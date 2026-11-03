@@ -47,3 +47,13 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 - 歷史安全掃描 22 筆命中／4 筆權屬未明仍待處理；本切片沒有新增 ignore、縮減掃描或放寬安全閘門。
 
 Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組裝候選：沿用既有同源、加密平台 session cookie 與 session context 驗證，限制操作和輸入大小，gateway 只呼叫注入 transport 一次。它要求 host 提供經審查的單次 transport 與嚴格 response projector，不選擇或呼叫任何 upstream；不得沿用預設會重試的 `platformRequest`。帳校切換後的回應隔離仍需 UI scope 管理。
+
+## 重新載入後的未結案保護候選
+
+帳號、校園及任務的未結案 operation 最多一筆；包含 running、unknown 及尚未由本人結案的 completed／failed。`confirm` 和 `claim` 在帳號交易鎖內檢查，候選 SQL 另有部分唯一索引；不同 request ID、文字、來源快照或新 session 都不能繞過。這是保守串行限制：同範圍其他內容也會暫時被阻擋。
+
+`status` 以目前有效 platform session 查詢，只回狀態及不透明 operation ID，不回前次輸入、session、確認碼、結果或執行權。只有 completed／failed 可由使用者明確確認 `ack` 結案；pending／unknown 無法結案或重送。`ack` 同 ID 重試冪等且不影響後續任務。這不提供未知結果的和解方法；未知會一直阻擋，直到未來經授權的可靠和解機制存在。
+
+本機 PostgreSQL 17 隔離驗證可用 `node scripts/platform-public-agent/postgres-local-run.mjs`（目前 runner 使用 macOS Homebrew 的 `/opt/homebrew/opt/postgresql@17/bin`）。runner 自建私有暫存叢集，禁止 TCP，只在自有 Unix socket 及合成最小帳號表上套用候選 schema；清理僅限它所建叢集。一般 `node scripts/test-platform-public-agent.mjs` 不啟動資料庫，會將 PG 整合項標為 skip。
+
+該 SQL 仍未編號、未註冊、未套到任何連線服務。正式導入前需核現有未結案資料是否與唯一索引衝突並停下處理，不可自動刪除或自動結案；另須核 migration 執行順序、正式帳號 DDL／grants、連線與 lock／statement timeout、備份／保留、未知任務和解及故障恢復。Web gateway 的實際 upstream transport、嚴格回執投影、UI scope 與 session 重新驗證仍未註冊或啟用。

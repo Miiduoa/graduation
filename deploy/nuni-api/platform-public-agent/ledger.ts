@@ -4,6 +4,8 @@ import {
   parseOperationLookup,
   PublicAgentError,
   isExecutionPair,
+  parseRecoveryScope,
+  parseRecoveryAcknowledgement,
   type PlatformTaskActor,
   type TaskBinding,
   type PublicTaskName,
@@ -79,6 +81,7 @@ type OperationRow = BindingRow & {
   confirmation_id: string;
   status: 'running' | 'unknown' | 'completed' | 'failed';
   execution_token_hash: string;
+  acknowledged_at: Date | string | null;
   result_json: unknown;
   failure_code: unknown;
   expires_at: Date | string;
@@ -336,6 +339,33 @@ export class PlatformPublicAgentLedger {
       )
     ).rows[0];
   }
+  private async unacknowledged(
+    tx: PublicAgentSql,
+    actor: PlatformTaskActor,
+    task: PublicTaskName,
+    schoolId: string,
+  ): Promise<{ id: string; status: OperationRow['status']; unexpired: boolean } | undefined> {
+    const rows = (
+      await tx.query<{ id: string; status: OperationRow['status']; unexpired: boolean }>(
+        `SELECT id,status,expires_at>clock_timestamp() AS unexpired FROM platform_public_agent_operations
+       WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND acknowledged_at IS NULL LIMIT 2 FOR UPDATE`,
+        [actor.platformAccountId, schoolId, task],
+      )
+    ).rows;
+    if (rows.length > 1) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+    return rows[0];
+  }
+  private async requireClearScope(
+    tx: PublicAgentSql,
+    actor: PlatformTaskActor,
+    binding: TaskBinding,
+  ): Promise<void> {
+    const open = await this.unacknowledged(tx, actor, binding.task, binding.schoolId);
+    if (!open) return;
+    const same = await this.operation(tx, actor, binding.task, binding.requestId);
+    if (!same || same.id !== open.id) return fail('PUBLIC_AGENT_OPEN_OPERATION', 409);
+    this.sameBinding(same, actor, binding);
+  }
   private async state(tx: PublicAgentSql, row: OperationRow): Promise<PublicAgentOperation> {
     if (!['running', 'unknown', 'completed', 'failed'].includes(row.status))
       return fail('PUBLIC_AGENT_STORE_INVALID', 503);
@@ -390,9 +420,11 @@ export class PlatformPublicAgentLedger {
       ).rows[0];
       if (existing) {
         this.sameBinding(existing, actor, binding);
+        await this.requireClearScope(tx, actor, binding);
         if (existing.unexpired !== true) return fail('PUBLIC_AGENT_CONFIRMATION_EXPIRED', 409);
         return { confirmationId: existing.id, expiresAt: expiry(existing.expires_at) };
       }
+      await this.requireClearScope(tx, actor, binding);
       // Retain consumed/expired bindings; capacity never silently forgets request IDs.
       const capacity = (
         await tx.query<{ at_capacity: boolean }>(
@@ -458,6 +490,7 @@ export class PlatformPublicAgentLedger {
           return fail('PUBLIC_AGENT_CONFIRMATION_CONFLICT', 409);
         return this.state(tx, existing);
       }
+      await this.requireClearScope(tx, actor, binding);
       const confirmation = (
         await tx.query<ConfirmationRow>(
           `SELECT *,expires_at>clock_timestamp() AS unexpired FROM platform_public_agent_confirmations
@@ -577,6 +610,69 @@ export class PlatformPublicAgentLedger {
     if (!row) return fail('PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE', 429);
     if (!Number.isSafeInteger(row.used) || row.used < 1 || row.used > limit)
       return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+  }
+
+  async status(
+    rawActor: PlatformTaskActor,
+    raw: unknown,
+  ): Promise<{
+    status: 'pending' | 'unknown' | 'completed' | 'failed';
+    operationId: string;
+  } | null> {
+    const { task, schoolId } = parseRecoveryScope(raw),
+      actor = this.actorInput(rawActor);
+    return this.transaction(async (tx) => {
+      await this.verifyActor(tx, actor);
+      await this.lockAccount(tx, actor);
+      await this.verifySession(tx, actor);
+      const row = await this.unacknowledged(tx, actor, task, schoolId);
+      if (!row) return null;
+      if (
+        !['running', 'unknown', 'completed', 'failed'].includes(row.status) ||
+        typeof row.unexpired !== 'boolean'
+      )
+        return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      const status =
+        row.status === 'running' ? (row.unexpired ? 'pending' : 'unknown') : row.status;
+      return { status, operationId: row.id };
+    });
+  }
+  async ack(
+    rawActor: PlatformTaskActor,
+    raw: unknown,
+  ): Promise<{ status: 'acknowledged'; operationId: string }> {
+    const { task, schoolId, operationId: id } = parseRecoveryAcknowledgement(raw),
+      actor = this.actorInput(rawActor);
+    return this.transaction(async (tx) => {
+      await this.verifyActor(tx, actor);
+      await this.lockAccount(tx, actor);
+      await this.verifySession(tx, actor);
+      const row = (
+        await tx.query<Pick<OperationRow, 'id' | 'status' | 'acknowledged_at'>>(
+          `SELECT id,status,acknowledged_at FROM platform_public_agent_operations
+         WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND id=$4 FOR UPDATE`,
+          [actor.platformAccountId, schoolId, task, id],
+        )
+      ).rows[0];
+      if (!row) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      if (!['running', 'unknown', 'completed', 'failed'].includes(row.status))
+        return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      if (row.status !== 'completed' && row.status !== 'failed')
+        return fail('PUBLIC_AGENT_OUTCOME_UNKNOWN', 409);
+      if (row.acknowledged_at === null) {
+        const changed = (
+          await tx.query<{ id: string }>(
+            `UPDATE platform_public_agent_operations SET acknowledged_at=clock_timestamp(),updated_at=clock_timestamp()
+           WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND id=$4
+             AND acknowledged_at IS NULL AND status IN ('completed','failed') RETURNING id`,
+            [actor.platformAccountId, schoolId, task, id],
+          )
+        ).rows[0];
+        if (!changed || changed.id !== id) return fail('PUBLIC_AGENT_CONFLICT', 409);
+      } else if (!(row.acknowledged_at instanceof Date) && typeof row.acknowledged_at !== 'string')
+        return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      return { status: 'acknowledged', operationId: id };
+    });
   }
 
   async read(

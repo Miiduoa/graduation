@@ -112,6 +112,11 @@ class TransactionFixture {
     if (/ AS at_capacity/u.test(sql)) return 'confirmation-capacity';
     if (
       sql.startsWith('UPDATE platform_public_agent_operations') &&
+      sql.includes('SET acknowledged_at=')
+    )
+      return 'ack-operation';
+    if (
+      sql.startsWith('UPDATE platform_public_agent_operations') &&
       sql.includes('execution_token_hash=$5')
     )
       return 'finalize-operation';
@@ -204,7 +209,17 @@ class TransactionFixture {
     }
     if (action === 'read-operation') {
       assert.match(sql, /FOR UPDATE/u);
-      assert.match(sql, /expires_at>clock_timestamp\(\)/u);
+      if (!sql.includes('id=$4')) assert.match(sql, /expires_at>clock_timestamp\(\)/u);
+      if (sql.includes('school_id=$2 AND task=$3')) {
+        const matches = [...this.data.operations.values()].filter(
+          (item) =>
+            item.platform_account_id === values[0] &&
+            item.school_id === values[1] &&
+            item.task === values[2] &&
+            (sql.includes('id=$4') ? item.id === values[3] : item.acknowledged_at === null),
+        );
+        return rows(matches.slice(0, 2).map(live));
+      }
       const row = this.data.operations.get(key(...values));
       return rows(row ? [live(row)] : []);
     }
@@ -242,6 +257,17 @@ class TransactionFixture {
         )
           return rows([]);
         if (this.data.operations.has(index)) throw dbFailure('23505');
+        if (
+          [...this.data.operations.values()].some(
+            (item) =>
+              item.platform_account_id === account &&
+              item.school_id === school &&
+              item.task === task &&
+              item.acknowledged_at === null,
+          )
+        )
+          throw dbFailure('23505');
+        row.acknowledged_at = null;
         row.confirmation_id = values[10];
         row.execution_token_hash = values[14];
         row.result_json = null;
@@ -290,6 +316,20 @@ class TransactionFixture {
       if (used >= limit) return rows([]);
       this.data.quota.set(index, { used: used + 1, account });
       return rows([{ used: used + 1 }]);
+    }
+    if (action === 'ack-operation') {
+      const row = [...this.data.operations.values()].find(
+        (item) =>
+          item.platform_account_id === values[0] &&
+          item.school_id === values[1] &&
+          item.task === values[2] &&
+          item.id === values[3] &&
+          item.acknowledged_at === null &&
+          ['completed', 'failed'].includes(item.status),
+      );
+      if (!row) return rows([]);
+      row.acknowledged_at = new Date(this.now);
+      return rows([{ id: row.id }]);
     }
     if (action === 'finalize-operation') {
       assert.match(

@@ -4,6 +4,8 @@ import {
   DETERMINISTIC_PROVIDER,
   exactRecord,
   parseConfirmedTask,
+  parseRecoveryScope,
+  parseRecoveryAcknowledgement,
   PublicAgentError,
   type ParsedPublicTask,
   type PlatformTaskActor,
@@ -129,6 +131,36 @@ export class PlatformPublicTaskService {
       const operation = await step(() => this.options.ledger.readBound(actor, task.binding));
       return this.deliver(auth, actor, task, operation, step, abort);
     });
+  }
+  async status(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
+    const input = parseRecoveryScope(raw);
+    return this.bounded(signal, async (step) => {
+      const actor = await step(() => this.admission.actor(auth));
+      const result = await step(() => this.options.ledger.status(actor, input));
+      sameActor(actor, await step(() => this.admission.actor(auth)));
+      return result;
+    });
+  }
+  async ack(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
+    const input = parseRecoveryAcknowledgement(raw);
+    let started = false;
+    try {
+      return await this.bounded(signal, async (step) => {
+        const actor = await step(() => this.admission.actor(auth));
+        started = true;
+        const result = await step(() => this.options.ledger.ack(actor, input));
+        sameActor(actor, await step(() => this.admission.actor(auth)));
+        return result;
+      });
+    } catch (error) {
+      if (
+        started &&
+        (!(error instanceof PublicAgentError) ||
+          ['PUBLIC_AGENT_TIMEOUT', 'PUBLIC_AGENT_CANCELLED'].includes(error.code))
+      )
+        throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
+      throw error;
+    }
   }
   async execute(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
     const input = exactRecord(raw, ['confirmationId', 'request']);

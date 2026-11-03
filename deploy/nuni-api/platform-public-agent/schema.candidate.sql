@@ -39,6 +39,8 @@ CREATE TABLE platform_public_agent_operations (
   execution_token_hash text NOT NULL CHECK (execution_token_hash ~ '^[a-f0-9]{64}$'),
   result_json jsonb,
   failure_code text,
+  acknowledged_at timestamptz,
+  CHECK (acknowledged_at IS NULL OR status IN ('completed','failed')),
   CHECK (result_json IS NULL OR (jsonb_typeof(result_json)='object' AND octet_length(result_json::text)<=32768)),
   CHECK ((status='completed' AND result_json IS NOT NULL AND failure_code IS NULL)
     OR (status='failed' AND result_json IS NULL AND failure_code IS NOT NULL AND failure_code IN ('SOURCE_CHANGED','INVALID_RESULT','EXECUTION_FAILED'))
@@ -52,6 +54,11 @@ CREATE TABLE platform_public_agent_operations (
     REFERENCES platform_public_agent_confirmations(id,platform_account_id,task,request_id)
     ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED
 );
+
+-- Unacknowledged operations of any status block a new request in the same scope.
+CREATE UNIQUE INDEX platform_public_agent_one_unacknowledged
+  ON platform_public_agent_operations(platform_account_id,school_id,task)
+  WHERE acknowledged_at IS NULL;
 
 CREATE TABLE platform_public_agent_quota (
   budget_kind text NOT NULL CHECK (budget_kind IN ('account','provider')),

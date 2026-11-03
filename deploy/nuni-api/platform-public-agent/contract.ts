@@ -98,6 +98,26 @@ export function parseOperationLookup(value: unknown): {
   };
 }
 
+/** Account-scoped recovery returns no former session payload or result. */
+export function parseRecoveryScope(value: unknown): { task: PublicTaskName; schoolId: string } {
+  const input = exactRecord(value, ['task', 'schoolId']);
+  return { task: taskName(input.task), schoolId: identifier(input.schoolId, 2, 40) };
+}
+export function parseRecoveryAcknowledgement(value: unknown) {
+  const input = exactRecord(value, ['task', 'schoolId', 'operationId', 'approved']);
+  if (
+    input.approved !== true ||
+    typeof input.operationId !== 'string' ||
+    !/^pago_[a-f0-9-]{36}$/u.test(input.operationId)
+  )
+    return fail();
+  return {
+    ...parseRecoveryScope({ task: input.task, schoolId: input.schoolId }),
+    operationId: input.operationId,
+    approved: true as const,
+  };
+}
+
 /** Two public, content-bound requests only. Suggestions never grant access to their destination. */
 export function parseConfirmedTask(value: unknown): ParsedPublicTask {
   const envelope = exactRecord(value, ['task', 'data']);

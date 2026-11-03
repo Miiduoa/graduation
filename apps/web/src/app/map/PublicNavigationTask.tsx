@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './map.module.css';
 
 export type PublicTaskPort = {
@@ -8,7 +8,7 @@ export type PublicTaskPort = {
   schoolName: string;
   localPreview?: boolean;
   call: (
-    action: 'preview' | 'confirm' | 'execute' | 'read',
+    action: 'preview' | 'confirm' | 'execute' | 'read' | 'status' | 'ack',
     body: unknown,
     signal: AbortSignal,
   ) => Promise<unknown>;
@@ -23,12 +23,29 @@ type Receipt = {
   mode: string;
 };
 type Preview = { request: unknown; receipt: Receipt; checkedAt: number };
+type State = 'pending' | 'unknown' | 'completed' | 'failed';
 type Operation = {
-  status: 'pending' | 'unknown' | 'completed' | 'failed';
+  status: State;
   operationId: string;
   result?: { receipt: Receipt };
   failureCode?: string;
 };
+type Gate =
+  | { kind: 'checking' | 'error' | 'clear' }
+  | { kind: 'locked'; operation: Pick<Operation, 'status' | 'operationId'> | null };
+function parseStatus(value: unknown): Pick<Operation, 'status' | 'operationId'> | null {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('INVALID_STATUS');
+  const v = value as Record<string, unknown>;
+  if (
+    !['pending', 'unknown', 'completed', 'failed'].includes(String(v.status)) ||
+    typeof v.operationId !== 'string' ||
+    !/^pago_[a-f0-9-]{36}$/u.test(v.operationId)
+  )
+    throw new Error('INVALID_STATUS');
+  return { status: v.status as State, operationId: v.operationId };
+}
 const message = (error: unknown) => {
   const code = error instanceof Error ? error.message : '';
   if (code.includes('DESTINATION_UNCLEAR'))
@@ -44,41 +61,112 @@ export function PublicNavigationTask({ port }: { port: PublicTaskPort }) {
   return <Task key={`${port.scope}:${port.schoolId}`} port={port} />;
 }
 function Task({ port }: { port: PublicTaskPort }) {
+  const [gate, setGate] = useState<Gate>({ kind: 'checking' });
   const [query, setQuery] = useState('');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const [uncertain, setUncertain] = useState(false);
+  const [confirmClose, setConfirmClose] = useState<string | null>(null);
   const pending = useRef<AbortController | null>(null),
     generation = useRef(0),
     running = useRef(false);
-  const focusInput = useRef(false);
-  const requestId = useRef<string | null>(null),
-    heading = useRef<HTMLHeadingElement>(null),
-    input = useRef<HTMLInputElement>(null);
-  useEffect(
-    () => () => {
-      generation.current++;
-      pending.current?.abort();
-    },
-    [],
-  );
+  const mayBeUnsettled = useRef(false),
+    requestId = useRef<string | null>(null),
+    lastAck = useRef<Pick<Operation, 'status' | 'operationId'> | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null),
+    input = useRef<HTMLInputElement>(null),
+    focusInput = useRef(false);
+  const scope = { task: 'public-campus-navigation', schoolId: port.schoolId };
+  const invalidate = useCallback(() => {
+    generation.current++;
+    pending.current?.abort();
+    running.current = false;
+  }, []);
+  useEffect(() => {
+    void checkStatus(true);
+    return invalidate;
+  }, [invalidate]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (focusInput.current) {
       input.current?.focus();
       focusInput.current = false;
     } else if (preview || operation || error) heading.current?.focus();
-  }, [preview, operation, error]);
-  async function run(action: 'preview' | 'execute' | 'read') {
+  }, [preview, operation, error, gate.kind]);
+  async function checkStatus(initial = false) {
     if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError('');
+    setOperation(null);
+    if (initial) setGate({ kind: 'checking' });
+    const controller = new AbortController(),
+      version = ++generation.current;
+    pending.current = controller;
+    try {
+      const state = parseStatus(await port.call('status', scope, controller.signal));
+      if (version !== generation.current) return;
+      if (state) {
+        mayBeUnsettled.current = true;
+        setGate({ kind: 'locked', operation: state });
+        setOperation((previous) =>
+          previous?.operationId === state.operationId && previous.status === state.status
+            ? previous
+            : null,
+        );
+        if (state.status === 'completed' && preview) {
+          setOperation(null);
+          try {
+            const result = (await port.call(
+              'read',
+              preview.request,
+              controller.signal,
+            )) as Operation;
+            const verified = parseStatus(result);
+            if (
+              !verified ||
+              verified.status !== 'completed' ||
+              verified.operationId !== state.operationId ||
+              !result.result?.receipt
+            )
+              throw new Error('INVALID_RECEIPT');
+            if (version === generation.current) setOperation(result);
+          } catch {
+            if (version === generation.current) setError('無法取得經來源確認的回執，請重新查詢。');
+          }
+        }
+      } else if (mayBeUnsettled.current) setGate({ kind: 'locked', operation: lastAck.current });
+      else setGate({ kind: 'clear' });
+    } catch {
+      if (version === generation.current) {
+        setGate((previous) =>
+          mayBeUnsettled.current
+            ? {
+                kind: 'locked',
+                operation:
+                  lastAck.current ?? (previous.kind === 'locked' ? previous.operation : null),
+              }
+            : { kind: 'error' },
+        );
+        setError('無法確認先前任務狀態，請重新查詢。');
+      }
+    } finally {
+      if (version === generation.current) {
+        running.current = false;
+        setBusy(false);
+      }
+    }
+  }
+  async function run(action: 'preview' | 'execute') {
+    if (running.current || gate.kind !== 'clear') return;
     running.current = true;
     setBusy(true);
     setError('');
     const controller = new AbortController(),
       version = ++generation.current;
     pending.current = controller;
-    let executeSent = false;
+    let sent = false,
+      refreshStatus = false;
     try {
       if (action === 'preview') {
         const value = (await port.call(
@@ -93,55 +181,115 @@ function Task({ port }: { port: PublicTaskPort }) {
         if (version === generation.current) {
           setPreview(value);
           setOperation(null);
-          setUncertain(false);
         }
       } else if (preview) {
-        let value: Operation | null;
-        if (action === 'execute') {
-          // One explicit button confirms this exact preview; ordinary navigation is no approval.
-          const confirmation = (await port.call(
-            'confirm',
-            { approved: true, request: preview.request },
-            controller.signal,
-          )) as { confirmationId: string };
-          if (version !== generation.current) return;
-          setUncertain(true);
-          executeSent = true;
-          value = (await port.call(
-            'execute',
-            { confirmationId: confirmation.confirmationId, request: preview.request },
-            controller.signal,
-          )) as Operation;
-        } else {
-          value = (await port.call('read', preview.request, controller.signal)) as Operation | null;
-        }
+        const confirmation = (await port.call(
+          'confirm',
+          { approved: true, request: preview.request },
+          controller.signal,
+        )) as { confirmationId: string };
+        if (version !== generation.current) return;
+        mayBeUnsettled.current = true;
+        sent = true;
+        setGate({ kind: 'locked', operation: null });
+        const result = (await port.call(
+          'execute',
+          { confirmationId: confirmation.confirmationId, request: preview.request },
+          controller.signal,
+        )) as Operation;
+        const state = parseStatus(result);
+        if (!state) throw new Error('INVALID_STATUS');
         if (version === generation.current) {
-          setOperation(value);
-          setUncertain(value === null || value.status === 'pending' || value.status === 'unknown');
+          setOperation(result);
+          setGate({ kind: 'locked', operation: state });
         }
       }
     } catch (failure) {
       if (version === generation.current) {
-        if (
+        if (failure instanceof Error && failure.message === 'PUBLIC_AGENT_OPEN_OPERATION') {
+          mayBeUnsettled.current = true;
+          setGate({ kind: 'locked', operation: null });
+          setError('已有尚未結案的任務，正在查詢狀態。');
+          refreshStatus = true;
+        } else if (
           action === 'execute' &&
-          (!executeSent ||
-            (failure instanceof Error && failure.message === 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE'))
+          sent &&
+          !(failure instanceof Error && failure.message === 'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE')
         ) {
-          setUncertain(false);
+          setGate({ kind: 'locked', operation: null });
+          setError('尚未確認執行結果。請查詢原任務，不要重新送出。');
+        } else {
+          if (sent) {
+            mayBeUnsettled.current = false;
+            setGate({ kind: 'clear' });
+          }
           setError(message(failure));
           if (failure instanceof Error && failure.message.includes('SOURCE_CHANGED')) {
             setPreview(null);
             requestId.current = null;
           }
-        } else if (action !== 'preview') {
-          setUncertain(true);
-          setError('尚未確認執行結果。請查詢原任務，不要重新送出。');
-        } else setError(message(failure));
+        }
       }
     } finally {
       if (version === generation.current) {
-        setBusy(false);
         running.current = false;
+        setBusy(false);
+        if (refreshStatus) void checkStatus();
+      }
+    }
+  }
+  async function acknowledge() {
+    if (
+      running.current ||
+      gate.kind !== 'locked' ||
+      !gate.operation ||
+      !['completed', 'failed'].includes(gate.operation.status) ||
+      confirmClose !== gate.operation.operationId
+    )
+      return;
+    running.current = true;
+    setBusy(true);
+    setError('');
+    lastAck.current = gate.operation;
+    const id = gate.operation.operationId,
+      controller = new AbortController(),
+      version = ++generation.current;
+    pending.current = controller;
+    try {
+      const response = (await port.call(
+        'ack',
+        { ...scope, operationId: id, approved: true },
+        controller.signal,
+      )) as { status?: unknown; operationId?: unknown };
+      if (response?.status !== 'acknowledged' || response.operationId !== id)
+        throw new Error('INVALID_ACK');
+      // Another tab can start a new operation after this acknowledgement commits.
+      // Recheck the durable gate before offering a new task. The backend admission
+      // remains authoritative for races after this read.
+      const current = parseStatus(await port.call('status', scope, controller.signal));
+      if (version === generation.current) {
+        setOperation(null);
+        setPreview(null);
+        setConfirmClose(null);
+        requestId.current = null;
+        if (current) {
+          mayBeUnsettled.current = true;
+          lastAck.current = null;
+          setGate({ kind: 'locked', operation: current });
+        } else {
+          mayBeUnsettled.current = false;
+          lastAck.current = null;
+          setGate({ kind: 'clear' });
+          focusInput.current = true;
+        }
+      }
+    } catch {
+      if (version === generation.current)
+        setError('無法確認結案，任務仍保留；請重新查詢或再次確認結案。');
+    } finally {
+      if (version === generation.current) {
+        running.current = false;
+        setBusy(false);
       }
     }
   }
@@ -150,8 +298,8 @@ function Task({ port }: { port: PublicTaskPort }) {
     pending.current?.abort();
     running.current = false;
     setBusy(false);
-    if (uncertain) {
-      setError('已停止等待，原任務可能仍在處理。請查詢結果。');
+    if (mayBeUnsettled.current) {
+      setError('已停止等待，原任務可能仍在處理。請查詢狀態。');
       return;
     }
     focusInput.current = true;
@@ -159,9 +307,10 @@ function Task({ port }: { port: PublicTaskPort }) {
     setOperation(null);
     setError('');
     requestId.current = null;
-    input.current?.focus();
   }
   const receipt = operation?.status === 'completed' ? operation.result?.receipt : null;
+  const state = gate.kind === 'locked' ? gate.operation?.status : null;
+  const terminal = state === 'completed' || state === 'failed';
   return (
     <section className={`card ${styles.task}`} aria-label="公開校園導航">
       <h2 ref={heading} tabIndex={-1}>
@@ -171,7 +320,13 @@ function Task({ port }: { port: PublicTaskPort }) {
       {port.localPreview && (
         <p role="note">本機流程預覽：合成帳號與暫存紀錄，地點使用既有公開目錄。</p>
       )}
-      {!preview && (
+      {gate.kind === 'checking' && <p role="status">正在確認先前任務狀態…</p>}
+      {gate.kind === 'error' && (
+        <button className="btn" disabled={busy} onClick={() => void checkStatus(true)}>
+          重新查詢狀態
+        </button>
+      )}
+      {gate.kind === 'clear' && !preview && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -198,7 +353,7 @@ function Task({ port }: { port: PublicTaskPort }) {
           </button>
         </form>
       )}
-      {preview && !receipt && (
+      {preview && gate.kind === 'clear' && (
         <>
           <p>
             <strong>
@@ -212,11 +367,9 @@ function Task({ port }: { port: PublicTaskPort }) {
             目錄日期：{preview.receipt.sourceDate}。導航會交由 Google
             地圖開啟，不代表道路或通行狀態已即時確認。
           </p>
-          {!operation && !uncertain && (
-            <button className="btn" disabled={busy} onClick={() => void run('execute')}>
-              {busy ? '處理中…' : '確認並建立路線'}
-            </button>
-          )}
+          <button className="btn" disabled={busy} onClick={() => void run('execute')}>
+            {busy ? '處理中…' : '確認並建立路線'}
+          </button>
         </>
       )}
       {receipt && (
@@ -242,21 +395,56 @@ function Task({ port }: { port: PublicTaskPort }) {
           <p>任務編號：{operation?.operationId}</p>
         </div>
       )}
-      {operation?.status === 'failed' && (
-        <p role="alert">路線未完成，地點或執行結果未通過驗證。沒有重新執行。</p>
-      )}
-      {(uncertain || operation?.status === 'pending' || operation?.status === 'unknown') && (
+      {gate.kind === 'locked' && (
         <>
-          <p role="status">結果尚未確認；相同任務不會重複執行或扣次數。</p>
-          <button className="btn" disabled={busy} onClick={() => void run('read')}>
+          <p role="status">
+            {terminal
+              ? state === 'completed'
+                ? '先前任務已完成。'
+                : '先前任務未完成。'
+              : '任務結果尚未確認；請勿重新送出。'}
+          </p>
+          {terminal && !receipt && !preview && (
+            <p>目前無法取得前次回執；確認結案後才能建立新任務。</p>
+          )}
+          <button className="btn" disabled={busy} onClick={() => void checkStatus()}>
             查詢原任務
           </button>
+          {terminal && confirmClose !== gate.operation?.operationId && (
+            <button
+              className="btn"
+              disabled={busy}
+              onClick={() => setConfirmClose(gate.operation!.operationId)}
+            >
+              結案並開始新任務
+            </button>
+          )}
+          {terminal && confirmClose === gate.operation?.operationId && (
+            <div role="group" aria-label="確認結案">
+              <p>確定結案？結案後才能建立新任務。</p>
+              <button className="btn" disabled={busy} onClick={() => void acknowledge()}>
+                確認結案
+              </button>
+              <button
+                className="btn secondary"
+                disabled={busy}
+                onClick={() => setConfirmClose(null)}
+              >
+                取消結案
+              </button>
+            </div>
+          )}
         </>
       )}
       {error && <p role="alert">{error}</p>}
-      {(busy || preview) && (
+      {gate.kind === 'clear' && (busy || preview) && (
         <button className="btn secondary" onClick={cancel}>
-          {uncertain ? '停止等待' : receipt ? '返回輸入' : '取消'}
+          取消
+        </button>
+      )}
+      {gate.kind === 'locked' && busy && (
+        <button className="btn secondary" onClick={cancel}>
+          停止等待
         </button>
       )}
     </section>

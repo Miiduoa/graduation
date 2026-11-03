@@ -9,7 +9,7 @@ import {
   type PlatformSession,
 } from './server';
 
-export type PublicAgentAction = 'preview' | 'confirm' | 'execute' | 'read';
+export type PublicAgentAction = 'preview' | 'confirm' | 'execute' | 'read' | 'status' | 'ack';
 export type PublicAgentTransport = (input: {
   action: PublicAgentAction;
   session: PlatformSession;
@@ -41,7 +41,7 @@ export function createPlatformPublicAgentGateway(options: {
   return async (request: NextRequest, action: string) => {
     try {
       if (options.enabled !== true) throw new NuniError(404, 'NOT_FOUND');
-      if (!['preview', 'confirm', 'execute', 'read'].includes(action))
+      if (!['preview', 'confirm', 'execute', 'read', 'status', 'ack'].includes(action))
         throw new NuniError(404, 'NOT_FOUND');
       if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
       if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
@@ -63,13 +63,17 @@ export function createPlatformPublicAgentGateway(options: {
             ? ['approved', 'request']
             : action === 'execute'
               ? ['confirmationId', 'request']
-              : ['task', 'data'];
+              : action === 'status'
+                ? ['task', 'schoolId']
+                : action === 'ack'
+                  ? ['task', 'schoolId', 'operationId', 'approved']
+                  : ['task', 'data'];
       if (
         Object.keys(body).length !== names.length ||
         Object.keys(body).some((key) => !names.includes(key))
       )
         throw new NuniError(422, 'INVALID_INPUT');
-      if (action === 'confirm' && body.approved !== true)
+      if ((action === 'confirm' || action === 'ack') && body.approved !== true)
         throw new NuniError(409, 'PUBLIC_AGENT_CONFIRMATION_REQUIRED');
       const abort = new AbortController();
       let reject!: (error: NuniError) => void;
@@ -108,6 +112,8 @@ export function createPlatformPublicAgentGateway(options: {
           error instanceof NuniError &&
           [
             'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE',
+            'PUBLIC_AGENT_OPEN_OPERATION',
+            'PUBLIC_AGENT_OPERATION_NOT_FOUND',
             'PUBLIC_AGENT_OUTCOME_UNKNOWN',
             'PUBLIC_AGENT_SESSION_INVALID',
             'PUBLIC_AGENT_SOURCE_CHANGED',

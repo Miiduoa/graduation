@@ -155,4 +155,25 @@ describe('unregistered platform public Agent gateway', () => {
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_INVALID_RESPONSE' });
   });
+  it('checks recovery request boundaries and preserves the explicit open-operation refusal', async () => {
+    const handle = createPlatformPublicAgentGateway({ enabled: true, transport, project });
+    const scope = { task: 'public-campus-navigation', schoolId: 'pu' };
+    expect((await handle(request({ body: { ...scope, owner: 'other' } }), 'status')).status).toBe(
+      422,
+    );
+    expect(
+      (
+        await handle(
+          request({ body: { ...scope, operationId: 'pago_test', approved: false } }),
+          'ack',
+        )
+      ).status,
+    ).toBe(409);
+    expect(transport).not.toHaveBeenCalled();
+    transport.mockRejectedValue(new NuniError(409, 'PUBLIC_AGENT_OPEN_OPERATION'));
+    const response = await handle(request(), 'execute');
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_OPEN_OPERATION' });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
 });

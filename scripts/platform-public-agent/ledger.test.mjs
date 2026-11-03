@@ -83,13 +83,13 @@ test('confirmation capacity blocks new request IDs but preserves replay without 
 test('consumed and expired confirmations both count, while another account keeps its own capacity', async () => {
   const f = fixture({ maxConfirmationsPerAccount: 2, confirmationTtlMs: 20, operationTtlMs: 10 });
   const used = binding(),
-    expired = binding({ requestId: 'request_0002' });
+    expired = binding({ requestId: 'request_0002', schoolId: 'other' });
   const first = await f.ledger.confirm(f.actor, used);
   const operation = await f.ledger.claim(f.actor, used, first.confirmationId);
   await f.ledger.confirm(f.actor, expired);
   f.db.now += 21;
   await rejectsCode(
-    f.ledger.confirm(f.actor, binding({ requestId: 'request_0003' })),
+    f.ledger.confirm(f.actor, binding({ requestId: 'request_0003', schoolId: 'other' })),
     'PUBLIC_AGENT_CONFIRMATION_CAPACITY',
   );
   await rejectsCode(f.ledger.confirm(f.actor, expired), 'PUBLIC_AGENT_CONFIRMATION_EXPIRED');
@@ -307,7 +307,7 @@ test('markUnknown is owner/content/session-bound and cannot introduce a new oper
 test('the final account budget slot admits one concurrent request and rolls back the other consume/provider debit', async () => {
   const f = fixture({ accountDailyLimit: 1 }),
     a = binding(),
-    b = binding({ requestId: 'request_0002' });
+    b = binding({ requestId: 'request_0002', schoolId: 'other' });
   const [ca, cb] = await Promise.all([f.ledger.confirm(f.actor, a), f.ledger.confirm(f.actor, b)]);
   const result = await Promise.allSettled([
     f.ledger.claim(f.actor, a, ca.confirmationId),
@@ -581,7 +581,7 @@ test('composed expiry persists unknown and cannot turn a repeated admission into
       confirmationId: confirmation.confirmationId,
       request: publicRequest('public-campus-navigation', 'pu', 'composed_request_0002'),
     }),
-    'PUBLIC_AGENT_REQUEST_CONFLICT',
+    'PUBLIC_AGENT_OPEN_OPERATION',
   );
   assert.equal(f.db.data.operations.size, 1);
   assert.deepEqual(quotas(f.db), [1, 1]);
@@ -1025,4 +1025,175 @@ test('only navigation accepts the deterministic execution pair and it retains it
       (value) => JSON.parse(value)[1] === 'synthetic-deterministic-budget',
     ),
   );
+});
+
+test('reload and fresh session expose only scoped unresolved status and block new request/source/payload', async () => {
+  const f = await claimedFixture(),
+    renewed = f.db.anotherSession(f.actor),
+    scope = { task: f.b.task, schoolId: f.b.schoolId };
+  const expected = { status: 'pending', operationId: f.claim.operationId };
+  assert.deepEqual(await f.make().status(renewed, scope), expected);
+  assert.deepEqual(Object.keys(expected).sort(), ['operationId', 'status']);
+  await rejectsCode(
+    f
+      .make()
+      .confirm(
+        renewed,
+        binding({ requestId: 'fresh_request_1', payloadHash: hash('changed source and query') }),
+      ),
+    'PUBLIC_AGENT_OPEN_OPERATION',
+  );
+  await rejectsCode(f.make().readBound(renewed, f.b), 'PUBLIC_AGENT_REQUEST_CONFLICT');
+  await rejectsCode(
+    f.make().ack(renewed, { ...scope, operationId: f.claim.operationId, approved: true }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  f.db.now += 31_000;
+  assert.deepEqual(await f.make().status(renewed, scope), { ...expected, status: 'unknown' });
+  await rejectsCode(
+    f.make().ack(renewed, { ...scope, operationId: f.claim.operationId, approved: true }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('completed outcome after lost response blocks fresh intent until explicit ack, and old ack never affects new operation', async () => {
+  const f = await claimedFixture(),
+    renewed = f.db.anotherSession(f.actor),
+    scope = { task: f.b.task, schoolId: f.b.schoolId };
+  await f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, resultFor(f));
+  assert.deepEqual(await f.make().status(renewed, scope), {
+    status: 'completed',
+    operationId: f.claim.operationId,
+  });
+  const newer = binding({ requestId: 'fresh_request_2', payloadHash: hash('changed data') });
+  await rejectsCode(f.make().confirm(renewed, newer), 'PUBLIC_AGENT_OPEN_OPERATION');
+  await rejectsCode(
+    f.make().ack(renewed, { ...scope, operationId: f.claim.operationId, approved: false }),
+    'PUBLIC_AGENT_INVALID_INPUT',
+  );
+  f.db.loseCommitAck = true;
+  await assert.rejects(
+    f.make().ack(renewed, { ...scope, operationId: f.claim.operationId, approved: true }),
+    /lost commit/u,
+  );
+  assert.equal(await f.make().status(renewed, scope), null);
+  const c = await f.make().confirm(renewed, newer),
+    next = await f.make().claim(renewed, newer, c.confirmationId);
+  assert.equal(next.status, 'claimed');
+  assert.deepEqual(
+    await f.make().ack(renewed, { ...scope, operationId: f.claim.operationId, approved: true }),
+    { status: 'acknowledged', operationId: f.claim.operationId },
+  );
+  assert.deepEqual(await f.make().status(renewed, scope), {
+    status: 'pending',
+    operationId: next.operationId,
+  });
+  assert.deepEqual(quotas(f.db), [2, 2]);
+});
+test('two prior confirmations racing claim permit one operation and roll back other quota and consume', async () => {
+  const f = fixture(),
+    a = binding(),
+    b = binding({ requestId: 'concurrent_request_2', payloadHash: hash('distinct source') });
+  const [ca, cb] = await Promise.all([f.ledger.confirm(f.actor, a), f.make().confirm(f.actor, b)]);
+  const claims = await Promise.allSettled([
+    f.ledger.claim(f.actor, a, ca.confirmationId),
+    f.make().claim(f.actor, b, cb.confirmationId),
+  ]);
+  assert.equal(claims.filter((x) => x.status === 'fulfilled').length, 1);
+  assert.equal(
+    claims.find((x) => x.status === 'rejected').reason.code,
+    'PUBLIC_AGENT_OPEN_OPERATION',
+  );
+  assert.equal(f.db.data.operations.size, 1);
+  assert.equal(
+    [...f.db.data.confirmations.values()].filter((x) => x.consumed_at === null).length,
+    1,
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('recovery status and acknowledgement reject other account, other school and revoked new session without revealing values', async () => {
+  const f = await claimedFixture(),
+    other = f.db.actor(),
+    renewed = f.db.anotherSession(f.actor),
+    scope = { task: f.b.task, schoolId: f.b.schoolId };
+  assert.equal(await f.make().status(other, scope), null);
+  assert.equal(await f.make().status(renewed, { ...scope, schoolId: 'other' }), null);
+  for (const [actor, schoolId] of [
+    [other, scope.schoolId],
+    [renewed, 'other'],
+  ])
+    await rejectsCode(
+      f.make().ack(actor, { ...scope, schoolId, operationId: f.claim.operationId, approved: true }),
+      'PUBLIC_AGENT_OPERATION_NOT_FOUND',
+    );
+  f.db.data.sessions.delete(renewed.sessionHash);
+  await rejectsCode(f.make().status(renewed, scope), 'PUBLIC_AGENT_SESSION_EXPIRED');
+  await rejectsCode(
+    f.make().ack(renewed, { ...scope, operationId: f.claim.operationId, approved: true }),
+    'PUBLIC_AGENT_SESSION_EXPIRED',
+  );
+});
+test('failed operation requires explicit acknowledgement while unrelated school and task remain independent', async () => {
+  const f = await claimedFixture(),
+    scope = { task: f.b.task, schoolId: f.b.schoolId };
+  await f.ledger.fail(f.actor, f.b, f.claim.operationId, f.claim.executionToken, 'INVALID_RESULT');
+  assert.deepEqual(await f.ledger.status(f.actor, scope), {
+    status: 'failed',
+    operationId: f.claim.operationId,
+  });
+  await rejectsCode(
+    f.ledger.confirm(f.actor, binding({ requestId: 'retry_failure_1' })),
+    'PUBLIC_AGENT_OPEN_OPERATION',
+  );
+  assert.ok(
+    (await f.ledger.confirm(f.actor, binding({ schoolId: 'other', requestId: 'other_school_1' })))
+      .confirmationId,
+  );
+  assert.ok(
+    (
+      await f.ledger.confirm(
+        f.actor,
+        binding({ task: 'campus-service-entry', requestId: 'other_task_001' }),
+      )
+    ).confirmationId,
+  );
+  assert.equal(
+    (await f.ledger.ack(f.actor, { ...scope, operationId: f.claim.operationId, approved: true }))
+      .status,
+    'acknowledged',
+  );
+  assert.ok(
+    (await f.ledger.confirm(f.actor, binding({ requestId: 'retry_failure_1' }))).confirmationId,
+  );
+});
+
+test('a preexisting other confirmation is blocked after scope claim but the original confirmation remains bound', async () => {
+  const f = fixture(),
+    a = binding(),
+    b = binding({ requestId: 'preexisting_confirm_2' });
+  const ca = await f.ledger.confirm(f.actor, a),
+    cb = await f.ledger.confirm(f.actor, b);
+  const first = await f.ledger.claim(f.actor, a, ca.confirmationId);
+  assert.equal(first.status, 'claimed');
+  await rejectsCode(f.ledger.confirm(f.actor, b), 'PUBLIC_AGENT_OPEN_OPERATION');
+  assert.deepEqual(await f.ledger.confirm(f.actor, a), ca);
+  await rejectsCode(f.ledger.claim(f.actor, b, cb.confirmationId), 'PUBLIC_AGENT_OPEN_OPERATION');
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('duplicate open rows in a corrupt or unindexed store fail closed instead of hiding an outcome', async () => {
+  const f = await claimedFixture();
+  const original = [...f.db.data.operations.values()][0];
+  f.db.data.operations.set('synthetic_duplicate', {
+    ...original,
+    id: 'pago_11111111-1111-4111-8111-111111111111',
+    request_id: 'synthetic_duplicate',
+  });
+  const scope = { task: f.b.task, schoolId: f.b.schoolId };
+  await rejectsCode(f.ledger.status(f.actor, scope), 'PUBLIC_AGENT_STORE_INVALID');
+  await rejectsCode(
+    f.ledger.confirm(f.actor, binding({ requestId: 'fresh_request_3' })),
+    'PUBLIC_AGENT_STORE_INVALID',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
 });
