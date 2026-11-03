@@ -3,14 +3,14 @@ import { SiteShell } from '@/components/SiteShell';
 import styles from '../servicePages.module.css';
 
 export const metadata: Metadata = {
-  title: '使用條款 | Campus One',
-  description: 'Campus One 使用條款',
+  title: '使用條款 | nuni',
+  description: 'nuni 使用條款',
 };
 
 const sections = [
   {
     title: '服務範圍',
-    body: 'Campus One 提供公告、課程、成績、校園地圖、訊息與經學校驗證的延伸服務。各項服務依學校開通情況提供。',
+    body: 'nuni 提供公告、課程、成績、校園地圖、訊息與經學校驗證的延伸服務。各項服務依學校開通情況提供。',
   },
   {
     title: '帳號責任',
@@ -37,7 +37,7 @@ const sections = [
 
 export default function TermsPage() {
   return (
-    <SiteShell title="使用條款" subtitle="使用 Campus One 前，請先了解服務範圍與帳號責任。">
+    <SiteShell title="使用條款" subtitle="使用 nuni 前，請先了解服務範圍與帳號責任。">
       <div className={styles.documentLayout}>
         <nav className={styles.contents} aria-label="使用條款章節">
           <p>本頁內容</p>

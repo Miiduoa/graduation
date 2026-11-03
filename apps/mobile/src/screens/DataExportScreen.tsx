@@ -145,7 +145,7 @@ function ExportEditor({
       shared = true;
       await shareAsync(file.uri, {
         mimeType: 'application/json',
-        dialogTitle: '儲存 Campus One 資料',
+        dialogTitle: '儲存 nuni 資料',
       });
       if (current()) setResult({ truncated: data.coverage.truncated });
     } catch {

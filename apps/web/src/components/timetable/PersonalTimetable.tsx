@@ -58,9 +58,12 @@ import { useSignInOptions } from '@/lib/signInOptions';
 import { listAcceptedFriends } from '@/lib/timetable/friends';
 import { useAcademicRecords } from '@/lib/useAcademicRecords';
 import type { AcademicCourse } from '@/lib/academicRecords';
+import { Modal } from '@/components/ui/Modal';
+import { TIMETABLE_COURSE_WORK_LABEL } from '@/lib/todayScreen';
 import { CourseEditor as EditableCourseDialog } from './CourseEditor';
 import { TimetableGrid, UnscheduledCourses } from './TimetableGrid';
 import { validateCourseDraft } from './courseEditorModel';
+import { resolveTimetableCourseWorkExit } from './timetableCourseWorkHref';
 import { planningReadiness } from './timetableMovement';
 import movement from './timetableMovement.module.css';
 
@@ -221,6 +224,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     return today >= 1 && today <= 5 ? today : 1;
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
+  const [courseAction, setCourseAction] = useState<PersonalCourse | null>(null);
   const [busy, setBusy] = useState(false);
   const savingRef = useRef(false);
   const activeRef = useRef(false);
@@ -357,13 +361,32 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
     ),
   ];
   const planning = planningReadiness(planningCourses, periodTotal, WEEKDAY_LABELS.length);
+  const courseWorkHrefFor = (course: PersonalCourse) => {
+    const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
+    const importedRow = importId
+      ? imported.records.find((row) => row.id === importId)
+      : undefined;
+    return resolveTimetableCourseWorkExit({
+      linkedCourseId: importedRow?.linkedCourseId,
+      courseName: course.name,
+      courseCode: importedRow?.courseCode,
+    });
+  };
   const openCourse = (course: PersonalCourse) => {
     if (busy || savingRef.current) return;
-    if (course.id.startsWith('import:')) router.push(importHref);
-    else {
+    // Imported rows: choose between import editor and the course-work shell.
+    if (course.id.startsWith('import:')) {
       setNotice('');
-      setEditing({ ...course });
+      setCourseAction({ ...course });
+      return;
     }
+    setCourseAction(null);
+    setNotice('');
+    setEditing({ ...course });
+  };
+  const beginImportEdit = () => {
+    setCourseAction(null);
+    router.push(importHref);
   };
   const planner = periodProfile
     ? new SchedulePlanner(visibleCourses, friends, selectedFriend, periodProfile)
@@ -1061,6 +1084,28 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
         </p>
       )}
       {!uid && <ShareNeedsSchoolAccountNotice schoolId={schoolId} />}
+      {courseAction && (
+        <Modal
+          isOpen
+          title={courseAction.name}
+          description="這門課來自匯入紀錄。可以回到匯入頁修改格位，或開啟作業與教材。"
+          onClose={() => setCourseAction(null)}
+          size="sm"
+        >
+          <div className={styles.toolbar} role="group" aria-label={`${courseAction.name} 的下一步`}>
+            <button type="button" className="btn" onClick={beginImportEdit}>
+              回到匯入編輯
+            </button>
+            <Link
+              className="btn primary"
+              href={courseWorkHrefFor(courseAction)}
+              onClick={() => setCourseAction(null)}
+            >
+              {TIMETABLE_COURSE_WORK_LABEL}
+            </Link>
+          </div>
+        </Modal>
+      )}
       {editing && (
         <EditableCourseDialog
           key={editing.id}
@@ -1076,6 +1121,7 @@ function TimetableWorkspace({ schoolId }: { schoolId: string }) {
             if (!savingRef.current) setEditing(null);
           }}
           periodProfile={periodProfile}
+          courseWorkHref={editing.name.trim() ? courseWorkHrefFor(editing) : undefined}
         />
       )}
 

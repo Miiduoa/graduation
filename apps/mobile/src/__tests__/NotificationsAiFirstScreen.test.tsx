@@ -157,21 +157,21 @@ test('manual mark-read failure preserves explanation and unread notice', async (
   mockNotifs.notifications = [
     {
       id: 'bad',
-      type: 'library_due',
-      title: '圖書館催還',
-      body: '請盡快還書',
+      type: 'announcement',
+      title: '殘缺公告',
+      body: '缺少編號',
       read: false,
       data: {},
     },
   ];
   mockNotifs.unreadCount = 1;
   const view = render(<NotificationsAiFirstScreen />);
-  fireEvent.press(view.getByText('圖書館催還'));
-  await waitFor(() => expect(view.getByText(/尚不支援開啟/)).toBeTruthy());
+  fireEvent.press(view.getByText('殘缺公告'));
+  await waitFor(() => expect(view.getByText(/缺少可用的公告編號/)).toBeTruthy());
   mockNotifs.markAsRead.mockResolvedValueOnce(false);
   fireEvent.press(view.getByText('標成已讀'));
   await waitFor(() => expect(view.getByText(/標為已讀失敗/)).toBeTruthy());
-  expect(view.getByText(/尚不支援開啟/)).toBeTruthy();
+  expect(view.getByText(/缺少可用的公告編號/)).toBeTruthy();
   expect(view.getByText('標成已讀')).toBeTruthy();
 });
 
@@ -222,10 +222,10 @@ test('school mismatch on grade notice keeps unread without opening homework', as
   expect(applyNotificationDestination).not.toHaveBeenCalled();
 });
 
-test('unknown or malformed destinations keep unread and offer explicit mark-read', async () => {
+test('unknown type opens notification center and marks read', async () => {
   mockNotifs.notifications = [
     {
-      id: 'bad',
+      id: 'lib1',
       type: 'library_due',
       title: '圖書館催還',
       body: '請盡快還書',
@@ -236,7 +236,26 @@ test('unknown or malformed destinations keep unread and offer explicit mark-read
   mockNotifs.unreadCount = 1;
   const view = render(<NotificationsAiFirstScreen />);
   fireEvent.press(view.getByText('圖書館催還'));
-  await waitFor(() => expect(view.getByText(/尚不支援開啟/)).toBeTruthy());
+  await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledWith('lib1'));
+  expect(applyNotificationDestination).toHaveBeenCalled();
+  expect(view.queryByText(/尚不支援開啟/)).toBeNull();
+});
+
+test('malformed destinations keep unread and offer explicit mark-read', async () => {
+  mockNotifs.notifications = [
+    {
+      id: 'bad',
+      type: 'announcement',
+      title: '格式錯誤公告',
+      body: '編號無效',
+      read: false,
+      data: { announcementId: '../evil' },
+    },
+  ];
+  mockNotifs.unreadCount = 1;
+  const view = render(<NotificationsAiFirstScreen />);
+  fireEvent.press(view.getByText('格式錯誤公告'));
+  await waitFor(() => expect(view.getByText(/格式無效/)).toBeTruthy());
   expect(mockNotifs.markAsRead).not.toHaveBeenCalled();
   fireEvent.press(view.getByText('標成已讀'));
   await waitFor(() => expect(mockNotifs.markAsRead).toHaveBeenCalledWith('bad'));

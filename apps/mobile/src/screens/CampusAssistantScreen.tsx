@@ -540,6 +540,9 @@ function AssistantConversation({
                 onOpenService={typeof navigation?.navigate === 'function'
                   ? () => safeNavigate(navigation, SERVICE_AFTER_WRITE[proposal.toolName])
                   : undefined}
+                onOpenSettings={typeof navigation?.navigate === 'function'
+                  ? () => safeNavigate(navigation, 'AssistantPermissions')
+                  : undefined}
               />
             ))}
           {message.role === 'assistant' && message.source === 'device' && (

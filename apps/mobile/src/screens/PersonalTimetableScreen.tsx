@@ -56,6 +56,7 @@ import {
   type StoredTimetable,
 } from '../services/personalTimetable';
 import { listAcceptedFriends, opponentUidFromFriendship } from '../services/friends';
+import { resolveTimetableClassroomNav } from '../hooks/timetableClassroomNav';
 
 export default function PersonalTimetableScreen() {
   const auth = useAuth();
@@ -114,6 +115,18 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
   const placedImportIds = useMemo(() => new Set(
     personalImportCourses(importedRecords, schoolId).map((course) => course.id),
   ), [importedRecords, schoolId]);
+  const openCourseWork = (course: PersonalCourse) => {
+    const importId = course.id.startsWith('import:') ? course.id.slice('import:'.length) : '';
+    const importedRow = importId
+      ? importedRecords.find((row) => row.id === importId)
+      : undefined;
+    const destination = resolveTimetableClassroomNav({
+      linkedCourseId: importedRow?.linkedCourseId,
+      courseName: course.name,
+      courseCode: importedRow?.courseCode,
+    });
+    safeNavigate(navigation, destination.screen, destination.params);
+  };
   const openCourse = (course: PersonalCourse) => course.id.startsWith('import:')
     || !profile ? safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' }) : setEditing(course);
   const listedImports = importedRecords.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId &&
@@ -400,25 +413,32 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
           <Text style={{ color: theme.colors.muted }}>{listedImports.length ? '以上課程保留原始時間，未放入節次格子。' : '這份課表目前沒有可列出的課程。可匯入或新增自己的資料。'}</Text>
         ) : (
           visible.map((course) => (
-            <Pressable
+            <View
               key={course.id}
-              onPress={() => openCourse(course)}
               style={{
                 borderWidth: 1,
                 borderColor: theme.colors.separator,
                 borderRadius: 12,
                 padding: 12,
                 backgroundColor: theme.colors.card,
+                gap: 8,
               }}
             >
-              <Text style={{ color: theme.colors.muted }}>
-                {WEEKDAY_LABELS[course.day - 1] || '未排定'} · {profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認'}
-              </Text>
-              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{course.name}</Text>
-              <Text style={{ color: theme.colors.muted }}>
-                {course.teacher || '教師未填'} · {course.room || '教室未填'}{course.id.startsWith('import:') ? ' · 個人匯入' : ''}
-              </Text>
-            </Pressable>
+              <Pressable onPress={() => openCourse(course)} accessibilityRole="button">
+                <Text style={{ color: theme.colors.muted }}>
+                  {WEEKDAY_LABELS[course.day - 1] || '未排定'} · {profile ? periodRangeLabel(course.start, course.end, profile) : '節次時間未確認'}
+                </Text>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{course.name}</Text>
+                <Text style={{ color: theme.colors.muted }}>
+                  {course.teacher || '教師未填'} · {course.room || '教室未填'}{course.id.startsWith('import:') ? ' · 個人匯入' : ''}
+                </Text>
+              </Pressable>
+              <Button
+                text="作業與教材"
+                kind="outline"
+                onPress={() => openCourseWork(course)}
+              />
+            </View>
           ))
         )}
 
@@ -453,6 +473,9 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
               placeholder="教室"
               style={inputStyle}
             />
+            {editing.name.trim() ? (
+              <Button text="作業與教材" kind="outline" onPress={() => openCourseWork(editing)} />
+            ) : null}
             <Button
               text="儲存"
               onPress={async () => {

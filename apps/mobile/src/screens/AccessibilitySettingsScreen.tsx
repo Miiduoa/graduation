@@ -101,7 +101,7 @@ export function AccessibilitySettingsScreen({ navigation }: Props) {
       <AICard title="前往裝置設定">
         <View style={{ gap: theme.space.md }}>
           <Text style={{ ...theme.typography.bodySmall, color: theme.colors.muted }}>
-            下方按鈕會開啟 Campus One 的系統設定。輔助使用選項請從裝置設定的主畫面進入。
+            下方按鈕會開啟 nuni 的系統設定。輔助使用選項請從裝置設定的主畫面進入。
           </Text>
           <AIButton label="開啟 App 系統設定" onPress={() => void openSettings()} />
           {error ? (

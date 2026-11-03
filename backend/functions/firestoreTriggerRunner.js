@@ -18,6 +18,9 @@ const TRIGGER_POLICIES = {
   groupQuestionAssistantReply: { sideEffect: 'notify', createdOnly: true },
   gradePublishedNotification: { sideEffect: 'notify', createdOnly: true },
   onCafeteriaStorefrontPostCreated: { sideEffect: 'notify', createdOnly: true },
+  onTeacherAssignmentPublished: { sideEffect: 'notify', createdOnly: true },
+  onAssignmentSubmissionWritten: { sideEffect: 'notify', createdOnly: false },
+  onSchoolAnnouncementCreated: { sideEffect: 'notify', createdOnly: true },
 };
 
 function policyFor(trigger) {

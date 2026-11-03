@@ -147,6 +147,11 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
               onPress={go('NotificationSettings')}
             />
             <AIRow
+              title="助理權限"
+              subtitle="逐項開關助理可執行的寫入動作（預設關閉）"
+              onPress={go('AssistantPermissions')}
+            />
+            <AIRow
               title="個人資料"
               subtitle="修改顯示名稱、簡介與電話"
               onPress={go('ProfileEdit')}
@@ -165,7 +170,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
         </>
       ) : null}
 
-      <AISection title="關於 Campus One">
+      <AISection title="關於 nuni">
         {version ? <AIRow title="版本" subtitle={version} static /> : null}
         <AIRow
           title="服務條款"

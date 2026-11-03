@@ -4,6 +4,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 const mockCallable = jest.fn();
 const mockGetDoc = jest.fn();
 const mockNavigate = jest.fn();
+const mockLoadPermissions = jest.fn();
 jest.mock('firebase/functions', () => ({ httpsCallable: () => mockCallable }));
 jest.mock('firebase/firestore', () => ({
   doc: (_db: unknown, ...parts: string[]) => parts.join('/'),
@@ -17,6 +18,9 @@ jest.mock('../firebase', () => ({
   getFunctionsInstance: () => ({}),
   getDb: () => 'db',
   getAuthInstance: () => ({ currentUser: { uid: 'alice' } }),
+}));
+jest.mock('../services/assistantPermissions', () => ({
+  loadAssistantWritePermissionsState: (...args: unknown[]) => mockLoadPermissions(...args),
 }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: (_nav: unknown, route: string) => mockNavigate(route) }));
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn() }) }));
@@ -42,6 +46,10 @@ beforeEach(() => {
   mockCallable.mockReset();
   mockNavigate.mockReset();
   mockGetDoc.mockReset().mockResolvedValue(missing);
+  mockLoadPermissions.mockReset().mockResolvedValue({
+    permissions: { createOrder: true },
+    source: 'server',
+  });
 });
 
 test('助理下單卡：伺服器沒建成寫「訂單沒送出去，請再試一次。」，再試一次帶同一個送出編號', async () => {
@@ -144,4 +152,17 @@ test('助理下單卡成功：寫末 6 碼；還沒號碼時寫待給號碼兩�
   expect(view.getByText('10 月 13 日（二）12:05・雞腿飯 ×1')).toBeTruthy();
   expect(view.getByText('狀態：待給號碼')).toBeTruthy();
   expect(view.queryByText(/co_abcdef123456/)).toBeNull();
+});
+
+test('助理下單卡在餐廳下單關閉時顯示權限文案且不呼叫下單', async () => {
+  mockLoadPermissions.mockResolvedValue({
+    permissions: { createOrder: false },
+    source: 'server',
+  });
+  const view = render(<AgentCardList cards={[card]} />);
+  await act(async () => fireEvent.press(view.getByText('✅ 確認下單')));
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(view.getByText(/餐廳下單/)).toBeTruthy();
+  fireEvent.press(view.getByText('前往設定'));
+  expect(mockNavigate).toHaveBeenCalledWith('AssistantPermissions');
 });

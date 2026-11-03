@@ -27,6 +27,7 @@ import {
   type PredictorItem,
   type MistakeEntry,
   type PredictionSnapshot,
+  type TodayAttendanceSituation,
 } from '@campus/shared';
 
 import {
@@ -89,6 +90,11 @@ export interface AIFullContext {
   };
   /** 智慧通知（critical/high 級別） */
   urgentNotifications: NotificationItem[];
+  /**
+   * 點名狀態提示（含「尚未點名／沒有簽到紀錄」；無紀錄≠缺席）。
+   * 供助理與站內提示共用同一套 planner 規則。
+   */
+  attendanceNotices: NotificationItem[];
   /** 錯題本當前狀態 */
   mistakes: {
     total: number;
@@ -228,13 +234,78 @@ export async function buildFullAIContext(
       submitted: e.submitted,
     })),
   );
+  // 點名情境目前僅接 DEMO_COURSES／getDemoAttendanceByCourse（demo 資料），
+  // 尚未串真實個人課表或 Firestore 場次；正式學生情境以網頁點名頁為準。
+  const todayAttendanceSituations: TodayAttendanceSituation[] = DEMO_COURSES.map((c) => {
+    const att = getDemoAttendanceByCourse(c.id);
+    const active = att.find((row) => row.active);
+    const latest = active ?? att[att.length - 1];
+    if (!latest) {
+      return {
+        courseId: String(c.id),
+        courseName: c.name,
+        viewerRole: 'student' as const,
+        scheduleStatus: 'unlinked' as const,
+        session: { kind: 'none' as const },
+      };
+    }
+    if (latest.active) {
+      return {
+        courseId: String(c.id),
+        courseName: c.name,
+        viewerRole: 'student' as const,
+        scheduleStatus: 'ok' as const,
+        classStartAt: latest.startedAt,
+        classEndAt: now,
+        session: {
+          kind: 'active' as const,
+          id: latest.id,
+          studentCheckedIn: latest.myStatus === 'present' || latest.myStatus === 'late',
+        },
+      };
+    }
+    return {
+      courseId: String(c.id),
+      courseName: c.name,
+      viewerRole: 'student' as const,
+      scheduleStatus: 'ok' as const,
+      classStartAt: latest.startedAt,
+      classEndAt: latest.startedAt,
+      session: {
+        kind: 'ended' as const,
+        id: latest.id,
+        studentCheckedIn: latest.myStatus === 'present' || latest.myStatus === 'late',
+        studentMarkedAbsent: latest.myStatus === 'absent',
+        studentMarkedExcused: latest.myStatus === 'excused',
+      },
+    };
+  });
+  const attendanceSessions = DEMO_COURSES.flatMap((c) =>
+    getDemoAttendanceByCourse(c.id)
+      .filter((row) => row.active)
+      .map((row) => ({
+        id: row.id,
+        courseId: row.courseId,
+        courseName: c.name,
+        active: true as const,
+        startedAt: row.startedAt,
+      })),
+  );
   const notifications = planNotifications({
     now,
     homeworks: allHomeworks,
     exams: allExams,
+    attendanceSessions,
+    todayAttendanceSituations,
   });
   const urgentNotifications = notifications.filter(
     (n) => n.severity === 'critical' || n.severity === 'high',
+  );
+  const attendanceNotices = notifications.filter((n) =>
+    n.kind === 'attendance_active' ||
+    n.kind === 'attendance_session_missing_teacher' ||
+    n.kind === 'attendance_session_missing_student' ||
+    n.kind === 'attendance_no_checkin_record',
   );
 
   // 4. Mistake repertoire (per-uid scoped)
@@ -290,6 +361,7 @@ export async function buildFullAIContext(
       })),
     },
     urgentNotifications,
+    attendanceNotices,
     mistakes,
     atRiskCourses,
     wide: await buildWideAISnapshot({ uid: options.uid, schoolId: options.schoolId ?? null }),
@@ -319,6 +391,12 @@ export function contextToPromptBlock(ctx: AIFullContext): string {
     lines.push('- 立即注意：');
     for (const n of ctx.urgentNotifications.slice(0, 5)) {
       lines.push(`  · [${n.severity}] ${n.title} — ${n.body}`);
+    }
+  }
+  if (ctx.attendanceNotices.length > 0) {
+    lines.push('- 點名狀態（無簽到紀錄≠缺席；僅老師明確標記才算缺席）：');
+    for (const n of ctx.attendanceNotices.slice(0, 5)) {
+      lines.push(`  · [${n.kind}] ${n.title} — ${n.body}`);
     }
   }
   lines.push('');
@@ -371,6 +449,11 @@ export function contextToCompactJson(ctx: AIFullContext) {
       priorityCount: ctx.studyPlan.priorityCount,
       overdue: ctx.studyPlan.overdueCount,
       urgent: ctx.urgentNotifications.slice(0, 5).map((n) => ({
+        kind: n.kind,
+        title: n.title,
+        body: n.body,
+      })),
+      attendanceNotices: ctx.attendanceNotices.slice(0, 5).map((n) => ({
         kind: n.kind,
         title: n.title,
         body: n.body,
