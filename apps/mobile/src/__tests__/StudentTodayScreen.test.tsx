@@ -78,6 +78,25 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  // Keep todayClass()'s one-hour offset on the same Taipei day, even in late-night CI runs.
+  // Freeze Date while preserving async rendering and animation scheduling.
+  jest.useFakeTimers({
+    doNotFake: [
+      'setTimeout',
+      'clearTimeout',
+      'setInterval',
+      'clearInterval',
+      'setImmediate',
+      'clearImmediate',
+      'nextTick',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'performance',
+      'hrtime',
+    ],
+  });
+  jest.setSystemTime(new Date('2026-11-03T08:00:00+08:00'));
   jest.clearAllMocks();
   mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a', role: 'student' } };
   mockTimetable.status = 'ready';
@@ -92,6 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => applyTheme('light'));
+  jest.useRealTimers();
 });
 
 test('opens timetable import from the empty timetable state', async () => {
