@@ -34,6 +34,15 @@ export function classroomContext(params: URLSearchParams): URLSearchParams {
   return result;
 }
 
+export function classroomDirectoryHref(
+  context: string,
+  destination: 'courses' | 'bookmarks' = 'courses',
+): string {
+  const query = classroomContext(new URLSearchParams(context)).toString();
+  const path = destination === 'bookmarks' ? '/classroom/material-bookmarks' : '/classroom';
+  return `${path}${query ? `?${query}` : ''}`;
+}
+
 export function classroomCourseHref(
   id: string,
   context: string,
