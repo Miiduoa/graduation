@@ -28,8 +28,8 @@ export function bindProvidencePublicCatalog(
     'pu',
   );
   return async (schoolId, signal) => {
-    if (signal.aborted || schoolId !== 'pu')
-      throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
+    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_SOURCE_UNAVAILABLE', 503);
+    if (schoolId !== 'pu') return null;
     // Return copies so no caller can alter the source subsequently delivered to another account.
     return {
       schoolId: snapshot.schoolId,

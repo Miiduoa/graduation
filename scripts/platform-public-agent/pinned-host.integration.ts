@@ -259,6 +259,32 @@ try {
         payload,
       });
     const body = { schoolId: 'pu', query: '從主顧樓到蓋夏圖書館', requestId: 'synthetic_host_01' };
+    const quotaBefore = await db.query<{ total: number }>(
+      'SELECT count(*)::integer AS total FROM platform_public_agent_quota',
+    );
+    const capability = await call('capability', { schoolId: 'pu' });
+    assert.equal(capability.statusCode, 200, capability.body);
+    assert.equal(capability.headers['cache-control'], 'no-store');
+    assert.deepEqual(capability.json().modes, ['deterministic']);
+    assert.equal(capability.json().schoolId, 'pu');
+    assert.equal(capability.json().source.date, '2026-10-19');
+    const unknown = await call('capability', { schoolId: 'other' });
+    assert.deepEqual(unknown.json(), { schoolId: 'other', modes: [], source: null });
+    assert.equal(
+      (await call('capability', { schoolId: 'pu' }, { origin: 'https://example.invalid' }))
+        .statusCode,
+      403,
+    );
+    assert.equal(
+      (await call('capability', { schoolId: 'pu' }, { authorization: 'Platform invalid' }))
+        .statusCode,
+      401,
+    );
+    const quotaAfter = await db.query<{ total: number }>(
+      'SELECT count(*)::integer AS total FROM platform_public_agent_quota',
+    );
+    assert.equal(quotaBefore.rows[0]?.total, 0);
+    assert.equal(quotaAfter.rows[0]?.total, 0);
     assert.equal(
       (await call('preview', body, { origin: 'https://example.invalid' })).statusCode,
       403,
