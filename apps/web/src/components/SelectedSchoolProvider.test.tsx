@@ -479,13 +479,28 @@ it('keeps the draft when confirm runs but commitSchool cannot proceed', async ()
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
   expect(screen.getByRole('dialog')).toBeTruthy();
   view.rerender(<DraftView loading />);
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: '捨棄草稿並切換' }));
-  });
+  await act(async () => {});
   expect(screen.queryByRole('dialog')).toBeNull();
   expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('不可提早丟掉');
   expect(navigation.replace).not.toHaveBeenCalled();
   expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
     JSON.stringify({ schoolId: 'school-a' }),
   );
+});
+
+it('cancels a pending school change when account identity changes', () => {
+  for (const owner of [defaults.ownerKey, 'bob']) {
+    localStorage.setItem(schoolPreferenceKey(owner), JSON.stringify({ schoolId: 'school-a' }));
+  }
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '舊帳草稿' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  view.rerender(<DraftView ownerKey="bob" />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  view.rerender(<DraftView />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(navigation.replace).not.toHaveBeenCalled();
 });
