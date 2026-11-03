@@ -1,4 +1,7 @@
 import { test, before, after } from 'node:test';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout } from 'node:timers';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -25,6 +28,12 @@ if (!folder) {
   assert.equal(compiled, join(folder.replace('/private/tmp/', '/tmp/'), 'compiled'));
   const { PlatformPublicAgentLedger } = await import(
     pathToFileURL(join(compiled, 'ledger.js')).href
+  );
+  const legacyCompiled = process.env.CAMPUS_AGENT_PG_LEGACY_COMPILED;
+  assert.ok(legacyCompiled);
+  assert.equal(realpathSync(legacyCompiled), realpathSync(join(folder, 'legacy-compiled')));
+  const { PlatformPublicAgentLedger: LegacyLedger } = await import(
+    pathToFileURL(join(legacyCompiled, 'ledger.js')).href
   );
   const { Pool } = await import('pg');
   const pool = new Pool({
@@ -207,6 +216,7 @@ if (!folder) {
       { c, result: op } = await claim(a, b);
     await assert.rejects(ack(a, b, op.operationId, false));
     await assert.rejects(ack(a, b, op.operationId));
+    await ledger().beginDispatch(a, b, op.operationId, op.executionToken);
     const done = await ledger().complete(a, b, op.operationId, op.executionToken, result(b));
     assert.equal(done.status, 'completed');
     const status = await ledger().status(a, lookup(b));
@@ -242,6 +252,204 @@ if (!folder) {
     );
     assert.equal(quota.rows[0].used, 1);
   });
+  test('verified not-dispatched tombstone forbids late dispatch and needs explicit ack', async () => {
+    const a = await actor(),
+      b = binding(),
+      { result: op } = await claim(a, b);
+    await ledger().markUnknown(a, b, op.operationId, op.executionToken);
+    const newer = await secondSession(a);
+    const reconciled = await ledger().reconcileNoDispatch(newer, {
+      ...lookup(b),
+      operationId: op.operationId,
+    });
+    assert.deepEqual(reconciled, { status: 'failed', operationId: op.operationId });
+    await assert.rejects(ledger().beginDispatch(a, b, op.operationId, op.executionToken));
+    await blocked(ledger().confirm(newer, binding()));
+    await ack(newer, b, op.operationId);
+    assert.equal(await ledger().status(newer, lookup(b)), null);
+    const quota = await pool.query(
+      "SELECT used FROM platform_public_agent_quota WHERE budget_kind='account' AND platform_account_id=$1",
+      [a.platformAccountId],
+    );
+    assert.equal(quota.rows[0].used, 1);
+  });
+  test('a fresh process can reconcile only a durable not-dispatched operation', async () => {
+    const a = await actor(),
+      b = binding(),
+      { result: op } = await claim(a, b);
+    await ledger().markUnknown(a, b, op.operationId, op.executionToken);
+    const newer = await secondSession(a);
+    const child = spawnSync(
+      process.execPath,
+      [join(dirname(fileURLToPath(import.meta.url)), 'postgres-reconcile-child.mjs')],
+      {
+        input: JSON.stringify({ actor: newer, scope: lookup(b), operationId: op.operationId }),
+        encoding: 'utf8',
+        env: {
+          PATH: '/usr/bin:/bin',
+          CAMPUS_AGENT_PG_FOLDER: folder,
+          CAMPUS_AGENT_PG_COMPILED: compiled,
+          CAMPUS_AGENT_PG_PARENT: parent,
+          C1_TEST_PARENT: String(process.pid),
+        },
+      },
+    );
+    assert.equal(child.status, 0, child.stderr);
+    const value = JSON.parse(child.stdout);
+    assert.deepEqual(value.before, { status: 'unknown', operationId: op.operationId });
+    assert.deepEqual(value.after, { status: 'failed', operationId: op.operationId });
+    await assert.rejects(ledger().beginDispatch(a, b, op.operationId, op.executionToken));
+    assert.deepEqual(await ledger().status(newer, lookup(b)), {
+      status: 'failed',
+      operationId: op.operationId,
+    });
+  });
+  test('lost dispatch commit response remains unknown, cannot reconcile or dispatch again', async () => {
+    const a = await actor(),
+      b = binding(),
+      { result: op } = await claim(a, b);
+    const lost = new PlatformPublicAgentLedger(
+      {
+        async transaction(fn, opts) {
+          await db.transaction(fn, opts);
+          throw Error('synthetic lost dispatch commit');
+        },
+      },
+      policy,
+    );
+    await assert.rejects(
+      lost.beginDispatch(a, b, op.operationId, op.executionToken),
+      /synthetic lost dispatch commit/u,
+    );
+    await ledger().markUnknown(a, b, op.operationId, op.executionToken);
+    await assert.rejects(
+      ledger().reconcileNoDispatch(a, { ...lookup(b), operationId: op.operationId }),
+      { code: 'PUBLIC_AGENT_OUTCOME_UNKNOWN' },
+    );
+    await assert.rejects(ledger().beginDispatch(a, b, op.operationId, op.executionToken));
+    assert.equal((await ledger().status(a, lookup(b))).status, 'unknown');
+  });
+  test('concurrent dispatch and no-dispatch reconcile never both succeed', async () => {
+    for (let i = 0; i < 12; i++) {
+      const a = await actor(),
+        b = binding(),
+        short = new PlatformPublicAgentLedger(db, { ...policy, operationTtlMs: 25 });
+      const c = await short.confirm(a, b),
+        op = await short.claim(a, b, c.confirmationId);
+      const [start, reconcile] = await Promise.allSettled([
+        short.beginDispatch(a, b, op.operationId, op.executionToken),
+        short.reconcileNoDispatch(a, { ...lookup(b), operationId: op.operationId }),
+      ]);
+      assert.ok(!(start.status === 'fulfilled' && reconcile.status === 'fulfilled'));
+      if (start.status === 'fulfilled') {
+        await short.markUnknown(a, b, op.operationId, op.executionToken);
+        await assert.rejects(
+          short.reconcileNoDispatch(a, { ...lookup(b), operationId: op.operationId }),
+        );
+      } else if (reconcile.status === 'fulfilled') {
+        await assert.rejects(short.beginDispatch(a, b, op.operationId, op.executionToken));
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        const final = await short.reconcileNoDispatch(a, {
+          ...lookup(b),
+          operationId: op.operationId,
+        });
+        assert.equal(final.status, 'failed');
+      }
+      const row = (
+        await pool.query(
+          'SELECT status,dispatch_started_at,failure_code FROM platform_public_agent_operations WHERE id=$1',
+          [op.operationId],
+        )
+      ).rows[0];
+      assert.ok(!(row.failure_code === 'NOT_DISPATCHED' && row.dispatch_started_at !== null));
+    }
+  });
+  test('new session scope and revoked original session cannot forge dispatch evidence', async () => {
+    const a = await actor(),
+      b = binding(),
+      { result: op } = await claim(a, b),
+      newer = await secondSession(a),
+      outsider = await actor();
+    await assert.rejects(ledger().beginDispatch(newer, b, op.operationId, op.executionToken));
+    await assert.rejects(
+      ledger().reconcileNoDispatch(outsider, { ...lookup(b), operationId: op.operationId }),
+      { code: 'PUBLIC_AGENT_OPERATION_NOT_FOUND' },
+    );
+    await pool.query('DELETE FROM platform_account_sessions WHERE token_sha256=$1', [
+      a.sessionHash,
+    ]);
+    await assert.rejects(ledger().beginDispatch(a, b, op.operationId, op.executionToken), {
+      code: 'PUBLIC_AGENT_SESSION_EXPIRED',
+    });
+    await assert.rejects(
+      ledger().reconcileNoDispatch(newer, { ...lookup(b), operationId: op.operationId }),
+      { code: 'PUBLIC_AGENT_OUTCOME_UNKNOWN' },
+    );
+  });
+  test('mixed version: actual legacy ledger cannot create an unfenced operation or consume quota', async () => {
+    const a = await actor(),
+      b = binding(),
+      old = new LegacyLedger(db, policy),
+      c = await old.confirm(a, b);
+    await assert.rejects(old.claim(a, b, c.confirmationId), { code: '23502' });
+    const row = (
+      await pool.query('SELECT consumed_at FROM platform_public_agent_confirmations WHERE id=$1', [
+        c.confirmationId,
+      ])
+    ).rows[0];
+    assert.equal(row.consumed_at, null);
+    assert.equal(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM platform_public_agent_operations WHERE platform_account_id=$1',
+          [a.platformAccountId],
+        )
+      ).rows[0].n,
+      0,
+    );
+    assert.equal(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM platform_public_agent_quota WHERE platform_account_id=$1',
+          [a.platformAccountId],
+        )
+      ).rows[0].n,
+      0,
+    );
+    const modern = await ledger().claim(a, b, c.confirmationId);
+    assert.equal(modern.status, 'claimed');
+    const legacyReplay = await old.claim(a, b, c.confirmationId);
+    assert.equal(legacyReplay.status, 'pending');
+    assert.notEqual(legacyReplay.status, 'claimed');
+  });
+  test('explicit provider failures require dispatch fence, never masquerade as NOT_DISPATCHED', async () => {
+    for (const code of [
+      'FREE_QUOTA_UNAVAILABLE',
+      'DESTINATION_UNCLEAR',
+      'INVALID_PROVIDER_RESPONSE',
+    ]) {
+      const a = await actor(),
+        b = binding(),
+        { result: op } = await claim(a, b);
+      await assert.rejects(ledger().fail(a, b, op.operationId, op.executionToken, code));
+      await ledger().beginDispatch(a, b, op.operationId, op.executionToken);
+      const failed = await ledger().fail(a, b, op.operationId, op.executionToken, code);
+      assert.equal(failed.status, 'failed');
+      assert.equal(failed.failureCode, code);
+      await assert.rejects(
+        ledger().reconcileNoDispatch(a, { ...lookup(b), operationId: op.operationId }),
+        { code: 'PUBLIC_AGENT_OUTCOME_UNKNOWN' },
+      );
+      const quota = (
+        await pool.query(
+          "SELECT used FROM platform_public_agent_quota WHERE budget_kind='account' AND platform_account_id=$1",
+          [a.platformAccountId],
+        )
+      ).rows[0];
+      assert.equal(quota.used, 1);
+    }
+  });
   test('database partial unique index independently rejects duplicate unresolved scope', async () => {
     const a = await actor(),
       b = binding(),
@@ -251,8 +459,8 @@ if (!folder) {
     await assert.rejects(
       pool.query(
         `INSERT INTO platform_public_agent_operations
-      (id,platform_account_id,credential_id,session_hash,task,request_id,school_id,payload_hash,provider,model,confirmation_id,status,execution_token_hash,expires_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'running',$12,clock_timestamp()+interval '10 seconds')`,
+      (id,platform_account_id,credential_id,session_hash,task,request_id,school_id,payload_hash,provider,model,confirmation_id,status,execution_token_hash,expires_at,dispatch_fence_version)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'running',$12,clock_timestamp()+interval '10 seconds',1)`,
         [
           `pago_${randomUUID()}`,
           a.platformAccountId,
@@ -362,20 +570,31 @@ if (!folder) {
       };
       let calls = 0,
         mode = 'success',
-        loseFailureAck = false;
+        loseFailureAck = false,
+        loseDispatchAck = false,
+        loseClaimAck = false;
       const serviceDb = {
         async transaction(fn, options) {
-          let finalizing = false;
+          let finalizing = false,
+            dispatching = false,
+            claiming = false;
           const result = await db.transaction(
             (tx) =>
               fn({
                 query(sql, params) {
                   if (sql.includes('SET status=$6,result_json=$7::jsonb')) finalizing = true;
+                  if (sql.includes('SET dispatch_started_at=clock_timestamp()')) dispatching = true;
+                  if (sql.includes('INSERT INTO platform_public_agent_operations')) claiming = true;
                   return tx.query(sql, params);
                 },
               }),
             options,
           );
+          if ((dispatching && loseDispatchAck) || (claiming && loseClaimAck)) {
+            loseDispatchAck = false;
+            loseClaimAck = false;
+            throw new Error('synthetic lost fence or claim acknowledgement');
+          }
           if (finalizing && loseFailureAck) {
             loseFailureAck = false;
             throw new Error('synthetic lost commit acknowledgement');
@@ -597,6 +816,116 @@ if (!folder) {
             'acknowledged',
           );
         }
+        // Claim committed but its acknowledgement disappeared: no dispatch can
+        // start, and only durable absence of the fence permits reconciliation.
+        mode = 'success';
+        const recoveryPrep = await send('prepareGroq', {
+          ...input,
+          requestId: `claim_${randomUUID()}`,
+        });
+        const recoveryConfirm = await send('confirm', {
+          approved: true,
+          request: recoveryPrep.body.request,
+        });
+        const recoveryRequest = {
+          confirmationId: recoveryConfirm.body.confirmationId,
+          request: recoveryPrep.body.request,
+        };
+        const beforeClaim = calls;
+        loseClaimAck = true;
+        assert.equal(
+          (await send('execute', recoveryRequest)).body.code,
+          'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+        );
+        assert.equal(calls, beforeClaim);
+        const pending = await send('status', { task: 'public-campus-navigation', schoolId: 'pu' });
+        assert.equal(pending.body.status, 'pending');
+        await pool.query(
+          "UPDATE platform_public_agent_operations SET created_at=clock_timestamp()-interval '3 minutes',expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1",
+          [pending.body.operationId],
+        );
+        await app.close();
+        app = fastify();
+        register();
+        const recovered = await send('reconcile', {
+          task: 'public-campus-navigation',
+          schoolId: 'pu',
+          operationId: pending.body.operationId,
+        });
+        assert.deepEqual(recovered.body, {
+          status: 'failed',
+          operationId: pending.body.operationId,
+        });
+        const tombstone = await send('read', recoveryPrep.body.request);
+        assert.equal(tombstone.body.failureCode, 'NOT_DISPATCHED');
+        assert.equal(calls, beforeClaim);
+        assert.equal(
+          (
+            await send('ack', {
+              task: 'public-campus-navigation',
+              schoolId: 'pu',
+              operationId: pending.body.operationId,
+              approved: true,
+            })
+          ).body.status,
+          'acknowledged',
+        );
+
+        // A committed dispatch marker with lost ACK is fundamentally different:
+        // no provider call, but the store cannot prove absence of dispatch.
+        const fencePrep = await send('prepareGroq', {
+          ...input,
+          requestId: `fence_${randomUUID()}`,
+        });
+        const fenceConfirm = await send('confirm', {
+          approved: true,
+          request: fencePrep.body.request,
+        });
+        const fenceRequest = {
+          confirmationId: fenceConfirm.body.confirmationId,
+          request: fencePrep.body.request,
+        };
+        const beforeFence = calls;
+        loseDispatchAck = true;
+        assert.equal(
+          (await send('execute', fenceRequest)).body.code,
+          'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+        );
+        assert.equal(calls, beforeFence);
+        await app.close();
+        app = fastify();
+        register();
+        const fenceState = await send('status', {
+          task: 'public-campus-navigation',
+          schoolId: 'pu',
+        });
+        assert.ok(['unknown', 'pending'].includes(fenceState.body.status));
+        const stored = await pool.query(
+          'SELECT dispatch_started_at FROM platform_public_agent_operations WHERE id=$1',
+          [fenceState.body.operationId],
+        );
+        assert.ok(stored.rows[0].dispatch_started_at);
+        assert.equal(
+          (
+            await send('reconcile', {
+              task: 'public-campus-navigation',
+              schoolId: 'pu',
+              operationId: fenceState.body.operationId,
+            })
+          ).body.code,
+          'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+        );
+        const quotaBefore = await pool.query(
+          "SELECT used FROM platform_public_agent_quota WHERE budget_kind='account' AND platform_account_id=$1",
+          [a.platformAccountId],
+        );
+        await send('execute', fenceRequest);
+        const quotaAfter = await pool.query(
+          "SELECT used FROM platform_public_agent_quota WHERE budget_kind='account' AND platform_account_id=$1",
+          [a.platformAccountId],
+        );
+        assert.equal(quotaAfter.rows[0].used, quotaBefore.rows[0].used);
+        assert.equal(calls, beforeFence);
       } finally {
         await app.close();
       }

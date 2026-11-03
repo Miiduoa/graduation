@@ -40,10 +40,16 @@ CREATE TABLE platform_public_agent_operations (
   result_json jsonb,
   failure_code text,
   acknowledged_at timestamptz,
+  dispatch_started_at timestamptz,
+  -- No default: any pre-fence executor must fail its INSERT rather than create false evidence.
+  dispatch_fence_version smallint NOT NULL CHECK (dispatch_fence_version=1),
   CHECK (acknowledged_at IS NULL OR status IN ('completed','failed')),
+  CHECK ((status NOT IN ('completed','failed')) OR
+    (status='failed' AND failure_code='NOT_DISPATCHED' AND dispatch_started_at IS NULL) OR
+    (dispatch_started_at IS NOT NULL AND (failure_code IS NULL OR failure_code<>'NOT_DISPATCHED'))),
   CHECK (result_json IS NULL OR (jsonb_typeof(result_json)='object' AND octet_length(result_json::text)<=32768)),
   CHECK ((status='completed' AND result_json IS NOT NULL AND failure_code IS NULL)
-    OR (status='failed' AND result_json IS NULL AND failure_code IS NOT NULL AND failure_code IN ('SOURCE_CHANGED','INVALID_RESULT','EXECUTION_FAILED','FREE_QUOTA_UNAVAILABLE','DESTINATION_UNCLEAR','INVALID_PROVIDER_RESPONSE'))
+    OR (status='failed' AND result_json IS NULL AND failure_code IS NOT NULL AND failure_code IN ('SOURCE_CHANGED','INVALID_RESULT','EXECUTION_FAILED','FREE_QUOTA_UNAVAILABLE','DESTINATION_UNCLEAR','INVALID_PROVIDER_RESPONSE','NOT_DISPATCHED'))
     OR (status IN ('running','unknown') AND result_json IS NULL AND failure_code IS NULL)),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

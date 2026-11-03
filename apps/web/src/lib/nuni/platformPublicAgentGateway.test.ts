@@ -176,4 +176,21 @@ describe('unregistered platform public Agent gateway', () => {
     expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_OPEN_OPERATION' });
     expect(transport).toHaveBeenCalledTimes(1);
   });
+  it('allows only server-evidence reconciliation scope and preserves unknown outcome', async () => {
+    const handle = createPlatformPublicAgentGateway({ enabled: true, transport, project });
+    const scope = {
+      task: 'public-campus-navigation',
+      schoolId: 'pu',
+      operationId: 'pago_synthetic',
+    };
+    expect(
+      (await handle(request({ body: { ...scope, notDispatched: true } }), 'reconcile')).status,
+    ).toBe(422);
+    expect(transport).not.toHaveBeenCalled();
+    transport.mockRejectedValue(new NuniError(409, 'PUBLIC_AGENT_OUTCOME_UNKNOWN'));
+    const response = await handle(request({ body: scope }), 'reconcile');
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_OUTCOME_UNKNOWN' });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
 });

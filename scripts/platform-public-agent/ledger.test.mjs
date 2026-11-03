@@ -29,12 +29,14 @@ const resultFor = (f, b = binding()) => ({
     distanceMeters: 120,
   },
 });
-async function claimedFixture(overrides = {}, change = {}) {
+async function claimedFixture(overrides = {}, change = {}, startDispatch = true) {
   const f = fixture(overrides),
     b = binding(change),
     confirmation = await f.ledger.confirm(f.actor, b);
   const claim = await f.ledger.claim(f.actor, b, confirmation.confirmationId);
   assert.equal(claim.status, 'claimed');
+  if (startDispatch)
+    await f.ledger.beginDispatch(f.actor, b, claim.operationId, claim.executionToken);
   return { ...f, b, confirmation, claim };
 }
 
@@ -1197,3 +1199,163 @@ test('duplicate open rows in a corrupt or unindexed store fail closed instead of
   );
   assert.deepEqual(quotas(f.db), [1, 1]);
 });
+
+test('executor fence is mandatory for completed and failed outcomes, and begins only once', async () => {
+  const f = await claimedFixture({}, {}, false);
+  await rejectsCode(
+    f.ledger.complete(f.actor, f.b, f.claim.operationId, f.claim.executionToken, resultFor(f)),
+    'PUBLIC_AGENT_DISPATCH_NOT_STARTED',
+  );
+  await rejectsCode(
+    f.ledger.fail(f.actor, f.b, f.claim.operationId, f.claim.executionToken, 'EXECUTION_FAILED'),
+    'PUBLIC_AGENT_DISPATCH_NOT_STARTED',
+  );
+  await rejectsCode(
+    f.ledger.fail(f.actor, f.b, f.claim.operationId, f.claim.executionToken, 'NOT_DISPATCHED'),
+    'PUBLIC_AGENT_INVALID_RESULT',
+  );
+  const attempts = await Promise.allSettled([
+    f.ledger.beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+    f.make().beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+  ]);
+  assert.equal(attempts.filter((item) => item.status === 'fulfilled').length, 1);
+  assert.equal(
+    attempts.find((item) => item.status === 'rejected').reason.code,
+    'PUBLIC_AGENT_DISPATCH_ALREADY_STARTED',
+  );
+  assert.equal(
+    (
+      await f.ledger.complete(
+        f.actor,
+        f.b,
+        f.claim.operationId,
+        f.claim.executionToken,
+        resultFor(f),
+      )
+    ).status,
+    'completed',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('expired no-dispatch can be reconciled by the same account new session but not auto acknowledged or refunded', async () => {
+  const f = await claimedFixture({ operationTtlMs: 5 }, {}, false);
+  const next = f.db.anotherSession(f.actor),
+    scope = { task: f.b.task, schoolId: f.b.schoolId, operationId: f.claim.operationId };
+  await rejectsCode(f.ledger.reconcileNoDispatch(next, scope), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  f.db.now += 6;
+  assert.deepEqual(await f.make().reconcileNoDispatch(next, scope), {
+    status: 'failed',
+    operationId: f.claim.operationId,
+  });
+  assert.deepEqual(await f.make().reconcileNoDispatch(next, scope), {
+    status: 'failed',
+    operationId: f.claim.operationId,
+  });
+  assert.equal((await f.ledger.readBound(f.actor, f.b)).failureCode, 'NOT_DISPATCHED');
+  assert.equal((await f.ledger.status(next, scopeFor(f))).status, 'failed');
+  await rejectsCode(
+    f.ledger.confirm(next, binding({ requestId: 'no_retry_1234' })),
+    'PUBLIC_AGENT_OPEN_OPERATION',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+  await f.ledger.ack(next, { ...scope, approved: true });
+  assert.ok(
+    (await f.ledger.confirm(next, binding({ requestId: 'allowed_after_ack_1' }))).confirmationId,
+  );
+});
+function scopeFor(f) {
+  return { task: f.b.task, schoolId: f.b.schoolId };
+}
+
+test('a dispatch marker, lost begin commit acknowledgement, or foreign scope can never prove no execution', async () => {
+  const f = await claimedFixture({}, {}, false),
+    next = f.db.anotherSession(f.actor);
+  const scope = { task: f.b.task, schoolId: f.b.schoolId, operationId: f.claim.operationId };
+  const other = f.db.actor();
+  await rejectsCode(f.ledger.reconcileNoDispatch(other, scope), 'PUBLIC_AGENT_OPERATION_NOT_FOUND');
+  await rejectsCode(
+    f.ledger.reconcileNoDispatch(next, { ...scope, schoolId: 'other' }),
+    'PUBLIC_AGENT_OPERATION_NOT_FOUND',
+  );
+  await rejectsCode(
+    f.ledger.reconcileNoDispatch(next, { ...scope, notSent: true }),
+    'PUBLIC_AGENT_INVALID_INPUT',
+  );
+  f.db.loseCommitAck = true;
+  await assert.rejects(
+    f.ledger.beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+    /lost commit/u,
+  );
+  assert.ok([...f.db.data.operations.values()][0].dispatch_started_at);
+  f.db.now += 31_000;
+  await rejectsCode(f.ledger.reconcileNoDispatch(next, scope), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  await rejectsCode(
+    f.ledger.beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal((await f.ledger.status(next, scopeFor(f))).status, 'unknown');
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('expired begin versus reconcile is serialized and never dispatches after reconciliation', async () => {
+  const f = await claimedFixture({ operationTtlMs: 5 }, {}, false),
+    next = f.db.anotherSession(f.actor);
+  f.db.now += 6;
+  const scope = { task: f.b.task, schoolId: f.b.schoolId, operationId: f.claim.operationId };
+  const [begin, reconciled] = await Promise.allSettled([
+    f.ledger.beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+    f.make().reconcileNoDispatch(next, scope),
+  ]);
+  assert.equal(begin.status, 'rejected');
+  assert.equal(begin.reason.code, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  assert.equal(reconciled.status, 'fulfilled');
+  assert.equal(reconciled.value.status, 'failed');
+  assert.equal([...f.db.data.operations.values()][0].dispatch_started_at, null);
+});
+
+test('missing, legacy or invalid dispatch fence version fails closed for every operation', async () => {
+  for (const value of [undefined, null, 0, 2, '1']) {
+    const f = await claimedFixture({ operationTtlMs: 5 }, {}, false),
+      row = [...f.db.data.operations.values()][0];
+    row.dispatch_fence_version = value;
+    f.db.now += 6;
+    const scope = { task: f.b.task, schoolId: f.b.schoolId, operationId: f.claim.operationId };
+    await rejectsCode(f.ledger.status(f.actor, scopeFor(f)), 'PUBLIC_AGENT_STORE_INVALID');
+    await rejectsCode(
+      f.ledger.beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+      'PUBLIC_AGENT_STORE_INVALID',
+    );
+    await rejectsCode(f.ledger.reconcileNoDispatch(f.actor, scope), 'PUBLIC_AGENT_STORE_INVALID');
+    await rejectsCode(
+      f.ledger.markUnknown(f.actor, f.b, f.claim.operationId, f.claim.executionToken),
+      'PUBLIC_AGENT_STORE_INVALID',
+    );
+    await rejectsCode(
+      f.ledger.ack(f.actor, { ...scope, approved: true }),
+      'PUBLIC_AGENT_STORE_INVALID',
+    );
+    assert.equal(row.dispatch_started_at, null);
+  }
+});
+
+for (const code of ['FREE_QUOTA_UNAVAILABLE', 'DESTINATION_UNCLEAR', 'INVALID_PROVIDER_RESPONSE']) {
+  test(`explicit ${code} can only be recorded after the dispatch fence`, async () => {
+    const f = await claimedFixture({}, {}, false);
+    await rejectsCode(
+      f.ledger.fail(f.actor, f.b, f.claim.operationId, f.claim.executionToken, code),
+      'PUBLIC_AGENT_DISPATCH_NOT_STARTED',
+    );
+    await f.ledger.beginDispatch(f.actor, f.b, f.claim.operationId, f.claim.executionToken);
+    const result = await f.ledger.fail(
+      f.actor,
+      f.b,
+      f.claim.operationId,
+      f.claim.executionToken,
+      code,
+    );
+    assert.equal(result.status, 'failed');
+    assert.equal(result.failureCode, code);
+    assert.deepEqual(quotas(f.db), [1, 1]);
+  });
+}

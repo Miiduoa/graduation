@@ -117,6 +117,16 @@ class TransactionFixture {
       return 'ack-operation';
     if (
       sql.startsWith('UPDATE platform_public_agent_operations') &&
+      sql.includes('SET dispatch_started_at=')
+    )
+      return 'begin-dispatch';
+    if (
+      sql.startsWith('UPDATE platform_public_agent_operations') &&
+      sql.includes("failure_code='NOT_DISPATCHED'")
+    )
+      return 'reconcile-no-dispatch';
+    if (
+      sql.startsWith('UPDATE platform_public_agent_operations') &&
       sql.includes('execution_token_hash=$5')
     )
       return 'finalize-operation';
@@ -268,6 +278,9 @@ class TransactionFixture {
         )
           throw dbFailure('23505');
         row.acknowledged_at = null;
+        assert.match(sql, /dispatch_fence_version\).*\$15,1 WHERE/u);
+        row.dispatch_fence_version = 1;
+        row.dispatch_started_at = null;
         row.confirmation_id = values[10];
         row.execution_token_hash = values[14];
         row.result_json = null;
@@ -331,10 +344,45 @@ class TransactionFixture {
       row.acknowledged_at = new Date(this.now);
       return rows([{ id: row.id }]);
     }
+    if (action === 'begin-dispatch') {
+      const row = [...this.data.operations.values()].find(
+        (item) =>
+          item.id === values[0] &&
+          item.platform_account_id === values[1] &&
+          item.session_hash === values[2] &&
+          item.payload_hash === values[3] &&
+          item.execution_token_hash === values[4] &&
+          item.dispatch_fence_version === 1 &&
+          item.status === 'running' &&
+          new Date(item.expires_at).getTime() > this.now &&
+          item.dispatch_started_at === null,
+      );
+      if (!row) return rows([]);
+      row.dispatch_started_at = new Date(this.now);
+      return rows([{ id: row.id }]);
+    }
+    if (action === 'reconcile-no-dispatch') {
+      const row = [...this.data.operations.values()].find(
+        (item) =>
+          item.platform_account_id === values[0] &&
+          item.school_id === values[1] &&
+          item.task === values[2] &&
+          item.id === values[3] &&
+          item.acknowledged_at === null &&
+          item.dispatch_started_at === null &&
+          (item.status === 'unknown' ||
+            (item.status === 'running' && new Date(item.expires_at).getTime() <= this.now)),
+      );
+      if (!row) return rows([]);
+      row.status = 'failed';
+      row.failure_code = 'NOT_DISPATCHED';
+      row.result_json = null;
+      return rows([{ id: row.id }]);
+    }
     if (action === 'finalize-operation') {
       assert.match(
         sql,
-        /execution_token_hash=\$5 AND status='running' AND expires_at>clock_timestamp\(\) RETURNING id/u,
+        /execution_token_hash=\$5 AND status='running' AND expires_at>clock_timestamp\(\).*dispatch_fence_version=1.*dispatch_started_at IS NOT NULL\) RETURNING id/u,
       );
       const row = [...this.data.operations.values()].find(
         (item) =>
@@ -343,7 +391,9 @@ class TransactionFixture {
           item.session_hash === values[2] &&
           item.payload_hash === values[3] &&
           item.execution_token_hash === values[4] &&
+          item.dispatch_fence_version === 1 &&
           item.status === 'running' &&
+          (values[5] === 'unknown' || item.dispatch_started_at !== null) &&
           new Date(item.expires_at).getTime() > this.now,
       );
       if (!row) return rows([]);

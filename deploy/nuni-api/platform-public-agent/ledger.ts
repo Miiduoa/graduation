@@ -51,7 +51,8 @@ export type PublicAgentFailureCode =
   | 'EXECUTION_FAILED'
   | 'FREE_QUOTA_UNAVAILABLE'
   | 'DESTINATION_UNCLEAR'
-  | 'INVALID_PROVIDER_RESPONSE';
+  | 'INVALID_PROVIDER_RESPONSE'
+  | 'NOT_DISPATCHED';
 type OperationIdentity = { operationId: string; expiresAt: number };
 export type PublicAgentOperation = OperationIdentity &
   (
@@ -88,6 +89,8 @@ type OperationRow = BindingRow & {
   status: 'running' | 'unknown' | 'completed' | 'failed';
   execution_token_hash: string;
   acknowledged_at: Date | string | null;
+  dispatch_started_at: Date | string | null;
+  dispatch_fence_version: number;
   result_json: unknown;
   failure_code: unknown;
   expires_at: Date | string;
@@ -143,7 +146,8 @@ const failureCode = (value: unknown): value is PublicAgentFailureCode =>
   value === 'EXECUTION_FAILED' ||
   value === 'FREE_QUOTA_UNAVAILABLE' ||
   value === 'DESTINATION_UNCLEAR' ||
-  value === 'INVALID_PROVIDER_RESPONSE';
+  value === 'INVALID_PROVIDER_RESPONSE' ||
+  value === 'NOT_DISPATCHED';
 function resultInput(value: unknown, task: PublicTaskName, schoolId: string): PublicAgentResult {
   const row = exactRecord(value, ['task', 'schoolId', 'sourceFingerprint', 'checkedAt', 'receipt']);
   if (
@@ -355,15 +359,29 @@ export class PlatformPublicAgentLedger {
     actor: PlatformTaskActor,
     task: PublicTaskName,
     schoolId: string,
-  ): Promise<{ id: string; status: OperationRow['status']; unexpired: boolean } | undefined> {
+  ): Promise<
+    | {
+        id: string;
+        status: OperationRow['status'];
+        unexpired: boolean;
+        dispatch_fence_version: number;
+      }
+    | undefined
+  > {
     const rows = (
-      await tx.query<{ id: string; status: OperationRow['status']; unexpired: boolean }>(
-        `SELECT id,status,expires_at>clock_timestamp() AS unexpired FROM platform_public_agent_operations
+      await tx.query<{
+        id: string;
+        status: OperationRow['status'];
+        unexpired: boolean;
+        dispatch_fence_version: number;
+      }>(
+        `SELECT id,status,dispatch_fence_version,expires_at>clock_timestamp() AS unexpired FROM platform_public_agent_operations
        WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND acknowledged_at IS NULL LIMIT 2 FOR UPDATE`,
         [actor.platformAccountId, schoolId, task],
       )
     ).rows;
-    if (rows.length > 1) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+    if (rows.length > 1 || (rows[0] && rows[0].dispatch_fence_version !== 1))
+      return fail('PUBLIC_AGENT_STORE_INVALID', 503);
     return rows[0];
   }
   private async requireClearScope(
@@ -378,7 +396,10 @@ export class PlatformPublicAgentLedger {
     this.sameBinding(same, actor, binding);
   }
   private async state(tx: PublicAgentSql, row: OperationRow): Promise<PublicAgentOperation> {
-    if (!['running', 'unknown', 'completed', 'failed'].includes(row.status))
+    if (
+      !['running', 'unknown', 'completed', 'failed'].includes(row.status) ||
+      row.dispatch_fence_version !== 1
+    )
       return fail('PUBLIC_AGENT_STORE_INVALID', 503);
     if (typeof row.unexpired !== 'boolean') return fail('PUBLIC_AGENT_STORE_INVALID', 503);
     if (row.status === 'running' && !row.unexpired) {
@@ -564,9 +585,9 @@ export class PlatformPublicAgentLedger {
       const row = (
         await tx.query<{ id: string; expires_at: Date | string }>(
           `INSERT INTO platform_public_agent_operations
-        (id,platform_account_id,credential_id,session_hash,task,request_id,school_id,payload_hash,provider,model,confirmation_id,status,expires_at,execution_token_hash)
+        (id,platform_account_id,credential_id,session_hash,task,request_id,school_id,payload_hash,provider,model,confirmation_id,status,expires_at,execution_token_hash,dispatch_fence_version)
         SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'running',
-          LEAST($12::timestamptz,$13::timestamptz,clock_timestamp()+($14::double precision*interval '1 millisecond')),$15
+          LEAST($12::timestamptz,$13::timestamptz,clock_timestamp()+($14::double precision*interval '1 millisecond')),$15,1
         WHERE $12::timestamptz>clock_timestamp() AND $13::timestamptz>clock_timestamp()
         RETURNING id,expires_at`,
           [
@@ -659,13 +680,16 @@ export class PlatformPublicAgentLedger {
       await this.lockAccount(tx, actor);
       await this.verifySession(tx, actor);
       const row = (
-        await tx.query<Pick<OperationRow, 'id' | 'status' | 'acknowledged_at'>>(
-          `SELECT id,status,acknowledged_at FROM platform_public_agent_operations
+        await tx.query<
+          Pick<OperationRow, 'id' | 'status' | 'acknowledged_at' | 'dispatch_fence_version'>
+        >(
+          `SELECT id,status,acknowledged_at,dispatch_fence_version FROM platform_public_agent_operations
          WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND id=$4 FOR UPDATE`,
           [actor.platformAccountId, schoolId, task, id],
         )
       ).rows[0];
       if (!row) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      if (row.dispatch_fence_version !== 1) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
       if (!['running', 'unknown', 'completed', 'failed'].includes(row.status))
         return fail('PUBLIC_AGENT_STORE_INVALID', 503);
       if (row.status !== 'completed' && row.status !== 'failed')
@@ -683,6 +707,116 @@ export class PlatformPublicAgentLedger {
       } else if (!(row.acknowledged_at instanceof Date) && typeof row.acknowledged_at !== 'string')
         return fail('PUBLIC_AGENT_STORE_INVALID', 503);
       return { status: 'acknowledged', operationId: id };
+    });
+  }
+
+  /** A durable dispatch fence; commit must be acknowledged before any executor call. */
+  async beginDispatch(
+    rawActor: PlatformTaskActor,
+    rawBinding: TaskBinding,
+    operationId: string,
+    executionToken: string,
+  ): Promise<{ started: true }> {
+    const actor = this.actorInput(rawActor),
+      binding = bindingInput(rawBinding);
+    if (
+      typeof operationId !== 'string' ||
+      !/^pago_[a-f0-9-]{36}$/u.test(operationId) ||
+      typeof executionToken !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(executionToken)
+    )
+      return fail('PUBLIC_AGENT_EXECUTION_LEASE_INVALID', 409);
+    const tokenHash = createHash('sha256').update(executionToken).digest('hex');
+    return this.transaction(async (tx) => {
+      await this.verifyActor(tx, actor);
+      await this.lockAccount(tx, actor);
+      await this.verifySession(tx, actor);
+      const row = await this.operation(tx, actor, binding.task, binding.requestId);
+      if (!row || row.id !== operationId) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      this.sameBinding(row, actor, binding);
+      if (row.dispatch_fence_version !== 1) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      if (
+        typeof row.execution_token_hash !== 'string' ||
+        !HASH.test(row.execution_token_hash) ||
+        !timingSafeEqual(
+          Buffer.from(tokenHash, 'hex'),
+          Buffer.from(row.execution_token_hash, 'hex'),
+        )
+      )
+        return fail('PUBLIC_AGENT_EXECUTION_LEASE_INVALID', 409);
+      if (row.status !== 'running' || row.unexpired !== true)
+        return fail('PUBLIC_AGENT_OUTCOME_UNKNOWN', 409);
+      if (row.dispatch_started_at !== null)
+        return fail('PUBLIC_AGENT_DISPATCH_ALREADY_STARTED', 409);
+      const changed = (
+        await tx.query<{ id: string }>(
+          `UPDATE platform_public_agent_operations
+        SET dispatch_started_at=clock_timestamp(),updated_at=clock_timestamp()
+        WHERE id=$1 AND platform_account_id=$2 AND session_hash=$3 AND payload_hash=$4
+          AND execution_token_hash=$5 AND status='running' AND expires_at>clock_timestamp()
+          AND dispatch_fence_version=1 AND dispatch_started_at IS NULL RETURNING id`,
+          [operationId, actor.platformAccountId, actor.sessionHash, binding.payloadHash, tokenHash],
+        )
+      ).rows[0];
+      if (!changed || changed.id !== operationId) return fail('PUBLIC_AGENT_OUTCOME_UNKNOWN', 409);
+      return { started: true as const };
+    });
+  }
+
+  /** Only the durable absence of a dispatch fence can prove non-execution. */
+  async reconcileNoDispatch(
+    rawActor: PlatformTaskActor,
+    raw: unknown,
+  ): Promise<{ status: 'failed'; operationId: string }> {
+    const input = exactRecord(raw, ['task', 'schoolId', 'operationId']);
+    const { task, schoolId, operationId } = parseRecoveryAcknowledgement({
+      ...input,
+      approved: true,
+    });
+    const actor = this.actorInput(rawActor);
+    return this.transaction(async (tx) => {
+      await this.verifyActor(tx, actor);
+      await this.lockAccount(tx, actor);
+      await this.verifySession(tx, actor);
+      const row = (
+        await tx.query<{
+          id: string;
+          status: OperationRow['status'];
+          failure_code: unknown;
+          dispatch_started_at: unknown;
+          dispatch_fence_version: number;
+          unexpired: boolean;
+        }>(
+          `SELECT id,status,failure_code,dispatch_started_at,dispatch_fence_version,expires_at>clock_timestamp() AS unexpired
+         FROM platform_public_agent_operations WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND id=$4 FOR UPDATE`,
+          [actor.platformAccountId, schoolId, task, operationId],
+        )
+      ).rows[0];
+      if (!row) return fail('PUBLIC_AGENT_OPERATION_NOT_FOUND', 404);
+      if (row.dispatch_fence_version !== 1) return fail('PUBLIC_AGENT_STORE_INVALID', 503);
+      if (
+        row.status === 'failed' &&
+        row.failure_code === 'NOT_DISPATCHED' &&
+        row.dispatch_started_at === null
+      )
+        return { status: 'failed' as const, operationId };
+      if (
+        typeof row.unexpired !== 'boolean' ||
+        row.dispatch_started_at !== null ||
+        !(row.status === 'unknown' || (row.status === 'running' && !row.unexpired))
+      )
+        return fail('PUBLIC_AGENT_OUTCOME_UNKNOWN', 409);
+      const changed = (
+        await tx.query<{ id: string }>(
+          `UPDATE platform_public_agent_operations
+        SET status='failed',failure_code='NOT_DISPATCHED',result_json=NULL,updated_at=clock_timestamp()
+        WHERE platform_account_id=$1 AND school_id=$2 AND task=$3 AND id=$4 AND acknowledged_at IS NULL
+          AND dispatch_fence_version=1 AND dispatch_started_at IS NULL AND (status='unknown' OR (status='running' AND expires_at<=clock_timestamp())) RETURNING id`,
+          [actor.platformAccountId, schoolId, task, operationId],
+        )
+      ).rows[0];
+      if (!changed || changed.id !== operationId) return fail('PUBLIC_AGENT_OUTCOME_UNKNOWN', 409);
+      return { status: 'failed' as const, operationId };
     });
   }
 
@@ -755,7 +889,7 @@ export class PlatformPublicAgentLedger {
     executionToken: string,
     code: PublicAgentFailureCode,
   ): Promise<PublicAgentOperation> {
-    if (!failureCode(code)) return fail('PUBLIC_AGENT_INVALID_RESULT');
+    if (!failureCode(code) || code === 'NOT_DISPATCHED') return fail('PUBLIC_AGENT_INVALID_RESULT');
     return this.finalize(actor, binding, operationId, executionToken, 'failed', null, code);
   }
 
@@ -805,12 +939,21 @@ export class PlatformPublicAgentLedger {
         return fail('PUBLIC_AGENT_EXECUTION_LEASE_INVALID', 409);
       const current = await this.state(tx, row);
       if (current.status !== 'pending') return current;
+      if (status !== 'unknown' && row.dispatch_started_at === null)
+        return fail('PUBLIC_AGENT_DISPATCH_NOT_STARTED', 409);
+      if (
+        row.dispatch_started_at !== null &&
+        !(row.dispatch_started_at instanceof Date) &&
+        typeof row.dispatch_started_at !== 'string'
+      )
+        return fail('PUBLIC_AGENT_STORE_INVALID', 503);
       const changed = (
         await tx.query<{ id: string }>(
           `UPDATE platform_public_agent_operations
         SET status=$6,result_json=$7::jsonb,failure_code=$8,updated_at=clock_timestamp()
         WHERE id=$1 AND platform_account_id=$2 AND session_hash=$3 AND payload_hash=$4
-          AND execution_token_hash=$5 AND status='running' AND expires_at>clock_timestamp() RETURNING id`,
+          AND execution_token_hash=$5 AND status='running' AND expires_at>clock_timestamp()
+          AND dispatch_fence_version=1 AND ($6='unknown' OR dispatch_started_at IS NOT NULL) RETURNING id`,
           [
             operationId,
             actor.platformAccountId,

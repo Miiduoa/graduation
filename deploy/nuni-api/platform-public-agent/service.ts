@@ -257,6 +257,27 @@ export class PlatformPublicTaskService {
       throw error;
     }
   }
+  async reconcileNoDispatch(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
+    const input = exactRecord(raw, ['task', 'schoolId', 'operationId']);
+    let started = false;
+    try {
+      return await this.bounded(signal, async (step) => {
+        const actor = await step(() => this.admission.actor(auth));
+        started = true;
+        const result = await step(() => this.options.ledger.reconcileNoDispatch(actor, input));
+        sameActor(actor, await step(() => this.admission.actor(auth)));
+        return result;
+      });
+    } catch (error) {
+      if (
+        started &&
+        (!(error instanceof PublicAgentError) ||
+          ['PUBLIC_AGENT_TIMEOUT', 'PUBLIC_AGENT_CANCELLED'].includes(error.code))
+      )
+        throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
+      throw error;
+    }
+  }
   async execute(auth: string | undefined, raw: unknown, signal?: AbortSignal) {
     const input = exactRecord(raw, ['confirmationId', 'request']);
     const task = this.parse(input.request);
@@ -264,6 +285,7 @@ export class PlatformPublicTaskService {
       | { actor: PlatformTaskActor; operationId: string; executionToken: string }
       | undefined;
     let admitted = false;
+    let dispatchAcknowledged = false;
     try {
       return await this.bounded(signal, async (step, abort) => {
         const actor = await step(() => this.admission.actor(auth));
@@ -277,6 +299,20 @@ export class PlatformPublicTaskService {
         executing = { actor, operationId: claim.operationId, executionToken: claim.executionToken };
         sameActor(actor, await step(() => this.admission.actor(auth)));
         const snapshot = await step(() => this.source(task, abort));
+        // A successful database commit acknowledgement must precede every executor.
+        // If this step times out, the bounded wrapper never invokes the executor even
+        // when the database commit arrives late.
+        const dispatch = await step(() =>
+          this.options.ledger.beginDispatch(
+            actor,
+            task.binding,
+            claim.operationId,
+            claim.executionToken,
+          ),
+        );
+        if (dispatch?.started !== true)
+          throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
+        dispatchAcknowledged = true;
         const rawResult = await step(() =>
           task.binding.provider === FREE_PROVIDER
             ? this.options.groqPlan!(
@@ -321,6 +357,12 @@ export class PlatformPublicTaskService {
     } catch (error) {
       if (executing) {
         const e = executing;
+        if (!dispatchAcknowledged) {
+          void this.options.ledger
+            .markUnknown(e.actor, task.binding, e.operationId, e.executionToken)
+            .catch(() => {});
+          throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
+        }
         // Only definitive provider responses may finish the operation. A lost
         // database acknowledgement remains unknown and is never retried as work.
         const knownFailure =

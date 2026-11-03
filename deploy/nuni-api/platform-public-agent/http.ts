@@ -20,6 +20,7 @@ const actions = [
   'status',
   'ack',
   'route',
+  'reconcile',
 ] as const;
 /** No registration or env switch. The host must explicitly assemble this handler. */
 export function createPlatformPublicAgentHandler(options: Options) {
@@ -91,7 +92,10 @@ export function createPlatformPublicAgentHandler(options: Options) {
       const session = await options.resolveHttpSession(request);
       if (!session.context || request.headers.get('x-session-context') !== session.context)
         return reply({ code: 'PUBLIC_AGENT_SESSION_CHANGED' }, 409);
-      const result = await options.service[action](session.authorization, input, request.signal);
+      const result =
+        action === 'reconcile'
+          ? await options.service.reconcileNoDispatch(session.authorization, input, request.signal)
+          : await options.service[action](session.authorization, input, request.signal);
       // Re-resolve the signed session on every delivery, including completed reads.
       const current = await options.resolveHttpSession(request);
       if (current.authorization !== session.authorization || current.context !== session.context)

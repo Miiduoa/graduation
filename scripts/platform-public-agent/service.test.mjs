@@ -395,3 +395,95 @@ test('HTTP total deadline cancels a stalled body without invoking the task', asy
   assert.equal(f.stats.executions, 0);
   assert.equal(f.db.data.confirmations.size, 0);
 });
+
+test('late dispatch-commit acknowledgement after deadline never invokes the executor', async () => {
+  let release, entered;
+  const waiting = new Promise((resolve) => {
+    release = resolve;
+  });
+  const enteredBegin = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const f = fixture({ timeoutMs: 25 });
+  f.db.beforeAction = async (action) => {
+    if (action === 'begin-dispatch') {
+      entered();
+      await waiting;
+    }
+  };
+  const { input } = await f.start();
+  const response = f.service.execute(f.authorization, input);
+  await enteredBegin;
+  await rejectsCode(response, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  assert.equal(f.stats.executions, 0);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.stats.executions, 0);
+  const scope = {
+    task: input.request.task,
+    schoolId: input.request.data.schoolId,
+    operationId: [...f.db.data.operations.values()][0].id,
+  };
+  await rejectsCode(
+    f.service.reconcileNoDispatch(f.authorization, scope),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('service reconciles a lost claim response only after proving expired no-dispatch in ledger', async () => {
+  const f = fixture();
+  const { input } = await f.start();
+  f.db.loseCommitAck = true;
+  await rejectsCode(f.service.execute(f.authorization, input), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  assert.equal(f.stats.executions, 0);
+  const scope = {
+    task: input.request.task,
+    schoolId: input.request.data.schoolId,
+    operationId: [...f.db.data.operations.values()][0].id,
+  };
+  await rejectsCode(
+    f.service.reconcileNoDispatch(f.authorization, scope),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  const another = f.db.actor(),
+    outsider = f.register(another, 'b');
+  f.db.now += 31_000;
+  await rejectsCode(
+    f.service.reconcileNoDispatch(outsider, scope),
+    'PUBLIC_AGENT_OPERATION_NOT_FOUND',
+  );
+  assert.deepEqual(await f.service.reconcileNoDispatch(f.authorization, scope), {
+    status: 'failed',
+    operationId: scope.operationId,
+  });
+  assert.deepEqual(
+    await f.service.status(f.authorization, { task: scope.task, schoolId: scope.schoolId }),
+    { status: 'failed', operationId: scope.operationId },
+  );
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('missing dispatch commit acknowledgement fails closed before the executor', async () => {
+  const f = fixture();
+  const { input } = await f.start();
+  f.ledger.beginDispatch = async () => undefined;
+  await rejectsCode(f.service.execute(f.authorization, input), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  assert.equal(f.stats.executions, 0);
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+
+test('source change after claim and before dispatch reports unknown, never a false terminal outcome', async () => {
+  const f = fixture();
+  const { input } = await f.start();
+  const claim = f.ledger.claim.bind(f.ledger);
+  f.ledger.claim = async (...args) => {
+    const result = await claim(...args);
+    f.source.value.places[0].name = '變更的入口';
+    return result;
+  };
+  await rejectsCode(f.service.execute(f.authorization, input), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  assert.equal(f.stats.executions, 0);
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});

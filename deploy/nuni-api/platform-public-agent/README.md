@@ -52,7 +52,7 @@ Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組
 
 帳號、校園及任務的未結案 operation 最多一筆；包含 running、unknown 及尚未由本人結案的 completed／failed。`confirm` 和 `claim` 在帳號交易鎖內檢查，候選 SQL 另有部分唯一索引；不同 request ID、文字、來源快照或新 session 都不能繞過。這是保守串行限制：同範圍其他內容也會暫時被阻擋。
 
-`status` 以目前有效 platform session 查詢，只回狀態及不透明 operation ID，不回前次輸入、session、確認碼、結果或執行權。只有 completed／failed 可由使用者明確確認 `ack` 結案；pending／unknown 無法結案或重送。`ack` 同 ID 重試冪等且不影響後續任務。這不提供未知結果的和解方法；未知會一直阻擋，直到未來經授權的可靠和解機制存在。
+`status` 以目前有效 platform session 查詢，只回狀態及不透明 operation ID，不回前次輸入、session、確認碼、結果或執行權。只有 completed／failed 可由使用者明確確認 `ack` 結案；pending／unknown 無法結案或重送。`ack` 同 ID 重試冪等且不影響後續任務。目前僅可和解已過期或未知、且資料庫可靠證實尚未派送的操作；一旦已開始派送或證據不足，仍維持未知並阻擋。
 
 本機 PostgreSQL 17 隔離驗證可用 `node scripts/platform-public-agent/postgres-local-run.mjs`（目前 runner 使用 macOS Homebrew 的 `/opt/homebrew/opt/postgresql@17/bin`）。runner 自建私有暫存叢集，禁止 TCP，只在自有 Unix socket 及合成最小帳號表上套用候選 schema；清理僅限它所建叢集。一般 `node scripts/test-platform-public-agent.mjs` 不啟動資料庫，會將 PG 整合項標為 skip。
 
@@ -62,6 +62,14 @@ Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組
 
 `prepareGroq` 只讀公開校園來源，列出將送出的校園、問題及公開地點 ID／名稱、Groq 與固定模型，並以來源 fingerprint、明確 model 和 payload 綁定確認內容；尚不呼叫供應商。本人明確確認後，`confirm`／`execute` 在 ledger 原子入場並保守扣內部額度，一次呼叫注入的 planner；規劃器最後讀取來源後、外送前重新驗證 session，不處理工具呼叫、不自動重送或 fallback。模型只回傳源內不同地點 ID，plan 存為未結案結果；第二次明確確認並傳同一 operation ID、完整 request 與 ID，`route` 才在重新核對未結案狀態、帳號與公開座標後建立 Google Maps 連結。已結案 plan 不再交付。身分／來源檢查仍非分散式原子保證。
 
-確定收到 429、unclear 或不合 schema 回應時，須成功持久寫入各自的 failed code 後才回 failed，並由本人明確結案；失敗寫入的 commit 回覆遺失、逾時、中止與網路失聯皆回 unknown，不能自動重送。內部共享額度非 Groq 即時餘額；目前 deterministic 與 Groq 使用同一 server budget。未知結果和解的 `beginDispatch`／可信未派送標記尚未接入，不能以此候選自動解除 unknown。
+確定收到 429、unclear 或不合 schema 回應時，須成功持久寫入各自的 failed code 後才回 failed，並由本人明確結案；失敗寫入的 commit 回覆遺失、逾時、中止與網路失聯皆回 unknown，不能自動重送。內部共享額度非 Groq 即時餘額；目前 deterministic 與 Groq 使用同一 server budget。只有持久標記證明未派送時可申請和解；其他未知結果不可自動解除。
 
 重跑真 Fastify／PostgreSQL 合成整合：在符合 pin integrity 的 Fastify 5.12.7 已安裝目錄執行 `node scripts/platform-public-agent/postgres-local-run.mjs --fastify-root /absolute/path/to/installation`。省略 `--fastify-root` 時該 Fastify 測試明確 skip。測試重建 Fastify 實例與另一 Node 程序的 ledger，模擬 provider fetch，不呼叫 Groq；安裝的 npm transitive 依賴不代表正式 pnpm lock，rate-limit plugin、正式全域守衛與 body parser 期限未覆蓋。
+
+## 派送前 fence 與證據式和解候選
+
+執行器呼叫 provider 或任何副作用之前，必須在有效 session、完整 payload 與一次性 token 綁定下，透過 `beginDispatch` transaction CAS 持久記錄 `dispatch_started_at`，而且收到明確 commit 回應；commit 回應不明或過時即不可派送。`reconcileNoDispatch` 只能以新有效平台 session 在同帳校 task 的鎖內，確認狀態為未知／已過期且 `dispatch_started_at IS NULL`，CAS 標記 `NOT_DISPATCHED`，不自動 ack 或退額度；一旦開始、缺少證據或版本不明均維持未知。客戶端不能提出未派送證據。
+
+候選表要求 `dispatch_fence_version=1` 且無 DEFAULT，新的 claim 明確寫入，舊版缺欄 INSERT 被拒並回滾 confirmation/quota。這只保護受相同 schema 約束的正常程式，無法抵擋有直接資料庫寫入權的惡意或錯誤程式。正式導入前必須證實所有執行路徑遵守 fence，並拒絕任何已有未標記 operation 的舊表／歷史資料；不得對歷史 NULL 補 1 或假稱未派送。若未確認 rolling mix、舊程序已停與 ACL，停止發布。
+
+`node scripts/platform-public-agent/full-migration-isolated-run.mjs --source <固定 tree b0a10ac 的獨立 checkout>` 只允許匹配 tree 且沒有未追蹤／工作樹漂移的來源，使用自行新建、無 TCP 的 PostgreSQL 17，透過該來源真正 `createDatabase` 套用完整原有 manifest，再以僅供測試的 `999_public_agent_isolated_test_only` 驗證增量、碰撞、checksum 失配、DDL／登記一體回滾及相同 manifest 的候選／回滾來源 verify。該測試使用本機 esbuild／Node 22 與合成角色，不是 OCI 映像、部署、正式 migration 編號、完整 ACL 或現況驗收；舊 image 不能直接回滾，需另建含完全一致新 manifest/checksum 的相容映像並驗證。

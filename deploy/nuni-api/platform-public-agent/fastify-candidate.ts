@@ -18,6 +18,7 @@ const actions = [
   'status',
   'ack',
   'route',
+  'reconcile',
 ] as const;
 type Action = (typeof actions)[number];
 /** Minimal structural subset, modelled on the pinned API overlay. */
@@ -150,7 +151,9 @@ export function registerPlatformPublicTaskRoutes(app: FastifyCandidate, options:
             const actor = verifiedActor(await options.accounts.resolveSession(authorization));
             if (abort.signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_TIMEOUT', 503);
             started = true;
-            const result = await service[action](authorization, request.body, abort.signal);
+            const result = await (action === 'reconcile'
+              ? service.reconcileNoDispatch(authorization, request.body, abort.signal)
+              : service[action](authorization, request.body, abort.signal));
             if (abort.signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_TIMEOUT', 503);
             const current = verifiedActor(await options.accounts.resolveSession(authorization));
             if (abort.signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_TIMEOUT', 503);
@@ -165,7 +168,10 @@ export function registerPlatformPublicTaskRoutes(app: FastifyCandidate, options:
         const known = error instanceof PublicAgentError ? error : null;
         if (
           started &&
-          (action === 'execute' || action === 'ack' || action === 'confirm') &&
+          (action === 'execute' ||
+            action === 'ack' ||
+            action === 'confirm' ||
+            action === 'reconcile') &&
           (!known ||
             [
               'PUBLIC_AGENT_SESSION_INVALID',

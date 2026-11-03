@@ -63,6 +63,24 @@ try {
   ]);
   const compiler = fileURLToPath(import.meta.resolve('typescript/bin/tsc'));
   const source = join(root, 'deploy/nuni-api/platform-public-agent');
+  const legacySource = join(folder, 'legacy-source'),
+    legacyCompiled = join(folder, 'legacy-compiled');
+  mkdirSync(legacySource, { mode: 0o700 });
+  mkdirSync(legacyCompiled, { mode: 0o700 });
+  for (const name of [
+    'contract.ts',
+    'ledger.ts',
+    'admission.ts',
+    'navigation.ts',
+    'service.ts',
+    'http.ts',
+  ]) {
+    const old = run('/usr/bin/git', [
+      'show',
+      `3fec049e588e61c02820ab51215ca43e74985364:deploy/nuni-api/platform-public-agent/${name}`,
+    ]);
+    writeFileSync(join(legacySource, name), old.stdout, { mode: 0o600 });
+  }
   run(process.execPath, [
     compiler,
     ...readdirSync(source)
@@ -85,6 +103,28 @@ try {
     '--outDir',
     compiled,
   ]);
+  run(process.execPath, [
+    compiler,
+    ...readdirSync(legacySource)
+      .filter((n) => n.endsWith('.ts'))
+      .map((n) => join(legacySource, n)),
+    '--strict',
+    '--target',
+    'ES2022',
+    '--module',
+    'commonjs',
+    '--moduleResolution',
+    'node',
+    '--types',
+    'node',
+    '--typeRoots',
+    realpathSync(join(root, 'node_modules/@types')),
+    '--noUncheckedIndexedAccess',
+    '--exactOptionalPropertyTypes',
+    '--skipLibCheck',
+    '--outDir',
+    legacyCompiled,
+  ]);
   writeFileSync(join(folder, 'owner'), `${process.pid}\n`, { mode: 0o600 });
   const tests = spawnSync(
     process.execPath,
@@ -98,6 +138,7 @@ try {
         CAMPUS_AGENT_PG_PARENT: String(process.pid),
         CAMPUS_AGENT_PG_COMPILED: compiled,
         ...(fastifyRoot ? { CAMPUS_AGENT_FASTIFY_ROOT: fastifyRoot } : {}),
+        CAMPUS_AGENT_PG_LEGACY_COMPILED: legacyCompiled,
       },
     },
   );

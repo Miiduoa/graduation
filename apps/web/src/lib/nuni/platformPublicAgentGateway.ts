@@ -9,7 +9,14 @@ import {
   type PlatformSession,
 } from './server';
 
-export type PublicAgentAction = 'preview' | 'confirm' | 'execute' | 'read' | 'status' | 'ack';
+export type PublicAgentAction =
+  | 'preview'
+  | 'confirm'
+  | 'execute'
+  | 'read'
+  | 'status'
+  | 'ack'
+  | 'reconcile';
 export type PublicAgentTransport = (input: {
   action: PublicAgentAction;
   session: PlatformSession;
@@ -41,7 +48,7 @@ export function createPlatformPublicAgentGateway(options: {
   return async (request: NextRequest, action: string) => {
     try {
       if (options.enabled !== true) throw new NuniError(404, 'NOT_FOUND');
-      if (!['preview', 'confirm', 'execute', 'read', 'status', 'ack'].includes(action))
+      if (!['preview', 'confirm', 'execute', 'read', 'status', 'ack', 'reconcile'].includes(action))
         throw new NuniError(404, 'NOT_FOUND');
       if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
       if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
@@ -67,7 +74,9 @@ export function createPlatformPublicAgentGateway(options: {
                 ? ['task', 'schoolId']
                 : action === 'ack'
                   ? ['task', 'schoolId', 'operationId', 'approved']
-                  : ['task', 'data'];
+                  : action === 'reconcile'
+                    ? ['task', 'schoolId', 'operationId']
+                    : ['task', 'data'];
       if (
         Object.keys(body).length !== names.length ||
         Object.keys(body).some((key) => !names.includes(key))
