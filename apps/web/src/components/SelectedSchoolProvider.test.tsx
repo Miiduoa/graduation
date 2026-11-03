@@ -446,3 +446,46 @@ it('switches immediately when there is no unsaved draft', () => {
   expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
   expect(navigation.replace).toHaveBeenCalledTimes(1);
 });
+
+it('keeps draft activity across catalog loading so a later switch still asks for confirmation', () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '目錄 loading 保留' } });
+  view.rerender(<DraftView catalogStatus="loading" />);
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('目錄 loading 保留');
+  act(() => capturedSelection.selectSchool('school-b'));
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  view.rerender(<DraftView />);
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('目錄 loading 保留');
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '保留在原校' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('keeps the draft when confirm runs but commitSchool cannot proceed', async () => {
+  localStorage.setItem(
+    schoolPreferenceKey(defaults.ownerKey),
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+  const view = render(<DraftView />);
+  fireEvent.change(screen.getByLabelText('助理草稿'), { target: { value: '不可提早丟掉' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  view.rerender(<DraftView loading />);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '捨棄草稿並切換' }));
+  });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect((screen.getByLabelText('助理草稿') as HTMLInputElement).value).toBe('不可提早丟掉');
+  expect(navigation.replace).not.toHaveBeenCalled();
+  expect(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))).toBe(
+    JSON.stringify({ schoolId: 'school-a' }),
+  );
+});

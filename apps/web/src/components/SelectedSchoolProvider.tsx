@@ -204,13 +204,16 @@ export function SelectedSchoolProvider({
   const [pendingSchoolId, setPendingSchoolId] = useState<string | null | undefined>(undefined);
   const pendingSwitch = pendingSchoolId !== undefined;
 
-  function commitSchool(id: string | null) {
-    if (
-      activeScope.current !== scope ||
-      !ready ||
-      (id !== null && !catalog.some((school) => school.id === id))
-    )
-      return;
+  function canCommitSchool(id: string | null) {
+    return (
+      activeScope.current === scope &&
+      ready &&
+      (id === null || catalog.some((school) => school.id === id))
+    );
+  }
+
+  function commitSchool(id: string | null): boolean {
+    if (!canCommitSchool(id)) return false;
     let nextStorageError: string | null = null;
     try {
       localStorage.setItem(storageKey, JSON.stringify({ schoolId: id }));
@@ -236,15 +239,12 @@ export function SelectedSchoolProvider({
       next.set('campus', 'all');
     }
     router.replace(`${pathname}?${next.toString()}${window.location.hash}`, { scroll: false });
+    return true;
   }
 
   function selectSchool(id: string | null) {
-    if (
-      activeScope.current !== scope ||
-      !ready ||
-      (id !== null && !catalog.some((school) => school.id === id))
-    )
-      return;
+    // loading／目錄未就緒時不接受換校，避免略過草稿確認。
+    if (!canCommitSchool(id)) return;
     if (hasCampusDraftActivity()) {
       if (id === (selectedSchool?.id ?? null)) return;
       setPendingSchoolId(id);
@@ -278,6 +278,11 @@ export function SelectedSchoolProvider({
             pendingSchoolId !== null &&
             !catalog.some((school) => school.id === pendingSchoolId)
           ) {
+            setPendingSchoolId(undefined);
+            return;
+          }
+          // 先確認可換校再捨棄草稿；無法 commit 時關閉確認、草稿保留。
+          if (!canCommitSchool(pendingSchoolId)) {
             setPendingSchoolId(undefined);
             return;
           }

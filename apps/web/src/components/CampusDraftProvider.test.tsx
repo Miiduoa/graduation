@@ -99,3 +99,30 @@ it('purgeAccountDrafts only removes that account session keys', () => {
   expect(sessionStorage.getItem(scopeStorageKey('alice', 'school-a'))).toBeNull();
   expect(sessionStorage.getItem(scopeStorageKey('bob', 'school-a'))).toContain('b');
 });
+
+it('keeps the last resolved school draft while ready flips false with a null schoolId', () => {
+  const view = render(<View schoolId="school-a" ready />);
+  act(() => latest.setText('loading 期間要留住'));
+  expect(hasCampusDraftActivity()).toBe(true);
+  view.rerender(<View schoolId={null} ready={false} />);
+  expect(screen.getByTestId('draft').textContent).toBe('loading 期間要留住');
+  expect(hasCampusDraftActivity()).toBe(true);
+  view.rerender(<View schoolId="school-a" ready />);
+  expect(screen.getByTestId('draft').textContent).toBe('loading 期間要留住');
+  expect(hasCampusDraftActivity()).toBe(true);
+});
+
+it('loads the new account session draft after identity change when ready', () => {
+  sessionStorage.setItem(
+    scopeStorageKey('bob', 'school-a'),
+    JSON.stringify({ assistant: 'Bob 既有草稿' }),
+  );
+  const view = render(<View uid="alice" schoolId="school-a" />);
+  act(() => latest.setText('Alice 的草稿'));
+  expect(sessionStorage.getItem(scopeStorageKey('alice', 'school-a'))).toBeTruthy();
+  view.rerender(<View uid="bob" schoolId="school-a" ready />);
+  expect(screen.getByTestId('draft').textContent).toBe('Bob 既有草稿');
+  expect(hasCampusDraftActivity()).toBe(true);
+  expect(sessionStorage.getItem(scopeStorageKey('alice', 'school-a'))).toBeNull();
+  expect(sessionStorage.getItem(scopeStorageKey('bob', 'school-a'))).toContain('Bob 既有草稿');
+});

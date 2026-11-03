@@ -77,8 +77,10 @@ function AssistantConversation({
   const functionsReady = areFunctionsConfigured();
 
   useLayoutEffect(() => {
-    if (!campusDraft.available || seededUrlDraft.current || campusDraft.text || !initialDraft) return;
+    // 網址 ?q= 有值且與現有草稿不同：以網址為準覆寫（明確深連結手遞）；無 q 才保留草稿。
+    if (!campusDraft.available || seededUrlDraft.current || !initialDraft) return;
     seededUrlDraft.current = true;
+    if (campusDraft.text === initialDraft) return;
     campusDraft.setText(initialDraft);
   }, [campusDraft, initialDraft]);
 

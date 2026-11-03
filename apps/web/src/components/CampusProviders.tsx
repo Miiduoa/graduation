@@ -121,6 +121,7 @@ function CampusDraftMount({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const school = useSelectedSchool();
   const ready = !school.loading && school.catalogStatus === 'ready';
+  // loading 時 selectedSchoolId 可能暫為 null；DraftStore.reconcile 會保留上一所已確定的校草稿。
   return (
     <CampusDraftProvider
       uid={auth.user?.uid ?? null}

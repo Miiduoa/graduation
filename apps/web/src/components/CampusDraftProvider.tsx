@@ -126,27 +126,31 @@ class DraftStore {
   reconcile(uid: string | null, schoolId: string | null, ready: boolean) {
     // Render 期間只改 snapshot，不通知 listener（由同一次 render 的 useSyncExternalStore 讀取）。
     const old = this.state;
+    // loading 期間 selectedSchoolId 常暫成 null：保留上一所已確定的校，避免清空記憶體草稿。
+    const effectiveSchoolId =
+      !ready && schoolId === null && old.schoolId !== null ? old.schoolId : schoolId;
     const identityChanged = old.resolved && old.uid !== uid;
-    const schoolChanged = old.schoolId !== schoolId && (old.resolved || old.schoolId !== null);
+    const schoolChanged =
+      old.schoolId !== effectiveSchoolId && (old.resolved || old.schoolId !== null);
     if (identityChanged || schoolChanged) {
       this.state = {
         uid,
-        schoolId,
+        schoolId: effectiveSchoolId,
         ready,
         resolved: ready || old.resolved,
-        // 換帳後不讀舊帳號 session；換校讀目標校自己的 key（不會帶 A 校草稿到 B 校）
-        drafts: ready && !identityChanged ? readStoredDrafts(scopeStorageKey(uid, schoolId)) : {},
+        // 換帳／換校：ready 時讀目前 uid+校 的 session（舊帳 key 含 uid，不會被新帳讀到）
+        drafts: ready ? readStoredDrafts(scopeStorageKey(uid, effectiveSchoolId)) : {},
       };
       return;
     }
-    if (old.ready !== ready || old.uid !== uid || old.schoolId !== schoolId) {
+    if (old.ready !== ready || old.uid !== uid || old.schoolId !== effectiveSchoolId) {
       const drafts =
         ready && !old.ready && !hasText(old.drafts)
-          ? readStoredDrafts(scopeStorageKey(uid, schoolId))
+          ? readStoredDrafts(scopeStorageKey(uid, effectiveSchoolId))
           : old.drafts;
       this.state = {
         uid,
-        schoolId,
+        schoolId: effectiveSchoolId,
         ready,
         resolved: ready || old.resolved,
         drafts,
