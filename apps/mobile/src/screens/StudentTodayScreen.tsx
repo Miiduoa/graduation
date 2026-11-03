@@ -23,7 +23,7 @@ import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { navigateFromInboxTask } from '../services/inboxActions';
 import { hasTCSession } from '../services/tronClassClient';
 import {
-  resolveTimetableClassroomNav,
+  courseWorkNavForClass,
   todayCourseWorkNavigateTarget,
   type TimetableClassroomDestination,
 } from '../hooks/timetableClassroomNav';
@@ -45,19 +45,6 @@ import {
   type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
-
-function courseWorkNavForClass(
-  item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string },
-) {
-  return (
-    item.courseWorkNav ??
-    resolveTimetableClassroomNav({
-      linkedCourseId: item.courseId,
-      courseName: item.title,
-      courseCode: item.courseCode,
-    })
-  );
-}
 
 type HomeState =
   | { scope: string; status: 'loading' | 'error' }
@@ -435,6 +422,7 @@ function NextActionCard({
     );
   }
   if (action.type === 'class') {
+    const classCta = action.class.courseId ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
     return (
       <Pressable
         accessibilityRole="button"
@@ -447,7 +435,7 @@ function NextActionCard({
           <Text style={s.headline}>{action.class.title}</Text>
           <Text style={s.meta}>{formatClassMeta(action.class)}</Text>
           <View style={s.cardButton}>
-            <Text style={s.cardButtonText}>{TODAY_COPY.viewCourse}</Text>
+            <Text style={s.cardButtonText}>{classCta}</Text>
           </View>
         </Animated.View>
       </Pressable>
