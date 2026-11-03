@@ -370,3 +370,132 @@ test('a natural-language location query opens the registered campus map without 
     params: undefined,
   });
 });
+
+function todayClass(
+  overrides: {
+    id?: string;
+    title?: string;
+    location?: string;
+    startAt?: number;
+    endAt?: number;
+    courseId?: string;
+    courseCode?: string;
+    courseWorkNav?: import('../hooks/timetableClassroomNav').TimetableClassroomDestination | false;
+  } = {},
+) {
+  const startAt = overrides.startAt ?? Date.now() + 60 * 60 * 1000;
+  const endAt = overrides.endAt ?? startAt + 50 * 60 * 1000;
+  const title = overrides.title ?? '資料結構';
+  const courseId = overrides.courseId;
+  const courseCode = overrides.courseCode;
+  const courseWorkNav =
+    overrides.courseWorkNav === false
+      ? undefined
+      : (overrides.courseWorkNav ??
+        (courseId
+          ? { kind: 'linked' as const, screen: 'CourseHub' as const, params: { courseId } }
+          : title.trim()
+            ? {
+                kind: 'search' as const,
+                screen: 'Classroom' as const,
+                params: {
+                  q: title.trim(),
+                  from: 'timetable' as const,
+                  ...(courseCode ? { code: courseCode } : {}),
+                },
+              }
+            : undefined));
+  return {
+    id: overrides.id ?? 'class-a',
+    title,
+    location: overrides.location ?? '主顧 303',
+    startAt,
+    endAt,
+    courseId,
+    courseCode,
+    ...(courseWorkNav ? { courseWorkNav } : {}),
+  };
+}
+
+test('today class without linkedCourseId opens Classroom with timetable search params', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  mockTimetable.classes = [todayClass({ courseCode: 'CS301' })];
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.findCourse);
+  fireEvent.press(view.getByTestId('next-action'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'Classroom',
+    params: { q: '資料結構', from: 'timetable', code: 'CS301' },
+  });
+});
+
+test('today class with linkedCourseId still opens CourseHub', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  mockTimetable.classes = [
+    todayClass({
+      courseId: 'cw_11111111-1111-4111-8111-111111111111',
+      courseCode: 'CS301',
+    }),
+  ];
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.viewCourse);
+  fireEvent.press(view.getByTestId('next-action'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'CourseHub',
+    params: {
+      courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
+      groupId: 'cw_11111111-1111-4111-8111-111111111111',
+      section: 'week',
+    },
+  });
+});
+
+test('today class with blank course name resolves via courseWorkNavForClass to Classroom home', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  mockTimetable.classes = [
+    todayClass({
+      title: '   ',
+      location: '',
+      courseWorkNav: false,
+    }),
+  ];
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(await view.findByText('教室未填'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'Classroom',
+    params: {},
+  });
+});
+
+test('today class list press without linkedCourseId opens Classroom search', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  mockTimetable.classes = [todayClass({ courseCode: 'CS301', title: '資料結構' })];
+  const view = render(<StudentTodayScreen />);
+  // Location text only appears on the class list row (not NextAction meta).
+  fireEvent.press(await view.findByText('主顧 303'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'Classroom',
+    params: { q: '資料結構', from: 'timetable', code: 'CS301' },
+  });
+});
+
+test('today class list press with linkedCourseId opens CourseHub', async () => {
+  jest.mocked(loadStudentHome).mockResolvedValue({ courses: [], tasks: [] });
+  mockTimetable.classes = [
+    todayClass({
+      title: '資料結構',
+      courseId: 'cw_11111111-1111-4111-8111-111111111111',
+      courseCode: 'CS301',
+    }),
+  ];
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(await view.findByText('主顧 303'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'CourseHub',
+    params: {
+      courseSpaceId: 'cw_11111111-1111-4111-8111-111111111111',
+      groupId: 'cw_11111111-1111-4111-8111-111111111111',
+      section: 'week',
+    },
+  });
+});

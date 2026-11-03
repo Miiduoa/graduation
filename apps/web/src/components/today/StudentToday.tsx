@@ -362,7 +362,8 @@ function NextActionBody({
   }
 
   if (action.type === 'class') {
-    const href = courseWeekHref(action.class.courseId);
+    const courseHref = courseWeekHref(action.class.courseId);
+    const href = courseHref === '/timetable' ? weekHref : courseHref;
     return (
       <>
         <Link href={href} className={styles.cardMain}>
@@ -371,7 +372,7 @@ function NextActionBody({
           <p className={styles.meta}>{formatClassMeta(action.class)}</p>
         </Link>
         <Link className={styles.action} href={href}>
-          {TODAY_COPY.viewCourse}
+          {courseHref === '/timetable' ? TODAY_COPY.viewWeek : TODAY_COPY.viewCourse}
         </Link>
       </>
     );
@@ -480,7 +481,8 @@ function TodayClassList({
         <ul className={styles.list}>
           {classes.map((item) => {
             const ended = item.endAt <= now.getTime();
-            const href = courseWeekHref(item.courseId);
+            const courseHref = courseWeekHref(item.courseId);
+            const href = courseHref === '/timetable' ? timetableHref : courseHref;
             return (
               <li key={item.id}>
                 <Link

@@ -25,7 +25,7 @@ import {
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
-import { useOptionalNuniSession } from '@/features/nuni/Session';
+import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
   changePersonalImport,
@@ -35,15 +35,19 @@ import {
 } from '@/lib/personalImports';
 import { loadHomeData } from '@/lib/homeOverview';
 import {
+  calendarCourseDeadlinesInMonth,
+  calendarCourseDeadlinesOnDate,
+  calendarDeadlinesFromLmsTasks,
+  loadNuniCalendarDeadlines,
+  mergeCalendarCourseDeadlines,
+  type CalendarCourseDeadline,
+} from '@/lib/calendarCourseDeadlines';
+import {
   CALENDAR_DUE_EMPTY,
   CALENDAR_DUE_EMPTY_DAY,
   CALENDAR_DUE_LOAD_ERROR,
   CALENDAR_DUE_TITLE,
   CALENDAR_DUE_UNSIGNED,
-  calendarDueItemsFromTasks,
-  calendarDueItemsInMonth,
-  calendarDueItemsOnDate,
-  type CalendarDueItem,
 } from '@/lib/todayCourseWork';
 import styles from '@/components/imports/PersonalImport.module.css';
 
@@ -258,6 +262,11 @@ function PersonalCalendarWorkspace({
   paused: boolean;
 }) {
   const { user, loading: authLoading } = useAuth();
+  const nuni = useOptionalNuniSession();
+  const nuniLoading = nuni?.loading ?? false;
+  const nuniContext = nuni?.session?.context;
+  const nuniAccountId = nuni?.session?.platformAccountId;
+  const signedIn = Boolean(user?.uid || nuniAccountId);
   const scope = context.scope;
   const scopeKey = context.scopeKey;
   const ledger = usePersonalImports(scope, !paused);
@@ -266,10 +275,11 @@ function PersonalCalendarWorkspace({
   const [selectedDate, setSelectedDate] = useState('');
   const [dues, setDues] = useState<{
     uid: string | null;
-    items: CalendarDueItem[];
+    items: CalendarCourseDeadline[];
     status: 'idle' | 'loading' | 'ready' | 'error';
   }>({ uid: null, items: [], status: 'idle' });
-  const dueStatus = dues.uid === user?.uid ? dues.status : 'idle';
+  const dueUid = user?.uid ?? null;
+  const dueStatus = dues.uid === dueUid ? dues.status : 'idle';
   const [dueRetry, setDueRetry] = useState(0);
   const changeMonth = (value: string) => {
     setMonth(value);
@@ -277,26 +287,55 @@ function PersonalCalendarWorkspace({
   };
 
   useEffect(() => {
-    if (authLoading || !user?.uid) return;
+    if (authLoading || nuniLoading || (!user?.uid && !nuniAccountId)) return;
     let active = true;
-    const uid = user.uid;
+    const uid = user?.uid;
+    const accountId = nuniAccountId;
+    const sessionContext = nuniContext;
     void Promise.resolve()
-      .then(() => {
-        if (active) setDues({ uid, items: [], status: 'loading' });
-        return loadHomeData(uid);
-      })
-      .then((home) => {
+      .then(async () => {
+        if (active) setDues({ uid: uid ?? null, items: [], status: 'loading' });
+        const [lmsResult, nuniResult] = await Promise.allSettled([
+          uid ? loadHomeData(uid) : Promise.resolve(null),
+          accountId && sessionContext
+            ? loadNuniCalendarDeadlines(
+                (path, input) => browserRequest(path, sessionContext, input),
+                accountId,
+                { cancelled: () => !active },
+              )
+            : Promise.resolve([] as CalendarCourseDeadline[]),
+        ]);
         if (!active) return;
-        setDues({ uid, items: calendarDueItemsFromTasks(home.tasks), status: 'ready' });
+        if (nuniResult.status === 'fulfilled' && nuniResult.value === 'cancelled') return;
+        const lms =
+          lmsResult.status === 'fulfilled' && lmsResult.value
+            ? calendarDeadlinesFromLmsTasks(lmsResult.value.tasks)
+            : [];
+        const classroom =
+          nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled'
+            ? nuniResult.value
+            : [];
+        const lmsOk = lmsResult.status === 'fulfilled';
+        const nuniOk =
+          nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled';
+        if (!lmsOk && !nuniOk) {
+          setDues({ uid: uid ?? null, items: [], status: 'error' });
+          return;
+        }
+        setDues({
+          uid: uid ?? null,
+          items: mergeCalendarCourseDeadlines(classroom, lms),
+          status: 'ready',
+        });
       })
       .catch(() => {
         if (!active) return;
-        setDues({ uid, items: [], status: 'error' });
+        setDues({ uid: uid ?? null, items: [], status: 'error' });
       });
     return () => {
       active = false;
     };
-  }, [authLoading, user?.uid, dueRetry]);
+  }, [authLoading, nuniLoading, user?.uid, nuniAccountId, nuniContext, dueRetry]);
   const goToday = () => {
     const today = emptyPersonalEventDraft().date;
     setMonth(today.slice(0, 7));
@@ -332,11 +371,11 @@ function PersonalCalendarWorkspace({
   );
   const events = selectedDate ? personalEventsOnDate(monthEvents, selectedDate) : monthEvents;
   const monthDues = useMemo(
-    () => calendarDueItemsInMonth(dues.uid === user?.uid ? dues.items : [], month),
-    [dues, user?.uid, month],
+    () => calendarCourseDeadlinesInMonth(dues.uid === dueUid ? dues.items : [], month),
+    [dues, dueUid, month],
   );
   const visibleDues = selectedDate
-    ? calendarDueItemsOnDate(monthDues, selectedDate)
+    ? calendarCourseDeadlinesOnDate(dues.uid === dueUid ? dues.items : [], selectedDate)
     : monthDues;
   const draftRow = personalEventRowFromDraft(
     draft,
@@ -742,13 +781,13 @@ function PersonalCalendarWorkspace({
             回今天看期限
           </Link>
         </div>
-        {!user && !authLoading ? (
+        {!signedIn && !authLoading && !nuniLoading ? (
           <p className={styles.empty}>
             {CALENDAR_DUE_UNSIGNED} <Link href="/">前往今天</Link>
           </p>
-        ) : !user || dueStatus === 'loading' || dueStatus === 'idle' || authLoading ? (
+        ) : !signedIn || dueStatus === 'loading' || dueStatus === 'idle' || authLoading || nuniLoading ? (
           <p role="status">正在讀取作業截止…</p>
-        ) : dueStatus === 'error' ? (
+        ) : dueStatus === 'error' && visibleDues.length === 0 ? (
           <>
             <p className={styles.empty} role="alert">
               {CALENDAR_DUE_LOAD_ERROR}
@@ -769,7 +808,9 @@ function PersonalCalendarWorkspace({
                 <div>
                   <time dateTime={item.dueDate}>{item.dueDate}</time>
                   <h3>{item.title}</h3>
-                  <p>{item.courseName} · 作業截止</p>
+                  <p>
+                    {item.courseName} · 作業截止 · {item.sourceLabel}
+                  </p>
                 </div>
                 <Link className="btn primary" href={item.href}>
                   查看作業

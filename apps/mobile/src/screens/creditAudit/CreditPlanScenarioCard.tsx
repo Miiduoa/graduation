@@ -11,6 +11,8 @@ import {
 import { portableCreditPlanJson } from '../../features/academics/creditPlanRepository';
 import { theme } from '../../ui/theme';
 import { CreditScenarioDeadlineCard } from './CreditScenarioDeadlineCard';
+import type { CreditScenarioWriter } from '@campus/shared/src/creditScenarioAdoption';
+import { CreditScenarioAdoptionActions } from './CreditScenarioAdoptionActions';
 
 const number = (value: number | null) => value === null ? '未設定' : formatCredits(value);
 function Action({ title, onPress, disabled = false, selected = false }: {
@@ -26,7 +28,9 @@ function Action({ title, onPress, disabled = false, selected = false }: {
   </Pressable>;
 }
 
-export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
+export function CreditPlanScenarioCard({ plan, scenarioWriter, scenarioBlocked }: {
+  plan: CreditPlan; scenarioWriter?: CreditScenarioWriter; scenarioBlocked?: string;
+}) {
   const c = theme.colors;
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState<{ source: CreditPlan; value: CreditScenario } | null>(null);
@@ -159,15 +163,23 @@ export function CreditPlanScenarioCard({ plan }: { plan: CreditPlan }) {
             <Text style={{ color: c.muted }}>{row.label}</Text><Text style={{ color: c.text }}>{number(row.before)} → {number(row.after)}</Text>
           </View>)}
           <Text style={{ color: c.muted, fontSize: 11, lineHeight: 19 }}>達標學期只計已排入學期的課程，不把其他預計學分放進某學期。完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關。總量達標不等於畢業，也不保證實際開課與先修條件。</Text>
+        </> : null}
+      </>}
+    </View> : null}
+    {/* 採用操作持續掛載，收合比較區也能保留同頁復原收據。 */}
+    <View style={expanded ? { paddingHorizontal: 16, paddingBottom: comparison ? 0 : 18, gap: 14 } : undefined}>
+      <CreditScenarioAdoptionActions plan={plan} candidate={comparison?.plan ?? null}
+        writer={scenarioWriter} visible={expanded} blocked={exporting ? '請先完成分享，再採用方案。' : scenarioBlocked}
+        onApplied={() => { setDraft(null); setEditing(null); }} />
+    </View>
+    {expanded && comparison ? <View style={{ paddingHorizontal: 16, paddingBottom: 18, gap: 14 }}>
           {comparison.afterInsights.possibleRetakes.length ? <Text style={{ color: c.text, lineHeight: 20 }}>此方案有同名課程，可能重複採計，請向系辦核對。</Text> : null}
           {comparison.afterInsights.workloadCautions.length ? <Text style={{ color: c.text, lineHeight: 20 }}>部分學期超過 25 學分（完整方案比較固定以 25 提醒，與上方個人負擔無關）；25 不是正式規定。</Text> : null}
           <View style={{ backgroundColor: c.surface2, borderRadius: 12, padding: 14, gap: 10 }}>
             <Text style={{ color: c.text, fontWeight: '700' }}>原規劃仍完整保留</Text>
-            <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可分享此方案的 JSON 備份，再由現有匯入流程確認採用；請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
+            <Text style={{ color: c.muted, fontSize: 12, lineHeight: 20 }}>比較不會退選或修改校方紀錄。可直接預覽並採用；跨裝置移轉仍可分享 JSON。請另外保留原規劃備份。分享完成後仍需自行核對是否確實保存。</Text>
             <Action title={exporting ? '正在處理比較備份…' : '匯出此比較方案 JSON'} disabled={!comparison.changed || exporting} onPress={() => void exportScenario()} />
           </View>
-        </> : null}
-      </>}
     </View> : null}
   </View>;
 }

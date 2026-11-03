@@ -216,7 +216,60 @@ describe('personal timetable data retention', () => {
     fireEvent.click(existingCourseButton());
     expect(screen.getByRole('region', { name: '編輯課程' })).toBeTruthy();
     const exit = within(screen.getByTestId('timetable-course-work-exit'));
-    expect(exit.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe('/classroom');
+    expect(exit.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe(
+      '/classroom?q=%E5%8E%9F%E6%9C%AC%E8%AA%B2%E7%A8%8B&from=timetable',
+    );
+  });
+
+  it('opens linked course work directly when the imported row has linkedCourseId', async () => {
+    mocks.records = [
+      {
+        id: 'imported',
+        kind: 'timetable',
+        title: '匯入課程',
+        courseCode: 'CS301',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        dayOfWeek: 2,
+        startPeriod: 3,
+        endPeriod: 4,
+        batchId: 'test',
+        importedAt: '2026-10-25T00:00:00Z',
+        linkedCourseId: 'cw_11111111-1111-4111-8111-111111111111',
+        source: { type: 'paste', line: 1, rawText: '' },
+      },
+    ];
+    await ready();
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視匯入紀錄 匯入課程/ })[0]);
+    expect(screen.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe(
+      '/classroom/course/cw_11111111-1111-4111-8111-111111111111',
+    );
+  });
+
+  it('searches classroom by course name and code when the import has no linkedCourseId', async () => {
+    mocks.records = [
+      {
+        id: 'imported',
+        kind: 'timetable',
+        title: '匯入課程',
+        courseCode: 'CS301',
+        schoolId: 'pu',
+        academicYear: '115',
+        semester: '1',
+        dayOfWeek: 2,
+        startPeriod: 3,
+        endPeriod: 4,
+        batchId: 'test',
+        importedAt: '2026-10-25T00:00:00Z',
+        source: { type: 'paste', line: 1, rawText: '' },
+      },
+    ];
+    await ready();
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視匯入紀錄 匯入課程/ })[0]);
+    expect(screen.getByRole('link', { name: '作業與教材' }).getAttribute('href')).toBe(
+      '/classroom?q=%E5%8C%AF%E5%85%A5%E8%AA%B2%E7%A8%8B&from=timetable&code=CS301',
+    );
   });
 
   it('starts with readable weekly courses on mobile and keeps an explicitly selected view', async () => {
@@ -283,7 +336,9 @@ describe('personal timetable data retention', () => {
     expect(screen.getAllByRole('button', { name: /編輯 剛新增的統計學/ }).length).toBeGreaterThan(
       0,
     );
-    expect(screen.getByRole('status').textContent).toContain('已切換至手動課表');
+    const savedNotice = screen.getByText(/已切換至手動課表/);
+    expect(savedNotice.getAttribute('role')).toBe('status');
+    expect(savedNotice.textContent).toContain('課程已更新。');
   });
 
   it('keeps an unsuccessful edit, freezes its fields while saving, and allows retry', async () => {

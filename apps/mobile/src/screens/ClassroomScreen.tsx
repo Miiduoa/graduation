@@ -34,6 +34,7 @@ import { httpsCallable } from 'firebase/functions';
 import { joinClassroomAttendance, readAttendanceQr } from '../services/liveAttendance';
 import { useClassroomFeed } from '../hooks/useClassroomFeed';
 import { useClassroomSession, type LiveClassroomSession } from '../hooks/useClassroomSession';
+import { ClassroomCourseSearch } from './ClassroomCourseSearch';
 import {
   doc,
   collection,
@@ -264,6 +265,12 @@ export function ClassroomScreen(props: any) {
   const focused = useIsFocused();
   const groupId: string | undefined = props?.route?.params?.groupId;
   const sessionId: string | undefined = props?.route?.params?.sessionId;
+  const courseQuery =
+    typeof props?.route?.params?.q === 'string' ? props.route.params.q.trim().slice(0, 120) : '';
+  const courseCodeParam =
+    typeof props?.route?.params?.code === 'string'
+      ? props.route.params.code.trim().slice(0, 40)
+      : '';
 
   const auth = useAuth();
   const db = getDb();
@@ -638,6 +645,17 @@ export function ClassroomScreen(props: any) {
     [auth.user, quizActive, groupId, sessionId],
   );
 
+  // Timetable fallback: no live session ids, but a course search query from the schedule.
+  // Uses nuni session inside ClassroomCourseSearch; do not require Firebase classroom auth here.
+  if ((!groupId || !sessionId) && courseQuery) {
+    return (
+      <ClassroomCourseSearch
+        query={courseQuery}
+        courseCode={courseCodeParam || undefined}
+        navigation={nav ?? {}}
+      />
+    );
+  }
   if (!auth.user)
     return <ErrorState title="課堂" subtitle="尚未登入" hint="請先登入才能加入課堂" />;
   if (!groupId || !sessionId)

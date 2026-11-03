@@ -7,6 +7,7 @@ import { useNuniSession } from '@/features/nuni/Session';
 import { personalImportSavedNotice } from '@campus/shared';
 import { personalImportsStorageKey, readPersonalImports } from '@/lib/personalImports';
 import { loadHomeData } from '@/lib/homeOverview';
+import { loadNuniCalendarDeadlines } from '@/lib/calendarCourseDeadlines';
 
 type SessionReply = {
   body: Record<string, unknown>;
@@ -31,6 +32,10 @@ vi.mock('@/components/imports/PersonalImportSync', () => ({
   PersonalImportSyncBridge: () => null,
 }));
 vi.mock('@/lib/homeOverview', () => ({ loadHomeData: vi.fn() }));
+vi.mock('@/lib/calendarCourseDeadlines', async (actual) => ({
+  ...(await actual<typeof import('@/lib/calendarCourseDeadlines')>()),
+  loadNuniCalendarDeadlines: vi.fn(),
+}));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/calendar',
   useSearchParams: () => new URLSearchParams(state.search),
@@ -102,6 +107,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(loadHomeData).mockReset();
   vi.mocked(loadHomeData).mockResolvedValue({ tasks: [], courses: [], unreadCount: 0 });
+  vi.mocked(loadNuniCalendarDeadlines).mockReset();
+  vi.mocked(loadNuniCalendarDeadlines).mockResolvedValue([]);
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   Object.defineProperty(navigator, 'locks', {
     configurable: true,
