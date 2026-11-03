@@ -115,6 +115,9 @@ async def check_mobile_navigation(page):
 
 
 UNSIGNED_TODAY = '登入後，這裡會列出近期要處理的課程待辦。'
+TODAY_FLOW_CLASS_TITLE = '下一堂課'
+TODAY_FLOW_WORK_TITLE = '今日／即將到期作業'
+TODAY_NOTIFY_TITLE = '未讀通知'
 TODAY_DATE = re.compile(r'^\d{1,2}月\d{1,2}日 週[日一二三四五六]$')
 OLD_ACCOUNT_COPY = [
     '示意',
@@ -228,7 +231,9 @@ async def check_unsigned_today(page):
     await expect(today.get_by_test_id('today-skeleton')).to_have_count(0)
     await expect(today.get_by_role('heading', name='今天', exact=True)).to_be_visible()
     await expect(today.locator('header p').first).to_have_text(TODAY_DATE)
-    await expect(page.get_by_text(UNSIGNED_TODAY, exact=True)).to_have_count(1)
+    flow = today.get_by_test_id('today-unified-flow')
+    await expect(flow).to_be_visible()
+    await expect(flow.get_by_text(UNSIGNED_TODAY)).to_be_visible()
     await expect(today.get_by_role('heading', name='先把課表放進來。', exact=True)).to_be_visible()
     await expect(today.get_by_role('link', name='匯入我的課表', exact=True)).to_have_attribute(
         'href', '/import?kind=timetable&campus=pu'
@@ -241,10 +246,11 @@ async def check_unsigned_today(page):
     for link in await quick_services.get_by_role('link').all():
         assert parse_qs(urlparse(await link.get_attribute('href')).query).get('campus') == ['pu']
     await expect(page.get_by_role('link', name='登入', exact=True)).to_be_visible()
-    await expect(today.get_by_role('heading', name='今天課表', exact=True)).to_be_visible()
-    await expect(today.get_by_text('還沒有課表。', exact=True)).to_be_visible()
-    await expect(today.get_by_role('link', name='匯入課表', exact=True)).to_be_visible()
-    await expect(today.get_by_role('heading', name='待處理', exact=True)).to_be_visible()
+    await expect(flow.get_by_role('heading', name=TODAY_FLOW_CLASS_TITLE, exact=True)).to_be_visible()
+    await expect(flow.get_by_text('還沒有課表。', exact=True)).to_be_visible()
+    await expect(flow.get_by_role('link', name='匯入課表', exact=True)).to_be_visible()
+    await expect(flow.get_by_role('heading', name=TODAY_FLOW_WORK_TITLE, exact=True)).to_be_visible()
+    await expect(flow.get_by_role('heading', name=TODAY_NOTIFY_TITLE, exact=True)).to_be_visible()
     await expect(page.get_by_role('heading', name='今天的校園日常')).to_have_count(0)
     await expect(page.get_by_role('link', name='用 Google 帳號登入')).to_have_count(0)
     await expect(page.locator('time[aria-current="date"]')).to_have_count(0)
@@ -285,7 +291,7 @@ async def check_home_font_preference(page):
                 'welcome body': welcome.locator('p').first,
                 'welcome action': welcome.get_by_role('link', name='匯入我的課表', exact=True),
                 'page title': today.get_by_role('heading', name='今天', exact=True),
-                'section title': today.get_by_role('heading', name='今天課表', exact=True),
+                'section title': today.get_by_role('heading', name=TODAY_FLOW_CLASS_TITLE, exact=True),
                 'empty state': today.get_by_text('還沒有課表。', exact=True),
             }
             sizes[preference] = {}
@@ -444,8 +450,11 @@ async def main():
             await expect(search).to_be_focused()
             await expect(page.get_by_role('heading', name='常用查詢', exact=True)).to_be_visible()
             await page.get_by_role('button', name='個人安排', exact=True).click()
-            await expect(page.locator('#life-service-results a')).to_have_count(2)
+            # 點餐關閉時不含訂單：宿舍、課程與作業、共同空堂
+            await expect(page.locator('#life-service-results a')).to_have_count(3)
             await expect(page.locator('#life-service-results a[href^="/dormitory"]')).to_be_visible()
+            await expect(page.locator('#life-service-results a[href^="/classroom"]')).to_be_visible()
+            await expect(page.locator('#life-service-results a[href^="/timetable"]')).to_be_visible()
             await page.get_by_role('button', name='全部', exact=True).click()
             await search.fill('報修')
             await expect(page.locator('#life-service-results a')).to_have_count(1)

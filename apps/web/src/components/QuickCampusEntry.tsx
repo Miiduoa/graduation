@@ -169,7 +169,7 @@ export function QuickCampusEntry() {
                       <small>{action.text}</small>
                       {aiResult?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
                         <span key={preview.destination} className={styles.serviceSnapshot}>
-                          <span>{preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}</span>
+                          <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
                           {preview.items.map((item, index) => (
                             <span key={index} className={styles.snapshotItem}>
                               {item.title}{item.detail ? ' · ' + item.detail : ''}

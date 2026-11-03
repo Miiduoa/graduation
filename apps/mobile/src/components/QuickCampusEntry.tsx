@@ -261,7 +261,7 @@ export function QuickCampusEntry({
                         borderTopColor: colors.border, borderTopWidth: 1, gap: 3,
                       }}>
                         <Text style={{ ...typography.caption, color: colors.muted }}>
-                          {preview.source === 'campus-platform' ? 'Campus One 資料' : '接通狀態'}：{preview.message}
+                          {preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}
                         </Text>
                         {preview.items.map((item, index) => (
                           <Text key={index} style={{ ...typography.caption, color: colors.text }}>

@@ -39,7 +39,7 @@ jobs:
           WORK="$RUNNER_TEMP/neon-rehearsal" \
           REPORT="$RUNNER_TEMP/neon-rehearsal/report.md" \
             scripts/ops/neon-migrate/rehearsal.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: neon-local-rehearsal

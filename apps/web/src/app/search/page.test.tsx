@@ -48,6 +48,14 @@ it('keeps every service discoverable without inventing a school selection', () =
   expect(screen.getByRole('link', { name: /^學校資訊/ }).getAttribute('href')).toBe('/school-info');
   expect(screen.getByRole('link', { name: /^校園活動/ }).getAttribute('href')).toBe('/events');
   expect(screen.getByRole('link', { name: /^宿舍/ }).getAttribute('href')).toBe('/dormitory');
+  expect(screen.getByRole('link', { name: /^課程與群組/ }).getAttribute('href')).toBe('/groups');
+  expect(screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')).toBe(
+    '/grades?tab=feedback',
+  );
+  expect(screen.getByRole('link', { name: /^玩課雲課程/ }).getAttribute('href')).toBe(
+    '/school-courses',
+  );
+  expect(screen.getByRole('link', { name: /^餐廳/ }).getAttribute('href')).toBe('/cafeteria');
   const serviceRoutes = screen.getAllByRole('link').map((link) => link.getAttribute('href'));
   expect(serviceRoutes).toContain('/leave');
   expect(serviceRoutes).toContain('/leave/review');
@@ -140,7 +148,7 @@ it('opens the feedback tab with the selected campus and without copying the sear
   window.history.replaceState({}, '', '/search?q=回饋&campus=nthu&token=private');
   render(<SearchPage />);
   const destination = new URL(
-    screen.getByRole('link', { name: /^課業成績與回饋/ }).getAttribute('href')!,
+    screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')!,
     'https://campus.example',
   );
   expect(destination.pathname).toBe('/grades');
@@ -176,7 +184,7 @@ it('uses the current school for feedback when the address still has an earlier c
   window.history.replaceState({}, '', '/search?campus=pu&schoolId=pu&school=PU&session=private');
   render(<SearchPage />);
   const target = new URL(
-    screen.getByRole('link', { name: /^課業成績與回饋/ }).getAttribute('href')!,
+    screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')!,
     'https://campus.example',
   );
   expect(target.pathname).toBe('/grades');
@@ -206,7 +214,7 @@ it.each(['職涯', '實習'])(
 it('finds tasks using separated words and full-width Latin characters', () => {
   render(<SearchPage />);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '繳交 作業' } });
-  expect(screen.getByRole('link', { name: /^課程空間/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: /^課程與作業/ })).toBeTruthy();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ＢＵＳ' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /^公車/ })).toBeTruthy();
@@ -233,10 +241,12 @@ it('restores filters after navigation and ignores unsupported categories', () =>
 
 it('shows a school login limitation before opening a service without hiding its entry', () => {
   const view = render(<SearchPage />);
-  expect(screen.getByRole('link', { name: /^成績/ }).textContent).toContain('尚未開放登入');
+  expect(screen.getByRole('link', { name: /^成績 查詢/ }).textContent).toContain('尚未開放登入');
   options.studentId = true;
   view.rerender(<SearchPage />);
-  expect(screen.getByRole('link', { name: /^成績/ }).textContent).not.toContain('尚未開放登入');
+  expect(screen.getByRole('link', { name: /^成績 查詢/ }).textContent).not.toContain(
+    '尚未開放登入',
+  );
 });
 
 it('retains a search and public destinations when login availability fails, and offers retry', () => {
@@ -270,7 +280,13 @@ it('recognizes a complex signed-in campus request using AI instead of only keywo
 
 it('hides readonly homework by default and restores it when enabled', () => {
   const view = render(<SearchPage />);
-  expect(screen.queryByRole('link', { name: /玩課雲作業與教材/ })).toBeNull();
-  view.rerender(<SchoolLmsReadonlyProvider enabled={true}><SearchPage /></SchoolLmsReadonlyProvider>);
-  expect(screen.getByRole('link', { name: /玩課雲作業與教材/ }).getAttribute('href')).toContain('/school-lms');
+  expect(screen.queryByRole('link', { name: /^玩課雲作業/ })).toBeNull();
+  view.rerender(
+    <SchoolLmsReadonlyProvider enabled={true}>
+      <SearchPage />
+    </SchoolLmsReadonlyProvider>,
+  );
+  expect(screen.getByRole('link', { name: /^玩課雲作業/ }).getAttribute('href')).toContain(
+    '/school-lms',
+  );
 });

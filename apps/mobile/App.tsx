@@ -108,10 +108,11 @@ import { initCrossModuleConnections } from './src/services/crossModuleConnector'
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
 import { rewriteLegacyShopsPath } from './src/app/legacyShopsPath';
 import { resolveDeprecatedRouteRedirect } from './src/app/deprecatedRouteRedirect';
+import { tabsWithMessages } from './src/app/tabsWithMessages';
 
 /**
- * 學生四個入口：今天｜課務｜生活｜我
- * 訊息仍在導覽堆疊，從「我」進入。
+ * 主導覽：今天｜課務｜生活｜訊息｜我
+ * 訊息 Tab 固定顯示；「我的」內另以「通知／私訊」對齊網頁用語。
  */
 const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
@@ -582,17 +583,18 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const permissions = usePermissions();
   // 訊息 Tab 上的紅色未讀徽章：即時訂閱我自己 DM 未讀數
   const unreadDms = useUnreadMessagingCount();
+  const tabs = tabsWithMessages(permissions.tabs);
 
-  const visibleTabKeys = permissions.tabs.map((t) => t.key);
+  const visibleTabKeys = tabs.map((t) => t.key);
   const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
 
   const renderTab = (route: (typeof visibleRoutes)[number]) => {
     const originalIndex = state.routes.findIndex((r) => r.key === route.key);
     const { options } = descriptors[route.key];
     const focused = state.index === originalIndex;
-    const config = permissions.tabs.find((t) => t.key === route.name);
+    const config = tabs.find((t) => t.key === route.name);
     const iconName = config?.icon ?? 'ic_tab_today';
-    const showUnreadBadge = route.name === '我的' && unreadDms > 0;
+    const showUnreadBadge = route.name === '訊息' && unreadDms > 0;
     const badgeLabel = unreadDms > 99 ? '99+' : String(unreadDms);
 
     return (
@@ -685,7 +687,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       }}
       pointerEvents="box-none"
     >
-      {/* 底部四個入口：今天｜課務｜生活｜我 */}
+      {/* 底部入口：今天｜課務｜生活｜訊息｜我 */}
       <View
         style={{
           position: 'absolute',
@@ -727,8 +729,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 /**
- * 學生四個入口：今天｜課務｜生活｜我
- * 訊息仍在導覽堆疊，從「我」進入。
+ * 主導覽：今天｜課務｜生活｜訊息｜我（訊息固定可見，不刪堆疊）。
  */
 function AppTabNavigator() {
   return (
@@ -744,7 +745,7 @@ function AppTabNavigator() {
       <Tab.Screen name="Today" component={HomeStack} />
       <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="校園" component={MapStack} />
-      <Tab.Screen name="訊息" component={MessagesStack} options={{ tabBarButton: () => null }} />
+      <Tab.Screen name="訊息" component={MessagesStack} />
       <Tab.Screen name="我的" component={MeStack} />
     </Tab.Navigator>
   );
