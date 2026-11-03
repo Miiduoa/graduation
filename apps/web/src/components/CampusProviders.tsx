@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { nuniRecord } from '@campus/shared/src/nuni';
 import { NuniSessionProvider, useNuniSession } from '@/features/nuni/Session';
 import { useAuth } from './AuthGuard';
-import { CampusDraftProvider } from './CampusDraftProvider';
+import { campusDraftIdentity, CampusDraftProvider } from './CampusDraftProvider';
 import {
   SelectedSchoolProvider,
   useSelectedSchool,
@@ -104,6 +104,7 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
     <SelectedSchoolProvider
       ownerKey={owner}
       loading={auth.loading || nuni.loading}
+      identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
       schools={catalog.schools}
       catalogStatus={catalog.status}
       catalogError="目前無法取得校園目錄，請重新讀取。"
@@ -120,11 +121,13 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
 function CampusDraftMount({ children }: { children: ReactNode }) {
   const auth = useAuth();
   const school = useSelectedSchool();
+  const nuni = useNuniSession();
   const ready = !school.loading && school.catalogStatus === 'ready';
-  // loading 時 selectedSchoolId 可能暫為 null；DraftStore.reconcile 會保留上一所已確定的校草稿。
+  // 身分未確認時隱藏草稿；校園目錄重讀仍保留同帳號的編輯內容。
   return (
     <CampusDraftProvider
-      uid={auth.user?.uid ?? null}
+      uid={campusDraftIdentity(auth.user?.uid, nuni.session?.platformAccountId)}
+      identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
       schoolId={school.selectedSchoolId}
       ready={ready}
     >

@@ -29,6 +29,7 @@ export type BrowseSchool = {
 
 export type SelectedSchoolProviderProps = {
   ownerKey: string | null;
+  identityReady?: boolean;
   loading: boolean;
   schools: readonly BrowseSchool[];
   catalogStatus: 'loading' | 'ready' | 'error';
@@ -113,6 +114,7 @@ function storedSelection(value: string | null): { present: boolean; schoolId: st
 
 export function SelectedSchoolProvider({
   ownerKey,
+  identityReady = true,
   loading,
   schools,
   catalogStatus,
@@ -202,7 +204,13 @@ export function SelectedSchoolProvider({
     : null;
   const unavailable = ready && requestedId !== null && selectedSchool === null;
   const [pendingSchoolId, setPendingSchoolId] = useState<string | null | undefined>(undefined);
-  const pendingSwitch = pendingSchoolId !== undefined;
+  const confirmationScope = useMemo(() => ({ scope, identityReady }), [scope, identityReady]);
+  const [pendingScope, setPendingScope] = useState(confirmationScope);
+  if (pendingScope !== confirmationScope) {
+    setPendingScope(confirmationScope);
+    setPendingSchoolId(undefined);
+  }
+  const pendingSwitch = pendingScope === confirmationScope && pendingSchoolId !== undefined;
 
   function canCommitSchool(id: string | null) {
     return (
@@ -273,7 +281,7 @@ export function SelectedSchoolProvider({
         isOpen={pendingSwitch}
         onClose={() => setPendingSchoolId(undefined)}
         onConfirm={() => {
-          if (pendingSchoolId === undefined) return;
+          if (pendingScope !== confirmationScope || pendingSchoolId === undefined) return;
           if (
             pendingSchoolId !== null &&
             !catalog.some((school) => school.id === pendingSchoolId)
