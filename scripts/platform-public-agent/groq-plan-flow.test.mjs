@@ -9,7 +9,8 @@ const load = (name) =>
   import(pathToFileURL(join(process.env.PLATFORM_AGENT_COMPILED, `${name}.js`)).href);
 const { PlatformPublicTaskService } = await load('service');
 const { createGroqNavigationPlanner } = await load('groq-navigation-plan');
-const { createGroqServerTransport, isFreeAssuranceDenied } = await load('groq-server-transport');
+const { createGroqServerTransport, createFreeAssuranceAttempt, isFreeAssuranceDenied } =
+  await load('groq-server-transport');
 const catalog = () => ({
   schoolId: 'pu',
   updatedAt: '2026-10-19',
@@ -239,6 +240,42 @@ test('guard errors and a late denial after timeout stay unknown without provider
   assert.equal((await f.service.execute(f.authorization, body)).status, 'unknown');
   assert.equal(sent, 0);
 });
+test('cancellation during a guard cannot turn its late false result into a definitive failure', async () => {
+  let sent = 0,
+    release,
+    entered;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => {
+      entered();
+      await held;
+      return false;
+    },
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const controller = new globalThis.AbortController();
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  const executing = f.service.execute(f.authorization, body, controller.signal);
+  await started;
+  controller.abort();
+  release();
+  await rejectsCode(executing, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+  assert.equal(sent, 0);
+});
 test('lost failure commit acknowledgement stays unknown until durable status is queried', async () => {
   let sent = 0;
   const transport = createGroqServerTransport({
@@ -265,6 +302,52 @@ test('lost failure commit acknowledgement stays unknown until durable status is 
   assert.equal(durable.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
   assert.equal(sent, 0);
 });
+test('cancellation while persisting a guard denial is unknown until durable status is queried', async () => {
+  let sent = 0,
+    release,
+    entered;
+  const holding = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  f.db.beforeAction = async (action, values) => {
+    if (action === 'finalize-operation' && values[7] === 'FREE_ASSURANCE_UNAVAILABLE') {
+      f.db.beforeAction = null;
+      entered();
+      await holding;
+    }
+  };
+  const controller = new globalThis.AbortController();
+  const executing = f.service.execute(
+    f.authorization,
+    {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    },
+    controller.signal,
+  );
+  await started;
+  controller.abort();
+  release();
+  await rejectsCode(executing, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  const durable = await f.service.read(f.authorization, p.request);
+  assert.equal(durable.status, 'failed');
+  assert.equal(durable.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(sent, 0);
+});
 test('guard exceptions and provider-fetch errors cannot forge an unsent denial', async () => {
   const denied = createGroqServerTransport({
     credential: 'synthetic-only',
@@ -274,6 +357,10 @@ test('guard exceptions and provider-fetch errors cannot forge an unsent denial',
     freeOnlyGuard: async () => false,
   });
   let proof;
+  const priorAttempt = createFreeAssuranceAttempt(
+    new globalThis.AbortController().signal,
+    'pago_11111111-1111-1111-1111-111111111111',
+  );
   try {
     await denied(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -286,11 +373,12 @@ test('guard exceptions and provider-fetch errors cannot forge an unsent denial',
         signal: new globalThis.AbortController().signal,
       },
       async () => {},
+      priorAttempt,
     );
   } catch (error) {
     proof = error;
   }
-  assert.equal(isFreeAssuranceDenied(proof), true);
+  assert.equal(isFreeAssuranceDenied(proof, priorAttempt), true);
   for (const fromGuard of [true, false]) {
     let sent = 0;
     const transport = createGroqServerTransport({
@@ -318,6 +406,56 @@ test('guard exceptions and provider-fetch errors cannot forge an unsent denial',
     assert.equal(state.status, 'unknown');
     assert.equal(sent, fromGuard ? 0 : 1);
   }
+});
+test('a denial proof from another operation cannot certify a later task', async () => {
+  let oldProof;
+  const priorAttempt = createFreeAssuranceAttempt(
+    new globalThis.AbortController().signal,
+    'pago_11111111-1111-1111-1111-111111111111',
+  );
+  const prior = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  try {
+    await prior(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: '{}',
+        signal: new globalThis.AbortController().signal,
+      },
+      async () => {},
+      priorAttempt,
+    );
+  } catch (error) {
+    oldProof = error;
+  }
+  assert.equal(isFreeAssuranceDenied(oldProof, priorAttempt), true);
+  let providerCalls = 0;
+  const f = fixture({
+    transport: async () => {
+      providerCalls++;
+      throw oldProof;
+    },
+  });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    f.service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+  assert.equal(providerCalls, 1);
 });
 test('timeout after admission stays unknown even when the model returns late', async () => {
   let release,

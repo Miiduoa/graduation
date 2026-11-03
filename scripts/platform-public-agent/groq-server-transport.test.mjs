@@ -6,10 +6,17 @@ import { pathToFileURL } from 'node:url';
 
 const { AbortController, Response } = globalThis;
 
-const { createGroqServerTransport, isFreeAssuranceDenied } = await import(
+const {
+  createGroqServerTransport,
+  createFreeAssuranceAttempt,
+  isFreeAssuranceDenied,
+  consumeFreeAssuranceDenied,
+} = await import(
   pathToFileURL(join(process.env.PLATFORM_AGENT_COMPILED, 'groq-server-transport.js')).href
 );
 const endpoint = 'https://api.groq.com/openai/v1/chat/completions';
+const operationId = 'pago_11111111-1111-1111-1111-111111111111';
+const otherOperation = 'pago_22222222-2222-2222-2222-222222222222';
 const credential = 'synthetic-secret-never-a-real-key';
 const init = () => ({
   method: 'POST',
@@ -20,6 +27,8 @@ const init = () => ({
   signal: new AbortController().signal,
 });
 const beforeSend = async () => {};
+const invoke = (transport, url, request, before = beforeSend) =>
+  transport(url, request, before, createFreeAssuranceAttempt(request.signal, operationId));
 const denied = (promise, code = 'PUBLIC_AGENT_PROVIDER_UNAVAILABLE') =>
   assert.rejects(promise, (error) => error.code === code && !String(error).includes(credential));
 
@@ -48,17 +57,17 @@ test('only exact endpoint and exact headers reach the injected transport', async
     'http://api.groq.com/openai/v1/chat/completions',
     `${endpoint}?key=test`,
   ])
-    await denied(transport(url, init(), beforeSend));
+    await denied(invoke(transport, url, init()));
   for (const request of [
     { ...init(), method: 'GET' },
     { ...init(), redirect: 'follow' },
     { ...init(), cache: 'default' },
     { ...init(), headers: { ...init().headers, authorization: 'attacker' } },
   ])
-    await denied(transport(endpoint, request, beforeSend));
+    await denied(invoke(transport, endpoint, request));
   assert.equal(checks, 0);
   assert.equal(calls, 0);
-  assert.equal((await transport(endpoint, init(), beforeSend)).status, 200);
+  assert.equal((await invoke(transport, endpoint, init())).status, 200);
   assert.equal(checks, 1);
   assert.equal(calls, 1);
 });
@@ -78,10 +87,24 @@ test('missing or declined no-charge guard, cancellation, and errors fail closed 
     fetch,
     freeOnlyGuard: async () => false,
   });
-  await assert.rejects(
-    refused(endpoint, init(), beforeSend),
-    (error) => isFreeAssuranceDenied(error) && !String(error).includes(credential),
+  const request = init(),
+    attempt = createFreeAssuranceAttempt(request.signal, operationId);
+  let proof;
+  try {
+    await refused(endpoint, request, beforeSend, attempt);
+  } catch (error) {
+    proof = error;
+  }
+  assert.equal(isFreeAssuranceDenied(proof, attempt), true);
+  assert.equal(
+    isFreeAssuranceDenied(proof, createFreeAssuranceAttempt(init().signal, otherOperation)),
+    false,
   );
+  await denied(refused(endpoint, request, beforeSend, attempt));
+  assert.equal(consumeFreeAssuranceDenied(proof, attempt, otherOperation), false);
+  assert.equal(consumeFreeAssuranceDenied(proof, attempt, operationId), true);
+  assert.equal(consumeFreeAssuranceDenied(proof, attempt, operationId), false);
+  assert.equal(String(proof).includes(credential), false);
   const broken = createGroqServerTransport({
     credential,
     fetch,
@@ -89,7 +112,7 @@ test('missing or declined no-charge guard, cancellation, and errors fail closed 
       throw Error(credential);
     },
   });
-  await denied(broken(endpoint, init(), beforeSend));
+  await denied(invoke(broken, endpoint, init()));
   assert.equal(calls, 0);
   const signal = new AbortController();
   signal.abort();
@@ -99,12 +122,36 @@ test('missing or declined no-charge guard, cancellation, and errors fail closed 
     freeOnlyGuard: async () => true,
   });
   await denied(
-    transport(endpoint, { ...init(), signal: signal.signal }, beforeSend),
+    invoke(transport, endpoint, { ...init(), signal: signal.signal }),
     'PUBLIC_AGENT_PROVIDER_CANCELLED',
   );
   assert.equal(calls, 0);
-  await denied(transport(endpoint, init(), beforeSend));
+  await denied(invoke(transport, endpoint, init()));
   assert.equal(calls, 1);
+});
+test('a denial proof is unusable after its execution or request signal aborts', async () => {
+  for (const abortRequest of [false, true]) {
+    const execution = new AbortController(),
+      request = new AbortController();
+    const attempt = createFreeAssuranceAttempt(execution.signal, operationId);
+    const transport = createGroqServerTransport({
+      credential,
+      fetch: async () => {
+        throw new Error('unexpected');
+      },
+      freeOnlyGuard: async () => false,
+    });
+    let proof;
+    try {
+      await transport(endpoint, { ...init(), signal: request.signal }, beforeSend, attempt);
+    } catch (error) {
+      proof = error;
+    }
+    assert.equal(isFreeAssuranceDenied(proof, attempt), true);
+    (abortRequest ? request : execution).abort();
+    assert.equal(isFreeAssuranceDenied(proof, attempt), false);
+    assert.equal(consumeFreeAssuranceDenied(proof, attempt, operationId), false);
+  }
 });
 
 test('session is revalidated after the potentially delayed guard and before sending', async () => {
@@ -122,7 +169,7 @@ test('session is revalidated after the potentially delayed guard and before send
     },
   });
   await assert.rejects(
-    transport(endpoint, init(), async () => {
+    invoke(transport, endpoint, init(), async () => {
       events.push('session');
       throw Object.assign(new Error('revoked'), { code: 'SYNTHETIC_REVOKED' });
     }),
@@ -130,7 +177,7 @@ test('session is revalidated after the potentially delayed guard and before send
   );
   assert.deepEqual(events, ['guard', 'session']);
   events.length = 0;
-  await transport(endpoint, init(), async () => {
+  await invoke(transport, endpoint, init(), async () => {
     events.push('session');
   });
   assert.deepEqual(events, ['guard', 'session', 'fetch']);

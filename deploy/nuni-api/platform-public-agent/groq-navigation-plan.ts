@@ -1,6 +1,6 @@
 import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 import { publicSnapshot, type PublicCatalogReader } from './navigation';
-import { isFreeAssuranceDenied } from './groq-server-transport';
+import { isFreeAssuranceDenied, type FreeAssuranceAttempt } from './groq-server-transport';
 
 // Unregistered candidate: a future trusted transport must add an authorized server
 // credential for exactly this endpoint. This module reads no credentials or environment.
@@ -18,6 +18,7 @@ type Options = {
     url: string,
     init: RequestInit,
     beforeSend: () => Promise<void>,
+    attempt: FreeAssuranceAttempt,
   ) => Promise<Response>;
   readPublicCatalog: PublicCatalogReader;
   timeoutMs?: number;
@@ -176,6 +177,7 @@ export function createGroqNavigationPlanner(options: Options) {
     raw: unknown,
     external: AbortSignal | undefined,
     beforeSend: (signal: AbortSignal) => Promise<void>,
+    attempt: FreeAssuranceAttempt,
   ): Promise<PublicPlan> => {
     if (typeof beforeSend !== 'function') return invalid('PUBLIC_AGENT_NOT_CONFIGURED', 503);
     const input = planInput(raw),
@@ -272,12 +274,12 @@ export function createGroqNavigationPlanner(options: Options) {
             }),
           };
           if (options.transport)
-            return await options.transport(GROQ_ENDPOINT, request, revalidateSession);
+            return await options.transport(GROQ_ENDPOINT, request, revalidateSession, attempt);
           await revalidateSession();
           return await options.fetch!(GROQ_ENDPOINT, request);
         } catch (error) {
           if (sessionFailed && error === sessionError) throw error;
-          if (options.transport && isFreeAssuranceDenied(error)) throw error;
+          if (options.transport && isFreeAssuranceDenied(error, attempt)) throw error;
           throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
         }
       });
@@ -322,7 +324,7 @@ export function createGroqNavigationPlanner(options: Options) {
       projectSource(input, await readSource());
       return plan;
     } catch (error) {
-      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error)) throw error;
+      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error, attempt)) throw error;
       throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
     } finally {
       clearTimeout(timer);

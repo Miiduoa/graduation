@@ -635,7 +635,7 @@ function Task({ port }: { port: PublicTaskPort }) {
             : operation.failureCode === 'FREE_QUOTA_UNAVAILABLE'
               ? '目前達到使用限制，這次沒有取得建議。請先確認結案，稍後可再試。'
               : operation.failureCode === 'FREE_ASSURANCE_UNAVAILABLE'
-                ? '目前無法確認免費使用保障，這次沒有傳送給 Groq。請先確認結案。'
+                ? '目前無法確認免費使用保障，這次的問題沒有傳送給 Groq。請先確認結案。'
                 : operation.failureCode === 'DESTINATION_UNCLEAR'
                   ? '無法確認起點與終點；請先確認結案再修改問題。'
                   : '這次沒有取得可驗證的建議；請先確認結案。'}

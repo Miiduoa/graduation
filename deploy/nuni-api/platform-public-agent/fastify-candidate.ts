@@ -7,6 +7,7 @@ import {
 import { PlatformPublicTaskService } from './service';
 import type { PublicCatalogReader } from './navigation';
 import type { PlatformSessionResolver } from './admission';
+import type { FreeAssuranceAttempt } from './groq-server-transport';
 
 const prefix = '/v1/auth/platform/public-agent';
 const actions = [
@@ -70,6 +71,7 @@ type Options = {
     input: { schoolId: string; query: string; fingerprint: string },
     signal: AbortSignal,
     beforeSend: (signal: AbortSignal) => Promise<void>,
+    attempt: FreeAssuranceAttempt,
   ) => Promise<unknown>;
 };
 const validAction = (action: string): action is Action => actions.some((value) => value === action);

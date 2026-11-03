@@ -12,7 +12,7 @@ const patch = readFileSync(join(folder, manifest.patch), 'utf8');
 
 test('source patch is pinned, excludes migrations, and matches reviewed agent modules', () => {
   assert.equal(manifest.baseTree, 'add9614a93c65b4587ca5649a83803614c786f28');
-  assert.equal(manifest.resultTree, '7197a3860038dbe5f675619b7043aa3190d0e45e');
+  assert.equal(manifest.resultTree, '2e38da3c971299ebdfeb2f57c15a0bdbda4e6cc1');
   assert.equal(manifest.migration, null);
   assert.equal(manifest.providerWired, false);
   assert.equal(createHash('sha256').update(patch).digest('hex'), manifest.sha256);

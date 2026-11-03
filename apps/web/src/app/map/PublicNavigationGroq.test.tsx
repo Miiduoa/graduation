@@ -103,7 +103,7 @@ it('keeps the question after a verified free assurance denial and explicit close
   render(<PublicNavigationTask port={port(call)} />);
   await disclose();
   fireEvent.click(screen.getByRole('button', { name: '同意傳送並取得建議' }));
-  expect((await screen.findByRole('alert')).textContent).toContain('沒有傳送給 Groq');
+  expect((await screen.findByRole('alert')).textContent).toContain('問題沒有傳送給 Groq');
   fireEvent.click(screen.getByRole('button', { name: '結案並開始新任務' }));
   fireEvent.click(screen.getByRole('button', { name: '確認結案' }));
   expect(((await screen.findByLabelText('起點與終點')) as HTMLInputElement).value).toBe(

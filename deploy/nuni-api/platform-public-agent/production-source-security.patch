@@ -452,10 +452,10 @@ index 0000000..cbd9dba
 +}
 diff --git a/apps/api/src/platform-public-agent/fastify-candidate.ts b/apps/api/src/platform-public-agent/fastify-candidate.ts
 new file mode 100644
-index 0000000..a1dd539
+index 0000000..dd752d0
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/fastify-candidate.ts
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,233 @@
 +import { PublicAgentError, type PlatformTaskActor } from './contract';
 +import {
 +  PlatformPublicAgentLedger,
@@ -465,6 +465,7 @@ index 0000000..a1dd539
 +import { PlatformPublicTaskService } from './service';
 +import type { PublicCatalogReader } from './navigation';
 +import type { PlatformSessionResolver } from './admission';
++import type { FreeAssuranceAttempt } from './groq-server-transport';
 +
 +const prefix = '/v1/auth/platform/public-agent';
 +const actions = [
@@ -528,6 +529,7 @@ index 0000000..a1dd539
 +    input: { schoolId: string; query: string; fingerprint: string },
 +    signal: AbortSignal,
 +    beforeSend: (signal: AbortSignal) => Promise<void>,
++    attempt: FreeAssuranceAttempt,
 +  ) => Promise<unknown>;
 +};
 +const validAction = (action: string): action is Action => actions.some((value) => value === action);
@@ -689,13 +691,13 @@ index 0000000..a1dd539
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-navigation-plan.ts b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
 new file mode 100644
-index 0000000..c7f18d2
+index 0000000..33f0c86
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-navigation-plan.ts
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,334 @@
 +import { exactRecord, FREE_MODEL, PublicAgentError } from './contract';
 +import { publicSnapshot, type PublicCatalogReader } from './navigation';
-+import { isFreeAssuranceDenied } from './groq-server-transport';
++import { isFreeAssuranceDenied, type FreeAssuranceAttempt } from './groq-server-transport';
 +
 +// Unregistered candidate: a future trusted transport must add an authorized server
 +// credential for exactly this endpoint. This module reads no credentials or environment.
@@ -713,6 +715,7 @@ index 0000000..c7f18d2
 +    url: string,
 +    init: RequestInit,
 +    beforeSend: () => Promise<void>,
++    attempt: FreeAssuranceAttempt,
 +  ) => Promise<Response>;
 +  readPublicCatalog: PublicCatalogReader;
 +  timeoutMs?: number;
@@ -871,6 +874,7 @@ index 0000000..c7f18d2
 +    raw: unknown,
 +    external: AbortSignal | undefined,
 +    beforeSend: (signal: AbortSignal) => Promise<void>,
++    attempt: FreeAssuranceAttempt,
 +  ): Promise<PublicPlan> => {
 +    if (typeof beforeSend !== 'function') return invalid('PUBLIC_AGENT_NOT_CONFIGURED', 503);
 +    const input = planInput(raw),
@@ -967,12 +971,12 @@ index 0000000..c7f18d2
 +            }),
 +          };
 +          if (options.transport)
-+            return await options.transport(GROQ_ENDPOINT, request, revalidateSession);
++            return await options.transport(GROQ_ENDPOINT, request, revalidateSession, attempt);
 +          await revalidateSession();
 +          return await options.fetch!(GROQ_ENDPOINT, request);
 +        } catch (error) {
 +          if (sessionFailed && error === sessionError) throw error;
-+          if (options.transport && isFreeAssuranceDenied(error)) throw error;
++          if (options.transport && isFreeAssuranceDenied(error, attempt)) throw error;
 +          throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +        }
 +      });
@@ -1017,7 +1021,7 @@ index 0000000..c7f18d2
 +      projectSource(input, await readSource());
 +      return plan;
 +    } catch (error) {
-+      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error)) throw error;
++      if (error instanceof PublicAgentError || isFreeAssuranceDenied(error, attempt)) throw error;
 +      throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503);
 +    } finally {
 +      clearTimeout(timer);
@@ -1027,23 +1031,71 @@ index 0000000..c7f18d2
 +}
 diff --git a/apps/api/src/platform-public-agent/groq-server-transport.ts b/apps/api/src/platform-public-agent/groq-server-transport.ts
 new file mode 100644
-index 0000000..76e6f56
+index 0000000..132b84f
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/groq-server-transport.ts
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,139 @@
 +import { PublicAgentError } from './contract';
 +
 +const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-+// Only this module can create a denial proof, after a definitive guard result
-+// and before its provider fetch. It contains no input or credential data.
-+const deniedProofs = new WeakSet<object>();
-+export function isFreeAssuranceDenied(value: unknown): boolean {
-+  return typeof value === 'object' && value !== null && deniedProofs.has(value);
++// A proof belongs to one service-created execution attempt. It contains no
++// input or credential, cannot survive another attempt and can be consumed once.
++export type FreeAssuranceAttempt = object;
++type AttemptState = {
++  signal: AbortSignal;
++  operationId: string;
++  phase: 'ready' | 'denied' | 'sent' | 'consumed';
++  requestSignal?: AbortSignal;
++  proof?: Error;
++};
++const attempts = new WeakMap<FreeAssuranceAttempt, AttemptState>();
++export function createFreeAssuranceAttempt(
++  signal: AbortSignal,
++  operationId: string,
++): FreeAssuranceAttempt {
++  if (!/^pago_[a-f0-9-]{36}$/u.test(operationId))
++    throw new PublicAgentError('PUBLIC_AGENT_NOT_CONFIGURED', 503);
++  const attempt = Object.freeze({});
++  attempts.set(attempt, { signal, operationId, phase: 'ready' });
++  return attempt;
 +}
-+function assuranceDenied(): Error {
-+  const error = new Error('free assurance unavailable');
-+  deniedProofs.add(error);
-+  return error;
++export function isFreeAssuranceDenied(value: unknown, attempt: FreeAssuranceAttempt): boolean {
++  const state = attempts.get(attempt);
++  return (
++    !!state &&
++    state.phase === 'denied' &&
++    state.proof === value &&
++    !state.signal.aborted &&
++    state.requestSignal?.aborted === false
++  );
++}
++export function consumeFreeAssuranceDenied(
++  value: unknown,
++  attempt: FreeAssuranceAttempt,
++  operationId: string,
++): boolean {
++  if (attempts.get(attempt)?.operationId !== operationId) return false;
++  if (!isFreeAssuranceDenied(value, attempt)) return false;
++  attempts.get(attempt)!.phase = 'consumed';
++  return true;
++}
++function assuranceDenied(attempt: FreeAssuranceAttempt, requestSignal: AbortSignal): Error | null {
++  const state = attempts.get(attempt);
++  if (!state || state.phase !== 'ready' || state.signal.aborted || requestSignal.aborted)
++    return null;
++  const proof = new Error('free assurance unavailable');
++  state.phase = 'denied';
++  state.requestSignal = requestSignal;
++  state.proof = proof;
++  return proof;
++}
++function beginFetch(attempt: FreeAssuranceAttempt, requestSignal: AbortSignal): boolean {
++  const state = attempts.get(attempt);
++  if (!state || state.phase !== 'ready' || state.signal.aborted || requestSignal.aborted)
++    return false;
++  state.phase = 'sent';
++  state.requestSignal = requestSignal;
++  return true;
 +}
 +type FreeOnlyGuard = (signal: AbortSignal) => Promise<boolean>;
 +type Options = { credential: string; fetch: typeof fetch; freeOnlyGuard: FreeOnlyGuard };
@@ -1065,7 +1117,12 @@ index 0000000..76e6f56
 +  )
 +    return unavailable();
 +  const credential = options.credential;
-+  return async (input: string, init: RequestInit, beforeSend: () => Promise<void>) => {
++  return async (
++    input: string,
++    init: RequestInit,
++    beforeSend: () => Promise<void>,
++    attempt: FreeAssuranceAttempt,
++  ) => {
 +    const headers = new Headers(init?.headers);
 +    if (
 +      input !== ENDPOINT ||
@@ -1089,11 +1146,16 @@ index 0000000..76e6f56
 +      return unavailable();
 +    }
 +    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
-+    if (allowed === false) throw assuranceDenied();
++    if (allowed === false)
++      throw (
++        assuranceDenied(attempt, signal) ??
++        new PublicAgentError('PUBLIC_AGENT_PROVIDER_UNAVAILABLE', 503)
++      );
 +    if (allowed !== true) return unavailable();
 +    // Recheck the session after the potentially slow guard and immediately before sending.
 +    await beforeSend();
 +    if (signal.aborted) throw new PublicAgentError('PUBLIC_AGENT_PROVIDER_CANCELLED', 503);
++    if (!beginFetch(attempt, signal)) return unavailable();
 +    try {
 +      return await options.fetch(ENDPOINT, {
 +        method: 'POST',
@@ -2792,10 +2854,10 @@ index 0000000..d7a259a
 +}
 diff --git a/apps/api/src/platform-public-agent/service.ts b/apps/api/src/platform-public-agent/service.ts
 new file mode 100644
-index 0000000..94149f0
+index 0000000..b35f68a
 --- /dev/null
 +++ b/apps/api/src/platform-public-agent/service.ts
-@@ -0,0 +1,551 @@
+@@ -0,0 +1,570 @@
 +import { isDeepStrictEqual } from 'node:util';
 +import { PlatformPublicAdmission, type PlatformSessionResolver } from './admission';
 +import {
@@ -2811,7 +2873,11 @@ index 0000000..94149f0
 +  type PlatformTaskActor,
 +} from './contract';
 +import { PlatformPublicAgentLedger } from './ledger';
-+import { isFreeAssuranceDenied } from './groq-server-transport';
++import {
++  createFreeAssuranceAttempt,
++  consumeFreeAssuranceDenied,
++  type FreeAssuranceAttempt,
++} from './groq-server-transport';
 +import {
 +  exactNavigation,
 +  validatedPlan,
@@ -2833,6 +2899,7 @@ index 0000000..94149f0
 +    input: { schoolId: string; query: string; fingerprint: string },
 +    signal: AbortSignal,
 +    beforeSend: (signal: AbortSignal) => Promise<void>,
++    attempt: FreeAssuranceAttempt,
 +  ) => Promise<unknown>;
 +  /** Controlled injection for tests; no default cloud provider or fallback. */
 +  execute?: (
@@ -3112,7 +3179,12 @@ index 0000000..94149f0
 +    const input = exactRecord(raw, ['confirmationId', 'request']);
 +    const task = this.parse(input.request);
 +    let executing:
-+      | { actor: PlatformTaskActor; operationId: string; executionToken: string }
++      | {
++          actor: PlatformTaskActor;
++          operationId: string;
++          executionToken: string;
++          attempt: FreeAssuranceAttempt;
++        }
 +      | undefined;
 +    let admitted = false;
 +    let dispatchAcknowledged = false;
@@ -3126,7 +3198,13 @@ index 0000000..94149f0
 +          const operation = await step(() => this.options.ledger.readBound(actor, task.binding));
 +          return this.deliver(auth, actor, task, operation, step, abort);
 +        }
-+        executing = { actor, operationId: claim.operationId, executionToken: claim.executionToken };
++        const attempt = createFreeAssuranceAttempt(abort, claim.operationId);
++        executing = {
++          actor,
++          operationId: claim.operationId,
++          executionToken: claim.executionToken,
++          attempt,
++        };
 +        sameActor(actor, await step(() => this.admission.actor(auth)));
 +        const snapshot = await step(() => this.source(task, abort));
 +        // A successful database commit acknowledgement must precede every executor.
@@ -3155,6 +3233,7 @@ index 0000000..94149f0
 +                async () => {
 +                  sameActor(actor, await this.admission.actor(auth));
 +                },
++                attempt,
 +              )
 +            : this.options.execute
 +              ? this.options.execute(task, snapshot, abort)
@@ -3196,7 +3275,8 @@ index 0000000..94149f0
 +        // Only definitive provider responses may finish the operation. A lost
 +        // database acknowledgement remains unknown and is never retried as work.
 +        const knownFailure =
-+          isFreeAssuranceDenied(error) && task.binding.provider === FREE_PROVIDER
++          task.binding.provider === FREE_PROVIDER &&
++          consumeFreeAssuranceDenied(error, e.attempt, e.operationId)
 +            ? 'FREE_ASSURANCE_UNAVAILABLE'
 +            : error instanceof PublicAgentError
 +              ? (
@@ -3227,6 +3307,7 @@ index 0000000..94149f0
 +            );
 +            if (failed.status !== 'failed' || failed.failureCode !== knownFailure)
 +              throw new Error('failure outcome unknown');
++            if (signal?.aborted) throw new Error('request cancelled');
 +            return failed;
 +          } catch {
 +            throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);

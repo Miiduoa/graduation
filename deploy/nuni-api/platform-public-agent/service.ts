@@ -13,7 +13,11 @@ import {
   type PlatformTaskActor,
 } from './contract';
 import { PlatformPublicAgentLedger } from './ledger';
-import { isFreeAssuranceDenied } from './groq-server-transport';
+import {
+  createFreeAssuranceAttempt,
+  consumeFreeAssuranceDenied,
+  type FreeAssuranceAttempt,
+} from './groq-server-transport';
 import {
   exactNavigation,
   validatedPlan,
@@ -35,6 +39,7 @@ type Options = {
     input: { schoolId: string; query: string; fingerprint: string },
     signal: AbortSignal,
     beforeSend: (signal: AbortSignal) => Promise<void>,
+    attempt: FreeAssuranceAttempt,
   ) => Promise<unknown>;
   /** Controlled injection for tests; no default cloud provider or fallback. */
   execute?: (
@@ -314,7 +319,12 @@ export class PlatformPublicTaskService {
     const input = exactRecord(raw, ['confirmationId', 'request']);
     const task = this.parse(input.request);
     let executing:
-      | { actor: PlatformTaskActor; operationId: string; executionToken: string }
+      | {
+          actor: PlatformTaskActor;
+          operationId: string;
+          executionToken: string;
+          attempt: FreeAssuranceAttempt;
+        }
       | undefined;
     let admitted = false;
     let dispatchAcknowledged = false;
@@ -328,7 +338,13 @@ export class PlatformPublicTaskService {
           const operation = await step(() => this.options.ledger.readBound(actor, task.binding));
           return this.deliver(auth, actor, task, operation, step, abort);
         }
-        executing = { actor, operationId: claim.operationId, executionToken: claim.executionToken };
+        const attempt = createFreeAssuranceAttempt(abort, claim.operationId);
+        executing = {
+          actor,
+          operationId: claim.operationId,
+          executionToken: claim.executionToken,
+          attempt,
+        };
         sameActor(actor, await step(() => this.admission.actor(auth)));
         const snapshot = await step(() => this.source(task, abort));
         // A successful database commit acknowledgement must precede every executor.
@@ -357,6 +373,7 @@ export class PlatformPublicTaskService {
                 async () => {
                   sameActor(actor, await this.admission.actor(auth));
                 },
+                attempt,
               )
             : this.options.execute
               ? this.options.execute(task, snapshot, abort)
@@ -398,7 +415,8 @@ export class PlatformPublicTaskService {
         // Only definitive provider responses may finish the operation. A lost
         // database acknowledgement remains unknown and is never retried as work.
         const knownFailure =
-          isFreeAssuranceDenied(error) && task.binding.provider === FREE_PROVIDER
+          task.binding.provider === FREE_PROVIDER &&
+          consumeFreeAssuranceDenied(error, e.attempt, e.operationId)
             ? 'FREE_ASSURANCE_UNAVAILABLE'
             : error instanceof PublicAgentError
               ? (
@@ -429,6 +447,7 @@ export class PlatformPublicTaskService {
             );
             if (failed.status !== 'failed' || failed.failureCode !== knownFailure)
               throw new Error('failure outcome unknown');
+            if (signal?.aborted) throw new Error('request cancelled');
             return failed;
           } catch {
             throw new PublicAgentError('PUBLIC_AGENT_OUTCOME_UNKNOWN', 503);
