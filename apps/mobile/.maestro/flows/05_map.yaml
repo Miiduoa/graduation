@@ -4,13 +4,20 @@ tags:
   - smoke
   - map
 ---
-- launchApp:
-    clearState: true
+# The workflow installs one iOS Debug app and runs onboarding before this flow.
+# Maestro's clearState reinstalls the app on iOS and can discard the Metro
+# Debug bundle URL; the saved failure screenshot showed a native
+# "No script URL provided" redbox, not a failed guest map assertion.
+# Restart the installed app without resetting its native Debug configuration.
+# Guest isolation is still explicitly checked below before any map action.
+- launchApp
 
 - extendedWaitUntil:
     visible:
       id: login-landing
     timeout: 90000
+- assertNotVisible:
+    id: tab-Today
 
 # Keep the tap target clear of the development warning banner at the screen edge.
 # A cold iOS accessibility swipe can exceed 20s; allow subsequent swipes to run.
