@@ -84,6 +84,16 @@ const message = (error: unknown) => {
   return '目前無法完成，請稍後重試。';
 };
 
+function CatalogDateNote({ date }: { date?: string }) {
+  return (
+    <span>
+      {date
+        ? `來源記錄日期 ${date}；各地點查核時間可能不同，非即時資料。`
+        : '來源記錄日期不明；各地點查核時間可能不同，資料非即時。'}
+    </span>
+  );
+}
+
 const AUTO_STATUS_INTERVAL_MS = 5_000;
 const AUTO_STATUS_MAX_CHECKS = 12;
 function subscribeVisibility(callback: () => void) {
@@ -563,8 +573,8 @@ function Task({ port }: { port: PublicTaskPort }) {
               ID。系統不會自動附加帳號、課表或定位；請勿在問題中輸入個資。
             </p>
             <p>
-              模型：{preview.model}；公開地點來源：{preview.sourceLabel}，資料日期{' '}
-              {preview.sourceDate}，共 {preview.placeCount} 筆。
+              模型：{preview.model}；公開地點來源：{preview.sourceLabel}，共 {preview.placeCount}{' '}
+              筆。 <CatalogDateNote date={preview.sourceDate} />
             </p>
             <p>問題：{query}</p>
             <button className="btn" disabled={busy} onClick={() => void run('execute')}>
@@ -582,7 +592,7 @@ function Task({ port }: { port: PublicTaskPort }) {
               只使用所選校園、起終點及公開地點；不讀取課表、定位或校務帳號，也不傳送給模型供應商。
             </p>
             <p>
-              目錄日期：{preview.receipt?.sourceDate}。導航會交由 Google
+              <CatalogDateNote date={preview.receipt?.sourceDate} /> 導航會交由 Google
               地圖開啟，不代表道路或通行狀態已即時確認。
             </p>
             <button className="btn" disabled={busy} onClick={() => void run('execute')}>
@@ -597,8 +607,8 @@ function Task({ port }: { port: PublicTaskPort }) {
             {plan.fromName} → {plan.toName}
           </p>
           <p>
-            公開來源：{preview?.sourceLabel}，資料日期 {preview?.sourceDate}
-            。請確認地點；不代表道路或通行狀態已即時確認。
+            公開來源：{preview?.sourceLabel}。<CatalogDateNote date={preview?.sourceDate} />
+            請確認地點；不代表道路或通行狀態已即時確認。
           </p>
           <button className="btn" disabled={busy} onClick={() => void confirmRoute()}>
             確認地點並建立步行路線
@@ -612,7 +622,7 @@ function Task({ port }: { port: PublicTaskPort }) {
             {receipt.from.name} → {receipt.to.name}
           </p>
           <p>
-            {receipt.sourceLabel} · 目錄日期 {receipt.sourceDate}
+            {receipt.sourceLabel} · <CatalogDateNote date={receipt.sourceDate} />
           </p>
           <div className={styles.actions}>
             <a className="btn" href={receipt.url} target="_blank" rel="noopener noreferrer">

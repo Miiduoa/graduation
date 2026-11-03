@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import {
+  PROVIDENCE_CAMPUS_PLACES,
+  PROVIDENCE_CAMPUS_SOURCE,
+} from '@campus/shared/src/providenceCampus';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -218,4 +222,41 @@ it('wires signed session through BFF, real task service and ledger to a verified
   expect(ack.status).toBe('acknowledged');
   expect(executions).toBe(1);
   expect(server).toHaveBeenCalledTimes(6);
+});
+
+it('keeps the real public collection date and later-added place through the signed-session BFF', async () => {
+  const original = structuredClone(catalog);
+  const places = PROVIDENCE_CAMPUS_PLACES.filter(
+    (place) => place.verification === 'cross-checked',
+  ).map(({ id, name, lat, lng, sourceUrl }) => ({ id, name, lat, lng, sourceUrl }));
+  const laterPlace = places.find((place) => place.id === 'pu-xijia');
+  expect(laterPlace?.sourceUrl).toBe('https://www.openstreetmap.org/relation/9246899');
+  expect(PROVIDENCE_CAMPUS_SOURCE.retrievedAt).toBe('2026-10-19');
+  expect(PROVIDENCE_CAMPUS_SOURCE.facilitiesRetrievedAt).toBe('2026-10-23');
+  Object.assign(catalog, {
+    updatedAt: PROVIDENCE_CAMPUS_SOURCE.retrievedAt,
+    label: PROVIDENCE_CAMPUS_SOURCE.mapDataLabel,
+    places,
+  });
+  try {
+    const server = apiServer();
+    vi.stubGlobal('fetch', server);
+    const response = await handleNuni(
+      webRequest('preview', {
+        schoolId: 'pu',
+        query: '從主顧樓到希嘉學苑',
+        requestId: 'wire_xijia_01',
+      }),
+      ['public-agent', 'preview'],
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.receipt.sourceDate).toBe(PROVIDENCE_CAMPUS_SOURCE.retrievedAt);
+    expect(result.receipt.to.id).toBe('pu-xijia');
+    expect(result.receipt.to.sourceUrl).toBe(laterPlace!.sourceUrl);
+    expect(result.request.data.consent.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(result)).not.toContain(account.sessionHandle);
+  } finally {
+    Object.assign(catalog, original);
+  }
 });

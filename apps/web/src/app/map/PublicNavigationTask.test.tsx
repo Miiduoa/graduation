@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  PROVIDENCE_CAMPUS_PLACES,
+  PROVIDENCE_CAMPUS_SOURCE,
+} from '@campus/shared/src/providenceCampus';
 import { PublicNavigationTask, type PublicTaskPort } from './PublicNavigationTask';
 const id = 'pago_00000000-0000-4000-8000-000000000001';
 const receipt = {
@@ -36,6 +40,57 @@ async function prepare() {
   await screen.findByRole('button', { name: '確認並建立路線' });
 }
 describe('durable public navigation gate', () => {
+  it('describes the source date honestly for a later-added campus place', async () => {
+    const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-xijia');
+    expect(place?.verification).toBe('cross-checked');
+    expect(place?.sourceUrl).toBe('https://www.openstreetmap.org/relation/9246899');
+    expect(PROVIDENCE_CAMPUS_SOURCE.retrievedAt).toBe('2026-10-19');
+    expect(PROVIDENCE_CAMPUS_SOURCE.facilitiesRetrievedAt).toBe('2026-10-23');
+    const sample = {
+      ...receipt,
+      to: { id: place!.id, name: place!.name, sourceUrl: place!.sourceUrl },
+      sourceDate: PROVIDENCE_CAMPUS_SOURCE.retrievedAt,
+    };
+    const call = vi.fn<PublicTaskPort['call']>(async (action) =>
+      action === 'status'
+        ? null
+        : action === 'preview'
+          ? { ...preview, receipt: sample }
+          : action === 'confirm'
+            ? { confirmationId: 'id' }
+            : { ...complete, result: { receipt: sample } },
+    );
+    render(<PublicNavigationTask port={make(call)} />);
+    fireEvent.change(await screen.findByLabelText('起點與終點'), {
+      target: { value: '從甲樓到希嘉學苑' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '檢視路線' }));
+    await screen.findByRole('button', { name: '確認並建立路線' });
+    expect(screen.getByText(/來源記錄日期\s*2026-10-19/).textContent).toMatch(
+      /各地點查核時間可能不同/,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '確認並建立路線' }));
+    await screen.findByText('路線已建立');
+    expect(screen.getByText(/來源記錄日期\s*2026-10-19/).textContent).toMatch(/非即時/);
+    expect(screen.getByRole('link', { name: '終點來源' }).getAttribute('href')).toBe(
+      place!.sourceUrl,
+    );
+  });
+  it('uses the supplied source record date for another campus without assuming a collection start', async () => {
+    const sample = { ...receipt, sourceDate: '2026-07-11', sourceLabel: '另一校合成來源' };
+    const call = vi.fn<PublicTaskPort['call']>(async (action) =>
+      action === 'status' ? null : { ...preview, receipt: sample },
+    );
+    render(
+      <PublicNavigationTask
+        port={{ ...make(call), schoolId: 'test-campus', schoolName: '測試校園' }}
+      />,
+    );
+    await prepare();
+    const note = screen.getByText(/來源記錄日期\s*2026-07-11/);
+    expect(note.textContent).toMatch(/各地點查核時間可能不同/);
+    expect(note.textContent).toMatch(/非即時/);
+  });
   it('checks status before input, executes only after confirmation, and explicitly closes the receipt', async () => {
     const call = normal();
     render(<PublicNavigationTask port={make(call)} />);

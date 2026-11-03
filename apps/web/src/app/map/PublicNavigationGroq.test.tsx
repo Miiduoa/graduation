@@ -1,5 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+import {
+  PROVIDENCE_CAMPUS_PLACES,
+  PROVIDENCE_CAMPUS_SOURCE,
+} from '@campus/shared/src/providenceCampus';
 import { PublicNavigationTask, type PublicTaskPort } from './PublicNavigationTask';
 const op = 'pago_11111111-1111-1111-1111-111111111111';
 const disclosure = {
@@ -32,6 +36,39 @@ async function disclose() {
   fireEvent.click(screen.getByRole('button', { name: '檢視傳送內容' }));
   await screen.findByRole('button', { name: '同意傳送並取得建議' });
 }
+it('explains the source record date for a later-added campus place before and after approval', async () => {
+  const place = PROVIDENCE_CAMPUS_PLACES.find((item) => item.id === 'pu-xijia');
+  expect(place?.verification).toBe('cross-checked');
+  const samplePlan = { ...plan, toId: place!.id, toName: place!.name };
+  const sampleReceipt = {
+    ...receipt,
+    to: { id: place!.id, name: place!.name, sourceUrl: place!.sourceUrl },
+    sourceDate: PROVIDENCE_CAMPUS_SOURCE.retrievedAt,
+  };
+  const call = vi.fn(async (action: string) => {
+    if (action === 'status') return null;
+    if (action === 'prepareGroq')
+      return { ...disclosure, sourceDate: PROVIDENCE_CAMPUS_SOURCE.retrievedAt };
+    if (action === 'confirm') return { confirmationId: 'c' };
+    if (action === 'execute') return { ...done, result: { receipt: samplePlan } };
+    if (action === 'route') return { operationId: op, receipt: sampleReceipt };
+    throw new Error('unexpected');
+  });
+  render(<PublicNavigationTask port={port(call)} />);
+  await disclose();
+  expect(screen.getByText(/來源記錄日期\s*2026-10-19/).textContent).toMatch(
+    /各地點查核時間可能不同/,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '同意傳送並取得建議' }));
+  await screen.findByRole('heading', { name: '請確認建議的地點' });
+  expect(screen.getByText(/來源記錄日期\s*2026-10-19/).textContent).toMatch(/非即時/);
+  fireEvent.click(screen.getByRole('button', { name: '確認地點並建立步行路線' }));
+  await screen.findByRole('link', { name: '終點來源' });
+  expect(screen.getByText(/來源記錄日期\s*2026-10-19/).textContent).toMatch(/非即時/);
+  expect(screen.getByRole('link', { name: '終點來源' }).getAttribute('href')).toBe(
+    place!.sourceUrl,
+  );
+});
 it('requires explicit disclosure consent before model execution and a second consent before route', async () => {
   const call = vi.fn(async (action: string) => {
     if (action === 'status') return null;
