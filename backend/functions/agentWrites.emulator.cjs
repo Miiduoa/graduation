@@ -225,7 +225,12 @@ test('an Agent return with a whitespace-only saved book title confirms its recei
   assert.equal((await bookRef.get()).data().available, 0);
 
   const input = { loanId: loan.loanId };
-  const action = await proposal({ actionProposals: [{ toolName: 'returnBook', input }] });
+  // 還書測例只開歸還權限；其餘維持預設關閉（與 main 請假權限 seed 模式一致）。
+  await db.doc('users/alice/settings/assistantPermissions').set({ returnBook: true });
+  const action = await proposal(
+    { actionProposals: [{ toolName: 'returnBook', input }] },
+    { seedLeavePermission: false },
+  );
   action.data.toolName = 'returnBook';
   action.data.input = input;
   const receipt = await executeAgentWrite.run(action);
