@@ -80,7 +80,16 @@ const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 
 describe('single-attempt candidate platform transport', () => {
-  it.each(['preview', 'confirm', 'execute', 'read', 'status', 'ack'] as PublicAgentAction[])(
+  it.each([
+    'preview',
+    'prepareGroq',
+    'confirm',
+    'execute',
+    'route',
+    'read',
+    'status',
+    'ack',
+  ] as PublicAgentAction[])(
     'uses only the fixed %s endpoint with server session',
     async (action) => {
       fetcher.mockResolvedValue(json({ ok: true }));

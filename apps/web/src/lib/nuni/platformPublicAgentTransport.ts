@@ -5,8 +5,10 @@ import type { PublicAgentAction, PublicAgentTransport } from './platformPublicAg
 // Candidate contract shared with the unregistered Fastify adapter; not a registered route.
 const PATHS: Record<PublicAgentAction, string> = {
   preview: '/v1/auth/platform/public-agent/preview',
+  prepareGroq: '/v1/auth/platform/public-agent/prepareGroq',
   confirm: '/v1/auth/platform/public-agent/confirm',
   execute: '/v1/auth/platform/public-agent/execute',
+  route: '/v1/auth/platform/public-agent/route',
   read: '/v1/auth/platform/public-agent/read',
   status: '/v1/auth/platform/public-agent/status',
   ack: '/v1/auth/platform/public-agent/ack',

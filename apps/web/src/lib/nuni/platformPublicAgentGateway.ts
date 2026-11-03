@@ -9,7 +9,15 @@ import {
   type PlatformSession,
 } from './server';
 
-export type PublicAgentAction = 'preview' | 'confirm' | 'execute' | 'read' | 'status' | 'ack';
+export type PublicAgentAction =
+  | 'preview'
+  | 'prepareGroq'
+  | 'confirm'
+  | 'execute'
+  | 'route'
+  | 'read'
+  | 'status'
+  | 'ack';
 export type PublicAgentTransport = (input: {
   action: PublicAgentAction;
   session: PlatformSession;
@@ -41,7 +49,18 @@ export function createPlatformPublicAgentGateway(options: {
   return async (request: NextRequest, action: string) => {
     try {
       if (options.enabled !== true) throw new NuniError(404, 'NOT_FOUND');
-      if (!['preview', 'confirm', 'execute', 'read', 'status', 'ack'].includes(action))
+      if (
+        ![
+          'preview',
+          'prepareGroq',
+          'confirm',
+          'execute',
+          'route',
+          'read',
+          'status',
+          'ack',
+        ].includes(action)
+      )
         throw new NuniError(404, 'NOT_FOUND');
       if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
       if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
@@ -57,23 +76,28 @@ export function createPlatformPublicAgentGateway(options: {
       }
       // Explicit boundaries prevent browser-provided identity or endpoint options.
       const names =
-        action === 'preview'
+        action === 'preview' || action === 'prepareGroq'
           ? ['schoolId', 'query', 'requestId']
           : action === 'confirm'
             ? ['approved', 'request']
             : action === 'execute'
               ? ['confirmationId', 'request']
-              : action === 'status'
-                ? ['task', 'schoolId']
-                : action === 'ack'
-                  ? ['task', 'schoolId', 'operationId', 'approved']
-                  : ['task', 'data'];
+              : action === 'route'
+                ? ['approved', 'operationId', 'request', 'fromId', 'toId']
+                : action === 'status'
+                  ? ['task', 'schoolId']
+                  : action === 'ack'
+                    ? ['task', 'schoolId', 'operationId', 'approved']
+                    : ['task', 'data'];
       if (
         Object.keys(body).length !== names.length ||
         Object.keys(body).some((key) => !names.includes(key))
       )
         throw new NuniError(422, 'INVALID_INPUT');
-      if ((action === 'confirm' || action === 'ack') && body.approved !== true)
+      if (
+        (action === 'confirm' || action === 'ack' || action === 'route') &&
+        body.approved !== true
+      )
         throw new NuniError(409, 'PUBLIC_AGENT_CONFIRMATION_REQUIRED');
       const abort = new AbortController();
       let reject!: (error: NuniError) => void;

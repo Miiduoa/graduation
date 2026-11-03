@@ -60,7 +60,7 @@ it('clears old account draft and ignores a late preview on platform account swit
   const fetcher = vi.fn(async (url: string) => {
     if (url.endsWith('/availability')) return Response.json({ enabled: true });
     if (url.endsWith('/status')) return Response.json(null);
-    if (url.endsWith('/preview'))
+    if (url.endsWith('/prepareGroq'))
       return await new Promise<Response>((r) => {
         resolve = r;
       });
@@ -70,7 +70,7 @@ it('clears old account draft and ignores a late preview on platform account swit
   const view = render(<View />);
   const input = await screen.findByLabelText('起點與終點');
   fireEvent.change(input, { target: { value: '從甲樓到乙館' } });
-  fireEvent.click(screen.getByRole('button', { name: '檢視路線' }));
+  fireEvent.click(screen.getByRole('button', { name: '檢視傳送內容' }));
   state.session = { platformAccountId: 'pa_b', context: 'context-b' };
   view.rerender(<View />);
   await waitFor(() =>

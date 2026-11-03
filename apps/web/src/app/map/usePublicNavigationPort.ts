@@ -5,7 +5,16 @@ import { useOptionalNuniSession } from '@/features/nuni/Session';
 import type { PublicTaskPort } from './PublicNavigationTask';
 
 type Availability = 'loading' | 'enabled' | 'disabled';
-const ACTIONS = new Set(['preview', 'confirm', 'execute', 'read', 'status', 'ack']);
+const ACTIONS = new Set([
+  'preview',
+  'prepareGroq',
+  'confirm',
+  'execute',
+  'route',
+  'read',
+  'status',
+  'ack',
+]);
 
 /** BFF is disabled by default; the browser never receives a platform session handle. */
 export function usePublicNavigationPort(schoolId: string | null, schoolName: string) {
@@ -39,6 +48,7 @@ export function usePublicNavigationPort(schoolId: string | null, schoolName: str
     if (availability !== 'enabled' || !context || !account || !schoolId) return undefined;
     return {
       scope: `${account}:${context}`,
+      mode: 'groq',
       schoolId,
       schoolName,
       async call(action, body, signal) {

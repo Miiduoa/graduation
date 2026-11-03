@@ -176,4 +176,21 @@ describe('unregistered platform public Agent gateway', () => {
     expect(await response.json()).toEqual({ error: 'PUBLIC_AGENT_OPEN_OPERATION' });
     expect(transport).toHaveBeenCalledTimes(1);
   });
+  it('requires the second route approval and forwards only the bound route shape', async () => {
+    const handle = createPlatformPublicAgentGateway({ enabled: true, transport, project });
+    const body = {
+      approved: false,
+      operationId: 'pago_synthetic',
+      request: {},
+      fromId: 'a',
+      toId: 'b',
+    };
+    expect((await handle(request({ body }), 'route')).status).toBe(409);
+    expect(transport).not.toHaveBeenCalled();
+    transport.mockResolvedValue({ accepted: true });
+    expect((await handle(request({ body: { ...body, approved: true } }), 'route')).status).toBe(
+      200,
+    );
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
 });

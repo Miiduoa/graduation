@@ -44,10 +44,20 @@ function taskRequest(value: unknown) {
   const schoolId = match(d.schoolId, /^[A-Za-z0-9_-]{2,40}$/u, 40),
     query = str(d.query, 240);
   const requestId = match(d.requestId, /^[A-Za-z0-9_-]{8,100}$/u, 100);
-  const c = row(d.consent, ['version', 'provider', 'schoolId', 'query', 'fingerprint']);
+  const provider =
+    d.consent && typeof d.consent === 'object' && !Array.isArray(d.consent)
+      ? (d.consent as Row).provider
+      : null;
+  const c = row(
+    d.consent,
+    provider === 'groq'
+      ? ['version', 'provider', 'model', 'schoolId', 'query', 'fingerprint']
+      : ['version', 'provider', 'schoolId', 'query', 'fingerprint'],
+  );
   if (
     c.version !== 1 ||
-    c.provider !== 'deterministic' ||
+    (c.provider !== 'deterministic' && c.provider !== 'groq') ||
+    (c.provider === 'groq' && c.model !== 'openai/gpt-oss-120b') ||
     c.schoolId !== schoolId ||
     c.query !== query
   )
@@ -61,7 +71,14 @@ function taskRequest(value: unknown) {
       schoolId,
       query,
       requestId,
-      consent: { version: 1, provider: 'deterministic', schoolId, query, fingerprint },
+      consent: {
+        version: 1,
+        provider: c.provider,
+        ...(c.provider === 'groq' ? { model: 'openai/gpt-oss-120b' } : {}),
+        schoolId,
+        query,
+        fingerprint,
+      },
     },
   };
 }
@@ -92,12 +109,19 @@ function place(value: unknown) {
     return fail();
   return { id, name, lat: p.lat, lng: p.lng, sourceUrl };
 }
-function receipt(value: unknown, query: string) {
+function receipt(value: unknown, query: string, selected?: { fromId: unknown; toId: unknown }) {
   const r = row(value, ['kind', 'from', 'to', 'url', 'sourceDate', 'sourceLabel', 'mode']);
-  if (r.kind !== 'walking-route' || r.mode !== 'deterministic') return fail();
+  if (r.kind !== 'walking-route' || (r.mode !== 'deterministic' && r.mode !== 'groq'))
+    return fail();
   const from = place(r.from),
     to = place(r.to);
-  if (from.id === to.id || query !== `從${from.name}到${to.name}`) return fail();
+  if (
+    from.id === to.id ||
+    (r.mode === 'deterministic'
+      ? query !== `從${from.name}到${to.name}`
+      : !selected || from.id !== selected.fromId || to.id !== selected.toId)
+  )
+    return fail();
   const sourceDate = match(r.sourceDate, /^\d{4}-\d{2}-\d{2}$/u, 10),
     sourceLabel = str(r.sourceLabel, 120);
   if (
@@ -118,7 +142,21 @@ function receipt(value: unknown, query: string) {
     url: expected.href,
     sourceDate,
     sourceLabel,
-    mode: 'deterministic',
+    mode: r.mode,
+  };
+}
+function plan(value: unknown) {
+  const p = row(value, ['kind', 'fromId', 'toId', 'fromName', 'toName']);
+  if (p.kind !== 'navigation-plan') return fail();
+  const fromId = match(p.fromId, /^[A-Za-z0-9_-]{1,120}$/u),
+    toId = match(p.toId, /^[A-Za-z0-9_-]{1,120}$/u);
+  if (fromId === toId) return fail();
+  return {
+    kind: 'navigation-plan',
+    fromId,
+    toId,
+    fromName: str(p.fromName, 100),
+    toName: str(p.toName, 100),
   };
 }
 function operation(value: unknown, input: unknown) {
@@ -133,7 +171,15 @@ function operation(value: unknown, input: unknown) {
     const r = row(base, ['status', 'operationId', 'expiresAt', 'failureCode']);
     if (
       typeof r.failureCode !== 'string' ||
-      !['SOURCE_CHANGED', 'INVALID_RESULT', 'EXECUTION_FAILED'].includes(r.failureCode)
+      ![
+        'SOURCE_CHANGED',
+        'NOT_DISPATCHED',
+        'INVALID_RESULT',
+        'EXECUTION_FAILED',
+        'FREE_QUOTA_UNAVAILABLE',
+        'DESTINATION_UNCLEAR',
+        'INVALID_PROVIDER_RESPONSE',
+      ].includes(r.failureCode)
     )
       return fail();
     return {
@@ -162,7 +208,10 @@ function operation(value: unknown, input: unknown) {
         schoolId: expected.data.schoolId,
         sourceFingerprint: expected.data.consent.fingerprint,
         checkedAt: number(result.checkedAt),
-        receipt: receipt(result.receipt, expected.data.query),
+        receipt:
+          expected.data.consent.provider === 'groq'
+            ? plan(result.receipt)
+            : receipt(result.receipt, expected.data.query),
       },
     };
   }
@@ -193,6 +242,63 @@ export function projectPlatformPublicAgent(
       dataScope: ['所選校園', '起點與終點', '公開地點目錄'],
       execution: 'deterministic',
     };
+  }
+  if (action === 'prepareGroq') {
+    const r = row(value, [
+      'request',
+      'provider',
+      'model',
+      'dataScope',
+      'sourceDate',
+      'sourceLabel',
+      'placeCount',
+    ]);
+    const request = taskRequest(r.request);
+    if (
+      request.data.consent.provider !== 'groq' ||
+      request.data.schoolId !== input.schoolId ||
+      request.data.query !== input.query ||
+      request.data.requestId !== input.requestId ||
+      r.provider !== 'groq' ||
+      r.model !== 'openai/gpt-oss-120b' ||
+      !Array.isArray(r.dataScope) ||
+      JSON.stringify(r.dataScope) !== JSON.stringify(['校園', '問題', '公開地點名稱與 ID']) ||
+      !Number.isSafeInteger(r.placeCount) ||
+      (r.placeCount as number) < 0 ||
+      (r.placeCount as number) > 200
+    )
+      return fail();
+    const sourceDate = match(r.sourceDate, /^\d{4}-\d{2}-\d{2}$/u, 10);
+    if (
+      !Number.isFinite(Date.parse(sourceDate)) ||
+      new Date(`${sourceDate}T00:00:00Z`).toISOString().slice(0, 10) !== sourceDate
+    )
+      return fail();
+    return {
+      request,
+      provider: 'groq',
+      model: 'openai/gpt-oss-120b',
+      dataScope: ['校園', '問題', '公開地點名稱與 ID'],
+      sourceDate,
+      sourceLabel: str(r.sourceLabel, 120),
+      placeCount: r.placeCount,
+    };
+  }
+  if (action === 'route') {
+    const r = row(value, ['operationId', 'receipt']);
+    const request = taskRequest(input.request);
+    if (
+      request.data.consent.provider !== 'groq' ||
+      r.operationId !== input.operationId ||
+      input.approved !== true
+    )
+      return fail();
+    const verified = receipt(r.receipt, request.data.query, {
+      fromId: input.fromId,
+      toId: input.toId,
+    });
+    if (verified.mode !== 'groq') return fail();
+    return { operationId: operationId(r.operationId), receipt: verified };
   }
   if (action === 'confirm') {
     const r = row(value, ['confirmationId', 'expiresAt']);
