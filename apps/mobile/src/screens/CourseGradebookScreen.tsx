@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
 import type { CourseGradebookData, CourseSpace } from '../data';
@@ -14,6 +14,11 @@ import { useDataSource } from '../hooks/useDataSource';
 import { listCourseSpaces, getCourseGradebook } from '../data/courseSpaceSource';
 import { canManageCourse, formatDateTime } from '../services/courseWorkspace';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import {
+  ASSIGNMENT_FOCUS_MISSING,
+  parseAssignmentFocusId,
+  resolveAssignmentFocus,
+} from './assignmentDeepLink';
 
 export function CourseGradebookScreen(props: any) {
   const nav = props?.navigation;
@@ -21,11 +26,14 @@ export function CourseGradebookScreen(props: any) {
     | string
     | undefined;
   const routeGroupName = props?.route?.params?.groupName as string | undefined;
+  const focusAssignmentId = parseAssignmentFocusId(props?.route?.params?.assignmentId);
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
   const workspaceSource = props?.route?.params?.sourceSystem === 'workspace';
   const schoolId = auth.profile?.schoolId ?? school.id;
+  const scrollRef = useRef<ScrollView>(null);
+  const didScrollFocus = useRef<string | null>(null);
 
   const {
     items: memberships,
@@ -62,6 +70,94 @@ export function CourseGradebookScreen(props: any) {
     if (isTeacher) return gradebook.rows;
     return gradebook.rows.filter((row) => row.uid === auth.user?.uid);
   }, [auth.user?.uid, gradebook, isTeacher]);
+
+  const assignmentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const assignment of gradebook?.assignments ?? []) ids.add(assignment.id);
+    for (const row of visibleRows) {
+      for (const entry of row.assignmentBreakdown) ids.add(entry.assignmentId);
+    }
+    return [...ids];
+  }, [gradebook?.assignments, visibleRows]);
+
+  const inGradebook = Boolean(focusAssignmentId && assignmentIds.includes(focusAssignmentId));
+  const canProbeAssignment = typeof ds.getAssignment === 'function';
+  const shouldProbeAssignment = Boolean(
+    focusAssignmentId &&
+      routeGroupId &&
+      gradebook &&
+      !gradebookLoading &&
+      !inGradebook,
+  );
+
+  const {
+    items: probedAssignments,
+    loading: probeLoading,
+  } = useAsyncList<{ id: string }>(async () => {
+    if (!shouldProbeAssignment || !focusAssignmentId || !routeGroupId || !canProbeAssignment) {
+      return [];
+    }
+    const row = await ds.getAssignment(focusAssignmentId, routeGroupId);
+    return row?.id ? [{ id: String(row.id) }] : [];
+  }, [
+    shouldProbeAssignment,
+    focusAssignmentId,
+    routeGroupId,
+    canProbeAssignment,
+    ds,
+    'assignment-focus-probe',
+  ]);
+
+  const focusIds = useMemo(() => {
+    const ids = new Set(assignmentIds);
+    for (const row of probedAssignments) ids.add(row.id);
+    return [...ids];
+  }, [assignmentIds, probedAssignments]);
+
+  const focusReady =
+    !focusAssignmentId ||
+    (!gradebookLoading &&
+      !!gradebook &&
+      (focusIds.includes(focusAssignmentId) ||
+        (canProbeAssignment
+          ? shouldProbeAssignment && !probeLoading
+          : // 無作業清單探查時：成績簿已有其他項目才可判定找不到；空清單不誤報。
+            assignmentIds.length > 0)));
+
+  const assignmentFocus = resolveAssignmentFocus(focusIds, focusAssignmentId, {
+    ready: focusReady,
+  });
+
+  useEffect(() => {
+    didScrollFocus.current = null;
+  }, [focusAssignmentId, routeGroupId]);
+
+  const scrollFocusedAssignmentIntoView = (target: View | null) => {
+    if (!target || !focusAssignmentId || !assignmentFocus.found) return;
+    if (didScrollFocus.current === focusAssignmentId) return;
+    const scroll = scrollRef.current as
+      | (ScrollView & { getInnerViewNode?: () => unknown })
+      | null;
+    if (!scroll) return;
+    const inner = typeof scroll.getInnerViewNode === 'function' ? scroll.getInnerViewNode() : scroll;
+    // measureLayout 在部分測試環境可能不存在，失敗時略過捲動即可。
+    const measurable = target as View & {
+      measureLayout?: (
+        relativeTo: unknown,
+        onSuccess: (x: number, y: number) => void,
+        onFail: () => void,
+      ) => void;
+    };
+    if (typeof measurable.measureLayout !== 'function') return;
+    measurable.measureLayout(
+      inner,
+      (_x, y) => {
+        didScrollFocus.current = focusAssignmentId;
+        scroll.scrollTo({ y: Math.max(0, y - 24), animated: true });
+      },
+      () => {},
+    );
+  };
 
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
@@ -154,6 +250,7 @@ export function CourseGradebookScreen(props: any) {
   return (
     <Screen noPadding>
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{
           gap: 14,
@@ -200,6 +297,14 @@ export function CourseGradebookScreen(props: any) {
           </Card>
         ) : null}
 
+        {assignmentFocus.missing ? (
+          <Card title="通知作業">
+            <Text accessibilityRole="text" style={{ color: theme.colors.muted, lineHeight: 22 }}>
+              {ASSIGNMENT_FOCUS_MISSING}
+            </Text>
+          </Card>
+        ) : null}
+
         <Card
           title="評分項目"
           subtitle={`最後發布：${formatDateTime(gradebook.finalScoresPublishedAt, '尚未發布')}`}
@@ -213,14 +318,28 @@ export function CourseGradebookScreen(props: any) {
               gradebook.assignments.map((assignment) => (
                 <View
                   key={assignment.id}
+                  ref={
+                    assignment.id === focusAssignmentId
+                      ? (node) => scrollFocusedAssignmentIntoView(node)
+                      : undefined
+                  }
                   style={{
                     padding: 12,
                     borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface2,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
+                    borderWidth: assignment.id === focusAssignmentId ? 2 : 1,
+                    borderColor:
+                      assignment.id === focusAssignmentId ? theme.colors.accent : theme.colors.border,
                     gap: 6,
                   }}
+                  accessibilityState={
+                    assignment.id === focusAssignmentId ? { selected: true } : undefined
+                  }
+                  accessibilityLabel={
+                    assignment.id === focusAssignmentId
+                      ? `${assignment.title}（通知定位）`
+                      : undefined
+                  }
                 >
                   <View
                     style={{
@@ -287,14 +406,30 @@ export function CourseGradebookScreen(props: any) {
               {row.assignmentBreakdown.map((entry) => (
                 <View
                   key={`${row.uid}-${entry.assignmentId}`}
+                  ref={
+                    entry.assignmentId === focusAssignmentId
+                      ? (node) => scrollFocusedAssignmentIntoView(node)
+                      : undefined
+                  }
                   style={{
                     padding: 12,
                     borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.surface2,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
+                    borderWidth: entry.assignmentId === focusAssignmentId ? 2 : 1,
+                    borderColor:
+                      entry.assignmentId === focusAssignmentId
+                        ? theme.colors.accent
+                        : theme.colors.border,
                     gap: 6,
                   }}
+                  accessibilityState={
+                    entry.assignmentId === focusAssignmentId ? { selected: true } : undefined
+                  }
+                  accessibilityLabel={
+                    entry.assignmentId === focusAssignmentId
+                      ? `${entry.title}（通知定位）`
+                      : undefined
+                  }
                 >
                   <View
                     style={{

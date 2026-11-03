@@ -779,8 +779,18 @@
   color: var(--soft);
   font-size: 12px;
 }
-.footer > span:first-child {
+.footerBrand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
+}
+
+.footerBrand img {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
 }
 .footer nav {
   display: flex;

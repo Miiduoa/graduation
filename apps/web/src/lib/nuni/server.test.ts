@@ -130,7 +130,7 @@ describe('Nuni additive classroom configuration', () => {
     expect(nuniEnabled()).toBe(expected);
   });
 
-  it('serves the Nuni API with the additive flag while Campus One uses Firebase', async () => {
+  it('serves the Nuni API with the additive flag while nuni uses Firebase', async () => {
     vi.stubEnv('CAMPUS_BACKEND', 'firebase');
     const value = session();
     fetcher.mockResolvedValue(response({ workspaces: [workspace] }));

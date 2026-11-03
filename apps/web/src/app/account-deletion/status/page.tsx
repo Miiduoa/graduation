@@ -3,7 +3,7 @@ import { DeletionStatus } from './DeletionStatusView';
 import { PUBLIC_PAGE_INTRO } from './deletionStatus';
 
 export const metadata: Metadata = {
-  title: '刪除進度 | Campus One',
+  title: '刪除進度 | nuni',
   description: PUBLIC_PAGE_INTRO,
 };
 

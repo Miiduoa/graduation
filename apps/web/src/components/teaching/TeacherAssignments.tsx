@@ -1,6 +1,8 @@
 'use client';
 
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   gradeQueueLabel,
   matchesGradeQueueFilter,
@@ -24,6 +26,12 @@ import {
   type AssignmentReview,
 } from '@/lib/teacherAssignments';
 import type { TeacherScope } from '@/lib/teacherCourse';
+import {
+  ASSIGNMENT_FOCUS_MISSING,
+  parseAssignmentFocusId,
+  resolveAssignmentFocus,
+  teacherSubmissionListHref,
+} from './assignmentDeepLink';
 import styles from './TeacherAssignments.module.css';
 
 const GRADE_FILTERS: GradeQueueFilter[] = ['all', 'needs_grade', 'graded'];
@@ -47,6 +55,8 @@ function message(error: unknown, fallback: string) {
 
 export function TeacherAssignments({ schoolId, courseId, assignments, refresh }: Props) {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const focusAssignmentId = parseAssignmentFocusId(searchParams.get('assignmentId'));
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueAt, setDueAt] = useState('');
@@ -57,6 +67,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
   const [saveSuccess, setSaveSuccess] = useState('');
   const assignmentIdRef = useRef<string | null>(null);
   const savingRef = useRef(false);
+  const deepLinkOpened = useRef('');
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [review, setReview] = useState<AssignmentReview | null>(null);
   const [reviewError, setReviewError] = useState('');
@@ -80,6 +91,10 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
   const [editBusy, setEditBusy] = useState(false);
   const [gradeFilter, setGradeFilter] = useState<GradeQueueFilter>('needs_grade');
   const scope: TeacherScope = { uid: user?.uid ?? '', schoolId, courseId };
+  const assignmentFocus = resolveAssignmentFocus(
+    assignments.map((row) => row.id),
+    focusAssignmentId,
+  );
   const queuedSubmissions = useMemo(() => {
     if (!review) return [];
     return sortGradeQueue(review.submissions).filter((row) =>
@@ -155,6 +170,15 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
       if (reviewGeneration.current === generation) setLoadingReview(false);
     }
   }
+
+  useEffect(() => {
+    if (!focusAssignmentId || !assignmentFocus.found) return;
+    if (deepLinkOpened.current === focusAssignmentId) return;
+    deepLinkOpened.current = focusAssignmentId;
+    void openReview(focusAssignmentId);
+    // Deep-link bootstrap only; avoid reopening when openReview identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusAssignmentId, assignmentFocus.found, assignments]);
 
   async function grade(event: FormEvent, studentUid: string) {
     event.preventDefault();
@@ -338,16 +362,30 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
       {editError ? <p role="alert" className={styles.error}>{editError}</p> : null}
       <div className={styles.reviews}>
         <h3>繳交與評分</h3>
+        {assignmentFocus.missing ? (
+          <p role="status" className={styles.note}>{ASSIGNMENT_FOCUS_MISSING}</p>
+        ) : null}
         {assignments.length === 0 ? (
           <p className={styles.note}>尚無已發布的作業。</p>
         ) : assignments.map((assignment) => (
-          <div key={assignment.id} className={styles.reviewItem}>
+          <div
+            key={assignment.id}
+            className={styles.reviewItem}
+            data-assignment-focused={assignment.id === focusAssignmentId ? 'true' : undefined}
+            id={`teacher-assignment-${assignment.id}`}
+          >
             <div className={styles.reviewHeading}>
               <span>{assignment.title}</span>
               <button type="button" className={styles.secondary} disabled={editBusy}
                 onClick={() => void openAssignmentEditor(assignment.id)}>
                 {editingAssignment === assignment.id ? '取消編輯' : '編輯作業'}
               </button>
+              <Link
+                className={styles.secondary}
+                href={teacherSubmissionListHref(courseId, assignment.id, searchParams.toString())}
+              >
+                開啟繳交列表
+              </Link>
               <button type="button" className={styles.secondary}
                 onClick={() => void openReview(assignment.id)}>
                 {reviewId === assignment.id ? '收起' : '查看繳交'}

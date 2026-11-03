@@ -1,13 +1,17 @@
 import React, { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { MESSAGING_NAV_SECTIONS } from '@campus/shared/src/academicSections';
 import { AIScreen, AIHero, AISection, AICard, AIRow, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
 import { loadFailureCopy } from '../utils/loadFailureCopy';
-import { rootNavigate, rootNavigateNested } from '../app/rootNavigation';
+import { rootNavigateNested } from '../app/rootNavigation';
+
+const NOTIFY_SECTION = MESSAGING_NAV_SECTIONS[0];
+const DM_SECTION = MESSAGING_NAV_SECTIONS[1];
 
 export default function MeAiFirstScreen() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
@@ -82,17 +86,28 @@ export default function MeAiFirstScreen() {
         </AICard>
         <AIRow title="個人資料" subtitle="修改顯示名稱、簡介與電話" onPress={go('ProfileEdit')} />
       </AISection>
-      <AISection title="課務與生活">
+      <AISection title="通知與私訊">
         <AIRow
-          title="我的課表"
-          subtitle="一週、單日、匯入與空堂"
-          onPress={() => rootNavigateNested('學習', 'PersonalTimetable')}
+          title={NOTIFY_SECTION.label}
+          subtitle="作業、系統與服務通知"
+          onPress={go(NOTIFY_SECTION.mobileScreen)}
         />
-        <AIRow title="訊息" subtitle="私訊與課程通知" onPress={() => rootNavigate('訊息')} />
+        <AIRow
+          title={DM_SECTION.label}
+          subtitle="與同學、老師的對話"
+          onPress={() => rootNavigateNested(DM_SECTION.mobileTab, DM_SECTION.mobileScreen)}
+        />
         <AIRow
           title="找人"
           subtitle="加好友後才能看對方課表"
           onPress={() => rootNavigateNested('訊息', 'FriendSearch')}
+        />
+      </AISection>
+      <AISection title="課務與生活">
+        <AIRow
+          title="課表"
+          subtitle="一週、單日、匯入與空堂"
+          onPress={() => rootNavigateNested('學習', 'PersonalTimetable')}
         />
         <AIRow
           title="課程與成績"
@@ -101,7 +116,7 @@ export default function MeAiFirstScreen() {
         />
         {isStudent && profile ? (
           <AIRow
-            title="學分試算"
+            title="學分規劃"
             subtitle="依你的修課資料檢查畢業條件"
             onPress={go('CreditAuditStack')}
           />
@@ -109,8 +124,7 @@ export default function MeAiFirstScreen() {
         <AIRow title="行事曆" subtitle="查看課程時間與自己的安排" onPress={go('Calendar')} />
         <AIRow title="我的群組" subtitle="查看已加入的課程與社團群組" onPress={go('Groups')} />
       </AISection>
-      <AISection title="通知與資料">
-        <AIRow title="通知中心" subtitle="查看這組帳號的作業與系統通知" onPress={go('Notifications')} />
+      <AISection title="資料與通知設定">
         <AIRow title="通知設定" onPress={go('NotificationSettings')} />
         <AIRow title="匯出我的資料" subtitle="取得帳號可匯出的資料" onPress={go('DataExport')} />
         <AIRow title="刪除帳號" subtitle="查看刪除範圍與確認步驟" onPress={go('AccountDeletion')} />

@@ -21,6 +21,32 @@
   gap: 16px;
   margin-bottom: 24px;
 }
+.plannerNotices {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 20px;
+}
+.plannerNotice {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.plannerNotice strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.plannerNotice span {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+}
 .workspaceHeading h2 {
   margin: 0;
   font-size: 20px;

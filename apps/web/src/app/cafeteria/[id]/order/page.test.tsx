@@ -65,7 +65,7 @@ it('sends the student to the shop site and does not pretend Nuni took the order'
   expect(link.getAttribute('href')).toContain('ref=nuni-pu-stall');
   expect(link.getAttribute('rel')).toBe('noopener noreferrer');
   expect(
-    screen.getByText('會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單'),
+    screen.getByText('會開啟店家自己的網站，訂單和付款由店家處理，nuni 查不到這筆訂單'),
   ).toBeTruthy();
   expect(screen.queryByRole('link', { name: /點餐|下單/ })).toBeNull();
 });

@@ -29,7 +29,7 @@ jest.mock('../state/nuniSession', () => ({
 jest.mock('../screens/NuniWorkspaceScreen', () => ({
   NuniWorkspaceScreen: () => {
     const { Text } = require('react-native');
-    return <Text testID="platform-workspace">Campus One 帳號</Text>;
+    return <Text testID="platform-workspace">nuni 帳號</Text>;
   },
 }));
 jest.mock('../screens/SSOLoginScreen', () => ({

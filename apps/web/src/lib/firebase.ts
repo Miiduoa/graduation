@@ -62,9 +62,14 @@ import {
   isPermissionDeniedError,
   normalizeNotificationPreferences,
   permissionDeniedError,
+  createDefaultAssistantWritePermissions,
+  normalizeAssistantWritePermissions,
+  serializeAssistantWritePermissions,
+  ASSISTANT_PERMISSIONS_DOC_ID,
   type PuStudentLoginResponse,
   normalizeSchoolSSOConfig,
   type NotificationPreferences,
+  type AssistantWritePermissions,
   type SchoolSSOConfig,
   type SSOCallbackResult,
   type SSOProvider,
@@ -73,6 +78,7 @@ import {
 
 export type {
   NotificationPreferences,
+  AssistantWritePermissions,
   SchoolSSOConfig,
   SSOCallbackResult,
   SSOProvider,
@@ -1032,6 +1038,45 @@ export async function saveNotificationPreferences(
     doc(firestore, 'users', userId, 'settings', 'notifications'),
     {
       ...prefs,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function fetchAssistantWritePermissions(
+  userId: string,
+): Promise<AssistantWritePermissions> {
+  if (!isFirebaseConfigured()) {
+    return createDefaultAssistantWritePermissions();
+  }
+
+  try {
+    const firestore = getDb();
+    const snap = await getDoc(
+      doc(firestore, 'users', userId, 'settings', ASSISTANT_PERMISSIONS_DOC_ID),
+    );
+    if (!snap.exists()) {
+      return createDefaultAssistantWritePermissions();
+    }
+    return normalizeAssistantWritePermissions(snap.data());
+  } catch (error) {
+    console.error('[Firebase] Failed to load assistant write permissions:', error);
+    return createDefaultAssistantWritePermissions();
+  }
+}
+
+export async function saveAssistantWritePermissions(
+  userId: string,
+  prefs: AssistantWritePermissions,
+): Promise<void> {
+  if (!isFirebaseConfigured()) return;
+
+  const firestore = getDb();
+  await setDoc(
+    doc(firestore, 'users', userId, 'settings', ASSISTANT_PERMISSIONS_DOC_ID),
+    {
+      ...serializeAssistantWritePermissions(prefs),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

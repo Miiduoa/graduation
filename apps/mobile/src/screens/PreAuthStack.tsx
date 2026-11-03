@@ -103,7 +103,7 @@ export function PreAuthStack() {
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}
-        options={{ title: 'Campus One' }}
+        options={{ title: 'nuni' }}
       />
     </Stack.Navigator>
   );

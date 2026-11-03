@@ -19,6 +19,10 @@ import {
   type CourseDirectoryFilter,
   type StudyAgendaFilter,
 } from './studyNavigation';
+import {
+  classroomQueryMatchKind,
+  filterCoursesByClassroomQuery,
+} from '@/components/timetable/timetableCourseWorkHref';
 import shared from './NuniApp.module.css';
 import styles from './StudyWorkspace.module.css';
 
@@ -57,6 +61,8 @@ export function WorkspaceList() {
   const queryFromUrl = params.get('q') ?? '';
   const filterFromUrl = params.get('courses');
   const taskFromUrl = params.get('task');
+  const fromTimetable = params.get('from') === 'timetable';
+  const courseCodeFromUrl = (params.get('code') ?? '').trim().slice(0, 40);
 
   useLayoutEffect(() => {
     active.current = true;
@@ -119,12 +125,23 @@ export function WorkspaceList() {
     .map((item) => `${item.id}:${item.memberRole}:${item.state}:${item.title}`)
     .sort()
     .join('|');
-  const normalizedQuery = courseSearchKey(query);
-  const shown = (items ?? []).filter(
-    (item) =>
-      inDirectory(item, filter) &&
-      (!normalizedQuery || courseSearchKey(item.title).includes(normalizedQuery)),
-  );
+  const inScope = (items ?? []).filter((item) => inDirectory(item, filter));
+  const shown = filterCoursesByClassroomQuery(inScope, query, {
+    fromTimetable,
+    courseCode: courseCodeFromUrl || undefined,
+  });
+  const matchKind = classroomQueryMatchKind(shown.length, Boolean(courseSearchKey(query)));
+  const clearTimetableAttribution = () => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('from') && !url.searchParams.has('code')) return;
+    url.searchParams.delete('from');
+    url.searchParams.delete('code');
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  };
   const changeFilter = (value: CourseDirectoryFilter) => {
     setFilter(value);
     replaceStudyQuery('courses', value, 'all');
@@ -132,6 +149,7 @@ export function WorkspaceList() {
   const changeQuery = (value: string) => {
     setQuery(value);
     replaceStudyQuery('q', value);
+    clearTimetableAttribution();
   };
   const changeTaskFilter = (value: StudyAgendaFilter) => {
     setTaskFilter(value);
@@ -146,7 +164,7 @@ export function WorkspaceList() {
     <div className={styles.workspace}>
       <header className={styles.pageHeading}>
         <div>
-          <p className={styles.kicker}>Campus One · 課程空間</p>
+          <p className={styles.kicker}>nuni · 課程空間</p>
           <h1>我的課程</h1>
           <p>先處理待辦，再回到每門課的教材與學習紀錄。</p>
         </div>
@@ -269,35 +287,63 @@ export function WorkspaceList() {
                 </button>
               </div>
             ) : items && !shown.length ? (
-              <div className={styles.empty} role="status">
+              <div className={styles.empty} role="status" data-testid="classroom-query-none">
                 <CampusIcon name="search" size={26} />
                 <h3>{query ? `找不到「${query}」` : '這個分類目前沒有課程'}</h3>
                 <p>
                   {query
-                    ? '換個課程關鍵字，或清除篩選再找一次。'
+                    ? fromTimetable
+                      ? '課表上的這門課尚未對應到課程空間。可查看全部課程，或用邀請碼加入課程。'
+                      : '換個課程關鍵字，或清除篩選再找一次。'
                     : filter === 'archived'
                       ? '課程封存後，原有教材和繳交紀錄會整理在這裡。'
                       : '可以切換其他分類，或使用老師提供的邀請碼加入課程。'}
                 </p>
                 {(query || filter !== 'all') && (
                   <button type="button" className={styles.textButton} onClick={resetDirectory}>
-                    查看所有進行中課程
+                    全部課程
                   </button>
                 )}
+                {query && fromTimetable ? (
+                  <button
+                    type="button"
+                    className={shared.button}
+                    onClick={() => {
+                      setAction('join');
+                      document.getElementById('course-entry')?.scrollIntoView({ block: 'nearest' });
+                    }}
+                  >
+                    加入課程
+                  </button>
+                ) : null}
               </div>
             ) : items ? (
               <>
-                <p className={styles.directoryStatus} role="status">
-                  {query
-                    ? `「${query}」找到 ${shown.length} 門課程`
-                    : `${directoryFilters.find(([value]) => value === filter)?.[1]} · ${shown.length} 門`}
+                <p
+                  className={styles.directoryStatus}
+                  role="status"
+                  data-testid={`classroom-query-status-${matchKind}`}
+                >
+                  {fromTimetable && matchKind === 'unique'
+                    ? `剛好找到「${query}」這門課`
+                    : query
+                      ? `「${query}」找到 ${shown.length} 門課程`
+                      : `${directoryFilters.find(([value]) => value === filter)?.[1]} · ${shown.length} 門`}
                 </p>
                 <ul className={styles.courseGrid}>
                   {shown.map((item) => (
                     <li key={item.id}>
                       <Link
-                        className={styles.courseCard}
+                        className={`${styles.courseCard}${fromTimetable && matchKind === 'unique' ? ` ${styles.courseCardHighlight}` : ''}`}
                         href={classroomCourseHref(item.id, context)}
+                        data-testid={
+                          fromTimetable && matchKind === 'unique'
+                            ? 'classroom-query-unique'
+                            : undefined
+                        }
+                        aria-current={
+                          fromTimetable && matchKind === 'unique' ? 'page' : undefined
+                        }
                       >
                         <span className={styles.courseIdentity}>
                           <CampusIcon
@@ -308,6 +354,7 @@ export function WorkspaceList() {
                             {item.state === 'archived'
                               ? '已封存'
                               : courseRoleLabels[item.memberRole]}
+                            {fromTimetable && matchKind === 'unique' ? ' · 課表對應' : ''}
                           </span>
                         </span>
                         <h3>{item.title}</h3>
@@ -328,6 +375,16 @@ export function WorkspaceList() {
           </section>
         </div>
         <aside className={styles.sidebar} aria-label="教材搜尋與課程操作">
+          <section className={styles.sidePanel}>
+            <div className={styles.sideTitle}>
+              <CampusIcon name="library" size={20} />
+              <h2>此裝置收藏</h2>
+            </div>
+            <p>收藏過的教材放在這裡，方便下次接著看。只保留在此瀏覽器的目前帳號。</p>
+            <Link className={`${shared.button} ${shared.secondary}`} href="/classroom/material-bookmarks">
+              查看收藏的教材
+            </Link>
+          </section>
           {items && items.length > 0 && (
             <section className={styles.sidePanel}>
               <div className={styles.sideTitle}>
@@ -415,7 +472,7 @@ export function WorkspaceList() {
             </div>
           </section>
           <p className={styles.scopeNote}>
-            這裡是你在 Campus One
+            這裡是你在 nuni
             加入的課程，與瀏覽中的學校分開管理；校方正式課程與成績仍以學校系統為準。
           </p>
         </aside>

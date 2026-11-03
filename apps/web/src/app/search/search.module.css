@@ -146,6 +146,13 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 24px;
+  align-content: start;
+}
+
+.serviceEntry {
+  display: grid;
+  min-width: 0;
+  align-content: start;
 }
 
 .service {
@@ -159,6 +166,18 @@
   transition:
     background 160ms ease,
     border-color 160ms ease;
+}
+
+.secondaryService {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  padding-inline-start: 18px;
+  background: var(--bg-soft, var(--panel));
+}
+
+.secondaryService h3 {
+  font-size: 15px;
+  font-weight: 550;
 }
 
 .service:hover {
