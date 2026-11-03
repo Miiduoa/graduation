@@ -5,7 +5,7 @@
  * 每筆最上面是取餐號碼；沒號碼寫「號碼還沒拿到，請到櫃台確認。」和「下單時間・品項」，
  * 店家取消的單寫「這張單店家取消了」，不再顯示號碼。App 關掉重開一樣從伺服器讀，不靠手機本機存的訂單。
  */
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { AIDetailScreen, AICard, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
@@ -16,6 +16,7 @@ import {
   describePickupNumber,
   formatShortOrderCode,
 } from '@campus/shared/src/ordering/pickupNumber';
+import { ORDER_FOCUS_MISSING, parseOrderFocusId, resolveOrderFocus } from './orderDeepLink';
 
 export const MY_ORDER_STATUS_LABELS: Record<string, string> = {
   pending: '等店家接單',
@@ -26,13 +27,31 @@ export const MY_ORDER_STATUS_LABELS: Record<string, string> = {
   cancelled: '訂單已取消',
 };
 
-type Props = { navigation?: { goBack?: () => void } };
+type Props = {
+  navigation?: { goBack?: () => void };
+  route?: { params?: { orderId?: string; schoolId?: string } };
+};
 
-export function MyOrderCard({ order }: { order: MyOrder }) {
+export function MyOrderCard({
+  order,
+  focused = false,
+}: {
+  order: MyOrder;
+  focused?: boolean;
+}) {
   const pickup = describePickupNumber(order);
   return (
-    <AICard title={MY_ORDER_STATUS_LABELS[order.status] ?? '訂單紀錄'} source={order.shop}>
-      <View style={{ gap: 6 }}>
+    <AICard
+      title={MY_ORDER_STATUS_LABELS[order.status] ?? '訂單紀錄'}
+      source={order.shop}
+      badge={focused ? '通知訂單' : undefined}
+      style={
+        focused
+          ? { borderWidth: 2, borderColor: aiTokens.ai }
+          : undefined
+      }
+    >
+      <View style={{ gap: 6 }} accessibilityLabel={focused ? `目前通知訂單 ${formatShortOrderCode(order.id)}` : undefined}>
         {pickup.state === 'assigned' ? (
           <Text
             accessibilityLabel={pickup.text}
@@ -64,14 +83,16 @@ export function MyOrderCard({ order }: { order: MyOrder }) {
   );
 }
 
-export default function MyOrdersScreen({ navigation }: Props) {
+export default function MyOrdersScreen({ navigation, route }: Props) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
   const { school } = useSchool();
   const userId = user?.uid ?? '';
   const schoolId = school.id;
+  const focusOrderId = parseOrderFocusId(route?.params?.orderId);
   const [orders, setOrders] = useState<MyOrder[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const orderedOnce = useRef('');
   useEffect(() => {
     setOrders(null);
     setFailed(false);
@@ -93,6 +114,21 @@ export default function MyOrdersScreen({ navigation }: Props) {
       stop();
     };
   }, [userId, schoolId]);
+
+  const focus = useMemo(
+    () => resolveOrderFocus((orders ?? []).map((order) => order.id), focusOrderId),
+    [orders, focusOrderId],
+  );
+
+  const displayOrders = useMemo(() => {
+    if (!orders || !focusOrderId || !focus.found) return orders;
+    if (orderedOnce.current === focusOrderId) return orders;
+    orderedOnce.current = focusOrderId;
+    const selected = orders.find((order) => order.id === focusOrderId);
+    if (!selected) return orders;
+    return [selected, ...orders.filter((order) => order.id !== focusOrderId)];
+  }, [orders, focusOrderId, focus.found]);
+
   return (
     <AIDetailScreen
       title="我的訂單"
@@ -113,10 +149,27 @@ export default function MyOrdersScreen({ navigation }: Props) {
         <ActivityIndicator accessibilityLabel="讀取訂單" color={aiTokens.ai} />
       ) : orders.length === 0 ? (
         <AICard title="還沒有訂單">
-          <Text style={{ color: aiTokens.muted }}>在「餐廳」點餐後，訂單和取餐號碼會出現在這裡。</Text>
+          {focusOrderId ? (
+            <Text accessibilityRole="text" style={{ color: aiTokens.muted }}>
+              {ORDER_FOCUS_MISSING}
+            </Text>
+          ) : (
+            <Text style={{ color: aiTokens.muted }}>在「餐廳」點餐後，訂單和取餐號碼會出現在這裡。</Text>
+          )}
         </AICard>
       ) : (
-        orders.map((order) => <MyOrderCard key={order.id} order={order} />)
+        <>
+          {focus.missing ? (
+            <AICard title="通知訂單">
+              <Text accessibilityRole="text" style={{ color: aiTokens.muted }}>
+                {ORDER_FOCUS_MISSING}
+              </Text>
+            </AICard>
+          ) : null}
+          {(displayOrders ?? orders).map((order) => (
+            <MyOrderCard key={order.id} order={order} focused={order.id === focusOrderId} />
+          ))}
+        </>
       )}
     </AIDetailScreen>
   );

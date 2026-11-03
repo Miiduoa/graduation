@@ -4,19 +4,22 @@ import {
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
 import type { PersonalTodayEntry } from '@campus/shared';
+import { courseHrefFromData } from './courseWorkLanding';
 import type { HomeCourse, HomeTask } from './homeOverview';
 import { courseTaskHref } from './todayCourseWork';
 import { sanitizeInternalPath } from './navigation';
 
+export const TIMETABLE_COURSE_WORK_LABEL = '作業與教材';
+export const TIMETABLE_COURSE_WORK_FALLBACK = '/classroom';
+
 export function todayClassesFromSchedule(
   entries: readonly PersonalTodayEntry[],
-  _now: Date,
-  courses: readonly HomeCourse[] = [],
+  now: Date,
 ): TodayClass[] {
+  void now;
   return entries.flatMap((entry) => {
     const { startAt, endAt } = entry;
     const linked = entry.row.linkedCourseId?.trim();
-    const matched = courses.find((course) => course.name.trim() === entry.row.title.trim());
     return [
       {
         id: entry.row.id,
@@ -24,7 +27,8 @@ export function todayClassesFromSchedule(
         location: entry.row.location?.trim() || '',
         startAt,
         endAt,
-        courseId: linked || matched?.id,
+        // Only trust explicit linkedCourseId; never guess by course title.
+        courseId: linked || undefined,
       },
     ];
   });
@@ -47,16 +51,34 @@ export function todayTodosFromHomeTasks(tasks: readonly HomeTask[]): TodayTodo[]
   });
 }
 
+/** Same shell as courseWorkLanding: nuni classroom vs school /course. */
 export function courseWeekHref(courseId: string | undefined, fallbackHref?: string): string {
   if (fallbackHref) {
     const safe = sanitizeInternalPath(fallbackHref, '');
     if (safe) return weekHash(safe);
   }
   if (!courseId) return '/timetable';
-  const path = /^cw_[0-9a-f-]{36}$/i.test(courseId)
-    ? `/classroom/course/${encodeURIComponent(courseId)}`
-    : `/course/${encodeURIComponent(courseId)}`;
-  return `${path}#week`;
+  const landed = courseHrefFromData({ courseId });
+  return landed ? `${landed}#week` : '/timetable';
+}
+
+/**
+ * Resolve a timetable row into the course work shell.
+ * Only trust explicit linkedCourseId; otherwise fall back to the classroom list.
+ */
+export function resolveTimetableCourseWorkHref(input: {
+  linkedCourseId?: string | null;
+  courseName: string;
+  courses?: readonly Pick<HomeCourse, 'id' | 'name'>[];
+  fallbackHref?: string;
+}): string {
+  const linked = input.linkedCourseId?.trim();
+  if (linked) {
+    const href = courseHrefFromData({ courseId: linked });
+    if (href) return href;
+  }
+  const fallback = sanitizeInternalPath(input.fallbackHref ?? '', '');
+  return fallback || TIMETABLE_COURSE_WORK_FALLBACK;
 }
 
 export function assignmentHref(todo: TodayTodo): string {

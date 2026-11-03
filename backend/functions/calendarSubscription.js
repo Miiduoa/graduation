@@ -85,7 +85,7 @@ function generateICalFeed(events, calendarName, now = new Date()) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Campus One//TW',
+    'PRODID:-//nuni//TW',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeICalText(calendarName)}`,

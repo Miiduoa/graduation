@@ -58,7 +58,7 @@ export default function AddCourseAiFirstScreen({ navigation }: ServiceScreenProp
       <AICard title="正式加退選">
         <View style={{ gap: 12 }}>
           <Text style={{ color: aiTokens.muted, lineHeight: 24 }}>
-            請登入校方入口網站，再進入「教務」的選課系統。Campus One
+            請登入校方入口網站，再進入「教務」的選課系統。nuni
             目前不會代送加退選申請，也不會把課表上的個人安排當成選課完成。
           </Text>
           {isProvidenceSchoolId(school.id) ? (

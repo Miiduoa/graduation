@@ -1,5 +1,5 @@
 /**
- * Campus One design tokens for shared surfaces and controls.
+ * nuni design tokens for shared surfaces and controls.
  * Keep assistant aliases compatible with existing imports; they use the product palette.
  */
 

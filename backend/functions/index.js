@@ -136,6 +136,11 @@ const {
   createGroupQuestionAssistantReplyTrigger,
   createGradePublishedNotificationHandler,
 } = require('./firestoreTriggerHandlers');
+const {
+  createAssignmentPublishedNotifyHandler,
+  createSubmissionNotifyHandler,
+  createSchoolAnnouncementNotifyHandler,
+} = require('./lib/coherenceNotify');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -1478,6 +1483,27 @@ exports.enqueueAssistantAction = onCall(
       throw new HttpsError('invalid-argument', 'Unsupported assistant action');
     }
     if (isOrderAssistantAction(request.data)) assertOnlineOrderingEnabled();
+
+    // 拆待辦／設提醒寫入本人待辦佇列前，依「建立個人待辦與提醒」開關檢查（預設關）。
+    const personalQueueActions = new Set([
+      'schedule_reminder',
+      'create_reminder_draft',
+      'split_assignment',
+    ]);
+    if (personalQueueActions.has(action)) {
+      const {
+        assistantWritePermissionDeniedMessage,
+        isAssistantWriteToolAllowed,
+        loadAssistantWritePermissions,
+      } = require('./lib/assistantWritePermissions');
+      const writePermissions = await loadAssistantWritePermissions(db, uid);
+      if (!isAssistantWriteToolAllowed(writePermissions, 'createPersonalTodoReminder')) {
+        throw new HttpsError(
+          'permission-denied',
+          assistantWritePermissionDeniedMessage('createPersonalTodoReminder'),
+        );
+      }
+    }
 
     const sensitiveActions = new Set([
       'submit_draft',
@@ -4393,6 +4419,31 @@ exports.gradePublishedNotification = onDocumentCreated(
     region: REGION,
   },
   createGradePublishedNotificationHandler({ sendPushToUser }),
+);
+
+// 連貫感切片 C：作業／繳交／成績／公告觸達（對齊實際寫入路徑，含冪等 claim）
+exports.onTeacherAssignmentPublished = onDocumentCreated(
+  {
+    document: 'groups/{groupId}/assignments/{assignmentId}',
+    region: REGION,
+  },
+  createAssignmentPublishedNotifyHandler({ db, sendPushToUser, sendPushToMultipleUsers }),
+);
+
+exports.onAssignmentSubmissionWritten = onDocumentWritten(
+  {
+    document: 'groups/{groupId}/assignments/{assignmentId}/submissions/{studentUid}',
+    region: REGION,
+  },
+  createSubmissionNotifyHandler({ db, sendPushToUser, sendPushToMultipleUsers }),
+);
+
+exports.onSchoolAnnouncementCreated = onDocumentCreated(
+  {
+    document: 'schools/{schoolId}/announcements/{announcementId}',
+    region: REGION,
+  },
+  createSchoolAnnouncementNotifyHandler({ db, sendPushToUser, sendPushToMultipleUsers }),
 );
 
 // =====================================================

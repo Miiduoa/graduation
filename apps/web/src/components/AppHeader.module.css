@@ -38,23 +38,17 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 35px;
-  height: 38px;
-  border: 1px solid color-mix(in srgb, var(--brand) 85%, var(--text));
-  border-radius: 10px 10px 10px 3px;
-  background: var(--brand);
-  color: var(--on-brand);
-  font-size: 23px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -1.5px;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 6px;
+  line-height: 0;
 }
 
-.mark span {
-  align-self: flex-end;
-  margin-bottom: 9px;
-  font-size: 11px;
-  line-height: 1;
+.mark img {
+  display: block;
+  width: 28px;
+  height: 28px;
 }
 
 .nav {

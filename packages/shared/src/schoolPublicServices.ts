@@ -1,7 +1,7 @@
 /**
  * School-specific official public entry points.
  * Source evidence checked 2026-10-24 (see docs/SCHOOL_PUBLIC_SERVICE_SOURCES_2026-10-24.md).
- * These are external public pages only — not Campus One integrations, private
+ * These are external public pages only — not nuni integrations, private
  * records, appointments, job listings, or authenticated school APIs.
  */
 

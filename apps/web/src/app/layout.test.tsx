@@ -30,8 +30,19 @@ vi.mock('@/features/nuni/NuniApp', () => ({
 
 afterEach(() => vi.unstubAllEnvs());
 
+it('publishes nuni apple web app title without Campus One', () => {
+  vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
+  const html = renderToStaticMarkup(
+    <RootLayout>
+      <main>內容</main>
+    </RootLayout>,
+  );
+  expect(html).toContain('content="nuni"');
+  expect(html).not.toMatch(/Campus One/i);
+});
+
 it.each(['nuni', 'firebase', ''])(
-  'keeps original route children and Campus One providers with NUNI_CLASSROOM_ENABLED=true and CAMPUS_BACKEND=%s',
+  'keeps original route children and nuni providers with NUNI_CLASSROOM_ENABLED=true and CAMPUS_BACKEND=%s',
   (backend) => {
     vi.stubEnv('CAMPUS_BACKEND', backend);
     vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
