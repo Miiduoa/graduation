@@ -88,6 +88,107 @@ it('updates schoolId when switching campus and keeps the current route, extra qu
   expect(options).toEqual({ scroll: false });
 });
 
+it('opens the new campus event list instead of reusing the old event identity', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?schoolId=school-a&campus=school-a&source=school-events&q=講座&view=upcoming&page=3';
+  window.history.replaceState({}, '', '/events/shared-id#registration');
+  render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  const [href, options] = navigation.replace.mock.calls[0];
+  const target = new URL(href, 'https://campus.test');
+  expect(target.pathname).toBe('/events');
+  expect(Object.fromEntries(target.searchParams)).toEqual({ schoolId: 'school-b', campus: 'school-b', school: 'B' });
+  expect(target.hash).toBe('');
+  expect(options).toEqual({ scroll: false });
+});
+
+it('returns to the unfiltered event list when switching from a detail to all campuses', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?campus=school-a&source=school-events&page=2';
+  render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  expect(navigation.replace).toHaveBeenCalledWith('/events?campus=all', { scroll: false });
+});
+
+it('keeps event identity when the campus has not changed', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?campus=school-a&source=school-events&page=2';
+  render(<View />);
+  act(() => capturedSelection.selectSchool('school-a'));
+  const target = new URL(navigation.replace.mock.calls[0][0], 'https://campus.test');
+  expect(target.pathname).toBe('/events/shared-id');
+  expect(target.searchParams.get('source')).toBe('school-events');
+  expect(target.searchParams.get('page')).toBe('2');
+});
+
+it('keeps the old detail scoped to its campus until the event list navigation completes', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?source=school-events';
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  navigation.replace.mockImplementation(() => {});
+  const view = render(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  expect(navigation.replace).toHaveBeenCalledWith(
+    '/events?schoolId=school-b&campus=school-b&school=B', { scroll: false },
+  );
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
+  navigation.pathname = '/events';
+  navigation.search = '?schoolId=school-b&campus=school-b&school=B';
+  view.rerender(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-b' });
+});
+
+it('persists only the last requested campus after repeated choices', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?source=school-events';
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  navigation.replace.mockImplementation(() => {});
+  const view = render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
+  navigation.pathname = '/events';
+  navigation.search = '?campus=all';
+  view.rerender(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: null });
+});
+
+it('does not save a pending event campus choice into a different account', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?source=school-events';
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  navigation.replace.mockImplementation(() => {});
+  const view = render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  const other = 'platform:bob|firebase:two';
+  view.rerender(<View ownerKey={other} />);
+  navigation.pathname = '/events';
+  navigation.search = '?schoolId=school-b&campus=school-b';
+  view.rerender(<View ownerKey={other} />);
+  expect(localStorage.getItem(schoolPreferenceKey(other))).toBeNull();
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-a' });
+});
+
+it('keeps a pending campus choice through a same-account session refresh', () => {
+  navigation.pathname = '/events/shared-id';
+  navigation.search = '?source=school-events';
+  localStorage.setItem(schoolPreferenceKey(defaults.ownerKey), JSON.stringify({ schoolId: 'school-a' }));
+  navigation.replace.mockImplementation(() => {});
+  const view = render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
+  view.rerender(<View loading />);
+  navigation.pathname = '/events';
+  navigation.search = '?schoolId=school-b&campus=school-b';
+  view.rerender(<View loading />);
+  view.rerender(<View />);
+  expect(screen.getByTestId('selected-school').textContent).toBe('乙校');
+  expect(JSON.parse(localStorage.getItem(schoolPreferenceKey(defaults.ownerKey))!)).toEqual({ schoolId: 'school-b' });
+});
+
 it('restores per-account preferences without copying an explicit URL choice into another account', () => {
   localStorage.setItem(
     schoolPreferenceKey(defaults.ownerKey),
