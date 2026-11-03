@@ -43,12 +43,12 @@ export function MessagesStack() {
       <Stack.Screen
         name="Inbox"
         component={MessagesLandingScreen}
-        options={{ title: '訊息', headerShown: false }}
+        options={{ title: '私訊', headerShown: false }}
       />
       <Stack.Screen
         name="MessagesHome"
         component={MessagesLandingScreen}
-        options={{ title: '訊息', headerShown: false }}
+        options={{ title: '私訊', headerShown: false }}
       />
       <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: '群組' }} />
       <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: '群組' }} />
