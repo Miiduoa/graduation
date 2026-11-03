@@ -143,7 +143,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
     setError('');
     try {
       if (usesDemoData()) throw new Error(DEMO_SUBMISSION_MESSAGE);
-      if (!courseId || !hwId) throw new Error('找不到這份作業。');
+      if (!courseId || !hwId) throw new Error('找不到這份作業。可能已被刪除，或你沒有查看權限。');
       if (!uid) throw new Error('請先登入。');
       const [assignment, submission] = await Promise.all([
         ds.getAssignment(hwId, courseId) as Promise<AssignmentRecord | null>,

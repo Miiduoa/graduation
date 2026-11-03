@@ -6,7 +6,13 @@ import { joinCourseAttendance, loadCourseAttendance, watchCourseMembership, type
 import { watchAttendanceLive, type AttendanceLiveOptions } from '@/lib/watchAttendanceLive';
 import { startAttendanceCamera } from '@/lib/attendanceCamera';
 
-const user = vi.hoisted(() => ({ uid: 'student' }));
+const user = vi.hoisted(() => ({ uid: 'student', search: '' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/course/course/attendance',
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(user.search),
+  useParams: () => ({ courseId: 'course' }),
+}));
 vi.mock('./AuthGuard', () => ({ useAuth: () => ({ user: { uid: user.uid }, loading: false }) }));
 vi.mock('./SiteShell', () => ({ SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main> }));
 vi.mock('./SchoolAccountRequired', () => ({ SchoolAccountRequired: () => null }));
@@ -46,7 +52,7 @@ async function publish(rows: AttendanceSession[]) {
   await act(async () => { listener.onSessions(rows); listener.onState('live'); });
 }
 beforeEach(() => {
-  vi.clearAllMocks(); user.uid = 'student';
+  vi.clearAllMocks(); user.uid = 'student'; user.search = '';
   vi.mocked(loadCourseAttendance).mockResolvedValue(data());
   vi.mocked(startAttendanceCamera).mockReturnValue(stopCamera);
   vi.mocked(watchCourseMembership).mockImplementation((_course, _uid, next) => {
