@@ -1054,7 +1054,7 @@ function ImportWorkspace({
       }
       if (/\.json$/i.test(file.name)) {
         if (file.size > PERSONAL_IMPORT_BACKUP_MAX_BYTES)
-          throw new Error('備份檔超過 8 MB，請確認是否為 Campus One 匯出的備份。');
+          throw new Error('備份檔超過 8 MB，請確認是否為 nuni 匯出的備份。');
         const restored = parsePersonalImportBackup(await file.text());
         if (!active.current || controller.signal.aborted) return;
         if (restored.schoolId !== scope.schoolId)
@@ -1094,7 +1094,7 @@ function ImportWorkspace({
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
           throw new Error(
-            '可讀圖片、PDF、XLSX、HTML、CSV、TSV、TXT、ICS 與 Campus One JSON 備份。舊版 XLS 請先另存為 XLSX。',
+            '可讀圖片、PDF、XLSX、HTML、CSV、TSV、TXT、ICS 與 nuni JSON 備份。舊版 XLS 請先另存為 XLSX。',
           );
         if (file.size > 400_000) throw new Error('文字檔超過 400 KB，請分成較小的檔案再匯入。');
         input = await file.text();
@@ -1531,7 +1531,7 @@ function ImportWorkspace({
           <summary>從已登入的學校網頁擷取</summary>
           <p>使用自己已登入的校務頁面，選取課表或成績表格並存成檔案。單次擷取，不會自動同步。</p>
           <ol>
-            <li>複製下方工具網址，新增一個「Campus One 擷取表格」書籤，貼到書籤的網址欄。</li>
+            <li>複製下方工具網址，新增一個「nuni 擷取表格」書籤，貼到書籤的網址欄。</li>
             <li>自行登入學校網站，開啟要匯入的課表或成績頁，再點這個書籤。</li>
             <li>
               選擇表格並下載，回到這裡選取 <strong>CampusOne-school-table.html</strong>
@@ -1676,7 +1676,7 @@ function ImportWorkspace({
               內；CSV／TSV／TXT／ICS，400 KB 內
             </small>
             <small>
-              換裝置：也可選擇 Campus One 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
+              換裝置：也可選擇 nuni 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
             </small>
           </div>
           <details className={styles.paste} open={pasteOpen || !!text}>

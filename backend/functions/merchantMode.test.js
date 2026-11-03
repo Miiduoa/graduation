@@ -105,7 +105,7 @@ test('native_order stays closed when the global switch is off and is not rewritt
 test('showcase stores use outbound-order copy and stay info-only without an https URL', () => {
   expect(SHOWCASE_ORDER_BUTTON_TEXT).toBe('到店家網站訂餐');
   expect(SHOWCASE_ORDER_CAPTION).toBe(
-    '會開啟店家自己的網站，訂單和付款由店家處理，Campus One 查不到這筆訂單',
+    '會開啟店家自己的網站，訂單和付款由店家處理，nuni 查不到這筆訂單',
   );
   expect(SHOWCASE_ORDER_BUTTON_TEXT).not.toMatch(/點餐|下單/);
   expect(

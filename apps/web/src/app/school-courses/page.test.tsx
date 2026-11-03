@@ -148,7 +148,7 @@ it('offers a scoped reconnect without hiding access to academic records', async 
   expect(grades.pathname).toBe('/grades');
   expect(grades.searchParams.get('schoolId')).toBe('pu');
   expect(grades.searchParams.get('campus')).toBe('pu');
-  expect(within(navigation).getByRole('link', { name: 'WOW Class 課程' }).getAttribute('aria-current')).toBe('page');
+  expect(within(navigation).getByRole('link', { name: '玩課雲課程' }).getAttribute('aria-current')).toBe('page');
   expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
 });
 

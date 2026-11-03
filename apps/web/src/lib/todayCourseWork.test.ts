@@ -1,10 +1,14 @@
 import { expect, it } from 'vitest';
 import type { HomeTask } from './homeOverview';
 import {
+  CALENDAR_DUE_TITLE,
   LATER_WORK_TITLE,
   TODAY_WORK_EMPTY,
   TODAY_WORK_NO_CLASS,
   TODAY_WORK_UNSIGNED,
+  calendarDueItemsFromTasks,
+  calendarDueItemsInMonth,
+  calendarDueItemsOnDate,
   courseTaskHref,
   selectLaterCourseWork,
   selectTodayCourseWork,
@@ -143,3 +147,28 @@ it.each(['https://evil.test', '//evil.test', '/\\evil.test', '/login?returnUrl=h
     ).toBe('/course/phys#quiz-q1');
   },
 );
+
+it('builds calendar due items for dated work and filters by day or month', () => {
+  const input = [
+    task({ id: 'a', dueAt: '2026-10-22T10:00:00.000Z', href: '/course/cs101#assignment-a' }),
+    task({
+      id: 'b',
+      courseId: 'zh',
+      courseName: '國文',
+      dueAt: '2026-10-28T02:00:00.000Z',
+      href: '/course/zh#assignment-b',
+    }),
+    task({ id: 'open', dueAt: null }),
+    task({ id: 'bad', dueAt: 'not-a-date' }),
+  ];
+  const dues = calendarDueItemsFromTasks(input);
+  expect(CALENDAR_DUE_TITLE).toBe('作業截止');
+  expect(dues.map((item) => item.id)).toEqual(['cs101:a', 'zh:b']);
+  expect(dues[0].dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(calendarDueItemsOnDate(dues, dues[0].dueDate).map((item) => item.id)).toEqual(['cs101:a']);
+  expect(calendarDueItemsInMonth(dues, dues[0].dueDate.slice(0, 7)).map((item) => item.id)).toEqual([
+    'cs101:a',
+    'zh:b',
+  ]);
+  expect(calendarDueItemsInMonth(dues, '2026-11')).toEqual([]);
+});

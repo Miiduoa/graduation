@@ -10,6 +10,8 @@ import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
   searchCampusServices,
+  secondaryCampusServices,
+  type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
@@ -27,6 +29,48 @@ const categoryLabels: Record<ServiceCategory, string> = {
   connect: '交流',
   account: '帳號',
 };
+
+function ServiceMenuLink({
+  service,
+  href,
+  currentService,
+  id,
+  filtering,
+  secondary,
+  onClose,
+}: {
+  service: CampusService & { note?: string };
+  href: string;
+  currentService?: string;
+  id: string;
+  filtering: boolean;
+  secondary?: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Link
+      data-service-link
+      href={href}
+      aria-label={service.name}
+      className={secondary ? styles.secondaryService : undefined}
+      aria-describedby={
+        service.href === '/food' && !isWebOnlineOrderingEnabled() ? `${id}-food-status` : undefined
+      }
+      aria-current={currentService === service.href ? 'page' : undefined}
+      onClick={onClose}
+    >
+      <span className={styles.serviceName}>
+        {service.name}
+        {service.href === '/food' && !isWebOnlineOrderingEnabled() ? (
+          <small id={`${id}-food-status`}>{ONLINE_ORDERING_OFF_TEXT}</small>
+        ) : filtering ? (
+          <small>{service.text}</small>
+        ) : null}
+      </span>
+      <span aria-hidden="true">→</span>
+    </Link>
+  );
+}
 
 export function CampusServiceMenu() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
@@ -75,7 +119,8 @@ export function CampusServiceMenu() {
     };
   }, []);
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
-  const filtering = !!query.trim() || category !== 'all';
+  const browsing = !query.trim();
+  const filtering = browsing ? category !== 'all' : true;
   const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);
   function closeMenu() {
@@ -248,31 +293,35 @@ export function CampusServiceMenu() {
             return (
               <section key={group.id} className={styles.menuGroup} aria-label={group.label}>
                 <h2>{group.label}</h2>
-                {services.map((service) => (
-                  <Link
-                    data-service-link
-                    href={href(service.href)}
-                    key={service.href}
-                    aria-label={service.name}
-                    aria-describedby={
-                      service.href === '/food' && !isWebOnlineOrderingEnabled()
-                        ? `${id}-food-status`
-                        : undefined
-                    }
-                    aria-current={currentService === service.href ? 'page' : undefined}
-                    onClick={closeMenu}
-                  >
-                    <span className={styles.serviceName}>
-                      {service.name}
-                      {service.href === '/food' && !isWebOnlineOrderingEnabled() ? (
-                        <small id={`${id}-food-status`}>{ONLINE_ORDERING_OFF_TEXT}</small>
-                      ) : filtering ? (
-                        <small>{service.text}</small>
-                      ) : null}
-                    </span>
-                    <span aria-hidden="true">→</span>
-                  </Link>
-                ))}
+                {services.map((service) => {
+                  const children = browsing
+                    ? secondaryCampusServices(service.href, schoolLmsEnabled)
+                    : [];
+                  return (
+                    <div key={service.href} className={styles.serviceEntry}>
+                      <ServiceMenuLink
+                        service={service}
+                        href={href(service.href)}
+                        currentService={currentService}
+                        id={id}
+                        filtering={filtering}
+                        onClose={closeMenu}
+                      />
+                      {children.map((child) => (
+                        <ServiceMenuLink
+                          key={child.href}
+                          service={child}
+                          href={href(child.href)}
+                          currentService={currentService}
+                          id={id}
+                          filtering={filtering}
+                          secondary
+                          onClose={closeMenu}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
               </section>
             );
           })}

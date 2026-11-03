@@ -151,7 +151,7 @@ function Assignment({
       ) : canTeach ? (
         <p>此為教師檢視。</p>
       ) : ['quiz', 'exam'].includes(assignment.type) ? (
-        <p>請在 Campus One 手機版的課程評量中作答。</p>
+        <p>請在 nuni 手機版的課程評量中作答。</p>
       ) : closed ? (
         <p>作業已截止。如需補交，請聯絡授課教師。</p>
       ) : (

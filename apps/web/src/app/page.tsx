@@ -15,6 +15,7 @@ import { useClientHydrated } from '@/lib/useClientHydrated';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { isTeacherRole, useSchoolRole } from '@/lib/useSchoolRole';
 import { StudentTodayPage } from '@/components/today/StudentToday';
+import { TeacherTodayPage } from '@/components/today/TeacherToday';
 import { todayTodosFromHomeTasks } from '@/lib/todayScreen';
 import styles from './home.module.css';
 
@@ -247,7 +248,7 @@ export default function HomePage() {
         ) : null}
         {isTeacherRole(role) && (
           <p className={styles.notice}>
-            <Link href="/teacher">老師工作台 →</Link> 看學生送來的課程申訴。
+            <Link href="/teacher">課務申訴審核 →</Link> 看學生送來的課程申訴。
           </p>
         )}
         {blocked ? (
@@ -268,19 +269,12 @@ export default function HomePage() {
             </div>
           </section>
         ) : teacherOnly ? (
-          <section className={styles.focus} aria-labelledby="focus-title">
-            <div className={styles.focusLabel}>教學安排</div>
-            <h2 id="focus-title">{`${teaching.length} 門課正在進行`}</h2>
-            <p>從授課課程查看學生繳交內容，安排教材與下一次作業。</p>
-            <div className={styles.focusActions}>
-              <Link className={styles.primary} href="#teaching-courses">
-                查看授課課程 <span aria-hidden>→</span>
-              </Link>
-              <Link className={styles.secondary} href="/timetable">
-                查看課表
-              </Link>
-            </div>
-          </section>
+          <TeacherTodayPage
+            now={now}
+            unsigned={!signedIn}
+            teachingCourses={teaching}
+            upcomingTodos={todos}
+          />
         ) : (
           <StudentTodayPage
             now={now}
@@ -290,7 +284,6 @@ export default function HomePage() {
             skeleton={busy}
             refreshing={loading && !!data}
             todos={todos}
-            courses={data?.courses ?? []}
             todosError={error || data?.tasksError || ''}
             lmsUnconnected={lmsUnconnected}
             leavingTodoIds={leavingTodoIds}

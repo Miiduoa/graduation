@@ -110,7 +110,7 @@ export function PWAInstallBanner() {
   return (
     <section className={styles.notice} aria-label="加入主畫面">
       <div className={styles.content}>
-        <h2 className={styles.title}>把 Campus One 加入主畫面</h2>
+        <h2 className={styles.title}>把 nuni 加入主畫面</h2>
         <p className={styles.description}>
           {isIOS
             ? '在瀏覽器選單選擇「分享」，再選「加入主畫面」。'
