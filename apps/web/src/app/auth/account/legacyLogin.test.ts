@@ -112,7 +112,7 @@ it.each([
   ['/grades?tab=feedback\t', '/'],
   ['/grades' + String.fromCharCode(127), '/'],
   ['/profile?' + 'a'.repeat(1300), '/'],
-])('keeps only Campus One return paths and rejects %s', (input, expected) => {
+])('keeps only nuni return paths and rejects %s', (input, expected) => {
   expect(sanitizeReturnPath(input)).toBe(expected);
   expect(readReturnPath(`returnUrl=${encodeURIComponent(input)}`)).toBe(expected);
 });
@@ -161,7 +161,7 @@ it.each([
   '/events/evt-1?schoolId=pu&source=school-club-events#registration',
   '/school-info?campus=ncku#contact',
   '/admin',
-])('hands the Campus One destination %s to its own login route', (destination) => {
+])('hands the nuni destination %s to its own login route', (destination) => {
   const href = campusOneLoginHref(new URLSearchParams({ next: destination }));
   expect(href).toBeTruthy();
   const login = new URL(href!, 'https://nuni.tw');
@@ -315,7 +315,7 @@ it.each([
   expect(campusOneLoginHref(new URLSearchParams({ returnUrl: path }))).toBeNull();
 });
 
-it('filters return context before handing a task to Campus One login', () => {
+it('filters return context before handing a task to nuni login', () => {
   const input = '/events/open-day?campus=pu&next=%2F%2Fevil.test&token=private#registration';
   const destination = '/events/open-day?campus=pu#registration';
   const href = campusOneLoginHref(new URLSearchParams({ returnUrl: input }));
@@ -417,7 +417,7 @@ it('searches schools by name through the existing find-school search endpoint', 
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
-it('treats Campus One session as signed in before falling back to /auth/session', async () => {
+it('treats nuni session as signed in before falling back to /auth/session', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(JSON.stringify({ authenticated: true, platformAccountId: 'pa_1' }), {
       status: 200,

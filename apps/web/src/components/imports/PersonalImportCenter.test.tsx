@@ -821,7 +821,7 @@ it('restores PDF preview and requests the original file only when re-running OCR
   await screen.findByText('grades.pdf');
   view.unmount();
   render(<PersonalImportCenter />);
-  expect(screen.getByText('資料庫')).toBeTruthy();
+  expect(screen.getByRole('cell', { name: '資料庫' })).toBeTruthy();
   const file = new File(['pdf'], 'grades.pdf', { type: 'application/pdf' });
   fireEvent.change(screen.getByLabelText('重新選擇原始 PDF'), { target: { files: [file] } });
   await waitFor(() =>
@@ -856,7 +856,7 @@ it('re-reads the same PDF locally and requires review before saving the recovere
       pdfMode: 'ocr',
     }),
   );
-  await screen.findByText('資料庫');
+  await screen.findByRole('cell', { name: '資料庫' });
   fireEvent.click(screen.getByRole('button', { name: '整理選取內容' }));
   expect(readPersonalImports(context)).toHaveLength(0);
   fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
@@ -885,12 +885,12 @@ it('preserves the existing PDF preview on re-read failure, then cancels and igno
   await screen.findByText('grades.pdf');
   fireEvent.click(screen.getByRole('button', { name: '重新辨識 PDF 整頁' }));
   await screen.findByText('讀取失敗');
-  expect(screen.getByText('資料庫')).toBeTruthy();
+  expect(screen.getByRole('cell', { name: '資料庫' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重新辨識 PDF 整頁' }));
   const signal = vi.mocked(readPersonalImportDocumentFile).mock.calls[2][1];
   fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
   expect(signal?.aborted).toBe(true);
-  expect(screen.getByText('資料庫')).toBeTruthy();
+  expect(screen.getByRole('cell', { name: '資料庫' })).toBeTruthy();
   context.schoolId = 'ncku';
   view.rerender(<PersonalImportCenter />);
   await act(async () => finish(pdfDocument));

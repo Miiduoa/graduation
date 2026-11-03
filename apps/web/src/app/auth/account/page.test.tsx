@@ -260,7 +260,7 @@ it.each([
   [true, false],
   [false, true],
   [true, true],
-])('preserves feedback context through the Campus One login handoff (signed in: %s, auth payload: %s)', async (signedIn, withAuthPayload) => {
+])('preserves feedback context through the nuni login handoff (signed in: %s, auth payload: %s)', async (signedIn, withAuthPayload) => {
   const destination = '/grades?tab=feedback&campus=nthu&q=a%26b%3Dc#recent';
   const replace = vi.fn();
   vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });

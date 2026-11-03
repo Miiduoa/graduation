@@ -127,7 +127,7 @@ test('role workspaces retain readable accent cards after a live theme change', (
       <CockpitAccentCard title="繼續閱讀" meta="第一章" ctaLabel="開啟教材" onPress={jest.fn()} />
     </>,
   );
-  expect(view.getByText('Campus One')).toBeTruthy();
+  expect(view.getByText('nuni')).toBeTruthy();
   expect(view.getByText('接下來')).toBeTruthy();
   expect(view.queryByText(/first 工作台/i)).toBeNull();
   act(() => applyTheme('dark'));

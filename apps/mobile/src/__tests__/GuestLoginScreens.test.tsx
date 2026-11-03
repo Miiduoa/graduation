@@ -387,7 +387,7 @@ test('an already displayed success dialog cannot navigate after its screen unmou
 test('a restored platform account has a return entry rather than another registration prompt', () => {
   mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
   const view = render(<LoginLandingScreen />);
-  expect(view.getByRole('button', { name: '回到我的 Campus One' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '回到我的 nuni' })).toBeTruthy();
   expect(view.queryByText('登入或建立帳號')).toBeNull();
   fireEvent.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
@@ -399,7 +399,7 @@ test('an unknown platform account state remains an explicit recovery entry', () 
   expect(view.getByRole('alert')).toHaveTextContent(mockPlatformAuth.error);
   fireEvent.press(view.getByRole('button', { name: '查看登入問題' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
-  expect(view.queryByText('回到我的 Campus One')).toBeNull();
+  expect(view.queryByText('回到我的 nuni')).toBeNull();
 });
 
 test('pending logout explains the next step without presenting a restored account', () => {
@@ -409,14 +409,14 @@ test('pending logout explains the next step without presenting a restored accoun
   expect(view.getByRole('alert')).toHaveTextContent(/上次登出還沒完成/);
   fireEvent.press(view.getByRole('button', { name: '處理未完成的登出' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
-  expect(view.queryByText('回到我的 Campus One')).toBeNull();
+  expect(view.queryByText('回到我的 nuni')).toBeNull();
 });
 
 test('hides the school login button when no usable school provider is listed', () => {
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
   expect(
-    landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    landing.getByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'),
   ).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   expect(landing.queryByText('前往學校登入')).toBeNull();
@@ -440,7 +440,7 @@ test('a release without school SSO keeps public and platform entries, but does n
   setSchoolLoginProviderKinds([]);
   const landing = render(<LoginLandingScreen />);
   expect(
-    landing.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    landing.getByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'),
   ).toBeTruthy();
   expect(landing.queryByTestId('school-login-start')).toBeNull();
   fireEvent.press(landing.getByTestId('public-Map'));
@@ -460,22 +460,37 @@ test('a release without school SSO keeps public and platform entries, but does n
 test('the guest school-login entry always follows the selected university', () => {
   const view = render(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
+  expect(view.getByText('學校帳號（尚未開放）')).toBeTruthy();
+  expect(view.getByText('學號登入（尚未開放）')).toBeTruthy();
+  expect(
+    view.getByText(
+      '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。',
+    ),
+  ).toBeTruthy();
+  expect(view.queryByText(/可直接使用 e 校園帳號/)).toBeNull();
+  expect(view.queryByText(/提供學號直接連線/)).toBeNull();
+  expect(view.queryByText('可連線')).toBeNull();
+  expect(view.queryByText('使用學號連線')).toBeNull();
+  expect(view.queryByText(/可以連線支援的校務系統/)).toBeNull();
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
   expect(
-    view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    view.getByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'),
   ).toBeTruthy();
   expect(view.getByTestId('login-start')).toBeTruthy();
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
   view.rerender(<LoginLandingScreen />);
   expect(view.getByTestId('school-login-start')).toBeTruthy();
+  expect(view.queryByText('可連線')).toBeNull();
+  expect(view.queryByText('使用學號連線')).toBeNull();
+  expect(view.queryByText(/提供學號直接連線/)).toBeNull();
 });
 
 test('a direct school login route cannot show Providence credentials while browsing NTHU', () => {
   mockSchool = { id: 'nthu', name: '國立清華大學', shortName: '清大' };
   const view = render(<SSOLoginScreen />);
-  expect(view.getByText('Campus One · 國立清華大學')).toBeTruthy();
+  expect(view.getByText('nuni · 國立清華大學')).toBeTruthy();
   expect(view.getByText(SCHOOL_LOGIN_BIND_HINT)).toBeTruthy();
   expect(view.queryByTestId('student-id-input')).toBeNull();
   expect(view.queryByTestId('student-password-input')).toBeNull();
@@ -538,7 +553,7 @@ test('guest campus connection surfaces the self-import path before the public di
   const view = render(<LoginLandingScreen />);
   expect(view.queryByTestId('school-login-start')).toBeNull();
   expect(
-    view.getByText('這間學校尚未開放學號直接連線；你仍可匯入自己從校務系統取得的資料。'),
+    view.getByText('尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'),
   ).toBeTruthy();
   fireEvent.press(view.getByTestId('school-import-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'PersonalImport', {

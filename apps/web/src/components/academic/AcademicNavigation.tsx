@@ -4,22 +4,22 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
+import {
+  ACADEMIC_LMS_SECTIONS,
+  ACADEMIC_SECTIONS,
+  academicNavigationPath,
+} from '@/lib/academicSections';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { CampusIcon } from '@/components/CampusIcon';
 import styles from './AcademicNavigation.module.css';
 
-const SECTIONS = [
-  { path: '/timetable', label: '課表' },
-  { path: '/classroom', label: '課程空間' },
-  { path: '/school-courses', label: 'WOW Class 課程' },
-  { path: '/school-lms', label: '作業與教材' },
-  { path: '/grades', label: '成績' },
-  { path: '/credit-planner', label: '學分規劃' },
-  { path: '/calendar', label: '行事曆' },
-] as const;
-
-function AcademicLinks({ pathname }: { pathname: string }) {
-  const enabled = useSchoolLmsReadonlyEnabled();
+function AcademicLinks({
+  pathname,
+  schoolLmsEnabled,
+}: {
+  pathname: string;
+  schoolLmsEnabled: boolean;
+}) {
   const params = useSearchParams();
   const campusSearch = useCampusNavigationSearch(params);
   const term = params?.get('term');
@@ -35,11 +35,17 @@ function AcademicLinks({ pathname }: { pathname: string }) {
         : pathname === '/import' && ['timetable', 'grades', 'events'].includes(requestedKind || '')
           ? requestedKind
           : 'timetable';
+  // 玩課雲課程清單可獨立開；玩課雲作業僅在唯讀旗標開啟時顯示，避免導向已 redirect 的死路。
+  const sections = [
+    ...ACADEMIC_SECTIONS,
+    ACADEMIC_LMS_SECTIONS[0],
+    ...(schoolLmsEnabled ? [ACADEMIC_LMS_SECTIONS[1]] : []),
+  ];
 
   return (
     <nav className={styles.navigation} aria-label="課務導覽">
       <ul className={styles.sections}>
-        {SECTIONS.filter(({ path }) => enabled || path !== '/school-lms').map(({ path, label }) => (
+        {sections.map(({ path, label }) => (
           <li key={path}>
             <Link
               href={campusServiceHref(path === '/timetable' ? timetablePath : path, campusSearch)}
@@ -65,14 +71,8 @@ function AcademicLinks({ pathname }: { pathname: string }) {
 
 export function AcademicNavigation() {
   const currentPath = usePathname();
-  const pathname = currentPath === '/credit-planner/review' ? '/credit-planner'
-    : currentPath?.startsWith('/school-lms/') ? '/school-lms'
-    : currentPath?.startsWith('/classroom/course/') ? '/classroom'
-    : currentPath;
-  if (
-    !pathname ||
-    (pathname !== '/import' && !SECTIONS.some((section) => section.path === pathname))
-  )
-    return null;
-  return <AcademicLinks pathname={pathname} />;
+  const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
+  const pathname = academicNavigationPath(currentPath);
+  if (!pathname) return null;
+  return <AcademicLinks pathname={pathname} schoolLmsEnabled={schoolLmsEnabled} />;
 }

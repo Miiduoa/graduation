@@ -1,11 +1,20 @@
 import React, { useCallback, useState } from 'react';
 import { Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { formatClock, type TodayClass } from '@campus/shared/src/pickNextAction';
-import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { formatClock, TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
+import {
+  courseWorkNavForClass,
+  todayCourseWorkNavigateTarget,
+  type TimetableClassroomDestination,
+} from '../hooks/timetableClassroomNav';
+import { useTodayTimetableData, type TodayTimetableClass } from '../hooks/useTodayTimetableData';
+import { safeNavigate } from '../utils/safeNavigate';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 
-export function nextLearningClass(classes: readonly TodayClass[], now: Date): TodayClass | null {
+export function nextLearningClass(
+  classes: readonly (TodayClass & { courseWorkNav?: TimetableClassroomDestination })[],
+  now: Date,
+): (TodayClass & { courseWorkNav?: TimetableClassroomDestination }) | null {
   const current = now.getTime();
   if (!Number.isFinite(current)) return null;
   return [...classes]
@@ -24,6 +33,7 @@ type Props = {
 };
 
 export function LearningNextClassCard({ onOpenTimetable, onImportTimetable }: Props) {
+  const navigation = useNavigation();
   const [now, setNow] = useState(() => new Date());
   const { status, classes, retry } = useTodayTimetableData(now);
   useFocusEffect(
@@ -33,10 +43,16 @@ export function LearningNextClassCard({ onOpenTimetable, onImportTimetable }: Pr
       return () => clearInterval(timer);
     }, []),
   );
-  const next = status === 'ready' ? nextLearningClass(classes, now) : null;
+  const next = status === 'ready' ? nextLearningClass(classes as TodayTimetableClass[], now) : null;
   const current = next && next.startAt <= now.getTime();
+  const courseWorkLabel = next?.courseId ? '作業與教材' : TODAY_COPY.findCourse;
   const body = { color: aiTokens.textSecondary, fontSize: 13, lineHeight: 20 } as const;
   const muted = { color: aiTokens.muted, fontSize: 12, lineHeight: 18 } as const;
+  const openCourseWork = () => {
+    if (!next) return;
+    const target = todayCourseWorkNavigateTarget(courseWorkNavForClass(next));
+    safeNavigate(navigation, target.screen, target.params);
+  };
 
   return (
     <AICard title="今天的課表" badge="個人課表" badgeTone="muted">
@@ -67,6 +83,7 @@ export function LearningNextClassCard({ onOpenTimetable, onImportTimetable }: Pr
               {' · '}
               依你自行編輯或匯入的課表顯示
             </Text>
+            <AIButton label={courseWorkLabel} onPress={openCourseWork} />
             <AIButton label="開啟我的課表" variant="ghost" onPress={onOpenTimetable} />
           </>
         ) : (

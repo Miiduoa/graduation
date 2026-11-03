@@ -57,6 +57,13 @@ const {
 const searchCampusDocs = require('./tools/searchCampusDocs');
 const { relevantItems } = require('../lib/assistantRelevance');
 const { runTool } = require('./tools/registry');
+const {
+  ASSISTANT_PERMISSIONS_SETTINGS_HREF,
+  assistantWritePermissionDeniedMessage,
+  isAssistantWriteToolAllowed,
+  loadAssistantWritePermissions,
+} = require('../lib/assistantWritePermissions');
+const { getIntentWritePlan } = require('./intentWritePlan');
 
 const db = getFirestore();
 
@@ -173,6 +180,8 @@ async function executeCampusAssistantCore({
   const source = 'cloud_functions';
   const freshness = 'live';
   let modelTrace = { provider: 'structured', model: null, usage: null, errors: [] };
+  // 校籍確認後再讀寫入權限，避免未授權成員多一次 settings 讀取。
+  let writePermissions = null;
 
   if (!schoolId) {
     await writeAssistantAuditLog({
@@ -208,6 +217,7 @@ async function executeCampusAssistantCore({
 
   if (uid) {
     await assertActiveSchoolMember(schoolId, uid);
+    writePermissions = await loadAssistantWritePermissions(db, uid);
   }
   // The profile may change between runtime prefetch and core execution.
   // Never attach data collected for another account or school to this response.
@@ -272,6 +282,68 @@ async function executeCampusAssistantCore({
     }).catch((error) => console.warn('[AI] audit log failed:', error?.message || error));
     return { ...response, modelTrace, intent };
   };
+
+  /** 規劃階段擋下未允許的寫入工具，並附設定頁連結。 */
+  const replyWritePermissionDenied = async (toolName) => {
+    response.content = assistantWritePermissionDeniedMessage(toolName);
+    response.suggestions = ['開啟助理權限設定', '今日公告', '功能說明'];
+    response.actions = [
+      assistantAction({
+        label: '開啟助理權限設定',
+        action: 'open_url',
+        params: { url: ASSISTANT_PERMISSIONS_SETTINGS_HREF },
+        requiresConfirmation: false,
+        sensitivity: 'low',
+        evidenceRefs: [{ type: 'system', id: 'assistant-write-permission', label: '助理寫入權限' }],
+      }),
+      assistantAction({
+        label: '助理權限設定',
+        action: 'navigate',
+        params: { screen: 'AssistantPermissions' },
+        requiresConfirmation: false,
+        sensitivity: 'low',
+        evidenceRefs: [{ type: 'system', id: 'assistant-write-permission', label: '助理寫入權限' }],
+      }),
+    ];
+    response.citations = [
+      { type: 'system', id: 'assistant-write-permission', label: '助理寫入權限', source: ASSISTANT_PERMISSIONS_SETTINGS_HREF },
+    ];
+    response.debug.route = 'write_permission_denied';
+    response.debug.writePermissionDenied = toolName;
+    return await finalizeResponse();
+  };
+
+  const ensureWriteToolAllowed = async (toolName) => {
+    if (isAssistantWriteToolAllowed(writePermissions, toolName)) return null;
+    return replyWritePermissionDenied(toolName);
+  };
+
+  /** 拆待辦／設提醒等寫入本人待辦佇列的動作；未開開關時不附確認動作。 */
+  const personalQueueAllowed = isAssistantWriteToolAllowed(
+    writePermissions,
+    'createPersonalTodoReminder',
+  );
+  const withPersonalQueueActions = (actions) => {
+    if (personalQueueAllowed) return actions;
+    return [];
+  };
+  const personalQueueClosedHint =
+    '若要拆待辦或設定提醒，請到設定 → 助理權限開啟「建立個人待辦與提醒」。';
+
+  // 寫入意圖在進 LLM／結構化草稿前就擋下，避免未授權工具進規劃。
+  // createOrder 若線上點餐關閉，交給 food_order 區塊回既有「不能線上點餐」文案。
+  {
+    const writePlan = getIntentWritePlan(intent);
+    if (
+      uid &&
+      writePlan?.requiresConfirmation &&
+      writePlan.toolName &&
+      !(writePlan.toolName === 'createOrder' && !isOnlineOrderingEnabled())
+    ) {
+      const deniedEarly = await ensureWriteToolAllowed(writePlan.toolName);
+      if (deniedEarly) return deniedEarly;
+    }
+  }
 
   if (shouldUseServerWebSearch(lastUserMessage, intent)) {
     const t0 = Date.now();
@@ -359,6 +431,7 @@ async function executeCampusAssistantCore({
       structuredContext,
       knowledgeChunks: campusChunks,
       webAnswer: ragWebAnswer,
+      writePermissions,
       toolCtx: {
         uid,
         schoolId,
@@ -593,6 +666,10 @@ async function executeCampusAssistantCore({
       response.suggestions = ['今日公告', '查課表', '功能說明'];
       return await finalizeResponse();
     }
+    {
+      const denied = await ensureWriteToolAllowed('submitLeaveRequest');
+      if (denied) return denied;
+    }
 
     const contextCourseId =
       context.courseId != null && String(context.courseId).trim()
@@ -659,6 +736,10 @@ async function executeCampusAssistantCore({
       response.suggestions = ['功能說明', '今日公告', '查課表'];
       return await finalizeResponse();
     }
+    {
+      const denied = await ensureWriteToolAllowed('reserveSeat');
+      if (denied) return denied;
+    }
     const seatInput = resolveReserveSeatInput(lastUserMessage, timeZone);
     if (!seatInput) {
       response.content = [
@@ -695,6 +776,10 @@ async function executeCampusAssistantCore({
       response.suggestions = ['功能說明', '今日公告', '查課表'];
       return await finalizeResponse();
     }
+    {
+      const denied = await ensureWriteToolAllowed('borrowBook');
+      if (denied) return denied;
+    }
     const bookInput = await resolveBorrowBookInput(lastUserMessage, schoolId);
     if (!bookInput) {
       response.content = [
@@ -726,6 +811,10 @@ async function executeCampusAssistantCore({
       response.content = intent === 'renew_book' ? '續借需要先登入，我才能讀取你的借閱紀錄。' : '還書登記需要先登入，我才能讀取你的借閱紀錄。';
       response.suggestions = ['登入後查借閱', '今日公告', '功能說明'];
       return await finalizeResponse();
+    }
+    {
+      const denied = await ensureWriteToolAllowed(intent === 'renew_book' ? 'renewBook' : 'returnBook');
+      if (denied) return denied;
     }
 
     const resolvedLoan = await resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage });
@@ -774,6 +863,10 @@ async function executeCampusAssistantCore({
       response.suggestions = ['功能說明'];
       return await finalizeResponse();
     }
+    {
+      const denied = await ensureWriteToolAllowed('createDormRepairRequest');
+      if (denied) return denied;
+    }
     const repairInput = resolveRepairInput(lastUserMessage);
     if (!repairInput) {
       response.content = '請補上位置與狀況（例：A棟 301 冷氣不冷）。';
@@ -804,6 +897,10 @@ async function executeCampusAssistantCore({
       response.content = '預約洗衣機需要先登入。請告訴我時段（例如：今晚 8 點）。';
       response.suggestions = ['功能說明', '今日公告', '查課表'];
       return await finalizeResponse();
+    }
+    {
+      const denied = await ensureWriteToolAllowed('reserveWashingMachine');
+      if (denied) return denied;
     }
     const washInput = await resolveWashReserveInput(lastUserMessage, schoolId);
     if (!washInput) {
@@ -844,6 +941,10 @@ async function executeCampusAssistantCore({
       response.content = '訂餐要先登入，並說明餐廳與品項（例：學生餐廳雞排飯＋紅茶）。';
       response.suggestions = ['功能說明'];
       return await finalizeResponse();
+    }
+    {
+      const denied = await ensureWriteToolAllowed('createOrder');
+      if (denied) return denied;
     }
     const orderInput = await resolveFoodOrderInput(lastUserMessage, schoolId);
     if (!orderInput) {
@@ -896,9 +997,12 @@ async function executeCampusAssistantCore({
       '4. 截止前預留 20 分鐘檢查格式與附件。',
       '',
       `截止時間：${formatAssistantDate(target.dueAt) || '未設定'}`,
+      ...(personalQueueAllowed ? [] : ['', personalQueueClosedHint]),
     ].join('\n');
-    response.suggestions = ['設定提醒', '更細拆步驟', '查看作業'];
-    response.actions = [
+    response.suggestions = personalQueueAllowed
+      ? ['設定提醒', '更細拆步驟', '查看作業']
+      : ['更細拆步驟', '查看作業', '開啟助理權限設定'];
+    response.actions = withPersonalQueueActions([
       assistantAction({
         label: '拆成待辦',
         action: 'split_assignment',
@@ -918,7 +1022,7 @@ async function executeCampusAssistantCore({
         sensitivity: 'medium',
         evidenceRefs: [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }],
       }),
-    ];
+    ]);
     response.citations = [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }];
     return await finalizeResponse();
   }
@@ -975,8 +1079,10 @@ async function executeCampusAssistantCore({
       ]
         .filter(Boolean)
         .join('\n');
-      response.suggestions = ['設定提醒', '今日摘要', '今日公告'];
-      response.actions = [
+      response.suggestions = personalQueueAllowed
+        ? ['設定提醒', '今日摘要', '今日公告']
+        : ['今日摘要', '今日公告', '開啟助理權限設定'];
+      response.actions = withPersonalQueueActions([
         assistantAction({
           label: '設定提醒',
           action: 'schedule_reminder',
@@ -990,7 +1096,10 @@ async function executeCampusAssistantCore({
             { type: 'assignment', id: earliest.id, label: earliest.title ?? '作業' },
           ],
         }),
-      ];
+      ]);
+      if (!personalQueueAllowed) {
+        response.content = `${response.content}\n\n${personalQueueClosedHint}`;
+      }
       response.citations = pendingAssignments.slice(0, 3).map((assignment) => ({
         type: 'assignment',
         id: assignment.id,
@@ -1028,9 +1137,11 @@ async function executeCampusAssistantCore({
     }
 
     response.content = lines.join('\n');
-    response.suggestions = ['設定提醒', '今日公告', '近期活動'];
+    response.suggestions = personalQueueAllowed
+      ? ['設定提醒', '今日公告', '近期活動']
+      : ['今日公告', '近期活動', '開啟助理權限設定'];
     if (pendingAssignments[0]) {
-      response.actions = [
+      response.actions = withPersonalQueueActions([
         assistantAction({
           label: '設定提醒',
           action: 'schedule_reminder',
@@ -1048,7 +1159,10 @@ async function executeCampusAssistantCore({
             },
           ],
         }),
-      ];
+      ]);
+      if (!personalQueueAllowed) {
+        response.content = `${response.content}\n\n${personalQueueClosedHint}`;
+      }
     }
     return await finalizeResponse();
   }

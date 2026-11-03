@@ -99,10 +99,10 @@ const SCHOOL_PAGE_CAPTURE_SCRIPT = String.raw`
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-labelledby', 'capture-title');
-  const title = element('h2', candidates.length ? '選擇要帶入 Campus One 的表格' : '沒有找到可擷取的校務表格');
+  const title = element('h2', candidates.length ? '選擇要帶入 nuni 的表格' : '沒有找到可擷取的校務表格');
   title.id = 'capture-title';
   panel.append(title);
-  panel.append(element('p', candidates.length ? '只擷取目前頁面可見的表格文字，下載後回到 Campus One 核對匯入。這是單次擷取，不會自動同步。' : '請先自行登入學校，並開啟課表或成績頁。不是 HTML 表格的頁面，可回到 Campus One 選擇截圖或貼上文字。'));
+  panel.append(element('p', candidates.length ? '只擷取目前頁面可見的表格文字，下載後回到 nuni 核對匯入。這是單次擷取，不會自動同步。' : '請先自行登入學校，並開啟課表或成績頁。不是 HTML 表格的頁面，可回到 nuni 選擇截圖或貼上文字。'));
   if (oversized) panel.append(element('p', '部分表格超過單次擷取範圍。請縮小頁面顯示的學期或資料範圍，再試一次。', 'note'));
   let selected = candidates.length === 1 ? 0 : -1;
   const choices = [];
@@ -145,7 +145,7 @@ const SCHOOL_PAGE_CAPTURE_SCRIPT = String.raw`
   download.addEventListener('click', () => {
     if (selected < 0 || !candidates[selected]) return;
     try {
-      const output = document.implementation.createHTMLDocument('Campus One 校務表格');
+      const output = document.implementation.createHTMLDocument('nuni 校務表格');
       const meta = output.createElement('meta');
       meta.setAttribute('charset', 'utf-8');
       output.head.prepend(meta);
@@ -181,7 +181,7 @@ const SCHOOL_PAGE_CAPTURE_SCRIPT = String.raw`
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
-      status.textContent = '已交由瀏覽器下載。請回到 Campus One 選擇這份 HTML 檔，核對內容後匯入。';
+      status.textContent = '已交由瀏覽器下載。請回到 nuni 選擇這份 HTML 檔，核對內容後匯入。';
     } catch { status.textContent = '這次未能下載表格。請改用複製表格或截圖匯入。'; }
   });
   const actions = element('div', undefined, 'actions');

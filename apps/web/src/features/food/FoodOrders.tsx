@@ -276,6 +276,9 @@ export function FoodOrderDetail({
       setShowToken(false);
       if (intent.action === 'pay') setCheckout(result as NuniFoodPaymentSessionProjection);
     },
+    onRejected() {
+      setCancelConfirmed(false);
+    },
   });
   useEffect(() => {
     panelRef.current?.focus();

@@ -139,3 +139,17 @@ test('empty plans do not expose fake comparisons or exports', () => {
   expect(view.getByText(/先在課程清單加入並儲存一門課/)).toBeTruthy();
   expect(view.queryByLabelText('匯出此比較方案 JSON')).toBeNull();
 });
+
+test('starting a comparison mounts the deadline card and stale plans remove it', () => {
+  const plan = sample();
+  const view = render(<CreditPlanScenarioCard plan={plan} />);
+  open(view);
+  expect(view.queryByLabelText('目標學期比較')).toBeNull();
+  fireEvent.press(view.getByLabelText('以全部課程開始比較'));
+  expect(view.getByLabelText('目標學期比較')).toBeTruthy();
+  expect(view.getByText('這個學期前，學分來得及嗎？')).toBeTruthy();
+  expect(view.getByText(/完整方案比較固定以 25 學分提醒，與上方個人每學期負擔提醒無關/)).toBeTruthy();
+  view.rerender(<CreditPlanScenarioCard plan={{ ...plan, recognized: '70' }} />);
+  expect(view.getByText(/原規劃已更新/)).toBeTruthy();
+  expect(view.queryByLabelText('目標學期比較')).toBeNull();
+});
