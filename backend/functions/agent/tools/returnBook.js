@@ -47,7 +47,9 @@ async function execute(ctx, rawInput) {
     }
     tx.update(bookRef, availability);
     tx.set(guardRef, { updatedAt: FieldValue.serverTimestamp() });
-    return { success: true, bookTitle: loan.bookTitle || loan.bookId };
+    const bookTitle = typeof loan.bookTitle === 'string' && loan.bookTitle.trim()
+      ? loan.bookTitle : loan.bookId;
+    return { success: true, bookTitle };
   });
 }
 

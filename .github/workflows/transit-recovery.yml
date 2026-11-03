@@ -38,7 +38,7 @@ jobs:
           mkdir -p evidence
           git archive --format=zip HEAD apps/web/src/lib/transit.ts apps/web/src/lib/transit-server.ts apps/web/src/app/api/transit/route.ts apps/web/src/app/bus apps/web/src/components/TransitExplorer.tsx apps/web/src/components/TransitExplorer.test.tsx apps/web/src/components/transit.module.css scripts/test-transit.cjs deploy/web .github/workflows/web-release.yml .github/workflows/transit-recovery.yml docs/TRANSIT.md > evidence/transit-reviewed-source.zip
           git rev-parse HEAD > evidence/revision.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: transit-reviewed-source-${{ github.sha }}
