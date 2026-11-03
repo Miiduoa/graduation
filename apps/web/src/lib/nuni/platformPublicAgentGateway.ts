@@ -11,12 +11,14 @@ import {
 
 export type PublicAgentAction =
   | 'preview'
+  | 'prepareGroq'
   | 'confirm'
   | 'execute'
+  | 'route'
   | 'read'
   | 'status'
-  | 'ack'
-  | 'reconcile';
+  | 'reconcile'
+  | 'ack';
 export type PublicAgentTransport = (input: {
   action: PublicAgentAction;
   session: PlatformSession;
@@ -48,7 +50,19 @@ export function createPlatformPublicAgentGateway(options: {
   return async (request: NextRequest, action: string) => {
     try {
       if (options.enabled !== true) throw new NuniError(404, 'NOT_FOUND');
-      if (!['preview', 'confirm', 'execute', 'read', 'status', 'ack', 'reconcile'].includes(action))
+      if (
+        ![
+          'preview',
+          'prepareGroq',
+          'confirm',
+          'execute',
+          'route',
+          'read',
+          'status',
+          'reconcile',
+          'ack',
+        ].includes(action)
+      )
         throw new NuniError(404, 'NOT_FOUND');
       if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
       if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
@@ -64,25 +78,30 @@ export function createPlatformPublicAgentGateway(options: {
       }
       // Explicit boundaries prevent browser-provided identity or endpoint options.
       const names =
-        action === 'preview'
+        action === 'preview' || action === 'prepareGroq'
           ? ['schoolId', 'query', 'requestId']
           : action === 'confirm'
             ? ['approved', 'request']
             : action === 'execute'
               ? ['confirmationId', 'request']
-              : action === 'status'
-                ? ['task', 'schoolId']
-                : action === 'ack'
-                  ? ['task', 'schoolId', 'operationId', 'approved']
+              : action === 'route'
+                ? ['approved', 'operationId', 'request', 'fromId', 'toId']
+                : action === 'status'
+                  ? ['task', 'schoolId']
                   : action === 'reconcile'
                     ? ['task', 'schoolId', 'operationId']
-                    : ['task', 'data'];
+                    : action === 'ack'
+                      ? ['task', 'schoolId', 'operationId', 'approved']
+                      : ['task', 'data'];
       if (
         Object.keys(body).length !== names.length ||
         Object.keys(body).some((key) => !names.includes(key))
       )
         throw new NuniError(422, 'INVALID_INPUT');
-      if ((action === 'confirm' || action === 'ack') && body.approved !== true)
+      if (
+        (action === 'confirm' || action === 'ack' || action === 'route') &&
+        body.approved !== true
+      )
         throw new NuniError(409, 'PUBLIC_AGENT_CONFIRMATION_REQUIRED');
       const abort = new AbortController();
       let reject!: (error: NuniError) => void;
@@ -120,11 +139,15 @@ export function createPlatformPublicAgentGateway(options: {
         if (
           error instanceof NuniError &&
           [
+            'PUBLIC_AGENT_INVALID_INPUT',
+            'PUBLIC_AGENT_CONFIRMATION_REQUIRED',
+            'PUBLIC_AGENT_DESTINATION_UNCLEAR',
             'PUBLIC_AGENT_FREE_QUOTA_UNAVAILABLE',
             'PUBLIC_AGENT_OPEN_OPERATION',
             'PUBLIC_AGENT_OPERATION_NOT_FOUND',
             'PUBLIC_AGENT_OUTCOME_UNKNOWN',
             'PUBLIC_AGENT_SESSION_INVALID',
+            'PUBLIC_AGENT_SESSION_EXPIRED',
             'PUBLIC_AGENT_SOURCE_CHANGED',
             'PUBLIC_AGENT_INVALID_RESPONSE',
           ].includes(error.code)

@@ -3,6 +3,9 @@ import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourse
 import { NextRequest, NextResponse } from 'next/server';
 import { handleFood, isFoodResource } from './food';
 import { handlePersonalImportSync } from './personalImportSync';
+import { createPlatformPublicAgentGateway } from './platformPublicAgentGateway';
+import { createPlatformPublicAgentTransport } from './platformPublicAgentTransport';
+import { projectPlatformPublicAgent } from './platformPublicAgentProjector';
 import {
   createNuniClasses,
   NuniError,
@@ -136,6 +139,22 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         return jsonResponse({ google: false, studentId: studentIdSignInOption(request) });
       }
       throw new NuniError(404, 'NOT_FOUND');
+    }
+    // Disabled until the API, ledger, source reader and release are explicitly ready.
+    if (segments[0] === 'public-agent') {
+      if (segments.length !== 2 || process.env.CAMPUS_PUBLIC_AGENT_ENABLED !== 'true')
+        throw new NuniError(404, 'NOT_FOUND');
+      if (segments[1] === 'availability') {
+        if (request.method !== 'GET' || request.nextUrl.search)
+          throw new NuniError(400, 'INVALID_INPUT');
+        return jsonResponse({ enabled: true });
+      }
+      const gateway = createPlatformPublicAgentGateway({
+        enabled: true,
+        transport: createPlatformPublicAgentTransport(),
+        project: projectPlatformPublicAgent,
+      });
+      return await gateway(request, segments[1]);
     }
     const method = request.method;
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')

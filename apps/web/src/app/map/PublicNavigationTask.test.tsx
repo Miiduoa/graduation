@@ -407,3 +407,38 @@ describe('durable public navigation gate', () => {
     await screen.findByText('路線已建立');
   });
 });
+
+it('rejects an array pretending to be a completed status and keeps the task closed', async () => {
+  const call = vi.fn<PublicTaskPort['call']>(async () => ({
+    status: ['completed'],
+    operationId: id,
+  }));
+  render(<PublicNavigationTask port={make(call)} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('無法確認先前任務狀態');
+  expect(screen.queryByLabelText('起點與終點')).toBeNull();
+  expect(screen.queryByRole('button', { name: '結案並開始新任務' })).toBeNull();
+});
+it('shows expired login after execution while retaining the unknown-result lock', async () => {
+  const call = vi.fn<PublicTaskPort['call']>(async (action: string) => {
+    if (action === 'status') return null;
+    if (action === 'preview') return preview;
+    if (action === 'confirm') return { confirmationId: 'id' };
+    throw new Error('PUBLIC_AGENT_SESSION_EXPIRED');
+  });
+  render(<PublicNavigationTask port={make(call)} />);
+  await prepare();
+  fireEvent.click(screen.getByRole('button', { name: '確認並建立路線' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('登入已失效');
+  expect(alert.textContent).toContain('執行結果尚未確認');
+  expect(screen.queryByRole('button', { name: '確認並建立路線' })).toBeNull();
+  expect(screen.getByRole('button', { name: '查詢原任務' })).toBeTruthy();
+});
+it('offers login recovery rather than calling an expired session an unknown execution on initial status', async () => {
+  const call = vi.fn<PublicTaskPort['call']>(async () => {
+    throw new Error('PUBLIC_AGENT_SESSION_EXPIRED');
+  });
+  render(<PublicNavigationTask port={make(call)} />);
+  expect((await screen.findByRole('alert')).textContent).toContain('登入已失效');
+  expect(screen.queryByLabelText('起點與終點')).toBeNull();
+});

@@ -3,7 +3,7 @@
 本機可走完「公開校園導航 → 檢視資料 → 本人確認 → 一次執行 → 來源與路線回執」。
 使用地圖頁的 `PublicNavigationTask` 元件與真實 HTTP handler／service／ledger 程式；
 `serve-local.mjs` 才注入合成平台 session、序列化 SQL protocol fixture 與既有公開地點目錄。
-這個頁面使用合成 session／交易 fixture，不是真實登入或雲端模型驗證；另有隔離 PostgreSQL 驗證，見下方。
+這不是正式登入、正式資料庫或雲端模型驗證。候選 SQL 已在全新隔離的合成 PostgreSQL 叢集測試，未套用正式服務。
 
 ```sh
 node scripts/test-platform-public-agent.mjs
@@ -20,7 +20,7 @@ node scripts/platform-public-agent/serve-local.mjs
 
 - `PlatformPublicAdmission` 使用既有 `PlatformAccountService.resolveSession` 結構介面，不接受 JSON 身分、角色、學籍或 Firebase uid。
 - `PlatformPublicTaskService` 預設只提供確定性導航；只有 host 明確注入 Groq planner 並在 Fastify 組裝選擇 `freeTierVerified` 才能測試雲端計畫。此布林值不能證明帳戶免費資格，正式部署前須核實。
-- `createPlatformPublicAgentHandler` 預設關閉，沒有在 Next／Fastify 註冊。未新增環境開關、部署或 migration manifest。地圖也未收到 production port，因此正式入口維持不變。
+- Web `/api/nuni/public-agent/{action}` 與地圖 port 僅在 `CAMPUS_PUBLIC_AGENT_ENABLED=true` 且既有 Nuni API gate 啟用時提供；未配置時預設關閉。`createPlatformPublicAgentHandler` 和 Fastify 路由仍未註冊，尚未部署或註冊 migration。正式啟用前還須整合 #433 草稿／切校 scope 與實際 API。
 - 未來 host 須以既有受信 signed HttpOnly cookie／platform session 實作 `resolveHttpSession`，提供固定 origin，不能使用本機 fixture 的測試 header。handler 驗 POST、同源、custom header、session context、8 KiB body、完整期限與回應前 session；不接受跨校／跨帳號身分 JSON。
 - 確認綁任務、內容雜湊、來源 fingerprint、校園、provider/model 與 session。`deterministic/public-poi-exact-match-v1` 與 Groq 是不同綁定；只有公開導航接受前者。
 
@@ -38,7 +38,7 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 
 ## 仍未核實／啟用
 
-- `schema.candidate.sql` 已在自建隔離 PostgreSQL 的合成帳號表執行；未套用至正式服務或新增 GRANT。正式 DDL／grants、所有 lock／statement timeout、帳號清理與部署故障路徑尚未驗證。
+- `schema.candidate.sql` 已在新建隔離合成 PostgreSQL 測試，未套用正式服務或新增正式 GRANT；正式 DDL、grants、完整 migration 與未覆蓋鎖、statement timeout／commit 故障及帳號清理仍待驗證。
 - fixture 的序列化回滾不是 PostgreSQL 證據。實際 DB transaction 不會因 HTTP abort 自動取消。
 - 確認紀錄上限預設 1000，過期／已耗用也計入；未知操作不刪除。保留及容量清理政策尚未核定。
 - 身分與來源為順序檢查，不是分散式原子快照，最後來源讀取後仍有 TOCTOU 窗口。
@@ -46,7 +46,7 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 - 真 session BFF、正式公開來源 reader／包裝註冊、部署與任何免費雲端 provider 帳戶額度均未啟用或實測。
 - 歷史安全掃描 22 筆命中／4 筆權屬未明仍待處理；本切片沒有新增 ignore、縮減掃描或放寬安全閘門。
 
-Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組裝候選：沿用既有同源、加密平台 session cookie 與 session context 驗證，限制操作和輸入大小，gateway 只呼叫注入 transport 一次。它要求 host 提供經審查的單次 transport 與嚴格 response projector，不選擇或呼叫任何 upstream；不得沿用預設會重試的 `platformRequest`。帳校切換後的回應隔離仍需 UI scope 管理。
+Web BFF 復用 `platformPublicAgentGateway.ts`、固定路徑的 `platformPublicAgentTransport.ts` 和嚴格投影器；沿用同源、加密平台 session cookie 與 session context，單次傳送，不使用會重試的 `platformRequest`。上游九個操作路徑仍是候選，正式 API 尚未註冊。
 
 ## 重新載入後的未結案保護候選
 
@@ -56,7 +56,7 @@ Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組
 
 本機 PostgreSQL 17 隔離驗證可用 `node scripts/platform-public-agent/postgres-local-run.mjs`（目前 runner 使用 macOS Homebrew 的 `/opt/homebrew/opt/postgresql@17/bin`）。runner 自建私有暫存叢集，禁止 TCP，只在自有 Unix socket 及合成最小帳號表上套用候選 schema；清理僅限它所建叢集。一般 `node scripts/test-platform-public-agent.mjs` 不啟動資料庫，會將 PG 整合項標為 skip。
 
-該 SQL 仍未編號、未註冊、未套到任何連線服務。正式導入前需核現有未結案資料是否與唯一索引衝突並停下處理，不可自動刪除或自動結案；另須核 migration 執行順序、正式帳號 DDL／grants、連線與 lock／statement timeout、備份／保留、未知任務和解及故障恢復。Web gateway 的實際 upstream transport、嚴格回執投影、UI scope 與 session 重新驗證仍未註冊或啟用。
+該 SQL 仍未編號、未註冊、未套到任何連線服務。正式導入前需核現有未結案資料是否與唯一索引衝突並停下處理，不可自動刪除或自動結案；另須核 migration 執行順序、正式帳號 DDL／grants、連線與 lock／statement timeout、備份／保留、未知任務和解及故障恢復。Web 單次 transport 與回執投影已有本機組裝；正式上游 route、可信來源及 #433 UI scope／切校確認仍未整合，不能啟用。
 
 ## Groq 公開導航計畫候選（未註冊）
 
@@ -73,3 +73,5 @@ Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組
 候選表要求 `dispatch_fence_version=1` 且無 DEFAULT，新的 claim 明確寫入，舊版缺欄 INSERT 被拒並回滾 confirmation/quota。這只保護受相同 schema 約束的正常程式，無法抵擋有直接資料庫寫入權的惡意或錯誤程式。正式導入前必須證實所有執行路徑遵守 fence，並拒絕任何已有未標記 operation 的舊表／歷史資料；不得對歷史 NULL 補 1 或假稱未派送。若未確認 rolling mix、舊程序已停與 ACL，停止發布。
 
 `node scripts/platform-public-agent/full-migration-isolated-run.mjs --source <固定 tree b0a10ac 的獨立 checkout>` 只允許匹配 tree 且沒有未追蹤／工作樹漂移的來源，使用自行新建、無 TCP 的 PostgreSQL 17，透過該來源真正 `createDatabase` 套用完整原有 manifest，再以僅供測試的 `999_public_agent_isolated_test_only` 驗證增量、碰撞、checksum 失配、DDL／登記一體回滾及相同 manifest 的候選／回滾來源 verify。該測試使用本機 esbuild／Node 22 與合成角色，不是 OCI 映像、部署、正式 migration 編號、完整 ACL 或現況驗收；舊 image 不能直接回滾，需另建含完全一致新 manifest/checksum 的相容映像並驗證。
+
+Web signed-session 合成鏈可執行 `node scripts/platform-public-agent/web-bff-local.mjs`，再開啟 http://127.0.0.1:4319/web-bff.html。它使用實際 NuniSessionProvider、加密合成 HttpOnly cookie、handleNuni、gateway、單次 transport、投影器和 task service／ledger；上游由合成 API 攔截，交易是 protocol fixture，沒有真 Fastify、真 PostgreSQL、正式帳號、模型呼叫或正式部署。
