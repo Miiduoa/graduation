@@ -20,7 +20,7 @@ node scripts/platform-public-agent/serve-local.mjs
 
 - `PlatformPublicAdmission` 使用既有 `PlatformAccountService.resolveSession` 結構介面，不接受 JSON 身分、角色、學籍或 Firebase uid。
 - `PlatformPublicTaskService` 目前只啟用確定性公開導航，沒有模型呼叫或 fallback；Groq 任務回 executor unavailable。原入場層仍保留兩個公開任務的嚴格契約。
-- `createPlatformPublicAgentHandler` 預設關閉，沒有在 Next／Fastify 註冊。未新增環境開關、部署或 migration manifest。地圖也未收到 production port，因此正式入口維持不變。
+- Web `/api/nuni/public-agent/{action}` 與地圖 port 僅在 `CAMPUS_PUBLIC_AGENT_ENABLED=true` 且既有 Nuni API gate 啟用時提供；未配置時預設關閉。`createPlatformPublicAgentHandler` 和 Fastify 仍未註冊，沒有部署或 migration manifest。正式啟用前還須整合 #433 草稿／切校 scope 與實際 API。
 - 未來 host 須以既有受信 signed HttpOnly cookie／platform session 實作 `resolveHttpSession`，提供固定 origin，不能使用本機 fixture 的測試 header。handler 驗 POST、同源、custom header、session context、8 KiB body、完整期限與回應前 session；不接受跨校／跨帳號身分 JSON。
 - 確認綁任務、內容雜湊、來源 fingerprint、校園、provider/model 與 session。`deterministic/public-poi-exact-match-v1` 與 Groq 是不同綁定；只有公開導航接受前者。
 
@@ -46,7 +46,7 @@ UI 確認前不執行，取消回輸入並恢復焦點；換帳校會卸載舊�
 - 真 session BFF、正式公開來源 reader／包裝註冊、部署與任何免費雲端 provider 帳戶額度均未啟用或實測。
 - 歷史安全掃描 22 筆命中／4 筆權屬未明仍待處理；本切片沒有新增 ignore、縮減掃描或放寬安全閘門。
 
-Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組裝候選：沿用既有同源、加密平台 session cookie 與 session context 驗證，限制操作和輸入大小，gateway 只呼叫注入 transport 一次。它要求 host 提供經審查的單次 transport 與嚴格 response projector，不選擇或呼叫任何 upstream；不得沿用預設會重試的 `platformRequest`。帳校切換後的回應隔離仍需 UI scope 管理。
+Web BFF 復用 `platformPublicAgentGateway.ts`、固定路徑的 `platformPublicAgentTransport.ts` 和嚴格投影器；沿用同源、加密平台 session cookie 與 session context，單次傳送，不使用會重試的 `platformRequest`。上游六個路徑仍是候選，正式 API 尚未註冊。
 
 ## 重新載入後的未結案保護候選
 
@@ -56,4 +56,6 @@ Web 另有未註冊的 `apps/web/src/lib/nuni/platformPublicAgentGateway.ts` 組
 
 本機 PostgreSQL 17 隔離驗證可用 `node scripts/platform-public-agent/postgres-local-run.mjs`（目前 runner 使用 macOS Homebrew 的 `/opt/homebrew/opt/postgresql@17/bin`）。runner 自建私有暫存叢集，禁止 TCP，只在自有 Unix socket 及合成最小帳號表上套用候選 schema；清理僅限它所建叢集。一般 `node scripts/test-platform-public-agent.mjs` 不啟動資料庫，會將 PG 整合項標為 skip。
 
-該 SQL 仍未編號、未註冊、未套到任何連線服務。正式導入前需核現有未結案資料是否與唯一索引衝突並停下處理，不可自動刪除或自動結案；另須核 migration 執行順序、正式帳號 DDL／grants、連線與 lock／statement timeout、備份／保留、未知任務和解及故障恢復。Web gateway 的實際 upstream transport、嚴格回執投影、UI scope 與 session 重新驗證仍未註冊或啟用。
+該 SQL 仍未編號、未註冊、未套到任何連線服務。正式導入前需核現有未結案資料是否與唯一索引衝突並停下處理，不可自動刪除或自動結案；另須核 migration 執行順序、正式帳號 DDL／grants、連線與 lock／statement timeout、備份／保留、未知任務和解及故障恢復。Web 單次 transport 與回執投影已有本機組裝；正式上游 route、可信來源及 #433 UI scope／切校確認仍未整合，不能啟用。
+
+Web signed-session 合成鏈可執行 `node scripts/platform-public-agent/web-bff-local.mjs`，再開啟 http://127.0.0.1:4319/web-bff.html。它使用實際 NuniSessionProvider、加密合成 HttpOnly cookie、handleNuni、gateway、單次 transport、投影器和 task service／ledger；上游由合成 API 攔截，交易是 protocol fixture，沒有真 Fastify、真 PostgreSQL、正式帳號、模型呼叫或正式部署。
