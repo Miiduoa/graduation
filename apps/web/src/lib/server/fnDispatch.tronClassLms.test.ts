@@ -359,6 +359,48 @@ it('rejects an in-flight course read when its linked session changes before comp
   expect(store.docs.get(CACHE)?.extras).toEqual({});
 });
 
+it.each([
+  { scenario: 'homework-list cache hit', data: {} },
+  { scenario: 'course-contents cache hit', data: { courseId: 10001 } },
+  { scenario: 'cached list with an unknown course', data: { courseId: 99999 } },
+])('does not return $scenario after the linked session changes during cache lookup', async ({ data }) => {
+  const { request, source, store } = setup();
+  expect((await request(data)).status).toBe(200);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+
+  // Simulate a legitimate reconnect after the initial session check, while
+  // Firestore is returning the already saved cache. No school HTTP call occurs.
+  const originalDoc = store.db.doc.bind(store.db);
+  let switched = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      get: async () => {
+        const snapshot = await ref.get();
+        switched = true;
+        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+        return snapshot;
+      },
+    };
+  });
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchActivities).mockClear();
+
+  const response = await request(data);
+  expect(switched).toBe(true);
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source } = setup();
   vi.stubEnv('SCHOOL_LMS_READONLY_ENABLED', 'false');
