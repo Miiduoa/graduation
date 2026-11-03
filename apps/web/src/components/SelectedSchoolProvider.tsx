@@ -13,6 +13,11 @@ import {
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { defaultBrowseSchoolId } from '@/lib/defaultBrowseSchool';
+import {
+  discardActiveCampusDrafts,
+  hasCampusDraftActivity,
+} from './CampusDraftProvider';
+import { ConfirmModal } from './ui/Modal';
 
 export type BrowseSchool = {
   id: string;
@@ -197,6 +202,13 @@ export function SelectedSchoolProvider({
     ? (catalog.find((school) => school.id === requestedId) ?? null)
     : null;
   const unavailable = ready && requestedId !== null && selectedSchool === null;
+  const [confirmationOwner, setConfirmationOwner] = useState(storageKey);
+  const [pendingSchoolId, setPendingSchoolId] = useState<string | null | undefined>(undefined);
+  if (confirmationOwner !== storageKey) {
+    setConfirmationOwner(storageKey);
+    setPendingSchoolId(undefined);
+  }
+  const pendingSwitch = pendingSchoolId !== undefined;
 
   useEffect(() => {
     const pending = pendingEventSchool.current;
@@ -205,7 +217,7 @@ export function SelectedSchoolProvider({
       pendingEventSchool.current = null;
       return;
     }
-    if (pathname !== '/events' || !ready || requestedId !== pending.id) return;
+    if (pathname !== '/events' || !ready || unavailable || requestedId !== pending.id) return;
     pendingEventSchool.current = null;
     let storageError: string | null = null;
     try {
@@ -215,15 +227,19 @@ export function SelectedSchoolProvider({
     }
     // Persist only once navigation has left the old campus-scoped event detail.
     setPreference({ scope, schoolId: pending.id, stored: true, storageError });
-  }, [pathname, ready, requestedId, scope, storageKey]);
+  }, [pathname, ready, requestedId, scope, storageKey, unavailable]);
 
-  function selectSchool(id: string | null) {
-    if (
-      activeScope.current !== scope ||
-      !ready ||
-      (id !== null && !catalog.some((school) => school.id === id))
-    )
-      return;
+  function canCommitSchool(id: string | null) {
+    return (
+      activeScope.current === scope &&
+      ready &&
+      (id === null || catalog.some((school) => school.id === id))
+    );
+  }
+
+  function commitSchool(id: string | null): boolean {
+    if (!canCommitSchool(id)) return false;
+    setPendingSchoolId(undefined);
     const leaveEventDetail =
       /^\/events\/[^/]+\/?$/.test(pathname) && (selectedSchool?.id ?? null) !== id;
     const next = new URLSearchParams(leaveEventDetail ? undefined : params?.toString());
@@ -257,6 +273,16 @@ export function SelectedSchoolProvider({
       setPreference({ scope, schoolId: id, stored: true, storageError });
     }
     router.replace(`${targetPath}?${next.toString()}${fragment}`, { scroll: false });
+    return true;
+  }
+
+  function selectSchool(id: string | null) {
+    if (!canCommitSchool(id) || id === (selectedSchool?.id ?? null)) return;
+    if (hasCampusDraftActivity()) {
+      setPendingSchoolId(id);
+      return;
+    }
+    commitSchool(id);
   }
 
   return (
@@ -275,6 +301,32 @@ export function SelectedSchoolProvider({
       }}
     >
       {children}
+      <ConfirmModal
+        isOpen={pendingSwitch}
+        onClose={() => setPendingSchoolId(undefined)}
+        onConfirm={() => {
+          if (pendingSchoolId === undefined) return;
+          if (
+            pendingSchoolId !== null &&
+            !catalog.some((school) => school.id === pendingSchoolId)
+          ) {
+            setPendingSchoolId(undefined);
+            return;
+          }
+          // 先確認可換校再捨棄草稿；無法 commit 時關閉確認、草稿保留。
+          if (!canCommitSchool(pendingSchoolId)) {
+            setPendingSchoolId(undefined);
+            return;
+          }
+          discardActiveCampusDrafts();
+          commitSchool(pendingSchoolId);
+        }}
+        title="切換校園？"
+        message="目前校園還有未送出的草稿。保留在原校可繼續編輯；捨棄後才會切換到新校園，草稿不會帶到另一所學校。"
+        confirmText="捨棄草稿並切換"
+        cancelText="保留在原校"
+        variant="warning"
+      />
     </SelectedSchoolContext.Provider>
   );
 }

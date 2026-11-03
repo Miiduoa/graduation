@@ -8,7 +8,17 @@ export type StudyAgendaFilter =
   | 'closed'
   | 'all';
 
-const contextKeys = ['campus', 'schoolId', 'school', 'q', 'courses', 'task', 'taskCourse'] as const;
+const contextKeys = [
+  'campus',
+  'schoolId',
+  'school',
+  'q',
+  'courses',
+  'task',
+  'taskCourse',
+  'from',
+  'code',
+] as const;
 
 export function courseDirectoryFilter(value: string | null): CourseDirectoryFilter {
   return value === 'studying' || value === 'teaching' || value === 'archived' ? value : 'all';
