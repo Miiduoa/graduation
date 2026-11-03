@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated as RNAnimated,
+  AppState,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -26,7 +27,6 @@ import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useAuth } from '../state/auth';
 import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
-import { useDataSource } from '../hooks/useDataSource';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import {
   arrayUnion,
@@ -43,7 +43,12 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
-import { recallChatMessage, toggleMessageReaction } from '../services/messaging';
+import {
+  newChatMessageId,
+  recallChatMessage,
+  sendChatMessageIdempotent,
+  toggleMessageReaction,
+} from '../services/messaging';
 import { deriveDmConversationId } from '../utils/conversationAccess';
 import {
   getPersona,
@@ -51,6 +56,27 @@ import {
   getPersonaConversations,
   isDemoPersonaUid,
 } from '../data/demoPersona';
+import {
+  canRetryDmSend,
+  classifyDmSendFailure,
+  clearOutboundDraftsForUser,
+  clearOutboundPreview,
+  clearOutboundPreviewsForUser,
+  confirmedServerMessageIds,
+  dmSendStatusLabel,
+  DM_SEND_CONTENT_MAX,
+  DM_SEND_RETRY_A11Y,
+  DM_SEND_RETRY_LABEL,
+  DM_SEND_STATUS_A11Y,
+  latestOutboundDraft,
+  mergeOutboundWithServerMessages,
+  nextDmSendStatus,
+  pruneConfirmedOutbound,
+  readOutboundDrafts,
+  setOutboundPreview,
+  writeOutboundDrafts,
+  type DmOutboundDraft,
+} from './messagingInboxModel';
 
 // ═══════ Types ═══════
 
@@ -67,6 +93,8 @@ type Msg = {
   fileUrl?: string;
   reactions?: Record<string, string[]>;
   recalledAt?: any;
+  localStatus?: DmOutboundDraft['status'];
+  local?: boolean;
 };
 
 type ConvoMeta = {
@@ -121,7 +149,6 @@ export function ChatScreen(props: any) {
   const conversationTitle = props?.route?.params?.conversationTitle as string | undefined;
   const auth = useAuth();
   const { school } = useSchool();
-  const ds = useDataSource();
   const db = getDb();
 
   const [peerId, setPeerId] = useState<string | undefined>(peerParam);
@@ -132,6 +159,7 @@ export function ChatScreen(props: any) {
 
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [outbound, setOutbound] = useState<DmOutboundDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
@@ -144,11 +172,23 @@ export function ChatScreen(props: any) {
   const fetchedUids = useRef<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendLockRef = useRef(false);
+  const retryLockRef = useRef<Set<string>>(new Set());
+  const scopeRef = useRef<string>('');
+  /** 畫面仍掛載時才更新 UI；失敗狀態落盤不依賴此旗標。 */
+  const screenAliveRef = useRef(true);
   /**
    * 跨對話切換的隔離鍵：每次 convoKey 變化都記錄目前生效的對話，
    * 防止上一個對話遲到回來的 snapshot 把訊息塞回 state，導致看到別人的對話。
    */
   const activeConvoKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    screenAliveRef.current = true;
+    return () => {
+      screenAliveRef.current = false;
+    };
+  }, []);
 
   const myUid = auth.user?.uid;
 
@@ -157,6 +197,80 @@ export function ChatScreen(props: any) {
     if (!myUid || !peerId || !school.id) return null;
     return dmId(school.id, myUid, peerId);
   }, [conversationIdParam, myUid, peerId, school.id]);
+
+  const sendScope = `${myUid ?? ''}:${school.id ?? ''}:${convoKey ?? ''}`;
+
+  useEffect(() => {
+    scopeRef.current = sendScope;
+  }, [sendScope]);
+
+  // 切帳號時清掉未確認草稿，避免把別人的未確認氣泡當成已送達。
+  // 僅在 uid 真的變更時清進程內草稿；首次 mount 需保留以便離開再進房還原。
+  const accountUidRef = useRef<string | undefined>(myUid);
+  useEffect(() => {
+    if (accountUidRef.current === myUid) return;
+    accountUidRef.current = myUid;
+    clearOutboundPreviewsForUser(null);
+    clearOutboundDraftsForUser(null);
+    setOutbound([]);
+    setSending(false);
+    sendLockRef.current = false;
+    retryLockRef.current.clear();
+  }, [myUid]);
+
+  // 進程內依 conversationId 還原 outbound（離開再進房仍可重試）；失敗原文一併填回輸入框。
+  useEffect(() => {
+    setSending(false);
+    sendLockRef.current = false;
+    if (!convoKey || !myUid) {
+      setOutbound([]);
+      return;
+    }
+    const restored = readOutboundDrafts(convoKey, myUid);
+    setOutbound(restored);
+    const latest = latestOutboundDraft(restored, convoKey);
+    if (latest && (latest.status === 'failed' || latest.status === 'unconfirmed')) {
+      setText(latest.content);
+    } else {
+      setText('');
+    }
+  }, [convoKey, myUid]);
+
+  const persistOutbound = useCallback(
+    (rows: DmOutboundDraft[]) => {
+      if (!convoKey || !myUid) return;
+      writeOutboundDrafts(convoKey, rows);
+      const mine = latestOutboundDraft(rows, convoKey);
+      if (mine) {
+        setOutboundPreview(convoKey, { uid: myUid, status: mine.status, text: mine.content });
+      } else {
+        clearOutboundPreview(convoKey, myUid);
+      }
+    },
+    [convoKey, myUid],
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') return;
+      setOutbound((prev) => {
+        const next = prev.map((row) => {
+          const status = nextDmSendStatus(row.status, 'background');
+          if (!status || status === 'delivered' || status === row.status) return row;
+          return { ...row, status };
+        });
+        if (convoKey) {
+          writeOutboundDrafts(convoKey, next);
+          const mine = latestOutboundDraft(next, convoKey);
+          if (mine && myUid) {
+            setOutboundPreview(convoKey, { uid: myUid, status: mine.status, text: mine.content });
+          }
+        }
+        return next;
+      });
+    });
+    return () => sub.remove();
+  }, [convoKey, myUid]);
 
   /* 由對話列表進入時，用 conversationId 反查對象（DM）。
    * 若使用者不是成員，Firestore 規則會回傳 permission-denied，
@@ -328,6 +442,7 @@ export function ChatScreen(props: any) {
 
     const unsub = onSnapshot(
       qy,
+      { includeMetadataChanges: true },
       (snapshot) => {
         // 防呆：若 callback 抵達時 convoKey 已切換，直接丟棄，不把舊對話的訊息塞回 state。
         if (activeConvoKeyRef.current !== convoKey) return;
@@ -336,7 +451,26 @@ export function ChatScreen(props: any) {
           id: d.id,
           ...(d.data() as any),
         })) as Msg[];
+        // 僅 !hasPendingWrites（server 確認）才 prune／視為已送達；pending 維持送出中／未確認。
+        const confirmedIds = confirmedServerMessageIds(snapshot.docs);
         setMessages(rows);
+        setOutbound((prev) => {
+          const next = pruneConfirmedOutbound(prev, confirmedIds);
+          if (convoKey && myUid) {
+            writeOutboundDrafts(convoKey, next);
+            const stillMine = latestOutboundDraft(next, convoKey);
+            if (stillMine) {
+              setOutboundPreview(convoKey, {
+                uid: myUid,
+                status: stillMine.status,
+                text: stillMine.content,
+              });
+            } else {
+              clearOutboundPreview(convoKey, myUid);
+            }
+          }
+          return next.length === prev.length ? prev : next;
+        });
         setLoading(false);
 
         // 自動標為已讀（用 arrayUnion 避免覆寫他人 readBy）
@@ -487,83 +621,222 @@ export function ChatScreen(props: any) {
     }
   };
 
+  const dispatchOutbound = useCallback(
+    async (draft: DmOutboundDraft) => {
+      const scopeAtStart = `${myUid ?? ''}:${school.id ?? ''}:${draft.conversationId}`;
+      const stillHere = () => screenAliveRef.current && scopeRef.current === scopeAtStart;
+      try {
+        if (isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
+          // Demo／mock：沿用固定 draft.id，重試不另建；不走會自產新 id 的 ds.sendMessage。
+          const existing = readOutboundDrafts(draft.conversationId, draft.senderId);
+          const next = existing.filter((row) => row.id !== draft.id);
+          writeOutboundDrafts(draft.conversationId, next);
+          const mine = latestOutboundDraft(next, draft.conversationId);
+          if (mine) {
+            setOutboundPreview(draft.conversationId, {
+              uid: draft.senderId,
+              status: mine.status,
+              text: mine.content,
+            });
+          } else {
+            clearOutboundPreview(draft.conversationId, draft.senderId);
+          }
+          if (!stillHere()) return;
+          setMessages((prev) =>
+            prev.some((row) => row.id === draft.id)
+              ? prev
+              : [
+                  ...prev,
+                  {
+                    id: draft.id,
+                    senderId: draft.senderId,
+                    content: draft.content,
+                    type: 'text',
+                    createdAt: { seconds: Math.floor(draft.createdAtMs / 1000) },
+                    readBy: [draft.senderId],
+                  },
+                ],
+          );
+          setOutbound(next);
+        } else {
+          await sendChatMessageIdempotent({
+            conversationId: draft.conversationId,
+            messageId: draft.id,
+            senderId: draft.senderId,
+            content: draft.content,
+            type: 'text',
+          });
+          if (!stillHere()) return;
+          // 真實寫入成功後仍保留 outbound，直到 snapshot 以 !hasPendingWrites 確認同 id，
+          // 避免短暫消失，也避免尚未確認時顯示「已送達」。
+        }
+        if (!stillHere()) return;
+        try {
+          const { aiBrain } = await import('../services/aiBrain');
+          aiBrain.reportToolOutcome(
+            'send_message',
+            {
+              peerId,
+              conversationId: draft.conversationId,
+              contentPreview: draft.content.slice(0, 60),
+              length: draft.content.length,
+            },
+            'success',
+            undefined,
+            `傳訊息給 ${peerId}：${draft.content.slice(0, 30)}`,
+          );
+        } catch (brainErr) {
+          console.warn('[ChatScreen] brain.observe failed:', brainErr);
+        }
+        void (async () => {
+          try {
+            const { companionThrottleMinInterval } = await import('../utils/companionSignalThrottle');
+            const ok = await companionThrottleMinInterval('chat_sent', 60_000);
+            if (!ok) return;
+            const { recordCompanionFeatureSignal } = await import('../services/companionEngine');
+            await recordCompanionFeatureSignal('chat_sent');
+          } catch {
+            /* optional */
+          }
+        })();
+      } catch (e: any) {
+        const kind = classifyDmSendFailure(e);
+        const status = nextDmSendStatus(draft.status, kind === 'failed' ? 'known_failure' : 'uncertain');
+        if (!status || status === 'delivered') return;
+        // 先依 conversationId 落盤，避免送出中離房後失敗回呼無法 setState、草稿停在 sending。
+        const existing = readOutboundDrafts(draft.conversationId, draft.senderId);
+        const next = existing.some((row) => row.id === draft.id)
+          ? existing.map((row) => (row.id === draft.id ? { ...row, status } : row))
+          : [...existing, { ...draft, status }];
+        writeOutboundDrafts(draft.conversationId, next);
+        setOutboundPreview(draft.conversationId, {
+          uid: draft.senderId,
+          status,
+          text: draft.content,
+        });
+        if (!stillHere()) return;
+        // 對齊網頁：失敗／未確認時把原文放回輸入框，保留同一則可重試。
+        setText(draft.content);
+        setOutbound(next);
+        try {
+          const { aiBrain } = await import('../services/aiBrain');
+          aiBrain.reportToolOutcome(
+            'send_message',
+            { peerId, conversationId: draft.conversationId, length: draft.content.length },
+            'failure',
+            e?.message,
+          );
+        } catch (brainErr) {
+          console.warn('[ChatScreen] brain.observe failed:', brainErr);
+        }
+      }
+    },
+    [myUid, peerId, school.id],
+  );
+
+  const onRetryOutbound = useCallback(
+    async (messageId: string) => {
+      if (!myUid || !convoKey) return;
+      const target = outbound.find((row) => row.id === messageId);
+      if (!target || !canRetryDmSend(target.status)) return;
+      if (retryLockRef.current.has(messageId)) return;
+      retryLockRef.current.add(messageId);
+      const nextStatus = nextDmSendStatus(target.status, 'retry');
+      if (nextStatus !== 'sending') {
+        retryLockRef.current.delete(messageId);
+        return;
+      }
+      const draft: DmOutboundDraft = { ...target, status: 'sending' };
+      setOutbound((prev) => {
+        const next = prev.map((row) => (row.id === messageId ? draft : row));
+        persistOutbound(next);
+        return next;
+      });
+      try {
+        await ensureConversation();
+        await dispatchOutbound(draft);
+      } finally {
+        retryLockRef.current.delete(messageId);
+      }
+    },
+    [convoKey, dispatchOutbound, myUid, outbound, persistOutbound],
+  );
+
   // ── 發送訊息 ──
   const onSend = async () => {
     if (!myUid || !convoKey || !text.trim()) return;
     if (!conversationIdParam && !peerId) return;
-    setSending(true);
+    if (sendLockRef.current || sending) return;
     const draftText = text.trim();
+    const messageContent = refPostId ? `${draftText}\n\n📎 引用貼文：${refPostId}` : draftText;
+    if (messageContent.length > DM_SEND_CONTENT_MAX) {
+      Alert.alert('無法送出', `訊息不可超過 ${DM_SEND_CONTENT_MAX} 字`);
+      return;
+    }
+    // 可重試 outbound 且內容相同時，主傳送改走既有 draft id，避免另建一則雙發。
+    const retryable = outbound.find(
+      (row) =>
+        row.conversationId === convoKey &&
+        canRetryDmSend(row.status) &&
+        row.content === messageContent,
+    );
+    if (retryable) {
+      setText('');
+      await onRetryOutbound(retryable.id);
+      return;
+    }
+    sendLockRef.current = true;
+    setSending(true);
+    // Demo／mock 也固定 draft.id 供重試重放；真實路徑用 Firestore 預產 id。
+    const messageId =
+      isFirebaseMockMode() || isDemoPersonaUid(myUid)
+        ? `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        : newChatMessageId(convoKey);
+    const draft: DmOutboundDraft = {
+      id: messageId,
+      conversationId: convoKey,
+      senderId: myUid,
+      content: messageContent,
+      status: 'sending',
+      createdAtMs: Date.now(),
+    };
+    setText('');
+    setOutbound((prev) => {
+      const next = [...prev, draft];
+      persistOutbound(next);
+      return next;
+    });
     try {
       await ensureConversation();
-      const messageContent = refPostId ? `${draftText}\n\n📎 引用貼文：${refPostId}` : draftText;
-      await ds.sendMessage({
-        conversationId: convoKey,
-        senderId: myUid,
-        content: messageContent,
-        type: 'text',
-      });
-      // 更新對話的 lastMessage
-      const convoRef = doc(db, 'conversations', convoKey);
-      await updateDoc(convoRef, {
-        lastMessageText: draftText.slice(0, 50),
-        lastMessageAt: serverTimestamp(),
-        lastMessageSenderId: myUid,
-        updatedAt: serverTimestamp(),
-        [`typingUsers.${myUid}`]: null,
-      }).catch(() => {});
-      try {
-        const { aiBrain } = await import('../services/aiBrain');
-        aiBrain.reportToolOutcome(
-          'send_message',
-          {
-            peerId,
-            conversationId: convoKey,
-            contentPreview: draftText.slice(0, 60),
-            length: draftText.length,
-          },
-          'success',
-          undefined,
-          `傳訊息給 ${peerId}：${draftText.slice(0, 30)}`,
-        );
-      } catch (brainErr) {
-        console.warn('[ChatScreen] brain.observe failed:', brainErr);
-      }
-      setText('');
-      void (async () => {
-        try {
-          const { companionThrottleMinInterval } = await import('../utils/companionSignalThrottle');
-          const ok = await companionThrottleMinInterval('chat_sent', 60_000);
-          if (!ok) return;
-          const { recordCompanionFeatureSignal } = await import('../services/companionEngine');
-          await recordCompanionFeatureSignal('chat_sent');
-        } catch {
-          /* optional */
-        }
-      })();
-    } catch (e: any) {
-      try {
-        const { aiBrain } = await import('../services/aiBrain');
-        aiBrain.reportToolOutcome(
-          'send_message',
-          { peerId, conversationId: convoKey, length: draftText.length },
-          'failure',
-          e?.message,
-        );
-      } catch (brainErr) {
-        console.warn('[ChatScreen] brain.observe failed:', brainErr);
-      }
-      Alert.alert('發送失敗', e?.message ?? '未知錯誤');
+      await dispatchOutbound(draft);
     } finally {
-      setSending(false);
+      sendLockRef.current = false;
+      if (screenAliveRef.current && scopeRef.current.endsWith(`:${convoKey}`)) setSending(false);
     }
   };
 
   // ── 搜尋過濾 ──
   const filteredMessages = useMemo(() => {
-    if (!searchQuery.trim()) return messages;
+    const merged = mergeOutboundWithServerMessages(messages, outbound, convoKey ?? '').map((row) => {
+      if ('local' in row && row.local) {
+        const draft = row as DmOutboundDraft & { local: true };
+        return {
+          id: draft.id,
+          senderId: draft.senderId,
+          content: draft.content,
+          type: 'text' as const,
+          createdAt: { seconds: Math.floor(draft.createdAtMs / 1000) },
+          readBy: [draft.senderId],
+          localStatus: draft.status,
+          local: true,
+        } satisfies Msg;
+      }
+      return row as Msg;
+    });
+    if (!searchQuery.trim()) return merged;
     const q = searchQuery.toLowerCase();
-    return messages.filter((m) => (m.content ?? m.text ?? '').toLowerCase().includes(q));
-  }, [messages, searchQuery]);
+    return merged.filter((m) => (m.content ?? m.text ?? '').toLowerCase().includes(q));
+  }, [messages, outbound, searchQuery, convoKey]);
 
   // ── 已讀狀態顯示 ──
   const isRead = useCallback(
@@ -645,9 +918,40 @@ export function ChatScreen(props: any) {
           <View style={[s.metaRow, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
             <Text style={s.timeText}>{formatTime(item.createdAt)}</Text>
             {mine && !item.recalledAt && (
-              <Text style={[s.readReceipt, read ? s.readReceiptRead : null]}>
-                {read ? '已讀' : '已送達'}
+              <Text
+                accessibilityLabel={
+                  item.localStatus
+                    ? DM_SEND_STATUS_A11Y[item.localStatus]
+                    : read
+                      ? '已讀'
+                      : '已送達'
+                }
+                style={[
+                  s.readReceipt,
+                  item.localStatus === 'failed'
+                    ? s.sendStatusFailed
+                    : item.localStatus === 'unconfirmed'
+                      ? s.sendStatusUnconfirmed
+                      : read
+                        ? s.readReceiptRead
+                        : null,
+                ]}
+              >
+                {item.localStatus
+                  ? dmSendStatusLabel(item.localStatus)
+                  : dmSendStatusLabel('delivered', read)}
               </Text>
+            )}
+            {mine && item.localStatus && canRetryDmSend(item.localStatus) && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={DM_SEND_RETRY_A11Y}
+                hitSlop={8}
+                onPress={() => onRetryOutbound(item.id)}
+                style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.7 }]}
+              >
+                <Text style={s.retryBtnText}>{DM_SEND_RETRY_LABEL}</Text>
+              </Pressable>
             )}
           </View>
         </Pressable>
@@ -741,10 +1045,12 @@ export function ChatScreen(props: any) {
             placeholder="輸入訊息..."
             placeholderTextColor={theme.colors.muted}
             multiline
-            maxLength={2000}
+            maxLength={DM_SEND_CONTENT_MAX}
             style={s.textInput}
           />
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={sending ? '訊息送出中' : '傳送訊息'}
             onPress={onSend}
             disabled={!text.trim() || sending}
             style={({ pressed }) => [
@@ -845,6 +1151,18 @@ const createStyles = () => StyleSheet.create({
   timeText: { color: theme.colors.muted, fontSize: 10 },
   readReceipt: { fontSize: 10, color: theme.colors.muted },
   readReceiptRead: { color: theme.colors.accent },
+  sendStatusFailed: { color: theme.colors.danger, fontWeight: '700' },
+  sendStatusUnconfirmed: { color: theme.colors.warning, fontWeight: '600' },
+  retryBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  retryBtnText: { color: theme.colors.accent, fontSize: 12, fontWeight: '700' },
   typingBar: {
     flexDirection: 'row',
     alignItems: 'center',

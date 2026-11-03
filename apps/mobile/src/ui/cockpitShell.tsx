@@ -46,7 +46,7 @@ export function CockpitHero(props: { eyebrow: string; title: string; summary?: s
             }}
             numberOfLines={1}
           >
-            Campus One
+            nuni
           </Text>
         </View>
         <View

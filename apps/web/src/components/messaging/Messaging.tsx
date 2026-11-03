@@ -1,5 +1,12 @@
 'use client';
 
+import {
+  notificationListFilter,
+  notificationTypeLabel,
+  notificationCampusLabel,
+} from '@campus/shared/src/notificationListFilter';
+
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { findSchoolById } from '@campus/shared/src/schools';
@@ -695,9 +702,11 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
       if (isCurrent()) setPending(null);
     }
   };
-  const rows = (state.data?.notifications ?? []).filter(
-    (notification) => !onlyUnread || !notification.read,
+  const rows = notificationListFilter(
+    state.data?.notifications ?? [],
+    onlyUnread ? 'unread' : 'all',
   );
+  const unreadCount = notificationListFilter(state.data?.notifications ?? [], 'unread').length;
   return (
     <div className={styles.stack}>
       <div className={styles.toolbar}>
@@ -714,7 +723,8 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
         </button>
       </div>
       <p className={styles.muted}>
-        查看目前學校與你的帳號收到的近期通知。開啟通知中的連結，可以前往處理。
+        只含已載入的近期通知（每個來源最多 50
+        則），不代表完整通知紀錄。開啟通知中的連結，可以前往處理。
       </p>
       <StateNotice status={state.status} retry={retry} />
       {error && (
@@ -724,6 +734,9 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
       )}
       {state.status === 'ready' && (
         <>
+          <p role="status" className={styles.muted}>
+            {unreadCount} 則未讀（只含已載入）
+          </p>
           {!!state.data?.unscopedCount && (
             <p className={styles.muted}>部分通知尚未標示學校，未列入本頁。</p>
           )}
@@ -742,6 +755,10 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
                       <h2>{notification.title || '通知'}</h2>
                       {!notification.read && <span className={styles.badge}>未讀</span>}
                     </div>
+                    <p className={styles.muted}>
+                      {notificationTypeLabel(notification.type)} ·{' '}
+                      {notificationCampusLabel(notification.data)}
+                    </p>
                     <p>{notification.body}</p>
                     <time className={styles.muted} dateTime={notification.createdAt ?? undefined}>
                       {time(notification.createdAt)}

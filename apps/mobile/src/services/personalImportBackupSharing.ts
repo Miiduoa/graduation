@@ -24,7 +24,7 @@ const nativeShare: BackupShareDependencies = {
     shareAsync(uri, {
       mimeType: 'application/json',
       UTI: 'public.json',
-      dialogTitle: '保存 Campus One 個人資料備份',
+      dialogTitle: '保存 nuni 個人資料備份',
     }),
 };
 

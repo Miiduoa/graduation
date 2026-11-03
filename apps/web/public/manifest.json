@@ -1,6 +1,6 @@
 {
-  "name": "Campus One",
-  "short_name": "Campus One",
+  "name": "nuni",
+  "short_name": "nuni",
   "description": "課程、待辦與校園生活",
   "start_url": "/",
   "display": "standalone",

@@ -43,7 +43,7 @@ jobs:
         run: pnpm --filter mobile test src/__tests__/SchoolPortalImport.test.tsx src/__tests__/SchoolPortalSession.test.tsx src/__tests__/SchoolPortalReview.test.tsx src/__tests__/SchoolPortalReimport.test.tsx src/__tests__/GuestLoginScreens.test.tsx --ci --json --outputFile=portal-jest-results.json
       - name: Preserve machine-readable results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: school-portal-test-results
           path: |

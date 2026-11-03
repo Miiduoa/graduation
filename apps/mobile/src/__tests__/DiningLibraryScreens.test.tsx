@@ -417,7 +417,7 @@ test('borrowing and renewal open the official personal account instead of local 
 test('library web search encodes the query, and another school cannot open PU service links', async () => {
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'A&B');
-  await act(async () => fireEvent.press(view.getByText('在圖書館網站搜尋')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   expect(Linking.openURL).toHaveBeenCalledWith(
     'https://webpacx.lib.pu.edu.tw/search?searchField=FullText&searchInput=A%26B',
   );
@@ -432,6 +432,111 @@ test('library account switches clear the previous keyword', () => {
   view.rerender(<LibraryAiFirstScreen />);
   expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
 });
+
+test('library fallback explains manual pasting before any clipboard or browser action', () => {
+  mockSchool = { id: 'cgu' };
+  const view = render(<LibraryAiFirstScreen />);
+  expect(
+    view.getByText('這個入口不會自動帶入關鍵字。開啟後請將關鍵字貼到館藏網站的搜尋欄位；是否可借請以館方系統為準。'),
+  ).toBeTruthy();
+  expect(view.getByRole('button', { name: '複製關鍵字並開啟館藏網站' })).toBeDisabled();
+  expect(view.getByRole('button', { name: '開啟館藏網站' })).not.toBeDisabled();
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 護理 ');
+  expect(view.getByRole('button', { name: '複製關鍵字並開啟館藏網站' })).not.toBeDisabled();
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  expect(view.queryByText('已複製關鍵字，請貼到圖書館網站的搜尋欄位。')).toBeNull();
+});
+
+test('library fallback copies the trimmed keyword before opening the official catalog', async () => {
+  mockSchool = { id: 'cgu' };
+  const pending = deferred<void>();
+  jest.mocked(Clipboard.setStringAsync).mockReturnValueOnce(pending.promise);
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 護理 & 健康 ');
+  fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站'));
+  expect(Clipboard.setStringAsync).toHaveBeenCalledTimes(1);
+  expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理 & 健康');
+  expect(Linking.openURL).not.toHaveBeenCalled();
+  await act(async () => pending.resolve());
+  expect(Linking.openURL).toHaveBeenCalledTimes(1);
+  expect(Linking.openURL).toHaveBeenCalledWith('https://web20.lib.cgu.edu.tw/');
+  expect(view.getByText('已複製關鍵字，請貼到圖書館網站的搜尋欄位。')).toBeTruthy();
+});
+
+test.each([
+  ['cgu', 'https://web20.lib.cgu.edu.tw/'],
+  ['cycu', 'https://cylis.lib.cycu.edu.tw/search*cht'],
+  ['tmu', 'https://libelis.tmu.edu.tw/webpacIndex.jsp'],
+])('library %s homepage opens without a keyword or clipboard access', async (schoolId, url) => {
+  mockSchool = { id: schoolId };
+  const view = render(<LibraryAiFirstScreen />);
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+  await act(async () => fireEvent.press(view.getByText('開啟館藏網站')));
+  expect(Linking.openURL).toHaveBeenCalledTimes(1);
+  expect(Linking.openURL).toHaveBeenCalledWith(url);
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  expect(view.queryByText('已複製關鍵字，請貼到圖書館網站的搜尋欄位。')).toBeNull();
+});
+
+test('library homepage action does not copy or attach an entered keyword', async () => {
+  mockSchool = { id: 'cgu' };
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '護理 & 健康');
+  await act(async () => fireEvent.press(view.getByText('開啟館藏網站')));
+  expect(Linking.openURL).toHaveBeenCalledTimes(1);
+  expect(Linking.openURL).toHaveBeenCalledWith('https://web20.lib.cgu.edu.tw/');
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('護理 & 健康');
+});
+
+test('library clipboard failure asks for manual entry without claiming it copied', async () => {
+  mockSchool = { id: 'cgu' };
+  jest.mocked(Clipboard.setStringAsync).mockRejectedValueOnce(new Error('clipboard unavailable'));
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '護理');
+  await act(async () => fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站')));
+  expect(view.getByText('請在學校圖書館網站自行輸入關鍵字。')).toBeTruthy();
+  expect(view.queryByText('已複製關鍵字，請貼到圖書館網站的搜尋欄位。')).toBeNull();
+  expect(Linking.openURL).toHaveBeenCalledWith('https://web20.lib.cgu.edu.tw/');
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('護理');
+});
+
+test('library external-open failure preserves the query and lets the user retry', async () => {
+  mockSchool = { id: 'cgu' };
+  jest.mocked(Linking.openURL).mockRejectedValueOnce(new Error('browser unavailable'));
+  const view = render(<LibraryAiFirstScreen />);
+  fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '護理');
+  await act(async () => fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站')));
+  expect(view.getByRole('alert')).toHaveTextContent('無法開啟圖書館網頁，請確認網路連線後重試。');
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('護理');
+  await act(async () => fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站')));
+  expect(Linking.openURL).toHaveBeenCalledTimes(2);
+  expect(Linking.openURL).toHaveBeenLastCalledWith('https://web20.lib.cgu.edu.tw/');
+  expect(view.queryByRole('alert')).toBeNull();
+  expect(view.getByLabelText('館藏關鍵字').props.value).toBe('護理');
+});
+
+test.each(['school', 'account'] as const)(
+  'library pending clipboard completion cannot open the old catalog after a %s switch',
+  async (change) => {
+    mockSchool = { id: 'cgu' };
+    const pending = deferred<void>();
+    jest.mocked(Clipboard.setStringAsync).mockReturnValueOnce(pending.promise);
+    const view = render(<LibraryAiFirstScreen />);
+    fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'private query');
+    fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站'));
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('private query');
+    if (change === 'school') mockSchool = { id: 'cycu' };
+    else mockUser = { uid: 'student-b' };
+    view.rerender(<LibraryAiFirstScreen />);
+    await act(async () => pending.resolve());
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
+    expect(view.queryByText('已複製關鍵字，請貼到圖書館網站的搜尋欄位。')).toBeNull();
+    expect(view.queryByRole('alert')).toBeNull();
+  },
+);
 
 test('餐廳頁頂端有「我的訂單」，按了開我的訂單', async () => {
   const navigate = jest.fn();
@@ -479,9 +584,9 @@ test('switching universities opens that university official library instead of P
   const navigate = jest.fn();
   const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
   expect(view.getByText('國立臺灣大學圖書館')).toBeTruthy();
-  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
+  expect(view.queryByText('開啟館藏網站')).toBeNull();
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 分散式系統 ');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   const opened = jest.mocked(Linking.openURL).mock.calls.at(-1)?.[0];
   expect(opened).toBeTruthy();
@@ -509,7 +614,7 @@ test('changing the university replaces both the catalog destination and previous
   mockSchool = { id: 'nthu' };
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'old query');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   const first = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
   expect(first.hostname).toBe('nthu.primo.exlibrisgroup.com');
   expect(first.searchParams.get('query')).toBe('any,contains,old query');
@@ -517,7 +622,7 @@ test('changing the university replaces both the catalog destination and previous
   view.rerender(<LibraryAiFirstScreen />);
   expect(view.getByLabelText('館藏關鍵字').props.value).toBe('');
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), 'new query');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   const second = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
   expect(second.hostname).toBe('ncku.primo.exlibrisgroup.com');
   expect(second.searchParams.get('vid')).toBe('886NCKU_INST:886NCKU_INST');
@@ -529,7 +634,7 @@ test('Soochow library search uses its verified Primo view instead of a different
   mockSchool = { id: 'scu' };
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '閱讀教育');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
   expect(url.hostname).toBe('uco-scu.primo.exlibrisgroup.com');
   expect(url.searchParams.get('vid')).toBe('886UCO_SCU:886SCU_INST');
@@ -541,7 +646,7 @@ test('Chang Gung library uses its official iGrid catalog rather than Providence'
   mockSchool = { id: 'cgu' };
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '護理');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站')));
   expect(jest.mocked(Linking.openURL)).toHaveBeenCalledWith('https://web20.lib.cgu.edu.tw/');
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('護理');
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
@@ -551,7 +656,7 @@ test('Chung Yuan library account and catalog stay on its official domain', async
   mockSchool = { id: 'cycu' };
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '企業管理');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站')));
   expect(Linking.openURL).toHaveBeenCalledWith('https://cylis.lib.cycu.edu.tw/search*cht');
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('企業管理');
   await act(async () => fireEvent.press(view.getByText('開啟我的借閱紀錄')));
@@ -563,7 +668,7 @@ test('Taipei Medical library uses its own WebPAC catalog rather than a Providenc
   mockSchool = { id: 'tmu' };
   const view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '醫學');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('複製關鍵字並開啟館藏網站')));
   expect(Linking.openURL).toHaveBeenCalledWith('https://libelis.tmu.edu.tw/webpacIndex.jsp');
   expect(Clipboard.setStringAsync).toHaveBeenCalledWith('醫學');
   expect(view.queryByText('蓋夏圖書館')).toBeNull();
@@ -574,10 +679,10 @@ test('NCUE library search opens WebPACX results without clipboard or Providence 
   const navigate = jest.fn();
   const view = render(<LibraryAiFirstScreen navigation={{ navigate }} />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), ' 資料庫 & SQL ');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
-  expect(view.queryByText('在圖書館網站搜尋')).toBeNull();
+  expect(view.queryByText('開啟館藏網站')).toBeNull();
   const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
   expect(url.hostname).toBe('webpacx.ncue.edu.tw');
   expect(url.pathname).toBe('/search');
@@ -589,7 +694,7 @@ test('NTUB and THU library searches stay on each school WebPACX host', async () 
   mockSchool = { id: 'ntub' };
   let view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '會計');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   expect(new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]).hostname).toBe(
     'webpacx.ntub.edu.tw',
   );
@@ -598,7 +703,7 @@ test('NTUB and THU library searches stay on each school WebPACX host', async () 
   mockSchool = { id: 'thu' };
   view = render(<LibraryAiFirstScreen />);
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '哲學');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   const thu = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);
   expect(thu.hostname).toBe('webpac.lib.thu.edu.tw');
   expect(thu.searchParams.get('searchInput')).toBe('哲學');
@@ -612,7 +717,7 @@ test('Fu Jen library search opens Sierra results with the 75-character limit', a
   expect(view.getByLabelText('館藏關鍵字').props.maxLength).toBe(75);
   expect(view.getByText('此校官方館藏關鍵字上限為 75 字。')).toBeTruthy();
   fireEvent.changeText(view.getByLabelText('館藏關鍵字'), '資料庫');
-  await act(async () => fireEvent.press(view.getByText('查詢館藏')));
+  await act(async () => fireEvent.press(view.getByText('開啟官方館藏結果')));
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalledWith('LibraryCatalog', expect.anything());
   const url = new URL(jest.mocked(Linking.openURL).mock.calls.at(-1)![0]);

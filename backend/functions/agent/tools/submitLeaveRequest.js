@@ -36,6 +36,6 @@ async function execute(ctx, rawInput) {
 
 module.exports = {
   name: 'submitLeaveRequest',
-  description: '使用者確認後，依本人在該校已儲存的課表建立 Campus One 待審請假申請。',
+  description: '使用者確認後，依本人在該校已儲存的課表建立 nuni 待審請假申請。',
   inputSchema, execute, requiresConfirmation: true,
 };

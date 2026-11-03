@@ -16,6 +16,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   Screen,
   Button,
@@ -35,7 +36,12 @@ import {
   where,
 } from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
-import { filterInbox, schoolConversations, unreadConversation } from './messagingInboxModel';
+import {
+  conversationListPreview,
+  filterInbox,
+  schoolConversations,
+  unreadConversation,
+} from './messagingInboxModel';
 import {
   getPersonaConversationSummaries,
   isDemoPersonaUid,
@@ -103,8 +109,15 @@ export function DmsScreen(props: any) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [loadedScope, setLoadedScope] = useState('');
+  const [previewTick, setPreviewTick] = useState(0);
 
   const myUid = auth.user?.uid;
+
+  useFocusEffect(
+    useCallback(() => {
+      setPreviewTick((value) => value + 1);
+    }, []),
+  );
   const scope = `${myUid ?? ''}:${school.id ?? ''}`;
   const demo = isFirebaseMockMode() || isDemoPersonaUid(myUid);
   const isUnread = (row: Conversation) =>
@@ -254,12 +267,12 @@ export function DmsScreen(props: any) {
         const atB = (b.lastMessageAt?.seconds ?? 0) as number;
         return atB - atA;
       });
-  }, [conversations, peerNames, myUid, loadedScope, scope]);
+  }, [conversations, peerNames, myUid, loadedScope, scope, previewTick]);
 
   const unreadCount = rows.filter(isUnread).length;
   const filteredRows = useMemo(
     () => filterInbox(rows, myUid, searchQuery, onlyUnread, demo ? (row) => (row.unreadCount ?? 0) > 0 : undefined),
-    [rows, myUid, searchQuery, onlyUnread, demo],
+    [rows, myUid, searchQuery, onlyUnread, demo, previewTick],
   );
 
   // ── 未登入 ──
@@ -283,11 +296,14 @@ export function DmsScreen(props: any) {
     const peerId = item.memberIds.find((id) => id !== myUid) ?? '';
     const initials = item.peerName.slice(0, 1).toUpperCase();
     const unread = isUnread(item);
+    const preview = item.peerTyping
+      ? '正在輸入⋯'
+      : conversationListPreview(item, myUid);
 
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${item.peerName}${unread ? '，未讀訊息' : ''}，${item.lastMessageText ?? '尚無訊息'}`}
+        accessibilityLabel={`${item.peerName}${unread ? '，未讀訊息' : ''}，${preview}`}
         onPress={() => nav?.navigate?.('Chat', { peerId, conversationId: item.id })}
         style={({ pressed }) => [s.row, unread && s.unreadRow, pressed && { opacity: 0.7 }]}
       >
@@ -309,9 +325,7 @@ export function DmsScreen(props: any) {
             <Text style={s.rowTime}>{item.timeLabel}</Text>
           </View>
           <Text style={s.rowPreview} numberOfLines={1}>
-            {item.peerTyping
-              ? '正在輸入⋯'
-              : item.lastMessageText ?? '(尚無訊息)'}
+            {preview}
           </Text>
         </View>
       </Pressable>

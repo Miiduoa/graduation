@@ -203,7 +203,23 @@ export function resolveNotificationDestination(
         summary: '開啟私訊',
       };
     }
-    case 'grade': {
+    case 'grade':
+    case 'feedback': {
+      // 作業繳交成績／回饋：有 groupId+assignmentId 時直開作業；傳統 schools/.../grades 走成績頁。
+      if (type === 'feedback' || (data.assignmentId && data.groupId)) {
+        const group = requireId(data.groupId ?? data.courseId, '課程編號');
+        if (group.ok === false) return group.destination;
+        const assignment = requireId(data.assignmentId, '作業編號');
+        if (assignment.ok === false) return assignment.destination;
+        return {
+          ok: true,
+          mode: 'nested',
+          tab: '學習',
+          screen: 'HomeworkSubmit',
+          params: { groupId: group.id, assignmentId: assignment.id },
+          summary: '開啟成績與回饋',
+        };
+      }
       // 後端 sendPushToUser payload：{ type:'grade', gradeId, schoolId, channel:'grades' }
       const gradeId = requireId(data.gradeId, '成績編號');
       if (gradeId.ok === false) return gradeId.destination;
@@ -233,6 +249,59 @@ export function resolveNotificationDestination(
         summary: '開啟成績',
       };
     }
+    case 'order': {
+      const orderId = requireId(data.orderId, '訂單編號');
+      if (orderId.ok === false) return orderId.destination;
+      const school = data.schoolId == null || data.schoolId === ''
+        ? null
+        : requireId(data.schoolId, '學校編號');
+      if (school && school.ok === false) return school.destination;
+      return {
+        ok: true,
+        mode: 'nested',
+        tab: '學習',
+        screen: 'StudentOrders',
+        params: {
+          orderId: orderId.id,
+          ...(school && school.ok ? { schoolId: school.id } : {}),
+        },
+        summary: '開啟訂單／取餐',
+      };
+    }
+    case 'live_session': {
+      const session = requireId(data.sessionId, '點名場次');
+      if (session.ok === false) return session.destination;
+      const group = data.groupId == null || data.groupId === ''
+        ? null
+        : requireId(data.groupId, '課程編號');
+      if (group && group.ok === false) return group.destination;
+      return {
+        ok: true,
+        mode: 'nested',
+        tab: '學習',
+        screen: 'AttendanceLive',
+        params: {
+          sessionId: session.id,
+          isTeacher: false,
+          ...(group && group.ok ? { groupId: group.id } : {}),
+        },
+        summary: '開啟點名',
+      };
+    }
+    case 'assignment_submission': {
+      const group = requireId(data.groupId ?? data.courseId, '課程編號');
+      if (group.ok === false) return group.destination;
+      const assignment = requireId(data.assignmentId, '作業編號');
+      if (assignment.ok === false) return assignment.destination;
+      return {
+        ok: true,
+        mode: 'nested',
+        tab: '學習',
+        screen: 'TeacherGrading',
+        params: { groupId: group.id, assignmentId: assignment.id },
+        summary: '開啟待批改繳交',
+      };
+    }
     default: {
       if (ASSIGNMENT_TYPES.has(type)) {
         const task =
@@ -260,12 +329,13 @@ export function resolveNotificationDestination(
           summary: task.kind === 'quiz' ? '開啟測驗' : '開啟作業',
         };
       }
+      // 未知類型：落到通知中心，避免推播／點擊後完全無反應。
       return {
-        ok: false,
-        code: 'unknown_type',
-        reason: type
-          ? `尚不支援開啟「${type}」類型的通知。可手動標成已讀，或稍後在對應功能查看。`
-          : '無法辨識這則通知的類型，已保留未讀以免誤標。',
+        ok: true,
+        mode: 'nested',
+        tab: '我的',
+        screen: 'Notifications',
+        summary: '開啟通知中心',
       };
     }
   }
