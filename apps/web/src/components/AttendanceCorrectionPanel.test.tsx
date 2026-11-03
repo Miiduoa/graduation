@@ -59,6 +59,7 @@ it('requires a confirmed roster and explicit reason for an instructor to correct
     status: 'late',
     reason: '教師已經核對學生的遲到時間',
     requestId: expect.any(String),
+    expectedRevision: null,
   }));
   await waitFor(() => expect(updated).toHaveBeenCalledTimes(1));
   expect(await screen.findByText('已保存更正，並建立操作稽核紀錄。')).toBeTruthy();

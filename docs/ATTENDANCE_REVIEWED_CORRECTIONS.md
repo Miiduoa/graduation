@@ -20,7 +20,7 @@
 
 expectedRevision 在後端暫時為選填，以維持既有客戶端相容；新版 Web 表單一律提供。舊客戶端未提供時仍可更正且會增加版本，因此新版表單能偵測其變更，但不能宣稱舊客戶端本身也有防覆寫確認流程。後續要全面強制，須先完成所有客戶端升級及相容盤點。
 
-採用獨立 Firebase Functions 的環境，必須先部署並驗證新版後端，再發布新版 Web 表單。舊後端會忽略未知欄位，僅發布新畫面不能提供交易層保護。Web 同源處理器與前端一起建置，仍須驗收部署是否使用正確端點。
+現行教師 Web 更正走 `HOSTED_WEB_CALLABLES` 的同源 `/api/fn/correctAttendanceRecord`，由 Next 內的 `attendanceSessionHandlers` 處理。對這條路徑而言，**部署 Web 即帶上 OCC**；不必先部署 Firebase Functions。`backend/functions/attendanceSessions.js` 仍與 handlers 鏡像同步，供 emulator 與日後獨立 Functions 環境使用。若某環境改走獨立 Functions 且後端尚未含 OCC，舊 Functions 會忽略未知欄位，不能只上新畫面便宣稱有交易層保護。
 
 這個變更不修改 Firestore Rules、不回寫學校教務紀錄、不處理管理者繞過服務直接改寫的資料，也不宣稱目前已部署正式版。
 
