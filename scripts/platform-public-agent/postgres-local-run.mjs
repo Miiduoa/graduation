@@ -9,13 +9,18 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const pg = '/opt/homebrew/opt/postgresql@17/bin';
+// Explicit opt-in to a locally installed Fastify package; never a DB connection URL.
+const args = process.argv.slice(2);
+if (args.length && (args.length !== 2 || args[0] !== '--fastify-root' || !isAbsolute(args[1])))
+  throw new Error('Usage: postgres-local-run.mjs [--fastify-root /absolute/package/root]');
+const fastifyRoot = args.length ? realpathSync(args[1]) : undefined;
 const folder = mkdtempSync('/tmp/c1pg-');
 const data = join(folder, 'data'),
   socket = join(folder, 'socket'),
@@ -92,6 +97,7 @@ try {
         CAMPUS_AGENT_PG_FOLDER: realpathSync(folder),
         CAMPUS_AGENT_PG_PARENT: String(process.pid),
         CAMPUS_AGENT_PG_COMPILED: compiled,
+        ...(fastifyRoot ? { CAMPUS_AGENT_FASTIFY_ROOT: fastifyRoot } : {}),
       },
     },
   );

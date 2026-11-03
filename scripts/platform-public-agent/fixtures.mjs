@@ -482,6 +482,7 @@ function publicRequest(
       requestId,
       consent: {
         provider: FREE_PROVIDER,
+        model: FREE_MODEL,
         version: 1,
         schoolId,
         query,

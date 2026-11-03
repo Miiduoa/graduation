@@ -295,287 +295,311 @@ if (!folder) {
     assert.equal(conf.rows[0].consumed_at, null);
     assert.equal(ops.rows[0].count, 0);
   });
-  test('real Fastify 5.12.7 and PostgreSQL compose two confirmations around a synthetic Groq plan', async () => {
-    const { createRequire } = await import('node:module');
-    const require = createRequire('/tmp/campus-fastify-5127/package.json');
-    const fastify = require('fastify');
-    assert.equal(require('fastify/package.json').version, '5.12.7');
-    const { registerPlatformPublicTaskRoutes } = await import(
-      pathToFileURL(join(compiled, 'fastify-candidate.js')).href
-    );
-    const { createGroqNavigationPlanner } = await import(
-      pathToFileURL(join(compiled, 'groq-navigation-plan.js')).href
-    );
-    const a = await actor(),
-      handle = `ps_${'a'.repeat(43)}`;
-    await pool.query('UPDATE platform_account_sessions SET token_sha256=$1 WHERE token_sha256=$2', [
-      hash(handle),
-      a.sessionHash,
-    ]);
-    a.sessionHash = hash(handle);
-    const accounts = {
-      async resolveSession(auth) {
-        if (auth !== `Platform ${handle}`)
-          throw Object.assign(new Error('synthetic invalid'), { code: 'PLATFORM_SESSION_INVALID' });
-        const row = (
-          await pool.query(
-            'SELECT expires_at FROM platform_account_sessions WHERE token_sha256=$1 AND platform_account_id=$2',
-            [a.sessionHash, a.platformAccountId],
-          )
-        ).rows[0];
-        if (!row)
-          throw Object.assign(new Error('synthetic revoked'), { code: 'PLATFORM_SESSION_INVALID' });
-        return {
-          platformAccountId: a.platformAccountId,
-          credentialId: a.credentialId,
-          expiresAt: a.expiresAt,
-        };
-      },
-    };
-    const catalog = {
-      schoolId: 'pu',
-      updatedAt: '2026-10-19',
-      label: '合成公開來源',
-      places: [
-        {
-          id: 'from',
-          name: '甲樓',
-          lat: 24,
-          lng: 120,
-          sourceUrl: 'https://www.openstreetmap.org/way/1',
+  test(
+    'real Fastify 5.12.7 and PostgreSQL compose two confirmations around a synthetic Groq plan',
+    { skip: !process.env.CAMPUS_AGENT_FASTIFY_ROOT },
+    async () => {
+      const { createRequire } = await import('node:module');
+      const require = createRequire(join(process.env.CAMPUS_AGENT_FASTIFY_ROOT, 'package.json'));
+      const fastify = require('fastify');
+      assert.equal(require('fastify/package.json').version, '5.12.7');
+      const { registerPlatformPublicTaskRoutes } = await import(
+        pathToFileURL(join(compiled, 'fastify-candidate.js')).href
+      );
+      const { createGroqNavigationPlanner } = await import(
+        pathToFileURL(join(compiled, 'groq-navigation-plan.js')).href
+      );
+      const a = await actor(),
+        handle = `ps_${'a'.repeat(43)}`;
+      await pool.query(
+        'UPDATE platform_account_sessions SET token_sha256=$1 WHERE token_sha256=$2',
+        [hash(handle), a.sessionHash],
+      );
+      a.sessionHash = hash(handle);
+      const accounts = {
+        async resolveSession(auth) {
+          if (auth !== `Platform ${handle}`)
+            throw Object.assign(new Error('synthetic invalid'), {
+              code: 'PLATFORM_SESSION_INVALID',
+            });
+          const row = (
+            await pool.query(
+              'SELECT expires_at FROM platform_account_sessions WHERE token_sha256=$1 AND platform_account_id=$2',
+              [a.sessionHash, a.platformAccountId],
+            )
+          ).rows[0];
+          if (!row)
+            throw Object.assign(new Error('synthetic revoked'), {
+              code: 'PLATFORM_SESSION_INVALID',
+            });
+          return {
+            platformAccountId: a.platformAccountId,
+            credentialId: a.credentialId,
+            expiresAt: a.expiresAt,
+          };
         },
-        {
-          id: 'to',
-          name: '乙館',
-          lat: 24.1,
-          lng: 120.1,
-          sourceUrl: 'https://www.openstreetmap.org/way/2',
-        },
-      ],
-    };
-    let calls = 0,
-      mode = 'success',
-      loseFailureAck = false;
-    const serviceDb = {
-      async transaction(fn, options) {
-        let finalizing = false;
-        const result = await db.transaction(
-          (tx) =>
-            fn({
-              query(sql, params) {
-                if (sql.includes('SET status=$6,result_json=$7::jsonb')) finalizing = true;
-                return tx.query(sql, params);
-              },
-            }),
-          options,
-        );
-        if (finalizing && loseFailureAck) {
-          loseFailureAck = false;
-          throw new Error('synthetic lost commit acknowledgement');
-        }
-        return result;
-      },
-    };
-    const readPublicCatalog = async () => globalThis.structuredClone(catalog);
-    const groqPlan = createGroqNavigationPlanner({
-      enabled: true,
-      readPublicCatalog,
-      fetch: async (_url, request) => {
-        calls++;
-        const sent = JSON.parse(request.body);
-        assert.equal(sent.model, 'openai/gpt-oss-120b');
-        if (mode === 'quota' || mode === 'lost') {
-          if (mode === 'lost') loseFailureAck = true;
-          return new globalThis.Response('{}', {
-            status: 429,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-        const content =
-          mode === 'unclear'
-            ? JSON.stringify({ kind: 'unclear', fromId: null, toId: null })
-            : mode === 'invalid'
-              ? '{"kind":"route","fromId":"from","fromId":"to","toId":"to"}'
-              : JSON.stringify({ kind: 'route', fromId: 'from', toId: 'to' });
-        return new globalThis.Response(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content,
+      };
+      const catalog = {
+        schoolId: 'pu',
+        updatedAt: '2026-10-19',
+        label: '合成公開來源',
+        places: [
+          {
+            id: 'from',
+            name: '甲樓',
+            lat: 24,
+            lng: 120,
+            sourceUrl: 'https://www.openstreetmap.org/way/1',
+          },
+          {
+            id: 'to',
+            name: '乙館',
+            lat: 24.1,
+            lng: 120.1,
+            sourceUrl: 'https://www.openstreetmap.org/way/2',
+          },
+        ],
+      };
+      let calls = 0,
+        mode = 'success',
+        loseFailureAck = false;
+      const serviceDb = {
+        async transaction(fn, options) {
+          let finalizing = false;
+          const result = await db.transaction(
+            (tx) =>
+              fn({
+                query(sql, params) {
+                  if (sql.includes('SET status=$6,result_json=$7::jsonb')) finalizing = true;
+                  return tx.query(sql, params);
                 },
-              },
-            ],
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        );
-      },
-    });
-    const disabled = fastify();
-    registerPlatformPublicTaskRoutes(disabled, {
-      enabled: true,
-      db,
-      accounts,
-      policy,
-      readPublicCatalog,
-      groqPlan,
-    });
-    const denied = await disabled.inject({
-      method: 'POST',
-      url: '/v1/auth/platform/public-agent/prepareGroq',
-      headers: { authorization: `Platform ${handle}`, 'content-type': 'application/json' },
-      payload: { schoolId: 'pu', query: '公開地點', requestId: 'free_not_verified_01' },
-    });
-    assert.equal(denied.statusCode, 503);
-    assert.equal(denied.json().code, 'PUBLIC_AGENT_EXECUTOR_UNAVAILABLE');
-    assert.equal(calls, 0);
-    await disabled.close();
-    let app = fastify();
-    const register = () =>
-      registerPlatformPublicTaskRoutes(app, {
+              }),
+            options,
+          );
+          if (finalizing && loseFailureAck) {
+            loseFailureAck = false;
+            throw new Error('synthetic lost commit acknowledgement');
+          }
+          return result;
+        },
+      };
+      const readPublicCatalog = async () => globalThis.structuredClone(catalog);
+      const groqPlan = createGroqNavigationPlanner({
         enabled: true,
-        freeTierVerified: true,
-        db: serviceDb,
+        readPublicCatalog,
+        fetch: async (_url, request) => {
+          calls++;
+          const sent = JSON.parse(request.body);
+          assert.equal(sent.model, 'openai/gpt-oss-120b');
+          if (mode === 'quota' || mode === 'lost') {
+            if (mode === 'lost') loseFailureAck = true;
+            return new globalThis.Response('{}', {
+              status: 429,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          const content =
+            mode === 'unclear'
+              ? JSON.stringify({ kind: 'unclear', fromId: null, toId: null })
+              : mode === 'invalid'
+                ? '{"kind":"route","fromId":"from","fromId":"to","toId":"to"}'
+                : JSON.stringify({ kind: 'route', fromId: 'from', toId: 'to' });
+          return new globalThis.Response(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: 'stop',
+                  message: {
+                    role: 'assistant',
+                    content,
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        },
+      });
+      const disabled = fastify();
+      registerPlatformPublicTaskRoutes(disabled, {
+        enabled: true,
+        db,
         accounts,
         policy,
         readPublicCatalog,
         groqPlan,
       });
-    register();
-    const send = async (action, payload, headers = {}) => {
-      const res = await app.inject({
+      const denied = await disabled.inject({
         method: 'POST',
-        url: `/v1/auth/platform/public-agent/${action}`,
-        headers: {
-          authorization: `Platform ${handle}`,
-          'content-type': 'application/json',
-          ...headers,
-        },
-        payload,
+        url: '/v1/auth/platform/public-agent/prepareGroq',
+        headers: { authorization: `Platform ${handle}`, 'content-type': 'application/json' },
+        payload: { schoolId: 'pu', query: '公開地點', requestId: 'free_not_verified_01' },
       });
-      return { status: res.statusCode, body: res.json() };
-    };
-    try {
-      const input = { schoolId: 'pu', query: '從入口去圖書館', requestId: `http_${randomUUID()}` };
-      assert.equal(
-        (await send('prepareGroq', input, { origin: 'https://untrusted.test' })).status,
-        403,
-      );
-      const p = await send('prepareGroq', input);
-      assert.equal(p.status, 200);
-      assert.equal(p.body.provider, 'groq');
+      assert.equal(denied.statusCode, 503);
+      assert.equal(denied.json().code, 'PUBLIC_AGENT_EXECUTOR_UNAVAILABLE');
       assert.equal(calls, 0);
-      assert.equal(
-        (await send('confirm', { approved: false, request: p.body.request })).status,
-        409,
-      );
-      assert.equal(calls, 0);
-      const c = await send('confirm', { approved: true, request: p.body.request });
-      assert.equal(c.status, 200);
-      assert.equal(calls, 0);
-      const payload = { confirmationId: c.body.confirmationId, request: p.body.request };
-      const [first, second] = await Promise.all([
-        send('execute', payload),
-        send('execute', payload),
-      ]);
-      assert.ok([first.body.status, second.body.status].includes('completed'));
-      assert.equal(calls, 1);
-      const completed = first.body.status === 'completed' ? first.body : second.body;
-      const route = {
-        approved: true,
-        operationId: completed.operationId,
-        request: p.body.request,
-        fromId: 'from',
-        toId: 'to',
-      };
-      assert.equal((await send('route', { ...route, approved: false })).status, 409);
-      assert.equal((await send('route', { ...route, fromId: 'to', toId: 'from' })).status, 502);
-      const link = await send('route', route);
-      assert.equal(link.status, 200);
-      assert.equal(new globalThis.URL(link.body.receipt.url).hostname, 'www.google.com');
-      await app.close();
-      app = fastify();
+      await disabled.close();
+      let app = fastify();
+      const register = () =>
+        registerPlatformPublicTaskRoutes(app, {
+          enabled: true,
+          freeTierVerified: true,
+          db: serviceDb,
+          accounts,
+          policy,
+          readPublicCatalog,
+          groqPlan,
+        });
       register();
-      const restarted = await send('status', { task: 'public-campus-navigation', schoolId: 'pu' });
-      assert.deepEqual(restarted.body, { status: 'completed', operationId: completed.operationId });
-      // A separate Node process reconstructs ledger and its pool using the same
-      // owned socket. This cannot inherit the first process's in-memory state.
-      const childSource = `import { Pool } from 'pg'; import { pathToFileURL } from 'node:url'; import { join } from 'node:path';
+      const send = async (action, payload, headers = {}) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/v1/auth/platform/public-agent/${action}`,
+          headers: {
+            authorization: `Platform ${handle}`,
+            'content-type': 'application/json',
+            ...headers,
+          },
+          payload,
+        });
+        return { status: res.statusCode, body: res.json() };
+      };
+      try {
+        const input = {
+          schoolId: 'pu',
+          query: '從入口去圖書館',
+          requestId: `http_${randomUUID()}`,
+        };
+        assert.equal(
+          (await send('prepareGroq', input, { origin: 'https://untrusted.test' })).status,
+          403,
+        );
+        const p = await send('prepareGroq', input);
+        assert.equal(p.status, 200);
+        assert.equal(p.body.provider, 'groq');
+        assert.equal(calls, 0);
+        assert.equal(
+          (await send('confirm', { approved: false, request: p.body.request })).status,
+          409,
+        );
+        assert.equal(calls, 0);
+        const c = await send('confirm', { approved: true, request: p.body.request });
+        assert.equal(c.status, 200);
+        assert.equal(calls, 0);
+        const payload = { confirmationId: c.body.confirmationId, request: p.body.request };
+        const [first, second] = await Promise.all([
+          send('execute', payload),
+          send('execute', payload),
+        ]);
+        assert.ok([first.body.status, second.body.status].includes('completed'));
+        assert.equal(calls, 1);
+        const completed = first.body.status === 'completed' ? first.body : second.body;
+        const route = {
+          approved: true,
+          operationId: completed.operationId,
+          request: p.body.request,
+          fromId: 'from',
+          toId: 'to',
+        };
+        assert.equal((await send('route', { ...route, approved: false })).status, 409);
+        assert.equal((await send('route', { ...route, fromId: 'to', toId: 'from' })).status, 502);
+        const link = await send('route', route);
+        assert.equal(link.status, 200);
+        assert.equal(new globalThis.URL(link.body.receipt.url).hostname, 'www.google.com');
+        await app.close();
+        app = fastify();
+        register();
+        const restarted = await send('status', {
+          task: 'public-campus-navigation',
+          schoolId: 'pu',
+        });
+        assert.deepEqual(restarted.body, {
+          status: 'completed',
+          operationId: completed.operationId,
+        });
+        // A separate Node process reconstructs ledger and its pool using the same
+        // owned socket. This cannot inherit the first process's in-memory state.
+        const childSource = `import { Pool } from 'pg'; import { pathToFileURL } from 'node:url'; import { join } from 'node:path';
         let input=''; for await (const chunk of process.stdin) input += chunk; const actor=JSON.parse(input);
         const { PlatformPublicAgentLedger }=await import(pathToFileURL(join(process.env.CAMPUS_AGENT_PG_COMPILED,'ledger.js')).href);
         const pool=new Pool({host:join(process.env.CAMPUS_AGENT_PG_FOLDER,'socket'),port:55432,database:'postgres',user:'campus_synthetic',ssl:false});
         const db={async transaction(fn){const client=await pool.connect();try{await client.query('BEGIN');const value=await fn(client);await client.query('COMMIT');return value;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}}};
         try { const ledger=new PlatformPublicAgentLedger(db,{providerBudgetKey:'synthetic-free',providerDailyLimit:1000,accountDailyLimit:1000}); const state=await ledger.status(actor,{task:'public-campus-navigation',schoolId:'pu'}); process.stdout.write(JSON.stringify(state)); } finally {await pool.end();}`;
-      const child = spawnSync(process.execPath, ['--input-type=module', '--eval', childSource], {
-        cwd: process.cwd(),
-        env: process.env,
-        input: JSON.stringify(a),
-        encoding: 'utf8',
-      });
-      assert.equal(child.status, 0, child.stderr);
-      assert.deepEqual(JSON.parse(child.stdout), restarted.body);
-      const next = await send('prepareGroq', { ...input, requestId: `after_${randomUUID()}` });
-      assert.equal(
-        (await send('confirm', { approved: true, request: next.body.request })).body.code,
-        'PUBLIC_AGENT_OPEN_OPERATION',
-      );
-      const ack = await send('ack', {
-        task: 'public-campus-navigation',
-        schoolId: 'pu',
-        operationId: completed.operationId,
-        approved: true,
-      });
-      assert.equal(ack.body.status, 'acknowledged');
-      assert.equal((await send('route', route)).status, 404);
-      assert.equal((await send('read', p.body.request)).status, 404);
-      for (const [kind, expected] of [
-        ['quota', 'FREE_QUOTA_UNAVAILABLE'],
-        ['unclear', 'DESTINATION_UNCLEAR'],
-        ['invalid', 'INVALID_PROVIDER_RESPONSE'],
-        ['lost', 'FREE_QUOTA_UNAVAILABLE'],
-      ]) {
-        mode = kind;
-        const prep = await send('prepareGroq', { ...input, requestId: `case_${randomUUID()}` });
-        const confirmation = await send('confirm', { approved: true, request: prep.body.request });
-        const request = {
-          confirmationId: confirmation.body.confirmationId,
-          request: prep.body.request,
-        };
-        const before = calls;
-        const value = await send('execute', request);
-        assert.equal(calls, before + 1);
-        if (kind === 'lost') {
-          assert.equal(value.status, 503);
-          assert.equal(value.body.code, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
-        } else {
-          assert.equal(value.body.status, 'failed');
-          assert.equal(value.body.failureCode, expected);
-        }
-        const status = await send('status', { task: 'public-campus-navigation', schoolId: 'pu' });
-        assert.equal(status.body.status, 'failed');
-        const blocked = await send('prepareGroq', { ...input, requestId: `later_${randomUUID()}` });
+        const child = spawnSync(process.execPath, ['--input-type=module', '--eval', childSource], {
+          cwd: process.cwd(),
+          env: process.env,
+          input: JSON.stringify(a),
+          encoding: 'utf8',
+        });
+        assert.equal(child.status, 0, child.stderr);
+        assert.deepEqual(JSON.parse(child.stdout), restarted.body);
+        const next = await send('prepareGroq', { ...input, requestId: `after_${randomUUID()}` });
         assert.equal(
-          (await send('confirm', { approved: true, request: blocked.body.request })).body.code,
+          (await send('confirm', { approved: true, request: next.body.request })).body.code,
           'PUBLIC_AGENT_OPEN_OPERATION',
         );
-        assert.equal((await send('execute', request)).body.status, 'failed');
-        assert.equal(calls, before + 1);
-        assert.equal(
-          (
-            await send('ack', {
-              task: 'public-campus-navigation',
-              schoolId: 'pu',
-              operationId: status.body.operationId,
-              approved: true,
-            })
-          ).body.status,
-          'acknowledged',
-        );
+        const ack = await send('ack', {
+          task: 'public-campus-navigation',
+          schoolId: 'pu',
+          operationId: completed.operationId,
+          approved: true,
+        });
+        assert.equal(ack.body.status, 'acknowledged');
+        assert.equal((await send('route', route)).status, 404);
+        assert.equal((await send('read', p.body.request)).status, 404);
+        for (const [kind, expected] of [
+          ['quota', 'FREE_QUOTA_UNAVAILABLE'],
+          ['unclear', 'DESTINATION_UNCLEAR'],
+          ['invalid', 'INVALID_PROVIDER_RESPONSE'],
+          ['lost', 'FREE_QUOTA_UNAVAILABLE'],
+        ]) {
+          mode = kind;
+          const prep = await send('prepareGroq', { ...input, requestId: `case_${randomUUID()}` });
+          const confirmation = await send('confirm', {
+            approved: true,
+            request: prep.body.request,
+          });
+          const request = {
+            confirmationId: confirmation.body.confirmationId,
+            request: prep.body.request,
+          };
+          const before = calls;
+          const value = await send('execute', request);
+          assert.equal(calls, before + 1);
+          if (kind === 'lost') {
+            assert.equal(value.status, 503);
+            assert.equal(value.body.code, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+          } else {
+            assert.equal(value.body.status, 'failed');
+            assert.equal(value.body.failureCode, expected);
+          }
+          const status = await send('status', { task: 'public-campus-navigation', schoolId: 'pu' });
+          assert.equal(status.body.status, 'failed');
+          const blocked = await send('prepareGroq', {
+            ...input,
+            requestId: `later_${randomUUID()}`,
+          });
+          assert.equal(
+            (await send('confirm', { approved: true, request: blocked.body.request })).body.code,
+            'PUBLIC_AGENT_OPEN_OPERATION',
+          );
+          assert.equal((await send('execute', request)).body.status, 'failed');
+          assert.equal(calls, before + 1);
+          assert.equal(
+            (
+              await send('ack', {
+                task: 'public-campus-navigation',
+                schoolId: 'pu',
+                operationId: status.body.operationId,
+                approved: true,
+              })
+            ).body.status,
+            'acknowledged',
+          );
+        }
+      } finally {
+        await app.close();
       }
-    } finally {
-      await app.close();
-    }
-  });
+    },
+  );
 }

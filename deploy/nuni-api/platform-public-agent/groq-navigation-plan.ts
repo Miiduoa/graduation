@@ -166,7 +166,12 @@ export function createGroqNavigationPlanner(options: Options) {
   )
     return invalid('PUBLIC_AGENT_NOT_CONFIGURED', 503);
   const timeoutMs = options.timeoutMs ?? 10_000;
-  return async (raw: unknown, external?: AbortSignal): Promise<PublicPlan> => {
+  return async (
+    raw: unknown,
+    external: AbortSignal | undefined,
+    beforeSend: (signal: AbortSignal) => Promise<void>,
+  ): Promise<PublicPlan> => {
+    if (typeof beforeSend !== 'function') return invalid('PUBLIC_AGENT_NOT_CONFIGURED', 503);
     const input = planInput(raw),
       controller = new AbortController();
     let stopped: PublicAgentError | undefined, reject!: (e: PublicAgentError) => void;
@@ -207,6 +212,9 @@ export function createGroqNavigationPlanner(options: Options) {
       });
     try {
       const projected = projectSource(input, await readSource());
+      // The trusted host revalidates this request's account/session after the
+      // last source read, immediately before the external request is permitted.
+      await step(() => beforeSend(controller.signal));
       const response = await step(async () => {
         try {
           return await options.fetch(GROQ_ENDPOINT, {

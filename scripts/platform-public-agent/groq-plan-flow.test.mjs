@@ -34,7 +34,10 @@ function fixture(overrides = {}) {
   const f = admissionFixture(),
     source = { value: catalog() },
     seen = [];
-  const readPublicCatalog = async () => globalThis.structuredClone(source.value);
+  const readPublicCatalog = async () => {
+    await source.beforeRead?.();
+    return globalThis.structuredClone(source.value);
+  };
   const fetch = async (url, init) => {
     seen.push({ url, body: JSON.parse(init.body) });
     return new globalThis.Response(
@@ -367,6 +370,10 @@ test('edited confirmation and stale source cannot dispatch to Groq', async () =>
   const extra = globalThis.structuredClone(p.request);
   extra.data.consent.model = 'other';
   await assert.rejects(f.service.confirm(f.authorization, { approved: true, request: extra }));
+  const old = globalThis.structuredClone(p.request);
+  delete old.data.consent.model;
+  await assert.rejects(f.service.confirm(f.authorization, { approved: true, request: old }));
+  assert.equal(p.request.data.consent.model, p.model);
   f.source.value.places[0].lat += 0.001;
   await rejectsCode(
     f.service.confirm(f.authorization, { approved: true, request: p.request }),
@@ -391,4 +398,32 @@ test('the caller cannot substitute a different query or session after confirmati
   );
   assert.equal(f.seen.length, 0);
   assert.deepEqual(quotas(f.db), []);
+});
+
+test('session revoked during final public-source read stops outbound call before fetch', async () => {
+  const f = fixture();
+  let reads = 0,
+    revoked = false;
+  const resolve = f.options.accounts.resolveSession;
+  f.options.accounts.resolveSession = async (auth) => {
+    if (revoked) throw Object.assign(new Error('revoked'), { code: 'PLATFORM_SESSION_INVALID' });
+    return resolve(auth);
+  };
+  f.source.beforeRead = async () => {
+    reads++;
+    if (reads === 6) revoked = true;
+  };
+  const p = await f.prepare(),
+    c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await assert.rejects(
+    f.service.execute(f.authorization, { confirmationId: c.confirmationId, request: p.request }),
+  );
+  assert.equal(revoked, true);
+  assert.equal(f.seen.length, 0);
+  revoked = false;
+  const state = await f.service.status(f.authorization, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+  });
+  assert.ok(['unknown', 'pending'].includes(state.status));
 });

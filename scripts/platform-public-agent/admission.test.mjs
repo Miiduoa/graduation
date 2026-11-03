@@ -54,7 +54,14 @@ function payload(kind = 'navigation', schoolId = 'pu', requestId = 'public_reque
       schoolId,
       query,
       requestId,
-      consent: { provider: 'groq', version: 1, schoolId, query, fingerprint },
+      consent: {
+        provider: 'groq',
+        model: 'openai/gpt-oss-120b',
+        version: 1,
+        schoolId,
+        query,
+        fingerprint,
+      },
     },
   };
 }

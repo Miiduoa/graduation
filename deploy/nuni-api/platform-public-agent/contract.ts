@@ -130,18 +130,35 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
   );
   const schoolId = identifier(data.schoolId, 2, 40);
   const requestId = identifier(data.requestId, 8, 100);
+  const rawConsent = data.consent;
+  const providerDescriptor =
+    rawConsent && typeof rawConsent === 'object' && !Array.isArray(rawConsent)
+      ? Object.getOwnPropertyDescriptor(rawConsent, 'provider')
+      : undefined;
+  const isGroqNavigation =
+    task === 'public-campus-navigation' &&
+    providerDescriptor &&
+    'value' in providerDescriptor &&
+    providerDescriptor.value === FREE_PROVIDER;
   const consent = exactRecord(
-    data.consent,
+    rawConsent,
     task === 'campus-service-entry'
       ? ['model', 'provider', 'purpose', 'schoolId', 'utterance', 'version']
-      : ['provider', 'version', 'schoolId', 'query', 'fingerprint'],
+      : isGroqNavigation
+        ? ['provider', 'model', 'version', 'schoolId', 'query', 'fingerprint']
+        : ['provider', 'version', 'schoolId', 'query', 'fingerprint'],
   );
   const provider =
     consent.provider === DETERMINISTIC_PROVIDER && task === 'public-campus-navigation'
       ? DETERMINISTIC_PROVIDER
       : FREE_PROVIDER;
   const model = provider === DETERMINISTIC_PROVIDER ? DETERMINISTIC_MODEL : FREE_MODEL;
-  if (consent.provider !== provider || consent.version !== 1 || consent.schoolId !== schoolId)
+  if (
+    consent.provider !== provider ||
+    (provider === FREE_PROVIDER && consent.model !== FREE_MODEL) ||
+    consent.version !== 1 ||
+    consent.schoolId !== schoolId
+  )
     return fail();
   let text: string;
   let fingerprint: string | null = null;
@@ -182,6 +199,7 @@ export function parseConfirmedTask(value: unknown): ParsedPublicTask {
       requestId,
       consent: Object.freeze({
         provider,
+        ...(provider === FREE_PROVIDER ? { model: FREE_MODEL } : {}),
         version: 1,
         schoolId,
         query: text,

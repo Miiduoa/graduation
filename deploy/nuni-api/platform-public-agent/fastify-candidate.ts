@@ -67,6 +67,7 @@ type Options = {
   groqPlan?: (
     input: { schoolId: string; query: string; fingerprint: string },
     signal: AbortSignal,
+    beforeSend: (signal: AbortSignal) => Promise<void>,
   ) => Promise<unknown>;
 };
 const validAction = (action: string): action is Action => actions.some((value) => value === action);

@@ -33,6 +33,7 @@ type Options = {
   groqPlan?: (
     input: { schoolId: string; query: string; fingerprint: string },
     signal: AbortSignal,
+    beforeSend: (signal: AbortSignal) => Promise<void>,
   ) => Promise<unknown>;
   /** Controlled injection for tests; no default cloud provider or fallback. */
   execute?: (
@@ -148,6 +149,7 @@ export class PlatformPublicTaskService {
           ...input,
           consent: {
             provider: FREE_PROVIDER,
+            model: FREE_MODEL,
             version: 1,
             schoolId: input.schoolId,
             query: input.query,
@@ -284,6 +286,9 @@ export class PlatformPublicTaskService {
                   fingerprint: snapshot.fingerprint,
                 },
                 abort,
+                async () => {
+                  sameActor(actor, await this.admission.actor(auth));
+                },
               )
             : this.options.execute
               ? this.options.execute(task, snapshot, abort)

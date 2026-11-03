@@ -43,7 +43,14 @@ function navigation() {
       schoolId,
       query,
       requestId: 'navigation_request_001',
-      consent: { provider: 'groq', version: 1, schoolId, query, fingerprint },
+      consent: {
+        provider: 'groq',
+        model: 'openai/gpt-oss-120b',
+        version: 1,
+        schoolId,
+        query,
+        fingerprint,
+      },
     },
   };
 }

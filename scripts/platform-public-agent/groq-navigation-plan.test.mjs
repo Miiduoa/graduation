@@ -60,7 +60,7 @@ const rejects = (promise, code) => assert.rejects(promise, (error) => error.code
 
 function controlled(response = () => json(envelope(plan)), options = {}) {
   const calls = [];
-  const planner = createGroqNavigationPlanner({
+  const rawPlanner = createGroqNavigationPlanner({
     enabled: true,
     fetch: async (...args) => {
       calls.push(args);
@@ -69,6 +69,7 @@ function controlled(response = () => json(envelope(plan)), options = {}) {
     readPublicCatalog: async () => catalog,
     ...options,
   });
+  const planner = (input, signal) => rawPlanner(input, signal, async () => {});
   return { planner, calls };
 }
 

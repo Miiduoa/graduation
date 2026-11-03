@@ -204,6 +204,7 @@ test('cloud request fails closed; deterministic mode never invokes a cloud fallb
   const f = fixture(),
     p = await f.preview();
   p.request.data.consent.provider = 'groq';
+  p.request.data.consent.model = 'openai/gpt-oss-120b';
   await rejectsCode(
     f.service.confirm(f.authorization, { approved: true, request: p.request }),
     'PUBLIC_AGENT_EXECUTOR_UNAVAILABLE',
