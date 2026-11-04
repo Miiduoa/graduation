@@ -23,7 +23,12 @@ it.each([0, 1])('finishes sequential planning/ordering within four calls and 700
 });
 it('corrects proposal claims and requires confirmation without losing unrelated facts', async () => {
   for (const answer of ['已為您生成提案確認卡。', '已下單。', '✅ 已為您預留。', '已加入行事曆。'])
-    expect(verifyProposalAnswer(answer, [])).toContain('尚未產生確認卡');
+    expect(verifyProposalAnswer(answer, [], '幫我點一份不辣的')).toContain('尚未產生確認卡');
+  expect(verifyProposalAnswer('這週要交樹與圖作業。請按確認卡。', [], '這禮拜有什麼要交的'))
+    .toContain('樹與圖作業');
+  expect(verifyProposalAnswer('這週要交樹與圖作業。請按確認卡。', [], '這禮拜有什麼要交的')).not.toMatch(
+    /尚未產生確認卡|請按確認卡/,
+  );
   const tools = createTools(fixtureAdapter().adapter, binding, secret, now, true);
   await tools.call('propose_open_page', { page: 'bus' });
   expect(verifyProposalAnswer('明天有英文課。✅ 已為您預留。', tools.cards))

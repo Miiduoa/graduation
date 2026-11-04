@@ -1,5 +1,102 @@
 import type { NuniFoodMenuProjection } from '@campus/shared/src/nuniFood';
-import { date, fail, id, object, text, type Obj } from './contracts';
+import { date, fail, id, object, taipeiDate, text, type Obj } from './contracts';
+export function pickupAt(now: number, raw?: unknown, question = ''): string {
+  const fromClock = (hour: string, minute: string) => {
+    const h = hour.padStart(2, '0');
+    if (Number(h) > 23 || Number(minute) > 59) return '';
+    return `${taipeiDate(now)}T${h}:${minute}:00+08:00`;
+  };
+  const fromQuestion = () => {
+    const time = question.match(/(\d{1,2})[:：](\d{2})/);
+    return time ? fromClock(time[1], time[2]) : '';
+  };
+  const fromRaw = () => {
+    if (typeof raw !== 'string' || !raw.trim()) return '';
+    const clock = raw.trim().match(/^(\d{1,2})[:：](\d{2})$/);
+    if (clock) return fromClock(clock[1], clock[2]);
+    if (
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/.test(raw) &&
+      Number.isFinite(Date.parse(raw))
+    )
+      return new Date(Date.parse(raw) + 28800000)
+        .toISOString()
+        .replace(/Z$/, '+08:00')
+        .replace('.000+', '+');
+    return '';
+  };
+  return (
+    fromQuestion() ||
+    fromRaw() ||
+    new Date(now + 40 * 60000 + 28800000)
+      .toISOString()
+      .replace(/Z$/, '+08:00')
+      .replace('.000+', '+')
+  );
+}
+function unwrap(result: unknown): Obj {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return {};
+  const row = result as Obj;
+  return row.data && typeof row.data === 'object' && !Array.isArray(row.data) ? (row.data as Obj) : row;
+}
+export function pickFoodCart(
+  evidence: { tool: string; result: unknown }[],
+  question: string,
+  now: number,
+): Obj | undefined {
+  const budgetMatch = question.match(/(\d+)\s*元/);
+  const budgetMinor = budgetMatch ? Number(budgetMatch[1]) * 100 : Number.POSITIVE_INFINITY;
+  const mild = /不辣/.test(question);
+  let tenantId = '';
+  let locationId = '';
+  let items: Obj[] = [];
+  for (const entry of evidence) {
+    const row = unwrap(entry.result);
+    if (entry.tool === 'get_food_locations' && Array.isArray(row.locations) && row.locations[0]) {
+      const first = row.locations[0];
+      if (first && typeof first === 'object' && !Array.isArray(first)) {
+        const loc = first as Obj;
+        if (typeof loc.tenantId === 'string') tenantId ||= loc.tenantId;
+        if (typeof loc.id === 'string') locationId ||= loc.id;
+      }
+    }
+    if (typeof row.completePageHref === 'string') {
+      const tenant = /[?&]tenant=([^&]+)/.exec(row.completePageHref);
+      if (tenant) tenantId ||= decodeURIComponent(tenant[1]);
+    }
+    if (entry.tool === 'get_food_menu' && Array.isArray(row.items)) {
+      if (typeof row.locationId === 'string') locationId = row.locationId;
+      items = row.items as Obj[];
+    }
+  }
+  if (!locationId || !items.length) return;
+  const picked = items.find((item) => {
+    const price = Number(item.amountMinor);
+    if (!Number.isFinite(price) || price > budgetMinor) return false;
+    if (mild && !JSON.stringify(item).includes('不辣')) return false;
+    return typeof item.id === 'string';
+  });
+  if (!picked) return;
+  const selectedOptionIds: string[] = [];
+  for (const group of Array.isArray(picked.groups) ? picked.groups : []) {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) continue;
+    const spec = group as Obj;
+    const options = Array.isArray(spec.options)
+      ? spec.options.flatMap((option) =>
+          option && typeof option === 'object' && !Array.isArray(option) ? [option as Obj] : [],
+        )
+      : [];
+    const preferred =
+      (mild ? options.find((option) => String(option.name).includes('不辣')) : undefined) || options[0];
+    if (preferred && typeof preferred.id === 'string' && Number(spec.min) >= 1)
+      selectedOptionIds.push(preferred.id);
+  }
+  return {
+    ...(tenantId ? { tenantId } : {}),
+    locationId,
+    requestedPickupAt: pickupAt(now, undefined, question),
+    items: [{ menuItemId: picked.id, quantity: 1, selectedOptionIds }],
+  };
+}
 export type FoodCart = {
   tenantId: string;
   locationId: string;

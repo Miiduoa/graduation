@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { confirm } from './actions';
 import { foodHref } from './food';
-import { GROQ_URL, createProviderModel, fallbackUrl, groqModel, providerError, providerUserMessage } from './groq';
+import { DEFAULT_FALLBACK_MODEL, GROQ_URL, createProviderModel, fallbackModel, fallbackUrl, groqModel, providerError, providerUserMessage } from './groq';
 import { planningAnswer, run } from './runner';
 import { createTools, selectTools } from './tools';
 import { fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
@@ -188,6 +188,42 @@ it('uses the configured fallback after Groq fails and reports Chinese when both 
   ).rejects.toMatchObject({ code: 'PROVIDER_ALL_FAILED' });
   expect(providerUserMessage('PROVIDER_ALL_FAILED')).toMatch(/主要與備援模型都無法連線/);
   expect(providerError(403, '').code).not.toMatch(/503/);
+});
+
+it('defaults the fallback catalog id and still allows an override', async () => {
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_FALLBACK_ACCOUNT_ID', 'acct_fallback_1');
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_FALLBACK_API_TOKEN', 'synthetic-fallback-token');
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_FALLBACK_MODEL', '');
+  const usageOk = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 };
+  const ok = {
+    choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+    usage: usageOk,
+  };
+  let body = '';
+  const fallback = fallbackModel(async (_url, init) => {
+    body = String(init?.body);
+    return Response.json(ok);
+  });
+  expect(fallback).not.toBeNull();
+  await fallback!({
+    messages: [{ role: 'user', content: '你好' }],
+    max_completion_tokens: 8,
+    signal: new AbortController().signal,
+  });
+  expect(JSON.parse(body).model).toBe(DEFAULT_FALLBACK_MODEL);
+  expect(DEFAULT_FALLBACK_MODEL).toBe('@cf/openai/gpt-oss-120b');
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_FALLBACK_MODEL', '@cf/meta/llama-3-override');
+  let override = '';
+  const custom = fallbackModel(async (_url, init) => {
+    override = String(init?.body);
+    return Response.json(ok);
+  });
+  await custom!({
+    messages: [{ role: 'user', content: '你好' }],
+    max_completion_tokens: 8,
+    signal: new AbortController().signal,
+  });
+  expect(JSON.parse(override).model).toBe('@cf/meta/llama-3-override');
 });
 
 it('keeps fallback disabled when backup settings are absent', async () => {
