@@ -4,7 +4,12 @@ import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { nuniRecord } from '@campus/shared/src/nuni';
 import { NuniSessionProvider, useNuniSession } from '@/features/nuni/Session';
 import { useAuth } from './AuthGuard';
-import { SelectedSchoolProvider, type BrowseSchool } from './SelectedSchoolProvider';
+import { campusDraftIdentity, CampusDraftProvider } from './CampusDraftProvider';
+import {
+  SelectedSchoolProvider,
+  useSelectedSchool,
+  type BrowseSchool,
+} from './SelectedSchoolProvider';
 import { PersonalImportSyncBridge } from './imports/PersonalImportSync';
 
 type Catalog = { schools: BrowseSchool[]; status: 'loading' | 'ready' | 'error' };
@@ -99,16 +104,38 @@ function SchoolPreferences({ children }: { children: ReactNode }) {
     <SelectedSchoolProvider
       ownerKey={owner}
       loading={auth.loading || nuni.loading}
+      identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
       schools={catalog.schools}
       catalogStatus={catalog.status}
       catalogError="目前無法取得校園目錄，請重新讀取。"
       onRetryCatalog={() => void refresh()}
     >
-      <PersonalImportSyncBridge />
-      {children}
+      <CampusDraftMount>
+        <PersonalImportSyncBridge />
+        {children}
+      </CampusDraftMount>
     </SelectedSchoolProvider>
   );
 }
+
+function CampusDraftMount({ children }: { children: ReactNode }) {
+  const auth = useAuth();
+  const school = useSelectedSchool();
+  const nuni = useNuniSession();
+  const ready = !school.loading && school.catalogStatus === 'ready';
+  // 身分未確認時隱藏草稿；校園目錄重讀仍保留同帳號的編輯內容。
+  return (
+    <CampusDraftProvider
+      uid={campusDraftIdentity(auth.user?.uid, nuni.session?.platformAccountId)}
+      identityReady={!auth.loading && !nuni.loading && !nuni.error && !nuni.pendingLogout}
+      schoolId={school.selectedSchoolId}
+      ready={ready}
+    >
+      {children}
+    </CampusDraftProvider>
+  );
+}
+
 export function CampusProviders({ children }: { children: ReactNode }) {
   return (
     <NuniSessionProvider>

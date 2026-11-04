@@ -24,6 +24,7 @@ import { navigateFromInboxTask } from '../services/inboxActions';
 import { hasTCSession } from '../services/tronClassClient';
 import {
   courseWorkNavForClass,
+  resolveTimetableClassroomNav,
   todayCourseWorkNavigateTarget,
   type TimetableClassroomDestination,
 } from '../hooks/timetableClassroomNav';
@@ -190,7 +191,7 @@ export default function StudentTodayScreen() {
     safeNavigate(navigation, target.screen, target.params);
   };
   const openTodo = (row: TodoRow, scrollToSubmit = false) => {
-    if (row.task) {
+    if (scrollToSubmit && row.task) {
       // The task carries its real assignment / quiz ID and destination.
       // If opening fails, the navigation helper explains why; never invent a submit ID.
       navigateFromInboxTask(navigation, row.task, {
@@ -200,12 +201,12 @@ export default function StudentTodayScreen() {
       });
       return;
     }
-    if (row.courseId) {
-      safeNavigate(navigation, 'CourseHub', {
-        groupId: row.courseId,
-        groupName: row.courseName,
-      });
-    }
+    const target = todayCourseWorkNavigateTarget(resolveTimetableClassroomNav({
+      // Inbox tasks already carry the real course/group ID; never infer it from a title.
+      linkedCourseId: row.courseId,
+      courseName: row.courseName,
+    }));
+    safeNavigate(navigation, target.screen, target.params);
   };
   const openWeek = () =>
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
@@ -266,7 +267,7 @@ export default function StudentTodayScreen() {
               now={now}
               styles={s}
               onOpenClass={openCourse}
-              onOpenTodo={(todo) => openTodo(todo, true)}
+              onOpenTodo={openTodo}
               onOpenWeek={openWeek}
             />
             <QuickCampusEntry
@@ -337,7 +338,7 @@ function NextActionCard({
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpenClass: (item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string }) => void;
-  onOpenTodo: (todo: TodoRow) => void;
+  onOpenTodo: (todo: TodoRow, scrollToSubmit?: boolean) => void;
   onOpenWeek: () => void;
 }) {
   const fade = useRef(new Animated.Value(1)).current;
@@ -414,9 +415,16 @@ function NextActionCard({
           <Text style={s.kind}>{TODAY_COPY.allClassesDone}</Text>
           <Text style={s.headline}>{todo.title}</Text>
           <Text style={s.meta}>{formatTodoDueLine(todo, now)}</Text>
-          <View style={s.cardButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={(event) => {
+              event.stopPropagation();
+              onOpenTodo(todo, true);
+            }}
+            style={s.cardButton}
+          >
             <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
-          </View>
+          </Pressable>
         </Animated.View>
       </Pressable>
     );
@@ -463,9 +471,16 @@ function NextActionCard({
         <Text style={s.kind}>{kind}</Text>
         <Text style={s.headline}>{todo.title}</Text>
         <Text style={[s.meta, overdue ? s.metaDanger : null]}>{meta}</Text>
-        <View style={s.cardButton}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={(event) => {
+            event.stopPropagation();
+            onOpenTodo(todo, true);
+          }}
+          style={s.cardButton}
+        >
           <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
-        </View>
+        </Pressable>
       </Animated.View>
     </Pressable>
   );

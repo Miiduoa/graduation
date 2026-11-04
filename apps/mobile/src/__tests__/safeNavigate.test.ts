@@ -66,6 +66,42 @@ describe('resolveTabForRoute', () => {
 });
 
 describe('safeNavigate / same-stack', () => {
+  test.each(['Today', '學習'])('從 %s 開啟助理權限仍透過我的分頁', (tab) => {
+    const tabs = {
+      getState: () => ({
+        routeNames: ['Today', '學習', '我的'],
+        routes: [
+          { name: tab },
+          {
+            name: '我的',
+            state: {
+              routeNames: ['MeHome', 'Settings', 'AssistantPermissions'],
+              routes: [{ name: 'AssistantPermissions' }],
+            },
+          },
+        ],
+      }),
+      getParent: () => null,
+    };
+    const nav = { ...makeNavigation(['CampusAssistant']), getParent: () => tabs };
+    expect(isRouteRegistered(nav, 'AssistantPermissions')).toBe(false);
+    expect(safeNavigate(nav, 'AssistantPermissions')).toBe(true);
+    expect(nav.navigate).toHaveBeenCalledTimes(1);
+    expect(nav.navigate).toHaveBeenCalledWith('我的', {
+      screen: 'AssistantPermissions',
+      params: undefined,
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  test('在我的分頁仍直接開啟已註冊的助理權限', () => {
+    const nav = makeNavigation(['MeHome', 'Settings', 'AssistantPermissions']);
+    expect(safeNavigate(nav, 'AssistantPermissions')).toBe(true);
+    expect(nav.navigate).toHaveBeenCalledTimes(1);
+    expect(nav.navigate).toHaveBeenCalledWith('AssistantPermissions', undefined);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
   test('從搜尋再次開啟已拜訪分頁的課表，仍透過該分頁導航', () => {
     const tabs = {
       getState: () => ({

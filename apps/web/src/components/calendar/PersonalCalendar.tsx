@@ -3,7 +3,8 @@
 import { MonthCalendar } from './MonthCalendar';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   buildPersonalEventsCalendar,
   personalEventsOnDate,
@@ -23,6 +24,7 @@ import {
   type PersonalImportRecord,
 } from '@campus/shared';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { browserRequest, useOptionalNuniSession } from '@/features/nuni/Session';
 import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import {
@@ -152,11 +154,113 @@ function downloadIcs(content: string, filename: string) {
 
 export function PersonalCalendar() {
   const context = usePersonalImportScope();
-  return <PersonalCalendarWorkspace key={context.scopeKey} />;
+  const auth = useAuth();
+  const nuni = useOptionalNuniSession();
+  const school = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const explicitSchool =
+    params?.get('campus')?.trim() || params?.get('schoolId')?.trim() || params?.get('school')?.trim();
+  const authErrorBlocks = !!auth.error && !nuni?.session;
+  const identityPending =
+    !!nuni?.loading ||
+    !!nuni?.error ||
+    !!nuni?.pendingLogout ||
+    (!nuni?.session && (auth.loading || !!auth.error));
+  const knownOwner = identityPending ? null : context.scope.owner;
+  const fallbackOwner =
+    auth.loading || auth.error ? null : auth.user ? `school:${auth.user.uid}` : 'guest';
+  const paused = context.loading || authErrorBlocks || !!nuni?.error || !!nuni?.pendingLogout;
+  const [confirmed, setConfirmed] = useState<typeof context | null>(null);
+  const fallbackChanged =
+    !!confirmed &&
+    !confirmed.scope.owner.startsWith('platform:') &&
+    fallbackOwner !== null &&
+    fallbackOwner !== confirmed.scope.owner;
+  const schoolChanged =
+    !!confirmed &&
+    !!explicitSchool &&
+    !!school &&
+    !school.loading &&
+    school.catalogStatus === 'ready' &&
+    context.scope.schoolId !== confirmed.scope.schoolId;
+  if (
+    confirmed &&
+    (nuni?.pendingLogout ||
+      fallbackChanged ||
+      schoolChanged ||
+      (paused && knownOwner !== null && knownOwner !== confirmed.scope.owner))
+  )
+    setConfirmed(null);
+  else if (
+    !paused &&
+    (confirmed?.scopeKey !== context.scopeKey || confirmed?.schoolName !== context.schoolName)
+  )
+    setConfirmed(context);
+  const retained =
+    confirmed &&
+    !fallbackChanged &&
+    !schoolChanged &&
+    (knownOwner === null || confirmed.scope.owner === knownOwner)
+      ? confirmed
+      : null;
+  const visible = nuni?.pendingLogout ? null : paused ? retained : context;
+  return (
+    <>
+      {nuni?.pendingLogout ? (
+        <div role="status">
+          <p>登出尚未完成，個人行程已隱藏。</p>
+          <button
+            type="button"
+            className="btn"
+            disabled={nuni.loading}
+            onClick={() => void nuni.logout()}
+          >
+            重試登出
+          </button>
+        </div>
+      ) : nuni?.error ? (
+        <div role="alert">
+          <p>
+            暫時無法確認帳號。
+            {retained ? '未儲存的內容仍保留，確認後可繼續。' : '請確認連線後再試。'}
+          </p>
+          <button type="button" className="btn" onClick={() => void nuni.refresh()}>
+            重新確認帳號
+          </button>
+        </div>
+      ) : authErrorBlocks ? (
+        <div role="alert">
+          <p>目前無法確認帳號，個人行程已暫時隱藏。重新整理會清除未儲存的草稿。</p>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              if (window.confirm('重新整理會清除未儲存的行程草稿。確定繼續？'))
+                window.location.reload();
+            }}
+          >
+            重新整理頁面
+          </button>
+        </div>
+      ) : context.loading ? (
+        <p role="status">正在確認個人行程的儲存位置…</p>
+      ) : null}
+      {visible && (
+        <div hidden={paused}>
+          <PersonalCalendarWorkspace key={visible.scopeKey} context={visible} paused={paused} />
+        </div>
+      )}
+    </>
+  );
 }
 
-function PersonalCalendarWorkspace() {
-  const context = usePersonalImportScope();
+function PersonalCalendarWorkspace({
+  context,
+  paused,
+}: {
+  context: ReturnType<typeof usePersonalImportScope>;
+  paused: boolean;
+}) {
   const { user, loading: authLoading } = useAuth();
   const nuni = useOptionalNuniSession();
   const nuniLoading = nuni?.loading ?? false;
@@ -165,12 +269,17 @@ function PersonalCalendarWorkspace() {
   const signedIn = Boolean(user?.uid || nuniAccountId);
   const scope = context.scope;
   const scopeKey = context.scopeKey;
-  const ledger = usePersonalImports(scope, !context.loading);
+  const ledger = usePersonalImports(scope, !paused);
   const [month, setMonth] = useState(() => emptyPersonalEventDraft().date.slice(0, 7));
   const [calendarView, setCalendarView] = useState<'month' | 'list'>('month');
   const [selectedDate, setSelectedDate] = useState('');
-  const [dueItems, setDueItems] = useState<CalendarCourseDeadline[]>([]);
-  const [dueStatus, setDueStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [dues, setDues] = useState<{
+    uid: string | null;
+    items: CalendarCourseDeadline[];
+    status: 'idle' | 'loading' | 'ready' | 'error';
+  }>({ uid: null, items: [], status: 'idle' });
+  const dueUid = user?.uid ?? null;
+  const dueStatus = dues.uid === dueUid ? dues.status : 'idle';
   const [dueRetry, setDueRetry] = useState(0);
   const changeMonth = (value: string) => {
     setMonth(value);
@@ -185,7 +294,7 @@ function PersonalCalendarWorkspace() {
     const sessionContext = nuniContext;
     void Promise.resolve()
       .then(async () => {
-        if (active) setDueStatus('loading');
+        if (active) setDues({ uid: uid ?? null, items: [], status: 'loading' });
         const [lmsResult, nuniResult] = await Promise.allSettled([
           uid ? loadHomeData(uid) : Promise.resolve(null),
           accountId && sessionContext
@@ -210,17 +319,18 @@ function PersonalCalendarWorkspace() {
         const nuniOk =
           nuniResult.status === 'fulfilled' && nuniResult.value !== 'cancelled';
         if (!lmsOk && !nuniOk) {
-          setDueItems([]);
-          setDueStatus('error');
+          setDues({ uid: uid ?? null, items: [], status: 'error' });
           return;
         }
-        setDueItems(mergeCalendarCourseDeadlines(classroom, lms));
-        setDueStatus('ready');
+        setDues({
+          uid: uid ?? null,
+          items: mergeCalendarCourseDeadlines(classroom, lms),
+          status: 'ready',
+        });
       })
       .catch(() => {
         if (!active) return;
-        setDueItems([]);
-        setDueStatus('error');
+        setDues({ uid: uid ?? null, items: [], status: 'error' });
       });
     return () => {
       active = false;
@@ -238,16 +348,22 @@ function PersonalCalendarWorkspace() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [formError, setFormError] = useState('');
+  const formErrorId = useId();
   const [exportNotice, setExportNotice] = useState('');
   const active = useRef(true);
+  const suspended = useRef(paused);
+  const writing = useRef(false);
   const requestId = useRef(0);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     active.current = true;
     return () => {
       active.current = false;
     };
   }, []);
+  useLayoutEffect(() => {
+    suspended.current = paused;
+  }, [paused]);
 
   const monthEvents = useMemo(
     () => filterPersonalEvents(ledger.records, month),
@@ -255,11 +371,11 @@ function PersonalCalendarWorkspace() {
   );
   const events = selectedDate ? personalEventsOnDate(monthEvents, selectedDate) : monthEvents;
   const monthDues = useMemo(
-    () => calendarCourseDeadlinesInMonth(dueItems, month),
-    [dueItems, month],
+    () => calendarCourseDeadlinesInMonth(dues.uid === dueUid ? dues.items : [], month),
+    [dues, dueUid, month],
   );
   const visibleDues = selectedDate
-    ? calendarCourseDeadlinesOnDate(dueItems, selectedDate)
+    ? calendarCourseDeadlinesOnDate(dues.uid === dueUid ? dues.items : [], selectedDate)
     : monthDues;
   const draftRow = personalEventRowFromDraft(
     draft,
@@ -267,12 +383,13 @@ function PersonalCalendarWorkspace() {
     mode === 'edit' ? baseline : null,
   );
   const draftIssues = personalEventDraftIssues(draftRow);
-  const canMutate = !context.loading && ledger.ready && !saving;
+  const canMutate = !paused && ledger.ready && !saving;
 
   const isActiveScope = (target: PersonalImportScope) =>
     active.current && scopeKey === personalImportsStorageKey(target);
 
   const openCreate = () => {
+    if (suspended.current || writing.current) return;
     setMode('create');
     setSelectedId(null);
     setBaseline(null);
@@ -282,6 +399,7 @@ function PersonalCalendarWorkspace() {
   };
 
   const openEdit = (row: PersonalImportRecord) => {
+    if (suspended.current || writing.current) return;
     setMode('edit');
     setSelectedId(row.id);
     setBaseline(row);
@@ -291,6 +409,7 @@ function PersonalCalendarWorkspace() {
   };
 
   const cancelForm = () => {
+    if (suspended.current || writing.current) return;
     setMode('idle');
     setSelectedId(null);
     setBaseline(null);
@@ -298,12 +417,14 @@ function PersonalCalendarWorkspace() {
   };
 
   const runSave = async (action: () => Promise<void>, success: string) => {
+    if (!active.current || suspended.current || writing.current) return;
     if (!canMutate || draftIssues.length) {
       setFormError(draftIssues[0]?.message || '請先確認行程內容。');
       return;
     }
     const ticket = ++requestId.current;
     const scoped = { ...scope };
+    writing.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
@@ -319,7 +440,10 @@ function PersonalCalendarWorkspace() {
       if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
       setFormError(personalEventSaveError(error));
     } finally {
-      if (active.current && ticket === requestId.current) setSaving(false);
+      if (active.current && ticket === requestId.current) {
+        writing.current = false;
+        setSaving(false);
+      }
     }
   };
 
@@ -328,7 +452,11 @@ function PersonalCalendarWorkspace() {
     void runSave(
       async () => {
         const row = personalEventRowFromDraft(draft, scoped.schoolId, null);
-        await savePersonalImportBatch(scoped, [row], () => isActiveScope(scoped));
+        await savePersonalImportBatch(
+          scoped,
+          [row],
+          () => isActiveScope(scoped) && !suspended.current,
+        );
       },
       personalImportSavedNotice(1, ledger.syncEnabled),
     );
@@ -340,20 +468,31 @@ function PersonalCalendarWorkspace() {
     const original = baseline;
     void runSave(async () => {
       const row = personalEventRowFromDraft(draft, scoped.schoolId, original);
-      await changePersonalImport(scoped, original, row, () => isActiveScope(scoped));
+      await changePersonalImport(
+        scoped,
+        original,
+        row,
+        () => isActiveScope(scoped) && !suspended.current,
+      );
     }, '個人行程已更新。');
   };
 
   const removeSelected = () => {
-    if (!baseline || !canMutate) return;
+    if (!baseline || !canMutate || suspended.current || writing.current) return;
     if (!window.confirm(`確定刪除「${baseline.title}」？刪除後無法復原。`)) return;
     const ticket = ++requestId.current;
     const scoped = { ...scope };
     const original = baseline;
+    writing.current = true;
     setSaving(true);
     setFormError('');
     setNotice('');
-    void changePersonalImport(scoped, original, null, () => isActiveScope(scoped))
+    void changePersonalImport(
+      scoped,
+      original,
+      null,
+      () => isActiveScope(scoped) && !suspended.current,
+    )
       .then(() => {
         if (!active.current || ticket !== requestId.current || !isActiveScope(scoped)) return;
         setNotice('已刪除這筆個人行程。');
@@ -367,12 +506,15 @@ function PersonalCalendarWorkspace() {
         setFormError(personalEventSaveError(error));
       })
       .finally(() => {
-        if (active.current && ticket === requestId.current) setSaving(false);
+        if (active.current && ticket === requestId.current) {
+          writing.current = false;
+          setSaving(false);
+        }
       });
   };
 
   const exportRecords = (target: PersonalImportRecord[], filename: string) => {
-    if (!ledger.ready) return;
+    if (!ledger.ready || suspended.current || !active.current) return;
     setExportNotice('');
     try {
       const result = buildPersonalEventsCalendar(target, {
@@ -484,7 +626,7 @@ function PersonalCalendarWorkspace() {
             列表
           </button>
         </div>
-        {!context.loading && ledger.ready && !ledger.error && calendarView === 'month' && (
+        {!paused && ledger.ready && !ledger.error && calendarView === 'month' && (
           <MonthCalendar
             key={month}
             records={monthEvents}
@@ -516,12 +658,17 @@ function PersonalCalendarWorkspace() {
           </p>
         )}
         {notice && <p role="status">{notice}</p>}
-        {formError && <p role="alert">{formError}</p>}
 
         {(mode === 'create' || mode === 'edit') && (
           <section className={styles.row} aria-label={mode === 'create' ? '新增行程' : '編輯行程'}>
             <h3>{mode === 'create' ? '新增行程' : `編輯 ${baseline?.title || '行程'}`}</h3>
-            <EventFormFields draft={draft} disabled={saving} onChange={setDraft} />
+            <EventFormFields
+              draft={draft}
+              disabled={saving || paused}
+              onChange={(next) => {
+                if (!suspended.current && !writing.current) setDraft(next);
+              }}
+            />
             {draftIssues.length > 0 && (
               <ul className={styles.issues}>
                 {draftIssues.map((issue) => (
@@ -529,12 +676,17 @@ function PersonalCalendarWorkspace() {
                 ))}
               </ul>
             )}
+            {formError && (
+              <p id={formErrorId} role="alert">{formError}</p>
+            )}
             <div className={styles.actions}>
               {mode === 'create' ? (
                 <button
                   type="button"
                   className="btn primary"
-                  disabled={!canMutate || draftIssues.length > 0}
+                  disabled={paused || !ledger.ready || draftIssues.length > 0}
+                  aria-disabled={saving || undefined}
+                  aria-describedby={formError ? formErrorId : undefined}
                   onClick={saveCreate}
                 >
                   {saving ? '儲存中…' : '儲存行程'}
@@ -544,7 +696,9 @@ function PersonalCalendarWorkspace() {
                   <button
                     type="button"
                     className="btn primary"
-                    disabled={!canMutate || draftIssues.length > 0}
+                    disabled={paused || !ledger.ready || draftIssues.length > 0}
+                    aria-disabled={saving || undefined}
+                    aria-describedby={formError ? formErrorId : undefined}
                     onClick={saveEdit}
                   >
                     {saving ? '儲存中…' : '儲存修改'}
@@ -552,7 +706,9 @@ function PersonalCalendarWorkspace() {
                   <button
                     type="button"
                     className="btn"
-                    disabled={!canMutate}
+                    disabled={paused || !ledger.ready}
+                    aria-disabled={saving || undefined}
+                    aria-describedby={formError ? formErrorId : undefined}
                     onClick={removeSelected}
                   >
                     刪除這筆
@@ -574,7 +730,7 @@ function PersonalCalendarWorkspace() {
           </section>
         )}
 
-        {context.loading || ledger.loading ? (
+        {paused || ledger.loading ? (
           <p role="status">正在讀取行程…</p>
         ) : ledger.error ? null : !events.length ? (
           <p className={styles.empty}>

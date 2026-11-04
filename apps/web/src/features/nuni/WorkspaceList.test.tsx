@@ -246,6 +246,69 @@ it('clears timetable attribution copy after the user edits search from from=time
   expect(new URLSearchParams(window.location.search).get('code')).toBeNull();
 });
 
+it('keeps from/code in course return context while attributed, and drops them after search clear', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable&code=ID201',
+  );
+  render(<WorkspaceList />);
+  const attributed = await screen.findByRole('link', { name: /互動設計/ });
+  expect(Object.fromEntries(new URL(attributed.getAttribute('href')!, window.location.origin).searchParams)).toMatchObject({
+    q: '互動設計',
+    from: 'timetable',
+    code: 'ID201',
+  });
+
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋課程名稱' }), {
+    target: { value: 'Data' },
+  });
+  const afterClear = await screen.findByRole('link', { name: /Data 資料庫系統/ });
+  const clearedParams = Object.fromEntries(
+    new URL(afterClear.getAttribute('href')!, window.location.origin).searchParams,
+  );
+  expect(clearedParams).toMatchObject({ q: 'Data' });
+  expect(clearedParams.from).toBeUndefined();
+  expect(clearedParams.code).toBeUndefined();
+});
+
+it('clears timetable attribution when the user changes course filter, and restores after a new timetable entry', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/classroom?q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable&code=ID201',
+  );
+  const view = render(<WorkspaceList />);
+  expect(await screen.findByTestId('classroom-query-unique')).toBeTruthy();
+  expect(screen.getByText(/· 課表對應/)).toBeTruthy();
+
+  const filters = within(screen.getByRole('group', { name: '篩選課程' }));
+  // 互動設計仍在「我教的課」，但手動改篩選即離開課表歸因語意
+  fireEvent.click(filters.getByRole('button', { name: /我教的課/ }));
+  expect(screen.queryByText(/· 課表對應/)).toBeNull();
+  expect(screen.queryByText(/剛好找到/)).toBeNull();
+  expect(new URLSearchParams(window.location.search).get('from')).toBeNull();
+  expect(new URLSearchParams(window.location.search).get('code')).toBeNull();
+  const course = await screen.findByRole('link', { name: /互動設計/ });
+  const hrefParams = Object.fromEntries(
+    new URL(course.getAttribute('href')!, window.location.origin).searchParams,
+  );
+  expect(hrefParams).toMatchObject({ q: '互動設計', courses: 'teaching' });
+  expect(hrefParams.from).toBeUndefined();
+  expect(hrefParams.code).toBeUndefined();
+
+  act(() => {
+    window.history.replaceState(
+      {},
+      '',
+      '/classroom?q=%E4%BA%92%E5%8B%95%E8%A8%AD%E8%A8%88&from=timetable&code=ID202',
+    );
+    view.rerender(<WorkspaceList />);
+  });
+  expect(await screen.findByTestId('classroom-query-unique')).toBeTruthy();
+  expect(screen.getByText(/· 課表對應/)).toBeTruthy();
+});
+
 it('drops timetable attribution after search edit when useSearchParams stays stale after replaceState', async () => {
   const stale =
     'q=%E5%B9%BD%E9%9D%88%E8%AA%B2%E8%A1%A8%E8%AA%B2&from=timetable&code=ZZ999';

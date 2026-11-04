@@ -1,13 +1,9 @@
-type SchoolSearchFields = { name: string; shortName?: string; code?: string };
+import { searchSchools } from '@campus/shared/src/schools';
+export { normalizeSchoolQuery } from '@campus/shared/src/schools';
 
-export function normalizeSchoolQuery(value: string) {
-  return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/臺/g, '台').trim();
-}
-
-export function filterSchools<T extends SchoolSearchFields>(schools: readonly T[], query: string): T[] {
-  const terms = normalizeSchoolQuery(query).split(/\s+/).filter(Boolean);
-  return schools.filter((school) => {
-    const fields = normalizeSchoolQuery([school.name, school.shortName, school.code].filter(Boolean).join(' '));
-    return terms.every((term) => fields.includes(term));
-  });
+export function filterSchools<T extends { id?: string; name: string; shortName?: string; code?: string }>(
+  schools: readonly T[],
+  query: string,
+): T[] {
+  return searchSchools(query, schools);
 }

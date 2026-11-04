@@ -143,7 +143,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload audit artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: audit-report
@@ -242,7 +242,7 @@ jobs:
           NODE
 
       - name: Upload Jest test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: mobile-jest-results
@@ -282,6 +282,33 @@ jobs:
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
         # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
         run: pnpm --filter web exec vitest run --coverage
+
+  test-nuni-assistant:
+    name: Assistant Integration Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            scripts/nuni-assistant/pnpm-lock.yaml
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install isolated assistant dependencies
+        run: pnpm --dir scripts/nuni-assistant install --ignore-workspace --frozen-lockfile
+      - name: Test assistant routes and web BFF integration
+        run: pnpm --dir scripts/nuni-assistant test
 
   test-functions:
     name: Functions Tests
@@ -335,7 +362,7 @@ jobs:
 
       - name: Preserve failed emulator diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: emulator-failure-logs
           path: |
@@ -451,7 +478,7 @@ jobs:
           fi
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-build
           include-hidden-files: true
@@ -488,6 +515,7 @@ jobs:
         lint-and-typecheck,
         test-mobile,
         test-web,
+        test-nuni-assistant,
         test-functions,
         test-rules,
         build-mobile,
@@ -573,7 +601,7 @@ jobs:
 
       - name: Preserve Firebase release evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firebase-release-${{ github.sha }}-${{ github.run_attempt }}
           path: |
@@ -591,6 +619,7 @@ jobs:
         lint-and-typecheck,
         test-mobile,
         test-web,
+        test-nuni-assistant,
         test-functions,
         test-rules,
         build-mobile,
@@ -608,6 +637,7 @@ jobs:
           echo "| Lint & Type Check | ${{ needs.lint-and-typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Mobile Tests | ${{ needs.test-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Web Tests | ${{ needs.test-web.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Assistant Integration Tests | ${{ needs.test-nuni-assistant.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Functions Tests | ${{ needs.test-functions.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rules Tests | ${{ needs.test-rules.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build Mobile | ${{ needs.build-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
