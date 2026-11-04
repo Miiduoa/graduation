@@ -480,7 +480,7 @@ it.each(['pu', ' PU ', ' Ｐ Ｕ ', 'p\tu'])('normalizes code %s and supplements
     expect.objectContaining({ tenantId: 'pu', available: true }),
   ]);
   expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-    '/auth/find-school/search?q=pu',
+    '/auth/find-school/search?q=' + encodeURIComponent(query.replace(/\s+/g, '')),
     '/auth/find-school/search?q=' + encodeURIComponent('靜宜大學'),
   ]);
 });
@@ -540,4 +540,36 @@ it('preserves empty-query directory order and reports endpoint errors', async ()
   await expect(searchSchoolsByName('pu')).rejects.toMatchObject({ code: 'NETWORK_UNAVAILABLE' });
   fetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
   await expect(searchSchoolsByName('pu')).rejects.toMatchObject({ code: 'SCHOOL_SEARCH_FAILED' });
+});
+
+// Match the retained endpoint's literal-name ILIKE semantics, without 臺/台 folding.
+it.each(['國立臺灣大學', '國立台灣大學', 'NTU', 'pu'])('preserves endpoint spelling for %s', async (query) => {
+  const schools = [
+    { tenantId: 'ntu', displayName: '國立臺灣大學', status: 'open' },
+    { tenantId: 'tw-other', displayName: '國立台灣大學分校', status: 'open' },
+    { tenantId: 'pu', displayName: '靜宜大學', status: 'open' },
+  ];
+  fetchMock.mockImplementation(async (input) => {
+    const q = new URL(String(input), 'https://nuni.invalid').searchParams.get('q')!;
+    return schoolSearchResponse(schools.filter((school) => school.displayName.toLowerCase().includes(q.toLowerCase())));
+  });
+  const rows = await searchSchoolsByName(query);
+  expect(rows.map((row) => row.tenantId)).toContain(query === 'pu' ? 'pu' : query === '國立台灣大學' ? 'tw-other' : 'ntu');
+  expect(new URL(String(fetchMock.mock.calls[0][0]), 'https://nuni.invalid').searchParams.get('q')).toBe(query);
+  if (query === 'NTU') {
+    expect(new URL(String(fetchMock.mock.calls[1][0]), 'https://nuni.invalid').searchParams.get('q')).toBe('國立臺灣大學');
+  }
+});
+
+it.each([[false, undefined], [true, undefined], [false, true], [true, true]])('preserves status denial (supplement: %s, available: %s)', async (supplement, available) => {
+  if (supplement) fetchMock.mockResolvedValueOnce(schoolSearchResponse([]));
+  fetchMock.mockResolvedValueOnce(schoolSearchResponse([
+    { tenantId: 'ntpu', displayName: '國立臺北大學', status: 'open' },
+    { tenantId: 'pu', displayName: '靜宜大學', status: 'not-open', available, reason: 'school-not-open' },
+    { displayName: '靜宜大學', status: 'open', available: true },
+  ]));
+  const rows = await searchSchoolsByName('pu');
+  expect(rows[0]).toMatchObject({ tenantId: 'pu', available: false, reason: 'school-not-open' });
+  expect(rows.filter((row) => row.available && row.tenantId).map((row) => row.tenantId)).toEqual(supplement ? [] : ['ntpu']);
+  expect(fetchMock).toHaveBeenCalledTimes(supplement ? 2 : 1);
 });

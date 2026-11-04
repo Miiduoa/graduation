@@ -451,7 +451,7 @@ function asSchool(value: unknown): DiscoveredSchool | null {
     ? row.providerKinds.filter((kind): kind is string => typeof kind === 'string')
     : undefined;
   const reason = typeof row.reason === 'string' ? row.reason : undefined;
-  if (row.available === false) return { available: false, tenantId, displayName, providerKinds, reason };
+  if (row.available === false || (typeof row.status === 'string' && row.status !== 'open')) return { available: false, tenantId, displayName, providerKinds, reason };
   if (tenantId) return { available: true, tenantId, displayName, providerKinds, reason };
   return null;
 }
@@ -483,7 +483,8 @@ async function fetchSchoolSearch(query: string): Promise<DiscoveredSchool[]> {
 export async function searchSchoolsByName(query: string): Promise<DiscoveredSchool[]> {
   const normalized = normalizeSchoolQuery(query);
   const compact = normalized.replace(/\s+/g, '');
-  const rows = await fetchSchoolSearch(compact);
+  // Preserve endpoint spelling; shared normalization is only for local matching.
+  const rows = await fetchSchoolSearch(query.replace(/\s+/g, ''));
   const directorySchool = (row: DiscoveredSchool) => mockSchools.find((school) =>
     school.id === row.tenantId ||
     normalizeSchoolQuery(school.code) === normalizeSchoolQuery(row.tenantId ?? '') ||
@@ -496,7 +497,7 @@ export async function searchSchoolsByName(query: string): Promise<DiscoveredScho
   ) : [];
   for (const school of exact) {
     if (rows.some((row) => directorySchool(row)?.id === school.id)) continue;
-    const supplemental = await fetchSchoolSearch(normalizeSchoolQuery(school.name).replace(/\s+/g, ''));
+    const supplemental = await fetchSchoolSearch(school.name);
     for (const row of supplemental) {
       if (directorySchool(row)?.id !== school.id) continue;
       if (row.tenantId && rows.some((existing) => existing.tenantId === row.tenantId)) continue;

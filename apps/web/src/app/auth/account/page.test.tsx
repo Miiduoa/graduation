@@ -164,7 +164,7 @@ it('opens the school-email form from 登入校園帳號 and looks up the school 
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/v1/auth/account/registration-start'))).toBe(true);
 });
 
-it.each([['靜宜大學', '靜宜大學'], [' Ｐ Ｕ ', 'pu'], [' 靜 宜 大 學 ', '靜宜大學']])('opens in-page school lookup for %s', async (query, expectedQuery) => {
+it.each([['靜宜大學', '靜宜大學'], [' Ｐ Ｕ ', 'ＰＵ'], [' 靜 宜 大 學 ', '靜宜大學']])('opens in-page school lookup for %s', async (query, expectedQuery) => {
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === '/api/nuni/session' || url === '/auth/session') {
@@ -337,12 +337,15 @@ it('drops a missing old return path when taking a signed-in visitor home', async
 
 
 
-it('keeps unavailable and tenant-less school results out of login choices', async () => {
+it.each(['available', 'status', 'supplemental-status'])('keeps unavailable and tenant-less school results out of login choices: %s', async (denial) => {
   fetchMock.mockImplementation(async (input) => {
     const url = String(input);
     if (url.startsWith('/auth/find-school/search?')) {
+      if (denial === 'supplemental-status' && new URL(url, 'https://nuni.invalid').searchParams.get('q') !== '靜宜大學') {
+        return new Response('{"schools":[]}', { status: 200 });
+      }
       return new Response(JSON.stringify({ schools: [
-        { tenantId: 'pu', displayName: '靜宜大學', available: false, reason: 'school-not-open' },
+        { tenantId: 'pu', displayName: '靜宜大學', providerKinds: ['google-workspace'], ...(denial === 'available' ? { available: false } : { status: 'not-open', available: true }), reason: 'school-not-open' },
         { displayName: '靜宜大學', available: true },
       ] }), { status: 200 });
     }
