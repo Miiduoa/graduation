@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { bytes, type ModelInput } from './contracts';
 import { providerError } from './groq';
 import { partialAnswer, run, scheduleIntent, verifyProposalAnswer } from './runner';
-import { createTools } from './tools';
+import { createTools, selectTools } from './tools';
 import { fakeModel, fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret, questions } from './fixtures';
 
 it.each([0, 1])('finishes sequential planning/ordering within four calls and 7000 tokens (%s)', async (index) => {
@@ -38,9 +38,16 @@ it('corrects proposal claims and requires confirmation without losing unrelated 
   expect(scheduleIntent('幫我排隊')).toBe(false);
   expect(scheduleIntent('幫我留言')).toBe(false);
   expect(scheduleIntent('留言')).toBe(false);
+  expect(selectTools('幫我排隊', false)).not.toContain('propose_study_plan');
+  expect(selectTools('幫我排寫作業的時間，下午', false)).toContain('propose_study_plan');
   expect(
     verifyProposalAnswer('已幫你安排好。請按確認卡。', [], '幫我排寫作業的時間'),
   ).toBe('尚未產生確認卡，也尚未執行寫入或下單。');
+  expect(verifyProposalAnswer('攝影社週五有攝影散步，請按確認卡。', [], '社團有什麼消息'))
+    .toMatch(/攝影社週五有攝影散步/);
+  expect(
+    verifyProposalAnswer('攝影社週五有攝影散步，請按確認卡。', [], '社團有什麼消息'),
+  ).not.toMatch(/請按確認卡/);
 });
 it('does not fill a study card for queueing or when writes are disabled', async () => {
   const usage = { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 };

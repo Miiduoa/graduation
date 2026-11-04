@@ -126,6 +126,13 @@ it('rewrites pickup time and amount from the food card and page-mode copy', () =
       expect(english).toContain('蔬菜便當可取');
       expect(english).not.toMatch(/payment|checkout|placed the order|reordered/i);
       expect(english).toContain('按確認後會開啟點餐頁，品項已帶好');
+      const orderPhrases = alignFoodCardAnswer(
+        'Place your order? 蔬菜便當可取. Order placed.',
+        tools.cards,
+      );
+      expect(orderPhrases).toContain('蔬菜便當可取');
+      expect(orderPhrases).not.toMatch(/place your order|order placed/i);
+      expect(orderPhrases).toContain('按確認後會開啟點餐頁，品項已帶好');
     });
 });
 

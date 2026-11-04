@@ -4,7 +4,7 @@ import { confirm } from './actions';
 import { foodHref } from './food';
 import { DEFAULT_FALLBACK_MODEL, GROQ_URL, createProviderModel, fallbackModel, fallbackUrl, groqModel, providerError, providerUserMessage } from './groq';
 import { planningAnswer, run } from './runner';
-import { createTools, selectTools } from './tools';
+import { createTools, selectTools, studyWindow } from './tools';
 import { fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
 
 afterEach(() => {
@@ -19,6 +19,31 @@ const cart = {
   items: [{ menuItemId: 'veggie', quantity: 1, selectedOptionIds: ['regular'] }],
 };
 const usage = { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 };
+
+it('normalizes invalid study-plan clocks and keeps the asked afternoon window', async () => {
+  expect(studyWindow('幫我排寫作業的時間，下午')).toEqual({ from: '13:00', to: '18:00' });
+  expect(studyWindow('幫我排寫作業的時間', '建議 15:00–16:00、17:00–19:00')).toEqual({
+    from: '15:00',
+    to: '19:00',
+  });
+  const tools = createTools(
+    fixtureAdapter().adapter,
+    binding,
+    secret,
+    now,
+    true,
+    false,
+    '幫我排寫作業的時間，下午',
+  );
+  const result = await tools.call('propose_study_plan', {
+    date: '2026-11-04',
+    from: '15:00:00',
+    to: '19:00:00',
+    taskIds: '樹與圖作業',
+  });
+  expect(result.value).toMatchObject({ planned: [expect.objectContaining({ proposed: true })] });
+  expect(tools.cards.every((card) => String(card.args.startTime) >= '13:00')).toBe(true);
+});
 
 it('schedules pending work without asking for task codes', async () => {
   const tools = createTools(fixtureAdapter().adapter, binding, secret, now, true);

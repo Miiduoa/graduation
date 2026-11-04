@@ -161,11 +161,77 @@ export function studyTitle(title: string): string {
     .trim();
   return ('寫作業：' + clean.replace(/作業(?:作業)+/g, '作業')).slice(0, 120);
 }
+export function scheduleIntent(question: string): boolean {
+  return (
+    /規劃|安排|排寫|留.?(?:一)?小時/.test(question) ||
+    /幫我排(?!隊)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question) ||
+    /幫我留(?!言)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question)
+  );
+}
+export function parseClock(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return;
+  const s = String(raw).trim().replace(/：/g, ':');
+  const hms = s.match(/^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$/);
+  if (hms) {
+    const hour = hms[1].padStart(2, '0');
+    if (Number(hour) > 23) return;
+    return hour + ':' + hms[2];
+  }
+  return;
+}
+function parseRange(raw: unknown): { from: string; to: string } | undefined {
+  if (typeof raw !== 'string') return;
+  const match = raw
+    .trim()
+    .replace(/：/g, ':')
+    .match(/^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?\s*[-–—~至到]\s*(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) return;
+  const from = parseClock(match[1] + ':' + match[2]);
+  const to = parseClock(match[3] + ':' + match[4]);
+  if (!from || !to || from >= to) return;
+  return { from, to };
+}
+function clockRanges(text: string): { from: string; to: string }[] {
+  const ranges: { from: string; to: string }[] = [];
+  const re =
+    /(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?\s*[-–—~至到]\s*(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?/g;
+  for (const match of text.matchAll(re)) {
+    const from = parseClock(match[1] + ':' + match[2]);
+    const to = parseClock(match[3] + ':' + match[4]);
+    if (from && to && from < to) ranges.push({ from, to });
+  }
+  return ranges;
+}
+const PERIODS: [RegExp, string, string][] = [
+  [/上午/, '08:00', '12:00'],
+  [/中午/, '11:00', '13:00'],
+  [/晚上|今晚|今夜/, '18:00', '22:00'],
+  [/下午/, '13:00', '18:00'],
+];
+export function studyWindow(question: string, answer = ''): { from: string; to: string } {
+  const fromQuestion = clockRanges(question);
+  if (fromQuestion.length)
+    return { from: fromQuestion[0].from, to: fromQuestion[fromQuestion.length - 1].to };
+  const single = question.match(/(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?/);
+  const clock = single ? parseClock(single[1] + ':' + single[2]) : undefined;
+  for (const [pattern, from, to] of PERIODS) {
+    if (pattern.test(question))
+      return clock && clock >= from && clock < to ? { from: clock, to } : { from, to };
+  }
+  if (clock) {
+    const end = Number(clock.slice(0, 2)) + 1;
+    return { from: clock, to: (end > 22 ? 22 : end).toString().padStart(2, '0') + clock.slice(2) };
+  }
+  const fromAnswer = clockRanges(answer);
+  if (fromAnswer.length)
+    return { from: fromAnswer[0].from, to: fromAnswer[fromAnswer.length - 1].to };
+  return { from: '08:00', to: '22:00' };
+}
 export const toolNames = Object.keys(definitions);
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
-  if (/作業|測驗|要交|規劃|排|剛剛|剛才/.test(question))
+  if (/作業|測驗|要交|規劃|剛剛|剛才/.test(question) || scheduleIntent(question))
     add(
       'get_due_work',
       'get_day_overview',
@@ -175,7 +241,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_study_plan',
     );
   if (/行程|事件|今晚|今夜|明晚/.test(question)) add('propose_personal_event');
-  if (/課|有空|下午|行程|規劃/.test(question))
+  if (/課|有空|下午|行程|規劃/.test(question) || scheduleIntent(question))
     add('get_schedule', 'get_calendar', 'find_free_time');
   if (/教材/.test(question)) add('list_courses', 'get_materials');
   if (/吃|中午|餐廳|規劃/.test(question)) add('get_dining');
@@ -199,7 +265,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
     out.delete('propose_open_page');
     out.delete('get_dining');
   }
-  if (/規劃|安排|排寫|幫我排/.test(question)) {
+  if (scheduleIntent(question)) {
     out.delete('propose_open_page');
     out.delete('propose_personal_event');
     out.delete('get_schedule');
@@ -217,7 +283,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
   if (names.length > 8 && names.includes('find_free_time'))
     names.splice(names.indexOf('get_calendar'), 1);
-  if (/規劃|安排|排寫|幫我排/.test(question))
+  if (scheduleIntent(question))
     return [
       'get_day_overview',
       'get_today_context',
@@ -226,10 +292,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
-  const priority = /規劃|安排|排寫|幫我排/.test(question)
-    ? ['get_day_overview', 'get_due_work', 'find_free_time', 'propose_study_plan']
-    : [];
-  return [...new Set([...priority, ...names])].slice(0, 8);
+  return names.slice(0, 8);
 }
 export const schemas = (names: string[]) =>
   names.map((name) => ({
@@ -986,10 +1049,34 @@ export function createTools(
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
       const cleaned = { ...object(raw) };
+      if (name === 'propose_study_plan' || name === 'find_free_time') {
+        const window = studyWindow(question);
+        const ranged = parseRange(cleaned.from) || parseRange(cleaned.to);
+        const from = parseClock(cleaned.from) || ranged?.from || window.from;
+        const to = parseClock(cleaned.to) || ranged?.to || window.to;
+        cleaned.from = from < to ? from : window.from;
+        cleaned.to = from < to ? to : window.to;
+        if (cleaned.minMinutes !== undefined) {
+          const minutes = Number(cleaned.minMinutes);
+          const max = name === 'find_free_time' ? 480 : 180;
+          cleaned.minMinutes = Number.isInteger(minutes)
+            ? Math.min(max, Math.max(15, minutes))
+            : 60;
+        }
+        if (cleaned.date !== undefined) {
+          try {
+            cleaned.date = date(cleaned.date);
+          } catch {
+            cleaned.date = taipeiDate(now);
+          }
+        }
+      }
       if (name === 'propose_study_plan') {
         if (cleaned.taskIds === undefined && cleaned.taskId !== undefined)
           cleaned.taskIds = Array.isArray(cleaned.taskId) ? cleaned.taskId : [cleaned.taskId];
         delete cleaned.taskId;
+        if (typeof cleaned.taskIds === 'string' && cleaned.taskIds.trim())
+          cleaned.taskIds = [cleaned.taskIds];
         const day = typeof cleaned.date === 'string' ? String(cleaned.date) : taipeiDate(now);
         await dueWork({ from: day, to: addDays(day, 6) });
         if (!Array.isArray(cleaned.taskIds) || !cleaned.taskIds.length) {
