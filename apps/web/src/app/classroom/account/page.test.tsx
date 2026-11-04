@@ -21,7 +21,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(mocks.search),
   useRouter: () => ({ push: vi.fn() }),
 }));
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>Campus One</header> }));
+vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
 vi.mock('@/components/SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/components/PWAInstallBanner', () => ({ PWAInstallBanner: () => null }));
 vi.mock('@/components/AuthGuard', () => ({

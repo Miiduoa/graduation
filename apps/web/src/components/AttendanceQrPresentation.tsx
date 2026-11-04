@@ -87,7 +87,7 @@ export function AttendanceQrPresentation({
       }}>
       {showing && <div className={styles.frame}>
         <header className={styles.header}>
-          <div><p className={styles.eyebrow}>CAMPUS ONE · 課堂簽到</p>
+          <div><p className={styles.eyebrow}>nuni · 課堂簽到</p>
             <h2 id={titleId}>{courseName.trim() || '課堂簽到'}</h2></div>
           <button ref={closeButton} type="button" className={styles.close} onClick={dismiss}>
             結束投影
@@ -100,7 +100,7 @@ export function AttendanceQrPresentation({
           </div>
           <div className={styles.instructions}>
             <span className={styles.badge}>點名進行中</span>
-            <p id={hintId} className={styles.hint}>在 Campus One 課堂頁開啟相機，掃描後按「確認簽到」。</p>
+            <p id={hintId} className={styles.hint}>在 nuni 課堂頁開啟相機，掃描後按「確認簽到」。</p>
             <div className={styles.metrics}>
               <div><span>剩餘簽到時間</span><strong aria-label={`剩餘 ${attendanceCountdown(remainingSeconds)}`}>
                 {attendanceCountdown(remainingSeconds)}
