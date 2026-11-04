@@ -471,3 +471,63 @@ test('narrows local deadlines across turns, selects the displayed row and prepar
     jest.useRealTimers();
   }
 });
+
+test('pages through the same filtered deadlines across Taipei midnight without loading a model', async () => {
+  const beforeMidnight = new Date('2026-11-04T15:59:30Z');
+  jest.useFakeTimers({ now: beforeMidnight });
+  try {
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    const tasks = Array.from({ length: 17 }, (_, index) => ({
+      title: '練習 ' + (index + 1), groupName: '資料庫管理',
+      dueAt: new Date(Date.parse('2026-11-05T09:00:00Z') + index * 60_000).toISOString(),
+      source: { kind: 'group-assignment' as const, groupId: 'db', assignmentId: String(index + 1) },
+    }));
+    const loaded = [...tasks, { ...tasks[0], groupName: '經濟學' },
+      { ...tasks[0], title: '下個月截止', dueAt: '2026-12-01T00:00:00Z' }];
+    const snapshot = { userId: 'A', schoolId: 'pu', checkedAt: beforeMidnight.toISOString(),
+      assignments: { status: 'available' as const, count: loaded.length + 3, items: loaded },
+      announcements: { status: 'available' as const, items: [] }, schedule: { status: 'unavailable' as const, count: null } };
+    const messages: import('../../features/campusAssistant').CampusAssistantMessage[] = [];
+    async function ask(content: string) {
+      messages.push({ role: 'user', content });
+      const result = await askCampusAssistant({ ...input(), mode: 'device', messages, senseSnapshot: snapshot });
+      messages.push({ role: 'assistant', content: result.content, assignmentRead: result.assignmentRead });
+      return result;
+    }
+    const first = await ask('明天資料庫管理的作業有哪些？');
+    expect(first.assignmentRead?.items).toEqual(tasks.slice(0, 8));
+    expect(first.assignmentRead?.page?.total).toBe(17);
+    expect(first.content).toContain('3 筆尚未同步');
+    jest.setSystemTime(new Date('2026-11-04T16:00:30Z'));
+    expect((await ask('幫我設提醒')).assignmentRead?.reviewReminder).toBe(true);
+    const second = await ask('還有呢？');
+    expect(second.assignmentRead?.items).toEqual(tasks.slice(8, 16));
+    const last = await ask('下一頁');
+    expect(last.assignmentRead?.items).toEqual(tasks.slice(16));
+    expect([first, second, last].flatMap((reply) => reply.assignmentRead!.items)).toEqual(tasks);
+    const atEnd = await ask('還有嗎？');
+    expect(atEnd.assignmentRead?.items).toEqual(tasks.slice(16));
+    expect((await ask('回到第一頁')).assignmentRead?.items).toEqual(tasks.slice(0, 8));
+    expect((await ask('第 3 頁')).assignmentRead?.items).toEqual(tasks.slice(16));
+    expect((await ask('第 9 頁')).assignmentRead?.items).toEqual(tasks.slice(16));
+    const back = await ask('上一頁');
+    expect(back.assignmentRead?.items).toEqual(tasks.slice(8, 16));
+    const selection = await ask('第二筆');
+    expect(selection.assignmentRead?.items).toEqual([tasks[9]]);
+    expect(selection.assignmentRead?.reviewReminder).toBe(true);
+    expect(selection.assignmentRead?.page).toBeUndefined();
+    // An evaluation time pinned to the first page must not extend authorization.
+    jest.setSystemTime(new Date('2026-11-04T16:16:00Z'));
+    const expired = await askCampusAssistant({ ...input(), mode: 'device', senseSnapshot: snapshot, messages: [
+      { role: 'assistant', content: second.content, assignmentRead: second.assignmentRead },
+      { role: 'user', content: '下一頁' },
+    ] });
+    expect(expired.tool).toBe('online-required');
+    expect(expired.content).not.toContain('練習 17');
+    expect(expired.assignmentRead).toBeUndefined();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(httpsCallable).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});

@@ -517,7 +517,7 @@ function AssistantConversation({
           {index === messages.length - 1 && message.role === 'assistant' && message.assignmentRead && currentSense && (
             <AssignmentReplyActions read={message.assignmentRead} snapshot={currentSense}
               context={{ userId: uid, schoolId, isCurrent: current, navigation }} disabled={busy || syncBusy}
-              onSelect={(index) => void send('第 ' + (index + 1) + ' 筆')} />
+              onAsk={(question) => void send(question)} />
           )}
           {message.role === 'assistant' && message.plan ? (
             <CampusEvidencePlanCard

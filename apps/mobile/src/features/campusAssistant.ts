@@ -127,7 +127,7 @@ export async function askCampusAssistant(input: {
       senseSnapshot, Date.parse(snapshot.checkedAt));
     const lookup = followUp && 'question' in followUp ? followUp : null;
     const localAnswer = followUp && 'reply' in followUp ? followUp.reply
-      : runOfflineCampusTool(lookup?.question ?? question, snapshot, senseSnapshot, uid, lookup?.filter);
+      : runOfflineCampusTool(lookup?.question ?? question, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
     if (localAnswer) {
       return {
         content: localAnswer.content,

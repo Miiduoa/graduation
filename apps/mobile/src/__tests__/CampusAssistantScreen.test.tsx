@@ -793,3 +793,34 @@ test('tapping a result retains the unsent draft and opens only the selected sour
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
   expect(view.getByText('確認設定本機提醒')).toBeTruthy();
 });
+
+test('moves between assignment pages without sending the draft and keeps the back button on a one-row last page', async () => {
+  const checkedAt = new Date().toISOString();
+  const items = Array.from({ length: 9 }, (_, i) => ({ title: '練習 ' + (i + 1), groupName: '資料庫', dueAt: null }));
+  const snapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+    assignments: { status: 'available' as const, count: items.length, items },
+    announcements: { status: 'available' as const, items: [] }, schedule: { status: 'unavailable' as const, count: null } };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot);
+  const question = '我有哪些待交作業？';
+  const page = (offset: number) => ({
+    source: 'device', tool: 'campus-snapshot', content: '已同步的作業', hasActions: false,
+    assignmentRead: { userId: 'A', schoolId: 'pu', checkedAt, filterQuestion: question, items: items.slice(offset, offset + 8),
+      page: { question, offset, total: items.length, asOf: Date.parse(checkedAt) } },
+  });
+  request.mockResolvedValueOnce(page(0)).mockResolvedValueOnce(page(8)).mockResolvedValueOnce(page(0));
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, question);
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '待會再問的問題');
+  expect(view.queryByText('上一頁作業')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('下一頁作業')));
+  expect(request.mock.calls[1][0].messages.at(-1).content).toBe('下一頁');
+  expect(view.queryByText('下一頁作業')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('上一頁作業')));
+  expect(request.mock.calls[2][0].messages.at(-1).content).toBe('上一頁');
+  expect(view.getByText('本頁第 2 筆')).toBeTruthy();
+  expect(field.props.value).toBe('待會再問的問題');
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+});

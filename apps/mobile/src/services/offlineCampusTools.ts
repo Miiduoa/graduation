@@ -6,7 +6,15 @@ import { outsideAssignmentNames, parseAssignmentDeadlineWindow, stripAssignmentD
 import { filterAssignmentQuery } from './assignmentQueryFilter';
 import { buildOfflineCampusPlan, type CampusEvidencePlan } from './offlineCampusPlanner';
 
+export const ASSIGNMENT_PAGE_SIZE = 8;
+export interface AssignmentPageRequest {
+  offset: number;
+  asOf: number;
+  reviewReminder?: boolean;
+}
+
 export interface AssignmentRead {
+  page?: AssignmentPageRequest & { total: number; question: string };
   reviewReminder?: boolean;
   userId: string;
   schoolId: string;
@@ -119,6 +127,7 @@ function syncedCampusAnswer(
   snapshot: CampusSenseSnapshot | null,
   assignmentOnly: boolean,
   filterQuestion: string,
+  page?: AssignmentPageRequest,
 ): OfflineCampusToolResult | null {
   if (!snapshot) return null;
   const now = Date.parse(context.checkedAt);
@@ -145,7 +154,10 @@ function syncedCampusAnswer(
       const filterText = assignmentOnly ? protectCalendarTitle(filterQuestion, assignments.items) : filterQuestion;
       const filtered = assignmentOnly ? filterAssignmentQuery(filterText, assignments.items)
         : { items: assignments.items, scope: null };
-      const window = assignmentOnly ? parseAssignmentDeadlineWindow(question === filterQuestion ? filterText : question, now) : null;
+      // Freeze only the query clock across pages. The caller validates the snapshot
+      // against the current clock on every turn, including after app resume.
+      const asOf = page?.asOf ?? now;
+      const window = assignmentOnly ? parseAssignmentDeadlineWindow(question === filterQuestion ? filterText : question, asOf) : null;
       if (window === 'clarify') return {
         tool: 'campus-snapshot', route: '/classroom',
         assignmentRead: { userId: snapshot.userId, schoolId: snapshot.schoolId, checkedAt: snapshot.checkedAt,
@@ -159,18 +171,25 @@ function syncedCampusAnswer(
           ? '尚未逾期' : /逾期|期限已過/.test(qualifier) ? '已逾期' : '';
       const matches = dated.filter(({ due }) => {
         if (status === '期限未確認' && Number.isFinite(due)) return false;
-        if (status === '已逾期' && !(due < now)) return false;
-        if (status === '尚未逾期' && !(due >= now)) return false;
+        if (status === '已逾期' && !(due < asOf)) return false;
+        if (status === '尚未逾期' && !(due >= asOf)) return false;
         if (!window) return true;
         const day = taipeiDayNumber(due);
         return day >= window.startDay && day < window.endDay &&
-          (!/未來|接下來/.test(window.label) || due >= now);
+          (!/未來|接下來/.test(window.label) || due >= asOf);
       }).sort((a, b) =>
         (Number.isFinite(a.due) ? a.due : Infinity) - (Number.isFinite(b.due) ? b.due : Infinity));
-      const preview = matches.slice(0, askingPriority ? 3 : 8);
+      const offset = page?.offset ?? 0;
+      if (page && (!Number.isSafeInteger(offset) || offset < 0 || offset % ASSIGNMENT_PAGE_SIZE !== 0 ||
+          offset >= matches.length || !Number.isFinite(new Date(asOf).getTime()))) {
+        return { tool: 'campus-snapshot', route: '/classroom', content: '無法核對這一頁的作業，請重新查詢。' };
+      }
+      const preview = matches.slice(offset, offset + (askingPriority ? 3 : ASSIGNMENT_PAGE_SIZE));
       if (assignmentOnly) {
         assignmentRead = { filterQuestion, userId: snapshot.userId, schoolId: snapshot.schoolId,
-          checkedAt: snapshot.checkedAt, items: preview.map(({ item }) => item) };
+          checkedAt: snapshot.checkedAt, items: preview.map(({ item }) => item),
+          ...(page?.reviewReminder ? { reviewReminder: true } : {}),
+          ...(matches.length > ASSIGNMENT_PAGE_SIZE ? { page: { offset, total: matches.length, question, asOf } } : {}) };
       }
       if (filtered.scope || window || status) {
         const detail = [filtered.scope, status, window && window.label + '截止（台灣時間）'].filter(Boolean).join('、');
@@ -179,6 +198,11 @@ function syncedCampusAnswer(
         lines.push('已接通課程的待交作業：' + assignments.count + ' 筆。');
         if (!matches.length) lines.push('這次同步沒有列出作業，不代表其他校務系統已全部繳交。');
       }
+      if (assignmentRead?.page) {
+        const range = preview.length === 1 ? String(offset + 1) : (offset + 1) + '–' + (offset + preview.length);
+        lines.push('本頁顯示第 ' + range + ' 筆，共 ' + matches.length + ' 筆符合。');
+        if (page && (window || status)) lines.push('沿用 ' + syncedTime(new Date(asOf).toISOString()) + ' 查詢時的日期與期限條件。');
+      }
       for (const [index, { item, due }] of preview.entries()) {
         const deadline = Number.isFinite(due)
           ? (due < now ? '｜期限已過 ' : '｜截止 ') + syncedTime(item.dueAt!)
@@ -186,7 +210,9 @@ function syncedCampusAnswer(
         lines.push((assignmentOnly ? (index + 1) + '. ' : '• ') + item.title +
           (item.groupName ? '（' + item.groupName + '）' : '') + deadline);
       }
-      if (matches.length > preview.length) {
+      if (assignmentRead?.page) {
+        if (offset + preview.length < matches.length) lines.push('回覆「下一頁」繼續查看。');
+      } else if (matches.length > preview.length) {
         lines.push('此回覆先列出 ' + preview.length + ' 筆；另有 ' + (matches.length - preview.length) +
           ' 筆已同步但未在此預覽展開，可從「未來七天」的逐日安排與其他作業區查看。');
       }
@@ -344,6 +370,7 @@ export function runOfflineCampusTool(
   senseSnapshot?: CampusSenseSnapshot | null,
   ownerUid = '',
   assignmentFilterQuestion?: string,
+  page?: AssignmentPageRequest,
 ): OfflineCampusToolResult | null {
   const text = question.trim().slice(0, 1600);
   if (!text) return null;
@@ -378,7 +405,7 @@ export function runOfflineCampusTool(
       route: plan.steps[0]?.route,
     };
   }
-  const synced = syncedCampusAnswer(text, context, snapshot, assignmentOnly, assignmentFilterQuestion ?? text);
+  const synced = syncedCampusAnswer(text, context, snapshot, assignmentOnly, assignmentFilterQuestion ?? text, page);
   if (synced) return synced;
   if (assignmentOnly && (!snapshot || snapshot.assignments.status !== 'available')) {
     return { tool: 'online-required', route: '/classroom',
