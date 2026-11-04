@@ -33,7 +33,10 @@ afterEach(() => {
 const json = (value: object) =>
   new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 it('disabled shows existing unavailable message without Firebase requests', async () => {
-  const fetch = vi.fn(async (_url: string) => new Response('{}', { status: 404 }));
+  const fetch = vi.fn(async (..._args: [string]) => {
+    void _args;
+    return new Response('{}', { status: 404 });
+  });
   vi.stubGlobal('fetch', fetch);
   render(<Assistant />);
   expect(await screen.findByText('雲端助理尚未啟用。')).toBeTruthy();
@@ -116,4 +119,87 @@ it('provider unavailable preserves deterministic entries and disables model cons
   fireEvent.click(screen.getByText('校園地圖'));
   const consent = await screen.findByText('同意外送上述公開資料並查詢');
   expect((consent as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('v2 uses conversation consent, memory, data steps and separate card confirmation', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      const body = JSON.parse(init.body as string);
+      bodies.push(body);
+      if (url.endsWith('confirm')) return json({ confirmed: true });
+      return json({
+        answer: 'v2 回答',
+        steps: [{ name: 'get_schedule', status: 'ok', summary: '已查課表' }],
+        cards: [
+          {
+            tool: 'propose_personal_event',
+            token: 'synthetic-card',
+            mutationId: 'm1',
+            schoolId: 'pu',
+            destination: '個人行事曆',
+            args: {
+              title: '精確作業安排',
+              date: '2026-11-04',
+              startTime: '20:00',
+              endTime: '21:00',
+            },
+          },
+        ],
+      });
+    }),
+  );
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '幫我排作業' } });
+  expect((screen.getByText('送出') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('v2 回答');
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0].history).toEqual([]);
+  expect(bodies[0].consent).toBe(true);
+  expect(screen.getByText('查了哪些資料')).toBeTruthy();
+  expect(screen.getByText('精確作業安排')).toBeTruthy();
+  fireEvent.click(screen.getByText('確認'));
+  await screen.findByText('已加入個人行事曆');
+  expect(bodies[1].token).toBe('synthetic-card');
+  fireEvent.change(question, { target: { value: '接續安排' } });
+  fireEvent.click(screen.getByText('送出'));
+  await waitFor(() => expect(bodies).toHaveLength(3));
+  expect(bodies[2].history).toEqual([
+    { role: 'user', content: '幫我排作業' },
+    { role: 'assistant', content: 'v2 回答' },
+  ]);
+});
+
+it('v2 aborts on school/account changes and drops late answers and cards', async () => {
+  let finish: (r: Response) => void = () => {};
+  let oldSignal: AbortSignal | undefined;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      oldSignal = init.signal as AbortSignal;
+      return new Promise<Response>((r) => {
+        finish = r;
+      });
+    }),
+  );
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '舊問題' } });
+  fireEvent.click(screen.getByText('送出'));
+  await waitFor(() => expect(oldSignal).toBeDefined());
+  state.context = 'session-b';
+  state.school = 'other';
+  view.rerender(<Assistant />);
+  expect(oldSignal?.aborted).toBe(true);
+  finish(json({ answer: '舊的私人內容', steps: [], cards: [] }));
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText('舊的私人內容')).toBeNull();
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 });
