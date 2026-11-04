@@ -296,7 +296,7 @@ function AssignmentQuestions({ data, open }: Props) {
               <Text style={{ ...text, color: theme.colors.accent, fontWeight: '600' }}>
                 {row.item.title}
               </Text>
-              {'receiptStatus' in row ? (
+              {'receiptStatus' in row && 'submittedAt' in row ? (
                 <Text style={text}>
                   {row.receiptStatus === 'feedback'
                     ? '已載入繳交紀錄 · 有老師回饋'
@@ -305,7 +305,7 @@ function AssignmentQuestions({ data, open }: Props) {
                       : row.receiptStatus === 'closed'
                         ? '已停止收件 · 本次未見繳交紀錄'
                         : '本次未見繳交紀錄 · 請到原頁核對'}
-                  {row.submittedAt ? ' · 繳交時間 ' + formatTaipeiDateTime(row.submittedAt, { seconds: false }) : ''}
+                  {typeof row.submittedAt === 'string' && row.submittedAt ? ' · 繳交時間 ' + formatTaipeiDateTime(row.submittedAt, { seconds: false }) : ''}
                 </Text>
               ) : (
                 <Text style={text}>
