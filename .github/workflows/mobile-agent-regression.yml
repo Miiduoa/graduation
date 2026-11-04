@@ -82,6 +82,9 @@ jobs:
             src/__tests__/CampusStudyAgendaCard.test.tsx \
             src/__tests__/CampusLocalReadResults.test.tsx \
             src/__tests__/AuthSignOut.test.tsx \
+            src/__tests__/services/nuniReceiptQuery.test.ts \
+            src/__tests__/StudyAgenda.test.tsx \
+            src/__tests__/NuniCourses.test.tsx \
             --runInBand --ci
 
       - name: Check authorized assignment snapshot contract
