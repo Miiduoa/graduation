@@ -3,7 +3,8 @@ import {
   type NuniStudyAgenda,
 } from '@campus/shared/src/nuniStudyAgenda';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
-import { outsideAssignmentNames } from './assignmentDeadlineWindow';
+import { outsideAssignmentNames, type AssignmentDeadlineWindow } from './assignmentDeadlineWindow';
+import { taipeiDayNumber } from './campusStudyAgenda';
 import { filterAssignmentQuery } from './assignmentQueryFilter';
 
 export type NuniReceiptRow = {
@@ -18,6 +19,8 @@ export type NuniReceiptRow = {
   submittedAt: string | null;
   receiptStatus: 'pending' | 'submitted' | 'feedback' | 'closed';
 };
+
+export type NuniReceiptDeadlineScope = { window: AssignmentDeadlineWindow; checkedAt: number };
 
 type ReceiptAnswer =
   | { kind: 'clarify'; message: string }
@@ -43,6 +46,7 @@ export function isNuniReceiptStatusFollowUp(question: string): boolean {
  */
 export function queryNuniReceipts(
   data: NuniStudyAgenda, question: string, scopeQuestion = question,
+  deadlineScope?: NuniReceiptDeadlineScope,
 ): ReceiptAnswer {
   const courses = new Map(data.workspaces
     .filter((course) => course.state === 'active' && course.memberRole === 'student')
@@ -69,6 +73,15 @@ export function queryNuniReceipts(
     const submitted = receiptStatus === 'submitted' || receiptStatus === 'feedback';
     if ((submittedOnly && !submitted) || (missingOnly && submitted)) return [];
     const due = task.dueAt ? parseTaipeiInstant(task.dueAt) : null;
+    if (deadlineScope) {
+      // Keep a status follow-up inside the prior Taiwan-time deadline window.
+      // An unknown timestamp cannot be assigned to a calendar day.
+      const { window, checkedAt } = deadlineScope;
+      const day = taipeiDayNumber(due ?? NaN);
+      if (!Number.isFinite(checkedAt) ||
+          !(day >= window.startDay && day < window.endDay) ||
+          (/(?:未來|接下來)/.test(window.label) && (due === null || due < checkedAt))) return [];
+    }
     return [{
       item: {
         courseId: task.courseId, id: task.id, groupName: task.groupName,
