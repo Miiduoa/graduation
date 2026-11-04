@@ -3,6 +3,10 @@ import argparse
 import hashlib
 import json
 import shutil
+import importlib.util
+import io
+import tarfile
+import tempfile
 import subprocess
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
@@ -19,19 +23,31 @@ def patch_app(source):
     return source.replace(marker, '  registerAssistantRoutes(app, platformAccounts, options.attendanceCodeSecret);\n\n' + marker)
 def prepare(output, source=None):
     manifest = json.loads((HERE / 'source.json').read_text())
-    security_file = HERE.parent / 'security/source.json'
-    if hashlib.sha256(security_file.read_bytes()).hexdigest() != manifest['securityManifestSha256']:
-        raise ValueError('Security source manifest changed')
-    security = json.loads(security_file.read_text())
     if output.exists():
         raise ValueError('Output must be a new directory')
-    run(['git', 'clone', '--quiet', '--no-hardlinks', str(source or security['repository']), str(output)])
-    run(['git', 'checkout', '--quiet', '--detach', security['baseCommit']], output)
-    for patch in security['patches']:
-        path = HERE.parent / 'security/patches' / patch['file']
-        if hashlib.sha256(path.read_bytes()).hexdigest() != patch['sha256']:
-            raise ValueError('Security patch checksum mismatch')
-        run(['git', 'apply', '--index', str(path)], output)
+    # Reconstruct the release from its historical manifests, never current overlays.
+    revision = manifest['releaseSourceCommit']
+    with tempfile.TemporaryDirectory(prefix='nuni-release-source-') as scratch:
+        archived = Path(scratch)
+        data = subprocess.check_output(['git', 'archive', revision,
+                                       'deploy/nuni-api', 'packages/shared/src'], cwd=ROOT)
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            archive.extractall(archived, filter='data')
+        api = archived / 'deploy/nuni-api'
+        if hashlib.sha256((api / 'composed/source.json').read_bytes()).hexdigest() != manifest['composedManifestSha256']:
+            raise ValueError('Release composed manifest changed')
+        base = json.loads((api / 'source.json').read_text())
+        run(['git', 'clone', '--quiet', '--no-hardlinks', str(source or base['repository']), str(output)])
+        run(['git', 'checkout', '--quiet', '--detach', base['baseCommit']], output)
+        for patch in base['patches']:
+            path = api / 'patches' / patch['file']
+            if hashlib.sha256(path.read_bytes()).hexdigest() != patch['sha256']:
+                raise ValueError('Release patch checksum mismatch')
+            run(['git', 'apply', '--index', str(path)], output)
+        spec = importlib.util.spec_from_file_location('release_composed', api / 'composed/prepare.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.apply_extension(output)
     if run(['git', 'write-tree'], output) != manifest['inputTree']:
         raise ValueError('Input tree mismatch')
     for name, checksum in manifest['files'].items():
@@ -45,6 +61,9 @@ def prepare(output, source=None):
     app.write_text(patch_app(app.read_text()))
     run(['git', 'add', 'apps/api/src/app.ts', 'apps/api/src/assistant'], output)
     tree = run(['git', 'write-tree'], output)
+    changed = run(['git', 'diff-tree', '--no-commit-id', '--name-only', '-r', manifest['inputTree'], tree], output).splitlines()
+    if any(name != 'apps/api/src/app.ts' and not name.startswith('apps/api/src/assistant/') for name in changed):
+        raise ValueError('Assistant candidate changes files outside its overlay')
     if tree != manifest['candidateTree']:
         raise ValueError('Assistant candidate tree mismatch: ' + tree)
     return tree

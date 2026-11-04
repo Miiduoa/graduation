@@ -1,18 +1,19 @@
 {
   "schema": "campus.assistant-source/v1",
-  "inputTree": "add9614a93c65b4587ca5649a83803614c786f28",
-  "securityManifestSha256": "a4d1f17ce00cae3447f7763ed66e2ca78d3ffbc387096ede449295d08e74def6",
-  "candidateTree": "35015b461cde994861f726c1671102467e03d70b",
+  "inputTree": "4c7919d6cff32789acb06e2b9f4edb180cdad3a1",
+  "candidateTree": "67e9e508c3416d7de5ee13db807818ec49a32df0",
   "files": {
     "deploy/nuni-api/assistant/confirmation.ts": "c0c1c4ffc8d0d994e8fc5285b067148d470557ba9104d6b22ee758665a147cd0",
     "deploy/nuni-api/assistant/fake.ts": "18396d587227fe36f6888fa7e037b2a63b9dbd4bc45407dfb3f3b95dcb0189f2",
-    "deploy/nuni-api/assistant/groq.ts": "fc240a7acb9eee26bce5eec5265003f4e3058df46b09e06577a16fe2e1bd1bbb",
+    "deploy/nuni-api/assistant/groq.ts": "5483bad8077e94e635eaa67bf45ca67f91171b760038ee860d688d73c7b17c7c",
     "deploy/nuni-api/assistant/permissions.ts": "dd8a980331b0530d6ea0fb389d69c7ed43c33103d38460b8580b2200c6f3f238",
     "deploy/nuni-api/assistant/provider.ts": "b8a1fcaa780a47189233f7f1a79365b3957d6d6ee231e13de78cfffb5ae32337",
     "deploy/nuni-api/assistant/publicContext.ts": "9e5bd8fba0f409bea988922c4867c9a29fe895921699b5202ad40dec4c237e55",
-    "deploy/nuni-api/assistant/routes.ts": "7b0742c15b6827e95be2046bb5c33bdb546054463d34a4cda26492ef7d23bd26",
-    "deploy/nuni-api/assistant/service.ts": "e42d1da9123e3d2556b95cf1ef3d11e332b6502de41f5b821c415d89367250be",
+    "deploy/nuni-api/assistant/routes.ts": "e74557a5a133a13639ca09411da661b8cd3ade262fa044de99f97cd12612baf4",
+    "deploy/nuni-api/assistant/service.ts": "e1453c6f3c4bea0f2cdc76f60d20fae01e0d4d6614070988bcaf0f8bb390ddcc",
     "packages/shared/src/assistantPermissions.ts": "16921b8e82150848914443469935ca71f7f00b8bc3bb3c18949552fc1819e270",
     "packages/shared/src/campusMapLookup.ts": "f864101ec100f99bd6da9eb8af73d3fe59d854574bd21c669b0cad6c7a30d445"
-  }
+  },
+  "releaseSourceCommit": "c93b4ac3851df68f76d607af29b086030735dc55",
+  "composedManifestSha256": "41998b001d8efe5279861dca245f9a9de820d539a5c232b72e15cbe8083aa6a4"
 }

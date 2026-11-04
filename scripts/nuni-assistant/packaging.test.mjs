@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const sha = (value) => createHash('sha256').update(value).digest('hex');
 test('all packaged modules bind shared permissions and trusted public map sources', () => {
@@ -12,14 +12,15 @@ test('all packaged modules bind shared permissions and trusted public map source
     readFileSync(new URL('../../deploy/nuni-api/assistant/source.json', import.meta.url)),
   );
   assert.match(manifest.candidateTree, /^[a-f0-9]{40}$/);
-  assert.equal(manifest.inputTree, 'add9614a93c65b4587ca5649a83803614c786f28');
+  assert.equal(manifest.inputTree, '4c7919d6cff32789acb06e2b9f4edb180cdad3a1');
   for (const [name, checksum] of Object.entries(manifest.files))
     assert.equal(sha(readFileSync(root + name)), checksum, name);
   assert.ok(manifest.files['packages/shared/src/assistantPermissions.ts']);
   assert.ok(manifest.files['packages/shared/src/campusMapLookup.ts']);
+  assert.equal(manifest.releaseSourceCommit, 'c93b4ac3851df68f76d607af29b086030735dc55');
   assert.equal(
-    sha(readFileSync(root + 'deploy/nuni-api/security/source.json')),
-    manifest.securityManifestSha256,
+    manifest.composedManifestSha256,
+    '41998b001d8efe5279861dca245f9a9de820d539a5c232b72e15cbe8083aa6a4',
   );
 });
 test('builder remains opt-in; guard matches exact actions and refuses drifted anchors', async () => {

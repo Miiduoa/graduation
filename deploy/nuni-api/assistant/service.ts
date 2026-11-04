@@ -36,7 +36,7 @@ export class AssistantService {
   async run(action: string, raw: unknown, actor: Actor): Promise<unknown> {
     if (action === 'execute' || action === 'enqueue')
       throw new AssistantError('ASSISTANT_WRITE_UNAVAILABLE', 403);
-    this.limit('ip:' + actor.ip, 60000, 30);
+    this.limit('account:' + actor.account, 60000, 30);
     if (action === 'capability')
       return {
         enabled: true,

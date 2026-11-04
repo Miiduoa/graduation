@@ -112,7 +112,7 @@ test('real rate-limit plugin executes; default flag and production fake fail clo
     const denied = await app.inject({ url: prefix + 'capability', headers });
     assert.equal(denied.statusCode, 429);
     assert.ok(denied.headers['retry-after']);
-    assert.equal(state.resolutions, 30);
+    assert.equal(state.resolutions, 31);
   } finally {
     await app.close();
   }
@@ -231,13 +231,40 @@ test('Groq errors do not retry; fixed destination and output schema', async () =
     assert.equal(m.groqProvider().ready, false);
     await assert.rejects(m.groqProvider().ask(input), /PROVIDER_UNAVAILABLE/);
     process.env.GROQ_API_KEY = 'synthetic-test-value';
+    const provider = m.groqProvider();
+    assert.equal(provider.model, 'openai/gpt-oss-120b');
+    const service = new m.AssistantService(provider);
+    const preview = await service.run('preview', { schoolId: 'pu', intent: 'map' }, actor);
+    const request = {
+      schoolId: 'pu',
+      intent: 'map',
+      confirmation: preview.confirmation,
+      consent: true,
+    };
+    provider.model = 'retired-model';
+    await assert.rejects(service.run('ask', request, actor), /CONFIRMATION/);
+    provider.model = 'openai/gpt-oss-120b';
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"intent":"map"}' } }],
+        }),
+      );
+    assert.equal((await service.run('ask', request, actor)).intent, 'map');
+
     for (const status of [401, 429, 500]) {
       let calls = 0;
       globalThis.fetch = async (url, init) => {
         calls++;
         assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
         assert.equal(init.redirect, 'error');
-        assert.equal(JSON.parse(init.body).max_tokens, 64);
+        const body = JSON.parse(init.body);
+        assert.equal(body.model, 'openai/gpt-oss-120b');
+        assert.equal(body.max_completion_tokens, 512);
+        assert.equal(body.reasoning_effort, 'low');
+        assert.equal(body.include_reasoning, false);
+        assert.equal(body.reasoning_format, undefined);
+        assert.deepEqual(body.response_format, { type: 'json_object' });
         return new Response('{}', { status });
       };
       await assert.rejects(m.groqProvider().ask(input));
@@ -262,26 +289,53 @@ test('Groq errors do not retry; fixed destination and output schema', async () =
 test('production logger excludes private input across success and failure paths', async () => {
   const { Writable } = await import('node:stream');
   const logs = [];
-  const stream = new Writable({ write(chunk, _encoding, done) { logs.push(chunk.toString()); done(); } });
+  const stream = new Writable({
+    write(chunk, _encoding, done) {
+      logs.push(chunk.toString());
+      done();
+    },
+  });
   const originalFetch = globalThis.fetch;
   process.env.GROQ_API_KEY = 'synthetic-provider-key';
   const privateText = '王小明 S123456789 private@example.test 原始問題獨特標記';
   const requestHeaders = { ...headers, 'content-type': 'application/json' };
-  const { app, state } = await createFixture({ production: true, provider: 'groq', logStream: stream });
+  const { app, state } = await createFixture({
+    production: true,
+    provider: 'groq',
+    logStream: stream,
+  });
   try {
-    const preview = await app.inject({ method: 'POST', url: prefix + 'preview', headers: requestHeaders,
-      payload: { schoolId: 'pu', question: privateText + ' 圖書館' } });
+    const preview = await app.inject({
+      method: 'POST',
+      url: prefix + 'preview',
+      headers: requestHeaders,
+      payload: { schoolId: 'pu', question: privateText + ' 圖書館' },
+    });
     assert.equal(preview.statusCode, 200);
-    const invalid = await app.inject({ method: 'POST', url: prefix + 'preview', headers: requestHeaders,
-      payload: '{"question":"' + privateText + '" broken}' });
+    const invalid = await app.inject({
+      method: 'POST',
+      url: prefix + 'preview',
+      headers: requestHeaders,
+      payload: '{"question":"' + privateText + '" broken}',
+    });
     assert.equal(invalid.statusCode, 400);
-    const oversized = await app.inject({ method: 'POST', url: prefix + 'preview', headers: requestHeaders,
-      payload: JSON.stringify({ question: privateText.repeat(1000) }) });
+    const oversized = await app.inject({
+      method: 'POST',
+      url: prefix + 'preview',
+      headers: requestHeaders,
+      payload: JSON.stringify({ question: privateText.repeat(1000) }),
+    });
     assert.equal(oversized.statusCode, 413);
-    globalThis.fetch = async () => { throw new Error(privateText + ' authorization Bearer synthetic-provider-key'); };
+    globalThis.fetch = async () => {
+      throw new Error(privateText + ' authorization Bearer synthetic-provider-key');
+    };
     const p = preview.json();
-    const failed = await app.inject({ method: 'POST', url: prefix + 'ask', headers: requestHeaders,
-      payload: { schoolId: 'pu', intent: p.intent, confirmation: p.confirmation, consent: true } });
+    const failed = await app.inject({
+      method: 'POST',
+      url: prefix + 'ask',
+      headers: requestHeaders,
+      payload: { schoolId: 'pu', intent: p.intent, confirmation: p.confirmation, consent: true },
+    });
     assert.equal(failed.statusCode, 503);
     state.resolverError = new Error(privateText + ' authorization ' + requestHeaders.authorization);
     const resolver = await app.inject({ url: prefix + 'capability', headers });
@@ -290,7 +344,10 @@ test('production logger excludes private input across success and failure paths'
     const captured = logs.join('');
     assert.ok(logs.length >= 3);
     assert.match(captured, /Assistant request failed/);
-    assert.doesNotMatch(captured, /王小明|S123456789|private@example|原始問題獨特標記|authorization|Bearer|synthetic-provider-key|question/i);
+    assert.doesNotMatch(
+      captured,
+      /王小明|S123456789|private@example|原始問題獨特標記|authorization|Bearer|synthetic-provider-key|question/i,
+    );
     assert.ok(!captured.includes(fixtureHandle));
     for (const line of captured.trim().split('\n')) assert.ok(JSON.parse(line).level >= 30);
   } finally {
@@ -299,4 +356,17 @@ test('production logger excludes private input across success and failure paths'
     delete process.env.GROQ_API_KEY;
     process.env.NODE_ENV = 'test';
   }
+});
+test('verified accounts share BFF egress without sharing quota; changing sessions cannot reset quota', async () => {
+  const m = await modules();
+  const service = new m.AssistantService(m.fakeProvider());
+  for (let i = 0; i < 30; i++) await service.run('capability', undefined, actor);
+  await assert.rejects(
+    service.run('capability', undefined, { ...actor, sessionHash: 'new-session', ip: '192.0.2.8' }),
+    /RATE_LIMITED/,
+  );
+  assert.equal(
+    (await service.run('capability', undefined, { ...actor, account: 'another-account' })).enabled,
+    true,
+  );
 });

@@ -4,7 +4,7 @@ export function groqProvider(): Provider {
   const key = process.env.GROQ_API_KEY;
   return {
     name: 'groq',
-    model: 'llama-3.3-70b-versatile',
+    model: 'openai/gpt-oss-120b',
     ready: !!key,
     async ask(input) {
       if (!key) throw new AssistantError('PROVIDER_UNAVAILABLE');
@@ -15,9 +15,11 @@ export function groqProvider(): Provider {
           signal: AbortSignal.timeout(15000),
           headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
+            model: 'openai/gpt-oss-120b',
             temperature: 0,
-            max_tokens: 64,
+            max_completion_tokens: 512,
+            reasoning_effort: 'low',
+            include_reasoning: false,
             response_format: { type: 'json_object' },
             messages: [
               {

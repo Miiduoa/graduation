@@ -37,7 +37,8 @@ export function registerAssistantRoutes(
       method: action === 'capability' ? 'GET' : 'POST',
       url: prefix + action,
       bodyLimit: 8192,
-      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+      // Coarse protection before session resolution; shared BFF egress needs headroom.
+      config: { rateLimit: { max: 600, timeWindow: '1 minute', hook: 'onRequest' } },
       errorHandler(error, request, reply) {
         if (error instanceof DomainError) {
           return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });

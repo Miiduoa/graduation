@@ -283,9 +283,13 @@ jobs:
   test-nuni-assistant:
     name: Assistant Integration Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
       - name: Setup Node.js
@@ -293,6 +297,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            scripts/nuni-assistant/pnpm-lock.yaml
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Install isolated assistant dependencies
