@@ -5,11 +5,8 @@ import { handleNuni } from './api';
 import { sealCookie, SESSION_COOKIE, sessionContext } from './server';
 import { assistantInput, projectAssistant } from './assistantContracts';
 import { assistantRequest } from './assistantTransport';
-import {
-  createFixture,
-  fixtureHandle,
-  fixtureSecret,
-} from '../../../../../scripts/nuni-assistant/harness.mjs';
+const fixtureHandle = 'ps_' + 't'.repeat(43);
+const fixtureSecret = 'local-web-assistant-fixture-only-'.repeat(2);
 const session = { sessionHandle: fixtureHandle as string, expiresAt: Date.now() + 3600000 };
 function request(action: string, input?: object, overrides: Record<string, string> = {}) {
   return new NextRequest('http://localhost:3000/api/nuni/assistant/' + action, {
@@ -127,47 +124,72 @@ it('PII is discarded locally, untrusted upstream prose and URLs are projected aw
     source: 'https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw',
   });
 });
-it('preview conversation crosses actual web BFF and local fake Fastify inject transport', async () => {
-  const { app, state } = await createFixture();
-  try {
-    vi.stubEnv('NUNI_API_BASE_URL', 'http://127.0.0.1:4317');
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+it('preview conversation projects a local upstream and forwards only public selections', async () => {
+  const confirmation = 'preview.' + 'a'.repeat(43);
+  const nextConfirmation = 'answer.' + 'b'.repeat(43);
+  let active = true;
+  const calls: string[] = [];
+  vi.stubEnv('NUNI_API_BASE_URL', 'http://127.0.0.1:4317');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: RequestInit) => {
       const target = new URL(url);
       expect(target.origin).toBe('http://127.0.0.1:4317');
-      const result = await app.inject({
-        method: init.method,
-        url: target.pathname,
-        headers: Object.fromEntries(new Headers(init.headers)),
-        ...(init.body ? { payload: init.body } : {}),
+      expect(new Headers(init.headers).get('Authorization')).toBe('Platform ' + fixtureHandle);
+      expect(init.cache).toBe('no-store');
+      expect(init.redirect).toBe('error');
+      const action = target.pathname.split('/').pop()!;
+      expect(target.pathname).toBe('/v1/auth/platform/assistant/' + action);
+      calls.push(action);
+      expect(init.method).toBe(action === 'capability' ? 'GET' : 'POST');
+      if (action === 'capability') {
+        expect(init.body).toBeUndefined();
+        return Response.json({ enabled: true, ready: true, simulation: true });
+      }
+      const body = JSON.parse(init.body as string);
+      expect(body).toEqual(
+        action === 'preview'
+          ? { schoolId: 'pu', intent: 'map' }
+          : {
+              schoolId: 'pu',
+              intent: 'map',
+              confirmation: action === 'route' ? nextConfirmation : confirmation,
+              consent: true,
+            },
+      );
+      if (!active) return Response.json({ error: { code: 'INVALID_SESSION' } }, { status: 401 });
+      return Response.json({
+        schoolId: 'pu',
+        intent: 'map',
+        simulation: true,
+        confirmation: action === 'ask' ? nextConfirmation : confirmation,
+        summary: 'untrusted upstream text',
+        answer: 'untrusted upstream text',
+        href: 'https://evil.test',
       });
-      return new Response(result.body, {
-        status: result.statusCode,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-    const cap = await handleNuni(request('capability'), ['assistant', 'capability']);
-    expect(cap.status).toBe(200);
-    expect((await cap.json()).simulation).toBe(true);
-    const preview = await handleNuni(
-      request('preview', { schoolId: 'pu', question: '圖書館怎麼走' }),
-      ['assistant', 'preview'],
-    );
-    expect(preview.status).toBe(200);
-    const p = await preview.json();
-    const input = { schoolId: 'pu', intent: p.intent, confirmation: p.confirmation, consent: true };
-    const ask = await handleNuni(request('ask', input), ['assistant', 'ask']);
-    expect(ask.status).toBe(200);
-    const answer = await ask.json();
-    expect(answer.answer).toContain('校園地圖');
-    const route = await handleNuni(
-      request('route', { ...input, confirmation: answer.confirmation }),
-      ['assistant', 'route'],
-    );
-    expect(route.status).toBe(200);
-    expect((await route.json()).href).toBe('/map?schoolId=pu');
-    state.active = false;
-    expect((await handleNuni(request('ask', input), ['assistant', 'ask'])).status).toBe(401);
-  } finally {
-    await app.close();
-  }
+    }),
+  );
+  const cap = await handleNuni(request('capability'), ['assistant', 'capability']);
+  expect(cap.status).toBe(200);
+  expect((await cap.json()).simulation).toBe(true);
+  const preview = await handleNuni(
+    request('preview', { schoolId: 'pu', question: '王小明 private@example.test 圖書館怎麼走' }),
+    ['assistant', 'preview'],
+  );
+  expect(preview.status).toBe(200);
+  const p = await preview.json();
+  const input = { schoolId: 'pu', intent: p.intent, confirmation: p.confirmation, consent: true };
+  const ask = await handleNuni(request('ask', input), ['assistant', 'ask']);
+  expect(ask.status).toBe(200);
+  const answer = await ask.json();
+  expect(answer.answer).toContain('校園地圖');
+  const route = await handleNuni(
+    request('route', { ...input, confirmation: answer.confirmation }),
+    ['assistant', 'route'],
+  );
+  expect(route.status).toBe(200);
+  expect((await route.json()).href).toBe('/map?schoolId=pu');
+  active = false;
+  expect((await handleNuni(request('ask', input), ['assistant', 'ask'])).status).toBe(401);
+  expect(calls).toEqual(['capability', 'preview', 'ask', 'route', 'ask']);
 });

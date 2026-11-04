@@ -280,6 +280,26 @@ jobs:
         # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
         run: pnpm --filter web exec vitest run --coverage
 
+  test-nuni-assistant:
+    name: Assistant Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install isolated assistant dependencies
+        run: pnpm --dir scripts/nuni-assistant install --ignore-workspace --frozen-lockfile
+      - name: Test assistant routes and web BFF integration
+        run: pnpm --dir scripts/nuni-assistant test
+
   test-functions:
     name: Functions Tests
     runs-on: ubuntu-latest
@@ -485,6 +505,7 @@ jobs:
         lint-and-typecheck,
         test-mobile,
         test-web,
+        test-nuni-assistant,
         test-functions,
         test-rules,
         build-mobile,
@@ -588,6 +609,7 @@ jobs:
         lint-and-typecheck,
         test-mobile,
         test-web,
+        test-nuni-assistant,
         test-functions,
         test-rules,
         build-mobile,
@@ -605,6 +627,7 @@ jobs:
           echo "| Lint & Type Check | ${{ needs.lint-and-typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Mobile Tests | ${{ needs.test-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Web Tests | ${{ needs.test-web.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Assistant Integration Tests | ${{ needs.test-nuni-assistant.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Functions Tests | ${{ needs.test-functions.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Rules Tests | ${{ needs.test-rules.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build Mobile | ${{ needs.build-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
