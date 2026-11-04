@@ -9,17 +9,24 @@ import {
   type PlatformSession,
 } from './server';
 
-export type PublicAgentAction =
-  | 'capability'
-  | 'preview'
-  | 'prepareGroq'
-  | 'confirm'
-  | 'execute'
-  | 'route'
-  | 'read'
-  | 'status'
-  | 'reconcile'
-  | 'ack';
+const publicAgentActions = [
+  'capability',
+  'preview',
+  'prepareGroq',
+  'confirm',
+  'execute',
+  'route',
+  'read',
+  'status',
+  'reconcile',
+  'ack',
+] as const;
+export type PublicAgentAction = (typeof publicAgentActions)[number];
+
+export function isPublicAgentAction(action: string): action is PublicAgentAction {
+  return publicAgentActions.some((candidate) => candidate === action);
+}
+
 export type PublicAgentTransport = (input: {
   action: PublicAgentAction;
   session: PlatformSession;
@@ -51,21 +58,7 @@ export function createPlatformPublicAgentGateway(options: {
   return async (request: NextRequest, action: string) => {
     try {
       if (options.enabled !== true) throw new NuniError(404, 'NOT_FOUND');
-      if (
-        ![
-          'capability',
-          'preview',
-          'prepareGroq',
-          'confirm',
-          'execute',
-          'route',
-          'read',
-          'status',
-          'reconcile',
-          'ack',
-        ].includes(action)
-      )
-        throw new NuniError(404, 'NOT_FOUND');
+      if (!isPublicAgentAction(action)) throw new NuniError(404, 'NOT_FOUND');
       if (request.method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
       if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
       requireSameOrigin(request);
@@ -126,11 +119,10 @@ export function createPlatformPublicAgentGateway(options: {
       const timer = setTimeout(cancel, timeoutMs);
       try {
         // Exactly one invocation. The injected implementation must also disable network retry.
-        const taskAction = action as PublicAgentAction;
         const value = await Promise.race([
           Promise.resolve().then(() => {
             if (abort.signal.aborted) throw new NuniError(503, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
-            return options.transport({ action: taskAction, session, body, signal: abort.signal });
+            return options.transport({ action, session, body, signal: abort.signal });
           }),
           stopped,
         ]);
@@ -138,7 +130,7 @@ export function createPlatformPublicAgentGateway(options: {
         // Fail closed if host has not provided the exact response contract.
         let safe: unknown;
         try {
-          safe = options.project(taskAction, value, body);
+          safe = options.project(action, value, body);
         } catch {
           throw new NuniError(502, 'PUBLIC_AGENT_INVALID_RESPONSE');
         }

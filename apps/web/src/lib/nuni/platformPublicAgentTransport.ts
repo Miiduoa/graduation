@@ -1,20 +1,9 @@
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import { apiOrigin, boundedJson, HANDLE } from './server';
-import type { PublicAgentAction, PublicAgentTransport } from './platformPublicAgentGateway';
+import { isPublicAgentAction, type PublicAgentTransport } from './platformPublicAgentGateway';
 
 // Candidate contract shared with the unregistered Fastify adapter; not a registered route.
-const PATHS: Record<PublicAgentAction, string> = {
-  capability: '/v1/auth/platform/public-agent/capability',
-  preview: '/v1/auth/platform/public-agent/preview',
-  prepareGroq: '/v1/auth/platform/public-agent/prepareGroq',
-  confirm: '/v1/auth/platform/public-agent/confirm',
-  execute: '/v1/auth/platform/public-agent/execute',
-  route: '/v1/auth/platform/public-agent/route',
-  read: '/v1/auth/platform/public-agent/read',
-  status: '/v1/auth/platform/public-agent/status',
-  reconcile: '/v1/auth/platform/public-agent/reconcile',
-  ack: '/v1/auth/platform/public-agent/ack',
-};
+const endpointPrefix = '/v1/auth/platform/public-agent';
 const FAILURES: Record<string, number> = {
   PUBLIC_AGENT_INVALID_INPUT: 422,
   PUBLIC_AGENT_CONFIRMATION_REQUIRED: 409,
@@ -39,7 +28,7 @@ export function createPlatformPublicAgentTransport(timeoutMs = 12_000): PublicAg
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000)
     throw new NuniError(503, 'PUBLIC_AGENT_NOT_CONFIGURED');
   return async ({ action, session, body, signal }) => {
-    if (!Object.hasOwn(PATHS, action) || !process.env.NUNI_API_BASE_URL?.trim())
+    if (!isPublicAgentAction(action) || !process.env.NUNI_API_BASE_URL?.trim())
       throw new NuniError(503, 'PUBLIC_AGENT_NOT_CONFIGURED');
     if (
       !session ||
@@ -48,8 +37,7 @@ export function createPlatformPublicAgentTransport(timeoutMs = 12_000): PublicAg
       session.expiresAt <= Date.now()
     )
       throw new NuniError(401, 'PUBLIC_AGENT_SESSION_INVALID');
-    const origin = apiOrigin(),
-      path = PATHS[action];
+    const origin = apiOrigin();
     const encoded = JSON.stringify(body);
     if (Buffer.byteLength(encoded, 'utf8') > 8192) throw new NuniError(413, 'BODY_TOO_LARGE');
     const controller = new AbortController();
@@ -69,7 +57,7 @@ export function createPlatformPublicAgentTransport(timeoutMs = 12_000): PublicAg
         stopped,
         (async () => {
           if (controller.signal.aborted) throw new NuniError(503, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
-          const response = await fetch(`${origin}${path}`, {
+          const response = await fetch(`${origin}${endpointPrefix}/${action}`, {
             method: 'POST',
             redirect: 'error',
             cache: 'no-store',
