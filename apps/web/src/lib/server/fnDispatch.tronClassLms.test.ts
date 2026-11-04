@@ -456,6 +456,48 @@ it.each([
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
 
+it.each([
+  'expired cached snapshot',
+  'cache bound to an older session',
+])('does not delete %s after a reconnect during the cache read', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const existing = store.docs.get(CACHE)!;
+  if (scenario === 'expired cached snapshot') {
+    existing.expiresAt = new Date(0);
+  } else {
+    existing.sessionId = 'a'.repeat(32);
+  }
+  const cacheBefore = structuredClone(existing);
+  const originalDoc = store.db.doc.bind(store.db);
+  const deleteCache = vi.fn();
+  let relinked = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      delete: deleteCache,
+      get: async () => {
+        const snapshot = await ref.get();
+        // The old request must not remove this cache after the user relinks.
+        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+        relinked = true;
+        return snapshot;
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(relinked).toBe(true);
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(deleteCache).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();
   const doc = vi.spyOn(store.db, 'doc');
