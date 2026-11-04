@@ -48,19 +48,9 @@ async function signedRelayRequest(
 }
 
 function requestWithPlacement(request: Request, placement: string): Request {
-  return new Proxy(request, {
-    get(target, prop, receiver) {
-      if (prop === 'headers') {
-        const headers = new Headers(target.headers);
-        headers.set('cf-placement', placement);
-        return headers;
-      }
-      if (prop === 'arrayBuffer') return () => target.arrayBuffer();
-      if (prop === 'clone') return () => requestWithPlacement(target.clone(), placement);
-      const value = Reflect.get(target, prop, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
+  const headers = new Headers(request.headers);
+  headers.set('cf-placement', placement);
+  return new Request(request, { headers });
 }
 
 it.each(['alcat.pu.edu.tw', 'MYPU.PU.EDU.TW.'])('blocks signed requests to paused E-campus host %s before forwarding', async (host) => {
