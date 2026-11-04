@@ -426,3 +426,46 @@ test('offline plan never uses an expired snapshot belonging to another account',
     step.evidence !== 'authorized-assignments')).toBe(true);
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+test('narrows local deadlines across turns, selects the displayed row and prepares a reminder without a model', async () => {
+  jest.useFakeTimers({ now: new Date('2026-11-04T09:00:00Z') });
+  try {
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    const source = (groupId: string) => ({ kind: 'group-assignment' as const, groupId, assignmentId: 'midterm' });
+    const items = [
+      { groupName: '資料庫管理', title: '期中報告', dueAt: '2026-11-10T05:30:00Z', source: source('management') },
+      { groupName: '資料庫設計', title: '期中報告', dueAt: '2026-11-09T04:00:00Z', source: source('design') },
+      { groupName: '工程倫理', title: '期中報告', dueAt: '2026-11-09T04:00:00Z', source: source('ethics') },
+    ];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      assignments: { status: 'available' as const, count: items.length, items },
+      announcements: { status: 'available' as const, items: [] }, schedule: { status: 'unavailable' as const, count: null } };
+    const messages: import('../../features/campusAssistant').CampusAssistantMessage[] = [];
+    async function ask(content: string) {
+      messages.push({ role: 'user', content });
+      const result = await askCampusAssistant({ ...input(), mode: 'device', messages, senseSnapshot });
+      messages.push({ role: 'assistant', content: result.content, assignmentRead: result.assignmentRead });
+      return result;
+    }
+    const original = await ask('資料庫的期中報告什麼時候交？');
+    expect(original.assignmentRead?.items).toEqual([items[1], items[0]]);
+    expect((await ask('那明天呢？')).assignmentRead?.items).toEqual([]);
+    const nextWeek = await ask('那下週呢？');
+    expect(nextWeek.assignmentRead?.items).toEqual([items[1], items[0]]);
+    expect((await ask('幫我設提醒')).content).toContain('哪一份');
+    const second = await ask('第二個');
+    expect(second.assignmentRead).toMatchObject({ reviewReminder: true, items: [items[0]] });
+    expect(second.content).toContain('13:30');
+    expect(second.content).not.toContain('資料庫設計');
+    // Replacing or clearing the source invalidates even an immediate selection.
+    const refreshed = await askCampusAssistant({ ...input(), mode: 'device',
+      messages: [...messages, { role: 'user', content: '第一筆' }],
+      senseSnapshot: { ...senseSnapshot, checkedAt: new Date(Date.now() - 1000).toISOString() } });
+    expect(refreshed.content).toContain('重新同步');
+    expect(refreshed.assignmentRead).toBeUndefined();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(httpsCallable).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});

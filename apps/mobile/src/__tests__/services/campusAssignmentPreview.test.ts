@@ -26,7 +26,7 @@ const answer = (loaded: number, total = loaded) =>
 test('a fully synced list still discloses the eight-row text preview limit', () => {
   const content = answer(137);
   expect(content).toContain('待交作業：137 筆');
-  expect(content.split('\n').filter((line) => line.startsWith('• '))).toHaveLength(8);
+  expect(content.split('\n').filter((line) => /^\d+\. /.test(line))).toHaveLength(8);
   expect(content).toContain('另有 129 筆已同步但未在此預覽展開');
   expect(content).toContain('逐日安排與其他作業區');
   expect(content).not.toContain('尚未同步');
@@ -46,7 +46,7 @@ test('no loaded rows is not a verified empty workload when the source total is p
 
 test('a complete short list has no phantom missing-work warning', () => {
   const content = answer(3);
-  expect(content.split('\n').filter((line) => line.startsWith('• '))).toHaveLength(3);
+  expect(content.split('\n').filter((line) => /^\d+\. /.test(line))).toHaveLength(3);
   expect(content).not.toContain('未在此預覽展開');
   expect(content).not.toContain('尚未同步');
 });

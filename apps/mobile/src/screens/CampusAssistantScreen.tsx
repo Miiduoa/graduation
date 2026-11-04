@@ -1,3 +1,4 @@
+import { AssignmentReplyActions } from './AssignmentReplyActions';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Linking, Text, TextInput, View } from 'react-native';
@@ -272,6 +273,7 @@ function AssistantConversation({
             route: reply.route,
             plan: reply.plan,
             localReads: reply.localReads,
+            assignmentRead: reply.assignmentRead,
           },
         ]);
         setDraft('');
@@ -296,8 +298,8 @@ function AssistantConversation({
     }
   };
 
-  const send = async () => {
-    const question = draft.trim();
+  const send = async (selection?: string) => {
+    const question = selection ?? draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     setBusy(true);
@@ -331,10 +333,11 @@ function AssistantConversation({
             route: reply.route,
             plan: reply.plan,
             localReads: reply.localReads,
+            assignmentRead: reply.assignmentRead,
             proposals: reply.proposals,
           },
         ]);
-        setDraft('');
+        if (!selection) setDraft('');
       }
     } catch (failure) {
       if (current()) {
@@ -401,7 +404,7 @@ function AssistantConversation({
                   : deviceStatus?.reason || '正在檢查本機模型…'}
               </Text>
               <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 12 }}>
-                本機課表查詢與服務導覽不需下載模型；自由問答才需要免費 GGUF 模型。本機課表只引用已保存副本，不包含校方即時狀態。
+                查課表、找已同步作業都能直接在手機上完成。可以先問「明天有哪些作業要交？」，再問「那下週呢？」。自由問答需下載免費模型。
               </Text>
               <AIButton
                 label={deviceStatus?.ready ? '管理手機 AI 模型' : '下載／管理免費 AI 模型'}
@@ -510,6 +513,11 @@ function AssistantConversation({
             <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
               {message.plan ? message.plan.overview : message.content}
             </Text>
+          )}
+          {index === messages.length - 1 && message.role === 'assistant' && message.assignmentRead && currentSense && (
+            <AssignmentReplyActions read={message.assignmentRead} snapshot={currentSense}
+              context={{ userId: uid, schoolId, isCurrent: current, navigation }} disabled={busy || syncBusy}
+              onSelect={(index) => void send('第 ' + (index + 1) + ' 筆')} />
           )}
           {message.role === 'assistant' && message.plan ? (
             <CampusEvidencePlanCard

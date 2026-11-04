@@ -5,7 +5,10 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string };
+import type { AssignmentRead } from '../services/offlineCampusTools';
+import { assignmentFollowUp } from '../services/assignmentFollowUp';
+
+export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -77,6 +80,7 @@ export async function askCampusAssistant(input: {
   tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
+  assignmentRead?: AssignmentRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -116,8 +120,14 @@ export async function askCampusAssistant(input: {
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
-    const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, input.scope);
-    const localAnswer = runOfflineCampusTool(messages[messages.length - 1].content, snapshot, senseSnapshot, uid);
+    const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid });
+    const question = messages[messages.length - 1].content;
+    const previous = input.messages[input.messages.length - 2];
+    const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
+      senseSnapshot, Date.parse(snapshot.checkedAt));
+    const lookup = followUp && 'question' in followUp ? followUp : null;
+    const localAnswer = followUp && 'reply' in followUp ? followUp.reply
+      : runOfflineCampusTool(lookup?.question ?? question, snapshot, senseSnapshot, uid, lookup?.filter);
     if (localAnswer) {
       return {
         content: localAnswer.content,
@@ -126,6 +136,7 @@ export async function askCampusAssistant(input: {
         tool: localAnswer.tool,
         route: localAnswer.route,
         ...(localAnswer.plan ? { plan: localAnswer.plan } : {}),
+        ...(localAnswer.assignmentRead ? { assignmentRead: localAnswer.assignmentRead } : {}),
       };
     }
 
@@ -194,7 +205,7 @@ export async function askCampusAssistant(input: {
       messages: [
         { role: 'system', content: formatOnDeviceSchoolPrompt(
           { ...snapshot, checkedAt: new Date().toISOString() },
-          validCampusSenseSnapshot(input.senseSnapshot, input.scope),
+          validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }),
         ) },
         ...compactHistory,
       ],
