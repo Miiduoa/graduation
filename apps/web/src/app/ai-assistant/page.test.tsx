@@ -55,6 +55,8 @@ vi.mock('./AgentCards', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
   sessionStorage.clear();
   state.uid = 'alice';
   state.query = '';

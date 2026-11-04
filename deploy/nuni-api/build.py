@@ -21,14 +21,18 @@ def parse_args(argv=None):
     extensions.add_argument('--course-access-candidate', action='store_true', help='Build the disabled-by-default course review candidate; never deploy or migrate')
     extensions.add_argument('--public-cafeterias-candidate', action='store_true', help='Build the public read-only cafeteria catalog; never deploy or migrate')
     extensions.add_argument('--food-ordering-candidate', action='store_true', help='Build the six-patch ordering candidate; never deploy, migrate or combine other candidates')
+    extensions.add_argument('--assistant-candidate', action='store_true', help='Build the pinned public assistant candidate; never deploy or migrate')
     extensions.add_argument('--security-candidate', action='store_true', help='Build the production-bound runtime dependency security image (deploy/nuni-api/security); never deploy, migrate, or alter default overlays')
+    parser.add_argument('--assistant-source', type=Path, help='Local archived source for the assistant candidate')
     parser.add_argument('--prepare-only', action='store_true', help='Write verified build context without building, pushing, deploying or migrating')
     parser.add_argument('--output-dir', type=Path, help='New directory for --prepare-only build context')
     args = parser.parse_args(argv)
     if args.prepare_only != bool(args.output_dir):
         parser.error('--prepare-only and --output-dir must be used together')
-    if args.prepare_only and not (args.imports_candidate or args.imports_compatible_rollback):
-        parser.error('--prepare-only requires an imports candidate or compatible rollback')
+    if args.assistant_source and not args.assistant_candidate:
+        parser.error('--assistant-source requires --assistant-candidate')
+    if args.prepare_only and not (args.imports_candidate or args.imports_compatible_rollback or args.assistant_candidate):
+        parser.error('--prepare-only requires an imports candidate, compatible rollback or assistant candidate')
     return args
 
 
@@ -37,6 +41,20 @@ def build(args):
         args.output_dir = args.output_dir.resolve()
         if args.output_dir.exists():
             raise SystemExit('Output directory must not exist')
+    if args.assistant_candidate:
+        spec = importlib.util.spec_from_file_location('assistant_prepare', root / 'assistant/prepare.py')
+        extension = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(extension)
+        context = contextlib.nullcontext(None) if args.prepare_only else tempfile.TemporaryDirectory(prefix='campus-assistant-build-')
+        with context as scratch:
+            checkout = args.output_dir if args.prepare_only else Path(scratch) / 'source'
+            tree = extension.prepare(checkout, args.assistant_source)
+            print(json.dumps({'candidateTree': tree, 'buildsImage': not args.prepare_only}))
+            if not args.prepare_only:
+                subprocess.run(['docker', 'build', '--platform', 'linux/amd64', '-f', 'apps/api/Dockerfile',
+                                '--label', 'org.opencontainers.image.revision=' + tree,
+                                '-t', 'nuni-api:assistant-candidate', '.'], cwd=checkout, check=True)
+        return
     if args.security_candidate:
         spec = importlib.util.spec_from_file_location('nuni_api_security_prepare', root / 'security' / 'prepare.py')
         extension = importlib.util.module_from_spec(spec)

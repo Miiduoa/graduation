@@ -1,3 +1,4 @@
+import { AssistantEnabledProvider } from '@/components/AssistantEnabledProvider';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { browserRequest } from '@/features/nuni/Session';
@@ -592,3 +593,12 @@ it('hides course permissions on refresh and supplies recovery without account-ed
   fireEvent.click(screen.getByRole('button', { name: '重新確認 Google 帳號' }));
   expect(state.nuni.refresh).toHaveBeenCalledTimes(1);
 });
+
+for (const enabled of [false, true]) {
+  it(`shows the nuni assistant explanation only when enabled=${enabled}`, () => {
+    state.nuni.session = { platformAccountId: 'fixture', context: 'fixture-context', isPlatformOperator: false };
+    render(<AssistantEnabledProvider enabled={enabled}><SettingsPage /></AssistantEnabledProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
+    expect(!!screen.queryByText(/nuni 校園助理目前僅提供公開資訊/)).toBe(enabled);
+  });
+}
