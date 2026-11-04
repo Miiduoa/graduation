@@ -216,6 +216,51 @@ it('opens the selected same-title assignment from the Google-account workspace w
   expect(mockRequest.mock.calls.every(([, , input]) => input == null)).toBe(true);
 });
 
+
+it('continues a platform course deadline query into a receipt read without another request and opens its exact activity', async () => {
+  const firstCourse = { ...course, title: '資料庫設計' };
+  const secondCourse = { ...course, id: 'cw_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: '資料庫管理' };
+  const secondId = 'cwa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const firstReport = { ...assignment, title: '期中報告', instructions: '請畫出資料庫結構。' };
+  const secondReport = {
+    ...assignment, id: secondId, workspaceId: secondCourse.id, title: '期中報告',
+    instructions: '已完成的資料庫管理報告。',
+    mySubmission: { ...receipt('已繳交'), assignmentId: secondId },
+    submissionCount: 1,
+  };
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path === 'memberships') return { memberships: [] };
+    if (path === 'class-workspaces') return { workspaces: [firstCourse, secondCourse] };
+    if (path === 'class-workspaces/' + firstCourse.id) return firstCourse;
+    if (path === 'class-workspaces/' + secondCourse.id) return secondCourse;
+    if (path === 'class-workspaces/' + firstCourse.id + '/assignments') return { assignments: [firstReport] };
+    if (path === 'class-workspaces/' + secondCourse.id + '/assignments') return { assignments: [secondReport] };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    return response(path, context, input);
+  });
+  const view = render(<NuniWorkspaceScreen />);
+  const toggle = await view.findByRole('button', { name: '問作業助理' });
+  mockRequest.mockClear();
+  fireEvent.press(toggle);
+  const ask = (question: string) => {
+    fireEvent.changeText(view.getByLabelText('輸入作業問題'), question);
+    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+  };
+  ask('資料庫的期中報告什麼時候交？');
+  expect(view.getByRole('button', { name: '查看作業：資料庫設計 · 期中報告' })).toBeTruthy();
+  ask('那已交的呢？');
+  expect(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '查看作業：資料庫設計 · 期中報告' })).toBeNull();
+  expect(mockRequest).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' }));
+  await view.findByLabelText('作業繳交區：期中報告');
+  expect(view.getByText(secondReport.instructions)).toBeTruthy();
+  expect(mockRequest.mock.calls.some(([path, context]) =>
+    path === 'class-workspaces/' + secondCourse.id + '/assignments' && context === 'context-first',
+  )).toBe(true);
+  expect(mockRequest.mock.calls.every(([, , input]) => input == null)).toBe(true);
+});
+
 function material(number: number, title = `第 ${number} 份教材`): NuniMaterial {
   return {
     id: `cwm_66666666-6666-4666-8666-${String(number).padStart(12, '0')}`,
