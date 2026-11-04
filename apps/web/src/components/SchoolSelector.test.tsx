@@ -6,6 +6,7 @@ const { selection } = vi.hoisted(() => {
   const schools = [
     { id: 'pu', name: '靜宜大學', shortName: '靜宜', code: 'PU', status: 'open' },
     { id: 'ntu', name: '國立臺灣大學', shortName: '臺大', code: 'NTU', status: 'not-open' },
+    { id: 'nccu', name: '國立政治大學', shortName: '政大', status: 'not-open' },
   ];
   return {
     selection: {
@@ -29,6 +30,13 @@ describe('school selector usability', () => {
     render(<SchoolSelector />);
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ＰＵ' } });
     expect(screen.getByRole('status').textContent).toBe('找到 1 所校園');
+    expect(selection.selectSchool).not.toHaveBeenCalled();
+  });
+  it('finds an unopened school by id while keeping its status label', () => {
+    render(<SchoolSelector />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: ' N c C u ' } });
+    expect(screen.getByRole('status').textContent).toBe('找到 1 所校園');
+    expect(screen.getByRole('option', { name: '國立政治大學（校務尚未開通）' })).toBeTruthy();
     expect(selection.selectSchool).not.toHaveBeenCalled();
   });
   it('keeps the current school clearly separate from unmatched results', () => {
