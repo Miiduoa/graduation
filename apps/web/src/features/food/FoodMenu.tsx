@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   NUNI_FOOD_LIMITS,
   canStartFoodOrder,
+  foodQuoteProblem,
   type NuniFoodMenuItem,
   type NuniFoodQuoteProjection,
   type NuniFoodOrderCommandResult,
@@ -54,18 +55,6 @@ function lineEstimate(item: NuniFoodMenuItem, line: CartLine) {
   return (item.basePrice.amountMinor + extras) * line.quantity;
 }
 
-function quoteProblem(quote: NuniFoodQuoteProjection, menuVersion: string | undefined, at: number) {
-  if (quote.state === 'consumed') return '這份報價已使用，請先到「我的訂單與取餐」查看訂單。';
-  if (quote.state === 'expired' || Date.parse(quote.expiresAt) <= at)
-    return '這份報價已過期，請重新計算金額與確認庫存。';
-  if (
-    (menuVersion && quote.menuVersion !== menuVersion) ||
-    !quote.allowedActions.includes('create-order')
-  )
-    return '店家的菜單或供應狀態已變更，請重新計算金額與確認庫存。';
-  return '';
-}
-
 export function FoodMenu({
   client,
   cache,
@@ -104,7 +93,7 @@ export function FoodMenu({
   );
   const menu = useFoodRead(load);
   const acceptingOrders = !!menu.data && canStartFoodOrder(menu.data.location);
-  const quoteNotice = quote ? quoteProblem(quote, menu.data?.menuVersion, now) : '';
+  const quoteNotice = quote ? foodQuoteProblem(quote, menu.data?.menuVersion, now) : '';
   const task = useFoodMutation({
     cache,
     scope,
@@ -620,7 +609,7 @@ export function FoodMenu({
             disabled={locked || !acceptingOrders || !confirmed || !!quoteNotice}
             onClick={() => {
               if (locked || !acceptingOrders || !confirmed) return;
-              const problem = quoteProblem(quote, menu.data?.menuVersion, Date.now());
+              const problem = foodQuoteProblem(quote, menu.data?.menuVersion, Date.now());
               if (problem) {
                 setValidation(problem);
                 return;

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState, ScrollView, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import QRCode from 'react-native-qrcode-svg';
-import { canStartFoodOrder } from '@campus/shared/src/nuniFood';
+import { canStartFoodOrder, foodQuoteProblem } from '@campus/shared/src/nuniFood';
 import type {
   NuniFoodCancelInput,
   NuniFoodCustomerOrderDetail,
@@ -400,6 +400,18 @@ function FoodMenu({
     };
   }, []);
   const locked = mutation.locked || !!quote;
+  const currentMenu =
+    !resource.loading && !resource.error && resource.data?.location.id === locationId
+      ? resource.data
+      : null;
+  const acceptingOrders = !!currentMenu && canStartFoodOrder(currentMenu.location);
+  function orderProblem(currentQuote: NuniFoodQuoteProjection, at: number) {
+    if (!currentMenu) return '請重新讀取門市菜單，再確認這份報價。';
+    if (!acceptingOrders) return '門市目前未開放點餐，請返回選擇其他門市或稍後重新讀取。';
+    if (currentQuote.locationId !== locationId) return '報價門市不符，請返回購物籃重新確認金額。';
+    return foodQuoteProblem(currentQuote, currentMenu.menuVersion, at);
+  }
+  const quoteNotice = quote ? orderProblem(quote, now) : '';
   const catalog = useMemo(
     () => resource.data?.sections.flatMap((section) => section.items) ?? [],
     [resource.data],
@@ -411,13 +423,21 @@ function FoodMenu({
   }, 0);
   const focusItem = focusId ? catalog.find((item) => item.id === focusId) : undefined;
   const focusLine = focusId ? (cart[focusId] ?? emptyLine()) : emptyLine();
-  const update = (id: string, patch: Partial<CartLine>) =>
+  const update = (id: string, patch: Partial<CartLine>) => {
+    if (locked || !acceptingOrders) return;
     setCart((previous) => ({
       ...previous,
       [id]: { ...emptyLine(), ...previous[id], ...patch },
     }));
+  };
   const openCustomize = (item: NuniFoodMenuItem) => {
-    if (locked || !item.available || !item.allowedActions.includes('add-to-quote')) return;
+    if (
+      locked ||
+      !acceptingOrders ||
+      !item.available ||
+      !item.allowedActions.includes('add-to-quote')
+    )
+      return;
     setError('');
     setLineErrors((previous) => {
       const next = { ...previous };
@@ -436,7 +456,7 @@ function FoodMenu({
     setStage('customize');
   };
   const saveCustomize = () => {
-    if (!focusItem || locked) return;
+    if (!focusItem || locked || !acceptingOrders) return;
     const line = cart[focusItem.id] ?? emptyLine();
     const issue = validateLine(focusItem, line);
     if (issue) {
@@ -473,8 +493,7 @@ function FoodMenu({
     }
   };
   const prepareQuote = () => {
-    if (locked || preparingQuote.current || !resource.data || resource.loading || resource.error)
-      return;
+    if (locked || preparingQuote.current || !acceptingOrders) return;
     setError('');
     const nextErrors: Record<string, string> = {};
     try {
@@ -534,7 +553,8 @@ function FoodMenu({
     const line = cart[item.id];
     const qty = line && line.quantity !== '' ? Number(line.quantity) : 0;
     const inCart = line?.inBasket !== false && qty > 0;
-    const canAdd = item.available && item.allowedActions.includes('add-to-quote');
+    const canAdd =
+      acceptingOrders && item.available && item.allowedActions.includes('add-to-quote');
     return (
       <FoodCard key={item.id}>
         <FoodText title>{item.name}</FoodText>
@@ -568,7 +588,10 @@ function FoodMenu({
   const renderCustomize = () => {
     if (!focusItem) return null;
     const disabled =
-      locked || !focusItem.available || !focusItem.allowedActions.includes('add-to-quote');
+      locked ||
+      !acceptingOrders ||
+      !focusItem.available ||
+      !focusItem.allowedActions.includes('add-to-quote');
     return (
       <FoodCard>
         <FoodText title>{focusItem.name}</FoodText>
@@ -660,7 +683,11 @@ function FoodMenu({
               </FoodButton>
             </FoodCard>
           );
-        const disabled = locked || !item.available || !item.allowedActions.includes('add-to-quote');
+        const disabled =
+          locked ||
+          !acceptingOrders ||
+          !item.available ||
+          !item.allowedActions.includes('add-to-quote');
         return (
           <FoodCard key={id}>
             <FoodText title>{item.name}</FoodText>
@@ -742,7 +769,7 @@ function FoodMenu({
       />
       <FoodButton
         variant="primary"
-        disabled={locked || resource.loading || !!resource.error || !selected.length}
+        disabled={locked || !acceptingOrders || !selected.length}
         onPress={prepareQuote}
       >
         確認餐點與金額
@@ -770,6 +797,9 @@ function FoodMenu({
             : '選餐後再確認購物籃'}
       </FoodText>
       <FoodReadState resource={resource} disabled={mutation.busy} />
+      {!quote && stage === 'menu' && currentMenu && !acceptingOrders ? (
+        <FoodText status>門市目前未開放點餐，可以返回門市列表或稍後重新讀取。</FoodText>
+      ) : null}
       {mutation.error ? <FoodText alert>{mutation.error}</FoodText> : null}
       <FoodStorageRecovery mutation={mutation} />
       {mutation.pending ? (
@@ -796,36 +826,33 @@ function FoodMenu({
         </>
       ) : null}
       {error ? <FoodText alert>{error}</FoodText> : null}
-      {quote && resource.data && !resource.error && !resource.loading ? (
+      {quote ? (
         <FoodCard>
           <FoodText title>確認這次訂單</FoodText>
-          <OrderLines lines={quote.lines} />
-          <FoodText>{`小計 ${money(quote.subtotal)}`}</FoodText>
-          {quote.fees.map((fee) => (
-            <FoodText key={fee.code}>{`${fee.label}：${money(fee.amount)}`}</FoodText>
-          ))}
-          <FoodText>{`應付總額 ${money(quote.total)}`}</FoodText>
-          <FoodText
-            status
-          >{`預計取餐 ${formatPickupTime(quote.requestedPickupAt)}（台灣時間）`}</FoodText>
-          <FoodText subdued>{`金額與庫存保留至 ${foodTime(quote.expiresAt)}`}</FoodText>
-          <FoodText>送出後請到店付款。這個步驟不會線上扣款。</FoodText>
-          {quote.state === 'expired' || Date.parse(quote.expiresAt) <= now ? (
-            <FoodText alert>這次報價已過期，請返回調整取餐時間，再重新確認金額。</FoodText>
+          {currentMenu ? (
+            <>
+              <FoodText>{`取餐門市：${currentMenu.location.name}`}</FoodText>
+              <OrderLines lines={quote.lines} />
+              <FoodText>{`小計 ${money(quote.subtotal)}`}</FoodText>
+              {quote.fees.map((fee) => (
+                <FoodText key={fee.code}>{`${fee.label}：${money(fee.amount)}`}</FoodText>
+              ))}
+              <FoodText>{`應付總額 ${money(quote.total)}`}</FoodText>
+              <FoodText
+                status
+              >{`預計取餐 ${formatPickupTime(quote.requestedPickupAt)}（台灣時間）`}</FoodText>
+              <FoodText subdued>{`金額與庫存保留至 ${foodTime(quote.expiresAt)}`}</FoodText>
+              <FoodText>送出後請到店付款。這個步驟不會線上扣款。</FoodText>
+            </>
           ) : null}
+          {quoteNotice ? <FoodText alert>{quoteNotice}</FoodText> : null}
           <FoodButton
             variant="primary"
-            disabled={
-              mutation.locked ||
-              resource.loading ||
-              !!resource.error ||
-              Date.parse(quote.expiresAt) <= now ||
-              quote.state !== 'active' ||
-              !quote.allowedActions.includes('create-order')
-            }
+            disabled={mutation.locked || !!quoteNotice}
             onPress={() => {
-              if (Date.parse(quote.expiresAt) <= Date.now()) {
-                setNow(Date.now());
+              const pressedAt = Date.now();
+              if (mutation.locked || orderProblem(quote, pressedAt)) {
+                setNow(pressedAt);
                 return;
               }
               void mutation.send({
@@ -864,34 +891,32 @@ function FoodMenu({
               {selected.length ? `查看購物籃（${cartCount} 份）` : '購物籃（尚無餐點）'}
             </FoodButton>
           ) : null}
-          {stage === 'menu' &&
-            !resource.loading &&
-            !resource.error &&
-            canStartFoodOrder(resource.data.location) && (
-              <FoodQuickAdd
-                items={catalog}
-                selected={selected}
-                disabled={locked}
-                onAdd={(lines) => {
-                  setCart((previous) => ({
-                    ...previous,
-                    ...Object.fromEntries(
-                      lines.map(({ itemId, quantity }) => [
-                        itemId,
-                        {
-                          ...emptyLine(),
-                          ...previous[itemId],
-                          quantity: String(quantity),
-                          inBasket: true,
-                        },
-                      ]),
-                    ),
-                  }));
-                  setError('');
-                  setLineErrors({});
-                }}
-              />
-            )}
+          {stage === 'menu' && acceptingOrders && (
+            <FoodQuickAdd
+              items={catalog}
+              selected={selected}
+              disabled={locked}
+              onAdd={(lines) => {
+                if (locked || !acceptingOrders) return;
+                setCart((previous) => ({
+                  ...previous,
+                  ...Object.fromEntries(
+                    lines.map(({ itemId, quantity }) => [
+                      itemId,
+                      {
+                        ...emptyLine(),
+                        ...previous[itemId],
+                        quantity: String(quantity),
+                        inBasket: true,
+                      },
+                    ]),
+                  ),
+                }));
+                setError('');
+                setLineErrors({});
+              }}
+            />
+          )}
           {locked && stage === 'menu'
             ? selected.map(([id, line]) => {
                 const item = catalog.find((candidate) => candidate.id === id);
