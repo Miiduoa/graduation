@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { Assistant } from './Assistant';
 const state = vi.hoisted(() => ({
@@ -23,6 +23,9 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
+beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   state.context = 'session-a';
@@ -278,4 +281,48 @@ it('v2 consent names Groq only until capability reports a fallback', async () =>
   const onLabel = await screen.findByRole('checkbox');
   expect(onLabel.closest('label')?.textContent).toMatch(/Groq/);
   expect(onLabel.closest('label')?.textContent).toMatch(/Cloudflare Workers AI/);
+});
+
+it('v2 renders markdown, assignment rows and food cards without raw paths', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      return json({
+        answer: '## 待繳\n- **樹與圖作業**（資訊課程）截止 2026-11-05T23:59:00+08:00\n社團請到 /clubs。',
+        steps: [{ name: 'get_due_work', status: 'ok', summary: '已查作業' }],
+        cards: [
+          {
+            tool: 'propose_food_order',
+            token: 'food-card',
+            mutationId: 'food-1',
+            schoolId: 'pu',
+            destination: '點餐頁',
+            args: {
+              reason: '帶到點餐頁',
+              href: '/food?tenant=a&location=dining-a',
+              summary: {
+                store: '合成蔬食餐廳',
+                totalMinor: 8000,
+                requestedPickupAt: '2026-11-04T12:00:00+08:00',
+                lines: [{ name: '蔬菜便當', quantity: 1, options: ['標準不辣'], unitMinor: 8000 }],
+              },
+            },
+          },
+        ],
+      });
+    }),
+  );
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '作業和午餐' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText('樹與圖作業')).toBeTruthy();
+  expect(screen.getByText(/資訊課程/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '開啟社團' }).getAttribute('href')).toBe('/clubs');
+  expect(screen.queryByText('/clubs')).toBeNull();
+  expect(screen.getByText('合成蔬食餐廳')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '前往點餐頁' }).getAttribute('href')).toContain('/food?');
+  expect(screen.getByText('確認')).toBeTruthy();
 });
