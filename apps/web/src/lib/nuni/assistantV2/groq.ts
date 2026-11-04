@@ -1,6 +1,7 @@
 import { maskMessages } from './privacy';
 import { bounded, bytes, object, V2Error, type Model, type ModelResult, type ToolCall } from './contracts';
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+export const DEFAULT_FALLBACK_MODEL = '@cf/openai/gpt-oss-120b';
 export const PROVIDER_USER_MESSAGES: Record<string, string> = {
   PROVIDER_EGRESS_DENIED: '模型服務目前拒絕此主機連線。若未設定備援，請稍後再試或改用校園頁面查詢。',
   PROVIDER_FORBIDDEN: '模型服務拒絕此次連線，請稍後再試或改用校園頁面查詢。',
@@ -200,7 +201,7 @@ export function fallbackModel(fetcher: typeof fetch = fetch): Model | null {
   if (!fallbackReady()) return null;
   const account = process.env.CAMPUS_ASSISTANT_V2_FALLBACK_ACCOUNT_ID!.trim();
   const token = process.env.CAMPUS_ASSISTANT_V2_FALLBACK_API_TOKEN!.trim();
-  const modelName = process.env.CAMPUS_ASSISTANT_V2_FALLBACK_MODEL?.trim() || '@hf/nousresearch/hermes-2-pro-mistral-7b';
+  const modelName = process.env.CAMPUS_ASSISTANT_V2_FALLBACK_MODEL?.trim() || DEFAULT_FALLBACK_MODEL;
   if (!/^@[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/.test(modelName)) return null;
   return async (input) => {
     const { signal, ...payload } = input;

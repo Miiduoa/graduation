@@ -106,7 +106,12 @@ it.each(['question', 'history', 'context', 'tool'])('masks secrets, student ids 
   expect(maskSensitive(marker)).toContain('遮罩');
 });
 it('does not ask for a nonexistent card', () => {
-  expect(verifyProposalAnswer('請按下方確認卡。', [])).toContain('尚未產生確認卡');
+  expect(verifyProposalAnswer('請按下方確認卡。', [], '幫我點一份')).toContain('尚未產生確認卡');
+  expect(verifyProposalAnswer('攝影社週五有活動。請按確認卡。', [], '我加入的社團最近有什麼消息'))
+    .toContain('攝影社');
+  expect(
+    verifyProposalAnswer('攝影社週五有活動。請按確認卡。', [], '我加入的社團最近有什麼消息'),
+  ).not.toMatch(/尚未產生確認卡|請按確認卡/);
 });
 it('corrects tonight to the server Taipei date and grounds planning / navigation replies', async () => {
   let calls = 0;

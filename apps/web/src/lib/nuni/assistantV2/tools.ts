@@ -1,4 +1,4 @@
-import { cartArgs, foodHref, priceCart } from './food';
+import { cartArgs, foodHref, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
 import {
   getOfficialCampusMapUrl,
@@ -389,6 +389,7 @@ export function createTools(
   now: number,
   writes: boolean,
   reorder = false,
+  question = '',
 ) {
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
@@ -649,10 +650,7 @@ export function createTools(
         );
         if (typeof detail.locationId !== 'string' || !detail.locationId)
           return fail('INVALID_INPUT');
-        const pickup =
-          typeof a.requestedPickupAt === 'string' && a.requestedPickupAt
-            ? a.requestedPickupAt
-            : new Date(now + 40 * 60000 + 28800000).toISOString().replace(/Z$/, '+08:00').replace('.000+', '+');
+        const pickup = pickupAt(now, a.requestedPickupAt, question);
         const items = (Array.isArray(detail.lines) ? detail.lines : []).slice(0, 5).map((raw) => {
           const line = object(raw);
           const selected = Array.isArray(line.selectedOptionIds)
@@ -952,7 +950,8 @@ export function createTools(
         list_clubs: '可省略 tenantId；多 realm 時用 context 可見 tenantId 重試',
         get_food_menu: '先呼叫 get_food_locations {} 取得 tenantId/locationId',
         propose_food_order: '先呼叫 get_food_locations，再 get_food_menu；依菜單 id 重試',
-        reorder_last_food_order: '可省略參數；伺服器會讀最近一筆自己的訂單並備同樣內容',
+        reorder_last_food_order:
+          '請省略全部參數後重試；伺服器會讀最近一筆自己的訂單並填入取餐時間，勿傳 HH:mm',
         get_course_work: '先呼叫 list_courses，使用回傳的 workspaceId',
         get_materials: '先呼叫 list_courses，使用回傳的 workspaceId',
         get_food_order: '先呼叫 list_food_orders 取得 orderId',
@@ -1003,6 +1002,8 @@ export function createTools(
         }
       }
       if (name === 'list_food_orders' && reorder) delete cleaned.state;
+      if (name === 'reorder_last_food_order' || name === 'propose_food_order')
+        cleaned.requestedPickupAt = pickupAt(now, cleaned.requestedPickupAt, question);
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);
@@ -1071,7 +1072,17 @@ export function createTools(
         key = name + canonical(a),
         cached = cache.has(key);
       if (!cached) cache.set(key, dispatch(name, a));
-      const value = await cache.get(key);
+      let value: unknown;
+      try {
+        value = await cache.get(key);
+      } catch (error) {
+        if (name !== 'reorder_last_food_order') throw error;
+        const filled = validateTool(name, { requestedPickupAt: pickupAt(now, undefined, question) });
+        const retryKey = name + canonical(filled);
+        if (retryKey === key) throw error;
+        cache.set(retryKey, dispatch(name, filled));
+        value = await cache.get(retryKey);
+      }
       remember(value, name);
       return {
         value: ignored.length ? { data: value, note: '已忽略未知參數欄位' } : value,

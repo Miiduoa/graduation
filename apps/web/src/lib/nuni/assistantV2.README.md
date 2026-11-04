@@ -111,7 +111,7 @@ token 另綁 conversation 的隨機 proposalSeq；同一輪多卡共用批次，
 Groq 401、403（egress/model/unknown）、429、timeout、network、5xx、invalid response 分類。
 已知 403 body pattern `Access denied. Please check your network settings.` → PROVIDER_EGRESS_DENIED；403 短路 60 秒。
 Groq 任何非 2xx 或網路失敗會寫一行 `provider.http_error`：provider、status、errorClass、可選 providerCode；不記金鑰、問題、原文或使用者內容。
-備援路徑用 `CAMPUS_ASSISTANT_V2_FALLBACK_ACCOUNT_ID`、`CAMPUS_ASSISTANT_V2_FALLBACK_API_TOKEN`（可選 `CAMPUS_ASSISTANT_V2_FALLBACK_MODEL`）；沒設就停用。Groq 失敗（不含 400 工具格式錯誤）才改走此路徑。兩者都失敗回 `PROVIDER_ALL_FAILED` 與中文說明，不是籠統 503。錯誤 body 只在記憶體讀最多 2 KiB，不記錄原文。BFF 429 回有界 Retry-After，不自動重試；401 不繼續私人回答。
+備援路徑用 `CAMPUS_ASSISTANT_V2_FALLBACK_ACCOUNT_ID`、`CAMPUS_ASSISTANT_V2_FALLBACK_API_TOKEN`（可選 `CAMPUS_ASSISTANT_V2_FALLBACK_MODEL`，未指定時為 `@cf/openai/gpt-oss-120b`）；沒設帳號／權杖就停用。Groq 失敗（不含 400 工具格式錯誤）才改走此路徑。兩者都失敗回 `PROVIDER_ALL_FAILED` 與中文說明，不是籠統 503。錯誤 body 只在記憶體讀最多 2 KiB，不記錄原文。BFF 429 回有界 Retry-After，不自動重試；401 不繼續私人回答。
 每請求有 assistant.completed/failed 白名單 JSON log，只記 requestId、stage/status/class、耗時、工具名稱、模型次數、usage/stopReason/simulation；不記問題、參數、資料、帳號、session、token、key 或原始錯誤。
 線上點餐關閉時，備單仍列出店家、品項與數量，確認卡／回覆附帶 `/food?tenant=&location=&items=` 連結；開啟且助理下單旗標允許時才走確認後下單。未改任何開關預設值。
 
