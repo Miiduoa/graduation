@@ -32,6 +32,73 @@ export function extractLinkCandidates(source: string, file: string) {
     },
   );
   const checker = program.getTypeChecker();
+  const written = new Set<ts.Symbol>();
+  function markWritten(node: ts.Node) {
+    if (ts.isIdentifier(node)) {
+      const symbol = checker.getSymbolAtLocation(node);
+      if (symbol) written.add(symbol);
+    }
+    ts.forEachChild(node, markWritten);
+  }
+  function findWrites(node: ts.Node) {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    )
+      markWritten(node.left);
+    if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      (node.operator === ts.SyntaxKind.PlusPlusToken ||
+        node.operator === ts.SyntaxKind.MinusMinusToken)
+    )
+      markWritten(node.operand);
+    if (
+      (ts.isForInStatement(node) || ts.isForOfStatement(node)) &&
+      !ts.isVariableDeclarationList(node.initializer)
+    )
+      markWritten(node.initializer);
+    ts.forEachChild(node, findWrites);
+  }
+  findWrites(tree);
+  // 不追蹤使用點的資料流；可變宣告一律未知，避免把初始值當成導航值。
+  function constantInitializer(node: ts.Identifier): ts.Expression | undefined {
+    const symbol = checker.getSymbolAtLocation(node);
+    if (symbol && written.has(symbol)) return undefined;
+    const declaration = symbol?.valueDeclaration;
+    if (
+      declaration &&
+      ts.isVariableDeclaration(declaration) &&
+      ts.isVariableDeclarationList(declaration.parent) &&
+      (declaration.parent.flags & ts.NodeFlags.Const) !== 0
+    )
+      return declaration.initializer;
+    return undefined;
+  }
+  const unknownScalar = Symbol('unknown');
+  type Scalar = string | number | boolean | null | undefined | typeof unknownScalar;
+  function scalar(node: ts.Expression, seen = new Set<ts.Node>()): Scalar {
+    if (seen.has(node)) return unknownScalar;
+    const next = new Set(seen).add(node);
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isSatisfiesExpression(node)
+    )
+      return scalar(node.expression, next);
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (ts.isNumericLiteral(node)) return Number(node.text);
+    if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
+    if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+    if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (ts.isVoidExpression(node)) return undefined;
+    if (ts.isIdentifier(node)) {
+      const initializer = constantInitializer(node);
+      return initializer ? scalar(initializer, next) : unknownScalar;
+    }
+    return unknownScalar;
+  }
   type Value = string | undefined;
   const dynamic = '__dynamic__';
   function combine(left: Value[], right: Value[]): Value[] {
@@ -60,8 +127,21 @@ export function extractLinkCandidates(source: string, file: string) {
           ts.SyntaxKind.AmpersandAmpersandToken,
           ts.SyntaxKind.QuestionQuestionToken,
         ].includes(node.operatorToken.kind)
-      )
+      ) {
+        const left = scalar(node.left);
+        if (left !== unknownScalar) {
+          const useRight =
+            node.operatorToken.kind === ts.SyntaxKind.BarBarToken
+              ? !left
+              : node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+                ? Boolean(left)
+                : left === null || left === undefined;
+          if (useRight) return resolve(node.right, next);
+          // false、null 等非字串值不會產生導航路徑。
+          return typeof left === 'string' ? [left] : [];
+        }
         return [...resolve(node.left, next), ...resolve(node.right, next)];
+      }
       if (node.operatorToken.kind === ts.SyntaxKind.PlusToken)
         return combine(resolve(node.left, next), resolve(node.right, next));
     }
@@ -73,10 +153,10 @@ export function extractLinkCandidates(source: string, file: string) {
       );
     }
     if (ts.isIdentifier(node)) {
+      const initializer = constantInitializer(node);
+      if (initializer) return resolve(initializer, next);
       const declaration = checker.getSymbolAtLocation(node)?.valueDeclaration;
-      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer)
-        return resolve(declaration.initializer, next);
-      return [dynamic];
+      return declaration && ts.isVariableDeclaration(declaration) ? [undefined] : [dynamic];
     }
     // 只有已知保留第一參數頁面路徑的 helper 才可穿透。
     if (

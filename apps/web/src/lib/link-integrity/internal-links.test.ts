@@ -55,6 +55,7 @@ export async function audit() {
 }
 
 describe('站內連結完整性', () => {
+  // CI 全庫 coverage 下曾耗時 17.4 秒；僅延長掃描期限，不變更斷鏈斷言。
   it('所有導航連結都有頁面、端點、靜態檔或已知導向', async () => {
     const { broken, links, unknown, routes } = await audit();
     if (process.env.LINK_INTEGRITY_REPORT === '1') {
@@ -100,7 +101,7 @@ describe('站內連結完整性', () => {
         `已失效的例外：${item.file} ${item.target}`,
       ).toBe(true);
     }
-  });
+  }, 60_000);
   it('遞迴解析導航呼叫、href、邏輯分支與動態拼接', () => {
     const { links, unknown } = extractLinkCandidates(
       `
@@ -144,6 +145,62 @@ describe('站內連結完整性', () => {
         'fixture.tsx',
       ).map((link) => link.target),
     ).toEqual(['/missing']);
+  });
+  it('可變導航變數與其別名一律列未知，不使用初始值', () => {
+    const result = extractLinkCandidates(
+      `
+      let destination = '/classroom'; destination = '/missing-reassigned'; router.push(destination);
+      let reverse = '/missing-initial'; reverse = '/classroom'; router.push(reverse);
+      let unchanged = '/classroom'; router.push(unchanged);
+      let conditional = '/classroom'; if (ok) conditional = '/missing';
+      const alias = conditional; router.push(alias);
+      let compound = '/classroom'; compound += '/missing'; router.push(compound);
+      var legacy = '/classroom'; router.push(legacy);
+    `,
+      'fixture.tsx',
+    );
+    expect(result.links).toEqual([]);
+    expect(result.unknown).toHaveLength(6);
+  });
+  it('偵測直接、解構、複合、遞增與迴圈寫入，且不混淆同名符號', () => {
+    const result = extractLinkCandidates(
+      `
+      const direct = '/classroom'; direct = '/missing'; router.push(direct);
+      const destructured = '/classroom'; [destructured] = values; router.push(destructured);
+      const compound = '/classroom'; compound += suffix; router.push(compound);
+      const incremented = '/classroom'; incremented++; router.push(incremented);
+      const looped = '/classroom'; for (looped of values) {} router.push(looped);
+      const outer = '/classroom';
+      function local() { let outer = '/missing'; outer = '/other'; }
+      router.push(outer);
+    `,
+      'fixture.tsx',
+    );
+    expect(result.links.map((link) => link.target)).toEqual(['/classroom']);
+    expect(result.unknown).toHaveLength(5);
+  });
+  it('已知左值遵守或、且、空值的短路語意', () => {
+    const result = extractLinkCandidates(
+      `
+      const fallback = '/missing-unused';
+      const target = '/classroom'; const alias = target;
+      router.push('/classroom' || fallback);
+      router.push(alias || fallback);
+      router.push('' || '/classroom');
+      router.push(false && fallback);
+      router.push(true && '/classroom');
+      router.push(null ?? '/classroom');
+      router.push((void 0) ?? '/classroom');
+      router.push('' ?? fallback);
+      router.push(0 ?? fallback);
+      router.push(target ?? fallback);
+      router.push(target && '/classroom');
+      router.push(false || '/classroom');
+    `,
+      'fixture.tsx',
+    );
+    expect(result.links.map((link) => link.target)).toEqual(Array(9).fill('/classroom'));
+    expect(result.unknown).toEqual([]);
   });
   it('未知計算與循環不會被當成字串片段或斷鏈', () => {
     const result = extractLinkCandidates(
