@@ -199,7 +199,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
     out.delete('propose_open_page');
     out.delete('get_dining');
   }
-  if (/規劃|安排|排寫/.test(question)) {
+  if (/規劃|安排|排寫|幫我排/.test(question)) {
     out.delete('propose_open_page');
     out.delete('propose_personal_event');
     out.delete('get_schedule');
@@ -217,7 +217,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
   if (names.length > 8 && names.includes('find_free_time'))
     names.splice(names.indexOf('get_calendar'), 1);
-  if (/規劃|安排|排寫/.test(question))
+  if (/規劃|安排|排寫|幫我排/.test(question))
     return [
       'get_day_overview',
       'get_today_context',
@@ -226,7 +226,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
-  const priority = /規劃|安排|排寫/.test(question)
+  const priority = /規劃|安排|排寫|幫我排/.test(question)
     ? ['get_day_overview', 'get_due_work', 'find_free_time', 'propose_study_plan']
     : [];
   return [...new Set([...priority, ...names])].slice(0, 8);

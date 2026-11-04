@@ -21,12 +21,18 @@ import {
 import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
 import { createTools, schemas, selectTools } from './tools';
 export { foodOrderIntent };
+export function scheduleIntent(question: string): boolean {
+  return (
+    /規劃|安排|排寫|留.?(?:一)?小時/.test(question) ||
+    /幫我排(?!隊)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question) ||
+    /幫我留(?!言)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question)
+  );
+}
 export function writeIntent(question: string): boolean {
   return (
     foodOrderIntent(question) ||
-    /下單|幫我排|排寫|留.?(?:一)?小時|幫我留|新增(?:個人)?(?:行程|事件)|加入(?:個人)?行事曆|規劃|安排/.test(
-      question,
-    )
+    scheduleIntent(question) ||
+    /下單|新增(?:個人)?(?:行程|事件)|加入(?:個人)?行事曆/.test(question)
   );
 }
 const SYSTEM =
@@ -173,8 +179,11 @@ export async function run(input: RunInput) {
     });
   const requestId = randomUUID();
   try {
-    const workOnly = /作業|要交|測驗|待繳/.test(input.question) && !/有空|行程|規劃|安排|課表/.test(input.question);
-    const context = !workOnly && /課|有空|行程|規劃|排|剛剛/.test(input.question)
+    const workOnly =
+      /作業|要交|測驗|待繳/.test(input.question) &&
+      !scheduleIntent(input.question) &&
+      !/有空|行程|課表/.test(input.question);
+    const context = !workOnly && /課|有空|行程|規劃|排|安排|剛剛/.test(input.question)
       ? await bounded((child) => tools.withSignal(child, () => tools.context()), signal, 15000)
       : {
           now: new Date(now).toISOString(),
@@ -389,7 +398,7 @@ export async function run(input: RunInput) {
           );
           response = value.value;
           evidence.push({ tool: call.function.name, result: response });
-          if (/規劃|安排/.test(input.question) && call.function.name === 'get_day_overview') {
+          if (scheduleIntent(input.question) && call.function.name === 'get_day_overview') {
             for (const done of [
               'get_day_overview',
               'get_due_work',
@@ -449,7 +458,7 @@ export async function run(input: RunInput) {
       if (
         tools.cards.length ||
         (steps.some((s) => s.name === 'get_due_work' && s.status !== 'error') &&
-          !/規劃|安排|幫我排|留.*小時/.test(input.question))
+          !scheduleIntent(input.question))
       )
         names.length = 0;
       if (accepted.length !== calls.length) stopReason = 'TOOL_LIMIT';
@@ -518,7 +527,7 @@ export async function run(input: RunInput) {
         if (cart) await ensure('propose_food_order', cart);
       }
     }
-    if (/規劃|安排/.test(input.question)) {
+    if (scheduleIntent(input.question)) {
       const day = relativeDate || taipeiDate(now);
       await ensure('get_day_overview', { date: day });
       if (/吃|餐|飯/.test(input.question)) await ensure('get_dining', {});
@@ -713,6 +722,33 @@ export function planningAnswer(
   );
 }
 
+const FOOD_PAGE_NEXT = '按確認後會開啟點餐頁，品項已帶好';
+const FOOD_ORDER_NEXT = '按確認才會送出訂單';
+const FOOD_PAGE_DROP =
+  /付款|完成訂單|下單|送出訂單|訂單已送出|正在幫[你您]下單|結帳|提交訂單|訂單已成立|\bpayment\b|\bcheckout\b|\bplaced?\s+(?:the\s+|an\s+)?orders?\b|\breordered?\b/i;
+const FOOD_ORDER_DROP = /已為[您你](?:重新)?下單|已重新下單|訂單已送出|已(?:經)?下單|完成下單/;
+
+function splitSentences(text: string): string[] {
+  return text.split(/(?<=[。！？\n])|(?<=[.!])(?=\s|$)/);
+}
+
+function collapseRepeatedNotice(text: string, notice: string): string {
+  const full = notice.endsWith('。') ? notice : notice + '。';
+  const escaped = full.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text
+    .replace(new RegExp('(?:\\s*' + escaped + ')+', 'g'), full)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function dropMatchingSentences(text: string, pattern: RegExp): string {
+  return splitSentences(text)
+    .filter((sentence) => !sentence.trim() || !pattern.test(sentence))
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
   const card = cards.find((c) => c.tool === 'propose_food_order');
   if (!card) return answer;
@@ -724,9 +760,15 @@ export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
   const pickup = pickupIso.length >= 16 ? pickupIso.slice(11, 16) : '';
   const totalMinor = Number(summary.totalMinor);
   const yuan = Number.isFinite(totalMinor) ? String(totalMinor / 100) : '';
+  const itemNames = Array.isArray(summary.lines)
+    ? summary.lines.flatMap((line) =>
+        line && typeof line === 'object' && !Array.isArray(line) && typeof (line as Obj).name === 'string'
+          ? [String((line as Obj).name)]
+          : [],
+      )
+    : [];
   const page = card.args.mode === 'page';
-  const pageNotice = '請按確認後開啟點餐頁，品項已帶好';
-  const orderNotice = '請核對並按下方確認卡；確認前尚未下單';
+  const next = page ? FOOD_PAGE_NEXT : FOOD_ORDER_NEXT;
   let out = answer;
   if (pickup) {
     out = out.replace(/\d{1,2}[:：]\d{2}/g, (match: string, offset: number, source: string) => {
@@ -748,40 +790,46 @@ export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
       return match;
     });
   }
-  if (page) {
-    out = out.replace(
-      /[^。！\n]*(?:將為[您你]送出訂單|已為[您你](?:重新)?下單|已(?:經)?(?:為[您你])?重新下單|完成下單|送出訂單)[^。！\n]*[。！]?/g,
-      pageNotice + '。',
-    );
-    if (!/開啟點餐頁|品項已帶好/.test(out)) out = out.replace(/\s*$/, '') + '\n' + pageNotice + '。';
-  } else {
-    out = out.replace(
-      /[^。！\n]*(?:已為[您你](?:重新)?下單|已(?:經)?下單)[^。！\n]*[。！]?/g,
-      orderNotice + '。',
-    );
-  }
+  out = dropMatchingSentences(out, page ? FOOD_PAGE_DROP : FOOD_ORDER_DROP);
+  if (itemNames.length && !itemNames.some((name) => out.includes(name)))
+    out = (out ? out + '\n' : '') + itemNames.join('、') + '。';
   if (pickup && !out.includes(pickup) && !(pickupIso && out.includes(pickupIso)))
-    out += '\n取餐時間 ' + pickup + (yuan ? '，合計 ' + yuan + ' 元' : '') + '。';
-  return out;
+    out += (out ? '\n' : '') + '取餐時間 ' + pickup + (yuan ? '，合計 ' + yuan + ' 元' : '') + '。';
+  else if (yuan && !out.includes(yuan + ' 元') && !out.includes(yuan + '元'))
+    out += (out ? '\n' : '') + '合計 ' + yuan + ' 元。';
+  if (!out.includes(next)) out = (out ? out + '\n' : '') + next + '。';
+  return out.trim();
 }
 
 export function verifyProposalAnswer(answer: string, cards: Card[], question = ''): string {
   const execution = /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?事件|建立(?:個人)?事件|安排好|訂購|儲存|預約)|已完成[。！]/;
   const cardClaim = /請[^。；！\n]{0,24}(?:按|點|核對)[^。；！\n]{0,16}卡|(?:按|點)[^。；！\n]{0,16}確認[^。；！\n]{0,6}卡|(?:已|成功)[^。；！\n]{0,20}(?:產生|生成|建立)[^。；！\n]{0,15}(?:卡|提案)/;
+  const food = cards.some((c) => c.tool === 'propose_food_order');
   const notice = cards.length
     ? '請核對並按下方確認卡；確認前尚未執行'
     : '尚未產生確認卡，也尚未執行寫入或下單';
   const writing = writeIntent(question);
-  const checked = answer
-    .split(/(?<=[。！\n])/)
+  let usedNotice = false;
+  const checked = splitSentences(answer)
     .map((sentence) => {
       if (!sentence) return sentence;
-      if (execution.test(sentence)) return cards.length || writing ? notice + '。' : '';
-      if (!cards.length && cardClaim.test(sentence)) return writing ? notice + '。' : '';
+      if (execution.test(sentence)) {
+        if (food) return '';
+        if (!(cards.length || writing)) return '';
+        if (usedNotice) return '';
+        usedNotice = true;
+        return notice + '。';
+      }
+      if (!cards.length && cardClaim.test(sentence)) {
+        if (!writing) return '';
+        if (usedNotice) return '';
+        usedNotice = true;
+        return notice + '。';
+      }
       return sentence;
     })
     .join('');
-  const trimmed = checked.trim();
+  let trimmed = collapseRepeatedNotice(checked, notice);
   if (!cards.length) {
     if (writing && (execution.test(answer) || cardClaim.test(answer) || !trimmed))
       return trimmed.includes('尚未產生確認卡')
@@ -789,7 +837,9 @@ export function verifyProposalAnswer(answer: string, cards: Card[], question = '
         : (trimmed ? trimmed + '\n' : '') + notice + '。';
     return trimmed;
   }
+  trimmed = dropMatchingSentences(trimmed, /尚未產生確認卡/);
+  if (food) return trimmed;
   if (!/確認前|按.*確認|點.*確認/.test(trimmed))
-    return (trimmed || answer) + '\n' + notice + '。';
+    return collapseRepeatedNotice((trimmed || answer) + '\n' + notice + '。', notice);
   return trimmed || answer;
 }

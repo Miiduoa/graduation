@@ -270,26 +270,28 @@ describe('runner and budget', () => {
     const r = await runCase(async (input) => {
       inputs.push(input);
       return n++ < count ? result('get_today_context') : result();
-    });
+    }, { question: '你好' });
     expect(r.modelCalls).toBe(count + 1);
     expect(r.steps.length).toBe(count);
     if (count === 3) expect(inputs[3].tools).toBeUndefined();
   });
   it('bounds multiple calls, malformed args, unknown tools, and ignores injection', async () => {
     let n = 0;
-    const r = await runCase(async () =>
-      n++
-        ? result()
-        : {
-            ...result(),
-            message: {
-              role: 'assistant',
-              tool_calls: [
-                result('get_today_context').message.tool_calls![0],
-                { ...result('confirm', '{').message.tool_calls![0], id: 'second' },
-              ],
+    const r = await runCase(
+      async () =>
+        n++
+          ? result()
+          : {
+              ...result(),
+              message: {
+                role: 'assistant',
+                tool_calls: [
+                  result('get_today_context').message.tool_calls![0],
+                  { ...result('confirm', '{').message.tool_calls![0], id: 'second' },
+                ],
+              },
             },
-          },
+      { question: '你好' },
     );
     expect(r.steps.map((s) => s.status)).toEqual(['ok', 'error']);
     const f = fixtureAdapter();
@@ -462,7 +464,7 @@ it('tool timeout remains partial, while the fourth call cannot execute tools', a
   });
   await vi.advanceTimersByTimeAsync(4001);
   expect((await pending).steps[0]).toMatchObject({ status: 'error', summary: 'DEADLINE_EXCEEDED' });
-  const repeated = await runCase(async () => result('get_today_context'));
+  const repeated = await runCase(async () => result('get_today_context'), { question: '你好' });
   expect(repeated.modelCalls).toBe(4);
   expect(repeated.steps).toHaveLength(3);
   expect(f.writes).toHaveLength(0);
