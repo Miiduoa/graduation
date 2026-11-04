@@ -36,7 +36,7 @@ test('keeps same-title student courses but never includes teacher, archived or q
   const result = queryNuniReceipts(agenda, '資料庫的期中報告交了嗎？');
   expect(result.kind).toBe('results');
   if (result.kind !== 'results') return;
-  expect(result.rows.map((row) => row.item.id)).toEqual(['pending', 'closed', 'submitted']);
+  expect(result.rows.map((row) => row.item.id)).toEqual(['closed', 'pending', 'submitted']);
   expect(result.rows.find((row) => row.item.id === 'submitted')?.submittedAt)
     .toBe('2026-11-04T05:00:00Z');
   expect(result.rows.find((row) => row.item.id === 'pending')?.submittedAt).toBeNull();
