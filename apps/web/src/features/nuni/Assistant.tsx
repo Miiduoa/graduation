@@ -6,6 +6,8 @@ import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
+import { AssistantThread } from './assistant/AssistantThread';
+import type { V2Card, V2Turn } from './assistant/types';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -173,46 +175,6 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
     </section>
   );
 }
-type V2Card = {
-  tool: string;
-  args: Record<string, unknown>;
-  token: string;
-  mutationId: string;
-  schoolId: string;
-  destination: string;
-};
-function foodSummary(raw: unknown): string {
-  if (!raw || typeof raw !== 'object') return '';
-  const summary = raw as Record<string, unknown>;
-  const lines = Array.isArray(summary.lines) ? summary.lines : [];
-  return `${String(summary.store)}：${lines
-    .map((raw) => {
-      const line = raw as Record<string, unknown>;
-      return `${String(line.name)} × ${String(line.quantity)}（${Array.isArray(line.options) ? line.options.join('、') : ''}，單價 ${Number(line.unitMinor) / 100} 元）`;
-    })
-    .join(
-      '；',
-    )}。合計 ${Number(summary.totalMinor) / 100} 元，${String(summary.pickupMethod)}，取餐時間 ${String(summary.requestedPickupAt)}。`;
-}
-const cardLabels: Record<string, string> = {
-  summary: '餐點與金額',
-  reason: '說明',
-  href: '點餐頁',
-  title: '標題',
-  date: '日期',
-  endDate: '結束日期',
-  startTime: '開始時間',
-  endTime: '結束時間',
-  allDay: '全天',
-  page: '頁面',
-  entityId: '項目',
-};
-type V2Reply = {
-  answer: string;
-  steps: { name: string; status: string; summary: string }[];
-  cards: V2Card[];
-  simulation: boolean;
-};
 function V2Conversation({
   context,
   schoolId,
@@ -227,7 +189,7 @@ function V2Conversation({
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
   const [question, setQuestion] = useState('');
-  const [turns, setTurns] = useState<{ question: string; reply: V2Reply }[]>([]);
+  const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -317,149 +279,40 @@ function V2Conversation({
       if (!controller.current?.signal.aborted) setPending(false);
     }
   }
+  async function cancel(turn: V2Turn, cardIndex: number) {
+    setPending(true);
+    try {
+      const card = turn.reply.cards[cardIndex];
+      const affected =
+        card.tool === 'propose_personal_event' ? turn.reply.cards.slice(cardIndex) : [card];
+      for (const c of affected) await send('cancel', { token: c.token, args: c.args });
+      setStates((s) => ({
+        ...s,
+        ...Object.fromEntries(affected.map((c) => [c.mutationId, '已取消'])),
+      }));
+    } catch {
+      setError('撤銷未完成，請重試。');
+    } finally {
+      setPending(false);
+    }
+  }
   return (
-    <section aria-label="情境助理 v2">
-      <p>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
-      <nav aria-label="校園服務入口">
-        <Link href={'/map?schoolId=' + encodeURIComponent(schoolId)}>校園地圖</Link> ·{' '}
-        <Link href={'/bus?schoolId=' + encodeURIComponent(schoolId)}>公車資訊</Link> ·{' '}
-        <Link href={'/cafeteria?schoolId=' + encodeURIComponent(schoolId)}>餐廳資訊</Link>
-      </nav>
-      {!ready && <p role="status">模型目前無法使用。</p>}
-      <label>
-        <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-        同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
-        Groq
-        {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
-      </label>
-      <div role="log">
-        {turns.map((turn, i) => (
-          <article key={i}>
-            <p>你：{turn.question}</p>
-            <p>{turn.reply.answer}</p>
-            {turn.reply.simulation && <p>模擬資料</p>}
-            <details>
-              <summary>查了哪些資料</summary>
-              <ul>
-                {turn.reply.steps.map((s, j) => (
-                  <li key={j}>
-                    {/food/.test(s.name) ? '餐點與訂單' : /transit/.test(s.name) ? '交通資訊' : /campus/.test(s.name) ? '校園資訊' : /club/.test(s.name) ? '社團資訊' : /propose/.test(s.name) ? '確認提議' : '課務與行程'}：{s.status === 'error' ? '本步驟未取得資料' : '已查詢'}
-                  </li>
-                ))}
-              </ul>
-            </details>
-            {turn.reply.cards.filter((c) => !states[c.mutationId]).length > 1 && (
-              <button
-                disabled={pending}
-                onClick={() => void execute(turn.reply.cards.filter((c) => !states[c.mutationId]))}
-              >
-                依序全部確認
-              </button>
-            )}
-            {turn.reply.cards.length > 1 && (
-              <p>讀書安排請依序確認；取消後若要更改順序，請重新規劃。</p>
-            )}
-            {turn.reply.cards.map((card, cardIndex) => (
-              <div key={card.mutationId}>
-                <p>
-                  學校：{card.schoolId}；目的地：{card.destination}
-                </p>
-                <dl>
-                  {Object.entries(card.args)
-                    .filter(
-                      ([key]) =>
-                        card.tool !== 'propose_food_order' || ['summary', 'reason', 'href'].includes(key),
-                    )
-                    .map(([key, value]) => (
-                      <div key={key}>
-                        <dt>{cardLabels[key] || key}</dt>
-                        <dd>
-                          {card.tool === 'propose_food_order' && key === 'href' && typeof value === 'string'
-                            ? <Link href={value}>開啟已備好的點餐頁</Link>
-                            : card.tool === 'propose_food_order' && key === 'summary'
-                            ? foodSummary(value)
-                            : typeof value === 'boolean'
-                              ? value
-                                ? '是'
-                                : '否'
-                              : typeof value === 'object'
-                                ? JSON.stringify(value)
-                                : String(value)}
-                        </dd>
-                      </div>
-                    ))}
-                </dl>
-                {states[card.mutationId] ? (
-                  states[card.mutationId].startsWith('/') ? (
-                    <Link href={states[card.mutationId]}>開啟確認的頁面</Link>
-                  ) : (
-                    <p>{states[card.mutationId]}</p>
-                  )
-                ) : (
-                  <>
-                    <button
-                      disabled={
-                        pending ||
-                        turn.reply.cards
-                          .slice(0, cardIndex)
-                          .some(
-                            (c) =>
-                              states[c.mutationId] !== '已加入個人行事曆' &&
-                              c.tool === 'propose_personal_event',
-                          )
-                      }
-                      onClick={() => void execute([card])}
-                    >
-                      確認
-                    </button>
-                    <button
-                      disabled={pending}
-                      onClick={() =>
-                        void (async () => {
-                          setPending(true);
-                          try {
-                            const affected =
-                              card.tool === 'propose_personal_event'
-                                ? turn.reply.cards.slice(cardIndex)
-                                : [card];
-                            for (const c of affected)
-                              await send('cancel', { token: c.token, args: c.args });
-                            setStates((s) => ({
-                              ...s,
-                              ...Object.fromEntries(affected.map((c) => [c.mutationId, '已取消'])),
-                            }));
-                          } catch {
-                            setError('撤銷未完成，請重試。');
-                          } finally {
-                            setPending(false);
-                          }
-                        })()
-                      }
-                    >
-                      取消
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
-          </article>
-        ))}
-      </div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void ask();
-        }}
-      >
-        <label>
-          問題
-          <input value={question} maxLength={1000} onChange={(e) => setQuestion(e.target.value)} />
-        </label>
-        <button disabled={!consent || !ready || pending || !question.trim()}>送出</button>
-      </form>
-      {pending && <p role="status">查詢中…</p>}
-      {error && <p role="alert">{error}</p>}
-    </section>
+    <AssistantThread
+      schoolId={schoolId}
+      ready={ready}
+      fallback={fallback}
+      consent={consent}
+      onConsent={setConsent}
+      question={question}
+      onQuestion={setQuestion}
+      turns={turns}
+      states={states}
+      pending={pending}
+      error={error}
+      onAsk={() => void ask()}
+      onConfirm={(cards) => void execute(cards)}
+      onCancel={(turn, index) => void cancel(turn, index)}
+    />
   );
 }
 function AssistantRoute() {
@@ -486,7 +339,7 @@ function AssistantRoute() {
 }
 export function Assistant() {
   return (
-    <SiteShell title="助理" subtitle="查詢公開校園資訊與站內服務入口。">
+    <SiteShell title="助理" subtitle="查詢課表、作業、餐點與校園服務。">
       <Suspense fallback={<p>載入中…</p>}>
         <AssistantRoute />
       </Suspense>
