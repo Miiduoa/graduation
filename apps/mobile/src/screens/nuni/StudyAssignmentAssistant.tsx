@@ -8,6 +8,7 @@ import {
   isAssignmentDeadlineQuestion,
   queryAssignmentDeadlines,
 } from '../../services/queryAssignmentDeadlines';
+import { isNuniReceiptQuestion, queryNuniReceipts } from '../../services/nuniReceiptQuery';
 import {
   ASSIGNMENT_PAGE_SIZE,
   assignmentOrdinal,
@@ -45,6 +46,7 @@ function AssignmentQuestions({ data, open }: Props) {
   const [search, setSearch] = useState<{ question: string; filter: string; at: number } | null>(
     null,
   );
+  const [receiptQuestion, setReceiptQuestion] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -78,10 +80,17 @@ function AssignmentQuestions({ data, open }: Props) {
       search ? queryAssignmentDeadlines(items, search.question, search.at, search.filter) : null,
     [items, search],
   );
+  const receipts = useMemo(
+    () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion) : null,
+    [data, receiptQuestion],
+  );
+  const fullRows = useMemo(
+    () => receipts?.kind === 'results' ? receipts.rows : answer?.kind === 'results' ? answer.rows : [],
+    [receipts, answer],
+  );
   const rows = useMemo(
-    () =>
-      answer?.kind === 'results' ? answer.rows.slice(offset, offset + ASSIGNMENT_PAGE_SIZE) : [],
-    [answer, offset],
+    () => fullRows.slice(offset, offset + ASSIGNMENT_PAGE_SIZE),
+    [fullRows, offset],
   );
   const shown = useMemo(
     () => (selected === null ? rows : rows.slice(selected, selected + 1)),
@@ -96,11 +105,11 @@ function AssignmentQuestions({ data, open }: Props) {
   }, [shown]);
 
   function page(move: NonNullable<ReturnType<typeof pageChoice>>) {
-    if (answer?.kind !== 'results' || !answer.rows.length) {
+    if (!fullRows.length) {
       setNotice('請先查詢有結果的作業清單。');
       return;
     }
-    const target = assignmentPageTarget(move, offset, answer.rows.length);
+    const target = assignmentPageTarget(move, offset, fullRows.length);
     if ('message' in target) {
       setNotice(target.message);
       return;
@@ -131,6 +140,15 @@ function AssignmentQuestions({ data, open }: Props) {
       }
       return;
     }
+    if (isNuniReceiptQuestion(question)) {
+      setReceiptQuestion(question);
+      setSearch(null);
+      setNotice('');
+      setSelected(null);
+      setOffset(0);
+      return;
+    }
+    setReceiptQuestion(null);
     const at = Date.now();
     const period = question
       .normalize('NFKC')
@@ -175,7 +193,7 @@ function AssignmentQuestions({ data, open }: Props) {
   );
   return (
     <View style={{ gap: 8 }}>
-      <Text style={text}>查詢所有修習課程已載入的待交作業，可指定課名、作業名稱或台灣日期。</Text>
+      <Text style={text}>可查已載入的待交作業、參考期限及繳交紀錄，並指定課名或作業名稱。</Text>
       {data.failedCourseIds.length || data.limitedCourseIds.length ? (
         <Text style={{ ...text, color: theme.colors.warning }}>
           部分課程未完整載入，結果只包含這次取得的作業。
@@ -201,7 +219,7 @@ function AssignmentQuestions({ data, open }: Props) {
       />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
         {button('查詢作業', () => ask(draft), !draft.trim())}
-        {!search && ['有哪些待交作業？', '明天有哪些作業？'].map((q) => button(q, () => ask(q)))}
+        {!search && !receiptQuestion && ['有哪些待交作業？', '明天有哪些作業？', '我已繳交的作業有哪些？'].map((q) => button(q, () => ask(q)))}
       </View>
       {notice ? (
         <Text accessibilityLiveRegion="polite" style={text}>
@@ -213,25 +231,32 @@ function AssignmentQuestions({ data, open }: Props) {
           想查哪一天或哪一週？可以回覆「明天」或「下週五」。
         </Text>
       )}
-      {answer?.kind === 'results' && (
+      {receipts?.kind === 'clarify' && (
+        <Text accessibilityLiveRegion="polite" style={text}>{receipts.message}</Text>
+      )}
+      {(answer?.kind === 'results' || receipts?.kind === 'results') && (
         <>
           <Text accessibilityLiveRegion="polite" style={{ ...text, fontWeight: '600' }}>
             {selected !== null
               ? '已選本頁第 ' + (selected + 1) + ' 筆'
-              : answer.rows.length
-                ? `符合 ${answer.rows.length} 筆 · 顯示第 ${offset + 1}–${offset + rows.length} 筆`
-                : '已載入的待交作業中沒有符合條件的項目。'}
+              : fullRows.length
+                ? `符合 ${fullRows.length} 筆 · 顯示第 ${offset + 1}–${offset + rows.length} 筆`
+                : receipts ? '已載入的課程紀錄中沒有符合的作業，請到原課程核對。'
+                  : '已載入的待交作業中沒有符合條件的項目。'}
           </Text>
-          {answer.window && answer.undated > 0 && (
+          {answer?.kind === 'results' && answer.window && answer.undated > 0 && (
             <Text style={text}>另有 {answer.undated} 筆未設定參考期限，無法依日期判斷。</Text>
           )}
-          {shown.map(({ item, due }, index) => (
+          {receipts?.kind === 'results' && (
+            <Text style={text}>來源：本次載入的 nuni 課程繳交紀錄。未見紀錄不代表校方 LMS 已確認未交；請到原作業頁核對。</Text>
+          )}
+          {shown.map((row, index) => (
             <Pressable
-              key={JSON.stringify([item.courseId, item.id])}
+              key={JSON.stringify([row.item.courseId, row.item.id])}
               accessibilityRole="button"
-              accessibilityLabel={'查看作業：' + item.groupName + ' · ' + item.title}
+              accessibilityLabel={'查看作業：' + row.item.groupName + ' · ' + row.item.title}
               onPress={() => {
-                if (activeRows.current === shown) open(item.courseId, item.id);
+                if (activeRows.current === shown) open(row.item.courseId, row.item.id);
               }}
               style={{
                 borderTopWidth: 1,
@@ -241,16 +266,29 @@ function AssignmentQuestions({ data, open }: Props) {
               }}
             >
               <Text style={{ ...text, color: theme.colors.muted }}>
-                本頁第 {(selected ?? index) + 1} 筆 · {item.groupName}
+                本頁第 {(selected ?? index) + 1} 筆 · {row.item.groupName}
               </Text>
               <Text style={{ ...text, color: theme.colors.accent, fontWeight: '600' }}>
-                {item.title}
+                {row.item.title}
               </Text>
-              <Text style={text}>
-                {Number.isFinite(due)
-                  ? '參考期限 ' + formatTaipeiDateTime(due, { seconds: false })
-                  : '未設定參考期限'}
-              </Text>
+              {'receiptStatus' in row ? (
+                <Text style={text}>
+                  {row.receiptStatus === 'feedback'
+                    ? '已載入繳交紀錄 · 有老師回饋'
+                    : row.receiptStatus === 'submitted'
+                      ? '已載入繳交紀錄'
+                      : row.receiptStatus === 'closed'
+                        ? '已停止收件 · 本次未見繳交紀錄'
+                        : '本次未見繳交紀錄 · 請到原頁核對'}
+                  {row.submittedAt ? ' · 繳交時間 ' + formatTaipeiDateTime(row.submittedAt, { seconds: false }) : ''}
+                </Text>
+              ) : (
+                <Text style={text}>
+                  {Number.isFinite(row.due)
+                    ? '參考期限 ' + formatTaipeiDateTime(row.due, { seconds: false })
+                    : '未設定參考期限'}
+                </Text>
+              )}
             </Pressable>
           ))}
           {selected !== null &&
@@ -258,10 +296,10 @@ function AssignmentQuestions({ data, open }: Props) {
               setSelected(null);
               setNotice('');
             })}
-          {selected === null && answer.rows.length > ASSIGNMENT_PAGE_SIZE && (
+          {selected === null && fullRows.length > ASSIGNMENT_PAGE_SIZE && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
               {button('上一頁作業', () => page('previous'), offset === 0)}
-              {button('下一頁作業', () => page('next'), offset + rows.length >= answer.rows.length)}
+              {button('下一頁作業', () => page('next'), offset + rows.length >= fullRows.length)}
             </View>
           )}
         </>
