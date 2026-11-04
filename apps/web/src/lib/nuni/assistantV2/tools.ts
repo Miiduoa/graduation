@@ -1,4 +1,4 @@
-import { cartArgs, foodHref, pickupAt, priceCart } from './food';
+import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
 import {
   getOfficialCampusMapUrl,
@@ -179,7 +179,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
     add('get_schedule', 'get_calendar', 'find_free_time');
   if (/教材/.test(question)) add('list_courses', 'get_materials');
   if (/吃|中午|餐廳|規劃/.test(question)) add('get_dining');
-  if (/訂|餐好了|點餐|幫我點|再點|跟上次一樣/.test(question))
+  if (foodOrderIntent(question))
     add(
       'get_food_locations',
       'get_food_menu',
@@ -188,12 +188,13 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'get_food_order',
       'reorder_last_food_order',
     );
+  else if (/點餐|菜單|便當/.test(question)) add('get_food_locations', 'get_food_menu');
   if (/社團/.test(question)) add('list_clubs', 'get_club_feed');
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
     add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
   // Prioritize the requested domain, retaining proposals for planning questions.
-  if (/點餐|幫我點|再點|跟上次一樣/.test(question)) {
+  if (foodOrderIntent(question)) {
     out.delete('get_today_context');
     out.delete('propose_open_page');
     out.delete('get_dining');
@@ -205,7 +206,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
     out.delete('get_calendar');
     out.delete('get_course_work');
   }
-  if (/點餐|幫我點/.test(question) && !/再點|上次/.test(question)) {
+  if (foodOrderIntent(question) && !/再點|上次/.test(question)) {
     out.delete('list_food_orders');
     out.delete('get_food_order');
     out.delete('reorder_last_food_order');

@@ -1,5 +1,23 @@
 import type { NuniFoodMenuProjection } from '@campus/shared/src/nuniFood';
 import { date, fail, id, object, taipeiDate, text, type Obj } from './contracts';
+export function foodOrderIntent(question: string): boolean {
+  if (
+    /點餐.{0,8}(?:開放|開了|有開|可以嗎|能不能|能否|了嗎)|(?:開放|有沒有).{0,6}點餐/.test(question) &&
+    !/(?:幫我|給我|我要)[點訂]|再點|跟上次|訂一份|點一份|點兩份|點\d+份|訂便當|點便當/.test(question)
+  )
+    return false;
+  return /幫我點|幫我訂|再點|跟上次一樣|訂一份|點一份|點兩份|點\d+份|訂便當|點便當|我要點|我要訂(?:餐|便當|麵|飯)|餐好了|給我點/.test(
+    question,
+  );
+}
+export function orderQuantity(question: string): number {
+  const digits = question.match(/(?:點|訂)\s*(\d+)\s*份/);
+  if (digits) return Math.min(20, Math.max(1, Number(digits[1])));
+  const words: Record<string, number> = { 一: 1, 兩: 2, 二: 2, 三: 3, 四: 4, 五: 5 };
+  const word = question.match(/(?:點|訂)\s*([一兩二三四五])\s*份/);
+  if (word) return words[word[1]] || 1;
+  return 1;
+}
 export function pickupAt(now: number, raw?: unknown, question = ''): string {
   const fromClock = (hour: string, minute: string) => {
     const h = hour.padStart(2, '0');
@@ -69,9 +87,10 @@ export function pickFoodCart(
     }
   }
   if (!locationId || !items.length) return;
+  const quantity = orderQuantity(question);
   const picked = items.find((item) => {
     const price = Number(item.amountMinor);
-    if (!Number.isFinite(price) || price > budgetMinor) return false;
+    if (!Number.isFinite(price) || price * quantity > budgetMinor) return false;
     if (mild && !JSON.stringify(item).includes('不辣')) return false;
     return typeof item.id === 'string';
   });
@@ -94,8 +113,38 @@ export function pickFoodCart(
     ...(tenantId ? { tenantId } : {}),
     locationId,
     requestedPickupAt: pickupAt(now, undefined, question),
-    items: [{ menuItemId: picked.id, quantity: 1, selectedOptionIds }],
+    items: [{ menuItemId: picked.id, quantity, selectedOptionIds }],
   };
+}
+export function foodLink(
+  evidence: { tool: string; result: unknown }[],
+  question: string,
+  now: number,
+): string {
+  const cart = pickFoodCart(evidence, question, now) || pickFoodCart(evidence, '', now);
+  if (
+    cart &&
+    typeof cart.tenantId === 'string' &&
+    typeof cart.locationId === 'string' &&
+    Array.isArray(cart.items) &&
+    cart.items.length
+  ) {
+    try {
+      return foodHref({
+        tenantId: cart.tenantId,
+        locationId: cart.locationId,
+        requestedPickupAt: String(cart.requestedPickupAt),
+        items: cart.items as FoodCart['items'],
+      });
+    } catch {
+      /* fall through to a page without items */
+    }
+  }
+  for (const entry of evidence) {
+    const href = unwrap(entry.result).completePageHref;
+    if (typeof href === 'string' && href.startsWith('/food')) return href;
+  }
+  return '/food';
 }
 export type FoodCart = {
   tenantId: string;
