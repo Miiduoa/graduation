@@ -21,7 +21,7 @@ import { getDb, getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { withRetry, withTimeout } from '../utils/retry';
 import { trackEvent } from './analytics';
 import { linkingOpenWithPuTronClassGate } from './tronClassWebUiGate';
-import { isPersonalEventReminderPayload } from './personalEventReminderModel';
+import { personalReminderCategory } from './personalReminderPayload';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -485,9 +485,9 @@ export function addNotificationReceivedListener(
 ): Notifications.EventSubscription {
   return Notifications.addNotificationReceivedListener((notification) => {
     const data = notification.request.content.data;
-    // Personal-event local reminders: never record title/body/payload; fixed nonsensitive category only.
-    if (isPersonalEventReminderPayload(data)) {
-      trackEvent('notification_received', { category: 'personal_event_reminder_local' });
+    const category = personalReminderCategory(data);
+    if (category) {
+      trackEvent('notification_received', { category });
     } else {
       trackEvent('notification_received', {
         title: notification.request.content.title ?? '',
@@ -506,8 +506,9 @@ export function addNotificationResponseReceivedListener(
 ): Notifications.EventSubscription {
   return Notifications.addNotificationResponseReceivedListener((response) => {
     const data = response.notification.request.content.data;
-    if (isPersonalEventReminderPayload(data)) {
-      trackEvent('notification_clicked', { category: 'personal_event_reminder_local' });
+    const category = personalReminderCategory(data);
+    if (category) {
+      trackEvent('notification_clicked', { category });
     } else {
       trackEvent('notification_clicked', {
         title: response.notification.request.content.title ?? '',
