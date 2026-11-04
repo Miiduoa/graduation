@@ -76,6 +76,7 @@ export async function handleV2(request: NextRequest, action: string) {
         enabled: true,
         version: 2,
         ready: Boolean(process.env.GROQ_API_KEY || fallbackReady()),
+        fallback: fallbackReady(),
         simulation: false,
       });
     }

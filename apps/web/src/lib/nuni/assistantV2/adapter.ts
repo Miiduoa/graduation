@@ -220,6 +220,7 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           state: value(r.state),
           title: value(r.locationName),
           locationId: value(r.locationId),
+          createdAt: value(r.createdAt, 40) || undefined,
         })),
         nextCursor: value(object(raw).nextCursor, 100) || undefined,
       };

@@ -272,3 +272,17 @@ it('handler preserves unknown-call reservations when provider failure crosses th
   expect(response.status).toBe(200);
   expect(calls).toBe(2);
 });
+it('capability reports fallback as a boolean without settings', async () => {
+  vi.mocked(createAdapter).mockReturnValue({
+    adapter: fixtureAdapter().adapter,
+    principal: async () => ({ platformAccountId: account, isPlatformOperator: false }),
+    apiCalls: () => 1,
+  });
+  const off = await (await handleNuni(request('capability'), ['assistant', 'capability'])).json();
+  expect(off).toMatchObject({ enabled: true, version: 2, fallback: false });
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_FALLBACK_ACCOUNT_ID', 'acct_fallback_1');
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_FALLBACK_API_TOKEN', 'synthetic-fallback-token');
+  const on = await (await handleNuni(request('capability'), ['assistant', 'capability'])).json();
+  expect(on.fallback).toBe(true);
+  expect(JSON.stringify(on)).not.toMatch(/acct_fallback_1|synthetic-fallback-token/);
+});

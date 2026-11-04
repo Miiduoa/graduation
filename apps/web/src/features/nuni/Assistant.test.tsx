@@ -252,3 +252,30 @@ it('v2 replaces old cards and cancellation waits for server revocation', async (
   expect(cancellations).toHaveLength(1);
   expect(cancellations[0]).toMatchObject({ token: 'card-2' });
 });
+
+it('v2 consent names Groq only until capability reports a fallback', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      return json({ answer: '', steps: [], cards: [] });
+    }),
+  );
+  const off = render(<Assistant />);
+  const offLabel = await screen.findByRole('checkbox');
+  expect(offLabel.closest('label')?.textContent).toMatch(/傳送\s*Groq/);
+  expect(offLabel.closest('label')?.textContent).not.toMatch(/Cloudflare Workers AI/);
+  off.unmount();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.endsWith('capability'))
+        return json({ enabled: true, ready: true, version: 2, fallback: true });
+      return json({ answer: '', steps: [], cards: [] });
+    }),
+  );
+  render(<Assistant />);
+  const onLabel = await screen.findByRole('checkbox');
+  expect(onLabel.closest('label')?.textContent).toMatch(/Groq/);
+  expect(onLabel.closest('label')?.textContent).toMatch(/Cloudflare Workers AI/);
+});

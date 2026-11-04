@@ -17,6 +17,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
+  const [fallback, setFallback] = useState(false);
   const [step, setStep] = useState<Step | null>(null);
   const [source, setSource] = useState('');
   const [href, setHref] = useState('');
@@ -56,6 +57,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
           setV2(value.version === 2);
           setReady(value.enabled === true);
           setProviderReady(value.ready === true);
+          setFallback(value.fallback === true);
         }
       })
       .catch((e) => {
@@ -95,7 +97,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
       if (!signal.aborted) setPending(false);
     }
   }
-  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={providerReady} />;
+  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={providerReady} fallback={fallback} />;
   return (
     <section aria-label="公開校園助理">
       <p>此助理目前提供公開資訊，尚未支援代辦寫入。私人課表、作業與借閱快照尚未支援。</p>
@@ -215,10 +217,12 @@ function V2Conversation({
   context,
   schoolId,
   ready,
+  fallback,
 }: {
   context: string;
   schoolId: string;
   ready: boolean;
+  fallback: boolean;
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
@@ -326,6 +330,7 @@ function V2Conversation({
         <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
         同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
         Groq
+        {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
       </label>
       <div role="log">
         {turns.map((turn, i) => (

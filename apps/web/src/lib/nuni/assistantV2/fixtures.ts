@@ -191,8 +191,8 @@ export function fixtureAdapter(ordering = false) {
     realms: async () => [{ tenantId: 'fixture-realm', schoolId: base.schoolId }],
     orders: async () => ({
       orders: [
-        { id: 'order-a', state: 'ready', title: '蔬菜便當', locationId: 'dining-a' },
-        { id: 'order-b', state: 'fulfilled', title: '蔬菜便當不辣標準', locationId: 'dining-a' },
+        { id: 'order-a', state: 'ready', title: '蔬菜便當', locationId: 'dining-a', createdAt: '2026-11-04T10:20:00+08:00' },
+        { id: 'order-b', state: 'fulfilled', title: '蔬菜便當不辣標準', locationId: 'dining-a', createdAt: '2026-11-03T10:20:00+08:00' },
       ],
     }),
     order: async (_tenant, orderId) => ({

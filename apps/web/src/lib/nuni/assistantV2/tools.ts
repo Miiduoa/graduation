@@ -635,7 +635,15 @@ export function createTools(
             unavailable: 'NO_RECENT_ORDER',
             nextStep: '沒有近期訂單可重點；請改查菜單後直接備單',
           };
-        const newest = object(rows[0]);
+        const newest = rows.reduce((best, raw) => {
+          const row = object(raw);
+          const next = Date.parse(String(row.createdAt ?? ''));
+          const current = Date.parse(String(object(best).createdAt ?? ''));
+          return (Number.isFinite(next) ? next : Number.NEGATIVE_INFINITY) >
+            (Number.isFinite(current) ? current : Number.NEGATIVE_INFINITY)
+            ? row
+            : object(best);
+        }, object(rows[0]));
         const detail = object(
           await dispatch('get_food_order', { tenantId: a.tenantId, orderId: newest.id }),
         );

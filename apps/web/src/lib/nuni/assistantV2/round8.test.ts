@@ -68,6 +68,44 @@ it('reorders the latest own order in one step and keeps pickup time from the que
   expect(result.cards[0].args.href).toBe(foodHref(cart));
 });
 
+it('reorders the newest order by createdAt even when the list is oldest first', async () => {
+  const f = fixtureAdapter();
+  f.adapter.orders = async () => ({
+    orders: [
+      {
+        id: 'order-old',
+        state: 'ready',
+        title: '舊單',
+        locationId: 'dining-a',
+        createdAt: '2026-11-01T08:00:00+08:00',
+      },
+      {
+        id: 'order-new',
+        state: 'ready',
+        title: '新單',
+        locationId: 'dining-a',
+        createdAt: '2026-11-04T11:00:00+08:00',
+      },
+    ],
+  });
+  f.adapter.order = async (_tenant, orderId) => ({
+    id: orderId,
+    locationId: 'dining-a',
+    lines: [
+      {
+        menuItemId: orderId === 'order-new' ? 'veggie' : 'rice',
+        quantity: orderId === 'order-new' ? 2 : 1,
+        selectedOptionIds: ['regular'],
+      },
+    ],
+  });
+  const tools = createTools(f.adapter, binding, secret, now, true);
+  await tools.call('reorder_last_food_order', { requestedPickupAt: '2026-11-04T12:10:00+08:00' });
+  expect(tools.cards[0].args.cart.items).toEqual([
+    { menuItemId: 'veggie', quantity: 2, selectedOptionIds: ['regular'] },
+  ]);
+});
+
 it('page-mode confirmation returns a prefilled food link and never submits', async () => {
   const f = fixtureAdapter(false);
   const tools = createTools(f.adapter, binding, secret, now, true);

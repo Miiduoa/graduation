@@ -33,3 +33,21 @@ it('parses the new entrance only with all gates and gives order precedence', asy
     { menuItemId: 'veggie', quantity: 1, selectedOptionIds: ['regular'] },
   ]);
 });
+it('rejects tenant and order that do not match the location charset', async () => {
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+  const invalid = await FoodPage({
+    searchParams: Promise.resolve({ tenant: '../bad', location: 'shop', order: 'receipt extra' }),
+  });
+  expect(invalid.props).toMatchObject({ initialTenant: '', initialOrder: '', initialLocation: 'shop' });
+  const valid = await FoodPage({
+    searchParams: Promise.resolve({ tenant: 'campus_1', location: 'shop', order: 'receipt-1' }),
+  });
+  expect(valid.props).toMatchObject({ initialTenant: 'campus_1', initialOrder: 'receipt-1', initialLocation: '' });
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_ENABLED', 'false');
+  const closed = await FoodPage({
+    searchParams: Promise.resolve({ tenant: '../bad', order: 'receipt-1' }),
+  });
+  expect(closed.props).toMatchObject({ initialTenant: '', initialOrder: 'receipt-1', initialLocation: '' });
+});

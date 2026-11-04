@@ -196,7 +196,10 @@ export type Adapter = {
     tenantId: string,
     cursor?: string,
     options?: { state?: string; limit?: number },
-  ): Promise<{ orders: { id: string; state: string; title?: string; locationId?: string }[]; nextCursor?: string }>;
+  ): Promise<{
+    orders: { id: string; state: string; title?: string; locationId?: string; createdAt?: string }[];
+    nextCursor?: string;
+  }>;
   order(tenantId: string, orderId: string): Promise<unknown>;
   clubs(
     tenantId: string,
