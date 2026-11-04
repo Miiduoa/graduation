@@ -8,7 +8,7 @@ import {
   isAssignmentDeadlineQuestion,
   queryAssignmentDeadlines,
 } from '../../services/queryAssignmentDeadlines';
-import { isNuniReceiptQuestion, queryNuniReceipts } from '../../services/nuniReceiptQuery';
+import { isNuniReceiptQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts } from '../../services/nuniReceiptQuery';
 import {
   ASSIGNMENT_PAGE_SIZE,
   assignmentOrdinal,
@@ -46,7 +46,7 @@ function AssignmentQuestions({ data, open }: Props) {
   const [search, setSearch] = useState<{ question: string; filter: string; at: number } | null>(
     null,
   );
-  const [receiptQuestion, setReceiptQuestion] = useState<string | null>(null);
+  const [receiptQuestion, setReceiptQuestion] = useState<{ question: string; scope: string } | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -81,7 +81,7 @@ function AssignmentQuestions({ data, open }: Props) {
     [items, search],
   );
   const receipts = useMemo(
-    () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion) : null,
+    () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion.question, receiptQuestion.scope) : null,
     [data, receiptQuestion],
   );
   const fullRows = useMemo(
@@ -141,7 +141,11 @@ function AssignmentQuestions({ data, open }: Props) {
       return;
     }
     if (isNuniReceiptQuestion(question)) {
-      setReceiptQuestion(question);
+      setReceiptQuestion({
+        question,
+        scope: receiptQuestion && isNuniReceiptStatusFollowUp(question)
+          ? receiptQuestion.scope : question,
+      });
       setSearch(null);
       setNotice('');
       setSelected(null);
