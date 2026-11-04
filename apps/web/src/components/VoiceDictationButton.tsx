@@ -67,12 +67,37 @@ export function VoiceDictationButton({
   const [interim, setInterim] = useState('');
   const recognitionRef = useRef<SpeechRecognizer | null>(null);
   const callback = useRef(onTranscript);
+  const endingRef = useRef<SpeechRecognizer | null>(null);
+  const pendingStart = useRef<{ recognition: SpeechRecognizer; start: () => void } | null>(null);
   const finishCapture = useCallback((recognition: SpeechRecognizer, abort = true) => {
     if (recognitionRef.current !== recognition) return;
     recognitionRef.current = null;
-    releaseRecognition(recognition, abort);
     setListening(false);
     setInterim('');
+    if (pendingStart.current?.recognition === recognition) {
+      pendingStart.current = null;
+      releaseRecognition(recognition, false);
+      return;
+    }
+    releaseRecognition(recognition, false);
+    if (!abort) return;
+    // abort() requests shutdown; the browser releases the capture only at onend.
+    // Keep that completion signal separate from the invalidated transcript session.
+    endingRef.current = recognition;
+    const ended = () => {
+      recognition.onend = null;
+      if (endingRef.current !== recognition) return;
+      endingRef.current = null;
+      const pending = pendingStart.current;
+      pendingStart.current = null;
+      if (pending && recognitionRef.current === pending.recognition) pending.start();
+    };
+    recognition.onend = ended;
+    try {
+      recognition.abort();
+    } catch {
+      ended();
+    }
   }, []);
 
   useEffect(() => {
@@ -84,7 +109,11 @@ export function VoiceDictationButton({
     return () => {
       const recognition = recognitionRef.current;
       recognitionRef.current = null;
-      if (recognition) releaseRecognition(recognition);
+      const pending = pendingStart.current;
+      pendingStart.current = null;
+      if (endingRef.current) releaseRecognition(endingRef.current, false);
+      endingRef.current = null;
+      if (recognition) releaseRecognition(recognition, pending?.recognition !== recognition);
     };
   }, []);
   useEffect(() => {
@@ -130,15 +159,19 @@ export function VoiceDictationButton({
     recognition.onend = () => {
       finishCapture(recognition, false);
     };
-    try {
-      setError('');
-      setInterim('');
-      setListening(true);
-      recognition.start();
-    } catch {
-      finishCapture(recognition);
-      setError('無法啟動語音辨識，請再試一次或使用鍵盤麥克風。');
-    }
+    const start = () => {
+      try {
+        recognition.start();
+      } catch {
+        finishCapture(recognition, false);
+        setError('無法啟動語音辨識，請再試一次或使用鍵盤麥克風。');
+      }
+    };
+    setError('');
+    setInterim('');
+    setListening(true);
+    if (endingRef.current) pendingStart.current = { recognition, start };
+    else start();
   }
 
   return (

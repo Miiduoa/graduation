@@ -5,6 +5,8 @@ import { VoiceDictationButton } from './VoiceDictationButton';
 class FakeSpeechRecognition {
   static last: FakeSpeechRecognition;
   static failStart = false;
+  static active: FakeSpeechRecognition | null = null;
+  static delayAbort = false;
   lang = '';
   interimResults = false;
   continuous = false;
@@ -15,9 +17,17 @@ class FakeSpeechRecognition {
   onend: (() => void) | null = null;
   start = vi.fn(() => {
     if (FakeSpeechRecognition.failStart) throw new Error('mock recognition unavailable');
+    if (FakeSpeechRecognition.active) throw new Error('previous recognition is still ending');
+    FakeSpeechRecognition.active = this;
   });
-  stop = vi.fn(() => this.onend?.());
-  abort = vi.fn();
+  end() {
+    if (FakeSpeechRecognition.active === this) FakeSpeechRecognition.active = null;
+    this.onend?.();
+  }
+  stop = vi.fn(() => this.end());
+  abort = vi.fn(() => {
+    if (!FakeSpeechRecognition.delayAbort) this.end();
+  });
   constructor() {
     FakeSpeechRecognition.last = this;
   }
@@ -25,6 +35,8 @@ class FakeSpeechRecognition {
 
 beforeEach(() => {
   FakeSpeechRecognition.failStart = false;
+  FakeSpeechRecognition.active = null;
+  FakeSpeechRecognition.delayAbort = false;
   Object.defineProperty(window, 'webkitSpeechRecognition', {
     configurable: true,
     value: FakeSpeechRecognition,
@@ -106,7 +118,7 @@ it('rejects final speech after stop even when the browser has not delivered onen
 
 it('starts a fresh capture after natural end and ignores the previous final event', () => {
   const { recognition, lateResult, onTranscript } = startCapture();
-  act(() => recognition.onend?.());
+  act(() => recognition.end());
   expect(recognition.abort).not.toHaveBeenCalled();
   expect(screen.queryByRole('status')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
@@ -215,6 +227,7 @@ it.each(['not-allowed', 'service-not-allowed', 'no-speech', 'audio-capture', 'ne
 );
 
 it('cleans up a start exception so retry works and stale events do nothing', () => {
+  FakeSpeechRecognition.delayAbort = true;
   FakeSpeechRecognition.failStart = true;
   const { recognition, onTranscript } = startCapture();
   expect(screen.getByRole('alert').textContent).toContain('無法啟動');
@@ -239,3 +252,62 @@ it('handles an abort implementation that throws without leaving stale listeners'
   expect(recognition.onresult).toBeNull();
   expect(screen.getByRole('button', { name: '使用語音輸入' })).toBeTruthy();
 });
+
+it('queues one restart click until the aborted browser capture actually ends', () => {
+  FakeSpeechRecognition.delayAbort = true;
+  const { recognition, lateResult, onTranscript } = startCapture();
+  const oldError = recognition.onerror!;
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  expect(screen.getByRole('button', { name: '使用語音輸入' }).getAttribute('aria-pressed')).toBe(
+    'false',
+  );
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  expect(next.start).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '停止語音輸入' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  act(() => {
+    lateResult(finalResult('舊的轉寫'));
+    oldError({ error: 'aborted' });
+    recognition.end();
+  });
+  expect(next.start).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+  act(() => next.onresult?.(finalResult('一次點擊重新輸入')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('一次點擊重新輸入');
+});
+
+it.each(['stop', 'disable', 'unmount'])(
+  'cancels a queued restart on %s before the previous capture ends',
+  (action) => {
+    FakeSpeechRecognition.delayAbort = true;
+    const { view, recognition, onTranscript } = startCapture();
+    fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    const oldEnd = recognition.onend!;
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    const next = FakeSpeechRecognition.last;
+    const lateResult = next.onresult!;
+    if (action === 'stop') fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    if (action === 'disable')
+      view.rerender(<VoiceDictationButton onTranscript={onTranscript} disabled />);
+    if (action === 'unmount') view.unmount();
+    act(() => {
+      recognition.end();
+      oldEnd();
+      lateResult(finalResult('取消後的文字'));
+    });
+    expect(next.start).not.toHaveBeenCalled();
+    expect(next.abort).not.toHaveBeenCalled();
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(screen.queryByRole('status')).toBeNull();
+    if (action !== 'unmount') {
+      view.rerender(<VoiceDictationButton onTranscript={onTranscript} />);
+      fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+      expect(FakeSpeechRecognition.last.start).toHaveBeenCalledOnce();
+      act(() => FakeSpeechRecognition.last.onresult?.(finalResult('取消後重試')));
+      expect(onTranscript).toHaveBeenCalledExactlyOnceWith('取消後重試');
+    }
+  },
+);
