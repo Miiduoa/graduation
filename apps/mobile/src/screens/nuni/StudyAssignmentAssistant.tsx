@@ -148,18 +148,18 @@ function AssignmentQuestions({ data, open }: Props) {
     }
     if (isNuniReceiptQuestion(question)) {
       const statusOnly = isNuniReceiptStatusFollowUp(question);
-      const fromDeadline = statusOnly && !receiptQuestion && search;
+      const fromDeadline = Boolean(statusOnly && !receiptQuestion && search);
       if (fromDeadline && (answer?.kind !== 'results' || answer.status)) {
         setNotice('上個作業查詢尚未確定日期或只查特定期限狀態；請指定課程和作業名稱後再查繳交紀錄。');
         return;
       }
       const previousReceipt = statusOnly ? receiptQuestion : null;
-      const inheritedDeadline = fromDeadline && answer?.kind === 'results' && answer.window
+      const inheritedDeadline = fromDeadline && search && answer?.kind === 'results' && answer.window
         ? { window: answer.window, checkedAt: search.at } : undefined;
       setReceiptQuestion({
         question,
         scope: previousReceipt?.scope ??
-          (fromDeadline && answer?.kind === 'results' ? search.filter : question),
+          (fromDeadline && search && answer?.kind === 'results' ? search.filter : question),
         deadlineScope: previousReceipt?.deadlineScope ?? inheritedDeadline,
       });
       setSearch(null);
