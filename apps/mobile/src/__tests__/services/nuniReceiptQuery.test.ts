@@ -1,5 +1,5 @@
 import type { NuniStudyAgenda, NuniStudyTask } from '@campus/shared/src/nuniStudyAgenda';
-import { isNuniReceiptQuestion, queryNuniReceipts } from '../../services/nuniReceiptQuery';
+import { isNuniReceiptQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts } from '../../services/nuniReceiptQuery';
 
 const task = (id: string, courseId: string, submittedAt: string | null = null,
   state: NuniStudyTask['state'] = 'open'): NuniStudyTask => ({
@@ -57,4 +57,31 @@ test('does not infer the referenced row or substitute a different course', () =>
   expect(queryNuniReceipts(agenda, '高等數學的期中報告交了嗎？')).toMatchObject({
     kind: 'results', rows: [],
   });
+});
+
+
+test('a receipt status follow-up keeps the previous exact course and title scope', () => {
+  const previous = '資料庫的期中報告交了嗎？';
+  expect(isNuniReceiptStatusFollowUp('那已交的呢？')).toBe(true);
+  expect(isNuniReceiptStatusFollowUp('那還沒交的呢？')).toBe(true);
+  expect(isNuniReceiptStatusFollowUp('這份作業幫我繳交')).toBe(false);
+  expect(queryNuniReceipts(agenda, '那已交的呢？', previous)).toMatchObject({
+    kind: 'results', rows: [{ item: { id: 'submitted', courseId: 'management' } }],
+  });
+  const missing = queryNuniReceipts(agenda, '那還沒交的呢？', previous);
+  expect(missing.kind).toBe('results');
+  if (missing.kind !== 'results') return;
+  expect(missing.rows.map((row) => row.item.id)).toEqual(['closed', 'pending']);
+  // A follow-up never silently turns one course into the whole account.
+  expect(queryNuniReceipts(agenda, '那已交的呢？', '資料庫管理的期中報告交了嗎？'))
+    .toMatchObject({ kind: 'results', rows: [{ item: { id: 'submitted', courseId: 'management' } }] });
+  expect(queryNuniReceipts(agenda, '那已交的呢？', '高等數學的期中報告交了嗎？'))
+    .toMatchObject({ kind: 'results', rows: [] });
+});
+
+test('status-only follow-up after a broad receipt list remains broad but read-only', () => {
+  const result = queryNuniReceipts(agenda, '那還沒交的呢？', '我已繳交的作業有哪些？');
+  expect(result.kind).toBe('results');
+  if (result.kind !== 'results') return;
+  expect(result.rows.map((row) => row.item.id)).toEqual(['closed', 'pending']);
 });
