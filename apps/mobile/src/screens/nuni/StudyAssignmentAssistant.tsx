@@ -8,7 +8,10 @@ import {
   isAssignmentDeadlineQuestion,
   queryAssignmentDeadlines,
 } from '../../services/queryAssignmentDeadlines';
-import { isNuniReceiptQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts } from '../../services/nuniReceiptQuery';
+import {
+  isNuniReceiptQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts,
+  type NuniReceiptDeadlineScope,
+} from '../../services/nuniReceiptQuery';
 import {
   ASSIGNMENT_PAGE_SIZE,
   assignmentOrdinal,
@@ -46,7 +49,9 @@ function AssignmentQuestions({ data, open }: Props) {
   const [search, setSearch] = useState<{ question: string; filter: string; at: number } | null>(
     null,
   );
-  const [receiptQuestion, setReceiptQuestion] = useState<{ question: string; scope: string } | null>(null);
+  const [receiptQuestion, setReceiptQuestion] = useState<{
+    question: string; scope: string; deadlineScope?: NuniReceiptDeadlineScope;
+  } | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
@@ -81,7 +86,8 @@ function AssignmentQuestions({ data, open }: Props) {
     [items, search],
   );
   const receipts = useMemo(
-    () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion.question, receiptQuestion.scope) : null,
+    () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion.question, receiptQuestion.scope,
+      receiptQuestion.deadlineScope) : null,
     [data, receiptQuestion],
   );
   const fullRows = useMemo(
@@ -141,10 +147,20 @@ function AssignmentQuestions({ data, open }: Props) {
       return;
     }
     if (isNuniReceiptQuestion(question)) {
+      const statusOnly = isNuniReceiptStatusFollowUp(question);
+      const fromDeadline = statusOnly && !receiptQuestion && search;
+      if (fromDeadline && (answer?.kind !== 'results' || answer.status)) {
+        setNotice('上個作業查詢尚未確定日期或只查特定期限狀態；請指定課程和作業名稱後再查繳交紀錄。');
+        return;
+      }
+      const previousReceipt = statusOnly ? receiptQuestion : null;
+      const inheritedDeadline = fromDeadline && answer?.kind === 'results' && answer.window
+        ? { window: answer.window, checkedAt: search.at } : undefined;
       setReceiptQuestion({
         question,
-        scope: receiptQuestion && isNuniReceiptStatusFollowUp(question)
-          ? receiptQuestion.scope : question,
+        scope: previousReceipt?.scope ??
+          (fromDeadline && answer?.kind === 'results' ? search.filter : question),
+        deadlineScope: previousReceipt?.deadlineScope ?? inheritedDeadline,
       });
       setSearch(null);
       setNotice('');
@@ -253,6 +269,11 @@ function AssignmentQuestions({ data, open }: Props) {
           )}
           {receipts?.kind === 'results' && (
             <Text style={text}>來源：本次載入的 nuni 課程繳交紀錄。未見紀錄不代表校方 LMS 已確認未交；請到原作業頁核對。</Text>
+          )}
+          {receipts?.kind === 'results' && receiptQuestion?.deadlineScope && (
+            <Text style={text}>
+              延續上一個查詢的「{receiptQuestion.deadlineScope.window.label}」截止範圍（台灣時間）。
+            </Text>
           )}
           {shown.map((row, index) => (
             <Pressable
