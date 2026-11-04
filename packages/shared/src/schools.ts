@@ -239,23 +239,49 @@ export function findSchoolsByCode(code?: string | null): School[] {
   return mockSchools.filter((s) => s.code === c);
 }
 
-export function searchSchools(query?: string | null, schools: School[] = mockSchools): School[] {
-  const needle = (query ?? '').trim().toLowerCase();
-  if (!needle) return schools;
+type SchoolSearchFields = {
+  id?: string;
+  name: string;
+  shortName?: string;
+  code?: string;
+  aliases?: readonly string[];
+  domains?: readonly string[];
+};
 
-  return schools.filter((school) => {
-    const haystacks = [
-      school.code,
-      school.name,
-      school.shortName,
-      ...(school.aliases ?? []),
-      ...(school.domains ?? []).map((domain) => domain.toLowerCase()),
-    ]
-      .filter((value): value is string => typeof value === 'string' && value.length > 0)
-      .map((value) => value.toLowerCase());
+export function normalizeSchoolQuery(value: string) {
+  return value.normalize('NFKC').toLocaleLowerCase('zh-TW').replace(/臺/g, '台').trim();
+}
 
-    return haystacks.some((value) => value.includes(needle));
-  });
+function withoutWhitespace(value: string) {
+  return normalizeSchoolQuery(value).replace(/\s+/g, '');
+}
+
+/** 代號完全相符優先，各組維持名錄順序，不變更輸入資料。 */
+export function searchSchools(query?: string | null): School[];
+export function searchSchools<T extends SchoolSearchFields>(query: string | null | undefined, schools: readonly T[]): T[];
+export function searchSchools(
+  query?: string | null,
+  schools: readonly SchoolSearchFields[] = mockSchools,
+): SchoolSearchFields[] {
+  const needle = withoutWhitespace(query ?? '');
+  const terms = normalizeSchoolQuery(query ?? '').split(/\s+/).filter(Boolean);
+  const exact: SchoolSearchFields[] = [];
+  const partial: SchoolSearchFields[] = [];
+  for (const school of schools) {
+    const fields = [school.name, school.shortName, school.code, school.id,
+      ...(school.aliases ?? []), ...(school.domains ?? [])]
+      .filter((field): field is string => Boolean(field))
+      .map(withoutWhitespace);
+    const exactCode = needle && [school.code, school.id].some(
+      (code) => code && withoutWhitespace(code) === needle,
+    );
+    if (exactCode) exact.push(school);
+    else if (fields.some((field) => field.includes(needle)) ||
+      terms.every((term) => fields.some((field) => field.includes(term)))) {
+      partial.push(school);
+    }
+  }
+  return [...exact, ...partial];
 }
 
 export function findSchoolById(id?: string | null): School | undefined {
