@@ -298,7 +298,7 @@ it('updates a changed task payload without waiting for its identifier to change'
   const card = screen.getByTestId('next-action');
   expect(card.textContent).toContain('修正版作業');
   expect(card.textContent).not.toContain('作業三 繳交');
-  expect(card.textContent).toContain('10:30 截止・還剩 1 小時');
+  expect(card.textContent).toContain('10:30 截止・還剩 40 分鐘');
   expect(within(card).getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
     '/classroom/course/cw_123#assignment-revised',
   );
