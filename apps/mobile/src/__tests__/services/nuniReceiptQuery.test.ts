@@ -85,3 +85,53 @@ test('status-only follow-up after a broad receipt list remains broad but read-on
   if (result.kind !== 'results') return;
   expect(result.rows.map((row) => row.item.id)).toEqual(['closed', 'pending']);
 });
+
+
+test('keeps the prior Taiwan-time deadline window when switching from due dates to receipt status', () => {
+  const tomorrow = '2026-11-05T00:00:00+08:00';
+  const later = '2026-11-06T00:00:00+08:00';
+  const dates: NuniStudyAgenda = {
+    ...agenda,
+    tasks: [
+      { ...task('submitted-tomorrow', 'management', '2026-11-04T05:00:00Z'), dueAt: tomorrow },
+      { ...task('submitted-later', 'management', '2026-11-04T05:00:00Z'), dueAt: later },
+      { ...task('pending-tomorrow', 'design'), dueAt: tomorrow },
+      { ...task('undated', 'design'), dueAt: null },
+      { ...task('other-course', 'teacher', '2026-11-04T05:00:00Z'), dueAt: tomorrow },
+    ],
+  };
+  const startDay = Date.UTC(2026, 10, 5) / 86_400_000;
+  const deadlineScope = {
+    window: { startDay, endDay: startDay + 1, label: '明天' },
+    checkedAt: Date.parse('2026-11-04T09:00:00Z'),
+  };
+  const scopeQuestion = '資料庫的期中報告什麼時候交？';
+  const done = queryNuniReceipts(dates, '那已交的呢？', scopeQuestion, deadlineScope);
+  expect(done).toMatchObject({
+    kind: 'results', rows: [{ item: { id: 'submitted-tomorrow', courseId: 'management' } }],
+  });
+  const missing = queryNuniReceipts(dates, '那還沒交的呢？', scopeQuestion, deadlineScope);
+  expect(missing.kind).toBe('results');
+  if (missing.kind !== 'results') return;
+  expect(missing.rows.map((row) => row.item.id)).toEqual(['pending-tomorrow']);
+  expect(missing.rows.every((row) => row.receiptStatus !== 'submitted')).toBe(true);
+});
+
+test('future-seven-day receipt status never includes an earlier deadline or an undated assignment', () => {
+  const dates: NuniStudyAgenda = {
+    ...agenda,
+    tasks: [
+      { ...task('already-due', 'management', '2026-11-04T05:00:00Z'), dueAt: '2026-11-04T09:00:00Z' },
+      { ...task('within-week', 'management', '2026-11-04T05:00:00Z'), dueAt: '2026-11-06T09:00:00Z' },
+      { ...task('undated', 'management', '2026-11-04T05:00:00Z'), dueAt: null },
+    ],
+  };
+  const startDay = Date.UTC(2026, 10, 4) / 86_400_000;
+  const result = queryNuniReceipts(dates, '那已交的呢？', '我有哪些作業？', {
+    window: { startDay, endDay: startDay + 7, label: '未來七天' },
+    checkedAt: Date.parse('2026-11-04T10:00:00Z'),
+  });
+  expect(result.kind).toBe('results');
+  if (result.kind !== 'results') return;
+  expect(result.rows.map((row) => row.item.id)).toEqual(['within-week']);
+});
