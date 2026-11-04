@@ -43,6 +43,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  vi.useRealTimers();
   Reflect.deleteProperty(window, 'webkitSpeechRecognition');
 });
 
@@ -309,5 +310,93 @@ it.each(['stop', 'disable', 'unmount'])(
       act(() => FakeSpeechRecognition.last.onresult?.(finalResult('取消後重試')));
       expect(onTranscript).toHaveBeenCalledExactlyOnceWith('取消後重試');
     }
+  },
+);
+
+it('restarts after the timeout without onend and ignores all late events from the old capture', () => {
+  vi.useFakeTimers();
+  FakeSpeechRecognition.delayAbort = true;
+  const { recognition, lateResult, onTranscript } = startCapture();
+  const oldError = recognition.onerror!;
+  const oldCaptureEnd = recognition.onend!;
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  const oldShutdownEnd = recognition.onend!;
+  // The browser releases the microphone but omits its completion event.
+  FakeSpeechRecognition.active = null;
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  act(() => vi.advanceTimersByTime(1499));
+  expect(next.start).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(1));
+  expect(next.start).toHaveBeenCalledOnce();
+  expect(recognition.onend).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+  act(() => {
+    lateResult(finalResult('逾時後的舊轉寫'));
+    oldError({ error: 'network' });
+    oldCaptureEnd();
+    oldShutdownEnd();
+  });
+  expect(onTranscript).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('button', { name: '停止語音輸入' })).toBeTruthy();
+  expect(next.start).toHaveBeenCalledOnce();
+  act(() => next.onresult?.(finalResult('逾時後的新轉寫')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('逾時後的新轉寫');
+});
+
+it('clears the fallback when onend arrives before the timeout', () => {
+  vi.useFakeTimers();
+  FakeSpeechRecognition.delayAbort = true;
+  const { recognition } = startCapture();
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const next = FakeSpeechRecognition.last;
+  act(() => {
+    vi.advanceTimersByTime(1000);
+    recognition.end();
+  });
+  expect(vi.getTimerCount()).toBe(0);
+  act(() => vi.advanceTimersByTime(2000));
+  expect(next.start).toHaveBeenCalledOnce();
+});
+
+it('shows the existing start error after a failed timeout restart and permits another click', () => {
+  vi.useFakeTimers();
+  FakeSpeechRecognition.delayAbort = true;
+  const { onTranscript } = startCapture();
+  fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  const failed = FakeSpeechRecognition.last;
+  act(() => vi.advanceTimersByTime(1500));
+  expect(failed.start).toHaveBeenCalledOnce();
+  expect(screen.getByRole('alert').textContent).toContain('無法啟動語音辨識');
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+  expect(failed.onresult).toBeNull();
+  FakeSpeechRecognition.active = null;
+  fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+  act(() => FakeSpeechRecognition.last.onresult?.(finalResult('再次點擊成功')));
+  expect(onTranscript).toHaveBeenCalledExactlyOnceWith('再次點擊成功');
+});
+
+it.each(['stop', 'disable', 'unmount'])(
+  'clears the fallback timer on %s without starting the canceled capture',
+  (action) => {
+    vi.useFakeTimers();
+    FakeSpeechRecognition.delayAbort = true;
+    const { view, onTranscript } = startCapture();
+    fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用語音輸入' }));
+    const next = FakeSpeechRecognition.last;
+    expect(vi.getTimerCount()).toBe(1);
+    if (action === 'stop') fireEvent.click(screen.getByRole('button', { name: '停止語音輸入' }));
+    if (action === 'disable')
+      view.rerender(<VoiceDictationButton onTranscript={onTranscript} disabled />);
+    if (action === 'unmount') view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(3000));
+    expect(next.start).not.toHaveBeenCalled();
+    expect(onTranscript).not.toHaveBeenCalled();
   },
 );

@@ -69,9 +69,15 @@ export function VoiceDictationButton({
   const callback = useRef(onTranscript);
   const endingRef = useRef<SpeechRecognizer | null>(null);
   const pendingStart = useRef<{ recognition: SpeechRecognizer; start: () => void } | null>(null);
+  const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRestartTimer = useCallback(() => {
+    if (restartTimer.current !== null) clearTimeout(restartTimer.current);
+    restartTimer.current = null;
+  }, []);
   const finishCapture = useCallback((recognition: SpeechRecognizer, abort = true) => {
     if (recognitionRef.current !== recognition) return;
     recognitionRef.current = null;
+    clearRestartTimer();
     setListening(false);
     setInterim('');
     if (pendingStart.current?.recognition === recognition) {
@@ -85,8 +91,9 @@ export function VoiceDictationButton({
     // Keep that completion signal separate from the invalidated transcript session.
     endingRef.current = recognition;
     const ended = () => {
-      recognition.onend = null;
       if (endingRef.current !== recognition) return;
+      clearRestartTimer();
+      releaseRecognition(recognition, false);
       endingRef.current = null;
       const pending = pendingStart.current;
       pendingStart.current = null;
@@ -98,7 +105,7 @@ export function VoiceDictationButton({
     } catch {
       ended();
     }
-  }, []);
+  }, [clearRestartTimer]);
 
   useEffect(() => {
     callback.current = onTranscript;
@@ -107,6 +114,7 @@ export function VoiceDictationButton({
   useEffect(() => {
     setSupported(!!browserSpeech());
     return () => {
+      clearRestartTimer();
       const recognition = recognitionRef.current;
       recognitionRef.current = null;
       const pending = pendingStart.current;
@@ -115,7 +123,7 @@ export function VoiceDictationButton({
       endingRef.current = null;
       if (recognition) releaseRecognition(recognition, pending?.recognition !== recognition);
     };
-  }, []);
+  }, [clearRestartTimer]);
   useEffect(() => {
     if (disabled && recognitionRef.current) finishCapture(recognitionRef.current);
   }, [disabled, finishCapture]);
@@ -170,8 +178,15 @@ export function VoiceDictationButton({
     setError('');
     setInterim('');
     setListening(true);
-    if (endingRef.current) pendingStart.current = { recognition, start };
-    else start();
+    if (endingRef.current) {
+      pendingStart.current = { recognition, start };
+      const ending = endingRef.current;
+      // Some browsers never deliver onend after abort. Retire the old capture
+      // after a bounded wait; start() still reports a busy microphone as an error.
+      restartTimer.current = setTimeout(() => {
+        if (endingRef.current === ending) ending.onend?.();
+      }, 1500);
+    } else start();
   }
 
   return (
