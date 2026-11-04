@@ -472,6 +472,9 @@ export function createTronClassLmsHandler({
       let cachedHomework: LmsReadonlySnapshot | null = null;
       let shouldPruneExtras = false;
       const cached = await cacheRef.get();
+      // An account can disconnect or relink while Firestore returns the cache.
+      // Check ownership before invalidating it or starting a school fetch.
+      await verifyLinkedSession();
       const cacheData = cached.data();
       if (cached.exists) {
         if (cacheData?.ownerUid !== uid || cacheData?.sessionId !== linkedId ||
