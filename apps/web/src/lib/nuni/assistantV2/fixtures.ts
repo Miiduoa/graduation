@@ -306,6 +306,7 @@ const plans: [string, Obj][][] = [
     ['list_food_orders', { tenantId: 'fixture-realm' }],
     ['get_food_order', { tenantId: 'fixture-realm', orderId: 'order-a' }],
     ['get_food_locations', { tenantId: 'fixture-realm' }],
+    ['get_food_menu', { tenantId: 'fixture-realm', locationId: 'dining-a' }],
     [
       'propose_food_order',
       {
@@ -365,7 +366,8 @@ export function fakeModel(caseIndex: number): Model {
     const plan = plans[caseIndex];
     const action = input.tools?.length ? plan[turn++] : undefined;
     const actions = action ? [action] : [];
-    if ((caseIndex === 4 || caseIndex === 9) && turn === 1) actions.push(plan[turn++]);
+    if (caseIndex === 4 && turn === 1) actions.push(plan[turn++], plan[turn++], plan[turn++]);
+    if (caseIndex === 9 && turn === 1) actions.push(plan[turn++]);
     if (action)
       return {
         message: {

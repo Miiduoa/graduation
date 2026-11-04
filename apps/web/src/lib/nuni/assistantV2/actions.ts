@@ -91,6 +91,7 @@ export function signCard(
   const payload = {
     v: 2,
     proposalSeq,
+    ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
     stage: 'execute',
     binding: hash(binding),
     tool,
@@ -115,7 +116,7 @@ export function signCard(
           : pageHref(args, binding.schoolId),
   };
 }
-export function verifyCard(binding: Binding, raw: unknown, secret: string, now: number) {
+function signedPayload(raw: unknown, secret: string) {
   const v = object(raw, ['token', 'args']);
   if (typeof v.token !== 'string' || v.token.length > 4096)
     return fail('CONFIRMATION_INVALID', 409);
@@ -134,6 +135,21 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
   } catch {
     return fail('CONFIRMATION_INVALID', 409);
   }
+  return p;
+}
+export function machineId(raw: unknown): string {
+  if (typeof raw !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(raw)) return fail();
+  return raw;
+}
+export function cardIssuer(raw: unknown, secret: string) {
+  const p = signedPayload(raw, secret);
+  return p.issuer === undefined ? undefined : machineId(p.issuer);
+}
+export function verifyCard(binding: Binding, raw: unknown, secret: string, now: number) {
+  const p = signedPayload(raw, secret);
+  const v = object(raw, ['token', 'args']);
+  if (p.issuer !== undefined && p.issuer !== process.env.FLY_MACHINE_ID)
+    return fail('CONFIRMATION_REVOKED', 409);
   const current = proposals.get(hash(binding));
   if (!current || current.seq !== p.proposalSeq || current.revoked.has(String(p.mutationId)))
     return fail('CONFIRMATION_REVOKED', 409);

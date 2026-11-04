@@ -8,7 +8,7 @@ import { fileURLToPath, URL } from 'node:url';
 async function modules() {
   const result = await build({
     stdin: {
-      contents: `export { preview } from './apps/web/src/lib/nuni/assistantV2/preview';`,
+      contents: `export { preview } from './apps/web/src/lib/nuni/assistantV2/preview'; export { run } from './apps/web/src/lib/nuni/assistantV2/runner'; export { providerError } from './apps/web/src/lib/nuni/assistantV2/groq'; export * from './apps/web/src/lib/nuni/assistantV2/fixtures';`,
       resolveDir: fileURLToPath(new URL('../../', import.meta.url)),
     },
     bundle: true,
@@ -49,7 +49,13 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
     }
     assert.deepEqual(
       results[4].tools.map((t) => t.name),
-      ['list_food_orders', 'get_food_order', 'get_food_locations', 'propose_food_order'],
+      [
+        'list_food_orders',
+        'get_food_order',
+        'get_food_locations',
+        'get_food_menu',
+        'propose_food_order',
+      ],
     );
     assert.deepEqual(
       results[5].tools.map((t) => t.name),
@@ -74,4 +80,55 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
   } finally {
     process.stdout.write = original;
   }
+});
+
+test('fake model failures recover, flatten the last request, sanitize args and block transit inventions', async () => {
+  const m = await modules();
+  const reply = (name, args = {}) => ({
+    message: name
+      ? {
+          role: 'assistant',
+          tool_calls: [
+            { id: 'c', type: 'function', function: { name, arguments: JSON.stringify(args) } },
+          ],
+        }
+      : { role: 'assistant', content: 'A1/B2 每10分鐘一班' },
+    usage: { prompt_tokens: 300, completion_tokens: 80, total_tokens: 380 },
+  });
+  const base = {
+    question: '規劃明天作業與交通',
+    history: [],
+    binding: m.fixtureBinding,
+    adapter: m.fixtureAdapter().adapter,
+    secret: m.FIXTURE_SECRET,
+    now: m.FIXTURE_NOW,
+    writes: true,
+    signal: new globalThis.AbortController().signal,
+    log: () => {},
+  };
+  let calls = 0;
+  const recovered = await m.run({
+    ...base,
+    model: async (input) => {
+      calls++;
+      if (calls === 1) throw m.providerError(400, '{"error":{"code":"tool_use_failed"}}');
+      if (calls === 2) return reply('get_due_work', { extra: 'ignored' });
+      if (calls === 3)
+        return reply('propose_study_plan', { date: '2026-11-05', taskIds: ['樹與圖作業'] });
+      assert.equal(input.tools, undefined);
+      assert.equal(input.tool_choice, undefined);
+      assert.ok(input.messages.every((r) => r.role !== 'tool' && !r.tool_calls));
+      assert.match(input.messages.at(-1).content, /trust="untrusted"/);
+      return reply();
+    },
+  });
+  assert.equal(recovered.modelCalls, 4);
+  assert.deepEqual(
+    recovered.steps.map((s) => s.status),
+    ['error', 'ok', 'ok'],
+  );
+  assert.equal(recovered.cards.length, 1);
+  assert.match(recovered.answer, /部分結果/);
+  assert.doesNotMatch(recovered.answer, /A1|B2/);
+  assert.match(recovered.answer, /未查到交通/);
 });

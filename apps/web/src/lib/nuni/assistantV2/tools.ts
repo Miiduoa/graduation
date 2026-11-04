@@ -177,7 +177,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
     add('get_schedule', 'get_calendar', 'find_free_time');
   if (/教材/.test(question)) add('list_courses', 'get_materials');
   if (/吃|中午|餐廳|規劃/.test(question)) add('get_dining');
-  if (/訂|餐好了|點餐|幫我點|再點/.test(question))
+  if (/訂|餐好了|點餐|幫我點|再點|跟上次一樣/.test(question))
     add(
       'get_food_locations',
       'get_food_menu',
@@ -190,7 +190,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
     add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
   // Prioritize the requested domain, retaining proposals for planning questions.
-  if (/點餐|幫我點|再點/.test(question)) {
+  if (/點餐|幫我點|再點|跟上次一樣/.test(question)) {
     out.delete('get_today_context');
     out.delete('propose_open_page');
     out.delete('get_dining');
@@ -206,6 +206,15 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
   if (names.length > 8 && names.includes('find_free_time'))
     names.splice(names.indexOf('get_calendar'), 1);
+  if (/規劃|安排|排寫/.test(question))
+    return [
+      'get_day_overview',
+      'get_due_work',
+      'propose_study_plan',
+      'get_dining',
+      'find_free_time',
+      'get_today_context',
+    ];
   const priority = /規劃|安排|排寫/.test(question)
     ? ['get_day_overview', 'get_due_work', 'find_free_time', 'propose_study_plan']
     : [];
@@ -454,6 +463,7 @@ export function createTools(
     found.sort((a, b) => String(a.dueAt || '9999').localeCompare(String(b.dueAt || '9999')));
     const end = Date.parse(addDays(to, 1) + 'T00:00:00+08:00');
     const start = Date.parse(from + 'T00:00:00+08:00');
+    const inRange = (t: Task) => Boolean(t.dueAt && Date.parse(t.dueAt) >= start && Date.parse(t.dueAt) < end);
     const pending = found.filter((t) => !t.submitted && t.state === 'open');
     return {
       from,
@@ -462,8 +472,8 @@ export function createTools(
         (t) => t.dueAt && Date.parse(t.dueAt) >= Math.max(now, start) && Date.parse(t.dueAt) < end,
       ),
       undated: pending.filter((t) => !t.dueAt),
-      submitted: found.filter((t) => t.submitted),
-      overdue: found.filter((t) => !t.submitted && t.dueAt && Date.parse(t.dueAt) < now),
+      submitted: found.filter((t) => t.submitted && inRange(t)),
+      overdue: found.filter((t) => !t.submitted && inRange(t) && t.dueAt && Date.parse(t.dueAt) < now),
       partial: unqueried.length > 0,
       unqueried,
       source: 'class-workspaces',
@@ -836,6 +846,24 @@ export function createTools(
     result.missing = missing;
     return result;
   }
+  const known = new Map<string, { id: string; title: string }[]>();
+  function remember(value: unknown, source: string) {
+    if (Array.isArray(value)) {
+      value.forEach((v) => remember(v, source));
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    const row = value as Obj;
+    if (typeof row.id === 'string' && typeof (row.title || row.name) === 'string') {
+      const list = known.get(source) || [];
+      if (!list.some((r) => r.id === row.id))
+        list.push({ id: row.id, title: String(row.title || row.name) });
+      known.set(source, list);
+    }
+    Object.values(row).forEach((v) => {
+      if (v && typeof v === 'object') remember(v, source);
+    });
+  }
   return {
     cards,
     context,
@@ -862,25 +890,92 @@ export function createTools(
           ? tenantIds
           : name === 'get_dining'
             ? [...diningIds]
-            : name.includes('food')
-              ? [...foodLocations]
-              : name.includes('club')
-                ? [...clubs]
-                : /course|materials/.test(name)
-                  ? courseIds
-                  : name.includes('study')
-                    ? [...tasks.keys()]
-                    : tenantIds
+            : name === 'get_food_order'
+              ? [...orders]
+              : name === 'propose_food_order'
+                ? [...foodLocations, ...(known.get('get_food_menu') || []).map((r) => r.id)]
+                : name.includes('food')
+                  ? [...foodLocations]
+                  : name.includes('club')
+                    ? [...clubs]
+                    : /course|materials/.test(name)
+                      ? courseIds
+                      : name.includes('study')
+                        ? [...tasks.keys()]
+                        : tenantIds
         ).slice(0, 5),
       };
     },
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
-      const a = validateTool(name, raw),
+      const cleaned = { ...object(raw) };
+      const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
+      if (name === 'get_transit' && cleaned.action === 'campus') {
+        for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);
+      }
+      ignored.forEach((k) => delete cleaned[k]);
+      if (name === 'propose_food_order' && Array.isArray(cleaned.items)) {
+        cleaned.items = cleaned.items.map((item) => {
+          const row = { ...object(item) };
+          for (const key of Object.keys(row))
+            if (!['menuItemId', 'quantity', 'selectedOptionIds'].includes(key)) {
+              ignored.push('items.' + key);
+              delete row[key];
+            }
+          return row;
+        });
+      }
+      const sources: Record<string, string[]> = {
+        workspaceId: ['list_courses'],
+        orderId: ['list_food_orders'],
+        communityId: ['list_clubs'],
+        locationId: ['get_food_locations', 'get_dining'],
+        taskIds: ['get_due_work', 'get_day_overview'],
+        menuItemId: ['get_food_menu'],
+        selectedOptionIds: ['get_food_menu'],
+        entityId:
+          cleaned.page === 'classroom'
+            ? ['list_courses']
+            : cleaned.page === 'orders'
+              ? ['list_food_orders']
+              : ['get_dining'],
+      };
+      function resolve(value: unknown, key: string): unknown {
+        const rows = (sources[key] || []).flatMap((source) => known.get(source) || []);
+        if (key === 'taskIds') rows.push(...tasks.values());
+        if (rows.some((r) => r.id === value)) return value;
+        const matches = [
+          ...new Map(rows.filter((r) => r.title === value).map((r) => [r.id, r])).values(),
+        ];
+        return matches.length === 1 ? matches[0].id : value;
+      }
+      for (const key of Object.keys(sources)) {
+        if (cleaned[key] !== undefined)
+          cleaned[key] = Array.isArray(cleaned[key])
+            ? (cleaned[key] as unknown[]).map((v) => resolve(v, key))
+            : resolve(cleaned[key], key);
+      }
+      if (Array.isArray(cleaned.items))
+        cleaned.items = cleaned.items.map((v) => {
+          const row = object(v);
+          return {
+            ...row,
+            menuItemId: resolve(row.menuItemId, 'menuItemId'),
+            selectedOptionIds: Array.isArray(row.selectedOptionIds)
+              ? row.selectedOptionIds.map((v) => resolve(v, 'selectedOptionIds'))
+              : row.selectedOptionIds,
+          };
+        });
+      const a = validateTool(name, cleaned),
         key = name + canonical(a),
         cached = cache.has(key);
       if (!cached) cache.set(key, dispatch(name, a));
-      return { value: await cache.get(key), cached };
+      const value = await cache.get(key);
+      remember(value, name);
+      return {
+        value: ignored.length ? { data: value, note: '已忽略未知參數欄位' } : value,
+        cached,
+      };
     },
   };
 }

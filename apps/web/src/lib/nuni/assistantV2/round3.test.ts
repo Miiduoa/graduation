@@ -54,7 +54,7 @@ it('queries course work concurrently, reserves API pairs and reports missing cov
 });
 it('separates submitted and overdue tasks and combines the actual requested day', async () => {
   const tools = createTools(fixtureAdapter().adapter, binding, secret, now, true);
-  const due = (await tools.call('get_due_work', {})).value as {
+  const due = (await tools.call('get_due_work', { from: '2026-11-01', to: '2026-11-10' })).value as {
     pending: { dueAt: string }[];
     submitted: unknown[];
     overdue: unknown[];
@@ -98,7 +98,7 @@ it('reserves 900 tokens for the final round and marks retained truncated content
       };
     },
   });
-  expect(limits).toEqual([384, 900]);
+  expect(limits).toEqual([256, 900]);
   expect(result.answer).toContain('已完成部分');
   expect(result.answer).toContain('輸出達上限');
   expect(result.usage.total_tokens).toBeLessThanOrEqual(7000);

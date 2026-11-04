@@ -9,7 +9,7 @@ import {
   requireSession,
   sessionContext,
 } from '../server';
-import { confirm, revoke } from './actions';
+import { cardIssuer, machineId, confirm, revoke } from './actions';
 import { createAdapter } from './adapter';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { groqModel } from './groq';
@@ -82,13 +82,26 @@ export async function handleV2(request: NextRequest, action: string) {
     const raw = object(
       await boundedJson(request, 16384),
       action === 'ask'
-        ? ['schoolId', 'conversationId', 'question', 'history', 'consent']
+        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance']
         : ['schoolId', 'conversationId', 'token', 'args'],
     );
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
+    const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
+    const target =
+      action === 'ask'
+        ? raw.preferredInstance === undefined
+          ? undefined
+          : machineId(raw.preferredInstance)
+        : cardIssuer({ token: raw.token, args: raw.args }, secret);
+    if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
+      if (request.headers.has('fly-replay-failed')) throw new V2Error(409, 'CONFIRMATION_REVOKED');
+      const response = jsonResponse({ error: 'INSTANCE_REPLAY_REQUIRED' }, 409);
+      response.headers.set('fly-replay', `instance=${target}`);
+      return response;
+    }
     const source = createAdapter(session, schoolId, signal),
       principal = await source.principal();
     const binding = {
@@ -97,7 +110,6 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId,
       schoolId,
     };
-    const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
     if (action === 'cancel')
       return jsonResponse(
@@ -158,7 +170,10 @@ export async function handleV2(request: NextRequest, action: string) {
           return result;
         },
       });
-      return jsonResponse(result);
+      return jsonResponse({
+        ...result,
+        ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
+      });
     } finally {
       active.delete(sessionKey);
     }

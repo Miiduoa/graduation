@@ -5,6 +5,7 @@ export class V2Error extends Error {
     readonly status: number,
     readonly code: string,
     readonly retryAfter?: number,
+    readonly providerCode?: string,
   ) {
     super(code);
   }

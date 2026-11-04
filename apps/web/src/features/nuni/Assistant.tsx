@@ -226,6 +226,7 @@ function V2Conversation({
   const [states, setStates] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const issuer = useRef<string | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => {
     const active = new AbortController();
@@ -265,7 +266,8 @@ function V2Conversation({
         { role: 'user', content: t.question },
         { role: 'assistant', content: t.reply.answer },
       ]);
-      const reply = await send('ask', { question: current, history, consent });
+      const reply = await send('ask', { question: current, history, consent, preferredInstance: issuer.current });
+      issuer.current = reply.issuer;
       if (reply.cards.length)
         setStates((s) => ({
           ...s,

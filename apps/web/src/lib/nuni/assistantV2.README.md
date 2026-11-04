@@ -26,14 +26,14 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 `--ordering=on` 的確認後恰好一次，是 fixture 模擬免付款能力的契約測試，不能當成正式已能免付款下單。
 未來既有 API 若新增免付款成立契約，才可接 submit：沿用現有 client quotes → orders，兩階段使用確認 token 綁定的 mutationId 衍生不同 idempotencyKey，API 持久冪等，不可只靠本機去重。
 菜單驗價金額為估算（minor units，UI 換算元），未呼叫 quote 保留庫存；價格改變必須重新提議。
-點餐頁新增既有 tenant query 下的 `location` 菜單入口，線上關閉時只渲染唯讀菜單、沒有組車／報價／下單按鈕；不支援購物車預填，卡片列出已備品項／規格／數量／金額／自取時間。
+點餐頁僅在 nuni + assistant + v2 三 gate 全開時解析既有 tenant query 下的 `location` 菜單入口；order query 優先。先讀可見 food realms，再讀該 realm 的 locations，僅 merchantMode=full 且允許 view-menu 的店家可用，無效則回原工作區。旗標關閉時與 main 446b845f 一樣只處理既有 tenant/order。線上關閉時只渲染唯讀菜單、沒有組車／報價／下單按鈕；不支援購物車預填，卡片列出已備品項／規格／數量／金額／自取時間。
 
 上線前需另外完成（本次未部署、未連正式服務）：
 
 - 在 **nuni-web** 設定 server-only `GROQ_API_KEY` secret，沿用既有 `BFF_SESSION_SECRET`。
 - 實測 Web 出口可連 Groq 固定端點，確認指定模型權限及 Groq 帳戶方案為 **Free**。
 - 核對組織真實 limits；本機 limiter 只對單進程有效，不保證多機全域額度。
-- 正式點餐需先確認既有 API 的免付款成立能力；目前所有訂單需付款，助理只導頁。先確認對話黏著單進程或共享撤銷機制，才能開放確認卡寫入。
+- 正式點餐需先確認既有 API 的免付款成立能力；目前所有訂單需付款，助理只導頁。開放確認卡寫入前需在隔離 Fly 環境驗收下述 machine replay／單進程部署約束。
 - personal-import API 同步 gate 必須可用；API 本身拒絕同步時，不繞過 gate。
 - `/realms` 目前可能只有 tenantId/name/services，沒有學校對照。
   可由服務端 `CAMPUS_ASSISTANT_V2_REALM_MAP` 提供明確的 JSON `{ "school-slug": ["verified-tenant-slug"] }` 對照。
@@ -45,7 +45,7 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 
 ## 工具
 
-所有 schema 都禁止額外欄位，日期／時間／ID 有界；workspace/order/community/location/entity ID 必須先由本題可信結果取得。
+所有 schema 都禁止額外欄位；dispatcher 剝除未知欄位並附 note，其餘參數仍須合法。日期／時間／ID 有界；workspace/order/community/location/entity ID 必須先由本題可信結果取得。標題只在本題已取得清單唯一且完全相符時對應 ID，否則回錯誤與可用 ID。
 模型不能提供帳號、session、任意 URL、SQL 或 confirm；學校固定於本題 scope。
 
 | 工具 | 資料／行為 |
@@ -79,7 +79,7 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 
 ## 記憶、預算與錯誤
 
-依問題預讀課表／作業情境，一般問候不讀 ledger/courses/realms。點餐／社團只先讀 scope realm，詳細來源用工具按需取得，不跨帳號快取。system 只有固定規則；情境是 user role 的明確不可信 `<context>` 資料區，貼文保留 tool role。情境以 UTF-8 bytes 保守上界限制至 400，必要時標 truncated/partial，完整資料可再用工具讀。
+依問題預讀情境；單純作業／測驗／待繳問題不預讀課表或事件，直接由 get_due_work 按需查詢。submitted／overdue 同樣依 from/to 截止日期篩選，無日期待繳另列 undated。一般問候不讀 ledger/courses/realms。點餐／社團只先讀 scope realm，詳細來源用工具按需取得，不跨帳號快取。system 只有固定規則；情境是 user role 的明確不可信 `<context>` 資料區，貼文保留 tool role。情境以 UTF-8 bytes 保守上界限制至 400，必要時標 truncated/partial，完整資料可再用工具讀。
 情境只涵蓋同步資料，裝置未同步課表不視為雲端已知，也不作權限依據。
 前端送最近 6 輪 user/assistant；伺服器拒絕 system/tool/額外欄位，歷史截至 400 bytes。
 外送同意在對話層取得；換帳、切校、pending logout 清除對話並 abort，忽略晚到結果。
@@ -98,8 +98,13 @@ confirm/cancel 必須重新驗 session；事件只新增 events，驗證合併�
 
 token 另綁 conversation 的隨機 proposalSeq；同一輪多卡共用批次，新卡批次取代舊批次，UI 停用舊卡，伺服器拒絕舊 seq。
 取消 POST `/api/nuni/assistant/cancel`，先驗簽／scope，再撤銷 mutationId；取消事件卡連同後續依序 revision 的卡一起撤銷。
-狀態僅在 handler 所在 Node 進程的模組記憶體，五分鐘到期清理，未知 seq 採拒絕；重啟或路由到別的副本會要求重建卡。
-多副本**無全域撤銷保證**：A 保留舊 seq、B 產生新 seq 時，A 仍可能接受舊 token。上線前必須保證同對話的 ask/confirm/cancel 黏著同一單進程，或另設共享撤銷儲存；本輪依限制沒有 DB／migration。不能宣稱只靠此記憶體方案解決跨副本撤銷。
+狀態僅在發卡 Node 進程的模組記憶體，五分鐘到期清理，未知 seq 採拒絕並要求重新產生卡片。
+
+第五輪：存在 `FLY_MACHINE_ID` 時，token 的已簽 payload 包含 issuer。confirm/cancel 通過既有 cookie／同源／session context 檢查並驗簽後，若 issuer 與目前 machine 不同，回 HTTP 409 及 `fly-replay: instance=<id>`，不讀 principal、不執行確認／撤銷；Fly Proxy 將原 POST（含 body）重送至 issuer，再重新執行完整 session/principal 與 token 驗證。ask 回覆 issuer，client 在同對話後續 ask 帶 preferredInstance，server 同樣 replay 至發卡 machine，讓新提議取代同一份 seq。preferredInstance 只作路由提示，不授予資料權限。無 FLY_MACHINE_ID 時不產 issuer、不 replay，維持單進程行為。
+
+依 [Fly 官方 dynamic routing 文件](https://docs.fly.io/networking/dynamic-request-routing)，語法為 `instance=<Machine ID>`，要求 http handler，超過 1 MB 的請求不可 replay；目前 BFF boundedJson 上限 16 KiB，POST body 在限制內。未設定 fallback 或 replay cache；指定 machine 已消失時由 Fly 回錯誤，若重啟後仍為同 id 則因未知 seq 拒絕。若收到 fly-replay-failed，直接拒絕，避免重送迴圈。瀏覽器遇失敗需重新產卡；不把不同 machine 的未知卡當有效卡。
+
+部署原始碼核對：`deploy/web/fly.nuni.toml` 的 app 是 nuni-web，http_service 指向 3000；沒有 processes 或啟動命令覆寫。`deploy/nuni-web-legacy/Dockerfile` runtime 為 `node apps/web/server.js`（3000），`deploy/web/Dockerfile` 為 `node server.js`（預設8080），均為單一 Next standalone Node，沒有 cluster／PM2／worker 啟動器。`deploy/web/start.cjs` 是另一路啟動器，每個 root 只 spawn 一個 server.js；選用 LEGACY_WEB_ROOT 時會另外啟動不同 port 的 legacy server，並非同一 app 多 worker。此保證以每台 machine、同一助理路由只有一個 Node 進程為前提；未連正式服務核對 runtime。若未來改 cluster 或同路由多 worker，須先改共享撤銷機制。
 事件去重仍由既有 API CAS/mutationId 負責，不因重啟失去持久去重。
 
 Groq 401、403（egress/model/unknown）、429、timeout、network、5xx、invalid response 分類。
@@ -135,3 +140,5 @@ node /tmp/nuni-v2-preview-bundle.mjs --model=fake --cases=all
 CI 的 assistant integration job 安裝 workspace 及既有 isolated dependencies 後執行 node tests；Web job 另跑 Vitest/typecheck/lint/build。此次依限制未執行完整 Next build。
 
 第三輪：清單工具可省略 scope id；單 realm 自動選取，多 realm 列可用 scope 或提示重查。scope/not-found/input 錯誤附安全的截短 id 或下一步，不放寬 ACL。最後回答若仍截斷保留已有文字並明示未完成；工具輪截斷至多利用原有四輪內的一輪改為 tools 關閉完成回答。規劃優先用日總覽，提議成功即進最後回答。
+
+第四輪修正：最多四次模型呼叫；工具輪 completion 上限 256，最終輪最多 900，總預算 7000。規劃題使用精簡 schema，取得 get_day_overview 後移除已涵蓋查詢。所有無工具輪次會去除 assistant tool_calls/tool 訊息，僅以標記不可信的 user JSON 傳遞已取得結果，不送 tools/tool_choice。400 僅記白名單 providerCode；tool_use_failed 與未知工具算失敗步驟並佔輪數。模型失敗後已有結果則用伺服器確定性摘要保留資料、入口與確認卡。沒有成功 get_transit 時，含路線代碼、班距／到站分鐘、首末班的回答會被確定性摘要取代。本次只跑離線 fixture，未連 Groq，真實 token／TPM 與模型品質仍需另行驗證。

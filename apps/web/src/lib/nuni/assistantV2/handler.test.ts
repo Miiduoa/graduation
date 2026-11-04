@@ -178,3 +178,40 @@ it('limits each account to three questions per minute and retains current-sessio
   expect(limited.headers.get('Retry-After')).toBe('60');
   expect(principal).toHaveBeenCalledTimes(4);
 });
+
+it('routes signed confirm/cancel and subsequent asks to the issuing machine before adapter execution', async () => {
+  vi.stubEnv('FLY_MACHINE_ID', 'machine-A');
+  const binding = { account, session: sessionContext(session), conversationId: 'sticky', schoolId: 'fixture-school' };
+  const card = signCard(binding, 'propose_open_page', { page: 'calendar' }, 1, FIXTURE_SECRET, Date.now());
+  vi.stubEnv('FLY_MACHINE_ID', 'machine-B');
+  vi.mocked(createAdapter).mockClear();
+  for (const action of ['confirm', 'cancel', 'ask']) {
+    const payload = action === 'ask'
+      ? { preferredInstance: 'machine-A', question: '你好', consent: true }
+      : { token: card.token, args: card.args };
+    const response = await handleNuni(request(action, { schoolId: binding.schoolId, conversationId: binding.conversationId, ...payload }), ['assistant', action]);
+    expect(response.headers.get('fly-replay')).toBe('instance=machine-A');
+    expect(response.status).toBe(409);
+  }
+  expect(createAdapter).not.toHaveBeenCalled();
+  const failed = await handleNuni(request('confirm', {
+    schoolId: binding.schoolId, conversationId: binding.conversationId,
+    token: card.token, args: card.args,
+  }, { 'fly-replay-failed': 'unavailable' }), ['assistant', 'confirm']);
+  expect(failed.status).toBe(409);
+  expect(failed.headers.has('fly-replay')).toBe(false);
+  const tampered = await handleNuni(request('confirm', {
+    schoolId: binding.schoolId, conversationId: binding.conversationId,
+    token: card.token + 'tampered', args: card.args,
+  }), ['assistant', 'confirm']);
+  expect(tampered.headers.has('fly-replay')).toBe(false);
+  expect(createAdapter).not.toHaveBeenCalled();
+  vi.stubEnv('FLY_MACHINE_ID', 'machine-A');
+  const f = fixtureAdapter();
+  vi.mocked(createAdapter).mockReturnValue({ adapter: f.adapter, principal: async () => ({ platformAccountId: account, isPlatformOperator: false }), apiCalls: () => 0 });
+  signCard(binding, 'propose_open_page', { page: 'today' }, 1, FIXTURE_SECRET, Date.now());
+  const response = await handleNuni(request('confirm', { schoolId: binding.schoolId, conversationId: binding.conversationId, token: card.token, args: card.args }), ['assistant', 'confirm']);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: 'CONFIRMATION_REVOKED' });
+  expect(f.writes).toHaveLength(0);
+});

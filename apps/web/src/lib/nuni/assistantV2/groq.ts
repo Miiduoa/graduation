@@ -8,6 +8,24 @@ export function providerError(status: number, body: string, retryAfter?: string 
         ? (Date.parse(retryAfter) - Date.now()) / 1000
         : 30;
   const seconds = Math.max(1, Math.min(60, Number.isFinite(parsed) ? Math.ceil(parsed) : 30));
+  if (status === 400) {
+    let code: unknown;
+    try {
+      code = JSON.parse(body)?.error?.code;
+    } catch {}
+    const allowed = [
+      'tool_use_failed',
+      'json_validate_failed',
+      'context_length_exceeded',
+      'invalid_request_error',
+    ];
+    return new V2Error(
+      400,
+      'PROVIDER_BAD_REQUEST',
+      undefined,
+      typeof code === 'string' && allowed.includes(code) ? code : 'invalid_request_error',
+    );
+  }
   if (status === 401) return new V2Error(503, 'PROVIDER_AUTH_FAILED');
   if (status === 403)
     return new V2Error(

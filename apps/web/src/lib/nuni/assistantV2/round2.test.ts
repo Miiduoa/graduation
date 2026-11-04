@@ -82,9 +82,14 @@ it('ordering on waits for confirmation and replay creates exactly one order', as
 });
 it('rejects prices, off-menu items, cross-store items and other users orders', async () => {
   const { f, tools, card } = await propose(true);
+  expect((await tools.call('propose_food_order', { ...cart, price: 1 })).value).toHaveProperty(
+    'note',
+  );
+  expect(
+    (await tools.call('propose_food_order', { ...cart, items: [{ ...cart.items[0], price: 1 }] }))
+      .value,
+  ).toHaveProperty('note');
   for (const args of [
-    { ...cart, price: 1 },
-    { ...cart, items: [{ ...cart.items[0], price: 1 }] },
     { ...cart, items: [{ ...cart.items[0], menuItemId: 'stolen' }] },
     { ...cart, locationId: 'dining-b' },
     { ...cart, tenantId: 'other-school' },

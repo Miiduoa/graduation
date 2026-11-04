@@ -146,10 +146,20 @@ function FoodAccount({
     : (available[0]?.tenantId ?? '');
   const selectedRealm = available.find((realm) => realm.tenantId === tenantId);
   const [created, setCreated] = useState<{ tenantId: string; orderId: string } | null>(null);
-  if (!orderingOn && initialTenant && initialLocation)
-    return (
-      <FoodMenuPreview client={client} tenantId={initialTenant} locationId={initialLocation} />
+  const previewLoad = useCallback(async () => {
+    if (orderingOn || initialOrder || !initialTenant || !initialLocation) return false;
+    const visible = await client.listRealms();
+    if (!visible.some((r) => r.tenantId === initialTenant && r.services.includes('food')))
+      return false;
+    const locations = await client.listLocations(initialTenant, { limit: 30 });
+    return locations.locations.some(
+      (l) => l.id === initialLocation && l.merchantMode === 'full' &&
+        l.allowedActions.includes('view-menu'),
     );
+  }, [client, orderingOn, initialOrder, initialTenant, initialLocation]);
+  const preview = useFoodRead(previewLoad);
+  if (preview.data === true)
+    return <FoodMenuPreview client={client} tenantId={initialTenant} locationId={initialLocation} />;
 
   return (
     <div className={styles.accountStack}>
@@ -193,7 +203,7 @@ function FoodAccount({
           {tenantId &&
             (tab === 'menu' ? (
               <FoodLocations
-                initialLocation={tenantId === initialTenant ? initialLocation : ''}
+                initialLocation={!initialOrder && tenantId === initialTenant ? initialLocation : ''}
                 key={tenantId}
                 client={client}
                 cache={cache}
@@ -255,7 +265,12 @@ function FoodLocations({
   );
   const locations = useFoodRead(load);
   const [selected, setSelected] = useFoodDraft(cache, `food:${tenantId}:location`, initialLocation);
-  if (selected) {
+  const validSelected =
+    selected !== initialLocation ||
+    locations.data?.locations.some(
+      (l) => l.id === selected && l.merchantMode === 'full' && l.allowedActions.includes('view-menu'),
+    );
+  if (selected && validSelected) {
     return (
       <FoodMenu
         key={`${tenantId}:${selected}`}
