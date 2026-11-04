@@ -117,6 +117,10 @@ it('replays failed preview turns without wiping reads or claiming a missing card
   const [orderOff, orderOn, due, reorder, clubs] = results;
 
   expect(orderOff.answer).toContain('蔬菜便當');
+  expect(orderOff.answer).toContain('11:10');
+  expect(orderOff.answer).not.toContain('12:30');
+  expect(orderOff.answer).not.toMatch(/將為您送出訂單|已為您重新下單/);
+  expect(orderOff.answer).toMatch(/開啟點餐頁|品項已帶好/);
   expect(orderOff.answer).not.toBe('尚未產生確認卡，也尚未執行寫入或下單。');
   expect(orderOff.cards).toHaveLength(1);
   expect(orderOff.cards[0].args.mode).toBe('page');
@@ -125,8 +129,10 @@ it('replays failed preview turns without wiping reads or claiming a missing card
 
   expect(orderOn.cards).toHaveLength(1);
   expect(orderOn.cards[0].args.mode).toBe('order');
+  expect(orderOn.stopReason).not.toBe('UNSUPPORTED_TRANSIT');
   expect(orderOn.answer).not.toBe('尚未產生確認卡，也尚未執行寫入或下單。');
   expect(orderOn.answer).toMatch(/確認/);
+  expect(orderOn.answer).not.toMatch(/已下單|已為您重新下單/);
 
   expect(due.cards).toHaveLength(0);
   expect(due.answer).toMatch(/樹與圖/);
@@ -142,5 +148,6 @@ it('replays failed preview turns without wiping reads or claiming a missing card
 
   expect(clubs.cards).toHaveLength(0);
   expect(clubs.answer).toMatch(/攝影/);
+  expect(clubs.answer).toMatch(/\/clubs/);
   expect(clubs.answer).not.toMatch(/尚未產生確認卡|請按確認卡/);
 });

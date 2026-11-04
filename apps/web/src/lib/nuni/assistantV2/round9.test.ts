@@ -23,6 +23,9 @@ it('keeps read replies from tool results and only mentions missing cards on writ
   expect(writeIntent('我加入的社團最近有什麼消息')).toBe(false);
   expect(writeIntent('幫我點一份不辣的')).toBe(true);
   expect(foodOrderIntent('中午吃什麼？幫我點一份不辣、100 元以內的')).toBe(true);
+  expect(foodOrderIntent('點餐開放了嗎')).toBe(false);
+  expect(foodOrderIntent('幫我訂便當')).toBe(true);
+  expect(foodOrderIntent('點兩份')).toBe(true);
   const read = verifyProposalAnswer(
     '這週要交樹與圖作業與程式練習。請按下方確認卡。',
     [],

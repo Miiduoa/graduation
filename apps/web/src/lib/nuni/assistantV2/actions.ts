@@ -74,10 +74,13 @@ const routes: Record<string, string> = {
 };
 export function pageArgs(raw: unknown): Obj {
   const a = object(raw, ['page', 'entityId']);
-  if (typeof a.page !== 'string' || !Object.hasOwn(routes, a.page)) return fail();
-  if (a.entityId !== undefined && !['classroom', 'orders', 'cafeteria'].includes(a.page))
-    return fail();
-  return { page: a.page, ...(a.entityId === undefined ? {} : { entityId: id(a.entityId) }) };
+  if (typeof a.page !== 'string') return fail();
+  const page = a.page.replace(/^\//, '') === 'club' ? 'clubs' : a.page.replace(/^\//, '');
+  if (!Object.hasOwn(routes, page)) return fail();
+  if (a.entityId !== undefined && ['classroom', 'orders', 'cafeteria'].includes(page))
+    return { page, entityId: id(a.entityId) };
+  if (a.entityId !== undefined) id(a.entityId);
+  return { page };
 }
 export function pageHref(raw: unknown, schoolId: string): string {
   const a = pageArgs(raw);
