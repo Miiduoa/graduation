@@ -14,112 +14,142 @@ export function files(root: string): string[] {
 
 export type InternalLink = { file: string; line: number; target: string };
 
-// 這些既有 helper／變數只附加查詢字串，不改變頁面路徑。
-function querySuffix(node: ts.Expression): boolean {
-  return (
-    /^(schoolSearch|search|queryString)$/.test(node.getText()) ||
-    (ts.isCallExpression(node) && node.expression.getText() === 'redirectQuery') ||
-    (ts.isConditionalExpression(node) && /['"`]\?/.test(node.getText()))
-  );
-}
+export type UnknownLink = { file: string; line: number; expression: string; reason: string };
 
-export function extractLinks(source: string, file: string): InternalLink[] {
+export function extractLinkCandidates(source: string, file: string) {
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const links: InternalLink[] = [];
+  const unknown: UnknownLink[] = [];
   const navigationCall =
     /^(?:(?:router|window\.location|location)\.(?:push|replace|assign)|redirect|permanentRedirect|window\.open|appendSchoolContext|withSchoolContext|academicLabel|lmsLabel|campusServiceHref|loginHref|route|href|replaceServiceListQuery|useServiceListQuery)$/;
-  const referenced = new Set<string>();
-  const declarations = new Map<string, ts.Expression>();
-  function identifiers(node: ts.Node) {
-    if (ts.isIdentifier(node)) referenced.add(node.text);
-    ts.forEachChild(node, identifiers);
+  // 以符號查找同檔宣告，避免不同作用域的同名變數互相覆蓋。
+  const program = ts.createProgram(
+    [file],
+    { noLib: true, noResolve: true },
+    {
+      ...ts.createCompilerHost({}),
+      getSourceFile: (name) => (name === file ? tree : undefined),
+    },
+  );
+  const checker = program.getTypeChecker();
+  type Value = string | undefined;
+  const dynamic = '__dynamic__';
+  function combine(left: Value[], right: Value[]): Value[] {
+    if (left.length * right.length > 256) return [undefined];
+    return left.flatMap((a) =>
+      right.map((b) => (a === undefined || b === undefined ? undefined : a + b)),
+    );
   }
-  function collect(node: ts.Node) {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer)
-      declarations.set(node.name.text, node.initializer);
+  function resolve(node: ts.Expression, seen = new Set<ts.Node>()): Value[] {
+    if (seen.has(node)) return [undefined];
+    const next = new Set(seen).add(node);
     if (
-      ts.isJsxAttribute(node) &&
-      /^(href|to|action|returnUrl)$/.test(node.name.getText(tree)) &&
-      node.initializer
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isSatisfiesExpression(node)
     )
-      identifiers(node.initializer);
+      return resolve(node.expression, next);
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
+    if (ts.isConditionalExpression(node))
+      return [...resolve(node.whenTrue, next), ...resolve(node.whenFalse, next)];
+    if (ts.isBinaryExpression(node)) {
+      if (
+        [
+          ts.SyntaxKind.BarBarToken,
+          ts.SyntaxKind.AmpersandAmpersandToken,
+          ts.SyntaxKind.QuestionQuestionToken,
+        ].includes(node.operatorToken.kind)
+      )
+        return [...resolve(node.left, next), ...resolve(node.right, next)];
+      if (node.operatorToken.kind === ts.SyntaxKind.PlusToken)
+        return combine(resolve(node.left, next), resolve(node.right, next));
+    }
+    if (ts.isTemplateExpression(node)) {
+      return node.templateSpans.reduce<Value[]>(
+        (values, span) =>
+          combine(combine(values, resolve(span.expression, next)), [span.literal.text]),
+        [node.head.text],
+      );
+    }
+    if (ts.isIdentifier(node)) {
+      const declaration = checker.getSymbolAtLocation(node)?.valueDeclaration;
+      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer)
+        return resolve(declaration.initializer, next);
+      return [dynamic];
+    }
+    // 只有已知保留第一參數頁面路徑的 helper 才可穿透。
+    if (
+      ts.isCallExpression(node) &&
+      /^(appendSchoolContext|withSchoolContext)$/.test(node.expression.getText(tree)) &&
+      node.arguments[0]
+    )
+      return resolve(node.arguments[0], next);
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) return [dynamic];
+    return [undefined];
+  }
+  function emit(expression: ts.Expression) {
+    const line = tree.getLineAndCharacterOfPosition(expression.getStart(tree)).line + 1;
+    for (const target of new Set(resolve(expression))) {
+      // 佔位值必須獨佔路徑段；直接接在頁名後可能是查詢後綴或另一個路徑。
+      const pathname = target?.split(/[?#]/)[0];
+      if (
+        target === undefined ||
+        target.startsWith(dynamic) ||
+        pathname?.split('/').some((part) => part.includes(dynamic) && part !== dynamic)
+      ) {
+        unknown.push({
+          file,
+          line,
+          expression: expression.getText(tree),
+          reason: '無法靜態推導完整站內目標',
+        });
+      } else if (target.startsWith('/') && !target.startsWith('//')) {
+        links.push({ file, line, target });
+      }
+    }
+  }
+  function visit(node: ts.Node) {
+    if (ts.isJsxAttribute(node) && /^(href|to|action|returnUrl)$/.test(node.name.getText(tree))) {
+      if (node.initializer && ts.isStringLiteral(node.initializer)) emit(node.initializer);
+      else if (
+        node.initializer &&
+        ts.isJsxExpression(node.initializer) &&
+        node.initializer.expression
+      )
+        emit(node.initializer.expression);
+    }
+    if (
+      ts.isPropertyAssignment(node) &&
+      /^(.*Href|href|path|route|to)$/.test(node.name.getText(tree).replace(/['"]/g, ''))
+    )
+      emit(node.initializer);
     if (
       ts.isCallExpression(node) &&
       navigationCall.test(node.expression.getText(tree)) &&
       node.arguments[0]
     )
-      identifiers(node.arguments[0]);
-    ts.forEachChild(node, collect);
-  }
-  collect(tree);
-  // 追溯同檔常數與中間變數；不執行產品程式碼。
-  let previous = -1;
-  while (previous !== referenced.size) {
-    previous = referenced.size;
-    for (const name of referenced) {
-      const initializer = declarations.get(name);
-      if (initializer) identifiers(initializer);
-    }
-  }
-  function visit(node: ts.Node) {
-    let target: string | undefined;
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) target = node.text;
-    if (ts.isTemplateExpression(node)) {
-      target =
-        node.head.text +
-        node.templateSpans
-          .map(
-            (span) => `${querySuffix(span.expression) ? '?' : '__dynamic__'}${span.literal.text}`,
-          )
-          .join('');
-    }
-    if (target?.startsWith('/') && !target.startsWith('//')) {
-      let navigation = false;
-      for (let parent: ts.Node | undefined = node.parent; parent; parent = parent.parent) {
-        if (
-          ts.isJsxAttribute(parent) &&
-          /^(href|to|action|returnUrl)$/.test(parent.name.getText(tree))
-        )
-          navigation = true;
-        if (
-          ts.isPropertyAssignment(parent) &&
-          /^(.*Href|href|path|route|to)$/.test(parent.name.getText(tree).replace(/['"]/g, ''))
-        )
-          navigation = true;
-        if (
-          ts.isCallExpression(parent) &&
-          parent.arguments[0] === node &&
-          navigationCall.test(parent.expression.getText(tree))
-        )
-          navigation = true;
-        if (
-          ts.isVariableDeclaration(parent) &&
-          (/(?:href|path|route|url)$/i.test(parent.name.getText(tree)) ||
-            referenced.has(parent.name.getText(tree)))
-        )
-          navigation = true;
-        if (ts.isBinaryExpression(parent) && /location\.href$/.test(parent.left.getText(tree)))
-          navigation = true;
-        if (ts.isReturnStatement(parent) && /(?:link|navigation|destination)/i.test(file))
-          navigation = true;
-        if (ts.isStatement(parent)) break;
-      }
-      if (navigation)
-        links.push({
-          file,
-          line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1,
-          target,
-        });
-    }
-    if (ts.isTemplateExpression(node)) {
-      // 插值屬於外層目標的資料，避免把 returnUrl 或外部 URL 片段當成另一個站內入口。
-      return;
-    }
-    // 模板片段由外層模板統一處理。
+      emit(node.arguments[0]);
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      /^(?:window\.)?location\.href$/.test(node.left.getText(tree))
+    )
+      emit(node.right);
+    if (
+      ts.isReturnStatement(node) &&
+      node.expression &&
+      /(?:link|navigation|destination)/i.test(file)
+    )
+      emit(node.expression);
     ts.forEachChild(node, visit);
   }
   visit(tree);
-  return links;
+  return { links, unknown };
+}
+
+export function extractLinks(source: string, file: string): InternalLink[] {
+  return extractLinkCandidates(source, file).links;
 }
 
 const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

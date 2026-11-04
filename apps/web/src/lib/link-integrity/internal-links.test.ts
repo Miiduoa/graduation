@@ -5,27 +5,11 @@ import { describe, expect, it } from 'vitest';
 import nextConfig from '../../../next.config';
 import { STUDENT_ACADEMIC_SECTIONS } from '@campus/shared/src/academicSections';
 import { legacyRewrites } from '../legacy-routing';
-import { appRoute, extractLinks, files, matchesRoute } from './scan';
+import { appRoute, extractLinkCandidates, extractLinks, files, matchesRoute } from './scan';
 
 const root = path.resolve(import.meta.dirname, '../..');
 // 每個例外都限制來源與目標；新增來源也必須重新審查。
-const allowed: { file: string; target: string; reason: string }[] = [
-  {
-    file: 'app/account-deletion/status/deletionStatus.ts',
-    target: '/v1/public/privacy/deletion-status',
-    reason: '外部 Nuni API 的相對端點，呼叫時組合 NUNI_API_ORIGIN，並非本站頁面。',
-  },
-  {
-    file: 'app/account-deletion/status/deletionStatus.ts',
-    target: '/v1/public/privacy/deletion-status/revoke',
-    reason: '外部 Nuni API 的撤銷端點，呼叫時組合 NUNI_API_ORIGIN，並非本站頁面。',
-  },
-  {
-    file: 'lib/transit-transfer.ts',
-    target: '/api/maas/routing',
-    reason: 'TDX MaaS 旅運規劃端點，交由交通代理組合外部來源，並非本站頁面。',
-  },
-];
+const allowed: { file: string; target: string; reason: string }[] = [];
 
 export async function audit() {
   const routes = files(path.join(root, 'app'))
@@ -33,14 +17,16 @@ export async function audit() {
     .map((file) => appRoute(path.relative(path.join(root, 'app'), file)));
   const redirects = await nextConfig.redirects!();
   const legacy = legacyRewrites(true);
-  const links = files(root)
+  const candidates = files(root)
     .filter(
       (file) =>
         /\.[jt]sx?$/.test(file) &&
         !/\.(test|spec)\./.test(file) &&
         !file.includes('/link-integrity/'),
     )
-    .flatMap((file) => extractLinks(fs.readFileSync(file, 'utf8'), path.relative(root, file)));
+    .map((file) => extractLinkCandidates(fs.readFileSync(file, 'utf8'), path.relative(root, file)));
+  const links = candidates.flatMap((item) => item.links);
+  const unknown = candidates.flatMap((item) => item.unknown);
   links.push(
     ...STUDENT_ACADEMIC_SECTIONS.map((section) => ({
       file: 'lib/academicSections.ts',
@@ -65,12 +51,12 @@ export async function audit() {
         fs.existsSync(path.join(root, '../public', target.split(/[?#]/)[0])))
     );
   }
-  return { links, routes, broken: links.filter((link) => !resolves(link.target)) };
+  return { links, unknown, routes, broken: links.filter((link) => !resolves(link.target)) };
 }
 
 describe('站內連結完整性', () => {
   it('所有導航連結都有頁面、端點、靜態檔或已知導向', async () => {
-    const { broken, links, routes } = await audit();
+    const { broken, links, unknown, routes } = await audit();
     if (process.env.LINK_INTEGRITY_REPORT === '1') {
       const roles = ['學生', '老師', '學校管理者', '店家', '營運'];
       const roleOf = (file: string, target: string) => {
@@ -97,7 +83,7 @@ describe('站內連結完整性', () => {
       });
       fs.writeFileSync(
         path.join(root, '../../../docs/internal-link-integrity.md'),
-        `# 站內連結盤點\n\n掃描 apps/web/src 的正式程式碼，共 ${links.length} 筆導航路徑、${routes.length} 個頁面／端點；未列例外的不存在路由 ${broken.filter((link) => !allowed.some((item) => item.file === link.file && item.target === link.target)).length} 筆。\n\n按來源及目標推定主要角色，共用入口歸學生；這不是權限驗證。包含共用課務設定 webPath、next.config redirects、啟用時的 legacy rewrites 與 public 靜態檔。legacy 端點僅代表既有路由契約，不保證未啟用 legacy 時可用。\n\n本次沒有能確認的錯字或改名斷鏈，因此沒有修改產品入口。外部端點以精確來源與目標列例外，均附理由；沒有以允許清單保留不存在的產品頁面。\n\n靜態分析涵蓋 href、設定路徑、路徑變數與導航呼叫；動態段以佔位值比對，已知查詢後綴只檢查頁面。執行期 API／使用者資料提供的完整網址、任意跨檔函式計算結果不在靜態證明範圍，亦未驗證每筆動態資源存在或角色授權。\n\n重建：\`EXPO_NO_DOTENV=1 DOTENV_CONFIG_PATH=/dev/null LINK_INTEGRITY_REPORT=1 pnpm --filter web exec vitest run src/lib/link-integrity/internal-links.test.ts\`\n\n${sections.join('\n\n')}\n`,
+        `# 站內連結盤點\n\n掃描 apps/web/src 的正式程式碼，共 ${links.length} 筆導航路徑、${routes.length} 個頁面／端點；未列例外的不存在路由 ${broken.filter((link) => !allowed.some((item) => item.file === link.file && item.target === link.target)).length} 筆。\n\n按來源及目標推定主要角色，共用入口歸學生；這不是權限驗證。包含共用課務設定 webPath、next.config redirects、啟用時的 legacy rewrites 與 public 靜態檔。legacy 端點僅代表既有路由契約，不保證未啟用 legacy 時可用。\n\n本次沒有能確認的錯字或改名斷鏈，因此沒有修改產品入口。僅因變數名稱含 path／url 的非導航常數不再納入；目前沒有需要保留的外部端點例外。\n\n靜態分析從 href、明確設定欄位及導航呼叫的完整表達式遞迴解析條件式、邏輯式、模板、拼接與同作用域變數；動態值獨佔路徑段時以佔位值比對。未知計算、循環引用與無法判定的動態後綴另列未知，不判斷斷鏈。執行期 API／使用者資料提供的完整網址、任意跨檔函式計算結果不在靜態證明範圍，亦未驗證每筆動態資源存在或角色授權。\n\n重建：\`EXPO_NO_DOTENV=1 DOTENV_CONFIG_PATH=/dev/null LINK_INTEGRITY_REPORT=1 pnpm --filter web exec vitest run src/lib/link-integrity/internal-links.test.ts\`\n\n${unknown.length} 筆目標無法靜態推導，列為未知、不判斷斷鏈。\n\n| 來源 | 結果 |\n| --- | --- |\n${unknown.map((item) => `| ${item.file}:${item.line} | 未知：${item.reason} |`).join('\n')}\n\n${sections.join('\n\n')}\n`,
       );
     }
     expect(links.length).toBeGreaterThan(100);
@@ -114,6 +100,62 @@ describe('站內連結完整性', () => {
         `已失效的例外：${item.file} ${item.target}`,
       ).toBe(true);
     }
+  });
+  it('遞迴解析導航呼叫、href、邏輯分支與動態拼接', () => {
+    const { links, unknown } = extractLinkCandidates(
+      `
+      router.push(ok ? '/missing-a' : '/missing-b');
+      router.push('/course/' + id);
+      const href = '/course/' + id; const alias = href; router.push(alias);
+      const view = <Link href={ready && ('/course/' + id)}/>;
+      router.replace(fallback || '/fallback');
+      redirect(destination ?? '/default');
+      router.push(appendSchoolContext('/missing', schoolId));
+      const url = \`/course/\${ok ? '?tab=a' : '/missing'}\`; router.push(url);
+    `,
+      'fixture.tsx',
+    );
+    expect(links.map((link) => link.target)).toEqual([
+      '/missing-a',
+      '/missing-b',
+      '/course/__dynamic__',
+      '/course/__dynamic__',
+      '/course/__dynamic__',
+      '/fallback',
+      '/default',
+      '/missing',
+      '/missing',
+      '/course/?tab=a',
+      '/course//missing',
+    ]);
+    expect(unknown).toHaveLength(3);
+    expect(matchesRoute('/course/__dynamic__', '/course/[id]')).toBe(true);
+  });
+  it('只解析導航資料流或設定欄位，並遵守變數作用域', () => {
+    expect(
+      extractLinks("const path = '/tmp/export.csv'; fs.writeFileSync(path, data);", 'fixture.tsx'),
+    ).toEqual([]);
+    expect(
+      extractLinks(
+        `const destination = '/missing'; router.push(destination);
+      function unused() { const destination = '/classroom'; }
+      function local(destination: string) { router.push(destination); }
+    `,
+        'fixture.tsx',
+      ).map((link) => link.target),
+    ).toEqual(['/missing']);
+  });
+  it('未知計算與循環不會被當成字串片段或斷鏈', () => {
+    const result = extractLinkCandidates(
+      `
+      router.push('/course/' + computeId());
+      const a = b; const b = a; router.push(a);
+      const view = <Link href={computeUrl('/fragment')}/>;
+    `,
+      'fixture.tsx',
+    );
+    expect(result.links).toEqual([]);
+    expect(result.unknown).toHaveLength(3);
   });
   it('涵蓋 JSX、設定、呼叫、動態模板與條件分支', () => {
     const links = extractLinks(
