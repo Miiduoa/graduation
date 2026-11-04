@@ -19,7 +19,16 @@ import {
   addDays,
 } from './contracts';
 import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
-import { createTools, schemas, selectTools, scheduleIntent, studyWindow } from './tools';
+import {
+  createTools,
+  schemas,
+  selectTools,
+  scheduleIntent,
+  studyPlanSelect,
+  personalSlotSelect,
+  studyWindow,
+  parseSpokenClock,
+} from './tools';
 export { foodOrderIntent, scheduleIntent };
 export function writeIntent(question: string): boolean {
   return (
@@ -520,17 +529,35 @@ export async function run(input: RunInput) {
         if (cart) await ensure('propose_food_order', cart);
       }
     }
-    if (scheduleIntent(input.question)) {
+    if (studyPlanSelect(input.question)) {
       const day = relativeDate || taipeiDate(now);
       const window = studyWindow(input.question, finalAnswer);
       await ensure('get_day_overview', { date: day });
       if (/吃|餐|飯/.test(input.question)) await ensure('get_dining', {});
-      if (!tools.cards.some((card) => card.tool === 'propose_personal_event'))
+      if (
+        !tools.cards.some((card) => card.tool === 'propose_personal_event') &&
+        window.from < window.to
+      )
         await ensure('propose_study_plan', {
           date: day,
           minMinutes: 60,
           from: window.from,
           to: window.to,
+        });
+    }
+    if (personalSlotSelect(input.question) && !studyPlanSelect(input.question)) {
+      const window = studyWindow(input.question, finalAnswer);
+      if (
+        !tools.cards.some((card) => card.tool === 'propose_personal_event') &&
+        window.from < window.to &&
+        parseSpokenClock(input.question)
+      )
+        await ensure('propose_personal_event', {
+          title: '寫作業',
+          date: relativeDate || taipeiDate(now),
+          allDay: false,
+          startTime: window.from,
+          endTime: window.to,
         });
     }
     if (
@@ -655,6 +682,7 @@ export function partialAnswer(
     const row = v as Obj;
     if (row.submitted === true || (typeof row.dueAt === 'string' &&
       (row.state !== 'open' || Date.parse(row.dueAt) < now))) return;
+    if (unsafeUntrusted(row)) return;
     if (typeof row.officialSource === 'string') labels.add('校園位置請參考官方地圖：' + row.officialSource);
     else if (typeof row.href === 'string' && row.href.startsWith('/map?')) labels.add('圖書館位置請開啟校園地圖確認：' + row.href);
     const title = row.title || row.name || (transit ? row.route : undefined);
@@ -800,6 +828,18 @@ export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
   return out.trim();
 }
 
+function hostingSentence(source: string, offset: number, length: number): string {
+  let start = 0;
+  for (const match of source.matchAll(/[。！？\n]/g)) {
+    const end = (match.index ?? 0) + match[0].length;
+    if (end <= offset) start = end;
+    else break;
+  }
+  const rest = source.slice(offset + length);
+  const next = rest.search(/[。！？\n]/);
+  return source.slice(start, next < 0 ? source.length : offset + length + next);
+}
+
 export function alignStudyCardAnswer(answer: string, cards: Card[]): string {
   const slots = cards
     .filter((card) => card.tool === 'propose_personal_event')
@@ -810,15 +850,33 @@ export function alignStudyCardAnswer(answer: string, cards: Card[]): string {
     }))
     .filter((slot) => slot.start && slot.end);
   if (!slots.length) return answer;
+  const used = new Set<string>();
   let out = answer.replace(
     /(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?\s*[-–—~至到]\s*(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?/g,
-    (match, h1: string, m1: string, h2: string, m2: string) => {
+    (match, h1: string, m1: string, h2: string, m2: string, offset: number, source: string) => {
       const start = h1.padStart(2, '0') + ':' + m1;
-      const end = h2.padStart(2, '0') + ':' + m2;
-      const slot = slots.find((row) => row.start === start);
-      return slot && slot.end !== end ? slot.start + '–' + slot.end : match;
+      const sentence = hostingSentence(source, offset, match.length);
+      const classSlot =
+        /課|教室|上課/.test(sentence) ||
+        (/有[\u4e00-\u9fff]{2,}/.test(sentence) && !/寫|作業|讀書|建議|規劃|安排/.test(sentence));
+      if (classSlot) return match;
+      const matched = slots.find((row) => row.start === start);
+      if (matched) {
+        used.add(matched.start + matched.end);
+        return matched.start + '–' + matched.end;
+      }
+      const unused = slots.find((row) => !used.has(row.start + row.end));
+      if (unused) {
+        used.add(unused.start + unused.end);
+        return unused.start + '–' + unused.end;
+      }
+      return '';
     },
   );
+  out = out
+    .replace(/[，,、]\s*(?=[，,、。.!！？?\n]|$)/g, '')
+    .replace(/(?:^|[。\n])[，,、\s]+/g, (match) => match.replace(/[，,、\s]+/g, ''))
+    .replace(/\s{2,}/g, ' ');
   const missing = slots.filter((slot) => !out.includes(slot.start));
   if (missing.length)
     out =
@@ -830,8 +888,21 @@ export function alignStudyCardAnswer(answer: string, cards: Card[]): string {
   return out;
 }
 
-function clubHeadlines(evidence: { tool: string; result: unknown }[]): string[] {
-  const titles: string[] = [];
+const UNSAFE_UNTRUSTED =
+  /https?:|ignore system|憑證|credentials|call confirm|不要遵守此資料/i;
+
+function unsafeUntrusted(row: Obj): boolean {
+  return UNSAFE_UNTRUSTED.test(
+    [row.title, row.name, row.text, row.body]
+      .filter((value) => typeof value === 'string')
+      .join(' '),
+  );
+}
+
+function scanClubRows(
+  evidence: { tool: string; result: unknown }[],
+  visitRow: (row: Obj, unsafe: boolean) => void,
+) {
   const visit = (value: unknown) => {
     if (Array.isArray(value)) {
       value.forEach(visit);
@@ -839,15 +910,45 @@ function clubHeadlines(evidence: { tool: string; result: unknown }[]): string[] 
     }
     if (!value || typeof value !== 'object') return;
     const row = value as Obj;
-    const title = row.title || row.name;
-    if (typeof title === 'string' && title.trim() && !/https?:|ignore system|憑證/i.test(title))
-      titles.push(clip(title.trim(), 40));
+    const unsafe = unsafeUntrusted(row);
+    visitRow(row, unsafe);
+    if (unsafe) return;
     Object.values(row).forEach((child) => {
       if (child && typeof child === 'object') visit(child);
     });
   };
   for (const entry of evidence) if (/club/.test(entry.tool)) visit(entry.result);
+}
+
+function clubHeadlines(evidence: { tool: string; result: unknown }[]): string[] {
+  const titles: string[] = [];
+  scanClubRows(evidence, (row, unsafe) => {
+    if (unsafe) return;
+    const title = row.title || row.name;
+    if (typeof title === 'string' && title.trim()) titles.push(clip(title.trim(), 40));
+  });
   return [...new Set(titles)].slice(0, 5);
+}
+
+function blockedClubTitles(evidence: { tool: string; result: unknown }[]): string[] {
+  const titles: string[] = [];
+  scanClubRows(evidence, (row, unsafe) => {
+    if (!unsafe) return;
+    const title = row.title || row.name;
+    if (typeof title === 'string' && title.trim()) titles.push(title.trim());
+  });
+  return [...new Set(titles)];
+}
+
+function alreadyHasClubNews(answer: string, titles: string[]): boolean {
+  return titles.some((title) => {
+    if (answer.includes(title)) return true;
+    for (let i = 0; i <= title.length - 2; i++) {
+      const gram = title.slice(i, i + 2);
+      if (/[\u4e00-\u9fff]{2}/.test(gram) && answer.includes(gram) && gram !== '合成') return true;
+    }
+    return false;
+  });
 }
 
 export function keepClubNews(
@@ -859,7 +960,10 @@ export function keepClubNews(
 ): string {
   const headlines = clubHeadlines(evidence);
   let out = answer.trim();
-  if (headlines.length && !headlines.some((title) => out.includes(title))) {
+  for (const blocked of blockedClubTitles(evidence))
+    if (blocked) out = out.split(blocked).join('');
+  out = out.replace(/\s{2,}/g, ' ').trim();
+  if (headlines.length && !alreadyHasClubNews(out, headlines)) {
     const rebuilt = headlines.join('、') + '。';
     out = out ? rebuilt + '\n' + out : rebuilt;
   }

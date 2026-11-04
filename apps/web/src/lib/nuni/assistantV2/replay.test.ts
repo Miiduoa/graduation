@@ -195,6 +195,24 @@ const slotAndClubFailures: ReplayCase[] = [
     ],
     final: '請按確認卡。',
   },
+  {
+    ordering: false,
+    question: '今晚八點幫我留一小時寫',
+    tools: [
+      { name: 'get_course_work', args: { workspaceId: 'course-a' } },
+      {
+        name: 'propose_personal_event',
+        args: {
+          title: '寫作業：樹與圖作業',
+          date: '2026-11-04',
+          allDay: false,
+          startTime: '08:00',
+          endTime: '09:00',
+        },
+      },
+    ],
+    final: '今晚幫你留一小時寫作業。請按確認卡。',
+  },
 ];
 
 it('replays failed preview turns without wiping reads or claiming a missing card', async () => {
@@ -273,7 +291,7 @@ it('replays groq copy and schedule misses with server cards and fixed next-step 
 
 it('replays afternoon study slots, skipped cards when writes are off, and club news body', async () => {
   const results = await Promise.all(slotAndClubFailures.map(replay));
-  const [afternoon, writesOff, clubNews, clubClaimOnly] = results;
+  const [afternoon, writesOff, clubNews, clubClaimOnly, tonight] = results;
 
   expect(afternoon.steps.some((step) => step.name === 'propose_study_plan' && step.summary === 'INVALID_INPUT')).toBe(
     false,
@@ -303,8 +321,17 @@ it('replays afternoon study slots, skipped cards when writes are off, and club n
   expect(clubNews.answer).toMatch(/\/clubs/);
   expect(clubNews.answer).not.toBe('社團頁：/clubs');
   expect(clubNews.answer).not.toMatch(/尚未產生確認卡|請按確認卡/);
+  expect(clubNews.answer).not.toContain('惡意合成貼文');
+  expect(clubNews.answer).not.toMatch(/^週五攝影散步/);
 
   expect(clubClaimOnly.answer).toMatch(/攝影|週五/);
   expect(clubClaimOnly.answer).toMatch(/\/clubs/);
   expect(clubClaimOnly.answer).not.toBe('社團頁：/clubs');
+  expect(clubClaimOnly.answer).not.toContain('惡意合成貼文');
+
+  expect(tonight.cards).toHaveLength(1);
+  expect(tonight.cards[0].tool).toBe('propose_personal_event');
+  expect(tonight.cards[0].args.startTime).toBe('20:00');
+  expect(tonight.cards[0].args.endTime).toBe('21:00');
+  expect(tonight.answer).toContain('20:00');
 });
