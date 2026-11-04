@@ -112,6 +112,51 @@ const failures: ReplayCase[] = [
   },
 ];
 
+const copyFailures: ReplayCase[] = [
+  {
+    ordering: false,
+    question: '中午吃什麼？幫我點一份不辣、100 元以內的',
+    tools: [
+      { name: 'get_food_locations', args: { tenantId: 'fixture-realm' } },
+      { name: 'get_food_menu', args: { locationId: 'dining-a', tenantId: 'fixture-realm' } },
+    ],
+    final: '蔬菜便當 80 元。請按下方確認卡確認並完成付款，以完成訂單。',
+  },
+  {
+    ordering: true,
+    question: '中午吃什麼？幫我點一份不辣、100 元以內的',
+    tools: [
+      { name: 'get_food_locations', args: { tenantId: 'fixture-realm' } },
+      { name: 'get_food_menu', args: { locationId: 'dining-a', tenantId: 'fixture-realm' } },
+    ],
+    final: '已為您重新下單，蔬菜便當處理中。',
+  },
+  {
+    ordering: false,
+    question: '再點一次上一單',
+    tools: [{ name: 'reorder_last_food_order', args: {} }],
+    final: '請確認並完成付款，以完成訂單。',
+  },
+  {
+    ordering: true,
+    question: '再點一次上一單',
+    tools: [{ name: 'reorder_last_food_order', args: {} }],
+    final: '已為您重新下單。',
+  },
+  {
+    ordering: false,
+    question: '幫我排寫作業的時間',
+    tools: [],
+    final: '下午可以寫作業。請按確認卡。尚未產生確認卡，也尚未執行寫入或下單。尚未產生確認卡，也尚未執行寫入或下單。',
+  },
+  {
+    ordering: false,
+    question: '幫我安排讀書',
+    tools: [],
+    final: '今天晚上再讀。',
+  },
+];
+
 it('replays failed preview turns without wiping reads or claiming a missing card', async () => {
   const results = await Promise.all(failures.map(replay));
   const [orderOff, orderOn, due, reorder, clubs] = results;
@@ -150,4 +195,38 @@ it('replays failed preview turns without wiping reads or claiming a missing card
   expect(clubs.answer).toMatch(/攝影/);
   expect(clubs.answer).toMatch(/\/clubs/);
   expect(clubs.answer).not.toMatch(/尚未產生確認卡|請按確認卡/);
+});
+
+it('replays groq copy and schedule misses with server cards and fixed next-step text', async () => {
+  const results = await Promise.all(copyFailures.map(replay));
+  const [pagePay, orderReorderCopy, pageLast, orderLast, scheduleText, arrangeText] = results;
+
+  expect(pagePay.cards[0].args.mode).toBe('page');
+  expect(pagePay.answer).toContain('蔬菜便當');
+  expect(pagePay.answer).toContain('按確認後會開啟點餐頁，品項已帶好');
+  expect(pagePay.answer).not.toMatch(/付款|完成訂單|下單|送出訂單|訂單已送出|正在幫你下單/);
+
+  expect(orderReorderCopy.cards[0].args.mode).toBe('order');
+  expect(orderReorderCopy.answer).toContain('蔬菜便當');
+  expect(orderReorderCopy.answer).toContain('按確認才會送出訂單');
+  expect(orderReorderCopy.answer).not.toMatch(/已為您下單|已重新下單|訂單已送出|已為您重新下單/);
+
+  expect(pageLast.cards[0].args.mode).toBe('page');
+  expect(pageLast.answer).toContain('按確認後會開啟點餐頁，品項已帶好');
+  expect(pageLast.answer).not.toMatch(/付款|完成訂單|下單|送出訂單|訂單已送出|正在幫你下單/);
+  expect(pageLast.answer).toMatch(/蔬菜便當|11:10|80/);
+
+  expect(orderLast.cards[0].args.mode).toBe('order');
+  expect(orderLast.answer).toContain('按確認才會送出訂單');
+  expect(orderLast.answer).not.toMatch(/已為您下單|已重新下單|訂單已送出|已為您重新下單/);
+  expect(orderLast.answer).toMatch(/蔬菜便當|11:10|80/);
+
+  expect(scheduleText.cards.length).toBeGreaterThan(0);
+  expect(scheduleText.cards.every((card) => card.tool === 'propose_personal_event')).toBe(true);
+  expect(scheduleText.answer.match(/尚未產生確認卡，也尚未執行寫入或下單/g) || []).toHaveLength(0);
+  expect(scheduleText.answer).toMatch(/確認/);
+
+  expect(arrangeText.cards.length).toBeGreaterThan(0);
+  expect(arrangeText.cards.every((card) => card.tool === 'propose_personal_event')).toBe(true);
+  expect(arrangeText.answer).toMatch(/依已查資料規劃如下|確認/);
 });

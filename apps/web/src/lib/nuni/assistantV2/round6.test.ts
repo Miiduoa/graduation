@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { bytes, type ModelInput } from './contracts';
 import { providerError } from './groq';
-import { partialAnswer, run, verifyProposalAnswer } from './runner';
+import { partialAnswer, run, scheduleIntent, verifyProposalAnswer } from './runner';
 import { createTools } from './tools';
 import { fakeModel, fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret, questions } from './fixtures';
 
@@ -33,6 +33,11 @@ it('corrects proposal claims and requires confirmation without losing unrelated 
   await tools.call('propose_open_page', { page: 'bus' });
   expect(verifyProposalAnswer('明天有英文課。✅ 已為您預留。', tools.cards))
     .toBe('明天有英文課。請核對並按下方確認卡；確認前尚未執行。');
+  expect(scheduleIntent('幫我排寫作業的時間')).toBe(true);
+  expect(scheduleIntent('幫我安排讀書')).toBe(true);
+  expect(
+    verifyProposalAnswer('已幫你安排好。請按確認卡。', [], '幫我排寫作業的時間'),
+  ).toBe('尚未產生確認卡，也尚未執行寫入或下單。');
 });
 it('normalizes only visible realm and previously listed location ids', async () => {
   const tools = createTools(fixtureAdapter().adapter, binding, secret, now, true);

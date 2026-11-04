@@ -103,7 +103,32 @@ it('rewrites pickup time and amount from the food card and page-mode copy', () =
       expect(answer).not.toContain('99 元');
       expect(answer).not.toMatch(/送出訂單|已為您重新下單/);
       expect(answer).toMatch(/開啟點餐頁|品項已帶好/);
+      const paid = alignFoodCardAnswer(
+        '蔬菜便當可取。請按下方確認卡確認並完成付款，以完成訂單。',
+        tools.cards,
+      );
+      expect(paid).toContain('蔬菜便當');
+      expect(paid).toContain('按確認後會開啟點餐頁，品項已帶好');
+      expect(paid).not.toMatch(/付款|完成訂單|下單|送出訂單|訂單已送出|正在幫你下單/);
+      expect(paid).not.toContain('確認並完成付款');
+      expect(paid).not.toContain('以完成訂單');
     });
+});
+
+it('order-mode copy drops completed-order sentences and uses the server next-step', async () => {
+  const tools = createTools(fixtureAdapter(true).adapter, binding, secret, now, true);
+  await tools.call('get_food_locations', {});
+  await tools.call('propose_food_order', {
+    tenantId: 'fixture-realm',
+    locationId: 'dining-a',
+    requestedPickupAt: pickup,
+    items: [{ menuItemId: 'veggie', quantity: 1, selectedOptionIds: ['regular'] }],
+  });
+  const answer = alignFoodCardAnswer('已為您重新下單，請稍候。蔬菜便當準備中。', tools.cards);
+  expect(answer).toContain('蔬菜便當');
+  expect(answer).toContain('按確認才會送出訂單');
+  expect(answer).not.toMatch(/已為您下單|已重新下單|訂單已送出|已為您重新下單/);
+  expect(answer).toContain('11:10');
 });
 
 it('page-mode model replies keep card pickup and never claim the order was sent', async () => {
