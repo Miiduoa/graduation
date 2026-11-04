@@ -48,14 +48,14 @@ export async function modules() {
 }
 export const fixtureHandle = 'ps_' + 't'.repeat(43);
 export const fixtureSecret = 'local-public-assistant-fixture-only-'.repeat(2);
-export async function createFixture({ enabled = true, production = false } = {}) {
+export async function createFixture({ enabled = true, production = false, logStream, provider = 'fake' } = {}) {
   const mod = await modules();
   process.env.CAMPUS_ASSISTANT_ENABLED = String(enabled);
-  process.env.CAMPUS_ASSISTANT_PROVIDER = 'fake';
+  process.env.CAMPUS_ASSISTANT_PROVIDER = provider;
   process.env.NODE_ENV = production ? 'production' : 'test';
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: logStream ? { level: 'info', stream: logStream } : false, logController: new Fastify.LogController({ disableRequestLogging: true }) });
   await app.register(rateLimit, { global: false, hook: 'preHandler' });
-  const state = { active: true, resolutions: 0 };
+  const state = { active: true, resolutions: 0, resolverError: null };
   app.addHook('preHandler', async (request) => {
     if (!mod.isAssistantRoute(request.method, request.url.split('?')[0])) {
       const error = new Error('guard');
@@ -71,6 +71,7 @@ export async function createFixture({ enabled = true, production = false } = {})
     {
       async resolveSession(auth) {
         state.resolutions++;
+        if (state.resolverError) throw state.resolverError;
         if (!state.active || auth !== 'Platform ' + fixtureHandle) {
           const e = new Error('invalid session');
           e.code = 'INVALID_SESSION';

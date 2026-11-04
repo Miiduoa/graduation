@@ -259,3 +259,44 @@ test('Groq errors do not retry; fixed destination and output schema', async () =
     delete process.env.GROQ_API_KEY;
   }
 });
+test('production logger excludes private input across success and failure paths', async () => {
+  const { Writable } = await import('node:stream');
+  const logs = [];
+  const stream = new Writable({ write(chunk, _encoding, done) { logs.push(chunk.toString()); done(); } });
+  const originalFetch = globalThis.fetch;
+  process.env.GROQ_API_KEY = 'synthetic-provider-key';
+  const privateText = '王小明 S123456789 private@example.test 原始問題獨特標記';
+  const requestHeaders = { ...headers, 'content-type': 'application/json' };
+  const { app, state } = await createFixture({ production: true, provider: 'groq', logStream: stream });
+  try {
+    const preview = await app.inject({ method: 'POST', url: prefix + 'preview', headers: requestHeaders,
+      payload: { schoolId: 'pu', question: privateText + ' 圖書館' } });
+    assert.equal(preview.statusCode, 200);
+    const invalid = await app.inject({ method: 'POST', url: prefix + 'preview', headers: requestHeaders,
+      payload: '{"question":"' + privateText + '" broken}' });
+    assert.equal(invalid.statusCode, 400);
+    const oversized = await app.inject({ method: 'POST', url: prefix + 'preview', headers: requestHeaders,
+      payload: JSON.stringify({ question: privateText.repeat(1000) }) });
+    assert.equal(oversized.statusCode, 413);
+    globalThis.fetch = async () => { throw new Error(privateText + ' authorization Bearer synthetic-provider-key'); };
+    const p = preview.json();
+    const failed = await app.inject({ method: 'POST', url: prefix + 'ask', headers: requestHeaders,
+      payload: { schoolId: 'pu', intent: p.intent, confirmation: p.confirmation, consent: true } });
+    assert.equal(failed.statusCode, 503);
+    state.resolverError = new Error(privateText + ' authorization ' + requestHeaders.authorization);
+    const resolver = await app.inject({ url: prefix + 'capability', headers });
+    assert.equal(resolver.statusCode, 503);
+    await app.close();
+    const captured = logs.join('');
+    assert.ok(logs.length >= 3);
+    assert.match(captured, /Assistant request failed/);
+    assert.doesNotMatch(captured, /王小明|S123456789|private@example|原始問題獨特標記|authorization|Bearer|synthetic-provider-key|question/i);
+    assert.ok(!captured.includes(fixtureHandle));
+    for (const line of captured.trim().split('\n')) assert.ok(JSON.parse(line).level >= 30);
+  } finally {
+    await app.close();
+    globalThis.fetch = originalFetch;
+    delete process.env.GROQ_API_KEY;
+    process.env.NODE_ENV = 'test';
+  }
+});

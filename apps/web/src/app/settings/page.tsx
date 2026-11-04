@@ -34,6 +34,7 @@ import { deleteTodaySenseModelCache } from '@/lib/todaySenseAgentRuntime';
 
 import { SiteShell } from '@/components/SiteShell';
 import { NuniAccountPanel } from '@/components/NuniAccountPanel';
+import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { useSignInOptions } from '@/lib/signInOptions';
@@ -217,6 +218,7 @@ function SettingsContent({
 }) {
   const { signOutUser } = useAuth();
   const nuni = useNuniSession();
+  const assistantEnabled = useAssistantEnabled();
   const schoolLoginReady = useSignInOptions().studentId;
   const mounted = useRef(true);
   const profileLock = useRef(false);
@@ -822,7 +824,7 @@ function SettingsContent({
         <SectionHeading title="助理權限">
           控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。涵蓋需確認的服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列。
         </SectionHeading>
-        {nuni.session && <p role="note">nuni 校園助理目前僅提供公開資訊，尚未支援代辦寫入；下方設定不會開啟 nuni 助理寫入功能。</p>}
+        {assistantEnabled && nuni.session && <p role="note">nuni 校園助理目前僅提供公開資訊，尚未支援代辦寫入；下方設定不會開啟 nuni 助理寫入功能。</p>}
         {!user && (
           <div className={styles.notice}>
             <h3>登入後設定助理權限</h3>

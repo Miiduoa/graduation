@@ -22,7 +22,7 @@ API 每個請求重新呼叫既有 `PlatformAccountService.resolveSession`。精
 
 ## 開關與 provider
 
-Web 與 API 分別要求 `CAMPUS_ASSISTANT_ENABLED=true`；缺值或其他值均關閉。Web 同時沿用既有 nuni backend gate。關閉時 BFF 回 404、nuni UI 顯示未啟用。既有 Firebase 頁面保留為獨立元件，不作 nuni 失敗後的 fallback。
+Web 與 API 分別要求 `CAMPUS_ASSISTANT_ENABLED=true`；缺值或其他值均關閉。Web 同時沿用既有 nuni backend gate。僅兩個 gate 同時成立才掛載新 UI。助理旗標缺值、false 或 nuni gate 關閉時，`/ai-assistant` 完整使用原 Legacy 頁（含登入、q／courseId、草稿及既有對話），不發 assistant capability；設定頁也不顯示新增的 nuni 助理說明。關閉時 assistant BFF 回 404。這是旗標選路；已啟用的新助理失敗時不 fallback。
 
 API 的 `CAMPUS_ASSISTANT_PROVIDER` 預設 groq；可選 fake。production 選 fake 會拒絕啟動該候選。fake 無網路、無金鑰，UI 明示模擬。
 

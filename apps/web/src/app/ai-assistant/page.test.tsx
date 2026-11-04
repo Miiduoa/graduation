@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CampusDraftProvider, scopeStorageKey } from '@/components/CampusDraftProvider';
-import AssistantPage from './LegacyAssistant';
+import AssistantPage from './page';
 import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
 const state = vi.hoisted(() => ({
@@ -55,6 +55,8 @@ vi.mock('./AgentCards', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
   sessionStorage.clear();
   state.uid = 'alice';
   state.query = '';

@@ -1,3 +1,5 @@
+import { AssistantEnabledProvider } from '@/components/AssistantEnabledProvider';
+import { nuniEnabled } from '@/lib/nuni/server';
 import { SchoolLmsReadonlyProvider } from '@/components/SchoolLmsReadonlyProvider';
 import { isSchoolLmsReadonlyEnabled } from '@/lib/server/schoolLmsReadonly';
 import type { Metadata, Viewport } from 'next';
@@ -78,7 +80,9 @@ export default function RootLayout({
         <AuthProvider>
           <ToastProvider position="top-center">
             <SchoolLmsReadonlyProvider enabled={isSchoolLmsReadonlyEnabled()}>
-              <CampusProviders>{children}</CampusProviders>
+              <AssistantEnabledProvider enabled={nuniEnabled() && process.env.CAMPUS_ASSISTANT_ENABLED === 'true'}>
+                <CampusProviders>{children}</CampusProviders>
+              </AssistantEnabledProvider>
             </SchoolLmsReadonlyProvider>
           </ToastProvider>
         </AuthProvider>

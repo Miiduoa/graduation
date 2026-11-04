@@ -38,6 +38,19 @@ export function registerAssistantRoutes(
       url: prefix + action,
       bodyLimit: 8192,
       config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+      errorHandler(error, request, reply) {
+        if (error instanceof DomainError) {
+          return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
+        }
+        const status = error.statusCode;
+        const statusCode = status && [400, 401, 413, 415, 429].includes(status) ? status : 503;
+        request.log.warn({ statusCode }, 'Assistant request failed');
+        const code = statusCode === 413 ? 'UPLOAD_TOO_LARGE'
+          : statusCode === 429 ? 'RATE_LIMITED'
+          : statusCode === 401 ? 'INVALID_SESSION'
+          : statusCode === 503 ? 'UNAVAILABLE' : 'INVALID_INPUT';
+        return reply.code(statusCode).send({ error: { code, message: '目前無法完成查詢。' } });
+      },
       async handler(request, reply) {
         reply.header('Cache-Control', 'no-store');
         const actor = await accounts.resolveSession(request.headers.authorization);
