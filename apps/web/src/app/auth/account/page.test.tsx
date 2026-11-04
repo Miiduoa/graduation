@@ -164,7 +164,7 @@ it('opens the school-email form from 登入校園帳號 and looks up the school 
   expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/v1/auth/account/registration-start'))).toBe(true);
 });
 
-it('opens an in-page school lookup from 尋找學校 and searches by school name', async () => {
+it.each([['靜宜大學', '靜宜大學'], [' Ｐ Ｕ ', 'pu'], [' 靜 宜 大 學 ', '靜宜大學']])('opens in-page school lookup for %s', async (query, expectedQuery) => {
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === '/api/nuni/session' || url === '/auth/session') {
@@ -182,7 +182,7 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
     if (url.startsWith('/auth/find-school/search?')) {
       const parsed = new URL(url, 'https://nuni.invalid');
       expect(parsed.pathname).toBe('/auth/find-school/search');
-      expect(parsed.searchParams.get('q')).toBe('靜宜大學');
+      expect(parsed.searchParams.get('q')).toBe(expectedQuery);
       if (init?.method === 'POST') {
         return new Response('', { status: 405, statusText: 'Method Not Allowed' });
       }
@@ -197,13 +197,13 @@ it('opens an in-page school lookup from 尋找學校 and searches by school name
   });
   render(<AccountPage />);
   fireEvent.click(await screen.findByRole('button', { name: '尋找學校' }));
-  fireEvent.change(screen.getByLabelText('學校配發的信箱或校名'), { target: { value: '靜宜大學' } });
+  fireEvent.change(screen.getByLabelText('學校配發的信箱或校名'), { target: { value: query } });
   fireEvent.click(screen.getByRole('button', { name: '找到我的學校' }));
   expect(await screen.findByRole('heading', { name: '靜宜大學' })).toBeTruthy();
   expect(
     fetchMock.mock.calls.some(
       ([url, init]) =>
-        url === '/auth/find-school/search?q=' + encodeURIComponent('靜宜大學') && init?.method !== 'POST',
+        url === '/auth/find-school/search?q=' + encodeURIComponent(expectedQuery) && init?.method !== 'POST',
     ),
   ).toBe(true);
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
@@ -335,3 +335,25 @@ it('drops a missing old return path when taking a signed-in visitor home', async
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
 });
 
+
+
+it('keeps unavailable and tenant-less school results out of login choices', async () => {
+  fetchMock.mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.startsWith('/auth/find-school/search?')) {
+      return new Response(JSON.stringify({ schools: [
+        { tenantId: 'pu', displayName: '靜宜大學', available: false, reason: 'school-not-open' },
+        { displayName: '靜宜大學', available: true },
+      ] }), { status: 200 });
+    }
+    if (url === '/auth/platform/providers') return new Response('{"kinds":[]}', { status: 200 });
+    return new Response('{"authenticated":false}', { status: 200 });
+  });
+  render(<AccountPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '尋找學校' }));
+  fireEvent.change(screen.getByLabelText('學校配發的信箱或校名'), { target: { value: ' Ｐ Ｕ ' } });
+  fireEvent.click(screen.getByRole('button', { name: '找到我的學校' }));
+  expect(await screen.findByText('這所學校還沒有開放建立帳號。開放的時間要看學校那邊的安排。')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '靜宜大學' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '使用學校 Google 帳號' })).toBeNull();
+});

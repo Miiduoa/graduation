@@ -1,3 +1,4 @@
+import { mockSchools, normalizeSchoolQuery, searchSchools } from '@campus/shared/src/schools';
 import { collapseInternalPathHash, loginHref, sanitizeInternalPath } from '@/lib/navigation';
 
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
@@ -455,7 +456,7 @@ function asSchool(value: unknown): DiscoveredSchool | null {
   return null;
 }
 
-export async function searchSchoolsByName(query: string): Promise<DiscoveredSchool[]> {
+async function fetchSchoolSearch(query: string): Promise<DiscoveredSchool[]> {
   let response: Response;
   try {
     response = await fetch('/auth/find-school/search?q=' + encodeURIComponent(query), {
@@ -476,6 +477,41 @@ export async function searchSchoolsByName(query: string): Promise<DiscoveredScho
   // { schools: [{ tenantId, displayName, status }] }; POST is 405.
   const rows = Array.isArray(body.schools) ? body.schools : [];
   return rows.map(asSchool).filter((school): school is DiscoveredSchool => school !== null);
+}
+
+/** Search metadata never grants login availability; only endpoint rows do. */
+export async function searchSchoolsByName(query: string): Promise<DiscoveredSchool[]> {
+  const normalized = normalizeSchoolQuery(query);
+  const compact = normalized.replace(/\s+/g, '');
+  const rows = await fetchSchoolSearch(compact);
+  const directorySchool = (row: DiscoveredSchool) => mockSchools.find((school) =>
+    school.id === row.tenantId ||
+    normalizeSchoolQuery(school.code) === normalizeSchoolQuery(row.tenantId ?? '') ||
+    (row.displayName && normalizeSchoolQuery(school.name) === normalizeSchoolQuery(row.displayName)),
+  );
+  // The retained endpoint may only search names. Resolve exact codes there too,
+  // keeping server availability (including explicit denials) authoritative.
+  const exact = compact ? searchSchools(normalized).filter((school) =>
+    [school.id, school.code].some((value) => normalizeSchoolQuery(value).replace(/\s+/g, '') === compact),
+  ) : [];
+  for (const school of exact) {
+    if (rows.some((row) => directorySchool(row)?.id === school.id)) continue;
+    const supplemental = await fetchSchoolSearch(normalizeSchoolQuery(school.name).replace(/\s+/g, ''));
+    for (const row of supplemental) {
+      if (directorySchool(row)?.id !== school.id) continue;
+      if (row.tenantId && rows.some((existing) => existing.tenantId === row.tenantId)) continue;
+      rows.push(row);
+    }
+  }
+  return searchSchools(normalized, rows.map((row) => {
+    const school = directorySchool(row);
+    return {
+      ...school,
+      id: row.tenantId,
+      name: row.displayName ?? school?.name ?? '',
+      row,
+    };
+  })).map(({ row }) => row);
 }
 
 export function looksLikeSchoolEmail(value: string): boolean {
