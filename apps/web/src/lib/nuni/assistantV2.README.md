@@ -142,3 +142,18 @@ CI 的 assistant integration job 安裝 workspace 及既有 isolated dependencie
 第三輪：清單工具可省略 scope id；單 realm 自動選取，多 realm 列可用 scope 或提示重查。scope/not-found/input 錯誤附安全的截短 id 或下一步，不放寬 ACL。最後回答若仍截斷保留已有文字並明示未完成；工具輪截斷至多利用原有四輪內的一輪改為 tools 關閉完成回答。規劃優先用日總覽，提議成功即進最後回答。
 
 第四輪修正：最多四次模型呼叫；工具輪 completion 上限 256，最終輪最多 900，總預算 7000。規劃題使用精簡 schema，取得 get_day_overview 後移除已涵蓋查詢。所有無工具輪次會去除 assistant tool_calls/tool 訊息，僅以標記不可信的 user JSON 傳遞已取得結果，不送 tools/tool_choice。400 僅記白名單 providerCode；tool_use_failed 與未知工具算失敗步驟並佔輪數。模型失敗後已有結果則用伺服器確定性摘要保留資料、入口與確認卡。沒有成功 get_transit 時，含路線代碼、班距／到站分鐘、首末班的回答會被確定性摘要取代。本次只跑離線 fixture，未連 Groq，真實 token／TPM 與模型品質仍需另行驗證。
+
+
+第六輪：精簡固定規則與模型 schema（完整驗證仍在伺服端），新點餐不送歷史訂單工具；已完成的地點／訂單查詢不再重送 schema。每輪以不可信 results 摘要取代累積的 assistant tool_calls/tool 訊息，省略已交、過期與重複來源欄位；最多仍為四次模型呼叫、7000 tokens、免費額度限制。工具輪實作上限為 256，最後只答輪最多 900，未增加上限。
+
+回覆後驗依實際卡片校正：零卡時改寫產卡／執行宣稱；有卡時改寫已下單、已預留等語句，補上按確認卡、確認前尚未執行。tool_use_failed／未知工具先回饋錯誤，第二次失敗改為只答，仍共用四次呼叫上限，不因工具名稱錯誤中止。tenantId 只在本題可見且同校 realm 內做大小寫正規化或單一 realm 補值；locationId 只比對先前列出的地點，不擴張 scope。「跟上次一樣／再點」由伺服端移除 list_food_orders 的 state，空清單提示省略 state 重查；讀書 taskIds 沿用本題可信清單唯一、完全相符標題轉 id。部分摘要略過已交、過期、課程清單與未查清單，不對非交通問題附交通提示。
+
+第六輪離線產物：
+
+```sh
+node scripts/nuni-assistant/v2-preview.mjs --model=fake --ordering=off --cases=all --output=/workspace/agent-backend/v2/preview-fake-r6-off.jsonl
+node scripts/nuni-assistant/v2-preview.mjs --model=fake --ordering=on --cases=food --output=/workspace/agent-backend/v2/preview-fake-r6-on.jsonl
+node_modules/.bin/esbuild apps/web/src/lib/nuni/assistantV2/preview.ts --bundle --platform=node --format=esm --target=node22 --tsconfig=apps/web/tsconfig.json --outfile=/tmp/nuni-v2-preview-bundle.mjs
+```
+
+fake 驗證只能證明流程、上限與卡片契約，合成 usage 不代表真 Groq token 成本或品質；本輪未連 Groq 或正式服務。

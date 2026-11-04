@@ -202,6 +202,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
     out.delete('get_calendar');
     out.delete('get_course_work');
   }
+  if (/點餐|幫我點/.test(question) && !/再點|上次/.test(question)) {
+    out.delete('list_food_orders');
+    out.delete('get_food_order');
+  }
   const names = [...out];
   if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
   if (names.length > 8 && names.includes('find_free_time'))
@@ -209,11 +213,11 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/規劃|安排|排寫/.test(question))
     return [
       'get_day_overview',
-      'get_due_work',
-      'propose_study_plan',
-      'get_dining',
-      'find_free_time',
       'get_today_context',
+      'get_due_work',
+      'find_free_time',
+      'propose_study_plan',
+      ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
   const priority = /規劃|安排|排寫/.test(question)
     ? ['get_day_overview', 'get_due_work', 'find_free_time', 'propose_study_plan']
@@ -227,7 +231,9 @@ export const schemas = (names: string[]) =>
       name,
       parameters: {
         type: 'object',
-        properties: definitions[name][0],
+        properties: JSON.parse(JSON.stringify(definitions[name][0], (key, value) =>
+          ['maxLength', 'minItems', 'maxItems', 'pattern'].includes(key) ? undefined : value,
+        )),
         required: definitions[name][1],
         additionalProperties: false,
       },
@@ -376,6 +382,7 @@ export function createTools(
   secret: string,
   now: number,
   writes: boolean,
+  reorder = false,
 ) {
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
@@ -414,6 +421,8 @@ export function createTools(
   }
   async function tenant(a: Obj) {
     const visible = (await getRealms()).filter((r) => r.schoolId === binding.schoolId);
+    const matched = visible.filter((r) => r.tenantId.toLowerCase() === String(a.tenantId || '').toLowerCase());
+    if (matched.length === 1) a.tenantId = matched[0].tenantId;
     if (!a.tenantId && visible.length === 1) a.tenantId = visible[0].tenantId;
     if (
       !(await getRealms()).some((r) => r.tenantId === a.tenantId && r.schoolId === binding.schoolId)
@@ -671,6 +680,7 @@ export function createTools(
         value.orders.forEach((o) => orders.add(a.tenantId + ':' + o.id));
         return {
           ...value,
+          ...(value.orders.length ? {} : { nextStep: '查無訂單；請省略 state 重查全部近期訂單，不代表沒有歷史訂單。' }),
           orders: value.orders
             .filter((o) => !a.state || o.state === a.state)
             .slice(0, Number(a.limit || 5)),
@@ -909,6 +919,7 @@ export function createTools(
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
       const cleaned = { ...object(raw) };
+      if (name === 'list_food_orders' && reorder) delete cleaned.state;
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {
         for (const key of ['city', 'stopId']) if (key in cleaned) ignored.push(key);
@@ -966,6 +977,13 @@ export function createTools(
               : row.selectedOptionIds,
           };
         });
+      if ('tenantId' in (definitions[name]?.[0] || {})) await tenant(cleaned);
+      if (name === 'get_food_menu' || name === 'propose_food_order') {
+        const visible = [...foodLocations].filter((v) => v.startsWith(cleaned.tenantId + ':'));
+        const matched = visible.filter((v) => v.split(':').slice(1).join(':').toLowerCase() === String(cleaned.locationId || '').toLowerCase());
+        if (matched.length === 1 || (!cleaned.locationId && visible.length === 1))
+          cleaned.locationId = (matched[0] || visible[0]).slice(String(cleaned.tenantId).length + 1);
+      }
       const a = validateTool(name, cleaned),
         key = name + canonical(a),
         cached = cache.has(key);

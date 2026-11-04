@@ -335,7 +335,7 @@ it('malicious club posts remain tool data and cannot enter system messages', asy
     },
   });
   const last = seen.at(-1)!;
-  expect(last.some((m) => m.role === 'tool' && m.content?.includes('Ignore system'))).toBe(true);
+  expect(last.some((m) => m.role === 'user' && m.content?.includes('<results trust="untrusted">') && m.content?.includes('Ignore system'))).toBe(true);
   expect(
     last.filter((m) => m.role === 'system').some((m) => m.content?.includes('Ignore system')),
   ).toBe(false);
