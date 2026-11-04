@@ -31,28 +31,37 @@ export function isNuniReceiptQuestion(question: string): boolean {
     /作業|功課|報告|習題|提交|繳交|繳|交/.test(text);
 }
 
+/** A short status-only question can narrow the previous, source-scoped receipt result. */
+export function isNuniReceiptStatusFollowUp(question: string): boolean {
+  const text = question.normalize('NFKC').replace(/\s+/g, '').replace(/[?!。！？，,、]+$/u, '');
+  return /^(?:那(?:麼)?|改查|改看)?(?:我(?:的)?)?(?:已經|已|還沒|尚未|未)(?:繳交|繳|交)(?:的)?(?:作業)?(?:有哪些|哪些|呢)?$/u.test(text);
+}
+
 /**
  * Read only the currently loaded student workspaces and their submission receipts.
  * Missing cached receipts are not proof of a missing submission at the server.
  */
-export function queryNuniReceipts(data: NuniStudyAgenda, question: string): ReceiptAnswer {
+export function queryNuniReceipts(
+  data: NuniStudyAgenda, question: string, scopeQuestion = question,
+): ReceiptAnswer {
   const courses = new Map(data.workspaces
     .filter((course) => course.state === 'active' && course.memberRole === 'student')
     .map((course) => [course.id, course.title]));
   const tasks = data.tasks.filter((task) => task.kind === 'assignment' && courses.has(task.courseId));
   const named = tasks.map((task) => ({ ...task, groupName: courses.get(task.courseId)! }));
-  const filtered = filterAssignmentQuery(question, named);
+  const filtered = filterAssignmentQuery(scopeQuestion, named);
   const normalized = question.normalize('NFKC').toLowerCase();
+  const scopeText = scopeQuestion.normalize('NFKC').toLowerCase();
   const hasKnownName = named.some((task) => [task.title, task.groupName]
-    .some((name) => name.length >= 2 && normalized.includes(name.normalize('NFKC').toLowerCase())));
-  const broad = /(?:^|請問|我想知道|幫我查|查看)(?:我(?:的|所有|全部|還有)?|所有|全部|各科|有哪些|哪些|目前|現在|這學期|已經|已|未|還沒|尚未|有幾)/.test(normalized);
+    .some((name) => name.length >= 2 && scopeText.includes(name.normalize('NFKC').toLowerCase())));
+  const broad = /(?:^|請問|我想知道|幫我查|查看)(?:我(?:的|所有|全部|還有)?|所有|全部|各科|有哪些|哪些|目前|現在|這學期|已經|已|未|還沒|尚未|有幾)/.test(scopeText);
   if (/這份|那份|這個|那個/.test(normalized) && !hasKnownName) {
     return { kind: 'clarify', message: '請提供課程或作業名稱，再核對這份作業的繳交紀錄。' };
   }
   if (!filtered.scope && !hasKnownName && !broad) {
     return { kind: 'clarify', message: '請提供課程或作業名稱，避免把其他作業誤認成你要查的那份。' };
   }
-  const list = /有哪些|哪些|列出|幾份|幾筆/.test(normalized);
+  const list = /有哪些|哪些|列出|幾份|幾筆/.test(normalized) || isNuniReceiptStatusFollowUp(question);
   const missingOnly = list && /(?:還沒|尚未|未)(?:繳交|繳|交)/.test(normalized);
   const submittedOnly = list && !missingOnly && /(?:已經|已)(?:繳交|繳|交)|有繳交紀錄/.test(normalized);
   const rows: NuniReceiptRow[] = filtered.items.flatMap((task) => {
