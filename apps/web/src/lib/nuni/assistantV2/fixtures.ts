@@ -185,7 +185,7 @@ export function fixtureAdapter(ordering = false) {
       },
     },
     ledger: async () => structuredClone(ledger),
-    courses: async () => [{ id: 'course-a', title: '資訊課程' }],
+    courses: async () => ({ courses: [{ id: 'course-a', title: '資訊課程' }], partial: false }),
     work: async () => structuredClone(tasks),
     materials: async () => ({ materials: [{ id: 'material-a', title: '樹與圖講義' }] }),
     realms: async () => [{ tenantId: 'fixture-realm', schoolId: base.schoolId }],

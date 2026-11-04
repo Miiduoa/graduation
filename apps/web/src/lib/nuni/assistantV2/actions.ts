@@ -79,6 +79,7 @@ export function signCard(
   secret: string,
   now: number,
   proposalSeq: string = beginProposal(binding, now),
+  previousEvent?: Card,
 ): Card {
   operationSignal()?.throwIfAborted();
   const args =
@@ -96,6 +97,11 @@ export function signCard(
     binding: hash(binding),
     tool,
     argsHash: hash(args),
+    ...(previousEvent && {
+      previousEventHash: hash(
+        eventRecord(eventArgs(previousEvent.args), binding.schoolId, previousEvent.mutationId, now),
+      ),
+    }),
     revision,
     mutationId,
     iat: now,
@@ -162,6 +168,8 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
     Number(p.iat) > now ||
     Number(p.exp) <= now ||
     Number(p.exp) - Number(p.iat) !== 300000 ||
+    (p.previousEventHash !== undefined &&
+      (typeof p.previousEventHash !== 'string' || !/^[a-f0-9]{64}$/.test(p.previousEventHash))) ||
     !Number.isSafeInteger(p.revision) ||
     Number(p.revision) < 0 ||
     !['propose_personal_event', 'propose_open_page', 'propose_food_order'].includes(String(p.tool))
@@ -182,6 +190,7 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
   return {
     tool: p.tool as Card['tool'],
     args,
+    previousEventHash: p.previousEventHash as string | undefined,
     revision: Number(p.revision),
     mutationId: p.mutationId,
     iat: Number(p.iat),
@@ -236,7 +245,13 @@ export async function confirm(
     if (canonical(existing) !== canonical(row)) return fail('CONFIRMATION_CONFLICT', 409);
     return { confirmed: true, replay: true, mutationId: p.mutationId };
   }
-  if (ledger.revision !== p.revision) return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
+  if (
+    ledger.revision !== p.revision ||
+    (p.previousEventHash &&
+      !ledger.records.some((r) => r.kind === 'events' && hash(r) === p.previousEventHash))
+  ) {
+    return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
+  }
   const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
   verifyCard(binding, raw, secret, now);
   operationSignal()?.throwIfAborted();

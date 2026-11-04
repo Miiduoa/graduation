@@ -21,8 +21,10 @@ it('offers actionable recovery without granting invented ids', async () => {
 });
 it('queries course work concurrently, reserves API pairs and reports missing coverage', async () => {
   const f = fixtureAdapter();
-  f.adapter.courses = async () =>
-    Array.from({ length: 8 }, (_, i) => ({ id: `c-${i}`, title: `課${i}` }));
+  f.adapter.courses = async () => ({
+    courses: Array.from({ length: 8 }, (_, i) => ({ id: `c-${i}`, title: `課${i}` })),
+    partial: false,
+  });
   f.adapter.remainingApiCalls = () => 7;
   let active = 0,
     peak = 0;
@@ -120,10 +122,10 @@ it('returns completed courses when another course reaches its deadline', async (
   vi.useFakeTimers();
   try {
     const f = fixtureAdapter();
-    f.adapter.courses = async () => [
-      { id: 'fast', title: '已查' },
-      { id: 'slow', title: '未查' },
-    ];
+    f.adapter.courses = async () => ({
+      courses: [{ id: 'fast', title: '已查' }, { id: 'slow', title: '未查' }],
+      partial: false,
+    });
     f.adapter.work = async (courseId) =>
       courseId === 'slow'
         ? new Promise(() => {})

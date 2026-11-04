@@ -1,6 +1,7 @@
 import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
 import { isWebOnlineOrderingEnabled } from '../../onlineOrdering';
 import { operationSignal } from './operation';
+import { createCourseAccess } from '@campus/shared/src/courseAccessClient';
 import { createNuniClasses, parseNuniPrincipal } from '@campus/shared/src/nuni';
 import {
   parsePersonalImportSnapshot,
@@ -135,10 +136,31 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
     remainingApiCalls: () => Math.max(0, 12 - apiCalls),
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),
-    courses: async () =>
-      (await classes.list())
-        .filter((c) => c.state === 'active' && c.memberRole === 'student')
-        .map((c) => ({ id: c.id, title: c.title })),
+    courses: async () => {
+      const candidates = (await classes.list()).filter(
+        (course) => course.state === 'active' && course.memberRole === 'student',
+      );
+      // Keep room for the assignment and quiz requests for each verified course.
+      const limit = Math.floor((12 - apiCalls) / 3);
+      const access = createCourseAccess(request);
+      const checked = await Promise.all(
+        candidates.slice(0, limit).map(async ({ id }) => {
+          try {
+            const receipt = await access.workspace(id, schoolId);
+            return receipt.status === 'reviewed' && receipt.memberRole === 'student'
+              ? { id, title: receipt.course.title }
+              : null;
+          } catch (error) {
+            if ((error as { status?: number }).status === 404) return null;
+            throw error;
+          }
+        }),
+      );
+      return {
+        courses: checked.filter((course) => course !== null),
+        partial: candidates.length > limit || checked.includes(null),
+      };
+    },
     work: async (courseId) => {
       if (12 - apiCalls < 2) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
       const [assignments, quizzes] = await Promise.all([

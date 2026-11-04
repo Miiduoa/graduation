@@ -214,6 +214,25 @@ describe('confirmation and CAS', () => {
       await confirm(binding, { token: card.token, args: card.args }, secret, now, f.adapter, true);
     expect(f.writes).toHaveLength(2);
   });
+  it('rejects a later card when an unrelated edit advanced the calendar revision', async () => {
+    const f = fixtureAdapter();
+    const tools = createTools(f.adapter, binding, secret, now, true);
+    await tools.context();
+    await tools.call('propose_study_plan', {
+      date: '2026-11-04', from: '17:00', taskIds: ['task-urgent', 'task-next'],
+    });
+    const [, second] = tools.cards;
+    const before = f.snapshot();
+    await f.adapter.write({
+      schoolId: binding.schoolId,
+      records: before.records.slice(1),
+      expectedRevision: before.revision,
+      mutationId: 'independent-edit',
+    });
+    await expect(confirm(binding, { token: second.token, args: second.args }, secret, now, f.adapter, true))
+      .rejects.toMatchObject({ code: 'PERSONAL_IMPORT_REVISION_CONFLICT' });
+    expect(f.writes).toHaveLength(1);
+  });
   it('signs server routes and falls back when writes unavailable', async () => {
     expect(pageHref({ page: 'orders' }, binding.schoolId)).toBe('/orders?schoolId=fixture-school');
     const f = fixtureAdapter(),
@@ -517,6 +536,35 @@ it('production projections keep explicit realm scope and omit payment, pickup cr
   expect(JSON.stringify(feed)).toContain('社團消息');
   expect(JSON.stringify({ order, feed })).not.toContain('PRIVATE_MARKER');
   vi.unstubAllEnvs();
+});
+
+it('only exposes student workspaces reviewed for the selected school', async () => {
+  const ids = [1, 2, 3, 4].map((n) => 'cw_11111111-1111-4111-8111-11111111111' + n);
+  const workspaces = ids.map((id) => ({ id, title: 'private account-wide title', state: 'active', memberRole: 'student' }));
+  const fetcher = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/class-workspaces')) return Response.json({ workspaces });
+    expect(url).toMatch(/\/course-access\/workspace-course$/);
+    const { workspaceId, schoolId } = JSON.parse(String(init.body));
+    expect(schoolId).toBe('pu');
+    const membership = { workspaceId, memberRole: 'student', membershipActive: true };
+    if (workspaceId === ids[1]) return Response.json({ error: 'NOT_FOUND' }, { status: 404 });
+    if (workspaceId === ids[2]) return Response.json({ ...membership, status: 'unreviewed', course: null });
+    expect(workspaceId).toBe(ids[0]);
+    return Response.json({ ...membership, status: 'reviewed', course: {
+      workspaceId, schoolId, id: 'ccd_11111111-1111-4111-8111-111111111111',
+      version: 1, verification: 'administrator-reviewed', academicYear: '115', semester: '1',
+      courseCode: 'CS301', teacher: '老師', className: '三甲', title: '本校已核對課程',
+    } });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const { adapter } = createAdapter({ sessionHandle: 'fixture', expiresAt: now + 1000 }, 'pu', signal());
+  const tools = createTools(adapter, { ...binding, schoolId: 'pu' }, secret, now, false);
+  expect((await tools.call('list_courses', {})).value).toEqual({
+    courses: [{ id: ids[0], title: '本校已核對課程' }], truncated: true,
+  });
+  for (const workspaceId of ids.slice(1))
+    await expect(tools.call('get_course_work', { workspaceId })).rejects.toMatchObject({ code: 'FORBIDDEN_SCOPE' });
+  expect(fetcher).toHaveBeenCalledTimes(4);
 });
 
 it('rejects signed wrong stage, lifetime and revision mutation', async () => {

@@ -188,7 +188,7 @@ export type Adapter = {
     submit(cart: import('./food').FoodCart, mutationId: string): Promise<unknown>;
   };
   ledger(): Promise<Ledger>;
-  courses(): Promise<Course[]>;
+  courses(): Promise<{ courses: Course[]; partial: boolean }>;
   work(courseId: string): Promise<Task[]>;
   materials(courseId: string, cursor?: string): Promise<unknown>;
   realms(): Promise<{ tenantId: string; schoolId?: string }[]>;

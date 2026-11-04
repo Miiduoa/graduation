@@ -405,8 +405,10 @@ export function createTools(
     }));
   const courseIds: string[] = [],
     tenantIds: string[] = [];
+  let courseCoveragePartial = false;
   const getCourses = () =>
-    (courses ||= adapter.courses().then((rows) => {
+    (courses ||= adapter.courses().then(({ courses: rows, partial }) => {
+      courseCoveragePartial = partial;
       courseIds.push(...rows.map((c) => c.id));
       return rows;
     }));
@@ -483,7 +485,7 @@ export function createTools(
       undated: pending.filter((t) => !t.dueAt),
       submitted: found.filter((t) => t.submitted && inRange(t)),
       overdue: found.filter((t) => !t.submitted && inRange(t) && t.dueAt && Date.parse(t.dueAt) < now),
-      partial: unqueried.length > 0,
+      partial: courseCoveragePartial || unqueried.length > 0,
       unqueried,
       source: 'class-workspaces',
     };
@@ -514,14 +516,16 @@ export function createTools(
       })
     )
       return fail('EVENT_CONFLICT', 409);
+    const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
     const card = signCard(
       binding,
       'propose_personal_event',
       raw,
-      l.revision + cards.filter((c) => c.tool === 'propose_personal_event').length,
+      l.revision + priorEvents.length,
       secret,
       now,
       sequence(),
+      priorEvents.at(-1),
     );
     cards.push(card);
     return { proposed: true, ...raw, requiresConfirmation: true };
@@ -653,7 +657,7 @@ export function createTools(
           source: 'personal-imports',
         };
       case 'list_courses':
-        return { courses: await getCourses(), truncated: (await getCourses()).length >= 20 };
+        return { courses: await getCourses(), truncated: courseCoveragePartial };
       case 'get_course_work':
         if (!a.workspaceId) return dueWork({});
         await course(a);
@@ -667,6 +671,7 @@ export function createTools(
         if (!a.workspaceId)
           return {
             courses: (await getCourses()).slice(0, 20),
+            partial: courseCoveragePartial,
             nextStep: '用上述課程 id 作 workspaceId 呼叫 get_materials',
           };
         await course(a);
@@ -821,7 +826,7 @@ export function createTools(
     try {
       const list = await getCourses();
       result.courses = list.slice(0, 3);
-      if (list.length > 3) missing.push('course_coverage');
+      if (courseCoveragePartial || list.length > 3) missing.push('course_coverage');
       const found: Task[] = [];
       for (const c of list.slice(0, 3)) {
         try {
