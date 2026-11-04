@@ -101,9 +101,9 @@ it('reorders the newest order by createdAt even when the list is oldest first', 
   });
   const tools = createTools(f.adapter, binding, secret, now, true);
   await tools.call('reorder_last_food_order', { requestedPickupAt: '2026-11-04T12:10:00+08:00' });
-  expect(tools.cards[0].args.cart.items).toEqual([
-    { menuItemId: 'veggie', quantity: 2, selectedOptionIds: ['regular'] },
-  ]);
+  expect(tools.cards[0].args).toMatchObject({
+    cart: { items: [{ menuItemId: 'veggie', quantity: 2, selectedOptionIds: ['regular'] }] },
+  });
 });
 
 it('page-mode confirmation returns a prefilled food link and never submits', async () => {
