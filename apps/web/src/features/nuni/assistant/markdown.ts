@@ -111,9 +111,8 @@ export function parseInline(text: string): Inline[] {
     }
     if (next.kind === 'link') {
       const href = m[2];
-      if (isInternalPath(href) || href.startsWith('https://'))
-        out.push({ type: 'link', href, label: m[1], path: isInternalPath(href) });
-      else out.push({ type: 'text', value: m[0] });
+      if (isInternalPath(href)) out.push({ type: 'link', href, label: m[1], path: true });
+      else out.push({ type: 'text', value: m[1] || href });
       rest = rest.slice(next.at + m[0].length);
       continue;
     }

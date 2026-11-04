@@ -31,6 +31,14 @@ it('keeps markdown link labels and rejects javascript urls', () => {
   expect(inline.some((n) => n.type === 'link' && n.href.startsWith('javascript'))).toBe(false);
 });
 
+it('keeps https urls as plain text instead of links', () => {
+  const inline = parseInline('[官網](https://example.invalid) 與 https://evil.test/x');
+  expect(inline.some((n) => n.type === 'link')).toBe(false);
+  expect(inline.some((n) => n.type === 'text' && n.value.includes('官網'))).toBe(true);
+  expect(JSON.stringify(inline)).toContain('https://evil.test/x');
+  expect(JSON.stringify(inline)).not.toContain('"href":"https://');
+});
+
 it('parses assignment lines with course name and due time', () => {
   expect(parseDueItem('- 樹與圖作業（資訊課程）截止 2026-11-05T23:59:00+08:00')).toMatchObject({
     title: '樹與圖作業',

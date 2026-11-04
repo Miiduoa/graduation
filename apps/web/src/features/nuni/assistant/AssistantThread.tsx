@@ -37,8 +37,24 @@ export function AssistantThread({
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
 }) {
+  const shell = useRef<HTMLElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const root = shell.current;
+    const node = dock.current;
+    if (!root || !node) return;
+    const apply = () => {
+      const height = Math.ceil(node.getBoundingClientRect().height);
+      if (height > 0) root.style.setProperty('--assistant-dock-height', `${height}px`);
+    };
+    apply();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [turns.length, question, pending]);
   useEffect(() => {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
@@ -55,7 +71,7 @@ export function AssistantThread({
     field.current?.focus();
   }
   return (
-    <section className={styles.shell} aria-label="情境助理 v2">
+    <section ref={shell} className={styles.shell} aria-label="情境助理 v2">
       <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
       <nav className={styles.services} aria-label="校園服務入口">
         <Link href={'/map' + schoolQuery}>校園地圖</Link>
@@ -136,11 +152,11 @@ export function AssistantThread({
             {error}
           </p>
         ) : null}
-        <div ref={end} />
+        <div ref={end} className={styles.logEnd} />
       </div>
-      <div className={styles.composerDock}>
+      <div ref={dock} className={styles.composerDock}>
         {turns.length > 0 ? (
-          <div className={styles.chips} aria-label="建議問題">
+          <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
             {SUGGESTIONS.map((phrase) => (
               <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
                 {phrase}

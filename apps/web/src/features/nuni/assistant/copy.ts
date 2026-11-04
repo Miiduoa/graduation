@@ -47,6 +47,10 @@ export function isSafeHref(href: string): boolean {
   return isInternalPath(href) || /^https:\/\/[^\s]+$/.test(href);
 }
 
+export function inAppHref(href: string): string | null {
+  return isInternalPath(href) && isSafeHref(href) ? href : null;
+}
+
 export function formatDayLabel(date: string): string {
   const parts = taipeiParts(`${date}T12:00:00+08:00`);
   if (!parts) return date;

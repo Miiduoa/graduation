@@ -1,12 +1,13 @@
 import Link from 'next/link';
-import { formatEventWhen, formatPickup, formatYuan, pageLabel } from './copy';
+import { formatEventWhen, formatPickup, formatYuan, inAppHref, pageLabel } from './copy';
 import styles from './AssistantReply.module.css';
 import type { V2Card } from './types';
 
 function Status({ value }: { value: string }) {
-  if (value.startsWith('/'))
+  const href = inAppHref(value);
+  if (href)
     return (
-      <Link className={styles.pageLink} href={value}>
+      <Link className={styles.pageLink} href={href}>
         開啟確認的頁面
       </Link>
     );
@@ -37,7 +38,7 @@ function FoodBody({ card }: { card: V2Card }) {
   const lines = Array.isArray(summary.lines) ? summary.lines : [];
   const store = typeof summary.store === 'string' ? summary.store : '點餐';
   const reason = typeof card.args.reason === 'string' ? card.args.reason : card.destination;
-  const href = typeof card.args.href === 'string' ? card.args.href : '';
+  const href = typeof card.args.href === 'string' ? inAppHref(card.args.href) : null;
   const total = formatYuan(summary.totalMinor);
   const pickup = formatPickup(summary.requestedPickupAt);
   return (

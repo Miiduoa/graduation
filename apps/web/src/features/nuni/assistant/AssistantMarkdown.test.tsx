@@ -19,3 +19,10 @@ it('does not execute html from the model reply', () => {
   expect(document.querySelector('script')).toBeNull();
   expect(screen.getByText('安全')).toBeTruthy();
 });
+
+it('does not turn https urls into tappable links', () => {
+  render(<AssistantMarkdown text={'請看 [官網](https://example.invalid) 與 https://evil.test'} />);
+  expect(screen.queryByRole('link')).toBeNull();
+  expect(screen.getByText(/官網/)).toBeTruthy();
+  expect(screen.getByText(/https:\/\/evil.test/)).toBeTruthy();
+});

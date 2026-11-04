@@ -41,3 +41,52 @@ it('surfaces a friendly error region', () => {
   render(<AssistantThread {...base} error="查詢未完成，請稍後再試。" />);
   expect(screen.getByRole('alert').textContent).toBe('查詢未完成，請稍後再試。');
 });
+
+it('measures the composer dock height onto the thread shell', () => {
+  class MockObserver {
+    callback: ResizeObserverCallback;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+    }
+    observe(node: Element) {
+      Object.defineProperty(node, 'getBoundingClientRect', {
+        value: () => ({
+          height: 128,
+          width: 390,
+          top: 0,
+          left: 0,
+          bottom: 128,
+          right: 390,
+          x: 0,
+          y: 0,
+          toJSON() {},
+        }),
+      });
+      this.callback(
+        [{ target: node, contentRect: { height: 128, width: 390 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  vi.stubGlobal('ResizeObserver', MockObserver);
+  const { container } = render(<AssistantThread {...base} />);
+  const shell = container.querySelector('[aria-label="情境助理 v2"]') as HTMLElement;
+  expect(shell.style.getPropertyValue('--assistant-dock-height')).toBe('128px');
+  vi.unstubAllGlobals();
+});
+
+it('collapses suggestion chips to one scrolling row after a turn', () => {
+  render(
+    <AssistantThread
+      {...base}
+      consent
+      onConsent={vi.fn()}
+      turns={[{ question: '下一堂課', reply: { answer: '在圖書館', steps: [], cards: [] } }]}
+    />,
+  );
+  const row = screen.getByLabelText('建議問題');
+  expect(row.className).toMatch(/chipsCompact/);
+  expect(screen.getByRole('button', { name: '送出' }).hasAttribute('disabled')).toBe(true);
+});

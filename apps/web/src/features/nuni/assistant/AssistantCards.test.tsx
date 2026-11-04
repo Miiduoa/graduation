@@ -93,3 +93,64 @@ it('keeps confirmed calendar copy and page link after write-in', () => {
   expect(screen.getByText('已加入個人行事曆')).toBeTruthy();
   expect(screen.queryByText('確認')).toBeNull();
 });
+
+it('only links food and confirmed pages through in-app hrefs', () => {
+  const { rerender } = render(
+    <AssistantCardStack
+      cards={[{ ...foodCard, args: { ...foodCard.args, href: 'https://evil.test/order' } }]}
+      states={{}}
+      pending={false}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('link', { name: '前往點餐頁' })).toBeNull();
+  rerender(
+    <AssistantCardStack
+      cards={[foodCard]}
+      states={{}}
+      pending={false}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('link', { name: '前往點餐頁' }).getAttribute('href')).toContain('/food?');
+  rerender(
+    <AssistantCardStack
+      cards={[eventCard('m1', '精確作業安排')]}
+      states={{ m1: 'https://evil.test/done' }}
+      pending={false}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole('link', { name: '開啟確認的頁面' })).toBeNull();
+  expect(screen.getByText('https://evil.test/done')).toBeTruthy();
+  rerender(
+    <AssistantCardStack
+      cards={[eventCard('m1', '精確作業安排')]}
+      states={{ m1: '/calendar?id=evt-1' }}
+      pending={false}
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole('link', { name: '開啟確認的頁面' }).getAttribute('href')).toBe(
+    '/calendar?id=evt-1',
+  );
+});
+
+it('keeps pending batch confirm disabled without hiding the label', () => {
+  render(
+    <AssistantCardStack
+      cards={[eventCard('m1', '寫作業：樹與圖作業'), eventCard('m2', '寫作業：程式練習')]}
+      states={{}}
+      pending
+      onConfirm={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  const batch = screen.getByRole('button', { name: '依序全部確認' }) as HTMLButtonElement;
+  expect(batch.disabled).toBe(true);
+  expect(batch.textContent).toBe('依序全部確認');
+});
