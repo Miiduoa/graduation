@@ -10,6 +10,11 @@ export function isPuEcampusDataFetchEnabled(): boolean {
   return false;
 }
 
+export function isPuEcampusDataHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.+$/, '');
+  return host === 'alcat.pu.edu.tw' || host === 'mypu.pu.edu.tw';
+}
+
 export function assertPuEcampusDataFetchEnabled(): void {
   if (!isPuEcampusDataFetchEnabled()) {
     const error = new Error(PU_ECAMPUS_DATA_PAUSED_MESSAGE);

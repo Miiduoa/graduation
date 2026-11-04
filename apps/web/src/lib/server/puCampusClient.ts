@@ -1,6 +1,7 @@
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
 import {
   isPuEcampusDataFetchEnabled,
+  isPuEcampusDataHost,
   PU_ECAMPUS_DATA_PAUSED_CODE,
   PU_ECAMPUS_DATA_PAUSED_MESSAGE,
 } from '@campus/shared/src/puEcampusDataPolicy';
@@ -511,7 +512,7 @@ export function createPuCampusGateway(
     const hostname = normalizeRelayHostname(new URL(url).hostname);
     const portalHostname = normalizeRelayHostname(new URL(portalOrigin).hostname);
     if (!isPuEcampusDataFetchEnabled() &&
-      (hostname === portalHostname || hostname === 'alcat.pu.edu.tw' || hostname === 'mypu.pu.edu.tw')) {
+      (hostname === portalHostname || isPuEcampusDataHost(hostname))) {
       throw new PuCampusError('paused', PU_ECAMPUS_DATA_PAUSED_MESSAGE, {
         ...init.context,
         code: PU_ECAMPUS_DATA_PAUSED_CODE,
