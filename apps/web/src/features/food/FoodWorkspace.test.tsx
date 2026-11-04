@@ -868,3 +868,60 @@ it('expands paper line items by default for in-progress orders and keeps finishe
   expect(within(donePaper).getByText('品項明細 · 1 項')).toBeTruthy();
   expect(within(donePaper).getByText('NT$120').closest('details')).toBeNull();
 });
+
+it('assistant location link opens a read-only menu while online ordering is off', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  render(
+    <FoodWorkspace
+      initialTenant="campus-one"
+      initialLocation={menuFixture().location.id}
+      initialItems={[{ menuItemId: 'rice', quantity: 1, selectedOptionIds: ['large'] }]}
+    />,
+  );
+  const preview = await screen.findByRole('region', { name: '餐廳菜單預覽' });
+  await within(preview).findByText('米飯店');
+  expect(preview.textContent).toMatch(/已備好：[\s\S]*蔬菜便當/);
+  expect(within(preview).queryByRole('button')).toBeNull();
+  expect(
+    mocks.request.mock.calls.some(
+      (call) => /\/(quotes|orders|payment-session)$/.test(call[0]) && call[2],
+    ),
+  ).toBe(false);
+  expect(mocks.request.mock.calls.some((call) => call[0].endsWith('/menu'))).toBe(true);
+});
+
+it.each(['false', 'true'])('rejects invisible tenants and unknown locations with ordering %s', async (ordering) => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', ordering);
+  const view = render(<FoodWorkspace initialTenant="invisible" initialLocation="foreign-shop" />);
+  await screen.findByRole('button', { name: '重新整理' });
+  await waitFor(() => expect(mocks.request).toHaveBeenCalled());
+  expect(mocks.request.mock.calls.some(([path]) => String(path).includes('invisible'))).toBe(false);
+  expect(screen.queryByRole('region', { name: '餐廳菜單預覽' })).toBeNull();
+  view.unmount();
+  mocks.request.mockClear();
+  render(<FoodWorkspace initialTenant="campus-one" initialLocation="unknown-shop" />);
+  await waitFor(() => expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/locations'))).toBe(true));
+  expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/menu'))).toBe(false);
+});
+it.each(['false', 'true'])('rejects menu restrictions with ordering %s', async (ordering) => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', ordering);
+  mocks.request.mockImplementation(async (path, context, input) => path.endsWith('/locations')
+    ? { locations: [{ ...menuFixture().location, merchantMode: 'info', allowedActions: [] }] }
+    : respond(path, context, input));
+  render(<FoodWorkspace initialTenant="campus-one" initialLocation={menuFixture().location.id} />);
+  await waitFor(() => expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/locations'))).toBe(true));
+  expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/menu'))).toBe(false);
+});
+it.each(['false', 'true'])('keeps order query ahead of a valid location with ordering %s', async (ordering) => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', ordering);
+  render(<FoodWorkspace initialTenant="campus-one" initialLocation={menuFixture().location.id} initialOrder="order-1" />);
+  await waitFor(() => expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/order-1'))).toBe(true));
+  expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/locations'))).toBe(false);
+  expect(screen.queryByRole('region', { name: '餐廳菜單預覽' })).toBeNull();
+});
+it('validates the location before opening the ordering menu', async () => {
+  render(<FoodWorkspace initialTenant="campus-one" initialLocation={menuFixture().location.id} />);
+  await waitFor(() => expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/menu'))).toBe(true));
+  const paths = mocks.request.mock.calls.map(([path]) => String(path));
+  expect(paths.findIndex((p) => p.endsWith('/locations'))).toBeLessThan(paths.findIndex((p) => p.endsWith('/menu')));
+});
