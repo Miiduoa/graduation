@@ -86,6 +86,22 @@ function OrderCard({ order, focused = false }: { order: MyOrder; focused?: boole
   );
 }
 
+function ClosedOrderNotice({ schoolId }: { schoolId: string | null }) {
+  return (
+    <div className={styles.empty}>
+      <p role="status">線上點餐目前未開放，無法查看這筆訂單。</p>
+      <div className={styles.actions}>
+        <Link
+          className={home.secondary}
+          href={schoolId ? `/cafeteria?schoolId=${encodeURIComponent(schoolId)}` : '/cafeteria'}
+        >
+          查看餐廳資訊
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function OrdersList({
   uid,
   schoolId,
@@ -128,18 +144,21 @@ function OrdersList({
     };
   }, [orders]);
 
+  const closedDeepLink = !isWebOnlineOrderingEnabled() && !!focusOrderId;
   const focus = resolveOrderFocus(
     (orders ?? []).map((order) => order.id),
     focusOrderId,
   );
 
   useEffect(() => {
-    if (!focus.found || !focusOrderId) return;
+    if (closedDeepLink || !focus.found || !focusOrderId) return;
     const frame = window.requestAnimationFrame(() => {
       landOnOrder(focusOrderId);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focus.found, focusOrderId, orders]);
+  }, [closedDeepLink, focus.found, focusOrderId, orders]);
+
+  if (closedDeepLink) return <ClosedOrderNotice schoolId={schoolId} />;
 
   if (failed) return <p role="alert">目前讀不到訂單，請確認連線後重新整理。</p>;
   if (orders === null) return <p role="status">正在讀取訂單…</p>;
@@ -215,9 +234,9 @@ function OrdersRoute({
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
   if (!user) {
     if (!isWebOnlineOrderingEnabled()) {
+      if (focusOrderId) return <ClosedOrderNotice schoolId={schoolId} />;
       return (
         <div className={styles.empty}>
-          {focusOrderId ? <p role="status">{ORDER_FOCUS_MISSING}</p> : null}
           <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>
         </div>
       );
@@ -250,12 +269,17 @@ export default function OrdersPage() {
   const campus = useCampusBrowseContext();
   const searchParams = useSearchParams();
   const focusOrderId = parseOrderFocusId(searchParams.get('orderId'));
+  const closedDeepLink = !orderingOn && !!focusOrderId;
   const ready = campus.status === 'ready' && !!campus.schoolId;
   return (
     <SiteShell
       title={orderingOn ? '我的訂單' : ONLINE_ORDERING_OFF_TEXT}
       subtitle={
-        orderingOn ? '取餐號碼和訂單狀態以店家那邊為準，會自動更新。' : ONLINE_ORDERING_OFF_TEXT
+        orderingOn
+          ? '取餐號碼和訂單狀態以店家那邊為準，會自動更新。'
+          : closedDeepLink
+            ? undefined
+            : ONLINE_ORDERING_OFF_TEXT
       }
       schoolName={orderingOn && ready ? campus.schoolName : undefined}
     >
@@ -270,7 +294,7 @@ export default function OrdersPage() {
             </Link>
             。
           </p>
-        ) : !orderingOn ? (
+        ) : !orderingOn && !closedDeepLink ? (
           <p className={styles.routeNote}>
             這裡顯示 App 餐廳的取餐號碼。其他訂單請到 <Link href="/food">訂單與取餐進度</Link>{' '}
             查看。
@@ -283,6 +307,8 @@ export default function OrdersPage() {
             <p role="alert">無法取得校園目錄，請稍後再試。</p>
           ) : orderingOn ? (
             <SchoolScopePlaceholder />
+          ) : closedDeepLink ? (
+            <ClosedOrderNotice schoolId={campus.schoolId} />
           ) : (
             <div>
               <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>

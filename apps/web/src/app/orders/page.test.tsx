@@ -303,7 +303,8 @@ it('線上點餐打開、有訂單：區分進行中與已結束，並標明 App
   expect(screen.getByText(/此頁是 App「餐廳」留下的訂單/)).toBeTruthy();
 });
 
-it('帶 orderId 時捲到並標示該筆訂單；點餐關閉仍可看到既有訂單', async () => {
+it('點餐開啟、帶 orderId 時捲到並標示該筆訂單', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
   state.search = 'orderId=co_waiting_bbb222';
   render(<OrdersPage />);
   const focused = await screen.findByRole('article', { current: true });
@@ -312,9 +313,45 @@ it('帶 orderId 時捲到並標示該筆訂單；點餐關閉仍可看到既有�
   expect(screen.getByText('取餐號碼 7')).toBeTruthy();
 });
 
-it('orderId 無效時給友善提示且不壞頁', () => {
+it('點餐開啟、orderId 無效時給友善提示且不壞頁', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
   state.search = 'orderId=co_missing_zzz999';
   render(<OrdersPage />);
   expect(screen.getByText(/找不到這筆訂單/)).toBeTruthy();
   expect(screen.getByText('取餐號碼 7')).toBeTruthy();
+});
+
+it.each(['未登入', '空列表', '找不到訂單', '已有該筆訂單', '未選校'])(
+  '點餐關閉、深連（%s）：統一說明無法查看並提供餐廳資訊出口', (scenario) => {
+    vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+    state.search = 'orderId=co_waiting_bbb222';
+    if (scenario === '未登入') state.uid = null;
+    if (scenario === '空列表') state.rows = [];
+    if (scenario === '找不到訂單') state.search = 'orderId=co_missing_zzz999';
+    if (scenario === '未選校') {
+      state.campus = { status: 'unselected', schoolId: null, schoolName: '', schoolSearch: '?campus=all' };
+    }
+    render(<OrdersPage />);
+    expect(screen.getAllByText('線上點餐目前未開放，無法查看這筆訂單。')).toHaveLength(1);
+    expect(screen.queryByText(/找不到這筆訂單/)).toBeNull();
+    expect(screen.queryByRole('article', { current: true })).toBeNull();
+    expect(screen.queryByRole('link', { name: '登入' })).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: '查看餐廳資訊' }).getAttribute('href')).toBe(
+      scenario === '未選校' ? '/cafeteria' : '/cafeteria?schoolId=pu',
+    );
+    expect(state.paths).toEqual(
+      scenario === '未登入' || scenario === '未選校' ? [] : ['users/alice/schools/pu/orders'],
+    );
+  },
+);
+
+it('點餐開啟、空列表深連仍提示找不到該筆訂單', () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  state.rows = [];
+  state.search = 'orderId=co_missing_zzz999';
+  render(<OrdersPage />);
+  expect(screen.getByText(/找不到這筆訂單/)).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '還沒有訂單' })).toBeTruthy();
+  expect(screen.queryByText(/無法查看這筆訂單/)).toBeNull();
 });
