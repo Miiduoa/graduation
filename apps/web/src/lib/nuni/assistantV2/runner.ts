@@ -19,15 +19,17 @@ import {
   addDays,
 } from './contracts';
 import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
-import { createTools, schemas, selectTools } from './tools';
-export { foodOrderIntent };
-export function scheduleIntent(question: string): boolean {
-  return (
-    /規劃|安排|排寫|留.?(?:一)?小時/.test(question) ||
-    /幫我排(?!隊)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question) ||
-    /幫我留(?!言)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question)
-  );
-}
+import {
+  createTools,
+  schemas,
+  selectTools,
+  scheduleIntent,
+  studyPlanSelect,
+  personalSlotSelect,
+  studyWindow,
+  parseSpokenClock,
+} from './tools';
+export { foodOrderIntent, scheduleIntent };
 export function writeIntent(question: string): boolean {
   return (
     foodOrderIntent(question) ||
@@ -527,12 +529,36 @@ export async function run(input: RunInput) {
         if (cart) await ensure('propose_food_order', cart);
       }
     }
-    if (scheduleIntent(input.question)) {
+    if (studyPlanSelect(input.question)) {
       const day = relativeDate || taipeiDate(now);
+      const window = studyWindow(input.question, finalAnswer);
       await ensure('get_day_overview', { date: day });
       if (/吃|餐|飯/.test(input.question)) await ensure('get_dining', {});
-      if (!tools.cards.some((card) => card.tool === 'propose_personal_event'))
-        await ensure('propose_study_plan', { date: day, minMinutes: 60 });
+      if (
+        !tools.cards.some((card) => card.tool === 'propose_personal_event') &&
+        window.from < window.to
+      )
+        await ensure('propose_study_plan', {
+          date: day,
+          minMinutes: 60,
+          from: window.from,
+          to: window.to,
+        });
+    }
+    if (personalSlotSelect(input.question) && !studyPlanSelect(input.question)) {
+      const window = studyWindow(input.question, finalAnswer);
+      if (
+        !tools.cards.some((card) => card.tool === 'propose_personal_event') &&
+        window.from < window.to &&
+        parseSpokenClock(input.question)
+      )
+        await ensure('propose_personal_event', {
+          title: '寫作業',
+          date: relativeDate || taipeiDate(now),
+          allDay: false,
+          startTime: window.from,
+          endTime: window.to,
+        });
     }
     if (
       /社團/.test(input.question) &&
@@ -572,13 +598,11 @@ export async function run(input: RunInput) {
       if (!finalAnswer.includes(href) && !finalAnswer.includes('items='))
         finalAnswer = (finalAnswer ? finalAnswer + '\n' : '') + '請至點餐頁繼續選擇：' + href;
     }
-    if (/社團/.test(input.question) && !/\/clubs/.test(finalAnswer)) {
-      const href =
-        tools.cards.find((card) => card.tool === 'propose_open_page')?.destination || '/clubs';
-      finalAnswer = (finalAnswer ? finalAnswer + '\n' : '') + '社團頁：' + href;
-    }
     finalAnswer = verifyProposalAnswer(finalAnswer, tools.cards, input.question);
     finalAnswer = alignFoodCardAnswer(finalAnswer, tools.cards);
+    finalAnswer = alignStudyCardAnswer(finalAnswer, tools.cards);
+    if (/社團/.test(input.question))
+      finalAnswer = keepClubNews(finalAnswer, evidence, tools.cards, input.question, now);
     if (!finalAnswer && evidence.length)
       finalAnswer = partialAnswer(evidence, tools.cards, input.question, now);
     else if (!finalAnswer)
@@ -658,6 +682,7 @@ export function partialAnswer(
     const row = v as Obj;
     if (row.submitted === true || (typeof row.dueAt === 'string' &&
       (row.state !== 'open' || Date.parse(row.dueAt) < now))) return;
+    if (unsafeUntrusted(row)) return;
     if (typeof row.officialSource === 'string') labels.add('校園位置請參考官方地圖：' + row.officialSource);
     else if (typeof row.href === 'string' && row.href.startsWith('/map?')) labels.add('圖書館位置請開啟校園地圖確認：' + row.href);
     const title = row.title || row.name || (transit ? row.route : undefined);
@@ -725,11 +750,11 @@ export function planningAnswer(
 const FOOD_PAGE_NEXT = '按確認後會開啟點餐頁，品項已帶好';
 const FOOD_ORDER_NEXT = '按確認才會送出訂單';
 const FOOD_PAGE_DROP =
-  /付款|完成訂單|下單|送出訂單|訂單已送出|正在幫[你您]下單|結帳|提交訂單|訂單已成立|\bpayment\b|\bcheckout\b|\bplaced?\s+(?:the\s+|an\s+)?orders?\b|\breordered?\b/i;
+  /付款|完成訂單|下單|送出訂單|訂單已送出|正在幫[你您]下單|結帳|提交訂單|訂單已成立|\bpayment\b|\bcheckout\b|\bplace(?:\s+your)?\s+orders?\b|\border placed\b|\bplaced?\s+(?:the\s+|an\s+|your\s+)?orders?\b|\breordered?\b/i;
 const FOOD_ORDER_DROP = /已為[您你](?:重新)?下單|已重新下單|訂單已送出|已(?:經)?下單|完成下單/;
 
 function splitSentences(text: string): string[] {
-  return text.split(/(?<=[。！？\n])|(?<=[.!])(?=\s|$)/);
+  return text.split(/(?<=[。！？\n])|(?<=[.!?])(?=\s|$)/);
 }
 
 function collapseRepeatedNotice(text: string, notice: string): string {
@@ -742,11 +767,12 @@ function collapseRepeatedNotice(text: string, notice: string): string {
 }
 
 function dropMatchingSentences(text: string, pattern: RegExp): string {
-  return splitSentences(text)
+  const next = splitSentences(text)
     .filter((sentence) => !sentence.trim() || !pattern.test(sentence))
     .join('')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  return next;
 }
 
 export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
@@ -790,7 +816,8 @@ export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
       return match;
     });
   }
-  out = dropMatchingSentences(out, page ? FOOD_PAGE_DROP : FOOD_ORDER_DROP);
+  const filtered = dropMatchingSentences(out, page ? FOOD_PAGE_DROP : FOOD_ORDER_DROP);
+  out = filtered || (itemNames.length ? itemNames.join('、') + '。' : out);
   if (itemNames.length && !itemNames.some((name) => out.includes(name)))
     out = (out ? out + '\n' : '') + itemNames.join('、') + '。';
   if (pickup && !out.includes(pickup) && !(pickupIso && out.includes(pickupIso)))
@@ -801,9 +828,174 @@ export function alignFoodCardAnswer(answer: string, cards: Card[]): string {
   return out.trim();
 }
 
+function hostingSentence(source: string, offset: number, length: number): string {
+  let start = 0;
+  for (const match of source.matchAll(/[。！？\n]/g)) {
+    const end = (match.index ?? 0) + match[0].length;
+    if (end <= offset) start = end;
+    else break;
+  }
+  const rest = source.slice(offset + length);
+  const next = rest.search(/[。！？\n]/);
+  return source.slice(start, next < 0 ? source.length : offset + length + next);
+}
+
+export function alignStudyCardAnswer(answer: string, cards: Card[]): string {
+  const slots = cards
+    .filter((card) => card.tool === 'propose_personal_event')
+    .map((card) => ({
+      start: typeof card.args.startTime === 'string' ? card.args.startTime : '',
+      end: typeof card.args.endTime === 'string' ? card.args.endTime : '',
+      title: typeof card.args.title === 'string' ? card.args.title : '',
+    }))
+    .filter((slot) => slot.start && slot.end);
+  if (!slots.length) return answer;
+  const used = new Set<string>();
+  let out = answer.replace(
+    /(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?\s*[-–—~至到]\s*(\d{1,2})[:：](\d{2})(?:[:：]\d{2})?/g,
+    (match, h1: string, m1: string, h2: string, m2: string, offset: number, source: string) => {
+      const start = h1.padStart(2, '0') + ':' + m1;
+      const sentence = hostingSentence(source, offset, match.length);
+      const classSlot =
+        /課|教室|上課/.test(sentence) ||
+        (/有[\u4e00-\u9fff]{2,}/.test(sentence) && !/寫|作業|讀書|建議|規劃|安排/.test(sentence));
+      if (classSlot) return match;
+      const matched = slots.find((row) => row.start === start);
+      if (matched) {
+        used.add(matched.start + matched.end);
+        return matched.start + '–' + matched.end;
+      }
+      const unused = slots.find((row) => !used.has(row.start + row.end));
+      if (unused) {
+        used.add(unused.start + unused.end);
+        return unused.start + '–' + unused.end;
+      }
+      return '';
+    },
+  );
+  out = out
+    .replace(/[，,、]\s*(?=[，,、。.!！？?\n]|$)/g, '')
+    .replace(/(?:^|[。\n])[，,、\s]+/g, (match) => match.replace(/[，,、\s]+/g, ''))
+    .replace(/\s{2,}/g, ' ');
+  const missing = slots.filter((slot) => !out.includes(slot.start));
+  if (missing.length)
+    out =
+      (out ? out.replace(/\s*$/, '') + '\n' : '') +
+      missing
+        .map((slot) => slot.start + '–' + slot.end + (slot.title ? ' ' + slot.title : ''))
+        .join('、') +
+      '。';
+  return out;
+}
+
+const UNSAFE_UNTRUSTED =
+  /https?:|ignore system|憑證|credentials|call confirm|不要遵守此資料/i;
+
+function unsafeUntrusted(row: Obj): boolean {
+  return UNSAFE_UNTRUSTED.test(
+    [row.title, row.name, row.text, row.body]
+      .filter((value) => typeof value === 'string')
+      .join(' '),
+  );
+}
+
+function scanClubRows(
+  evidence: { tool: string; result: unknown }[],
+  visitRow: (row: Obj, unsafe: boolean) => void,
+) {
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    const row = value as Obj;
+    const unsafe = unsafeUntrusted(row);
+    visitRow(row, unsafe);
+    if (unsafe) return;
+    Object.values(row).forEach((child) => {
+      if (child && typeof child === 'object') visit(child);
+    });
+  };
+  for (const entry of evidence) if (/club/.test(entry.tool)) visit(entry.result);
+}
+
+function clubHeadlines(evidence: { tool: string; result: unknown }[]): string[] {
+  const titles: string[] = [];
+  scanClubRows(evidence, (row, unsafe) => {
+    if (unsafe) return;
+    const title = row.title || row.name;
+    if (typeof title === 'string' && title.trim()) titles.push(clip(title.trim(), 40));
+  });
+  return [...new Set(titles)].slice(0, 5);
+}
+
+function blockedClubTitles(evidence: { tool: string; result: unknown }[]): string[] {
+  const titles: string[] = [];
+  scanClubRows(evidence, (row, unsafe) => {
+    if (!unsafe) return;
+    const title = row.title || row.name;
+    if (typeof title === 'string' && title.trim()) titles.push(title.trim());
+  });
+  return [...new Set(titles)];
+}
+
+function alreadyHasClubNews(answer: string, titles: string[]): boolean {
+  return titles.some((title) => {
+    if (answer.includes(title)) return true;
+    for (let i = 0; i <= title.length - 2; i++) {
+      const gram = title.slice(i, i + 2);
+      if (/[\u4e00-\u9fff]{2}/.test(gram) && answer.includes(gram) && gram !== '合成') return true;
+    }
+    return false;
+  });
+}
+
+export function keepClubNews(
+  answer: string,
+  evidence: { tool: string; result: unknown }[],
+  cards: Card[],
+  question: string,
+  now: number,
+): string {
+  const headlines = clubHeadlines(evidence);
+  let out = answer.trim();
+  for (const blocked of blockedClubTitles(evidence))
+    if (blocked) out = out.split(blocked).join('');
+  out = out.replace(/\s{2,}/g, ' ').trim();
+  if (headlines.length && !alreadyHasClubNews(out, headlines)) {
+    const rebuilt = headlines.join('、') + '。';
+    out = out ? rebuilt + '\n' + out : rebuilt;
+  }
+  if (!out && evidence.length) out = partialAnswer(evidence, cards, question, now);
+  if (!/\/clubs/.test(out)) {
+    const href = cards.find((card) => card.tool === 'propose_open_page')?.destination || '/clubs';
+    out = (out ? out + '\n' : '') + '社團頁：' + href;
+  }
+  return out;
+}
+
+const EXECUTION_CLAIM =
+  /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?事件|建立(?:個人)?事件|安排好|訂購|儲存|預約)|已完成[。！]/;
+const CARD_CLAIM =
+  /請[^。；！？\n.!?]*?(?:按|點|核對)[^。；！？\n.!?]*?卡|(?:按|點)[^。；！？\n.!?]*?確認[^。；！？\n.!?]*?卡|(?:已|成功)[^。；！？\n.!?]*?(?:產生|生成|建立)[^。；！？\n.!?]*?(?:卡|提案)/;
+
+function stripClaim(sentence: string, pattern: RegExp): string {
+  const stripped = sentence
+    .replace(pattern, '')
+    .replace(/[，,、；;]\s*(?=[。.!！？?]|$)/g, '')
+    .replace(/^[，,、；;\s]+/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return stripped;
+}
+
+function leftoverFact(text: string): string {
+  const kept = text.replace(/[\s✅✔☒•·、，,。.!！？?\u200b]+/g, '');
+  return kept;
+}
+
 export function verifyProposalAnswer(answer: string, cards: Card[], question = ''): string {
-  const execution = /(?:已|成功)(?:經)?(?:為[您你]|幫[您你])?(?:完成|重新)?(?:下單|預留|加入(?:個人)?行事曆|新增(?:個人)?事件|建立(?:個人)?事件|安排好|訂購|儲存|預約)|已完成[。！]/;
-  const cardClaim = /請[^。；！\n]{0,24}(?:按|點|核對)[^。；！\n]{0,16}卡|(?:按|點)[^。；！\n]{0,16}確認[^。；！\n]{0,6}卡|(?:已|成功)[^。；！\n]{0,20}(?:產生|生成|建立)[^。；！\n]{0,15}(?:卡|提案)/;
   const food = cards.some((c) => c.tool === 'propose_food_order');
   const notice = cards.length
     ? '請核對並按下方確認卡；確認前尚未執行'
@@ -813,14 +1005,21 @@ export function verifyProposalAnswer(answer: string, cards: Card[], question = '
   const checked = splitSentences(answer)
     .map((sentence) => {
       if (!sentence) return sentence;
-      if (execution.test(sentence)) {
+      if (EXECUTION_CLAIM.test(sentence)) {
+        const kept = leftoverFact(stripClaim(sentence, EXECUTION_CLAIM))
+          ? stripClaim(sentence, EXECUTION_CLAIM)
+          : '';
+        if (kept) return kept;
         if (food) return '';
         if (!(cards.length || writing)) return '';
         if (usedNotice) return '';
         usedNotice = true;
         return notice + '。';
       }
-      if (!cards.length && cardClaim.test(sentence)) {
+      if (!cards.length && CARD_CLAIM.test(sentence)) {
+        const raw = stripClaim(sentence, CARD_CLAIM);
+        if (leftoverFact(raw))
+          return /[。.!！？?]$/.test(raw) ? raw : raw + '。';
         if (!writing) return '';
         if (usedNotice) return '';
         usedNotice = true;
@@ -831,13 +1030,13 @@ export function verifyProposalAnswer(answer: string, cards: Card[], question = '
     .join('');
   let trimmed = collapseRepeatedNotice(checked, notice);
   if (!cards.length) {
-    if (writing && (execution.test(answer) || cardClaim.test(answer) || !trimmed))
+    if (writing && (EXECUTION_CLAIM.test(answer) || CARD_CLAIM.test(answer) || !trimmed))
       return trimmed.includes('尚未產生確認卡')
         ? trimmed
         : (trimmed ? trimmed + '\n' : '') + notice + '。';
     return trimmed;
   }
-  trimmed = dropMatchingSentences(trimmed, /尚未產生確認卡/);
+  trimmed = dropMatchingSentences(trimmed, /尚未產生確認卡/) || trimmed;
   if (food) return trimmed;
   if (!/確認前|按.*確認|點.*確認/.test(trimmed))
     return collapseRepeatedNotice((trimmed || answer) + '\n' + notice + '。', notice);

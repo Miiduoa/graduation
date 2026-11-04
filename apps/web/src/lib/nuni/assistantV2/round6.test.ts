@@ -3,8 +3,91 @@ import { expect, it, vi } from 'vitest';
 import { bytes, type ModelInput } from './contracts';
 import { providerError } from './groq';
 import { partialAnswer, run, scheduleIntent, verifyProposalAnswer } from './runner';
-import { createTools } from './tools';
+import { createTools, selectTools } from './tools';
 import { fakeModel, fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret, questions } from './fixtures';
+
+const ACCEPTANCE_TOOLS: Record<string, string[]> = {
+  '我今天下午有空嗎，幫我排寫作業': [
+    'get_day_overview',
+    'get_today_context',
+    'get_due_work',
+    'find_free_time',
+    'propose_study_plan',
+  ],
+  '中午吃什麼？幫我點一份不辣、100 元以內的': [
+    'get_food_locations',
+    'get_food_menu',
+    'propose_food_order',
+  ],
+  '這禮拜有什麼要交的': [
+    'get_today_context',
+    'propose_open_page',
+    'get_due_work',
+    'get_day_overview',
+    'get_course_work',
+    'find_free_time',
+    'propose_personal_event',
+    'propose_study_plan',
+  ],
+  '下一堂課在哪，幾點': [
+    'get_today_context',
+    'propose_open_page',
+    'get_schedule',
+    'get_calendar',
+    'find_free_time',
+  ],
+  '跟上次一樣再點一次，12:10 去拿': [
+    'reorder_last_food_order',
+    'propose_food_order',
+    'get_food_menu',
+    'list_food_orders',
+  ],
+  '我加入的社團最近有什麼消息': [
+    'get_today_context',
+    'propose_open_page',
+    'list_clubs',
+    'get_club_feed',
+  ],
+  '有什麼未讀通知': ['get_today_context', 'propose_open_page'],
+  '剛剛那份最急的，今晚八點幫我留一小時寫': [
+    'get_today_context',
+    'propose_open_page',
+    'get_due_work',
+    'get_day_overview',
+    'get_course_work',
+    'find_free_time',
+    'propose_personal_event',
+    'propose_study_plan',
+  ],
+  '去圖書館怎麼走，順便看公車': [
+    'get_today_context',
+    'propose_open_page',
+    'get_campus_info',
+    'get_transit',
+  ],
+  '幫我規劃明天：課、作業、吃飯': [
+    'get_day_overview',
+    'get_today_context',
+    'get_due_work',
+    'find_free_time',
+    'propose_study_plan',
+    'get_dining',
+  ],
+  '幫我排寫作業的時間': [
+    'get_day_overview',
+    'get_today_context',
+    'get_due_work',
+    'find_free_time',
+    'propose_study_plan',
+  ],
+  '幫我安排讀書': [
+    'get_day_overview',
+    'get_today_context',
+    'get_due_work',
+    'find_free_time',
+    'propose_study_plan',
+  ],
+};
 
 it.each([0, 1])('finishes sequential planning/ordering within four calls and 7000 tokens (%s)', async (index) => {
   const requests: ModelInput[] = [];
@@ -38,9 +121,26 @@ it('corrects proposal claims and requires confirmation without losing unrelated 
   expect(scheduleIntent('幫我排隊')).toBe(false);
   expect(scheduleIntent('幫我留言')).toBe(false);
   expect(scheduleIntent('留言')).toBe(false);
+  expect(selectTools('幫我排隊', false)).not.toContain('propose_study_plan');
+  expect(selectTools('幫我留言', false)).not.toContain('propose_study_plan');
+  expect(selectTools('幫我排寫作業的時間，下午', false)).toContain('propose_study_plan');
+  expect(selectTools('今晚八點幫我留一小時寫', false)).toEqual(
+    expect.arrayContaining(['get_course_work', 'propose_personal_event']),
+  );
+  expect(selectTools('剛剛那份最急的，今晚八點幫我留一小時寫', false)).toEqual(
+    expect.arrayContaining(['get_course_work', 'propose_personal_event']),
+  );
+  expect(Object.keys(ACCEPTANCE_TOOLS)).toHaveLength(12);
+  for (const [question, names] of Object.entries(ACCEPTANCE_TOOLS))
+    expect(selectTools(question, false)).toEqual(names);
   expect(
     verifyProposalAnswer('已幫你安排好。請按確認卡。', [], '幫我排寫作業的時間'),
   ).toBe('尚未產生確認卡，也尚未執行寫入或下單。');
+  expect(verifyProposalAnswer('攝影社週五有攝影散步，請按確認卡。', [], '社團有什麼消息'))
+    .toMatch(/攝影社週五有攝影散步/);
+  expect(
+    verifyProposalAnswer('攝影社週五有攝影散步，請按確認卡。', [], '社團有什麼消息'),
+  ).not.toMatch(/請按確認卡/);
 });
 it('does not fill a study card for queueing or when writes are disabled', async () => {
   const usage = { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 };
