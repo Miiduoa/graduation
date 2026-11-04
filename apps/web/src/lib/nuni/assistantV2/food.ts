@@ -8,13 +8,14 @@ export type FoodCart = {
 };
 export function cartArgs(raw: unknown): FoodCart {
   const a = object(raw, ['tenantId', 'locationId', 'requestedPickupAt', 'items']);
-  const requestedPickupAt = text(a.requestedPickupAt, 40);
+  const supplied = text(a.requestedPickupAt, 40);
   if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:Z|\+08:00)$/.test(requestedPickupAt) ||
-    !Number.isFinite(Date.parse(requestedPickupAt))
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})$/.test(supplied) ||
+    !Number.isFinite(Date.parse(supplied))
   )
     return fail();
-  date(requestedPickupAt.slice(0, 10));
+  date(supplied.slice(0, 10));
+  const requestedPickupAt = new Date(Date.parse(supplied) + 28800000).toISOString().replace(/Z$/, '+08:00').replace('.000+', '+');
   if (!Array.isArray(a.items) || !a.items.length || a.items.length > 5) return fail();
   return {
     tenantId: id(a.tenantId),

@@ -216,8 +216,10 @@ it('v2 replaces old cards and cancellation waits for server revocation', async (
         cancellations.push(body);
         return json({ revoked: true });
       }
+      if (!body.routeToken) return json({ bootstrap: true, conversationId: 'server-conversation', routeToken: 'signed-route' });
+      expect(body.routeToken).toBe('signed-route');
+      expect(body.conversationId).toBe('server-conversation');
       const seq = ++asks;
-      expect(body.preferredInstance).toBe(seq === 1 ? undefined : 'machine-A');
       return json({
         issuer: 'machine-A',
         answer: '提議' + seq,

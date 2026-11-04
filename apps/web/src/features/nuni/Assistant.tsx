@@ -219,14 +219,14 @@ function V2Conversation({
   schoolId: string;
   ready: boolean;
 }) {
-  const [conversationId] = useState(() => crypto.randomUUID());
+  const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<{ question: string; reply: V2Reply }[]>([]);
   const [states, setStates] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const issuer = useRef<string | undefined>(undefined);
+  const routeToken = useRef<string | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => {
     const active = new AbortController();
@@ -242,7 +242,7 @@ function V2Conversation({
       redirect: 'error',
       signal,
       headers: { 'Content-Type': 'application/json', 'X-Campus-Session': context },
-      body: JSON.stringify({ schoolId, conversationId, ...input }),
+      body: JSON.stringify({ schoolId, conversationId: conversation.current, ...input }),
     });
     if (!response.ok)
       throw new Error(
@@ -266,8 +266,12 @@ function V2Conversation({
         { role: 'user', content: t.question },
         { role: 'assistant', content: t.reply.answer },
       ]);
-      const reply = await send('ask', { question: current, history, consent, preferredInstance: issuer.current });
-      issuer.current = reply.issuer;
+      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      if (reply.bootstrap) {
+        conversation.current = reply.conversationId;
+        routeToken.current = reply.routeToken;
+        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      }
       if (reply.cards.length)
         setStates((s) => ({
           ...s,
@@ -331,7 +335,7 @@ function V2Conversation({
               <ul>
                 {turn.reply.steps.map((s, j) => (
                   <li key={j}>
-                    {s.name}：{s.summary} ({s.status})
+                    {/food/.test(s.name) ? '餐點與訂單' : /transit/.test(s.name) ? '交通資訊' : /campus/.test(s.name) ? '校園資訊' : /club/.test(s.name) ? '社團資訊' : /propose/.test(s.name) ? '確認提議' : '課務與行程'}：{s.status === 'error' ? '本步驟未取得資料' : '已查詢'}
                   </li>
                 ))}
               </ul>

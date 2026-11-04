@@ -1,3 +1,4 @@
+import { maskMessages } from './privacy';
 import { bounded, object, V2Error, type Model, type ModelResult, type ToolCall } from './contracts';
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export function providerError(status: number, body: string, retryAfter?: string | null) {
@@ -79,6 +80,7 @@ export function groqModel(key: string | undefined, fetcher: typeof fetch = fetch
         headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...payload,
+          messages: maskMessages(payload.messages),
           model: 'openai/gpt-oss-120b',
           reasoning_effort: 'low',
           include_reasoning: false,

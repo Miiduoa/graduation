@@ -16,6 +16,37 @@ import {
   type EventArgs,
   type Obj,
 } from './contracts';
+// Each process boot is a new issuance epoch. A lost owner is never reassigned.
+const routeEpoch = randomUUID();
+export function issueRoute(binding: Binding, secret: string) {
+  const payload = { scope: hash({ session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }), binding: hash(binding), issuer: process.env.FLY_MACHINE_ID || 'local', epoch: routeEpoch };
+  const body = Buffer.from(canonical(payload)).toString('base64url');
+  return body + '.' + mac(secret, 'route:' + body);
+}
+function routePayload(token: unknown, secret: string) {
+  if (typeof token !== 'string' || token.length > 2048) return fail('CONFIRMATION_REVOKED', 409);
+  const [body, signature, extra] = token.split('.');
+  const expected = mac(secret, 'route:' + body);
+  if (extra || !signature || signature.length !== expected.length ||
+      !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return fail('CONFIRMATION_REVOKED', 409);
+  let payload: Obj;
+  try { payload = object(JSON.parse(Buffer.from(body, 'base64url').toString())); }
+  catch { return fail('CONFIRMATION_REVOKED', 409); }
+  return payload;
+}
+export function routeTarget(token: unknown, scope: Omit<Binding, 'account'>, secret: string) {
+  const payload = routePayload(token, secret);
+  if (payload.scope !== hash(scope)) return fail('CONFIRMATION_REVOKED', 409);
+  const owner = machineId(payload.issuer);
+  if (owner === (process.env.FLY_MACHINE_ID || 'local') && payload.epoch !== routeEpoch)
+    return fail('CONFIRMATION_REVOKED', 409);
+  return owner;
+}
+export function routeOwner(token: unknown, binding: Binding, secret: string) {
+  const payload = routePayload(token, secret);
+  if (payload.binding !== hash(binding)) return fail('CONFIRMATION_REVOKED', 409);
+  return routeTarget(token, { session: binding.session, conversationId: binding.conversationId, schoolId: binding.schoolId }, secret);
+}
 const proposals = new Map<string, { seq: string; expires: number; revoked: Set<string> }>();
 export function beginProposal(binding: Binding, now: number) {
   for (const [key, value] of proposals) if (value.expires <= now) proposals.delete(key);
@@ -92,6 +123,7 @@ export function signCard(
   const payload = {
     v: 2,
     proposalSeq,
+    epoch: routeEpoch,
     ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
     stage: 'execute',
     binding: hash(binding),
@@ -160,6 +192,7 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
   if (!current || current.seq !== p.proposalSeq || current.revoked.has(String(p.mutationId)))
     return fail('CONFIRMATION_REVOKED', 409);
   if (
+    p.epoch !== routeEpoch ||
     p.v !== 2 ||
     p.stage !== 'execute' ||
     p.binding !== hash(binding) ||
@@ -216,7 +249,10 @@ export async function confirm(
   now: number,
   adapter: Adapter,
   writes: boolean,
+  clock?: () => number,
 ) {
+  const started = Date.now();
+  const currentTime = clock || (() => now + (Date.now() - started));
   const p = verifyCard(binding, raw, secret, now);
   if (p.tool === 'propose_food_order') {
     const cart = cartArgs(p.args.cart);
@@ -231,7 +267,7 @@ export async function confirm(
       return { href: String(p.args.href), reason: p.args.reason };
     const summary = priceCart(cart, await adapter.food.menu(cart.tenantId, cart.locationId));
     if (canonical(summary) !== canonical(p.args.summary)) return fail('PRICE_CHANGED', 409);
-    verifyCard(binding, raw, secret, now);
+    verifyCard(binding, raw, secret, currentTime());
     operationSignal()?.throwIfAborted();
     return adapter.food.submit(cart, p.mutationId);
   }
@@ -253,7 +289,7 @@ export async function confirm(
     return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
   }
   const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
-  verifyCard(binding, raw, secret, now);
+  verifyCard(binding, raw, secret, currentTime());
   operationSignal()?.throwIfAborted();
   await adapter.write({
     schoolId: binding.schoolId,

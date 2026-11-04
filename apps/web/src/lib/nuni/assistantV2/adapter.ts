@@ -219,6 +219,7 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           id: id(r.id),
           state: value(r.state),
           title: value(r.locationName),
+          locationId: value(r.locationId),
         })),
         nextCursor: value(object(raw).nextCursor, 100) || undefined,
       };

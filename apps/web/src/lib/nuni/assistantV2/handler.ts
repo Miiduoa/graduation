@@ -9,7 +9,7 @@ import {
   requireSession,
   sessionContext,
 } from '../server';
-import { cardIssuer, machineId, confirm, revoke } from './actions';
+import { cardIssuer, machineId, confirm, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { groqModel } from './groq';
@@ -82,7 +82,7 @@ export async function handleV2(request: NextRequest, action: string) {
     const raw = object(
       await boundedJson(request, 16384),
       action === 'ask'
-        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance']
+        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken']
         : ['schoolId', 'conversationId', 'token', 'args'],
     );
     const schoolId = id(raw.schoolId),
@@ -90,12 +90,9 @@ export async function handleV2(request: NextRequest, action: string) {
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const target =
-      action === 'ask'
-        ? raw.preferredInstance === undefined
-          ? undefined
-          : machineId(raw.preferredInstance)
-        : cardIssuer({ token: raw.token, args: raw.args }, secret);
+    const target = action === 'ask'
+      ? raw.routeToken === undefined ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
+      : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
       if (request.headers.has('fly-replay-failed')) throw new V2Error(409, 'CONFIRMATION_REVOKED');
       const response = jsonResponse({ error: 'INSTANCE_REPLAY_REQUIRED' }, 409);
@@ -110,6 +107,18 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId,
       schoolId,
     };
+    if (action === 'ask') {
+      // Missing credentials can only bootstrap a fresh server-generated binding.
+      // They can never issue a replacement for a client-selected old binding.
+      if (raw.routeToken === undefined) {
+        if (raw.consent !== true) throw new V2Error(422, 'CONSENT_REQUIRED');
+        text(raw.question, 1000);
+        history(raw.history);
+        const fresh = { ...binding, conversationId: randomUUID() };
+        return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret) });
+      }
+    }
+    if (action === 'ask') routeOwner(raw.routeToken, binding, secret);
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
     if (action === 'cancel')
       return jsonResponse(

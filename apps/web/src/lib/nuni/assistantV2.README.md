@@ -157,3 +157,19 @@ node_modules/.bin/esbuild apps/web/src/lib/nuni/assistantV2/preview.ts --bundle 
 ```
 
 fake 驗證只能證明流程、上限與卡片契約，合成 usage 不代表真 Groq token 成本或品質；本輪未連 Groq 或正式服務。
+
+## 第七輪：對話歸屬、模型出口與回覆驗證
+
+本節取代第五輪僅依 preferredInstance 黏著路由的說明。每個正式 ask 都必須使用伺服端簽發的 routeToken。缺憑證時只回 bootstrap：伺服端產生新的 conversationId，HMAC 綁定完整 account/session/conversation/school binding、issuer（FLY_MACHINE_ID，非 Fly 為 local）與本 Node 啟動 epoch；不執行模型、不發卡。UI 保存新的識別與憑證，再送出原問題。客戶端指定的舊 conversationId／preferredInstance 不能取得該 binding 的新憑證；偽造、跨 binding、舊啟動 epoch 均拒絕。不同對話彼此獨立，不提供跨對話撤銷保證。
+
+Fly 上先沿用既有 cookie／同源／session context 檢查，驗憑證簽章及 session/conversation/school scope 後以 fly-replay 轉至已簽 issuer（此階段零業務 API）；原機器重新驗 principal 與含 account 的完整 binding；錯誤或缺少客戶端提示不能切換發卡機。同一 binding 的新提議只會在原機器替換 seq。confirm/cancel 仍依已簽卡片 issuer replay，卡片另帶啟動 epoch。機器消失時不接手舊 binding：Proxy 失敗或 fly-replay-failed 一律不執行，重新載入建立新 conversationId／epoch；同 id 重啟也拒絕舊 routeToken 和卡片，未知 seq 拒絕。沒有共享狀態，無法支援舊對話無縫故障移轉。
+
+部署假設：每個 FLY_MACHINE_ID 同時只有一個服務助理路由的 Node；Fly Proxy 必須正確保留 POST/body/cookie 與 replay-failed 語意，BFF_SESSION_SECRET 在副本間一致。非 Fly 由 epoch 將對話限制在同一 Node；落在另一 Node 直接拒絕，不容許重發同 binding 卡片。多 worker 共用 machine id 時也會因 epoch 不同拒絕，無法保證可用性，應停用寫入直到路由能保證單一發卡進程。未改基礎設施或正式設定；仍需隔離環境驗 Proxy、重啟與 CAS，離線測試不代表部署驗收。
+
+question/history/context/tool results 在摘要裁切前及模型呼叫前共用敏感資料遮罩，Groq provider 出口再套用相同政策。可辨識 key 前綴、Bearer/JWT/私鑰、帶標籤的學號與成績及具名敏感欄位會遮罩。只允許既有投影欄位與有界、經遮罩的自由文字外送；不得新增提交全文、feedback、帳號或付款憑證。無標籤自由文字中的私人資訊無法可靠辨識，不能宣稱任意文字絕對零敏感資料。log 仍只記固定 metadata，不記原文、卡片或憑證。
+
+未知 usage 的已送出呼叫保留完整預留至本題結束；成功回覆只結算當次預留，先前未知成本不因重試或跨分鐘歸零。仍最多四次模型、7000 token 保守記帳、12 次 API、55 秒。provider 如回報超出預留會立即停止，無法回收已發生費用。確認事件／點餐在 ledger/menu I/O 後、真正寫入前重讀時鐘驗期限；context 近期作業以實際時間比較排除已逾期項目。
+
+本人已列出訂單與該訂單詳情中的 locationId，只有在本題伺服端驗證同校 realm 與訂單清單範圍後才加入可見地點；其他地點仍拒絕。取餐時間接受 ISO Z、毫秒與 offset，統一 +08:00 後沿用原驗證。相對日期依伺服端台北 today 校正事件／讀書提議日期，回覆日期同步校正；規劃回覆由伺服端證據摘要產生，避免自造課名／時段或宣稱未呼叫的工具失敗。圖書館路線題先查校園地圖與交通，無位置資料只提供官方／站內地圖入口、不猜地點。沒有卡片時移除按確認卡的指示，內部工具名稱／錯誤碼不呈現在回覆或 UI 查詢步驟。
+
+第七輪離線產物：`/workspace/agent-backend/v2/preview-fake-r7-off.jsonl`（off/all）、`preview-fake-r7-on.jsonl`（on/food）與 `/tmp/nuni-v2-preview-bundle.mjs`。未連 Groq 或正式 API，fake 結果不代表真 Groq 的語意品質。正式點餐仍只導頁，不呼叫 quotes/orders POST 或 payment-session；ONLINE_ORDERING_ENABLED 語意不變。

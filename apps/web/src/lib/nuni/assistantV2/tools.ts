@@ -173,6 +173,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_personal_event',
       'propose_study_plan',
     );
+  if (/行程|事件|今晚|今夜|明晚/.test(question)) add('propose_personal_event');
   if (/課|有空|下午|行程|規劃/.test(question))
     add('get_schedule', 'get_calendar', 'find_free_time');
   if (/教材/.test(question)) add('list_courses', 'get_materials');
@@ -682,7 +683,10 @@ export function createTools(
           state: a.state as string | undefined,
           limit: Number(a.limit || 5),
         });
-        value.orders.forEach((o) => orders.add(a.tenantId + ':' + o.id));
+        value.orders.forEach((o) => {
+          orders.add(a.tenantId + ':' + o.id);
+          if (typeof o.locationId === 'string' && o.locationId) foodLocations.add(a.tenantId + ':' + id(o.locationId));
+        });
         return {
           ...value,
           ...(value.orders.length ? {} : { nextStep: '查無訂單；請省略 state 重查全部近期訂單，不代表沒有歷史訂單。' }),
@@ -691,10 +695,13 @@ export function createTools(
             .slice(0, Number(a.limit || 5)),
         };
       }
-      case 'get_food_order':
+      case 'get_food_order': {
         await tenant(a);
         if (!orders.has(a.tenantId + ':' + a.orderId)) return fail('FORBIDDEN_SCOPE', 403);
-        return adapter.order(String(a.tenantId), String(a.orderId));
+        const order = object(await adapter.order(String(a.tenantId), String(a.orderId)));
+        if (typeof order.locationId === 'string' && order.locationId) foodLocations.add(a.tenantId + ':' + id(order.locationId));
+        return order;
+      }
       case 'list_clubs': {
         await tenant(a);
         const value = await adapter.clubs(
@@ -842,7 +849,8 @@ export function createTools(
             !t.submitted &&
             t.state === 'open' &&
             t.dueAt &&
-            t.dueAt.slice(0, 10) <= addDays(today, 7),
+            Date.parse(t.dueAt) >= now &&
+            Date.parse(t.dueAt) < Date.parse(addDays(today, 7) + 'T00:00:00+08:00'),
         )
         .sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt)))
         .slice(0, 3);

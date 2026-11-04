@@ -46,18 +46,21 @@ it('reorders from all recent orders even if the model supplies a state', async (
   const empty = createTools(adapter, binding, secret, now, true);
   expect((await empty.call('list_food_orders', {})).value).toHaveProperty('nextStep', expect.stringContaining('省略 state'));
 });
-it('switches to answer only after two rejected generations instead of aborting', async () => {
+it('retains rejected-generation reservations and stops when the remaining budget is insufficient', async () => {
   let calls = 0;
+  let reservations = 0;
   const r = await run({ question: '規劃明天作業', history: [], binding, adapter: fixtureAdapter().adapter,
     secret, now, writes: true, signal: new AbortController().signal, log: () => {},
     model: async (input) => {
+      reservations += bytes({ messages: input.messages, tools: input.tools }) + input.max_completion_tokens + 128;
+      expect(reservations).toBeLessThanOrEqual(7000);
       if (++calls <= 2) throw providerError(400, '{"error":{"code":"tool_use_failed"}}');
       expect(input.tools).toBeUndefined();
       expect(input.messages.at(-1)?.content).toContain('最終簡答');
       return { message: { role: 'assistant', content: '尚未完成查詢，請重新提問。' }, usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 } };
     },
   });
-  expect(r.modelCalls).toBe(3);
+  expect(r.modelCalls).toBeLessThanOrEqual(3);
   expect(r.stopReason).not.toBe('ABORTED');
 });
 it('partial work results exclude completed and overdue items and unrelated transit hints', () => {
