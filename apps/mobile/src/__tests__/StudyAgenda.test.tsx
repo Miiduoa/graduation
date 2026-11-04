@@ -262,3 +262,100 @@ it('clears export selection while refreshing data and excludes confirmed submiss
   fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
   expect(view.getByRole('button', { name: '預覽已選 0 項' }).props.accessibilityState.disabled).toBe(true);
 });
+
+it('queries only current student assignments and opens the selected platform record', () => {
+  jest.useFakeTimers({ now: new Date('2026-11-04T09:00:00Z') });
+  try {
+    const workspaces: NuniStudyAgenda['workspaces'] = [
+      { id: 'design', title: '資料庫設計', state: 'active', memberRole: 'student' },
+      { id: 'management', title: '資料庫管理', state: 'active', memberRole: 'student' },
+      { id: 'ethics', title: '工程倫理', state: 'active', memberRole: 'student' },
+      { id: 'archived', title: '資料庫歷史', state: 'archived', memberRole: 'student' },
+      { id: 'teacher', title: '資料庫教學', state: 'active', memberRole: 'owner-teacher' },
+    ];
+    const items = workspaces.map(({ id, title }) => task(id, {
+      courseId: id, courseTitle: title, title: '期中報告', dueAt: '2026-11-05T13:00:00Z',
+    }));
+    const distractors = [
+      task('closed', { ...items[0], id: 'closed', state: 'closed' }),
+      task('submitted', { ...items[0], id: 'submitted', submittedAt: '2026-11-04T07:00:00Z' }),
+      task('quiz', { ...items[0], id: 'quiz', kind: 'quiz' }),
+    ];
+    const data = agenda([...items, ...distractors], { workspaces });
+    const open = jest.fn();
+    const retry = jest.fn();
+    const view = render(<StudyAgenda data={data} loading={false} error="" retry={retry} open={open} />);
+    fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+    fireEvent.changeText(view.getByLabelText('輸入作業問題'), '資料庫的期中報告什麼時候交？');
+    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+    const matches = view.getAllByRole('button', { name: /^查看作業：/ });
+    expect(matches).toHaveLength(2);
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' }));
+    expect(open.mock.calls).toEqual([['management', 'management']]);
+    expect(retry).not.toHaveBeenCalled();
+    view.rerender(<StudyAgenda data={data} loading error="" retry={retry} open={open} />);
+    expect(view.queryByRole('button', { name: '問作業助理' })).toBeNull();
+    expect(view.queryAllByRole('button', { name: /^查看作業：/ })).toHaveLength(0);
+    view.rerender(<StudyAgenda data={agenda([], { workspaces })} loading={false} error="" retry={retry} open={open} />);
+    expect(view.queryAllByRole('button', { name: /^查看作業：/ })).toHaveLength(0);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('uses Taipei local deadline strings from the platform when filtering tomorrow', () => {
+  jest.useFakeTimers({ now: new Date('2026-11-04T15:57:00Z') });
+  try {
+    const workspaces: NuniStudyAgenda['workspaces'] = [
+      { id: 'course', title: '資料庫', state: 'active', memberRole: 'student' },
+    ];
+    const data = agenda([
+      task('late-today', { title: '今天最後一份', dueAt: '2026-11-04T23:59:00' }),
+      task('midnight', { title: '午夜的作業', dueAt: '2026-11-05T00:00:00' }),
+      task('undated', { title: '沒有參考期限', dueAt: null }),
+    ], { workspaces, limitedCourseIds: ['course'] });
+    const retry = jest.fn(), open = jest.fn();
+    const view = render(<StudyAgenda data={data} loading={false} error="" retry={retry} open={open} />);
+    fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+    fireEvent.changeText(view.getByLabelText('輸入作業問題'), '明天有哪些作業要交？');
+    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+    expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+    fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫 · 午夜的作業' }));
+    expect(open.mock.calls).toEqual([['course', 'midnight']]);
+    expect(retry).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('pages the platform results locally and invalidates them when the course data changes', () => {
+  const workspaces: NuniStudyAgenda['workspaces'] = [
+    { id: 'course', title: '資料庫', state: 'active', memberRole: 'student' },
+  ];
+  const rows = Array.from({ length: 17 }, (_, i) => task(String(i + 1), {
+    dueAt: new Date(Date.UTC(2026, 10, 5 + i)).toISOString(),
+  }));
+  const open = jest.fn(), retry = jest.fn();
+  const props = { loading: false, error: '', open, retry };
+  const view = render(<StudyAgenda data={agenda(rows, { workspaces })} {...props} />);
+  fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+  fireEvent.changeText(view.getByLabelText('輸入作業問題'), '有哪些作業待交？');
+  fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(8);
+  fireEvent.changeText(view.getByLabelText('輸入作業問題'), '還有呢？');
+  fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+  fireEvent.changeText(view.getByLabelText('輸入作業問題'), '第二筆');
+  fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+  expect(open).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫 · 作業 10' }));
+  expect(open.mock.calls).toEqual([['course', '10']]);
+  fireEvent.press(view.getByRole('button', { name: '返回清單' }));
+  fireEvent.press(view.getByRole('button', { name: '下一頁作業' }));
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+  expect(view.getByRole('button', { name: '查看作業：資料庫 · 作業 17' })).toBeTruthy();
+  view.rerender(<StudyAgenda data={agenda([task('replacement')], { workspaces })} {...props} />);
+  expect(view.queryByRole('button', { name: '查看作業：資料庫 · 作業 17' })).toBeNull();
+  expect(retry).not.toHaveBeenCalled();
+});

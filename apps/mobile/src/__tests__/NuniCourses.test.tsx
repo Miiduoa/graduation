@@ -4,6 +4,7 @@ import { AppState, ScrollView, type AppStateStatus } from 'react-native';
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import { createNuniClasses, NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { NuniCourses } from '../screens/nuni/NuniCourses';
+import { NuniWorkspaceScreen } from '../screens/NuniWorkspaceScreen';
 import { NuniDraftProvider } from '../state/nuniDrafts';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { materialBookmarkStorageKey } from '@campus/shared/src/materialBookmarks';
@@ -169,6 +170,51 @@ async function openCourse() {
   await view.findByText('校園訪談');
   return view;
 }
+
+it('opens the selected same-title assignment from the Google-account workspace without a request during search', async () => {
+  const secondCourse = { ...course, id: 'cw_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: '資料庫管理' };
+  const firstCourse = { ...course, title: '資料庫設計' };
+  const title = '期中報告';
+  const firstReport = { ...assignment, title, instructions: '請繪製資料模型。' };
+  const secondReport = { ...assignment, title, workspaceId: secondCourse.id,
+    id: 'cwa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', instructions: '請繳交查詢效能分析。' };
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path === 'memberships') return { memberships: [] };
+    if (path === 'class-workspaces') return { workspaces: [firstCourse, secondCourse] };
+    if (path === `class-workspaces/${firstCourse.id}`) return firstCourse;
+    if (path === `class-workspaces/${secondCourse.id}`) return secondCourse;
+    if (path === `class-workspaces/${firstCourse.id}/assignments`) return { assignments: [firstReport] };
+    if (path === `class-workspaces/${secondCourse.id}/assignments`) return { assignments: [secondReport] };
+    if (path.endsWith('/quizzes')) return { quizzes: [] };
+    return response(path, context, input);
+  });
+  const view = render(<NuniWorkspaceScreen />);
+  expect(view.getByRole('tab', { name: '課程', selected: true })).toBeTruthy();
+  const toggle = await view.findByRole('button', { name: '問作業助理' });
+  mockRequest.mockClear();
+  const originalFetch = global.fetch;
+  const directFetch = jest.fn().mockRejectedValue(new Error('Unexpected network request during local lookup'));
+  global.fetch = directFetch;
+  try {
+    fireEvent.press(toggle);
+    fireEvent.changeText(view.getByLabelText('輸入作業問題'), '期中報告什麼時候交？');
+    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+    expect(await view.findByRole('button', { name: '查看作業：資料庫設計 · 期中報告' })).toBeTruthy();
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(directFetch).not.toHaveBeenCalled();
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' }));
+  await view.findByLabelText('作業繳交區：期中報告');
+  expect(view.getByText(secondReport.instructions)).toBeTruthy();
+  expect(view.queryByText(firstReport.instructions)).toBeNull();
+  expect(mockRequest.mock.calls.some(([path, context]) =>
+    path === `class-workspaces/${secondCourse.id}/assignments` && context === 'context-first',
+  )).toBe(true);
+  expect(mockRequest.mock.calls.every(([, , input]) => input == null)).toBe(true);
+});
 
 function material(number: number, title = `第 ${number} 份教材`): NuniMaterial {
   return {

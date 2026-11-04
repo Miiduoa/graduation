@@ -1,12 +1,11 @@
 import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
-import { confirmedTimestamp, taipeiDayNumber } from './campusStudyAgenda';
-import { outsideAssignmentNames, parseAssignmentDeadlineWindow, stripAssignmentDeadlinePeriods, withoutDeadlineConstraint } from './assignmentDeadlineWindow';
-import { filterAssignmentQuery } from './assignmentQueryFilter';
+import { outsideAssignmentNames } from './assignmentDeadlineWindow';
+import { asksForAssignments, queryAssignmentDeadlines } from './queryAssignmentDeadlines';
 import { buildOfflineCampusPlan, type CampusEvidencePlan } from './offlineCampusPlanner';
+import { ASSIGNMENT_PAGE_SIZE } from './assignmentResultPage';
 
-export const ASSIGNMENT_PAGE_SIZE = 8;
 export interface AssignmentPageRequest {
   offset: number;
   asOf: number;
@@ -100,25 +99,6 @@ function syncedTime(value: string): string {
   }).format(new Date(value));
 }
 
-// A bare “截止” could refer to event registration, library loans, or another service.
-function asksForAssignments(question: string): boolean {
-  if (!/作業|功課|報告|習題|測驗/.test(question) &&
-      /借閱|還書|圖書館|報名|活動|繳費|學費|帳單|註冊|住宿|水費|電費/.test(question)) return false;
-  return /作業|功課|待交|待繳/.test(question) ||
-    /(?:報告|習題|測驗).*(?:繳交期限|截止|到期)|(?:哪天|幾號|何時|什麼時候|幾點)(?:要|得|需|必須)?(?:繳交|繳|交)/.test(question);
-}
-
-// When a saved name directly precedes a due-date question, a weekday inside that name
-// belongs to the title (“星期一報告什麼時候交”), even if its actual deadline is on Friday.
-function protectCalendarTitle(question: string, items: CampusSenseSnapshot['assignments']['items']): string {
-  const prefix = question.match(/^(.*?)(?:的)?(?:什麼時候|何時|幾點|幾號|哪天|哪一天)(?:要|得|需)?(?:繳交|交|繳|截止|到期)/)?.[1];
-  if (!prefix || prefix === stripAssignmentDeadlinePeriods(prefix)) return question;
-  const title = items.reduce((best, item) =>
-    item.title.length > best.length && prefix.endsWith(item.title) ? item.title : best, '');
-  if (!title || title === stripAssignmentDeadlinePeriods(title)) return question;
-  return prefix.slice(0, -title.length) + '「' + title + '」' + question.slice(prefix.length);
-}
-
 const PRIORITY_QUESTION = /今日重點|今天要做|今天要先|今天先做|今天該做|先處理|待辦摘要|校園摘要|先完成哪|有什麼重要的/;
 
 function syncedCampusAnswer(
@@ -151,34 +131,17 @@ function syncedCampusAnswer(
     const assignments = snapshot.assignments;
     if (assignments.status === 'available') {
       matched = true;
-      const filterText = assignmentOnly ? protectCalendarTitle(filterQuestion, assignments.items) : filterQuestion;
-      const filtered = assignmentOnly ? filterAssignmentQuery(filterText, assignments.items)
-        : { items: assignments.items, scope: null };
-      // Freeze only the query clock across pages. The caller validates the snapshot
-      // against the current clock on every turn, including after app resume.
+      // Page through the original result while validating the snapshot against the current clock.
       const asOf = page?.asOf ?? now;
-      const window = assignmentOnly ? parseAssignmentDeadlineWindow(question === filterQuestion ? filterText : question, asOf) : null;
-      if (window === 'clarify') return {
+      const query = queryAssignmentDeadlines(assignments.items, assignmentOnly ? question : '', asOf,
+        assignmentOnly ? filterQuestion : '');
+      if (query.kind === 'clarify') return {
         tool: 'campus-snapshot', route: '/classroom',
         assignmentRead: { userId: snapshot.userId, schoolId: snapshot.schoolId, checkedAt: snapshot.checkedAt,
-          items: [], filterQuestion: withoutDeadlineConstraint(filterText) },
+          items: [], filterQuestion: query.filterQuestion },
         content: '想查哪一天或哪一週截止的作業？可以回覆「明天」、「下週五」或「未來七天」。',
       };
-      const dated = filtered.items.map((item) => ({ item, due: confirmedTimestamp(item.dueAt) }));
-      const qualifier = assignmentOnly ? outsideAssignmentNames(filterQuestion) : '';
-      const status = /(?:沒有|未提供|沒有提供|未確認)(?:截止日期|截止時間|期限)|(?:截止日期|截止時間|期限)(?:未提供|未確認)/.test(qualifier)
-        ? '期限未確認' : /(?:未|還沒|尚未)逾期/.test(qualifier)
-          ? '尚未逾期' : /逾期|期限已過/.test(qualifier) ? '已逾期' : '';
-      const matches = dated.filter(({ due }) => {
-        if (status === '期限未確認' && Number.isFinite(due)) return false;
-        if (status === '已逾期' && !(due < asOf)) return false;
-        if (status === '尚未逾期' && !(due >= asOf)) return false;
-        if (!window) return true;
-        const day = taipeiDayNumber(due);
-        return day >= window.startDay && day < window.endDay &&
-          (!/未來|接下來/.test(window.label) || due >= asOf);
-      }).sort((a, b) =>
-        (Number.isFinite(a.due) ? a.due : Infinity) - (Number.isFinite(b.due) ? b.due : Infinity));
+      const { rows: matches, scope, status, window, undated } = query;
       const offset = page?.offset ?? 0;
       if (page && (!Number.isSafeInteger(offset) || offset < 0 || offset % ASSIGNMENT_PAGE_SIZE !== 0 ||
           offset >= matches.length || !Number.isFinite(new Date(asOf).getTime()))) {
@@ -191,8 +154,8 @@ function syncedCampusAnswer(
           ...(page?.reviewReminder ? { reviewReminder: true } : {}),
           ...(matches.length > ASSIGNMENT_PAGE_SIZE ? { page: { offset, total: matches.length, question, asOf } } : {}) };
       }
-      if (filtered.scope || window || status) {
-        const detail = [filtered.scope, status, window && window.label + '截止（台灣時間）'].filter(Boolean).join('、');
+      if (scope || window || status) {
+        const detail = [scope, status, window && window.label + '截止（台灣時間）'].filter(Boolean).join('、');
         lines.push('已同步作業中符合「' + detail + '」的有 ' + matches.length + ' 筆。');
       } else {
         lines.push('已接通課程的待交作業：' + assignments.count + ' 筆。');
@@ -216,9 +179,8 @@ function syncedCampusAnswer(
         lines.push('此回覆先列出 ' + preview.length + ' 筆；另有 ' + (matches.length - preview.length) +
           ' 筆已同步但未在此預覽展開，可從「未來七天」的逐日安排與其他作業區查看。');
       }
-      if (window) {
-        const undated = dated.filter(({ due }) => !Number.isFinite(due)).length;
-        if (undated) lines.push('另有 ' + undated + ' 筆截止時間未確認，無法按日期歸入這段期間。');
+      if (window && undated) {
+        lines.push('另有 ' + undated + ' 筆截止時間未確認，無法按日期歸入這段期間。');
       }
       if (assignments.count !== null && assignments.count > assignments.items.length) {
         lines.push('另有 ' + (assignments.count - assignments.items.length) +

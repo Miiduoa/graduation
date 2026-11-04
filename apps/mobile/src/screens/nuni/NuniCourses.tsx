@@ -940,7 +940,7 @@ function CourseList({
         <>
           <StudyAgenda
             data={agendaData}
-            loading={agenda.loading}
+            loading={agenda.loading || result.loading}
             error={agenda.error}
             retry={() => void agenda.refresh()}
             open={open}
