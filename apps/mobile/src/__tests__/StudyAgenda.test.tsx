@@ -394,3 +394,35 @@ it('checks loaded receipts by course and title without treating absence as a con
   expect(view.getByText('請提供課程或作業名稱，再核對這份作業的繳交紀錄。')).toBeTruthy();
   expect(view.queryAllByRole('button', { name: /^查看作業：/ })).toHaveLength(0);
 });
+
+
+it('keeps a named course receipt scope across status-only follow-ups and opens the exact activity', () => {
+  const workspaces: NuniStudyAgenda['workspaces'] = [
+    { id: 'design', title: '資料庫設計', state: 'active', memberRole: 'student' },
+    { id: 'management', title: '資料庫管理', state: 'active', memberRole: 'student' },
+    { id: 'ethics', title: '工程倫理', state: 'active', memberRole: 'student' },
+  ];
+  const rows = workspaces.map(({ id, title }) => task(id, {
+    title: '期中報告', courseId: id, courseTitle: title,
+    submittedAt: id === 'management' || id === 'ethics' ? '2026-11-04T05:00:00Z' : null,
+  }));
+  const open = jest.fn();
+  const view = render(<StudyAgenda data={agenda(rows, { workspaces })}
+    loading={false} error="" retry={jest.fn()} open={open} />);
+  fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+  const ask = (question: string) => {
+    fireEvent.changeText(view.getByLabelText('輸入作業問題'), question);
+    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+  };
+  ask('資料庫的期中報告交了嗎？');
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(2);
+  ask('那已交的呢？');
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+  expect(view.queryByRole('button', { name: '查看作業：工程倫理 · 期中報告' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' }));
+  expect(open).toHaveBeenCalledWith('management', 'management');
+  ask('那還沒交的呢？');
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫設計 · 期中報告' }));
+  expect(open).toHaveBeenCalledWith('design', 'design');
+});
