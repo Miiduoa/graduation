@@ -122,19 +122,26 @@ test('opens timetable import from the empty timetable state', async () => {
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
 
-test('opens the assignment submit screen from a todo row', async () => {
+test.each(['assignment', 'quiz'] as const)('opens the course from a %s todo row', async (kind) => {
   const data = result();
+  data.tasks[0].kind = kind;
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
   fireEvent.press(await view.findByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit',
-    params: {
-      courseId: 'course-a',
-      hwId: 'homework-a',
-      hwTitle: '繳交期末報告',
-      dueAt: data.tasks[0].dueAt?.toISOString(),
-    },
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
+  });
+});
+
+test('a todo without a course ID carries the course name to Classroom search', async () => {
+  const data = result();
+  data.tasks[0].groupId = '  ';
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(await view.findByLabelText('繳交期末報告，資料結構'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'Classroom', params: { q: '資料結構', from: 'timetable' },
   });
 });
 
@@ -256,8 +263,8 @@ test('reveals the remaining work inline and lets the student collapse the list',
   expect(rootNavigateNested).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText('作業 3，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit',
-    params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-3' }),
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
   fireEvent.press(view.getByText('收合待辦'));
   expect(view.queryByLabelText('作業 3，資料結構')).toBeNull();
@@ -291,8 +298,8 @@ test('a malformed deadline stays visible as undated instead of disappearing', as
   expect(view.getAllByText(/未設截止時間/).length).toBeGreaterThan(0);
   fireEvent.press(view.getByLabelText('繳交期末報告，資料結構'));
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
-    screen: 'HomeworkSubmit',
-    params: { courseId: 'course-a', hwId: 'homework-a', hwTitle: '繳交期末報告' },
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
 });
 
@@ -329,12 +336,15 @@ test('pull-to-refresh keeps current records visible and stays active until both 
   expect(view.UNSAFE_getByType(RefreshControl).props.refreshing).toBe(false);
 });
 
-test('the entire next-assignment card opens that assignment directly', async () => {
+test('the explicit submit button opens the real assignment', async () => {
   const data = result();
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
   await view.findByText(TODAY_COPY.nextAssignment);
-  fireEvent.press(view.getByTestId('next-action'));
+  const stopPropagation = jest.fn();
+  fireEvent.press(view.getByText(TODAY_COPY.goSubmit), { stopPropagation });
+  expect(stopPropagation).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
     screen: 'HomeworkSubmit',
     params: {
@@ -517,5 +527,42 @@ test('today class list press with linkedCourseId opens CourseHub', async () => {
       groupId: 'cw_11111111-1111-4111-8111-111111111111',
       section: 'week',
     },
+  });
+});
+
+test.each([-48, 3, 72])('the work card opens its course for a deadline offset of %s hours', async (hours) => {
+  const data = result();
+  data.tasks[0].dueAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findAllByText('繳交期末報告');
+  fireEvent.press(view.getByTestId('next-action'));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
+  });
+});
+
+test('after classes end, the card opens the course and its button still submits the assignment', async () => {
+  const data = result();
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  mockTimetable.classes = [todayClass({
+    startAt: Date.now() - 2 * 60 * 60 * 1000,
+    endAt: Date.now() - 60 * 60 * 1000,
+  })];
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.allClassesDone);
+  fireEvent.press(view.getByTestId('next-action'));
+  expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    screen: 'CourseHub',
+    params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
+  });
+  const stopPropagation = jest.fn();
+  fireEvent.press(view.getByText(TODAY_COPY.goSubmit), { stopPropagation });
+  expect(stopPropagation).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).toHaveBeenCalledTimes(2);
+  expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    screen: 'HomeworkSubmit',
+    params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a', scrollToSubmit: true }),
   });
 });
