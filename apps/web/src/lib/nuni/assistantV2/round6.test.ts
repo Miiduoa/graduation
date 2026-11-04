@@ -35,9 +35,41 @@ it('corrects proposal claims and requires confirmation without losing unrelated 
     .toBe('明天有英文課。請核對並按下方確認卡；確認前尚未執行。');
   expect(scheduleIntent('幫我排寫作業的時間')).toBe(true);
   expect(scheduleIntent('幫我安排讀書')).toBe(true);
+  expect(scheduleIntent('幫我排隊')).toBe(false);
+  expect(scheduleIntent('幫我留言')).toBe(false);
+  expect(scheduleIntent('留言')).toBe(false);
   expect(
     verifyProposalAnswer('已幫你安排好。請按確認卡。', [], '幫我排寫作業的時間'),
   ).toBe('尚未產生確認卡，也尚未執行寫入或下單。');
+});
+it('does not fill a study card for queueing or when writes are disabled', async () => {
+  const usage = { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 };
+  const queue = await run({
+    question: '幫我排隊',
+    history: [],
+    binding,
+    adapter: fixtureAdapter().adapter,
+    secret,
+    now,
+    writes: true,
+    signal: new AbortController().signal,
+    log: () => {},
+    model: async () => ({ message: { role: 'assistant', content: '請到櫃檯取號。' }, usage }),
+  });
+  expect(queue.cards).toHaveLength(0);
+  const disabled = await run({
+    question: '幫我排寫作業的時間',
+    history: [],
+    binding,
+    adapter: fixtureAdapter().adapter,
+    secret,
+    now,
+    writes: false,
+    signal: new AbortController().signal,
+    log: () => {},
+    model: async () => ({ message: { role: 'assistant', content: '下午可以寫作業。' }, usage }),
+  });
+  expect(disabled.cards).toHaveLength(0);
 });
 it('normalizes only visible realm and previously listed location ids', async () => {
   const tools = createTools(fixtureAdapter().adapter, binding, secret, now, true);

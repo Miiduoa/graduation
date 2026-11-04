@@ -22,7 +22,11 @@ import { foodLink, foodOrderIntent, pickFoodCart, pickupAt } from './food';
 import { createTools, schemas, selectTools } from './tools';
 export { foodOrderIntent };
 export function scheduleIntent(question: string): boolean {
-  return /幫我排|排寫|留.?(?:一)?小時|幫我留|規劃|安排/.test(question);
+  return (
+    /規劃|安排|排寫|留.?(?:一)?小時/.test(question) ||
+    /幫我排(?!隊)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question) ||
+    /幫我留(?!言)[\s\S]{0,12}(?:時間|作業|讀書|寫|小時)/.test(question)
+  );
 }
 export function writeIntent(question: string): boolean {
   return (
@@ -720,11 +724,12 @@ export function planningAnswer(
 
 const FOOD_PAGE_NEXT = '按確認後會開啟點餐頁，品項已帶好';
 const FOOD_ORDER_NEXT = '按確認才會送出訂單';
-const FOOD_PAGE_DROP = /付款|完成訂單|下單|送出訂單|訂單已送出|正在幫[你您]下單/;
+const FOOD_PAGE_DROP =
+  /付款|完成訂單|下單|送出訂單|訂單已送出|正在幫[你您]下單|結帳|提交訂單|訂單已成立|\bpayment\b|\bcheckout\b|\bplaced?\s+(?:the\s+|an\s+)?orders?\b|\breordered?\b/i;
 const FOOD_ORDER_DROP = /已為[您你](?:重新)?下單|已重新下單|訂單已送出|已(?:經)?下單|完成下單/;
 
 function splitSentences(text: string): string[] {
-  return text.split(/(?<=[。！？\n])/);
+  return text.split(/(?<=[。！？\n])|(?<=[.!])(?=\s|$)/);
 }
 
 function collapseRepeatedNotice(text: string, notice: string): string {

@@ -112,6 +112,20 @@ it('rewrites pickup time and amount from the food card and page-mode copy', () =
       expect(paid).not.toMatch(/付款|完成訂單|下單|送出訂單|訂單已送出|正在幫你下單/);
       expect(paid).not.toContain('確認並完成付款');
       expect(paid).not.toContain('以完成訂單');
+      const checkout = alignFoodCardAnswer(
+        '蔬菜便當可取。請去結帳。提交訂單後就完成。訂單已成立。',
+        tools.cards,
+      );
+      expect(checkout).toContain('蔬菜便當可取');
+      expect(checkout).toContain('按確認後會開啟點餐頁，品項已帶好');
+      expect(checkout).not.toMatch(/結帳|提交訂單|訂單已成立/);
+      const english = alignFoodCardAnswer(
+        '蔬菜便當可取. Please complete payment. Go to checkout! I placed the order. Reordered already.',
+        tools.cards,
+      );
+      expect(english).toContain('蔬菜便當可取');
+      expect(english).not.toMatch(/payment|checkout|placed the order|reordered/i);
+      expect(english).toContain('按確認後會開啟點餐頁，品項已帶好');
     });
 });
 
