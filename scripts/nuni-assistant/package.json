@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fastify": "5.10.0",
+    "@fastify/rate-limit": "11.1.0"
+  }
+}

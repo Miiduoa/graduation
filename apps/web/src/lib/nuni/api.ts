@@ -1,3 +1,4 @@
+import { handleAssistant } from './assistant';
 import { CourseAccessError, courseMetadata, courseRecord, parseCourseCandidate, sameCourseScope } from '@campus/shared/src/courseAccess';
 import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourseAccessPath } from '@campus/shared/src/courseAccessClient';
 import { NextRequest, NextResponse } from 'next/server';
@@ -137,6 +138,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       }
       throw new NuniError(404, 'NOT_FOUND');
     }
+    if (segments[0] === 'assistant') return await handleAssistant(request, segments);
     const method = request.method;
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
