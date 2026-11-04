@@ -195,6 +195,7 @@ function foodSummary(raw: unknown): string {
 const cardLabels: Record<string, string> = {
   summary: '餐點與金額',
   reason: '說明',
+  href: '點餐頁',
   title: '標題',
   date: '日期',
   endDate: '結束日期',
@@ -244,15 +245,17 @@ function V2Conversation({
       headers: { 'Content-Type': 'application/json', 'X-Campus-Session': context },
       body: JSON.stringify({ schoolId, conversationId: conversation.current, ...input }),
     });
+    const result = await response.json();
     if (!response.ok)
       throw new Error(
-        response.status === 409
-          ? '資料或登入狀態已變更，請重新提議。'
-          : response.status === 429
-            ? '已達查詢預算，請稍後再試。'
-            : '查詢未完成，請稍後再試。',
+        typeof result.message === 'string' && result.message
+          ? result.message
+          : response.status === 409
+            ? '資料或登入狀態已變更，請重新提議。'
+            : response.status === 429
+              ? '已達查詢預算，請稍後再試。'
+              : '查詢未完成，請稍後再試。',
       );
-    const result = await response.json();
     if (signal.aborted) throw new Error('已取消');
     return result;
   }
@@ -360,13 +363,15 @@ function V2Conversation({
                   {Object.entries(card.args)
                     .filter(
                       ([key]) =>
-                        card.tool !== 'propose_food_order' || ['summary', 'reason'].includes(key),
+                        card.tool !== 'propose_food_order' || ['summary', 'reason', 'href'].includes(key),
                     )
                     .map(([key, value]) => (
                       <div key={key}>
                         <dt>{cardLabels[key] || key}</dt>
                         <dd>
-                          {card.tool === 'propose_food_order' && key === 'summary'
+                          {card.tool === 'propose_food_order' && key === 'href' && typeof value === 'string'
+                            ? <Link href={value}>開啟已備好的點餐頁</Link>
+                            : card.tool === 'propose_food_order' && key === 'summary'
                             ? foodSummary(value)
                             : typeof value === 'boolean'
                               ? value

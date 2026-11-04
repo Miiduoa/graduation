@@ -83,7 +83,7 @@ it.each(['question', 'history', 'context', 'tool'])('masks secrets, student ids 
   const requests: ModelInput[] = [];
   const logs: unknown[] = [];
   let calls = 0;
-  f.adapter.courses = async () => [{ id: 'course', title: marker }];
+  f.adapter.courses = async () => ({ courses: [{ id: 'course', title: marker }], partial: false });
   await run({ question: source === 'question' ? marker : source === 'context' ? '今天課表' : '教材',
     history: source === 'history' ? [{ role: 'user', content: marker }] : [], binding, adapter: f.adapter,
     secret, now, writes: true, signal: new AbortController().signal, log: (r) => logs.push(r),
@@ -133,7 +133,7 @@ it('corrects tonight to the server Taipei date and grounds planning / navigation
 
 it('context excludes expired work using instants across timezones', async () => {
   const f = fixtureAdapter();
-  f.adapter.courses = async () => [{ id: 'c', title: '課程' }];
+  f.adapter.courses = async () => ({ courses: [{ id: 'c', title: '課程' }], partial: false });
   f.adapter.work = async () => [
     { id: 'old', courseId: 'c', title: '逾期', state: 'open', submitted: false, dueAt: new Date(now - 1).toISOString() },
     { id: 'new', courseId: 'c', title: '近期', state: 'open', submitted: false, dueAt: new Date(now + 3600000).toISOString() },

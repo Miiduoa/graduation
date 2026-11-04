@@ -1,4 +1,4 @@
-import { cartArgs, priceCart } from './food';
+import { cartArgs, foodHref, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
 import {
   getOfficialCampusMapUrl,
@@ -54,6 +54,7 @@ const definitions: Record<string, [Obj, string[]]> = {
     },
     ['tenantId', 'locationId', 'requestedPickupAt', 'items'],
   ],
+  reorder_last_food_order: [{ tenantId: s, requestedPickupAt: { type: 'string', maxLength: 40 } }, []],
   get_due_work: [{ from: d, to: d }, []],
   get_day_overview: [{ date: d }, ['date']],
   get_today_context: [{}, []],
@@ -128,7 +129,7 @@ const definitions: Record<string, [Obj, string[]]> = {
       minMinutes: { type: 'integer', minimum: 15, maximum: 180 },
       taskIds: { type: 'array', items: s, minItems: 1, maxItems: 4 },
     },
-    ['date', 'taskIds'],
+    ['date'],
   ],
   propose_open_page: [
     {
@@ -185,6 +186,7 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_food_order',
       'list_food_orders',
       'get_food_order',
+      'reorder_last_food_order',
     );
   if (/社團/.test(question)) add('list_clubs', 'get_club_feed');
   if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
@@ -206,7 +208,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/點餐|幫我點/.test(question) && !/再點|上次/.test(question)) {
     out.delete('list_food_orders');
     out.delete('get_food_order');
+    out.delete('reorder_last_food_order');
   }
+  if (/再點|跟上次一樣/.test(question))
+    return ['reorder_last_food_order', 'propose_food_order', 'get_food_menu', 'list_food_orders'];
   const names = [...out];
   if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
   if (names.length > 8 && names.includes('find_free_time'))
@@ -609,11 +614,7 @@ export function createTools(
           cart,
           summary,
           mode,
-          href:
-            '/food?tenant=' +
-            encodeURIComponent(cart.tenantId) +
-            '&location=' +
-            encodeURIComponent(cart.locationId),
+          href: foodHref(cart),
           reason: !(adapter.food.onlineEnabled?.() ?? adapter.food.enabled())
             ? '線上點餐尚未開放；帶到點餐頁'
             : !adapter.food.enabled()
@@ -623,7 +624,47 @@ export function createTools(
                 : '確認後下單，自取',
         };
         cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
-        return { proposed: true, mode, reason: args.reason, summary, requiresConfirmation: true };
+        return { proposed: true, mode, reason: args.reason, summary, href: args.href, requiresConfirmation: true };
+      }
+      case 'reorder_last_food_order': {
+        await tenant(a);
+        const listed = object(await dispatch('list_food_orders', { tenantId: a.tenantId }));
+        const rows = Array.isArray(listed.orders) ? listed.orders : [];
+        if (!rows.length)
+          return {
+            unavailable: 'NO_RECENT_ORDER',
+            nextStep: '沒有近期訂單可重點；請改查菜單後直接備單',
+          };
+        const newest = object(rows[0]);
+        const detail = object(
+          await dispatch('get_food_order', { tenantId: a.tenantId, orderId: newest.id }),
+        );
+        if (typeof detail.locationId !== 'string' || !detail.locationId)
+          return fail('INVALID_INPUT');
+        const pickup =
+          typeof a.requestedPickupAt === 'string' && a.requestedPickupAt
+            ? a.requestedPickupAt
+            : new Date(now + 40 * 60000 + 28800000).toISOString().replace(/Z$/, '+08:00').replace('.000+', '+');
+        const items = (Array.isArray(detail.lines) ? detail.lines : []).slice(0, 5).map((raw) => {
+          const line = object(raw);
+          const selected = Array.isArray(line.selectedOptionIds)
+            ? line.selectedOptionIds
+            : Array.isArray(line.selectedOptions)
+              ? line.selectedOptions.map((option) => object(option).optionId).filter((v) => typeof v === 'string')
+              : [];
+          return {
+            menuItemId: line.menuItemId,
+            quantity: Number.isInteger(line.quantity) ? line.quantity : 1,
+            selectedOptionIds: selected,
+          };
+        });
+        if (!items.length) return fail('INVALID_INPUT');
+        return dispatch('propose_food_order', {
+          tenantId: a.tenantId,
+          locationId: detail.locationId,
+          requestedPickupAt: pickup,
+          items,
+        });
       }
       case 'get_due_work':
         return dueWork(a);
@@ -767,12 +808,16 @@ export function createTools(
         return { proposed: true, requiresConfirmation: true };
       }
       case 'propose_study_plan': {
-        if (new Set(a.taskIds as string[]).size !== (a.taskIds as string[]).length) return fail();
-        const selected = (a.taskIds as string[])
-          .map((k) => tasks.get(k))
-          .sort((a, b) => String(a?.dueAt || '9999').localeCompare(String(b?.dueAt || '9999')));
-        if (selected.some((t) => !t || t.submitted || t.state !== 'open'))
+        const requested = Array.isArray(a.taskIds) ? (a.taskIds as string[]) : [];
+        if (new Set(requested).size !== requested.length) return fail();
+        if (requested.length && requested.some((k) => !tasks.has(k))) return fail('UNKNOWN_PENDING_TASK');
+        const selected = (requested.length ? requested.map((k) => tasks.get(k)!) : [...tasks.values()].filter((t) => !t.submitted && t.state === 'open' && t.dueAt && Date.parse(t.dueAt) >= now))
+          .sort((a, b) => String(a?.dueAt || '9999').localeCompare(String(b?.dueAt || '9999')))
+          .slice(0, 4);
+        if (selected.some((t) => t.submitted || t.state !== 'open'))
           return fail('UNKNOWN_PENDING_TASK');
+        if (!selected.length)
+          return { planned: [], unplanned: 0, note: '目前期間沒有未交作業可安排' };
         const slots = freeTime(await getLedger(), a).slots.map((s) => ({ ...s }));
         const minutes = Number(a.minMinutes || 60),
           planned: unknown[] = [];
@@ -899,11 +944,12 @@ export function createTools(
         list_clubs: '可省略 tenantId；多 realm 時用 context 可見 tenantId 重試',
         get_food_menu: '先呼叫 get_food_locations {} 取得 tenantId/locationId',
         propose_food_order: '先呼叫 get_food_locations，再 get_food_menu；依菜單 id 重試',
+        reorder_last_food_order: '可省略參數；伺服器會讀最近一筆自己的訂單並備同樣內容',
         get_course_work: '先呼叫 list_courses，使用回傳的 workspaceId',
         get_materials: '先呼叫 list_courses，使用回傳的 workspaceId',
         get_food_order: '先呼叫 list_food_orders 取得 orderId',
         get_club_feed: '先呼叫 list_clubs 取得 communityId',
-        propose_study_plan: '先呼叫 get_due_work 取得待繳 taskIds，再查 get_day_overview',
+        propose_study_plan: '可省略 taskIds；伺服器會用已讀取的未交作業安排，勿向使用者索取代碼',
         get_transit: '先以 action=campus 查詢；arrivals 需真實 city/stopId',
       };
       return {
@@ -932,6 +978,22 @@ export function createTools(
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
       const cleaned = { ...object(raw) };
+      if (name === 'propose_study_plan') {
+        if (cleaned.taskIds === undefined && cleaned.taskId !== undefined)
+          cleaned.taskIds = Array.isArray(cleaned.taskId) ? cleaned.taskId : [cleaned.taskId];
+        delete cleaned.taskId;
+        const day = typeof cleaned.date === 'string' ? String(cleaned.date) : taipeiDate(now);
+        await dueWork({ from: day, to: addDays(day, 6) });
+        if (!Array.isArray(cleaned.taskIds) || !cleaned.taskIds.length) {
+          const pending = [...tasks.values()]
+            .filter((row) => !row.submitted && row.state === 'open' && row.dueAt && Date.parse(row.dueAt) >= now)
+            .sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt)))
+            .slice(0, 4)
+            .map((row) => row.id);
+          if (pending.length) cleaned.taskIds = pending;
+          else delete cleaned.taskIds;
+        }
+      }
       if (name === 'list_food_orders' && reorder) delete cleaned.state;
       const ignored = Object.keys(cleaned).filter((k) => !(k in (definitions[name]?.[0] || {})));
       if (name === 'get_transit' && cleaned.action === 'campus') {

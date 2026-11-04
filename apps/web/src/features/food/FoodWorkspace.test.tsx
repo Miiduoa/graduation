@@ -871,10 +871,16 @@ it('expands paper line items by default for in-progress orders and keeps finishe
 
 it('assistant location link opens a read-only menu while online ordering is off', async () => {
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
-  render(<FoodWorkspace initialTenant="campus-one" initialLocation={menuFixture().location.id} />);
+  render(
+    <FoodWorkspace
+      initialTenant="campus-one"
+      initialLocation={menuFixture().location.id}
+      initialItems={[{ menuItemId: 'rice', quantity: 1, selectedOptionIds: ['large'] }]}
+    />,
+  );
   const preview = await screen.findByRole('region', { name: '餐廳菜單預覽' });
   await within(preview).findByText('米飯店');
-  expect(within(preview).getByText(/蔬菜便當/)).toBeTruthy();
+  expect(preview.textContent).toMatch(/已備好：[\s\S]*蔬菜便當/);
   expect(within(preview).queryByRole('button')).toBeNull();
   expect(
     mocks.request.mock.calls.some(

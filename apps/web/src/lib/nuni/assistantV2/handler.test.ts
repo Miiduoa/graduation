@@ -18,6 +18,7 @@ vi.mock('./groq', async (importOriginal) => {
   return {
     ...original,
     groqModel: () => (input: ModelInput) => providerCall(input),
+    createProviderModel: () => (input: ModelInput) => providerCall(input),
   };
 });
 const session = { sessionHandle: 'ps_' + 'v'.repeat(43), expiresAt: Date.now() + 3600000 };

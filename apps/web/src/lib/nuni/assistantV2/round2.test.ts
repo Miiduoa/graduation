@@ -68,7 +68,7 @@ it('ordering off prepares a server priced card with zero order calls, including 
     f.adapter,
     true,
   );
-  expect(receipt).toMatchObject({ href: '/food?tenant=fixture-realm&location=dining-a' });
+  expect(receipt).toMatchObject({ href: '/food?tenant=fixture-realm&location=dining-a&items=veggie.1.regular' });
   expect(f.orderCalls).toHaveLength(0);
 });
 it('ordering on waits for confirmation and replay creates exactly one order', async () => {

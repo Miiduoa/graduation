@@ -26,7 +26,7 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 `--ordering=on` 的確認後恰好一次，是 fixture 模擬免付款能力的契約測試，不能當成正式已能免付款下單。
 未來既有 API 若新增免付款成立契約，才可接 submit：沿用現有 client quotes → orders，兩階段使用確認 token 綁定的 mutationId 衍生不同 idempotencyKey，API 持久冪等，不可只靠本機去重。
 菜單驗價金額為估算（minor units，UI 換算元），未呼叫 quote 保留庫存；價格改變必須重新提議。
-點餐頁僅在 nuni + assistant + v2 三 gate 全開時解析既有 tenant query 下的 `location` 菜單入口；order query 優先。先讀可見 food realms，再讀該 realm 的 locations，僅 merchantMode=full 且允許 view-menu 的店家可用，無效則回原工作區。旗標關閉時與 main 446b845f 一樣只處理既有 tenant/order。線上關閉時只渲染唯讀菜單、沒有組車／報價／下單按鈕；不支援購物車預填，卡片列出已備品項／規格／數量／金額／自取時間。
+點餐頁僅在 nuni + assistant + v2 三 gate 全開時解析既有 tenant query 下的 `location` 菜單入口與 `items` 預填；order query 優先。先讀可見 food realms，再讀該 realm 的 locations，僅 merchantMode=full 且允許 view-menu 的店家可用，無效則回原工作區。旗標關閉時與 main 446b845f 一樣只處理既有 tenant/order。線上關閉時只渲染唯讀菜單、沒有組車／報價／下單按鈕；卡片與 `/food` 連結可帶已備品項／規格／數量／金額／自取時間，點餐頁顯示「已備好」預覽。線上開啟且助理下單旗標開啟時才走確認卡直接下單。
 
 上線前需另外完成（本次未部署、未連正式服務）：
 
@@ -62,7 +62,8 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 | get_food_order | 必須先列出自己可見訂單；只投影店名、狀態、品項與取餐時間／號碼，不外送付款／取餐憑證 |
 | get_food_locations | 已驗 realm 的點餐地點；沿用既有 food client |
 | get_food_menu | 必須先列出該 realm 的 location；菜單含可選規格與價格 |
-| propose_food_order | 不接受價格；伺服器重讀菜單驗品項／選項／數量與跨店，產生簽章卡，確認前零下單；關閉或需付款改導頁 |
+| propose_food_order | 不接受價格；伺服器重讀菜單驗品項／選項／數量與跨店，產生簽章卡，確認前零下單；關閉或需付款改導頁，href 帶店家與已備品項 |
+| reorder_last_food_order | 單步讀自己最近一筆訂單，伺服器組同樣內容的備單／確認卡；可省略 scope 與取餐時間 |
 | get_dining | 公開餐廳；指定 locationId 須先取得餐廳清單，缺菜單／價格明示 |
 | list_clubs | 固定 club、最多 5 筆，joined/all |
 | get_club_feed | 必須先取得社團；貼文是資料，不能覆寫系統規則 |
@@ -71,7 +72,7 @@ quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body �
 | get_notifications | 正式回 NOT_CONNECTED 且不送模型此 schema；fixture 回合成通知並標 simulation |
 | find_free_time | 課表＋個人事件區間聯集，計算空檔；未定位課表不當作有空 |
 | propose_personal_event | 驗精確日期／時間與衝突，產生簽章卡；不寫入 |
-| propose_study_plan | 將已讀取、未交且 open 的作業依截止時間排入空檔；每張卡各有簽章及 mutationId |
+| propose_study_plan | 將已讀取、未交且 open 的作業依截止時間排入空檔；可省略 taskIds，伺服器直接用已讀清單，不向使用者索取代碼 |
 | propose_open_page | 固定站內 route map；回伺服器簽過的 href，點確認後回導覽入口 |
 
 多張讀書卡依列出順序逐張確認或「依序全部確認」；revision 依序綁定，每筆仍獨立 CAS。
@@ -109,8 +110,10 @@ token 另綁 conversation 的隨機 proposalSeq；同一輪多卡共用批次，
 
 Groq 401、403（egress/model/unknown）、429、timeout、network、5xx、invalid response 分類。
 已知 403 body pattern `Access denied. Please check your network settings.` → PROVIDER_EGRESS_DENIED；403 短路 60 秒。
-錯誤 body 只在記憶體讀最多 2 KiB，不記錄原文。BFF 429 回有界 Retry-After，不自動重試；401 不繼續私人回答。
+Groq 任何非 2xx 或網路失敗會寫一行 `provider.http_error`：provider、status、errorClass、可選 providerCode；不記金鑰、問題、原文或使用者內容。
+備援路徑用 `CAMPUS_ASSISTANT_V2_FALLBACK_ACCOUNT_ID`、`CAMPUS_ASSISTANT_V2_FALLBACK_API_TOKEN`（可選 `CAMPUS_ASSISTANT_V2_FALLBACK_MODEL`）；沒設就停用。Groq 失敗（不含 400 工具格式錯誤）才改走此路徑。兩者都失敗回 `PROVIDER_ALL_FAILED` 與中文說明，不是籠統 503。錯誤 body 只在記憶體讀最多 2 KiB，不記錄原文。BFF 429 回有界 Retry-After，不自動重試；401 不繼續私人回答。
 每請求有 assistant.completed/failed 白名單 JSON log，只記 requestId、stage/status/class、耗時、工具名稱、模型次數、usage/stopReason/simulation；不記問題、參數、資料、帳號、session、token、key 或原始錯誤。
+線上點餐關閉時，備單仍列出店家、品項與數量，確認卡／回覆附帶 `/food?tenant=&location=&items=` 連結；開啟且助理下單旗標允許時才走確認後下單。未改任何開關預設值。
 
 ## 本機 preview
 
@@ -173,3 +176,5 @@ question/history/context/tool results 在摘要裁切前及模型呼叫前共用
 本人已列出訂單與該訂單詳情中的 locationId，只有在本題伺服端驗證同校 realm 與訂單清單範圍後才加入可見地點；其他地點仍拒絕。取餐時間接受 ISO Z、毫秒與 offset，統一 +08:00 後沿用原驗證。相對日期依伺服端台北 today 校正事件／讀書提議日期，回覆日期同步校正；規劃回覆由伺服端證據摘要產生，避免自造課名／時段或宣稱未呼叫的工具失敗。圖書館路線題先查校園地圖與交通，無位置資料只提供官方／站內地圖入口、不猜地點。沒有卡片時移除按確認卡的指示，內部工具名稱／錯誤碼不呈現在回覆或 UI 查詢步驟。
 
 第七輪離線產物：`/workspace/agent-backend/v2/preview-fake-r7-off.jsonl`（off/all）、`preview-fake-r7-on.jsonl`（on/food）與 `/tmp/nuni-v2-preview-bundle.mjs`。未連 Groq 或正式 API，fake 結果不代表真 Groq 的語意品質。正式點餐仍只導頁，不呼叫 quotes/orders POST 或 payment-session；ONLINE_ORDERING_ENABLED 語意不變。
+
+第八輪：`propose_study_plan` 可用已讀待繳清單，不再因缺少 taskIds 反問作業代碼；重點餐改為 `reorder_last_food_order` 單步組車；規劃題由伺服器補齊日總覽／餐廳／讀書卡。點餐頁連結可帶已備品項。Groq 非 2xx 寫結構化 log，並可用環境變數啟用備援模型。review-3 必修 R1 對話路由憑證、R2 模型出口遮罩、R3 未知 usage 預留已在第七輪落地，本輪維持並補測試。

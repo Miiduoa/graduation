@@ -12,7 +12,7 @@ import {
 import { cardIssuer, machineId, confirm, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
-import { groqModel } from './groq';
+import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
 import { run, safeCode } from './runner';
 const active = new Set<string>();
 const hits = new Map<string, number[]>();
@@ -22,7 +22,7 @@ let minute = 0,
   day = 0,
   dailyRequests = 0,
   dailyTokens = 0;
-const provider = groqModel(process.env.GROQ_API_KEY);
+const provider = createProviderModel();
 function quota(now: number, amount: number) {
   if (Math.floor(now / 60000) !== minute) {
     minute = Math.floor(now / 60000);
@@ -75,7 +75,7 @@ export async function handleV2(request: NextRequest, action: string) {
       return jsonResponse({
         enabled: true,
         version: 2,
-        ready: Boolean(process.env.GROQ_API_KEY),
+        ready: Boolean(process.env.GROQ_API_KEY || fallbackReady()),
         simulation: false,
       });
     }
@@ -201,7 +201,13 @@ export async function handleV2(request: NextRequest, action: string) {
         durationMs: Date.now() - started,
         simulation: false,
       });
-    const response = jsonResponse({ error: code }, status);
+    const response = jsonResponse(
+      {
+        error: code,
+        ...(PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
+      },
+      status,
+    );
     if (e.retryAfter) response.headers.set('Retry-After', String(e.retryAfter));
     return response;
   } finally {

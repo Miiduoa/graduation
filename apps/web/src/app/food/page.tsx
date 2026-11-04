@@ -1,5 +1,6 @@
 import { nuniEnabled } from '@/lib/nuni/server';
 import { FoodWorkspace } from '@/features/food/FoodWorkspace';
+import { parseFoodItems } from '@/lib/nuni/assistantV2/food';
 
 export default async function FoodPage({
   searchParams,
@@ -18,6 +19,7 @@ export default async function FoodPage({
           : ''
       }
       initialOrder={typeof params.order === 'string' ? params.order : ''}
+      initialItems={v2 && !params.order ? parseFoodItems(params.items) : []}
     />
   );
 }

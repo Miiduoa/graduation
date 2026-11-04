@@ -21,14 +21,17 @@ const clientHydrated = () => true;
 const serverHydrated = () => false;
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
+export type PreparedFoodItem = { menuItemId: string; quantity: number; selectedOptionIds: string[] };
 export function FoodWorkspace({
   initialTenant = '',
   initialOrder = '',
   initialLocation = '',
+  initialItems = [],
 }: {
   initialTenant?: string;
   initialOrder?: string;
   initialLocation?: string;
+  initialItems?: PreparedFoodItem[];
 }) {
   const auth = useNuniSession();
   // Delayed Suspense on /food must hydrate against the server's account-checking markup.
@@ -85,6 +88,7 @@ export function FoodWorkspace({
             initialLocation={initialLocation}
             initialTenant={initialTenant}
             initialOrder={initialOrder}
+            initialItems={initialItems}
           />
         ) : (
           <NuniSignIn
@@ -107,6 +111,7 @@ function FoodAccount({
   initialTenant,
   initialOrder,
   initialLocation,
+  initialItems,
 }: {
   accountId: string;
   context: string;
@@ -114,6 +119,7 @@ function FoodAccount({
   initialTenant: string;
   initialOrder: string;
   initialLocation: string;
+  initialItems: PreparedFoodItem[];
 }) {
   const client = useMemo(
     () =>
@@ -159,7 +165,14 @@ function FoodAccount({
   }, [client, orderingOn, initialOrder, initialTenant, initialLocation]);
   const preview = useFoodRead(previewLoad);
   if (preview.data === true)
-    return <FoodMenuPreview client={client} tenantId={initialTenant} locationId={initialLocation} />;
+    return (
+      <FoodMenuPreview
+        client={client}
+        tenantId={initialTenant}
+        locationId={initialLocation}
+        prepared={initialItems}
+      />
+    );
 
   return (
     <div className={styles.accountStack}>
@@ -204,6 +217,7 @@ function FoodAccount({
             (tab === 'menu' ? (
               <FoodLocations
                 initialLocation={!initialOrder && tenantId === initialTenant ? initialLocation : ''}
+                initialItems={!initialOrder && tenantId === initialTenant ? initialItems : []}
                 key={tenantId}
                 client={client}
                 cache={cache}
@@ -245,6 +259,7 @@ function FoodAccount({
 
 function FoodLocations({
   initialLocation,
+  initialItems,
   client,
   cache,
   accountId,
@@ -252,6 +267,7 @@ function FoodLocations({
   onOrder,
 }: {
   initialLocation: string;
+  initialItems: PreparedFoodItem[];
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
@@ -279,6 +295,7 @@ function FoodLocations({
         accountId={accountId}
         tenantId={tenantId}
         locationId={selected}
+        initialItems={selected === initialLocation ? initialItems : []}
         onBack={() => setSelected('')}
         onOrder={onOrder}
       />
@@ -367,10 +384,12 @@ function FoodMenuPreview({
   client,
   tenantId,
   locationId,
+  prepared = [],
 }: {
   client: FoodClient;
   tenantId: string;
   locationId: string;
+  prepared?: PreparedFoodItem[];
 }) {
   const load = useCallback(
     () => client.getMenu(tenantId, locationId),
@@ -385,6 +404,23 @@ function FoodMenuPreview({
       {menu.data && (
         <>
           <h2>{menu.data.location.name}</h2>
+          {prepared.length > 0 && (
+            <p>
+              已備好：
+              {prepared
+                .map((line) => {
+                  const listed = menu.data;
+                  const item = listed?.sections.flatMap((section) => section.items).find((row) => row.id === line.menuItemId);
+                  if (!item) return '';
+                  const options = line.selectedOptionIds
+                    .map((id) => item.optionGroups.flatMap((group) => group.options).find((option) => option.id === id)?.name)
+                    .filter(Boolean);
+                  return `${item.name} × ${line.quantity}${options.length ? `（${options.join('、')}）` : ''}`;
+                })
+                .filter(Boolean)
+                .join('、')}
+            </p>
+          )}
           {menu.data.sections.map((section) => (
             <section key={section.id}>
               <h3>{section.name}</h3>

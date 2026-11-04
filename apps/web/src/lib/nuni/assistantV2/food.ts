@@ -79,15 +79,43 @@ export function priceCart(cart: FoodCart, menu: NuniFoodMenuProjection) {
     requestedPickupAt: cart.requestedPickupAt,
   };
 }
+export function foodHref(cart: FoodCart): string {
+  const items = cart.items
+    .map((line) => [line.menuItemId, String(line.quantity), ...line.selectedOptionIds].join('.'))
+    .join(',');
+  return (
+    '/food?tenant=' +
+    encodeURIComponent(cart.tenantId) +
+    '&location=' +
+    encodeURIComponent(cart.locationId) +
+    '&items=' +
+    encodeURIComponent(items)
+  );
+}
+export function parseFoodItems(raw: unknown): FoodCart['items'] {
+  if (typeof raw !== 'string' || !raw || raw.length > 400) return [];
+  return raw.split(',').flatMap((entry) => {
+    const [menuItemId, qty, ...selectedOptionIds] = entry.split('.');
+    const quantity = Number(qty);
+    if (
+      !menuItemId ||
+      !/^[A-Za-z0-9_-]{1,100}$/.test(menuItemId) ||
+      !Number.isInteger(quantity) ||
+      quantity < 1 ||
+      quantity > 20 ||
+      selectedOptionIds.length > 20 ||
+      selectedOptionIds.some((option) => !/^[A-Za-z0-9_-]{1,100}$/.test(option)) ||
+      new Set(selectedOptionIds).size !== selectedOptionIds.length
+    )
+      return [];
+    return [{ menuItemId, quantity, selectedOptionIds }];
+  }).slice(0, 5);
+}
 export function foodCardArgs(raw: unknown): Obj {
   const a = object(raw, ['cart', 'summary', 'mode', 'href', 'reason']);
   const cart = cartArgs(a.cart);
   if (!['order', 'page'].includes(String(a.mode))) return fail();
-  const href =
-    '/food?tenant=' +
-    encodeURIComponent(cart.tenantId) +
-    '&location=' +
-    encodeURIComponent(cart.locationId);
+  const href = foodHref(cart);
   if (a.href !== href) return fail();
   return { cart, summary: object(a.summary), mode: a.mode, href, reason: text(a.reason, 120) };
 }

@@ -13,9 +13,9 @@ it.each([
   vi.stubEnv('CAMPUS_ASSISTANT_V2_ENABLED', v2);
   vi.stubEnv('CAMPUS_BACKEND', '');
   vi.stubEnv('NUNI_CLASSROOM_ENABLED', nuni);
-  for (const params of [{}, { tenant: 'campus', location: 'shop' }, { tenant: 'campus', location: 'shop', order: 'receipt' }]) {
+  for (const params of [{}, { tenant: 'campus', location: 'shop' }, { tenant: 'campus', location: 'shop', order: 'receipt' }, { tenant: 'campus', location: 'shop', items: 'veggie.1.regular' }]) {
     const page = await FoodPage({ searchParams: Promise.resolve(params) });
-    expect(page.props).toEqual({ initialTenant: params.tenant || '', initialOrder: params.order || '', initialLocation: '' });
+    expect(page.props).toEqual({ initialTenant: params.tenant || '', initialOrder: params.order || '', initialLocation: '', initialItems: [] });
   }
 });
 it('parses the new entrance only with all gates and gives order precedence', async () => {
@@ -26,4 +26,10 @@ it('parses the new entrance only with all gates and gives order precedence', asy
     const page = await FoodPage({ searchParams: Promise.resolve({ tenant: 'campus', location, order }) });
     expect(page.props.initialLocation).toBe(expected);
   }
+  const prepared = await FoodPage({
+    searchParams: Promise.resolve({ tenant: 'campus', location: 'shop', items: 'veggie.1.regular' }),
+  });
+  expect(prepared.props.initialItems).toEqual([
+    { menuItemId: 'veggie', quantity: 1, selectedOptionIds: ['regular'] },
+  ]);
 });
