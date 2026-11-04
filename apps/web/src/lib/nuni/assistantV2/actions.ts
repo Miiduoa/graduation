@@ -1,3 +1,5 @@
+import { operationSignal } from './operation';
+import { cartArgs, foodCardArgs, priceCart } from './food';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
 import {
@@ -14,6 +16,18 @@ import {
   type EventArgs,
   type Obj,
 } from './contracts';
+const proposals = new Map<string, { seq: string; expires: number; revoked: Set<string> }>();
+export function beginProposal(binding: Binding, now: number) {
+  for (const [key, value] of proposals) if (value.expires <= now) proposals.delete(key);
+  const seq = randomUUID();
+  proposals.set(hash(binding), { seq, expires: now + 300000, revoked: new Set() });
+  return seq;
+}
+export function revoke(binding: Binding, raw: unknown, secret: string, now: number) {
+  const p = verifyCard(binding, raw, secret, now);
+  proposals.get(hash(binding))!.revoked.add(p.mutationId);
+  return { revoked: true };
+}
 const routes: Record<string, string> = {
   today: '/today',
   timetable: '/timetable',
@@ -64,11 +78,19 @@ export function signCard(
   revision: number,
   secret: string,
   now: number,
+  proposalSeq: string = beginProposal(binding, now),
 ): Card {
-  const args = tool === 'propose_personal_event' ? { ...eventArgs(raw) } : pageArgs(raw);
+  operationSignal()?.throwIfAborted();
+  const args =
+    tool === 'propose_food_order'
+      ? foodCardArgs(raw)
+      : tool === 'propose_personal_event'
+        ? { ...eventArgs(raw) }
+        : pageArgs(raw);
   const mutationId = 'av2_' + randomUUID().replaceAll('-', '');
   const payload = {
     v: 2,
+    proposalSeq,
     stage: 'execute',
     binding: hash(binding),
     tool,
@@ -86,9 +108,11 @@ export function signCard(
     mutationId,
     schoolId: binding.schoolId,
     destination:
-      tool === 'propose_personal_event'
-        ? '個人行事曆（無推播提醒）'
-        : pageHref(args, binding.schoolId),
+      tool === 'propose_food_order'
+        ? String(args.reason)
+        : tool === 'propose_personal_event'
+          ? '個人行事曆（無推播提醒）'
+          : pageHref(args, binding.schoolId),
   };
 }
 export function verifyCard(binding: Binding, raw: unknown, secret: string, now: number) {
@@ -110,6 +134,9 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
   } catch {
     return fail('CONFIRMATION_INVALID', 409);
   }
+  const current = proposals.get(hash(binding));
+  if (!current || current.seq !== p.proposalSeq || current.revoked.has(String(p.mutationId)))
+    return fail('CONFIRMATION_REVOKED', 409);
   if (
     p.v !== 2 ||
     p.stage !== 'execute' ||
@@ -121,10 +148,15 @@ export function verifyCard(binding: Binding, raw: unknown, secret: string, now: 
     Number(p.exp) - Number(p.iat) !== 300000 ||
     !Number.isSafeInteger(p.revision) ||
     Number(p.revision) < 0 ||
-    !['propose_personal_event', 'propose_open_page'].includes(String(p.tool))
+    !['propose_personal_event', 'propose_open_page', 'propose_food_order'].includes(String(p.tool))
   )
     return fail('CONFIRMATION_INVALID', 409);
-  const args = p.tool === 'propose_personal_event' ? { ...eventArgs(v.args) } : pageArgs(v.args);
+  const args =
+    p.tool === 'propose_food_order'
+      ? foodCardArgs(v.args)
+      : p.tool === 'propose_personal_event'
+        ? { ...eventArgs(v.args) }
+        : pageArgs(v.args);
   if (
     p.argsHash !== hash(args) ||
     typeof p.mutationId !== 'string' ||
@@ -161,6 +193,23 @@ export async function confirm(
   writes: boolean,
 ) {
   const p = verifyCard(binding, raw, secret, now);
+  if (p.tool === 'propose_food_order') {
+    const cart = cartArgs(p.args.cart);
+    if (
+      !(await adapter.realms()).some(
+        (r) => r.tenantId === cart.tenantId && r.schoolId === binding.schoolId,
+      )
+    )
+      return fail('FORBIDDEN_SCOPE', 403);
+    if (!adapter.food) return fail('ORDERING_DISABLED', 403);
+    if (p.args.mode === 'page' || !adapter.food.enabled() || adapter.food.paymentRequired)
+      return { href: String(p.args.href), reason: p.args.reason };
+    const summary = priceCart(cart, await adapter.food.menu(cart.tenantId, cart.locationId));
+    if (canonical(summary) !== canonical(p.args.summary)) return fail('PRICE_CHANGED', 409);
+    verifyCard(binding, raw, secret, now);
+    operationSignal()?.throwIfAborted();
+    return adapter.food.submit(cart, p.mutationId);
+  }
   if (p.tool === 'propose_open_page') return { href: pageHref(p.args, binding.schoolId) };
   if (!writes) return fail('ASSISTANT_WRITE_UNAVAILABLE', 403);
   const ledger = await adapter.ledger();
@@ -173,6 +222,8 @@ export async function confirm(
   }
   if (ledger.revision !== p.revision) return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
   const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
+  verifyCard(binding, raw, secret, now);
+  operationSignal()?.throwIfAborted();
   await adapter.write({
     schoolId: binding.schoolId,
     expectedRevision: p.revision,

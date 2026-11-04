@@ -1,3 +1,4 @@
+import type { NuniFoodMenuProjection } from '@campus/shared/src/nuniFood';
 import { randomUUID } from 'node:crypto';
 import { confirm } from './actions';
 import {
@@ -17,7 +18,58 @@ export const fixtureBinding: Binding = {
   schoolId: 'fixture-school',
   conversationId: 'fixture-conversation',
 };
-export function fixtureAdapter() {
+export function fixtureAdapter(ordering = false) {
+  const orderCalls: Obj[] = [];
+  const receipts = new Map<string, unknown>();
+  const money = (amountMinor: number) => ({ amountMinor, currency: 'TWD' as const });
+  const menus: NuniFoodMenuProjection[] = ['dining-a', 'dining-b'].map((locationId, i) => ({
+    location: {
+      id: locationId,
+      campusId: 'fixture-campus',
+      name: i ? '合成麵館' : '合成蔬食餐廳',
+      description: '合成資料',
+      zoneLabel: '活動中心',
+      timeZone: 'Asia/Taipei',
+      state: 'open',
+      merchantMode: 'full',
+      sourceLabel: 'fixture',
+      sourceUpdatedAt: null,
+      allowedActions: ['view-menu'],
+    },
+    menuVersion: 'fixture-v1',
+    generatedAt: '2026-11-04T02:00:00Z',
+    sections: [
+      {
+        id: 'main',
+        name: '主餐',
+        items: [
+          {
+            id: i ? 'noodle' : 'veggie',
+            name: i ? '湯麵' : '蔬菜便當',
+            description: '不辣，標準份量',
+            basePrice: money(i ? 9000 : 8000),
+            available: true,
+            dietaryTags: ['不辣'],
+            allergenTags: [],
+            nutrition: { declared: false },
+            optionGroups: [
+              {
+                id: 'size',
+                name: '規格',
+                minimumSelections: 1,
+                maximumSelections: 1,
+                options: [
+                  { id: 'regular', name: '標準不辣', priceDelta: money(0), available: true },
+                  { id: 'large', name: '加大不辣', priceDelta: money(2000), available: true },
+                ],
+              },
+            ],
+            allowedActions: ['add-to-quote'],
+          },
+        ],
+      },
+    ],
+  }));
   const base = {
     schoolId: 'fixture-school',
     academicYear: '115',
@@ -116,16 +168,47 @@ export function fixtureAdapter() {
   const writes: Obj[] = [];
   const adapter: Adapter = {
     simulation: true,
+    food: {
+      enabled: () => ordering,
+      paymentRequired: false,
+      locations: async () => ({ locations: menus.map((m) => m.location) }),
+      menu: async (_tenant, location) => {
+        const menu = menus.find((m) => m.location.id === location);
+        if (!menu) throw new V2Error(404, 'NOT_FOUND');
+        return structuredClone(menu);
+      },
+      submit: async (cart, mutationId) => {
+        if (receipts.has(mutationId)) return { confirmed: true, replay: true, mutationId };
+        orderCalls.push({ ...cart, mutationId });
+        receipts.set(mutationId, true);
+        return { confirmed: true, replay: false, mutationId };
+      },
+    },
     ledger: async () => structuredClone(ledger),
     courses: async () => [{ id: 'course-a', title: '資訊課程' }],
     work: async () => structuredClone(tasks),
     materials: async () => ({ materials: [{ id: 'material-a', title: '樹與圖講義' }] }),
     realms: async () => [{ tenantId: 'fixture-realm', schoolId: base.schoolId }],
-    orders: async () => ({ orders: [{ id: 'order-a', state: 'ready', title: '蔬菜便當' }] }),
-    order: async () => ({
-      id: 'order-a',
-      state: 'ready',
+    orders: async () => ({
+      orders: [
+        { id: 'order-a', state: 'ready', title: '蔬菜便當' },
+        { id: 'order-b', state: 'fulfilled', title: '蔬菜便當不辣標準' },
+      ],
+    }),
+    order: async (_tenant, orderId) => ({
+      id: orderId,
+      state: orderId === 'order-a' ? 'ready' : 'fulfilled',
       title: '蔬菜便當',
+      locationId: 'dining-a',
+      lines: [
+        {
+          menuItemId: 'veggie',
+          name: '蔬菜便當',
+          quantity: 1,
+          selectedOptionIds: ['regular'],
+          preferences: '不辣、標準',
+        },
+      ],
       pickupNumber: 'SYN-12',
       updatedAt: '2026-11-04T10:20:00+08:00',
     }),
@@ -176,25 +259,23 @@ export function fixtureAdapter() {
       return structuredClone(ledger);
     },
   };
-  return { adapter, writes, snapshot: () => structuredClone(ledger) };
+  return { adapter, writes, orderCalls, snapshot: () => structuredClone(ledger) };
 }
 export const questions = [
   '我今天下午有空嗎，幫我排寫作業',
-  '中午吃什麼',
+  '中午吃什麼？幫我點一份不辣、100 元以內的',
   '這禮拜有什麼要交的',
   '下一堂課在哪，幾點',
-  '我訂的餐好了沒',
+  '跟上次一樣再點一次，12:10 去拿',
   '我加入的社團最近有什麼消息',
   '有什麼未讀通知',
   '剛剛那份最急的，今晚八點幫我留一小時寫',
   '去圖書館怎麼走，順便看公車',
   '幫我規劃明天：課、作業、吃飯',
 ];
-const range = { from: '2026-11-04', to: '2026-11-04' };
 const plans: [string, Obj][][] = [
   [
-    ['get_schedule', range],
-    ['get_calendar', range],
+    ['get_day_overview', { date: '2026-11-04' }],
     [
       'propose_study_plan',
       {
@@ -206,15 +287,34 @@ const plans: [string, Obj][][] = [
       },
     ],
   ],
-  [['get_dining', {}]],
   [
-    ['list_courses', {}],
-    ['get_course_work', { workspaceId: 'course-a' }],
+    ['get_food_locations', { tenantId: 'fixture-realm' }],
+    ['get_food_menu', { tenantId: 'fixture-realm', locationId: 'dining-a' }],
+    [
+      'propose_food_order',
+      {
+        tenantId: 'fixture-realm',
+        locationId: 'dining-a',
+        requestedPickupAt: '2026-11-04T12:00:00+08:00',
+        items: [{ menuItemId: 'veggie', quantity: 1, selectedOptionIds: ['regular'] }],
+      },
+    ],
   ],
+  [['get_due_work', {}]],
   [['get_today_context', {}]],
   [
     ['list_food_orders', { tenantId: 'fixture-realm' }],
     ['get_food_order', { tenantId: 'fixture-realm', orderId: 'order-a' }],
+    ['get_food_locations', { tenantId: 'fixture-realm' }],
+    [
+      'propose_food_order',
+      {
+        tenantId: 'fixture-realm',
+        locationId: 'dining-a',
+        requestedPickupAt: '2026-11-04T12:10:00+08:00',
+        items: [{ menuItemId: 'veggie', quantity: 1, selectedOptionIds: ['regular'] }],
+      },
+    ],
   ],
   [
     ['list_clubs', { tenantId: 'fixture-realm' }],
@@ -239,7 +339,7 @@ const plans: [string, Obj][][] = [
     ['get_transit', { action: 'campus' }],
   ],
   [
-    ['get_schedule', { from: '2026-11-05', to: '2026-11-05' }],
+    ['get_day_overview', { date: '2026-11-05' }],
     ['get_dining', {}],
     [
       'propose_study_plan',
@@ -264,23 +364,28 @@ export function fakeModel(caseIndex: number): Model {
   return async (input) => {
     const plan = plans[caseIndex];
     const action = input.tools?.length ? plan[turn++] : undefined;
+    const actions = action ? [action] : [];
+    if ((caseIndex === 4 || caseIndex === 9) && turn === 1) actions.push(plan[turn++]);
     if (action)
       return {
         message: {
           role: 'assistant',
           content: null,
-          tool_calls: [
-            {
-              id: 'call-' + randomUUID(),
-              type: 'function',
-              function: { name: action[0], arguments: JSON.stringify(action[1]) },
-            },
-          ],
+          tool_calls: actions.map((entry) => ({
+            id: 'call-' + randomUUID(),
+            type: 'function',
+            function: { name: entry[0], arguments: JSON.stringify(entry[1]) },
+          })),
         },
         usage: { prompt_tokens: 800, completion_tokens: 80, total_tokens: 880 },
       };
     return {
-      message: { role: 'assistant', content: answers[caseIndex] },
+      message: {
+        role: 'assistant',
+        content: [1, 4].includes(caseIndex)
+          ? '模擬：已依不辣偏好備好蔬菜便當標準份一份80元，自取。請核對確認卡；若線上點餐尚未開放則帶到點餐頁。'
+          : answers[caseIndex],
+      },
       usage: { prompt_tokens: 800, completion_tokens: 120, total_tokens: 920 },
     };
   };

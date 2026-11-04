@@ -203,3 +203,48 @@ it('v2 aborts on school/account changes and drops late answers and cards', async
   expect(screen.queryByText('舊的私人內容')).toBeNull();
   expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
 });
+
+it('v2 replaces old cards and cancellation waits for server revocation', async () => {
+  let asks = 0;
+  const cancellations: unknown[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+      const body = JSON.parse(init.body as string);
+      if (url.endsWith('cancel')) {
+        cancellations.push(body);
+        return json({ revoked: true });
+      }
+      const seq = ++asks;
+      return json({
+        answer: '提議' + seq,
+        steps: [],
+        cards: [
+          {
+            tool: 'propose_personal_event',
+            token: 'card-' + seq,
+            mutationId: 'm-' + seq,
+            schoolId: 'pu',
+            destination: '個人曆',
+            args: { title: '安排' + seq },
+          },
+        ],
+      });
+    }),
+  );
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '今晚' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('提議1');
+  fireEvent.change(question, { target: { value: '改成明晚' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('已被新提議取代');
+  expect(screen.getAllByText('確認')).toHaveLength(1);
+  fireEvent.click(screen.getByText('取消'));
+  await screen.findByText('已取消');
+  expect(cancellations).toHaveLength(1);
+  expect(cancellations[0]).toMatchObject({ token: 'card-2' });
+});

@@ -124,7 +124,7 @@ export type Binding = {
   schoolId: string;
 };
 export type Card = {
-  tool: 'propose_personal_event' | 'propose_open_page';
+  tool: 'propose_personal_event' | 'propose_open_page' | 'propose_food_order';
   args: Obj;
   token: string;
   mutationId: string;
@@ -174,6 +174,18 @@ export type Task = {
 };
 export type Adapter = {
   simulation: boolean;
+  remainingApiCalls?(): number;
+  food?: {
+    enabled(): boolean;
+    onlineEnabled?(): boolean;
+    paymentRequired: boolean;
+    locations(tenantId: string): Promise<unknown>;
+    menu(
+      tenantId: string,
+      locationId: string,
+    ): Promise<import('@campus/shared/src/nuniFood').NuniFoodMenuProjection>;
+    submit(cart: import('./food').FoodCart, mutationId: string): Promise<unknown>;
+  };
   ledger(): Promise<Ledger>;
   courses(): Promise<Course[]>;
   work(courseId: string): Promise<Task[]>;
@@ -205,19 +217,28 @@ export type Adapter = {
   }): Promise<Ledger>;
 };
 export async function bounded<T>(
-  work: () => Promise<T>,
+  work: (signal: AbortSignal) => Promise<T>,
   signal: AbortSignal,
   ms: number,
 ): Promise<T> {
   signal.throwIfAborted();
+  const child = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: () => void = () => {};
   try {
     return await new Promise<T>((resolve, reject) => {
-      abort = () => reject(new V2Error(499, 'ABORTED'));
-      timer = setTimeout(() => reject(new V2Error(504, 'DEADLINE_EXCEEDED')), ms);
+      abort = () => {
+        child.abort();
+        reject(new V2Error(499, 'ABORTED'));
+      };
+      timer = setTimeout(() => {
+        child.abort();
+        reject(new V2Error(504, 'DEADLINE_EXCEEDED'));
+      }, ms);
       signal.addEventListener('abort', abort, { once: true });
-      Promise.resolve().then(work).then(resolve, reject);
+      Promise.resolve()
+        .then(() => work(child.signal))
+        .then(resolve, reject);
     });
   } finally {
     clearTimeout(timer);

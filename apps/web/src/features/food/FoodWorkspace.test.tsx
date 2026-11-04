@@ -868,3 +868,19 @@ it('expands paper line items by default for in-progress orders and keeps finishe
   expect(within(donePaper).getByText('品項明細 · 1 項')).toBeTruthy();
   expect(within(donePaper).getByText('NT$120').closest('details')).toBeNull();
 });
+
+it('assistant location link opens a read-only menu while online ordering is off', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  publicOpen = false;
+  render(<FoodWorkspace initialTenant="campus-one" initialLocation={menuFixture().location.id} />);
+  const preview = await screen.findByRole('region', { name: '餐廳菜單預覽' });
+  await within(preview).findByText('米飯店');
+  expect(within(preview).getByText(/蔬菜便當/)).toBeTruthy();
+  expect(within(preview).queryByRole('button')).toBeNull();
+  expect(
+    mocks.request.mock.calls.some(
+      (call) => /\/(quotes|orders|payment-session)$/.test(call[0]) && call[2],
+    ),
+  ).toBe(false);
+  expect(mocks.request.mock.calls.some((call) => call[0].endsWith('/menu'))).toBe(true);
+});

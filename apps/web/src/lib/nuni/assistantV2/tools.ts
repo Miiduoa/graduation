@@ -1,11 +1,14 @@
+import { cartArgs, priceCart } from './food';
+import { operationSignal, withOperationSignal } from './operation';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
 } from '@campus/shared/src/campusMapLookup';
 import { buildPersonalToday } from '@campus/shared/src/imports/today';
-import { eventInterval, pageArgs, pageHref, signCard } from './actions';
+import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './actions';
 import {
   addDays,
+  bounded,
   canonical,
   clock,
   date,
@@ -26,15 +29,39 @@ const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  get_food_locations: [{ tenantId: s }, []],
+  get_food_menu: [{ tenantId: s, locationId: s }, []],
+  propose_food_order: [
+    {
+      tenantId: s,
+      locationId: s,
+      requestedPickupAt: { type: 'string', maxLength: 40 },
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 5,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            menuItemId: s,
+            quantity: { type: 'integer', minimum: 1, maximum: 20 },
+            selectedOptionIds: { type: 'array', items: s, maxItems: 20 },
+          },
+          required: ['menuItemId', 'quantity', 'selectedOptionIds'],
+        },
+      },
+    },
+    ['tenantId', 'locationId', 'requestedPickupAt', 'items'],
+  ],
+  get_due_work: [{ from: d, to: d }, []],
+  get_day_overview: [{ date: d }, ['date']],
   get_today_context: [{}, []],
   get_schedule: [{ from: d, to: d }, ['from', 'to']],
   get_calendar: [{ from: d, to: d }, ['from', 'to']],
   list_courses: [{}, []],
-  get_course_work: [
-    { workspaceId: s, kind: { enum: ['assignments', 'quizzes', 'both'] } },
-    ['workspaceId'],
-  ],
-  get_materials: [{ workspaceId: s, cursor: s }, ['workspaceId']],
+  get_course_work: [{ workspaceId: s, kind: { enum: ['assignments', 'quizzes', 'both'] } }, []],
+  get_materials: [{ workspaceId: s, cursor: { type: 'string', maxLength: 500 } }, []],
   list_food_orders: [
     {
       tenantId: s,
@@ -54,14 +81,24 @@ const definitions: Record<string, [Obj, string[]]> = {
         ],
       },
       limit: { type: 'integer', minimum: 1, maximum: 5 },
-      cursor: s,
+      cursor: { type: 'string', maxLength: 500 },
     },
-    ['tenantId'],
+    [],
   ],
   get_food_order: [{ tenantId: s, orderId: s }, ['tenantId', 'orderId']],
   get_dining: [{ locationId: s }, []],
-  list_clubs: [{ tenantId: s, membership: { enum: ['joined', 'all'] }, cursor: s }, ['tenantId']],
-  get_club_feed: [{ tenantId: s, communityId: s, cursor: s }, ['tenantId', 'communityId']],
+  list_clubs: [
+    {
+      tenantId: s,
+      membership: { enum: ['joined', 'all'] },
+      cursor: { type: 'string', maxLength: 500 },
+    },
+    [],
+  ],
+  get_club_feed: [
+    { tenantId: s, communityId: s, cursor: { type: 'string', maxLength: 500 } },
+    ['tenantId', 'communityId'],
+  ],
   get_campus_info: [
     { kind: { enum: ['map', 'library', 'bus', 'announcements', 'events'] } },
     ['kind'],
@@ -115,13 +152,22 @@ const definitions: Record<string, [Obj, string[]]> = {
     ['page'],
   ],
 };
+export function studyTitle(title: string): string {
+  const clean = title
+    .replace(/作[」』”"']\s*作業/g, '作業')
+    .replace(/[「」『』“”\"']/g, '')
+    .replace(/^(?:寫作業[：:]?\s*|寫\s*)+/, '')
+    .trim();
+  return ('寫作業：' + clean.replace(/作業(?:作業)+/g, '作業')).slice(0, 120);
+}
 export const toolNames = Object.keys(definitions);
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
-  if (/作業|要交|規劃|排|剛剛|剛才/.test(question))
+  if (/作業|測驗|要交|規劃|排|剛剛|剛才/.test(question))
     add(
-      'list_courses',
+      'get_due_work',
+      'get_day_overview',
       'get_course_work',
       'find_free_time',
       'propose_personal_event',
@@ -131,16 +177,39 @@ export function selectTools(question: string, simulation: boolean): string[] {
     add('get_schedule', 'get_calendar', 'find_free_time');
   if (/教材/.test(question)) add('list_courses', 'get_materials');
   if (/吃|中午|餐廳|規劃/.test(question)) add('get_dining');
-  if (/訂|餐好了/.test(question)) add('list_food_orders', 'get_food_order');
+  if (/訂|餐好了|點餐|幫我點|再點/.test(question))
+    add(
+      'get_food_locations',
+      'get_food_menu',
+      'propose_food_order',
+      'list_food_orders',
+      'get_food_order',
+    );
   if (/社團/.test(question)) add('list_clubs', 'get_club_feed');
-  if (/圖書館|怎麼走|公車|地圖|公告|活動/.test(question)) add('get_campus_info', 'get_transit');
+  if (/圖書館|怎麼走|公車|交通|到站|地圖|公告|活動/.test(question))
+    add('get_campus_info', 'get_transit');
   if (/通知/.test(question) && simulation) add('get_notifications');
   // Prioritize the requested domain, retaining proposals for planning questions.
+  if (/點餐|幫我點|再點/.test(question)) {
+    out.delete('get_today_context');
+    out.delete('propose_open_page');
+    out.delete('get_dining');
+  }
+  if (/規劃|安排|排寫/.test(question)) {
+    out.delete('propose_open_page');
+    out.delete('propose_personal_event');
+    out.delete('get_schedule');
+    out.delete('get_calendar');
+    out.delete('get_course_work');
+  }
   const names = [...out];
   if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
   if (names.length > 8 && names.includes('find_free_time'))
     names.splice(names.indexOf('get_calendar'), 1);
-  return names.slice(0, 8);
+  const priority = /規劃|安排|排寫/.test(question)
+    ? ['get_day_overview', 'get_due_work', 'find_free_time', 'propose_study_plan']
+    : [];
+  return [...new Set([...priority, ...names])].slice(0, 8);
 }
 export const schemas = (names: string[]) =>
   names.map((name) => ({
@@ -160,13 +229,16 @@ export function validateTool(name: string, raw: unknown): Obj {
   const [props, required] = definitions[name];
   const a = object(raw, Object.keys(props));
   if (required.some((k) => a[k] === undefined)) return fail();
+  if (name === 'propose_food_order') return { ...cartArgs(a) };
   for (const [key, value] of Object.entries(a)) {
     const spec = props[key] as Obj;
     if (spec.enum && !(spec.enum as unknown[]).includes(value)) return fail();
     if (spec.type === 'string') {
       if (spec.format === 'date') date(value);
       else if (key === 'from' || key === 'to' || key.endsWith('Time')) clock(value);
-      else if (key.endsWith('Id') || key === 'cursor') id(value);
+      else if (key === 'cursor') {
+        if (!/^[A-Za-z0-9_-]{1,500}$/.test(text(value, 500))) return fail();
+      } else if (key.endsWith('Id')) id(value);
       else text(value, Number(spec.maxLength || 100));
     }
     if (spec.type === 'boolean' && typeof value !== 'boolean') return fail();
@@ -196,9 +268,9 @@ export function validateTool(name: string, raw: unknown): Obj {
     (a.action === 'arrivals' ? !a.city || !a.stopId : a.city || a.stopId)
   )
     return fail();
-  if (name === 'get_schedule' || name === 'get_calendar') {
+  if (name === 'get_schedule' || name === 'get_calendar' || name === 'get_due_work') {
     if (
-      String(a.from) > String(a.to) ||
+      String(a.from || '0000') > String(a.to || '9999') ||
       Date.parse(String(a.to)) - Date.parse(String(a.from)) >
         (name === 'get_schedule' ? 6 : 30) * 86400000
     )
@@ -306,19 +378,34 @@ export function createTools(
   const orders = new Set<string>(),
     clubs = new Set<string>();
   const cards: Card[] = [];
+  let proposalSeq: string | undefined;
+  const sequence = () => (proposalSeq ||= beginProposal(binding, now));
   const diningIds = new Set<string>();
+  const foodLocations = new Set<string>();
   const getLedger = () =>
     (ledger ||= adapter.ledger().then((value) => {
       if (value.schoolId !== binding.schoolId) return fail('FORBIDDEN_SCOPE', 403);
       return value;
     }));
-  const getCourses = () => (courses ||= adapter.courses().then((value) => value.slice(0, 20)));
-  const getRealms = () => (realms ||= adapter.realms());
+  const courseIds: string[] = [],
+    tenantIds: string[] = [];
+  const getCourses = () =>
+    (courses ||= adapter.courses().then((rows) => {
+      courseIds.push(...rows.map((c) => c.id));
+      return rows;
+    }));
+  const getRealms = () =>
+    (realms ||= adapter.realms().then((rows) => {
+      tenantIds.push(...rows.filter((r) => r.schoolId === binding.schoolId).map((r) => r.tenantId));
+      return rows;
+    }));
   async function course(a: Obj) {
     if (!(await getCourses()).some((c) => c.id === a.workspaceId))
       return fail('FORBIDDEN_SCOPE', 403);
   }
   async function tenant(a: Obj) {
+    const visible = (await getRealms()).filter((r) => r.schoolId === binding.schoolId);
+    if (!a.tenantId && visible.length === 1) a.tenantId = visible[0].tenantId;
     if (
       !(await getRealms()).some((r) => r.tenantId === a.tenantId && r.schoolId === binding.schoolId)
     )
@@ -330,12 +417,66 @@ export function createTools(
     found.forEach((t) => tasks.set(t.id, t));
     return found;
   }
+  async function dueWork(a: Obj) {
+    const from = date(a.from || taipeiDate(now)),
+      to = date(a.to || addDays(from, 6));
+    if (to < from || Date.parse(to) - Date.parse(from) > 30 * 86400000) return fail();
+    const list = await getCourses();
+    const unqueried: { id: string; title: string; reason: string }[] = [];
+    const found: Task[] = [];
+    // Reserve whole assignment/quiz pairs before starting parallel work.
+    let remaining = adapter.remainingApiCalls?.() ?? 12;
+    const selected = list.filter((c) => {
+      if (workCache.has(c.id)) return true;
+      if (remaining < 2) {
+        unqueried.push({ ...c, reason: 'API_BUDGET_EXCEEDED' });
+        return false;
+      }
+      remaining -= 2;
+      return true;
+    });
+    await Promise.all(
+      selected.map(async (c) => {
+        try {
+          found.push(
+            ...(await bounded(
+              (child) => withOperationSignal(child, () => work(c.id)),
+              operationSignal() || new AbortController().signal,
+              3000,
+            )),
+          );
+        } catch (e) {
+          if ((e as { status?: number }).status === 401) throw e;
+          unqueried.push({ ...c, reason: (e as { code?: string }).code || 'UNAVAILABLE' });
+        }
+      }),
+    );
+    found.sort((a, b) => String(a.dueAt || '9999').localeCompare(String(b.dueAt || '9999')));
+    const end = Date.parse(addDays(to, 1) + 'T00:00:00+08:00');
+    const start = Date.parse(from + 'T00:00:00+08:00');
+    const pending = found.filter((t) => !t.submitted && t.state === 'open');
+    return {
+      from,
+      to,
+      pending: pending.filter(
+        (t) => t.dueAt && Date.parse(t.dueAt) >= Math.max(now, start) && Date.parse(t.dueAt) < end,
+      ),
+      undated: pending.filter((t) => !t.dueAt),
+      submitted: found.filter((t) => t.submitted),
+      overdue: found.filter((t) => !t.submitted && t.dueAt && Date.parse(t.dueAt) < now),
+      partial: unqueried.length > 0,
+      unqueried,
+      source: 'class-workspaces',
+    };
+  }
   async function propose(raw: Obj) {
     if (!writes)
       return {
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
+    if (typeof raw.title === 'string' && /^寫/.test(raw.title))
+      raw = { ...raw, title: studyTitle(raw.title) };
     const l = await getLedger(),
       e = eventArgs(raw),
       [start, end] = eventInterval(e);
@@ -361,6 +502,7 @@ export function createTools(
       l.revision + cards.filter((c) => c.tool === 'propose_personal_event').length,
       secret,
       now,
+      sequence(),
     );
     cards.push(card);
     return { proposed: true, ...raw, requiresConfirmation: true };
@@ -368,6 +510,120 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'get_food_locations': {
+        if (!a.tenantId) {
+          const visible = (await getRealms()).filter((r) => r.schoolId === binding.schoolId);
+          if (visible.length !== 1)
+            return {
+              realms: visible.slice(0, 5),
+              nextStep:
+                '使用上述 tenantId 呼叫 get_food_locations；沒有 realm 表示目前 scope 未連接',
+            };
+        }
+        await tenant(a);
+        if (!adapter.food) return { unavailable: 'NOT_CONNECTED' };
+        const data = object(await adapter.food.locations(String(a.tenantId)));
+        if (Array.isArray(data.locations))
+          data.locations.forEach((v) => foodLocations.add(a.tenantId + ':' + id(object(v).id)));
+        return {
+          locations: Array.isArray(data.locations)
+            ? data.locations.map((v) => {
+                const row = object(v);
+                return { tenantId: a.tenantId, id: row.id, name: row.name, state: row.state };
+              })
+            : [],
+          truncated: Boolean(data.nextCursor),
+          completePageHref: '/food?tenant=' + encodeURIComponent(String(a.tenantId)),
+        };
+      }
+      case 'get_food_menu': {
+        await tenant(a);
+        if (!a.locationId)
+          return {
+            ...object(await dispatch('get_food_locations', { tenantId: a.tenantId })),
+            nextStep: '用上述 location id 呼叫 get_food_menu',
+          };
+        if (!adapter.food || !foodLocations.has(a.tenantId + ':' + a.locationId))
+          return fail('FORBIDDEN_SCOPE', 403);
+        const menu = await adapter.food.menu(String(a.tenantId), String(a.locationId));
+        return {
+          locationId: menu.location.id,
+          items: menu.sections
+            .flatMap((s) => s.items)
+            .filter((i) => i.available)
+            .slice(0, 5)
+            .map((item) => ({
+              id: item.id,
+              name: item.name,
+              amountMinor: item.basePrice.amountMinor,
+              tags: item.dietaryTags,
+              groups: item.optionGroups.map((g) => ({
+                min: g.minimumSelections,
+                max: g.maximumSelections,
+                options: g.options
+                  .filter((o) => o.available)
+                  .map((o) => ({ id: o.id, name: o.name, deltaMinor: o.priceDelta.amountMinor })),
+              })),
+            })),
+          partial: true,
+          completePageHref:
+            '/food?tenant=' +
+            encodeURIComponent(String(a.tenantId)) +
+            '&location=' +
+            encodeURIComponent(String(a.locationId)),
+        };
+      }
+      case 'propose_food_order': {
+        await tenant(a);
+        if (!adapter.food || !foodLocations.has(a.tenantId + ':' + a.locationId))
+          return fail('FORBIDDEN_SCOPE', 403);
+        const cart = cartArgs(a);
+        if (Date.parse(cart.requestedPickupAt) <= now) return fail('INVALID_PICKUP_TIME');
+        const summary = priceCart(cart, await adapter.food.menu(cart.tenantId, cart.locationId));
+        const mode = adapter.food.enabled() && !adapter.food.paymentRequired ? 'order' : 'page';
+        const args = {
+          cart,
+          summary,
+          mode,
+          href:
+            '/food?tenant=' +
+            encodeURIComponent(cart.tenantId) +
+            '&location=' +
+            encodeURIComponent(cart.locationId),
+          reason: !(adapter.food.onlineEnabled?.() ?? adapter.food.enabled())
+            ? '線上點餐尚未開放；帶到點餐頁'
+            : !adapter.food.enabled()
+              ? '助理下單尚未開放；帶到點餐頁'
+              : adapter.food.paymentRequired
+                ? '此訂單需付款，請到點餐頁完成'
+                : '確認後下單，自取',
+        };
+        cards.push(signCard(binding, name, args, 0, secret, now, sequence()));
+        return { proposed: true, mode, reason: args.reason, summary, requiresConfirmation: true };
+      }
+      case 'get_due_work':
+        return dueWork(a);
+      case 'get_day_overview': {
+        const day = date(a.date);
+        const l = await getLedger();
+        const due = await dueWork({ from: day, to: day });
+        const classes = schedule(l, day, day);
+        let free: unknown;
+        try {
+          free = freeTime(l, { date: day });
+        } catch {
+          free = { incomplete: true, note: '課表或事件不完整，無法判定空檔' };
+        }
+        return {
+          date: day,
+          schedule: classes,
+          events: calendar(l, day, day),
+          due,
+          free,
+          partial: due.partial || classes.unplaced > 0 || Boolean((free as Obj).incomplete),
+          coverage: '僅已同步資料；不得推測未查到的課表',
+        };
+      }
       case 'get_today_context':
         return context();
       case 'get_schedule':
@@ -380,6 +636,7 @@ export function createTools(
       case 'list_courses':
         return { courses: await getCourses(), truncated: (await getCourses()).length >= 20 };
       case 'get_course_work':
+        if (!a.workspaceId) return dueWork({});
         await course(a);
         return (await work(String(a.workspaceId))).filter(
           (t) =>
@@ -388,6 +645,11 @@ export function createTools(
             t.kind === (a.kind === 'assignments' ? 'assignment' : 'quiz'),
         );
       case 'get_materials':
+        if (!a.workspaceId)
+          return {
+            courses: (await getCourses()).slice(0, 20),
+            nextStep: '用上述課程 id 作 workspaceId 呼叫 get_materials',
+          };
         await course(a);
         return adapter.materials(String(a.workspaceId), a.cursor as string | undefined);
       case 'list_food_orders': {
@@ -468,7 +730,7 @@ export function createTools(
                 : a.page === 'cafeteria' && diningIds.has(entity);
           if (!allowed) return fail('FORBIDDEN_SCOPE', 403);
         }
-        const card = signCard(binding, name, a, 0, secret, now);
+        const card = signCard(binding, name, a, 0, secret, now, sequence());
         cards.push(card);
         return { proposed: true, requiresConfirmation: true };
       }
@@ -495,7 +757,7 @@ export function createTools(
           const endTime = new Date(start + minutes * 60000 + 28800000).toISOString().slice(11, 16);
           planned.push(
             await propose({
-              title: ('寫作業：' + task!.title).slice(0, 120),
+              title: studyTitle(task!.title),
               date: slot.date,
               startTime: slot.startTime,
               endTime,
@@ -577,6 +839,42 @@ export function createTools(
   return {
     cards,
     context,
+    recovery(name: string) {
+      const next: Record<string, string> = {
+        get_dining: '先呼叫 get_dining {} 取得 locationId',
+        get_food_locations:
+          '呼叫 get_food_locations {} 列出可用 realm，或用 context 中的 tenantId 重試',
+        list_food_orders: '可省略 tenantId；多 realm 時用 context 可見 tenantId 重試',
+        list_clubs: '可省略 tenantId；多 realm 時用 context 可見 tenantId 重試',
+        get_food_menu: '先呼叫 get_food_locations {} 取得 tenantId/locationId',
+        propose_food_order: '先呼叫 get_food_locations，再 get_food_menu；依菜單 id 重試',
+        get_course_work: '先呼叫 list_courses，使用回傳的 workspaceId',
+        get_materials: '先呼叫 list_courses，使用回傳的 workspaceId',
+        get_food_order: '先呼叫 list_food_orders 取得 orderId',
+        get_club_feed: '先呼叫 list_clubs 取得 communityId',
+        propose_study_plan: '先呼叫 get_due_work 取得待繳 taskIds，再查 get_day_overview',
+        get_transit: '先以 action=campus 查詢；arrivals 需真實 city/stopId',
+      };
+      return {
+        nextStep:
+          next[name] || `依 ${name} schema 補正參數後重試；日期 YYYY-MM-DD、時間 HH:mm，不猜 id`,
+        availableIds: (['list_food_orders', 'list_clubs', 'get_food_locations'].includes(name)
+          ? tenantIds
+          : name === 'get_dining'
+            ? [...diningIds]
+            : name.includes('food')
+              ? [...foodLocations]
+              : name.includes('club')
+                ? [...clubs]
+                : /course|materials/.test(name)
+                  ? courseIds
+                  : name.includes('study')
+                    ? [...tasks.keys()]
+                    : tenantIds
+        ).slice(0, 5),
+      };
+    },
+    withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
       const a = validateTool(name, raw),
         key = name + canonical(a),

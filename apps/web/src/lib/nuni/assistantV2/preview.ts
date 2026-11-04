@@ -16,13 +16,16 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 export async function preview(args = process.argv.slice(2)) {
   const options = Object.fromEntries(
     args.map((a) => {
-      if (!/^--(model|cases|output)=/.test(a)) throw new Error('Unknown argument');
+      if (!/^--(model|cases|output|ordering)=/.test(a)) throw new Error('Unknown argument');
       return a.slice(2).split(/=(.*)/).slice(0, 2);
     }),
   );
   const mode = options.model || 'fake';
   if (!['fake', 'groq'].includes(mode)) throw new Error('model must be fake or groq');
-  if (options.cases && options.cases !== 'all') throw new Error('cases must be all');
+  if (options.cases && !['all', 'food'].includes(options.cases))
+    throw new Error('cases must be all or food');
+  const ordering = options.ordering || 'off';
+  if (!['on', 'off'].includes(ordering)) throw new Error('ordering must be on or off');
   if (mode === 'groq' && !process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is required');
   const network = globalThis.fetch;
   const deny: typeof fetch = async (url, init) => {
@@ -37,22 +40,29 @@ export async function preview(args = process.argv.slice(2)) {
     minuteStart = 0,
     minuteTokens = 0;
   const groq = groqModel(mode === 'groq' ? process.env.GROQ_API_KEY : undefined, deny);
-  const throttled: Model = async (input) => {
+  const pace = async (input: Parameters<Model>[0]) => {
     const reservation =
       bytes({ messages: input.messages, tools: input.tools }) + input.max_completion_tokens + 128;
     const now = Date.now();
-    const until = Math.max(now, nextCallAt);
-    if (now < minuteStart + 61000 && minuteTokens + reservation > 7000)
-      throw new V2Error(429, 'PREVIEW_TOKEN_BUDGET', 60);
+    if (reservation > 8000) throw new V2Error(429, 'PREVIEW_TOKEN_BUDGET');
+    const until = Math.max(
+      now,
+      nextCallAt,
+      minuteTokens + reservation > 8000 ? minuteStart + 60000 : 0,
+    );
     while (Date.now() < until) {
       input.signal.throwIfAborted();
       await wait(Math.min(10000, until - Date.now()));
     }
     input.signal.throwIfAborted();
-    if (Date.now() >= minuteStart + 61000) {
+    if (Date.now() >= minuteStart + 60000) {
       minuteStart = Date.now();
       minuteTokens = 0;
     }
+  };
+  const throttled: Model = async (input) => {
+    const reservation =
+      bytes({ messages: input.messages, tools: input.tools }) + input.max_completion_tokens + 128;
     minuteTokens += reservation;
     nextCallAt = Date.now() + 2100;
     const result = await groq(input);
@@ -61,10 +71,8 @@ export async function preview(args = process.argv.slice(2)) {
   };
   try {
     for (let i = 0; i < questions.length; i++) {
-      if (mode === 'groq' && i > 0) {
-        for (let pause = 0; pause < 7; pause++) await wait(pause === 6 ? 1000 : 10000);
-      }
-      const fixture = fixtureAdapter();
+      if (options.cases === 'food' && ![1, 4].includes(i)) continue;
+      const fixture = fixtureAdapter(ordering === 'on');
       const binding = { ...fixtureBinding, conversationId: i === 7 ? 'case-3' : 'case-' + (i + 1) };
       const toolSequence: { name: string; args: Obj }[] = [];
       const base = fixture.adapter;
@@ -98,6 +106,7 @@ export async function preview(args = process.argv.slice(2)) {
           secret: FIXTURE_SECRET,
           writes: true,
           retry429: mode === 'groq',
+          ...(mode === 'groq' ? { beforeModel: pace, previewDeadlineMs: 120000 } : {}),
           signal: new AbortController().signal,
           now: FIXTURE_NOW,
           log: () => {},
@@ -108,11 +117,13 @@ export async function preview(args = process.argv.slice(2)) {
             { role: 'assistant', content: result.answer },
           ];
         const confirmed: unknown[] = [];
-        if (i === 7 && result.cards[0]) {
+        if ([1, 4, 7].includes(i) && result.cards[0]) {
           confirmed.push(await fixtureConfirm(binding, result.cards[0], base));
           confirmed.push(await fixtureConfirm(binding, result.cards[0], base));
         }
         const record = {
+          ordering,
+          orderCalls: fixture.orderCalls.length,
           caseId: i + 1,
           question: questions[i],
           tools: toolSequence,
@@ -144,6 +155,8 @@ export async function preview(args = process.argv.slice(2)) {
       } catch (e) {
         lines.push(
           JSON.stringify({
+            ordering,
+            orderCalls: fixture.orderCalls.length,
             caseId: i + 1,
             question: questions[i],
             error: (e as { code?: string }).code || 'PREVIEW_FAILED',

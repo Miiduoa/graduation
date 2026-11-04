@@ -294,7 +294,7 @@ describe('runner and budget', () => {
     };
     let count = 0;
     const r = await runCase(async () => (count++ ? result() : result('get_dining')), {
-      question: questions[1],
+      question: '中午吃什麼',
       adapter: f.adapter,
     });
     expect(r.steps[0].status).toBe('error');
@@ -306,7 +306,7 @@ describe('runner and budget', () => {
     await expect(runCase(model, { adapter: f.adapter })).rejects.toMatchObject({ status: 401 });
     expect(model).not.toHaveBeenCalled();
   });
-  it('handles empty/length output and token exhaustion without repair', async () => {
+  it('handles empty output, one bounded final retry, and token exhaustion', async () => {
     const model = vi.fn(async () => ({
       ...result(),
       message: { role: 'assistant', content: ' ' },
@@ -314,7 +314,7 @@ describe('runner and budget', () => {
     }));
     const r = await runCase(model);
     expect(r.answer.trim()).not.toBe('');
-    expect(model).toHaveBeenCalledTimes(1);
+    expect(model).toHaveBeenCalledTimes(2);
     const huge = await runCase(async () => ({
       ...result('get_today_context'),
       usage: { prompt_tokens: 6999, completion_tokens: 1, total_tokens: 7000 },
@@ -439,7 +439,7 @@ it('tool timeout remains partial, while the fourth call cannot execute tools', a
   let calls = 0;
   const pending = runCase(async () => (calls++ ? result() : result('get_dining')), {
     adapter: f.adapter,
-    question: questions[1],
+    question: '中午吃什麼',
   });
   await vi.advanceTimersByTimeAsync(4001);
   expect((await pending).steps[0]).toMatchObject({ status: 'error', summary: 'DEADLINE_EXCEEDED' });

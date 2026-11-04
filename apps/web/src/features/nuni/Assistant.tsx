@@ -179,7 +179,22 @@ type V2Card = {
   schoolId: string;
   destination: string;
 };
+function foodSummary(raw: unknown): string {
+  if (!raw || typeof raw !== 'object') return '';
+  const summary = raw as Record<string, unknown>;
+  const lines = Array.isArray(summary.lines) ? summary.lines : [];
+  return `${String(summary.store)}：${lines
+    .map((raw) => {
+      const line = raw as Record<string, unknown>;
+      return `${String(line.name)} × ${String(line.quantity)}（${Array.isArray(line.options) ? line.options.join('、') : ''}，單價 ${Number(line.unitMinor) / 100} 元）`;
+    })
+    .join(
+      '；',
+    )}。合計 ${Number(summary.totalMinor) / 100} 元，${String(summary.pickupMethod)}，取餐時間 ${String(summary.requestedPickupAt)}。`;
+}
 const cardLabels: Record<string, string> = {
+  summary: '餐點與金額',
+  reason: '說明',
   title: '標題',
   date: '日期',
   endDate: '結束日期',
@@ -251,6 +266,16 @@ function V2Conversation({
         { role: 'assistant', content: t.reply.answer },
       ]);
       const reply = await send('ask', { question: current, history, consent });
+      if (reply.cards.length)
+        setStates((s) => ({
+          ...s,
+          ...Object.fromEntries(
+            turns
+              .flatMap((t) => t.reply.cards)
+              .filter((c) => !s[c.mutationId])
+              .map((c) => [c.mutationId, '已被新提議取代']),
+          ),
+        }));
       setTurns((t) => [...t, { question: current, reply }]);
       setQuestion('');
     } catch (e) {
@@ -266,7 +291,11 @@ function V2Conversation({
     try {
       for (const card of cards) {
         const result = await send('confirm', { token: card.token, args: card.args });
-        setStates((s) => ({ ...s, [card.mutationId]: result.href || '已加入個人行事曆' }));
+        setStates((s) => ({
+          ...s,
+          [card.mutationId]:
+            result.href || (card.tool === 'propose_food_order' ? '已送出訂單' : '已加入個人行事曆'),
+        }));
       }
     } catch (e) {
       if (!controller.current?.signal.aborted)
@@ -286,7 +315,8 @@ function V2Conversation({
       {!ready && <p role="status">模型目前無法使用。</p>}
       <label>
         <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-        同意在本次對話將問題、必要課表與作業摘要傳送 Groq
+        同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+        Groq
       </label>
       <div role="log">
         {turns.map((turn, i) => (
@@ -321,12 +351,27 @@ function V2Conversation({
                   學校：{card.schoolId}；目的地：{card.destination}
                 </p>
                 <dl>
-                  {Object.entries(card.args).map(([key, value]) => (
-                    <div key={key}>
-                      <dt>{cardLabels[key] || key}</dt>
-                      <dd>{typeof value === 'boolean' ? (value ? '是' : '否') : String(value)}</dd>
-                    </div>
-                  ))}
+                  {Object.entries(card.args)
+                    .filter(
+                      ([key]) =>
+                        card.tool !== 'propose_food_order' || ['summary', 'reason'].includes(key),
+                    )
+                    .map(([key, value]) => (
+                      <div key={key}>
+                        <dt>{cardLabels[key] || key}</dt>
+                        <dd>
+                          {card.tool === 'propose_food_order' && key === 'summary'
+                            ? foodSummary(value)
+                            : typeof value === 'boolean'
+                              ? value
+                                ? '是'
+                                : '否'
+                              : typeof value === 'object'
+                                ? JSON.stringify(value)
+                                : String(value)}
+                        </dd>
+                      </div>
+                    ))}
                 </dl>
                 {states[card.mutationId] ? (
                   states[card.mutationId].startsWith('/') ? (
@@ -354,18 +399,25 @@ function V2Conversation({
                     <button
                       disabled={pending}
                       onClick={() =>
-                        setStates((s) => ({
-                          ...s,
-                          ...Object.fromEntries(
-                            (card.tool === 'propose_personal_event'
-                              ? turn.reply.cards.slice(cardIndex)
-                              : [card]
-                            ).map((c) => [
-                              c.mutationId,
-                              c.mutationId === card.mutationId ? '已取消' : '需重新規劃',
-                            ]),
-                          ),
-                        }))
+                        void (async () => {
+                          setPending(true);
+                          try {
+                            const affected =
+                              card.tool === 'propose_personal_event'
+                                ? turn.reply.cards.slice(cardIndex)
+                                : [card];
+                            for (const c of affected)
+                              await send('cancel', { token: c.token, args: c.args });
+                            setStates((s) => ({
+                              ...s,
+                              ...Object.fromEntries(affected.map((c) => [c.mutationId, '已取消'])),
+                            }));
+                          } catch {
+                            setError('撤銷未完成，請重試。');
+                          } finally {
+                            setPending(false);
+                          }
+                        })()
                       }
                     >
                       取消

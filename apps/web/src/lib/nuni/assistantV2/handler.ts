@@ -1,3 +1,4 @@
+import { withOperationSignal } from './operation';
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import {
@@ -8,7 +9,7 @@ import {
   requireSession,
   sessionContext,
 } from '../server';
-import { confirm } from './actions';
+import { confirm, revoke } from './actions';
 import { createAdapter } from './adapter';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { groqModel } from './groq';
@@ -47,7 +48,7 @@ function quota(now: number, amount: number) {
 }
 export async function handleV2(request: NextRequest, action: string) {
   const requestId = randomUUID();
-  const stage = ['capability', 'ask', 'confirm'].includes(action) ? action : 'unknown';
+  const stage = ['capability', 'ask', 'confirm', 'cancel'].includes(action) ? action : 'unknown';
   const started = Date.now();
   let logged = false;
   const log = (r: Obj) => {
@@ -61,7 +62,8 @@ export async function handleV2(request: NextRequest, action: string) {
       process.env.CAMPUS_ASSISTANT_V2_ENABLED !== 'true'
     )
       throw new V2Error(404, 'NOT_FOUND');
-    if (!['capability', 'ask', 'confirm'].includes(action)) throw new V2Error(404, 'NOT_FOUND');
+    if (!['capability', 'ask', 'confirm', 'cancel'].includes(action))
+      throw new V2Error(404, 'NOT_FOUND');
     if (request.method !== (action === 'capability' ? 'GET' : 'POST'))
       throw new V2Error(405, 'METHOD_NOT_ALLOWED');
     if (request.nextUrl.search) throw new V2Error(400, 'INVALID_INPUT');
@@ -97,17 +99,23 @@ export async function handleV2(request: NextRequest, action: string) {
     };
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
+    if (action === 'cancel')
+      return jsonResponse(
+        revoke(binding, { token: raw.token, args: raw.args }, secret, Date.now()),
+      );
     if (action === 'confirm')
       return jsonResponse(
         await bounded(
-          () =>
-            confirm(
-              binding,
-              { token: raw.token, args: raw.args },
-              secret,
-              Date.now(),
-              source.adapter,
-              writes,
+          (child) =>
+            withOperationSignal(child, () =>
+              confirm(
+                binding,
+                { token: raw.token, args: raw.args },
+                secret,
+                Date.now(),
+                source.adapter,
+                writes,
+              ),
             ),
           signal,
           12000,

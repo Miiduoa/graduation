@@ -11,7 +11,7 @@ import { Select } from '@/components/ui/Input';
 import { FoodMenu } from './FoodMenu';
 import { FoodOrders } from './FoodOrders';
 import { clearAllFoodPendingForAccount } from './foodPersistence';
-import { useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
+import { foodMoney, useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
 import styles from './Food.module.css';
@@ -24,9 +24,11 @@ export type FoodClient = ReturnType<typeof createNuniFoodClient>;
 export function FoodWorkspace({
   initialTenant = '',
   initialOrder = '',
+  initialLocation = '',
 }: {
   initialTenant?: string;
   initialOrder?: string;
+  initialLocation?: string;
 }) {
   const auth = useNuniSession();
   // Delayed Suspense on /food must hydrate against the server's account-checking markup.
@@ -80,6 +82,7 @@ export function FoodWorkspace({
             accountId={auth.session.platformAccountId}
             context={auth.session.context}
             cache={scope.drafts}
+            initialLocation={initialLocation}
             initialTenant={initialTenant}
             initialOrder={initialOrder}
           />
@@ -103,12 +106,14 @@ function FoodAccount({
   cache,
   initialTenant,
   initialOrder,
+  initialLocation,
 }: {
   accountId: string;
   context: string;
   cache: FoodDraftCache;
   initialTenant: string;
   initialOrder: string;
+  initialLocation: string;
 }) {
   const client = useMemo(
     () =>
@@ -141,6 +146,11 @@ function FoodAccount({
     : (available[0]?.tenantId ?? '');
   const selectedRealm = available.find((realm) => realm.tenantId === tenantId);
   const [created, setCreated] = useState<{ tenantId: string; orderId: string } | null>(null);
+  if (!orderingOn && initialTenant && initialLocation)
+    return (
+      <FoodMenuPreview client={client} tenantId={initialTenant} locationId={initialLocation} />
+    );
+
   return (
     <div className={styles.accountStack}>
       <div className={`${styles.bar} ${styles.accountBar}`}>
@@ -183,6 +193,7 @@ function FoodAccount({
           {tenantId &&
             (tab === 'menu' ? (
               <FoodLocations
+                initialLocation={tenantId === initialTenant ? initialLocation : ''}
                 key={tenantId}
                 client={client}
                 cache={cache}
@@ -223,12 +234,14 @@ function FoodAccount({
 }
 
 function FoodLocations({
+  initialLocation,
   client,
   cache,
   accountId,
   tenantId,
   onOrder,
 }: {
+  initialLocation: string;
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
@@ -241,7 +254,7 @@ function FoodLocations({
     [client, tenantId, cursor],
   );
   const locations = useFoodRead(load);
-  const [selected, setSelected] = useFoodDraft(cache, `food:${tenantId}:location`, '');
+  const [selected, setSelected] = useFoodDraft(cache, `food:${tenantId}:location`, initialLocation);
   if (selected) {
     return (
       <FoodMenu
@@ -332,5 +345,60 @@ function FoodLocations({
         </>
       )}
     </div>
+  );
+}
+
+function FoodMenuPreview({
+  client,
+  tenantId,
+  locationId,
+}: {
+  client: FoodClient;
+  tenantId: string;
+  locationId: string;
+}) {
+  const load = useCallback(
+    () => client.getMenu(tenantId, locationId),
+    [client, tenantId, locationId],
+  );
+  const menu = useFoodRead(load);
+  return (
+    <section aria-label="餐廳菜單預覽">
+      <p>線上點餐尚未開放；可先查看菜單，備好的品項請見助理確認卡。</p>
+      {menu.loading && <p role="status">正在讀取菜單…</p>}
+      {menu.error && <p role="alert">{menu.error}</p>}
+      {menu.data && (
+        <>
+          <h2>{menu.data.location.name}</h2>
+          {menu.data.sections.map((section) => (
+            <section key={section.id}>
+              <h3>{section.name}</h3>
+              <ul>
+                {section.items.map((item) => (
+                  <li key={item.id}>
+                    {item.name} · {foodMoney(item.basePrice)} ·{' '}
+                    {item.available ? '供應中' : '暫停供應'}
+                    <p>
+                      {item.description} {item.dietaryTags.join('、')}
+                    </p>
+                    {item.optionGroups.map((group) => (
+                      <p key={group.id}>
+                        {group.name}：
+                        {group.options
+                          .map(
+                            (option) =>
+                              `${option.name} ${foodMoney(option.priceDelta)}${option.available ? '' : '（暫停供應）'}`,
+                          )
+                          .join('、')}
+                      </p>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </>
+      )}
+    </section>
   );
 }

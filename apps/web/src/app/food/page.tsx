@@ -9,6 +9,11 @@ export default async function FoodPage({
   return (
     <FoodWorkspace
       initialTenant={typeof params.tenant === 'string' ? params.tenant : ''}
+      initialLocation={
+        typeof params.location === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(params.location)
+          ? params.location
+          : ''
+      }
       initialOrder={typeof params.order === 'string' ? params.order : ''}
     />
   );

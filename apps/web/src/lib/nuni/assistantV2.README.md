@@ -14,12 +14,26 @@
 內層 `CAMPUS_ASSISTANT_V2_ENABLED=true` 才選 v2；缺值或其他值均回 #454。
 事件提議及確認寫入還要求 `CAMPUS_ASSISTANT_V2_WRITES_ENABLED=true`，預設關閉。
 寫入關閉時提供個人曆入口，不假裝已儲存。導航卡不寫入 ledger。
+助理下單另要求 `CAMPUS_ASSISTANT_V2_ORDERING_ENABLED=true`（缺值關閉），獨立於事件寫入旗標。
+線上點餐沿用 `isWebOnlineOrderingEnabled()`／既有 `NEXT_PUBLIC_ONLINE_ORDERING` 判斷；不設定、不修改後端 `ONLINE_ORDERING_ENABLED`。
+任一點餐開關關閉：仍可查菜單、推薦、驗價組車；卡片為「帶到點餐頁」，線上關閉時明示「線上點餐尚未開放」，零 quotes/orders 呼叫。
+
+**既有付款限制**：已只讀核對 `features/food/FoodMenu.tsx`、`lib/nuni/food.ts`、shared `nuniFood.ts` 與本機 API `food-service.ts`。
+既有前端使用 `POST /api/nuni/realms/:tenantId/food/quotes` → `POST .../orders`；BFF 轉相同 `v1/auth/platform` 路徑，沿用 JSON、Accept、`Authorization: Platform <session>`，無額外 idempotency header。
+quote body 為 locationId/requestedPickupAt/items/idempotencyKey；order body 為 quoteId/idempotencyKey，冪等鍵在 body。
+現有 createOrder **一律產生 awaiting_payment（Web payment-pending）**，沒有已驗證的免付款成立能力。
+依本需求的付款例外，正式 adapter 即使兩旗標開啟也只導頁，不呼叫 quotes、orders、payment-session 或任何金流。
+`--ordering=on` 的確認後恰好一次，是 fixture 模擬免付款能力的契約測試，不能當成正式已能免付款下單。
+未來既有 API 若新增免付款成立契約，才可接 submit：沿用現有 client quotes → orders，兩階段使用確認 token 綁定的 mutationId 衍生不同 idempotencyKey，API 持久冪等，不可只靠本機去重。
+菜單驗價金額為估算（minor units，UI 換算元），未呼叫 quote 保留庫存；價格改變必須重新提議。
+點餐頁新增既有 tenant query 下的 `location` 菜單入口，線上關閉時只渲染唯讀菜單、沒有組車／報價／下單按鈕；不支援購物車預填，卡片列出已備品項／規格／數量／金額／自取時間。
 
 上線前需另外完成（本次未部署、未連正式服務）：
 
 - 在 **nuni-web** 設定 server-only `GROQ_API_KEY` secret，沿用既有 `BFF_SESSION_SECRET`。
 - 實測 Web 出口可連 Groq 固定端點，確認指定模型權限及 Groq 帳戶方案為 **Free**。
 - 核對組織真實 limits；本機 limiter 只對單進程有效，不保證多機全域額度。
+- 正式點餐需先確認既有 API 的免付款成立能力；目前所有訂單需付款，助理只導頁。先確認對話黏著單進程或共享撤銷機制，才能開放確認卡寫入。
 - personal-import API 同步 gate 必須可用；API 本身拒絕同步時，不繞過 gate。
 - `/realms` 目前可能只有 tenantId/name/services，沒有學校對照。
   可由服務端 `CAMPUS_ASSISTANT_V2_REALM_MAP` 提供明確的 JSON `{ "school-slug": ["verified-tenant-slug"] }` 對照。
@@ -39,11 +53,16 @@
 | get_today_context | 本題快取的台北時間、今日／下一堂、7 日作業／事件及缺漏 |
 | get_schedule | 最多 7 日同步課表，重用 period、學期及 classExceptions 計算 |
 | get_calendar | 最多 31 日同步個人事件，標來源 |
-| list_courses | API 可讀且 active/student 的 workspace，最多 20 門 |
+| list_courses | API 可讀且 active/student 的 workspace，完整可見課程清單 |
+| get_due_work | 可省略 from/to，預設今天至第七天；並行查全部可見課程，先保留每課兩次 API 額度，每課最多 3 秒；待繳依截止排序，已交／過期分列；不足標 partial 並列 unqueried，不把未查課程當成沒有作業 |
+| get_day_overview | date 指定任一天，合併該日實際同步課表、個人事件、當日待繳與空檔；缺課表或事件時不推測空檔 |
 | get_course_work | workspaceId、可選 kind；作業／測驗截止與自己的提交狀態，不外送提交全文／評語 |
-| get_materials | workspaceId、cursor；教材標題、日期與站內課程入口 |
+| get_materials | workspaceId、cursor；教材標題、日期與站內課程入口；超過五筆明示 truncated，停用 cursor 並提供 completePageHref，避免漏頁；cursor 與 shared parser 同為英數底線連字號、最多500字元 |
 | list_food_orders | 已驗證 scope 的 tenant，最多 5 筆，可選 state/limit/cursor |
 | get_food_order | 必須先列出自己可見訂單；只投影店名、狀態、品項與取餐時間／號碼，不外送付款／取餐憑證 |
+| get_food_locations | 已驗 realm 的點餐地點；沿用既有 food client |
+| get_food_menu | 必須先列出該 realm 的 location；菜單含可選規格與價格 |
+| propose_food_order | 不接受價格；伺服器重讀菜單驗品項／選項／數量與跨店，產生簽章卡，確認前零下單；關閉或需付款改導頁 |
 | get_dining | 公開餐廳；指定 locationId 須先取得餐廳清單，缺菜單／價格明示 |
 | list_clubs | 固定 club、最多 5 筆，joined/all |
 | get_club_feed | 必須先取得社團；貼文是資料，不能覆寫系統規則 |
@@ -60,22 +79,28 @@
 
 ## 記憶、預算與錯誤
 
-每題重建本題情境，不跨帳號快取。情境以 UTF-8 bytes 保守上界限制至 400，必要時標 truncated/partial，完整資料可再用工具讀。
+依問題預讀課表／作業情境，一般問候不讀 ledger/courses/realms。點餐／社團只先讀 scope realm，詳細來源用工具按需取得，不跨帳號快取。system 只有固定規則；情境是 user role 的明確不可信 `<context>` 資料區，貼文保留 tool role。情境以 UTF-8 bytes 保守上界限制至 400，必要時標 truncated/partial，完整資料可再用工具讀。
 情境只涵蓋同步資料，裝置未同步課表不視為雲端已知，也不作權限依據。
 前端送最近 6 輪 user/assistant；伺服器拒絕 system/tool/額外欄位，歷史截至 400 bytes。
 外送同意在對話層取得；換帳、切校、pending logout 清除對話並 abort，忽略晚到結果。
 
 模型固定 `openai/gpt-oss-120b`；固定 Groq HTTPS endpoint、redirect:error、reasoning_effort:low、include_reasoning:false。
 按問題選最多 8 個工具，模型自行選擇工具、順序及次數。多 tool_calls 依序處理；每題最多 8 個工具結果、12 次既有 API 呼叫。
-最多 4 次模型呼叫，最後一次 tools 關閉；輸出最多 384 tokens，整題預算 7000 tokens、deadline 55 秒，單次模型 12 秒／工具 4 秒。
+最多 4 次模型呼叫，最後一次 tools 關閉；中間工具輪最多 384 tokens，最後 tools 關閉的回答輪最多 900 tokens（含 reasoning），整題預算 7000 tokens、deadline 55 秒，單次模型 12 秒／工具 4 秒。bounded 各有專屬 AbortController，子 signal 經 AsyncLocalStorage 傳至 API／交通 fetch，逾時真正取消且不誤取消下一個操作。
 沒有本地相容 tokenizer，先用 JSON UTF-8 bytes 加 framing 預留作保守 token 上界（含 schemas），再以 provider usage 結算；不宣稱精準 tokenizer。
-工具回覆最多 600 bytes，同題同參數讀取快取，第三次同呼叫停止工具；預算不足使用已有結果或明示未完成，不做第 5 次修復。
+一般工具回覆最多 600 bytes，待繳／日總覽最多約 1800 bytes（超出標 truncated），同題同參數讀取快取，第三次同呼叫停止工具；預算不足使用已有結果或明示未完成，不做第 5 次修復。
 單進程每帳號 3 題/分鐘、10 題/小時，每 session 同時 1 題；provider 24 calls/min、800/day、7000 tokens/min、160K/day 的保守預留。
 
 HMAC-SHA256 使用獨立 domain，綁帳號／session／conversation／school／tool／canonical args hash／revision／mutationId／iat/exp（5 分鐘），timing-safe 比對。
-confirm 必須重新驗 session；只新增 events，驗證合併後完整 records，保留其他紀錄，以 API CAS 寫入。
+confirm/cancel 必須重新驗 session；事件只新增 events，驗證合併後完整 records，保留其他紀錄，以 API CAS 寫入。
 不確定回覆後可重送原 token；ledger 中相同 mutationId/精確內容回 replay，不重複新增，不更換 mutationId。
 這是個人事件，不是推播提醒／通知排程。
+
+token 另綁 conversation 的隨機 proposalSeq；同一輪多卡共用批次，新卡批次取代舊批次，UI 停用舊卡，伺服器拒絕舊 seq。
+取消 POST `/api/nuni/assistant/cancel`，先驗簽／scope，再撤銷 mutationId；取消事件卡連同後續依序 revision 的卡一起撤銷。
+狀態僅在 handler 所在 Node 進程的模組記憶體，五分鐘到期清理，未知 seq 採拒絕；重啟或路由到別的副本會要求重建卡。
+多副本**無全域撤銷保證**：A 保留舊 seq、B 產生新 seq 時，A 仍可能接受舊 token。上線前必須保證同對話的 ask/confirm/cancel 黏著同一單進程，或另設共享撤銷儲存；本輪依限制沒有 DB／migration。不能宣稱只靠此記憶體方案解決跨副本撤銷。
+事件去重仍由既有 API CAS/mutationId 負責，不因重啟失去持久去重。
 
 Groq 401、403（egress/model/unknown）、429、timeout、network、5xx、invalid response 分類。
 已知 403 body pattern `Access denied. Please check your network settings.` → PROVIDER_EGRESS_DENIED；403 短路 60 秒。
@@ -86,17 +111,18 @@ Groq 401、403（egress/model/unknown）、429、timeout、network、5xx、inval
 
 只使用 `fixtures.ts` adapter；fake 完全離線。groq 也只用合成業務資料，網路僅允許固定 Groq chat completions URL，拒絕 redirect／任意 base URL，不讀 dotenv。
 固定台北 2026-11-04，含課表、未交／已交／過期作業、事件、未讀通知、訂單、社團惡意貼文及公開餐廳／公車 fixture。
-第 8 題接第 3 題歷史，模擬確認兩次，驗證只新增一筆。JSONL 的 actionCards 不輸出 token；fake usage 為合成計數，不代表真模型品質或 token 成本。
+含兩個點餐地點的菜單（價格、不辣、標準／加大）及最近兩筆自己的訂單。`--ordering=on|off` 預設 off，同時模擬線上與助理子旗標；`--cases=all|food`，food 只跑第2、5題並模擬確認與重播，JSONL 另含 ordering/orderCalls。第 8 題接第 3 題歷史，模擬確認兩次，驗證只新增一筆。JSONL 的 actionCards 不輸出 token；fake usage 為合成計數，不代表真模型品質或 token 成本。
 
 在 repo 根目錄（使用既有 esbuild，不安裝套件）：
 
 ```sh
-node scripts/nuni-assistant/v2-preview.mjs --model=fake --cases=all --output=/tmp/nuni-v2-preview.jsonl
+node scripts/nuni-assistant/v2-preview.mjs --model=fake --ordering=off --cases=all --output=/tmp/nuni-v2-preview.jsonl
+node scripts/nuni-assistant/v2-preview.mjs --model=fake --ordering=on --cases=food --output=/tmp/nuni-v2-food-on.jsonl
 node scripts/nuni-assistant/v2-preview.mjs --model=groq --cases=all --output=/tmp/nuni-v2-groq.jsonl
 ```
 
-Groq 模式由執行環境讀金鑰，不印出。題間至少 61 秒、call 間至少 2.1 秒並預留 tokens；429 依 Retry-After 最多重試一次，也計入 4 call 上限，若等待會超過 55 秒則停止，不另起無限重試。
-本次僅執行 fake，沒有連 Groq 或任何正式服務。
+Groq 模式由執行環境讀金鑰，不印出。取消固定題間61秒，依每次輸入與輸出上限預留 token、按 usage 結算；call 間至少2.1秒（低於30 RPM），8000 TPM不足才等待，單次等待拆成最多10秒。節流在模型12秒 timeout 之外，preview 每題含等待最多120秒，正式仍55秒；429 依 Retry-After 最多重試一次，也計入 4 call 上限，若等待會超過 55 秒則停止，不另起無限重試。
+本次僅執行 fake，沒有連 Groq 或任何正式服務；未實測10題 Groq 能否在8分鐘內完成，真模型 token量、429及外部延遲仍可能超時，不宣稱已驗收此時間目標。
 
 打包成單一 .mjs，複製到另一台機器後只需 Node 22（fake 不需 node_modules、網路或設定）：
 
@@ -107,3 +133,5 @@ node /tmp/nuni-v2-preview-bundle.mjs --model=fake --cases=all
 
 測試不依賴 scripts 的隔離 Fastify 套件；harness.mjs 沒有被 Web tsc 引用。
 CI 的 assistant integration job 安裝 workspace 及既有 isolated dependencies 後執行 node tests；Web job 另跑 Vitest/typecheck/lint/build。此次依限制未執行完整 Next build。
+
+第三輪：清單工具可省略 scope id；單 realm 自動選取，多 realm 列可用 scope 或提示重查。scope/not-found/input 錯誤附安全的截短 id 或下一步，不放寬 ACL。最後回答若仍截斷保留已有文字並明示未完成；工具輪截斷至多利用原有四輪內的一輪改為 tools 關閉完成回答。規劃優先用日總覽，提議成功即進最後回答。

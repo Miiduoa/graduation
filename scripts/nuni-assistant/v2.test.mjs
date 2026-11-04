@@ -37,6 +37,7 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
     assert.equal(output.trim().split('\n').length, 10);
     for (const result of results) {
       assert.equal(result.error, undefined);
+      assert.equal(result.stopReason, '');
       assert.ok(
         result.toolSteps.every((s) => s.status !== 'error'),
         JSON.stringify(result.toolSteps),
@@ -48,17 +49,26 @@ test('offline preview exercises all ten cases and confirms exactly once', async 
     }
     assert.deepEqual(
       results[4].tools.map((t) => t.name),
-      ['list_food_orders', 'get_food_order'],
+      ['list_food_orders', 'get_food_order', 'get_food_locations', 'propose_food_order'],
     );
     assert.deepEqual(
       results[5].tools.map((t) => t.name),
       ['list_clubs', 'get_club_feed'],
     );
+    assert.ok(results[0].tools.some((t) => t.name === 'get_day_overview'));
+    assert.ok(results[2].tools.some((t) => t.name === 'get_due_work'));
+    assert.ok(results[9].tools.some((t) => t.name === 'get_day_overview'));
     assert.equal(results[0].actionCards.length, 2);
     assert.equal(results[7].fixtureWrites, 1);
     assert.equal(results[7].eventCount, 1);
     assert.equal(results[7].confirmationResults[1].replay, true);
     assert.equal(results.filter((r) => r.fixtureWrites).length, 1);
+    const food = await preview(['--model=fake', '--ordering=on', '--cases=food']);
+    assert.equal(food.length, 2);
+    for (const r of food) {
+      assert.equal(r.orderCalls, 1);
+      assert.equal(r.confirmationResults[1].replay, true);
+    }
     await assert.rejects(preview(['--model=unknown']));
     await assert.rejects(preview(['--base-url=https://example.invalid']));
   } finally {

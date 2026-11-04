@@ -1,3 +1,6 @@
+import { createNuniFoodClient } from '@campus/shared/src/nuniFood';
+import { isWebOnlineOrderingEnabled } from '../../onlineOrdering';
+import { operationSignal } from './operation';
 import { createNuniClasses, parseNuniPrincipal } from '@campus/shared/src/nuni';
 import {
   parsePersonalImportSnapshot,
@@ -22,9 +25,14 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
     isPublic = false,
   ) => {
     signal.throwIfAborted();
+    operationSignal()?.throwIfAborted();
     if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
     if (!/^[A-Za-z0-9/_-]+$/.test(path)) throw new V2Error(422, 'INVALID_INPUT');
-    const local = AbortSignal.any([signal, AbortSignal.timeout(4000)]);
+    const local = AbortSignal.any([
+      signal,
+      ...(operationSignal() ? [operationSignal()!] : []),
+      AbortSignal.timeout(4000),
+    ]);
     return bounded(
       async () => {
         const response = await fetch(
@@ -65,7 +73,14 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
       4000,
     );
   };
-  const classes = createNuniClasses((path, input, query) => request(path, input, query));
+  let verifiedPrincipal: ReturnType<typeof parseNuniPrincipal> | undefined;
+  const classes = createNuniClasses(
+    (path, input, query) => request(path, input, query),
+    async () => {
+      if (!verifiedPrincipal) throw new V2Error(401, 'UNAUTHENTICATED');
+      return verifiedPrincipal.platformAccountId;
+    },
+  );
   const transit = createTransitService({
     credentials: () => ({
       clientId: process.env.TDX_CLIENT_ID,
@@ -75,7 +90,11 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
       if (++apiCalls > 12) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
       return fetch(url, {
         ...init,
-        signal: AbortSignal.any([signal, AbortSignal.timeout(4000)]),
+        signal: AbortSignal.any([
+          signal,
+          ...(operationSignal() ? [operationSignal()!] : []),
+          AbortSignal.timeout(4000),
+        ]),
         redirect: 'error',
       });
     },
@@ -98,8 +117,22 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
     }
     return { tenantId };
   }
+  const food = createNuniFoodClient((path, input, query) => request(path, input, query));
   const adapter: Adapter = {
+    food: {
+      onlineEnabled: () => isWebOnlineOrderingEnabled(),
+      enabled: () =>
+        isWebOnlineOrderingEnabled() && process.env.CAMPUS_ASSISTANT_V2_ORDERING_ENABLED === 'true',
+      // Existing createOrder always creates awaiting_payment; never invoke it here.
+      paymentRequired: true,
+      locations: (tenant) => food.listLocations(tenant, { limit: 5 }),
+      menu: (tenant, location) => food.getMenu(tenant, location),
+      submit: async () => {
+        throw new V2Error(403, 'PAYMENT_REQUIRED');
+      },
+    },
     simulation: false,
+    remainingApiCalls: () => Math.max(0, 12 - apiCalls),
     ledger: async () =>
       parsePersonalImportSnapshot(await request('personal-imports/read', { schoolId }), schoolId),
     courses: async () =>
@@ -107,8 +140,11 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
         .filter((c) => c.state === 'active' && c.memberRole === 'student')
         .map((c) => ({ id: c.id, title: c.title })),
     work: async (courseId) => {
-      const assignments = await classes.assignments(courseId),
-        quizzes = await classes.quizzes(courseId);
+      if (12 - apiCalls < 2) throw new V2Error(429, 'API_BUDGET_EXCEEDED');
+      const [assignments, quizzes] = await Promise.all([
+        classes.assignments(courseId),
+        classes.quizzes(courseId),
+      ]);
       return [
         ...assignments.map((a) => ({
           id: a.id,
@@ -139,7 +175,11 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           createdAt: m.createdAt,
           href: '/classroom/course/' + encodeURIComponent(courseId),
         })),
-        nextCursor: page.nextCursor,
+        nextCursor: page.materials.length > 5 ? undefined : page.nextCursor,
+        truncated: page.materials.length > 5,
+        completePageHref: '/classroom/course/' + encodeURIComponent(courseId),
+        note:
+          page.materials.length > 5 ? '本頁僅顯示前五筆，請開啟完整課程頁查看其餘教材' : undefined,
       };
     },
     realms: async () =>
@@ -169,6 +209,7 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
         id: value(r.id),
         state: value(r.state),
         location: value(r.locationName),
+        locationId: value(r.locationId),
         requestedPickupAt: value(r.requestedPickupAt),
         pickupNumber: value(pickup.displayCode),
         readyAt: value(pickup.readyAt),
@@ -176,7 +217,14 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
           ? r.lines.slice(0, 5).map((line) => {
               const item = object(line);
               return {
+                menuItemId: value(item.menuItemId),
                 name: value(item.nameSnapshot),
+                selectedOptions: Array.isArray(item.selectedOptions)
+                  ? item.selectedOptions.slice(0, 20).map((o) => ({
+                      name: value(object(o).nameSnapshot),
+                      optionId: value(object(o).optionId),
+                    }))
+                  : [],
                 quantity: Number.isSafeInteger(item.quantity) ? item.quantity : null,
               };
             })
@@ -258,7 +306,8 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
   return {
     adapter,
     async principal() {
-      return parseNuniPrincipal(await request('sessions/current'));
+      verifiedPrincipal = parseNuniPrincipal(await request('sessions/current'));
+      return verifiedPrincipal;
     },
     apiCalls: () => apiCalls,
   };
