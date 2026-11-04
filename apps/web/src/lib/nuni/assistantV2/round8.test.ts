@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { confirm } from './actions';
 import { foodHref } from './food';
-import { createProviderModel, fallbackUrl, groqModel, providerError, providerUserMessage } from './groq';
+import { GROQ_URL, createProviderModel, fallbackUrl, groqModel, providerError, providerUserMessage } from './groq';
 import { planningAnswer, run } from './runner';
 import { createTools, selectTools } from './tools';
 import { fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret } from './fixtures';
@@ -130,7 +130,7 @@ it('uses the configured fallback after Groq fails and reports Chinese when both 
   const hits: string[] = [];
   const success = createProviderModel(async (url) => {
     hits.push(String(url));
-    if (String(url).includes('groq.com')) return new Response('Access denied. Please check your network settings.', { status: 403 });
+    if (String(url) === GROQ_URL) return new Response('Access denied. Please check your network settings.', { status: 403 });
     expect(String(url)).toBe(fallbackUrl('acct_fallback_1'));
     return Response.json(ok);
   });
@@ -142,7 +142,7 @@ it('uses the configured fallback after Groq fails and reports Chinese when both 
   expect(answered.message.content).toBe('備援回答');
   expect(hits).toHaveLength(2);
   const failed = createProviderModel(async (url) => {
-    if (String(url).includes('groq.com')) return new Response('blocked', { status: 403 });
+    if (String(url) === GROQ_URL) return new Response('blocked', { status: 403 });
     return new Response('unavailable', { status: 503 });
   });
   await expect(
