@@ -20,7 +20,7 @@ export function assignmentFollowUp(
   const text = question.normalize('NFKC').replace(/\s+/g, '').replace(/[?!。！？，,、]+$/u, '');
   const period = text.replace(/^(?:那麼?|改看|改查)/u, '').replace(/(?:的呢|呢|的)$/u, '');
   const window = parseAssignmentDeadlineWindow(period, now);
-  const clarifyDate = window === 'clarify' && /^[上下本這個周週星期禮拜昨今明後天日末一二兩三四五六七八九十年月號至到以之前年內0-9/-]+$/u.test(period);
+  const clarifyDate = window === 'clarify' && /^[上下本這個和與或及還是、未來接下周週星期禮拜昨今明後天日末一二兩三四五六七八九十年月號至到以之前年內0-9/-]+$/u.test(period);
   const date = window && window !== 'clarify' && window.label === period;
   const choice = text.match(ordinal);
   const wantsReminder = reminder.test(text);

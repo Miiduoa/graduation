@@ -4,21 +4,35 @@ const DAY_MS = 86_400_000;
 const WEEKDAYS = '一二三四五六日';
 const PERIOD = /[上下本這]?(?:週|周|星期|禮拜)[一二三四五六日天末]?|今天|今日|明天|明日|後天|昨天|昨日|(?:接下來|未來)\s*[七7]\s*天/g;
 
+const QUOTED_NAME = /「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"/g;
+const OTHER_PERIOD = /(?:未來|接下來)\s*[一二兩三四五六七八九十\d]+\s*天|\d{1,2}\s*月\s*\d{1,2}\s*[日號]|\d{1,4}[-/]\d{1,2}(?:[-/]\d{1,2})?/;
+const dateTerm = '(?:' + PERIOD.source + '|' + OTHER_PERIOD.source + ')';
+const dateConstraint = new RegExp(
+  '(?:從|自)?(?:[上下](?=[上下])|大(?=後天))?' + dateTerm +
+  '(?:\\s*(?:到|至|和|或|、|跟)\\s*(?:' + dateTerm + '|[一二三四五六日天]))?' +
+  '(?:\\s*(?:[之以]?[前後]|早上|上午|中午|下午|晚上|凌晨|[零一二三四五六七八九十\\d]+\\s*[點時:：]\\d*))?', 'g',
+);
+
+export function outsideAssignmentNames(question: string): string {
+  return question.replace(QUOTED_NAME, ' ');
+}
+
+/** Keep the course/title words when the user corrects an unsupported date range on their next turn. */
+export function withoutDeadlineConstraint(question: string): string {
+  return question.replace(new RegExp(QUOTED_NAME.source + '|' + dateConstraint.source, 'g'),
+    (match) => /^[「『“"]/.test(match) ? match : ' ').trim();
+}
+
 export function stripAssignmentDeadlinePeriods(question: string): string {
   return question.replace(PERIOD, ' ');
 }
 
 export type AssignmentDeadlineWindow = { startDay: number; endDay: number; label: string };
 
-export function resolveAssignmentDeadlineWindow(question: string, timestamp: number): AssignmentDeadlineWindow | null {
-  const window = parseAssignmentDeadlineWindow(question, timestamp);
-  return window === 'clarify' ? null : window;
-}
-
 /** Weeks run Monday through Sunday, including earlier deadlines in the requested week. */
 export function parseAssignmentDeadlineWindow(question: string, timestamp: number): AssignmentDeadlineWindow | 'clarify' | null {
   // A literal title can contain calendar words without imposing a deadline window.
-  const text = question.replace(/「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"/g, ' ');
+  const text = outsideAssignmentNames(question);
   const periods = text.match(PERIOD);
   if (/(?:下下|上上)(?:週|周|星期|禮拜)|大後天|今明|明後|昨今|(?:未來|接下來)\s*(?![七7]\s*天)[一二兩三四五六八九十\d]+\s*天|\d{1,2}\s*月\s*\d{1,2}\s*[日號]|\d{1,4}[-/]\d{1,2}/.test(text)) return 'clarify';
   if (!periods) return null;

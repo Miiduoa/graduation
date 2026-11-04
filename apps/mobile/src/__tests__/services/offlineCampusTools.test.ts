@@ -232,6 +232,13 @@ describe('scoped deadline reads', () => {
     expect(answer?.content).toContain('3 筆尚未同步');
   });
 
+  test('overdue, undated and still-open queries return only rows with the matching deadline status', () => {
+    expect(read('有哪些逾期作業？')?.assignmentRead?.items).toEqual([previous]);
+    expect(read('有哪些尚未逾期作業？')?.assignmentRead?.items).toEqual([sunday, monday]);
+    expect(read('沒有截止日期的作業有哪些？')?.assignmentRead?.items.map((row) => row.title))
+      .toEqual(['未確認', '無時區']);
+  });
+
   test('今天 includes earlier deadlines today; the next seven days start now and do not trigger the planner', () => {
     expect(read('今天有哪些作業？')?.assignmentRead?.items).toEqual([previous, sunday]);
     expect(read('未來七天有哪些作業截止？')?.assignmentRead?.items).toEqual([sunday, monday]);
@@ -252,8 +259,8 @@ describe('scoped deadline reads', () => {
 
   test.each(['今天到明天', '下下週', '本週五以前', '明天下午'])('%s does not silently narrow the requested period', (date) => {
     const result = read(date + '有哪些作業截止？');
-    expect(result?.content).toContain('你想查哪段時間');
-    expect(result?.assignmentRead).toBeUndefined();
+    expect(result?.content).toContain('想查哪一天');
+    expect(result?.assignmentRead?.items).toEqual([]);
   });
 
   test('a specific weekday and weekend stay within the requested week', () => {
@@ -282,4 +289,33 @@ test('explicit homework writes and reminders do not produce an assignment list',
     expect(reply?.tool).toBe('open-service');
     expect(reply?.assignmentRead).toBeUndefined();
   }
+});
+
+test('a weekday in a known assignment title is not its deadline filter', () => {
+  const named = { title: '星期一報告', groupName: '資管', dueAt: '2026-10-30T09:00:00Z' }; // Friday
+  const source = { ...authorizedSense, assignments: {
+    ...authorizedSense.assignments, count: 3, items: [named, ...authorizedSense.assignments.items],
+  } };
+  const result = runOfflineCampusTool('星期一報告什麼時候交？', snapshot, source, 'alice');
+  expect(result?.assignmentRead?.items).toEqual([named]);
+});
+
+test('a date clarification preserves the course when the next message replaces only the date', () => {
+  const source = { ...authorizedSense, assignments: { ...authorizedSense.assignments, count: 2, items: [
+    { title: '查詢練習', groupName: '資料庫', dueAt: '2026-10-27T10:00:00Z' },
+    { title: '閱讀心得', groupName: '英文', dueAt: '2026-10-27T10:00:00Z' },
+  ] } };
+  const first = runOfflineCampusTool('資料庫作業從今天到明天有哪些？', snapshot, source, 'alice');
+  expect(first?.assignmentRead?.items).toEqual([]);
+  const answer = runOfflineCampusTool('明天有哪些作業？', snapshot, source, 'alice', first?.assignmentRead?.filterQuestion);
+  expect(answer?.assignmentRead?.items).toEqual([source.assignments.items[0]]);
+});
+
+test.each(['校園活動計畫', '翻譯練習', '公告設計'])('quoted title %s stays a deadline query', (title) => {
+  const named = { title, groupName: '資管', dueAt: '2026-10-30T09:00:00Z' };
+  const source = { ...authorizedSense, assignments: {
+    ...authorizedSense.assignments, count: 3, items: [named, ...authorizedSense.assignments.items],
+  } };
+  const reply = runOfflineCampusTool('「' + title + '」這份作業什麼時候交？', snapshot, source, 'alice');
+  expect(reply?.assignmentRead?.items).toEqual([named]);
 });

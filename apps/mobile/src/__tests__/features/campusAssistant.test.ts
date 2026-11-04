@@ -450,6 +450,8 @@ test('narrows local deadlines across turns, selects the displayed row and prepar
     const original = await ask('資料庫的期中報告什麼時候交？');
     expect(original.assignmentRead?.items).toEqual([items[1], items[0]]);
     expect((await ask('那明天呢？')).assignmentRead?.items).toEqual([]);
+    const ambiguous = await ask('資料庫的期中報告從今天到明天截止嗎？');
+    expect(ambiguous.content).toContain('想查哪一天');
     const nextWeek = await ask('那下週呢？');
     expect(nextWeek.assignmentRead?.items).toEqual([items[1], items[0]]);
     expect((await ask('幫我設提醒')).content).toContain('哪一份');
