@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   NUNI_FOOD_LIMITS,
+  canStartFoodOrder,
   type NuniFoodMenuItem,
   type NuniFoodQuoteProjection,
   type NuniFoodOrderCommandResult,
@@ -10,6 +11,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import type { FoodClient } from './FoodWorkspace';
+import { FoodQuickAdd } from './FoodQuickAdd';
 import {
   FoodMutationStatus,
   foodKey,
@@ -52,6 +54,18 @@ function lineEstimate(item: NuniFoodMenuItem, line: CartLine) {
   return (item.basePrice.amountMinor + extras) * line.quantity;
 }
 
+function quoteProblem(quote: NuniFoodQuoteProjection, menuVersion: string | undefined, at: number) {
+  if (quote.state === 'consumed') return '這份報價已使用，請先到「我的訂單與取餐」查看訂單。';
+  if (quote.state === 'expired' || Date.parse(quote.expiresAt) <= at)
+    return '這份報價已過期，請重新計算金額與確認庫存。';
+  if (
+    (menuVersion && quote.menuVersion !== menuVersion) ||
+    !quote.allowedActions.includes('create-order')
+  )
+    return '店家的菜單或供應狀態已變更，請重新計算金額與確認庫存。';
+  return '';
+}
+
 export function FoodMenu({
   client,
   cache,
@@ -89,6 +103,8 @@ export function FoodMenu({
     [client, tenantId, locationId],
   );
   const menu = useFoodRead(load);
+  const acceptingOrders = !!menu.data && canStartFoodOrder(menu.data.location);
+  const quoteNotice = quote ? quoteProblem(quote, menu.data?.menuVersion, now) : '';
   const task = useFoodMutation({
     cache,
     scope,
@@ -115,7 +131,10 @@ export function FoodMenu({
     },
   });
   const locked = !menu.data || task.busy || !!task.pending || task.storageBlocked;
-  const items = menu.data?.sections.flatMap((section) => section.items) ?? [];
+  const items = useMemo(
+    () => menu.data?.sections.flatMap((section) => section.items) ?? [],
+    [menu.data],
+  );
   const selected = items.filter((item) => (cart[item.id]?.quantity ?? 0) > 0);
   const selectedCount = selected.reduce((total, item) => total + cart[item.id].quantity, 0);
   const estimatedTotal = selected.reduce(
@@ -164,7 +183,7 @@ export function FoodMenu({
   }
 
   function requestQuote(requestedAt: number) {
-    if (locked || menu.data?.location.merchantMode !== 'full') return;
+    if (locked || !acceptingOrders) return;
     if (
       Object.values(cart).some(
         (line) =>
@@ -251,6 +270,7 @@ export function FoodMenu({
       </div>
       {menu.loading && <p role="status">正在讀取菜單…</p>}
       {menu.error && <p role="alert">{menu.error}</p>}
+      {menu.data && !acceptingOrders && <p role="status">門市目前暫停接單。</p>}
       <FoodMutationStatus task={task} />
       {validation && (
         <p role="alert" className={styles.validation}>
@@ -266,6 +286,27 @@ export function FoodMenu({
       {menu.data && (
         <div className={styles.menuLayout}>
           <div className={styles.menuBody}>
+            {acceptingOrders && (
+              <FoodQuickAdd
+                items={items}
+                cart={cart}
+                disabled={locked}
+                onApply={(lines) => {
+                  setCart((current) => ({
+                    ...current,
+                    ...Object.fromEntries(
+                      lines.map(({ itemId, quantity }) => [
+                        itemId,
+                        { ...(current[itemId] ?? emptyLine), quantity },
+                      ]),
+                    ),
+                  }));
+                  setQuote(null);
+                  setConfirmed(false);
+                  setValidation('');
+                }}
+              />
+            )}
             {menu.data.sections.length > 1 && (
               <nav className={styles.sectionNav} aria-label="菜單分類">
                 {menu.data.sections.map((section) => (
@@ -292,7 +333,7 @@ export function FoodMenu({
                     locked ||
                     !item.available ||
                     !item.allowedActions.includes('add-to-quote') ||
-                    menu.data!.location.merchantMode !== 'full';
+                    !acceptingOrders;
                   return (
                     <article
                       key={item.id}
@@ -524,7 +565,7 @@ export function FoodMenu({
             <Button
               variant="primary"
               fullWidth
-              disabled={locked || !selected.length}
+              disabled={locked || !acceptingOrders || !selected.length}
               onClick={() => requestQuote(Date.now())}
             >
               計算金額與確認庫存
@@ -541,6 +582,7 @@ export function FoodMenu({
         >
           <p className={styles.eyebrow}>最後確認</p>
           <h3>確認這份餐點</h3>
+          {menu.data && <p>取餐門市：{menu.data.location.name}</p>}
           {quote.lines.map((line, index) => (
             <p key={index}>
               {[
@@ -563,31 +605,24 @@ export function FoodMenu({
           <p>
             取餐：{foodTime(quote.requestedPickupAt)} · 請在 {foodTime(quote.expiresAt)} 前確認
           </p>
+          {quoteNotice && <p role="status">{quoteNotice}</p>}
           <label className={styles.check}>
             <input
               type="checkbox"
               checked={confirmed}
-              disabled={locked}
+              disabled={locked || !acceptingOrders || !!quoteNotice}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
             我已確認餐點、取餐時間與應付金額
           </label>
           <Button
             variant="primary"
-            disabled={
-              locked ||
-              !confirmed ||
-              !quote.allowedActions.includes('create-order') ||
-              Date.parse(quote.expiresAt) <= now
-            }
+            disabled={locked || !acceptingOrders || !confirmed || !!quoteNotice}
             onClick={() => {
-              if (
-                locked ||
-                !confirmed ||
-                !quote.allowedActions.includes('create-order') ||
-                Date.parse(quote.expiresAt) <= Date.now()
-              ) {
-                setValidation('金額或保留時間已過期，請重新計算。');
+              if (locked || !acceptingOrders || !confirmed) return;
+              const problem = quoteProblem(quote, menu.data?.menuVersion, Date.now());
+              if (problem) {
+                setValidation(problem);
                 return;
               }
               void task.send({

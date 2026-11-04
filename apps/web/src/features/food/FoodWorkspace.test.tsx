@@ -277,6 +277,115 @@ async function quote() {
   await waitFor(() => expect(screen.queryByText('正在讀取菜單…')).toBeNull());
 }
 
+it('uses the current menu to preview a phrase locally, then requires options and confirmation before ordering', async () => {
+  render(<FoodWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '查看菜單：米飯店' }));
+  const input = await screen.findByLabelText('輸入餐點與份數');
+  const requestsBeforeTyping = mocks.request.mock.calls.length;
+  fireEvent.change(input, { target: { value: '幫我點一份蔬菜便當' } });
+  expect(screen.getByText('加入後：蔬菜便當共 1 份')).toBeTruthy();
+  expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('0');
+  fireEvent.click(button('加入已選餐點'));
+  expect(button('加入已選餐點').disabled).toBe(true);
+  fireEvent.click(button('計算金額與確認庫存'));
+  expect(screen.getByRole('alert').textContent).toContain('必選項目');
+  expect(mocks.request.mock.calls).toHaveLength(requestsBeforeTyping);
+  fireEvent.click(screen.getByLabelText('加飯（+NT$20）'));
+  fireEvent.click(button('計算金額與確認庫存'));
+  await screen.findByText('應付 NT$120');
+  await waitFor(() => expect(screen.queryByText('正在讀取菜單…')).toBeNull());
+  expect(button('確認送出訂單').disabled).toBe(true);
+  expect(
+    mocks.request.mock.calls.filter(([path, , input]) => path.endsWith('/orders') && input),
+  ).toHaveLength(0);
+  fireEvent.click(screen.getByLabelText('我已確認餐點、取餐時間與應付金額'));
+  fireEvent.click(button('確認送出訂單'));
+  const receipt = await screen.findByRole('region', { name: '訂單紙本明細' });
+  expect(receipt.textContent).toContain('order-1');
+  expect(receipt.textContent).toContain('NT$120');
+  expect(
+    mocks.request.mock.calls.filter(([path, , input]) => path.endsWith('/orders') && input),
+  ).toHaveLength(1);
+});
+
+it('adds several meals atomically, preserves existing options and notes, and discards the previous quote', async () => {
+  const menu = menuFixture();
+  const rice = menu.sections[0].items[0];
+  menu.sections[0].items.push({ ...rice, id: 'tea', name: '紅茶', optionGroups: [] });
+  mocks.request.mockImplementation((path, context, input) =>
+    path.endsWith('/menu') ? Promise.resolve(menu) : respond(path, context, input),
+  );
+  render(<FoodWorkspace />);
+  await quote();
+  fireEvent.click(screen.getByLabelText('我已確認餐點、取餐時間與應付金額'));
+  const input = screen.getByLabelText('輸入餐點與份數');
+  fireEvent.change(input, { target: { value: '蔬菜便當兩份、紅茶一杯' } });
+  expect(screen.getByText('加入後：蔬菜便當共 3 份、紅茶共 1 份')).toBeTruthy();
+  fireEvent.click(button('加入已選餐點'));
+  expect(screen.queryByRole('region', { name: '送出前確認' })).toBeNull();
+  expect((screen.getByLabelText('加飯（+NT$20）') as HTMLInputElement).checked).toBe(true);
+  fireEvent.change(screen.getByLabelText('蔬菜便當 餐點備註'), { target: { value: '分開裝' } });
+  fireEvent.change(input, { target: { value: '紅茶一杯、滷蛋' } });
+  fireEvent.click(button('加入已選餐點'));
+  expect(screen.getByRole('alert')).toBeTruthy();
+  fireEvent.change(input, { target: { value: '蔬菜便當二十份、紅茶一杯' } });
+  fireEvent.click(button('加入已選餐點'));
+  expect(screen.getByRole('alert').textContent).toContain('上限');
+  expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('3');
+  expect((screen.getByLabelText('紅茶 數量') as HTMLInputElement).value).toBe('1');
+  fireEvent.change(input, { target: { value: '蔬菜便當' } });
+  fireEvent.click(button('加入已選餐點'));
+  expect((screen.getByLabelText('蔬菜便當 數量') as HTMLInputElement).value).toBe('4');
+  expect((screen.getByLabelText('蔬菜便當 餐點備註') as HTMLInputElement).value).toBe('分開裝');
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith('/quotes'))).toHaveLength(1);
+});
+
+it.each(['menu-changed', 'expired', 'consumed'] as const)(
+  'blocks checkout when a quote is %s even if it advertises create-order',
+  async (condition) => {
+    mocks.request.mockImplementation((path, context, input) => {
+      if (path.endsWith('/quotes')) {
+        const result = quoteFixture(input.requestedPickupAt);
+        if (condition === 'menu-changed') result.menuVersion = 'previous-menu';
+        else result.state = condition;
+        return Promise.resolve(result);
+      }
+      return respond(path, context, input);
+    });
+    render(<FoodWorkspace />);
+    await quote();
+    const confirmation = screen.getByRole('region', { name: '送出前確認' });
+    expect(within(confirmation).getByText('取餐門市：米飯店')).toBeTruthy();
+    expect(within(confirmation).getByRole('status').textContent).toContain(
+      condition === 'consumed' ? '查看訂單' : '重新計算',
+    );
+    expect(button('確認送出訂單').disabled).toBe(true);
+    expect((within(confirmation).getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+    expect(
+      mocks.request.mock.calls.some(([path, , input]) => path.endsWith('/orders') && input),
+    ).toBe(false);
+  },
+);
+
+it('locks quick add and checkout if the location pauses while the quote is returned', async () => {
+  const menu = menuFixture();
+  mocks.request.mockImplementation((path, context, input) => {
+    if (path.endsWith('/menu')) return Promise.resolve(menu);
+    if (path.endsWith('/quotes')) menu.location.state = 'paused';
+    return respond(path, context, input);
+  });
+  render(<FoodWorkspace />);
+  await quote();
+  expect(screen.getByText('門市目前暫停接單。')).toBeTruthy();
+  expect(screen.queryByLabelText('輸入餐點與份數')).toBeNull();
+  expect(button('增加蔬菜便當').disabled).toBe(true);
+  expect(button('計算金額與確認庫存').disabled).toBe(true);
+  expect(button('確認送出訂單').disabled).toBe(true);
+  expect(
+    mocks.request.mock.calls.some(([path, , input]) => path.endsWith('/orders') && input),
+  ).toBe(false);
+});
+
 it('omits confirm-to-submit copy on /food when online ordering is off', async () => {
   vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
   render(<FoodWorkspace />);

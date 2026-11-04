@@ -13,6 +13,14 @@ export const NUNI_FOOD_LIMITS = {
   maxOptions: 20,
 } as const;
 
+export function canStartFoodOrder(location: T.NuniFoodLocationSummary): boolean {
+  return (
+    location.state === 'open' &&
+    location.merchantMode === 'full' &&
+    location.allowedActions.includes('view-menu')
+  );
+}
+
 type Fail = () => never;
 type Parser<T> = (value: unknown, fail: Fail) => T;
 const invalidInput: Fail = () => {

@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
@@ -190,9 +190,10 @@ function AssistantRoute() {
     />
   );
 }
-export function Assistant() {
+export function Assistant({ children }: { children?: ReactNode }) {
   return (
     <SiteShell title="助理" subtitle="查詢公開校園資訊與站內服務入口。">
+      {children}
       <Suspense fallback={<p>載入中…</p>}>
         <AssistantRoute />
       </Suspense>

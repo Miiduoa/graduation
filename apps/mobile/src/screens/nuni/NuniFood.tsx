@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, ScrollView, Text, View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import QRCode from 'react-native-qrcode-svg';
+import { canStartFoodOrder } from '@campus/shared/src/nuniFood';
 import type {
   NuniFoodCancelInput,
   NuniFoodCustomerOrderDetail,
@@ -36,6 +37,7 @@ import { isMobileOnlineOrderingEnabled } from '../../utils/onlineOrdering';
 
 import { foodCustomerNextStep } from './foodOrderGuidance';
 import { PickupTimePicker } from './PickupTimePicker';
+import { FoodQuickAdd } from './FoodQuickAdd';
 import { formatPickupTime, pickupTimeFromMinutes } from './foodPickupTime';
 
 const page = { padding: 20, paddingBottom: 48, gap: 16 };
@@ -398,8 +400,11 @@ function FoodMenu({
     };
   }, []);
   const locked = mutation.locked || !!quote;
-  const catalog = resource.data?.sections.flatMap((section) => section.items) ?? [];
-  const selected = activeCartEntries(cart);
+  const catalog = useMemo(
+    () => resource.data?.sections.flatMap((section) => section.items) ?? [],
+    [resource.data],
+  );
+  const selected = useMemo(() => activeCartEntries(cart), [cart]);
   const cartCount = selected.reduce((sum, [, line]) => {
     const quantity = Number(line.quantity);
     return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
@@ -859,6 +864,34 @@ function FoodMenu({
               {selected.length ? `查看購物籃（${cartCount} 份）` : '購物籃（尚無餐點）'}
             </FoodButton>
           ) : null}
+          {stage === 'menu' &&
+            !resource.loading &&
+            !resource.error &&
+            canStartFoodOrder(resource.data.location) && (
+              <FoodQuickAdd
+                items={catalog}
+                selected={selected}
+                disabled={locked}
+                onAdd={(lines) => {
+                  setCart((previous) => ({
+                    ...previous,
+                    ...Object.fromEntries(
+                      lines.map(({ itemId, quantity }) => [
+                        itemId,
+                        {
+                          ...emptyLine(),
+                          ...previous[itemId],
+                          quantity: String(quantity),
+                          inBasket: true,
+                        },
+                      ]),
+                    ),
+                  }));
+                  setError('');
+                  setLineErrors({});
+                }}
+              />
+            )}
           {locked && stage === 'menu'
             ? selected.map(([id, line]) => {
                 const item = catalog.find((candidate) => candidate.id === id);
