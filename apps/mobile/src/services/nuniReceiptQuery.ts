@@ -58,7 +58,11 @@ export function queryNuniReceipts(
   const scopeText = scopeQuestion.normalize('NFKC').toLowerCase();
   const hasKnownName = named.some((task) => [task.title, task.groupName]
     .some((name) => name.length >= 2 && scopeText.includes(name.normalize('NFKC').toLowerCase())));
-  const broad = /(?:^|請問|我想知道|幫我查|查看)(?:我(?:的|所有|全部|還有)?|所有|全部|各科|有哪些|哪些|目前|現在|這學期|已經|已|未|還沒|尚未|有幾)/.test(scopeText);
+  const broad = /(?:^|請問|我想知道|幫我查|查看)(?:我(?:的|所有|全部|還有)?|所有|全部|各科|有哪些|哪些|目前|現在|這學期|已經|已|未|還沒|尚未|有幾)/.test(scopeText) ||
+    // A broad deadline list such as "明天有哪些作業？" may be the source of
+    // a follow-up. Its date is already enforced by deadlineScope, not a name.
+    (Boolean(deadlineScope) && !filtered.scope &&
+      /^(?:今天|今日|明天|明日|後天|上週|本週|這週|下週|未來[七7]天)(?:的)?(?:有哪些|哪些|作業|功課|待交)/.test(scopeText));
   if (/這份|那份|這個|那個/.test(normalized) && !hasKnownName) {
     return { kind: 'clarify', message: '請提供課程或作業名稱，再核對這份作業的繳交紀錄。' };
   }
