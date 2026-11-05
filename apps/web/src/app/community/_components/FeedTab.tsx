@@ -13,7 +13,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import Link from 'next/link';
 import styles from '../community.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
-import { selectCampusFeedPosts, type FeedFilter, type FeedOrder } from './feedView';
+import { selectCampusFeedPosts } from './feedView';
+import { FEED_FILTERS, FEED_ORDERS, feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
+import { useFeedChoice } from './useFeedChoice';
 import { listFollowingIds, followUser, unfollowUser } from '@/lib/community/follows';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
@@ -40,7 +42,7 @@ import {
   type StoryAuthorGroup,
 } from '@/lib/community/firestore';
 
-type FilterKey = FeedFilter | 'saved';
+type FilterKey = (typeof FEED_FILTERS)[number];
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
 
@@ -106,8 +108,8 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<FilterKey>('all');
-  const [order, setOrder] = useState<FeedOrder>('recommended');
+  const [filter, setFilter] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'filter'), FEED_FILTERS);
+  const [order, setOrder] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});

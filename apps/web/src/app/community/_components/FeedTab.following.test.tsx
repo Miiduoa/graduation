@@ -338,3 +338,52 @@ it('allows the new account to follow an author while the old account write is pe
   await act(async () => oldFollow.reject(new Error('permission-denied')));
   expect(screen.queryByText('追蹤狀態未更新，請確認網路和對方校籍後重試。')).toBeNull();
 });
+
+it('reopens the chosen filter and order for this account and school with a fresh search', async () => {
+  const feed = (sid: string) => <FeedTab schoolId={sid} schoolSearch={`?schoolId=${sid}`} />;
+  const selected = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed');
+  const first = render(feed('pu'));
+  await screen.findByText('小明的貼文');
+  fireEvent.click(screen.getByRole('button', { name: '追蹤' }));
+  fireEvent.click(screen.getByRole('button', { name: '最新' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '個人搜尋內容' } });
+  first.unmount();
+  const view = render(feed('pu'));
+  await screen.findByText('小明的貼文');
+  expect(selected('追蹤')).toBe('true');
+  expect(selected('最新')).toBe('true');
+  expect(screen.queryByText('小華的貼文')).toBeNull();
+  expect(screen.getByRole('searchbox')).toHaveProperty('value', '');
+  const storage = window.localStorage;
+  const stored = Array.from({ length: storage.length }, (_, index) => storage.getItem(storage.key(index)!));
+  expect(stored.sort()).toEqual(['following', 'latest']);
+
+  view.rerender(feed('ncku'));
+  expect(selected('全部')).toBe('true');
+  expect(selected('推薦')).toBe('true');
+  mocks.auth.user = { uid: 'dana' };
+  view.rerender(feed('pu'));
+  expect(selected('全部')).toBe('true');
+  expect(selected('推薦')).toBe('true');
+  mocks.auth.user = { uid: 'alice' };
+  view.rerender(feed('pu'));
+  expect(selected('追蹤')).toBe('true');
+  expect(selected('最新')).toBe('true');
+});
+
+it('uses the default for corrupt preferences and still switches feed without writable browser storage', async () => {
+  const { feedChoiceKey } = await import('@campus/shared/src/communityFeedPreferences');
+  const filterKey = feedChoiceKey('alice', 'pu', 'filter')!;
+  window.localStorage.setItem(filterKey, 'arbitrary-data');
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('小明的貼文');
+  expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
+  const write = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  try {
+    fireEvent.click(screen.getByRole('button', { name: '追蹤' }));
+    expect(screen.getByRole('button', { name: '追蹤' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByText('小華的貼文')).toBeNull();
+  } finally {
+    write.mockRestore();
+  }
+});

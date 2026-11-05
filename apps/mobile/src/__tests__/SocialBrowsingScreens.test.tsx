@@ -1,4 +1,6 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
 import { ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
@@ -122,7 +124,8 @@ const screens = [
   },
 ];
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   mockOffline = false;
   jest.clearAllMocks();
   mockNavigate.mockReset();
@@ -599,4 +602,74 @@ test.each([
   await act(async () => fireEvent.press(view.getByLabelText(retry)));
   expect(await view.findByText(count)).toBeTruthy();
   expect(view.getByText(post.title)).toBeTruthy();
+});
+
+test('remembers feed controls only for the same account and school and clears the search on return', async () => {
+  const first = render(<HomeFeedScreen />);
+  await first.findByLabelText('圖文分類');
+  await act(async () => {
+    fireEvent.press(first.getByLabelText('圖文分類'));
+    fireEvent.press(first.getByLabelText('最新'));
+    fireEvent.changeText(first.getByLabelText('搜尋本校貼文'), '個人關鍵字');
+  });
+  first.unmount();
+  const view = render(<HomeFeedScreen />);
+  await act(async () => {});
+  expect(view.getByLabelText('圖文分類').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('最新').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('');
+  const values = await AsyncStorage.multiGet(await AsyncStorage.getAllKeys());
+  expect(values.map(([, value]) => value).sort()).toEqual(['latest', 'media']);
+
+  mockSchoolId = 'ncku';
+  view.rerender(<HomeFeedScreen />);
+  await act(async () => {});
+  expect(view.getByLabelText('全部分類').props.accessibilityState.selected).toBe(true);
+  mockUser = { uid: 'dana' };
+  mockSchoolId = 'pu';
+  view.rerender(<HomeFeedScreen />);
+  await act(async () => {});
+  expect(view.getByLabelText('推薦').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('全部分類').props.accessibilityState.selected).toBe(true);
+});
+
+test('a late filter read cannot undo a tap while an untouched sort choice still restores', async () => {
+  const key = feedChoiceKey('alice', 'pu', 'filter')!;
+  let release!: (value: string) => void;
+  const delayed = new Promise<string>((resolve) => { release = resolve; });
+  await jest.mocked(AsyncStorage.getItem).withImplementation(
+    (requested) => requested === key ? delayed : Promise.resolve('latest'),
+    async () => {
+      const view = render(<HomeFeedScreen />);
+      await view.findByLabelText('圖文分類');
+      await act(async () => { fireEvent.press(view.getByLabelText('圖文分類')); });
+      await act(async () => { release('following'); });
+      expect(view.getByLabelText('圖文分類').props.accessibilityState.selected).toBe(true);
+      expect(view.getByLabelText('最新').props.accessibilityState.selected).toBe(true);
+    },
+  );
+});
+
+test('a delayed previous account and unavailable storage do not change the new account’s controls', async () => {
+  const previous = feedChoiceKey('alice', 'pu', 'filter')!;
+  let release!: (value: string) => void;
+  const delayed = new Promise<string>((resolve) => { release = resolve; });
+  await jest.mocked(AsyncStorage.getItem).withImplementation(
+    (key) => key === previous ? delayed : Promise.reject(new Error('unavailable')),
+    async () => {
+      const view = render(<HomeFeedScreen />);
+      await view.findByLabelText('圖文分類');
+      mockUser = { uid: 'dana' };
+      view.rerender(<HomeFeedScreen />);
+      await act(async () => { release('following'); });
+      expect(view.getByLabelText('全部分類').props.accessibilityState.selected).toBe(true);
+      await jest.mocked(AsyncStorage.setItem).withImplementation(
+        () => Promise.reject(new Error('unavailable')),
+        async () => {
+          await act(async () => { fireEvent.press(view.getByLabelText('圖文分類')); });
+          expect(view.getByLabelText('圖文分類').props.accessibilityState.selected).toBe(true);
+        },
+      );
+    },
+  );
 });

@@ -50,7 +50,6 @@ import {
   mobileFeedSearchScopeLabel,
   MOBILE_FEED_PAGE_SIZE,
   selectMobileFeedPosts,
-  type MobileFeedOrder,
   type MobileFeedRecoveryActionId,
 } from './feedDiscoveryModel';
 import {
@@ -60,8 +59,10 @@ import {
   removeCampusPostBookmark,
 } from '../../services/campusPostBookmarks';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { FEED_FILTERS, FEED_ORDERS, feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
+import { useFeedChoice } from './useFeedChoice';
 
-type FilterKey = 'all' | 'following' | 'subscribed' | 'media' | 'saved';
+type FilterKey = (typeof FEED_FILTERS)[number];
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
 
@@ -140,8 +141,9 @@ function HomeFeedContent() {
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
-  const [filter, setFilter] = useState<FilterKey>('all');
-  const [order, setOrder] = useState<MobileFeedOrder>('recommended');
+  const uid = isDemoUid(auth.user?.uid) || isFirebaseMockMode() ? null : auth.user?.uid;
+  const [filter, setFilter] = useFeedChoice(feedChoiceKey(uid, school?.id, 'filter'), FEED_FILTERS);
+  const [order, setOrder] = useFeedChoice(feedChoiceKey(uid, school?.id, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
   const [pageLimit, setPageLimit] = useState(MOBILE_FEED_PAGE_SIZE);
   const [hasMore, setHasMore] = useState(false);
