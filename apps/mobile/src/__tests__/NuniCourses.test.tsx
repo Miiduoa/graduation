@@ -190,15 +190,15 @@ it('opens the selected same-title assignment from the Google-account workspace w
   });
   const view = render(<NuniWorkspaceScreen />);
   expect(view.getByRole('tab', { name: '課程', selected: true })).toBeTruthy();
-  const toggle = await view.findByRole('button', { name: '問作業助理' });
+  const toggle = await view.findByRole('button', { name: '問課業助理' });
   mockRequest.mockClear();
   const originalFetch = global.fetch;
   const directFetch = jest.fn().mockRejectedValue(new Error('Unexpected network request during local lookup'));
   global.fetch = directFetch;
   try {
     fireEvent.press(toggle);
-    fireEvent.changeText(view.getByLabelText('輸入作業問題'), '期中報告什麼時候交？');
-    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+    fireEvent.changeText(view.getByLabelText('輸入課業問題'), '期中報告什麼時候交？');
+    fireEvent.press(view.getByRole('button', { name: '查詢課業' }));
     expect(await view.findByRole('button', { name: '查看作業：資料庫設計 · 期中報告' })).toBeTruthy();
     expect(mockRequest).not.toHaveBeenCalled();
     expect(directFetch).not.toHaveBeenCalled();
@@ -216,6 +216,56 @@ it('opens the selected same-title assignment from the Google-account workspace w
   expect(mockRequest.mock.calls.every(([, , input]) => input == null)).toBe(true);
 });
 
+
+it('opens only the selected quiz across same-title course activities without requesting data during lookup', async () => {
+  const title = '單元一';
+  const firstCourse = { ...course, title: '資料庫設計' };
+  const secondCourse = { ...course, id: 'cw_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: '資料庫管理' };
+  const firstQuiz = { ...quiz, title, prompt: '說明實體關聯模型。' };
+  const secondQuiz = { ...quiz, id: 'cwq_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    workspaceId: secondCourse.id, title, prompt: '說明索引適用的情境。' };
+  const answeredId = 'cwq_dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const answered = { ...firstQuiz, id: answeredId, title: '已作答練習',
+    myResponse: { ...quizReceipt(), quizId: answeredId }, responseCount: 1 };
+  const closed = { ...firstQuiz, id: 'cwq_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    title: '已結束練習', state: 'closed', closedAt: date };
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (path === 'memberships') return { memberships: [] };
+    if (path === 'class-workspaces') return { workspaces: [firstCourse, secondCourse] };
+    if (path === `class-workspaces/${secondCourse.id}`) return secondCourse;
+    if (path === `class-workspaces/${firstCourse.id}/quizzes`) return { quizzes: [firstQuiz, answered, closed] };
+    if (path === `class-workspaces/${secondCourse.id}/quizzes`) return { quizzes: [secondQuiz] };
+    if (path === `class-workspaces/${firstCourse.id}/assignments`) return { assignments: [{ ...assignment, title }] };
+    if (path === `class-workspaces/${secondCourse.id}/assignments`) return { assignments: [] };
+    return response(path, context, input);
+  });
+  const view = render(<NuniWorkspaceScreen />);
+  const toggle = await view.findByRole('button', { name: '問課業助理' });
+  mockRequest.mockClear();
+  const originalFetch = global.fetch;
+  const directFetch = jest.fn().mockRejectedValue(new Error('Unexpected network request during quiz lookup'));
+  global.fetch = directFetch;
+  try {
+    fireEvent.press(toggle);
+    fireEvent.changeText(view.getByLabelText('輸入課業問題'), '有哪些待答測驗？');
+    fireEvent.press(view.getByRole('button', { name: '查詢課業' }));
+    expect(view.getAllByRole('button', { name: /^查看測驗：/ })).toHaveLength(2);
+    expect(view.getByRole('button', { name: '查看測驗：資料庫設計 · 單元一' })).toBeTruthy();
+    expect(view.queryByRole('button', { name: /^查看作業：/ })).toBeNull();
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(directFetch).not.toHaveBeenCalled();
+  } finally {
+    global.fetch = originalFetch;
+  }
+  fireEvent.press(view.getByRole('button', { name: '查看測驗：資料庫管理 · 單元一' }));
+  expect(await view.findByTestId(`quiz-submit-${secondQuiz.id}`)).toBeTruthy();
+  expect(view.getByText(secondQuiz.prompt)).toBeTruthy();
+  expect(view.queryByText(firstQuiz.prompt)).toBeNull();
+  expect(mockRequest.mock.calls.some(([path, context]) =>
+    path === `class-workspaces/${secondCourse.id}/quizzes` && context === mockSession.context,
+  )).toBe(true);
+  expect(mockRequest.mock.calls.every(([, , input, method]) => input == null && (method ?? 'GET') === 'GET')).toBe(true);
+});
 
 it('continues a platform course deadline query into a receipt read without another request and opens its exact activity', async () => {
   const firstCourse = { ...course, title: '資料庫設計' };
@@ -239,12 +289,12 @@ it('continues a platform course deadline query into a receipt read without anoth
     return response(path, context, input);
   });
   const view = render(<NuniWorkspaceScreen />);
-  const toggle = await view.findByRole('button', { name: '問作業助理' });
+  const toggle = await view.findByRole('button', { name: '問課業助理' });
   mockRequest.mockClear();
   fireEvent.press(toggle);
   const ask = (question: string) => {
-    fireEvent.changeText(view.getByLabelText('輸入作業問題'), question);
-    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+    fireEvent.changeText(view.getByLabelText('輸入課業問題'), question);
+    fireEvent.press(view.getByRole('button', { name: '查詢課業' }));
   };
   ask('資料庫的期中報告什麼時候交？');
   expect(view.getByRole('button', { name: '查看作業：資料庫設計 · 期中報告' })).toBeTruthy();
