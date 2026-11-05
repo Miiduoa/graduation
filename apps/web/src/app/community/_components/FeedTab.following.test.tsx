@@ -423,3 +423,20 @@ it('opens the tapped author without losing the feed filter and clears the viewer
   expect(screen.queryByRole('dialog')).toBeNull();
   await screen.findByRole('button', { name: 'Bob的限時動態，有新動態' });
 });
+
+it('hides a previously loaded story while retrying a rejected server read', async () => {
+  const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', expiresAt: Date.now() + 60_000, kind: 'text', text: '社團活動' };
+  mocks.fetchStories.mockResolvedValueOnce([story]);
+  mocks.groupStories.mockImplementation((rows) => rows.length ? [{ authorUid: 'bob', latestAt: Date.now(), stories: rows }] : []);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('button', { name: /Bob的限時動態/ });
+  mocks.fetchStories.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+  const retry = await screen.findByRole('button', { name: '重新讀取' });
+  const pending = deferred<unknown[]>();
+  mocks.fetchStories.mockReturnValueOnce(pending.promise);
+  fireEvent.click(retry);
+  expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
+  await act(async () => pending.resolve([]));
+  expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
+});

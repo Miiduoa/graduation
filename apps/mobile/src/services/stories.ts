@@ -4,7 +4,6 @@ import {
   doc,
   getDoc,
   getDocFromServer,
-  getDocs,
   getDocsFromServer,
   limit,
   orderBy,
@@ -15,6 +14,7 @@ import {
   where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { readStoryQuery } from '@campus/shared/src/signedInSocialReads';
 import { buildStoryViewerPage, STORY_VIEWER_QUERY_LIMIT, storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '../firebase';
 import { fetchSchoolDirectoryProfiles } from './memberDirectory';
@@ -89,32 +89,21 @@ export async function listActiveStoriesForSchool(
   options: { throwOnError?: boolean } = {},
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
   try {
-    const snap = await getDocs(
-      query(
-        storiesCollection(db),
-        where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
-        limit(lim),
-      ),
-    );
+    const bySchool = where('schoolId', '==', schoolId);
+    const snap = await readStoryQuery((ordered) => getDocsFromServer(query(
+      storiesCollection(db),
+      bySchool,
+      ...(ordered ? [orderBy('createdAt', 'desc')] : []),
+      limit(lim),
+    )));
+    const now = Date.now();
     return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    // 缺索引 fallback：不排序
-    try {
-      const snap = await getDocs(
-        query(storiesCollection(db), where('schoolId', '==', schoolId), limit(lim)),
-      );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-        .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch (error) {
-      if (options.throwOnError) throw error;
-      return [];
-    }
+      .map((d) => ({ ...(d.data() as Omit<CampusStoryDoc, 'id'>), id: d.id }))
+      .filter((s) => typeof s.expiresAt === 'number' && Number.isFinite(s.expiresAt) && s.expiresAt > now);
+  } catch (error) {
+    if (options.throwOnError) throw error;
+    return [];
   }
 }
 

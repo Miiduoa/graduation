@@ -257,16 +257,16 @@ service firebase.storage {
         return isAuthenticated()
           && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
       }
-      function isPublishedStory() {
-        let story = firestore.get(/databases/(default)/documents/campusStories/$(storyId)).data;
-        return story.schoolId == schoolId
-          && resource.metadata.ownerUid == story.authorUid
-          && story.mediaUrl is string && story.mediaUrl.size() > 0
-          && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
-            || (story.kind == 'video' && fileName == 'video' && resource.contentType == 'video/mp4'));
+      // Readers use mediaUrl from the school-scoped Firestore feed. Only the
+      // publisher needs the raw object to obtain that URL while composing.
+      function currentUploader() {
+        let profile = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+        return profile.get('schoolId', '') == schoolId
+          && profile.get('accountDeletionInProgress', false) != true
+          && profile.get('status', '') != 'deleted';
       }
-      allow get: if activeStoryMember()
-        && (resource.metadata.get('ownerUid', '') == request.auth.uid || isPublishedStory());
+      allow get: if isAuthenticated() && resource.metadata.get('ownerUid', '') == request.auth.uid
+        && activeStoryMember() && currentUploader();
       // Draft uploads may be retried until their Firestore story is published.
       allow create, update: if activeStoryMember()
         && request.resource.metadata.ownerUid == request.auth.uid

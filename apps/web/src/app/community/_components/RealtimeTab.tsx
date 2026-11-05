@@ -58,7 +58,6 @@ export function RealtimeTab(props: { schoolId: string }) {
   const [checkingIn, setCheckingIn] = useState(false);
   const checkInFlight = useRef(false);
   const checkedInHere = heartbeatSession?.poiId === selectedPoi;
-  const shelf = useStoryShelf(storyGroups, schoolId, user?.uid);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
@@ -95,6 +94,7 @@ export function RealtimeTab(props: { schoolId: string }) {
     error,
     refresh,
   } = useCommunityLoad(load, '暫時無法讀取校園動態，請確認連線後重試。');
+  const shelf = useStoryShelf(storiesLoading || error ? [] : storyGroups, schoolId, user?.uid);
 
   useEffect(() => {
     (async () => {

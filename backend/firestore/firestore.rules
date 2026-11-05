@@ -1736,12 +1736,15 @@ service cloud.firestore {
     }
 
     match /campusStories/{storyId} {
-      allow read: if isSignedIn() && isSchoolMember(resource.data.schoolId);
+      // Keep the author's confirmation read available after a lost create acknowledgement.
+      allow get: if isCurrentSchoolMember(resource.data.schoolId)
+        && (resource.data.authorUid == request.auth.uid
+          || (resource.data.expiresAt is number && resource.data.expiresAt > request.time.toMillis()));
+      allow list: if isCurrentSchoolMember(resource.data.schoolId);
       allow create: if isSignedIn()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.get('allowReplies', false) is bool
-        && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId)
+        && isCurrentSchoolMember(request.resource.data.schoolId)
         && request.resource.data.expiresAt != null;
       allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
       allow update: if false;
@@ -1751,7 +1754,7 @@ service cloud.firestore {
       }
       function canAccessReceipts() {
         let parent = story();
-        return isSchoolMember(parent.schoolId)
+        return isCurrentSchoolMember(parent.schoolId)
           && parent.expiresAt is number && parent.expiresAt > request.time.toMillis();
       }
       function validOwnReceipt(viewerUid) {

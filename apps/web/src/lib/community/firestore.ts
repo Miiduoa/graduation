@@ -28,6 +28,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   increment,
   limit,
   orderBy,
@@ -41,6 +42,7 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { readStoryQuery } from '@campus/shared/src/signedInSocialReads';
 import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
@@ -531,27 +533,17 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
+  const bySchool = where('schoolId', '==', schoolId);
+  const snap = await readStoryQuery((ordered) => getDocsFromServer(query(
+    storiesCol(db),
+    bySchool,
+    ...(ordered ? [orderBy('createdAt', 'desc')] : []),
+    limit(lim),
+  )));
   const now = Date.now();
-  try {
-    const snap = await getDocs(
-      query(
-        storiesCol(db),
-        where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
-        limit(lim),
-      ),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    const snap = await getDocs(
-      query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  }
+  return snap.docs
+    .map((d) => ({ ...(d.data() as Omit<CampusStoryDoc, 'id'>), id: d.id }))
+    .filter((s) => typeof s.expiresAt === 'number' && Number.isFinite(s.expiresAt) && s.expiresAt > now);
 }
 
 export async function markStoryViewed(
