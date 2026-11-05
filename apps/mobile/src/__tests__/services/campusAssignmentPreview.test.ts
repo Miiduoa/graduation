@@ -81,6 +81,20 @@ test('relative date paging stays on the original Taiwan day and stops when the s
 });
 
 
+test('a receipt-status follow-up does not invent submissions from a pending-only snapshot', () => {
+  const source = snapshot(3);
+  const first = runOfflineCampusTool('我有哪些待交作業？', context, source, 'A')!.assignmentRead;
+  const follow = assignmentFollowUp('那已交的呢？', first, source, Date.parse(checkedAt));
+  expect(follow).toMatchObject({
+    reply: {
+      tool: 'online-required',
+      content: expect.stringContaining('只列待交項目'),
+    },
+  });
+  expect('assignmentRead' in follow.reply ? follow.reply.assignmentRead : undefined).toBeUndefined();
+  expect(JSON.stringify(follow)).not.toContain('已繳交');
+});
+
 test('paging preserves a reminder choice without arming a reminder on a new query', () => {
   const source = snapshot(17);
   const now = Date.parse(checkedAt);

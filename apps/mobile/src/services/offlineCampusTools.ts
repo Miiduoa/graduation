@@ -5,6 +5,7 @@ import { outsideAssignmentNames } from './assignmentDeadlineWindow';
 import { asksForAssignments, queryAssignmentDeadlines } from './queryAssignmentDeadlines';
 import { buildOfflineCampusPlan, type CampusEvidencePlan } from './offlineCampusPlanner';
 import { ASSIGNMENT_PAGE_SIZE } from './assignmentResultPage';
+import { isNuniReceiptStatusFollowUp } from './nuniReceiptQuery';
 
 export interface AssignmentPageRequest {
   offset: number;
@@ -346,7 +347,10 @@ export function runOfflineCampusTool(
     return { tool: 'open-service', route: '/classroom',
       content: '請先查詢待交作業，選定要提醒的那一份，再確認提醒時間。' };
   }
-  if (askingAssignments && /已(?:經)?[交繳]|[交繳]了(?:沒|嗎)|是否已[交繳]/.test(intent)) {
+  const asksSubmittedReceipt = /已(?:經)?[交繳]|[交繳]了(?:沒|嗎)|是否已[交繳]|繳交紀錄|提交紀錄|有沒有(?:繳交|交)|是否(?:已)?(?:繳交|交)/.test(intent);
+  if (isNuniReceiptStatusFollowUp(text) ||
+      (asksSubmittedReceipt && (askingAssignments || /作業|功課|報告|習題/.test(intent)) &&
+        !/公告|通知|課表|翻譯|幫我寫|刪除|修改|上傳|代交|自動繳交|直接送出|幫我送出|我要交/.test(intent))) {
     return { tool: 'online-required', route: '/classroom',
       content: '已同步的摘要只列待交項目。請在原始課程頁核對繳交紀錄。' };
   }

@@ -427,6 +427,39 @@ test('offline plan never uses an expired snapshot belonging to another account',
   expect(mockCallable).not.toHaveBeenCalled();
 });
 
+test('a deadline-to-receipt follow-up does not send assignment rows to the local model', async () => {
+  jest.useFakeTimers({ now: new Date('2026-11-04T09:00:00Z') });
+  try {
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    const items = [
+      { groupName: '資料庫管理', title: '期中報告', dueAt: '2026-11-10T05:30:00Z',
+        source: { kind: 'group-assignment' as const, groupId: 'management', assignmentId: 'midterm' } },
+    ];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      assignments: { status: 'available' as const, count: items.length, items },
+      announcements: { status: 'available' as const, items: [] }, schedule: { status: 'unavailable' as const, count: null } };
+    const first = await askCampusAssistant({
+      ...input(), mode: 'device', senseSnapshot,
+      messages: [{ role: 'user', content: '資料庫的期中報告什麼時候交？' }],
+    });
+    const follow = await askCampusAssistant({
+      ...input(), mode: 'device', senseSnapshot,
+      messages: [
+        { role: 'user', content: '資料庫的期中報告什麼時候交？' },
+        { role: 'assistant', content: first.content, assignmentRead: first.assignmentRead },
+        { role: 'user', content: '那已交的呢？' },
+      ],
+    });
+    expect(follow).toMatchObject({ source: 'device', tool: 'online-required', route: '/classroom' });
+    expect(follow.content).toContain('只列待交項目');
+    expect(follow.assignmentRead).toBeUndefined();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(httpsCallable).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 test('narrows local deadlines across turns, selects the displayed row and prepares a reminder without a model', async () => {
   jest.useFakeTimers({ now: new Date('2026-11-04T09:00:00Z') });
   try {

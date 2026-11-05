@@ -5,6 +5,7 @@ import { confirmedTimestamp } from './campusStudyAgenda';
 import { parseAssignmentDeadlineWindow } from './assignmentDeadlineWindow';
 import { resolveCampusAssignmentTarget } from './campusAssignmentTarget';
 import { assignmentDeadlineLabel } from './campusAssignmentQuery';
+import { isNuniReceiptStatusFollowUp } from './nuniReceiptQuery';
 
 type FollowUp = { question: string; filter: string; page?: AssignmentPageRequest } | { reply: OfflineCampusToolResult };
 
@@ -25,7 +26,8 @@ export function assignmentFollowUp(
   const choice = assignmentOrdinal(text);
   const wantsReminder = reminder.test(text);
   const move = pageChoice(text);
-  if (!date && !clarifyDate && choice === null && !wantsReminder && move === null) return null;
+  const receiptFollowUp = isNuniReceiptStatusFollowUp(question);
+  if (!date && !clarifyDate && choice === null && !wantsReminder && move === null && !receiptFollowUp) return null;
 
   const reply = (content: string, assignmentRead?: AssignmentRead): FollowUp => ({
     reply: { content, tool: assignmentRead ? 'campus-snapshot' : 'online-required', route: '/classroom',
@@ -37,6 +39,9 @@ export function assignmentFollowUp(
     return reply('上次查詢的作業清單已失效。請重新同步校園資料，再查一次作業。');
   }
   if (clarifyDate) return reply('想查哪一天或哪一週？可以回覆「下週五」或「下週」。', previous);
+  if (receiptFollowUp) {
+    return reply('已同步的摘要只列待交項目。請在原始課程頁核對繳交紀錄。');
+  }
   if (date) return { question: period + '有哪些待交作業？', filter: previous.filterQuestion };
 
   // Match the displayed order to the same authorized rows. Conversation text

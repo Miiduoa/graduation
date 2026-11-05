@@ -291,6 +291,19 @@ test('explicit homework writes and reminders do not produce an assignment list',
   }
 });
 
+test('submission-status questions stay source-backed and never invent a receipt from the pending snapshot', () => {
+  for (const question of ['那已交的呢？', '資料庫的期中報告交了嗎？', '作業交了沒']) {
+    const reply = runOfflineCampusTool(question, snapshot, authorizedSense, 'alice');
+    expect(reply).toMatchObject({ tool: 'online-required', route: '/classroom' });
+    expect(reply?.content).toContain('只列待交項目');
+    expect(reply?.content).not.toContain('資料庫期末報告');
+    expect(reply?.assignmentRead).toBeUndefined();
+  }
+  const pending = runOfflineCampusTool('我還有哪些作業還沒交？', snapshot, authorizedSense, 'alice');
+  expect(pending?.tool).toBe('campus-snapshot');
+  expect(pending?.assignmentRead?.items.map((item) => item.title)).toContain('資料庫期末報告');
+});
+
 test('a weekday in a known assignment title is not its deadline filter', () => {
   const named = { title: '星期一報告', groupName: '資管', dueAt: '2026-10-30T09:00:00Z' }; // Friday
   const source = { ...authorizedSense, assignments: {
