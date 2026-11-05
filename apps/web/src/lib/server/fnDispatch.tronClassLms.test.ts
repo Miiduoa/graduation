@@ -575,6 +575,58 @@ it('preserves a stale cache when its safe replacement cannot be fetched', async 
   expect(store.docs.get(CACHE)).toEqual(cacheBefore);
 });
 
+it('rejects a cache hit if the session relinks during extras cleanup', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, { expiresAt: string }>;
+  extras['10001'].expiresAt = new Date(0).toISOString();
+  const originalDoc = store.db.doc.bind(store.db);
+  let wrote = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      set: async (...args: Parameters<typeof ref.set>) => {
+        await ref.set(...args);
+        wrote = true;
+        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(wrote).toBe(true);
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it('rejects a cold read when the session relinks during the cache write', async () => {
+  const { request, store } = setup();
+  const originalDoc = store.db.doc.bind(store.db);
+  let wrote = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      set: async (...args: Parameters<typeof ref.set>) => {
+        await ref.set(...args);
+        wrote = true;
+        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+      },
+    };
+  });
+  const response = await request();
+  expect(wrote).toBe(true);
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();
   const doc = vi.spyOn(store.db, 'doc');
