@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { AppState, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { isAssistantTimetableOwner, readAssistantTimetable, subscribeAssistantTimetableOwner } from '../services/assistantTimetableSource';
+import { isAssistantTimetableOwner, readAssistantTimetable, subscribeAssistantTimetableOwner, type PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses } from '../services/nextSavedClasses';
 import { subscribePersonalImports } from '../services/personalImports';
 import { subscribeTimetableChanges } from '../widgets/timetableChanges';
@@ -38,9 +38,10 @@ function classHint(source: Source, now: Date) {
   };
 }
 
-export function AssistantClassNowHint({ uid, schoolId, children }: {
+export function AssistantClassNowHint({ uid, schoolId, platformTimetable, children }: {
   uid: string;
   schoolId: string;
+  platformTimetable?: PlatformTimetableAccess;
   children?: (upcoming: boolean) => React.ReactNode;
 }) {
   const [hint, setHint] = useState<ReturnType<typeof classHint>>(null);
@@ -53,7 +54,7 @@ export function AssistantClassNowHint({ uid, schoolId, children }: {
     const tick = () => {
       clearTimeout(timer);
       if (!focused || !foreground) return;
-      if (!isAssistantTimetableOwner(uid)) source = null;
+      if (!isAssistantTimetableOwner(uid, platformTimetable)) source = null;
       const now = new Date();
       setHint(classHint(source, now));
       if (source) timer = setTimeout(tick, MINUTE - now.getTime() % MINUTE);
@@ -63,16 +64,17 @@ export function AssistantClassNowHint({ uid, schoolId, children }: {
       const version = ++generation;
       source = null;
       tick();
-      if (!isAssistantTimetableOwner(uid)) return;
-      const result = await readAssistantTimetable(uid, schoolId).catch(() => null);
+      if (!isAssistantTimetableOwner(uid, platformTimetable)) return;
+      const result = await readAssistantTimetable(uid, schoolId, platformTimetable).catch(() => null);
       if (!focused || version !== generation) return;
       source = result;
       tick();
     };
     void reload();
-    const account = subscribeAssistantTimetableOwner(uid, () => void reload());
+    const account = subscribeAssistantTimetableOwner(uid, () => void reload(), platformTimetable);
+    const owner = platformTimetable ? `nuni:${platformTimetable.accountId}` : `firebase:${uid}`;
     const imports = subscribePersonalImports(({ scope }) => {
-      if (scope.owner === `firebase:${uid}` && scope.schoolId === schoolId) void reload();
+      if (scope.owner === owner && scope.schoolId === schoolId) void reload();
     });
     const manual = subscribeTimetableChanges(() => void reload());
     const app = AppState.addEventListener('change', (state) => {
@@ -92,7 +94,7 @@ export function AssistantClassNowHint({ uid, schoolId, children }: {
       account?.();
       app.remove();
     };
-  }, [uid, schoolId]));
+  }, [uid, schoolId, platformTimetable]));
 
   return (
     <>
@@ -104,7 +106,8 @@ export function AssistantClassNowHint({ uid, schoolId, children }: {
         </View>
       ) : (
         <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
-          查現在或下一堂課會讀取手機已存課表。整理課業時會同步已授權的作業與公告。
+          {platformTimetable ? '查這台手機已存的上課時間與教室，也可以用鍵盤麥克風提問。'
+            : '查現在或下一堂課會讀取手機已存課表。整理課業時會同步已授權的作業與公告。'}
         </Text>
       )}
       {children?.(hint?.upcoming === true)}

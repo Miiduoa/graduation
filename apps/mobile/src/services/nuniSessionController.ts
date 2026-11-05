@@ -14,7 +14,7 @@ import {
   type NuniTransport,
 } from './nuniClient';
 
-export type NativeNuniSession = NuniPrincipal & { context: string };
+export type NativeNuniSession = NuniPrincipal & { context: string; expiresAt: number };
 export type NativeNuniState = {
   session: NativeNuniSession | null;
   loading: boolean;
@@ -112,6 +112,14 @@ export class NuniSessionController {
   private current(run: number) {
     return !this.disposed && run === this.generation;
   }
+  /** Check a captured session for local reads without refreshing or exposing its credential. */
+  isSessionCurrent = (accountId: string, context: string): boolean => {
+    const { session, loading, error, pendingLogout } = this.state;
+    return !this.disposed && !loading && !error && !pendingLogout && !!session &&
+      session.context === context && session.platformAccountId === accountId &&
+      this.record?.platformAccountId === accountId && !this.record.pendingLogout &&
+      this.record.expiresAt > this.now();
+  };
   activate = () => {
     this.disposed = false;
   };
@@ -204,7 +212,7 @@ export class NuniSessionController {
       if (principal.platformAccountId !== this.record.platformAccountId)
         throw new NuniError(409, 'SESSION_CHANGED');
       this.update({
-        session: { ...principal, context: `native-${this.now()}-${run}` },
+        session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
         loading: false,
         error: '',
         pendingLogout: false,
@@ -271,7 +279,7 @@ export class NuniSessionController {
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
       this.storageRead = true;
       this.update({
-        session: { ...principal, context: `native-${this.now()}-${run}` },
+        session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
         loading: false,
         error: '',
         pendingLogout: false,

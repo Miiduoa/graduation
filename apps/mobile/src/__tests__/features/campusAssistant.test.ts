@@ -744,3 +744,78 @@ test('an account switch while reading the current timetable discards the old acc
   expect(localLLM.generate).not.toHaveBeenCalled();
   expect(mockCallable).not.toHaveBeenCalled();
 });
+
+describe('platform timetable without a school account', () => {
+  const platform = () => ({
+    ...input(), mode: 'device' as const, scope: { uid: '', schoolId: 'pu' },
+    platformTimetable: { accountId: 'pa-student', isCurrent: () => true },
+    messages: [{ role: 'user' as const, content: '我現在有課嗎？' }],
+  });
+
+  test('looks up the platform timetable and follows the verified occurrence without a local model or a Firebase call', async () => {
+    mockUid = null;
+    const request = platform();
+    withCurrent([classOccurrence]);
+    const reply = await askCampusAssistant(request);
+    expect(reply.savedClassRead).toMatchObject({ uid: '', owner: 'nuni:pa-student', classes: [classOccurrence] });
+    withCurrent([{ ...classOccurrence, room: '405' }]);
+    const followUp = await askCampusAssistant({ ...request, messages: [
+      { role: 'assistant', content: reply.content, savedClassRead: reply.savedClassRead },
+      { role: 'user', content: '在哪間教室？' },
+    ] });
+    expect(followUp.savedClassRead).toMatchObject({ owner: 'nuni:pa-student', focus: 'room' });
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).toMatchObject({
+      uid: '', platformTimetable: request.platformTimetable, classFollowUp: [classOccurrence],
+    });
+    expect(followUp.content).toContain('405');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+  });
+
+  test('never follows a different platform owner, even for otherwise identical class IDs', async () => {
+    withCurrent([classOccurrence]);
+    const reply = await askCampusAssistant({ ...platform(), messages: [
+      { role: 'assistant', content: '舊課', savedClassRead: {
+        uid: '', owner: 'nuni:other', schoolId: 'pu', updatedAt: null, currentAt: '2026-11-05T03:00:00Z', classes: [classOccurrence],
+      } }, { role: 'user', content: '在哪間教室？' },
+    ] });
+    expect(reply.savedClassRead).toBeUndefined();
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+    expect(reply.content).not.toContain(classOccurrence.room);
+  });
+
+  test('routes a new account to import and preserves the recovery route after a storage failure', async () => {
+    const request = platform();
+    expect((await askCampusAssistant(request)).route).toBe('/timetable/import');
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    collectOnDeviceSchoolContext.mockResolvedValueOnce({
+      checkedAt: new Date().toISOString(), schoolId: 'pu',
+      timetable: { source: 'unreadable', courses: [], updatedAt: null },
+    });
+    expect((await askCampusAssistant(request)).route).toBe('/timetable');
+  });
+
+  test('unrelated questions do not unlock Firebase, authorized snapshots or native inference', async () => {
+    const request = platform();
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    const reply = await askCampusAssistant({ ...request, messages: [{ role: 'user', content: '請幫我送出請假' }] });
+    expect(reply).toMatchObject({ source: 'device', tool: 'saved-timetable', hasActions: false });
+    expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+    await expect(askCampusAssistant({ ...request, mode: 'campus' })).rejects.toThrow('session changed');
+    await expect(askCampusAssistant({ ...request, scope: { uid: 'A', schoolId: 'pu' } })).rejects.toThrow('session changed');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+  });
+
+  test('discards an answer when the verified platform session expires during the read', async () => {
+    withCurrent([classOccurrence]);
+    const request = platform();
+    const isCurrent = jest.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    await expect(askCampusAssistant({ ...request, platformTimetable: { ...request.platformTimetable, isCurrent } }))
+      .rejects.toThrow('session changed');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+  });
+});

@@ -15,7 +15,7 @@ import { NuniSessionController, type NativeNuniState } from '../services/nuniSes
 
 const KEY = 'campus-one.nuni.native-session.v1';
 type Auth = NativeNuniState &
-  Pick<NuniSessionController, 'refresh' | 'signIn' | 'logout' | 'request' | 'upload' | 'bffRequest'>;
+  Pick<NuniSessionController, 'refresh' | 'signIn' | 'logout' | 'request' | 'upload' | 'bffRequest' | 'isSessionCurrent'>;
 const Context = createContext<Auth | null>(null);
 
 function createController() {
@@ -65,6 +65,7 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
     <Context.Provider
       value={{
         ...state,
+        isSessionCurrent: controller.isSessionCurrent,
         refresh: controller.refresh,
         signIn: controller.signIn,
         logout: controller.logout,

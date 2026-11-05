@@ -124,11 +124,11 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
   const viewTerm = selectedView === 'legacy' ? manualTerm : activeTerm;
   const matchesTerm = initialTerm === undefined || viewTerm === initialTerm;
   const occurrences = useMemo(() => {
-    if (!initialDate || !initialCourseId || !timetable || !matchesTerm) return [];
+    if (!initialDate || !initialCourseId || !timetable || !matchesTerm || loadError || importStatus !== 'ready') return [];
     return findSavedClassOccurrences(records, {
       schoolId, term: viewTerm, courseId: initialCourseId, date: initialDate, startAt: initialStartAt,
     });
-  }, [initialDate, initialCourseId, timetable, matchesTerm, records, viewTerm, schoolId, initialStartAt]);
+  }, [initialDate, initialCourseId, timetable, matchesTerm, records, viewTerm, schoolId, initialStartAt, loadError, importStatus]);
   const datedCourse = occurrences.length === 1 ? occurrences[0] : undefined;
   const selectedCourse = matchesTerm && (!initialDate || datedCourse) ? displayCourses.find((course) =>
     course.id === initialCourseId || `manual:${course.id}` === initialCourseId || course.id === `import:${initialCourseId}`) : undefined;
@@ -297,6 +297,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
         {initialCourseId ? <View style={{ padding: 16, gap: 6 }}>
           <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{datedCourse?.row.title || selectedCourse?.name || (initialDate ? '上課時間' : '這堂課已變更，請核對目前課表')}</Text>
           {occurrenceSummary ? <Text style={{ color: theme.colors.muted }}>{occurrenceSummary}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
+          {initialDate && (loadError || importStatus === 'error') && <Button text="重新核對這堂課" onPress={() => void load()} />}
         </View> : null}
         {importScope && importScope.owner !== 'guest:device' && <ClassReminderToggle key={`reminders:${importScopeKey}`} scope={importScopeKey} />}
         <PersonalCalendarExport key={`calendar:${importScopeKey}:${selectedView === 'legacy' ? manualTerm : activeTerm}`} records={personalTimetableRecords(timetable, importedRecords)} schoolId={schoolId}

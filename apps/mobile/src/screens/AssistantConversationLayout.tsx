@@ -16,6 +16,7 @@ import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 export type AssistantPanel = 'chat' | 'tools';
 
 type Props = {
+  title: string;
   subtitle: string;
   panel: AssistantPanel;
   onSelect: (panel: AssistantPanel) => void;
@@ -28,7 +29,7 @@ type Props = {
 };
 
 export function AssistantConversationLayout({
-  subtitle,
+  title, subtitle,
   panel,
   onSelect,
   locked,
@@ -57,8 +58,8 @@ export function AssistantConversationLayout({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: aiTokens.bg }}
     >
-      <AIDetailHeader title="校園助理" subtitle={subtitle} onBack={onBack} />
-      <View
+      <AIDetailHeader title={title} subtitle={subtitle} onBack={onBack} />
+      {tools ? <View
         accessibilityRole="tablist"
         style={{
           flexDirection: 'row',
@@ -102,7 +103,7 @@ export function AssistantConversationLayout({
             </Pressable>
           );
         })}
-      </View>
+      </View> : null}
       {/* Keep action confirmations and the reading position alive when visiting tools. */}
       <View
         style={{ flex: 1, display: panel === 'chat' ? 'flex' : 'none' }}
@@ -121,7 +122,7 @@ export function AssistantConversationLayout({
           {composer}
         </View>
       </View>
-      <ScrollView
+      {tools ? <ScrollView
         accessibilityElementsHidden={panel !== 'tools'}
         importantForAccessibility={panel === 'tools' ? 'auto' : 'no-hide-descendants'}
         keyboardShouldPersistTaps="handled"
@@ -129,7 +130,7 @@ export function AssistantConversationLayout({
         contentContainerStyle={{ paddingTop: 8, paddingBottom: bottomSpace + 12 }}
       >
         {tools}
-      </ScrollView>
+      </ScrollView> : null}
     </KeyboardAvoidingView>
   );
 }

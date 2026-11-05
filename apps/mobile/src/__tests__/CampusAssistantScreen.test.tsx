@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
-import { askCampusAssistant } from '../features/campusAssistant';
+import { askCampusAssistant, getOnDeviceAssistantReadiness } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
 import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } from '../services/campusAssignmentReminders';
@@ -14,7 +14,10 @@ jest.mock('../app/useAIOverlay', () => ({
 }));
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
-let mockPlatform: { loading?: boolean; session?: { platformAccountId: string } } | null = null;
+let mockPlatform: {
+  loading?: boolean; session?: { platformAccountId: string; context?: string };
+  isSessionCurrent?: (id: string, context: string) => boolean;
+} | null = null;
 jest.mock('../state/nuniSession', () => ({
   ...jest.requireActual('../state/nuniSession'), useOptionalNuniSession: () => mockPlatform,
 }));
@@ -1069,5 +1072,87 @@ test('an unresolved or active platform session cannot open the campus account ti
   await act(async () => view.rerender(<CampusAssistantScreen />));
   expect(view.queryByText('查下一堂課')).toBeNull();
   expect(view.queryByText('現在有課嗎？')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+});
+
+const platformRoute = { name: 'NuniTimetableAssistant' };
+
+function usePlatformFixture(accountId: string, context = 'context-a') {
+  mockPlatform = {
+    session: { platformAccountId: accountId, context },
+    isSessionCurrent: (id, captured) =>
+      id === mockPlatform?.session?.platformAccountId && captured === mockPlatform.session?.context,
+  };
+}
+
+test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
+  usePlatformFixture('student-b');
+  const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',
+    date: '2026-11-05', startTime: '10:10', endTime: '12:00' };
+  const read = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', classes: [item], updatedAt: null };
+  request.mockResolvedValueOnce({ content: item.name, source: 'device', tool: 'saved-timetable', savedClassRead: read })
+    .mockResolvedValueOnce({ content: item.room, source: 'device', tool: 'saved-timetable', savedClassRead: { ...read, focus: 'room' } });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalTimetable', 'PersonalImport'] }) }} />);
+  expect(view.getByText('課表助理')).toBeTruthy();
+  expect(view.queryByRole('tab')).toBeNull();
+  expect(view.queryByText('整理今日重點')).toBeNull();
+  expect(getOnDeviceAssistantReadiness).not.toHaveBeenCalled();
+  const field = view.getByLabelText('詢問校園助理');
+  await act(async () => fireEvent.press(view.getByText('查下一堂課')));
+  const call = request.mock.calls[0][0];
+  expect(call.scope).toEqual({ uid: '', schoolId: 'pu' });
+  expect(call.platformTimetable.accountId).toBe('student-b');
+  expect(call.platformTimetable.isCurrent()).toBe(true);
+  expect(call).not.toHaveProperty('senseSnapshot');
+  fireEvent.changeText(field, '接著要問的問題');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '在哪間教室？' })));
+  expect(request.mock.calls[1][0].messages[1].savedClassRead).toEqual(read);
+  expect(field.props.value).toBe('接著要問的問題');
+  fireEvent.press(view.getAllByRole('button', { name: /在課表中查看平台帳號的專題/ })[1]);
+  expect(navigate).toHaveBeenLastCalledWith('PersonalTimetable', {
+    schoolId: 'pu', courseId: item.courseId, date: item.date, term: item.term,
+    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: read.owner, schoolId: 'pu' }),
+  });
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('a platform session replacement discards pending results even for the same platform account', async () => {
+  usePlatformFixture('student-b');
+  const response = deferred<object>();
+  request.mockReturnValue(response.promise);
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  fireEvent.press(view.getByText('現在有課嗎？'));
+  const claim = request.mock.calls[0][0].platformTimetable;
+  usePlatformFixture('student-b', 'context-new');
+  expect(claim.isCurrent()).toBe(false);
+  view.rerender(<CampusAssistantScreen route={platformRoute} />);
+  await act(async () => response.resolve({ content: '舊學生的課表', source: 'device' }));
+  expect(view.queryByText('舊學生的課表')).toBeNull();
+  expect(view.getByText('現在有課嗎？')).toBeTruthy();
+});
+
+test('a missing nuni timetable opens the public import screen; unrelated questions expose no unregistered service shortcut', async () => {
+  usePlatformFixture('student-b');
+  request.mockResolvedValueOnce({ content: '請匯入這個帳號的課表', source: 'device', tool: 'saved-timetable', route: '/timetable/import' })
+    .mockResolvedValueOnce({ content: '可查現在或下一堂課。', source: 'device', tool: 'saved-timetable' });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalImport'] }) }} />);
+  await act(async () => fireEvent.press(view.getByText('現在有課嗎？')));
+  fireEvent.press(view.getByRole('button', { name: '匯入課表' }));
+  expect(navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '公車');
+  expect(view.queryByText('前往公車')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.queryByText('查看公車')).toBeNull();
+});
+
+test('the general assistant keeps its model tools and masks the Firebase timetable while a nuni account is active', async () => {
+  usePlatformFixture('student-b');
+  const view = render(<CampusAssistantScreen route={{ name: 'CampusAssistant' }} />);
+  expect(view.queryByText('現在有課嗎？')).toBeNull();
+  openCampusTools(view);
+  expect(view.getByText('下載／管理免費 AI 模型')).toBeTruthy();
+  expect(getOnDeviceAssistantReadiness).toHaveBeenCalled();
   expect(request).not.toHaveBeenCalled();
 });

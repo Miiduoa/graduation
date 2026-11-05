@@ -5,6 +5,7 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
+import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AssignmentRead } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
@@ -32,8 +33,13 @@ function engine() {
   return require('../services/localLLMInference') as typeof import('../services/localLLMInference');
 }
 
-function scopeCheck(input: { scope: CampusAssistantScope; isCurrent: () => boolean }, requiresAuth: boolean) {
+function scopeCheck(input: { scope: CampusAssistantScope; isCurrent: () => boolean; platformTimetable?: PlatformTimetableAccess }, requiresAuth: boolean) {
   if (!input.isCurrent()) throw new OnDeviceAssistantError('session-changed');
+  if (input.platformTimetable) {
+    if (requiresAuth || input.scope.uid || !input.scope.schoolId || !input.platformTimetable.accountId ||
+        !input.platformTimetable.isCurrent()) throw new OnDeviceAssistantError('session-changed');
+    return;
+  }
   if (requiresAuth && (isFirebaseMockMode() || !input.scope.uid || !input.scope.schoolId ||
       getAuthInstance().currentUser?.uid !== input.scope.uid)) {
     throw new OnDeviceAssistantError('session-changed');
@@ -67,6 +73,7 @@ export async function askCampusAssistant(input: {
   scope: CampusAssistantScope;
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
+  platformTimetable?: PlatformTimetableAccess;
   /** Optional per-request native cancellation; never cancels unrelated tasks. */
   signal?: AbortSignal;
   schoolName?: string | null;
@@ -108,21 +115,25 @@ export async function askCampusAssistant(input: {
   if (mode === 'device') {
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
-    const { runOfflineCampusTool } =
-      require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
-
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
     const question = messages[messages.length - 1].content;
     const previous = input.messages[input.messages.length - 2];
     const lastClass = previous?.role === 'assistant' ? previous.savedClassRead : undefined;
     const classQuery = savedClassQuery(question, lastClass);
+    const platform = input.platformTimetable;
+    const owner = platform && `nuni:${platform.accountId}`;
+    if (platform && !classQuery) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false,
+        content: '可以問「我現在有課嗎？」或「下一堂課在哪裡？」。查到課程後，也可以接著問教室與下課時間。' };
+    }
     const snapshot = await collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
+      ...(platform && { platformTimetable: platform }),
       ...(classQuery?.window === 'current' && { includeCurrentClasses: true }),
       ...(classQuery && classQuery.window !== 'current' && { includeNextClasses: true }),
-      ...(classQuery?.followUp && lastClass?.uid === uid &&
+      ...(classQuery?.followUp && lastClass?.uid === uid && lastClass.owner === owner &&
         lastClass.schoolId === input.scope.schoolId ? { classFollowUp: lastClass.classes } : {}),
     });
     scopeCheck(input, false);
@@ -130,11 +141,13 @@ export async function askCampusAssistant(input: {
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
-    const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid });
     if (classQuery) {
-      const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass);
+      const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass, owner);
       return { ...answer, source: 'device', hasActions: false };
     }
+    const { runOfflineCampusTool } =
+      require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
+    const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid });
     const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
       senseSnapshot, Date.parse(snapshot.checkedAt));
     const lookup = followUp && 'question' in followUp ? followUp : null;

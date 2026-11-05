@@ -124,6 +124,31 @@ describe('class lookups from saved timetables and imports', () => {
     ]);
   });
 
+  test('platform imports and manual classes share the same local namespace and preserve the school alias', async () => {
+    const platformTimetable = { accountId: 'pa-student', isCurrent: () => true };
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
+    saveImports({ ...original, schoolId: 'tw-pu', id: 'other', title: '英文', location: '210' });
+    const result = await collectOnDeviceSchoolContext({ uid: '', schoolId: 'tw-pu', platformTimetable, includeNextClasses: true });
+    expect(loadOfflinePersonalTimetable).toHaveBeenCalledWith('nuni:pa-student', 'tw-pu');
+    expect(loadPersonalImports).toHaveBeenCalledWith({ owner: 'nuni:pa-student', schoolId: 'tw-pu' });
+    expect(result.timetable.nextClasses?.map((entry) => entry.courseId).sort()).toEqual(['manual:db', 'other']);
+  });
+
+  test('platform reads fail closed across account changes and differentiate new accounts from storage failures', async () => {
+    const platformTimetable = { accountId: 'pa-student', isCurrent: jest.fn(() => true) };
+    const params = { uid: '', schoolId: 'pu', includeCurrentClasses: true, platformTimetable };
+    platformTimetable.isCurrent.mockReturnValueOnce(false);
+    expect((await collectOnDeviceSchoolContext(params)).timetable.source).toBe('not-available');
+    expect(loadPersonalImports).not.toHaveBeenCalled();
+    expect(loadOfflinePersonalTimetable).not.toHaveBeenCalled();
+    expect((await collectOnDeviceSchoolContext(params)).timetable.source).toBe('not-available');
+    jest.mocked(loadPersonalImports).mockRejectedValueOnce(new Error('cannot read ledger'));
+    expect((await collectOnDeviceSchoolContext(params)).timetable.source).toBe('unreadable');
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
+    platformTimetable.isCurrent.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect((await collectOnDeviceSchoolContext(params)).timetable).toEqual({ source: 'not-available', courses: [], updatedAt: null });
+  });
+
   test('handles exact start, in-progress classes, and the last class of the day', async () => {
     saveImports(original);
     jest.setSystemTime(new Date('2026-11-05T08:10:00+08:00'));

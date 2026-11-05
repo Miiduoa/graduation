@@ -19,8 +19,9 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../services/assistantTimetableSource', () => ({
   ...jest.requireActual('../services/assistantTimetableSource'), readAssistantTimetable: jest.fn(),
 }));
+let mockImportChange: (change: { scope: { owner: string; schoolId: string } }) => void;
 jest.mock('../services/personalImports', () => ({
-  subscribePersonalImports: () => () => undefined,
+  subscribePersonalImports: (listener: typeof mockImportChange) => { mockImportChange = listener; return () => undefined; },
 }));
 
 const row: PersonalImportRecord = {
@@ -113,7 +114,7 @@ test('drops private hints on background and reads the selected account on return
   mockAuthUid = 'B';
   screen.rerender(hint('B'));
   await act(async () => finish(saved(row)));
-  expect(read).toHaveBeenLastCalledWith('B', 'pu');
+  expect(read).toHaveBeenLastCalledWith('B', 'pu', undefined);
   expect(screen.queryByText('資料庫')).toBeNull();
   screen.unmount();
   expect(remove).toHaveBeenCalled();
@@ -132,7 +133,7 @@ test('checks the actual Firebase account again before displaying an async read',
   let finish!: (s: ReturnType<typeof saved>) => void;
   read.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
   const screen = render(hint());
-  expect(read).toHaveBeenCalledWith('A', 'pu');
+  expect(read).toHaveBeenCalledWith('A', 'pu', undefined);
   mockAuthUid = 'B';
   await act(async () => finish(saved(row)));
   expect(screen.queryByText('資料庫')).toBeNull();
@@ -147,4 +148,23 @@ test('immediately clears a visible class when the signed-in Firebase user change
   act(() => notify());
   expect(screen.queryByText('資料庫')).toBeNull();
   expect(read).toHaveBeenCalledTimes(1);
+});
+
+test('a platform hint listens only to that nuni ledger and clears a reply crossing a session change', async () => {
+  const accountId = 'pa_11111111-1111-4111-8111-111111111111';
+  let valid = true;
+  const access = { accountId, isCurrent: () => valid };
+  const screen = render(<AssistantClassNowHint uid="" schoolId="pu" platformTimetable={access} />);
+  await act(async () => {});
+  expect(screen.getByText('資料庫')).toBeTruthy();
+  expect(read).toHaveBeenLastCalledWith('', 'pu', access);
+  act(() => mockImportChange({ scope: { owner: 'firebase:A', schoolId: 'pu' } }));
+  expect(read).toHaveBeenCalledTimes(1);
+  let finish!: (s: ReturnType<typeof saved>) => void;
+  read.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  act(() => mockImportChange({ scope: { owner: 'nuni:' + accountId, schoolId: 'pu' } }));
+  expect(read).toHaveBeenCalledTimes(2);
+  valid = false;
+  await act(async () => finish(saved(row)));
+  expect(screen.queryByText('資料庫')).toBeNull();
 });

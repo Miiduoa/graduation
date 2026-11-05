@@ -3,6 +3,7 @@ import type { OnDeviceSchoolContext, SavedClassOccurrence } from './onDeviceScho
 
 export type SavedClassRead = {
   uid: string;
+  owner?: string;
   schoolId: string;
   classes: SavedClassOccurrence[];
   updatedAt: string | null;
@@ -44,7 +45,7 @@ export function savedClassQuery(question: string, previous?: SavedClassRead): Cl
 type SavedClassAnswer = {
   tool: 'saved-timetable';
   content: string;
-  route?: '/timetable';
+  route?: '/timetable' | '/timetable/import';
   savedClassRead?: SavedClassRead;
 };
 
@@ -53,25 +54,29 @@ function sameOccurrence(a: SavedClassOccurrence, b: SavedClassOccurrence) {
 }
 
 export function answerSavedClassQuery(
-  query: ClassQuery, context: OnDeviceSchoolContext, uid: string, previous?: SavedClassRead,
+  query: ClassQuery, context: OnDeviceSchoolContext, uid: string, previous?: SavedClassRead, owner?: string,
 ): SavedClassAnswer {
   const { timetable, schoolId } = context;
   const fallback = (content: string): SavedClassAnswer => ({
     tool: 'saved-timetable', content, route: '/timetable',
   });
-  if (!uid) return fallback('請先登入校園帳號，再從「我的課表」確認這台手機儲存的課程。');
+  if (!uid && !owner) return fallback('請先登入校園帳號，再從「我的課表」確認這台手機儲存的課程。');
   const current = query.window === 'current';
   const classes = current ? timetable.currentClasses : timetable.nextClasses;
+  if (owner && timetable.source === 'not-available') {
+    return { tool: 'saved-timetable', route: '/timetable/import', content: '這個 nuni 帳號在這台手機還沒有可核對的課表。匯入本學期的課表後，就能查時間和教室。' };
+  }
+  if (timetable.source === 'unreadable') return fallback('這台手機暫時讀不到已存的課表。請開啟「我的課表」重新讀取。');
   if (!classes) return fallback(timetable.source === 'not-available'
     ? '這台手機還沒有可核對的個人課表。請先開啟「我的課表」匯入或儲存課程。'
     : `手機課表的資料不足，無法確認${current ? '這個時段的課程' : '下一堂課'}。請開啟「我的課表」核對學期與上課時間。`);
-  if (query.followUp && (!previous || previous.uid !== uid || previous.schoolId !== schoolId ||
+  if (query.followUp && (!previous || previous.uid !== uid || previous.owner !== owner || previous.schoolId !== schoolId ||
       previous.classes.length !== classes.length ||
       !previous.classes.every((prior) => classes.some((item) => sameOccurrence(prior, item))))) {
     return fallback(`手機課表已無法核對剛才那堂課的原時段。可以再問一次「${current ? '我現在有課嗎？' : '下一堂課是什麼？'}」查看目前的安排。`);
   }
   const savedClassRead: SavedClassRead = {
-    uid, schoolId, classes, updatedAt: timetable.updatedAt,
+    uid, ...(owner && { owner }), schoolId, classes, updatedAt: timetable.updatedAt,
     ...(classes.length && query.focus ? { focus: query.focus } : {}), ...(current ? { currentAt: context.checkedAt } : {}),
   };
   if (!classes.length) {

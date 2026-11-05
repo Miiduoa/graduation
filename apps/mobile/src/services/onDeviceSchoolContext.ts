@@ -1,5 +1,5 @@
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
-import { readAssistantTimetable } from './assistantTimetableSource';
+import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, type SavedClassOccurrence } from './nextSavedClasses';
 import { loadOfflinePersonalTimetable } from './personalTimetable';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
@@ -11,7 +11,7 @@ export type OnDeviceSchoolContext = {
   schoolId: string;
   schoolName: string;
   timetable: {
-    source: 'saved-device-copy' | 'not-available';
+    source: 'saved-device-copy' | 'not-available' | 'unreadable';
     updatedAt: string | null;
     nextClasses?: SavedClassOccurrence[];
     currentClasses?: SavedClassOccurrence[];
@@ -29,6 +29,7 @@ export async function collectOnDeviceSchoolContext(
     uid: string;
     schoolId: string;
     schoolName?: string | null;
+    platformTimetable?: PlatformTimetableAccess;
     includeNextClasses?: boolean;
     includeCurrentClasses?: boolean;
     classFollowUp?: readonly SavedClassOccurrence[];
@@ -40,10 +41,10 @@ export async function collectOnDeviceSchoolContext(
     schoolName: (params.schoolName || '').trim().slice(0, 90),
     timetable: { source: 'not-available', updatedAt: null, courses: [] },
   };
-  if (!params.uid || !params.schoolId) return base;
+  const includeMeetings = params.includeCurrentClasses || params.includeNextClasses;
+  if (!params.schoolId || (params.platformTimetable ? !includeMeetings : !params.uid)) return base;
   try {
-    const includeMeetings = params.includeCurrentClasses || params.includeNextClasses;
-    const source = includeMeetings ? await readAssistantTimetable(params.uid, params.schoolId) : null;
+    const source = includeMeetings ? await readAssistantTimetable(params.uid, params.schoolId, params.platformTimetable) : null;
     const timetable = includeMeetings ? source?.timetable : await loadOfflinePersonalTimetable(params.uid, params.schoolId);
     if (!timetable && !source) return base;
     const schoolId = toPublicSchoolId(params.schoolId) || params.schoolId;
@@ -72,7 +73,8 @@ export async function collectOnDeviceSchoolContext(
       },
     };
   } catch {
-    // Corrupt cache is not a valid timetable and must never become fabricated data.
+    // A storage failure is distinct from an empty platform account that can start an import.
+    if (params.platformTimetable) base.timetable.source = 'unreadable';
     return base;
   }
 }
