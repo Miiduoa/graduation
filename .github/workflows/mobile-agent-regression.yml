@@ -91,6 +91,7 @@ jobs:
             src/__tests__/CampusLocalReadResults.test.tsx \
             src/__tests__/AuthSignOut.test.tsx \
             src/__tests__/personalEventReminderNavigation.test.ts \
+            src/__tests__/usePushNotifications.test.ts \
             src/__tests__/personalEventReminderTelemetry.test.ts \
             src/__tests__/services/nuniReceiptQuery.test.ts \
             src/__tests__/StudyAgenda.test.tsx \
