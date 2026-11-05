@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { recognizeRuledTimetableGrid } from './ruledTimetableGrid';
+import { recognizeRuledTimetableGrid } from '@campus/shared/src/imports/ruledTimetableGrid';
 
 function fixture() {
   const width = 440, height = 240;
@@ -56,6 +56,13 @@ describe('ruled screenshot timetable', () => {
     }],
     ['unread course in a blank cell', (f: ReturnType<typeof fixture>) => f.pixel(140, 120, 40)],
     ['unread course text', (f: ReturnType<typeof fixture>) => f.pixel(284, 131, 40)],
+    ['course box on a blank cell', (f: ReturnType<typeof fixture>) => {
+      f.rows.push([5, 1, 1, 1, 108, 1, 121, 110, 39, 14, 96, '假課程'].join('\t'));
+      f.pixel(122, 112, 30); // An isolated speck is insufficient evidence of text.
+    }],
+    ['room box on a blank line of an occupied cell', (f: ReturnType<typeof fixture>) => {
+      f.rows.push([5, 1, 1, 1, 180, 1, 315, 177, 40, 9, 96, 'B202'].join('\t'));
+    }],
     ['unread footer', (f: ReturnType<typeof fixture>) => f.pixel(230, 206, 30)],
     ['extra footer', (f: ReturnType<typeof fixture>) => f.word('備註', 24, 212)],
     ['extra teacher or note in a cell', (f: ReturnType<typeof fixture>) => f.word('教師', 260, 120)],

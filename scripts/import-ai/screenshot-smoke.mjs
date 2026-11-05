@@ -1,8 +1,12 @@
 // Run against a local Web build with Playwright and its Chromium browser installed.
 // The OCR engine reads real PNGs. Only the recognition API response is a fixture.
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const { chromium } = require('playwright');
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { fileURLToPath, URL } from 'node:url';
+import process from 'node:process';
+import console from 'node:console';
+
+const { chromium } = createRequire(import.meta.url)('playwright');
 
 const base = new URL(process.env.TIMETABLE_TEST_URL || 'http://127.0.0.1:3100');
 assert.ok(['localhost', '127.0.0.1'].includes(base.hostname), 'Use a local Web build');
@@ -63,7 +67,7 @@ async function check(browser, name, courses) {
     await page.getByLabel('學期', { exact: true }).fill('1');
     await page
       .getByLabel('選擇交給 AI 辨識的截圖')
-      .setInputFiles(path.join(__dirname, 'fixtures', name + '.png'));
+      .setInputFiles(fileURLToPath(new URL('./fixtures/' + name + '.png', import.meta.url)));
     const save = page.getByRole('button', { name: '確認匯入 3 筆', exact: true });
     await save.waitFor({ timeout: 90_000 });
     assert.ok(requests > 0);
@@ -72,10 +76,13 @@ async function check(browser, name, courses) {
     await save.click();
     const key = 'campus.personal-imports.v1:guest:personal';
     await page.waitForFunction(
-      (key) => JSON.parse(localStorage.getItem(key) || '{}').records?.length === 3,
+      (key) => JSON.parse(globalThis.localStorage.getItem(key) || '{}').records?.length === 3,
       key,
     );
-    const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).records, key);
+    const saved = await page.evaluate(
+      (key) => JSON.parse(globalThis.localStorage.getItem(key)).records,
+      key,
+    );
     assert.deepEqual(
       saved.map((row) => [row.title, row.dayOfWeek, row.startPeriod, row.endPeriod, row.location]),
       courses,

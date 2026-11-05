@@ -1345,6 +1345,7 @@ test('one screenshot action sends OCR text to the scoped organizer and opens a r
   expect(view.getByText(/原圖留在手機/)).toBeTruthy();
   fireEvent.press(view.getByText('用 AI 辨識課表截圖'));
   await view.findByText('前往核對 1 堂課');
+  expect(mockRecognize).toHaveBeenCalledWith(expect.any(String), 'image/png', expect.anything(), true);
   expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(1);
   expect(runMobilePersonalImportAi).toHaveBeenCalledWith(
     timetableImageText,

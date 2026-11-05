@@ -991,7 +991,9 @@ function ImportWorkspace({
       abort.current = new AbortController();
       if (!ocr.current) throw new Error('辨識程式尚未就緒，請改貼文字。');
       setNotice('正在讀取截圖，可隨時取消。');
-      const result = await ocr.current.recognize(base64, mime, abort.current.signal);
+      const readGrid = mode === 'ai' && mime === 'image/png' && asset.width <= 4096 &&
+        asset.height <= 4096 && asset.width * asset.height <= 4_000_000;
+      const result = await ocr.current.recognize(base64, mime, abort.current.signal, readGrid);
       if (!current(run)) return;
       if (mode === 'ai' && !result.trim()) {
         setNotice('這張截圖沒有讀到文字，請裁切到課表範圍後再試。');

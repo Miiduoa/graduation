@@ -10,7 +10,7 @@ import {
   type PersonalImportKind,
 } from '@campus/shared';
 import { isPersonalImportCloudMaskSafe } from '@campus/shared/src/imports/aiCloud';
-import { recognizeRuledTimetableGrid } from './ruledTimetableGrid';
+import { recognizeRuledTimetableGrid } from '@campus/shared/src/imports/ruledTimetableGrid';
 
 type Worker = {
   recognize: (

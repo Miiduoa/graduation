@@ -145,6 +145,7 @@ export function recognizeRuledTimetableGrid(pixels: Pixels, tsv: string): string
   regions.push({ group: preamble, xMin: 0, xMax: width, yMin: 0, yMax: top });
   for (const { group, xMin, xMax, yMin, yMax } of regions) {
     let previous: Word | undefined;
+    const linesWithoutInk = new Set(group.map((word) => word.line));
     for (const word of group) {
       let x0 = word.x - 4;
       // Tesseract's boxes for a split Chinese word can leave ink in the narrow gap
@@ -157,9 +158,21 @@ export function recognizeRuledTimetableGrid(pixels: Pixels, tsv: string): string
       const y0 = Math.max(yMin, word.y - 4), y1 = Math.min(yMax, word.y + word.h + 4);
       painted += (y1 - y0) * (x1 - x0);
       if (painted > width * height * 4) return null;
+      if (linesWithoutInk.has(word.line)) {
+        // Read original pixels within the reported word, excluding table rules and OCR padding.
+        let darkPixels = 0;
+        for (let y = Math.max(yMin, word.y); y < Math.min(yMax, word.y + word.h) && darkPixels < 6; y++) {
+          for (let x = Math.max(xMin, word.x); x < Math.min(xMax, word.x + word.w) && darkPixels < 6; x++) {
+            const i = (y * width + x) * 4;
+            if (Math.max(data[i], data[i + 1], data[i + 2]) < 145) darkPixels++;
+          }
+        }
+        if (darkPixels >= 6) linesWithoutInk.delete(word.line);
+      }
       for (let y = y0; y < y1; y++) ink.fill(0, y * width + x0, y * width + x1);
       previous = word;
     }
+    if (linesWithoutInk.size) return null;
   }
   for (let y = 0; y < height; y++) {
     const offset = y * width;
