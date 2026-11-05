@@ -139,8 +139,9 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
       {!(outdated && choosing) && shown.slice(0, visibleCount).map((item, index) => {
         const deadline = item.dueAt ? parseTaipeiInstant(item.dueAt) : null;
         const overdue = deadline !== null && !!comparisonTime && deadline < Date.parse(comparisonTime);
-        const status = item.submittedAt ? '已繳交' : item.state === 'closed' ? '已停止收件 · 未繳交'
-          : overdue ? '已逾期 · 未繳交' : '待繳交';
+        // A missing local receipt is not proof of a failed submission on the school's server.
+        const status = item.submittedAt ? '已繳交' : item.state === 'closed' ? '已停止收件 · 未見繳交紀錄'
+          : overdue ? '已逾期 · 未見繳交紀錄' : '仍在收件 · 未見繳交紀錄';
         const due = item.dueAt ? `截止 ${formatTaipeiDateTime(item.dueAt, { seconds: false })}` : '未設定截止時間';
         const title = choosing ? `第 ${index + 1} 份 · ${item.title}` : item.title;
         const disabled = busy || (!!choosing && (!latest || !!outdated));
