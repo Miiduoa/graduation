@@ -43,7 +43,7 @@ it('opens overdue but still accepted work without falsely calling it closed', ()
     />,
   );
   expect(view.getByText('參考期限已過 · 仍可繳交')).toBeTruthy();
-  fireEvent.press(view.getByRole('button', { name: '開啟作業：作業 past' }));
+  fireEvent.press(view.getByRole('button', { name: /^開啟作業：資料庫 · 作業 past，參考期限已過/ }));
   expect(open).toHaveBeenCalledWith('course', 'past');
 });
 
@@ -183,6 +183,77 @@ it('scopes partial counts and warnings to a selected course', () => {
   expect(view.getByRole('button', { name: '待完成 1' })).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '篩選課程：所有課程' }));
   expect(view.getByRole('button', { name: '待完成 2+' })).toBeTruthy();
+});
+
+it('keeps the course scope for same-title tasks, assistant answers and empty-filter recovery', () => {
+  const workspaces: NuniStudyAgenda['workspaces'] = [
+    { id: 'db', title: '資料庫', state: 'active', memberRole: 'student' },
+    { id: 'net', title: '網路', state: 'active', memberRole: 'student' },
+  ];
+  const data = agenda(
+    workspaces.map(({ id, title }) =>
+      task('report-' + id, { courseId: id, courseTitle: title, title: '期中報告' }),
+    ),
+    { workspaces, studiedCourseCount: 2 },
+  );
+  const open = jest.fn();
+  const view = render(
+    <StudyAgenda data={data} open={open} loading={false} error="" retry={jest.fn()} />,
+  );
+  fireEvent.press(view.getByRole('button', { name: /^開啟作業：網路 · 期中報告，/ }));
+  expect(open).toHaveBeenLastCalledWith('net', 'report-net');
+  fireEvent.press(view.getByRole('button', { name: '篩選課程：資料庫' }));
+  fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+  fireEvent.press(view.getByRole('button', { name: '有哪些待交作業？' }));
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫 · 期中報告' }));
+  expect(open).toHaveBeenLastCalledWith('db', 'report-db');
+  fireEvent.press(view.getByRole('button', { name: '篩選課程：網路' }));
+  expect(view.queryByRole('button', { name: /^查看作業：/ })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+  fireEvent.press(view.getByRole('button', { name: '有哪些待交作業？' }));
+  expect(view.getByRole('button', { name: '查看作業：網路 · 期中報告' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '老師回饋 0' }));
+  expect(view.queryByRole('button', { name: /^查看作業：/ })).toBeNull();
+  expect(view.queryByText('優先處理')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '查看這門課的全部項目' }));
+  expect(view.getByRole('button', { name: '篩選課程：網路' })).toHaveAccessibilityState({
+    selected: true,
+  });
+  expect(view.getAllByRole('button', { name: /^開啟作業/ })).toHaveLength(1);
+});
+
+it('keeps more tasks visible on return and resets the limit for a different filter', () => {
+  const cache = new Map<string, unknown>();
+  const data = agenda(Array.from({ length: 10 }, (_, index) => task(String(index))));
+  const content = (
+    <NuniDraftProvider cache={cache}>
+      <StudyAgenda data={data} loading={false} error="" retry={jest.fn()} open={jest.fn()} />
+    </NuniDraftProvider>
+  );
+  const first = render(content);
+  fireEvent.press(first.getByRole('button', { name: '再顯示 2 項' }));
+  first.unmount();
+  const second = render(content);
+  expect(second.getAllByRole('button', { name: /^開啟作業/ })).toHaveLength(10);
+  fireEvent.press(second.getByRole('button', { name: '全部 10' }));
+  expect(second.getAllByRole('button', { name: /^開啟作業/ })).toHaveLength(8);
+});
+
+it('only offers calendar export for the chosen progress and upcoming dates', () => {
+  const data = agenda([
+    task('soon', { dueAt: new Date(Date.now() + 86400000).toISOString() }),
+    task('later', { dueAt: new Date(Date.now() + 20 * 86400000).toISOString() }),
+  ]);
+  const view = render(
+    <StudyAgenda data={data} loading={false} error="" retry={jest.fn()} open={jest.fn()} />,
+  );
+  fireEvent.press(view.getByRole('button', { name: '未來七天 1' }));
+  fireEvent.press(view.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(view.getAllByRole('checkbox')).toHaveLength(1);
+  expect(view.getByRole('checkbox', { name: /作業 soon/ })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '老師回饋 0' }));
+  expect(view.queryByRole('button', { name: '匯出未繳期限 ICS' })).toBeNull();
 });
 
 it('distinguishes closed unanswered quizzes from unsubmitted assignments', () => {

@@ -2093,7 +2093,7 @@ it('searches the course directory, separates roles and restores all courses afte
 
 it('opens a quiz directly from the cross-course agenda', async () => {
   const view = render(<NuniCourses />);
-  fireEvent.press(await view.findByRole('button', { name: '開啟測驗：需求練習' }));
+  fireEvent.press(await view.findByRole('button', { name: /^開啟測驗：服務設計課程 · 需求練習，/ }));
   expect(await view.findByLabelText('測驗內容：需求練習')).toBeTruthy();
   expect(view.getByRole('button', { name: '測驗 1' })).toHaveAccessibilityState({ selected: true });
   expect(view.queryByLabelText('作業內容：校園訪談')).toBeNull();
@@ -2142,12 +2142,12 @@ it('removes previous agenda and feedback after a rejected session refresh', asyn
   });
   const view = render(<NuniCourses />);
   await view.findByText('上一份已載入回饋');
-  expect(view.getByRole('button', { name: '開啟測驗：需求練習' })).toBeTruthy();
+  expect(view.getByRole('button', { name: /^開啟測驗：服務設計課程 · 需求練習，/ })).toBeTruthy();
   denied = true;
   fireEvent.press(view.getByRole('button', { name: '更新課程' }));
   await view.findByRole('button', { name: '重新讀取待辦' });
   expect(view.queryByText('上一份已載入回饋')).toBeNull();
-  expect(view.queryByRole('button', { name: '開啟測驗：需求練習' })).toBeNull();
+  expect(view.queryByRole('button', { name: /^開啟測驗：服務設計課程 · 需求練習，/ })).toBeNull();
 });
 
 it.each([403, 404])('keeps a revoked course directory hidden while retrying a %i list response', async (status) => {
@@ -2168,7 +2168,7 @@ it.each([403, 404])('keeps a revoked course directory hidden while retrying a %i
   const view = render(<NuniCourses />);
   await view.findByText('已撤銷課程的回饋');
   expect(view.getByRole('button', { name: '服務設計課程' })).toBeTruthy();
-  expect(view.getByRole('button', { name: '開啟測驗：需求練習' })).toBeTruthy();
+  expect(view.getByRole('button', { name: /^開啟測驗：服務設計課程 · 需求練習，/ })).toBeTruthy();
 
   fireEvent.press(view.getByRole('button', { name: '更新課程' }));
   await waitFor(() => {
@@ -2180,7 +2180,7 @@ it.each([403, 404])('keeps a revoked course directory hidden while retrying a %i
   await waitFor(() => expect(listReads).toBe(3));
   expect(view.getByText('正在讀取課程…')).toBeTruthy();
   expect(view.queryByRole('button', { name: '服務設計課程' })).toBeNull();
-  expect(view.queryByRole('button', { name: '開啟測驗：需求練習' })).toBeNull();
+  expect(view.queryByRole('button', { name: /^開啟測驗：服務設計課程 · 需求練習，/ })).toBeNull();
   expect(view.queryByText('已撤銷課程的回饋')).toBeNull();
   expect(view.queryByLabelText('搜尋我的課程')).toBeNull();
 
@@ -2571,6 +2571,8 @@ it('跨課搜尋進教材後返回保留關鍵字與結果並重新驗權', asyn
     return response(path, context, input);
   });
   const view = render(<NuniCourses />);
+  expect(view.queryByLabelText('跨課教材關鍵字')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '跨課找教材', expanded: false }));
   fireEvent.changeText(view.getByLabelText('跨課教材關鍵字'), '返回保留');
   fireEvent.press(view.getByText('搜尋教材'));
   await view.findByText('返回保留教材');
@@ -2582,6 +2584,10 @@ it('跨課搜尋進教材後返回保留關鍵字與結果並重新驗權', asyn
   expect(view.getByLabelText('跨課教材關鍵字').props.value).toBe('返回保留');
   expect(view.getByText('返回保留教材')).toBeTruthy();
   expect(view.getByText('目前搜尋：返回保留')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '收起教材搜尋' }));
+  fireEvent.press(view.getByRole('button', { name: '跨課找教材' }));
+  expect(view.getByLabelText('跨課教材關鍵字').props.value).toBe('返回保留');
+  expect(view.queryByText('返回保留教材')).toBeNull();
 });
 
 
@@ -2595,6 +2601,7 @@ it('長搜尋清單返回時等清單尺寸更新才還原保存位置，且一�
   const scroll = jest.spyOn(ScrollView.prototype, 'scrollTo');
   try {
     const view = render(<NuniCourses />);
+    fireEvent.press(view.getByRole('button', { name: '跨課找教材' }));
     fireEvent.changeText(view.getByLabelText('跨課教材關鍵字'), '長清單教材');
     fireEvent.press(view.getByText('搜尋教材'));
     await view.findByText('長清單教材 35');
