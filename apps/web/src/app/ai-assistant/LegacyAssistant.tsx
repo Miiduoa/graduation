@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
@@ -405,9 +413,10 @@ function AssistantRoute() {
   );
 }
 
-export default function AssistantPage() {
+export default function AssistantPage({ children }: { children?: ReactNode }) {
   return (
     <SiteShell title="助理" subtitle="從一個問題開始，找到需要的資訊。">
+      {children}
       <Suspense fallback={<p role="status">載入中…</p>}>
         <AssistantRoute />
       </Suspense>

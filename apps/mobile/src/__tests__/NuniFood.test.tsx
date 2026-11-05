@@ -399,6 +399,63 @@ test('student selects required options, reviews whole TWD quote and explicitly p
   expect(writes()[1][2]).toMatchObject({ quoteId: 'quote-one' });
   expect(writes().some((call) => call[0].includes('payment-session'))).toBe(false);
 });
+test('quick add previews multiple menu items locally and keeps required choices for the basket', async () => {
+  mockRequest.mockImplementation(async (path, context, input) => {
+    const result = await respond(path, context, input);
+    if (path === `${realm}/locations/location-one/menu` && 'sections' in result) {
+      const items = result.sections[0].items;
+      items.push({ ...items[0], id: 'tea', name: '紅茶', basePrice: price(30), optionGroups: [] });
+    }
+    return result;
+  });
+  const view = render(ui());
+  await openMenu(view);
+  const input = view.getByLabelText('輸入餐點與份數');
+  const add = () => fireEvent.press(view.getByRole('button', { name: '加入已選餐點' }));
+  fireEvent.changeText(input, '雞腿飯兩份、未知餐點一份');
+  add();
+  expect(view.getByRole('button', { name: '購物籃還是空的' })).toBeTruthy();
+  fireEvent.changeText(input, '雞腿飯兩份、紅茶一杯');
+  expect(view.getByText('加入後：雞腿飯共 2 份、紅茶共 1 份')).toBeTruthy();
+  expect(view.getByRole('button', { name: '購物籃還是空的' })).toBeTruthy();
+  add();
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 3 份' }));
+  expect(view.getByLabelText('雞腿飯數量').props.value).toBe('2');
+  expect(view.getByLabelText('紅茶數量').props.value).toBe('1');
+  fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+  expect(view.getByRole('alert')).toHaveTextContent(/米飯/);
+  expect(writes()).toHaveLength(0);
+});
+
+test('quick add respects the combined limit, preserves customization and waits for explicit checkout', async () => {
+  const view = render(ui());
+  await openMenu(view);
+  fireEvent.press(view.getByRole('button', { name: '選擇雞腿飯' }));
+  fireEvent.changeText(view.getByLabelText('雞腿飯備註'), '醬另外放');
+  fireEvent.press(view.getByRole('button', { name: '雞腿飯：糙米（5 元）' }));
+  fireEvent.press(view.getByRole('button', { name: '放入購物籃' }));
+  const input = view.getByLabelText('輸入餐點與份數');
+  const add = () => fireEvent.press(view.getByRole('button', { name: '加入已選餐點' }));
+  fireEvent.changeText(input, '雞腿飯二十份');
+  add();
+  expect(view.getByRole('alert')).toHaveTextContent(/20/);
+  expect(view.getByRole('button', { name: '查看購物籃，已選 1 份' })).toBeTruthy();
+  fireEvent.changeText(input, '雞腿飯一份');
+  add();
+  fireEvent.press(view.getByRole('button', { name: '查看購物籃，已選 2 份' }));
+  expect(view.getByLabelText('雞腿飯備註').props.value).toBe('醬另外放');
+  expect(writes()).toHaveLength(0);
+  fireEvent.press(view.getByRole('button', { name: '確認餐點與金額' }));
+  await view.findByText('應付總額 180 元');
+  expect(writes()).toHaveLength(1);
+  expect(writes()[0][2].items).toEqual([
+    { menuItemId: 'rice', quantity: 2, selectedOptionIds: ['brown'], customerNote: '醬另外放' },
+  ]);
+  fireEvent.press(view.getByRole('button', { name: '確認送出訂單，到店付款' }));
+  await view.findByText('取餐號碼 A001');
+  expect(writes().map(([path]) => path)).toEqual([`${realm}/quotes`, `${realm}/orders`]);
+});
+
 test('missing required option and out-of-range quantities do not request a quote', async () => {
   const view = render(ui());
   await openMenu(view);
@@ -550,6 +607,36 @@ test('expired quote cannot create an order', async () => {
   expect(view.getByText(/這次報價已過期/)).toBeTruthy();
   expect(writes()).toHaveLength(1);
 });
+test.each(['menu-version', 'paused', 'read-error'] as const)(
+  'refreshing the menu after a quote blocks checkout with %s',
+  async (change) => {
+    const view = render(ui());
+    await fillQuote(view);
+    const confirm = { name: '確認送出訂單，到店付款' };
+    expect(view.getByRole('button', confirm)).toBeEnabled();
+    const menuPath = `${realm}/locations/location-one/menu`;
+    mockRequest.mockImplementation(async (path, context, input) => {
+      if (path === menuPath && change === 'read-error') throw new NuniError(0, 'NETWORK_ERROR');
+      const result = await respond(path, context, input);
+      if (path === menuPath && change === 'menu-version')
+        return { ...result, menuVersion: 'menu-two' };
+      return result;
+    });
+    if (change === 'paused') locationDetails = { state: 'paused' };
+    const menuReads = () => mockRequest.mock.calls.filter(([path]) => path === menuPath).length;
+    const previousReads = menuReads();
+    const reload = { name: '重新讀取' };
+    fireEvent.press(view.getByRole('button', reload));
+    await waitFor(() => {
+      expect(menuReads()).toBeGreaterThan(previousReads);
+      expect(view.getByRole('button', reload)).toBeEnabled();
+    });
+    const submit = view.getByRole('button', confirm);
+    expect(submit).toBeDisabled();
+    fireEvent.press(submit);
+    expect(writes().map(([path]) => path)).toEqual([`${realm}/quotes`]);
+  },
+);
 describe('手機取餐時間', () => {
   const beforeMidnight = Date.parse('2026-11-01T15:45:00.000Z');
   let now: jest.SpyInstance;
@@ -667,7 +754,9 @@ describe('手機取餐時間', () => {
     fireEvent.press(view.getByRole('button', { name: '重新讀取' }));
     expect(await view.findByText(warning)).toBeTruthy();
     expect(view.getByRole('button', { name: '重新讀取' })).toBeEnabled();
-    expect(view.getByRole('button', { name: '確認餐點與金額' })).toBeEnabled();
+    const submit = view.getByRole('button', { name: '確認餐點與金額' });
+    expect(submit).toBeDisabled();
+    fireEvent.press(submit);
     expect(writes()).toHaveLength(0);
     fireEvent.press(view.getByRole('button', { name: '返回門市列表' }));
     expect(await view.findByRole('button', { name: '選餐：餐坊' })).toBeTruthy();
@@ -879,7 +968,7 @@ describe('手機取餐時間', () => {
     const view = render(ui());
     await fillQuote(view);
     expect(Date.parse(expiresAt)).toBeGreaterThan(Date.now());
-    expect(view.getByText('這次報價已過期，請返回調整取餐時間，再重新確認金額。')).toBeTruthy();
+    expect(view.getByText('這次報價已過期，請確認取餐時間並重新計算金額。')).toBeTruthy();
     expect(view.getByRole('button', { name: '確認送出訂單，到店付款' })).toBeDisabled();
     fireEvent.press(view.getByRole('button', { name: '返回修改餐點與取餐時間' }));
     expect(view.getByRole('button', { name: '15 分鐘後' })).toBeEnabled();
@@ -893,7 +982,7 @@ describe('手機取餐時間', () => {
     const firstInput = writes()[0][2];
     now.mockReturnValue(beforeMidnight + 60_000);
     fireEvent.press(view.getByRole('button', { name: '確認送出訂單，到店付款' }));
-    expect(view.getByText('這次報價已過期，請返回調整取餐時間，再重新確認金額。')).toBeTruthy();
+    expect(view.getByText('這次報價已過期，請確認取餐時間並重新計算金額。')).toBeTruthy();
     expect(view.getByRole('button', { name: '確認送出訂單，到店付款' })).toBeDisabled();
     expect(writes()).toHaveLength(1);
     fireEvent.press(view.getByRole('button', { name: '返回修改餐點與取餐時間' }));
@@ -927,6 +1016,8 @@ test('unknown order write survives back and same-account revalidation with the e
   fireEvent.press(await view.findByRole('button', { name: '選餐：餐坊' }));
   await view.findByRole('button', { name: '重試確認這次送出' });
   expect(view.getByLabelText('雞腿飯數量').props.editable).toBe(false);
+  // The store may have paused after accepting the original order. Reconcile the same key.
+  locationDetails = { state: 'paused' };
   mockAuth.loading = true;
   view.rerender(ui(cache));
   mockAuth.loading = false;
