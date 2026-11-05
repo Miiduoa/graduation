@@ -9,8 +9,8 @@ import {
   queryAssignmentDeadlines,
 } from '../../services/queryAssignmentDeadlines';
 import {
-  isNuniReceiptQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts,
-  type NuniReceiptDeadlineScope,
+  isNuniReceiptQuestion, isNuniReceiptReferenceQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts,
+  type NuniReceiptDeadlineScope, type NuniReceiptSource,
 } from '../../services/nuniReceiptQuery';
 import {
   ASSIGNMENT_PAGE_SIZE,
@@ -51,6 +51,7 @@ function AssignmentQuestions({ data, open }: Props) {
   );
   const [receiptQuestion, setReceiptQuestion] = useState<{
     question: string; scope: string; deadlineScope?: NuniReceiptDeadlineScope;
+    source?: NuniReceiptSource;
   } | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -87,7 +88,7 @@ function AssignmentQuestions({ data, open }: Props) {
   );
   const receipts = useMemo(
     () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion.question, receiptQuestion.scope,
-      receiptQuestion.deadlineScope) : null,
+      receiptQuestion.deadlineScope, receiptQuestion.source) : null,
     [data, receiptQuestion],
   );
   const fullRows = useMemo(
@@ -147,6 +148,10 @@ function AssignmentQuestions({ data, open }: Props) {
       return;
     }
     if (isNuniReceiptQuestion(question)) {
+      // Only an explicit ordinal selection resolves "這份作業". A single
+      // displayed result is not permission to guess the user's referent.
+      const chosen = isNuniReceiptReferenceQuestion(question) && selected !== null
+        ? rows[selected]?.item : undefined;
       const statusOnly = isNuniReceiptStatusFollowUp(question);
       const fromDeadline = Boolean(statusOnly && !receiptQuestion && search);
       if (fromDeadline && (answer?.kind !== 'results' || answer.status)) {
@@ -161,6 +166,7 @@ function AssignmentQuestions({ data, open }: Props) {
         scope: previousReceipt?.scope ??
           (fromDeadline && search && answer?.kind === 'results' ? search.filter : question),
         deadlineScope: previousReceipt?.deadlineScope ?? inheritedDeadline,
+        source: previousReceipt?.source ?? (chosen ? { courseId: chosen.courseId, id: chosen.id } : undefined),
       });
       setSearch(null);
       setNotice('');
