@@ -23,6 +23,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import {
+  assertPuEcampusDataFetchEnabled,
+  isPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
+import {
   resolveCourseCatalogCapability,
   unsupportedCourseCatalogMessage,
 } from '@campus/shared/src';
@@ -47,7 +52,7 @@ const TOKEN_CACHE: { token: string | null; warmedAt: number } = {
 function shouldSkipDirectCatalogFetch(): boolean {
   // The official PU catalog does not allow browser-origin API calls. Native can query it directly;
   // Web should rely on cache/empty state until a server-side proxy is available.
-  return Platform.OS === 'web';
+  return !isPuEcampusDataFetchEnabled() || Platform.OS === 'web';
 }
 
 const COMMON_HEADERS: Record<string, string> = {
@@ -118,6 +123,7 @@ export type CatalogQueryOptions = {
 // ─── HTTP helpers ──────────────────────────────────────────
 
 async function warmupCookieJar(signal?: AbortSignal): Promise<void> {
+  assertPuEcampusDataFetchEnabled();
   if (TOKEN_CACHE.warmedAt && Date.now() - TOKEN_CACHE.warmedAt < 60 * 60 * 1000) return;
   try {
     await fetch(BASE, {
@@ -134,6 +140,7 @@ async function warmupCookieJar(signal?: AbortSignal): Promise<void> {
 }
 
 async function getCsrfToken(signal?: AbortSignal): Promise<string> {
+  assertPuEcampusDataFetchEnabled();
   await warmupCookieJar(signal);
   // Token 有效期不長，每次查詢前都拿新的最穩定
   const res = await fetch(BASE + 'getCsrfToken', {
@@ -161,6 +168,7 @@ async function postForm(
   data: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<any> {
+  assertPuEcampusDataFetchEnabled();
   const csrf = await getCsrfToken(signal);
   const body = new URLSearchParams({ csrf_token: csrf, ...data }).toString();
 
@@ -392,9 +400,10 @@ export async function queryCatalog(
     };
   }
 
-  if (!options.forceRefresh) {
-    const cached = await readCache(cacheSchoolId, merged);
-    if (cached) return cached;
+  const paused = !isPuEcampusDataFetchEnabled();
+  if (paused || !options.forceRefresh) {
+    const cached = await readCache(cacheSchoolId, merged, paused);
+    if (cached) return paused ? { ...cached, error: PU_ECAMPUS_DATA_PAUSED_MESSAGE } : cached;
   }
 
   if (shouldSkipDirectCatalogFetch()) {
@@ -405,7 +414,9 @@ export async function queryCatalog(
       source: 'sample',
       fetchedAt: Date.now(),
       showRemain: false,
-      error: 'Web 版無法直接連線課綱查詢系統，請使用行動裝置或後端代理同步。',
+      error: paused
+        ? PU_ECAMPUS_DATA_PAUSED_MESSAGE
+        : 'Web 版無法直接連線課綱查詢系統，請使用行動裝置或後端代理同步。',
     };
   }
 
@@ -637,12 +648,13 @@ function cacheKeyOf(schoolId: string, filter: CatalogFilter): string {
 async function readCache(
   schoolId: string,
   filter: CatalogFilter,
+  allowExpired = false,
 ): Promise<CatalogQueryResult | null> {
   try {
     const raw = await AsyncStorage.getItem(cacheKeyOf(schoolId, filter));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CatalogQueryResult;
-    if (!parsed.fetchedAt || Date.now() - parsed.fetchedAt > CACHE_TTL_MS) return null;
+    if (!parsed.fetchedAt || (!allowExpired && Date.now() - parsed.fetchedAt > CACHE_TTL_MS)) return null;
     parsed.source = 'cache';
     return parsed;
   } catch {
