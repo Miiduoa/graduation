@@ -8,6 +8,7 @@ process.env.ONLINE_ORDERING_ENABLED = 'true';
 const { createGroupMembershipHandlers } = require('./groupMembership');
 const { createOrderHandler } = require('./createOrder');
 const { createSubmitProductFeedback } = require('./productFeedback');
+const { createReplyToCampusStory } = require('./storyReplies');
 
 const emulatorHost = /^(?:127\.0\.0\.1|localhost|0\.0\.0\.0):([0-9]{1,5})$/.exec(
   process.env.FIRESTORE_EMULATOR_HOST || '',
@@ -93,6 +94,25 @@ beforeEach(async () => {
 after(async () => {
   await db.terminate();
   await deleteApp(app);
+});
+
+test('simultaneous story replies with the same id create one DM message and one receipt', async () => {
+  const seed = db.batch();
+  seed.set(db.doc('users/alice'), { schoolId: 'pu' });
+  seed.set(db.doc('users/bob'), { schoolId: 'pu' });
+  seed.set(db.doc('campusStories/one'), { authorUid: 'bob', schoolId: 'pu', allowReplies: true, expiresAt: Date.now() + 60000 });
+  await seed.commit();
+  const send = createReplyToCampusStory({ db });
+  const request = { auth: { uid: 'alice' }, data: { viewerUid: 'alice', schoolId: 'pu', storyId: 'one',
+    authorUid: 'bob', replyId: 'reply-concurrency-test-001', content: '一起去嗎？' } };
+  const receipts = await Promise.all([send(request), send(request), send(request)]);
+  assert.deepEqual(receipts, [receipts[0], receipts[0], receipts[0]]);
+  const thread = db.doc('conversations/dm_pu_alice_bob');
+  const messages = await thread.collection('messages').get();
+  assert.equal(messages.size, 1);
+  assert.equal(messages.docs[0].id, receipts[0].messageId);
+  assert.ok(messages.docs[0].data().createdAt.toMillis() > 0);
+  assert.equal((await thread.get()).data().lastMessage.id, receipts[0].messageId);
 });
 
 test('concurrent feedback retries persist one receipt with a server timestamp', async () => {

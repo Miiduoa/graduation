@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
+  Switch,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -65,6 +66,7 @@ function StoryComposer(props: any) {
   const videoKey = candidate?.selection ?? (media?.kind === 'video' ? media.selection : undefined);
   const videoUri = candidate?.uri ?? (media?.kind === 'video' ? media.uri : null);
   const [body, setBody] = useState('');
+  const [allowReplies, setAllowReplies] = useState(true);
   const [bgColor, setBgColor] = useState(BG_COLORS[0]);
   const [poiId, setPoiId] = useState<string | null>(initialPoiId);
   const [poiName, setPoiName] = useState<string | null>(initialPoiName);
@@ -165,6 +167,7 @@ function StoryComposer(props: any) {
       }
       if (!active.current) return;
       await publishStory(entry.id, {
+        allowReplies,
         schoolId: sid,
         authorUid: uid,
         kind,
@@ -311,6 +314,16 @@ function StoryComposer(props: any) {
           </View>
         ) : null}
 
+        <View style={styles.replyPreference}>
+          <Text style={styles.replyPreferenceText}>允許同校成員私訊回覆</Text>
+          <Switch
+            accessibilityLabel="允許同校成員私訊回覆"
+            value={allowReplies}
+            disabled={busy}
+            onValueChange={setAllowReplies}
+          />
+        </View>
+
         <Pressable style={[styles.btn, (busy || candidate) && { opacity: 0.65 }]} disabled={busy || !!candidate} onPress={publish}>
           {busy ? (
             <ActivityIndicator color={theme.colors.onAccent} />
@@ -403,6 +416,8 @@ const createStyles = () => StyleSheet.create({
   },
   poiChipTxt: { color: theme.colors.accent, fontSize: 12, fontWeight: '700' },
 
+  replyPreference: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 52, marginTop: 12 },
+  replyPreferenceText: { flex: 1, color: theme.colors.text, fontSize: 15 },
   btn: {
     backgroundColor: theme.colors.accent,
     paddingVertical: 14,

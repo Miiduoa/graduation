@@ -88,6 +88,7 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
     verifiedSocialPoisForSchool(schoolId).find((item) => item.id === requestedPoi),
   );
   const [body, setBody] = useState('');
+  const [allowReplies, setAllowReplies] = useState(true);
   const [bgColor, setBgColor] = useState<string>(BACKGROUNDS[0][1]);
   const [media, setMedia] = useState<{ file: File; preview: string; duration?: number } | null>(
     null,
@@ -191,6 +192,7 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
         authorUid: user.uid,
         kind: media?.duration ? 'video' : media ? 'image' : 'text',
         text: body.trim(),
+        allowReplies,
         mediaUrl: media ? uploadedUrl.current : null,
         bgColor,
         poiId: poi?.id ?? null,
@@ -267,6 +269,14 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
               ))}
             </fieldset>
           )}
+          <label className={styles.replySetting}>
+            <input
+              type="checkbox"
+              checked={allowReplies}
+              onChange={(event) => setAllowReplies(event.target.checked)}
+            />
+            允許同校成員私訊回覆
+          </label>
           {poi && (
             <button
               className={styles.location}

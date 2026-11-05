@@ -41,6 +41,7 @@ it('writes the image at the school story Storage path and publishes the matching
     schoolId: 'ncku',
     authorUid: 'student',
     kind: 'image',
+    allowReplies: false,
     mediaUrl: url,
     expiresAtMs: 123,
   });
@@ -50,6 +51,7 @@ it('writes the image at the school story Storage path and publishes the matching
       schoolId: 'ncku',
       authorUid: 'student',
       kind: 'image',
+      allowReplies: false,
       mediaUrl: url,
       createdAt: 'server-time',
       expiresAt: 123,
@@ -73,6 +75,7 @@ const content = {
   authorUid: 'student',
   schoolId: 'ncku',
   kind: 'image' as const,
+  allowReplies: true,
   text: '球場集合',
   mediaUrl: 'https://example.test/photo',
   bgColor: '#243b35',

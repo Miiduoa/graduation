@@ -38,6 +38,7 @@ export type CampusStoryDoc = {
   createdAt?: unknown;
   expiresAt?: number;
   viewCount?: number;
+  allowReplies?: boolean;
 };
 
 export function reserveStoryId(): string {
@@ -54,9 +55,11 @@ export async function publishStory(storyId: string, payload: {
   poiId?: string | null;
   poiName?: string | null;
   expiresAtMs: number;
+  allowReplies: boolean;
 }): Promise<string> {
   const ref = doc(storiesCollection(), storyId);
   const content = {
+    allowReplies: payload.allowReplies,
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,

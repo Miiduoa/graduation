@@ -964,6 +964,25 @@ describe('firestore security rules', () => {
     await assertFails(db.collection('messages').doc('message-1').get());
   });
 
+  test('only the server can attach story reply provenance to private messages', async () => {
+    const path = 'conversations/dm_pu_alice_bob';
+    const message = { senderId: 'alice', content: '哈囉', type: 'text' };
+    const origin = { storyId: 'story-one', authorUid: 'bob' };
+    await seedFirestore(async db => {
+      await db.doc(path).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
+      await db.doc(path + '/messages/reply').set({ ...message, storyReplyTo: origin });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const other = testEnv.authenticatedContext('other').firestore();
+    const plain = alice.doc(path + '/messages/plain');
+    await assertSucceeds(plain.set(message));
+    await assertFails(plain.update({ storyReplyTo: origin }));
+    await assertFails(alice.doc(path + '/messages/forged').set({ ...message, storyReplyTo: origin }));
+    await assertSucceeds(bob.doc(path + '/messages/reply').get());
+    await assertFails(other.doc(path + '/messages/reply').get());
+  });
+
   test('deny conversation creation when schoolId is missing', async () => {
     const db = testEnv.authenticatedContext('alice').firestore();
 
@@ -1517,6 +1536,15 @@ describe('campus story view receipts', () => {
       }
       await db.doc('schools/other/members/outsider').set({ status: 'active' });
     });
+  });
+
+  test('a story can be published with either reply setting or by an older client', async () => {
+    const db = dbFor('author');
+    const base = { authorUid: 'author', schoolId: 'pu', expiresAt: Date.now() + 86_400_000 };
+    await assertSucceeds(db.doc('campusStories/allow').set({ ...base, allowReplies: true }));
+    await assertSucceeds(db.doc('campusStories/closed').set({ ...base, allowReplies: false }));
+    await assertSucceeds(db.doc('campusStories/legacy').set(base));
+    await assertFails(db.doc('campusStories/invalid').set({ ...base, allowReplies: 'true' }));
   });
 
   test('only the author can page the list; a viewer can get their own receipt', async () => {

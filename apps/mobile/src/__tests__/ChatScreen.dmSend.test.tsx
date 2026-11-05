@@ -361,3 +361,20 @@ test('failure after unmount persists failed draft for later retry', async () => 
   expect(again.getByLabelText('重試送出此則訊息')).toBeTruthy();
   expect(again.getByDisplayValue('離房後失敗')).toBeTruthy();
 });
+
+test('a story reply shows only its origin label, and recall removes the label and content', async () => {
+  const view = render(
+    <ChatScreen
+      route={{ params: { conversationId: 'dm_pu_alice_bob', peerId: 'bob' } }}
+      navigation={{ setOptions: jest.fn() }}
+    />,
+  );
+  const message = { senderId: 'bob', content: '操場見', storyReplyTo: { storyId: 's1', authorUid: 'alice' } };
+  await act(async () => emitMessages([{ id: 'm1', data: message }]));
+  expect(view.getByText('回覆了限時動態')).toBeTruthy();
+  expect(view.getByText('操場見')).toBeTruthy();
+  await act(async () => emitMessages([{ id: 'm1', data: { ...message, recalledAt: 1 } }]));
+  expect(view.getByText('訊息已撤回')).toBeTruthy();
+  expect(view.queryByText('回覆了限時動態')).toBeNull();
+  expect(view.queryByText('操場見')).toBeNull();
+});

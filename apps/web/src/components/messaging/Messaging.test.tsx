@@ -595,3 +595,20 @@ it('shows source labels and limited coverage without inferring a campus', async 
   expect(screen.getByText(/成績 · 靜宜大學/)).toBeTruthy();
   expect(screen.getByText('其他通知 · 未標示校園')).toBeTruthy();
 });
+
+it('labels a story reply in the conversation and removes its context after recall', async () => {
+  const thread = contents();
+  thread.messages[0].isStoryReply = true;
+  vi.mocked(watchConversationContents).mockImplementation((_session, _id, receive) => {
+    receive(thread);
+    return vi.fn();
+  });
+  render(<Chat />);
+  await screen.findByText('回覆了限時動態');
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  const receive = vi.mocked(watchConversationContents).mock.calls.at(-1)![2];
+  act(() => receive({ ...thread, messages: [{ ...thread.messages[0], recalled: true }] }));
+  expect(screen.getByText('訊息已收回')).toBeTruthy();
+  expect(screen.queryByText('回覆了限時動態')).toBeNull();
+  expect(screen.queryByText('伺服器的訊息')).toBeNull();
+});

@@ -579,6 +579,9 @@ export function PrivateConversationView({
                   key={row.id}
                   className={row.senderId === session.uid ? styles.mine : styles.theirs}
                 >
+                  {!row.recalled && row.isStoryReply && (
+                    <small className={styles.messageMeta}>回覆了限時動態</small>
+                  )}
                   <p>
                     {row.recalled
                       ? '訊息已收回'

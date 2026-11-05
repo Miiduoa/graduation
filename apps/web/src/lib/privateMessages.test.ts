@@ -518,3 +518,15 @@ it('refuses reactions on messages outside the current school and on recalled mes
     expect.objectContaining({ data: expect.objectContaining({ schoolId: session.schoolId }) }),
   );
 });
+
+it('recognizes a story reply only when its author is the other member of the DM', () => {
+  const receive = vi.fn();
+  watchConversationContents(session, 'conversation-1', receive, vi.fn());
+  listener('conversations/conversation-1').receive(document('conversation-1', conversation()));
+  const messages = listener('conversations/conversation-1/messages');
+  messages.receive(querySnapshot(['bob', 'alice', 'third'].map((authorUid, index) =>
+    document('message-' + index, message({ storyReplyTo: { storyId: 'story-1', authorUid } }))
+  )));
+  const parsed = receive.mock.lastCall![0] as { messages: { id: string; isStoryReply: boolean }[] };
+  expect(parsed.messages.filter((m) => m.isStoryReply).map((m) => m.id)).toEqual(['message-1']);
+});

@@ -93,6 +93,7 @@ type Msg = {
   fileUrl?: string;
   reactions?: Record<string, string[]>;
   recalledAt?: any;
+  storyReplyTo?: { storyId: string; authorUid: string };
   localStatus?: DmOutboundDraft['status'];
   local?: boolean;
 };
@@ -899,6 +900,11 @@ export function ChatScreen(props: any) {
         >
           {!mine && <Text style={s.senderName}>{senderName}</Text>}
           <View style={[s.msgBox, mine ? s.msgBoxMine : s.msgBoxPeer]}>
+            {!item.recalledAt && !!item.storyReplyTo?.storyId && !!item.storyReplyTo.authorUid && (
+              <Text style={[s.storyReplyLabel, mine ? s.msgTextMine : s.msgTextPeer]}>
+                回覆了限時動態
+              </Text>
+            )}
             <Text style={[s.msgText, mine ? s.msgTextMine : s.msgTextPeer]}>
               {item.recalledAt ? '訊息已撤回' : item.content ?? item.text}
             </Text>
@@ -1144,6 +1150,7 @@ const createStyles = () => StyleSheet.create({
     borderColor: theme.colors.border,
     borderBottomLeftRadius: 4,
   },
+  storyReplyLabel: { fontSize: 12, fontWeight: '600', marginBottom: 4 },
   msgText: { fontSize: 15, lineHeight: 21 },
   msgTextMine: { color: theme.colors.onAccent },
   msgTextPeer: { color: theme.colors.text },

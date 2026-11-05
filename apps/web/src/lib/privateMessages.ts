@@ -48,6 +48,7 @@ export type PrivateMessage = {
   type: string;
   createdAt: string | null;
   recalled: boolean;
+  isStoryReply?: boolean;
   reactions?: Record<string, string[]>;
 };
 export type ConversationContents = {
@@ -148,6 +149,7 @@ function parseMessage(
     (row.conversationId && row.conversationId !== conversation.id)
   )
     throw new MessagingError('permission');
+  const storyRef = object(row.storyReplyTo);
   if (typeof row.content !== 'string') throw new MessagingError('unavailable');
   return {
     id,
@@ -156,6 +158,12 @@ function parseMessage(
     type: text(row.type) || 'text',
     createdAt: messageTime(row.createdAt),
     recalled: !!row.recalledAt,
+    isStoryReply:
+      row.type === 'text' &&
+      typeof storyRef.storyId === 'string' &&
+      !!storyRef.storyId &&
+      conversation.memberIds.includes(text(storyRef.authorUid)) &&
+      storyRef.authorUid !== row.senderId,
     reactions: parseReactions(row.reactions),
   };
 }

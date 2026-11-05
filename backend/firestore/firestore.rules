@@ -862,6 +862,7 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && exists(/databases/$(database)/documents/conversations/$(conversationId))
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+          && !('storyReplyTo' in request.resource.data)
           && request.resource.data.senderId == request.auth.uid;
         allow update: if isSignedIn()
           && exists(/databases/$(database)/documents/conversations/$(conversationId))
@@ -1732,6 +1733,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && isSchoolMember(resource.data.schoolId);
       allow create: if isSignedIn()
         && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.get('allowReplies', false) is bool
         && request.resource.data.schoolId != null
         && isSchoolMember(request.resource.data.schoolId)
         && request.resource.data.expiresAt != null;

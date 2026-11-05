@@ -35,6 +35,7 @@ const { createOrderHandler } = require('./createOrder');
 const { assertOnlineOrderingEnabled, isOrderAssistantAction } = require('./lib/onlineOrdering');
 const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
+const { createReplyToCampusStory } = require('./storyReplies');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const {
@@ -2755,6 +2756,7 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
 );
 
 exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+exports.replyToCampusStory = onCall({ region: REGION }, createReplyToCampusStory({ db }));
 const {
   createCreateTimetableShareHandler,
   createRevokeTimetableShareHandler,

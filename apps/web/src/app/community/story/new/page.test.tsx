@@ -79,6 +79,7 @@ it('publishes only once to the selected school with the signed-in author, palett
     authorUid: 'student',
     kind: 'text',
     text: '放學去打球',
+    allowReplies: true,
     poiId: null,
     poiName: null,
     mediaUrl: null,
@@ -94,6 +95,7 @@ it('keeps the caption, photo and reserved ID for retry after the document write 
   const file = new File(['jpeg'], 'campus.jpg', { type: 'image/jpeg' });
   render(<StoryComposePage />);
   chooseImage(file);
+  fireEvent.click(screen.getByRole('checkbox', { name: '允許同校成員私訊回覆' }));
   await screen.findByAltText('已選取的照片');
   fireEvent.change(screen.getByLabelText('照片說明（選填）'), { target: { value: '午後校園' } });
   fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
@@ -113,6 +115,7 @@ it('keeps the caption, photo and reserved ID for retry after the document write 
   expect(mock.publish.mock.calls[1][0]).toMatchObject({
     kind: 'image',
     text: '午後校園',
+    allowReplies: false,
     mediaUrl: 'https://example.test/image',
     storyId: 'new-story',
   });
