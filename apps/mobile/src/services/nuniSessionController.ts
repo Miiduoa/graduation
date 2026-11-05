@@ -14,7 +14,7 @@ import {
   type NuniTransport,
 } from './nuniClient';
 
-export type NativeNuniSession = NuniPrincipal & { context: string };
+export type NativeNuniSession = NuniPrincipal & { context: string; expiresAt: number };
 export type NativeNuniState = {
   session: NativeNuniSession | null;
   loading: boolean;
@@ -112,6 +112,43 @@ export class NuniSessionController {
   private current(run: number) {
     return !this.disposed && run === this.generation;
   }
+  /** Same account, still within the stored lifetime, already verified in memory. */
+  private liveVerifiedSession(): NativeNuniSession | null {
+    const { session, loading, error, pendingLogout } = this.state;
+    if (
+      this.loggingOut ||
+      pendingLogout ||
+      loading ||
+      error ||
+      !session ||
+      !this.record ||
+      this.record.pendingLogout ||
+      session.platformAccountId !== this.record.platformAccountId ||
+      this.record.expiresAt <= this.now()
+    ) {
+      return null;
+    }
+    return session;
+  }
+  private dropVerifiedSession(next: NativeNuniState) {
+    this.invalidate();
+    this.update(next);
+  }
+  // A transient foreground refresh or offline verification must preserve the owner's local alarms.
+  localReminderOwner(): string | null | undefined {
+    if (this.loggingOut || this.state.pendingLogout) return null;
+    if (!this.storageRead || this.state.loading) return undefined;
+    const row = this.record;
+    return row && !row.pendingLogout && row.expiresAt > this.now() ? row.platformAccountId : null;
+  }
+  /** Check a captured session for local reads without refreshing or exposing its credential. */
+  isSessionCurrent = (accountId: string, context: string): boolean => {
+    const { session, loading, error, pendingLogout } = this.state;
+    return !this.disposed && !loading && !error && !pendingLogout && !!session &&
+      session.context === context && session.platformAccountId === accountId &&
+      this.record?.platformAccountId === accountId && !this.record.pendingLogout &&
+      this.record.expiresAt > this.now();
+  };
   activate = () => {
     this.disposed = false;
   };
@@ -154,13 +191,20 @@ export class NuniSessionController {
   }
   refresh = async (): Promise<void> => {
     if (this.signingIn || this.loggingOut || this.disposed) return;
-    const run = this.invalidate();
-    this.update({
-      session: null,
-      loading: true,
-      error: '',
-      pendingLogout: !!this.record?.pendingLogout,
-    });
+    const live = this.liveVerifiedSession();
+    const run = live ? this.generation : this.invalidate();
+    if (!live) {
+      this.update({
+        session: null,
+        loading: true,
+        error: '',
+        pendingLogout: !!this.record?.pendingLogout,
+      });
+    }
+    const finish = (next: NativeNuniState) => {
+      if (live) this.dropVerifiedSession(next);
+      else this.update(next);
+    };
     try {
       if (!this.storageRead) {
         const value = await this.deps.storage.read();
@@ -174,11 +218,11 @@ export class NuniSessionController {
       if (fenced && !this.record) await this.deps.logoutFence.clear();
       if (!this.current(run)) return;
       if (!this.record) {
-        this.update({ session: null, loading: false, error: '', pendingLogout: false });
+        finish({ session: null, loading: false, error: '', pendingLogout: false });
         return;
       }
       if (this.record.pendingLogout) {
-        this.update({
+        finish({
           session: null,
           loading: false,
           error: '登出尚未完成，請重試以結束這次登入。',
@@ -189,7 +233,7 @@ export class NuniSessionController {
       if (this.record.expiresAt <= this.now()) {
         await this.forget();
         if (this.current(run))
-          this.update({
+          finish({
             session: null,
             loading: false,
             error: '登入已逾時，請重新登入。',
@@ -201,16 +245,26 @@ export class NuniSessionController {
         await this.call('sessions/current', this.record.sessionHandle),
       );
       if (!this.current(run)) return;
-      if (principal.platformAccountId !== this.record.platformAccountId)
+      if (
+        principal.platformAccountId !== this.record.platformAccountId ||
+        (live && principal.platformAccountId !== live.platformAccountId)
+      )
         throw new NuniError(409, 'SESSION_CHANGED');
       this.update({
-        session: { ...principal, context: `native-${this.now()}-${run}` },
+        session: {
+          ...principal,
+          context: live?.context ?? `native-${this.now()}-${run}`,
+          expiresAt: this.record.expiresAt,
+        },
         loading: false,
         error: '',
         pendingLogout: false,
       });
     } catch (error) {
       if (!this.current(run)) return;
+      const closed =
+        error instanceof NuniError && (error.status === 401 || error.status === 409);
+      if (live && !closed) return;
       if (error instanceof NuniError && error.status === 401) {
         try {
           await this.forget();
@@ -219,7 +273,7 @@ export class NuniSessionController {
         }
       }
       if (this.current(run))
-        this.update({
+        finish({
           session: null,
           loading: false,
           error: '無法確認登入狀態，請重新連線後再試。',
@@ -271,7 +325,7 @@ export class NuniSessionController {
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
       this.storageRead = true;
       this.update({
-        session: { ...principal, context: `native-${this.now()}-${run}` },
+        session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
         loading: false,
         error: '',
         pendingLogout: false,

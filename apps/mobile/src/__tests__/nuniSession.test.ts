@@ -26,7 +26,7 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
-function setup(initial: string | null = null, initialFence = false) {
+function setup(initial: string | null = null, initialFence = false, now = () => 1000) {
   let fenced = initialFence;
   const logoutFence = {
     read: jest.fn(async () => fenced),
@@ -64,7 +64,7 @@ function setup(initial: string | null = null, initialFence = false) {
     request,
     credential,
     clearCredential: jest.fn(async () => {}),
-    now: () => 1000,
+    now,
   });
   return {
     controller,
@@ -94,6 +94,52 @@ it('exposes a restored principal only after server verification, never from stor
     expect.any(AbortSignal),
   );
 });
+it('authorizes local reads only for the verified account, current session and unexpired lifetime', async () => {
+  let clock = 1000;
+  const { controller, request } = setup(stored(false, 2000), false, () => clock);
+  expect(controller.isSessionCurrent(account, '')).toBe(false);
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  expect(controller.state.session!.expiresAt).toBe(2000);
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  expect(controller.isSessionCurrent('other-account', context)).toBe(false);
+  expect(controller.isSessionCurrent(account, 'old-session')).toBe(false);
+  clock = 2000;
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+  expect(request).toHaveBeenCalledTimes(1);
+  clock = 1999;
+  const refresh = controller.refresh();
+  expect(controller.state).toMatchObject({ loading: false, session: expect.objectContaining({ context }) });
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  await refresh;
+  expect(controller.state.session!.context).toBe(context);
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  controller.dispose();
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+});
+
+it('keeps an unexpired verified session across a foreground refresh and clears it when expired', async () => {
+  let clock = 1000;
+  const { controller, request } = setup(stored(false, 5000), false, () => clock);
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const during = deferred<unknown>();
+  request.mockImplementationOnce(() => during.promise);
+  const refresh = controller.refresh();
+  expect(controller.state.session).toMatchObject({ platformAccountId: account, context });
+  expect(controller.state.loading).toBe(false);
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  during.resolve(principal);
+  await refresh;
+  expect(controller.state.session!.context).toBe(context);
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  clock = 5000;
+  await controller.refresh();
+  expect(controller.state.session).toBeNull();
+  expect(controller.state.error).toBe('登入已逾時，請重新登入。');
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+});
+
 it('does not expose offline cached identity and allows a verified retry', async () => {
   const { controller, request } = setup(stored());
   request.mockRejectedValueOnce(new NuniError(0, 'NETWORK_ERROR'));
@@ -164,9 +210,10 @@ it('rejects an old screen context before sending a mutation', async () => {
   await controller.refresh();
   const previous = controller.state.session!.context;
   await controller.refresh();
+  expect(controller.state.session!.context).toBe(previous);
   const calls = request.mock.calls.length;
   await expect(
-    controller.request('class-workspaces', previous, { title: 'stale write' }),
+    controller.request('class-workspaces', 'stale-context', { title: 'stale write' }),
   ).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
   expect(request).toHaveBeenCalledTimes(calls);
 });
@@ -187,6 +234,7 @@ it('uses the same consumer transaction as Web, verifies current session, and sto
   const { controller, request, credential, persisted } = setup();
   await controller.refresh();
   await expect(controller.signIn()).resolves.toBe('signed-in');
+  expect(controller.state.session!.expiresAt).toBe(3_601_000);
   expect(credential).toHaveBeenCalledWith(transaction.clientId, transaction.nonce);
   expect(request).toHaveBeenCalledWith(
     'sessions',

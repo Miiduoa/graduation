@@ -6,12 +6,14 @@ import {
 } from '../app/rootNavigation';
 import {
   isPublicNavigationReady,
+  publicNavigateNuniWorkspace,
   publicNavigatePersonalCalendar,
   publicNavigatePersonalTimetable,
   subscribePublicNavigationReady,
 } from '../app/publicNavigation';
 import { classDate } from '@campus/shared';
-import { isClassReminderPayload, personalReminderCategory } from './personalReminderPayload';
+import { resolveNuniAssignmentReminderTap } from './nuniAssignmentReminders';
+import { isClassReminderPayload, isNuniAssignmentReminderPayload, personalReminderCategory } from './personalReminderPayload';
 import { resolvePersonalEventReminderTap } from './personalEventReminders';
 import type { PersonalImportScope } from './personalImports';
 
@@ -24,7 +26,13 @@ type TapOptions = {
   clearLastResponse?: (expected: ReminderResponse) => Promise<void>;
 };
 
+type NavigationScope = PersonalImportScope & { nuniContext?: string };
+
 type Destination =
+  | {
+      screen: 'NuniWorkspace';
+      params: { tab: 'courses'; workspaceId: string; assignmentId: string; assistantAccountId: string };
+    }
   | { screen: 'PersonalCalendar'; params: { eventId: string } }
   | {
       screen: 'PersonalTimetable';
@@ -33,11 +41,11 @@ type Destination =
 
 let pendingTap: { response: ReminderResponse; key: string } | null = null;
 let lastHandledResponseKey: string | null = null;
-let scopeProvider: () => PersonalImportScope | null = () => null;
+let scopeProvider: () => NavigationScope | null = () => null;
 const readyListeners = new Set<() => void>();
 
 export function setPersonalEventReminderScopeProvider(
-  provider: () => PersonalImportScope | null,
+  provider: () => NavigationScope | null,
 ) {
   scopeProvider = provider;
   notifyReminderNavigationReady();
@@ -50,7 +58,15 @@ function responseKey(response: ReminderResponse): string {
   return `${identifier}:${action}:${JSON.stringify(data ?? {})}`;
 }
 
-async function resolveDestination(payload: unknown, scope: PersonalImportScope): Promise<Destination | null> {
+async function resolveDestination(response: ReminderResponse, scope: NavigationScope): Promise<Destination | null> {
+  const request = response.notification?.request;
+  const payload = request?.content?.data;
+  if (isNuniAssignmentReminderPayload(payload)) {
+    if (!scope.nuniContext || !scope.owner.startsWith('nuni:') || !request?.identifier) return null;
+    const accountId = scope.owner.slice('nuni:'.length);
+    const target = await resolveNuniAssignmentReminderTap(payload, request.identifier, { accountId, schoolId: scope.schoolId });
+    return target ? { screen: 'NuniWorkspace', params: { tab: 'courses', ...target, assistantAccountId: accountId } } : null;
+  }
   if (isClassReminderPayload(payload)) {
     if (
       scope.owner === 'guest:device' ||
@@ -67,18 +83,20 @@ async function resolveDestination(payload: unknown, scope: PersonalImportScope):
     ) return null;
     return { screen: 'PersonalTimetable', params: { ...params, date: classDate(new Date(startAt)), startAt } };
   }
-  const event = await resolvePersonalEventReminderTap(payload, scope);
+  const event = await resolvePersonalEventReminderTap(payload, { owner: scope.owner, schoolId: scope.schoolId });
   return event.ok ? { screen: 'PersonalCalendar', params: { eventId: event.eventId } } : null;
 }
 
 function navigate(destination: Destination): boolean {
-  if (isSchoolNavigationReady()) return rootNavigateNested('學習', destination.screen, destination.params);
+  const tab = destination.screen === 'NuniWorkspace' ? '我的' : '學習';
+  if (isSchoolNavigationReady()) return rootNavigateNested(tab, destination.screen, destination.params);
   if (isPublicNavigationReady()) {
+    if (destination.screen === 'NuniWorkspace') return publicNavigateNuniWorkspace(destination.params);
     return destination.screen === 'PersonalCalendar'
       ? publicNavigatePersonalCalendar(destination.params)
       : publicNavigatePersonalTimetable(destination.params);
   }
-  return rootNavigationRef.isReady() && rootNavigateNested('學習', destination.screen, destination.params);
+  return rootNavigationRef.isReady() && rootNavigateNested(tab, destination.screen, destination.params);
 }
 
 function navigatorsReady(): boolean {
@@ -115,18 +133,17 @@ export async function flushPendingPersonalEventReminderTap(options?: TapOptions)
   const tap = pendingTap;
   const scope = scopeProvider();
   if (!tap || !scope || !navigatorsReady()) return false;
-  const destination = await resolveDestination(tap.response.notification?.request?.content?.data, scope);
+  const destination = await resolveDestination(tap.response, scope);
   if (pendingTap !== tap) return false;
   const current = scopeProvider();
-  if (!current || current.owner !== scope.owner || current.schoolId !== scope.schoolId) {
-    pendingTap = null;
-    return false;
-  }
-  if (destination && !navigate(destination)) return false;
+  const sameScope = current && current.owner === scope.owner && current.schoolId === scope.schoolId;
+  const allowed = !!destination && sameScope &&
+    (destination.screen !== 'NuniWorkspace' || current.nuniContext === scope.nuniContext);
+  if (allowed && !navigate(destination)) return false;
   lastHandledResponseKey = tap.key;
   pendingTap = null;
   if (options?.clearLastResponse) await options.clearLastResponse(tap.response).catch(() => undefined);
-  return destination !== null;
+  return !!allowed;
 }
 
 export function subscribePersonalEventReminderNavigationReady(

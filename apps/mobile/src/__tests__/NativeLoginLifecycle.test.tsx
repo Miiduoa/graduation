@@ -1,5 +1,6 @@
 import React from 'react';
 import { AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NuniSessionProvider } from '../state/nuniSession';
 import { NuniWorkspaceScreen } from '../screens/NuniWorkspaceScreen';
@@ -8,6 +9,11 @@ const account = 'pa_11111111-1111-4111-8111-111111111111';
 const handle = 'ps_' + 'a'.repeat(43);
 let mockStored: string | null = null;
 let mockAvailable = true;
+const mockAlarmIds = new Set<string>();
+jest.mock('expo-notifications', () => ({
+  getAllScheduledNotificationsAsync: async () => [...mockAlarmIds].map((identifier) => ({ identifier })),
+  cancelScheduledNotificationAsync: async (identifier: string) => { mockAlarmIds.delete(identifier); },
+}));
 let mockAppActive: ((state: string) => void) | undefined;
 const mockRequest = jest.fn();
 const mockCapability = jest.fn();
@@ -88,8 +94,8 @@ it('same verified account retains its draft after going to another app and back'
   await act(async () => {
     mockAppActive?.('active');
   });
-  expect(view.queryByTestId('review-course-draft')).toBeNull();
-  expect(view.getByLabelText('正在確認 Google 帳號')).toBeTruthy();
+  expect(view.getByTestId('review-course-draft').props.value).toBe('訪談作業尚未送出');
+  expect(view.queryByLabelText('正在確認 Google 帳號')).toBeNull();
   await act(async () =>
     accept({ authenticated: true, platformAccountId: account, isPlatformOperator: false }),
   );
@@ -131,4 +137,28 @@ it('a cancelled Google chooser returns to a usable native sign-in action', async
   await view.findByRole('button', { name: '使用 Google 繼續' });
   expect(view.queryByText('目前無法確認登入狀態')).toBeNull();
   expect(mockRequest.mock.calls.some(([path]) => path === 'sessions')).toBe(false);
+});
+
+it('keeps a reminder through foreground/offline verification and removes its alarm and receipt on logout', async () => {
+  const token = '22222222-2222-4222-8222-222222222222';
+  const identifier = 'nuni.assignment.due.' + token;
+  const registry = '@nuni-assignment-reminders:v1';
+  mockAlarmIds.add(identifier);
+  await AsyncStorage.setItem(registry, JSON.stringify([{
+    token, accountId: account, schoolId: 'pu', workspaceId: 'cw_' + token, assignmentId: 'cwa_' + token,
+    triggerAt: Date.now() + 3_600_000, dueAtMs: Date.now() + 7_200_000,
+  }]));
+  const view = render(ui());
+  await view.findByTestId('review-course-draft');
+  mockRequest.mockRejectedValueOnce(new Error('offline'));
+  await act(async () => { mockAppActive?.('active'); });
+  await view.findByTestId('review-course-draft');
+  expect(view.queryByText('目前無法確認登入狀態')).toBeNull();
+  expect(mockAlarmIds.has(identifier)).toBe(true);
+  expect(await AsyncStorage.getItem(registry)).not.toBeNull();
+  await act(async () => { mockAppActive?.('active'); });
+  fireEvent.press(await view.findByRole('tab', { name: '帳號' }));
+  fireEvent.press(await view.findByRole('button', { name: '登出 Google 帳號' }));
+  await waitFor(() => expect(mockAlarmIds.has(identifier)).toBe(false));
+  expect(await AsyncStorage.getItem(registry)).toBeNull();
 });

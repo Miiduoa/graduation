@@ -5,6 +5,7 @@ import { MESSAGING_NAV_SECTIONS } from '@campus/shared/src/academicSections';
 import { AIScreen, AIHero, AISection, AICard, AIRow, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { useNuniSession } from '../state/nuniSession';
 import { usePermissions } from '../hooks/usePermissions';
 import { safeNavigate } from '../utils/safeNavigate';
 import { loadFailureCopy } from '../utils/loadFailureCopy';
@@ -17,8 +18,10 @@ export default function MeAiFirstScreen() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const navigation = useNavigation();
   const auth = useAuth();
+  const platform = useNuniSession();
   const { signOutWithWarning } = auth;
   const { isStudent } = usePermissions();
+  const platformReady = !!platform.session && !platform.loading && !platform.error && !platform.pendingLogout;
   const uid = auth.user?.uid;
   const profile = auth.profile?.uid === uid ? auth.profile : null;
   const currentUid = useRef(uid);
@@ -70,6 +73,13 @@ export default function MeAiFirstScreen() {
           subtitle="和網頁版共用的課程、學校資格與店家權限"
           onPress={go('NuniWorkspace')}
         />
+        {platformReady ? (
+          <AIRow
+            title="開啟課表助理"
+            subtitle="用已驗證的 nuni 帳號查這堂課與作業"
+            onPress={go('NuniTimetableAssistant')}
+          />
+        ) : null}
       </AISection>
       <AISection title="學校帳號資料">
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>

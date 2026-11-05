@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
-import { askCampusAssistant } from '../features/campusAssistant';
+import { askCampusAssistant, getOnDeviceAssistantReadiness } from '../features/campusAssistant';
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
 import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } from '../services/campusAssignmentReminders';
@@ -14,7 +14,10 @@ jest.mock('../app/useAIOverlay', () => ({
 }));
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
-let mockPlatform: { loading?: boolean; session?: { platformAccountId: string } } | null = null;
+let mockPlatform: {
+  loading?: boolean; session?: { platformAccountId: string; context?: string };
+  isSessionCurrent?: (id: string, context: string) => boolean;
+} | null = null;
 jest.mock('../state/nuniSession', () => ({
   ...jest.requireActual('../state/nuniSession'), useOptionalNuniSession: () => mockPlatform,
 }));
@@ -49,6 +52,10 @@ jest.mock('../features/campusAssistantActions', () => ({
 jest.mock('../services/campusSenseSnapshot', () => ({
   ...jest.requireActual('../services/campusSenseSnapshot'),
   refreshCampusSenseSnapshot: jest.fn(),
+}));
+let mockUpcomingClass = false;
+jest.mock('../screens/AssistantClassNowHint', () => ({
+  AssistantClassNowHint: ({ children }: { children: (upcoming: boolean) => React.ReactNode }) => children(mockUpcomingClass),
 }));
 jest.mock('../screens/LegacyAssignmentReminders', () => ({ LegacyAssignmentReminders: () => null }));
 jest.mock('../services/campusAssignmentReminders', () => ({
@@ -87,6 +94,7 @@ beforeEach(() => {
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([]);
   mockUid = 'A';
   mockSchool = 'pu';
+  mockUpcomingClass = false;
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 });
@@ -984,6 +992,60 @@ test('the next-class shortcut opens the selected occurrence in its own term and 
   expect(view.queryByText('B203')).toBeNull();
 });
 
+test.each([false, true])('puts the imminent class first only when the timetable hint confirms it (%s)', (upcoming) => {
+  mockUpcomingClass = upcoming;
+  const view = render(<CampusAssistantScreen />);
+  const choices = view.getAllByRole('button', { name: /^(現在有課嗎？|查下一堂課)$/ });
+  expect(choices).toHaveLength(2);
+  expect(choices[0]).toBe(view.getByRole('button', { name: upcoming ? '查下一堂課' : '現在有課嗎？' }));
+});
+
+test('one tap on current class checks the device and can open a staggered overlap by its original start', async () => {
+  const navigate = jest.fn();
+  const first = { courseId: 'manual:a', term: '115|1', name: '資料結構', room: 'A301',
+    date: '2026-11-05', startTime: '09:10', endTime: '11:00' };
+  const second = { ...first, courseId: 'manual:b', name: '資料庫', room: 'B203', startTime: '10:10' };
+  request.mockResolvedValue({ content: '課程時段重疊', source: 'device', tool: 'saved-timetable',
+    savedClassRead: { uid: 'A', schoolId: 'pu', classes: [first, second], updatedAt: null, currentAt: '2026-11-05T02:25:00Z' } });
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '現在有課嗎？' })));
+  expect(request.mock.calls[0][0]).toMatchObject({ mode: 'device', messages: [{ role: 'user', content: '我現在有課嗎？' }] });
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  expect(view.getByText('這個時段有 2 堂課')).toBeTruthy();
+  expect(view.getByText('查詢時間 2026/11/5 上午10:25（台灣時間）')).toBeTruthy();
+  expect(view.queryByText('下一堂課')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: /在課表中查看資料庫.*10:10–11:00.*B203/ }));
+  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
+    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
+    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+  } });
+});
+
+test('a verified free period offers the next class without erasing an unsent draft', async () => {
+  const navigate = jest.fn();
+  request.mockResolvedValueOnce({ content: '此時沒有排課', source: 'device', tool: 'saved-timetable',
+    route: '/timetable', savedClassRead: { uid: 'A', schoolId: 'pu', classes: [], updatedAt: null, currentAt: '2026-11-05T02:25:00Z' } })
+    .mockResolvedValueOnce({ content: '尚未排定接下來的課程', source: 'device', tool: 'saved-timetable', route: '/timetable' });
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '現在有課嗎？' })));
+  expect(view.getByText('這個時段沒有排課')).toBeTruthy();
+  expect(view.getByText('查詢時間 2026/11/5 上午10:25（台灣時間）')).toBeTruthy();
+  expect(view.getByRole('button', { name: '開啟我的課表' })).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '準備明天的考試');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查下一堂課' })));
+  expect(request.mock.calls[1][0].messages.at(-1)).toEqual({ role: 'user', content: '下一堂課是什麼？' });
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('準備明天的考試');
+});
+
+test('unavailable evidence displays its explanation and offers the timetable without declaring a free period', async () => {
+  request.mockResolvedValue({ content: '這台手機目前無法確認這個時段的課程。', source: 'device', tool: 'saved-timetable', route: '/timetable' });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '現在有課嗎？' })));
+  expect(view.getByText('這台手機目前無法確認這個時段的課程。')).toBeTruthy();
+  expect(view.getByRole('button', { name: '開啟我的課表' })).toBeTruthy();
+  expect(view.queryByText('這個時段沒有排課')).toBeNull();
+});
+
 test('a failed next-class shortcut retries the original read in one tap', async () => {
   request.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({
     content: '請核對本學期與上課時間。', tool: 'saved-timetable', source: 'device', route: '/timetable',
@@ -1004,8 +1066,253 @@ test('an unresolved or active platform session cannot open the campus account ti
   mockPlatform = { loading: true };
   await act(async () => view.rerender(<CampusAssistantScreen />));
   expect(view.queryByText('查下一堂課')).toBeNull();
+  expect(view.queryByText('現在有課嗎？')).toBeNull();
   mockPlatform = { session: { platformAccountId: 'student-b' } };
   await act(async () => view.rerender(<CampusAssistantScreen />));
   expect(view.queryByText('查下一堂課')).toBeNull();
+  expect(view.queryByText('現在有課嗎？')).toBeNull();
   expect(request).not.toHaveBeenCalled();
+});
+
+const platformRoute = { name: 'NuniTimetableAssistant' };
+
+function usePlatformFixture(accountId: string, context = 'context-a') {
+  mockPlatform = {
+    session: { platformAccountId: accountId, context },
+    isSessionCurrent: (id, captured) =>
+      id === mockPlatform?.session?.platformAccountId && captured === mockPlatform.session?.context,
+  };
+}
+
+test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
+  usePlatformFixture('student-b');
+  const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',
+    date: '2026-11-05', startTime: '10:10', endTime: '12:00' };
+  const read = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', classes: [item], updatedAt: null };
+  request.mockResolvedValueOnce({ content: item.name, source: 'device', tool: 'saved-timetable', savedClassRead: read })
+    .mockResolvedValueOnce({ content: item.room, source: 'device', tool: 'saved-timetable', savedClassRead: { ...read, focus: 'room' } });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalTimetable', 'PersonalImport'] }) }} />);
+  expect(view.getByText('課表助理')).toBeTruthy();
+  expect(view.queryByRole('tab')).toBeNull();
+  expect(view.queryByText('整理今日重點')).toBeNull();
+  expect(getOnDeviceAssistantReadiness).not.toHaveBeenCalled();
+  const field = view.getByLabelText('詢問校園助理');
+  await act(async () => fireEvent.press(view.getByText('查下一堂課')));
+  const call = request.mock.calls[0][0];
+  expect(call.scope).toEqual({ uid: '', schoolId: 'pu' });
+  expect(call.platformTimetable.accountId).toBe('student-b');
+  expect(call.platformTimetable.isCurrent()).toBe(true);
+  expect(call).not.toHaveProperty('senseSnapshot');
+  fireEvent.changeText(field, '接著要問的問題');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '在哪間教室？' })));
+  expect(request.mock.calls[1][0].messages[1].savedClassRead).toEqual(read);
+  expect(field.props.value).toBe('接著要問的問題');
+  fireEvent.press(view.getAllByRole('button', { name: /在課表中查看平台帳號的專題/ })[1]);
+  expect(navigate).toHaveBeenLastCalledWith('PersonalTimetable', {
+    schoolId: 'pu', courseId: item.courseId, date: item.date, term: item.term,
+    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: read.owner, schoolId: 'pu' }),
+  });
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('a platform session replacement discards pending results even for the same platform account', async () => {
+  usePlatformFixture('student-b');
+  const response = deferred<object>();
+  request.mockReturnValue(response.promise);
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  fireEvent.press(view.getByText('現在有課嗎？'));
+  const claim = request.mock.calls[0][0].platformTimetable;
+  usePlatformFixture('student-b', 'context-new');
+  expect(claim.isCurrent()).toBe(false);
+  view.rerender(<CampusAssistantScreen route={platformRoute} />);
+  await act(async () => response.resolve({ content: '舊學生的課表', source: 'device' }));
+  expect(view.queryByText('舊學生的課表')).toBeNull();
+  expect(view.getByText('現在有課嗎？')).toBeTruthy();
+});
+
+test('a missing nuni timetable opens the public import screen; unrelated questions expose no unregistered service shortcut', async () => {
+  usePlatformFixture('student-b');
+  request.mockResolvedValueOnce({ content: '請匯入這個帳號的課表', source: 'device', tool: 'saved-timetable', route: '/timetable/import' })
+    .mockResolvedValueOnce({ content: '可查現在或下一堂課。', source: 'device', tool: 'saved-timetable' });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalImport'] }) }} />);
+  await act(async () => fireEvent.press(view.getByText('現在有課嗎？')));
+  fireEvent.press(view.getByRole('button', { name: '匯入課表' }));
+  expect(navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '公車');
+  expect(view.queryByText('前往公車')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  expect(view.queryByText('查看公車')).toBeNull();
+});
+
+test('the general assistant keeps its model tools and masks the Firebase timetable while a nuni account is active', async () => {
+  usePlatformFixture('student-b');
+  const view = render(<CampusAssistantScreen route={{ name: 'CampusAssistant' }} />);
+  expect(view.queryByText('現在有課嗎？')).toBeNull();
+  openCampusTools(view);
+  expect(view.getByText('下載／管理免費 AI 模型')).toBeTruthy();
+  expect(getOnDeviceAssistantReadiness).toHaveBeenCalled();
+  expect(request).not.toHaveBeenCalled();
+});
+
+test('the nuni course action opens a specific assignment and keeps a typed draft intact', async () => {
+  usePlatformFixture('student-b');
+  const navigate = jest.fn();
+  const item = { courseId: 'import:x', term: '115|1', name: '資訊管理', room: 'A302',
+    date: '2026-11-05', startTime: '10:10', endTime: '12:00' };
+  const anchor = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', classes: [item], updatedAt: null };
+  request.mockResolvedValueOnce({ content: item.name, source: 'device', savedClassRead: anchor })
+    .mockResolvedValueOnce({ content: '這堂課的作業', source: 'device', courseworkRead: {
+      anchor, checkedAt: '2026-11-05T02:30:00Z', result: {
+        kind: 'assignments', workspace: { id: 'work-id', title: '資訊管理' }, limited: false,
+        assignments: [{ id: 'assign-id', title: '小考報告', dueAt: null, state: 'closed', submittedAt: null }],
+      },
+    } });
+  const screen = render(<CampusAssistantScreen route={platformRoute}
+    navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace', 'PersonalImport', 'PersonalTimetable'] }) }} />);
+  await act(async () => fireEvent.press(screen.getByText('查下一堂課')));
+  const input = screen.getByLabelText('詢問校園助理');
+  fireEvent.changeText(input, '保留我的草稿');
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: '查這堂課的作業' })));
+  expect(input.props.value).toBe('保留我的草稿');
+  fireEvent.press(screen.getByRole('button', { name: /查看作業：小考報告，已停止收件 · 未繳交/ }));
+  expect(navigate).toHaveBeenCalledWith('NuniWorkspace', {
+    tab: 'courses', workspaceId: 'work-id', assignmentId: 'assign-id', assistantAccountId: 'student-b',
+  });
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('course choices show reviewed class details, verify the selected ID, and mark an open late assignment as overdue', async () => {
+  usePlatformFixture('student-b');
+  const anchor = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', updatedAt: null,
+    classes: [{ courseId: 'import:x', term: '115|1', name: '資料結構', room: '', date: '2026-11-05', startTime: '10:10', endTime: '12:00' }] };
+  const info = { teacher: '林老師', academicYear: '115', semester: '1', schoolId: 'pu', courseCode: 'CS101' };
+  const reply = (result: unknown) => ({
+    source: 'device', content: '資料結構作業', courseworkRead: { anchor, result, checkedAt: '2026-11-05T02:30:00Z' },
+  });
+  request.mockResolvedValueOnce(reply({ kind: 'choose', workspaces: [
+    { id: 'first', title: '資料結構', reviewed: { ...info, className: '甲班' } },
+    { id: 'second', title: '資料結構', reviewed: { ...info, className: '乙班' } },
+  ] })).mockResolvedValueOnce(reply({ kind: 'assignments', limited: false, workspace: { id: 'second', title: '資料結構' },
+    assignments: [
+      { id: 'one', title: '練習一', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: null },
+      { id: 'two', title: '練習二', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: '2026-11-04T00:00:00Z' },
+    ],
+  }));
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: /資料結構.*115學年度.*乙班.*林老師/ })));
+  expect(request.mock.calls[1][0].courseworkChoice).toEqual({ workspaceId: 'second' });
+  expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未繳交/ })).toBeTruthy();
+  expect(view.getByRole('button', { name: /查看作業：練習二，已繳交/ })).toBeTruthy();
+});
+
+describe('class assignment follow-ups in the nuni timetable assistant', () => {
+  const anchor = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', updatedAt: null,
+    classes: [{ courseId: 'import:db', term: '115|1', name: '資料庫', room: 'A2', date: '2026-11-05', startTime: '10:10', endTime: '12:00' }] };
+  const result = { kind: 'assignments' as const, limited: true, workspace: { id: 'db-class', title: '資料庫' },
+    assignments: [
+      { id: 'first', title: '週記', state: 'open' as const, dueAt: '2026-11-04T00:00:00Z', submittedAt: null },
+      { id: 'second', title: '週記', state: 'open' as const, dueAt: '2026-11-06T12:00:00Z', submittedAt: '2026-11-04T05:20:55Z' },
+    ] };
+  const checkedAt = '2026-11-05T01:45:00Z';
+  const reply = (extra: object = {}) => ({
+    source: 'device', content: '資料庫的課堂作業', courseworkRead: { anchor, checkedAt, result, ...extra },
+  });
+  beforeEach(() => usePlatformFixture('student-b'));
+
+  test('shows Taipei times both before and after confirmation and accepts just one tap while scheduling', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse(checkedAt));
+    try {
+      const work = { ...result, assignments: [{ ...result.assignments[1], submittedAt: null }] };
+      const card = (value: object) => reply({ result: work, view: { kind: 'reminder', action: 'set',
+        ids: ['second'], minutes: 60, ...value } });
+      let finish!: (value: unknown) => void;
+      request.mockResolvedValueOnce(reply({ result: work }))
+        .mockResolvedValueOnce(card({ step: 'review', message: '請核對作業和提醒時間。' }))
+        .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      const screen = render(<CampusAssistantScreen route={platformRoute} />);
+      fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
+      await act(async () => fireEvent.press(screen.getByText('送出問題')));
+      await act(async () => fireEvent.press(screen.getByRole('button', { name: '提醒我交這份' })));
+      expect(screen.getByText('台灣時間')).toBeTruthy();
+      expect(screen.getByText('截止時間 · 2026/11/6 下午8:00')).toBeTruthy();
+      expect(screen.getByLabelText('提醒時間，2026/11/6 下午7:00，台灣時間')).toBeTruthy();
+      expect(screen.getByText('提醒時間 · 2026/11/6 下午7:00')).toBeTruthy();
+      expect(screen.getByRole('radio', { name: '提前 1 小時', checked: true })).toBeTruthy();
+      expect(request.mock.calls[1][0].courseworkChoice).toBeUndefined();
+      const confirm = screen.getByRole('button', { name: '確認設定提醒' });
+      await act(async () => { fireEvent.press(confirm); fireEvent.press(confirm); });
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(request.mock.calls[2][0].courseworkChoice).toEqual({ reminder: 'confirm', id: 'second' });
+      expect(screen.queryByRole('button', { name: '取消作業查詢' })).toBeNull();
+      await act(async () => finish(card({ step: 'result', next: 'remove', message: '已設定這份作業的手機提醒。' })));
+      expect(screen.getByText('已設定這份作業的手機提醒。')).toBeTruthy();
+      expect(screen.getAllByText('提醒時間 · 2026/11/6 下午7:00')).toHaveLength(2);
+      expect(screen.getByRole('button', { name: '取消這份作業的提醒' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '確認設定提醒' })).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  test('clarifies same-title receipts, preserves exact selection, keeps the time of the source read and opens that assignment', async () => {
+    const navigate = jest.fn();
+    request.mockResolvedValueOnce(reply())
+      .mockResolvedValueOnce(reply({ view: { kind: 'choose-receipt', ids: ['first', 'second'], message: '請選擇要核對的作業。' } }))
+      .mockResolvedValueOnce(reply({ view: { kind: 'receipt', ids: ['second'], message: '週記有繳交紀錄。' } }))
+      .mockResolvedValueOnce(reply());
+    const screen = render(<CampusAssistantScreen route={platformRoute}
+      navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace'] }) }} />);
+    const input = screen.getByLabelText('詢問校園助理');
+    fireEvent.changeText(input, '這堂課有什麼作業？');
+    await act(async () => fireEvent.press(screen.getByText('送出問題')));
+    fireEvent.changeText(input, '保留草稿');
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '我交了嗎？' })));
+    expect(screen.getByText('請選擇要核對的作業。')).toBeTruthy();
+    const second = screen.getByRole('button', { name: /選擇作業：第 2 份，週記，截止.*11\/6/ });
+    await act(async () => fireEvent.press(second));
+    expect(request.mock.calls[2][0].courseworkChoice).toEqual({ assignmentId: 'second' });
+    expect(screen.getByText(/繳交於 .*11\/4.*20:55/)).toBeTruthy();
+    expect(input.props.value).toBe('保留草稿');
+    fireEvent.press(screen.getByRole('button', { name: /查看作業：週記，已繳交.*繳交於/ }));
+    expect(navigate).toHaveBeenLastCalledWith('NuniWorkspace', {
+      tab: 'courses', workspaceId: 'db-class', assignmentId: 'second', assistantAccountId: 'student-b',
+    });
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '回到這門課的作業' })));
+    expect(request.mock.calls[3][0].messages.at(-1).content).toBe('回到這門課的作業');
+    expect(screen.getAllByRole('button', { name: /^查看作業：週記/ })).toHaveLength(2);
+  });
+
+  test('prioritization displays only the identified assignment and keeps the capped-source notice', async () => {
+    request.mockResolvedValueOnce(reply())
+      .mockResolvedValueOnce(reply({ view: { kind: 'priority', ids: ['first'], message: '最早逾期、仍在收件的作業。' } }));
+    const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
+    await act(async () => fireEvent.press(screen.getByText('送出問題')));
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '哪個最急？' })));
+    expect(screen.getByText('優先處理的作業')).toBeTruthy();
+    expect(screen.getByText('最早逾期、仍在收件的作業。')).toBeTruthy();
+    expect(screen.getAllByText(/已達平台單次查詢上限/)).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^查看作業：週記/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /^查看作業：週記，已逾期/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '我交了嗎？' })).toBeTruthy();
+  });
+
+  test('a changed assignment only offers a fresh read, keeps its exact destination and suppresses a stale receipt claim', async () => {
+    request.mockResolvedValueOnce(reply({ changedAssignmentId: 'first', openedAssignmentId: 'first',
+      view: { kind: 'receipt', ids: ['first'], message: '舊的收據回答' } }))
+      .mockResolvedValueOnce(reply());
+    const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
+    await act(async () => fireEvent.press(screen.getByText('送出問題')));
+    expect(screen.getByText('作業已更新，這是上次查詢的紀錄。')).toBeTruthy();
+    expect(screen.queryByText('舊的收據回答')).toBeNull();
+    expect(screen.queryByRole('button', { name: '我交了嗎？' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '哪個最急？' })).toBeNull();
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '重新核對繳交紀錄' })));
+    expect(request.mock.calls[1][0].courseworkChoice).toEqual({ refreshAssignmentId: 'first' });
+  });
 });

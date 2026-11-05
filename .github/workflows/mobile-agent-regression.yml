@@ -75,6 +75,14 @@ jobs:
             src/__tests__/services/localCampusToolProtocol.test.ts \
             src/__tests__/features/campusAssistant.test.ts \
             src/__tests__/features/campusAssistantSemantic.test.ts \
+            src/__tests__/services/nuniAssignmentReminders.test.ts \
+            src/__tests__/services/nuniClassCoursework.test.ts \
+            src/__tests__/services/onDeviceSchoolContext.test.ts \
+            src/__tests__/NativeLoginLifecycle.test.tsx \
+            src/__tests__/nuniSession.test.ts \
+            src/__tests__/NuniTimetableAssistantNavigation.test.tsx \
+            src/__tests__/AssistantClassNowHint.test.tsx \
+            src/__tests__/SavedClassReplyCard.test.tsx \
             src/__tests__/CampusAssistantScreen.test.tsx \
             src/__tests__/CampusAssignmentWorkbench.test.tsx \
             src/__tests__/CampusAssignmentCoverage.test.tsx \
@@ -82,6 +90,8 @@ jobs:
             src/__tests__/CampusStudyAgendaCard.test.tsx \
             src/__tests__/CampusLocalReadResults.test.tsx \
             src/__tests__/AuthSignOut.test.tsx \
+            src/__tests__/personalEventReminderNavigation.test.ts \
+            src/__tests__/personalEventReminderTelemetry.test.ts \
             src/__tests__/services/nuniReceiptQuery.test.ts \
             src/__tests__/StudyAgenda.test.tsx \
             src/__tests__/NuniCourses.test.tsx \
