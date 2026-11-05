@@ -297,6 +297,38 @@ test.each([platformScope, firebaseScope, { owner: 'guest:device', schoolId: 'pu'
   },
 );
 
+
+test('keeps the tapped assignment pending through an in-flight session recheck', async () => {
+  let verified: typeof assignmentScope | null = assignmentScope;
+  mockPublicReady.mockReturnValue(true);
+  mockPublicWorkspace.mockReturnValue(true);
+  const clear = jest.fn(async () => undefined);
+  let finish!: (target: typeof assignmentTarget) => void;
+  mockAssignmentResolve.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  mockAssignmentResolve.mockResolvedValue(assignmentTarget);
+  setPersonalEventReminderScopeProvider(() => verified);
+
+  const inflight = handlePersonalEventReminderResponse(assignmentTap, { clearLastResponse: clear });
+  expect(mockAssignmentResolve).toHaveBeenCalledTimes(1);
+  // A foreground auth recheck briefly has no verified identity.
+  verified = null;
+  setPersonalEventReminderScopeProvider(() => verified);
+  finish(assignmentTarget);
+  await expect(inflight).resolves.toBe(false);
+  expect(mockPublicWorkspace).not.toHaveBeenCalled();
+  expect(clear).not.toHaveBeenCalled();
+
+  verified = assignmentScope;
+  setPersonalEventReminderScopeProvider(() => verified);
+  await expect(flushPendingPersonalEventReminderTap({ clearLastResponse: clear })).resolves.toBe(true);
+  expect(mockPublicWorkspace).toHaveBeenCalledTimes(1);
+  expect(mockPublicWorkspace).toHaveBeenCalledWith({
+    tab: 'courses', ...assignmentTarget, assistantAccountId: 'alice',
+  });
+  expect(clear).toHaveBeenCalledTimes(1);
+  expect(clear).toHaveBeenCalledWith(assignmentTap);
+});
+
 test.each([
   { ...assignmentScope, schoolId: 'other' }, { ...assignmentScope, owner: 'nuni:bob' },
   { ...assignmentScope, nuniContext: undefined }, { ...assignmentScope, nuniContext: 'new-session' },

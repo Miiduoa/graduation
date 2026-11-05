@@ -136,7 +136,11 @@ export async function flushPendingPersonalEventReminderTap(options?: TapOptions)
   const destination = await resolveDestination(tap.response, scope);
   if (pendingTap !== tap) return false;
   const current = scopeProvider();
-  const sameScope = current && current.owner === scope.owner && current.schoolId === scope.schoolId;
+  // Foreground session revalidation can temporarily hide the scope while a
+  // reminder lookup is in flight. Keep the tap queued until verification
+  // returns instead of consuming and clearing a valid OS response.
+  if (!current) return false;
+  const sameScope = current.owner === scope.owner && current.schoolId === scope.schoolId;
   const allowed = !!destination && sameScope &&
     (destination.screen !== 'NuniWorkspace' || current.nuniContext === scope.nuniContext);
   if (allowed && !navigate(destination)) return false;
