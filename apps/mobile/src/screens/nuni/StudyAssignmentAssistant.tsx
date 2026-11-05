@@ -353,8 +353,8 @@ function AssignmentQuestions({ data, open }: Props) {
               日期依線上測驗的參考期限篩選，開考時間請到課程公告核對。
             </Text>
           )}
-          {quizzes?.kind === 'results' && quizzes.undated > 0 && (
-            <Text style={text}>另有 {quizzes.undated} 筆無可核對的參考期限，無法依日期判斷。</Text>
+          {quizzes?.kind === 'results' && quizzes.undatedOutsideWindow > 0 && (
+            <Text style={text}>另有 {quizzes.undatedOutsideWindow} 筆無可核對的參考期限，無法依日期判斷。</Text>
           )}
           {quizzes?.kind === 'results' && !quiz?.source && selected === null && (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

@@ -40,7 +40,9 @@ test('looks up due dates in Taipei for the requested course prefix and only scop
     });
   }
   const all = queryNuniQuizzes(data, '有哪些測驗？', now);
-  expect(all.kind).toBe('results');
+  expect(all).toMatchObject({ kind: 'results', undatedOutsideWindow: 0 });
+  expect(queryNuniQuizzes(data, '明天有哪些測驗？', now))
+    .toMatchObject({ kind: 'results', undatedOutsideWindow: 1 });
   if (all.kind === 'results') expect(all.rows.map((r) => r.item.id)).toEqual(['a', 'b', 'c', 'later', 'later-missing', 'closed']);
 });
 

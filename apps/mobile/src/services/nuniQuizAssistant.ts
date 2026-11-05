@@ -13,7 +13,7 @@ export type NuniQuizRow = {
   state: 'open' | 'closed';
 };
 type Answer = { kind: 'clarify'; message: string; context?: NuniQuizContext }
-  | { kind: 'results'; rows: NuniQuizRow[]; undated: number; context: NuniQuizContext };
+  | { kind: 'results'; rows: NuniQuizRow[]; undatedOutsideWindow: number; context: NuniQuizContext };
 
 const QUIZ = /測驗|小考|隨堂考|考試|期[中末]考|\bquiz\b/i;
 const QUOTED = /「[^」]*」|『[^』]*』|“[^”]*”|"[^"]*"/g;
@@ -126,5 +126,5 @@ export function queryNuniQuizzes(
   return { kind: 'results', rows: lookup.rows.map(({ item, due }) => ({
     item: { id: item.id, courseId: item.courseId, title: item.title, groupName: item.groupName, dueAt: item.dueAt },
     due, submittedAt: item.submittedAt, state: item.state,
-  })), undated: lookup.undated, context };
+  })), undatedOutsideWindow: lookup.window ? lookup.undated : 0, context };
 }
