@@ -555,3 +555,38 @@ it('resolves "這份作業" only after a deliberate ordinal choice, keeping the 
   expect(open).toHaveBeenCalledTimes(2);
   expect(retry).not.toHaveBeenCalled();
 });
+
+
+it('keeps the exact source when a pending-deadline result is selected before asking about its receipt', () => {
+  jest.useFakeTimers({ now: new Date('2026-11-04T09:00:00Z') });
+  try {
+    const workspaces: NuniStudyAgenda['workspaces'] = [
+      { id: 'design', title: '資料庫設計', state: 'active', memberRole: 'student' },
+      { id: 'management', title: '資料庫管理', state: 'active', memberRole: 'student' },
+      { id: 'staff', title: '資料庫教學', state: 'active', memberRole: 'owner-teacher' },
+    ];
+    const rows = workspaces.map(({ id, title }) => task(id, {
+      courseId: id, courseTitle: title, title: '期中報告',
+      dueAt: '2026-11-05T10:00:00+08:00',
+    }));
+    const open = jest.fn();
+    const view = render(<StudyAgenda data={agenda(rows, { workspaces })} loading={false}
+      error="" retry={jest.fn()} open={open} />);
+    fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+    const ask = (question: string) => {
+      fireEvent.changeText(view.getByLabelText('輸入作業問題'), question);
+      fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+    };
+    ask('明天有哪些作業？');
+    expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(2);
+    ask('第二筆');
+    ask('這份作業交了嗎？');
+    expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+    expect(view.getByText('本次未見繳交紀錄 · 請到原頁核對')).toBeTruthy();
+    fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' }));
+    expect(open).toHaveBeenCalledWith('management', 'management');
+    expect(view.queryByRole('button', { name: '查看作業：資料庫教學 · 期中報告' })).toBeNull();
+  } finally {
+    jest.useRealTimers();
+  }
+});
