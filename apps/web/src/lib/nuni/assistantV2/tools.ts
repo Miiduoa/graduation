@@ -156,7 +156,7 @@ const definitions: Record<string, [Obj, string[]]> = {
 export function studyTitle(title: string): string {
   const clean = title
     .replace(/作[」』”"']\s*作業/g, '作業')
-    .replace(/[「」『』“”\"']/g, '')
+    .replace(/[「」『』“”"']/g, '')
     .replace(/^(?:寫作業[：:]?\s*|寫\s*)+/, '')
     .trim();
   return ('寫作業：' + clean.replace(/作業(?:作業)+/g, '作業')).slice(0, 120);
@@ -223,7 +223,7 @@ export function parseSpokenClock(text: string): string | undefined {
   const digital = text.match(/(\d{1,2})[:：](\d{2})/);
   if (digital) return parseClock(digital[1] + ':' + digital[2]);
   const spoken = text.match(
-    /(凌晨|早上|上午|中午|下午|傍晚|晚上|今晚|今夜|明晚)?\s*([零一二三四五六七八九十兩\d]{1,3})\s*點(半)?/,
+    /(凌晨|早上|上午|今早|明早|中午|下午|傍晚|晚上|今晚|今夜|明晚)?\s*([零一二三四五六七八九十兩\d]{1,3})\s*點(半)?/,
   );
   if (!spoken) return;
   const hour = chineseHour(spoken[2]);
@@ -235,7 +235,7 @@ export function parseSpokenClock(text: string): string | undefined {
       ? '晚上'
       : /下午|傍晚/.test(text)
         ? '下午'
-        : /上午|早上|凌晨/.test(text)
+        : /上午|早上|凌晨|今早|明早/.test(text)
           ? '上午'
           : '');
   if (
@@ -273,7 +273,7 @@ function clockRanges(text: string): { from: string; to: string }[] {
   return ranges;
 }
 const PERIODS: [RegExp, string, string][] = [
-  [/上午/, '08:00', '12:00'],
+  [/上午|早上|早晨|今早|明早/, '08:00', '12:00'],
   [/中午/, '11:00', '13:00'],
   [/晚上|今晚|今夜/, '18:00', '22:00'],
   [/下午/, '13:00', '18:00'],
@@ -482,7 +482,7 @@ export function calendar(ledger: Ledger, from: string, to: string) {
       allDay: r.allDay ?? !r.startTime,
     }));
 }
-export function freeTime(ledger: Ledger, args: Obj) {
+export function freeTime(ledger: Ledger, args: Obj, notBefore = -Infinity) {
   const day = date(args.date),
     from = String(args.from || '08:00'),
     to = String(args.to || '22:00'),
@@ -499,7 +499,7 @@ export function freeTime(ledger: Ledger, args: Obj) {
     }
   }
   if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
-  let cursor = start;
+  let cursor = Math.max(start, Math.ceil(notBefore / 60000) * 60000);
   const slots: { date: string; startTime: string; endTime: string; minutes: number }[] = [];
   const append = (a: number, b: number) => {
     if (b - a >= duration * 60000)
@@ -644,6 +644,8 @@ export function createTools(
     const l = await getLedger(),
       e = eventArgs(raw),
       [start, end] = eventInterval(e);
+    if (scheduleIntent(question) && (e.allDay ? end <= now : start < now))
+      return fail('EVENT_START_PASSED', 409);
     const classes = schedule(l, e.date, e.endDate || e.date);
     if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
     if (
@@ -817,7 +819,7 @@ export function createTools(
         const classes = schedule(l, day, day);
         let free: unknown;
         try {
-          free = freeTime(l, { date: day });
+          free = freeTime(l, { date: day }, day === taipeiDate(now) ? now : undefined);
         } catch {
           free = { incomplete: true, note: '課表或事件不完整，無法判定空檔' };
         }
@@ -931,7 +933,7 @@ export function createTools(
             a.kind === 'library' ? '請在校園地圖查圖書館；未提供步行時間' : '請以頁面最新資料為準',
         };
       case 'find_free_time':
-        return freeTime(await getLedger(), a);
+        return freeTime(await getLedger(), a, a.date === taipeiDate(now) ? now : undefined);
       case 'propose_personal_event':
         return propose(a);
       case 'propose_open_page': {
@@ -962,7 +964,7 @@ export function createTools(
           return { planned: [], unplanned: 0, note: '目前期間沒有未交作業可安排' };
         if (String(a.from || '08:00') >= String(a.to || '22:00'))
           return { planned: [], unplanned: selected.length, note: '指定時段沒有可安排空檔' };
-        const slots = freeTime(await getLedger(), a).slots.map((s) => ({ ...s }));
+        const slots = freeTime(await getLedger(), a, now).slots;
         const minutes = Number(a.minMinutes || 60),
           planned: unknown[] = [];
         for (const task of selected) {
@@ -1143,8 +1145,10 @@ export function createTools(
         const from = parseClock(cleaned.from) || ranged?.from || window.from;
         const to = parseClock(cleaned.to) || ranged?.to || window.to;
         if (from && to) {
-          cleaned.from = from;
-          cleaned.to = to;
+          const requestedWindow = name === 'propose_study_plan' &&
+            (parseSpokenClock(question) || PERIODS.some(([pattern]) => pattern.test(question)));
+          cleaned.from = requestedWindow && from < window.from ? window.from : from;
+          cleaned.to = requestedWindow && to > window.to ? window.to : to;
         }
         if (cleaned.minMinutes !== undefined) {
           const minutes = Number(cleaned.minMinutes);
