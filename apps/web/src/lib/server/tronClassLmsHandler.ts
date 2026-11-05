@@ -506,6 +506,8 @@ export function createTronClassLmsHandler({
             // 清掉過期 extras 失敗時仍繼續讀取。
           }
         }
+        // Cache maintenance can yield; the session might be replaced while it writes.
+        await verifyLinkedSession();
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
@@ -599,6 +601,8 @@ export function createTronClassLmsHandler({
       } catch {
         // 快取寫入失敗仍回傳剛讀到的資料。
       }
+      // Do not return the old session's data if the user relinked during the write.
+      await verifyLinkedSession();
       return merged;
     } catch (error) {
       if (error instanceof HttpsError) throw error;
