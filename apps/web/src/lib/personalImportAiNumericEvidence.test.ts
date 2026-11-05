@@ -177,3 +177,50 @@ describe('AI import keeps unsupported fields editable', () => {
     );
   });
 });
+
+describe('numeric weekdays in a labelled timetable', () => {
+  const header = '開始節次,課程名稱,星期,結束節次';
+  const row = '4,資料庫,3,5';
+  const course = { title: '資料庫', dayOfWeek: 3, evidence: row };
+  it.each([',', '\t'])('accepts the weekday cell even when columns and model rows are reordered (%j)', (delimiter) => {
+    const records = [row, '2,資料庫,4,3'].map((line) => line.replaceAll(',', delimiter));
+    const source = [header.replaceAll(',', delimiter), ...records].join('\n');
+    const result = parsePersonalImportAiResponse(JSON.stringify({ complete: true, rows: [
+      { ...course, dayOfWeek: 4, evidence: records[1] }, { ...course, evidence: records[0] },
+    ] }), source, options);
+    expect(result.rows.map((item) => [item.dayOfWeek, item.source.line])).toEqual([[4, 3], [3, 2]]);
+    expect(result.issues.some((issue) => issue.field === 'dayOfWeek')).toBe(false);
+  });
+  it.each([
+    [header, row, { ...course, dayOfWeek: 4 }], // start period
+    ['', row, course],
+    ['開始節次,課程名稱,教室,結束節次', row, course],
+    ['星期,課程名稱,星期,結束節次', row, course],
+    [header, row, { ...course, evidence: '資料庫,3' }],
+    [header, row, { ...course, title: '資料' }],
+    [header, row, { ...course, uncertainFields: ['dayOfWeek'] }],
+    [header, '4,資料庫,三或3,5', { ...course, evidence: '4,資料庫,三或3,5' }],
+  ] as const)('keeps unverified weekdays blank for %s / %s / %o', (heading, line, candidate) => {
+    const result = parsePersonalImportAiResponse(output(candidate), [heading, line].filter(Boolean).join('\n'), options);
+    expect(result.rows[0].dayOfWeek).toBeUndefined();
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ai-uncertain-field', field: 'dayOfWeek' }));
+  });
+});
+
+describe('aligned screenshot evidence boundaries', () => {
+  const header = '課程名稱    星期    開始節次    結束節次';
+  const evidence = '資料庫    3    4    5';
+  it.each([
+    ['paste', header + '\n' + evidence],
+    ['screenshot', evidence],
+    ['screenshot', header.replace('星期', '教室') + '\n' + evidence],
+    ['screenshot', header.replace('開始節次', '星期') + '\n' + evidence],
+    ['screenshot', header + '\n' + evidence + '\n異常    2    3'],
+    ['screenshot', header + '\n' + evidence + '\n"程式,設計"    2    3    4'],
+  ] as const)('does not infer a weekday from ambiguous %s input (%s)', (type, source) => {
+    const result = parsePersonalImportAiResponse(output({ title: '資料庫', dayOfWeek: 3, evidence }), source, {
+      ...options, source: { type },
+    });
+    expect(result.rows[0].dayOfWeek).toBeUndefined();
+  });
+});

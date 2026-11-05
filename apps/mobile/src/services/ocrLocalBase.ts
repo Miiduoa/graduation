@@ -5,6 +5,7 @@ import { TimetableOcrError } from './timetableOcr';
 const files: Array<{ module: number; path: string[] }> = [
   { module: require('../../assets/ocr/tesseract.min.bin'), path: ['tesseract.min.js'] },
   { module: require('../../assets/ocr/worker.min.bin'), path: ['worker.min.js'] },
+  { module: require('../../assets/ocr/ruled-timetable-grid.bin'), path: ['ruled-timetable-grid.js'] },
   {
     module: require('../../assets/ocr/tesseract-core-simd-lstm.wasm.js.bin'),
     path: ['tesseract-core-simd-lstm.wasm.js'],
@@ -38,8 +39,13 @@ async function copyOcrFiles(): Promise<string> {
     if (!asset.localUri)
       throw new TimetableOcrError('辨識程式未能載入，請改貼文字。', 'unavailable');
     const dest = new File(root, ...file.path);
-    if (dest.exists) continue;
-    new File(asset.localUri).copy(dest);
+    const source = new File(asset.localUri);
+    if (dest.exists) {
+      if (file.path[0] !== 'ruled-timetable-grid.js' || (source.md5 && dest.md5 === source.md5))
+        continue;
+      dest.delete();
+    }
+    source.copy(dest);
   }
   const uri = root.uri;
   return uri.endsWith('/') ? uri : `${uri}/`;

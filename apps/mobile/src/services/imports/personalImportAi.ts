@@ -24,6 +24,7 @@ import {
   maskPersonalImportCloudBatch,
   isPersonalImportCloudMaskSafe,
 } from '@campus/shared/src/imports/aiCloud';
+import { hasFlattenedScreenshotWeek } from '@campus/shared/src/imports/parser';
 import { localLLM } from '../localLLMInference';
 
 export const MOBILE_IMPORT_AI_MAX_CHARACTERS = PERSONAL_IMPORT_AI_MAX_SOURCE_TEXT;
@@ -152,6 +153,15 @@ export async function runMobilePersonalImportAi(
   if (pending) throw new Error('前一次本機運算尚未停止，請稍候再試；原始資料與完成結果仍保留。');
   if (text.length > MOBILE_IMPORT_AI_MAX_CHARACTERS)
     throw new Error('這次文字超過 40,000 字元，請分批整理；原文仍保留。');
+  if (
+    !request.retryBatches &&
+    options.kind === 'timetable' &&
+    options.source?.type === 'screenshot' &&
+    hasFlattenedScreenshotWeek(text)
+  ) {
+    const parsed = parsePersonalImport(text, options);
+    if (parsed.issues.some((issue) => issue.code === 'screenshot-grid-layout')) return parsed;
+  }
   let cloudAvailable = !!request.platformContext && isPersonalImportCloudMaskSafe(text);
   if (
     cloudAvailable &&
@@ -449,7 +459,7 @@ export async function runMobilePersonalImportAi(
           }
         }
         try {
-          const parsed = parsePersonalImportAiResponse(output, sourceText, context);
+          const parsed = parsePersonalImportAiResponse(output, sourceText, context, 'text', columnContext);
           const audit = auditPersonalImportAiTable(
             sourceText,
             parsed.rows,
