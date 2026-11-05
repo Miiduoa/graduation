@@ -564,3 +564,83 @@ test('pages through the same filtered deadlines across Taipei midnight without l
     jest.useRealTimers();
   }
 });
+
+const classOccurrence = {
+  courseId: 'manual:db', name: '資料庫', room: '任垣 210', date: '2026-11-05',
+  term: '115|1', startTime: '10:10', endTime: '12:00',
+};
+function withUpcoming(classes: typeof classOccurrence[] | undefined, checkedAt = '2026-11-05T01:55:00Z') {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  collectOnDeviceSchoolContext.mockResolvedValueOnce({
+    schoolId: 'pu', checkedAt,
+    timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [], nextClasses: classes },
+  });
+}
+
+test('finds the next class without a model and checks the same occurrence again for a room follow-up', async () => {
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  const question = { role: 'user' as const, content: '下一堂課是什麼？' };
+  withUpcoming([classOccurrence]);
+  const first = await askCampusAssistant({ ...input(), mode: 'device', messages: [question] });
+  expect(first.savedClassRead?.classes).toEqual([classOccurrence]);
+  const moved = { ...classOccurrence, room: '主顧 303' };
+  withUpcoming([moved]);
+  const reply = await askCampusAssistant({
+    ...input(), mode: 'device', messages: [
+      question, { role: 'assistant', ...first }, { role: 'user', content: '那堂課在哪間教室？' },
+    ],
+  });
+  expect(reply.savedClassRead).toMatchObject({ classes: [moved], focus: 'room' });
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0].classFollowUp).toEqual([classOccurrence]);
+  expect(reply.content).not.toContain(classOccurrence.room);
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('a room follow-up does not silently switch to the new next class when the requested occurrence cannot be confirmed', async () => {
+  withUpcoming([{ ...classOccurrence, courseId: 'manual:other', room: 'C306' }]);
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device', messages: [
+      { role: 'assistant', content: '資料庫', savedClassRead: {
+        uid: 'A', schoolId: 'pu', updatedAt: null, classes: [classOccurrence],
+      } }, { role: 'user', content: '在哪間教室？' },
+    ],
+  });
+  expect(result).toMatchObject({ tool: 'saved-timetable', route: '/timetable' });
+  expect(result.savedClassRead).toBeUndefined();
+  expect(result.content).not.toMatch(/C306|任垣/);
+});
+
+test('today uses the Taiwan date and does not return tomorrow as a remaining class today', async () => {
+  withUpcoming([{ ...classOccurrence, date: '2026-11-06' }], '2026-11-05T15:58:00Z');
+  const reply = await askCampusAssistant({ ...input(), mode: 'device', messages: [
+    { role: 'user', content: '今天下一堂課是什麼？' },
+  ] });
+  expect(reply.content).toContain('今天剩下');
+  expect(reply.savedClassRead).toBeUndefined();
+});
+
+test.each(['翻譯「下一堂課是什麼」', '提醒我下一堂課要交作業', '明天所有的課表'])(
+  'a different request does not receive a next-class answer: %s', async (content) => {
+    const reply = await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+    expect(reply.savedClassRead).toBeUndefined();
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('includeNextClasses');
+  },
+);
+
+test('a room follow-up from another scope never asks the local store to resolve that reference', async () => {
+  withUpcoming([classOccurrence]);
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device', messages: [
+      { role: 'assistant', content: '原課表', savedClassRead: {
+        uid: 'B', schoolId: 'other', updatedAt: null, classes: [classOccurrence],
+      } }, { role: 'user', content: '那在哪個教室？' },
+    ],
+  });
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+  expect(result.savedClassRead).toBeUndefined();
+  expect(result.content).not.toContain(classOccurrence.name);
+});

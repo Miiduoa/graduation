@@ -201,6 +201,37 @@ export function studyTaskTiming(
   return days <= 7 ? 'week' : 'later';
 }
 
+export type StudyAgendaFilter =
+  | 'pending'
+  | 'soon'
+  | 'overdue'
+  | 'feedback'
+  | 'submitted'
+  | 'closed'
+  | 'all';
+
+export function groupStudyTasks(tasks: NuniStudyTask[], now: Instant) {
+  const groups: Record<StudyAgendaFilter, NuniStudyTask[]> = {
+    all: tasks,
+    pending: [],
+    overdue: [],
+    soon: [],
+    submitted: [],
+    closed: [],
+    feedback: [],
+  };
+  for (const task of tasks) {
+    const status = studyTaskStatus(task);
+    groups[status].push(task);
+    if (status === 'feedback') groups.submitted.push(task);
+    if (status !== 'pending') continue;
+    const timing = studyTaskTiming(task, now);
+    if (timing === 'overdue') groups.overdue.push(task);
+    else if (timing === 'today' || timing === 'week') groups.soon.push(task);
+  }
+  return groups;
+}
+
 export function sortStudyTasks(tasks: readonly NuniStudyTask[], now: Instant): NuniStudyTask[] {
   const statusRank = { pending: 0, closed: 1, submitted: 2, feedback: 2 };
   const timingRank = { overdue: 0, today: 1, week: 2, later: 3, undated: 4 };

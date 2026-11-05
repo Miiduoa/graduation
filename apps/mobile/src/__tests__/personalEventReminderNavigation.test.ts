@@ -1,3 +1,7 @@
+import React from 'react';
+import { act, render, waitFor } from '@testing-library/react-native';
+import { PersonalEventReminderBridge } from '../components/PersonalEventReminderBridge';
+import * as notificationService from '../services/notifications';
 import {
   __resetPersonalEventReminderNavigationForTests,
   flushPendingPersonalEventReminderTap,
@@ -13,7 +17,20 @@ const mockRootNavigateNested = jest.fn(() => true);
 const mockRootReady = jest.fn(() => false);
 const mockPublicReady = jest.fn(() => false);
 const mockPublicNavigate = jest.fn(() => true);
+const mockPublicTimetable = jest.fn((_params: unknown) => true);
 const mockResolve = jest.fn();
+let mockScope: { owner: string; schoolId: string } | null = null;
+
+jest.mock('../state/personalImportScope', () => ({ usePersonalImportScope: () => mockScope }));
+jest.mock('../services/personalImports', () => ({
+  personalImportStorageKey: (scope: object) => JSON.stringify(scope),
+  subscribePersonalImports: () => () => undefined,
+}));
+jest.mock('../services/notifications', () => ({
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  getLastNotificationResponseAsync: jest.fn(async () => null),
+  clearLastNotificationResponseAsync: jest.fn(async () => undefined),
+}));
 
 jest.mock('../app/rootNavigation', () => ({
   rootNavigateNested: (...args: unknown[]) => mockRootNavigateNested(...args),
@@ -24,10 +41,13 @@ jest.mock('../app/rootNavigation', () => ({
 jest.mock('../app/publicNavigation', () => ({
   isPublicNavigationReady: () => mockPublicReady(),
   publicNavigatePersonalCalendar: (...args: unknown[]) => mockPublicNavigate(...args),
+  publicNavigatePersonalTimetable: (params: unknown) => mockPublicTimetable(params),
   subscribePublicNavigationReady: () => () => undefined,
 }));
 jest.mock('../services/personalEventReminders', () => ({
   resolvePersonalEventReminderTap: (...args: unknown[]) => mockResolve(...args),
+  invalidatePersonalEventRemindersForScopeChange: jest.fn(async () => undefined),
+  reconcilePersonalEventReminders: jest.fn(async () => undefined),
 }));
 
 beforeEach(() => {
@@ -147,4 +167,89 @@ test('denied or invalid taps clear the exact response without navigating', async
   ).resolves.toBe(false);
   expect(mockPublicNavigate).not.toHaveBeenCalled();
   expect(cleared).toEqual([response]);
+});
+
+const platformScope = { owner: 'nuni:alice', schoolId: 'pu' };
+const firebaseScope = { owner: 'firebase:alice', schoolId: 'pu' };
+const classStart = Date.parse('2026-11-04T00:05:00+08:00');
+
+function classResponse(scope: typeof platformScope, overrides: Record<string, unknown> = {}) {
+  const data = {
+    category: 'personal_class_occurrence',
+    scope: JSON.stringify(scope),
+    courseId: 'manual:c1',
+    startAt: classStart,
+    ...overrides,
+  };
+  return { notification: { request: { identifier: 'class-1', content: { data } } } };
+}
+
+test('NUNI cold-start class tap waits for scope and public navigation, using the Taipei occurrence date', async () => {
+  const response = classResponse(platformScope);
+  await expect(handlePersonalEventReminderResponse(response)).resolves.toBe(false);
+  setPersonalEventReminderScopeProvider(() => platformScope);
+  await expect(flushPendingPersonalEventReminderTap()).resolves.toBe(false);
+  mockPublicReady.mockReturnValue(true);
+  await Promise.all([flushPendingPersonalEventReminderTap(), handlePersonalEventReminderResponse(response)]);
+  expect(mockPublicTimetable).toHaveBeenCalledTimes(1);
+  expect(mockPublicTimetable).toHaveBeenCalledWith({ schoolId: 'pu', courseId: 'manual:c1', date: '2026-11-04', startAt: classStart, reminderScope: JSON.stringify(platformScope) });
+  expect(mockResolve).not.toHaveBeenCalled();
+});
+
+test('a live school class tap opens the focused timetable and never opens the inbox', async () => {
+  setPersonalEventReminderScopeProvider(() => firebaseScope);
+  mockRootReady.mockReturnValue(true);
+  await expect(handlePersonalEventReminderResponse(classResponse(firebaseScope))).resolves.toBe(true);
+  expect(mockRootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalTimetable', {
+    schoolId: 'pu', courseId: 'manual:c1', date: '2026-11-04', startAt: classStart, reminderScope: JSON.stringify(firebaseScope),
+  });
+  expect(mockPublicTimetable).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['other owner', { owner: 'nuni:bob', schoolId: 'pu' }, {}],
+  ['other school', { owner: 'nuni:alice', schoolId: 'nthu' }, {}],
+  ['guest', { owner: 'guest:device', schoolId: 'pu' }, {}],
+  ['invalid course', platformScope, { courseId: '  ' }],
+  ['invalid timestamp', platformScope, { startAt: Number.MAX_SAFE_INTEGER }],
+] as const)('rejects a queued class tap after resolving %s', async (_name, resolvedScope, overrides) => {
+  const response = classResponse(platformScope, overrides);
+  const clear = jest.fn(async () => undefined);
+  await handlePersonalEventReminderResponse(response);
+  setPersonalEventReminderScopeProvider(() => resolvedScope);
+  mockPublicReady.mockReturnValue(true);
+  await expect(flushPendingPersonalEventReminderTap({ clearLastResponse: clear })).resolves.toBe(false);
+  expect(mockPublicTimetable).not.toHaveBeenCalled();
+  expect(mockRootNavigateNested).not.toHaveBeenCalled();
+  expect(clear).toHaveBeenCalledWith(response);
+});
+
+test('legacy same-scope class taps focus the course without guessing an occurrence date', async () => {
+  setPersonalEventReminderScopeProvider(() => platformScope);
+  mockPublicReady.mockReturnValue(true);
+  await expect(handlePersonalEventReminderResponse(classResponse(platformScope, { startAt: undefined }))).resolves.toBe(true);
+  expect(mockPublicTimetable).toHaveBeenCalledWith({ schoolId: 'pu', courseId: 'manual:c1', reminderScope: JSON.stringify(platformScope) });
+});
+
+test('the mounted bridge restores a platform tap and receives live taps without school login', async () => {
+  const initial = classResponse(platformScope);
+  const last = jest.mocked(notificationService.getLastNotificationResponseAsync);
+  last.mockResolvedValue(initial as Awaited<ReturnType<typeof last>>);
+  mockScope = null;
+  mockPublicReady.mockReturnValue(true);
+  const view = render(React.createElement(PersonalEventReminderBridge));
+  await waitFor(() => expect(last).toHaveBeenCalled());
+  expect(mockPublicTimetable).not.toHaveBeenCalled();
+
+  mockScope = platformScope;
+  view.rerender(React.createElement(PersonalEventReminderBridge));
+  await waitFor(() => expect(mockPublicTimetable).toHaveBeenCalledTimes(1));
+  const newer = classResponse(platformScope, { courseId: 'manual:c2' });
+  last.mockResolvedValue(newer as Awaited<ReturnType<typeof last>>);
+  const [onResponse] = jest.mocked(notificationService.addNotificationResponseReceivedListener).mock.calls[0]!;
+  await act(async () => { onResponse(newer as Parameters<typeof onResponse>[0]); });
+  expect(mockPublicTimetable).toHaveBeenLastCalledWith(expect.objectContaining({ courseId: 'manual:c2' }));
+  expect(mockPublicTimetable).toHaveBeenCalledTimes(2);
+  expect(mockRootNavigateNested).not.toHaveBeenCalled();
+  view.unmount();
 });

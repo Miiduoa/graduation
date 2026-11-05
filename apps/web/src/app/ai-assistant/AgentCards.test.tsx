@@ -85,20 +85,16 @@ it('伺服器已發號：直接顯示取餐號碼', async () => {
 
 it('連點確認下單、失敗後再連點：同時只會有一個請求，全部同一個送出編號', async () => {
   let release: (value: unknown) => void = () => undefined;
-  mocks.confirm
-    .mockImplementationOnce(
-      () => new Promise((resolve) => setTimeout(() => resolve({ success: false, errorMessage: '下單失敗，請稍後再試' }), 0)),
-    )
-    .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+  mocks.confirm.mockImplementation(() => new Promise((resolve) => (release = resolve)));
   render(<AgentCardList cards={[draft]} schoolId="pu" />);
   const button = screen.getByText('確認下單');
   await act(async () => {
     fireEvent.click(button);
     fireEvent.click(button);
     fireEvent.click(button);
-    await new Promise((resolve) => setTimeout(resolve, 5));
   });
   expect(mocks.confirm).toHaveBeenCalledTimes(1);
+  await act(async () => release({ success: false, errorMessage: '下單失敗，請稍後再試' }));
   expect(screen.getByText('訂單沒送出去，請再試一次。')).toBeTruthy();
   const again = screen.getByText('再試一次');
   await act(async () => {

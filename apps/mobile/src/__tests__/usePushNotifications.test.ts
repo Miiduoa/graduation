@@ -140,7 +140,10 @@ test('hook handleResponse passes the live schoolId from SchoolNavigation args', 
   expect(mockApply).toHaveBeenCalled();
 });
 
-test('personal event reminder payloads are ignored before dedup navigation and clear', async () => {
+test.each([
+  { type: 'personal_event_reminder_v1', v: 1, t: 'tok', g: 1 },
+  { category: 'personal_class_occurrence', courseId: 'manual:c1' },
+])('personal local reminder payloads are ignored before dedup navigation and clear', async (data) => {
   const {
     clearLastNotificationResponseAsync,
   } = require('../services/notifications') as {
@@ -156,12 +159,7 @@ test('personal event reminder payloads are ignored before dedup navigation and c
         request: {
           identifier: 'per-evtrem.tok',
           content: {
-            data: {
-              type: 'personal_event_reminder_v1',
-              v: 1,
-              t: 'tok',
-              g: 1,
-            },
+            data,
           },
         },
       },
