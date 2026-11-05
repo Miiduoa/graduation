@@ -25,6 +25,7 @@ const { replace, signIn, state } = vi.hoisted(() => ({
     retryOptions: vi.fn(),
     selectedSchoolId: null as string | null,
     schoolDirectoryLoading: false,
+    requestedUnavailable: false,
     selectSchool: vi.fn(),
   },
 }));
@@ -65,6 +66,8 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
     selectedSchoolId: state.selectedSchoolId,
     selectedSchool: state.selectedSchoolId ? { id: state.selectedSchoolId, name: '校園' } : null,
     loading: state.schoolDirectoryLoading,
+    catalogStatus: 'ready',
+    requestedUnavailable: state.requestedUnavailable,
     selectSchool: state.selectSchool,
     schools: [{ id: 'pu', name: '靜宜大學' }, { id: 'ntu', name: '國立臺灣大學' }],
   }),
@@ -89,6 +92,7 @@ beforeEach(() => {
   state.optionsError = false;
   state.selectedSchoolId = null;
   state.schoolDirectoryLoading = false;
+  state.requestedUnavailable = false;
   signIn.mockResolvedValue({ uid: 'one' });
   vi.stubGlobal('location', { ...window.location, replace });
 });
@@ -381,6 +385,51 @@ it('shows the teacher LMS notice from the error code even if the server body is 
   expect((await screen.findByRole('alert')).textContent).toBe(TEACHER_LMS_UNAVAILABLE_COPY);
 });
 
+it('takes a guest from a private task to the service directory for the selected campus', () => {
+  state.user = null;
+  state.selectedSchoolId = 'ntu';
+  const view = render(<LoginPage />);
+  const link = screen.getByRole('link', { name: '不登入，繼續瀏覽' });
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/search');
+  expect(destination.searchParams.get('schoolId')).toBe('ntu');
+  state.selectedSchoolId = 'pu';
+  view.rerender(<LoginPage />);
+  const afterSwitch = new URL(link.getAttribute('href')!, 'https://campus.local');
+  expect(afterSwitch.pathname).toBe('/search');
+  expect(afterSwitch.searchParams.get('schoolId')).toBe('pu');
+  expect(replace).not.toHaveBeenCalled();
+});
+
+it('keeps an explicit all-campus selection for a guest', () => {
+  state.user = null;
+  state.params = new URLSearchParams({ returnUrl: '/grades', campus: 'all' });
+  render(<LoginPage />);
+  const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/search');
+  expect(destination.searchParams.get('campus')).toBe('all');
+});
+
+it('keeps the requested campus while the directory is loading', () => {
+  state.user = null;
+  state.schoolDirectoryLoading = true;
+  state.params = new URLSearchParams({ returnUrl: '/grades', schoolId: 'ntu' });
+  render(<LoginPage />);
+  const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
+  expect(destination.pathname).toBe('/search');
+  expect(destination.searchParams.get('schoolId')).toBe('ntu');
+});
+
+it('keeps an unavailable campus request for the school selector', () => {
+  state.user = null;
+  state.requestedUnavailable = true;
+  state.params = new URLSearchParams({ returnUrl: '/grades', schoolId: 'unknown-campus' });
+  render(<LoginPage />);
+  const destination = new URL(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')!, 'https://campus.local');
+  expect(destination.searchParams.get('schoolId')).toBe('unknown-campus');
+  expect(destination.searchParams.has('campus')).toBe(false);
+});
+
 it('offers school verification for an academic task without a misleading Google alternative', () => {
   state.user = null;
   state.studentId = true;
@@ -390,7 +439,7 @@ it('offers school verification for an academic task without a misleading Google 
   expect(screen.getByRole('button', { name: '連線學校帳號' })).toBeTruthy();
   expect(replace).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
-    '/#public-services',
+    '/search?campus=all',
   );
 });
 
@@ -419,7 +468,7 @@ it('treats lost-found as a school destination under Google-only sign-in options'
     screen.getByText('這個頁面要用學校帳號，Google 帳號無法代替。'),
   ).toBeTruthy();
   expect(screen.getByRole('link', { name: '不登入，繼續瀏覽' }).getAttribute('href')).toBe(
-    '/#public-services',
+    '/search?campus=all',
   );
   expect(replace).not.toHaveBeenCalled();
 });

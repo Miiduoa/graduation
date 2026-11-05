@@ -2,16 +2,23 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
+  attendanceActorUid,
   attendanceError,
   correctCourseAttendance,
   loadAttendanceCorrections,
   loadCourseAttendanceRoster,
   type AttendanceCorrection,
+  type AttendanceCorrectionCommand,
   type AttendanceCorrectionStatus,
   type AttendanceStudent,
 } from '@/lib/courseAttendance';
 import { Button } from './ui/Button';
 import { AttendanceRegisterPanel } from './AttendanceRegisterPanel';
+import { AttendanceCorrectionReview } from './AttendanceCorrectionReview';
+import { AttendanceCorrectionResume } from './AttendanceCorrectionResume';
+import { rememberCorrectionBookmark, clearCorrectionBookmark } from '@/lib/attendanceCorrectionBookmark';
+import { correctionReviewScope, type CorrectionReview } from '@/lib/attendanceCorrectionReview';
+import { isAttendanceResultUncertain } from '@/lib/attendanceRequest';
 import styles from './course-attendance-correction.module.css';
 
 const statuses: { status: AttendanceCorrectionStatus; label: string }[] = [
@@ -25,17 +32,30 @@ const titleFor = (status: string | null) =>
 const timestamp = (value: string | null) =>
   value ? new Date(value).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '時間待確認';
 
-export function AttendanceCorrectionPanel({
-  courseId,
-  sessionId,
-  active = false,
-  onUpdated,
-}: {
+type Props = {
   courseId: string;
   sessionId: string;
   active?: boolean;
   onUpdated: () => Promise<void>;
-}) {
+};
+type CorrectionAttempt = {
+  command: Readonly<AttendanceCorrectionCommand>;
+  studentLabel: string;
+};
+
+export function AttendanceCorrectionPanel(props: Props) {
+  // Route changes must unmount old reads, drafts and pending results together.
+  const actorUid = attendanceActorUid();
+  return <AttendanceCorrectionResume
+    key={JSON.stringify([props.courseId, props.sessionId, actorUid])}
+    scope={{ actorUid: actorUid ?? '', courseId: props.courseId, sessionId: props.sessionId }}
+    currentActor={attendanceActorUid}
+  >
+    <AttendanceCorrectionEditor {...props} />
+  </AttendanceCorrectionResume>;
+}
+
+function AttendanceCorrectionEditor({ courseId, sessionId, active = false, onUpdated }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -48,8 +68,17 @@ export function AttendanceCorrectionPanel({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [registerRevision, setRegisterRevision] = useState(0);
+  const [review, setReview] = useState<CorrectionReview | null>(null);
+  const [reviewAttempt, setReviewAttempt] = useState(0);
+  const scope = correctionReviewScope(courseId, sessionId, selectedUid);
+  const reviewed = review?.scope === scope ? review : null;
+  const isActive = active || reviewed?.active === true;
   const reasonInput = useRef<HTMLTextAreaElement>(null);
-  const operationId = useRef<string | null>(null);
+  const attempt = useRef<CorrectionAttempt | null>(null);
+  const [pendingRetry, setPendingRetry] = useState<CorrectionAttempt | null>(null);
+  const [bookmarkSaved, setBookmarkSaved] = useState(false);
+  const recoveryButton = useRef<HTMLButtonElement>(null);
+  const locked = busy || pendingRetry !== null;
   const mounted = useRef(true);
   const revision = useRef(0);
   const submitting = useRef(false);
@@ -73,8 +102,12 @@ export function AttendanceCorrectionPanel({
     };
   }, []);
 
+  useEffect(() => {
+    if (pendingRetry && !busy) recoveryButton.current?.focus();
+  }, [pendingRetry, busy]);
+
   async function showPanel(studentUid?: string) {
-    if (submitting.current) return;
+    if (submitting.current || attempt.current) return;
     if (open && !studentUid) {
       revision.current += 1;
       setOpen(false);
@@ -86,6 +119,7 @@ export function AttendanceCorrectionPanel({
       setNotice('');
       return;
     }
+    setReview(null);
     const current = ++revision.current;
     setOpen(true);
     setLoading(true);
@@ -94,7 +128,7 @@ export function AttendanceCorrectionPanel({
     setStudentQuery('');
     setReason('');
     setStatus('present');
-    operationId.current = null;
+    attempt.current = null;
     try {
       const [roster, history] = await Promise.all([
         loadCourseAttendanceRoster(courseId),
@@ -119,34 +153,40 @@ export function AttendanceCorrectionPanel({
     }
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (
-      submitting.current || !selectedUid || reason.trim().length < 6 || loading ||
-      (active && (status === 'absent' || status === 'excused'))
-    ) return;
+  async function save(current: CorrectionAttempt, recovering: boolean) {
+    if (submitting.current) return;
+    const actorUid = current.command.actorUid;
+    if (!actorUid || actorUid !== attendanceActorUid()) {
+      setError('登入帳號已變更，請重新登入原帳號核對紀錄。');
+      return;
+    }
+    const bookmarkScope = { actorUid, courseId, sessionId };
+    const stored = rememberCorrectionBookmark(bookmarkScope, current.command.requestId);
+    if (stored === 'conflict') {
+      setError('此場次已有其他待確認操作，請重新整理後先查核原收據。沒有送出新的更正。');
+      return;
+    }
+    setBookmarkSaved(stored === 'saved');
     submitting.current = true;
+    attempt.current = current;
     setBusy(true);
     setError('');
     setNotice('');
-    operationId.current ??= crypto.randomUUID();
     const requestIdentity = revision.current;
     try {
-      const result = await correctCourseAttendance({
-        groupId: courseId,
-        sessionId,
-        studentUid: selectedUid,
-        status,
-        reason,
-        requestId: operationId.current,
-      });
+      const result = await correctCourseAttendance(current.command);
+      clearCorrectionBookmark(bookmarkScope, current.command.requestId);
       if (!mounted.current || requestIdentity !== revision.current) return;
-      operationId.current = null;
+      attempt.current = null;
+      setPendingRetry(null);
       setNotice(result.reused ? '這筆更正已保存，已確認先前操作結果。' : '已保存更正，並建立操作稽核紀錄。');
       setReason('');
+      setReview(null);
+      setReviewAttempt((value) => value + 1);
       setRegisterRevision((value) => value + 1);
       try {
         await onUpdated();
+        if (!mounted.current || revision.current !== requestIdentity) return;
         const refreshed = await loadAttendanceCorrections(courseId, sessionId);
         if (mounted.current && revision.current === requestIdentity) setAudits(refreshed);
       } catch {
@@ -155,15 +195,57 @@ export function AttendanceCorrectionPanel({
         }
       }
     } catch (problem) {
-      if (mounted.current && revision.current === requestIdentity) setError(attendanceError(problem));
+      const code = (problem as { code?: string })?.code?.replace('functions/', '');
+      if (code === 'aborted' || (!recovering && !isAttendanceResultUncertain(problem))) {
+        clearCorrectionBookmark(bookmarkScope, current.command.requestId);
+      }
+      if (mounted.current && revision.current === requestIdentity) {
+        if (code === 'aborted') {
+          attempt.current = null;
+          setPendingRetry(null);
+          setReview(null);
+          setReviewAttempt((value) => value + 1);
+          setError('紀錄可能已由其他操作更新，本次沒有覆寫。正在重新核對；請比較目前狀態，再按確認送出。');
+        } else {
+          // A later permission rejection cannot disprove an earlier ambiguous commit.
+          if (recovering || isAttendanceResultUncertain(problem)) setPendingRetry(current);
+          else attempt.current = null;
+          setError(attendanceError(problem));
+        }
+      }
     } finally {
       submitting.current = false;
       if (mounted.current && revision.current === requestIdentity) setBusy(false);
     }
   }
 
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      submitting.current || attempt.current || !selectedStudent || !reviewed ||
+      reason.trim().length < 6 || reason.trim().length > 300 || loading ||
+      (isActive && (status === 'absent' || status === 'excused'))
+    ) return;
+    const actorUid = attendanceActorUid();
+    if (!actorUid) { setError('登入已失效，請重新登入後核對紀錄。'); return; }
+    await save({
+      command: Object.freeze({
+        groupId: courseId,
+        sessionId,
+        studentUid: selectedUid,
+        status,
+        reason: reason.trim(),
+        requestId: crypto.randomUUID(),
+        expectedRevision: reviewed.revision,
+        actorUid,
+      }),
+      studentLabel: `${selectedStudent.displayName}${selectedStudent.studentId ? `（${selectedStudent.studentId}）` : ''}`,
+    }, false);
+  }
+
   function invalidatePendingRetry() {
-    operationId.current = null;
+    // Only editable before submission or after a definite rejection.
+    if (attempt.current) return;
     setNotice('');
     setError('');
   }
@@ -175,13 +257,13 @@ export function AttendanceCorrectionPanel({
           <h4>出席更正</h4>
           <p>僅授課教師可操作。每筆更正都會記錄修改前後狀態、操作人員及原因。</p>
         </div>
-        <Button variant="outline" disabled={busy} onClick={() => void showPanel()}>
+        <Button type="button" variant="outline" disabled={locked} onClick={() => void showPanel()}>
           {open ? '收合更正' : '管理出席更正'}
         </Button>
       </div>
       <AttendanceRegisterPanel key={`${courseId}:${sessionId}`}
         courseId={courseId} sessionId={sessionId} revision={registerRevision}
-        disabled={busy || loading} onCorrect={(uid) => void showPanel(uid)} />
+        disabled={locked || loading} onCorrect={(uid) => void showPanel(uid)} />
       {open && (
         <>
           {loading ? <p role="status" className={styles.note}>正在確認教師權限與課程名冊…</p> : null}
@@ -193,10 +275,12 @@ export function AttendanceCorrectionPanel({
                 type="search"
                 value={studentQuery}
                 placeholder="輸入姓名或學號"
-                disabled={busy}
+                disabled={locked}
                 onChange={(event) => {
+                  if (attempt.current) return;
                   setStudentQuery(event.target.value);
                   setSelectedUid('');
+                  setReview(null);
                   invalidatePendingRetry();
                 }}
               />
@@ -204,9 +288,9 @@ export function AttendanceCorrectionPanel({
               <select
                 id={`correction-user-${sessionId}`}
                 value={selectedUid}
-                disabled={busy}
+                disabled={locked}
                 required
-                onChange={(event) => { setSelectedUid(event.target.value); invalidatePendingRetry(); }}
+                onChange={(event) => { if (attempt.current) return; setSelectedUid(event.target.value); setReview(null); invalidatePendingRetry(); }}
               >
                 <option value="" disabled>請選擇要更正的學生</option>
                 {selectableStudents.map((student) => (
@@ -222,8 +306,9 @@ export function AttendanceCorrectionPanel({
               <select
                 id={`correction-status-${sessionId}`}
                 value={status}
-                disabled={busy}
+                disabled={locked}
                 onChange={(event) => {
+                  if (attempt.current) return;
                   setStatus(event.target.value as AttendanceCorrectionStatus);
                   invalidatePendingRetry();
                 }}
@@ -232,12 +317,17 @@ export function AttendanceCorrectionPanel({
                   <option
                     key={entry.status}
                     value={entry.status}
-                    disabled={active && (entry.status === 'absent' || entry.status === 'excused')}
+                    disabled={isActive && (entry.status === 'absent' || entry.status === 'excused')}
                   >
                     {entry.label}
                   </option>
                 ))}
               </select>
+              {selectedUid && <AttendanceCorrectionReview
+                key={`${scope}:${reviewAttempt}`}
+                courseId={courseId} sessionId={sessionId} studentUid={selectedUid}
+                proposedStatus={titleFor(status)} disabled={locked} onReview={setReview}
+              />}
               <label htmlFor={`correction-reason-${sessionId}`}>更正原因</label>
               <textarea
                 ref={reasonInput}
@@ -246,25 +336,46 @@ export function AttendanceCorrectionPanel({
                 minLength={6}
                 maxLength={300}
                 required
-                disabled={busy}
+                disabled={locked}
                 value={reason}
                 placeholder="例如：授課教師現場確認出席、已核准請假或核對點名紀錄"
-                onChange={(event) => { setReason(event.target.value); invalidatePendingRetry(); }}
+                onChange={(event) => { if (attempt.current) return; setReason(event.target.value); invalidatePendingRetry(); }}
               />
               <p className={styles.note}>
-                {active
+                {isActive
                   ? '點名仍在進行中，可以補登出席或遲到。必須結束點名後才能核定缺席或請假。'
                   : '學生沒有簽到，不代表缺席。選擇「缺席」將建立一筆由教師正式確認的紀錄。'}
               </p>
-              <div className={styles.actions}>
-                <Button type="submit" variant="primary" disabled={busy || !selectedUid || reason.trim().length < 6 || (active && (status === 'absent' || status === 'excused'))}>
+              {!pendingRetry && <div className={styles.actions}>
+                <Button type="submit" variant="primary" disabled={busy || !selectedUid || !reviewed || reason.trim().length < 6 || (isActive && (status === 'absent' || status === 'excused'))}>
                   {busy ? '正在儲存…' : '確認並保存更正'}
                 </Button>
-              </div>
+              </div>}
             </form>
           )}
           {!loading && students.length === 0 && !error && (
             <p className={styles.note}>這門課目前沒有符合資格的學生名冊。</p>
+          )}
+          {pendingRetry && (
+            <section className={styles.recovery} aria-label="確認原更正結果" aria-busy={busy}>
+              <div role="status">
+                <h5>這筆更正的結果還沒確認</h5>
+                <p>伺服器可能已保存。先確認這一筆，再進行其他更正。</p>
+                <dl>
+                  <div><dt>學生</dt><dd>{pendingRetry.studentLabel}</dd></div>
+                  <div><dt>核定狀態</dt><dd>{titleFor(pendingRetry.command.status)}</dd></div>
+                  <div><dt>原因</dt><dd>{pendingRetry.command.reason}</dd></div>
+                </dl>
+              </div>
+              <button ref={recoveryButton} type="button" className={styles.recoveryAction}
+                disabled={busy} onClick={() => void save(pendingRetry, true)}>
+                {busy ? '正在確認原更正…' : '確認原更正結果'}
+              </button>
+              <p className={styles.note}>沿用原請求編號與核對版本，不會另建一筆。</p>
+              <p className={styles.note}>{bookmarkSaved
+                ? '已在此分頁保留操作識別碼；重新整理後可唯讀查核收據，不會自動重送更正。'
+                : '瀏覽器無法保留操作識別碼；請先留在本頁確認結果。離開後須自行查核名冊與更正歷程。'}</p>
+            </section>
           )}
           {error && <p role="alert" className={styles.error}>{error}</p>}
           {notice && <p role="status" className={styles.success}>{notice}</p>}

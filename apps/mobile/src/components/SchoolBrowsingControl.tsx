@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { School } from '@campus/shared/src';
-import { searchSchools } from '@campus/shared/src/schools';
+import { normalizeSchoolQuery, searchSchools } from '@campus/shared/src/schools';
 import { useSchool } from '../state/school';
 import { fetchSchoolDirectory } from '../services/schoolDirectory';
 import { theme } from '../ui/theme';
@@ -50,7 +50,7 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
 
   const matches = useMemo(() => {
     const found = searchSchools(query, directory ?? []);
-    return query.trim()
+    return normalizeSchoolQuery(query)
       ? found
       : [...found].sort((a, b) => Number(b.id === school.id) - Number(a.id === school.id));
   }, [query, directory, school.id]);

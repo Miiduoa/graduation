@@ -13,6 +13,11 @@ import {
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { defaultBrowseSchoolId } from '@/lib/defaultBrowseSchool';
+import {
+  discardActiveCampusDrafts,
+  hasCampusDraftActivity,
+} from './CampusDraftProvider';
+import { ConfirmModal } from './ui/Modal';
 
 export type BrowseSchool = {
   id: string;
@@ -24,6 +29,7 @@ export type BrowseSchool = {
 
 export type SelectedSchoolProviderProps = {
   ownerKey: string | null;
+  identityReady?: boolean;
   loading: boolean;
   schools: readonly BrowseSchool[];
   catalogStatus: 'loading' | 'ready' | 'error';
@@ -108,6 +114,7 @@ function storedSelection(value: string | null): { present: boolean; schoolId: st
 
 export function SelectedSchoolProvider({
   ownerKey,
+  identityReady = true,
   loading,
   schools,
   catalogStatus,
@@ -121,6 +128,7 @@ export function SelectedSchoolProvider({
   const storageKey = schoolPreferenceKey(ownerKey);
   const scope = useMemo(() => ({ storageKey, loading }), [storageKey, loading]);
   const activeScope = useRef<typeof scope | null>(null);
+  const pendingEventSchool = useRef<{ storageKey: string; id: string | null; from: string } | null>(null);
   const [preference, setPreference] = useState<{
     scope: typeof scope;
     schoolId: string | null;
@@ -196,22 +204,48 @@ export function SelectedSchoolProvider({
     ? (catalog.find((school) => school.id === requestedId) ?? null)
     : null;
   const unavailable = ready && requestedId !== null && selectedSchool === null;
+  const [pendingSchoolId, setPendingSchoolId] = useState<string | null | undefined>(undefined);
+  const confirmationScope = useMemo(() => ({ scope, identityReady }), [scope, identityReady]);
+  const [pendingScope, setPendingScope] = useState(confirmationScope);
+  if (pendingScope !== confirmationScope) {
+    setPendingScope(confirmationScope);
+    setPendingSchoolId(undefined);
+  }
+  const pendingSwitch = pendingScope === confirmationScope && pendingSchoolId !== undefined;
 
-  function selectSchool(id: string | null) {
-    if (
-      activeScope.current !== scope ||
-      !ready ||
-      (id !== null && !catalog.some((school) => school.id === id))
-    )
+  useEffect(() => {
+    const pending = pendingEventSchool.current;
+    if (!pending) return;
+    if (!identityReady || pending.storageKey !== storageKey || (pathname !== pending.from && pathname !== '/events')) {
+      pendingEventSchool.current = null;
       return;
+    }
+    if (pathname !== '/events' || !ready || unavailable || requestedId !== pending.id) return;
+    pendingEventSchool.current = null;
     let storageError: string | null = null;
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ schoolId: id }));
+      localStorage.setItem(storageKey, JSON.stringify({ schoolId: pending.id }));
     } catch {
       storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
     }
-    setPreference({ scope, schoolId: id, stored: true, storageError });
-    const next = new URLSearchParams(params?.toString());
+    // Persist only once navigation has left the old campus-scoped event detail.
+    setPreference({ scope, schoolId: pending.id, stored: true, storageError });
+  }, [identityReady, pathname, ready, requestedId, scope, storageKey, unavailable]);
+
+  function canCommitSchool(id: string | null) {
+    return (
+      activeScope.current === scope &&
+      ready &&
+      (id === null || catalog.some((school) => school.id === id))
+    );
+  }
+
+  function commitSchool(id: string | null): boolean {
+    if (!canCommitSchool(id)) return false;
+    setPendingSchoolId(undefined);
+    const leaveEventDetail =
+      /^\/events\/[^/]+\/?$/.test(pathname) && (selectedSchool?.id ?? null) !== id;
+    const next = new URLSearchParams(leaveEventDetail ? undefined : params?.toString());
     if (pathname === '/map' && selectedSchool?.id !== id) {
       next.delete('route');
       next.delete('focus');
@@ -227,7 +261,31 @@ export function SelectedSchoolProvider({
       next.delete('school');
       next.set('campus', 'all');
     }
-    router.replace(`${pathname}?${next.toString()}${window.location.hash}`, { scroll: false });
+    const targetPath = leaveEventDetail ? '/events' : pathname;
+    const fragment = leaveEventDetail ? '' : window.location.hash;
+    if (leaveEventDetail) {
+      pendingEventSchool.current = { storageKey, id, from: pathname };
+    } else {
+      pendingEventSchool.current = null;
+      let storageError: string | null = null;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ schoolId: id }));
+      } catch {
+        storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
+      }
+      setPreference({ scope, schoolId: id, stored: true, storageError });
+    }
+    router.replace(`${targetPath}?${next.toString()}${fragment}`, { scroll: false });
+    return true;
+  }
+
+  function selectSchool(id: string | null) {
+    if (!canCommitSchool(id) || id === (selectedSchool?.id ?? null)) return;
+    if (hasCampusDraftActivity()) {
+      setPendingSchoolId(id);
+      return;
+    }
+    commitSchool(id);
   }
 
   return (
@@ -246,6 +304,32 @@ export function SelectedSchoolProvider({
       }}
     >
       {children}
+      <ConfirmModal
+        isOpen={pendingSwitch}
+        onClose={() => setPendingSchoolId(undefined)}
+        onConfirm={() => {
+          if (pendingScope !== confirmationScope || pendingSchoolId === undefined) return;
+          if (
+            pendingSchoolId !== null &&
+            !catalog.some((school) => school.id === pendingSchoolId)
+          ) {
+            setPendingSchoolId(undefined);
+            return;
+          }
+          // 先確認可換校再捨棄草稿；無法 commit 時關閉確認、草稿保留。
+          if (!canCommitSchool(pendingSchoolId)) {
+            setPendingSchoolId(undefined);
+            return;
+          }
+          discardActiveCampusDrafts();
+          commitSchool(pendingSchoolId);
+        }}
+        title="切換校園？"
+        message="目前校園還有未送出的草稿。保留在原校可繼續編輯；捨棄後才會切換到新校園，草稿不會帶到另一所學校。"
+        confirmText="捨棄草稿並切換"
+        cancelText="保留在原校"
+        variant="warning"
+      />
     </SelectedSchoolContext.Provider>
   );
 }

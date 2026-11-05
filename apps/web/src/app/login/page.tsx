@@ -21,6 +21,7 @@ import { isPublicCampusPath, publicCampusServices } from '@/lib/publicCampusServ
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { SchoolLoginHttpError, schoolLoginFailureCopy } from '@/lib/schoolLoginErrorCopy';
 import { STUDENT_ID_PREPARING_COPY, useSignInOptions } from '@/lib/signInOptions';
+import { buildCampusNavigationSearch, campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 
 function loginDestination(value: string | null): string {
   const safe = collapseInternalPathHash(
@@ -59,6 +60,8 @@ function LoginForm({
 }) {
   const { user, loading: schoolLoading } = useAuth();
   const selection = useOptionalSelectedSchool();
+  const params = useSearchParams();
+  const campusSearch = useCampusNavigationSearch(params);
   const selectedSchoolId = selection?.selectedSchoolId ?? null;
   const schoolDirectoryReady = !selection || !selection.loading;
   const importHref = selectedSchoolId && selection?.selectedSchool
@@ -87,7 +90,11 @@ function LoginForm({
   const publicDestination = isPublicCampusPath(
     new URL(destination, 'https://campus.local').pathname,
   );
-  const guestDestination = publicDestination ? destination : '/#public-services';
+  const directoryDestination = campusServiceHref(
+    '/search',
+    selection?.requestedUnavailable ? buildCampusNavigationSearch(params) : campusSearch,
+  );
+  const guestDestination = publicDestination ? destination : directoryDestination;
   useEffect(() => {
     const restore = () => {
       if (busyRef.current === 'platform') {

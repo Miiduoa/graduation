@@ -29,6 +29,9 @@ it('opens only on teacher action, shows the class and count without raw token te
   launch();
   expect(screen.getByRole('dialog', { name: '資料結構' })).toBeTruthy();
   expect(screen.getByAltText('本次課堂投影簽到 QR Code').getAttribute('src')).toBe(props.image);
+  expect(screen.getByText('nuni · 課堂簽到')).toBeTruthy();
+  expect(screen.getByText('在 nuni 課堂頁開啟相機，掃描後按「確認簽到」。')).toBeTruthy();
+  expect(screen.getByRole('dialog').textContent).not.toMatch(/Campus One/i);
   expect(screen.getByText('10:00')).toBeTruthy();
   expect(screen.getByText('23')).toBeTruthy();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '結束投影' }));

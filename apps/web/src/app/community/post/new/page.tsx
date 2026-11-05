@@ -7,11 +7,13 @@
  * 圖片走 lib/community/media.ts 上傳到 Firebase Storage 後寫入 mediaUrls。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { CommunityLoadError, useCommunityLoad } from '../../_components/useCommunityLoad';
 import { CommunityAccess } from '../../_components/CommunityAccess';
+import { useBoardCreationAccess } from '../../_components/useBoardCreationAccess';
+import { BoardCreationStatus } from '../../_components/BoardCreationStatus';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -49,11 +51,15 @@ export default function PostComposePage() {
 
 function PostComposeInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
+  const boardAccess = useBoardCreationAccess(schoolId);
+  const communityHref = `/community?schoolId=${encodeURIComponent(schoolId)}`;
+  const boardsHref = `${communityHref}&tab=boards`;
   const { user, loading: authLoading } = useAuth();
   const searchParams = useSearchParams();
   const routeBoardId = searchParams?.get('boardId') ?? '';
 
   const [boards, setBoards] = useState<CampusBoard[]>([]);
+  const [boardsLoaded, setBoardsLoaded] = useState(false);
   const [boardId, setBoardId] = useState(routeBoardId);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -63,6 +69,11 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
   const [previews, setPreviews] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const emptyRetryRef = useRef<HTMLButtonElement | null>(null);
+  const emptyRetryFlight = useRef(false);
+  const focusRestoredForm = useRef(false);
+  const boardPickerRef = useRef<HTMLSelectElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadBoards = useCallback(async () => {
     const rows = await listBoards(schoolId, 80);
@@ -70,13 +81,36 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
       const selected = await getBoardById(schoolId, routeBoardId);
       if (selected) rows.push(selected);
     }
+    if (rows.length > 0 && emptyRetryRef.current === document.activeElement) {
+      focusRestoredForm.current = true;
+    }
     setBoards(rows);
+    setBoardsLoaded(true);
   }, [schoolId, routeBoardId]);
   const {
     loading: boardsLoading,
     error: boardsError,
     refresh: refreshBoards,
   } = useCommunityLoad(loadBoards, '暫時無法讀取看板，請確認連線後重試。');
+
+  useLayoutEffect(() => {
+    if (!focusRestoredForm.current || boardsLoading || boardsError || boards.length === 0) return;
+    focusRestoredForm.current = false;
+    if (document.activeElement !== document.body) return;
+    const picker = boardPickerRef.current;
+    if (picker && !picker.disabled) picker.focus();
+    else titleInputRef.current?.focus();
+  }, [boards.length, boardsLoading, boardsError]);
+
+  async function retryEmptyBoards() {
+    if (emptyRetryFlight.current || boardsLoading) return;
+    emptyRetryFlight.current = true;
+    try {
+      await refreshBoards();
+    } finally {
+      emptyRetryFlight.current = false;
+    }
+  }
 
   const selectedBoard = useMemo(() => boards.find((b) => b.id === boardId), [boards, boardId]);
 
@@ -185,6 +219,34 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
     );
   }
 
+  if (boardsLoaded && boards.length === 0) {
+    return (
+      <section className="card" style={{ padding: 18, maxWidth: 720 }} aria-busy={boardsLoading}>
+        <h2>目前沒有可發布的看板</h2>
+        <BoardCreationStatus access={boardAccess} />
+        <p>{boardAccess.status === 'allowed'
+          ? '建立看板後，就能回到這裡發文。'
+          : '看板由學校管理者建立，開放後就能發文。'}</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+          {boardAccess.status === 'allowed' ? (
+            <Link className="btn primary" href={boardsHref}>前往建立看板</Link>
+          ) : (
+            <Link className="btn primary" href={communityHref}>回校園交流</Link>
+          )}
+          <button
+            ref={emptyRetryRef}
+            type="button"
+            className="btn"
+            aria-disabled={boardsLoading}
+            onClick={() => void retryEmptyBoards()}
+          >重新讀取看板</button>
+        </div>
+        {boardsLoading ? <p role="status">正在重新讀取看板…</p> : null}
+        {boardsError ? <p role="alert">{boardsError}</p> : null}
+      </section>
+    );
+  }
+
   return (
     <div className="card" style={{ padding: 18, maxWidth: 720 }}>
       <label htmlFor="post-board" style={{ display: 'block', marginBottom: 8, fontWeight: 700 }}>
@@ -194,12 +256,9 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
         <CommunityLoadError message={boardsError} retry={refreshBoards} />
       ) : boardsLoading ? (
         <p role="status">正在讀取看板…</p>
-      ) : boards.length === 0 ? (
-        <p>
-          目前沒有可發布的看板。<Link href="/community?tab=boards">前往建立看板</Link>
-        </p>
       ) : (
         <select
+          ref={boardPickerRef}
           id="post-board"
           className="input"
           value={boardId}
@@ -217,7 +276,7 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
       )}
       {!boardsLoading && !boardsError && routeBoardId && !selectedBoard && (
         <p role="alert">
-          這個看板已不存在或無法使用。<Link href="/community?tab=boards">選擇其他看板</Link>
+          這個看板已不存在或無法使用。<Link href={boardsHref}>選擇其他看板</Link>
         </p>
       )}
       {selectedBoard && (
@@ -259,6 +318,7 @@ function PostComposeInner({ schoolId }: { schoolId: string }) {
 
       <Label>標題</Label>
       <input
+        ref={titleInputRef}
         className="input"
         value={title}
         onChange={(e) => setTitle(e.target.value.slice(0, MAX_TITLE))}

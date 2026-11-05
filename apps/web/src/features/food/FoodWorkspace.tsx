@@ -11,7 +11,7 @@ import { Select } from '@/components/ui/Input';
 import { FoodMenu } from './FoodMenu';
 import { FoodOrders } from './FoodOrders';
 import { clearAllFoodPendingForAccount } from './foodPersistence';
-import { useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
+import { foodMoney, useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
 import styles from './Food.module.css';
@@ -21,12 +21,17 @@ const clientHydrated = () => true;
 const serverHydrated = () => false;
 
 export type FoodClient = ReturnType<typeof createNuniFoodClient>;
+export type PreparedFoodItem = { menuItemId: string; quantity: number; selectedOptionIds: string[] };
 export function FoodWorkspace({
   initialTenant = '',
   initialOrder = '',
+  initialLocation = '',
+  initialItems = [],
 }: {
   initialTenant?: string;
   initialOrder?: string;
+  initialLocation?: string;
+  initialItems?: PreparedFoodItem[];
 }) {
   const auth = useNuniSession();
   // Delayed Suspense on /food must hydrate against the server's account-checking markup.
@@ -80,8 +85,10 @@ export function FoodWorkspace({
             accountId={auth.session.platformAccountId}
             context={auth.session.context}
             cache={scope.drafts}
+            initialLocation={initialLocation}
             initialTenant={initialTenant}
             initialOrder={initialOrder}
+            initialItems={initialItems}
           />
         ) : (
           <NuniSignIn
@@ -103,12 +110,16 @@ function FoodAccount({
   cache,
   initialTenant,
   initialOrder,
+  initialLocation,
+  initialItems,
 }: {
   accountId: string;
   context: string;
   cache: FoodDraftCache;
   initialTenant: string;
   initialOrder: string;
+  initialLocation: string;
+  initialItems: PreparedFoodItem[];
 }) {
   const client = useMemo(
     () =>
@@ -141,6 +152,28 @@ function FoodAccount({
     : (available[0]?.tenantId ?? '');
   const selectedRealm = available.find((realm) => realm.tenantId === tenantId);
   const [created, setCreated] = useState<{ tenantId: string; orderId: string } | null>(null);
+  const previewLoad = useCallback(async () => {
+    if (orderingOn || initialOrder || !initialTenant || !initialLocation) return false;
+    const visible = await client.listRealms();
+    if (!visible.some((r) => r.tenantId === initialTenant && r.services.includes('food')))
+      return false;
+    const locations = await client.listLocations(initialTenant, { limit: 30 });
+    return locations.locations.some(
+      (l) => l.id === initialLocation && l.merchantMode === 'full' &&
+        l.allowedActions.includes('view-menu'),
+    );
+  }, [client, orderingOn, initialOrder, initialTenant, initialLocation]);
+  const preview = useFoodRead(previewLoad);
+  if (preview.data === true)
+    return (
+      <FoodMenuPreview
+        client={client}
+        tenantId={initialTenant}
+        locationId={initialLocation}
+        prepared={initialItems}
+      />
+    );
+
   return (
     <div className={styles.accountStack}>
       <div className={`${styles.bar} ${styles.accountBar}`}>
@@ -183,6 +216,8 @@ function FoodAccount({
           {tenantId &&
             (tab === 'menu' ? (
               <FoodLocations
+                initialLocation={!initialOrder && tenantId === initialTenant ? initialLocation : ''}
+                initialItems={!initialOrder && tenantId === initialTenant ? initialItems : []}
                 key={tenantId}
                 client={client}
                 cache={cache}
@@ -223,12 +258,16 @@ function FoodAccount({
 }
 
 function FoodLocations({
+  initialLocation,
+  initialItems,
   client,
   cache,
   accountId,
   tenantId,
   onOrder,
 }: {
+  initialLocation: string;
+  initialItems: PreparedFoodItem[];
   client: FoodClient;
   cache: FoodDraftCache;
   accountId: string;
@@ -241,8 +280,13 @@ function FoodLocations({
     [client, tenantId, cursor],
   );
   const locations = useFoodRead(load);
-  const [selected, setSelected] = useFoodDraft(cache, `food:${tenantId}:location`, '');
-  if (selected) {
+  const [selected, setSelected] = useFoodDraft(cache, `food:${tenantId}:location`, initialLocation);
+  const validSelected =
+    selected !== initialLocation ||
+    locations.data?.locations.some(
+      (l) => l.id === selected && l.merchantMode === 'full' && l.allowedActions.includes('view-menu'),
+    );
+  if (selected && validSelected) {
     return (
       <FoodMenu
         key={`${tenantId}:${selected}`}
@@ -251,6 +295,7 @@ function FoodLocations({
         accountId={accountId}
         tenantId={tenantId}
         locationId={selected}
+        initialItems={selected === initialLocation ? initialItems : []}
         onBack={() => setSelected('')}
         onOrder={onOrder}
       />
@@ -332,5 +377,79 @@ function FoodLocations({
         </>
       )}
     </div>
+  );
+}
+
+function FoodMenuPreview({
+  client,
+  tenantId,
+  locationId,
+  prepared = [],
+}: {
+  client: FoodClient;
+  tenantId: string;
+  locationId: string;
+  prepared?: PreparedFoodItem[];
+}) {
+  const load = useCallback(
+    () => client.getMenu(tenantId, locationId),
+    [client, tenantId, locationId],
+  );
+  const menu = useFoodRead(load);
+  return (
+    <section aria-label="餐廳菜單預覽">
+      <p>線上點餐尚未開放；可先查看菜單，備好的品項請見助理確認卡。</p>
+      {menu.loading && <p role="status">正在讀取菜單…</p>}
+      {menu.error && <p role="alert">{menu.error}</p>}
+      {menu.data && (
+        <>
+          <h2>{menu.data.location.name}</h2>
+          {prepared.length > 0 && (
+            <p>
+              已備好：
+              {prepared
+                .map((line) => {
+                  const listed = menu.data;
+                  const item = listed?.sections.flatMap((section) => section.items).find((row) => row.id === line.menuItemId);
+                  if (!item) return '';
+                  const options = line.selectedOptionIds
+                    .map((id) => item.optionGroups.flatMap((group) => group.options).find((option) => option.id === id)?.name)
+                    .filter(Boolean);
+                  return `${item.name} × ${line.quantity}${options.length ? `（${options.join('、')}）` : ''}`;
+                })
+                .filter(Boolean)
+                .join('、')}
+            </p>
+          )}
+          {menu.data.sections.map((section) => (
+            <section key={section.id}>
+              <h3>{section.name}</h3>
+              <ul>
+                {section.items.map((item) => (
+                  <li key={item.id}>
+                    {item.name} · {foodMoney(item.basePrice)} ·{' '}
+                    {item.available ? '供應中' : '暫停供應'}
+                    <p>
+                      {item.description} {item.dietaryTags.join('、')}
+                    </p>
+                    {item.optionGroups.map((group) => (
+                      <p key={group.id}>
+                        {group.name}：
+                        {group.options
+                          .map(
+                            (option) =>
+                              `${option.name} ${foodMoney(option.priceDelta)}${option.available ? '' : '（暫停供應）'}`,
+                          )
+                          .join('、')}
+                      </p>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </>
+      )}
+    </section>
   );
 }
