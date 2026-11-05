@@ -115,22 +115,24 @@ it('starts with pending work and separates latest feedback, submitted receipts a
     ]),
   );
   render(<Harness />);
-  await screen.findByRole('link', { name: '仍可補交' });
-  expect(screen.queryByRole('link', { name: '已停止的任務' })).toBeNull();
-  expect(screen.queryByRole('link', { name: '已有本次回饋' })).toBeNull();
-  expect(screen.getByRole('link', { name: '前往繳交：仍可補交' })).toBeTruthy();
-  const metrics = within(screen.getByRole('group', { name: '待辦快速篩選' }));
+  await screen.findByRole('link', { name: /，仍可補交$/ });
+  expect(screen.queryByRole('link', { name: /，已停止的任務$/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /，已有本次回饋$/ })).toBeNull();
+  const metrics = within(screen.getByRole('group', { name: '篩選課業待辦' }));
   fireEvent.click(metrics.getByRole('button', { name: /老師回饋/ }));
-  expect(screen.getByRole('link', { name: '已有本次回饋' })).toBeTruthy();
-  expect(screen.queryByRole('link', { name: '回饋後已重交' })).toBeNull();
+  expect(screen.getByRole('link', { name: /，已有本次回饋$/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /仍可補交/ })).toBeNull();
+  expect(screen.queryByRole('region', { name: '建議先處理' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '匯出未繳期限 ICS' })).toBeNull();
+  expect(screen.queryByRole('link', { name: /，回饋後已重交$/ })).toBeNull();
   expect(screen.getByText('這次資料來源完整。')).toBeTruthy();
   const filters = within(screen.getByRole('group', { name: '篩選課業待辦' }));
-  fireEvent.click(filters.getByRole('button', { name: '已繳交／作答' }));
-  expect(screen.getByRole('link', { name: '回饋後已重交' })).toBeTruthy();
+  fireEvent.click(filters.getByRole('button', { name: /已繳交／作答/ }));
+  expect(screen.getByRole('link', { name: /，回饋後已重交$/ })).toBeTruthy();
   expect(screen.queryByText('這是上一稿的回饋。')).toBeNull();
-  fireEvent.click(filters.getByRole('button', { name: '已停止收件' }));
-  expect(screen.getByRole('link', { name: '已停止的任務' })).toBeTruthy();
-  expect(screen.queryByRole('link', { name: '已有本次回饋' })).toBeNull();
+  fireEvent.click(filters.getByRole('button', { name: /已停止收件/ }));
+  expect(screen.getByRole('link', { name: /，已停止的任務$/ })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /，已有本次回饋$/ })).toBeNull();
 });
 
 it('does not claim all work is finished after a partially failed empty load and offers retry', async () => {
@@ -139,11 +141,11 @@ it('does not claim all work is finished after a partially failed empty load and 
   await screen.findByText(/有 1 門課未能完整讀取/);
   expect(screen.getByRole('heading', { name: '已載入的項目中沒有符合的待辦' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '目前沒有待完成的項目' })).toBeNull();
-  const summary = screen.getByRole('group', { name: '待辦快速篩選' });
+  const summary = screen.getByRole('group', { name: '篩選課業待辦' });
   expect(within(summary).getByRole('button', { name: /待完成/ }).textContent).toContain('0+');
   state.load.mockResolvedValueOnce(agenda([task(1)]));
   fireEvent.click(screen.getByRole('button', { name: '重試' }));
-  await screen.findByRole('link', { name: '學習任務 1' });
+  await screen.findByRole('link', { name: /，學習任務 1$/ });
   expect(state.load).toHaveBeenCalledTimes(2);
   expect(screen.queryByText(/有 1 門課未能完整讀取/)).toBeNull();
 });
@@ -151,10 +153,10 @@ it('does not claim all work is finished after a partially failed empty load and 
 it('labels source caps as incomplete counts instead of a complete todo total', async () => {
   state.load.mockResolvedValue(agenda([task(1)], { limitedCourseIds: [memberships[0].id] }));
   render(<Harness />);
-  await screen.findByRole('link', { name: '學習任務 1' });
+  await screen.findByRole('link', { name: /，學習任務 1$/ });
   expect(screen.getByText(/有 1 門課達到目前的顯示上限/)).toBeTruthy();
   expect(screen.getByText('顯示 1 / 1 項（已載入）')).toBeTruthy();
-  const summary = screen.getByRole('group', { name: '待辦快速篩選' });
+  const summary = screen.getByRole('group', { name: '篩選課業待辦' });
   expect(within(summary).getByRole('button', { name: /待完成/ }).textContent).toContain('1+');
 });
 
@@ -171,9 +173,9 @@ it('links each task to its own panel and anchor while preserving campus and dire
     unexpected: 'do-not-copy',
   }).toString();
   render(<Harness context={context} />);
-  await screen.findByRole('link', { name: assignment.title });
+  await screen.findByRole('link', { name: new RegExp(`，${assignment.title}$`) });
   for (const item of [assignment, quiz]) {
-    const title = screen.getByRole('link', { name: item.title });
+    const title = screen.getByRole('link', { name: new RegExp(`，${item.title}$`) });
     const destination = new URL(title.getAttribute('href')!, window.location.origin);
     expect(destination.pathname).toBe(`/classroom/course/${memberships[0].id}`);
     expect(Object.fromEntries(destination.searchParams)).toMatchObject({
@@ -193,7 +195,8 @@ it('shows six tasks initially, expands the remaining work, and can collapse with
   render(<Harness />);
   await screen.findByText('顯示 6 / 8 項');
   expect(screen.getAllByRole('listitem')).toHaveLength(6);
-  fireEvent.click(screen.getByRole('button', { name: '再顯示 12 項' }));
+  expect(screen.getAllByRole('link')).toHaveLength(6);
+  fireEvent.click(screen.getByRole('button', { name: '再顯示 2 項' }));
   expect(screen.getAllByRole('listitem')).toHaveLength(8);
   expect(screen.getByText('顯示 8 / 8 項')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '收合清單' }));
@@ -211,21 +214,21 @@ it('restores the task course from the URL and preserves that scope when opening 
   window.history.replaceState({}, '', `/classroom?taskCourse=${workspaces[1].id}`);
   state.load.mockResolvedValue(agenda([first, second], { workspaces, studiedCourseCount: 2 }));
   const view = render(<Harness workspaces={workspaces} context="campus=tw-pu" />);
-  await screen.findByRole('link', { name: second.title });
-  expect(screen.queryByRole('link', { name: first.title })).toBeNull();
+  await screen.findByRole('link', { name: new RegExp(`，${second.title}$`) });
+  expect(screen.queryByRole('link', { name: new RegExp(`，${first.title}$`) })).toBeNull();
   expect((screen.getByRole('combobox', { name: '待辦課程' }) as HTMLSelectElement).value).toBe(
     workspaces[1].id,
   );
   fireEvent.change(screen.getByRole('combobox', { name: '待辦課程' }), {
     target: { value: 'all' },
   });
-  expect(screen.getByRole('link', { name: first.title })).toBeTruthy();
+  expect(screen.getByRole('link', { name: new RegExp(`，${first.title}$`) })).toBeTruthy();
   expect(new URLSearchParams(window.location.search).has('taskCourse')).toBe(false);
   fireEvent.change(screen.getByRole('combobox', { name: '待辦課程' }), {
     target: { value: workspaces[0].id },
   });
   const destination = new URL(
-    screen.getByRole('link', { name: first.title }).getAttribute('href')!,
+    screen.getByRole('link', { name: new RegExp(`，${first.title}$`) }).getAttribute('href')!,
     window.location.origin,
   );
   expect(destination.searchParams.get('taskCourse')).toBe(workspaces[0].id);
@@ -234,8 +237,42 @@ it('restores the task course from the URL and preserves that scope when opening 
     window.history.replaceState({}, '', `/classroom?taskCourse=${workspaces[1].id}`);
     view.rerender(<Harness workspaces={workspaces} context="campus=tw-pu" />);
   });
-  expect(screen.getByRole('link', { name: second.title })).toBeTruthy();
-  expect(screen.queryByRole('link', { name: first.title })).toBeNull();
+  expect(screen.getByRole('link', { name: new RegExp(`，${second.title}$`) })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: new RegExp(`，${first.title}$`) })).toBeNull();
+  expect(state.load).toHaveBeenCalledTimes(1);
+});
+
+it('opens the right course for same-title work and keeps the selected course when clearing an empty status', async () => {
+  const workspaces: NuniWorkspace[] = [
+    ...memberships,
+    { ...memberships[0], id: 'cw_22222222-2222-4222-8222-222222222222', title: '網路通訊' },
+  ];
+  const first = task(1, { title: '期中報告' });
+  const second = task(2, {
+    title: first.title,
+    courseId: workspaces[1].id,
+    courseTitle: workspaces[1].title,
+  });
+  state.load.mockResolvedValue(agenda([first, second], { workspaces, studiedCourseCount: 2 }));
+  render(<Harness workspaces={workspaces} />);
+  for (const item of [first, second]) {
+    const link = await screen.findByRole('link', {
+      name: `前往繳交，${item.courseTitle}，作業，期中報告`,
+    });
+    expect(link.getAttribute('href')).toContain(
+      `/classroom/course/${item.courseId}?view=assignments#assignment-${item.id}`,
+    );
+  }
+  const picker = screen.getByRole('combobox', { name: '待辦課程' }) as HTMLSelectElement;
+  fireEvent.change(picker, { target: { value: second.courseId } });
+  fireEvent.click(screen.getByRole('button', { name: /老師回饋/ }));
+  expect(screen.queryAllByRole('link')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '查看這門課的全部項目' }));
+  expect(picker.value).toBe(second.courseId);
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(
+    screen.getByRole('link', { name: /網路通訊，作業，期中報告/ }).getAttribute('href'),
+  ).toContain(second.id);
   expect(state.load).toHaveBeenCalledTimes(1);
 });
 
@@ -264,17 +301,16 @@ it('cancels obsolete membership reads and never lets their late responses replac
       }),
     );
   });
-  await screen.findByRole('link', { name: '目前課程的作業' });
+  await screen.findByRole('link', { name: /，目前課程的作業$/ });
   await act(async () => {
     oldRead.resolve(agenda([task(1, { title: '過期回應的作業' })]));
   });
-  expect(screen.queryByRole('link', { name: '過期回應的作業' })).toBeNull();
-  expect(screen.getByRole('link', { name: '目前課程的作業' })).toBeTruthy();
+  expect(screen.queryByRole('link', { name: /，過期回應的作業$/ })).toBeNull();
+  expect(screen.getByRole('link', { name: /，目前課程的作業$/ })).toBeTruthy();
   const currentFence = state.load.mock.calls[1][2] as { cancelled(): boolean };
   view.unmount();
   await waitFor(() => expect(currentFence.cancelled()).toBe(true));
 });
-
 
 it('does not attribute another course loading failure to the selected healthy course', async () => {
   const workspaces: NuniWorkspace[] = [
@@ -282,10 +318,11 @@ it('does not attribute another course loading failure to the selected healthy co
     { ...memberships[0], id: 'cw_22222222-2222-4222-8222-222222222222', title: '網路通訊' },
   ];
   state.load.mockResolvedValue(
-    agenda(
-      [task(21, { courseId: workspaces[1].id, courseTitle: workspaces[1].title })],
-      { workspaces, studiedCourseCount: 2, failedCourseIds: [workspaces[0].id] },
-    ),
+    agenda([task(21, { courseId: workspaces[1].id, courseTitle: workspaces[1].title })], {
+      workspaces,
+      studiedCourseCount: 2,
+      failedCourseIds: [workspaces[0].id],
+    }),
   );
   render(<Harness workspaces={workspaces} />);
   await screen.findByText(/有 1 門課未能完整讀取/);
@@ -293,11 +330,10 @@ it('does not attribute another course loading failure to the selected healthy co
     target: { value: workspaces[1].id },
   });
   expect(screen.queryByText(/有 1 門課未能完整讀取/)).toBeNull();
-  const summary = within(screen.getByRole('group', { name: '待辦快速篩選' }));
+  const summary = within(screen.getByRole('group', { name: '篩選課業待辦' }));
   expect(summary.getByRole('button', { name: /待完成/ }).textContent).toContain('1');
   expect(summary.getByRole('button', { name: /待完成/ }).textContent).not.toContain('+');
 });
- 
 
 it('shows an explainable cross-course focus queue with direct task actions', async () => {
   const overdue = task(31, { title: '仍可處理的逾時作業', dueAt: '2026-10-20T10:00:00+08:00' });
@@ -307,25 +343,28 @@ it('shows an explainable cross-course focus queue with direct task actions', asy
     id: 'cwq_00000000-0000-4000-8000-000000000032',
     dueAt: '2026-10-25T20:00:00+08:00',
   });
-  const completed = task(33, { title: '已經繳交過的作業', submittedAt: '2026-10-24T12:00:00+08:00' });
+  const completed = task(33, {
+    title: '已經繳交過的作業',
+    submittedAt: '2026-10-24T12:00:00+08:00',
+  });
   state.load.mockResolvedValue(agenda([quiz, completed, overdue]));
   render(<Harness context="campus=tw-pu" />);
-  const focus = await screen.findByRole('region', { name: '今日優先課業' });
+  const focus = await screen.findByRole('region', { name: '建議先處理' });
   const links = within(focus).getAllByRole('link');
   expect(links).toHaveLength(2);
   expect(links[0].getAttribute('aria-label')).toContain(overdue.title);
   expect(links[1].getAttribute('aria-label')).toContain(quiz.title);
   expect(links[0].getAttribute('href')).toContain(`#assignment-${overdue.id}`);
   expect(links[1].getAttribute('href')).toContain(`#quiz-${quiz.id}`);
-  expect(focus.textContent).toContain('已過參考時間 · 仍可開啟');
+  expect(focus.textContent).toContain('已過建議時間');
   expect(focus.textContent).not.toContain(completed.title);
 });
 
 it('marks a partially loaded recommendation as incomplete rather than a full student plan', async () => {
   state.load.mockResolvedValue(agenda([task(90)], { failedCourseIds: [memberships[0].id] }));
   render(<Harness />);
-  const focus = await screen.findByRole('region', { name: '今日優先課業' });
-  expect(focus.textContent).toContain('部分課程資料尚未完整');
+  const focus = await screen.findByRole('region', { name: '建議先處理' });
+  expect(focus.textContent).toContain('依已載入項目排序');
 });
 
 it('exports loaded tasks beyond the visible list and clears export choices after refreshing', async () => {
@@ -341,4 +380,21 @@ it('exports loaded tasks beyond the visible list and clears export choices after
   fireEvent.click(await screen.findByRole('button', { name: '匯出未繳期限 ICS' }));
   expect(screen.getByRole('button', { name: '預覽已選 0 項' }).hasAttribute('disabled')).toBe(true);
   expect(screen.queryByRole('button', { name: '下載 ICS' })).toBeNull();
+});
+
+it('exports only matching pending dates after switching from all work to the coming week', async () => {
+  state.load.mockResolvedValue(
+    agenda([
+      task(1, { title: '這週交' }),
+      task(2, { title: '月底以後交', dueAt: '2026-11-25T08:00:00+08:00' }),
+    ]),
+  );
+  render(<Harness />);
+  fireEvent.click(await screen.findByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: /未來七天/ }));
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+  expect(screen.getByRole('checkbox', { name: /這週交/ })).toBeTruthy();
 });

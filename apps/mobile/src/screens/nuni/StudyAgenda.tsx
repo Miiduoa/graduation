@@ -1,21 +1,21 @@
 import { StudyAssignmentAssistant } from './StudyAssignmentAssistant';
 import { StudyDeadlineExport } from './StudyDeadlineExport';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import {
+  groupStudyTasks,
   sortStudyTasks,
   studyTaskStatus,
   studyTaskTiming,
   type NuniStudyAgenda,
-  type NuniStudyTask,
+  type StudyAgendaFilter,
 } from '@campus/shared/src/nuniStudyAgenda';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { feedbackPredatesSubmission } from '@campus/shared/src/lmsReviewQueue';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
 
-type Filter = 'pending' | 'soon' | 'overdue' | 'feedback' | 'submitted' | 'closed' | 'all';
-const FILTERS: [Filter, string][] = [
+const FILTERS: [StudyAgendaFilter, string][] = [
   ['pending', '待完成'],
   ['soon', '未來七天'],
   ['overdue', '已過建議時間'],
@@ -24,17 +24,6 @@ const FILTERS: [Filter, string][] = [
   ['closed', '已停止收件'],
   ['all', '全部'],
 ];
-const belongs = (task: NuniStudyTask, filter: Filter, now: number) => {
-  if (filter === 'all') return true;
-  const status = studyTaskStatus(task);
-  if (filter === 'submitted') return status === 'submitted' || status === 'feedback';
-  if (filter === 'soon' || filter === 'overdue') {
-    if (status !== 'pending') return false;
-    const timing = studyTaskTiming(task, now);
-    return filter === 'soon' ? timing === 'today' || timing === 'week' : timing === 'overdue';
-  }
-  return status === filter;
-};
 
 export function StudyAgenda({
   data,
@@ -50,29 +39,34 @@ export function StudyAgenda({
   open(courseId: string, activityId?: string): void;
 }) {
   const theme = useTheme();
-  const [filter, setFilter] = useNuniDraftState<Filter>('courses:agenda-filter', 'pending');
+  const [filter, setFilter] = useNuniDraftState<StudyAgendaFilter>('courses:agenda-filter', 'pending');
   const [courseFilter, setCourseFilter] = useNuniDraftState<string>('courses:agenda-course', 'all');
-  const [limit, setLimit] = useState(8);
+  const [limit, setLimit] = useNuniDraftState('courses:agenda-limit', 8);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
-  const tasks = sortStudyTasks(data?.tasks ?? [], now);
   const studentCourses = (data?.workspaces ?? []).filter(
     (course) => course.state === 'active' && course.memberRole === 'student',
   );
-  const selectedCourse =
-    courseFilter === 'all' || studentCourses.some((course) => course.id === courseFilter)
-      ? courseFilter
-      : 'all';
-  const scopedTasks =
-    selectedCourse === 'all' ? tasks : tasks.filter((task) => task.courseId === selectedCourse);
-  const visible = scopedTasks.filter((task) => belongs(task, filter, now));
-  const failedCourseIds =
-    data?.failedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
-  const limitedCourseIds =
-    data?.limitedCourseIds.filter((id) => selectedCourse === 'all' || id === selectedCourse) ?? [];
+  const course = studentCourses.find((item) => item.id === courseFilter);
+  const selectedCourse = course?.id ?? 'all';
+  const scopedData = useMemo(() => {
+    if (!data || selectedCourse === 'all') return data;
+    return {
+      workspaces: data.workspaces.filter((course) => course.id === selectedCourse),
+      tasks: data.tasks.filter((task) => task.courseId === selectedCourse),
+      studiedCourseCount: 1,
+      failedCourseIds: data.failedCourseIds.filter((id) => id === selectedCourse),
+      limitedCourseIds: data.limitedCourseIds.filter((id) => id === selectedCourse),
+    };
+  }, [data, selectedCourse]);
+  const scopedTasks = scopedData?.tasks ?? [];
+  const groups = groupStudyTasks(scopedTasks, now);
+  const visible = sortStudyTasks(groups[filter], now);
+  const failedCourseIds = scopedData?.failedCourseIds ?? [];
+  const limitedCourseIds = scopedData?.limitedCourseIds ?? [];
   const partial = failedCourseIds.length > 0 || limitedCourseIds.length > 0;
   const copy = { color: theme.colors.text, fontSize: 15, lineHeight: 23 };
   if (!loading && !data && !error) return null;
@@ -95,7 +89,7 @@ export function StudyAgenda({
           先處理這些
         </Text>
         <Text style={{ ...copy, color: theme.colors.muted }}>
-          修習課程的作業與測驗，依參考期限排列。
+          {course?.title ?? '所有修習課程'} · {FILTERS.find(([value]) => value === filter)?.[1]}
         </Text>
       </View>
       {loading ? (
@@ -130,17 +124,6 @@ export function StudyAgenda({
             重新讀取待辦
           </Text>
         </Pressable>
-      ) : null}
-      {data && !loading && !error && studentCourses.length > 0 ? (
-        <StudyAssignmentAssistant data={data} open={open} />
-      ) : null}
-      {data && !loading && !error ? (
-        <StudyDeadlineExport
-          key={selectedCourse}
-          tasks={scopedTasks}
-          partial={partial}
-          retry={retry}
-        />
       ) : null}
       {data ? (
         <>
@@ -222,15 +205,19 @@ export function StudyAgenda({
                       color: filter === value ? theme.colors.accent : theme.colors.muted,
                     }}
                   >
-                    {label} {scopedTasks.filter((task) => belongs(task, value, now)).length}
+                    {label} {groups[value].length}
                     {partial ? '+' : ''}
                   </Text>
                 </Pressable>
               ))}
             </ScrollView>
           </View>
+          {scopedData && !loading && !error && studentCourses.length > 0 ? (
+            <StudyAssignmentAssistant key={filter} data={scopedData} open={open} />
+          ) : null}
           {visible.length ? (
-            visible.slice(0, limit).map((task) => {
+            visible.slice(0, limit).map((task, index) => {
+              const nextUp = filter === 'pending' && index === 0;
               const status = studyTaskStatus(task);
               const timing = studyTaskTiming(task, now);
               const kind = task.kind === 'assignment' ? '作業' : '測驗';
@@ -258,27 +245,43 @@ export function StudyAgenda({
                             : timing === 'week'
                               ? '建議七天內完成'
                               : '待完成';
+              const due = task.dueAt && formatTaipeiDateTime(task.dueAt, { seconds: false });
+              const dueLabel = due ? `參考期限 ${due}` : '未設定參考期限';
               return (
                 <Pressable
                   key={`${task.kind}:${task.courseId}:${task.id}`}
                   accessibilityRole="button"
-                  accessibilityLabel={`開啟${kind}：${task.title}`}
+                  accessibilityLabel={`開啟${kind}：${task.courseTitle} · ${task.title}，${label}，${dueLabel}`}
                   onPress={() => open(task.courseId, task.id)}
                   style={({ pressed }) => ({
                     paddingVertical: 14,
-                    paddingHorizontal: 2,
-                    borderTopWidth: 1,
+                    paddingHorizontal: nextUp ? 14 : 2,
+                    backgroundColor: nextUp ? theme.colors.accentSoft : theme.colors.surface,
+                    borderRadius: nextUp ? 12 : 0,
+                    borderTopWidth: nextUp ? 0 : 1,
                     borderColor: theme.colors.border,
                     gap: 5,
                     opacity: pressed ? 0.65 : 1,
                   })}
                 >
+                  {nextUp && (
+                    <Text
+                      style={{ ...copy, color: theme.colors.accent, fontSize: 13, fontWeight: '700' }}
+                    >
+                      {partial ? '已載入待辦中優先處理' : '優先處理'}
+                    </Text>
+                  )}
                   <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>
                     {task.courseTitle} · {kind}
                   </Text>
-                  <Text style={{ ...copy, fontWeight: '600', fontSize: 17, lineHeight: 26 }}>
-                    {task.title}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ ...copy, flex: 1, fontWeight: '600', fontSize: 17, lineHeight: 26 }}>
+                      {task.title}
+                    </Text>
+                    <Text style={{ ...copy, color: theme.colors.accent, fontSize: 13 }}>
+                      {status === 'feedback' ? '看回饋' : status === 'submitted' ? '看紀錄' : '查看'} ›
+                    </Text>
+                  </View>
                   <Text
                     style={{
                       ...copy,
@@ -294,9 +297,7 @@ export function StudyAgenda({
                     {label}
                   </Text>
                   <Text style={{ ...copy, color: theme.colors.muted, fontSize: 13 }}>
-                    {task.dueAt
-                      ? `參考期限 ${formatTaipeiDateTime(task.dueAt, { seconds: false })}`
-                      : '未設定參考期限'}
+                    {dueLabel}
                   </Text>
                 </Pressable>
               );
@@ -322,6 +323,20 @@ export function StudyAgenda({
                               : '目前沒有課業活動。'}
             </Text>
           )}
+          {visible.length === 0 && filter !== 'all' && scopedTasks.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setFilter('all');
+                setLimit(8);
+              }}
+              style={{ minHeight: 44, justifyContent: 'center' }}
+            >
+              <Text style={{ ...copy, color: theme.colors.accent, fontWeight: '600' }}>
+                {selectedCourse === 'all' ? '查看全部項目' : '查看這門課的全部項目'}
+              </Text>
+            </Pressable>
+          )}
           {visible.length > limit ? (
             <Pressable
               accessibilityRole="button"
@@ -337,6 +352,14 @@ export function StudyAgenda({
             參考期限用於安排進度；是否能繳交，以老師的收件狀態為準。
           </Text>
         </>
+      ) : null}
+      {data && !loading && !error && ['pending', 'overdue', 'soon', 'all'].includes(filter) ? (
+        <StudyDeadlineExport
+          key={JSON.stringify([selectedCourse, filter])}
+          tasks={visible}
+          partial={partial}
+          retry={retry}
+        />
       ) : null}
     </View>
   );

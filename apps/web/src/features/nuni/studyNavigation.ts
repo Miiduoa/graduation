@@ -1,12 +1,7 @@
+import type { StudyAgendaFilter } from '@campus/shared/src/nuniStudyAgenda';
+
+export type { StudyAgendaFilter };
 export type CourseDirectoryFilter = 'all' | 'studying' | 'teaching' | 'archived';
-export type StudyAgendaFilter =
-  | 'pending'
-  | 'soon'
-  | 'overdue'
-  | 'feedback'
-  | 'submitted'
-  | 'closed'
-  | 'all';
 
 const contextKeys = [
   'campus',
