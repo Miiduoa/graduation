@@ -106,6 +106,23 @@ function weekday(value: string): number | undefined {
   )[clean.toLowerCase()];
 }
 
+/** Unindented cell text beneath weekday headings has lost its horizontal position in OCR. */
+export function hasFlattenedScreenshotWeek(text: string): boolean {
+  if (text.length > PERSONAL_IMPORT_MAX_TEXT_LENGTH) return false;
+  const lines = text.split('\n');
+  const header = lines.findIndex((line) => {
+    const cells = line.trim().split(/[\s|｜,，、]+/);
+    if (/^(節次|節數|時間|時段|period|time)$/i.test(cells[0])) cells.shift();
+    if (cells.length < 3 || cells.length > 7 || cells.some((cell) => /^\d+$/.test(cell)))
+      return false;
+    const days = cells.map(weekday);
+    return days.every((day) => day !== undefined) && new Set(days).size === days.length;
+  });
+  return header >= 0 && lines.slice(header + 1).some((line) =>
+    /^[\p{L}][^\s,，|｜;；]*\r?$/u.test(line),
+  );
+}
+
 function periods(
   value: string,
   profile?: PeriodProfileId,
@@ -245,11 +262,15 @@ function readTable(text: string, delimiter: string): SourceTable {
 }
 
 /** OCR text tables can retain column gaps; single spaces inside course names are never delimiters. */
+export function splitScreenshotColumns(line: string): string[] {
+  return line.trim().split(/[ \u00a0\u3000]{2,}/);
+}
+
 function readScreenshotTable(text: string, searchHeader = true): SourceTable {
   const lines = text
     .split('\n')
     .map((rawText, index) => ({
-      cells: rawText.trim().split(/[ \u00a0\u3000]{2,}/),
+      cells: splitScreenshotColumns(rawText),
       line: index + 1,
       rawText,
     }))
@@ -467,12 +488,27 @@ export function parsePersonalImport(
         });
         return mapPersonalImportPeriods(row, options);
       });
-    } else
+    } else {
       rows = normalized
         .split('\n')
         .map((rawText, index) => ({ rawText, line: index + 1 }))
         .filter((source) => source.rawText.trim())
         .map((source) => naturalRow(source.rawText, source.line, options, issues));
+      if (
+        options.kind === 'timetable' &&
+        options.source?.type === 'screenshot' &&
+        hasFlattenedScreenshotWeek(normalized) &&
+        !rows.some((row) => row.title && row.dayOfWeek && (row.startPeriod || row.startTime))
+      )
+        return {
+          rows: [],
+          issues: [{
+            code: 'screenshot-grid-layout',
+            severity: 'warning',
+            message: '讀到了週課表的星期欄，但無法確認每門課的位置。請對照原圖，在課表格點選星期和節次補上課程，或改貼有星期與節次的課程清單。',
+          }],
+        };
+    }
   }
   if (rows.length > PERSONAL_IMPORT_MAX_ROWS)
     return {

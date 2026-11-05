@@ -666,6 +666,7 @@ function ImportWorkspace({
     setReviewPage(0);
     setParseIssues(
       parsed.issues.filter((issue) => {
+        if (issue.code === 'screenshot-grid-layout') return true;
         if (issue.severity !== 'error') return false;
         const row = parsed.rows.find((item) => item.id === issue.rowId);
         return (
@@ -758,7 +759,7 @@ function ImportWorkspace({
       return;
     if (!request.input.image && !request.input.text?.trim()) return;
     // Keep the reviewed draft unchanged until the replacement has completed.
-    const preserveDraft = rows.length > 0 || !!importDocument;
+    const preserveDraft = rows.length > 0 || !!importDocument || (!!request.input.image && !!text);
     if (!preserveDraft) setRetryAi(null);
     const controller = new AbortController();
     job.current?.abort();
@@ -878,9 +879,30 @@ function ImportWorkspace({
       });
       if (!currentRead()) return;
       if (!result.rows.length) {
+        if (!preserveDraft && request.input.image && preparedPreview && result.sourceText?.trim()) {
+          setText(result.sourceText);
+          setSource(request.source);
+          setSourceImage(request.input.image);
+          setPreview(preparedPreview);
+          preparedPreview = '';
+          setSchoolPage(null);
+          setBackup(null);
+          setParseIssues(result.issues.filter((issue) => issue.code === 'screenshot-grid-layout'));
+          setRetryAi(result.retry ? { ...request, retry: result.retry } : null);
+          setNotice(
+            result.issues.find((issue) => issue.code === 'screenshot-grid-layout')?.message ??
+              '已讀到截圖文字，但還沒整理出資料。請對照截圖修正原文，再整理成待確認清單。',
+          );
+          requestAnimationFrame(() => {
+            if (!suspended.current && !controller.signal.aborted) originalText.current?.focus();
+          });
+          return;
+        }
         setNotice(
-          result.issues.map((issue) => issue.message).join(' ') ||
-            '沒有整理出可核對的資料，原本的草稿仍保留。請重試或貼上學校的表格文字。',
+          preserveDraft
+            ? '這次沒有整理出可核對的資料，原本的草稿仍保留。'
+            : result.issues.map((issue) => issue.message).join(' ') ||
+                '沒有整理出可核對的資料。可以貼上學校的表格文字，或手動加一筆。',
         );
         return;
       }
@@ -1090,7 +1112,7 @@ function ImportWorkspace({
         }
         pendingPreview = url;
         setPreview(url);
-        input = await recognizePersonalImportImage(file, controller.signal, setProgress);
+        input = await recognizePersonalImportImage(file, controller.signal, setProgress, kind);
       } else {
         if (!/\.(csv|tsv|txt|ics)$/i.test(file.name))
           throw new Error(
@@ -1354,7 +1376,8 @@ function ImportWorkspace({
           <p className={styles.eyebrow}>你的校園資料，一次整理</p>
           <h2>把課表與紀錄帶進來</h2>
           <p>
-            貼上學校表格、選擇檔案，或讓裝置端 AI 讀取截圖。先看清楚，再加入你的課表、成績與行事曆。
+            貼上學校表格、選擇檔案，或用 AI
+            整理截圖裡的文字。核對後，就能加入你的課表、成績與行事曆。
           </p>
         </div>
         <p className={styles.storage}>
@@ -1679,8 +1702,17 @@ function ImportWorkspace({
               換裝置：也可選擇 nuni 完整備份（JSON，8 MB 內），一次帶回三類資料與所有學期。
             </small>
           </div>
-          <details className={styles.paste} open={pasteOpen || !!text}>
-            <summary>或貼上從學校網頁複製的表格／文字</summary>
+          <details className={styles.paste} open={pasteOpen || !!text || !!preview}>
+            <summary>
+              {source.type === 'screenshot' ? '核對截圖文字' : '或貼上從學校網頁複製的表格／文字'}
+            </summary>
+            {preview && !rows.length && (
+              <details className={styles.source} open>
+                <summary>對照這張截圖</summary>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={preview} alt="你選擇的資料截圖，僅供核對" className={styles.preview} />
+              </details>
+            )}
             <label className={styles.field}>
               原始文字
               <textarea
@@ -1713,6 +1745,14 @@ function ImportWorkspace({
                 maxLength={200000}
               />
             </label>
+            {kind === 'timetable' &&
+              source.type === 'screenshot' &&
+              !rows.length &&
+              parseIssues.some((issue) => issue.code === 'screenshot-grid-layout') && (
+                <a className="btn" href="#import-review">
+                  在週課表補上課程
+                </a>
+              )}
             <button
               className="btn"
               type="button"
@@ -1722,7 +1762,9 @@ function ImportWorkspace({
               整理成待確認清單
             </button>
             <p className={styles.note}>
-              學校網頁：選取整張表格並複製，直接貼到上方。也可選擇自行儲存的 HTML 網頁。
+              {source.type === 'screenshot'
+                ? '可以直接修正辨識文字，再按「整理成待確認清單」。'
+                : '選取並複製學校網頁上的整張表格，貼到上方。也可以選擇已儲存的 HTML 網頁。'}
             </p>
           </details>
         </fieldset>
@@ -1932,13 +1974,6 @@ function ImportWorkspace({
               : '尚未選用學校節次表。請保留原始上課時間；其他學校與週末課程會顯示在下方個人紀錄。'}
           </p>
         )}
-        {preview && !rows.length && (
-          <details className={styles.source} open>
-            <summary>對照這張截圖</summary>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview} alt="你選擇的資料截圖，僅供核對" className={styles.preview} />
-          </details>
-        )}
       </section>
       {importDocument && (
         <fieldset disabled={reading || saving} className={styles.fieldset}>
@@ -2036,7 +2071,13 @@ function ImportWorkspace({
           />
         </fieldset>
       )}
-      <section ref={review} className={styles.panel} aria-label="核對匯入資料">
+      <section
+        id="import-review"
+        tabIndex={-1}
+        ref={review}
+        className={styles.panel}
+        aria-label="核對匯入資料"
+      >
         <div className={styles.heading}>
           <h2>
             <span>2</span> 核對內容
@@ -2249,7 +2290,11 @@ function ImportWorkspace({
                           className={styles.preview}
                         />
                       </a>
-                      <small>點圖片可另開放大；原圖只保留在這次畫面。</small>
+                      <small>
+                        {kind === 'timetable'
+                          ? '點圖放大，核對每門課所在的星期欄與節次。格線清楚的週課表會依儲存格位置整理。'
+                          : '點圖可另開放大，原圖只保留在這次畫面。'}
+                      </small>
                     </>
                   ) : (
                     <pre>{text}</pre>

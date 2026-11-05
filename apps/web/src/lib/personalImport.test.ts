@@ -177,6 +177,24 @@ describe('personal import parsing preserves evidence', () => {
     expect(grid.rows.every((row) => row.startPeriod === undefined)).toBe(true);
   });
 
+  it('keeps detached OCR cells out of screenshot course drafts without suppressing positioned courses', () => {
+    const flattened = '節次  星期一  星期二  星期三\n1  程式設計\nB202\n2\n3  資料庫系統\nA301';
+    const screenshot = { ...timetable, source: { type: 'screenshot' as const } };
+    const parsed = parsePersonalImport(flattened, screenshot);
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.issues).toContainEqual(expect.objectContaining({ code: 'screenshot-grid-layout' }));
+
+    const explicit = parsePersonalImport(flattened + '\n網路管理 星期二 第3節', screenshot);
+    expect(explicit.rows).toContainEqual(expect.objectContaining({
+      title: '網路管理', dayOfWeek: 2, startPeriod: 3,
+    }));
+    for (const other of [
+      parsePersonalImport(flattened, { ...grades, source: screenshot.source }),
+      parsePersonalImport(flattened, { ...timetable, source: { type: 'paste' } }),
+      parsePersonalImport('節次\t星期一\t星期二\t星期三\n1\t設計\t\t\n2\t\t\t資料庫', screenshot),
+    ]) expect(other.issues.some((issue) => issue.code === 'screenshot-grid-layout')).toBe(false);
+  });
+
   it('preserves quoted newlines and doubled quotes', () => {
     const parsed = parsePersonalImport('課程名稱,學分,成績\n"設計\n""實習""",2,通過', grades);
     expect(errors(parsed.issues)).toEqual([]);

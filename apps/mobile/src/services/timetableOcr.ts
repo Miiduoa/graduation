@@ -25,7 +25,7 @@ export async function readImageBase64(uri: string): Promise<string> {
 
 export const TIMETABLE_OCR_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
-<body><script src="tesseract.min.js"></script><script>
+<body><script src="tesseract.min.js"></script><script src="ruled-timetable-grid.js"></script><script>
 let current = null;
 function send(payload) { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(payload)); }
 function imageError(error) {
@@ -41,7 +41,28 @@ window.cancelTimetable = function(id) {
   if (current.worker) current.worker.terminate();
   current = null;
 };
-window.recognizeTimetable = async function(id, base64, mime) {
+async function readRuledGrid(uri, tsv, job) {
+  if (!window.TimetableGrid || !tsv || tsv.length > 256000) return null;
+  const canvas = document.createElement('canvas');
+  try {
+    const image = new Image();
+    image.src = uri;
+    await image.decode();
+    const width = image.naturalWidth, height = image.naturalHeight;
+    if (job.cancelled || width < 48 || height < 48 || width > 4096 || height > 4096 || width * height > 4000000) return null;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(image, 0, 0);
+    return window.TimetableGrid.recognizeRuledTimetableGrid(ctx.getImageData(0, 0, width, height), tsv);
+  } catch {
+    return null;
+  } finally {
+    canvas.width = canvas.height = 0;
+  }
+}
+window.recognizeTimetable = async function(id, base64, mime, readGrid) {
   if (current) window.cancelTimetable(current.id);
   const job = { id: id, worker: null, cancelled: false }; current = job;
   try {
@@ -56,8 +77,13 @@ window.recognizeTimetable = async function(id, base64, mime) {
     if (job.cancelled) { await worker.terminate(); return; }
     await worker.setParameters({ preserve_interword_spaces: '1' });
     if (job.cancelled) return;
-    const result = await worker.recognize('data:' + mime + ';base64,' + base64);
-    if (!job.cancelled) send({ id: id, ok: true, text: result.data.text || '' });
+    const uri = 'data:' + mime + ';base64,' + base64;
+    const checkGrid = readGrid && mime === 'image/png';
+    const result = checkGrid ? await worker.recognize(uri, {}, { text: true, tsv: true }) : await worker.recognize(uri);
+    const text = result.data.text || '';
+    const grid = checkGrid && !job.cancelled && text.length <= 40000 && /(?:星期|週|周)[一二三四五六日天]/u.test(text)
+      ? await readRuledGrid(uri, result.data.tsv, job) : null;
+    if (!job.cancelled) send({ id: id, ok: true, text: text, grid: grid });
   } catch (error) {
     if (!job.cancelled) send({ id: id, ok: false, error: imageError(error) });
   } finally {
