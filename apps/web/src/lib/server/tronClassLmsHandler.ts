@@ -459,12 +459,15 @@ export function createTronClassLmsHandler({
       const verifyLinkedSession = async () => {
         await requireAcademicAccount(db, uid);
         const [latestPortal, latestSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
+        const latestCookies = schoolSessionCookies(latestSession.data()?.cookies);
         if (!latestPortal.exists || latestPortal.data()?.ownerUid !== uid ||
           latestPortal.data()?.tronClassSessionId !== linkedId ||
           !(schoolSessionExpiry(latestPortal.data()?.expiresAt) > now()) ||
           !latestSession.exists || latestSession.data()?.ownerUid !== uid ||
           !(schoolSessionExpiry(latestSession.data()?.expiresAt) > now()) ||
-          !schoolSessionCookies(latestSession.data()?.cookies)) reconnect();
+          !latestCookies || latestSession.data()?.userId !== session.userId ||
+          Object.keys(latestCookies).length !== Object.keys(cookies).length ||
+          Object.entries(cookies).some(([name, value]) => latestCookies[name] !== value)) reconnect();
       };
 
       const cacheRef = db.doc(`${LMS_CACHE_COLLECTION}/${uid}`);
@@ -476,17 +479,15 @@ export function createTronClassLmsHandler({
       // Check ownership before invalidating it or starting a school fetch.
       await verifyLinkedSession();
       const cacheData = cached.data();
-      if (cached.exists) {
-        if (cacheData?.ownerUid !== uid || cacheData?.sessionId !== linkedId ||
-          !cacheStillFresh(cacheData.expiresAt, now()) ||
-          !publicSnapshot(cacheData.snapshot, uid)) {
-          await cacheRef.delete?.();
-        } else {
-          const pruned = readCachedExtras(cacheData.extras, now());
-          extras = refresh ? {} : pruned.extras;
-          cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!);
-          shouldPruneExtras = !refresh && pruned.pruned;
-        }
+      // Never delete a stale cache on a read. A concurrent reconnect may have
+      // replaced this document for the new session after our snapshot was read.
+      // Invalid entries are not served and are overwritten on successful fetch.
+      if (cached.exists && cacheData?.ownerUid === uid && cacheData?.sessionId === linkedId &&
+        cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid)) {
+        const pruned = readCachedExtras(cacheData.extras, now());
+        extras = refresh ? {} : pruned.extras;
+        cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!);
+        shouldPruneExtras = !refresh && pruned.pruned;
       }
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
@@ -543,14 +544,7 @@ export function createTronClassLmsHandler({
           ? await mapPool(courses, LMS_COURSE_CONCURRENCY, (course) => readPagedHomework(source, cookies, course))
           : [];
 
-        await requireAcademicAccount(db, uid);
-        const [currentPortal, currentSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
-        if (!currentPortal.exists || currentPortal.data()?.ownerUid !== uid ||
-          currentPortal.data()?.tronClassSessionId !== linkedId ||
-          !(schoolSessionExpiry(currentPortal.data()?.expiresAt) > now()) ||
-          !currentSession.exists || currentSession.data()?.ownerUid !== uid ||
-          !(schoolSessionExpiry(currentSession.data()?.expiresAt) > now()) ||
-          !schoolSessionCookies(currentSession.data()?.cookies)) reconnect();
+        await verifyLinkedSession();
 
         const fetchedAt = new Date(now()).toISOString();
         const expiresAt = new Date(now() + LMS_SNAPSHOT_TTL_MS).toISOString();
