@@ -1199,6 +1199,7 @@ test('course choices show reviewed class details, verify the selected ID, and ma
     assignments: [
       { id: 'one', title: '練習一', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: null },
       { id: 'two', title: '練習二', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: '2026-11-04T00:00:00Z' },
+      { id: 'three', title: '練習三', state: 'open', dueAt: '2026-11-06T04:00:00Z', submittedAt: null },
     ],
   }));
   const view = render(<CampusAssistantScreen route={platformRoute} />);
@@ -1208,6 +1209,8 @@ test('course choices show reviewed class details, verify the selected ID, and ma
   expect(request.mock.calls[1][0].courseworkChoice).toEqual({ workspaceId: 'second' });
   expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未見繳交紀錄/ })).toBeTruthy();
   expect(view.getByRole('button', { name: /查看作業：練習二，已繳交/ })).toBeTruthy();
+  expect(view.getByRole('button', { name: /查看作業：練習三，仍在收件 · 未見繳交紀錄/ })).toBeTruthy();
+  expect(view.queryByText('未繳交')).toBeNull();
 });
 
 describe('class assignment follow-ups in the nuni timetable assistant', () => {
