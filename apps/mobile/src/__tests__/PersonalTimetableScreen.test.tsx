@@ -3,13 +3,14 @@ import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import type { PersonalImportRecord } from '@campus/shared';
 import PersonalTimetableScreen from '../screens/PersonalTimetableScreen';
+import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { loadPersonalTimetable, loadPersonalTimetableDraft, savePersonalTimetable } from '../services/personalTimetable';
 import { loadPersonalImports } from '../services/personalImports';
 import { safeNavigate } from '../utils/safeNavigate';
 
 let mockUser: { uid: string } | null = null;
 let mockSchool = { id: 'ncku', name: '國立成功大學' };
-let mockRoute: { params?: { term: string; courseId?: string; schoolId?: string; date?: string } } = {};
+let mockRoute: { params?: PreAuthStackParamList['PersonalTimetable'] } = {};
 let mockScope: { owner: string; schoolId: string } | null = {
   owner: 'nuni:account-a',
   schoolId: 'ncku',
@@ -157,6 +158,7 @@ test('unknown school clock times remain readable without borrowing another schoo
     });
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週末課程');
+  expect(view.queryByText('開啟課前提醒')).toBeNull();
   expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
@@ -300,4 +302,46 @@ test('cloud reload and draft preview are explicit and sharing does not edit exce
   await waitFor(() => expect(loadPersonalTimetable).toHaveBeenLastCalledWith('synthetic', 'ncku', undefined));
   fireEvent.press(view.getByText('目前好友看不到這份課表（點一下開放）'));
   await waitFor(() => expect(savePersonalTimetable).toHaveBeenCalledWith('synthetic', expect.objectContaining({ shareWithFriends: true, classExceptionsRevision: 2 }), undefined, false));
+});
+
+test('a class reminder selects the correct occurrence when a makeup and regular class share a date', async () => {
+  const original = record();
+  const timetable = await jest.mocked(loadPersonalTimetable)(null, 'ncku', 'nuni:account-a');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...timetable, classExceptions: [{
+    id: 'makeup', courseKey: classMeetingKey(original), originalDate: '2026-11-09', kind: 'move',
+    date: '2026-11-02', startTime: '16:00', endTime: '18:00', location: '下午補課教室', createdAt: '', original,
+  }] });
+  mockRoute = { params: {
+    courseId: original.id, schoolId: 'ncku', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T16:00:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  const focused = '2026-11-02 · 16:00–18:00 · 下午補課教室';
+  await view.findByText(focused);
+
+  mockScope = { owner: 'nuni:account-b', schoolId: 'ncku' };
+  view.rerender(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  expect(view.queryByText(focused)).toBeNull();
+});
+
+test('an old notification does not show the regular class after its afternoon makeup is removed', async () => {
+  mockRoute = { params: {
+    courseId: 'course-a', schoolId: 'ncku', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T16:00:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('這個時段目前沒有排這堂課，請查看調整紀錄。');
+  expect(view.queryByText('2026-11-02 · 08:00–09:50 · 教室 303')).toBeNull();
+});
+
+test('a failed import read does not report a class cancellation from a notification', async () => {
+  jest.mocked(loadPersonalImports).mockRejectedValueOnce(new Error('storage unavailable'));
+  mockRoute = { params: {
+    courseId: 'course-a', schoolId: 'ncku', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T08:00:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('課表暫時讀不到，請重新讀取後核對上課時間。');
+  expect(view.queryByText('這個時段目前沒有排這堂課，請查看調整紀錄。')).toBeNull();
 });
