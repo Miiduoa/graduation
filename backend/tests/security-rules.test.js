@@ -1794,10 +1794,63 @@ describe('storage security rules', () => {
     }
   });
 
+  test('DM attachments reject a transferred member with stale old-school access', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('conversations/private').set({ schoolId: 'pu', memberIds: ['alice', 'bob'] });
+    });
+
+    const alice = testEnv.authenticatedContext('alice').storage();
+    const bob = testEnv.authenticatedContext('bob').storage();
+    const outsider = testEnv.authenticatedContext('outsider').storage();
+    // Both historical message attachments and the newer media location use this gate.
+    const files = [
+      'conversations/private/messages/one/file.pdf',
+      'conversations/private/media/one/file.pdf',
+    ];
+
+    for (const file of files) {
+      await assertSucceeds(uploadString(alice.ref(file), 'original attachment', 'application/pdf'));
+      await assertSucceeds(bob.ref(file).getMetadata());
+      await assertFails(outsider.ref(file).getMetadata());
+    }
+
+    // A student's old school member record can remain active during a transfer.
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ schoolId: 'other' });
+    });
+    for (const file of files) {
+      await assertFails(bob.ref(file).getMetadata());
+      await assertFails(uploadString(bob.ref(file), 'unauthorized replacement', 'application/pdf'));
+      await assertSucceeds(alice.ref(file).getMetadata());
+    }
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
+    });
+    for (const file of files) {
+      await assertFails(bob.ref(file).getMetadata());
+    }
+
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+    });
+    for (const file of files) {
+      await assertSucceeds(bob.ref(file).getMetadata());
+    }
+  });
+
   test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ displayName: 'Alice' });
-      await db.doc('conversations/private').set({ memberIds: ['alice', 'bob'] });
+      await db.doc('users/alice').set({ displayName: 'Alice', schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('conversations/private').set({ schoolId: 'pu', memberIds: ['alice', 'bob'] });
       await db.doc('repairRequests/one').set({ userId: 'alice' });
     });
     const storage = testEnv.authenticatedContext('alice', { role: 'admin' }).storage();
