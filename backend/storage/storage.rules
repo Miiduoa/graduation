@@ -94,10 +94,22 @@ service firebase.storage {
         );
     }
 
+    // A stale membership in a previous school does not grant access to DM attachments.
+    function isCurrentSchoolMemberStorage(schoolId) {
+      return schoolId is string
+        && schoolId.size() > 0
+        && isSchoolMemberStorage(schoolId)
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
+    }
+
     function conversationMember(conversationId) {
       return isActiveAccount()
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
-        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
+        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds
+        && isCurrentSchoolMemberStorage(
+          firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.get('schoolId', '')
+        );
     }
 
     function assignmentGroupId(assignmentId) {
