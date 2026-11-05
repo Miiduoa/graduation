@@ -1,11 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getStorageInstance } from '../firebase';
 import { campusPostStoragePath, conversationMediaPath, storyStoragePath } from './campusSocialPaths';
 
-export async function uploadRawToPath(path: string, data: Blob, contentType: string) {
+export async function uploadRawToPath(path: string, data: Blob, contentType: string, customMetadata?: Record<string, string>) {
   const r = ref(getStorageInstance(), path);
-  await uploadBytes(r, data, { contentType });
+  await uploadBytes(r, data, { contentType, customMetadata });
   return getDownloadURL(r);
 }
 
@@ -23,11 +22,20 @@ export async function uploadCampusPostMedia(schoolId: string, postId: string, lo
   return uploadLocalUri(path, localUri, ct);
 }
 
-export async function uploadStoryMedia(schoolId: string, storyId: string, localUri: string, fileName: string) {
-  const ext = fileName.split('.').pop() ?? 'jpg';
-  const ct = ext.match(/mp4|mov/i) ? 'video/mp4' : 'image/jpeg';
-  const path = storyStoragePath(schoolId, storyId, `${Date.now()}_${fileName}`);
-  return uploadLocalUri(path, localUri, ct);
+export const STORY_IMAGE_LIMIT = 10 * 1024 * 1024;
+
+export async function uploadStoryImage(
+  schoolId: string,
+  storyId: string,
+  ownerUid: string,
+  localUri: string,
+  pickerMime: string,
+) {
+  const blob = await (await fetch(localUri)).blob();
+  const mime = blob.type && blob.type !== 'application/octet-stream' ? blob.type : pickerMime;
+  if (!mime?.startsWith('image/') || !blob.size) throw new Error('請選擇一張可讀取的照片。');
+  if (blob.size >= STORY_IMAGE_LIMIT) throw new Error('照片須小於 10 MB。');
+  return uploadRawToPath(storyStoragePath(schoolId, storyId, 'image'), blob, mime, { ownerUid });
 }
 
 export async function uploadConversationAttachment(

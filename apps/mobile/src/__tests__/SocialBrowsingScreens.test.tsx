@@ -9,7 +9,7 @@ import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
-import { listActiveStoriesForSchool } from '../services/stories';
+import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
 import { listFollowingIds, followUser } from '../services/follows';
 import {
   listCampusPostBookmarkIds,
@@ -73,8 +73,9 @@ jest.mock('../services/boards', () => ({
   CAMPUS_BOARD_TYPE_LABEL: { department: '系所', course: '課程', topic: '主題', anon: '匿名' },
 }));
 jest.mock('../services/stories', () => ({
+  ...jest.requireActual('../services/stories'),
   listActiveStoriesForSchool: jest.fn(async () => []),
-  groupStoriesByAuthor: () => [],
+  markStoryViewed: jest.fn(async () => {}),
 }));
 jest.mock('../services/campusPostBookmarks', () => ({
   listCampusPostBookmarkIds: jest.fn(async () => []),
@@ -672,4 +673,32 @@ test('a delayed previous account and unavailable storage do not change the new a
       );
     },
   );
+});
+
+
+test('opens stories without navigating away, shows photo captions and steps between authors', async () => {
+  const common = { schoolId: 'pu', kind: 'text' as const, expiresAt: Date.now() + 3600_000 };
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValue([
+    { ...common, id: 'c1', authorUid: 'classmate', text: '球場見', createdAt: 1 },
+    { ...common, id: 'b1', authorUid: 'bob', text: '社課開場', createdAt: 2 },
+    { ...common, id: 'b2', authorUid: 'bob', kind: 'image', mediaUrl: 'https://cdn.example/p.jpg', text: '器材位置', createdAt: 3 },
+    { ...common, id: 'foreign', schoolId: 'other', authorUid: 'outsider', text: '其他學校內容', createdAt: 5 },
+  ]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
+  const view = render(<HomeFeedScreen />);
+  fireEvent.changeText(await view.findByLabelText('搜尋本校貼文'), '社課');
+  fireEvent.press(await view.findByLabelText('查看 小柏 的限時動態'));
+  expect(view.getByText('社課開場')).toBeTruthy();
+  expect(view.getByRole('button', { name: '上一則' })).toBeDisabled();
+  fireEvent.press(view.getByText('下一則'));
+  expect(view.getByText('器材位置')).toBeTruthy();
+  fireEvent.press(view.getByText('下一則'));
+  expect(view.getByText('球場見')).toBeTruthy();
+  fireEvent.press(view.getByText('上一則'));
+  expect(view.getByText('器材位置')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('關閉限時動態'));
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('社課');
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(listActiveStoriesForSchool).toHaveBeenCalledTimes(1);
+  expect(markStoryViewed).not.toHaveBeenCalledWith('foreign', expect.anything());
 });

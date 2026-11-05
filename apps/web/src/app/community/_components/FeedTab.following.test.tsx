@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { FeedTab } from './FeedTab';
 
 const mocks = vi.hoisted(() => ({
@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   fetchBoards: vi.fn(),
   fetchSubscriptions: vi.fn(),
   fetchStories: vi.fn(),
+  groupStories: vi.fn(),
+  markViewed: vi.fn(),
   fetchProfiles: vi.fn(),
   listFollowing: vi.fn(),
   follow: vi.fn(),
@@ -30,7 +32,8 @@ vi.mock('@/lib/community/firestore', () => ({
   listBoards: mocks.fetchBoards,
   listSubscribedBoardIds: mocks.fetchSubscriptions,
   listActiveStoriesForSchool: mocks.fetchStories,
-  groupStoriesByAuthor: () => [],
+  groupStoriesByAuthor: mocks.groupStories,
+  markStoryViewed: mocks.markViewed,
   fetchSchoolDirectoryProfiles: mocks.fetchProfiles,
 }));
 vi.mock('@/lib/community/bookmarks', () => ({
@@ -68,6 +71,8 @@ beforeEach(() => {
   mocks.fetchBoards.mockResolvedValue([{ id: 'board', name: '自由討論', schoolId: 'pu' }]);
   mocks.fetchSubscriptions.mockResolvedValue([]);
   mocks.fetchStories.mockResolvedValue([]);
+  mocks.groupStories.mockReturnValue([]);
+  mocks.markViewed.mockResolvedValue(undefined);
   mocks.fetchProfiles.mockResolvedValue([
     { uid: 'bob', displayName: 'Bob' },
     { uid: 'carol', displayName: 'Carol' },
@@ -386,4 +391,35 @@ it('uses the default for corrupt preferences and still switches feed without wri
   } finally {
     write.mockRestore();
   }
+});
+
+it('opens the tapped author without losing the feed filter and clears the viewer on account changes', async () => {
+  // jsdom has no native dialog methods; Chromium covers top-layer focus behavior.
+  const proto = HTMLDialogElement.prototype;
+  for (const name of ['showModal', 'close'] as const) {
+    const original = Object.getOwnPropertyDescriptor(proto, name);
+    Object.defineProperty(proto, name, { configurable: true, value(this: HTMLDialogElement) { this.open = name === 'showModal'; } });
+    onTestFinished(() => {
+      if (original) Object.defineProperty(proto, name, original);
+      else Reflect.deleteProperty(proto, name);
+    });
+  }
+  const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', expiresAt: Date.now() + 60_000, kind: 'text', text: '圖書館集合' };
+  mocks.groupStories.mockReturnValue([{ authorUid: 'bob', latestAt: Date.now(), stories: [story] }]);
+  const { rerender } = render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '追蹤' }));
+  const avatar = await screen.findByRole('button', { name: 'Bob的限時動態，有新動態' });
+  avatar.focus();
+  fireEvent.click(avatar);
+  const dialog = screen.getByRole('dialog', { name: '限時動態' });
+  expect(within(dialog).getByText('圖書館集合')).toBeTruthy();
+  expect(mocks.markViewed).toHaveBeenCalledWith('story-bob', 'alice');
+  fireEvent.click(within(dialog).getByRole('button', { name: '關閉限時動態' }));
+  expect(document.activeElement).toBe(avatar);
+  expect(screen.queryByText('小華的貼文')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Bob的限時動態，已看過' }));
+  mocks.auth.user = { uid: 'another-student' };
+  rerender(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  await screen.findByRole('button', { name: 'Bob的限時動態，有新動態' });
 });
