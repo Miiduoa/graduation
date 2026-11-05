@@ -198,7 +198,7 @@ export async function runLocalPersonalImportAi({
       }
     });
     if (signal.aborted) throw abortError();
-    const parsed = parsePersonalImportAiResponse(raw, source, snapshot, mode);
+    const parsed = parsePersonalImportAiResponse(raw, source, snapshot, mode, columnContext);
     if (mode === 'image') return parsed; // Generated transcription is not an independent source.
     onProgress('正在逐列對照原始表格，檢查漏列與欄位配對。');
     if (signal.aborted) throw abortError();

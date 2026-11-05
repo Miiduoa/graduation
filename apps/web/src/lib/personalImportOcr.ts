@@ -7,10 +7,17 @@ import {
   PERSONAL_IMPORT_OCR_LANGUAGES,
   PERSONAL_IMPORT_OCR_SCRIPT,
   PERSONAL_IMPORT_OCR_WORKER,
+  type PersonalImportKind,
 } from '@campus/shared';
+import { isPersonalImportCloudMaskSafe } from '@campus/shared/src/imports/aiCloud';
+import { recognizeRuledTimetableGrid } from './ruledTimetableGrid';
 
 type Worker = {
-  recognize: (file: File) => Promise<{ data: { text: string } }>;
+  recognize: (
+    file: File,
+    options?: object,
+    output?: { text: boolean; tsv: boolean },
+  ) => Promise<{ data: { text: string; tsv?: string } }>;
   setParameters: (parameters: Record<string, string>) => Promise<unknown>;
   terminate: () => Promise<unknown>;
 };
@@ -61,6 +68,7 @@ export async function recognizePersonalImportImage(
   file: File,
   signal: AbortSignal,
   progress: (message: string) => void,
+  kind?: PersonalImportKind,
 ): Promise<string> {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type))
     throw new Error('請選 PNG、JPEG 或 WebP 圖片。');
@@ -82,9 +90,14 @@ export async function recognizePersonalImportImage(
     if (signal.aborted) onAbort();
   });
   const recognize = async () => {
+    let checkWeekGrid = false;
     try {
       const bitmap = await createImageBitmap(file);
       const pixels = bitmap.width * bitmap.height;
+      checkWeekGrid =
+        kind === 'timetable' &&
+        pixels <= 4_000_000 &&
+        Math.max(bitmap.width, bitmap.height) <= 4096;
       bitmap.close();
       if (pixels > 24_000_000) throw new Error('圖片尺寸太大，請裁切到需要的表格後再試。');
     } catch (error) {
@@ -111,8 +124,45 @@ export async function recognizePersonalImportImage(
     }
     worker = created;
     await worker.setParameters({ preserve_interword_spaces: '1' });
-    const result = await worker.recognize(file);
-    return result.data.text;
+    const { data } = checkWeekGrid
+      ? await worker.recognize(file, {}, { text: true, tsv: true })
+      : await worker.recognize(file);
+    // Check the original OCR before replacing any of its text with cell coordinates.
+    if (
+      checkWeekGrid &&
+      !stopped &&
+      data.tsv &&
+      data.tsv.length <= 256_000 &&
+      data.text.length <= 40_000 &&
+      /(?:星期|週|周)[一二三四五六日天]/u.test(data.text) &&
+      isPersonalImportCloudMaskSafe(data.text)
+    ) {
+      let bitmap: ImageBitmap | undefined;
+      const canvas = document.createElement('canvas');
+      try {
+        bitmap = await createImageBitmap(file);
+        if (stopped) return data.text;
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        if (context) {
+          context.drawImage(bitmap, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+          const table = recognizeRuledTimetableGrid(pixels, data.tsv);
+          if (table) {
+            progress('已對上週課表格線，正在整理各格的課程。');
+            return table;
+          }
+        }
+      } catch {
+        // A browser without pixel readback can still return its original OCR text.
+      } finally {
+        bitmap?.close();
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    }
+    return data.text;
   };
   try {
     return await Promise.race([recognize(), stop]);

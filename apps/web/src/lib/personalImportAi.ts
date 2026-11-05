@@ -1,6 +1,6 @@
 'use client';
 
-import { parsePersonalImport } from '@campus/shared/src/imports/parser';
+import { hasFlattenedScreenshotWeek, parsePersonalImport } from '@campus/shared/src/imports/parser';
 import {
   parsePersonalImportAiResponse,
   type PersonalImportAiResult,
@@ -159,7 +159,7 @@ export async function runPersonalImportAi(
     if (!request.retry && request.input.image) {
       progress('正在這台裝置讀取圖片文字，原圖不會上傳。');
       try {
-        source = await recognizePersonalImportImage(request.input.image, signal, progress);
+        source = await recognizePersonalImportImage(request.input.image, signal, progress, options.kind);
         if (!source.trim()) throw new Error('圖片文字辨識未取得文字。');
       } catch (error) {
         if (signal.aborted) throw cancelled();
@@ -181,6 +181,17 @@ export async function runPersonalImportAi(
     }
     if (signal.aborted) throw cancelled();
     if (!request.retry) originalSource = source;
+    if (
+      !request.retry &&
+      options.kind === 'timetable' &&
+      options.source?.type === 'screenshot' &&
+      hasFlattenedScreenshotWeek(source)
+    ) {
+      // The text provider cannot recover positions that were lost when OCR flattened the grid.
+      const parsed = parsePersonalImport(source, options);
+      if (parsed.issues.some((issue) => issue.code === 'screenshot-grid-layout'))
+        return { ...parsed, sourceText: source };
+    }
     if (request.retry) {
       work = [...request.retry.batches];
       cloudEnabled = sourceMaskSafe;
@@ -229,7 +240,7 @@ export async function runPersonalImportAi(
         });
         if (response.ok) {
           try {
-            result = parsePersonalImportAiResponse(response.output, response.sourceText, options);
+            result = parsePersonalImportAiResponse(response.output, response.sourceText, options, 'text', response.columnContext);
             const audit = auditPersonalImportAiTable(
               response.sourceText,
               result.rows,

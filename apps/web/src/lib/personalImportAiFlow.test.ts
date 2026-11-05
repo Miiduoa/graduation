@@ -52,6 +52,20 @@ it('uses cloud before loading a local model and preserves source validation', as
   );
 });
 
+it('returns the original flattened screenshot for correction before a batch can create unplaced courses', async () => {
+  const text = '節次  星期一  星期二  星期三\n1  程式設計\nB202\n2\n3  資料庫系統\nA301';
+  vi.mocked(recognizePersonalImportImage).mockResolvedValue(text);
+  const result = await run('', {
+    input: { image: new File(['image'], '課表.png', { type: 'image/png' }) },
+    options: { ...options, kind: 'timetable', source: { type: 'screenshot' } },
+  });
+  expect(result.sourceText).toBe(text);
+  expect(result.rows).toEqual([]);
+  expect(result.issues).toContainEqual(expect.objectContaining({ code: 'screenshot-grid-layout' }));
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(runLocalPersonalImportAi).not.toHaveBeenCalled();
+});
+
 it.each([429, 503, 504, 500, 401])(
   'falls back to local for cloud status %s without losing the input',
   async (status) => {
@@ -456,3 +470,56 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
     }
   }
 }
+
+it('keeps a numeric weekday from a masked cloud batch with a separate header and restores the original row', async () => {
+  const header = '課程名稱,教師,星期,開始節次,結束節次';
+  const line = '資料庫,王小明,3,4,5';
+  const text = header + '\n' + line;
+  fetcher.mockImplementation(async (_url, init) => {
+    const payload = JSON.parse(init.body as string);
+    expect(payload.text).toBe('資料庫,[個資已遮罩],3,4,5');
+    expect(payload.columnContext).toBe(header);
+    return success(payload.text, JSON.stringify({ complete: true, rows: [
+      { title: '資料庫', dayOfWeek: 3, startPeriod: '4', endPeriod: '5', evidence: payload.text },
+    ] }), payload.columnContext);
+  });
+  const result = await run(text, {
+    options: { ...options, kind: 'timetable' },
+    retry: { sourceText: text, completed: { rows: [], issues: [] }, batches: [{ text: line, startLine: 2, columnContext: header }] },
+  });
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(runLocalPersonalImportAi).not.toHaveBeenCalled();
+  expect(result.rows[0]).toMatchObject({
+    title: '資料庫', dayOfWeek: 3, startPeriod: 4, endPeriod: 5, teacher: '王小明', source: { line: 2, rawText: line },
+  });
+});
+
+it('keeps the three numeric weekdays read from a course-list screenshot', async () => {
+  // Captured from the bundled chi_tra+eng OCR on a three-course synthetic screenshot.
+  const source = [
+    '115 學年度第一學期課程清單',
+    '',
+    '課程名稱                        星期               開始節次               結束節次               教室',
+    '資料庫系統                    3                    4                          5                          A301',
+    '程式設計                    1                 2                      3                      B202',
+    '資訊安全                  5               6                    7                    C103'
+  ].join('\n');
+  const records = [
+    ['資料庫系統', 3, 4, 5, 'A301'],
+    ['程式設計', 1, 2, 3, 'B202'],
+    ['資訊安全', 5, 6, 7, 'C103'],
+  ] as const;
+  vi.mocked(recognizePersonalImportImage).mockResolvedValue(source);
+  const rows = records.map(([title, dayOfWeek, startPeriod, endPeriod, location]) => ({
+    title, dayOfWeek, startPeriod, endPeriod, location,
+    evidence: [title, dayOfWeek, startPeriod, endPeriod, location].join(' '),
+  }));
+  fetcher.mockResolvedValue(success(source, JSON.stringify({ complete: true, rows })));
+  const result = await run('', {
+    input: { image: new File(['fixture'], 'list.png', { type: 'image/png' }) },
+    options: { ...options, kind: 'timetable', source: { type: 'screenshot' } },
+  });
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(runLocalPersonalImportAi).not.toHaveBeenCalled();
+  expect(result.rows.map((row) => [row.title, row.dayOfWeek, row.startPeriod, row.endPeriod, row.location])).toEqual(records);
+});

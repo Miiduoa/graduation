@@ -455,6 +455,7 @@ it('previews only the encoded PNG, keeps the original file for OCR, and releases
     original,
     expect.any(AbortSignal),
     expect.any(Function),
+    'grades',
   );
   expect(screen.getByAltText('你選擇的資料截圖，僅供核對').getAttribute('src')).toBe(
     'blob:preview',
@@ -998,8 +999,8 @@ function aiGradePreview(title = '資料庫') {
     ],
   };
 }
-function chooseAiScreenshot() {
-  const file = new File(['image'], 'grades.png', { type: 'image/png' });
+function chooseAiScreenshot(name = 'grades.png') {
+  const file = new File(['image'], name, { type: 'image/png' });
   fireEvent.change(screen.getByLabelText('這份資料的學年度'), { target: { value: '115' } });
   fireEvent.change(screen.getByLabelText('學期'), { target: { value: '1' } });
   fireEvent.change(screen.getByLabelText('選擇交給 AI 辨識的截圖'), { target: { files: [file] } });
@@ -1271,6 +1272,105 @@ it('restores AI warnings but requires a fresh acknowledgement after returning to
   ).toBe(false);
   expect(screen.queryByRole('img')).toBeNull();
 });
+
+it('repairs screenshot text against the decoded preview when AI returns no rows', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  const sourceText = '課表 週一 資料庫 第3節';
+  vi.mocked(runPersonalImportAi).mockResolvedValue({ rows: [], issues: [], sourceText });
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot('timetable.png');
+
+  const editor = await screen.findByDisplayValue(sourceText);
+  await waitFor(() => expect(document.activeElement).toBe(editor));
+  expect(screen.getByRole('img').getAttribute('src')).toBe('blob:preview');
+  expect(URL.createObjectURL).toHaveBeenCalledWith(
+    expect.objectContaining({ type: 'image/png', size: new Blob(['safe pixels']).size }),
+  );
+  expect(readPersonalImportDraft(context)?.text).toBe(sourceText);
+  expect(screen.queryByRole('button', { name: /確認匯入/ })).toBeNull();
+
+  fireEvent.change(editor, {
+    target: { value: '課程名稱,星期,開始節次,結束節次\n資料庫,一,3,3' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '整理成待確認清單' }));
+  expect(screen.getByRole('button', { name: '修正星期一第3節 資料庫' })).toBeTruthy();
+  expect(readPersonalImports(context)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '確認匯入 1 筆' }));
+  await waitFor(() => expect(readPersonalImports(context)).toHaveLength(1));
+  expect(readPersonalImports(context)[0].source).toMatchObject({
+    type: 'screenshot',
+    name: 'timetable.png',
+  });
+  expect(runPersonalImportAi).toHaveBeenCalledTimes(1);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+});
+
+it('keeps unparsed text when another screenshot produces no rows', async () => {
+  vi.mocked(runPersonalImportAi).mockResolvedValue({
+    rows: [],
+    issues: [],
+    sourceText: '其他截圖文字',
+  });
+  render(<PersonalImportCenter />);
+  fireEvent.change(screen.getByLabelText('原始文字'), { target: { value: '正在校對的原文' } });
+  chooseAiScreenshot();
+  await screen.findByText(/原本的草稿仍保留/);
+  expect(screen.getByDisplayValue('正在校對的原文')).toBeTruthy();
+  expect(screen.queryByDisplayValue('其他截圖文字')).toBeNull();
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(readPersonalImportDraft(context)?.source.type).toBe('paste');
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+});
+
+it('opens a blank weekly grid for manual placement when OCR loses the weekday columns', async () => {
+  window.history.replaceState(null, '', '/import?kind=timetable');
+  vi.mocked(runPersonalImportAi).mockResolvedValue({
+    rows: [],
+    issues: [
+      { code: 'screenshot-grid-layout', severity: 'warning', message: '無法確認星期與節次。' },
+    ],
+    sourceText: '節次  星期一  星期二  星期三\n1  資料庫\nA301',
+  });
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot('timetable.png');
+  const placement = await screen.findByRole('link', { name: '在週課表補上課程' });
+  const grid = document.querySelector(placement.getAttribute('href')!);
+  const cell = screen.getByRole('button', { name: '新增星期三第3節' });
+  expect(grid?.contains(cell)).toBe(true);
+  fireEvent.click(cell);
+  fireEvent.change(screen.getByLabelText('名稱'), { target: { value: '資料庫' } });
+  expect(screen.getByRole('button', { name: '修正星期三第3節 資料庫' })).toBeTruthy();
+  expect(screen.getByRole('img').getAttribute('src')).toBe('blob:preview');
+  expect(readPersonalImports(context)).toHaveLength(0);
+});
+
+it.each(['cancel', 'revalidate'] as const)(
+  'discards a late empty-row screenshot result on %s',
+  async (action) => {
+    let finish!: (result: Awaited<ReturnType<typeof runPersonalImportAi>>) => void;
+    vi.mocked(runPersonalImportAi).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = render(<PersonalImportCenter />);
+    chooseAiScreenshot();
+    await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+    if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+    else {
+      context.loading = true;
+      view.rerender(<PersonalImportCenter />);
+    }
+    await act(async () => finish({ rows: [], issues: [], sourceText: '過期的截圖文字' }));
+    context.loading = false;
+    view.rerender(<PersonalImportCenter />);
+    expect(screen.queryByDisplayValue('過期的截圖文字')).toBeNull();
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(readPersonalImportDraft(context)?.text ?? '').toBe('');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+  },
+);
 
 it('requires replacement confirmation and preserves existing edits when AI fails', async () => {
   vi.mocked(runPersonalImportAi).mockRejectedValue(new Error('模型目前無法載入。'));

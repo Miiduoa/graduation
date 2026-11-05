@@ -901,3 +901,58 @@
 .weekGrid small {
   display: block;
 }
+.weekGrid th[scope='row'] {
+  top: auto;
+  left: 0;
+  z-index: 1;
+}
+.weekGrid thead th {
+  z-index: 2;
+}
+.weekGrid thead th:first-child {
+  left: 0;
+  z-index: 3;
+}
+.weekGrid td[data-has-course='true'] button {
+  border-inline-start: 3px solid var(--brand);
+  background: var(--brand-soft, var(--bg-soft));
+  overflow-wrap: anywhere;
+}
+.weekGrid td[data-has-course='false'] button {
+  text-align: center;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.outsideGrid {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.outsideGrid h3,
+.outsideGrid p {
+  margin: 0;
+}
+.outsideGrid h3 {
+  font-size: 1rem;
+}
+.outsideGrid h3 span,
+.outsideGrid p,
+.outsideGrid button span {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.outsideGrid button {
+  display: grid;
+  gap: 3px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  font: inherit;
+  text-align: start;
+  color: var(--text);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}

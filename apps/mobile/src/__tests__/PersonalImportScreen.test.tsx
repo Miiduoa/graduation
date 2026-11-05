@@ -7,6 +7,7 @@ import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   personalImportPreviewNotice,
   personalImportSavedNotice,
+  parsePersonalImport,
   personalImportUndoBody,
   personalImportUndoneNotice,
   serializePersonalImportBackup,
@@ -1313,6 +1314,203 @@ function prepareScreenshot() {
   });
   mockRecognize.mockResolvedValue('課程名稱,學分,成績\n資料庫,3,85');
 }
+
+const timetableImageText = '資料庫 星期一 第1-2節 主顧303';
+
+test('one screenshot action sends OCR text to the scoped organizer and opens a reviewable timetable draft', async () => {
+  readyAi();
+  mockPlatform.session = {
+    platformAccountId: 'pa_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    context: 'session-timetable',
+    isPlatformOperator: false,
+  };
+  mockRequest.mockResolvedValue({ workspaces: [] });
+  prepareScreenshot();
+  mockRecognize.mockResolvedValue(timetableImageText);
+  jest.mocked(runMobilePersonalImportAi).mockImplementation(async (text, options) =>
+    parsePersonalImportAiResponse(
+      JSON.stringify({
+        complete: true,
+        rows: [{
+          title: '資料庫', dayOfWeek: 1, startPeriod: 1, endPeriod: 2,
+          location: '主顧303', evidence: timetableImageText,
+        }],
+      }),
+      text,
+      options,
+    ),
+  );
+  const view = render(<PersonalImportScreen />);
+  await view.findByText('用 AI 辨識課表截圖');
+  expect(view.getByText(/原圖留在手機/)).toBeTruthy();
+  fireEvent.press(view.getByText('用 AI 辨識課表截圖'));
+  await view.findByText('前往核對 1 堂課');
+  expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(1);
+  expect(runMobilePersonalImportAi).toHaveBeenCalledWith(
+    timetableImageText,
+    expect.objectContaining({ kind: 'timetable', source: { type: 'screenshot', name: '成績.png' } }),
+    expect.anything(),
+    expect.objectContaining({ platformContext: 'session-timetable' }),
+  );
+  expect(view.queryByText('用 AI 辨識課表截圖')).toBeNull();
+  expect(view.getByText(/請在下方補上這批課程/)).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '1');
+  expect(view.getByText('前往核對 1 堂課')).toBeTruthy();
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+  fireEvent.press(view.getByLabelText('已逐筆核對 AI 結果'));
+  fireEvent.press(view.getByText('確認新增 1 筆'));
+  await waitFor(async () => expect((await loadPersonalImports(scope)).records[0]?.title).toBe('資料庫'));
+  expect((await loadPersonalImports(scope)).records[0]).toMatchObject({ academicYear: '115', semester: '1' });
+  expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(await loadPersonalImports(scope))).not.toContain('file:///');
+});
+
+test('batch term entry fills missing screenshot terms and preserves source and individually edited values', async () => {
+  prepareScreenshot();
+  mockRecognize.mockResolvedValue(timetableImageText);
+  jest.mocked(runMobilePersonalImportAi).mockImplementation(async (_text, options) => ({
+    rows: ['來源已填', '手動修正', '待填課程'].map((title, index) => ({
+      id: `term-${index}`,
+      kind: 'timetable',
+      schoolId: 'pu',
+      title,
+      dayOfWeek: index + 1,
+      startPeriod: 1,
+      endPeriod: 1,
+      academicYear: index === 0 ? '114' : '',
+      semester: index === 0 ? '2' : '',
+      source: { type: 'screenshot', name: options.source?.name, rawText: title, line: index + 1 },
+    })),
+    issues: [
+      { code: 'ai-review-required', severity: 'warning', message: '請核對' },
+      { code: 'ai-uncertain-field', severity: 'warning', field: 'academicYear', rowId: 'term-0', message: '核對來源學年' },
+    ],
+  }));
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByText('用 AI 辨識課表截圖'));
+  await view.findByText('前往核對 3 堂課');
+  const year = view.getByLabelText('這批資料的學年度（例如 115）');
+  const semester = view.getByLabelText('這批資料的學期（例如 1、2、暑期）');
+  fireEvent.changeText(year, '114');
+  fireEvent.changeText(semester, '1');
+  fireEvent.press(view.getByLabelText('修正星期二第1節 手動修正'));
+  fireEvent.changeText(view.getByLabelText('學年度'), '116');
+  fireEvent.press(view.getByText('回到週課表核對'));
+  fireEvent.changeText(year, '115');
+  fireEvent.changeText(semester, '暑期');
+  await waitFor(async () => {
+    const draft = await loadPersonalImportDraft(scope);
+    expect(draft?.rows.map((row) => [row.academicYear, row.semester]))
+      .toEqual([['114', '2'], ['116', '暑期'], ['115', '暑期']]);
+    expect(draft?.issues).toContainEqual(expect.objectContaining({ rowId: 'term-0', field: 'academicYear' }));
+  });
+  expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(1);
+});
+
+test('cancelling a timetable screenshot before OCR finishes prevents the AI handoff', async () => {
+  prepareScreenshot();
+  let finish!: (text: string) => void;
+  mockRecognize.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByText('用 AI 辨識課表截圖'));
+  await waitFor(() => expect(mockRecognize).toHaveBeenCalledTimes(1));
+  fireEvent.press(view.getByText('取消讀取'));
+  expect(mockRecognize.mock.calls[0][2].aborted).toBe(true);
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '保留這段文字');
+  await act(async () => finish(timetableImageText));
+  expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('保留這段文字');
+  expect(view.queryByLabelText('原始匯入截圖')).toBeNull();
+});
+
+test('changing the semester during screenshot processing keeps completed courses and retries the remaining batch', async () => {
+  prepareScreenshot();
+  const remaining = { text: '程式設計 星期二 第3節', startLine: 2 };
+  mockRecognize.mockResolvedValue(`${timetableImageText}\n${remaining.text}`);
+  let release!: () => void;
+  jest.mocked(runMobilePersonalImportAi).mockImplementationOnce(async (text, options, _signal, request) => {
+    const partial = {
+      ...parsePersonalImport(text.split('\n')[0], options),
+      retryBatches: [remaining],
+    };
+    request?.onProgress?.(partial);
+    await new Promise<void>((resolve) => { release = resolve; });
+    return partial;
+  }).mockImplementationOnce(async (_text, options) => parsePersonalImport(remaining.text, options));
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByText('用 AI 辨識課表截圖'));
+  await view.findByText('前往核對 1 堂課');
+  fireEvent.changeText(view.getByLabelText('這批資料的學期（例如 1、2、暑期）'), '2');
+  expect(jest.mocked(runMobilePersonalImportAi).mock.calls[0][2].aborted).toBe(true);
+  await act(async () => release());
+  fireEvent.press(view.getByText('重試未完成段落'));
+  await view.findByText('前往核對 2 堂課');
+  const retried = jest.mocked(runMobilePersonalImportAi).mock.calls[1];
+  expect(retried[1].semester).toBe('2');
+  expect(retried[3]?.retryBatches).toEqual([remaining]);
+  expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
+});
+
+test('a flattened screenshot offers the weekly grid with its original image for manual placement', async () => {
+  prepareScreenshot();
+  mockRecognize.mockResolvedValue('節次 星期一 星期二 星期三\n1 資料庫 管理學\nA301');
+  jest.mocked(runMobilePersonalImportAi).mockImplementation(async (text, options) =>
+    parsePersonalImport(text, options),
+  );
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByText('用 AI 辨識課表截圖'));
+  await view.findByText('開啟週課表補課');
+  expect(view.getByText(/無法確認每門課的位置/)).toBeTruthy();
+  expect(view.queryByText(/前往核對/)).toBeNull();
+  fireEvent.changeText(view.getByLabelText('這批資料的學年度（例如 115）'), '115');
+  fireEvent.press(view.getByText('開啟週課表補課'));
+  fireEvent.press(view.getByLabelText('新增星期一第1節'));
+  expect(view.getByText('回到週課表核對')).toBeTruthy();
+  expect(view.getAllByLabelText('原始匯入截圖').map((image) => image.props.source.uri))
+    .toEqual(['file:///my-grades.png', 'file:///my-grades.png']);
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
+
+test('a failed timetable organization retries the existing screenshot text without reopening the picker', async () => {
+  prepareScreenshot();
+  mockRecognize.mockResolvedValue(timetableImageText);
+  jest.mocked(runMobilePersonalImportAi).mockRejectedValue(new Error('interrupted'));
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByText('用 AI 辨識課表截圖'));
+  await view.findByText(/AI 未能完成這次整理/);
+  fireEvent.press(view.getByText('用 AI 整理這張截圖'));
+  await waitFor(() => expect(runMobilePersonalImportAi).toHaveBeenCalledTimes(2));
+  expect(mockRecognize).toHaveBeenCalledTimes(1);
+  expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(runMobilePersonalImportAi).mock.calls[1][0]).toBe(timetableImageText);
+  expect((await loadPersonalImports(scope)).records).toHaveLength(0);
+});
+
+test('an unreadable timetable screenshot keeps the previous source and does not contact AI', async () => {
+  prepareScreenshot();
+  mockRecognize.mockResolvedValue('   ');
+  const view = render(<PersonalImportScreen />);
+  await view.findByText('用 AI 辨識課表截圖');
+  fireEvent.changeText(view.getByLabelText('貼上或修正原始文字'), '原先的課表');
+  fireEvent.press(view.getByText('用 AI 辨識課表截圖'));
+  await view.findByText(/這張截圖沒有讀到文字/);
+  expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe('原先的課表');
+});
+
+test('an oversized timetable screenshot keeps the complete editable OCR source without sending it', async () => {
+  prepareScreenshot();
+  const text = timetableImageText.repeat(100);
+  mockRecognize.mockResolvedValue(text);
+  const view = render(<PersonalImportScreen />);
+  fireEvent.press(await view.findByText('用 AI 辨識課表截圖'));
+  await view.findByText(/已保留截圖和完整文字/);
+  expect(runMobilePersonalImportAi).not.toHaveBeenCalled();
+  expect(view.getByLabelText('貼上或修正原始文字').props.value).toBe(text);
+  expect(view.getByLabelText('原始匯入截圖')).toBeTruthy();
+});
 
 test('original screenshot remains available after AI failure and is not saved with the record', async () => {
   readyAi();

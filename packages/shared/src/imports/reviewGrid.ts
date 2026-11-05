@@ -17,15 +17,50 @@ export function reviewPeriods(rows: PersonalImportRow[], profile?: PeriodProfile
   return Array.from({ length: last }, (_, i) => ({ index: i + 1, label: String(i + 1) }));
 }
 
+function coversPeriod(row: PersonalImportRow, period: number) {
+  return (
+    !!row.startPeriod && row.startPeriod <= period && (row.endPeriod ?? row.startPeriod) >= period
+  );
+}
+
 export function reviewCellRows(rows: PersonalImportRow[], day: number, period: number) {
   return rows.filter(
-    (row) =>
-      row.kind === 'timetable' &&
-      row.dayOfWeek === day &&
-      !!row.startPeriod &&
-      row.startPeriod <= period &&
-      (row.endPeriod ?? row.startPeriod) >= period,
+    (row) => row.kind === 'timetable' && row.dayOfWeek === day && coversPeriod(row, period),
   );
+}
+
+/** Keep clock-only and incomplete entries reachable even when no grid cell can display them. */
+export function rowsOutsideReviewGrid(
+  rows: PersonalImportRow[],
+  periods: { index: number; label: string }[],
+) {
+  return rows
+    .filter(
+      (row) =>
+        row.kind === 'timetable' &&
+        (!REVIEW_DAYS[(row.dayOfWeek ?? 0) - 1] ||
+          !periods.some((period) => coversPeriod(row, period.index))),
+    )
+    .map((row) => {
+      const day = REVIEW_DAYS[(row.dayOfWeek ?? 0) - 1];
+      const label = (index: number) =>
+        periods.find((period) => period.index === index)?.label ?? String(index);
+      let time = row.periodLabel?.trim();
+      if (row.startTime || row.endTime) {
+        time = `${row.startTime || '開始待補'}–${row.endTime || '結束待補'}`;
+      } else if (!time && row.startPeriod) {
+        time =
+          row.endPeriod && row.endPeriod !== row.startPeriod
+            ? `第 ${label(row.startPeriod)}–${label(row.endPeriod)} 節`
+            : `第 ${label(row.startPeriod)} 節`;
+      }
+      return {
+        row,
+        detail: [day ? `星期${day}` : '星期待補', time || '時段待補', row.location]
+          .filter(Boolean)
+          .join(' · '),
+      };
+    });
 }
 
 /** Each resulting row owns its own period and can be corrected independently. */
