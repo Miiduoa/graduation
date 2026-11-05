@@ -297,6 +297,44 @@ test.each([platformScope, firebaseScope, { owner: 'guest:device', schoolId: 'pu'
   },
 );
 
+
+test.each([
+  ['the same session', assignmentScope, true],
+  ['a new login for the same account', { ...assignmentScope, nuniContext: 'new-session' }, false],
+  ['a different account', { ...assignmentScope, owner: 'nuni:bob' }, false],
+  ['a different school', { ...assignmentScope, schoolId: 'other' }, false],
+] as const)('an in-flight assignment tap survives a temporary recheck only in its original scope: %s', async (_label, restored, allowed) => {
+  let verified: typeof assignmentScope | null = assignmentScope;
+  mockPublicReady.mockReturnValue(true);
+  mockPublicWorkspace.mockReturnValue(true);
+  const clear = jest.fn(async () => undefined);
+  let finish!: (target: typeof assignmentTarget) => void;
+  mockAssignmentResolve.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  mockAssignmentResolve.mockResolvedValue(assignmentTarget);
+  setPersonalEventReminderScopeProvider(() => verified);
+
+  const inflight = handlePersonalEventReminderResponse(assignmentTap, { clearLastResponse: clear });
+  expect(mockAssignmentResolve).toHaveBeenCalledTimes(1);
+  // A foreground auth recheck briefly has no verified identity.
+  verified = null;
+  setPersonalEventReminderScopeProvider(() => verified);
+  finish(assignmentTarget);
+  await expect(inflight).resolves.toBe(false);
+  expect(mockPublicWorkspace).not.toHaveBeenCalled();
+  expect(clear).not.toHaveBeenCalled();
+
+  verified = restored;
+  setPersonalEventReminderScopeProvider(() => verified);
+  await expect(flushPendingPersonalEventReminderTap({ clearLastResponse: clear })).resolves.toBe(allowed);
+  expect(mockAssignmentResolve).toHaveBeenCalledTimes(allowed ? 2 : 1);
+  expect(mockPublicWorkspace).toHaveBeenCalledTimes(allowed ? 1 : 0);
+  if (allowed) expect(mockPublicWorkspace).toHaveBeenCalledWith({
+    tab: 'courses', ...assignmentTarget, assistantAccountId: 'alice',
+  });
+  expect(clear).toHaveBeenCalledTimes(1);
+  expect(clear).toHaveBeenCalledWith(assignmentTap);
+});
+
 test.each([
   { ...assignmentScope, schoolId: 'other' }, { ...assignmentScope, owner: 'nuni:bob' },
   { ...assignmentScope, nuniContext: undefined }, { ...assignmentScope, nuniContext: 'new-session' },
@@ -312,4 +350,74 @@ test.each([
   await expect(pending).resolves.toBe(false);
   expect(clear).toHaveBeenCalledWith(assignmentTap);
   expect(mockPublicWorkspace).not.toHaveBeenCalled();
+});
+
+test('an older cold-start read cannot replace a live tap when navigation becomes ready', async () => {
+  mockScope = null;
+  const initial = classResponse(platformScope, { courseId: 'manual:old' });
+  const live = classResponse(platformScope, { courseId: 'manual:new' });
+  const last = jest.mocked(notificationService.getLastNotificationResponseAsync);
+  type NativeResponse = NonNullable<Awaited<ReturnType<typeof last>>>;
+  let restore!: (response: NativeResponse) => void;
+  last.mockReturnValueOnce(new Promise((resolve) => { restore = resolve; }));
+  const view = render(React.createElement(PersonalEventReminderBridge));
+  const [receive] = jest.mocked(notificationService.addNotificationResponseReceivedListener).mock.calls[0]!;
+  await act(async () => { receive(live as NativeResponse); });
+  await act(async () => { restore(initial as NativeResponse); });
+  // Scope readiness can fire repeatedly. Only the live response may navigate or be cleared.
+  last.mockResolvedValue(live as NativeResponse);
+  mockPublicReady.mockReturnValue(true);
+  mockScope = platformScope;
+  view.rerender(React.createElement(PersonalEventReminderBridge));
+  await waitFor(() => expect(mockPublicTimetable).toHaveBeenCalledTimes(1));
+  expect(mockPublicTimetable).toHaveBeenCalledWith(expect.objectContaining({ courseId: 'manual:new' }));
+  expect(last).toHaveBeenCalledTimes(2); // initial read, then verify the live response before clearing
+  expect(notificationService.clearLastNotificationResponseAsync).toHaveBeenCalledTimes(1);
+  view.unmount();
+  mockScope = null;
+});
+
+test('a newer tap owned by another handler supersedes the queued reminder without clearing either response', async () => {
+  mockScope = null;
+  const old = classResponse(platformScope);
+  const last = jest.mocked(notificationService.getLastNotificationResponseAsync);
+  type NativeResponse = NonNullable<Awaited<ReturnType<typeof last>>>;
+  last.mockResolvedValue(old as NativeResponse);
+  const view = render(React.createElement(PersonalEventReminderBridge));
+  await act(async () => {});
+  const [receive] = jest.mocked(notificationService.addNotificationResponseReceivedListener).mock.calls[0]!;
+  const other = { notification: { request: { identifier: 'announcement', content: { data: { type: 'announcement' } } } } };
+  await act(async () => { receive(other as NativeResponse); });
+  mockPublicReady.mockReturnValue(true);
+  mockScope = platformScope;
+  await act(async () => { view.rerender(React.createElement(PersonalEventReminderBridge)); });
+  expect(mockPublicTimetable).not.toHaveBeenCalled();
+  expect(last).toHaveBeenCalledTimes(1);
+  expect(notificationService.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+  view.unmount();
+  mockScope = null;
+});
+
+test('a delayed clear check cannot erase a newer live notification from the OS', async () => {
+  mockPublicReady.mockReturnValue(true);
+  mockScope = platformScope;
+  const last = jest.mocked(notificationService.getLastNotificationResponseAsync);
+  type NativeResponse = NonNullable<Awaited<ReturnType<typeof last>>>;
+  last.mockResolvedValue(null);
+  const view = render(React.createElement(PersonalEventReminderBridge));
+  await act(async () => {});
+  const [receive] = jest.mocked(notificationService.addNotificationResponseReceivedListener).mock.calls[0]!;
+  let finishRead!: (response: NativeResponse) => void;
+  last.mockReturnValueOnce(new Promise((resolve) => { finishRead = resolve; }));
+  const old = classResponse(platformScope);
+  await act(async () => { receive(old as NativeResponse); });
+  expect(mockPublicTimetable).toHaveBeenCalledTimes(1);
+  const other = { notification: { request: { identifier: 'announcement', content: { data: { type: 'announcement' } } } } };
+  await act(async () => {
+    receive(other as NativeResponse);
+    finishRead(old as NativeResponse);
+  });
+  expect(notificationService.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+  view.unmount();
+  mockScope = null;
 });

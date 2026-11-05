@@ -39,7 +39,7 @@ type Destination =
       params: { schoolId: string; courseId: string; reminderScope: string; date?: string; startAt?: number };
     };
 
-let pendingTap: { response: ReminderResponse; key: string } | null = null;
+let pendingTap: { response: ReminderResponse; key: string; lookupScope?: NavigationScope } | null = null;
 let lastHandledResponseKey: string | null = null;
 let scopeProvider: () => NavigationScope | null = () => null;
 const readyListeners = new Set<() => void>();
@@ -133,12 +133,19 @@ export async function flushPendingPersonalEventReminderTap(options?: TapOptions)
   const tap = pendingTap;
   const scope = scopeProvider();
   if (!tap || !scope || !navigatorsReady()) return false;
-  const destination = await resolveDestination(tap.response, scope);
+  // A deferred retry belongs to the identity that started the first lookup.
+  // A new login to the same account must not adopt an in-flight assignment tap.
+  const original = tap.lookupScope ??= { ...scope };
+  const isAssignment = isNuniAssignmentReminderPayload(tap.response.notification?.request?.content?.data);
+  const matchesOriginal = (candidate: NavigationScope) =>
+    candidate.owner === original.owner && candidate.schoolId === original.schoolId &&
+    (!isAssignment || candidate.nuniContext === original.nuniContext);
+  const destination = matchesOriginal(scope) ? await resolveDestination(tap.response, scope) : null;
   if (pendingTap !== tap) return false;
   const current = scopeProvider();
-  const sameScope = current && current.owner === scope.owner && current.schoolId === scope.schoolId;
-  const allowed = !!destination && sameScope &&
-    (destination.screen !== 'NuniWorkspace' || current.nuniContext === scope.nuniContext);
+  // A foreground recheck may temporarily hide the scope. Retry on readiness.
+  if (!current) return false;
+  const allowed = !!destination && matchesOriginal(current);
   if (allowed && !navigate(destination)) return false;
   lastHandledResponseKey = tap.key;
   pendingTap = null;
@@ -167,6 +174,11 @@ export function subscribePersonalEventReminderNavigationReady(
 /** Notify when scope becomes resolvable so queued taps can flush without polling. */
 export function notifyPersonalEventReminderScopeResolved() {
   notifyReminderNavigationReady();
+}
+
+/** A newer tap owned by another notification handler supersedes our queued destination. */
+export function discardPendingPersonalEventReminderTap() {
+  pendingTap = null;
 }
 
 /** Test helper */

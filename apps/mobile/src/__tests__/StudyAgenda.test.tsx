@@ -47,7 +47,7 @@ it('opens overdue but still accepted work without falsely calling it closed', ()
   expect(open).toHaveBeenCalledWith('course', 'past');
 });
 
-it('separates closed unfinished work from confirmed submissions', () => {
+it('separates closed work without a loaded receipt from confirmed submissions', () => {
   const view = render(
     <StudyAgenda
       data={agenda([
@@ -61,7 +61,8 @@ it('separates closed unfinished work from confirmed submissions', () => {
     />,
   );
   fireEvent.press(view.getByRole('button', { name: '已停止收件 1' }));
-  expect(view.getByText('作業 closed')).toBeTruthy();
+  expect(view.getByText('已停止收件 · 未見繳交紀錄')).toBeTruthy();
+  expect(view.getByRole('button', { name: /作業 closed，已停止收件 · 未見繳交紀錄/ })).toBeTruthy();
   expect(view.queryByText('作業 sent')).toBeNull();
   fireEvent.press(view.getByRole('button', { name: '已有繳交紀錄 1' }));
   expect(view.getByText('作業 sent')).toBeTruthy();
@@ -267,7 +268,7 @@ it('distinguishes closed unanswered quizzes from unsubmitted assignments', () =>
     />,
   );
   fireEvent.press(view.getByRole('button', { name: '已停止收件 1' }));
-  expect(view.getByText('已結束 · 未作答')).toBeTruthy();
+  expect(view.getByText('已結束 · 未見作答紀錄')).toBeTruthy();
 });
 
 it('preserves the selected agenda filter when navigating away and returning', () => {
