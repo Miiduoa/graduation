@@ -22,6 +22,7 @@ import {
   type CampusStoryDoc,
   type StoryAuthorGroup,
 } from '../../services/stories';
+import { StoryAudiencePanel } from './StoryAudiencePanel';
 
 const STORY_DURATION = 7000;
 
@@ -29,6 +30,7 @@ const STORY_DURATION = 7000;
 export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?: string) {
   const [clock, setClock] = useState(Date.now);
   const [seen, setSeen] = useState<ReadonlySet<string>>(new Set());
+  const recorded = React.useRef(new Set<string>());
   const [selectedId, selectStory] = useState<string | null>(null);
   const groups = useMemo(() => {
     const now = Math.max(clock, Date.now());
@@ -69,19 +71,23 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
   const group = groups[groupIndex];
   const index = group?.stories.findIndex((s) => s.id === selectedId) ?? -1;
   const story = group?.stories[index];
+  const storyId = story?.id;
+  const authorUid = story?.authorUid;
+  const expiresAt = story?.expiresAt;
   useEffect(() => {
-    if (selectedId && !story) selectStory(null);
-    if (
-      story &&
-      uid &&
-      !seen.has(story.id) &&
-      story.expiresAt! > Date.now() &&
-      !isFirebaseMockMode()
-    ) {
-      setSeen((previous) => new Set(previous).add(story.id));
-      void markStoryViewed(story.id, uid).catch(() => {});
+    if (!storyId) {
+      if (selectedId) selectStory(null);
+      return;
     }
-  }, [selectedId, story, uid, seen]);
+    if (!uid || !schoolId || !authorUid || !expiresAt || expiresAt <= Date.now()) return;
+    setSeen((previous) => (previous.has(storyId) ? previous : new Set(previous).add(storyId)));
+    if (authorUid === uid || isFirebaseMockMode() || recorded.current.has(storyId)) return;
+    recorded.current.add(storyId);
+    void markStoryViewed({ id: storyId, schoolId, authorUid }, uid).catch(() => {
+      // Reopen to retry. A network failure should not reset the local reading position.
+      recorded.current.delete(storyId);
+    });
+  }, [selectedId, storyId, authorUid, expiresAt, uid, schoolId]);
 
   const openGroup = useCallback(
     (g: StoryAuthorGroup) => {
@@ -145,8 +151,11 @@ function StorySlide({
   nextAuthorId,
   selectStory,
 }: SlideProps) {
+  const [audienceFor, setAudienceFor] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
+  const inspecting = group.isMine && audienceFor === story.id;
+  const playbackActive = playing && !inspecting;
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
   const hasVideo = story.kind === 'video';
@@ -168,7 +177,7 @@ function StorySlide({
     return () => subscription.remove();
   }, [playing]);
   useEffect(() => {
-    if (!playing || !ready || hasVideo) return;
+    if (!playbackActive || !ready || hasVideo) return;
     const start = Date.now();
     const duration = remaining.current;
     const progress = Animated.timing(fill, {
@@ -185,7 +194,7 @@ function StorySlide({
       progress.stop();
       remaining.current = Math.max(0, duration - (Date.now() - start));
     };
-  }, [playing, ready, story.id, nextId, selectStory, fill, hasVideo]);
+  }, [playbackActive, ready, story.id, nextId, selectStory, fill, hasVideo]);
 
   const swipe = useMemo(
     () =>
@@ -204,15 +213,20 @@ function StorySlide({
   const nextLabel = nextId ? '下一則' : '看完了';
   const playLabel = playing ? '暫停播放' : hasVideo ? '播放影片' : '自動播放';
 
+  const back = () => setAudienceFor(null);
+  const safeArea = {
+    paddingTop: Math.max(12, insets.top),
+    paddingBottom: Math.max(12, insets.bottom),
+  };
+
   return (
-    <Modal visible animationType="fade" onRequestClose={close}>
+    <Modal visible animationType="fade" onRequestClose={inspecting ? back : close}>
       <View
-        accessibilityViewIsModal
+        accessibilityViewIsModal={!inspecting}
+        accessibilityElementsHidden={inspecting}
+        importantForAccessibility={inspecting ? 'no-hide-descendants' : 'auto'}
         onAccessibilityEscape={close}
-        style={[
-          styles.shell,
-          { paddingTop: Math.max(12, insets.top), paddingBottom: Math.max(12, insets.bottom) },
-        ]}
+        style={[styles.shell, safeArea, inspecting && styles.hidden]}
       >
         <View style={[styles.progress, total > 16 && { gap: 1 }]}>
           {group.stories.map((s, i) => (
@@ -263,7 +277,7 @@ function StorySlide({
             <StoryClip
               key={story.id}
               uri={story.mediaUrl}
-              playing={playing}
+              playing={playbackActive}
               fill={fill}
               onEnd={() => selectStory(nextId ?? null)}
               onPause={() => setPlaying(false)}
@@ -311,6 +325,18 @@ function StorySlide({
             {!!story.poiName && <Text style={styles.counter}>{story.poiName}</Text>}
           </ScrollView>
         ) : null}
+        {group.isMine ? (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.audienceButton}
+            onPress={() => setAudienceFor(story.id)}
+          >
+            <Ionicons name="eye-outline" color="#b8e7d4" size={18} />
+            <Text style={styles.stepText}>誰看過</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.audienceNotice}>作者可查看誰看過</Text>
+        )}
         <View style={styles.controls}>
           <Pressable
             accessibilityRole="button"
@@ -332,6 +358,15 @@ function StorySlide({
           </Pressable>
         </View>
       </View>
+      {inspecting && (
+        <View
+          style={[styles.shell, safeArea]}
+          accessibilityViewIsModal
+          onAccessibilityEscape={back}
+        >
+          <StoryAudiencePanel key={story.id} story={story} onBack={back} />
+        </View>
+      )}
     </Modal>
   );
 }
@@ -354,13 +389,14 @@ function StoryClip({
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [positionSeconds, setPositionSeconds] = useState(0);
   // Native callbacks may arrive after a swipe, close or pause.
-  const current = React.useRef(false);
+  const session = useMemo(() => ({ playing }), [playing]);
+  const current = React.useRef<typeof session | null>(null);
   React.useLayoutEffect(() => {
-    current.current = true;
+    current.current = session;
     return () => {
-      current.current = false;
+      current.current = null;
     };
-  }, []);
+  }, [session]);
   if (failed || !uri || !supportsStoryVideo) {
     return (
       <View style={styles.clipStatus}>
@@ -400,7 +436,7 @@ function StoryClip({
         }}
         onPlaybackStatusUpdate={(status) => {
           if (
-            !current.current ||
+            current.current !== session ||
             !status.isLoaded ||
             !playing ||
             AppState.currentState === 'background' ||
@@ -483,6 +519,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  hidden: { display: 'none' },
+  audienceNotice: { color: '#c2cbc8', fontSize: 13, textAlign: 'center', marginTop: 8 },
+  audienceButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    borderRadius: 12,
+    backgroundColor: '#20342d',
   },
   disabled: { opacity: 0.4 },
   stepText: { color: '#fff', fontSize: 14, fontWeight: '600' },

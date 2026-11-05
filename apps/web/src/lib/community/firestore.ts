@@ -41,6 +41,7 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
@@ -550,9 +551,12 @@ export async function listActiveStoriesForSchool(
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
-  const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+export async function markStoryViewed(
+  story: Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>,
+  viewerUid: string,
+) {
+  if (story.authorUid === viewerUid) return;
+  const viewRef = doc(getDb(), ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, { viewerUid, viewedAt: serverTimestamp() });

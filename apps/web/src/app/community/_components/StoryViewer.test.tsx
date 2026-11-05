@@ -29,6 +29,7 @@ function renderVideo() {
   };
   const viewer = {
     group: { authorUid: 'one', latestAt: 0, stories: [story] },
+    isOwner: false,
     index: 0,
     hasPrevious: false,
     hasNext: true,

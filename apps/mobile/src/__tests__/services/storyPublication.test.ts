@@ -65,10 +65,17 @@ test.each([
   expect(uploadBytes).not.toHaveBeenCalled();
 });
 
+test('opening your own story does not access viewer receipts', async () => {
+  await markStoryViewed({ id: 'story', schoolId: 'pu', authorUid: 'alice' }, 'alice');
+  expect(doc).not.toHaveBeenCalled();
+  expect(getDoc).not.toHaveBeenCalled();
+  expect(setDoc).not.toHaveBeenCalled();
+});
+
 test('records a view without trying to modify the read-only story document', async () => {
   jest.mocked(getDoc).mockResolvedValue({ exists: () => false } as never);
-  await markStoryViewed('story', 'alice');
-  expect(doc).toHaveBeenCalledWith({}, 'campusStories', 'story', 'storyViews', 'alice');
+  await markStoryViewed({ id: 'story', schoolId: 'pu', authorUid: 'bob' }, 'alice');
+  expect(doc).toHaveBeenCalledWith({}, 'campusStories', 'story', 'schools', 'pu', 'authors', 'bob', 'views', 'alice');
   expect(setDoc).toHaveBeenCalledTimes(1);
   expect(updateDoc).not.toHaveBeenCalled();
 });
