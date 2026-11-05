@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import { Alert } from 'react-native';
 import { signInWithCredential } from 'firebase/auth';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
+import MeAiFirstScreen from '../screens/MeAiFirstScreen';
 import { SSOLoginScreen } from '../screens/SSOLoginScreen';
 import { signInWithStudentId } from '../services/studentIdAuth';
 import {
@@ -18,6 +19,10 @@ import { Button } from '../ui/components';
 
 const mockNavigation = { navigate: jest.fn() };
 const mockRefreshProfile = jest.fn();
+let mockAuthUser: { uid: string; displayName?: string; email?: string } | null = null;
+let mockAuthProfile: {
+  uid: string; displayName?: string; department?: string; studentId?: string; email?: string; role?: string;
+} | null = null;
 let mockPlatformAuth = {
   session: null as { platformAccountId: string } | null,
   loading: false,
@@ -34,8 +39,18 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
+jest.mock('../app/rootNavigation', () => ({ rootNavigateNested: jest.fn() }));
 jest.mock('../components/TodayTimetablePanel', () => ({ TodayTimetablePanel: () => null }));
-jest.mock('../state/auth', () => ({ useAuth: () => ({ refreshProfile: mockRefreshProfile }) }));
+jest.mock('../state/auth', () => ({
+  useAuth: () => ({
+    refreshProfile: mockRefreshProfile,
+    user: mockAuthUser,
+    profile: mockAuthProfile,
+    profileLoading: false,
+    error: '',
+    signOutWithWarning: jest.fn(),
+  }),
+}));
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockPlatformAuth }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool }),
@@ -55,6 +70,8 @@ beforeEach(() => {
   Object.assign(Constants.expoConfig!, { extra: { appEnv: 'development' } });
   setSchoolLoginProviderKinds(['school-issued']);
   mockSchool = { id: 'pu', name: '靜宜大學', shortName: '靜宜' };
+  mockAuthUser = null;
+  mockAuthProfile = null;
   mockPlatformAuth = { session: null, loading: false, error: '', pendingLogout: false };
   jest.mocked(signInWithStudentId).mockReset();
   mockRefreshProfile.mockReset();
@@ -389,6 +406,8 @@ test('a restored platform account has a return entry rather than another registr
   mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
   const view = render(<LoginLandingScreen />);
   expect(view.getByRole('button', { name: '回到我的 nuni' })).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '開啟課表助理' }));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniTimetableAssistant');
   expect(view.queryByText('登入或建立帳號')).toBeNull();
   fireEvent.press(view.getByTestId('login-start'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
@@ -401,6 +420,7 @@ test('an unknown platform account state remains an explicit recovery entry', () 
   fireEvent.press(view.getByRole('button', { name: '查看登入問題' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(view.queryByText('回到我的 nuni')).toBeNull();
+  expect(view.queryByRole('button', { name: '開啟課表助理' })).toBeNull();
 });
 
 test('pending logout explains the next step without presenting a restored account', () => {
@@ -411,6 +431,7 @@ test('pending logout explains the next step without presenting a restored accoun
   fireEvent.press(view.getByRole('button', { name: '處理未完成的登出' }));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
   expect(view.queryByText('回到我的 nuni')).toBeNull();
+  expect(view.queryByRole('button', { name: '開啟課表助理' })).toBeNull();
 });
 
 test('hides the school login button when no usable school provider is listed', () => {
@@ -601,6 +622,26 @@ test('legacy teacher LMS copy still shows the current teacher-unavailable notice
   fireEvent.press(view.getByText('使用學號登入'));
   await view.findByText('老師登入暫時無法使用');
   expect(view.queryByText(/暫未開放|純數字學號/)).toBeNull();
+});
+
+test('school-account me page opens the timetable assistant only with a verified nuni session', () => {
+  mockAuthUser = { uid: 'firebase-a', displayName: '同學', email: 'a@pu.edu.tw' };
+  mockAuthProfile = { uid: 'firebase-a', displayName: '同學', department: '資訊系' };
+  mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
+  const view = render(<MeAiFirstScreen />);
+  fireEvent.press(view.getByText('開啟課表助理'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniTimetableAssistant');
+});
+
+test('school-account me page hides the timetable assistant without a verified nuni session', () => {
+  mockAuthUser = { uid: 'firebase-a', displayName: '同學' };
+  mockAuthProfile = { uid: 'firebase-a', displayName: '同學' };
+  const view = render(<MeAiFirstScreen />);
+  expect(view.queryByText('開啟課表助理')).toBeNull();
+  mockPlatformAuth.session = { platformAccountId: 'pa-restored' };
+  mockPlatformAuth.pendingLogout = true;
+  view.rerender(<MeAiFirstScreen />);
+  expect(view.queryByText('開啟課表助理')).toBeNull();
 });
 
 test('native school login failure clears the password and allows a fresh attempt', async () => {

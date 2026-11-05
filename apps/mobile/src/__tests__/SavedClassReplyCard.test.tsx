@@ -51,3 +51,13 @@ test('labels an overnight class end on the following day', () => {
   expect(view.getByText('23:10–隔日 00:20')).toBeTruthy();
   expect(view.getByRole('button', { name: /23:10–隔日 00:20/ })).toBeTruthy();
 });
+
+test('uses the check time for an overnight class countdown even when reopened later', () => {
+  const overnight = { ...first, startTime: '23:10', endTime: '00:20' };
+  const view = render(<SavedClassReplyCard classes={[overnight]} updatedAt="2026-11-04T16:20:00Z"
+    currentAt="2026-11-05T16:14:45Z" disabled={false} onOpen={jest.fn()} />);
+  expect(view.getByText('查詢時間 2026/11/6 上午12:14（台灣時間）')).toBeTruthy();
+  expect(view.getByText(/手機儲存課表.*2026\/11\/5 上午12:20/)).toBeTruthy();
+  expect(view.getByText('查詢時距下課約 6 分鐘')).toBeTruthy();
+  expect(view.getByRole('button', { name: /23:10–隔日 00:20.*距下課約 6 分鐘/ })).toBeTruthy();
+});
