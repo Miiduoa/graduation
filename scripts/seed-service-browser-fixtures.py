@@ -88,6 +88,7 @@ def seed_announcements(school, count):
     ))
     write_document(f"schools/{school}/announcements/staff-notice", announcement(
         school, "教師研習報名通知", count + 3, category="event", studentFeed=False, audience="staff",
+        originalUrl="https://campus.example.invalid/fixtures/announcements/staff-notice",
     ))
     write_document(f"schools/{school}/announcements/hidden-notice", announcement(
         school, "已撤下的測試公告", count + 4, visible=False, studentFeed=False,
