@@ -247,6 +247,72 @@ test('a dated widget link shows the makeup room and date rather than the weekly 
   expect(view.getByLabelText('查看日期').props.value).toBe('2026-11-03');
 });
 
+test('a manual assistant link keeps its source when an identical imported class is displayed once', async () => {
+  mockUser = { uid: 'student-a' };
+  mockScope = { owner: 'firebase:student-a', schoolId: 'ncku' };
+  const base = await jest.mocked(loadPersonalTimetable)(mockUser.uid, 'ncku');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    ...base, meta: { ...base.meta, year: '115', semester: '1' },
+    courses: [{ id: 'same', name: '成大課程', day: 1, start: 2, end: 3, teacher: '', room: '教室 303', color: 'blue' }],
+  });
+  mockRoute = { params: {
+    term: '115|1', courseId: 'manual:same', schoolId: 'ncku', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T08:00:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  const focused = '2026-11-02 · 08:00–09:50 · 教室 303';
+  await view.findByText(focused);
+  mockScope = { owner: 'nuni:student-a', schoolId: 'ncku' };
+  view.rerender(<PersonalTimetableScreen />);
+  await view.findByText('成大課程');
+  expect(view.queryByText(focused)).toBeNull();
+});
+
+test('an unavailable linked term cannot select the same course id in another term', async () => {
+  mockRoute = { params: {
+    term: '114|1', courseId: 'course-a', schoolId: 'ncku', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T08:00:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('目前課表的學期與原先選取的課程不同，請核對學期。');
+  expect(view.queryByText('2026-11-02 · 08:00–09:50 · 教室 303')).toBeNull();
+  expect(view.getAllByText('成大課程')).toHaveLength(1);
+});
+
+test('a Providence alias keeps the account scope while locating its canonical manual course', async () => {
+  mockUser = { uid: 'student' };
+  mockSchool = { id: 'tw-pu', name: '靜宜大學' };
+  mockScope = { owner: 'firebase:student', schoolId: 'tw-pu' };
+  const base = await jest.mocked(loadPersonalTimetable)(mockUser.uid, 'tw-pu');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({
+    ...base, schoolId: 'pu', meta: { ...base.meta, year: '115', semester: '1' },
+    courses: [{ id: 'a', name: '靜宜課程', day: 1, start: 1, end: 1, teacher: '', room: '主顧 101', color: 'blue' }],
+  });
+  jest.mocked(loadPersonalImports).mockResolvedValue({ version: 1, records: [], batches: [] });
+  mockRoute = { params: {
+    term: '115|1', courseId: 'manual:a', schoolId: 'tw-pu', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T08:10:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('2026-11-02 · 08:10–09:00 · 主顧 101');
+  expect(loadPersonalImports).toHaveBeenCalledWith(mockScope);
+});
+
+test('two occurrences of the same row starting together cannot select a room', async () => {
+  const original = record();
+  const base = await jest.mocked(loadPersonalTimetable)(null, 'ncku', 'nuni:account-a');
+  jest.mocked(loadPersonalTimetable).mockResolvedValue({ ...base, classExceptions: [{
+    id: 'same-start', courseKey: classMeetingKey(original), originalDate: '2026-11-09', kind: 'move',
+    date: '2026-11-02', startTime: '08:00', endTime: '09:00', location: '補課教室', createdAt: '', original,
+  }] });
+  mockRoute = { params: {
+    term: '115|1', courseId: original.id, schoolId: 'ncku', date: '2026-11-02',
+    startAt: Date.parse('2026-11-02T08:00:00+08:00'), reminderScope: JSON.stringify(mockScope),
+  } };
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('這一天有多筆符合的上課紀錄，請核對課表時段。');
+  expect(view.queryByText(/^2026-11-02 · 08:00/)).toBeNull();
+});
 
 test('作業與教材 opens Classroom search when the imported course has no linkedCourseId', async () => {
   jest.mocked(loadPersonalImports).mockResolvedValue({

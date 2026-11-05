@@ -1,5 +1,11 @@
-import { loadOfflinePersonalTimetable } from './personalTimetable';
+import { withClassExceptions } from '@campus/shared/src/timetable/classExceptions';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import { loadPersonalImports } from './personalImports';
+import { nextSavedClasses, type SavedClassOccurrence } from './nextSavedClasses';
+import { loadOfflinePersonalTimetable, personalTimetableRecords } from './personalTimetable';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
+
+export type { SavedClassOccurrence } from './nextSavedClasses';
 
 export type OnDeviceSchoolContext = {
   checkedAt: string;
@@ -8,6 +14,7 @@ export type OnDeviceSchoolContext = {
   timetable: {
     source: 'saved-device-copy' | 'not-available';
     updatedAt: string | null;
+    nextClasses?: SavedClassOccurrence[];
     courses: Array<{ name: string; day: number; start: number; end: number; room?: string }>;
   };
 };
@@ -18,7 +25,13 @@ export type OnDeviceSchoolContext = {
  * Browsing a school never proves enrollment.
  */
 export async function collectOnDeviceSchoolContext(
-  params: { uid: string; schoolId: string; schoolName?: string | null },
+  params: {
+    uid: string;
+    schoolId: string;
+    schoolName?: string | null;
+    includeNextClasses?: boolean;
+    classFollowUp?: readonly SavedClassOccurrence[];
+  },
 ): Promise<OnDeviceSchoolContext> {
   const base: OnDeviceSchoolContext = {
     checkedAt: new Date().toISOString(),
@@ -29,13 +42,29 @@ export async function collectOnDeviceSchoolContext(
   if (!params.uid || !params.schoolId) return base;
   try {
     const timetable = await loadOfflinePersonalTimetable(params.uid, params.schoolId);
-    if (!timetable) return base;
+    const imported = params.includeNextClasses
+      ? (await loadPersonalImports({ owner: `firebase:${params.uid}`, schoolId: params.schoolId })).records
+          .filter((row) => row.kind === 'timetable' && row.schoolId === params.schoolId)
+      : [];
+    if (!timetable && !imported.length) return base;
+    const schoolId = toPublicSchoolId(params.schoolId) || params.schoolId;
+    if (timetable && toPublicSchoolId(timetable.schoolId) !== schoolId) return base;
+    const records = params.includeNextClasses
+      ? (timetable ? personalTimetableRecords(timetable, imported) : withClassExceptions(imported))
+          .map((row) => row.schoolId === schoolId ? row : { ...row, schoolId })
+      : [];
+    const savedAt = timetable?.updatedAt;
+    let updatedAt = typeof savedAt === 'string' && Number.isFinite(Date.parse(savedAt)) ? savedAt : null;
+    for (const row of imported) {
+      if (!updatedAt || Date.parse(row.importedAt) > Date.parse(updatedAt)) updatedAt = row.importedAt;
+    }
     return {
       ...base,
       timetable: {
         source: 'saved-device-copy',
-        updatedAt: typeof timetable.updatedAt === 'string' ? timetable.updatedAt : null,
-        courses: timetable.courses.slice(0, 80).map((course) => ({
+        updatedAt,
+        ...(params.includeNextClasses && { nextClasses: nextSavedClasses(records, schoolId, new Date(base.checkedAt), params.classFollowUp) }),
+        courses: (timetable?.courses || []).slice(0, 80).map((course) => ({
           name: String(course.name).slice(0, 48),
           day: course.day,
           start: course.start,
