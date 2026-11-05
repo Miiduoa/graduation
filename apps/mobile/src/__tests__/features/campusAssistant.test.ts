@@ -819,3 +819,119 @@ describe('platform timetable without a school account', () => {
     expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
   });
 });
+
+describe('nuni class to coursework', () => {
+  const transport = { request: jest.fn(), bffRequest: jest.fn() };
+  const openWork = () => jest.spyOn(require('../../services/nuniClassCoursework'), 'readNuniClassCoursework')
+    .mockResolvedValue({ kind: 'unlinked' });
+  const base = () => ({
+    ...input(), mode: 'device' as const, scope: { uid: '', schoolId: 'pu' }, courseworkRequests: transport,
+    platformTimetable: { accountId: 'pa-student', isCurrent: () => true },
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test.each([
+    ['這堂課有什麼作業？', 'current'],
+    ['我現在這堂課有作業嗎？', 'current'],
+    ['查下一堂課的作業', 'next'],
+    ['這堂課要交什麼作業？', 'current'],
+  ])('grounds the first-turn question before reading a workspace: %s', async (question, window) => {
+    const load = openWork();
+    if (window === 'current') withCurrent([classOccurrence]); else withUpcoming([classOccurrence]);
+    const reply = await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: question }] });
+    expect(reply.courseworkRead?.anchor.classes).toEqual([classOccurrence]);
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({
+      ...transport, occurrence: classOccurrence, accountId: 'pa-student', schoolId: 'pu',
+    }));
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  });
+
+  test('an empty current timetable yields a local answer with no workspace requests', async () => {
+    const load = openWork();
+    withCurrent([]);
+    const reply = await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: '這堂課有作業嗎' }] });
+    expect(reply.savedClassRead?.classes).toEqual([]);
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  test('a staggered overlap asks for a class first, resolving only the verified choice', async () => {
+    const load = openWork();
+    const lab = { ...classOccurrence, courseId: 'lab', room: 'H205' };
+    withCurrent([classOccurrence, lab]);
+    const question = { role: 'user' as const, content: '這堂課有什麼作業' };
+    const first = await askCampusAssistant({ ...base(), messages: [question] });
+    expect(first.courseworkRead?.result.kind).toBe('choose-class');
+    expect(load).not.toHaveBeenCalled();
+    const second = await askCampusAssistant({ ...base(), courseworkChoice: { classIndex: 1 },
+      messages: [question, { role: 'assistant', ...first }, { role: 'user', content: '第二堂' }],
+    });
+    expect(load.mock.calls[0][0]).toMatchObject({ occurrence: lab });
+    expect(second.courseworkRead?.anchor.classes).toEqual([lab]);
+  });
+
+  test('foreign anchors and stale workspace buttons never get assignment data', async () => {
+    const load = openWork();
+    const anchor = { uid: '', owner: 'nuni:pa-other', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    const messages = [{ role: 'assistant' as const, content: '查課', savedClassRead: anchor },
+      { role: 'user' as const, content: '這堂課有作業嗎？' }];
+    await askCampusAssistant({ ...base(), messages });
+    const previous = { role: 'assistant' as const, content: '選課',
+      courseworkRead: { anchor: { ...anchor, owner: 'nuni:pa-student' }, result: {
+        kind: 'choose' as const, workspaces: [{ id: 'one', title: classOccurrence.name }],
+      } } };
+    await askCampusAssistant({ ...base(), courseworkChoice: { workspaceId: 'forged' },
+      messages: [previous, { role: 'user', content: '選擇課程' }] });
+    expect(load).not.toHaveBeenCalled();
+    await askCampusAssistant({ ...base(), courseworkChoice: { workspaceId: 'one' },
+      messages: [previous, { role: 'user', content: '選擇課程' }] });
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ occurrence: classOccurrence, selectedWorkspaceId: 'one' }));
+  });
+  test.each(['有作業嗎？', '有什麼作業要交？', '作業呢？'])('only resolves a short spoken follow-up with a previous class: %s', async (question) => {
+    const load = openWork();
+    await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: question }] });
+    expect(load).not.toHaveBeenCalled();
+    const anchor = { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    await askCampusAssistant({ ...base(), messages: [
+      { role: 'assistant', content: '剛才選的課', courseworkRead: { anchor, selectedWorkspaceId: 'confirmed', result: {
+        kind: 'assignments', workspace: { id: 'confirmed', title: classOccurrence.name }, assignments: [], limited: false,
+      } } }, { role: 'user', content: question },
+    ] });
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ occurrence: classOccurrence, selectedWorkspaceId: 'confirmed' }));
+  });
+  test('retry keeps the chosen workspace, but asking about the next class resolves a fresh source', async () => {
+    const load = openWork().mockResolvedValue({ kind: 'unavailable' });
+    const anchor = { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    const reviewed = { schoolId: 'pu', academicYear: '115', semester: '1', className: '乙班', teacher: '林老師', courseCode: 'DB101' };
+    const previous = { role: 'assistant' as const, content: '選擇課程', courseworkRead: { anchor, result: {
+      kind: 'choose' as const, workspaces: [{ id: 'confirmed', title: classOccurrence.name, reviewed }],
+    } } };
+    const failed = await askCampusAssistant({ ...base(), courseworkChoice: { workspaceId: 'confirmed' },
+      messages: [previous, { role: 'user', content: '乙班' }] });
+    const retry = { role: 'assistant' as const, ...failed };
+    await askCampusAssistant({ ...base(), messages: [retry, { role: 'user', content: '這堂課有什麼作業？' }] });
+    expect(load.mock.lastCall?.[0]).toMatchObject({ selectedWorkspaceId: 'confirmed', expectedReviewed: reviewed });
+    const other = { ...classOccurrence, courseId: 'physics', name: '物理' };
+    withUpcoming([other]);
+    await askCampusAssistant({ ...base(), messages: [retry, { role: 'user', content: '下一堂課的作業呢？' }] });
+    expect(load.mock.lastCall?.[0]).toMatchObject({ occurrence: other, selectedWorkspaceId: undefined });
+  });
+  test('cancellation ends the local wait while a workspace response is still outstanding', async () => {
+    const stop = new AbortController();
+    let rejectLate!: (error: Error) => void;
+    openWork().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectLate = reject; }));
+    const anchor = { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    const pending = askCampusAssistant({ ...base(), signal: stop.signal, messages: [
+      { role: 'assistant', content: '查課', savedClassRead: anchor }, { role: 'user', content: '這堂課有什麼作業？' },
+    ] });
+    stop.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    rejectLate(new Error('network timeout'));
+  });
+  test.each(['翻譯「這堂課有什麼作業」', '提醒我明天交作業', '送出這堂課的作業', '所有課程的作業'])(
+    'does not read coursework for %s', async (question) => {
+      const load = openWork();
+      await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: question }] });
+      expect(load).not.toHaveBeenCalled();
+    },
+  );
+});

@@ -19,6 +19,7 @@ export type PreAuthStackParamList = {
   PersonalCalendar: { eventId?: string } | undefined;
   NuniWorkspace: {
     tab?: 'courses' | 'food' | 'merchant' | 'account';
+    assistantAccountId?: string;
     workspaceId?: string;
     assignmentId?: string;
     materialId?: string;

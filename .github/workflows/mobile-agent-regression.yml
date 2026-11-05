@@ -75,6 +75,7 @@ jobs:
             src/__tests__/services/localCampusToolProtocol.test.ts \
             src/__tests__/features/campusAssistant.test.ts \
             src/__tests__/features/campusAssistantSemantic.test.ts \
+            src/__tests__/services/nuniClassCoursework.test.ts \
             src/__tests__/services/onDeviceSchoolContext.test.ts \
             src/__tests__/nuniSession.test.ts \
             src/__tests__/NuniTimetableAssistantNavigation.test.tsx \

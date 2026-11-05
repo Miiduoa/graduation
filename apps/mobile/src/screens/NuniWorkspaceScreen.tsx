@@ -25,6 +25,7 @@ import { clearAllFoodPendingForAccount } from '../state/foodPersistence';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import type { PreAuthStackParamList } from './preAuthTypes';
 import { NuniCourses } from './nuni/NuniCourses';
 import { NuniMerchant } from './nuni/NuniMerchant';
 import { NuniFood } from './nuni/NuniFood';
@@ -280,12 +281,14 @@ function Account({ onLogout }: { onLogout: () => void }) {
 function SignedInWorkspace({
   onLogout,
   initialTab,
+  courseAccountChanged,
   initialWorkspaceId,
   initialAssignmentId,
   initialMaterialId,
 }: {
   onLogout: () => void;
   initialTab?: Tab;
+  courseAccountChanged: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -325,6 +328,11 @@ function SignedInWorkspace({
         accessibilityElementsHidden={tab !== 'courses'}
         importantForAccessibility={tab === 'courses' ? 'auto' : 'no-hide-descendants'}
       >
+        {courseAccountChanged && (
+          <Text accessibilityRole="alert" style={s.scopeNotice}>
+            已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。
+          </Text>
+        )}
         <NuniCourses
           active={tab === 'courses'}
           initialWorkspaceId={initialWorkspaceId}
@@ -354,11 +362,15 @@ export function NuniWorkspaceScreen({
   route,
 }: {
   route?: {
-    params?: { tab?: Tab; workspaceId?: string; assignmentId?: string; materialId?: string };
+    params?: PreAuthStackParamList['NuniWorkspace'];
   };
 } = {}) {
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
+  const params = route?.params;
+  const courseAccountChanged = params?.assistantAccountId !== undefined &&
+    params.assistantAccountId !== auth.session?.platformAccountId;
+  const target = courseAccountChanged ? undefined : params;
   const identity = useRef({ key: '', epoch: 0 });
   const identityKey = auth.session
     ? JSON.stringify([auth.session.platformAccountId, auth.session.context])
@@ -474,10 +486,11 @@ export function NuniWorkspaceScreen({
         <SignedInWorkspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
           onLogout={logout}
-          initialTab={route?.params?.tab}
-          initialWorkspaceId={route?.params?.workspaceId}
-          initialAssignmentId={route?.params?.assignmentId}
-          initialMaterialId={route?.params?.materialId}
+          initialTab={courseAccountChanged ? 'courses' : target?.tab}
+          courseAccountChanged={courseAccountChanged}
+          initialWorkspaceId={target?.workspaceId}
+          initialAssignmentId={target?.assignmentId}
+          initialMaterialId={target?.materialId}
         />
       </NuniDraftProvider>
     );
@@ -519,6 +532,7 @@ const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
     content: { flexGrow: 1, padding: 24, gap: 18, paddingBottom: 48 },
+    scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text },
     center: {
       flex: 1,
       backgroundColor: theme.colors.bg,

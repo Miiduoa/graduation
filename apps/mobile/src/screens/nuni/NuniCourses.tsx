@@ -706,11 +706,14 @@ function CourseScope({
     }
   }, [initialWorkspaceId, setSelected]);
   useEffect(() => {
-    if (initialAssignmentId) setFocusActivityId(initialAssignmentId);
-  }, [initialAssignmentId]);
-  useEffect(() => {
-    if (initialMaterialId) setFocusMaterialId(initialMaterialId);
-  }, [initialMaterialId, setFocusMaterialId]);
+    if (initialMaterialId) {
+      setFocusActivityId(undefined);
+      setFocusMaterialId(initialMaterialId);
+    } else if (initialAssignmentId) {
+      setFocusMaterialId(undefined);
+      setFocusActivityId(initialAssignmentId);
+    }
+  }, [initialAssignmentId, initialMaterialId, setFocusMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
       searchOffset.current = null;

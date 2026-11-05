@@ -1156,3 +1156,56 @@ test('the general assistant keeps its model tools and masks the Firebase timetab
   expect(getOnDeviceAssistantReadiness).toHaveBeenCalled();
   expect(request).not.toHaveBeenCalled();
 });
+
+test('the nuni course action opens a specific assignment and keeps a typed draft intact', async () => {
+  usePlatformFixture('student-b');
+  const navigate = jest.fn();
+  const item = { courseId: 'import:x', term: '115|1', name: '資訊管理', room: 'A302',
+    date: '2026-11-05', startTime: '10:10', endTime: '12:00' };
+  const anchor = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', classes: [item], updatedAt: null };
+  request.mockResolvedValueOnce({ content: item.name, source: 'device', savedClassRead: anchor })
+    .mockResolvedValueOnce({ content: '這堂課的作業', source: 'device', courseworkRead: {
+      anchor, checkedAt: '2026-11-05T02:30:00Z', result: {
+        kind: 'assignments', workspace: { id: 'work-id', title: '資訊管理' }, limited: false,
+        assignments: [{ id: 'assign-id', title: '小考報告', dueAt: null, state: 'closed', submittedAt: null }],
+      },
+    } });
+  const screen = render(<CampusAssistantScreen route={platformRoute}
+    navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace', 'PersonalImport', 'PersonalTimetable'] }) }} />);
+  await act(async () => fireEvent.press(screen.getByText('查下一堂課')));
+  const input = screen.getByLabelText('詢問校園助理');
+  fireEvent.changeText(input, '保留我的草稿');
+  await act(async () => fireEvent.press(screen.getByRole('button', { name: '查這堂課的作業' })));
+  expect(input.props.value).toBe('保留我的草稿');
+  fireEvent.press(screen.getByRole('button', { name: /查看作業：小考報告，已停止收件 · 未繳交/ }));
+  expect(navigate).toHaveBeenCalledWith('NuniWorkspace', {
+    tab: 'courses', workspaceId: 'work-id', assignmentId: 'assign-id', assistantAccountId: 'student-b',
+  });
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('course choices show reviewed class details, verify the selected ID, and mark an open late assignment as overdue', async () => {
+  usePlatformFixture('student-b');
+  const anchor = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', updatedAt: null,
+    classes: [{ courseId: 'import:x', term: '115|1', name: '資料結構', room: '', date: '2026-11-05', startTime: '10:10', endTime: '12:00' }] };
+  const info = { teacher: '林老師', academicYear: '115', semester: '1', schoolId: 'pu', courseCode: 'CS101' };
+  const reply = (result: unknown) => ({
+    source: 'device', content: '資料結構作業', courseworkRead: { anchor, result, checkedAt: '2026-11-05T02:30:00Z' },
+  });
+  request.mockResolvedValueOnce(reply({ kind: 'choose', workspaces: [
+    { id: 'first', title: '資料結構', reviewed: { ...info, className: '甲班' } },
+    { id: 'second', title: '資料結構', reviewed: { ...info, className: '乙班' } },
+  ] })).mockResolvedValueOnce(reply({ kind: 'assignments', limited: false, workspace: { id: 'second', title: '資料結構' },
+    assignments: [
+      { id: 'one', title: '練習一', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: null },
+      { id: 'two', title: '練習二', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: '2026-11-04T00:00:00Z' },
+    ],
+  }));
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: /資料結構.*115學年度.*乙班.*林老師/ })));
+  expect(request.mock.calls[1][0].courseworkChoice).toEqual({ workspaceId: 'second' });
+  expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未繳交/ })).toBeTruthy();
+  expect(view.getByRole('button', { name: /查看作業：練習二，已繳交/ })).toBeTruthy();
+});

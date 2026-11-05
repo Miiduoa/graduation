@@ -6,12 +6,14 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react-native/p
 import { NuniSessionProvider } from '../state/nuniSession';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
+import { personalImportStorageKey } from '../services/personalImports';
 import type { StoredTimetable } from '../services/personalTimetable';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 const mockSchool = { id: 'pu', name: '靜宜大學' };
 let mockStored: string | null;
 const mockRequest = jest.fn();
+const mockAssignmentBff = jest.fn();
 jest.unmock('@react-navigation/native');
 jest.mock('expo-secure-store', () => ({
   isAvailableAsync: async () => true,
@@ -21,6 +23,7 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('../services/nuniClient', () => ({
   ...jest.requireActual('../services/nuniClient'),
   nuniPlatformRequest: (...args: unknown[]) => mockRequest(...args),
+  nuniBffRequest: (...args: unknown[]) => mockAssignmentBff(...args),
 }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: null, loading: false }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
@@ -52,6 +55,7 @@ beforeEach(async () => {
     platformAccountId: account, sessionHandle: 'ps_' + 'a'.repeat(43),
     expiresAt: Date.now() + 3_600_000, pendingLogout: false,
   });
+  mockAssignmentBff.mockReset().mockRejectedValue(new Error('unexpected assignment BFF request'));
   mockRequest.mockReset().mockImplementation(async (path) => {
     if (path !== 'sessions/current') throw Error('unexpected request: ' + path);
     return { authenticated: true, platformAccountId: account, isPlatformOperator: false };
@@ -161,4 +165,76 @@ test('a conversation left open at session expiry hides the previous class and ca
   expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
   fireEvent.press(accountLink);
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+});
+
+test('the assistant opens the exact assignment in the linked workspace even when another joined class has the same name', async () => {
+  const course = {
+    id: 'cw_11111111-1111-4111-8111-111111111111', title: '資料庫管理', memberRole: 'student', state: 'active',
+  };
+  const other = { ...course, id: 'cw_22222222-2222-4222-8222-222222222222' };
+  const assignment = {
+    id: 'cwa_11111111-1111-4111-8111-111111111111', workspaceId: course.id, title: '小考報告',
+    instructions: '請上傳這週的關聯模型。', state: 'open', unitId: null, unitTitle: null, closedAt: null,
+    createdAt: '2026-11-03T08:00:00Z', dueAt: '2026-11-06T08:00:00Z', submissionCount: 0, mySubmission: null,
+  };
+  await AsyncStorage.removeItem(`campus-one-personal-timetable:nuni:${account}:pu`);
+  await AsyncStorage.setItem(personalImportStorageKey({ owner: `nuni:${account}`, schoolId: 'pu' }), JSON.stringify({
+    version: 1, batches: [], records: [{
+      id: 'import-db', batchId: 'batch-db', kind: 'timetable', title: course.title, location: '主顧 305',
+      schoolId: 'pu', academicYear: '115', semester: '1', dayOfWeek: 4, startPeriod: 1, endPeriod: 2,
+      importedAt: '2026-11-02T08:00:00Z', source: { type: 'paste', line: 1, rawText: '資料庫管理' },
+      linkedCourseId: course.id,
+    }],
+  }));
+  mockRequest.mockImplementation(async (path) => {
+    if (path === 'sessions/current') return { authenticated: true, platformAccountId: account, isPlatformOperator: false };
+    if (path === 'class-workspaces') return { workspaces: [other, course] };
+    if (path === `class-workspaces/${course.id}`) return course;
+    if (path === `class-workspaces/${course.id}/materials/page`) return { materials: [], nextCursor: null };
+    if (path === `class-workspaces/${course.id}/quizzes`) return { quizzes: [] };
+    throw Error('unexpected direct read ' + path);
+  });
+  mockAssignmentBff.mockImplementation(async (path) => {
+    if (path === `class-workspaces/${course.id}/assignments`) return { assignments: [assignment] };
+    throw Error('unexpected assignment read ' + path);
+  });
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  fireEvent.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  fireEvent.press(await screen.findByText('現在有課嗎？'));
+  const ask = await screen.findByRole('button', { name: '查這堂課的作業' });
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
+  expect(mockAssignmentBff).not.toHaveBeenCalled();
+  fireEvent.press(ask);
+  const target = await screen.findByRole('button', { name: /查看作業.*小考報告/ });
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current', 'class-workspaces']);
+  expect(mockAssignmentBff.mock.calls.map(([path]) => path)).toEqual([`class-workspaces/${course.id}/assignments`]);
+  fireEvent.press(target);
+  await screen.findByLabelText('作業繳交區：小考報告');
+  expect(screen.getByText(assignment.instructions)).toBeTruthy();
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'NuniWorkspace', params: { tab: 'courses', workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account },
+  });
+  expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].every(([path, , body]) =>
+    !path.includes(other.id) && body === undefined)).toBe(true);
+  act(() => navigation.goBack());
+  await screen.findByRole('button', { name: /查看作業.*小考報告/ });
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+});
+
+test('opening an assistant link from another account drops the previous course and assignment targets', async () => {
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  await screen.findByRole('button', { name: '開啟課表助理' });
+  const previousCourse = 'cw_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  act(() => navigation.navigate('NuniWorkspace', {
+    tab: 'courses', workspaceId: previousCourse, assignmentId: 'cwa_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    assistantAccountId: 'pa_22222222-2222-4222-8222-222222222222',
+  }));
+  await screen.findByText('已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。');
+  expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(previousCourse))).toBe(false);
 });

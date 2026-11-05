@@ -5,12 +5,15 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
+import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AssignmentRead } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
+import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
+  type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead };
+export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead; courseworkRead?: CourseworkRead };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -74,6 +77,8 @@ export async function askCampusAssistant(input: {
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
   platformTimetable?: PlatformTimetableAccess;
+  courseworkRequests?: CourseworkRequests;
+  courseworkChoice?: CourseworkChoice;
   /** Optional per-request native cancellation; never cancels unrelated tasks. */
   signal?: AbortSignal;
   schoolName?: string | null;
@@ -90,6 +95,7 @@ export async function askCampusAssistant(input: {
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
+  courseworkRead?: CourseworkRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -118,10 +124,33 @@ export async function askCampusAssistant(input: {
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
     const question = messages[messages.length - 1].content;
     const previous = input.messages[input.messages.length - 2];
-    const lastClass = previous?.role === 'assistant' ? previous.savedClassRead : undefined;
+    const lastReply = previous?.role === 'assistant' ? previous : undefined;
+    const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;
     const classQuery = savedClassQuery(question, lastClass);
     const platform = input.platformTimetable;
     const owner = platform && `nuni:${platform.accountId}`;
+    const coursework = platform && classCourseworkQuestion(question, !!lastClass?.classes.length);
+    if (platform && (input.courseworkChoice || coursework)) {
+      let sourceReply = lastReply;
+      if (!input.courseworkChoice && (coursework !== 'context' || !lastClass)) {
+        const window = coursework === 'next' ? 'next' : 'current';
+        const snapshot = await collectOnDeviceSchoolContext({
+          uid, schoolId: input.scope.schoolId, schoolName: input.schoolName, platformTimetable: platform,
+          ...(window === 'next' ? { includeNextClasses: true } : { includeCurrentClasses: true }),
+        });
+        scopeCheck(input, false);
+        assertNotCancelled();
+        const course = answerSavedClassQuery({ window }, snapshot, uid, undefined, owner);
+        if (!course.savedClassRead?.classes.length) return { ...course, source: 'device', hasActions: false };
+        sourceReply = { role: 'assistant', ...course };
+      }
+      const work = await abortableCampusRead(() => answerNuniCoursework(sourceReply, platform, input.scope.schoolId,
+        () => input.isCurrent() && platform.isCurrent() && !input.signal?.aborted, input.courseworkRequests, input.courseworkChoice),
+      input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { ...work, source: 'device', hasActions: false };
+    }
     if (platform && !classQuery) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
         content: '可以問「我現在有課嗎？」或「下一堂課在哪裡？」。查到課程後，也可以接著問教室與下課時間。' };
