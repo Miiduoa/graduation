@@ -74,6 +74,8 @@ test('reuses the DM without resetting read state and never bumps the preview on 
 
 test.each([
   ['users/alice', { schoolId: 'other' }],
+  // A legacy active school membership must not override the author's current school.
+  ['users/bob', { schoolId: 'other' }],
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
   ['users/bob', { accountDeletionInProgress: true }],
   ['schools/pu/members/alice', {}],
@@ -97,6 +99,19 @@ test.each([
   store.docs.set(path, record);
   await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
   expect([...store.docs.keys()].some((key) => key.includes('/messages/'))).toBe(false);
+});
+
+test('does not send or replay a receipt after the author transfers schools', async () => {
+  const original = await send();
+  store.docs.set('users/bob', { schoolId: 'other' });
+  // Old school membership can lag behind the profile during a transfer.
+  expect(store.docs.get('schools/pu/members/bob')).toMatchObject({ status: 'active' });
+  await expect(send({ replyId: 'test-reply-0000000002' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(store.docs.get(thread).lastMessage.id).toBe(original.messageId);
+  expect([...store.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(1);
 });
 
 test('rejects an expired or deleted story, a self reply, and an account switch', async () => {

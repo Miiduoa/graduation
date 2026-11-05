@@ -81,6 +81,7 @@ function createReplyToCampusStory({ db }) {
         !availableProfile(senderProfile) ||
         !availableProfile(authorProfile) ||
         senderProfile.data().schoolId !== schoolId ||
+        authorProfile.data().schoolId !== schoolId ||
         senderMember.data()?.status !== 'active' ||
         authorMember.data()?.status !== 'active' ||
         blocks.some((block) => block.exists)
