@@ -51,3 +51,9 @@ export function publicNavigatePersonalTimetable(params: NonNullable<PreAuthStack
   publicNavigationRef.dispatch(CommonActions.navigate({ name: 'PersonalTimetable', params }));
   return true;
 }
+
+export function publicNavigateNuniWorkspace(params: NonNullable<PreAuthStackParamList['NuniWorkspace']>) {
+  if (!isPublicNavigationReady()) return false;
+  publicNavigationRef.dispatch(CommonActions.navigate({ name: 'NuniWorkspace', params }));
+  return true;
+}

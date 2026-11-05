@@ -1337,6 +1337,7 @@ it('opens the deep-linked assignment submit area even if drafts hid that card', 
       : response(path, context, input),
   );
   const cache = new Map<string, unknown>([
+    ['courses:focused-material', 'cwm_99999999-9999-4999-8999-999999999999'],
     [`course:${courseId}:tab`, 'materials'],
     [`course:${courseId}:activity-filter`, 'pending'],
   ]);

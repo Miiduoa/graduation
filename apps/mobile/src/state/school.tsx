@@ -20,6 +20,7 @@ export type SchoolSelection = {
 };
 
 export type SchoolContextValue = {
+  selectionReady: boolean;
   selection: SchoolSelection;
   setSelection: (next: Partial<SchoolSelection>) => void;
   school: ReturnType<typeof resolveSchool>;
@@ -219,12 +220,13 @@ export function SchoolProvider(props: {
 
   const value: SchoolContextValue = useMemo(
     () => ({
+      selectionReady: loaded,
       selection: normalizedSelection,
       setSelection,
       school,
       schoolId: normalizedSelection.schoolId ?? school?.id ?? null,
     }),
-    [normalizedSelection, school],
+    [loaded, normalizedSelection, school],
   );
 
   return <SchoolContext.Provider value={value}>{props.children}</SchoolContext.Provider>;

@@ -19,6 +19,8 @@ import { DormitoryScreen } from './DormitoryScreen';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
+import { AIButton } from '../ui/aiFirst';
+import { useNuniSession } from '../state/nuniSession';
 import { useThemeMode } from '../state/theme';
 
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
@@ -41,6 +43,8 @@ function PublicCareerScreen(props: ServiceScreenProps) {
  */
 export function PreAuthStack() {
   useThemeMode();
+  const platform = useNuniSession();
+  const platformReady = !!platform.session && !platform.loading && !platform.error && !platform.pendingLogout;
 
   return (
     <Stack.Navigator
@@ -93,6 +97,11 @@ export function PreAuthStack() {
         options={{ headerShown: false, title: '職涯' }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen
+        name="NuniTimetableAssistant"
+        getComponent={() => require('./NuniTimetableAssistantScreen').NuniTimetableAssistantScreen}
+        options={{ title: '課表助理', headerShown: false }}
+      />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
       <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
       <Stack.Screen
@@ -103,7 +112,13 @@ export function PreAuthStack() {
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}
-        options={{ title: 'nuni' }}
+        options={({ navigation }) => ({
+          title: 'nuni',
+          headerRight: platformReady ? () => (
+            <AIButton label="問課表" variant="ghost" style={{ minHeight: 44 }}
+              onPress={() => navigation.navigate('NuniTimetableAssistant')} />
+          ) : undefined,
+        })}
       />
     </Stack.Navigator>
   );
