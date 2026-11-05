@@ -14,6 +14,10 @@ jest.mock('../app/useAIOverlay', () => ({
 }));
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
+let mockPlatform: { loading?: boolean; session?: { platformAccountId: string } } | null = null;
+jest.mock('../state/nuniSession', () => ({
+  ...jest.requireActual('../state/nuniSession'), useOptionalNuniSession: () => mockPlatform,
+}));
 jest.mock('../state/auth', () => ({
   useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }),
 }));
@@ -79,6 +83,7 @@ beforeEach(() => {
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([]);
   mockUid = 'A';
   mockSchool = 'pu';
+  mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 });
 test('failed questions remain editable and retry does not add duplicated history', async () => {
@@ -823,4 +828,53 @@ test('moves between assignment pages without sending the draft and keeps the bac
   expect(view.getByText('本頁第 2 筆')).toBeTruthy();
   expect(field.props.value).toBe('待會再問的問題');
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+});
+
+test('the next-class shortcut opens the selected occurrence in its own term and account', async () => {
+  const navigate = jest.fn();
+  const first = { courseId: 'manual:a', term: '115|1', name: '專題', room: 'A301',
+    date: '2026-11-05', startTime: '10:10', endTime: '12:00' };
+  const second = { ...first, courseId: 'manual:b', room: 'B203' };
+  request.mockResolvedValue({ content: '兩堂專題', source: 'device', tool: 'saved-timetable',
+    savedClassRead: { uid: 'A', schoolId: 'pu', classes: [first, second], updatedAt: null } });
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByText('查下一堂課')));
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request.mock.calls[0][0]).toMatchObject({
+    mode: 'device', messages: [{ role: 'user', content: '下一堂課是什麼？' }],
+  });
+  expect(view.getByText('同時段有多堂課')).toBeTruthy();
+  expect(view.queryByText('開啟我的課表')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: /在課表中查看專題.*B203/ }));
+  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
+    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
+    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+  } });
+  mockSchool = 'other';
+  view.rerender(<CampusAssistantScreen navigation={{ navigate }} />);
+  expect(view.queryByText('B203')).toBeNull();
+});
+
+test('a failed next-class shortcut can be retried from the composer', async () => {
+  request.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({
+    content: '請核對本學期與上課時間。', tool: 'saved-timetable', source: 'device', route: '/timetable',
+  });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('查下一堂課')));
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('下一堂課是什麼？');
+  await act(async () => fireEvent.press(view.getByText('重試查詢')));
+  expect(request.mock.calls[1][0].messages).toEqual([{ role: 'user', content: '下一堂課是什麼？' }]);
+  expect(view.getByText('請核對本學期與上課時間。')).toBeTruthy();
+});
+
+test('an unresolved or active platform session cannot open the campus account timetable', async () => {
+  const view = render(<CampusAssistantScreen />);
+  expect(view.getByText('查下一堂課')).toBeTruthy();
+  mockPlatform = { loading: true };
+  await act(async () => view.rerender(<CampusAssistantScreen />));
+  expect(view.queryByText('查下一堂課')).toBeNull();
+  mockPlatform = { session: { platformAccountId: 'student-b' } };
+  await act(async () => view.rerender(<CampusAssistantScreen />));
+  expect(view.queryByText('查下一堂課')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
 });

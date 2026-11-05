@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
-  buildPersonalToday,
   validClassDate,
   periodProfileForSchool,
   periodTimes,
@@ -36,7 +35,10 @@ import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { toPublicSchoolId } from '../data/schoolIds';
 import { usePersonalImportScope } from '../state/personalImportScope';
+import { findSavedClassOccurrences } from '../services/nextSavedClasses';
+import type { PreAuthStackParamList } from './preAuthTypes';
 import { loadPersonalImports, personalImportCourses, selectPersonalTimetableCourses } from '../services/personalImports';
 import { PersonalImportSummary } from '../components/PersonalImportSummary';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -63,14 +65,24 @@ export default function PersonalTimetableScreen() {
   const { school } = useSchool();
   const scope = usePersonalImportScope();
   const route = useRoute();
-  const params = route.params as { term?: string; courseId?: string; schoolId?: string; date?: string } | undefined;
-  const term = params?.schoolId && params.schoolId !== (school?.id || 'pu') ? undefined : params?.term;
-  const courseId = params?.schoolId === (school?.id || 'pu') ? params.courseId : undefined;
-  const date = params?.schoolId === (school?.id || 'pu') && params.date && validClassDate(params.date) ? params.date : undefined;
-  return <PersonalTimetableWorkspace initialDate={date} initialCourseId={courseId} initialTerm={term} key={`${auth.user?.uid || 'guest'}:${school?.id || 'pu'}:${scope?.owner || 'pending'}:${term || ''}:${courseId || ''}:${date || ''}`} />;
+  const params = route.params as PreAuthStackParamList['PersonalTimetable'];
+  const schoolId = school?.id || 'pu';
+  const scopeMatches = params?.reminderScope === undefined ||
+    (scope && params.reminderScope === JSON.stringify(scope));
+  const sameSchool = scopeMatches && params?.schoolId === schoolId;
+  const term = scopeMatches && (!params?.schoolId || sameSchool) ? params?.term : undefined;
+  const courseId = sameSchool ? params.courseId : undefined;
+  const date = sameSchool && params.date && validClassDate(params.date) ? params.date : undefined;
+  const startAt = date ? params?.startAt : undefined;
+  return <PersonalTimetableWorkspace
+    key={JSON.stringify([auth.user?.uid, schoolId, scope?.owner, term, courseId, date, startAt])}
+    initialDate={date} initialCourseId={courseId} initialTerm={term} initialStartAt={startAt}
+  />;
 }
 
-function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate }: { initialTerm?: string; initialCourseId?: string; initialDate?: string }) {
+function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate, initialStartAt }: {
+  initialTerm?: string; initialCourseId?: string; initialDate?: string; initialStartAt?: number;
+}) {
   const navigation = useNavigation();
   const auth = useAuth();
   const { school } = useSchool();
@@ -97,18 +109,29 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
   const [importStatus, setImportStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [importTerm, setImportTerm] = useState(initialTerm || '');
   const importedRecords = useMemo(() => importState?.scope === importScopeKey ? importState.records : [], [importState, importScopeKey]);
-  const allTerms = personalTimetableTerms([
-    ...(timetable ? personalTimetableRecords(timetable) : []), ...importedRecords,
-  ], schoolId);
+  const records = useMemo(() => {
+    const rows = timetable ? personalTimetableRecords(timetable, importedRecords) : importedRecords;
+    return rows.map((row) => row.schoolId !== schoolId && toPublicSchoolId(row.schoolId) === toPublicSchoolId(schoolId)
+      ? { ...row, schoolId } : row);
+  }, [timetable, importedRecords, schoolId]);
+  const allTerms = personalTimetableTerms(records, schoolId);
   const importTerms = allTerms.map((term) => term.key);
   const activeTerm = importTerms.includes(importTerm) ? importTerm : importTerms[0];
   const manualTerm = timetable ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : '';
   const selectedView = importTerm === 'legacy' || activeTerm === manualTerm
     ? 'legacy' : activeTerm?.replace('|', '／');
   const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
-  const datedCourse = initialDate && timetable ? buildPersonalToday(personalTimetableRecords(timetable, importedRecords), { schoolId, termKey: activeTerm, now: new Date(`${initialDate}T12:00:00+08:00`) }).today.find((entry) => entry.row.id === initialCourseId) : undefined;
-  const selectedCourse = displayCourses.find((course) => course.id === initialCourseId ||
-    `manual:${course.id}` === initialCourseId || course.id === `import:${initialCourseId}`);
+  const viewTerm = selectedView === 'legacy' ? manualTerm : activeTerm;
+  const matchesTerm = initialTerm === undefined || viewTerm === initialTerm;
+  const occurrences = useMemo(() => {
+    if (!initialDate || !initialCourseId || !timetable || !matchesTerm) return [];
+    return findSavedClassOccurrences(records, {
+      schoolId, term: viewTerm, courseId: initialCourseId, date: initialDate, startAt: initialStartAt,
+    });
+  }, [initialDate, initialCourseId, timetable, matchesTerm, records, viewTerm, schoolId, initialStartAt]);
+  const datedCourse = occurrences.length === 1 ? occurrences[0] : undefined;
+  const selectedCourse = matchesTerm && (!initialDate || datedCourse) ? displayCourses.find((course) =>
+    course.id === initialCourseId || `manual:${course.id}` === initialCourseId || course.id === `import:${initialCourseId}`) : undefined;
   useEffect(() => {
     if (selectedCourse?.day) setDay(selectedCourse.day);
   }, [selectedCourse?.day]);
@@ -258,19 +281,29 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate 
   };
 
 
+  let occurrenceSummary: string | undefined;
+  if (initialDate) {
+    if (loadError || importStatus === 'error') occurrenceSummary = '課表暫時讀不到，請重新讀取後核對上課時間。';
+    else if (importStatus === 'loading') occurrenceSummary = '正在核對上課時間…';
+    else if (!matchesTerm) occurrenceSummary = '目前課表的學期與原先選取的課程不同，請核對學期。';
+    else if (occurrences.length > 1) occurrenceSummary = '這一天有多筆符合的上課紀錄，請核對課表時段。';
+    else if (datedCourse) occurrenceSummary = `${initialDate} · ${datedCourse.startTime}–${datedCourse.endTime} · ${datedCourse.row.location || '教室未填'}`;
+    else occurrenceSummary = '這個時段目前沒有排這堂課，請查看調整紀錄。';
+  }
+
   return (
     <Screen title="我的課表" subtitle="查看上課時間與空堂">
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 120 }}>
         {initialCourseId ? <View style={{ padding: 16, gap: 6 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{selectedCourse?.name || '這堂課已變更，請核對目前課表'}</Text>
-          {initialDate ? <Text style={{ color: theme.colors.muted }}>{datedCourse ? `${initialDate} · ${datedCourse.startTime}–${datedCourse.endTime} · ${datedCourse.row.location || '教室未填'}` : '這堂課在指定日期沒有排課，請查看調整紀錄。'}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
+          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{datedCourse?.row.title || selectedCourse?.name || (initialDate ? '上課時間' : '這堂課已變更，請核對目前課表')}</Text>
+          {occurrenceSummary ? <Text style={{ color: theme.colors.muted }}>{occurrenceSummary}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
         </View> : null}
         {importScopeKey && <ClassReminderToggle key={`reminders:${importScopeKey}`} scope={importScopeKey} />}
         <PersonalCalendarExport key={`calendar:${importScopeKey}:${selectedView === 'legacy' ? manualTerm : activeTerm}`} records={personalTimetableRecords(timetable, importedRecords)} schoolId={schoolId}
           termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
           disabled={loadError || importStatus !== 'ready'} />
         <ClassExceptions key={`exceptions:${importScopeKey}`} records={personalTimetableRecords(timetable, importedRecords)}
-          exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={initialDate}
+          exceptions={timetable.classExceptions} schoolId={schoolId} initialDate={matchesTerm ? initialDate : undefined}
           termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
           disabled={loadError || importStatus !== 'ready'}
           onSave={(classExceptions) => persist({ ...timetable, classExceptions }, '這次安排已儲存。', true)} />

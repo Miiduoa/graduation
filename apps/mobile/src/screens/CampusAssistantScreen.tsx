@@ -1,10 +1,12 @@
 import { AssignmentReplyActions } from './AssignmentReplyActions';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Linking, Text, TextInput, View } from 'react-native';
+import { Linking, ScrollView, Text, TextInput, View } from 'react-native';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
+import { SavedClassReplyCard } from './SavedClassReplyCard';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import {
@@ -71,9 +73,12 @@ function isTransientCampusSyncError(error: unknown): boolean {
 
 export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const platform = useOptionalNuniSession();
+  const uid = loading || platform?.loading || platform?.pendingLogout || platform?.error || platform?.session
+    ? '' : user?.uid ?? '';
   const { school } = useSchool();
-  const scope = JSON.stringify([user?.uid, school.id]);
+  const scope = JSON.stringify([uid, platform?.session?.platformAccountId, school.id]);
   const active = useRef(scope);
   active.current = scope;
   const initialScope = useRef(scope);
@@ -81,7 +86,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   return (
     <AssistantConversation
       key={scope}
-      uid={user?.uid ?? ''}
+      uid={uid}
       schoolId={school.id}
       schoolName={school.name}
       initialPrompt={initialScope.current === scope ? prompt : ''}
@@ -129,6 +134,8 @@ function AssistantConversation({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [linkError, setLinkError] = useState('');
+  const scroll = useRef<ScrollView>(null);
+  const lastRevealed = useRef(-1);
   const mounted = useRef(true);
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
@@ -165,6 +172,7 @@ function AssistantConversation({
     if (lock.current || syncLock.current || next === mode) return;
     setMode(next);
     setMessages([]);
+    lastRevealed.current = -1;
     setError('');
   };
   const progressFor = (controller: AbortController) => (progress: CampusSenseProgress) => {
@@ -274,6 +282,7 @@ function AssistantConversation({
             plan: reply.plan,
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
+            savedClassRead: reply.savedClassRead,
           },
         ]);
         setDraft('');
@@ -301,6 +310,7 @@ function AssistantConversation({
   const send = async (selection?: string) => {
     const question = selection ?? draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || !current()) return;
+    const restoreEmptyDraft = () => { if (selection && !draft.trim()) setDraft(question); };
     lock.current = true;
     setBusy(true);
     setError('');
@@ -318,6 +328,7 @@ function AssistantConversation({
         ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
       if (controller.signal.aborted && current()) {
+        restoreEmptyDraft();
         setError('已停止本機回答，問題仍保留在輸入欄，可修改後重試。');
         return;
       }
@@ -334,6 +345,7 @@ function AssistantConversation({
             plan: reply.plan,
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
+            savedClassRead: reply.savedClassRead,
             proposals: reply.proposals,
           },
         ]);
@@ -341,6 +353,7 @@ function AssistantConversation({
       }
     } catch (failure) {
       if (current()) {
+        restoreEmptyDraft();
         if (failure instanceof OnDeviceAssistantError) {
           if (failure.code === 'model-required') {
             setError('手機尚未下載 AI 模型，請先安裝免費模型。訊息已保留，不會自動改用雲端。');
@@ -368,10 +381,16 @@ function AssistantConversation({
     }
   };
   return (
-    <AIDetailScreen title="校園助理" onBack={() => {
+    <AIDetailScreen title="校園助理" scrollRef={scroll} keyboardShouldPersistTaps="handled" onBack={() => {
       inFlight.current?.abort();
       navigation?.goBack?.();
     }}>
+      {mode === 'device' && uid && !draft.trim() && !messages.length ? (
+        <AICard title="接下來的課">
+          <AIButton label="查下一堂課" disabled={busy || syncBusy}
+            onPress={() => void send('下一堂課是什麼？')} />
+        </AICard>
+      ) : null}
       <AICard
         title="工作模式"
         badge={mode === 'device' ? '手機內推論' : '校園連線'}
@@ -498,8 +517,27 @@ function AssistantConversation({
         </AICard>
       ) : null}
       {messages.map((message, index) => (
-        <AICard key={index} title={message.role === 'user' ? '你的問題' : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
-          {message.role === 'assistant' && message.localReads?.length ? (
+        <View key={index} onLayout={({ nativeEvent }) => {
+          if (message.role === 'assistant' && index === messages.length - 1 && index > lastRevealed.current) {
+            lastRevealed.current = index;
+            scroll.current?.scrollTo({ y: nativeEvent.layout.y, animated: false });
+          }
+        }}>
+        <AICard title={message.role === 'user' ? '你的問題' : message.savedClassRead?.focus === 'room' ? '上課教室'
+          : message.savedClassRead?.focus === 'time' ? '上課時間' : message.savedClassRead?.classes.length
+          ? (message.savedClassRead.classes.length > 1 ? '同時段有多堂課' : '下一堂課') : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+          {message.role === 'assistant' && message.savedClassRead ? (
+            <SavedClassReplyCard classes={message.savedClassRead.classes} updatedAt={message.savedClassRead.updatedAt} focus={message.savedClassRead.focus}
+              disabled={busy || syncBusy || !navigation?.navigate}
+              onOpen={(item) => {
+                if (!current() || message.savedClassRead?.uid !== uid || message.savedClassRead.schoolId !== schoolId) return;
+                safeNavigate(navigation, 'PersonalTimetable', {
+                  schoolId, courseId: item.courseId, date: item.date, term: item.term,
+                  startAt: Date.parse(`${item.date}T${item.startTime}:00+08:00`),
+                  reminderScope: JSON.stringify({ owner: 'firebase:' + uid, schoolId }),
+                });
+              }} />
+          ) : message.role === 'assistant' && message.localReads?.length ? (
             <CampusLocalReadResults
               results={message.localReads}
               disabled={busy || syncBusy}
@@ -553,7 +591,7 @@ function AssistantConversation({
                   : undefined}
               />
             ))}
-          {message.role === 'assistant' && message.source === 'device' && (
+          {message.role === 'assistant' && message.source === 'device' && !message.savedClassRead && (
             <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
               {message.tool === 'local-agent'
                 ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
@@ -566,7 +604,7 @@ function AssistantConversation({
                   : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
             </Text>
           )}
-          {message.role === 'assistant' && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
+          {message.role === 'assistant' && !message.savedClassRead && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
             <View style={{ marginTop: 12 }}>
               <AIButton
                 label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
@@ -578,7 +616,7 @@ function AssistantConversation({
                 }}
               />
             </View>
-          ) : message.role === 'assistant' && !message.plan && !message.localReads?.length && index > 0 ? (
+          ) : message.role === 'assistant' && !message.savedClassRead && !message.plan && !message.localReads?.length && index > 0 ? (
             <View style={{ marginTop: 12, gap: 8 }}>
               {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
                 .slice(0, 3)
@@ -603,6 +641,7 @@ function AssistantConversation({
             </Text>
           ) : null}
         </AICard>
+        </View>
       ))}
       {(uid || mode === 'device') ? (
         <AICard title={mode === 'device' ? '問手機 AI' : '查詢校園即時資料'}>

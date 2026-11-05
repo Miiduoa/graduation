@@ -6,9 +6,10 @@ import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
 import type { AssignmentRead } from '../services/offlineCampusTools';
+import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead };
+export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -81,6 +82,7 @@ export async function askCampusAssistant(input: {
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
+  savedClassRead?: SavedClassRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -110,10 +112,17 @@ export async function askCampusAssistant(input: {
       require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
 
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const question = messages[messages.length - 1].content;
+    const previous = input.messages[input.messages.length - 2];
+    const lastClass = previous?.role === 'assistant' ? previous.savedClassRead : undefined;
+    const classQuery = savedClassQuery(question, lastClass);
     const snapshot = await collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
+      ...(classQuery ? { includeNextClasses: true } : {}),
+      ...((classQuery === 'room' || classQuery === 'time') && lastClass?.uid === uid &&
+        lastClass.schoolId === input.scope.schoolId ? { classFollowUp: lastClass.classes } : {}),
     });
     scopeCheck(input, false);
     assertNotCancelled();
@@ -121,8 +130,10 @@ export async function askCampusAssistant(input: {
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
     const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid });
-    const question = messages[messages.length - 1].content;
-    const previous = input.messages[input.messages.length - 2];
+    if (classQuery) {
+      const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass);
+      return { ...answer, source: 'device', hasActions: false };
+    }
     const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
       senseSnapshot, Date.parse(snapshot.checkedAt));
     const lookup = followUp && 'question' in followUp ? followUp : null;
