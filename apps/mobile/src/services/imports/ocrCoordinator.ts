@@ -1,9 +1,11 @@
+import { isPersonalImportCloudMaskSafe } from '@campus/shared/src/imports/aiCloud';
 import { TimetableOcrError, IMPORT_IMAGE_MAX_BYTES } from '../timetableOcr';
 
 type Job = {
   id: number;
   base64: string;
   mime: string;
+  readGrid: boolean;
   resolve: (value: string) => void;
   reject: (error: TimetableOcrError) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -20,6 +22,7 @@ export class OcrCoordinator {
     base64: string,
     mime: 'image/png' | 'image/jpeg',
     signal?: AbortSignal,
+    readGrid = false,
   ): Promise<string> {
     this.cancel();
     if (signal?.aborted) return Promise.reject(new TimetableOcrError('已取消辨識。', 'cancelled'));
@@ -38,6 +41,7 @@ export class OcrCoordinator {
         id,
         base64,
         mime,
+        readGrid: readGrid && mime === 'image/png',
         resolve,
         reject,
         timer,
@@ -51,11 +55,11 @@ export class OcrCoordinator {
     const job = this.pending;
     if (job)
       this.inject(
-        `window.recognizeTimetable(${job.id},${JSON.stringify(job.base64)},${JSON.stringify(job.mime)}); true;`,
+        `window.recognizeTimetable(${job.id},${JSON.stringify(job.base64)},${JSON.stringify(job.mime)},${job.readGrid}); true;`,
       );
   }
   message(raw: string) {
-    let value: { ready?: boolean; id?: number; ok?: boolean; text?: unknown; error?: unknown };
+    let value: { ready?: boolean; id?: number; ok?: boolean; text?: unknown; grid?: unknown; error?: unknown };
     try {
       value = JSON.parse(raw);
     } catch {
@@ -73,8 +77,16 @@ export class OcrCoordinator {
     this.pending = null;
     clearTimeout(job.timer);
     job.cleanup();
-    if (value.ok && typeof value.text === 'string') job.resolve(value.text);
-    else {
+    if (value.ok && typeof value.text === 'string') {
+      // Keep the masking decision attached to the complete original, before selecting cells.
+      const grid = value.grid;
+      job.resolve(
+        job.readGrid && typeof grid === 'string' && grid.length > 0 && grid.length <= 40_000 &&
+        value.text.length <= 40_000 && value.text.trim().length > 0 && isPersonalImportCloudMaskSafe(value.text)
+          ? grid
+          : value.text,
+      );
+    } else {
       const message =
         typeof value.error === 'string' && /[\u4e00-\u9fff]/.test(value.error)
           ? value.error
