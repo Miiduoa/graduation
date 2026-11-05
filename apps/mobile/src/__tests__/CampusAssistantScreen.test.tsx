@@ -760,3 +760,67 @@ test('no real due time means the agent never offers a notification action', asyn
   expect(view.queryByText('設定手機本機截止提醒')).toBeNull();
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });
+
+test('tapping a result retains the unsent draft and opens only the selected source; a reminder still needs confirmation', async () => {
+  const checkedAt = new Date().toISOString();
+  const dueAt = new Date(Date.now() + 3 * 86_400_000).toISOString();
+  const items = ['資料庫設計', '資料庫管理'].map((groupName, index) => ({
+    title: '期中報告', groupName, dueAt,
+    source: { kind: 'group-assignment' as const, groupId: 'db' + index, assignmentId: 'report' },
+  }));
+  const snapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+    assignments: { status: 'available' as const, count: 2, items },
+    announcements: { status: 'available' as const, items: [] }, schedule: { status: 'unavailable' as const, count: null } };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot);
+  const assignmentRead = { userId: 'A', schoolId: 'pu', checkedAt, items, filterQuestion: '期中報告何時交？' };
+  const reply = { source: 'device', tool: 'campus-snapshot', content: '有兩份同名報告', route: '/classroom', hasActions: false };
+  request.mockResolvedValueOnce({ ...reply, assignmentRead });
+  request.mockResolvedValueOnce({ ...reply, content: '資料庫管理的報告', assignmentRead: { ...assignmentRead, items: [items[1]], reviewReminder: true } });
+  const navigate = jest.fn();
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '期中報告何時交？');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '還在輸入的問題');
+  await act(async () => fireEvent.press(view.getByText('第 2 筆')));
+  const turns = request.mock.calls[1][0].messages;
+  expect(turns[1].assignmentRead).toEqual(assignmentRead);
+  expect(turns[2]).toEqual({ role: 'user', content: '第 2 筆' });
+  expect(field.props.value).toBe('還在輸入的問題');
+  fireEvent.press(view.getByText('查看這份作業'));
+  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'HomeworkSubmit', params: { groupId: 'db1', assignmentId: 'report' } });
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+  expect(view.getByText('確認設定本機提醒')).toBeTruthy();
+});
+
+test('moves between assignment pages without sending the draft and keeps the back button on a one-row last page', async () => {
+  const checkedAt = new Date().toISOString();
+  const items = Array.from({ length: 9 }, (_, i) => ({ title: '練習 ' + (i + 1), groupName: '資料庫', dueAt: null }));
+  const snapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+    assignments: { status: 'available' as const, count: items.length, items },
+    announcements: { status: 'available' as const, items: [] }, schedule: { status: 'unavailable' as const, count: null } };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot);
+  const question = '我有哪些待交作業？';
+  const page = (offset: number) => ({
+    source: 'device', tool: 'campus-snapshot', content: '已同步的作業', hasActions: false,
+    assignmentRead: { userId: 'A', schoolId: 'pu', checkedAt, filterQuestion: question, items: items.slice(offset, offset + 8),
+      page: { question, offset, total: items.length, asOf: Date.parse(checkedAt) } },
+  });
+  request.mockResolvedValueOnce(page(0)).mockResolvedValueOnce(page(8)).mockResolvedValueOnce(page(0));
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, question);
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '待會再問的問題');
+  expect(view.queryByText('上一頁作業')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('下一頁作業')));
+  expect(request.mock.calls[1][0].messages.at(-1).content).toBe('下一頁');
+  expect(view.queryByText('下一頁作業')).toBeNull();
+  await act(async () => fireEvent.press(view.getByText('上一頁作業')));
+  expect(request.mock.calls[2][0].messages.at(-1).content).toBe('上一頁');
+  expect(view.getByText('本頁第 2 筆')).toBeTruthy();
+  expect(field.props.value).toBe('待會再問的問題');
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+});
