@@ -113,7 +113,7 @@ function expectAnnouncementReadFailure() {
   expect(screen.getByRole('button', { name: '再試一次' })).toBeTruthy();
   expect(screen.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(screen.queryByText('學校網站暫時連不上')).toBeNull();
-  expect(screen.queryByText(/最近 0 則/)).toBeNull();
+  expect(screen.queryByText(/共 0 則公告/)).toBeNull();
   expect(screen.queryByRole('link', { name: '教務處' })).toBeNull();
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
   expect(screen.queryByRole('article')).toBeNull();
@@ -213,6 +213,10 @@ it('keeps server categories, pinned flags and search functional without invented
   );
   render(<AnnouncementsPage />);
   await screen.findByText('課務消息');
+  const options = screen.getByRole('button', { name: '篩選公告' });
+  expect(options.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('button', { name: '活動' })).toBeNull();
+  fireEvent.click(options);
   fireEvent.click(screen.getByRole('button', { name: '活動' }));
   expect(screen.getByText('展覽消息')).toBeTruthy();
   expect(screen.queryByText('課務消息')).toBeNull();
@@ -224,6 +228,10 @@ it('keeps server categories, pinned flags and search functional without invented
   fireEvent.click(screen.getByLabelText('只看置頂'));
   expect(screen.getAllByRole('article')).toHaveLength(1);
   expect(screen.getByText('置頂')).toBeTruthy();
+  fireEvent.click(options);
+  expect(options.textContent).toContain('只看置頂');
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.getAllByRole('article')).toHaveLength(1);
 });
 
 it('keeps older 學務處 and 住宿 announcements visible and searchable when other offices fill the recent list', async () => {
@@ -308,7 +316,7 @@ it('keeps cached announcements when a later Firestore read fails', async () => {
 
 function expectAnnouncementLoading() {
   expect(screen.getByText('正在讀取公告…')).toBeTruthy();
-  expect(screen.queryByText(/最近 0 則/)).toBeNull();
+  expect(screen.queryByText(/共 0 則公告/)).toBeNull();
   expect(screen.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
   expect(screen.queryByText('暫時讀不到資料，請稍後再試')).toBeNull();
   expect(screen.queryByText('目前沒有公開公告')).toBeNull();
@@ -323,7 +331,7 @@ it('does not show an empty school state before the first feed returns', async ()
   expectAnnouncementLoading();
   await act(async () => pending.resolve(snapshot(announcementDocument('校園公告實際內容'))));
   await screen.findByText('校園公告實際內容');
-  expect(screen.getByText(/最近 \d+ 則/)).toBeTruthy();
+  expect(screen.getByText(/共 \d+ 則公告/)).toBeTruthy();
   expect(screen.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
 });
 
@@ -866,14 +874,14 @@ it('keeps undated and future rows out of the student wall and 全部公告, and 
   }) as never);
   render(<AnnouncementsPage />);
   await screen.findByText('日常選課');
-  expect(screen.getByText(/最近 1 則/)).toBeTruthy();
+  expect(screen.getByText(/共 1 則公告/)).toBeTruthy();
   expect(screen.getByRole('button', { name: '全部公告' })).toBeTruthy();
   expect(screen.queryByText('無日期稿')).toBeNull();
   expect(screen.queryByText('未來稿')).toBeNull();
   expect(screen.queryByText(/Cisco/)).toBeNull();
   expect(screen.queryByText(/點名計分單/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '全部公告' }));
-  expect(screen.getByText(/最近 3 則/)).toBeTruthy();
+  expect(screen.getByText(/共 3 則公告/)).toBeTruthy();
   expect(screen.getByText(/Cisco/)).toBeTruthy();
   expect(screen.getByText(/點名計分單/)).toBeTruthy();
   expect(screen.queryByText('無日期稿')).toBeNull();
@@ -1046,6 +1054,9 @@ it('uses the current address when Next restores a cached page with older server 
   await screen.findByRole('link', { name: '選課時程' });
   expect(screen.getAllByRole('article')).toHaveLength(1);
   expect((screen.getByLabelText('搜尋公告') as HTMLInputElement).value).toBe('選課');
+  const options = screen.getByRole('button', { name: /篩選公告.*學術、只看置頂/ });
+  expect(options.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(options);
   expect((screen.getByLabelText('只看置頂') as HTMLInputElement).checked).toBe(true);
   expect(screen.queryByText('其他活動')).toBeNull();
 });
