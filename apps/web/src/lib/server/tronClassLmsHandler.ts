@@ -7,6 +7,8 @@ import {
   schoolSessionCookies,
   schoolSessionExpiry,
   type AcademicFirestore,
+  type AcademicTransaction,
+  type SchoolDataSnapshot,
 } from './academicRecordsHandlers';
 import type { LmsReadonlySource } from './tronClassLmsSource';
 import type {
@@ -77,6 +79,11 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function documentVersion(snapshot: SchoolDataSnapshot): string | undefined {
+  const time = snapshot.updateTime;
+  return time && `${time.seconds}:${time.nanoseconds}`;
 }
 
 type CourseRow = { id: number; name: string };
@@ -433,8 +440,9 @@ export function createTronClassLmsHandler({
 
     try {
       await requireAcademicAccount(db, uid);
-      const sessions = await db.collection('_puSessions').where('ownerUid', '==', uid)
-        .orderBy('expiresAt', 'desc').limit(1).get();
+      const currentPortal = db.collection('_puSessions').where('ownerUid', '==', uid)
+        .orderBy('expiresAt', 'desc').limit(1);
+      const sessions = await currentPortal.get();
       const portalSnapshot = sessions.docs[0];
       const portal = portalSnapshot?.data();
       if (portal?.ownerUid !== uid || !(schoolSessionExpiry(portal.expiresAt) > now())) reconnect();
@@ -446,6 +454,7 @@ export function createTronClassLmsHandler({
       }
       const sessionRef = db.doc(`_puTronClassSessions/${linkedId}`);
       const sessionSnapshot = await sessionRef.get();
+      const sessionVersion = documentVersion(sessionSnapshot);
       const session = sessionSnapshot.data();
       const cookies = schoolSessionCookies(session?.cookies);
       if (!sessionSnapshot.exists || session?.ownerUid !== uid || !cookies ||
@@ -456,14 +465,20 @@ export function createTronClassLmsHandler({
 
       // Cache hits must be revalidated too. The linked LMS session may change
       // while Firestore is returning a cached snapshot, without any school call.
-      const verifyLinkedSession = async () => {
-        await requireAcademicAccount(db, uid);
-        const [latestPortal, latestSession] = await Promise.all([portalSnapshot.ref.get(), sessionRef.get()]);
+      const verifyLinkedSession = async (tx?: AcademicTransaction) => {
+        const [portals, latestSession] = await Promise.all([
+          tx ? tx.get(currentPortal) : currentPortal.get(),
+          tx ? tx.get(sessionRef) : sessionRef.get(),
+          requireAcademicAccount(db, uid, tx),
+        ]);
+        const latestPortal = portals.docs[0];
         const latestCookies = schoolSessionCookies(latestSession.data()?.cookies);
-        if (!latestPortal.exists || latestPortal.data()?.ownerUid !== uid ||
+        if (!latestPortal?.exists || latestPortal.ref.path !== portalSnapshot.ref.path ||
+          latestPortal.data()?.ownerUid !== uid ||
           latestPortal.data()?.tronClassSessionId !== linkedId ||
           !(schoolSessionExpiry(latestPortal.data()?.expiresAt) > now()) ||
           !latestSession.exists || latestSession.data()?.ownerUid !== uid ||
+          documentVersion(latestSession) !== sessionVersion ||
           !(schoolSessionExpiry(latestSession.data()?.expiresAt) > now()) ||
           !latestCookies || latestSession.data()?.userId !== session.userId ||
           Object.keys(latestCookies).length !== Object.keys(cookies).length ||
@@ -475,14 +490,34 @@ export function createTronClassLmsHandler({
       let cachedHomework: LmsReadonlySnapshot | null = null;
       let shouldPruneExtras = false;
       const cached = await cacheRef.get();
-      // An account can disconnect or relink while Firestore returns the cache.
-      // Check ownership before invalidating it or starting a school fetch.
+      // A relink can leave the original portal document intact.
       await verifyLinkedSession();
       const cacheData = cached.data();
-      // Never delete a stale cache on a read. A concurrent reconnect may have
-      // replaced this document for the new session after our snapshot was read.
-      // Invalid entries are not served and are overwritten on successful fetch.
-      if (cached.exists && cacheData?.ownerUid === uid && cacheData?.sessionId === linkedId &&
+      const saveCache = async (snapshot: LmsReadonlySnapshot) => {
+        if (!sessionVersion || !db.runTransaction) return;
+        try {
+          await db.runTransaction(async (tx) => {
+            await verifyLinkedSession(tx);
+            const current = await tx.get(cacheRef);
+            // A concurrent refresh, relink or cleanup has already replaced our input.
+            if (cached.exists !== current.exists || (current.exists &&
+              (!current.updateTime || documentVersion(current) !== documentVersion(cached)))) return;
+            tx.set(cacheRef, {
+              ownerUid: uid, sessionId: linkedId, sessionVersion,
+              fetchedAt: snapshot.fetchedAt,
+              expiresAt: new Date(snapshot.cache.expiresAt),
+              snapshot,
+              extras,
+            });
+          });
+        } catch (error) {
+          if (error instanceof HttpsError) throw error;
+          // Cache storage is optional. The caller still verifies access before responding.
+        }
+      };
+
+      if (cached.exists && sessionVersion && cacheData?.sessionVersion === sessionVersion &&
+        cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid)) {
         const pruned = readCachedExtras(cacheData.extras, now());
         extras = refresh ? {} : pruned.extras;
@@ -491,23 +526,10 @@ export function createTronClassLmsHandler({
       }
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
-        await verifyLinkedSession();
         if (shouldPruneExtras) {
-          try {
-            await cacheRef.set?.({
-              ownerUid: uid,
-              sessionId: linkedId,
-              fetchedAt: cacheData!.fetchedAt,
-              expiresAt: cacheData!.expiresAt,
-              snapshot: cachedHomework,
-              extras,
-            }, { merge: false });
-          } catch {
-            // 清掉過期 extras 失敗時仍繼續讀取。
-          }
+          await saveCache(cachedHomework);
+          await verifyLinkedSession();
         }
-        // Cache maintenance can yield; the session might be replaced while it writes.
-        await verifyLinkedSession();
         return {
           ...mergeExtras(cachedHomework, extras),
           cache: { hit: true, expiresAt: cachedHomework.cache.expiresAt },
@@ -583,24 +605,10 @@ export function createTronClassLmsHandler({
         }
       }
 
-      // Cache-only and school-fetch responses must both fail closed if the portal
-      // was re-linked or signed out during an asynchronous read.
-      await verifyLinkedSession();
-
-      const merged = mergeExtras(homeworkOnlySnapshot(snapshot), extras);
+      const homework = homeworkOnlySnapshot(snapshot);
+      const merged = mergeExtras(homework, extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
-      try {
-        await cacheRef.set?.({
-          ownerUid: uid,
-          sessionId: linkedId,
-          fetchedAt: snapshot.fetchedAt,
-          expiresAt: new Date(Date.parse(snapshot.cache.expiresAt)),
-          snapshot: homeworkOnlySnapshot(snapshot),
-          extras,
-        }, { merge: false });
-      } catch {
-        // 快取寫入失敗仍回傳剛讀到的資料。
-      }
+      await saveCache(homework);
       // Do not return the old session's data if the user relinked during the write.
       await verifyLinkedSession();
       return merged;

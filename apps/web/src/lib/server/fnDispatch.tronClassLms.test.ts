@@ -311,18 +311,37 @@ it('does not serve another linked TronClass session\'s cached courses after reco
   expect(store.docs.get(CACHE)?.sessionId).toBe(nextId);
 });
 
-it('invalidates legacy cache entries without a verified session binding', async () => {
+it.each(['sessionId', 'sessionVersion'])('refetches a legacy cache missing %s', async (field) => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
-  const cached = store.docs.get(CACHE);
-  expect(cached?.sessionId).toBe(LMS_ID);
-  delete cached!.sessionId;
+  const cached = store.docs.get(CACHE)!;
+  delete cached[field];
   vi.mocked(source.fetchHomeworkPage).mockClear();
 
   const body = await (await request()).json();
   expect(body.result.cache.hit).toBe(false);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+  expect(store.docs.get(CACHE)?.[field]).toBeDefined();
+});
+
+it.each([
+  { cookies: { session: 'new-cookie' }, userId: 10 },
+  { cookies: { session: 'lms-secret' }, userId: 11 },
+])('discards homework and course extras after an in-place LMS rotation to %j', async (session) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const oldVersion = store.docs.get(CACHE)?.sessionVersion;
+  await store.db.doc(LMS).set(session, { merge: true });
+  vi.mocked(source.fetchCourses).mockClear().mockResolvedValue([{ id: 10002, name: '新課程' }]);
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchCourses).toHaveBeenCalledWith(session.cookies, { userId: session.userId, status: 'ongoing' });
+  expect(body.result.courses).toEqual([{ id: 10002, name: '新課程' }]);
+  expect(body.result.contentsLoadedFor).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+  expect(store.docs.get(CACHE)?.sessionVersion).not.toEqual(oldVersion);
 });
 
 it('does not expose an otherwise fresh cache when its LMS session changes owner', async () => {
@@ -357,6 +376,27 @@ it('rejects an in-flight course read when its linked session changes before comp
   expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
   expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
   expect(store.docs.get(CACHE)?.extras).toEqual({});
+});
+
+it('rejects an in-flight read when a newer portal takes precedence over the still-valid original', async () => {
+  const { request, source, store } = setup();
+  const originalPortal = structuredClone(store.docs.get(PORTAL));
+  const newId = 'c'.repeat(32);
+  const laterExpiry = new Date(Date.now() + 120_000);
+  vi.mocked(source.fetchCourses).mockImplementationOnce(async () => {
+    await store.db.doc(`_puTronClassSessions/${newId}`).set({
+      ownerUid: UID, userId: 11, cookies: { session: 'new-cookie' }, expiresAt: laterExpiry,
+    });
+    await store.db.doc('_puSessions/new-login').set({
+      ownerUid: UID, tronClassSessionId: newId, expiresAt: laterExpiry,
+    });
+    return [LMS_FIXTURE_COURSE];
+  });
+
+  const response = await request();
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(store.docs.get(PORTAL)).toEqual(originalPortal);
 });
 
 it.each([
@@ -420,7 +460,7 @@ it.each([
     cached.extras = { '10001': { invalid: true } };
   }
   const cacheBefore = structuredClone(cached);
-  const writeCache = vi.fn();
+  const cacheTransaction = vi.spyOn(store.db, 'runTransaction');
   const originalDoc = store.db.doc.bind(store.db);
   let changed = false;
   vi.spyOn(store.db, 'doc').mockImplementation((path) => {
@@ -428,7 +468,6 @@ it.each([
     if (path !== CACHE) return ref;
     return {
       ...ref,
-      set: writeCache,
       get: async () => {
         const snapshot = await ref.get();
         changed = true;
@@ -451,7 +490,7 @@ it.each([
   const body = await response.json();
   expect(body.error.status).toBe('FAILED_PRECONDITION');
   expect(body.result).toBeUndefined();
-  expect(writeCache).not.toHaveBeenCalled();
+  expect(cacheTransaction).not.toHaveBeenCalled();
   expect(store.docs.get(CACHE)).toEqual(cacheBefore);
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
@@ -506,14 +545,13 @@ it.each([
   expect((await request()).status).toBe(200);
   const cacheBefore = structuredClone(store.docs.get(CACHE));
   const originalDoc = store.db.doc.bind(store.db);
-  const cacheWrite = vi.fn();
+  const cacheTransaction = vi.spyOn(store.db, 'runTransaction');
   const cacheDelete = vi.fn();
   vi.spyOn(store.db, 'doc').mockImplementation((path) => {
     const ref = originalDoc(path);
     if (path !== CACHE) return ref;
     return {
       ...ref,
-      set: cacheWrite,
       delete: cacheDelete,
       get: async () => {
         const snapshot = await ref.get();
@@ -531,7 +569,7 @@ it.each([
   const response = await request();
   expect(response.ok).toBe(false);
   expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
-  expect(cacheWrite).not.toHaveBeenCalled();
+  expect(cacheTransaction).not.toHaveBeenCalled();
   expect(cacheDelete).not.toHaveBeenCalled();
   expect(store.docs.get(CACHE)).toEqual(cacheBefore);
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
@@ -575,56 +613,101 @@ it('preserves a stale cache when its safe replacement cannot be fetched', async 
   expect(store.docs.get(CACHE)).toEqual(cacheBefore);
 });
 
-it('rejects a cache hit if the session relinks during extras cleanup', async () => {
+it.each([
+  { path: PORTAL, change: { tronClassSessionId: 'c'.repeat(32) }, status: 'FAILED_PRECONDITION' },
+  { path: LMS, change: { ownerUid: 'another-owner' }, status: 'FAILED_PRECONDITION' },
+  { path: `users/${UID}`, change: { accountDeletionInProgress: true }, status: 'PERMISSION_DENIED' },
+  { path: `schools/pu/members/${UID}`, change: { status: 'inactive' }, status: 'PERMISSION_DENIED' },
+])('rejects access revoked at $path just before the cache transaction', async ({ path, change, status }) => {
+  const { request, store } = setup();
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    await store.db.doc(path).set(change, { merge: true });
+    return runTransaction(callback);
+  });
+
+  const response = await request();
+  expect((await response.json()).error.status).toBe(status);
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
+it('returns fresh homework after a cache commit fails and retries on the next read', async () => {
+  const { request, source, store } = setup();
+  store.failNextCommit();
+  const first = await (await request()).json();
+  expect(first.result.cache.hit).toBe(false);
+  expect(first.result.homework).toHaveLength(2);
+  expect(store.docs.has(CACHE)).toBe(false);
+
+  const retry = await (await request()).json();
+  expect(retry.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+});
+
+it('preserves course contents cached by a faster request for the same session', async () => {
+  const { request, source, store } = setup();
+  let release!: () => void;
+  vi.mocked(source.fetchCourses).mockImplementationOnce(() => new Promise((resolve) => {
+    release = () => resolve([LMS_FIXTURE_COURSE]);
+  }));
+  const pending = request();
+  await vi.waitFor(() => expect(source.fetchCourses).toHaveBeenCalledTimes(1));
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const winner = structuredClone(store.docs.get(CACHE));
+  release();
+
+  expect((await pending).status).toBe(200);
+  expect(store.docs.get(CACHE)).toEqual(winner);
+  vi.mocked(source.fetchActivities).mockClear();
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.materials).toHaveLength(1);
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+});
+
+it('does not prune course contents refreshed after the initial cache read', async () => {
   const { request, source, store } = setup();
   expect((await request({ courseId: 10001 })).status).toBe(200);
+  const fresh = structuredClone(store.docs.get(CACHE)!);
   const extras = store.docs.get(CACHE)!.extras as Record<string, { expiresAt: string }>;
   extras['10001'].expiresAt = new Date(0).toISOString();
-  const originalDoc = store.db.doc.bind(store.db);
-  let wrote = false;
-  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
-    const ref = originalDoc(path);
-    if (path !== CACHE) return ref;
-    return {
-      ...ref,
-      set: async (...args: Parameters<typeof ref.set>) => {
-        await ref.set(...args);
-        wrote = true;
-        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
-      },
-    };
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  const transaction = vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    await store.db.doc(CACHE).set(fresh);
+    return runTransaction(callback);
   });
   for (const method of Object.values(source)) vi.mocked(method).mockClear();
 
-  const response = await request();
-  expect(wrote).toBe(true);
-  expect(response.ok).toBe(false);
-  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect((await request()).status).toBe(200);
+  expect(transaction).toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(fresh);
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
 
-it('rejects a cold read when the session relinks during the cache write', async () => {
-  const { request, store } = setup();
-  const originalDoc = store.db.doc.bind(store.db);
-  let wrote = false;
-  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
-    const ref = originalDoc(path);
-    if (path !== CACHE) return ref;
-    return {
-      ...ref,
-      set: async (...args: Parameters<typeof ref.set>) => {
-        await ref.set(...args);
-        wrote = true;
-        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
-      },
-    };
+it.each(['cold fetch', 'extras cleanup'])('rejects %s if the portal relinks after commit', async (scenario) => {
+  const { request, source, store } = setup();
+  if (scenario === 'extras cleanup') {
+    expect((await request({ courseId: 10001 })).status).toBe(200);
+    const extras = store.docs.get(CACHE)!.extras as Record<string, { expiresAt: string }>;
+    extras['10001'].expiresAt = new Date(0).toISOString();
+    for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  }
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    const result = await runTransaction(callback);
+    await store.db.doc(PORTAL).set({ tronClassSessionId: 'c'.repeat(32) }, { merge: true });
+    return result;
   });
+
   const response = await request();
-  expect(wrote).toBe(true);
-  expect(response.ok).toBe(false);
   const body = await response.json();
   expect(body.error.status).toBe('FAILED_PRECONDITION');
   expect(body.result).toBeUndefined();
+  expect(store.docs.get(CACHE)?.extras).toEqual({});
+  if (scenario === 'extras cleanup') {
+    for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+  }
 });
 
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
