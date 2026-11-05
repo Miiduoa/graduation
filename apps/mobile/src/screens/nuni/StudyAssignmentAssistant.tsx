@@ -49,14 +49,15 @@ export function StudyAssignmentAssistant({ data, open }: Props) {
     <View style={{ gap: 6 }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="問作業助理"
+        accessibilityLabel={expanded ? '收起作業助理' : '問作業助理'}
         accessibilityState={{ expanded }}
         onPress={() => setOpenedFor(expanded ? null : data)}
-        style={{ minHeight: 44, justifyContent: 'center' }}
+        style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
       >
-        <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 16 }}>
-          {expanded ? '收起作業助理' : '問作業助理'}
+        <Text style={{ color: expanded ? theme.colors.text : theme.colors.accent, fontWeight: '600', fontSize: expanded ? 20 : 16 }}>
+          {expanded ? '作業助理' : '問作業助理'}
         </Text>
+        {expanded && <Text style={{ color: theme.colors.accent, fontSize: 14 }}>收起</Text>}
       </Pressable>
       {expanded && <AssignmentQuestions data={data} open={open} />}
     </View>
@@ -227,6 +228,16 @@ function AssignmentQuestions({ data, open }: Props) {
     setDraft('');
   }
 
+  let summary = `符合 ${fullRows.length} 筆 · 顯示第 ${offset + 1}–${offset + rows.length} 筆`;
+  if (!fullRows.length) {
+    summary = receipts ? '已載入的課程紀錄中沒有符合的作業，請到原課程核對。'
+      : '已載入的待交作業中沒有符合條件的項目。';
+  } else if (selected !== null) {
+    summary = '已選本頁第 ' + (selected + 1) + ' 筆';
+  } else if (receiptQuestion?.source && fullRows.length === 1) {
+    summary = '這份作業的繳交紀錄';
+  }
+
   const text = { color: theme.colors.text, fontSize: 15, lineHeight: 22 };
   const button = (label: string, action: () => void, disabled = false, accessibilityLabel = label) => (
     <Pressable
@@ -236,7 +247,11 @@ function AssignmentQuestions({ data, open }: Props) {
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={action}
-      style={{ minHeight: 44, paddingHorizontal: 8, justifyContent: 'center' }}
+      style={({ pressed }) => ({
+        minHeight: 44, paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center',
+        alignSelf: 'flex-start', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border,
+        backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.surface,
+      })}
     >
       <Text style={{ ...text, color: disabled ? theme.colors.muted : theme.colors.accent }}>
         {label}
@@ -245,34 +260,34 @@ function AssignmentQuestions({ data, open }: Props) {
   );
   return (
     <View style={{ gap: 8 }}>
-      <Text style={text}>可查已載入的待交作業、參考期限及繳交紀錄，並指定課名或作業名稱。</Text>
+      <Text style={{ ...text, color: theme.colors.muted }}>查詢已載入的作業期限與繳交紀錄</Text>
       {data.failedCourseIds.length || data.limitedCourseIds.length ? (
         <Text style={{ ...text, color: theme.colors.warning }}>
           部分課程未完整載入，結果只包含這次取得的作業。
         </Text>
       ) : null}
-      <TextInput
-        accessibilityLabel="輸入作業問題"
-        placeholder="例如：資料庫的作業什麼時候交？"
-        value={draft}
-        onChangeText={setDraft}
-        maxLength={240}
-        returnKeyType="search"
-        onSubmitEditing={submitDraft}
-        placeholderTextColor={theme.colors.muted}
-        style={{
-          ...text,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          borderRadius: 8,
-          minHeight: 46,
-          padding: 10,
-        }}
-      />
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-        {button('查詢作業', submitDraft, !draft.trim())}
-        {!search && !receiptQuestion && ['有哪些待交作業？', '明天有哪些作業？', '我已繳交的作業有哪些？'].map((q) => button(q, () => ask(q)))}
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <TextInput
+          accessibilityLabel="輸入作業問題"
+          placeholder="例如：資料庫有哪些作業？"
+          value={draft}
+          onChangeText={setDraft}
+          maxLength={240}
+          returnKeyType="search"
+          onSubmitEditing={submitDraft}
+          placeholderTextColor={theme.colors.muted}
+          style={{
+            ...text, flex: 1, minWidth: 0, minHeight: 46, padding: 10,
+            borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10,
+          }}
+        />
+        {button('查詢', submitDraft, !draft.trim(), '查詢作業')}
       </View>
+      {!search && !receiptQuestion && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          {['有哪些待交作業？', '明天有哪些作業？', '我已繳交的作業有哪些？'].map((q) => button(q, () => ask(q)))}
+        </View>
+      )}
       {notice ? (
         <Text accessibilityLiveRegion="polite" style={text}>
           {notice}
@@ -298,23 +313,15 @@ function AssignmentQuestions({ data, open }: Props) {
       {(answer?.kind === 'results' || receipts?.kind === 'results') && (
         <>
           <Text accessibilityLiveRegion="polite" style={{ ...text, fontWeight: '600' }}>
-            {selected !== null
-              ? '已選本頁第 ' + (selected + 1) + ' 筆'
-              : fullRows.length
-                ? `符合 ${fullRows.length} 筆 · 顯示第 ${offset + 1}–${offset + rows.length} 筆`
-                : receipts ? '已載入的課程紀錄中沒有符合的作業，請到原課程核對。'
-                  : '已載入的待交作業中沒有符合條件的項目。'}
+            {summary}
           </Text>
           {answer?.kind === 'results' && answer.window && answer.undated > 0 && (
             <Text style={text}>另有 {answer.undated} 筆未設定參考期限，無法依日期判斷。</Text>
           )}
-          {receipts?.kind === 'results' && (
-            <Text style={text}>來源：本次載入的 nuni 課程繳交紀錄。未見紀錄不代表校方 LMS 已確認未交；請到原作業頁核對。</Text>
-          )}
           {answer?.kind === 'results' && !answer.status && selected === null && (
             <View style={{ gap: 2 }}>
               <Text style={{ ...text, fontSize: 13, color: theme.colors.muted }}>
-                {['查繳交紀錄', answer.scope, answer.window?.label].filter(Boolean).join(' · ')}
+                {['同範圍的繳交紀錄', answer.scope, answer.window?.label].filter(Boolean).join(' · ')}
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {button('已繳交', () => {
@@ -380,6 +387,11 @@ function AssignmentQuestions({ data, open }: Props) {
               </View>
             );
           })}
+          {receipts?.kind === 'results' && (
+            <Text style={{ ...text, color: theme.colors.muted, fontSize: 13 }}>
+              來源：本次載入的 nuni 課程繳交紀錄。未見紀錄不代表校方 LMS 已確認未交。
+            </Text>
+          )}
           {selected !== null &&
             button('返回清單', () => {
               setSelected(null);
