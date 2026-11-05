@@ -16,7 +16,7 @@ import { applyTheme, clearSchoolTheme, createDarkTheme } from '../ui/theme';
 
 let mockAuth = {
   user: { uid: 'student-a' } as { uid: string } | null,
-  profile: { schoolId: 'school-a', role: 'student' } as { schoolId: string; role: string } | null,
+  profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' } as { uid: string; schoolId: string; role: string } | null,
 };
 const mockNavigate = jest.fn();
 const mockNavigation = { navigate: mockNavigate };
@@ -98,7 +98,7 @@ beforeEach(() => {
   });
   jest.setSystemTime(new Date('2026-11-03T08:00:00+08:00'));
   jest.clearAllMocks();
-  mockAuth = { user: { uid: 'student-a' }, profile: { schoolId: 'school-a', role: 'student' } };
+  mockAuth = { user: { uid: 'student-a' }, profile: { uid: 'student-a', schoolId: 'school-a', role: 'student' } };
   mockTimetable.status = 'ready';
   mockTimetable.classes = [];
   mockTimetable.termKey = '115-1';
@@ -118,6 +118,7 @@ test('opens timetable import from the empty timetable state', async () => {
   mockTimetable.status = 'empty';
   const view = render(<StudentTodayScreen />);
   await view.findByText(TODAY_COPY.noTimetable);
+  expect(loadStudentHome).toHaveBeenCalledWith('student-a', 'school-a', 'today');
   fireEvent.press(view.getByText(TODAY_COPY.importTimetable));
   expect(rootNavigateNested).toHaveBeenCalledWith('學習', 'PersonalImport', { kind: 'timetable' });
 });
@@ -170,7 +171,7 @@ test.each(['account', 'school'])(
     fireEvent(view.UNSAFE_getByType(RefreshControl), 'refresh');
     mockAuth =
       change === 'account'
-        ? { ...mockAuth, user: { uid: 'student-b' } }
+        ? { user: { uid: 'student-b' }, profile: { ...mockAuth.profile!, uid: 'student-b' } }
         : { ...mockAuth, profile: { ...mockAuth.profile!, schoolId: 'school-b' } };
     view.rerender(<StudentTodayScreen />);
     expect(view.queryByText('繳交期末報告')).toBeNull();
@@ -182,6 +183,14 @@ test.each(['account', 'school'])(
     expect(view.getByText('今天')).toBeTruthy();
   },
 );
+
+test('a profile from the previous account cannot supply the school for coursework', async () => {
+  mockAuth = { ...mockAuth, user: { uid: 'student-b' } };
+  jest.mocked(loadStudentHome).mockRejectedValueOnce(new Error('school missing'));
+  const view = render(<StudentTodayScreen />);
+  await view.findByText('無法讀取校務課程。請確認登入狀態與網路連線後重試。');
+  expect(loadStudentHome).toHaveBeenCalledWith('student-b', undefined, 'today');
+});
 
 test('shows the unsigned sentence when nobody is signed in', async () => {
   mockAuth = { user: null, profile: null };
@@ -341,9 +350,9 @@ test('the explicit submit button opens the real assignment', async () => {
   jest.mocked(loadStudentHome).mockResolvedValue(data);
   const view = render(<StudentTodayScreen />);
   await view.findByText(TODAY_COPY.nextAssignment);
-  const stopPropagation = jest.fn();
-  fireEvent.press(view.getByText(TODAY_COPY.goSubmit), { stopPropagation });
-  expect(stopPropagation).toHaveBeenCalledTimes(1);
+  const submit = view.getByRole('button', { name: TODAY_COPY.goSubmit });
+  expect(view.getByTestId('next-action')).not.toContainElement(submit);
+  fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(1);
   expect(mockNavigate).toHaveBeenCalledWith('學習', {
     screen: 'HomeworkSubmit',
@@ -557,12 +566,78 @@ test('after classes end, the card opens the course and its button still submits 
     screen: 'CourseHub',
     params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
   });
-  const stopPropagation = jest.fn();
-  fireEvent.press(view.getByText(TODAY_COPY.goSubmit), { stopPropagation });
-  expect(stopPropagation).toHaveBeenCalledTimes(1);
+  const submit = view.getByRole('button', { name: TODAY_COPY.goSubmit });
+  expect(view.getByTestId('next-action')).not.toContainElement(submit);
+  fireEvent.press(submit);
   expect(mockNavigate).toHaveBeenCalledTimes(2);
   expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
     screen: 'HomeworkSubmit',
     params: expect.objectContaining({ courseId: 'course-a', hwId: 'homework-a', scrollToSubmit: true }),
   });
+});
+
+test.each([
+  { hours: 2, afterClass: false, heading: TODAY_COPY.dueToday },
+  { hours: 72, afterClass: false, heading: '下一個測驗' },
+  { hours: 72, afterClass: true, heading: TODAY_COPY.allClassesDone },
+])('the $heading card opens the exact quiz in one tap or lets the student visit the course', async ({ hours, afterClass, heading }) => {
+  const data = result();
+  const dueAt = new Date(Date.now() + hours * 60 * 60 * 1000);
+  data.tasks.push({
+    ...data.tasks[0], id: 'quiz-b', kind: 'quiz', title: '排序測驗', assignmentId: 'quiz-42', dueAt,
+  });
+  data.tasks[0].dueAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  if (afterClass) {
+    mockTimetable.classes = [todayClass({ startAt: Date.now() - 7200000, endAt: Date.now() - 3600000 })];
+  }
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(heading);
+  const quiz = view.getByRole('button', { name: '去作答' });
+  const course = view.getByRole('button', { name: /排序測驗.*看課程/ });
+  expect(course).not.toContainElement(quiz);
+  fireEvent.press(quiz);
+  expect(mockNavigate).toHaveBeenCalledTimes(1);
+  expect(mockNavigate).toHaveBeenCalledWith('學習', {
+    screen: 'QuizTaking',
+    params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() },
+  });
+  fireEvent.press(course);
+  expect(mockNavigate).toHaveBeenCalledTimes(2);
+  expect(mockNavigate).toHaveBeenLastCalledWith('學習', {
+    screen: 'CourseHub', params: { courseSpaceId: 'course-a', groupId: 'course-a', section: 'week' },
+  });
+});
+
+test('a quiz due just after Taipei midnight says tomorrow when it is still the previous evening', async () => {
+  jest.setSystemTime(new Date('2026-11-03T23:55:00+08:00'));
+  const data = result();
+  data.tasks[0] = {
+    ...data.tasks[0], kind: 'quiz', assignmentId: 'quiz-42', title: '排序測驗',
+    dueAt: new Date('2026-11-04T00:05:00+08:00'),
+  };
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText('明天截止')).toBeVisible();
+  expect(view.queryByText(TODAY_COPY.dueToday)).toBeNull();
+  expect(view.getByRole('button', { name: '去作答' })).toBeVisible();
+});
+
+test('a class starting soon keeps the urgent quiz visible in the collapsed list above 13 late assignments', async () => {
+  const data = result();
+  const dueAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  data.tasks = [
+    { ...data.tasks[0], id: 'quiz-urgent', kind: 'quiz', title: '期中考', assignmentId: 'quiz-42', dueAt },
+    ...Array.from({ length: 13 }, (_, i) => ({
+      ...data.tasks[0], id: `late-${i}`, title: `補交 ${i}`, assignmentId: `old-${i}`,
+      dueAt: new Date(Date.now() - (13 - i) * 60 * 60 * 1000), lateSubmissionAllowed: true,
+    })),
+  ];
+  mockTimetable.classes = [todayClass({ startAt: Date.now() + 15 * 60 * 1000 })];
+  jest.mocked(loadStudentHome).mockResolvedValue(data);
+  const view = render(<StudentTodayScreen />);
+  await view.findByText(TODAY_COPY.nextClass);
+  expect(view.getByRole('button', { name: '期中考，資料結構' })).toBeVisible();
+  expect(view.getByText(TODAY_COPY.moreTodos(11))).toBeVisible();
+  expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();
 });

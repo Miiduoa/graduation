@@ -2,9 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
-import type { CampusPlanStep } from '../services/offlineCampusPlanner';
 import { resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
-import type { CampusReminderLead } from '../services/campusAssignmentReminders';
+import type { CampusReminderLead, ReminderAssignment } from '../services/campusAssignmentReminders';
 
 function deadlineLabel(iso: string) {
   return new Intl.DateTimeFormat('zh-TW', {
@@ -46,16 +45,18 @@ export function CampusAssignmentReminderAction({
   userId,
   schoolId,
   disabled,
+  reviewOnOpen = false,
   isCurrent,
 }: {
-  step: CampusPlanStep;
+  step: ReminderAssignment;
   snapshot: CampusSenseSnapshot | null;
   userId: string;
   schoolId: string;
   disabled: boolean;
+  reviewOnOpen?: boolean;
   isCurrent: () => boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(reviewOnOpen);
   const [lead, setLead] = useState<CampusReminderLead>(60);
   const [saving, setSaving] = useState(false);
   const [confirmedLead, setConfirmedLead] = useState<CampusReminderLead | null>(null);
