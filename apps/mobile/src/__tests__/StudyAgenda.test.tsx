@@ -509,3 +509,49 @@ it('never expands an overdue-only lookup into all receipts on a vague follow-up'
   expect(view.getByText(/上個作業查詢尚未確定日期或只查特定期限狀態/)).toBeTruthy();
   expect(view.queryByText(/來源：本次載入的 nuni 課程繳交紀錄/)).toBeNull();
 });
+
+
+it('resolves "這份作業" only after a deliberate ordinal choice, keeping the exact nuni activity source', () => {
+  const workspaces: NuniStudyAgenda['workspaces'] = [
+    { id: 'design', title: '資料庫設計', state: 'active', memberRole: 'student' },
+    { id: 'management', title: '資料庫管理', state: 'active', memberRole: 'student' },
+    { id: 'staff', title: '資料庫教學', state: 'active', memberRole: 'owner-teacher' },
+  ];
+  const tasks = [
+    task('closed', { courseId: 'design', courseTitle: '資料庫設計', title: '期中報告', state: 'closed' }),
+    task('pending', { courseId: 'design', courseTitle: '資料庫設計', title: '期中報告' }),
+    task('submitted', { courseId: 'management', courseTitle: '資料庫管理',
+      title: '期中報告', submittedAt: '2026-11-04T05:00:00Z' }),
+    task('teacher-only', { courseId: 'staff', courseTitle: '資料庫教學',
+      title: '期中報告', submittedAt: '2026-11-04T05:00:00Z' }),
+  ];
+  const open = jest.fn(), retry = jest.fn();
+  const view = render(<StudyAgenda data={agenda(tasks, { workspaces })} loading={false}
+    error="" retry={retry} open={open} />);
+  fireEvent.press(view.getByRole('button', { name: '問作業助理' }));
+  const ask = (question: string) => {
+    fireEvent.changeText(view.getByLabelText('輸入作業問題'), question);
+    fireEvent.press(view.getByRole('button', { name: '查詢作業' }));
+  };
+  ask('這份作業交了嗎？');
+  expect(view.getByText('請提供課程或作業名稱，再核對這份作業的繳交紀錄。')).toBeTruthy();
+  ask('資料庫的期中報告交了嗎？');
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(3);
+  ask('第三筆');
+  expect(view.getByText('已選本頁第 3 筆')).toBeTruthy();
+  ask('這份作業交了嗎？');
+  expect(view.getAllByRole('button', { name: /^查看作業：/ })).toHaveLength(1);
+  expect(view.getByText(/已載入繳交紀錄.*繳交時間/)).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' }));
+  expect(open).toHaveBeenCalledWith('management', 'submitted');
+  ask('那還沒交的呢？');
+  expect(view.queryAllByRole('button', { name: /^查看作業：/ })).toHaveLength(0);
+  ask('資料庫的期中報告交了嗎？');
+  ask('第二筆');
+  ask('這份作業交了嗎？');
+  expect(view.getByText('本次未見繳交紀錄 · 請到原頁核對')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫設計 · 期中報告' }));
+  expect(open).toHaveBeenCalledWith('design', 'pending');
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(retry).not.toHaveBeenCalled();
+});
