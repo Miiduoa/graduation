@@ -10,6 +10,7 @@ export type TimetableOcrHandle = {
     base64: string,
     mime: 'image/png' | 'image/jpeg',
     signal?: AbortSignal,
+    readGrid?: boolean,
   ) => Promise<string>;
   cancel: () => void;
 };
@@ -51,14 +52,14 @@ export const TimetableOcrHost = forwardRef<TimetableOcrHandle>(function Timetabl
   useImperativeHandle(
     ref,
     () => ({
-      recognize: async (base64, mime, signal) => {
+      recognize: async (base64, mime, signal, readGrid) => {
         if (!baseUrl) await prepareOcrBaseUrl();
         if (needsRestart.current) {
           needsRestart.current = false;
           hostEpoch.current += 1;
           setHostGeneration(hostEpoch.current);
         }
-        return instance.recognize(base64, mime, signal);
+        return instance.recognize(base64, mime, signal, readGrid);
       },
       cancel: () => instance.cancel(),
     }),

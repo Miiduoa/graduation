@@ -7,6 +7,7 @@ accounts or external services are used. The existing Firestore rules stay active
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -54,6 +55,19 @@ async def readable_filter_labels(page):
             assert metrics['height'] >= 44, f'Filter target is too short: {await button.inner_text()}'
 
 
+async def show_filters(toggle):
+    if await toggle.get_attribute('aria-expanded') == 'false':
+        await toggle.press('Enter')
+    await expect(toggle).to_have_attribute('aria-expanded', 'true')
+
+
+async def open_at_trailing_edge(link):
+    await link.scroll_into_view_if_needed()
+    box = await link.bounding_box()
+    assert box and box['height'] >= 44, 'Announcement main link is too short to tap'
+    await link.click(position={'x': box['width'] - 10, 'y': box['height'] * 0.65})
+
+
 async def goto(page, path):
     await page.goto(BASE + path, wait_until='load')
 
@@ -77,6 +91,10 @@ async def main():
             service_workers='block',
         )
         await context.route('**/*', fixtures)
+        original = 'https://campus.example.invalid/fixtures/announcements/staff-notice'
+        await context.route(original, lambda route: route.fulfill(
+            content_type='text/plain', body='Original announcement fixture',
+        ))
         page = await context.new_page()
         page.set_default_timeout(15000)
         page.on('pageerror', lambda error: errors.append(str(error)))
@@ -84,6 +102,15 @@ async def main():
             await goto(page, '/announcements?schoolId=pu&campus=pu')
             await expect(page.get_by_role('link', name='選課與加退選時程', exact=True)).to_be_visible()
             await expect(page.get_by_role('article')).to_have_count(30)
+            toggle = page.get_by_role('button', name=re.compile(r'^篩選公告'))
+            category = page.get_by_role('button', name='學術', exact=True)
+            pinned = page.get_by_label('只看置頂', exact=True)
+            search = page.get_by_label('搜尋公告', exact=True)
+            await expect(toggle).to_have_attribute('aria-expanded', 'false')
+            await expect(category).to_be_hidden()
+            await expect(pinned).to_be_hidden()
+            await expect(search).to_be_visible()
+            await expect(page.get_by_role('button', name='全部公告', exact=True)).to_be_visible()
             await no_overflow(page)
             await page.screenshot(path=str(OUT / 'announcements-desktop.png'), animations='disabled')
             checks.append('public announcement list reads emulator documents and limits initial display to 30 rows')
@@ -91,29 +118,48 @@ async def main():
             await page.get_by_role('button', name='顯示更多公告（剩餘 36 則）').click()
             await expect(page.get_by_role('article')).to_have_count(60)
             assert query(page.url).get('page') == ['2'], page.url
-            older = page.get_by_role('article').nth(45).get_by_role('heading').get_by_role('link')
-            older_title = await older.inner_text()
-            await older.click()
+            older = page.get_by_role('article').nth(45)
+            older_title = await older.get_by_role('heading').inner_text()
+            await open_at_trailing_edge(older.get_by_role('link', name=older_title, exact=True))
             await expect(page.get_by_role('heading', name=older_title, exact=True)).to_be_visible()
             await page.get_by_role('link', name='← 返回公告列表').click()
             await expect(page.get_by_role('article')).to_have_count(60)
             assert query(page.url).get('page') == ['2'], page.url
             checks.append('opening an older announcement and returning restores the expanded list')
 
-            search = page.get_by_label('搜尋公告', exact=True)
             await search.fill('必要文件')
             await expect(page.get_by_role('article')).to_have_count(1)
             await expect(page.get_by_role('link', name='選課與加退選時程', exact=True)).to_be_visible()
             assert 'page' not in query(page.url)
             await search.fill('選課')
-            await page.get_by_role('button', name='學術', exact=True).click()
-            await page.get_by_label('只看置頂', exact=True).check()
+            await show_filters(toggle)
+            await category.press('Space')
+            await pinned.press('Space')
+            await toggle.press('Enter')
+            await expect(toggle).to_have_attribute('aria-expanded', 'false')
+            await expect(pinned).to_be_hidden()
             await expect(page.get_by_role('article')).to_have_count(1)
             expected = {'q': ['選課'], 'category': ['academic'], 'pinned': ['1'], 'schoolId': ['pu'], 'campus': ['pu']}
             for key, value in expected.items():
                 assert query(page.url).get(key) == value, page.url
             detail = page.get_by_role('link', name='選課與加退選時程', exact=True)
-            await detail.click()
+            share = page.get_by_role('button', name='分享公告：選課與加退選時程', exact=True)
+            await detail.focus()
+            await page.keyboard.press('Tab')
+            await expect(share).to_be_focused()
+            await page.evaluate("""() => {
+                Object.defineProperty(navigator, 'share', {
+                    configurable: true, value: async data => { window.lastAnnouncementShare = data; }
+                })
+            }""")
+            await share.click()
+            shared = await page.evaluate('window.lastAnnouncementShare')
+            assert shared['title'] == '選課與加退選時程'
+            assert urlparse(shared['url']).path == '/announcements/flow-reading'
+            assert query(shared['url']).get('schoolId') == ['pu']
+            assert urlparse(page.url).path == '/announcements'
+            checks.append('keyboard can set and collapse filters, then reach share separately from the announcement link')
+            await open_at_trailing_edge(detail)
             await expect(page.get_by_role('heading', name='選課與加退選時程', exact=True)).to_be_visible()
             await expect(page.get_by_role('article')).to_contain_text('完成選課後請重新核對課表，必要文件請洽課務組。')
             await expect(page.get_by_role('article')).to_contain_text('完整公告第一段。')
@@ -123,8 +169,10 @@ async def main():
             await page.go_back(wait_until='load')
             await expect(page.get_by_role('article')).to_have_count(1)
             await expect(page.get_by_label('搜尋公告', exact=True)).to_have_value('選課')
-            await expect(page.get_by_label('只看置頂', exact=True)).to_be_checked()
-            await page.get_by_role('link', name='選課與加退選時程', exact=True).click()
+            await show_filters(toggle)
+            await expect(category).to_have_attribute('aria-pressed', 'true')
+            await expect(pinned).to_be_checked()
+            await detail.press('Enter')
             await page.get_by_role('link', name='← 返回公告列表').click()
             await page.wait_for_url(lambda url: urlparse(url).path == '/announcements')
             await expect(page.get_by_label('搜尋公告', exact=True)).to_have_value('選課')
@@ -149,6 +197,17 @@ async def main():
             await expect(page.get_by_role('button', name='全部公告', exact=True)).to_have_attribute('aria-pressed', 'true')
             await expect(page.get_by_role('link', name='教師研習報名通知', exact=True)).to_be_visible()
             checks.append('official-only announcements remain reachable and the all-announcements view survives reload')
+            source = page.get_by_role('article').get_by_role('link', name='看原文', exact=True)
+            await expect(source).to_have_attribute('href', original)
+            async with context.expect_page() as opening:
+                await source.click()
+            popup = await opening.value
+            await expect(popup).to_have_url(original)
+            await expect(popup.locator('body')).to_have_text('Original announcement fixture')
+            assert await popup.evaluate('window.opener === null')
+            await popup.close()
+            await expect(page.get_by_label('搜尋公告', exact=True)).to_have_value('教師研習')
+            checks.append('official source opens its own page without opening the detail or losing the list search')
 
             await goto(page, '/announcements/hidden-notice?campus=pu')
             await expect(page.get_by_role('heading', name='找不到這則公告', exact=True)).to_be_visible()
@@ -167,17 +226,20 @@ async def main():
                     await page.set_viewport_size({'width': width, 'height': 844})
                     await goto(page, '/announcements?campus=pu&q=選課&category=academic&pinned=1')
                     await expect(page.get_by_role('article')).to_have_count(1)
-                    await no_overflow(page)
-                    await readable_filter_labels(page)
                     if width == 390:
                         await page.screenshot(path=str(OUT / f'announcements-{theme}-mobile.png'), full_page=True, animations='disabled')
+                    await show_filters(toggle)
+                    await expect(category).to_have_attribute('aria-pressed', 'true')
+                    await expect(pinned).to_be_checked()
+                    await no_overflow(page)
+                    await readable_filter_labels(page)
                     await page.locator('html').evaluate('el => el.style.fontSize = "32px"')
                     await no_overflow(page)
                     await readable_filter_labels(page)
                     if width == 320:
                         await page.screenshot(path=str(OUT / f'announcements-{theme}-large.png'), full_page=True, animations='disabled')
                     await page.locator('html').evaluate('el => el.style.fontSize = ""')
-                    await page.get_by_role('link', name='選課與加退選時程', exact=True).click()
+                    await open_at_trailing_edge(detail)
                     await expect(page.get_by_role('article')).to_contain_text('完整公告第一段。')
                     await no_overflow(page)
                     await page.locator('html').evaluate('el => el.style.fontSize = "32px"')

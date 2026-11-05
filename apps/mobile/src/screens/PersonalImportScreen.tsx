@@ -316,6 +316,7 @@ function ImportWorkspace({
     type: 'paste',
   });
   const [editedIds, setEditedIds] = useState<string[]>([]);
+  const filledTerms = useRef({ academicYear: new Set<string>(), semester: new Set<string>() });
   const [rows, setRows] = useState<PersonalImportRow[]>([]);
   const [backupPreview, setBackupPreview] = useState<
     (Omit<ReturnType<typeof parsePersonalImportBackup>, 'rows'> & { name: string }) | null
@@ -364,6 +365,7 @@ function ImportWorkspace({
   const [savedQuery, setSavedQuery] = useState('');
   const [selectedRecordId, setSelectedRecordId] = useState(initialRecordId);
   const savedScroll = useRef<ScrollView>(null);
+  const reviewTargetY = useRef(0);
   const [visibleSavedCount, setVisibleSavedCount] = useState(40);
   const [savedFeedback, setSavedFeedback] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -685,9 +687,11 @@ function ImportWorkspace({
   }, [rowIdsKey]);
   const isAiPreview = issues.some((issue) => issue.code === 'ai-review-required');
   const generalIssues = issues.filter(
-    (issue) => !['ai-review-required', 'ai-uncertain-field'].includes(issue.code),
+    (issue) => !['ai-review-required', 'ai-uncertain-field', 'screenshot-grid-layout'].includes(issue.code),
   );
   const updateDraft = (before: PersonalImportRow, next: PersonalImportRow) => {
+    if (before.academicYear !== next.academicYear) filledTerms.current.academicYear.delete(next.id);
+    if (before.semester !== next.semester) filledTerms.current.semester.delete(next.id);
     if (next.kind === 'timetable' && profile) {
       const slots = periodSlots(profile);
       if (next.startPeriod !== before.startPeriod)
@@ -717,6 +721,24 @@ function ImportWorkspace({
     );
   };
 
+  const changeTerm = (field: 'academicYear' | 'semester', value: string) => {
+    cancel();
+    if (field === 'academicYear') setYear(value);
+    else setSemester(value);
+    setAiReviewed(false);
+    if (kind === 'timetable' && source.type === 'screenshot') {
+      const fill = new Set(rows
+        .filter((row) => !row[field] || filledTerms.current[field].has(row.id))
+        .map((row) => row.id));
+      filledTerms.current[field] = fill;
+      setRows((items) => items.map((row) => fill.has(row.id) ? { ...row, [field]: value } : row));
+      setIssues((items) => items.filter((issue) => issue.field !== field || !fill.has(issue.rowId ?? '')));
+      return;
+    }
+    setRows([]);
+    setAiRetry(null);
+    setIssues([]);
+  };
   const organizeWithAi = async (input?: {
     text: string;
     source: { type: 'paste' | 'file' | 'screenshot'; name?: string };
@@ -818,6 +840,8 @@ function ImportWorkspace({
           : null,
       );
       if (!parsed.rows.length) {
+        const layoutIssue = parsed.issues.find((issue) => issue.code === 'screenshot-grid-layout');
+        if (layoutIssue) setIssues([layoutIssue]);
         setNotice(
           parsed.issues
             .filter((issue) => !issue.rowId)
@@ -921,13 +945,16 @@ function ImportWorkspace({
       setNotice(
         parsed.rows.length
           ? personalImportPreviewNotice(parsed.rows.length)
-          : '沒有找到可匯入的資料。可修正文字，或手動新增一筆。',
+          : parsed.issues.find((issue) => issue.code === 'screenshot-grid-layout')?.message ||
+              '沒有找到可匯入的資料。可修正文字，或手動新增一筆。',
       );
     } catch (error) {
       setNotice(personalImportErrorMessage(error, '無法解析，請檢查內容。'));
     }
   };
-  const pickImage = async (referenceOnly = false) => {
+  const pickImage = async (mode: 'ocr' | 'ai' | 'reference' = 'ocr') => {
+    if (!active() || busy || savingRef.current) return;
+    if (mode === 'ai' && (kind !== 'timetable' || rows.length || aiState.status === 'busy')) return;
     cancel();
     const run = generation.current;
     setBusy(true);
@@ -954,7 +981,7 @@ function ImportWorkspace({
         asset.width * asset.height > IMPORT_IMAGE_MAX_PIXELS
       )
         throw new Error('圖片上限 8 MB、2,000 萬像素，請先裁切。');
-      if (referenceOnly) {
+      if (mode === 'reference') {
         setSourceImage({ uri: asset.uri, width: asset.width, height: asset.height });
         setNotice('已補上對照截圖，草稿內容沒有變更。');
         return;
@@ -964,10 +991,17 @@ function ImportWorkspace({
       abort.current = new AbortController();
       if (!ocr.current) throw new Error('辨識程式尚未就緒，請改貼文字。');
       setNotice('正在讀取截圖，可隨時取消。');
-      const result = await ocr.current.recognize(base64, mime, abort.current.signal);
+      const readGrid = mode === 'ai' && mime === 'image/png' && asset.width <= 4096 &&
+        asset.height <= 4096 && asset.width * asset.height <= 4_000_000;
+      const result = await ocr.current.recognize(base64, mime, abort.current.signal, readGrid);
       if (!current(run)) return;
+      if (mode === 'ai' && !result.trim()) {
+        setNotice('這張截圖沒有讀到文字，請裁切到課表範圍後再試。');
+        return;
+      }
       setText(result);
-      setSource({ type: 'screenshot', name: asset.fileName || '截圖' });
+      const screenshot = { type: 'screenshot' as const, name: asset.fileName || '截圖' };
+      setSource(screenshot);
       setSourceImage({ uri: asset.uri, width: asset.width, height: asset.height });
       setImageViewerOpen(false);
       clearDocumentSource();
@@ -976,6 +1010,15 @@ function ImportWorkspace({
       setRows([]);
       setAiRetry(null);
       setIssues([]);
+      if (mode === 'ai') {
+        if (result.length > MOBILE_IMPORT_AI_MAX_CHARACTERS) {
+          setNotice('已保留截圖和完整文字。請在原始文字欄分段，再用 AI 整理。');
+          return;
+        }
+        // Hand off the current picker result, independent of the pending React state update.
+        await organizeWithAi({ text: result, source: screenshot });
+        return;
+      }
       setNotice(
         result.trim()
           ? '已讀取文字，請核對後按「整理成可編輯資料」。'
@@ -1465,6 +1508,18 @@ function ImportWorkspace({
         </Text>
       </Screen>
     );
+  const hasScreenshotText = source.type === 'screenshot' && !!text.trim();
+  const gridNeedsPlacement = issues.some((issue) => issue.code === 'screenshot-grid-layout');
+  const showScreenshotEntry =
+    kind === 'timetable' &&
+    !documentPrep &&
+    !backupPreview &&
+    (!rows.length || source.type === 'screenshot');
+  const feedback = notice ? (
+    <Text accessibilityRole="alert" style={textStyle}>
+      {notice}
+    </Text>
+  ) : null;
   return (
     <Screen title="匯入我的資料" subtitle="課表、成績、活動，從你手上的資料開始">
       <TimetableOcrHost ref={ocr} />
@@ -1487,7 +1542,7 @@ function ImportWorkspace({
               padding: 18,
               borderRadius: 18,
               gap: 10,
-              backgroundColor: theme.colors.surface,
+              backgroundColor: showScreenshotEntry ? theme.colors.focusSurface : theme.colors.surface,
               borderColor: theme.colors.border,
               borderWidth: 1,
             }}
@@ -1498,29 +1553,67 @@ function ImportWorkspace({
             </Text>
             <Text
               accessibilityRole="header"
-              style={{ ...textStyle, fontSize: 22, lineHeight: 30, fontWeight: '700' }}
+              style={{ color: theme.colors.text, fontSize: 22, lineHeight: 30, fontWeight: '700' }}
             >
-              把學校資料整理好
+              {showScreenshotEntry
+                ? rows.length ? '核對截圖裡的課程' : '從課表截圖開始'
+                : '把學校資料整理好'}
             </Text>
-            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-              放入表格、截圖或文字，核對後才新增。已存資料不會整份被取代。
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingTop: 4 }}>
-              {['1 放入資料', '2 核對內容', '3 確認新增'].map((step, index) => (
-                <Text
-                  key={step}
-                  style={{
-                    fontSize: 13,
-                    fontWeight: '600',
-                    color: (rows.length ? index === 1 : index === 0)
-                      ? theme.colors.accentStrong
-                      : theme.colors.muted,
-                  }}
-                >
-                  {step}
+            {showScreenshotEntry ? (
+              <>
+                <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
+                  {session
+                    ? '原圖留在手機。辨識文字會先遮蔽可辨識的姓名、學號與證號，再交給雲端 AI。'
+                    : '在手機讀取原圖，使用本機模型或一般規則整理。'}
+                  {rows.some((row) => !row.academicYear || !row.semester)
+                    ? '請在下方補上這批課程的學年度與學期。'
+                    : '整理後可逐堂核對星期、節次和教室。'}
                 </Text>
-              ))}
-            </View>
+                {rows.length || gridNeedsPlacement ? (
+                  <Button
+                    text={rows.length ? `前往核對 ${rows.length} 堂課` : '開啟週課表補課'}
+                    kind="primary"
+                    disabled={busy || saving}
+                    onPress={() =>
+                      savedScroll.current?.scrollTo({ y: reviewTargetY.current, animated: true })
+                    }
+                  />
+                ) : (
+                  <Button
+                    text={hasScreenshotText ? '用 AI 整理這張截圖' : '用 AI 辨識課表截圖'}
+                    kind="primary"
+                    disabled={
+                      busy || saving || aiState.status === 'busy' ||
+                      (hasScreenshotText && text.length > MOBILE_IMPORT_AI_MAX_CHARACTERS)
+                    }
+                    onPress={() => hasScreenshotText ? void organizeWithAi() : void pickImage('ai')}
+                  />
+                )}
+                {feedback}
+              </>
+            ) : (
+              <>
+                <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+                  放入表格、截圖或文字，核對後才新增。已存資料不會整份被取代。
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingTop: 4 }}>
+                  {['1 放入資料', '2 核對內容', '3 確認新增'].map((step, index) => (
+                    <Text
+                      key={step}
+                      style={{
+                        fontSize: 13,
+                        fontWeight: '600',
+                        color: (rows.length ? index === 1 : index === 0)
+                          ? theme.colors.accentStrong
+                          : theme.colors.muted,
+                      }}
+                    >
+                      {step}
+                    </Text>
+                  ))}
+                </View>
+              </>
+            )}
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {kinds.map(([value, title]) => (
@@ -1753,29 +1846,13 @@ function ImportWorkspace({
               <Field
                 label="這批資料的學年度（例如 115）"
                 value={academicYear}
-                onChange={(value) => {
-                  generation.current += 1;
-                  if (busy) cancel();
-                  setYear(value);
-                  setRows([]);
-                  setAiRetry(null);
-                  setIssues([]);
-                  setAiReviewed(false);
-                }}
+                onChange={(value) => changeTerm('academicYear', value)}
                 disabled={saving}
               />
               <Field
                 label="這批資料的學期（例如 1、2、暑期）"
                 value={semester}
-                onChange={(value) => {
-                  generation.current += 1;
-                  if (busy) cancel();
-                  setSemester(value);
-                  setRows([]);
-                  setAiRetry(null);
-                  setIssues([]);
-                  setAiReviewed(false);
-                }}
+                onChange={(value) => changeTerm('semester', value)}
                 disabled={saving}
               />
               <Text
@@ -1819,7 +1896,9 @@ function ImportWorkspace({
                 >
                   <Text style={{ color: theme.colors.text, fontWeight: '600' }}>手機裡的截圖</Text>
                   <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
-                    讀出文字後，再讓 AI 協助整理。
+                    {kind === 'timetable'
+                      ? '先檢查或修改辨識文字，再決定如何整理。'
+                      : '讀出文字後，再讓 AI 協助整理。'}
                   </Text>
                   <Button
                     text="選擇截圖"
@@ -1842,7 +1921,7 @@ function ImportWorkspace({
               <Text style={{ color: theme.colors.muted }}>
                 截圖支援 PNG、JPG，最多 8 MB；從學校網站儲存的 HTML 可選取課程或成績表格（500 KB
                 內）。 文字檔支援 TXT、CSV、TSV、ICS；PDF／XLSX 上限 8
-                MiB。內容在裝置上讀取，不會上傳。
+                MiB。原圖與檔案皆在裝置上讀取。
               </Text>
               {schoolPage ? (
                 <View
@@ -2042,41 +2121,47 @@ function ImportWorkspace({
             <Button
               text="補上對照截圖（保留草稿）"
               disabled={busy || saving}
-              onPress={() => void pickImage(true)}
+              onPress={() => void pickImage('reference')}
             />
           ) : null}
           {kind === 'timetable' && !documentPrep && !backupPreview ? (
-            <TimetableReviewGrid
-              rows={rows.filter((row) => selected.has(row.id))}
-              editedIds={editedIds}
-              profile={profile}
-              disabled={busy || saving}
-              onEdit={(row) => {
-                setReviewFilter('all');
-                setVisibleRowCount(rows.length);
-                setGridEditing(row.id);
+            <View
+              onLayout={(event) => {
+                if (!rows.length) reviewTargetY.current = event.nativeEvent.layout.y;
               }}
-              onAdd={(day, period) => {
-                const row: PersonalImportRow = {
-                  id: createPersonalImportId(),
-                  kind: 'timetable',
-                  title: '',
-                  schoolId,
-                  academicYear,
-                  semester,
-                  dayOfWeek: day,
-                  startPeriod: period,
-                  endPeriod: period,
-                  source: { type: 'paste', line: 1, rawText: '' },
-                };
-                setRows((current) => [...current, row]);
-                setSelected((current) => new Set([...current, row.id]));
-                setGridEditing(row.id);
-                setReviewFilter('all');
-                setVisibleRowCount(rows.length + 1);
-                setAiReviewed(false);
-              }}
-            />
+            >
+              <TimetableReviewGrid
+                rows={rows.filter((row) => selected.has(row.id))}
+                editedIds={editedIds}
+                profile={profile}
+                disabled={busy || saving}
+                onEdit={(row) => {
+                  setReviewFilter('all');
+                  setVisibleRowCount(rows.length);
+                  setGridEditing(row.id);
+                }}
+                onAdd={(day, period) => {
+                  const row: PersonalImportRow = {
+                    id: createPersonalImportId(),
+                    kind: 'timetable',
+                    title: '',
+                    schoolId,
+                    academicYear,
+                    semester,
+                    dayOfWeek: day,
+                    startPeriod: period,
+                    endPeriod: period,
+                    source: { type: 'paste', line: 1, rawText: '' },
+                  };
+                  setRows((current) => [...current, row]);
+                  setSelected((current) => new Set([...current, row.id]));
+                  setGridEditing(row.id);
+                  setReviewFilter('all');
+                  setVisibleRowCount(rows.length + 1);
+                  setAiReviewed(false);
+                }}
+              />
+            </View>
           ) : null}
           {rows.length ? (
             <Button
@@ -2240,11 +2325,7 @@ function ImportWorkspace({
               </Text>
             </Pressable>
           ) : null}
-          {notice ? (
-            <Text accessibilityRole="alert" style={textStyle}>
-              {notice}
-            </Text>
-          ) : null}
+          {!showScreenshotEntry ? feedback : null}
           {generalIssues.length && !documentPrep ? (
             <View style={{ gap: 5 }}>
               {generalIssues.map((issue, i) => (
@@ -2258,6 +2339,9 @@ function ImportWorkspace({
             <>
               <Text
                 accessibilityRole="header"
+                onLayout={(event) => {
+                  reviewTargetY.current = event.nativeEvent.layout.y;
+                }}
                 style={{ ...textStyle, fontSize: 20, fontWeight: '700' }}
               >
                 2. 核對 {rows.length} 筆資料

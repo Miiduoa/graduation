@@ -60,3 +60,30 @@ test('host disposal rejects pending recognition and timeout is bounded', async (
   jest.advanceTimersByTime(90_000);
   expect(await second).toContain('逾時');
 });
+
+test('uses locally reconstructed cells only for a current opted-in PNG with a safe original OCR source', async () => {
+  const ocr = new OcrCoordinator(jest.fn());
+  const original = '節次 星期一 星期二 星期三\n1 資料庫';
+  const grid = '課程名稱,星期,開始節次,結束節次\n資料庫,星期一,1,1';
+  const unsafe = '課程名稱 學生姓名 星期\n資料庫 測試同學 星期一';
+  for (const [index, sample] of [
+    { mime: 'image/png', readGrid: true, text: original, expected: grid },
+    { mime: 'image/jpeg', readGrid: true, text: original, expected: original },
+    { mime: 'image/png', readGrid: false, text: original, expected: original },
+    { mime: 'image/png', readGrid: true, text: unsafe, expected: unsafe },
+  ].entries()) {
+    const pending = ocr.recognize('', sample.mime as 'image/png' | 'image/jpeg', undefined, sample.readGrid);
+    ocr.message(JSON.stringify({ id: index + 1, ok: true, text: sample.text, grid }));
+    await expect(pending).resolves.toBe(sample.expected);
+  }
+});
+
+test('a cancelled grid candidate cannot replace the next screenshot', async () => {
+  const ocr = new OcrCoordinator(jest.fn());
+  const stale = ocr.recognize('', 'image/png', undefined, true).catch((error) => error.kind);
+  const next = ocr.recognize('', 'image/png', undefined, true);
+  ocr.message(JSON.stringify({ id: 1, ok: true, text: '原來的圖', grid: '過期的課表' }));
+  ocr.message(JSON.stringify({ id: 2, ok: true, text: '新圖的文字', grid: null }));
+  await expect(stale).resolves.toBe('cancelled');
+  await expect(next).resolves.toBe('新圖的文字');
+});

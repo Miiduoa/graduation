@@ -1,4 +1,5 @@
 import { isPeriodProfileId, slotIndexForLabel } from '../timetable/schoolPeriods';
+import { numericTimetableWeekdayEvidence } from './aiTableAudit';
 import { createPersonalImportId } from './records';
 import { hasCreditEvidence, hasPeriodEvidence } from './numericEvidence';
 import { validatePersonalImportDocument, type PersonalImportDocument } from './documents';
@@ -122,7 +123,7 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const compact = (value: string) =>
   normalizePersonalImportText(value).replace(/\s+/gu, '').toLocaleLowerCase('en');
 
-function sourceExcerpt(source: string, evidence: string): { text: string; line: number } | null {
+function sourceExcerpt(source: string, evidence: string): { text: string; line: number; start: number } | null {
   let normalized = '';
   const offsets: { start: number; end: number }[] = [];
   let offset = 0;
@@ -138,6 +139,7 @@ function sourceExcerpt(source: string, evidence: string): { text: string; line: 
   if (!match || index < 0 || !offsets[index] || !offsets[index + match.length - 1]) return null;
   const start = offsets[index].start;
   return {
+    start,
     text: source.slice(start, offsets[index + match.length - 1].end),
     line: source.slice(0, start).split('\n').length,
   };
@@ -327,10 +329,13 @@ export function parsePersonalImportAiResponse(
   sourceText: string,
   options: PersonalImportOptions,
   mode: PersonalImportAiMode = 'text',
+  columnContext = '',
 ): PersonalImportAiResult {
   checkInput(sourceText, options, mode);
   const envelope = parseEnvelope(raw);
   const issues: ImportIssue[] = [];
+  const weekdayEvidence = mode === 'text' && options.kind === 'timetable'
+    ? numericTimetableWeekdayEvidence(sourceText, columnContext, options.source?.type === 'screenshot') : undefined;
   const rows = (envelope.rows as unknown[]).map((candidate, index) => {
     if (
       !object(candidate) ||
@@ -352,6 +357,9 @@ export function parsePersonalImportAiResponse(
       throw new Error('AI 回傳的待確認欄位格式不完整，請重試。');
     // Match fields against the actual source, not spacing rewritten by the model.
     const groundingText = excerpt?.text ?? evidence;
+    const weekdayCell = excerpt && weekdayEvidence?.get(excerpt.start);
+    const weekdayConfirmed = weekdayCell && weekdayCell.rawText === groundingText && weekdayCell.day === candidate.dayOfWeek &&
+      typeof candidate.title === 'string' && compact(weekdayCell.title) === compact(candidate.title);
     const uncertain = new Set<string>((candidate.uncertainFields as string[] | undefined) ?? []);
     const eventRange =
       options.kind === 'events' && candidate.allDay === true ? explicitAllDayRange(groundingText) : null;
@@ -407,6 +415,7 @@ export function parsePersonalImportAiResponse(
       if (
         mode === 'text' &&
         !exclusiveRangeEnd &&
+        !(field === 'dayOfWeek' && weekdayConfirmed) &&
         !supported(field, clean as string | number | boolean, groundingText)
       ) {
         warn(field);

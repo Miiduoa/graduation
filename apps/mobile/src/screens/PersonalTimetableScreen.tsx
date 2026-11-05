@@ -298,7 +298,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
           <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{datedCourse?.row.title || selectedCourse?.name || (initialDate ? '上課時間' : '這堂課已變更，請核對目前課表')}</Text>
           {occurrenceSummary ? <Text style={{ color: theme.colors.muted }}>{occurrenceSummary}</Text> : selectedCourse ? <Text style={{ color: theme.colors.muted }}>{selectedCourse.room || '教室未填'}</Text> : null}
         </View> : null}
-        {importScopeKey && <ClassReminderToggle key={`reminders:${importScopeKey}`} scope={importScopeKey} />}
+        {importScope && importScope.owner !== 'guest:device' && <ClassReminderToggle key={importScopeKey} scope={importScopeKey} />}
         <PersonalCalendarExport key={`calendar:${importScopeKey}:${selectedView === 'legacy' ? manualTerm : activeTerm}`} records={personalTimetableRecords(timetable, importedRecords)} schoolId={schoolId}
           termKey={selectedView === 'legacy' ? manualTerm : activeTerm}
           disabled={loadError || importStatus !== 'ready'} />

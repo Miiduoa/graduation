@@ -158,6 +158,7 @@ test('unknown school clock times remain readable without borrowing another schoo
     });
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週末課程');
+  expect(view.queryByText('開啟課前提醒')).toBeNull();
   expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();

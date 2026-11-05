@@ -658,6 +658,7 @@ function CourseScope({
     return () => { focus(); blur(); };
   }, [navigation]);
   const searchState = useCourseSearchState();
+  const [searchOpen, setSearchOpen] = useState(false);
   const bookmarks = useMaterialBookmarks(session.platformAccountId);
   const bookmarkScope = `${session.platformAccountId}:${session.context}`;
   const [showBookmarks, setShowBookmarks] = useNuniDraftState('courses:bookmarks', false);
@@ -782,25 +783,58 @@ function CourseScope({
         />
       ) : (
         <>
-          <Button
-            label={`此裝置收藏${bookmarks.ready ? ` · ${bookmarks.items.length}` : ''}`}
-            onPress={() => {
-              searchOffset.current = null;
-              pendingSearchReturn.current = null;
-              scrollRef.current?.scrollTo({ y: 0, animated: false });
-              contentOffsetYRef.current = 0;
-              setShowBookmarks(true);
-            }}
-          />
-          <CrossCourseMaterialSearch state={searchState} active={active && focused} join={() => setJoinRequested((value) => value + 1)} classes={classes} open={(courseId, materialId) => {
-            pendingSearchReturn.current = null;
-            searchOffset.current = contentOffsetYRef.current;
-            scrollRef.current?.scrollTo({ y: 0, animated: false });
-            contentOffsetYRef.current = 0;
-            setFocusActivityId(undefined);
-            setFocusMaterialId(materialId);
-            setSelected(courseId);
-          }} />
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>學習空間</Text>
+            <Text
+              accessibilityRole="header"
+              style={{ color: theme.colors.text, fontSize: 30, fontWeight: '600', lineHeight: 39 }}
+            >
+              我的課程
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Button
+              label={searchOpen ? '收起教材搜尋' : '跨課找教材'}
+              expanded={searchOpen}
+              onPress={() => {
+                if (searchOpen) {
+                  searchState.setCourses(null);
+                  searchState.setSubmitted('');
+                }
+                setSearchOpen(!searchOpen);
+              }}
+            />
+            <Button
+              label={`此裝置收藏${bookmarks.ready ? ` · ${bookmarks.items.length}` : ''}`}
+              onPress={() => {
+                searchOffset.current = null;
+                pendingSearchReturn.current = null;
+                scrollRef.current?.scrollTo({ y: 0, animated: false });
+                contentOffsetYRef.current = 0;
+                setShowBookmarks(true);
+              }}
+            />
+          </View>
+          {searchOpen && (
+            <CrossCourseMaterialSearch
+              state={searchState}
+              active={active && focused}
+              join={() => {
+                setSearchOpen(false);
+                setJoinRequested((value) => value + 1);
+              }}
+              classes={classes}
+              open={(courseId, materialId) => {
+                pendingSearchReturn.current = null;
+                searchOffset.current = contentOffsetYRef.current;
+                scrollRef.current?.scrollTo({ y: 0, animated: false });
+                contentOffsetYRef.current = 0;
+                setFocusActivityId(undefined);
+                setFocusMaterialId(materialId);
+                setSelected(courseId);
+              }}
+            />
+          )}
           <CourseList classes={classes} open={openCourse} joinRequested={joinRequested} />
         </>
       )}
@@ -884,16 +918,6 @@ function CourseList({
   ];
   return (
     <>
-      <View style={{ gap: 6 }}>
-        <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>學習空間</Text>
-        <Text
-          accessibilityRole="header"
-          style={{ color: theme.colors.text, fontSize: 30, fontWeight: '600', lineHeight: 39 }}
-        >
-          我的課程
-        </Text>
-        <Copy>先掌握待辦，再回到課程繼續學習。</Copy>
-      </View>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button
           label="加入課程"
