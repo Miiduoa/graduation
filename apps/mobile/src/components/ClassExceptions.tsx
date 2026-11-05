@@ -150,7 +150,7 @@ export function ClassExceptions({
       )}
       {!plan && <Text accessibilityRole="alert">請填寫完整有效日期。</Text>}
       {plan?.today.map((entry) => (
-        <View key={`${entry.row.id}:${entry.startAt}`}>
+        <View key={`${entry.row.id}:${entry.originalDate}:${entry.startAt}`}>
           <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{entry.row.title}</Text>
           <Text style={{ color: theme.colors.text }}>
             {entry.startTime}–{entry.endTime} · {entry.row.location || '教室未填'}

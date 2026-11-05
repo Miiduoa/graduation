@@ -45,7 +45,7 @@ pnpm --filter web exec vitest run src/lib/nuni/assistant.test.ts -t 'preview con
 
 UI 另以 `src/features/nuni/Assistant.test.tsx` 驗證兩次按鈕確認、未啟用、換帳切校與晚到回應。preview 是可重現的測試流程，沒有另加瀏覽器測試登入後門。
 
-測試專用套件在 `scripts/nuni-assistant` 與根 workspace 隔離，使用 Fastify 5.10.0／rate-limit 11.1.0，與正式組合來源的 package／lockfile 一致。security 候選的 Fastify 5.12.7 不屬於這次正式來源。
+測試專用套件在 `scripts/nuni-assistant` 與根 workspace 隔離，使用 Fastify 5.12.8／rate-limit 11.1.0。這只釘測試執行時（含 Fastify inject 與 `v2.test.mjs`），**不是**正式 nuni-api 已升級。正式組合來源的 Fastify 仍是 5.10.0；另案 security overlay 候選仍是 5.12.7，兩者都不在這次測試依賴變更範圍。把測試套件升到 5.12.8 是為了跟上目前 5.x 安全修補（含 GHSA-3qgw-9275-xf8w），不能解讀成正式站、Fly 映像或 composed lockfile 已更換。
 
 ## 來源重建（僅建立本機 context）
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import {
   personalImportStorageKey,
@@ -21,7 +22,7 @@ import {
   clearLastNotificationResponseAsync,
   getLastNotificationResponseAsync,
 } from '../services/notifications';
-import { isPersonalEventReminderPayload } from '../services/personalEventReminderModel';
+import { personalReminderCategory } from '../services/personalReminderPayload';
 import {
   fencePersonalEventReminderRuntimeFailure,
   publishPersonalEventReminderRuntimeFailure,
@@ -36,13 +37,25 @@ import {
  */
 export function PersonalEventReminderBridge() {
   const scope = usePersonalImportScope();
+  const platform = useOptionalNuniSession();
+  const latestPlatform = useRef(platform);
+  latestPlatform.current = platform;
   const latest = useRef(scope);
   latest.current = scope;
   const previousScope = useRef(scope);
   const key = scope ? personalImportStorageKey(scope) : '';
 
   useEffect(() => {
-    setPersonalEventReminderScopeProvider(() => latest.current);
+    setPersonalEventReminderScopeProvider(() => {
+      const scoped = latest.current;
+      const auth = latestPlatform.current;
+      const session = auth?.session;
+      if (scoped && session && scoped.owner === `nuni:${session.platformAccountId}` &&
+          auth.isSessionCurrent(session.platformAccountId, session.context)) {
+        return { ...scoped, nuniContext: session.context };
+      }
+      return scoped;
+    });
     return () => setPersonalEventReminderScopeProvider(() => null);
   }, []);
 
@@ -133,7 +146,7 @@ export function PersonalEventReminderBridge() {
       const expectedAction = expected.actionIdentifier ?? 'default';
       if (currentId !== expectedId || currentAction !== expectedAction) return;
       if (JSON.stringify(currentData) !== JSON.stringify(expectedData)) return;
-      if (!isPersonalEventReminderPayload(currentData)) return;
+      if (!personalReminderCategory(currentData)) return;
       await clearLastNotificationResponseAsync();
     };
 
@@ -143,7 +156,7 @@ export function PersonalEventReminderBridge() {
     }) => {
       if (cancelled) return;
       const data = response.notification?.request?.content?.data;
-      if (!isPersonalEventReminderPayload(data)) return;
+      if (!personalReminderCategory(data)) return;
       void handlePersonalEventReminderResponse(response, {
         clearLastResponse: (expected) => clearIfSame(expected),
       }).catch(() => undefined);
@@ -154,7 +167,7 @@ export function PersonalEventReminderBridge() {
         const response = await getLastNotificationResponseAsync();
         if (!response || cancelled) return;
         const data = response.notification?.request?.content?.data;
-        if (!isPersonalEventReminderPayload(data)) return;
+        if (!personalReminderCategory(data)) return;
         await handlePersonalEventReminderResponse(response, {
           clearLastResponse: (expected) => clearIfSame(expected),
         });

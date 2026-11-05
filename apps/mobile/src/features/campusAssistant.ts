@@ -5,10 +5,17 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
+import { abortableCampusRead } from '../services/abortableCampusRead';
+import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AssignmentRead } from '../services/offlineCampusTools';
+import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
+import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
+import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
+import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
+  type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead };
+export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead; courseworkRead?: CourseworkRead };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -31,8 +38,13 @@ function engine() {
   return require('../services/localLLMInference') as typeof import('../services/localLLMInference');
 }
 
-function scopeCheck(input: { scope: CampusAssistantScope; isCurrent: () => boolean }, requiresAuth: boolean) {
+function scopeCheck(input: { scope: CampusAssistantScope; isCurrent: () => boolean; platformTimetable?: PlatformTimetableAccess }, requiresAuth: boolean) {
   if (!input.isCurrent()) throw new OnDeviceAssistantError('session-changed');
+  if (input.platformTimetable) {
+    if (requiresAuth || input.scope.uid || !input.scope.schoolId || !input.platformTimetable.accountId ||
+        !input.platformTimetable.isCurrent()) throw new OnDeviceAssistantError('session-changed');
+    return;
+  }
   if (requiresAuth && (isFirebaseMockMode() || !input.scope.uid || !input.scope.schoolId ||
       getAuthInstance().currentUser?.uid !== input.scope.uid)) {
     throw new OnDeviceAssistantError('session-changed');
@@ -66,6 +78,9 @@ export async function askCampusAssistant(input: {
   scope: CampusAssistantScope;
   messages: CampusAssistantMessage[];
   isCurrent: () => boolean;
+  platformTimetable?: PlatformTimetableAccess;
+  courseworkRequests?: CourseworkRequests;
+  courseworkChoice?: CourseworkChoice;
   /** Optional per-request native cancellation; never cancels unrelated tasks. */
   signal?: AbortSignal;
   schoolName?: string | null;
@@ -81,6 +96,8 @@ export async function askCampusAssistant(input: {
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
+  savedClassRead?: SavedClassRead;
+  courseworkRead?: CourseworkRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -106,23 +123,80 @@ export async function askCampusAssistant(input: {
   if (mode === 'device') {
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
-    const { runOfflineCampusTool } =
-      require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
-
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const question = messages[messages.length - 1].content;
+    const previous = input.messages[input.messages.length - 2];
+    const lastReply = previous?.role === 'assistant' ? previous : undefined;
+    const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;
+    const classQuery = savedClassQuery(question, lastClass);
+    const platform = input.platformTimetable;
+    const owner = platform && `nuni:${platform.accountId}`;
+    let choice = input.courseworkChoice;
+    if (platform && (choice ? 'reminder' in choice : lastReply?.courseworkRead?.view?.kind === 'reminder' || isCourseworkReminderQuestion(question))) {
+      const selected = choice && 'reminder' in choice ? choice : undefined;
+      const reminder = await abortableCampusRead(() => answerCourseworkReminder(lastReply?.courseworkRead,
+        question, platform, input.scope.schoolId, () => input.isCurrent() && platform.isCurrent() && !input.signal?.aborted,
+        input.courseworkRequests, selected), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      if (reminder) return { ...reminder, source: 'device', hasActions: false };
+    }
+    if (platform && (!choice || 'assignmentId' in choice)) {
+      const local = courseworkSnapshotAnswer(lastReply?.courseworkRead, question, platform.accountId,
+        input.scope.schoolId, choice && 'assignmentId' in choice ? choice.assignmentId : undefined);
+      if (local) {
+        if ('content' in local) return { ...local, source: 'device', hasActions: false };
+        choice = local;
+      }
+    }
+    const coursework = platform && classCourseworkQuestion(question, !!lastClass?.classes.length);
+    if (platform && (choice || coursework)) {
+      let sourceReply = lastReply;
+      if (!choice && (coursework !== 'context' || !lastClass)) {
+        const window = coursework === 'next' ? 'next' : 'current';
+        const snapshot = await collectOnDeviceSchoolContext({
+          uid, schoolId: input.scope.schoolId, schoolName: input.schoolName, platformTimetable: platform,
+          ...(window === 'next' ? { includeNextClasses: true } : { includeCurrentClasses: true }),
+        });
+        scopeCheck(input, false);
+        assertNotCancelled();
+        const course = answerSavedClassQuery({ window }, snapshot, uid, undefined, owner);
+        if (!course.savedClassRead?.classes.length) return { ...course, source: 'device', hasActions: false };
+        sourceReply = { role: 'assistant', ...course };
+      }
+      const work = await abortableCampusRead(() => answerNuniCoursework(sourceReply, platform, input.scope.schoolId,
+        () => input.isCurrent() && platform.isCurrent() && !input.signal?.aborted, input.courseworkRequests, choice),
+      input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { ...work, source: 'device', hasActions: false };
+    }
+    if (platform && !classQuery) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false,
+        content: '可以問「我現在有課嗎？」或「下一堂課在哪裡？」。查到課程後，也可以接著問教室與下課時間。' };
+    }
     const snapshot = await collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
+      ...(platform && { platformTimetable: platform }),
+      ...(classQuery?.window === 'current' && { includeCurrentClasses: true }),
+      ...(classQuery && classQuery.window !== 'current' && { includeNextClasses: true }),
+      ...(classQuery?.followUp && lastClass?.uid === uid && lastClass.owner === owner &&
+        lastClass.schoolId === input.scope.schoolId ? { classFollowUp: lastClass.classes } : {}),
     });
     scopeCheck(input, false);
     assertNotCancelled();
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
+    if (classQuery) {
+      const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass, owner);
+      return { ...answer, source: 'device', hasActions: false };
+    }
+    const { runOfflineCampusTool } =
+      require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
     const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid });
-    const question = messages[messages.length - 1].content;
-    const previous = input.messages[input.messages.length - 2];
     const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
       senseSnapshot, Date.parse(snapshot.checkedAt));
     const lookup = followUp && 'question' in followUp ? followUp : null;

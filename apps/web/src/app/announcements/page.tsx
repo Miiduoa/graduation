@@ -136,6 +136,7 @@ function AnnouncementReader({
     selection.queryKey === queryKey ? selection.filters : readAnnouncementListState(currentQuery);
   if (selection.queryKey !== queryKey) setSelection({ queryKey, filters });
   const { search, category, view: listView, pinned: pinnedOnly } = filters;
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const generation = useRef(0);
@@ -243,7 +244,7 @@ function AnnouncementReader({
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return;
       if (mounted.current && request === generation.current) {
-        setNotice('暫時無法分享，請從網址列複製這個頁面的連結。');
+        setNotice('暫時無法分享，請開啟這則公告後複製連結。');
       }
     }
   }
@@ -278,7 +279,13 @@ function AnnouncementReader({
     );
   });
   const visibleAnnouncements = filtered.slice(0, filters.page * ANNOUNCEMENT_PAGE_SIZE);
-  const hasFilters = Boolean(search.trim() || category !== 'all' || pinnedOnly);
+  const activeOptions = [
+    category !== 'all' && categories.find((item) => item.id === category)?.label,
+    pinnedOnly && '只看置頂',
+  ]
+    .filter(Boolean)
+    .join('、');
+  const hasFilters = Boolean(search.trim() || activeOptions);
   const downLinks = view.sources.filter((item) => item.status === 'unavailable' && item.listUrl);
   const showStaleNotice =
     listed.length > 0 && (view.stale || view.sources.some((item) => item.status === 'unavailable'));
@@ -289,36 +296,9 @@ function AnnouncementReader({
 
   return (
     <div className={styles.page}>
-      <div className={styles.source}>
-        <p>
-          公開公告 · 最近 {listed.length} 則
-          <span>
-            {new Date(view.fetchedAt).toLocaleTimeString('zh-TW', {
-              timeZone: 'Asia/Taipei',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}{' '}
-            讀取
-          </span>
-        </p>
-        <button className="btn" disabled={refreshing} onClick={() => void refresh()}>
-          {refreshing ? '正在更新…' : '更新公告'}
-        </button>
-      </div>
       {showFeed ? (
         <div className={styles.toolbar}>
-          <label className={styles.search}>
-            搜尋公告
-            <input
-              ref={searchInput}
-              type="search"
-              maxLength={200}
-              placeholder="標題、內容或發布單位"
-              value={search}
-              onChange={(event) => updateFilters({ search: event.target.value })}
-            />
-          </label>
-          <div className={styles.filters} aria-label="公告檢視">
+          <div className={styles.filters} role="group" aria-label="公告檢視">
             <button
               type="button"
               aria-pressed={listView === 'student'}
@@ -334,43 +314,81 @@ function AnnouncementReader({
               {ANNOUNCEMENT_ALL_VIEW_LABEL}
             </button>
           </div>
-          <div className={styles.filters} aria-label="公告分類">
-            {categories.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                aria-pressed={category === item.id}
-                onClick={() => updateFilters({ category: item.id })}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <label className={styles.pinnedFilter}>
+          <div className={styles.searchTools}>
             <input
-              type="checkbox"
-              checked={pinnedOnly}
-              onChange={(event) => updateFilters({ pinned: event.target.checked })}
+              className={styles.search}
+              aria-label="搜尋公告"
+              ref={searchInput}
+              type="search"
+              maxLength={200}
+              placeholder="搜尋標題、內容或發布單位"
+              value={search}
+              onChange={(event) => updateFilters({ search: event.target.value })}
             />
-            只看置頂
-          </label>
-        </div>
-      ) : null}
-      {showFeed ? (
-        <div className={styles.resultBar}>
-          <p role="status" aria-live="polite">
-            {hasFilters ? `找到 ${filtered.length} 則公告` : `共 ${filtered.length} 則公告`}
-            {filtered.length > visibleAnnouncements.length
-              ? `，目前顯示 ${visibleAnnouncements.length} 則`
-              : ''}
-          </p>
-          {hasFilters ? (
-            <button type="button" onClick={clearFilters}>
-              清除篩選
+            <button
+              type="button"
+              className={styles.filterToggle}
+              aria-expanded={filtersOpen}
+              aria-controls="announcement-filter-options"
+              onClick={() => setFiltersOpen((open) => !open)}
+            >
+              篩選公告{activeOptions && ` · ${activeOptions}`}
+              <span className={styles.caret} aria-hidden="true" />
             </button>
-          ) : null}
+          </div>
+          <div id="announcement-filter-options" className={styles.options} hidden={!filtersOpen}>
+            <div className={styles.filters} role="group" aria-label="公告分類">
+              {categories.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-pressed={category === item.id}
+                  onClick={() => updateFilters({ category: item.id })}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <label className={styles.pinnedFilter}>
+              <input
+                type="checkbox"
+                checked={pinnedOnly}
+                onChange={(event) => updateFilters({ pinned: event.target.checked })}
+              />
+              只看置頂
+            </label>
+          </div>
         </div>
       ) : null}
+      <div className={styles.resultBar}>
+        <div className={styles.resultInfo}>
+          {showFeed && (
+            <p role="status" aria-live="polite">
+              {hasFilters ? `找到 ${filtered.length} 則公告` : `共 ${filtered.length} 則公告`}
+              {filtered.length > visibleAnnouncements.length
+                ? `，目前顯示 ${visibleAnnouncements.length} 則`
+                : ''}
+            </p>
+          )}
+          <time dateTime={view.fetchedAt}>
+            {new Date(view.fetchedAt).toLocaleTimeString('zh-TW', {
+              timeZone: 'Asia/Taipei',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            })}{' '}
+            讀取
+          </time>
+        </div>
+        {showFeed && hasFilters && (
+          <button type="button" onClick={clearFilters}>
+            清除篩選
+          </button>
+        )}
+        <button type="button" disabled={refreshing} onClick={refresh}>
+          {refreshing ? '正在更新…' : '更新公告'}
+        </button>
+      </div>
       {notice && (
         <p role="status" className={styles.notice}>
           {notice}
@@ -438,37 +456,44 @@ function AnnouncementReader({
               id={`announcement-${encodeURIComponent(announcement.id)}`}
               className={styles.announcement}
             >
-              <div className={styles.meta}>
-                {announcement.pinned && <span className={styles.pinned}>置頂</span>}
-                <span>
-                  {categories.find((item) => item.id === categoryOf(announcement))?.label}
-                </span>
-                {(announcement.source || announcement.office) && (
-                  <span>{announcement.source || announcement.office}</span>
-                )}
-                {announcement.publishedAt ? (
-                  <time dateTime={announcement.publishedAt}>
-                    {new Date(announcement.publishedAt).toLocaleDateString('zh-TW', {
-                      timeZone: 'Asia/Taipei',
-                      year: 'numeric',
-                      month: 'numeric',
-                      day: 'numeric',
-                    })}
-                  </time>
-                ) : (
-                  <span>未提供發布日期</span>
-                )}
-              </div>
-              <h2>
-                <Link
-                  href={`/announcements/${encodeURIComponent(announcement.id)}?${announcementListQuery(schoolId, filters, currentQuery)}`}
+              <Link
+                className={styles.rowLink}
+                aria-labelledby={`announcement-title-${encodeURIComponent(announcement.id)}`}
+                aria-describedby={`announcement-meta-${encodeURIComponent(announcement.id)}`}
+                href={`/announcements/${encodeURIComponent(announcement.id)}?${announcementListQuery(schoolId, filters, currentQuery)}`}
+              >
+                <div
+                  id={`announcement-meta-${encodeURIComponent(announcement.id)}`}
+                  className={styles.meta}
                 >
+                  {announcement.pinned && <span className={styles.pinned}>置頂</span>}
+                  <span>
+                    {categories.find((item) => item.id === categoryOf(announcement))?.label}
+                  </span>
+                  {(announcement.source || announcement.office) && (
+                    <span>{announcement.source || announcement.office}</span>
+                  )}
+                  {announcement.publishedAt ? (
+                    <time dateTime={announcement.publishedAt}>
+                      {new Date(announcement.publishedAt).toLocaleDateString('zh-TW', {
+                        timeZone: 'Asia/Taipei',
+                        year: 'numeric',
+                        month: 'numeric',
+                        day: 'numeric',
+                      })}
+                    </time>
+                  ) : (
+                    <span>未提供發布日期</span>
+                  )}
+                </div>
+                <h2 id={`announcement-title-${encodeURIComponent(announcement.id)}`}>
                   {announcement.title}
-                </Link>
-              </h2>
-              {(announcement.summary || announcement.body) && (
-                <p className={styles.preview}>{announcement.summary || announcement.body}</p>
-              )}
+                </h2>
+                {(announcement.summary || announcement.body) && (
+                  <p className={styles.preview}>{announcement.summary || announcement.body}</p>
+                )}
+                <span className={styles.rowArrow} aria-hidden="true" />
+              </Link>
               {announcement.originalUrl ? (
                 <a
                   className={styles.share}
@@ -522,7 +547,11 @@ export default function AnnouncementsPage(props: {
   useEffect(() => {
     if (loading) return;
     const nextAccount = user?.uid ?? null;
-    if (previousAccount.current.settled && previousAccount.current.uid !== nextAccount && schoolId) {
+    if (
+      previousAccount.current.settled &&
+      previousAccount.current.uid !== nextAccount &&
+      schoolId
+    ) {
       replaceServiceListQuery(
         '/announcements',
         schoolId,
@@ -536,7 +565,7 @@ export default function AnnouncementsPage(props: {
     <SiteShell
       schoolName={visible ? context.schoolName : undefined}
       title="校園公告"
-      subtitle="公開處室公告的摘要與原文連結。一般帳號即可查看。"
+      subtitle="免登入即可閱讀各處室公告。"
     >
       {!visible ? (
         <section className={styles.status}>

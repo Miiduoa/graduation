@@ -278,7 +278,8 @@ export async function confirm(
   if (!writes) return fail('ASSISTANT_WRITE_UNAVAILABLE', 403);
   const ledger = await adapter.ledger();
   if (ledger.schoolId !== binding.schoolId) return fail('FORBIDDEN_SCOPE', 403);
-  const row = eventRecord(eventArgs(p.args), binding.schoolId, p.mutationId, p.iat);
+  const event = eventArgs(p.args);
+  const row = eventRecord(event, binding.schoolId, p.mutationId, p.iat);
   const existing = ledger.records.find((r) => r.id === p.mutationId);
   if (existing) {
     if (canonical(existing) !== canonical(row)) return fail('CONFIRMATION_CONFLICT', 409);
@@ -292,7 +293,13 @@ export async function confirm(
     return fail('PERSONAL_IMPORT_REVISION_CONFLICT', 409);
   }
   const records = validatePersonalImportSyncRecords([...ledger.records, row], binding.schoolId);
-  verifyCard(binding, raw, secret, currentTime());
+  const writeTime = currentTime();
+  verifyCard(binding, raw, secret, writeTime);
+  const [start] = eventInterval(event);
+  // An explicitly backdated entry can still be recorded. Recheck a prospective
+  // timed card after reading the ledger and before its first write.
+  if (!event.allDay && start >= p.iat && start < Math.floor(writeTime / 60000) * 60000)
+    return fail('EVENT_START_PASSED', 409);
   operationSignal()?.throwIfAborted();
   await adapter.write({
     schoolId: binding.schoolId,

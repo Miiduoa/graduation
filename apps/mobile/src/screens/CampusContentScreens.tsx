@@ -19,6 +19,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useCampusEvents } from '../hooks/useCampusEvents';
 import {
+  type CampusAnnouncementFeed,
   loadCampusAnnouncementFeed,
   loadCampusAnnouncement,
   loadCampusEvent,
@@ -123,6 +124,10 @@ function useContent<T>(
   };
 }
 
+function hasAnnouncementRows(feed: CampusAnnouncementFeed | null) {
+  return Boolean(feed?.announcements.length || feed?.officialAnnouncements?.length);
+}
+
 function useAnnouncementFeed() {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
   const { user } = useAuth();
@@ -134,7 +139,7 @@ function useAnnouncementFeed() {
   const mounted = useRef(true);
   const [state, setState] = useState<{
     scope: string;
-    feed: Awaited<ReturnType<typeof loadCampusAnnouncementFeed>> | null;
+    feed: CampusAnnouncementFeed | null;
     loading: boolean;
     stale: boolean;
     failed: boolean;
@@ -145,7 +150,7 @@ function useAnnouncementFeed() {
     setState((prev) => ({
       scope,
       feed: prev.scope === scope ? prev.feed : null,
-      loading: !(prev.scope === scope && (prev.feed?.announcements.length ?? 0) > 0),
+      loading: prev.scope !== scope || !hasAnnouncementRows(prev.feed),
       stale: prev.scope === scope ? prev.stale : false,
       failed: false,
     }));
@@ -156,10 +161,7 @@ function useAnnouncementFeed() {
     } catch {
       if (mounted.current && activeScope.current === scope && generation.current === request) {
         setState((prev) => {
-          const cached =
-            prev.scope === scope && prev.feed && prev.feed.announcements.length > 0
-              ? prev.feed
-              : null;
+          const cached = prev.scope === scope && hasAnnouncementRows(prev.feed) ? prev.feed : null;
           return {
             scope,
             feed: cached,
@@ -349,6 +351,7 @@ function ContentRow({
   subtitle,
   preview,
   labels = [],
+  pinned = false,
   first,
   kind,
   onPress,
@@ -357,6 +360,7 @@ function ContentRow({
   subtitle: string;
   preview?: string;
   labels?: Array<string | undefined>;
+  pinned?: boolean;
   first: boolean;
   kind: '公告' | '活動';
   onPress: () => void;
@@ -365,7 +369,7 @@ function ContentRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[title, ...tags, subtitle].filter(Boolean).join('，')}
+      accessibilityLabel={[title, pinned && '置頂', ...tags, subtitle].filter(Boolean).join('，')}
       accessibilityHint={`開啟${kind}詳情`}
       onPress={() => {
         Keyboard.dismiss();
@@ -380,6 +384,21 @@ function ContentRow({
         backgroundColor: pressed ? aiTokens.panel : 'transparent',
       })}
     >
+      {pinned ? (
+        <View
+          style={{
+            alignSelf: 'flex-start',
+            backgroundColor: aiTokens.aiSoft,
+            borderRadius: aiTokens.radius.sm,
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+          }}
+        >
+          <Text style={{ color: aiTokens.text, fontSize: 12, lineHeight: 18, fontWeight: '700' }}>
+            置頂
+          </Text>
+        </View>
+      ) : null}
       {tags.length ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
           {tags.map((label) => (
@@ -424,6 +443,7 @@ function CampusAnnouncementsContent({ navigation }: Props) {
   );
   const content = useAnnouncementFeed();
   const [category, setCategory] = useState<AnnouncementCategory | 'all'>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
   const [listView, setListView] = useState<'student' | 'all'>('student');
   const [search, setSearch] = useState('');
   const [displayLimit, setDisplayLimit] = useState(ANNOUNCEMENTS_PER_PAGE);
@@ -442,29 +462,35 @@ function CampusAnnouncementsContent({ navigation }: Props) {
   const rows = listView === 'all' ? official : student;
   const sources = content.sources;
   const showFeed = official.length > 0 || student.length > 0;
-  const visible = rows.filter(
+  const matching = rows.filter(
     (row) =>
       (category === 'all' || row.category === category) &&
       matchesCampusContent(search, [row.title, row.summary, row.body, row.source, row.office]),
   );
+  const pinned = matching.filter((row) => row.pinned);
+  const visible = pinnedOnly ? pinned : matching;
   const shown = visible.slice(0, displayLimit);
   const resetFilters = () => {
     setSearch('');
     setCategory('all');
+    setPinnedOnly(false);
     setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
   };
   const changeView = (nextView: 'student' | 'all') => {
+    if (listView === nextView) return;
     setListView(nextView);
     setCategory('all');
+    setPinnedOnly(false);
     setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
   };
-  const filtered = Boolean(search.trim()) || category !== 'all';
+  const filtered = Boolean(search.trim()) || category !== 'all' || pinnedOnly;
   const down = sources.filter((item) => item.status === 'unavailable');
   const downLinks = down.filter((item) => item.listUrl);
   const officialUrl = verifiedOfficialAnnouncementUrl(school.id);
   const catalogLinks = officialUrl ? listAnnouncementCatalogLinks(school.id) : [];
   const phase = announcementViewPhase(content.loading, student, sources, content.failed);
-  const showStaleNotice = rows.length > 0 && (content.stale || down.length > 0);
+  const staleRows = rows.length ? rows : official;
+  const showStaleNotice = staleRows.length > 0 && (content.stale || down.length > 0);
   const staleSources =
     content.stale && !down.length
       ? [{ status: 'unavailable' as const, lastSuccessAt: undefined }]
@@ -544,7 +570,7 @@ function CampusAnnouncementsContent({ navigation }: Props) {
           {showStaleNotice ? (
             <AICard
               title={formatStaleAnnouncementNotice(
-                staleAnnouncementUpdatedAt(staleSources, rows),
+                staleAnnouncementUpdatedAt(staleSources, staleRows),
                 content.stale ? 'firestore' : 'source_down',
               )}
             >
@@ -596,6 +622,16 @@ function CampusAnnouncementsContent({ navigation }: Props) {
                 ))}
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              {pinned.length > 0 || pinnedOnly ? (
+                <ContentFilter
+                  label={`只看置頂（${pinned.length}）`}
+                  selected={pinnedOnly}
+                  onPress={() => {
+                    setPinnedOnly(!pinnedOnly);
+                    setDisplayLimit(ANNOUNCEMENTS_PER_PAGE);
+                  }}
+                />
+              ) : null}
               <Text
                 accessibilityLiveRegion="polite"
                 style={{ color: aiTokens.muted, flex: 1, minWidth: 160, lineHeight: 21 }}
@@ -620,11 +656,15 @@ function CampusAnnouncementsContent({ navigation }: Props) {
                   first={index === 0}
                   kind="公告"
                   title={row.title}
-                  subtitle={[row.source || row.office, dateLabel(row.publishedAt)]
+                  subtitle={[
+                    categoryNames[row.category],
+                    row.source || row.office,
+                    dateLabel(row.publishedAt),
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                   preview={row.summary || row.body}
-                  labels={[row.pinned ? '置頂' : undefined, categoryNames[row.category]]}
+                  pinned={row.pinned}
                   onPress={() => {
                     if (content.current()) safeNavigate(navigation, '公告詳情', { id: row.id });
                   }}
@@ -632,10 +672,15 @@ function CampusAnnouncementsContent({ navigation }: Props) {
               ))
             ) : listView === 'student' && student.length === 0 ? (
               <AICard title={ANNOUNCEMENT_EMPTY_CONNECTED_TEXT}>
-                <Text>教師向、資安轉知等正式公告可到「{ANNOUNCEMENT_ALL_VIEW_LABEL}」查看。</Text>
+                <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
+                  教師向、資安轉知等正式公告收錄在「{ANNOUNCEMENT_ALL_VIEW_LABEL}」。
+                </Text>
+                <AIButton label="查看全部公告" variant="ghost" onPress={() => changeView('all')} />
               </AICard>
             ) : (
-              <AICard title={search.trim() ? '找不到符合的公告' : '這個分類目前沒有公告'}>
+              <AICard
+                title={search.trim() || pinnedOnly ? '找不到符合的公告' : '這個分類目前沒有公告'}
+              >
                 <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
                   試著改用其他關鍵字，或清除篩選查看目前的公告。
                 </Text>

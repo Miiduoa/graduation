@@ -13,7 +13,12 @@ jest.mock('expo-notifications', () => ({
   addNotificationResponseReceivedListener: jest.fn(),
 }));
 
-test('personal reminder receipt and click telemetry omit title and payload', () => {
+test.each([
+  [{ category: 'nuni_assignment_due', lookupToken: 'private-lookup' }, 'nuni_assignment_reminder_local'],
+  [{ type: PERSONAL_EVENT_REMINDER_TYPE, v: 1, t: 'tok', g: 1 }, 'personal_event_reminder_local'],
+  [{ category: 'personal_class_occurrence', scope: 'private-owner', courseId: 'private-course', startAt: 123 }, 'personal_class_reminder_local'],
+] as const)('personal reminder receipt and click telemetry omit title and payload', (data, category) => {
+  jest.clearAllMocks();
   const receivedHandlers: Array<(notification: unknown) => void> = [];
   const responseHandlers: Array<(response: unknown) => void> = [];
   (Notifications.addNotificationReceivedListener as jest.Mock).mockImplementation((cb) => {
@@ -28,7 +33,6 @@ test('personal reminder receipt and click telemetry omit title and payload', () 
   addNotificationReceivedListener(() => undefined);
   addNotificationResponseReceivedListener(() => undefined);
 
-  const data = { type: PERSONAL_EVENT_REMINDER_TYPE, v: 1, t: 'tok', g: 1 };
   receivedHandlers[0]!({
     request: { content: { title: '個人行程提醒', data } },
   });
@@ -38,12 +42,13 @@ test('personal reminder receipt and click telemetry omit title and payload', () 
   });
 
   expect(trackEvent).toHaveBeenCalledWith('notification_received', {
-    category: 'personal_event_reminder_local',
+    category,
   });
   expect(trackEvent).toHaveBeenCalledWith('notification_clicked', {
-    category: 'personal_event_reminder_local',
+    category,
   });
   const serialized = JSON.stringify((trackEvent as jest.Mock).mock.calls);
   expect(serialized).not.toContain('tok');
+  expect(serialized).not.toContain('private-');
   expect(serialized).not.toContain('個人行程提醒');
 });

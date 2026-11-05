@@ -6,58 +6,97 @@ import {
 } from '../app/rootNavigation';
 import {
   isPublicNavigationReady,
+  publicNavigateNuniWorkspace,
   publicNavigatePersonalCalendar,
+  publicNavigatePersonalTimetable,
   subscribePublicNavigationReady,
 } from '../app/publicNavigation';
-import { isPersonalEventReminderPayload } from './personalEventReminderModel';
+import { classDate } from '@campus/shared';
+import { resolveNuniAssignmentReminderTap } from './nuniAssignmentReminders';
+import { isClassReminderPayload, isNuniAssignmentReminderPayload, personalReminderCategory } from './personalReminderPayload';
 import { resolvePersonalEventReminderTap } from './personalEventReminders';
 import type { PersonalImportScope } from './personalImports';
 
-type PendingTap = {
-  responseKey: string;
-  /** Exact QUEUED response identity for safe last-response clear. */
-  response: {
-    notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
-    actionIdentifier?: string;
-  };
-  payload: unknown;
-  queuedAt: number;
+type ReminderResponse = {
+  notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
+  actionIdentifier?: string;
 };
 
-let pendingTap: PendingTap | null = null;
+type TapOptions = {
+  clearLastResponse?: (expected: ReminderResponse) => Promise<void>;
+};
+
+type NavigationScope = PersonalImportScope & { nuniContext?: string };
+
+type Destination =
+  | {
+      screen: 'NuniWorkspace';
+      params: { tab: 'courses'; workspaceId: string; assignmentId: string; assistantAccountId: string };
+    }
+  | { screen: 'PersonalCalendar'; params: { eventId: string } }
+  | {
+      screen: 'PersonalTimetable';
+      params: { schoolId: string; courseId: string; reminderScope: string; date?: string; startAt?: number };
+    };
+
+let pendingTap: { response: ReminderResponse; key: string } | null = null;
 let lastHandledResponseKey: string | null = null;
-let scopeProvider: () => PersonalImportScope | null = () => null;
+let scopeProvider: () => NavigationScope | null = () => null;
 const readyListeners = new Set<() => void>();
 
 export function setPersonalEventReminderScopeProvider(
-  provider: () => PersonalImportScope | null,
+  provider: () => NavigationScope | null,
 ) {
   scopeProvider = provider;
   notifyReminderNavigationReady();
 }
 
-function responseKey(response: {
-  notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
-  actionIdentifier?: string;
-}): string {
+function responseKey(response: ReminderResponse): string {
   const identifier = response.notification?.request?.identifier ?? 'unknown';
   const action = response.actionIdentifier ?? 'default';
   const data = response.notification?.request?.content?.data;
   return `${identifier}:${action}:${JSON.stringify(data ?? {})}`;
 }
 
-function navigateToFocusedEvent(eventId: string): boolean {
-  if (rootNavigationRef.isReady() && isSchoolNavigationReady()) {
-    return rootNavigateNested('學習', 'PersonalCalendar', { eventId });
+async function resolveDestination(response: ReminderResponse, scope: NavigationScope): Promise<Destination | null> {
+  const request = response.notification?.request;
+  const payload = request?.content?.data;
+  if (isNuniAssignmentReminderPayload(payload)) {
+    if (!scope.nuniContext || !scope.owner.startsWith('nuni:') || !request?.identifier) return null;
+    const accountId = scope.owner.slice('nuni:'.length);
+    const target = await resolveNuniAssignmentReminderTap(payload, request.identifier, { accountId, schoolId: scope.schoolId });
+    return target ? { screen: 'NuniWorkspace', params: { tab: 'courses', ...target, assistantAccountId: accountId } } : null;
   }
+  if (isClassReminderPayload(payload)) {
+    if (
+      scope.owner === 'guest:device' ||
+      payload.scope !== JSON.stringify({ owner: scope.owner, schoolId: scope.schoolId }) ||
+      typeof payload.courseId !== 'string' || !payload.courseId.trim()
+    ) return null;
+    const params = { schoolId: scope.schoolId, courseId: payload.courseId, reminderScope: payload.scope };
+    // Older notifications can still focus the course, but carry no occurrence date.
+    if (payload.startAt === undefined) return { screen: 'PersonalTimetable', params };
+    const { startAt } = payload;
+    if (
+      typeof startAt !== 'number' || !Number.isInteger(startAt) ||
+      startAt < 0 || startAt > Date.parse('9999-12-31T23:59:59.999+08:00')
+    ) return null;
+    return { screen: 'PersonalTimetable', params: { ...params, date: classDate(new Date(startAt)), startAt } };
+  }
+  const event = await resolvePersonalEventReminderTap(payload, { owner: scope.owner, schoolId: scope.schoolId });
+  return event.ok ? { screen: 'PersonalCalendar', params: { eventId: event.eventId } } : null;
+}
+
+function navigate(destination: Destination): boolean {
+  const tab = destination.screen === 'NuniWorkspace' ? '我的' : '學習';
+  if (isSchoolNavigationReady()) return rootNavigateNested(tab, destination.screen, destination.params);
   if (isPublicNavigationReady()) {
-    return publicNavigatePersonalCalendar({ eventId });
+    if (destination.screen === 'NuniWorkspace') return publicNavigateNuniWorkspace(destination.params);
+    return destination.screen === 'PersonalCalendar'
+      ? publicNavigatePersonalCalendar(destination.params)
+      : publicNavigatePersonalTimetable(destination.params);
   }
-  // School container may be ready via ref before our mark helper in older call sites.
-  if (rootNavigationRef.isReady()) {
-    return rootNavigateNested('學習', 'PersonalCalendar', { eventId });
-  }
-  return false;
+  return rootNavigationRef.isReady() && rootNavigateNested(tab, destination.screen, destination.params);
 }
 
 function navigatorsReady(): boolean {
@@ -74,111 +113,37 @@ function notifyReminderNavigationReady() {
   }
 }
 
-/**
- * Revalidate immediately before navigation. Never auto-switch account/school.
- * Idempotent tap replay must not repeatedly navigate.
- * Mark handled only after successful actual navigation.
- */
+/** Defer until scope and navigation are ready. Repeated OS responses open the destination once. */
 export async function handlePersonalEventReminderResponse(
-  response: {
-    notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
-    actionIdentifier?: string;
-  },
-  options?: {
-    clearLastResponse?: (expected: {
-      notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
-      actionIdentifier?: string;
-    }) => Promise<void>;
-  },
+  response: ReminderResponse,
+  options?: TapOptions,
 ): Promise<boolean> {
-  const payload = response.notification?.request?.content?.data;
-  if (!isPersonalEventReminderPayload(payload)) return false;
-
+  if (!personalReminderCategory(response.notification?.request?.content?.data)) return false;
   const key = responseKey(response);
   if (lastHandledResponseKey === key) {
     if (options?.clearLastResponse) await options.clearLastResponse(response).catch(() => undefined);
     return true;
   }
-
-  const scope = scopeProvider();
-  if (!navigatorsReady() || !scope) {
-    pendingTap = { responseKey: key, response, payload, queuedAt: Date.now() };
-    return false;
-  }
-
-  const resolved = await resolvePersonalEventReminderTap(payload, scopeProvider());
-  // Re-read scope after async work — never navigate a foreign event into a new identity.
-  const scopeNow = scopeProvider();
-  if (!scopeNow || scopeNow.owner !== scope.owner || scopeNow.schoolId !== scope.schoolId) {
-    pendingTap = null;
-    return false;
-  }
-  if (!resolved.ok) {
-    // Denied/invalid taps: clear the exact response, do not navigate, do not mark as handled
-    // for a successful navigation path — but consume so cold-start does not loop.
-    lastHandledResponseKey = key;
-    pendingTap = null;
-    if (options?.clearLastResponse) await options.clearLastResponse(response).catch(() => undefined);
-    return false;
-  }
-
-  if (!navigatorsReady()) {
-    pendingTap = { responseKey: key, response, payload, queuedAt: Date.now() };
-    return false;
-  }
-
-  const navigated = navigateToFocusedEvent(resolved.eventId);
-  if (!navigated) {
-    pendingTap = { responseKey: key, response, payload, queuedAt: Date.now() };
-    return false;
-  }
-
-  lastHandledResponseKey = key;
-  pendingTap = null;
-  if (options?.clearLastResponse) await options.clearLastResponse(response).catch(() => undefined);
-  return true;
+  if (pendingTap?.key !== key) pendingTap = { response, key };
+  return flushPendingPersonalEventReminderTap(options);
 }
 
-/** Flush a queued cold-start tap once canonical scope + the active navigator are ready. */
-export async function flushPendingPersonalEventReminderTap(
-  options?: {
-    clearLastResponse?: (expected: {
-      notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
-      actionIdentifier?: string;
-    }) => Promise<void>;
-  },
-): Promise<boolean> {
-  if (!pendingTap) return false;
-  if (!navigatorsReady()) return false;
+/** Cold-start and live listeners may observe the same tap while identity or navigation initializes. */
+export async function flushPendingPersonalEventReminderTap(options?: TapOptions): Promise<boolean> {
+  const tap = pendingTap;
   const scope = scopeProvider();
-  if (!scope) return false;
-  const queued = pendingTap;
-  const resolved = await resolvePersonalEventReminderTap(queued.payload, scopeProvider());
-  const scopeNow = scopeProvider();
-  if (!scopeNow || scopeNow.owner !== scope.owner || scopeNow.schoolId !== scope.schoolId) {
-    pendingTap = null;
-    return false;
-  }
-  if (!resolved.ok) {
-    lastHandledResponseKey = queued.responseKey;
-    pendingTap = null;
-    if (options?.clearLastResponse) {
-      await options.clearLastResponse(queued.response).catch(() => undefined);
-    }
-    return false;
-  }
-  if (lastHandledResponseKey === queued.responseKey) {
-    pendingTap = null;
-    return true;
-  }
-  const navigated = navigateToFocusedEvent(resolved.eventId);
-  if (!navigated) return false;
-  lastHandledResponseKey = queued.responseKey;
+  if (!tap || !scope || !navigatorsReady()) return false;
+  const destination = await resolveDestination(tap.response, scope);
+  if (pendingTap !== tap) return false;
+  const current = scopeProvider();
+  const sameScope = current && current.owner === scope.owner && current.schoolId === scope.schoolId;
+  const allowed = !!destination && sameScope &&
+    (destination.screen !== 'NuniWorkspace' || current.nuniContext === scope.nuniContext);
+  if (allowed && !navigate(destination)) return false;
+  lastHandledResponseKey = tap.key;
   pendingTap = null;
-  if (options?.clearLastResponse) {
-    await options.clearLastResponse(queued.response).catch(() => undefined);
-  }
-  return true;
+  if (options?.clearLastResponse) await options.clearLastResponse(tap.response).catch(() => undefined);
+  return !!allowed;
 }
 
 export function subscribePersonalEventReminderNavigationReady(
