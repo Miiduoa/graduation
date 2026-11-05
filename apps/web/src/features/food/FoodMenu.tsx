@@ -61,6 +61,7 @@ export function FoodMenu({
   accountId,
   tenantId,
   locationId,
+  initialItems = [],
   onBack,
   onOrder,
 }: {
@@ -69,11 +70,16 @@ export function FoodMenu({
   accountId: string;
   tenantId: string;
   locationId: string;
+  initialItems?: { menuItemId: string; quantity: number; selectedOptionIds: string[] }[];
   onBack(): void;
   onOrder(orderId: string): void;
 }) {
   const scope = `food:cart:${tenantId}:${locationId}`;
-  const [cart, setCart] = useFoodDraft<Cart>(cache, scope, {});
+  const [cart, setCart] = useFoodDraft<Cart>(cache, scope, () =>
+    Object.fromEntries(
+      initialItems.map((line) => [line.menuItemId, { quantity: line.quantity, options: line.selectedOptionIds, note: '' }]),
+    ),
+  );
   const [pickup, setPickup] = useFoodDraft(cache, `${scope}:time`, () =>
     taipeiInput(Date.now() + 30 * 60_000),
   );
