@@ -99,10 +99,20 @@ service cloud.firestore {
         );
     }
 
+    // An active old-school membership alone must not permit access after transfer.
+    function isCurrentSchoolMember(schoolId) {
+      return schoolId is string
+        && schoolId.size() > 0
+        && isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
+    }
+
     function isConversationMember(conversationId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/conversations/$(conversationId))
-        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+        && isCurrentSchoolMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.get('schoolId', ''));
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
@@ -844,29 +854,25 @@ service cloud.firestore {
 
     // Conversations (DMs and group chats)
     match /conversations/{conversationId} {
-      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.memberIds
+        && isCurrentSchoolMember(resource.data.get('schoolId', ''));
       allow create: if isSignedIn()
         && request.auth.uid in request.resource.data.memberIds
-        && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId);
+        && isCurrentSchoolMember(request.resource.data.get('schoolId', ''));
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.memberIds
+        && isCurrentSchoolMember(resource.data.get('schoolId', ''))
         && request.resource.data.schoolId == resource.data.schoolId
         && request.resource.data.memberIds == resource.data.memberIds;
       allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
-        allow create: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+        allow read: if isConversationMember(conversationId);
+        allow create: if isConversationMember(conversationId)
           && !('storyReplyTo' in request.resource.data)
           && request.resource.data.senderId == request.auth.uid;
-        allow update: if isSignedIn()
-          && exists(/databases/$(database)/documents/conversations/$(conversationId))
-          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+        allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
           && (
             (

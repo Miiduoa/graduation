@@ -969,6 +969,10 @@ describe('firestore security rules', () => {
     const message = { senderId: 'alice', content: '哈囉', type: 'text' };
     const origin = { storyId: 'story-one', authorUid: 'bob' };
     await seedFirestore(async db => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
       await db.doc(path).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
       await db.doc(path + '/messages/reply').set({ ...message, storyReplyTo: origin });
     });
@@ -981,6 +985,56 @@ describe('firestore security rules', () => {
     await assertFails(alice.doc(path + '/messages/forged').set({ ...message, storyReplyTo: origin }));
     await assertSucceeds(bob.doc(path + '/messages/reply').get());
     await assertFails(other.doc(path + '/messages/reply').get());
+  });
+
+
+  test('transferring school revokes DM reads, sends and edits even if old membership stays active', async () => {
+    const thread = 'conversations/dm_pu_alice_bob';
+    const nested = thread + '/messages/story-reply';
+    const legacy = 'messages/old-reply';
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc(thread).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
+      await db.doc(nested).set({
+        conversationId: 'dm_pu_alice_bob', senderId: 'alice', content: '校內限動私訊',
+        storyReplyTo: { storyId: 'old-story', authorUid: 'alice' }, readBy: ['alice'],
+      });
+      await db.doc(legacy).set({
+        conversationId: 'dm_pu_alice_bob', senderId: 'alice', text: '舊版私訊', readBy: ['alice'],
+      });
+    });
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await assertSucceeds(bob.doc(thread).get());
+    await assertSucceeds(bob.doc(nested).get());
+    await assertSucceeds(bob.doc(legacy).get());
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ schoolId: 'other' });
+    });
+    await assertFails(bob.doc(thread).get());
+    await assertFails(bob.doc(thread).update({ lastMessageText: 'forged' }));
+    await assertFails(bob.doc(nested).get());
+    await assertFails(bob.doc(nested).update({ readBy: ['alice', 'bob'] }));
+    await assertFails(bob.doc(thread + '/messages/new').set({ senderId: 'bob', content: 'hello' }));
+    await assertFails(bob.doc(legacy).get());
+    await assertFails(bob.doc(legacy).update({ readBy: ['alice', 'bob'] }));
+    await assertFails(bob.doc('messages/forged').set({
+      conversationId: 'dm_pu_alice_bob', senderId: 'bob', text: 'hello',
+    }));
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
+    });
+    await assertFails(bob.doc(thread).get());
+    await assertFails(bob.doc(nested).get());
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+    });
+    await assertSucceeds(bob.doc(thread).get());
+    await assertSucceeds(bob.doc(nested).get());
   });
 
   test('deny conversation creation when schoolId is missing', async () => {
@@ -999,6 +1053,8 @@ describe('firestore security rules', () => {
 
   test('allow conversation members to update nested message readBy only', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'tw-demo-uni' });
+      await db.doc('users/bob').set({ schoolId: 'tw-demo-uni' });
       await db.collection('schools').doc('tw-demo-uni').collection('members').doc('alice').set({
         role: 'student',
         status: 'active',
@@ -2701,6 +2757,8 @@ describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
 
   test('nested conversation message reaction/read/recall cannot strip or forge fields', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
       await db.doc('schools/pu/members/alice').set({ role: 'member', status: 'active' });
       await db.doc('schools/pu/members/bob').set({ role: 'member', status: 'active' });
       await db.doc('conversations/dm-1').set({
@@ -2790,6 +2848,8 @@ describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
 
   test('root messages readBy allowlist blocks delete/insert of other fields', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
       await db.doc('conversations/c-root').set({
         schoolId: 'pu',
         memberIds: ['alice', 'bob'],
@@ -3864,6 +3924,8 @@ describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
 
   test('nested conversation message reaction/read/recall cannot strip or forge fields', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
       await db.doc('schools/pu/members/alice').set({ role: 'member', status: 'active' });
       await db.doc('schools/pu/members/bob').set({ role: 'member', status: 'active' });
       await db.doc('conversations/dm-1').set({
@@ -3952,6 +4014,8 @@ describe('P1 authorization: MapDiff affectedKeys allowlists', () => {
 
   test('root messages readBy allowlist blocks delete/insert of other fields', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
       await db.doc('conversations/c-root').set({
         schoolId: 'pu',
         memberIds: ['alice', 'bob'],
