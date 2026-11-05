@@ -2,7 +2,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import AssistantPage, { dynamic } from './page';
-vi.mock('./LegacyAssistant', () => ({ default: () => <div>Legacy entry</div> }));
+vi.mock('./LegacyAssistant', () => ({
+  default: ({ children }: { children?: ReactNode }) => <div>Legacy entry{children}</div>,
+}));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => ({ loading: false, error: '', pendingLogout: false, session: { context: 'session-a' } }),
 }));
@@ -35,3 +37,27 @@ for (const gate of ['off', 'backend', 'classroom']) {
     });
   }
 }
+
+it.each([
+  { platform: true, assistant: true, ordering: true, label: '點餐與取餐' },
+  { platform: true, assistant: false, ordering: true, label: '點餐與取餐' },
+  { platform: true, assistant: true, ordering: false, label: '查詢訂單與取餐進度' },
+  { platform: true, assistant: false, ordering: false, label: '查詢訂單與取餐進度' },
+  { platform: false, assistant: true, ordering: true, label: null },
+])(
+  'offers the available food service with platform=$platform, assistant=$assistant, ordering=$ordering',
+  async ({ platform, assistant, ordering, label }) => {
+    vi.stubEnv('CAMPUS_BACKEND', platform ? 'nuni' : '');
+    vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'false');
+    vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', String(assistant));
+    vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', String(ordering));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ enabled: true, ready: false }))),
+    );
+    render(<AssistantPage />);
+    if (platform && assistant) await screen.findByText('模型目前無法使用，可直接開啟公開服務入口。');
+    if (label) expect(screen.getByRole('link', { name: label }).getAttribute('href')).toBe('/food');
+    else expect(screen.queryByRole('link', { name: /點餐|取餐/ })).toBeNull();
+  },
+);

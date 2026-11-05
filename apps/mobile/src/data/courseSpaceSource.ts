@@ -9,6 +9,7 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  type Firestore,
 } from 'firebase/firestore';
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { joinClassroomAttendance } from '../services/liveAttendance';
@@ -521,11 +522,26 @@ async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
   return out;
 }
 
+async function getActiveInboxSession(db: Firestore, groupId: string) {
+  for (const source of ['attendanceSessions', 'liveSessions']) {
+    const snapshot = await getDocs(
+      query(
+        collection(db, 'groups', groupId, source),
+        where('schemaVersion', '==', 2),
+        where('active', '==', true),
+        limit(1),
+      ),
+    );
+    if (snapshot?.docs[0]) return snapshot.docs[0];
+  }
+}
+
+type InboxMode = 'inbox' | 'learning' | 'today';
 type StudentTaskWindow = { dueAt: Date | null; lateSubmissionOpen: boolean };
 
 function studentTaskWindow(
   assignment: Record<string, unknown>,
-  mode: 'inbox' | 'learning',
+  mode: InboxMode,
   now: number,
 ): StudentTaskWindow | null {
   if (assignment.published === false || assignment.status === 'draft' || assignment.status === 'closed') {
@@ -537,29 +553,33 @@ function studentTaskWindow(
   const week = 7 * 24 * 60 * 60 * 1000;
   const lateSubmissionOpen = diff !== null && diff < 0 && assignment.allowLateSubmission === true;
   if (diff !== null && diff < 0 && !lateSubmissionOpen) return null;
-  if (mode === 'inbox' && (diff === null || diff < -week || diff > week)) return null;
+  if (mode !== 'learning' && (diff === null || diff < -week || diff > week)) return null;
   return { dueAt, lateSubmissionOpen };
 }
 
 export async function listInboxTasks(
   userId: string,
   schoolId?: string,
-  mode: 'inbox' | 'learning' = 'inbox',
+  mode: InboxMode = 'inbox',
 ): Promise<InboxTask[]> {
+  if (mode === 'today' && !schoolId?.trim()) throw new Error('請先選擇學校後查看課程。');
   if (isFirebaseMockMode()) return [];
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
-  if (memberships.length === 0) {
-    return mode === 'learning' ? [] : (await listActionQueueInboxTasks(userId)).slice(0, 14);
+  const courses = mode === 'today'
+    ? memberships.filter((course) => course.role === 'member')
+    : memberships;
+  if (!courses.length) {
+    return mode === 'inbox' ? (await listActionQueueInboxTasks(userId)).slice(0, 14) : [];
   }
 
   const now = Date.now();
   const tasks = await Promise.all(
-    memberships.map(async (membership) => {
+    courses.map(async (membership) => {
       const groupTasks: InboxTask[] = [];
       const teachingMembership = canManageMembership(membership.role);
 
-      if ((membership.unreadCount ?? 0) > 0) {
+      if (mode !== 'today' && (membership.unreadCount ?? 0) > 0) {
         groupTasks.push({
           id: `group-${membership.groupId}`,
           kind: 'group',
@@ -583,27 +603,9 @@ export async function listInboxTasks(
         });
       }
 
-      const attendanceActiveSnap = await getDocs(
-        query(
-          collection(db, 'groups', membership.groupId, 'attendanceSessions'),
-          where('schemaVersion', '==', 2),
-          where('active', '==', true),
-          limit(1),
-        ),
-      );
-      const liveActiveSnap =
-        attendanceActiveSnap && !attendanceActiveSnap.empty
-          ? null
-          : await getDocs(
-              query(
-                collection(db, 'groups', membership.groupId, 'liveSessions'),
-                where('schemaVersion', '==', 2),
-                where('active', '==', true),
-                limit(1),
-              ),
-            );
-      const activeDoc = attendanceActiveSnap?.docs[0] ?? liveActiveSnap?.docs[0];
-
+      const activeDoc = mode === 'today'
+        ? undefined
+        : await getActiveInboxSession(db, membership.groupId);
       if (activeDoc) {
         groupTasks.push({
           id: `live-${membership.groupId}-${activeDoc.id}`,
@@ -774,8 +776,20 @@ export async function listInboxTasks(
   );
 
   const fromGroups = tasks.flat();
-  const fromAssistantQueue =
-    mode === 'learning' ? [] : await listActionQueueInboxTasks(userId);
+  if (mode === 'today') {
+    // The Today card prioritizes deadlines within 24 hours, then open late work.
+    // All tasks in this seven-day window have valid deadlines.
+    const tomorrow = now + 24 * 60 * 60 * 1000;
+    const dueSoon = (due: number) => due >= now && due <= tomorrow;
+    return fromGroups
+      .sort((left, right) => {
+        const a = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const b = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return Number(dueSoon(b)) - Number(dueSoon(a)) || a - b || left.id.localeCompare(right.id);
+      })
+      .slice(0, 14);
+  }
+  const fromAssistantQueue = mode === 'inbox' ? await listActionQueueInboxTasks(userId) : [];
 
   const sorted = [...fromAssistantQueue, ...fromGroups].sort((left, right) => {
     if (left.priority !== right.priority) return left.priority - right.priority;
@@ -783,7 +797,7 @@ export async function listInboxTasks(
     const timeB = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
     return timeA - timeB;
   });
-  // The compact Today inbox remains bounded. The learning workspace needs the
+  // The mixed inbox remains bounded. The learning workspace needs the
   // complete enrolled-course task list for accurate filters and summary counts.
   return mode === 'learning' ? sorted : sorted.slice(0, 14);
 }
