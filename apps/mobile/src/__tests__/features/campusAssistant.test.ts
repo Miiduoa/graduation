@@ -815,6 +815,28 @@ describe('platform timetable without a school account', () => {
     expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
   });
 
+  test('a platform-only date follow-up cannot reuse the previous Firebase announcement read or snapshot', async () => {
+    mockUid = null;
+    const checkedAt = new Date().toISOString();
+    const items = [{ title: '舊帳號的公告', publishedAt: checkedAt,
+      source: { kind: 'school-announcement' as const, id: 'private-to-a' } }];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+      announcements: { status: 'available' as const, items },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      schedule: { status: 'unavailable' as const, count: null } };
+    const reply = await askCampusAssistant({ ...platform(), senseSnapshot, messages: [
+      { role: 'assistant', content: items[0].title, announcementRead: {
+        userId: 'A', schoolId: 'pu', checkedAt, items, summary: '1 則公告',
+      } },
+      { role: 'user', content: '那昨天呢？' },
+    ] });
+    expect(reply.announcementRead).toBeUndefined();
+    expect(reply.content).not.toContain(items[0].title);
+    expect(reply.route).not.toBe('/announcements');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  });
+
   test('discards an answer when the verified platform session expires during the read', async () => {
     withCurrent([classOccurrence]);
     const request = platform();
@@ -1154,4 +1176,95 @@ describe('nuni class to coursework', () => {
     });
   });
 
+});
+
+test('keeps a date follow-up scoped to the observed announcement list without running a model', async () => {
+  jest.useFakeTimers({ now: new Date('2026-11-05T16:05:00Z') });
+  try {
+    const items = [
+      { title: '今日日程異動', publishedAt: '2026-11-05T16:01:00Z',
+        source: { kind: 'school-announcement' as const, id: 'today' } },
+      { title: '昨日選課公告', publishedAt: '2026-11-05T15:59:00Z',
+        source: { kind: 'legacy-announcement' as const, id: 'older' } },
+    ];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      announcements: { status: 'available' as const, items },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      schedule: { status: 'unavailable' as const, count: null } };
+    const args = { ...input(), mode: 'device' as const, senseSnapshot };
+    const first = await askCampusAssistant({ ...args, messages: [{ role: 'user', content: '今天發布了哪些校園公告？' }] });
+    expect(first.announcementRead?.items).toEqual([items[0]]);
+    const turns = [
+      { role: 'assistant' as const, content: first.content, announcementRead: first.announcementRead },
+      { role: 'user' as const, content: '那昨天呢？' },
+    ];
+    const second = await askCampusAssistant({ ...args, messages: turns });
+    expect(second.announcementRead?.items).toEqual([items[1]]);
+    expect(second.content).not.toContain(items[0].title);
+    const stale = await askCampusAssistant({ ...args, messages: turns, senseSnapshot: null });
+    expect(stale.tool).toBe('online-required');
+    expect(stale.content).not.toContain(items[1].title);
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a date follow-up re-reads announcements from the current authorized snapshot without a model', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-01T16:04:00Z'));
+  try {
+    const scope = { ...input(), mode: 'device' as const };
+    const senseSnapshot = {
+      userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'unavailable' as const, count: null },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      announcements: { status: 'available' as const, items: [
+        { title: '昨日停水', publishedAt: '2026-11-01T15:59:00Z' },
+        { title: '今日復水', publishedAt: '2026-11-01T16:00:00Z' },
+      ] },
+    };
+    const initial = { role: 'user' as const, content: '今天有哪些公告？' };
+    const answer = await askCampusAssistant({ ...scope, senseSnapshot, messages: [initial] });
+    expect(answer.content).toContain('今日復水');
+    expect(answer.content).not.toContain('昨日停水');
+    const history = [initial, { role: 'assistant' as const, ...answer }];
+    const messages = [...history, { role: 'user' as const, content: '那昨天呢？' }];
+    const yesterday = await askCampusAssistant({ ...scope, senseSnapshot, messages });
+    expect(yesterday).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+    expect(yesterday.content).toContain('昨日停水');
+    expect(yesterday.content).not.toContain('今日復水');
+    for (const date of ['那最近七天呢？', '改看上個禮拜']) {
+      const otherPeriod = await askCampusAssistant({ ...scope, senseSnapshot,
+        messages: [...history, { role: 'user', content: date }] });
+      expect(otherPeriod).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+      expect(otherPeriod.content).toContain('昨日停水');
+    }
+    const timetable = await askCampusAssistant({ ...scope, senseSnapshot,
+      messages: [...history, { role: 'user', content: '那昨天的課表呢？' }] });
+    expect(timetable.route).toBe('/timetable');
+    jest.setSystemTime(new Date('2026-11-01T16:05:00Z'));
+    const replacement = { title: '修訂後的昨日公告', publishedAt: '2026-11-01T15:59:00Z' };
+    const refreshed = { ...senseSnapshot, checkedAt: new Date().toISOString(),
+      announcements: { ...senseSnapshot.announcements, items: [replacement] } };
+    const reread = await askCampusAssistant({ ...scope, senseSnapshot: refreshed, messages });
+    expect(reread.announcementRead).toMatchObject({ checkedAt: refreshed.checkedAt, items: [replacement] });
+    expect(reread.content).not.toContain('昨日停水');
+    for (const foreign of [{ userId: 'another-student' }, { schoolId: 'another-school' }]) {
+      const prior = { role: 'assistant' as const, ...answer, announcementRead: { ...answer.announcementRead!, ...foreign } };
+      const rejected = await askCampusAssistant({ ...scope, senseSnapshot: refreshed,
+        messages: [prior, { role: 'user', content: '那昨天呢？' }] });
+      expect(rejected.tool).toBe('online-required');
+      expect(rejected.announcementRead).toBeUndefined();
+      expect(rejected.content).not.toMatch(/修訂後的昨日公告|昨日停水|今日復水/);
+    }
+    jest.setSystemTime(new Date('2026-11-01T16:25:00Z'));
+    const expired = await askCampusAssistant({ ...scope, senseSnapshot, messages });
+    expect(expired).toMatchObject({ tool: 'online-required', route: '/announcements' });
+    expect(expired.content).not.toMatch(/昨日停水|今日復水/);
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(httpsCallable).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
 });

@@ -7,7 +7,7 @@ import type { LocalCampusReadResult } from '../services/localCampusToolProtocol'
 
 import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
-import type { AssignmentRead } from '../services/offlineCampusTools';
+import type { AnnouncementRead, AssignmentRead, OfflineCampusToolResult } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
@@ -15,7 +15,16 @@ import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead; courseworkRead?: CourseworkRead };
+export type CampusAssistantMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  route?: string;
+  assignmentRead?: AssignmentRead;
+  announcementRead?: AnnouncementRead;
+  savedClassRead?: SavedClassRead;
+  courseworkRead?: CourseworkRead;
+};
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -98,6 +107,7 @@ export async function askCampusAssistant(input: {
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
+  announcementRead?: AnnouncementRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -194,14 +204,24 @@ export async function askCampusAssistant(input: {
       const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass, owner);
       return { ...answer, source: 'device', hasActions: false };
     }
-    const { runOfflineCampusTool } =
+    const { runOfflineCampusTool, announcementDateFollowUp } =
       require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
     const senseSnapshot = validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid });
-    const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
-      senseSnapshot, Date.parse(snapshot.checkedAt));
+    const now = Date.parse(snapshot.checkedAt);
+    const previousAnnouncements = lastReply?.announcementRead;
+    const askedAnnouncements = previousAnnouncements ||
+      (lastReply?.tool === 'campus-snapshot' && lastReply.route === '/announcements');
+    const period = askedAnnouncements ? announcementDateFollowUp(question, now) : null;
+    if (period && previousAnnouncements && (senseSnapshot?.announcements.status !== 'available' ||
+        previousAnnouncements.userId !== uid || previousAnnouncements.schoolId !== input.scope.schoolId)) {
+      return { content: '上次的公告摘要已失效。請重新同步，再選擇要查的日期。',
+        tool: 'online-required', route: '/announcements', source: 'device', hasActions: false };
+    }
+    const readQuestion = period ? period + '有哪些校園公告？' : question;
+    const followUp = assignmentFollowUp(question, lastReply?.assignmentRead, senseSnapshot, now);
     const lookup = followUp && 'question' in followUp ? followUp : null;
     const localAnswer = followUp && 'reply' in followUp ? followUp.reply
-      : runOfflineCampusTool(lookup?.question ?? question, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
+      : runOfflineCampusTool(lookup?.question ?? readQuestion, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
     if (localAnswer) {
       return {
         content: localAnswer.content,
@@ -209,6 +229,7 @@ export async function askCampusAssistant(input: {
         source: 'device',
         tool: localAnswer.tool,
         route: localAnswer.route,
+        ...(localAnswer.announcementRead ? { announcementRead: localAnswer.announcementRead } : {}),
         ...(localAnswer.plan ? { plan: localAnswer.plan } : {}),
         ...(localAnswer.assignmentRead ? { assignmentRead: localAnswer.assignmentRead } : {}),
       };
@@ -238,7 +259,10 @@ export async function askCampusAssistant(input: {
     // bounded reads. Facts are still produced by scoped deterministic tools.
     const { resolveLocalCampusSemanticReads } = require('../services/localCampusSemanticReads') as
       typeof import('../services/localCampusSemanticReads');
-    const selectedReads = await resolveLocalCampusSemanticReads({
+    // A notice mention that the read tool declined (e.g. translating supplied text)
+    // should use the conversation, without substituting public titles or personal records.
+    const useCampusReads = !/公告|通知/.test(question);
+    const selectedReads = useCampusReads ? await resolveLocalCampusSemanticReads({
       messages, context: snapshot, snapshot: senseSnapshot,
       uid, schoolId: input.scope.schoolId,
       assertCurrent: () => { scopeCheck(input, false); assertNotCancelled(); },
@@ -250,7 +274,7 @@ export async function askCampusAssistant(input: {
       scopeCheck(input, false);
       assertNotCancelled();
       throw error;
-    });
+    }) : null;
     if (selectedReads) {
       return {
         content: selectedReads.content,
@@ -279,7 +303,7 @@ export async function askCampusAssistant(input: {
       messages: [
         { role: 'system', content: formatOnDeviceSchoolPrompt(
           { ...snapshot, checkedAt: new Date().toISOString() },
-          validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }),
+          useCampusReads ? validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }) : null,
         ) },
         ...compactHistory,
       ],
