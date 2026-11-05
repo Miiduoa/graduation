@@ -498,6 +498,83 @@ it.each([
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
 
+it.each([
+  'rotated cookies',
+  'changed TronClass user ID',
+])('rejects a cache hit after %s in the same session document', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cacheBefore = structuredClone(store.docs.get(CACHE));
+  const originalDoc = store.db.doc.bind(store.db);
+  const cacheWrite = vi.fn();
+  const cacheDelete = vi.fn();
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      set: cacheWrite,
+      delete: cacheDelete,
+      get: async () => {
+        const snapshot = await ref.get();
+        if (scenario === 'rotated cookies') {
+          Object.assign(store.docs.get(LMS)!, { cookies: { session: 'rotated-lms-session' } });
+        } else {
+          Object.assign(store.docs.get(LMS)!, { userId: 11 });
+        }
+        return snapshot;
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(cacheWrite).not.toHaveBeenCalled();
+  expect(cacheDelete).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it.each([
+  'rotated cookies',
+  'changed TronClass user ID',
+])('rejects a cold fetch when %s during the school read', async (scenario) => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchCourses).mockImplementationOnce(async () => {
+    if (scenario === 'rotated cookies') {
+      Object.assign(store.docs.get(LMS)!, { cookies: { session: 'rotated-lms-session' } });
+    } else {
+      Object.assign(store.docs.get(LMS)!, { userId: 11 });
+    }
+    return [LMS_FIXTURE_COURSE];
+  });
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
+it('preserves a stale cache when its safe replacement cannot be fetched', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  cached.expiresAt = new Date(0);
+  const cacheBefore = structuredClone(cached);
+  vi.mocked(source.fetchCourses).mockRejectedValueOnce(new Error('upstream unavailable'));
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('UNAVAILABLE');
+  // No unconditional delete: another request may have replaced this document
+  // after we observed the stale snapshot. It is never returned to the caller.
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+});
+
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();
   const doc = vi.spyOn(store.db, 'doc');
