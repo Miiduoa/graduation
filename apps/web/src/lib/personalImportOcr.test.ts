@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import {
   PERSONAL_IMPORT_IMAGE_UNREADABLE,
   PERSONAL_IMPORT_OCR_CORE,
@@ -14,6 +14,11 @@ import { recognizePersonalImportImage } from './personalImportOcr';
 const ocrDir = path.resolve(__dirname, '../../public/ocr');
 const source = readFileSync(path.resolve(__dirname, './personalImportOcr.ts'), 'utf8');
 const csp = readFileSync(path.resolve(__dirname, '../../next.config.ts'), 'utf8');
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 it('serves the recognizer and language files from this site', () => {
   expect(source).not.toMatch(/jsdelivr|tessdata\.projectnaptha|cdn\./);
@@ -48,4 +53,28 @@ it('maps an undecodable image to a Chinese notice', async () => {
   await expect(
     recognizePersonalImportImage(file, new AbortController().signal, () => {}),
   ).rejects.toThrow(PERSONAL_IMPORT_IMAGE_UNREADABLE);
+});
+
+it('keeps the original OCR when grid extraction would discard an unsafe personal-data heading', async () => {
+  const raw = '姓名  未知欄位\n測試學生  其他值\n節次  星期一  星期二  星期三';
+  const bitmap = { width: 640, height: 480, close: vi.fn() };
+  vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue(bitmap));
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext');
+  const worker = {
+    setParameters: vi.fn(),
+    terminate: vi.fn().mockResolvedValue(undefined),
+    recognize: vi.fn().mockResolvedValue({ data: { text: raw, tsv: 'pixel coordinates' } }),
+  };
+  vi.stubGlobal('Tesseract', { createWorker: vi.fn().mockResolvedValue(worker) });
+  vi.spyOn(document.head, 'append').mockImplementation((script) => {
+    (script as HTMLScriptElement).dispatchEvent(new Event('load'));
+  });
+  const file = new File(['pixels'], 'weekly.png', { type: 'image/png' });
+  await expect(
+    recognizePersonalImportImage(file, new AbortController().signal, () => {}, 'timetable'),
+  ).resolves.toBe(raw);
+  expect(worker.recognize).toHaveBeenCalledWith(file, {}, { text: true, tsv: true });
+  expect(getContext).not.toHaveBeenCalled();
+  expect(bitmap.close).toHaveBeenCalledOnce();
+  expect(worker.terminate).toHaveBeenCalledOnce();
 });

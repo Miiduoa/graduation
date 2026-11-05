@@ -1,4 +1,5 @@
 import { isPeriodProfileId, slotIndexForLabel, type PeriodProfileId } from '../timetable/schoolPeriods';
+import { splitScreenshotColumns } from './parser';
 import { readImportDelimitedRecords, type ImportDelimitedRecord } from './aiDelimitedText';
 import type { ImportIssue, PersonalImportKind, PersonalImportRow } from './types';
 
@@ -59,8 +60,21 @@ function headerOf(cells: string[], kind: PersonalImportKind): Header | null {
     ? { columns: cells.length, fields } : null;
 }
 
-function contentRecords(text: string, delimiter: ',' | '\t'): ImportDelimitedRecord[] | null {
-  const records = readImportDelimitedRecords(text, delimiter)?.filter((record) =>
+type TableFormat = ',' | '\t' | 'aligned-screenshot';
+
+function contentRecords(text: string, format: TableFormat): ImportDelimitedRecord[] | null {
+  if (format === 'aligned-screenshot') {
+    // Mixed delimiters and quotes cannot establish column boundaries from OCR spacing.
+    if (/[\t,;|"、]/u.test(text)) return null;
+    const records = [...text.matchAll(/[^\r\n]+/gu)].filter(([line]) => line.trim()).map((match) => {
+      const start = match.index!;
+      const end = start + match[0].length;
+      return { start, end, contentEnd: end, cells: splitScreenshotColumns(match[0]) };
+    });
+    if (records[0]?.cells.length === 1) records.shift(); // Optional screenshot title above the header.
+    return records;
+  }
+  const records = readImportDelimitedRecords(text, format)?.filter((record) =>
     text.slice(record.start, record.contentEnd).trim(),
   );
   if (!records) return null;
@@ -69,15 +83,16 @@ function contentRecords(text: string, delimiter: ',' | '\t'): ImportDelimitedRec
   return records;
 }
 
-function sourceTable(text: string, kind: PersonalImportKind, context: string) {
-  const tables: Array<{ header: Header; records: SourceRecord[] }> = [];
-  for (const delimiter of ['\t', ','] as const) {
-    const records = contentRecords(text, delimiter);
+function sourceTable(text: string, kind: PersonalImportKind, context: string, screenshot = false) {
+  const tables: Array<{ header: Header; records: ImportDelimitedRecord[] }> = [];
+  const formats: TableFormat[] = screenshot ? ['\t', ',', 'aligned-screenshot'] : ['\t', ','];
+  for (const format of formats) {
+    const records = contentRecords(text, format);
     if (!records?.length) continue;
     let header = headerOf(records[0].cells, kind);
     if (header) records.shift();
-    else if (context) {
-      const reference = contentRecords(context, delimiter);
+    else if (context && format !== 'aligned-screenshot') {
+      const reference = contentRecords(context, format);
       if (reference?.length === 1) header = headerOf(reference[0].cells, kind);
     }
     if (!header || !records.length) continue;
@@ -88,17 +103,27 @@ function sourceTable(text: string, kind: PersonalImportKind, context: string) {
     // label a partial scan as complete coverage or count a summary as a course.
     if (records.some((record) => /^(?:合計|總計|小計|總學分|總學分數|學期平均|total|subtotal)$/iu
       .test(record.cells[titleColumn].trim()))) continue;
-    tables.push({ header, records: records.map((record, index) => ({
-      cells: record.cells,
-      // The first data row may quote its source header too; never another data row.
-      firstExcerpt: index === 0 ? compact(text.slice(0, record.contentEnd)) : undefined,
-      prefixLength: compact(text.slice(0, record.start)).length,
-      evidence: compact(text.slice(record.start, record.contentEnd)),
-      title: compact(record.cells[titleColumn]),
-      line: text.slice(0, record.start).split('\n').length,
-    })) });
+    tables.push({ header, records });
   }
   return tables.length === 1 ? tables[0] : null;
+}
+
+/** Numeric weekday cells are meaningful only in the exact row of a labelled timetable. */
+export function numericTimetableWeekdayEvidence(text: string, context: string, screenshot: boolean) {
+  const weekdays = new Map<number, { rawText: string; title: string; day: number }>();
+  const table = sourceTable(text, 'timetable', context, screenshot);
+  const dayColumn = table?.header.fields.get('dayOfWeek');
+  if (!table || dayColumn === undefined) return weekdays;
+  const titleColumn = table.header.fields.get('title')!;
+  for (const record of table.records) {
+    const day = normalized(record.cells[dayColumn]);
+    if (/^[1-7]$/u.test(day)) weekdays.set(record.start, {
+      rawText: text.slice(record.start, record.contentEnd),
+      title: record.cells[titleColumn],
+      day: Number(day),
+    });
+  }
+  return weekdays;
 }
 
 function dayValue(text: string): number | null {
@@ -162,7 +187,17 @@ export function auditPersonalImportAiTable(
     return { status: 'unavailable' };
   const table = sourceTable(text, kind, columnContext);
   if (!table) return { status: 'unavailable' };
-  const { header, records } = table;
+  const { header } = table;
+  const titleColumn = header.fields.get('title')!;
+  const records: SourceRecord[] = table.records.map((record, index) => ({
+    cells: record.cells,
+    // The first data row may quote its source header too; never another data row.
+    firstExcerpt: index === 0 ? compact(text.slice(0, record.contentEnd)) : undefined,
+    prefixLength: compact(text.slice(0, record.start)).length,
+    evidence: compact(text.slice(record.start, record.contentEnd)),
+    title: compact(record.cells[titleColumn]),
+    line: text.slice(0, record.start).split('\n').length,
+  }));
   const candidates = rows.map((row) => {
     const evidence = compact(row.source.rawText);
     if (!evidence || row.kind !== kind) return [];
