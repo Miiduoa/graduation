@@ -58,7 +58,11 @@ jest.mock('../services/campusAssignmentReminders', () => ({
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const request = askCampusAssistant as jest.Mock;
+function openCampusTools(view: ReturnType<typeof render>) {
+  fireEvent.press(view.getByRole('tab', { name: '校園工具' }));
+}
 function selectCampusMode(view: ReturnType<typeof render>) {
+  openCampusTools(view);
   fireEvent.press(view.getByText('校園即時 · 需網路'));
 }
 function deferred<T>() {
@@ -101,6 +105,106 @@ test('failed questions remain editable and retry does not add duplicated history
   expect(view.getByText('已找到公告')).toBeTruthy();
   expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
 });
+test.each([
+  ['今日重點', '重新整理今日重點', '今天要先處理什麼？'],
+  ['未來七天', '重新規劃未來七天', '依手機課表與授權作業安排接下來七天的學習計畫'],
+])('retrying %s refreshes its sources and leaves the draft intact', async (initial, retry, question) => {
+  const sensed = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date(Date.now() - 1000).toISOString(),
+    schedule: { status: 'unavailable' as const, count: null },
+    assignments: { status: 'available' as const, count: 0, items: [] },
+    announcements: { status: 'available' as const, items: [] },
+  };
+  const refreshed = { ...sensed, checkedAt: new Date().toISOString() };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(sensed).mockResolvedValueOnce(refreshed);
+  request.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ content: '今天的安排', source: 'device' });
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '還在想怎麼問');
+  openCampusTools(view);
+  await act(async () => fireEvent.press(view.getByText(initial)));
+  await act(async () => fireEvent.press(view.getByText(retry)));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls[1][0]).toMatchObject({
+    messages: [{ role: 'user', content: question }], mode: 'device', senseSnapshot: refreshed,
+  });
+  expect(view.getByText('今天的安排')).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('還在想怎麼問');
+  expect(view.queryByText(retry)).toBeNull();
+});
+
+async function failAssignmentPage(draft: string) {
+  const checkedAt = new Date().toISOString();
+  const items = Array.from({ length: 9 }, (_, i) => ({ title: `報告 ${i + 1}`, groupName: '資管', dueAt: null }));
+  const snapshot = {
+    userId: 'A', schoolId: 'pu', checkedAt,
+    schedule: { status: 'unavailable' as const, count: null },
+    announcements: { status: 'available' as const, items: [] },
+    assignments: { status: 'available' as const, count: items.length, items },
+  };
+  const question = '我的待交作業';
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot);
+  request.mockResolvedValueOnce({
+    source: 'device', content: '八份待交報告',
+    assignmentRead: { userId: 'A', schoolId: 'pu', checkedAt, items: items.slice(0, 8),
+      filterQuestion: question, page: { question, offset: 0, total: items.length, asOf: Date.parse(checkedAt) } },
+  }).mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ source: 'device', content: '最後一份報告' });
+  const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, question);
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, draft);
+  await act(async () => fireEvent.press(view.getByText('下一頁作業')));
+  return { view, field, snapshot };
+}
+
+test.each(['', '待會才要送出的問題'])('an assignment retry resends only the selected page with draft "%s"', async (draft) => {
+  const { view, field, snapshot } = await failAssignmentPage(draft);
+  await act(async () => fireEvent.press(view.getByText('重試「下一頁」')));
+  expect(request.mock.calls[2][0].messages).toEqual(request.mock.calls[1][0].messages);
+  expect(request.mock.calls[2][0].messages.at(-1)).toEqual({ role: 'user', content: '下一頁' });
+  expect(request.mock.calls[2][0]).toMatchObject({ mode: 'device', senseSnapshot: snapshot });
+  expect(view.getByText('最後一份報告')).toBeTruthy();
+  expect(field.props.value).toBe(draft);
+  expect(view.queryByText('重試「下一頁」')).toBeNull();
+});
+
+test('an assignment retry cannot run after its source expires or is cleared', async () => {
+  const { view, snapshot } = await failAssignmentPage('繼續寫的問題');
+  const expired = jest.spyOn(Date, 'now').mockReturnValue(Date.parse(snapshot.checkedAt) + 16 * 60_000);
+  try {
+    fireEvent.press(view.getByText('重試「下一頁」'));
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally {
+    expired.mockRestore();
+  }
+  openCampusTools(view);
+  fireEvent.press(view.getByText('清除本次校園摘要'));
+  fireEvent.press(view.getByText('對話'));
+  expect(view.queryByText('重試「下一頁」')).toBeNull();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('繼續寫的問題');
+});
+
+test('stopping a brief during sync discards late data and offers the same brief again', async () => {
+  const sync = deferred<Awaited<ReturnType<typeof refreshCampusSenseSnapshot>>>();
+  jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(sync.promise);
+  const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
+  fireEvent.press(view.getByText('今日重點'));
+  fireEvent.press(view.getByText('取消這次同步'));
+  expect(jest.mocked(refreshCampusSenseSnapshot).mock.calls[0][0].signal?.aborted).toBe(true);
+  await act(async () => sync.resolve({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
+  expect(request).not.toHaveBeenCalled();
+  expect(view.getByText('重新整理今日重點')).toBeTruthy();
+});
+
 test.each(['account', 'school', 'account-back'])(
   '%s changes hide old questions and ignore a late reply',
   async (change) => {
@@ -307,6 +411,7 @@ test('a user explicitly syncs authorized context before it reaches local inferen
   });
   const view = render(<CampusAssistantScreen />);
   expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledWith({
@@ -315,12 +420,14 @@ test('a user explicitly syncs authorized context before it reaches local inferen
   });
   expect(jest.mocked(refreshCampusSenseSnapshot).mock.calls[0][0].signal?.aborted).toBe(false);
   expect(view.getByText('已取得本次授權資料')).toBeTruthy();
+  fireEvent.press(view.getByText('對話'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我的待交作業');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
     mode: 'device', senseSnapshot: snapshot,
   }));
   expect(view.getByText(/先前主動同步的授權摘要/)).toBeTruthy();
+  openCampusTools(view);
   fireEvent.press(view.getByText('清除本次校園摘要'));
   expect(view.getByText('尚未同步校園摘要')).toBeTruthy();
 });
@@ -334,6 +441,7 @@ test('switching schools drops sensed data and ignores a late sync response', asy
   }>();
   jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(pending.promise);
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   fireEvent.press(view.getByText('同步我的校園資料'));
   mockSchool = 'other';
   view.rerender(<CampusAssistantScreen />);
@@ -343,6 +451,7 @@ test('switching schools drops sensed data and ignores a late sync response', asy
     assignments: { status: 'available', count: 0, items: [] },
     announcements: { status: 'available', items: [] },
   }));
+  openCampusTools(view);
   expect(view.queryByText('已取得本次授權資料')).toBeNull();
   expect(view.getByText('尚未同步校園摘要')).toBeTruthy();
 });
@@ -364,7 +473,8 @@ test('one-tap daily brief senses authorized sources and synthesizes on the phone
   });
   const view = render(<CampusAssistantScreen />);
   expect(request).not.toHaveBeenCalled();
-  await act(async () => fireEvent.press(view.getByText('今日重點')));
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('整理今日重點')));
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
     mode: 'device',
@@ -440,6 +550,7 @@ test('the seven-day agent entry shows sourced steps and only navigates to verifi
   });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('未來七天')));
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
@@ -474,6 +585,7 @@ test('an idle campus sense dashboard expires automatically rather than showing s
   let afterExpiry: jest.SpyInstance | undefined;
   try {
     const view = render(<CampusAssistantScreen />);
+    openCampusTools(view);
     await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
     expect(view.getByText('已取得本次授權資料')).toBeTruthy();
 
@@ -517,6 +629,7 @@ test('one-tap weekly plan still uses local timetable when the campus is offline'
     },
   });
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('未來七天')));
   expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
@@ -544,7 +657,9 @@ test('a temporary network error reuses only a recent, authorized in-memory sense
     content: '依上次有效快照整理今日作業', hasActions: false,
   });
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('今日重點')));
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
     mode: 'device',
@@ -574,8 +689,10 @@ test('a denied campus permission drops the old snapshot even when it was recentl
     source: 'device', hasActions: false,
   });
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
   expect(view.getByText('已取得本次授權資料')).toBeTruthy();
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('今日重點')));
   expect(request).toHaveBeenCalledWith(expect.objectContaining({
     mode: 'device', senseSnapshot: null,
@@ -619,7 +736,9 @@ test('source-verified assignment requires review and confirmation before a local
   jest.mocked(cancelCampusAssignmentReminder).mockResolvedValueOnce(true);
 
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
 
@@ -679,7 +798,9 @@ test('an already scheduled local reminder is restored when reopening the assista
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([60]);
   jest.mocked(cancelCampusAssignmentReminder).mockResolvedValueOnce(true);
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await waitFor(() => expect(view.getByText('已設定截止前 1 小時提醒')).toBeTruthy());
@@ -722,7 +843,9 @@ test('unverified OS reminder status blocks scheduling until a successful recheck
     .mockRejectedValueOnce(new Error('Native inventory unavailable'))
     .mockResolvedValueOnce([]);
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await waitFor(() => expect(view.getByText(/無法確認裝置提醒狀態/)).toBeTruthy());
@@ -758,7 +881,9 @@ test('no real due time means the agent never offers a notification action', asyn
     },
   });
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要做什麼？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   expect(view.getByText('沒有截止日期的練習')).toBeTruthy();
@@ -783,7 +908,9 @@ test('tapping a result retains the unsent draft and opens only the selected sour
   request.mockResolvedValueOnce({ ...reply, content: '資料庫管理的報告', assignmentRead: { ...assignmentRead, items: [items[1]], reviewReminder: true } });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
   const field = view.getByLabelText('詢問校園助理');
   fireEvent.changeText(field, '期中報告何時交？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
@@ -814,7 +941,9 @@ test('moves between assignment pages without sending the draft and keeps the bac
   });
   request.mockResolvedValueOnce(page(0)).mockResolvedValueOnce(page(8)).mockResolvedValueOnce(page(0));
   const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
   await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
   const field = view.getByLabelText('詢問校園助理');
   fireEvent.changeText(field, question);
   await act(async () => fireEvent.press(view.getByText('送出問題')));
@@ -855,14 +984,16 @@ test('the next-class shortcut opens the selected occurrence in its own term and 
   expect(view.queryByText('B203')).toBeNull();
 });
 
-test('a failed next-class shortcut can be retried from the composer', async () => {
+test('a failed next-class shortcut retries the original read in one tap', async () => {
   request.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({
     content: '請核對本學期與上課時間。', tool: 'saved-timetable', source: 'device', route: '/timetable',
   });
   const view = render(<CampusAssistantScreen />);
   await act(async () => fireEvent.press(view.getByText('查下一堂課')));
-  expect(view.getByLabelText('詢問校園助理').props.value).toBe('下一堂課是什麼？');
-  await act(async () => fireEvent.press(view.getByText('重試查詢')));
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  expect(request).toHaveBeenCalledTimes(1);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重試「下一堂課是什麼？」' })));
+  expect(request).toHaveBeenCalledTimes(2);
   expect(request.mock.calls[1][0].messages).toEqual([{ role: 'user', content: '下一堂課是什麼？' }]);
   expect(view.getByText('請核對本學期與上課時間。')).toBeTruthy();
 });

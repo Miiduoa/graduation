@@ -1,9 +1,10 @@
 import { AssignmentReplyActions } from './AssignmentReplyActions';
 import { LegacyAssignmentReminders } from './LegacyAssignmentReminders';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Linking, ScrollView, Text, TextInput, View } from 'react-native';
+import { Linking, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from 'react-native';
+import { AssistantConversationLayout, type AssistantPanel } from './AssistantConversationLayout';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
-import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
+import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { SavedClassReplyCard } from './SavedClassReplyCard';
 import { useOptionalNuniSession } from '../state/nuniSession';
@@ -34,6 +35,10 @@ import {
   type CampusSenseSnapshot,
   type CampusSenseProgress,
 } from '../services/campusSenseSnapshot';
+
+const NEXT_CLASS = '下一堂課是什麼？';
+const TODAY_BRIEF = '今天要先處理什麼？';
+const WEEK_BRIEF = '依手機課表與授權作業安排接下來七天的學習計畫';
 
 const SERVICE_AFTER_WRITE: Record<CampusAgentWriteTool, string> = {
   submitLeaveRequest: 'CoursesHome',
@@ -95,6 +100,11 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
     />
   );
 }
+type AssistantShortcut =
+  | { kind: 'brief'; question: typeof TODAY_BRIEF | typeof WEEK_BRIEF }
+  | { kind: 'next-class'; question: typeof NEXT_CLASS }
+  | { kind: 'selection'; question: string; checkedAt: string };
+
 function AssistantConversation({
   uid,
   schoolId,
@@ -130,16 +140,19 @@ function AssistantConversation({
   const [syncProgress, setSyncProgress] = useState<CampusSenseProgress | null>(null);
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
+  const [panel, setPanel] = useState<AssistantPanel>('chat');
+  const chatScroll = useRef<ScrollView>(null);
+  const lastRevealed = useRef(-1);
   const [deviceCheck, setDeviceCheck] = useState(0);
   const [error, setError] = useState('');
+  const [activeShortcut, setActiveShortcut] = useState<AssistantShortcut | null>(null);
   const [busy, setBusy] = useState(false);
   const [linkError, setLinkError] = useState('');
-  const scroll = useRef<ScrollView>(null);
-  const lastRevealed = useRef(-1);
   const mounted = useRef(true);
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
+  const canAsk = mode === 'device' || Boolean(uid);
   const quickActions = getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
   useEffect(() => {
@@ -168,12 +181,20 @@ function AssistantConversation({
     });
     return () => { active = false; };
   }, [deviceCheck]);
+  const editDraft = (text: string) => {
+    if (lock.current) return;
+    setDraft(text);
+    setError('');
+    setActiveShortcut(null);
+  };
   const changeMode = (next: CampusAssistantMode) => {
     if (lock.current || syncLock.current || next === mode) return;
-    setMode(next);
-    setMessages([]);
     lastRevealed.current = -1;
+    setMode(next);
+    setPanel('chat');
+    setMessages([]);
     setError('');
+    setActiveShortcut(null);
   };
   const progressFor = (controller: AbortController) => (progress: CampusSenseProgress) => {
     if (current() && !controller.signal.aborted && inFlight.current === controller) setSyncProgress(progress);
@@ -184,6 +205,8 @@ function AssistantConversation({
   const syncCampus = async () => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     syncLock.current = true;
+    setError('');
+    setActiveShortcut(null);
     const controller = new AbortController();
     inFlight.current = controller;
     setSyncBusy(true);
@@ -214,11 +237,13 @@ function AssistantConversation({
       }
     }
   };
-  const briefPlan = async (question: string) => {
+  const briefPlan = async (question: typeof TODAY_BRIEF | typeof WEEK_BRIEF) => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     syncLock.current = true;
     setBusy(true);
+    setActiveShortcut({ kind: 'brief', question });
+    setPanel('chat');
     setSyncBusy(true);
     setSyncProgress(null);
     setError('');
@@ -265,10 +290,7 @@ function AssistantConversation({
         isCurrent: current,
         signal: controller.signal,
       });
-      if (controller.signal.aborted && current()) {
-        setError('已停止這次本地整理，沒有將取消後的回答加入對話。');
-        return;
-      }
+      if (controller.signal.aborted) return;
       if (current()) {
         setMessages([
           ...next,
@@ -285,21 +307,18 @@ function AssistantConversation({
             savedClassRead: reply.savedClassRead,
           },
         ]);
-        setDraft('');
+        setActiveShortcut(null);
       }
     } catch {
-      if (current()) {
-        if (controller.signal.aborted) {
-          setError('已停止這次本地整理；資料不會自動傳送到雲端 AI。');
-        } else {
-          setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型；沒有自動將問題傳給雲端 AI。');
-        }
+      if (current() && !controller.signal.aborted) {
+        setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型。');
       }
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
       syncLock.current = false;
       if (current()) {
+        if (controller.signal.aborted) setError('已停止這次本地整理。');
         setBusy(false);
         setSyncBusy(false);
         setSyncProgress(null);
@@ -307,11 +326,12 @@ function AssistantConversation({
     }
   };
 
-  const send = async (selection?: string) => {
-    const question = selection ?? draft.trim();
+  const send = async (shortcut?: Exclude<AssistantShortcut, { kind: 'brief' }>) => {
+    const question = shortcut?.question ?? draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || !current()) return;
-    const restoreEmptyDraft = () => { if (selection && !draft.trim()) setDraft(question); };
+    if (shortcut?.kind === 'selection' && shortcut.checkedAt !== validCampusSenseSnapshot(sense, { uid, schoolId })?.checkedAt) return;
     lock.current = true;
+    setActiveShortcut(shortcut ?? null);
     setBusy(true);
     setError('');
     const controller = new AbortController();
@@ -328,8 +348,7 @@ function AssistantConversation({
         ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
       if (controller.signal.aborted && current()) {
-        restoreEmptyDraft();
-        setError('已停止本機回答，問題仍保留在輸入欄，可修改後重試。');
+        setError('已停止本機回答。');
         return;
       }
       if (current()) {
@@ -349,11 +368,11 @@ function AssistantConversation({
             proposals: reply.proposals,
           },
         ]);
-        if (!selection) setDraft('');
+        if (!shortcut) setDraft('');
+        setActiveShortcut(null);
       }
     } catch (failure) {
       if (current()) {
-        restoreEmptyDraft();
         if (failure instanceof OnDeviceAssistantError) {
           if (failure.code === 'model-required') {
             setError('手機尚未下載 AI 模型，請先安裝免費模型。訊息已保留，不會自動改用雲端。');
@@ -362,7 +381,7 @@ function AssistantConversation({
           } else if (failure.code === 'model-busy') {
             setError('手機 AI 正在執行其他任務或安裝模型；這次問題已保留，請稍後再送出。');
           } else if (failure.code === 'cancelled') {
-            setError('已停止本機回答，問題仍保留在輸入欄，可修改後重試。');
+            setError('已停止本機回答。');
           } else if (failure.code === 'session-changed') {
             setError('帳號或學校已變更，這次回覆已捨棄。');
           } else {
@@ -380,29 +399,28 @@ function AssistantConversation({
       if (current()) setBusy(false);
     }
   };
-  return (
-    <AIDetailScreen title="校園助理" scrollRef={scroll} keyboardShouldPersistTaps="handled" onBack={() => {
-      inFlight.current?.abort();
-      navigation?.goBack?.();
-    }}>
-      {mode === 'device' && uid && !draft.trim() && !messages.length ? (
-        <AICard title="接下來的課">
-          <AIButton label="查下一堂課" disabled={busy || syncBusy}
-            onPress={() => void send('下一堂課是什麼？')} />
-        </AICard>
-      ) : null}
+  const scrollToEntry = (event: LayoutChangeEvent) => {
+    chatScroll.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - 8), animated: false });
+  };
+  const revealReply = (index: number, event: LayoutChangeEvent) => {
+    if (index !== messages.length - 1 || lastRevealed.current === index || panel !== 'chat') return;
+    lastRevealed.current = index;
+    scrollToEntry(event);
+  };
+  const campusTools = (
+    <>
       <AICard
         title="工作模式"
         badge={mode === 'device' ? '手機內推論' : '校園連線'}
         badgeTone={mode === 'device' ? 'success' : 'ai'}
       >
         <View style={{ gap: 12 }}>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <AIButton
               label={mode === 'device' ? '✓ 手機本地 AI · 免費推論' : '手機本地 AI · 免費推論'}
               variant={mode === 'device' ? 'primary' : 'ghost'}
               size="sm"
-              style={{ flex: 1 }}
+              style={{ flexGrow: 1, flexBasis: 146 }}
               disabled={busy || syncBusy}
               onPress={() => changeMode('device')}
             />
@@ -410,7 +428,7 @@ function AssistantConversation({
               label={mode === 'campus' ? '✓ 校園即時 · 需網路' : '校園即時 · 需網路'}
               variant={mode === 'campus' ? 'primary' : 'ghost'}
               size="sm"
-              style={{ flex: 1 }}
+              style={{ flexGrow: 1, flexBasis: 146 }}
               disabled={busy || syncBusy}
               onPress={() => changeMode('campus')}
             />
@@ -462,9 +480,9 @@ function AssistantConversation({
           }}
           assignmentContext={{ userId: uid, schoolId, isCurrent: current, navigation }}
           onSync={() => void syncCampus()}
-          onBrief={() => void briefPlan('今天要先處理什麼？')}
-          onWeekBrief={() => void briefPlan('依手機課表與授權作業安排接下來七天的學習計畫')}
-          onClear={() => { setSense(null); setSenseError(''); }}
+          onBrief={() => void briefPlan(TODAY_BRIEF)}
+          onWeekBrief={() => void briefPlan(WEEK_BRIEF)}
+          onClear={() => { setSense(null); setSenseError(''); setActiveShortcut(null); setError(''); }}
         />
       ) : null}
       <AICard>
@@ -494,227 +512,258 @@ function AssistantConversation({
           </View>
         ) : null}
       </AICard>
-      {(uid || mode === 'device') && messages.length === 0 && !draft.trim() ? (
-        <AICard title="一點就能開始">
-          <View style={{ gap: 10 }}>
-            <Text style={{ color: aiTokens.muted, lineHeight: 22 }}>
-              不需要想完整的提問。點一個問題，確認文字後再送出。
-            </Text>
-            {[
-              '幫我把期末報告拆成可以完成的步驟',
-              '請依手機儲存的課表整理學習安排',
-              '我要找校園圖書館，應該開啟哪個功能？',
-              ...(currentSense ? ['今天要先處理什麼？', '我還有哪些作業待交？'] : []),
-            ].map((question) => (
-              <AIButton
-                key={question}
-                label={question}
-                variant="ghost"
-                onPress={() => setDraft(question)}
-              />
-            ))}
+    </>
+  );
+  return (
+    <AssistantConversationLayout
+      subtitle={schoolName + ' · ' + (mode === 'device' ? '手機本地' : '校園連線')}
+      panel={panel} onSelect={setPanel} locked={busy || syncBusy} chatScroll={chatScroll}
+      onBack={() => {
+        inFlight.current?.abort();
+        navigation?.goBack?.();
+      }}
+      tools={campusTools}
+      composer={canAsk ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
+          paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
+          <TextInput
+            accessibilityLabel="詢問校園助理"
+            value={draft} maxLength={1600} multiline editable={!busy} onChangeText={editDraft}
+            placeholder={mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
+            placeholderTextColor={aiTokens.muted}
+            style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
+              borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
+              backgroundColor: aiTokens.panel, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
+          />
+          {busy && mode === 'device' ? (
+            <AIButton label={syncBusy ? '取消這次同步' : '停止本機回答'} variant="ghost" size="sm"
+              onPress={() => inFlight.current?.abort()} />
+          ) : (
+            <AIButton label={busy ? '正在查詢…' : error && !activeShortcut ? '重試查詢' : '送出問題'}
+              size="sm" disabled={busy || syncBusy || !draft.trim()} onPress={() => void send()} />
+          )}
+        </View>
+      ) : null}
+    >
+      {!uid && mode === 'campus' && (
+        <AICard title="校園即時查詢需要登入">
+          <AIButton label="改問手機助理" onPress={() => changeMode('device')} />
+        </AICard>
+      )}
+      {uid && mode === 'device' && messages.length === 0 && !busy && !error && !draft.trim() ? (
+        <AICard title="我的課業安排">
+          <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
+            下一堂課直接看手機已存課表。整理今日重點與七天安排時，會同步已授權的作業與公告。
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            <AIButton label="查下一堂課" onPress={() => void send({ kind: 'next-class', question: NEXT_CLASS })} />
+            <AIButton label="整理今日重點" variant="ghost" onPress={() => void briefPlan(TODAY_BRIEF)} />
+            <AIButton label="規劃未來七天" variant="ghost" onPress={() => void briefPlan(WEEK_BRIEF)} />
           </View>
         </AICard>
       ) : null}
-      {messages.map((message, index) => (
-        <View key={index} onLayout={({ nativeEvent }) => {
-          if (message.role === 'assistant' && index === messages.length - 1 && index > lastRevealed.current) {
-            lastRevealed.current = index;
-            scroll.current?.scrollTo({ y: nativeEvent.layout.y, animated: false });
-          }
-        }}>
-        <AICard title={message.role === 'user' ? '你的問題' : message.savedClassRead?.focus === 'room' ? '上課教室'
-          : message.savedClassRead?.focus === 'time' ? '上課時間' : message.savedClassRead?.classes.length
-          ? (message.savedClassRead.classes.length > 1 ? '同時段有多堂課' : '下一堂課') : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
-          {message.role === 'assistant' && message.savedClassRead ? (
-            <SavedClassReplyCard classes={message.savedClassRead.classes} updatedAt={message.savedClassRead.updatedAt} focus={message.savedClassRead.focus}
-              disabled={busy || syncBusy || !navigation?.navigate}
-              onOpen={(item) => {
-                if (!current() || message.savedClassRead?.uid !== uid || message.savedClassRead.schoolId !== schoolId) return;
-                safeNavigate(navigation, 'PersonalTimetable', {
-                  schoolId, courseId: item.courseId, date: item.date, term: item.term,
-                  startAt: Date.parse(`${item.date}T${item.startTime}:00+08:00`),
-                  reminderScope: JSON.stringify({ owner: 'firebase:' + uid, schoolId }),
-                });
-              }} />
-          ) : message.role === 'assistant' && message.localReads?.length ? (
-            <CampusLocalReadResults
-              results={message.localReads}
-              disabled={busy || syncBusy}
-              onOpenRoute={(route) => {
-                if (!current()) return;
-                const destination = VERIFIED_SERVICE_ROUTES[route];
-                if (destination) safeNavigate(navigation, destination.route);
-              }}
-            />
-          ) : (
-            <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
-              {message.plan ? message.plan.overview : message.content}
-            </Text>
+      {canAsk && messages.length === 0 && !busy && !error ? (
+        <AICard title={draft.trim() ? '繼續你的提問' : '想先處理哪件事？'}>
+          <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 22 }}>
+            {draft.trim() ? '可以修改輸入欄裡的問題，再按送出。'
+              : mode === 'device' ? '先選一個問題，或直接輸入。用手機鍵盤的麥克風也能口述。'
+              : '先確認要查的內容。送出後，助理會連線查詢。'}
+          </Text>
+          {!draft.trim() && (
+            <View style={{ gap: 6, marginTop: 10 }}>
+              {(mode === 'device'
+                ? ['請依手機儲存的課表整理學習安排', ...(currentSense ? ['我還有哪些作業待交？'] : []),
+                  '幫我把期末報告拆成可以完成的步驟']
+                : ['這週有哪些校園活動？', '最近有哪些校園公告？']
+              ).map((question) => (
+                <AIButton key={question} label={question} variant="ghost" size="sm"
+                  style={{ alignSelf: 'stretch' }} onPress={() => editDraft(question)} />
+              ))}
+            </View>
           )}
-          {index === messages.length - 1 && message.role === 'assistant' && message.assignmentRead && currentSense && (
-            <AssignmentReplyActions read={message.assignmentRead} snapshot={currentSense}
-              context={{ userId: uid, schoolId, isCurrent: current, navigation }} disabled={busy || syncBusy}
-              onAsk={(question) => void send(question)} />
-          )}
-          {message.role === 'assistant' && message.plan ? (
-            <CampusEvidencePlanCard
-              plan={message.plan}
-              disabled={busy || syncBusy}
-              navigation={navigation}
-              reminderContext={{
-                userId: uid,
-                schoolId,
-                snapshot: currentSense,
-                isCurrent: current,
-              }}
-              onOpenRoute={(route: CampusPlanRoute) => {
-                if (!current()) return;
-                const destination = VERIFIED_SERVICE_ROUTES[route];
-                if (destination) safeNavigate(navigation, destination.route);
-              }}
-            />
-          ) : null}
-          {message.role === 'assistant' && message.source === 'campus' &&
-            index === messages.length - 1 && message.proposals?.map((proposal, proposalIndex) => (
-              <CampusAgentActionReview
-                key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
-                proposal={proposal}
-                userId={uid}
-                schoolId={schoolId}
-                isCurrent={current}
-                onOpenService={typeof navigation?.navigate === 'function'
-                  ? () => safeNavigate(navigation, SERVICE_AFTER_WRITE[proposal.toolName])
-                  : undefined}
-                onOpenSettings={typeof navigation?.navigate === 'function'
-                  ? () => safeNavigate(navigation, 'AssistantPermissions')
-                  : undefined}
-              />
-            ))}
-          {message.role === 'assistant' && message.source === 'device' && !message.savedClassRead && (
-            <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
-              {message.tool === 'local-agent'
-                ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
-                : message.tool === 'campus-plan'
-                ? '手機端多步驟規劃 · 資料來源與期限已標示 · 未執行任何寫入'
-                : message.tool === 'campus-snapshot'
-                ? '手機規則計算 · 先前主動同步的授權摘要（非即時結果）'
-                : message.tool
-                  ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
-                  : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
-            </Text>
-          )}
-          {message.role === 'assistant' && !message.savedClassRead && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
-            <View style={{ marginTop: 12 }}>
-              <AIButton
-                label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
-                variant="ghost"
+        </AICard>
+      ) : null}
+      {messages.map((message, index) => message.role === 'user' ? (
+        <View key={index} style={{ alignSelf: 'flex-end', maxWidth: '85%', marginRight: 16,
+          marginVertical: 8, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 16,
+          backgroundColor: aiTokens.aiSoft }}>
+          <Text style={{ color: aiTokens.textSecondary, fontSize: 12 }}>你的問題</Text>
+          <Text selectable style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>{message.content}</Text>
+        </View>
+      ) : (
+        <View key={index} onLayout={(event) => revealReply(index, event)}>
+          <AICard title={message.savedClassRead?.focus === 'room' ? '上課教室'
+            : message.savedClassRead?.focus === 'time' ? '上課時間' : message.savedClassRead?.classes.length
+            ? (message.savedClassRead.classes.length > 1 ? '同時段有多堂課' : '下一堂課') : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+            {message.savedClassRead ? (
+              <SavedClassReplyCard classes={message.savedClassRead.classes} updatedAt={message.savedClassRead.updatedAt} focus={message.savedClassRead.focus}
+                disabled={busy || syncBusy || !navigation?.navigate}
+                onOpen={(item) => {
+                  if (!current() || message.savedClassRead?.uid !== uid || message.savedClassRead.schoolId !== schoolId) return;
+                  safeNavigate(navigation, 'PersonalTimetable', {
+                    schoolId, courseId: item.courseId, date: item.date, term: item.term,
+                    startAt: Date.parse(`${item.date}T${item.startTime}:00+08:00`),
+                    reminderScope: JSON.stringify({ owner: 'firebase:' + uid, schoolId }),
+                  });
+                }} />
+            ) : message.localReads?.length ? (
+              <CampusLocalReadResults
+                results={message.localReads}
                 disabled={busy || syncBusy}
-                onPress={() => {
-                  const destination = message.route && VERIFIED_SERVICE_ROUTES[message.route];
+                onOpenRoute={(route) => {
+                  if (!current()) return;
+                  const destination = VERIFIED_SERVICE_ROUTES[route];
                   if (destination) safeNavigate(navigation, destination.route);
                 }}
               />
-            </View>
-          ) : message.role === 'assistant' && !message.savedClassRead && !message.plan && !message.localReads?.length && index > 0 ? (
-            <View style={{ marginTop: 12, gap: 8 }}>
-              {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
-                .slice(0, 3)
-                .map((action) => (
-                  <AIButton
-                    key={action.destination}
-                    label={'查看' + action.label}
-                    variant="ghost"
-                    disabled={busy || syncBusy}
-                    onPress={() => safeNavigate(navigation, action.route)}
-                  />
-                ))}
-            </View>
-          ) : null}
-          {message.requiresService && !message.proposals?.length ? (
-            <Text style={{ color: aiTokens.muted, lineHeight: 24, marginTop: 12 }}>
-              尚未送出任何申請或交易。請到對應服務確認辦理。
-            </Text>
-          ) : message.proposals?.length && index < messages.length - 1 ? (
-            <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 12 }}>
-              這是先前的任務建議。若要確認執行狀態，請到對應服務頁面核對。
-            </Text>
-          ) : null}
-        </AICard>
-        </View>
-      ))}
-      {(uid || mode === 'device') ? (
-        <AICard title={mode === 'device' ? '問手機 AI' : '查詢校園即時資料'}>
-          <View style={{ gap: 12 }}>
-            <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 13 }}>
-              可以用手機鍵盤麥克風口述；辨識結果可先修改。手機 AI 只在本機運算，提交校園服務仍需自己確認。
-            </Text>
-            <TextInput
-              accessibilityLabel="詢問校園助理"
-              value={draft}
-              maxLength={1600}
-              multiline
-              editable={!busy}
-              onChangeText={(value) => {
-                if (!lock.current) {
-                  setDraft(value);
-                  setError('');
-                }
-              }}
-              placeholder={mode === 'device' ? '例如：幫我安排三天的報告進度' : '例如：這週有哪些校園活動？'}
-              placeholderTextColor={aiTokens.muted}
-              style={{
-                color: aiTokens.text,
-                borderColor: aiTokens.border,
-                borderWidth: 1,
-                borderRadius: 12,
-                minHeight: 96,
-                padding: 12,
-                textAlignVertical: 'top',
-              }}
-            />
-            {quickActions.length > 0 && typeof navigation?.navigate === 'function' ? (
-              <View style={{ gap: 10, padding: 12, borderRadius: 12, backgroundColor: aiTokens.panel }}>
-                <Text style={{ color: aiTokens.text, fontWeight: '700' }}>
-                  也可以直接使用對應服務
-                </Text>
-                {quickActions.map((action) => (
-                  <AIButton
-                    key={action.destination}
-                    label={'前往' + action.label}
-                    variant="ghost"
-                    disabled={busy || syncBusy}
-                    onPress={() => {
-                      if (!current()) return;
-                      safeNavigate(navigation, action.route);
-                    }}
-                  />
-                ))}
-                <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
-                  只是開啟頁面，提交或付款仍要自行確認。
-                </Text>
-              </View>
-            ) : null}
-            {error ? (
-              <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>
-                {error}
+            ) : (
+              <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>
+                {message.plan ? message.plan.overview : message.content}
               </Text>
-            ) : null}
-            <AIButton
-              label={busy ? '正在查詢…' : error ? '重試查詢' : '送出問題'}
-              disabled={busy || syncBusy || !draft.trim()}
-              onPress={() => void send()}
-            />
-            {busy && mode === 'device' ? (
-              <AIButton
-                label="停止本機回答"
-                variant="ghost"
-                onPress={() => inFlight.current?.abort()}
+            )}
+            {index === messages.length - 1 && message.assignmentRead && currentSense && (
+              <AssignmentReplyActions read={message.assignmentRead} snapshot={currentSense}
+                context={{ userId: uid, schoolId, isCurrent: current, navigation }} disabled={busy || syncBusy}
+                onAsk={(question) => void send({ kind: 'selection', question, checkedAt: currentSense.checkedAt })} />
+            )}
+            {message.plan ? (
+              <CampusEvidencePlanCard
+                plan={message.plan}
+                disabled={busy || syncBusy}
+                navigation={navigation}
+                reminderContext={{
+                  userId: uid,
+                  schoolId,
+                  snapshot: currentSense,
+                  isCurrent: current,
+                }}
+                onOpenRoute={(route: CampusPlanRoute) => {
+                  if (!current()) return;
+                  const destination = VERIFIED_SERVICE_ROUTES[route];
+                  if (destination) safeNavigate(navigation, destination.route);
+                }}
               />
             ) : null}
-          </View>
-        </AICard>
+            {message.source === 'campus' &&
+              index === messages.length - 1 && message.proposals?.map((proposal, proposalIndex) => (
+                <CampusAgentActionReview
+                  key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
+                  proposal={proposal}
+                  userId={uid}
+                  schoolId={schoolId}
+                  isCurrent={current}
+                  onOpenService={typeof navigation?.navigate === 'function'
+                    ? () => safeNavigate(navigation, SERVICE_AFTER_WRITE[proposal.toolName])
+                    : undefined}
+                  onOpenSettings={typeof navigation?.navigate === 'function'
+                    ? () => safeNavigate(navigation, 'AssistantPermissions')
+                    : undefined}
+                />
+              ))}
+            {message.source === 'device' && !message.savedClassRead && (
+              <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
+                {message.tool === 'local-agent'
+                  ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
+                  : message.tool === 'campus-plan'
+                  ? '手機端多步驟規劃 · 資料來源與期限已標示 · 未執行任何寫入'
+                  : message.tool === 'campus-snapshot'
+                  ? '手機規則計算 · 先前主動同步的授權摘要（非即時結果）'
+                  : message.tool
+                    ? '本機規則／已保存資料 · 未進行雲端推論或即時校園查詢'
+                    : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
+              </Text>
+            )}
+            {!message.savedClassRead && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
+              <View style={{ marginTop: 12 }}>
+                <AIButton
+                  label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
+                  variant="ghost"
+                  disabled={busy || syncBusy}
+                  onPress={() => {
+                    const destination = message.route && VERIFIED_SERVICE_ROUTES[message.route];
+                    if (destination) safeNavigate(navigation, destination.route);
+                  }}
+                />
+              </View>
+            ) : !message.savedClassRead && !message.plan && !message.localReads?.length && index > 0 ? (
+              <View style={{ marginTop: 12, gap: 8 }}>
+                {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
+                  .slice(0, 3)
+                  .map((action) => (
+                    <AIButton
+                      key={action.destination}
+                      label={'查看' + action.label}
+                      variant="ghost"
+                      disabled={busy || syncBusy}
+                      onPress={() => safeNavigate(navigation, action.route)}
+                    />
+                  ))}
+              </View>
+            ) : null}
+            {message.requiresService && !message.proposals?.length ? (
+              <Text style={{ color: aiTokens.muted, lineHeight: 24, marginTop: 12 }}>
+                尚未送出任何申請或交易。請到對應服務確認辦理。
+              </Text>
+            ) : message.proposals?.length && index < messages.length - 1 ? (
+              <Text style={{ color: aiTokens.muted, lineHeight: 22, marginTop: 12 }}>
+                這是先前的任務建議。若要確認執行狀態，請到對應服務頁面核對。
+              </Text>
+            ) : null}
+          </AICard>
+        </View>
+      ))}
+      {busy && (
+        <View onLayout={scrollToEntry}>
+          <AICard title={syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
+            <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
+              {activeShortcut?.question ?? draft.trim()}
+            </Text>
+            {syncBusy ? (
+              <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.textSecondary, lineHeight: 21 }}>
+                {syncProgress?.total != null
+                  ? `已核對 ${syncProgress.loaded} / ${syncProgress.total} 筆作業`
+                  : '正在核對校園資料的讀取權限…'}
+              </Text>
+            ) : null}
+          </AICard>
+        </View>
+      )}
+      {mode === 'device' && senseError ? (
+        <Text accessibilityRole="alert" style={{ marginHorizontal: 16, color: aiTokens.textSecondary }}>{senseError}</Text>
       ) : null}
-    </AIDetailScreen>
+      {canAsk && quickActions.length > 0 && typeof navigation?.navigate === 'function' ? (
+        <View style={{ marginHorizontal: 16, gap: 10, padding: 12, borderRadius: 12, backgroundColor: aiTokens.panel }}>
+          <Text style={{ color: aiTokens.text, fontWeight: '700' }}>
+            也可以直接使用對應服務
+          </Text>
+          {quickActions.map((action) => (
+            <AIButton
+              key={action.destination}
+              label={'前往' + action.label}
+              variant="ghost"
+              disabled={busy || syncBusy}
+              onPress={() => {
+                if (!current()) return;
+                safeNavigate(navigation, action.route);
+              }}
+            />
+          ))}
+          <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
+            只是開啟頁面，提交或付款仍要自行確認。
+          </Text>
+        </View>
+      ) : null}
+      {error ? (
+        <View onLayout={scrollToEntry} style={{ marginHorizontal: 16, paddingVertical: 8, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{error}</Text>
+          {activeShortcut && (activeShortcut.kind !== 'selection' || activeShortcut.checkedAt === currentSense?.checkedAt) ? (
+            <AIButton label={activeShortcut.kind !== 'brief' ? `重試「${activeShortcut.question}」`
+                : activeShortcut.question === TODAY_BRIEF ? '重新整理今日重點' : '重新規劃未來七天'} variant="ghost"
+              disabled={busy || syncBusy}
+              onPress={() => void (activeShortcut.kind === 'brief' ? briefPlan(activeShortcut.question) : send(activeShortcut))} />
+          ) : null}
+        </View>
+      ) : null}
+    </AssistantConversationLayout>
   );
 }

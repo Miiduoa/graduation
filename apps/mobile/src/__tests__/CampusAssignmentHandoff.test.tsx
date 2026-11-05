@@ -135,6 +135,7 @@ test('the full assistant wires sync, local plan and exact homework handoff', asy
   });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  fireEvent.press(view.getByText('校園工具'));
   await act(async () => fireEvent.press(view.getByText('今日重點')));
   fireEvent.press(view.getByText('查看這份作業'));
   expect(navigate).toHaveBeenCalledWith('學習', {

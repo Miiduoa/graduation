@@ -1062,6 +1062,7 @@ test.each(['AIChat', 'AIAgentConsole'])(
   async (route) => {
     const { view, navigation } = await mount(HomeStack);
     act(() => navigation.navigate(route));
+    fireEvent.press(view.getByText('校園工具'));
     fireEvent.press(view.getByText('校園即時 · 需網路'));
     fireEvent.changeText(view.getByLabelText('詢問校園助理'), '本週有哪些活動？');
     await act(async () => fireEvent.press(view.getByText('送出問題')));
