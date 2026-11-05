@@ -12,6 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { StoryVideoPlayer, supportsStoryVideo } from './StoryVideoPlayer';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isFirebaseMockMode } from '../../firebase';
@@ -148,16 +149,16 @@ function StorySlide({
   const [playing, setPlaying] = useState(false);
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
+  const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
   const imageFailed = hasImage && failedImage === story.id;
   const ready = !hasImage || loadedImage === story.id || imageFailed;
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
-  const [fill] = useState(() => new Animated.Value(0));
+  const fill = useMemo(() => new Animated.Value(0), [story.id]);
   useEffect(() => {
     remaining.current = STORY_DURATION;
-    fill.setValue(0);
-  }, [story.id, fill]);
+  }, [story.id]);
 
   useEffect(() => {
     if (!playing) return;
@@ -167,7 +168,7 @@ function StorySlide({
     return () => subscription.remove();
   }, [playing]);
   useEffect(() => {
-    if (!playing || !ready) return;
+    if (!playing || !ready || hasVideo) return;
     const start = Date.now();
     const duration = remaining.current;
     const progress = Animated.timing(fill, {
@@ -184,7 +185,7 @@ function StorySlide({
       progress.stop();
       remaining.current = Math.max(0, duration - (Date.now() - start));
     };
-  }, [playing, ready, story.id, nextId, selectStory, fill]);
+  }, [playing, ready, story.id, nextId, selectStory, fill, hasVideo]);
 
   const swipe = useMemo(
     () =>
@@ -201,7 +202,7 @@ function StorySlide({
   );
   const total = group.stories.length;
   const nextLabel = nextId ? '下一則' : '看完了';
-  const playLabel = playing ? '暫停播放' : '自動播放';
+  const playLabel = playing ? '暫停播放' : hasVideo ? '播放影片' : '自動播放';
 
   return (
     <Modal visible animationType="fade" onRequestClose={close}>
@@ -252,10 +253,22 @@ function StorySlide({
           </Pressable>
         </View>
         <View
-          style={[styles.canvas, !hasImage && { backgroundColor: story.bgColor || '#243b35' }]}
+          style={[
+            styles.canvas,
+            !hasImage && !hasVideo && { backgroundColor: story.bgColor || '#243b35' },
+          ]}
           {...swipe.panHandlers}
         >
-          {hasImage && !imageFailed ? (
+          {hasVideo ? (
+            <StoryClip
+              key={story.id}
+              uri={story.mediaUrl}
+              playing={playing}
+              fill={fill}
+              onEnd={() => selectStory(nextId ?? null)}
+              onPause={() => setPlaying(false)}
+            />
+          ) : hasImage && !imageFailed ? (
             <Image
               key={story.id}
               source={{ uri: story.mediaUrl! }}
@@ -286,13 +299,15 @@ function StorySlide({
             onPress={() => selectStory(nextId ?? null)}
           />
         </View>
-        {(hasImage && story.text) || story.poiName ? (
+        {((hasImage || hasVideo) && story.text) || story.poiName ? (
           <ScrollView
             key={story.id}
             style={styles.details}
             contentContainerStyle={styles.detailContent}
           >
-            {hasImage && !!story.text && <Text style={styles.caption}>{story.text}</Text>}
+            {(hasImage || hasVideo) && !!story.text && (
+              <Text style={styles.caption}>{story.text}</Text>
+            )}
             {!!story.poiName && <Text style={styles.counter}>{story.poiName}</Text>}
           </ScrollView>
         ) : null}
@@ -321,6 +336,101 @@ function StorySlide({
   );
 }
 
+function StoryClip({
+  uri,
+  playing,
+  fill,
+  onEnd,
+  onPause,
+}: {
+  uri?: string | null;
+  playing: boolean;
+  fill: Animated.Value;
+  onEnd: () => void;
+  onPause: () => void;
+}) {
+  const [muted, setMuted] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const [positionSeconds, setPositionSeconds] = useState(0);
+  // Native callbacks may arrive after a swipe, close or pause.
+  const current = React.useRef(false);
+  React.useLayoutEffect(() => {
+    current.current = true;
+    return () => {
+      current.current = false;
+    };
+  }, []);
+  if (failed || !uri || !supportsStoryVideo) {
+    return (
+      <View style={styles.clipStatus}>
+        <Text style={styles.stepText}>影片暫時無法播放</Text>
+        {uri && supportsStoryVideo && (
+          <Pressable
+            accessibilityRole="button"
+            style={styles.step}
+            onPress={() => setFailed(false)}
+          >
+            <Text style={styles.stepText}>重新載入影片</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.photo}>
+      <StoryVideoPlayer
+        source={{ uri, overrideFileExtensionAndroid: 'mp4' }}
+        style={styles.photo}
+        accessibilityLabel="限時動態影片"
+        shouldPlay={playing}
+        isMuted={muted}
+        isLooping={false}
+        onError={() => {
+          if (!current.current) return;
+          setMuted(true);
+          setPositionSeconds(0);
+          setDurationSeconds(0);
+          setFailed(true);
+          onPause();
+        }}
+        onReadyForDisplay={({ status }) => {
+          if (current.current && status?.isLoaded && status.durationMillis)
+            setDurationSeconds(Math.ceil(status.durationMillis / 1000));
+        }}
+        onPlaybackStatusUpdate={(status) => {
+          if (
+            !current.current ||
+            !status.isLoaded ||
+            !playing ||
+            AppState.currentState === 'background' ||
+            AppState.currentState === 'inactive'
+          )
+            return;
+          if (status.durationMillis) {
+            setPositionSeconds(Math.floor(status.positionMillis / 1000));
+            fill.setValue(Math.min(1, status.positionMillis / status.durationMillis));
+          }
+          if (status.didJustFinish) onEnd();
+        }}
+      />
+      <View style={styles.clipTools}>
+        <Text style={styles.clipTime}>
+          {durationSeconds ? `${positionSeconds} / ${durationSeconds} 秒` : '載入影片…'}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={muted ? '開啟影片聲音' : '將影片靜音'}
+          style={styles.sound}
+          onPress={() => setMuted(!muted)}
+        >
+          <Ionicons name={muted ? 'volume-mute' : 'volume-high'} color="white" size={20} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   shell: { flex: 1, paddingHorizontal: 12, backgroundColor: '#0b0d0d' },
   progress: { flexDirection: 'row', gap: 4 },
@@ -338,6 +448,19 @@ const styles = StyleSheet.create({
   counter: { color: '#c2cbc8', fontSize: 13 },
   iconButton: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   canvas: { flex: 1, overflow: 'hidden', borderRadius: 16, backgroundColor: '#000' },
+  clipTools: {
+    position: 'absolute',
+    bottom: 8,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#242928',
+    borderRadius: 22,
+    paddingLeft: 12,
+  },
+  clipTime: { color: '#fff', fontSize: 13, fontVariant: ['tabular-nums'] },
+  sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {

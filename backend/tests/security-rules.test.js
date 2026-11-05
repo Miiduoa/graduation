@@ -1531,6 +1531,38 @@ describe('storage security rules', () => {
     await assertFails(upload(alice, 'alice'));
   });
 
+  test('video stories accept an owner’s MP4 and keep the clip private until publication', async () => {
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob']) {
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+      }
+      await db.doc('schools/other/members/carol').set({ status: 'active' });
+    });
+    const alice = testEnv.authenticatedContext('alice');
+    const bob = testEnv.authenticatedContext('bob');
+    const carol = testEnv.authenticatedContext('carol');
+    const folder = 'schools/pu/stories/campus-clip';
+    const put = (client, name, type, ownerUid) => client.storage().ref(`${folder}/${name}`).putString(
+      'clip fixture', 'raw', { contentType: type, customMetadata: { ownerUid } },
+    );
+    await assertFails(put(carol, 'video', 'video/mp4', 'carol'));
+    await assertFails(put(alice, 'image', 'video/mp4', 'alice'));
+    await assertFails(put(alice, 'video', 'image/jpeg', 'alice'));
+    await assertFails(put(alice, 'video', 'video/quicktime', 'alice'));
+    await assertFails(put(alice, 'alternate-clip', 'video/mp4', 'alice'));
+    await assertSucceeds(put(alice, 'video', 'video/mp4', 'alice'));
+    await assertFails(put(bob, 'video', 'video/mp4', 'bob'));
+    const clip = alice.storage().ref(`${folder}/video`);
+    await assertFails(bob.storage().ref(clip.fullPath).getMetadata());
+    const mediaUrl = await assertSucceeds(clip.getDownloadURL());
+    await assertSucceeds(alice.firestore().doc('campusStories/campus-clip').set({
+      schoolId: 'pu', authorUid: 'alice', kind: 'video', mediaUrl, expiresAt: Date.now() + 86_400_000,
+    }));
+    await assertSucceeds(bob.storage().ref(clip.fullPath).getMetadata());
+    await assertFails(carol.storage().ref(clip.fullPath).getMetadata());
+    await assertFails(put(alice, 'video', 'video/mp4', 'alice'));
+  });
+
   test('other members can read only the published story author’s matching media', async () => {
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({ status: 'active' });

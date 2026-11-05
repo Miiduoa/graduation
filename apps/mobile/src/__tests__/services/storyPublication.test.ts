@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
-import { uploadStoryImage } from '../../services/mediaUpload';
+import { uploadStoryImage, uploadStoryVideo } from '../../services/mediaUpload';
 import { markStoryViewed, publishStory, reserveStoryId } from '../../services/stories';
 
 jest.mock('firebase/firestore', () => ({
@@ -106,4 +106,28 @@ test('recovers a committed create after a lost response only for the same active
       .mockResolvedValue({ data: () => ({ ...persisted, ...changed }) } as never);
     await expect(publishStory('reserved', draft)).rejects.toBe(denied);
   }
+});
+
+test('publishes a checked MP4 at the reserved video object with the signed-in owner', async () => {
+  localPhoto('video/mp4', 9500);
+  await uploadStoryVideo('tw-pu', 'reserved', 'alice', 'file:///clip.mp4', 30_000);
+  expect(ref).toHaveBeenCalledWith({}, 'schools/tw-pu/stories/reserved/video');
+  expect(uploadBytes).toHaveBeenCalledWith('storage-ref', expect.anything(), {
+    contentType: 'video/mp4',
+    customMetadata: { ownerUid: 'alice' },
+  });
+});
+
+test.each([
+  ['video/mp4', 42, 30_001],
+  ['video/mp4', 42, NaN],
+  ['video/mp4', 100 * 1024 * 1024, 30_000],
+  ['video/quicktime', 900, 7000],
+  ['video/mp4', 0, 7000],
+] as const)('rejects invalid clip %s/%i/%i before upload', async (mime, bytes, duration) => {
+  localPhoto(mime, bytes);
+  await expect(
+    uploadStoryVideo('pu', 'reserved', 'alice', 'file:///clip', duration),
+  ).rejects.toThrow();
+  expect(uploadBytes).not.toHaveBeenCalled();
 });

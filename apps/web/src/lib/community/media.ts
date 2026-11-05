@@ -2,10 +2,11 @@
  * 校園社群 — 圖片上傳 (Web)
  *
  * 與 mobile/services/campusMedia.ts 對齊：
- *  - 限動存於 schools/{schoolId}/stories/{storyId}/image。
+ *  - 限動存於 schools/{schoolId}/stories/{storyId}/{image|video}。
  *  - 走 Firebase Storage 直寫
  *  - 接受 File 物件（瀏覽器 <input type="file"> 拿到的）；mobile 是 URI string
  */
+import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_BYTES } from '@campus/shared/src/storyVideo';
 import { getApps } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -60,21 +61,28 @@ async function uploadMediaFile(
   return { url, path, contentType };
 }
 
-export function storyImageError(file: File): string | null {
-  if (!file.type.startsWith('image/') || !file.size) return '請選擇一張可讀取的圖片。';
+export function storyMediaError(file: File): string | null {
+  if (file.type === STORY_VIDEO_CONTENT_TYPE) {
+    if (!file.size) return '影片沒有內容，請重新選取。';
+    if (file.size >= STORY_VIDEO_MAX_BYTES) return '影片須小於 100 MB，請換一段較短的影片。';
+    return null;
+  }
+  if (!file.type.startsWith('image/')) return '請選擇照片或 MP4 影片。';
+  if (!file.size) return '請選擇一張可讀取的圖片。';
   if (file.size >= 10 * 1024 * 1024) return '照片須小於 10 MB，請換一張較小的照片。';
   return null;
 }
 
-export async function uploadStoryImage(input: {
+export async function uploadStoryMedia(input: {
   schoolId: string;
   storyId: string;
   uid: string;
   file: File;
 }): Promise<UploadedCampusMedia> {
-  const error = storyImageError(input.file);
+  const error = storyMediaError(input.file);
   if (error) throw new Error(error);
-  return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/image`, input.file, {
+  const kind = input.file.type === STORY_VIDEO_CONTENT_TYPE ? 'video' : 'image';
+  return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/${kind}`, input.file, {
     ownerUid: input.uid,
   });
 }
