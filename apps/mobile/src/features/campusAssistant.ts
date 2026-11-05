@@ -9,6 +9,7 @@ import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AssignmentRead } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
+import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
@@ -129,10 +130,19 @@ export async function askCampusAssistant(input: {
     const classQuery = savedClassQuery(question, lastClass);
     const platform = input.platformTimetable;
     const owner = platform && `nuni:${platform.accountId}`;
+    let choice = input.courseworkChoice;
+    if (platform && (!choice || 'assignmentId' in choice)) {
+      const local = courseworkSnapshotAnswer(lastReply?.courseworkRead, question, platform.accountId,
+        input.scope.schoolId, choice && 'assignmentId' in choice ? choice.assignmentId : undefined);
+      if (local) {
+        if ('content' in local) return { ...local, source: 'device', hasActions: false };
+        choice = local;
+      }
+    }
     const coursework = platform && classCourseworkQuestion(question, !!lastClass?.classes.length);
-    if (platform && (input.courseworkChoice || coursework)) {
+    if (platform && (choice || coursework)) {
       let sourceReply = lastReply;
-      if (!input.courseworkChoice && (coursework !== 'context' || !lastClass)) {
+      if (!choice && (coursework !== 'context' || !lastClass)) {
         const window = coursework === 'next' ? 'next' : 'current';
         const snapshot = await collectOnDeviceSchoolContext({
           uid, schoolId: input.scope.schoolId, schoolName: input.schoolName, platformTimetable: platform,
@@ -145,7 +155,7 @@ export async function askCampusAssistant(input: {
         sourceReply = { role: 'assistant', ...course };
       }
       const work = await abortableCampusRead(() => answerNuniCoursework(sourceReply, platform, input.scope.schoolId,
-        () => input.isCurrent() && platform.isCurrent() && !input.signal?.aborted, input.courseworkRequests, input.courseworkChoice),
+        () => input.isCurrent() && platform.isCurrent() && !input.signal?.aborted, input.courseworkRequests, choice),
       input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
       scopeCheck(input, false);
       assertNotCancelled();

@@ -2,11 +2,13 @@ import React from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
-import { act, cleanup, fireEvent, render } from '@testing-library/react-native/pure';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react-native/pure';
 import { NuniSessionProvider } from '../state/nuniSession';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { personalImportStorageKey } from '../services/personalImports';
+import type { NuniAssignment } from '@campus/shared/src/nuni';
+import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
 import type { StoredTimetable } from '../services/personalTimetable';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
@@ -15,6 +17,7 @@ let mockStored: string | null;
 const mockRequest = jest.fn();
 const mockAssignmentBff = jest.fn();
 jest.unmock('@react-navigation/native');
+jest.mock('expo-crypto', () => ({ randomUUID: () => '00000000-0000-4000-8000-000000000001' }));
 jest.mock('expo-secure-store', () => ({
   isAvailableAsync: async () => true,
   getItemAsync: async () => mockStored,
@@ -167,12 +170,12 @@ test('a conversation left open at session expiry hides the previous class and ca
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
 });
 
-test('the assistant opens the exact assignment in the linked workspace even when another joined class has the same name', async () => {
+async function linkedWorkspaceFixture() {
   const course = {
     id: 'cw_11111111-1111-4111-8111-111111111111', title: '資料庫管理', memberRole: 'student', state: 'active',
   };
   const other = { ...course, id: 'cw_22222222-2222-4222-8222-222222222222' };
-  const assignment = {
+  const assignment: NuniAssignment = {
     id: 'cwa_11111111-1111-4111-8111-111111111111', workspaceId: course.id, title: '小考報告',
     instructions: '請上傳這週的關聯模型。', state: 'open', unitId: null, unitTitle: null, closedAt: null,
     createdAt: '2026-11-03T08:00:00Z', dueAt: '2026-11-06T08:00:00Z', submissionCount: 0, mySubmission: null,
@@ -198,6 +201,11 @@ test('the assistant opens the exact assignment in the linked workspace even when
     if (path === `class-workspaces/${course.id}/assignments`) return { assignments: [assignment] };
     throw Error('unexpected assignment read ' + path);
   });
+  return { course, other, assignment };
+}
+
+test('the assistant opens the exact assignment in the linked workspace even when another joined class has the same name', async () => {
+  const { course, other, assignment } = await linkedWorkspaceFixture();
   const navigation = createNavigationContainerRef<PreAuthStackParamList>();
   const screen = render(
     <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
@@ -237,4 +245,84 @@ test('opening an assistant link from another account drops the previous course a
   }));
   await screen.findByText('已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。');
   expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(previousCourse))).toBe(false);
+});
+
+test('a confirmed submission and withdrawal invalidate the chat receipt until the exact assignment is checked again', async () => {
+  jest.spyOn(assignmentFileSubmit, 'assignmentFileSubmitEnabledNative').mockReturnValue(true);
+  const { course, assignment } = await linkedWorkspaceFixture();
+  const other = { ...assignment, id: 'cwa_33333333-3333-4333-8333-333333333333', title: '讀書心得' };
+  const listPath = `class-workspaces/${course.id}/assignments`;
+  const itemPath = `${listPath}/${assignment.id}`;
+  const body = '只留在工作區的繳交內容';
+  const submittedAt = '2026-11-05T01:45:00Z';
+  let submitted = false;
+  mockAssignmentBff.mockImplementation(async (path, _session, input) => {
+    if (path === `${itemPath}/submit-files` && input?.body === body) submitted = true;
+    else if (path === `${itemPath}/withdraw-submission` && input?.submittedAt === submittedAt) submitted = false;
+    else if (path !== listPath) throw Error(`unexpected BFF route: ${path}`);
+    const item: NuniAssignment = { ...assignment, mySubmission: submitted ? {
+      assignmentId: assignment.id, platformAccountId: account, displayName: '測試學生',
+      body, state: 'submitted', submittedAt, teacherFeedback: null, reviewedAt: null,
+    } : null };
+    return path === listPath ? { assignments: [other, item] } : item;
+  });
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  fireEvent.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  fireEvent.press(await screen.findByText('現在有課嗎？'));
+  fireEvent.press(await screen.findByRole('button', { name: '查這堂課的作業' }));
+  fireEvent.press(await screen.findByRole('button', { name: /查看作業.*小考報告/ }));
+  await screen.findByLabelText('作業繳交區：小考報告');
+  fireEvent.changeText(screen.getByLabelText('作業內容：小考報告'), body);
+  fireEvent.press(within(screen.getByTestId(`assignment-${assignment.id}`)).getByRole('button', { name: '繳交作業' }));
+  await screen.findByText('已收到伺服器繳交紀錄。');
+  act(() => navigation.goBack());
+  const checkAgain = async (status: RegExp) => {
+    const refresh = (await screen.findAllByRole('button', { name: '重新核對繳交紀錄' })).at(-1)!;
+    const reads = mockAssignmentBff.mock.calls.filter(([path]) => path === listPath).length;
+    fireEvent.press(refresh);
+    await screen.findByText(status);
+    expect(mockAssignmentBff.mock.calls.filter(([path]) => path === listPath)).toHaveLength(reads + 1);
+    expect(screen.queryByText(body)).toBeNull();
+  };
+  await checkAgain(/^繳交於 /);
+  fireEvent.press(screen.getAllByRole('button', { name: /查看作業.*小考報告/ }).at(-1)!);
+  fireEvent.press(await screen.findByRole('button', { name: '撤回繳交' }));
+  await screen.findByText('已撤回，截止前可以重新繳交。');
+  act(() => navigation.goBack());
+  await checkAgain(/^尚無繳交紀錄 · 仍在收件$/);
+  expect(submitted).toBe(false);
+});
+
+test('after opening a namesake from an older list, a spoken receipt question follows that item across navigation', async () => {
+  const { course, assignment } = await linkedWorkspaceFixture();
+  const secondId = 'cwa_33333333-3333-4333-8333-333333333333';
+  const second: NuniAssignment = { ...assignment, id: secondId, dueAt: null, mySubmission: {
+    assignmentId: secondId, platformAccountId: account, displayName: '測試學生', state: 'submitted',
+    body: '工作區內的私密作答', teacherFeedback: null, reviewedAt: null, submittedAt: '2026-11-03T06:08:09Z',
+  } };
+  mockAssignmentBff.mockResolvedValue({ assignments: [assignment, second] });
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  fireEvent.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  fireEvent.press(await screen.findByText('現在有課嗎？'));
+  fireEvent.press(await screen.findByRole('button', { name: '查這堂課的作業' }));
+  fireEvent.press(await screen.findByRole('button', { name: '哪個最急？' }));
+  fireEvent.press(await screen.findByRole('button', { name: /查看先前的作業：小考報告，已繳交/ }));
+  await screen.findByLabelText('作業繳交區：小考報告');
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({ workspaceId: course.id, assignmentId: secondId });
+  act(() => navigation.goBack());
+  const reads = mockAssignmentBff.mock.calls.length;
+  const oldSnapshots = await screen.findAllByText(/^繳交於 .*下午2:08:09/);
+  fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '我交了嗎？');
+  await act(async () => fireEvent.press(screen.getByText('送出問題')));
+  expect(screen.getAllByText(/^繳交於 .*下午2:08:09/)).toHaveLength(oldSnapshots.length + 1);
+  expect(screen.queryByText(second.mySubmission!.body)).toBeNull();
+  expect(mockAssignmentBff).toHaveBeenCalledTimes(reads);
+  fireEvent.press(screen.getByRole('button', { name: /查看作業：小考報告，已繳交/ }));
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({ workspaceId: course.id, assignmentId: secondId });
 });

@@ -6,9 +6,11 @@ import { AssistantConversationLayout, type AssistantPanel } from './AssistantCon
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
-import { NuniCourseworkReply } from './NuniCourseworkReply';
+import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
 import { classCourseworkQuestion, type CourseworkChoice, type CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
+import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
+import { subscribeNuniAssignmentChanges } from '../services/nuniAssignmentChanges';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import { AssistantClassNowHint } from './AssistantClassNowHint';
 import { useAssistantSessionExpiry } from '../state/useAssistantSessionExpiry';
@@ -112,6 +114,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
       key={scope}
       uid={uid}
       platformTimetable={platformTimetable}
+      platformContext={context}
       courseworkRequests={platformTimetable && context && platform ? {
         request: (path, input) => platform.request(path, context, input),
         bffRequest: (path) => platform.bffRequest(path, context),
@@ -133,6 +136,7 @@ type AssistantShortcut =
 function AssistantConversation({
   uid,
   platformTimetable,
+  platformContext,
   courseworkRequests,
   schoolId,
   schoolName,
@@ -142,6 +146,7 @@ function AssistantConversation({
 }: {
   uid: string;
   platformTimetable?: PlatformTimetableAccess;
+  platformContext?: string;
   courseworkRequests?: CourseworkRequests;
   schoolId: string;
   schoolName: string;
@@ -204,6 +209,19 @@ function AssistantConversation({
       inFlight.current = null;
     };
   }, []);
+  const changesDuringRead = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    if (!platformTimetable) return;
+    return subscribeNuniAssignmentChanges(({ accountId, context, workspaceId, assignmentId }) => {
+      if (accountId !== platformTimetable.accountId || context !== platformContext || !platformTimetable.isCurrent()) return;
+      changesDuringRead.current?.set(workspaceId, assignmentId);
+      setMessages((previous) => previous.map((message) => {
+        const read = message.courseworkRead;
+        return read?.result.kind === 'assignments' && read.result.workspace.id === workspaceId
+          ? { ...message, courseworkRead: { ...read, changedAssignmentId: assignmentId } } : message;
+      }));
+    });
+  }, [platformContext, platformTimetable]);
   const current = () => mounted.current && isScopeCurrent() && (!platformTimetable || platformTimetable.isCurrent());
   useEffect(() => {
     if (platformTimetable) return;
@@ -370,7 +388,10 @@ function AssistantConversation({
     setError('');
     const controller = new AbortController();
     inFlight.current = controller;
-    const next: CampusAssistantMessage[] = [...messages, { role: 'user', content: question }];
+    const duringRead = platformTimetable ? new Map<string, string>() : null;
+    changesDuringRead.current = duringRead;
+    const asked: CampusAssistantMessage = { role: 'user', content: question };
+    const next = [...messages, asked];
     try {
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
@@ -392,8 +413,10 @@ function AssistantConversation({
         return;
       }
       if (current()) {
-        setMessages([
-          ...next,
+        const read = reply.courseworkRead;
+        const changed = read?.result.kind === 'assignments' && duringRead?.get(read.result.workspace.id);
+        setMessages((previous) => [
+          ...previous, asked,
           {
             role: 'assistant',
             content: reply.content,
@@ -405,7 +428,7 @@ function AssistantConversation({
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
-            courseworkRead: reply.courseworkRead,
+            courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
             proposals: reply.proposals,
           },
         ]);
@@ -437,6 +460,7 @@ function AssistantConversation({
         }
       }
     } finally {
+      changesDuringRead.current = null;
       if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
       if (current()) setBusy(false);
@@ -650,17 +674,31 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.courseworkRead ? '課堂作業' : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+          <AICard title={message.courseworkRead ? courseworkReplyTitle(message.courseworkRead) : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
             {platformTimetable && message.courseworkRead ? (
               <NuniCourseworkReply read={message.courseworkRead} latest={index === messages.length - 1}
                 busy={busy || syncBusy}
                 onSelect={(choice, label) => void send({ kind: 'coursework', choice, question: label })}
+                onAsk={(question) => void send({ kind: 'coursework', question })}
                 onRetry={() => void send({ kind: 'coursework', question: CLASS_WORK })}
                 onCheckClass={() => void send({ kind: 'class', question: message.courseworkRead?.anchor.currentAt ? CURRENT_CLASS : NEXT_CLASS })}
                 onLink={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
                 onOpen={(workspaceId, assignmentId) => {
-                  if (current()) safeNavigate(navigation, 'NuniWorkspace', {
+                  if (!current() || !safeNavigate(navigation, 'NuniWorkspace', {
                     tab: 'courses', workspaceId, assignmentId, assistantAccountId: platformTimetable.accountId,
+                  })) return;
+                  setMessages((previous) => {
+                    const entry = previous[index];
+                    const read = entry?.courseworkRead;
+                    if (read?.result.kind !== 'assignments') return previous;
+                    if (index === previous.length - 1) return [...previous.slice(0, index),
+                      { ...entry, courseworkRead: { ...read, openedAssignmentId: assignmentId } }];
+                    const resumed = resumeOpenedCoursework(previous, read, assignmentId);
+                    const item = read.result.assignments.find((row) => row.id === assignmentId);
+                    if (!item || !resumed) return previous;
+                    return [...previous, { role: 'user', content: `查看作業：${item.title}` },
+                      { role: 'assistant', source: 'device', tool: 'saved-timetable',
+                        content: resumed.view?.message ?? '請重新核對這份作業。', courseworkRead: resumed }];
                   });
                 }} />
             ) : message.savedClassRead ? (

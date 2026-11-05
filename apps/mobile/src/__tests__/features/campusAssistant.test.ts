@@ -1,3 +1,6 @@
+import { resumeOpenedCoursework } from '../../features/nuniCourseworkSnapshot';
+import type { CourseworkRead, CourseworkChoice } from '../../features/nuniCourseworkFollowUp';
+import type { NuniClassCoursework } from '../../services/nuniClassCoursework';
 import { httpsCallable } from 'firebase/functions';
 import {
   askCampusAssistant,
@@ -934,4 +937,133 @@ describe('nuni class to coursework', () => {
       expect(load).not.toHaveBeenCalled();
     },
   );
+  describe('follow-ups on an already read assignment list', () => {
+    const stamp = '2026-11-05T01:45:00Z';
+    beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(Date.parse(stamp)));
+    afterEach(() => jest.restoreAllMocks());
+    const row = { id: 'a', title: '設計報告', state: 'open' as const, submittedAt: null, dueAt: '2026-11-03T10:00:00+08:00' };
+    const snapshot: Extract<NuniClassCoursework, { kind: 'assignments' }> = {
+      kind: 'assignments', workspace: { id: 'linked', title: '資料庫' }, limited: true,
+      assignments: [row, { ...row, id: 'b', title: '讀書心得' },
+        { ...row, id: 'c', title: '今天的作業', dueAt: stamp },
+        { ...row, id: 'd', title: '設計報告', submittedAt: '2026-11-02T00:01:00Z' },
+        { ...row, id: 'e', title: '延伸作業', dueAt: null },
+        { ...row, id: 'f', title: '練習', state: 'closed', dueAt: '2026-10-01T00:00:00Z' }],
+    };
+    const read: CourseworkRead = {
+      checkedAt: stamp, anchor: { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null },
+      result: snapshot,
+    };
+    const ask = (question: string, previous = read, courseworkChoice?: CourseworkChoice) => askCampusAssistant({
+      ...base(), courseworkChoice, messages: [
+        { role: 'assistant', content: '課程作業', courseworkRead: previous }, { role: 'user', content: question },
+      ],
+    });
+
+    test('priority keeps tied open overdue items and next deadline includes exact now; projections never touch data sources', async () => {
+      const remote = openWork();
+      const urgent = await ask('哪個最急？');
+      expect(urgent.courseworkRead).toMatchObject({ checkedAt: stamp, result: { limited: true }, view: { kind: 'priority', ids: ['a', 'b'] } });
+      const next = await ask('下一個要截止的是哪個？', urgent.courseworkRead!);
+      expect(next.courseworkRead?.view).toMatchObject({ ids: ['c'] });
+      const receipt = await ask('我交了嗎？', next.courseworkRead!);
+      expect(receipt.courseworkRead?.view).toMatchObject({ kind: 'receipt', ids: ['c'] });
+      expect(receipt.content).toContain('仍在收件');
+      const list = await ask('回到這門課的作業', receipt.courseworkRead!);
+      expect(list.courseworkRead?.view).toBeUndefined();
+      expect(list.courseworkRead?.result).toBe(snapshot);
+      expect(remote).not.toHaveBeenCalled();
+      expect(require('../../services/onDeviceSchoolContext').collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+      expect(localLLM.generate).not.toHaveBeenCalled();
+    });
+    test('receipt asks for an exact item, resolves ordinals within a title collision, and preserves the receipt timestamp', async () => {
+      const remote = openWork();
+      const initial = await ask('我交了嗎？');
+      expect(initial.courseworkRead?.view?.kind).toBe('choose-receipt');
+      const collision = await ask('「設計報告」我交了嗎？', initial.courseworkRead!);
+      expect(collision.courseworkRead?.view?.ids).toEqual(['a', 'd']);
+      const byOrdinal = await ask('第二份', collision.courseworkRead!);
+      expect(byOrdinal.courseworkRead?.view).toMatchObject({ kind: 'receipt', ids: ['d'] });
+      expect(byOrdinal.content).toMatch(/2026\/11\/2.*8:01/);
+      const again = await ask('那這份交了沒？', byOrdinal.courseworkRead!);
+      expect(again.courseworkRead?.view?.ids).toEqual(['d']);
+      const byId = await ask('選擇', collision.courseworkRead!, { assignmentId: 'a' });
+      expect(byId.courseworkRead?.view?.ids).toEqual(['a']);
+      expect((await ask('選擇', collision.courseworkRead!, { assignmentId: 'b' })).courseworkRead).toBeUndefined();
+      expect(remote).not.toHaveBeenCalled();
+    });
+    test('an opened row is a referent but an explicit title takes precedence and returning to list forgets the open row', async () => {
+      const previous = { ...read, openedAssignmentId: 'd' };
+      expect((await ask('我交了嗎？', previous)).courseworkRead?.view?.ids).toEqual(['d']);
+      expect((await ask('讀書心得交了嗎？', previous)).courseworkRead?.view?.ids).toEqual(['b']);
+      const list = (await ask('回到這門課的作業', previous)).courseworkRead!;
+      expect((await ask('我交了嗎？', list)).courseworkRead?.view?.kind).toBe('choose-receipt');
+    });
+    test('an actual submission change forces a new read of the same assignment ID, even when two names are identical', async () => {
+      const freshRow = { ...row, submittedAt: '2026-11-05T02:00:00Z' };
+      const remote = openWork().mockResolvedValue({ ...snapshot, assignments: [snapshot.assignments[3], freshRow] });
+      const refreshed = await ask('我交了嗎？', { ...read, openedAssignmentId: 'a', changedAssignmentId: 'a' });
+      expect(remote.mock.lastCall?.[0]).toMatchObject({ expectedLinkedWorkspaceId: 'linked' });
+      expect(refreshed.courseworkRead?.view).toMatchObject({ ids: ['a'], kind: 'receipt' });
+      expect(refreshed.content).toMatch(/2026\/11\/5.*10:00/);
+      expect(refreshed.courseworkRead?.changedAssignmentId).toBeUndefined();
+      remote.mockResolvedValue({ ...snapshot, assignments: [snapshot.assignments[3]] });
+      const lost = await ask('重新核對', read, { refreshAssignmentId: 'a' });
+      expect(lost.courseworkRead?.result.kind).toBe('changed');
+      expect(lost.content).not.toContain('設計報告');
+    });
+    test('retry after a failed exact-item refresh stays on the same workspace and item', async () => {
+      const remote = openWork().mockResolvedValueOnce({ kind: 'unavailable' }).mockResolvedValueOnce(snapshot);
+      const failed = await ask('重新核對', read, { refreshAssignmentId: 'd' });
+      expect(failed.courseworkRead).toMatchObject({ result: { kind: 'unavailable' }, retryAssignmentId: 'd' });
+      const retry = await ask('這堂課有什麼作業？', failed.courseworkRead!);
+      expect(retry.courseworkRead?.view).toMatchObject({ kind: 'receipt', ids: ['d'] });
+      expect(remote.mock.lastCall?.[0]).toMatchObject({ expectedLinkedWorkspaceId: 'linked' });
+    });
+    test('dirty generic priority does not recommend stale data and unrecognized target IDs cannot cause a remote read', async () => {
+      const remote = openWork();
+      const dirty = { ...read, changedAssignmentId: 'a' };
+      expect((await ask('哪份最急？', dirty)).content).toContain('重新查詢');
+      expect((await ask('確認', dirty, { refreshAssignmentId: 'unknown' })).courseworkRead).toBeUndefined();
+      expect(remote).not.toHaveBeenCalled();
+    });
+    test('unknown deadlines do not outrank known ones and closed/submitted work never appears as pending', async () => {
+      const only = (index: number) => ({ ...read, result: { ...snapshot, assignments: [snapshot.assignments[index]] } });
+      expect((await ask('哪份最急？', only(4))).content).toContain('無法依截止時間排序');
+      expect((await ask('哪份快截止？', only(0))).courseworkRead?.view?.ids).toEqual([]);
+      expect((await ask('哪份最急？', only(5))).courseworkRead?.view?.ids).toEqual([]);
+      expect((await ask('哪份最急？', only(3))).courseworkRead?.view?.ids).toEqual([]);
+    });
+    test('elapsed deadlines do not stay upcoming while the source and submission timestamps remain unchanged', async () => {
+      const remote = openWork();
+      jest.mocked(Date.now).mockReturnValue(Date.parse('2026-11-06T01:45:00Z'));
+      const reply = await ask('哪個最快截止？');
+      expect(reply.courseworkRead).toMatchObject({ checkedAt: stamp, view: {
+        kind: 'priority', ids: [], rankedAt: '2026-11-06T01:45:00.000Z',
+      } });
+      expect(remote).not.toHaveBeenCalled();
+    });
+    test('opening a historical assignment cannot revive an omitted item or a later failed source as a receipt', () => {
+      const latest: CourseworkRead = { ...read, checkedAt: '2026-11-05T01:48:00Z',
+        result: { ...snapshot, assignments: [row] } };
+      const history = [{ courseworkRead: read }, { courseworkRead: latest }];
+      expect(resumeOpenedCoursework(history, read, 'd')).toMatchObject({
+        checkedAt: latest.checkedAt, view: { kind: 'choose-receipt', ids: [] },
+      });
+      const failed: CourseworkRead = { ...read, result: { kind: 'unavailable' }, expectedLinkedWorkspaceId: snapshot.workspace.id };
+      expect(resumeOpenedCoursework([...history, { courseworkRead: failed }], read, 'd')).toMatchObject({
+        result: { kind: 'unavailable' }, retryAssignmentId: 'd',
+      });
+    });
+    test.each([{ owner: 'nuni:other' }, { schoolId: 'ncku' }, { uid: 'legacy' }])('an invalid scope cannot project private coursework %j', async (patch) => {
+      const remote = openWork();
+      const wrong = { ...read, anchor: { ...read.anchor, ...patch } };
+      const reply = await ask('哪份最急？', wrong);
+      expect(reply.courseworkRead).toBeUndefined();
+      expect(reply.content).not.toContain('設計報告');
+      expect((await ask('確認', wrong, { refreshAssignmentId: 'a' })).courseworkRead).toBeUndefined();
+      expect(remote).not.toHaveBeenCalled();
+    });
+  });
+
 });

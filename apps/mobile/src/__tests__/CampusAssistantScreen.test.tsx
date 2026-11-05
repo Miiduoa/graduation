@@ -1209,3 +1209,76 @@ test('course choices show reviewed class details, verify the selected ID, and ma
   expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未繳交/ })).toBeTruthy();
   expect(view.getByRole('button', { name: /查看作業：練習二，已繳交/ })).toBeTruthy();
 });
+
+describe('class assignment follow-ups in the nuni timetable assistant', () => {
+  const anchor = { uid: '', owner: 'nuni:student-b', schoolId: 'pu', updatedAt: null,
+    classes: [{ courseId: 'import:db', term: '115|1', name: '資料庫', room: 'A2', date: '2026-11-05', startTime: '10:10', endTime: '12:00' }] };
+  const result = { kind: 'assignments' as const, limited: true, workspace: { id: 'db-class', title: '資料庫' },
+    assignments: [
+      { id: 'first', title: '週記', state: 'open' as const, dueAt: '2026-11-04T00:00:00Z', submittedAt: null },
+      { id: 'second', title: '週記', state: 'open' as const, dueAt: '2026-11-06T12:00:00Z', submittedAt: '2026-11-04T05:20:55Z' },
+    ] };
+  const checkedAt = '2026-11-05T01:45:00Z';
+  const reply = (extra: object = {}) => ({
+    source: 'device', content: '資料庫的課堂作業', courseworkRead: { anchor, checkedAt, result, ...extra },
+  });
+  beforeEach(() => usePlatformFixture('student-b'));
+
+  test('clarifies same-title receipts, preserves exact selection, keeps the time of the source read and opens that assignment', async () => {
+    const navigate = jest.fn();
+    request.mockResolvedValueOnce(reply())
+      .mockResolvedValueOnce(reply({ view: { kind: 'choose-receipt', ids: ['first', 'second'], message: '請選擇要核對的作業。' } }))
+      .mockResolvedValueOnce(reply({ view: { kind: 'receipt', ids: ['second'], message: '週記有繳交紀錄。' } }))
+      .mockResolvedValueOnce(reply());
+    const screen = render(<CampusAssistantScreen route={platformRoute}
+      navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace'] }) }} />);
+    const input = screen.getByLabelText('詢問校園助理');
+    fireEvent.changeText(input, '這堂課有什麼作業？');
+    await act(async () => fireEvent.press(screen.getByText('送出問題')));
+    fireEvent.changeText(input, '保留草稿');
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '我交了嗎？' })));
+    expect(screen.getByText('請選擇要核對的作業。')).toBeTruthy();
+    const second = screen.getByRole('button', { name: /選擇作業：第 2 份，週記，截止.*11\/6/ });
+    await act(async () => fireEvent.press(second));
+    expect(request.mock.calls[2][0].courseworkChoice).toEqual({ assignmentId: 'second' });
+    expect(screen.getByText(/繳交於 .*11\/4.*20:55/)).toBeTruthy();
+    expect(input.props.value).toBe('保留草稿');
+    fireEvent.press(screen.getByRole('button', { name: /查看作業：週記，已繳交.*繳交於/ }));
+    expect(navigate).toHaveBeenLastCalledWith('NuniWorkspace', {
+      tab: 'courses', workspaceId: 'db-class', assignmentId: 'second', assistantAccountId: 'student-b',
+    });
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '回到這門課的作業' })));
+    expect(request.mock.calls[3][0].messages.at(-1).content).toBe('回到這門課的作業');
+    expect(screen.getAllByRole('button', { name: /^查看作業：週記/ })).toHaveLength(2);
+  });
+
+  test('prioritization displays only the identified assignment and keeps the capped-source notice', async () => {
+    request.mockResolvedValueOnce(reply())
+      .mockResolvedValueOnce(reply({ view: { kind: 'priority', ids: ['first'], message: '最早逾期、仍在收件的作業。' } }));
+    const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
+    await act(async () => fireEvent.press(screen.getByText('送出問題')));
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '哪個最急？' })));
+    expect(screen.getByText('優先處理的作業')).toBeTruthy();
+    expect(screen.getByText('最早逾期、仍在收件的作業。')).toBeTruthy();
+    expect(screen.getAllByText(/已達平台單次查詢上限/)).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^查看作業：週記/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /^查看作業：週記，已逾期/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '我交了嗎？' })).toBeTruthy();
+  });
+
+  test('a changed assignment only offers a fresh read, keeps its exact destination and suppresses a stale receipt claim', async () => {
+    request.mockResolvedValueOnce(reply({ changedAssignmentId: 'first', openedAssignmentId: 'first',
+      view: { kind: 'receipt', ids: ['first'], message: '舊的收據回答' } }))
+      .mockResolvedValueOnce(reply());
+    const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
+    await act(async () => fireEvent.press(screen.getByText('送出問題')));
+    expect(screen.getByText('作業已更新，這是上次查詢的紀錄。')).toBeTruthy();
+    expect(screen.queryByText('舊的收據回答')).toBeNull();
+    expect(screen.queryByRole('button', { name: '我交了嗎？' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '哪個最急？' })).toBeNull();
+    await act(async () => fireEvent.press(screen.getByRole('button', { name: '重新核對繳交紀錄' })));
+    expect(request.mock.calls[1][0].courseworkChoice).toEqual({ refreshAssignmentId: 'first' });
+  });
+});

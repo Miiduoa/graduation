@@ -77,6 +77,7 @@ import {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
+import { notifyNuniAssignmentChanged } from '../../services/nuniAssignmentChanges';
 import type { NativeNuniSession } from '../../services/nuniSessionController';
 import type {
   NuniRecentTeacherFeedback,
@@ -757,6 +758,9 @@ function CourseScope({
           id={selected}
           classes={classes}
           classroom={classroom}
+          onAssignmentChanged={(assignmentId) => notifyNuniAssignmentChanged({
+            accountId: session.platformAccountId, context: session.context, workspaceId: selected, assignmentId,
+          })}
           onBack={() => {
             pendingSearchReturn.current = searchOffset.current;
             searchOffset.current = null;
@@ -1113,6 +1117,7 @@ function CourseDetail({
   id,
   classes,
   classroom,
+  onAssignmentChanged,
   onBack,
   initialAssignmentId,
   initialMaterialId,
@@ -1127,6 +1132,7 @@ function CourseDetail({
   id: string;
   classes: Classes;
   classroom: ReturnType<typeof createNuniClassroom>;
+  onAssignmentChanged(assignmentId: string): void;
   onBack(): void;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -1436,7 +1442,10 @@ function CourseDetail({
     targetSeekCancelled,
   ]);
   const saveActivity = (item: Activity) => {
-    if ('instructions' in item) assignmentRevision.current += 1;
+    if ('instructions' in item) {
+      assignmentRevision.current += 1;
+      onAssignmentChanged(item.id);
+    }
     result.commit(
       (current) =>
         current
