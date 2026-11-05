@@ -77,6 +77,59 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
   };
 }
 
+async function liveForegroundCurrent(
+  status: 401 | 409,
+  code: string,
+): Promise<{
+  controller: NuniSessionController;
+  storage: ReturnType<typeof setup>['storage'];
+  persisted: () => string | null;
+  context: string;
+  finishRead: () => Promise<void>;
+}> {
+  const { controller, request, storage, persisted } = setup(stored());
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  const pending = deferred<unknown>();
+  request.mockImplementationOnce(() => pending.promise);
+  const reading = controller.request('class-workspaces', context);
+  const rejected = expect(reading).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  const signal = request.mock.calls.at(-1)![3]!;
+  expect(signal.aborted).toBe(false);
+  let settle!: (reason: unknown) => void;
+  const current = new Promise<unknown>((_ok, fail) => {
+    settle = fail;
+  });
+  const before = request.mock.calls.filter(([path]) => path === 'sessions/current').length;
+  request.mockImplementationOnce(() => current);
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && request.mock.calls.filter(([path]) => path === 'sessions/current').length === before; i++) {
+    await Promise.resolve();
+  }
+  expect(controller.state).toMatchObject({
+    loading: false,
+    session: expect.objectContaining({ platformAccountId: account, context }),
+  });
+  expect(controller.isSessionCurrent(account, context)).toBe(true);
+  expect(signal.aborted).toBe(false);
+  settle(new NuniError(status, code));
+  await refresh;
+  expect(controller.state.session).toBeNull();
+  expect(signal.aborted).toBe(true);
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+  return {
+    controller,
+    storage,
+    persisted,
+    context,
+    finishRead: async () => {
+      pending.resolve({ workspaces: [] });
+      await rejected;
+    },
+  };
+}
+
 it('exposes a restored principal only after server verification, never from storage', async () => {
   const { controller, request } = setup(stored());
   const current = deferred<unknown>();
@@ -138,6 +191,20 @@ it('keeps an unexpired verified session across a foreground refresh and clears i
   expect(controller.state.session).toBeNull();
   expect(controller.state.error).toBe('登入已逾時，請重新登入。');
   expect(controller.isSessionCurrent(account, context)).toBe(false);
+});
+
+it('forgets a live session when foreground refresh sees PLATFORM_SESSION_INVALID', async () => {
+  const closed = await liveForegroundCurrent(401, 'PLATFORM_SESSION_INVALID');
+  expect(closed.storage.clear).toHaveBeenCalled();
+  expect(closed.persisted()).toBeNull();
+  await closed.finishRead();
+});
+
+it('drops a live session when foreground refresh sees a 409 current-session conflict', async () => {
+  const closed = await liveForegroundCurrent(409, 'SESSION_CHANGED');
+  expect(closed.controller.state.error).not.toBe('');
+  expect(closed.controller.isSessionCurrent(account, closed.context)).toBe(false);
+  await closed.finishRead();
 });
 
 it('does not expose offline cached identity and allows a verified retry', async () => {
