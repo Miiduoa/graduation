@@ -124,10 +124,8 @@ function AssistantConversation({
     Array<CampusAssistantMessage & {
       requiresService?: boolean;
       source?: CampusAssistantMode;
-      tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
       plan?: CampusEvidencePlan;
       localReads?: LocalCampusReadResult[];
-      route?: string;
       proposals?: CampusAgentWriteProposal[];
     }>
   >([]);
@@ -573,6 +571,7 @@ function AssistantConversation({
             <View style={{ gap: 6, marginTop: 10 }}>
               {(mode === 'device'
                 ? ['請依手機儲存的課表整理學習安排', ...(currentSense ? ['我還有哪些作業待交？'] : []),
+                  ...(currentSense?.announcements.status === 'available' ? ['今天有哪些校園公告？'] : []),
                   '幫我把期末報告拆成可以完成的步驟']
                 : ['這週有哪些校園活動？', '最近有哪些校園公告？']
               ).map((question) => (

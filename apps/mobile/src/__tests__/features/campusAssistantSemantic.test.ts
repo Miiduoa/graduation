@@ -175,3 +175,13 @@ test('does not reload or steal another screen\'s model after selection', async (
   expect(mockLoad).not.toHaveBeenCalled();
   expect(mockGenerate).toHaveBeenCalledTimes(1);
 });
+
+test.each(['幫我翻譯這則公告', '我有哪些私訊通知？'])('%s does not give the model unrelated synced titles', async (content) => {
+  mockGenerate.mockResolvedValueOnce({ content: '請提供要處理的內容。', finishReason: 'stop' });
+  const result = await askCampusAssistant({ ...request(), messages: [{ role: 'user', content }] });
+  expect(result.localReads).toBeUndefined();
+  expect(mockGenerate).toHaveBeenCalledTimes(1);
+  const { formatOnDeviceSchoolPrompt } = require('../../services/onDeviceSchoolContext');
+  expect(formatOnDeviceSchoolPrompt).toHaveBeenCalledWith(expect.anything(), null);
+  expect(httpsCallable).not.toHaveBeenCalled();
+});

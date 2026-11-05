@@ -644,3 +644,46 @@ test('a room follow-up from another scope never asks the local store to resolve 
   expect(result.savedClassRead).toBeUndefined();
   expect(result.content).not.toContain(classOccurrence.name);
 });
+
+test('a date follow-up re-reads announcements from the current authorized snapshot without a model', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-01T16:04:00Z'));
+  try {
+    const scope = { ...input(), mode: 'device' as const };
+    const senseSnapshot = {
+      userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'unavailable' as const, count: null },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      announcements: { status: 'available' as const, items: [
+        { title: '昨日停水', publishedAt: '2026-11-01T15:59:00Z' },
+        { title: '今日復水', publishedAt: '2026-11-01T16:00:00Z' },
+      ] },
+    };
+    const initial = { role: 'user' as const, content: '今天有哪些公告？' };
+    const answer = await askCampusAssistant({ ...scope, senseSnapshot, messages: [initial] });
+    expect(answer.content).toContain('今日復水');
+    expect(answer.content).not.toContain('昨日停水');
+    const history = [initial, { role: 'assistant' as const, ...answer }];
+    const messages = [...history, { role: 'user' as const, content: '那昨天呢？' }];
+    const yesterday = await askCampusAssistant({ ...scope, senseSnapshot, messages });
+    expect(yesterday).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+    expect(yesterday.content).toContain('昨日停水');
+    expect(yesterday.content).not.toContain('今日復水');
+    for (const date of ['那最近七天呢？', '改看上個禮拜']) {
+      const otherPeriod = await askCampusAssistant({ ...scope, senseSnapshot,
+        messages: [...history, { role: 'user', content: date }] });
+      expect(otherPeriod).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+      expect(otherPeriod.content).toContain('昨日停水');
+    }
+    const timetable = await askCampusAssistant({ ...scope, senseSnapshot,
+      messages: [...history, { role: 'user', content: '那昨天的課表呢？' }] });
+    expect(timetable.route).toBe('/timetable');
+    jest.setSystemTime(new Date('2026-11-01T16:25:00Z'));
+    const expired = await askCampusAssistant({ ...scope, senseSnapshot, messages });
+    expect(expired).toMatchObject({ tool: 'online-required', route: '/announcements' });
+    expect(expired.content).not.toMatch(/昨日停水|今日復水/);
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(httpsCallable).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});

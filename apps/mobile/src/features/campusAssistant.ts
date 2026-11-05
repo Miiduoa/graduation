@@ -5,11 +5,18 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
-import type { AssignmentRead } from '../services/offlineCampusTools';
+import type { AssignmentRead, OfflineCampusToolResult } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead };
+export type CampusAssistantMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  route?: string;
+  assignmentRead?: AssignmentRead;
+  savedClassRead?: SavedClassRead;
+};
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -108,7 +115,7 @@ export async function askCampusAssistant(input: {
   if (mode === 'device') {
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
-    const { runOfflineCampusTool } =
+    const { runOfflineCampusTool, announcementDateFollowUp } =
       require('../services/offlineCampusTools') as typeof import('../services/offlineCampusTools');
 
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
@@ -134,11 +141,15 @@ export async function askCampusAssistant(input: {
       const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass);
       return { ...answer, source: 'device', hasActions: false };
     }
+    const now = Date.parse(snapshot.checkedAt);
+    const announcementDate = previous?.role === 'assistant' && previous.tool === 'campus-snapshot' &&
+      previous.route === '/announcements' ? announcementDateFollowUp(question, now) : null;
+    const readQuestion = announcementDate ? announcementDate + '有哪些校園公告？' : question;
     const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
-      senseSnapshot, Date.parse(snapshot.checkedAt));
+      senseSnapshot, now);
     const lookup = followUp && 'question' in followUp ? followUp : null;
     const localAnswer = followUp && 'reply' in followUp ? followUp.reply
-      : runOfflineCampusTool(lookup?.question ?? question, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
+      : runOfflineCampusTool(lookup?.question ?? readQuestion, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
     if (localAnswer) {
       return {
         content: localAnswer.content,
@@ -175,7 +186,10 @@ export async function askCampusAssistant(input: {
     // bounded reads. Facts are still produced by scoped deterministic tools.
     const { resolveLocalCampusSemanticReads } = require('../services/localCampusSemanticReads') as
       typeof import('../services/localCampusSemanticReads');
-    const selectedReads = await resolveLocalCampusSemanticReads({
+    // A notice mention that the read tool declined (e.g. translating supplied text)
+    // should use the conversation, without substituting public titles or personal records.
+    const useCampusReads = !/公告|通知/.test(question);
+    const selectedReads = useCampusReads ? await resolveLocalCampusSemanticReads({
       messages, context: snapshot, snapshot: senseSnapshot,
       uid, schoolId: input.scope.schoolId,
       assertCurrent: () => { scopeCheck(input, false); assertNotCancelled(); },
@@ -187,7 +201,7 @@ export async function askCampusAssistant(input: {
       scopeCheck(input, false);
       assertNotCancelled();
       throw error;
-    });
+    }) : null;
     if (selectedReads) {
       return {
         content: selectedReads.content,
@@ -216,7 +230,7 @@ export async function askCampusAssistant(input: {
       messages: [
         { role: 'system', content: formatOnDeviceSchoolPrompt(
           { ...snapshot, checkedAt: new Date().toISOString() },
-          validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }),
+          useCampusReads ? validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }) : null,
         ) },
         ...compactHistory,
       ],

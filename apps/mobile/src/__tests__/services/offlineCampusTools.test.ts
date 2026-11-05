@@ -332,3 +332,81 @@ test.each(['校園活動計畫', '翻譯練習', '公告設計'])('quoted title 
   const reply = runOfflineCampusTool('「' + title + '」這份作業什麼時候交？', snapshot, source, 'alice');
   expect(reply?.assignmentRead?.items).toEqual([named]);
 });
+
+describe('publication dates in the authorized announcement snapshot', () => {
+  const checkedAt = '2026-11-01T16:05:00Z'; // Monday, 00:05 in Taipei
+  const context = { ...snapshot, checkedAt };
+  const source: CampusSenseSnapshot = {
+    ...authorizedSense, checkedAt,
+    announcements: { status: 'available', items: [
+      { title: '場館開放', publishedAt: '2026-11-01T15:59:59Z' },
+      { title: '無日期', publishedAt: null },
+      { title: '更早一週', publishedAt: '2026-10-25T15:59:59Z' },
+      { title: '午夜開始', publishedAt: '2026-11-01T16:00:00Z' },
+      { title: '尚未發布', publishedAt: '2026-11-01T16:05:01Z' },
+      { title: '凌晨更新', publishedAt: '2026-11-01T16:04:59Z' },
+    ] },
+  };
+  const ask = (q: string) => runOfflineCampusTool(q, context, source, 'alice')?.content ?? '';
+
+  test.each(['今天有哪些公告？', '本週有哪些校園公告？'])('%s uses Taiwan midnight and Monday as the start of the week', (q) => {
+    const result = ask(q);
+    expect(result).toContain('午夜開始');
+    expect(result).toContain('凌晨更新');
+    expect(result.indexOf('凌晨更新')).toBeLessThan(result.indexOf('午夜開始'));
+    expect(result).not.toMatch(/場館開放|無日期|更早一週|尚未發布/);
+    expect(result).toContain('另有 1 則');
+  });
+  test.each(['昨天有哪些公告？', '上週有哪些公告？', '上週日有哪些公告？'])('%s stays within its previous calendar period', (q) => {
+    const result = ask(q);
+    expect(result).toContain('場館開放');
+    expect(result).not.toMatch(/午夜開始|凌晨更新|更早一週|無日期|尚未發布/);
+  });
+  test('the latest single result uses publication order and cannot include unverified dates', () => {
+    const result = ask('最新一則公告是什麼？');
+    expect(result).toContain('凌晨更新');
+    expect(result).not.toMatch(/場館開放|午夜開始|無日期|尚未發布/);
+    expect(ask('有哪些校園公告？')).toContain('無日期');
+  });
+  test.each(['上個月有哪些公告？', '從昨天到今天有哪些公告？', '明天有哪些公告？'])('%s never falls back to listing every title', (q) => {
+    expect(ask(q)).toContain('公告頁');
+    expect(ask(q)).not.toMatch(/場館開放|午夜開始|無日期|尚未發布/);
+  });
+  test('an expired, foreign or unavailable source does not answer with a cached title', () => {
+    for (const rejected of [
+      { ...source, userId: 'someone-else' }, { ...source, schoolId: 'elsewhere' },
+      { ...source, checkedAt: '2026-11-01T15:45:00Z' },
+      { ...source, announcements: { ...source.announcements, status: 'unavailable' as const } },
+    ]) {
+      const answer = runOfflineCampusTool('昨天的公告呢？', context, rejected, 'alice');
+      expect(answer).toMatchObject({ tool: 'online-required', route: '/announcements' });
+      expect(answer?.content).not.toContain('場館開放');
+    }
+  });
+});
+
+test.each(['翻譯這則公告', '幫我寫公告', '請發布公告', '新增公告', '怎麼關閉通知', '我有哪些私訊通知', '我的課程通知'])(
+  '%s cannot read back public announcement titles', (q) => {
+    for (const sense of [authorizedSense, null]) {
+      const reply = runOfflineCampusTool(q, snapshot, sense, 'alice');
+      expect(reply?.tool).not.toBe('campus-snapshot');
+      expect(reply?.route).not.toBe('/announcements');
+      expect(reply?.content ?? '').not.toContain('校園網路維護公告');
+    }
+  },
+);
+
+test('an explicit navigation request opens the announcement service without listing cached titles', () => {
+  const reply = runOfflineCampusTool('打開校園公告', snapshot, authorizedSense, 'alice');
+  expect(reply).toMatchObject({ tool: 'open-service', route: '/announcements' });
+  expect(reply?.content).not.toContain('校園網路維護公告');
+});
+
+test('newest notices with the same source timestamp remain tied', () => {
+  const announcements = { status: 'available' as const, items: ['教室異動', '選課公告'].map((title) =>
+    ({ title, publishedAt: '2026-10-25T00:00:00Z' })) };
+  const reply = runOfflineCampusTool('最新一則公告是什麼？', snapshot, { ...authorizedSense, announcements }, 'alice');
+  expect(reply?.content).toContain('教室異動');
+  expect(reply?.content).toContain('選課公告');
+  expect(reply?.content).toMatch(/(先後|同時|同日)/);
+});

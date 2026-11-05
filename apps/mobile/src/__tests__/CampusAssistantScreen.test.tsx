@@ -279,6 +279,24 @@ test('suggested questions fill an editable draft without calling the backend unt
   expect(request).not.toHaveBeenCalled();
 });
 
+test('offers today’s announcements when the user has synced an available source', async () => {
+  const question = '今天有哪些校園公告？';
+  const view = render(<CampusAssistantScreen />);
+  expect(view.queryByText(question)).toBeNull();
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    announcements: { status: 'available', items: [] },
+    assignments: { status: 'unavailable', count: null, items: [] },
+    schedule: { status: 'unavailable', count: null },
+  });
+  openCampusTools(view);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByText('對話'));
+  fireEvent.press(view.getByText(question));
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe(question);
+  expect(request).not.toHaveBeenCalled();
+});
+
 test('assistant offers the existing service directly instead of inventing a transaction', async () => {
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);

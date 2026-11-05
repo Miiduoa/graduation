@@ -1,7 +1,8 @@
 import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
-import { outsideAssignmentNames } from './assignmentDeadlineWindow';
+import { outsideAssignmentNames, parseAssignmentDeadlineWindow } from './assignmentDeadlineWindow';
+import { confirmedTimestamp, taipeiDayNumber } from './campusStudyAgenda';
 import { asksForAssignments, queryAssignmentDeadlines } from './queryAssignmentDeadlines';
 import { buildOfflineCampusPlan, type CampusEvidencePlan } from './offlineCampusPlanner';
 import { ASSIGNMENT_PAGE_SIZE } from './assignmentResultPage';
@@ -102,11 +103,89 @@ function syncedTime(value: string): string {
 
 const PRIORITY_QUESTION = /今日重點|今天要做|今天要先|今天先做|今天該做|先處理|待辦摘要|校園摘要|先完成哪|有什麼重要的/;
 
+// Match the remaining words of a listing request after removing its supported date.
+// An unrecognized range or subject must not silently turn into an unfiltered list.
+const NOTICE_LIST_WORDS = /公告|通知|全校|校園|校方|學校裡?|最新|最近|近期|全部|所有|幫我|給我|請問|想知道|告訴我|查詢|查閱|查|看看?|一下|列出|清單|整理|摘要|截至目前|目前|發布|發佈|發出|發了|新增|更新|哪些|哪幾則|幾[個則筆篇]|多少|總共|有沒有|沒有|什麼|哪一則|一則|已經|可以|[有是已新的嗎呢了請我\s，、。！？!?]/g;
+const noticeDate = new Intl.DateTimeFormat('zh-TW', {
+  timeZone: 'Asia/Taipei', year: 'numeric', month: 'numeric', day: 'numeric',
+});
+
+function noticeWindow(question: string, now: number) {
+  const text = question.replace(/([上這下])個(星期|禮拜)/g, '$1$2');
+  const recent = text.match(/(?:最近|近|過去)\s*[七7]\s*[天日]/)?.[0];
+  const today = taipeiDayNumber(now);
+  const window = recent ? { startDay: today - 6, endDay: today + 1, label: recent }
+    : parseAssignmentDeadlineWindow(text, now);
+  return { text, window };
+}
+
+export function announcementDateFollowUp(question: string, now: number): string | null {
+  const period = question.normalize('NFKC').replace(/\s+/g, '').replace(/[?!。！？，,、]+$/u, '')
+    .replace(/^(?:那麼?|改看|改查)/u, '').replace(/(?:的呢|呢|的)$/u, '');
+  const { window, text } = noticeWindow(period, now);
+  if (window && window !== 'clarify' && window.label === text) return period;
+  // Keep unsupported date-only refinements on the announcement topic so they can clarify.
+  if (/(?:今|昨|前天|後天|週|周|星期|禮拜|天|日|月|號|年|\d[-/]\d)/.test(period) &&
+      /^[上中下大本這個和與或及還是、從至到起底初末未來接最近過去以之內前後周週星期禮拜昨今明天日一二兩三四五六七八九十年月號早晚午晨點時零\d/:：-]+$/u.test(period)) return period;
+  return null;
+}
+
+function isPublicNoticeQuery(text: string): boolean {
+  if (!/公告|(?:校園|學校|校方)(?:的)?(?:新)?通知/.test(text)) return false;
+  if (/(?:私訊|個人|課程|班級|社群|系統|推播|作業|成績)(?:的)?(?:新)?(?:公告|通知)|通知(?:設定|權限)|通知我|翻譯|翻成|改寫|潤飾|寫作|寫一|寫.*公告|撰寫|草擬|起草|怎麼寫|什麼意思|刪除|關閉|關掉|修改|編輯/.test(text)) return false;
+  if (/^(?:請(?:幫我)?|幫我|我要|我想|替我|直接|請直接)?(?:新增|發布|發佈|張貼|發送|發)(?:一[則篇]|這[則篇]|個|校園|校方|學校|新|的)*(?:公告|通知)/.test(text)) return false;
+  return /查|看|哪些|哪幾|有什麼|有沒|幾[個則筆篇]|多少|最新|最近|近期|全部|清單|列出|整理|摘要|哪一則/.test(text) ||
+    /^(?:(?:今天|今日|昨天|昨日|明天|明日|後天|[上下本這近過去未來]|\d)[^，。！？?]{0,18})?(?:全校|校園|學校|校方)?(?:公告|通知)(?:呢|嗎)?[？?！!。]*$/.test(text);
+}
+
+function syncedAnnouncementLines(
+  question: string, snapshot: CampusSenseSnapshot, now: number, limit: number, standalone: boolean,
+): string[] {
+  const { text, window } = noticeWindow(question, now);
+  const remainder = window && window !== 'clarify' ? text.replace(window.label, '') : text;
+  const unsupported = standalone ? Boolean(remainder.replace(NOTICE_LIST_WORDS, ''))
+    : /[年月]|[上下本這]?(?:週|周|星期|禮拜)|[今昨明後前]天|[上中下]午|[早晚]上|凌晨|\d[-/]\d/.test(outsideAssignmentNames(remainder));
+  if (window === 'clarify' || unsupported) {
+    return ['這次摘要無法核對指定的查詢條件。可以問「今天有哪些公告？」或「上週有哪些公告？」，其他條件請到公告頁查詢。'];
+  }
+  if (window && (window.startDay > taipeiDayNumber(now) || /未來|接下來/.test(window.label))) {
+    return ['這份摘要只能核對同步時已發布的公告。請在指定期間到公告頁查看更新。'];
+  }
+  const latest = /最新|最近|近期/.test(text);
+  const cutoff = Math.min(now, Date.parse(snapshot.checkedAt));
+  const rows = snapshot.announcements.items.map((item) => ({
+    item, published: confirmedTimestamp(item.publishedAt),
+  }));
+  const undated = rows.filter(({ published }) => !Number.isFinite(published));
+  const matches = rows.filter(({ published }) => {
+    if (!Number.isFinite(published) || published > cutoff) return false;
+    if (!window) return true;
+    const day = taipeiDayNumber(published);
+    return day >= window.startDay && day < window.endDay;
+  }).sort((a, b) => b.published - a.published);
+  if (!window && !latest) matches.push(...undated);
+  const singleLatest = latest && /一則/.test(text);
+  const top = singleLatest && matches.length ? matches.filter((row) => row.published === matches[0].published) : matches;
+  const preview = top.slice(0, limit);
+  const scope = window ? window.label + '發布的公告（台灣時間）' : latest ? '有發布時間的公告' : '校園公告';
+  const lines = ['本次僅同步部分校園公告。摘要中' + scope + '有 ' + matches.length + ' 則。'];
+  if (singleLatest && top.length > 1) lines.push('最新的 ' + top.length + ' 則公告發布時間相同，無法判定先後。');
+  for (const { item, published } of preview) {
+    lines.push('• ' + item.title + (Number.isFinite(published)
+      ? '｜發布日期 ' + noticeDate.format(published) : '｜發布時間未確認'));
+  }
+  if (preview.length < top.length) lines.push('先列出 ' + preview.length + ' 則，其餘請至公告頁查看。');
+  if ((window || latest) && undated.length) lines.push('另有 ' + undated.length + ' 則發布時間未確認，未列入結果。');
+  if (!matches.length) lines.push('完整公告請到校園公告頁核對。');
+  return lines;
+}
+
 function syncedCampusAnswer(
   question: string,
   context: OnDeviceSchoolContext,
   snapshot: CampusSenseSnapshot | null,
   assignmentOnly: boolean,
+  askingAnnouncements: boolean,
   filterQuestion: string,
   page?: AssignmentPageRequest,
 ): OfflineCampusToolResult | null {
@@ -114,8 +193,7 @@ function syncedCampusAnswer(
   const now = Date.parse(context.checkedAt);
   const intent = outsideAssignmentNames(question);
   const askingAssignments = assignmentOnly || asksForAssignments(intent);
-  const askingAnnouncements = /公告|通知/.test(intent);
-  const askingPriority = PRIORITY_QUESTION.test(intent);
+  const askingPriority = PRIORITY_QUESTION.test(intent) && (!askingAnnouncements || askingAssignments || /待辦|課表|規劃|安排/.test(intent));
   // Writing a submission is never a read-only snapshot action.
   if (/幫我.{0,12}(?:交作業|繳作業|提交|刪除|修改)|(?:代交|自動繳交)/.test(intent)) {
     return null;
@@ -195,12 +273,8 @@ function syncedCampusAnswer(
     const announcements = snapshot.announcements;
     if (announcements.status === 'available') {
       matched = true;
-      lines.push('同步時可讀取的校園公告（僅列部分）：');
-      if (!announcements.items.length) lines.push('本次沒有列出公告，不能當作校方最新公告為空。');
-      for (const item of announcements.items.slice(0, askingPriority ? 2 : 8)) {
-        lines.push('• ' + item.title +
-          (item.publishedAt ? '｜發布 ' + syncedTime(item.publishedAt) : '｜發布時間未提供'));
-      }
+      lines.push(...syncedAnnouncementLines(askingAnnouncements ? question : '', snapshot, now,
+        askingPriority ? 2 : 8, askingAnnouncements && !askingPriority && !askingAssignments));
     } else {
       lines.push('校園公告來源目前無法取得，不能判定有沒有新公告。');
     }
@@ -240,7 +314,6 @@ function syncedCampusAnswer(
 
 function realtimeOnly(question: string): OfflineCampusToolResult | null {
   const source: Array<{ pattern: RegExp; route?: string; label: string }> = [
-    { pattern: /(?:最新|即時|今天|本週|這週|近期|有哪些|查詢|查).{0,8}公告|公告.{0,8}(?:最新|即時|本週|這週|近期|有哪些)/, route: '/announcements', label: '校園公告' },
     { pattern: /(?:最新|即時|今天|本週|這週|近期|有哪些|查詢|查).{0,8}活動|活動.{0,8}(?:最新|即時|本週|這週|近期|有哪些)/, route: '/events', label: '校園活動' },
     { pattern: /(?:我|我的|今天|明天|本週|這週|下週|有哪些|截止|待交|待繳|未交|還沒交|查詢|查).{0,12}(?:作業|測驗|考試|待辦)|(?:作業|測驗|考試).{0,12}(?:截止|繳交|有哪些|幾份|還有|交完)/, route: '/classroom', label: '個人作業／測驗' },
     { pattern: /(?:我的|我這|這學期|本學期|查).{0,10}(?:成績|GPA|學分)|(?:成績|GPA|學分).{0,10}(?:最新|查|多少|幾分|這學期|我的|已修)/i, route: '/grades', label: '個人成績／學分' },
@@ -340,6 +413,11 @@ export function runOfflineCampusTool(
   const intent = outsideAssignmentNames(text);
   const requestedWrite = userWriteRequest(intent);
   if (requestedWrite) return requestedWrite;
+  const askingNotices = isPublicNoticeQuery(intent);
+  if (/公告|通知/.test(intent)) {
+    if (/(?:打開|開啟|前往|帶我去|服務入口)/.test(intent)) return openReadOnlyService(text);
+    if (!askingNotices) return null;
+  }
   if (/作業|功課|報告|截止/.test(intent) &&
       /翻譯|翻成|改寫|潤飾|寫一篇|解釋|什麼意思|什麼是|造句/.test(intent)) return null;
   const askingAssignments = asksForAssignments(intent);
@@ -360,7 +438,9 @@ export function runOfflineCampusTool(
   // A deadline list (including “未來七天”) is a query over assignments, not a study plan.
   const assignmentOnly = (askingAssignments || assignmentFilterQuestion !== undefined) &&
     !PRIORITY_QUESTION.test(intent) && !/安排|規劃|計畫|優先順序|公告|通知|提醒|課表|空堂/.test(intent);
-  const plan = ownerUid && !assignmentOnly ? buildOfflineCampusPlan({
+  const announcementOnly = askingNotices && !askingAssignments &&
+    !/規劃|計畫|安排|課表|空堂|優先順序/.test(intent);
+  const plan = ownerUid && !assignmentOnly && !announcementOnly ? buildOfflineCampusPlan({
     question: text, context, snapshot, uid: ownerUid,
   }) : null;
   if (plan) {
@@ -371,7 +451,7 @@ export function runOfflineCampusTool(
       route: plan.steps[0]?.route,
     };
   }
-  const synced = syncedCampusAnswer(text, context, snapshot, assignmentOnly, assignmentFilterQuestion ?? text, page);
+  const synced = syncedCampusAnswer(text, context, snapshot, assignmentOnly, askingNotices, assignmentFilterQuestion ?? text, page);
   if (synced) return synced;
   if (assignmentOnly && (!snapshot || snapshot.assignments.status !== 'available')) {
     return { tool: 'online-required', route: '/classroom',
@@ -381,6 +461,10 @@ export function runOfflineCampusTool(
   if (live) return live;
   const navigation = openReadOnlyService(text);
   if (navigation) return navigation;
+  if (announcementOnly && (!snapshot || snapshot.announcements.status !== 'available')) {
+    return { tool: 'online-required', route: '/announcements',
+      content: '校園公告需要正式資料來源。請先同步校園資料，或開啟公告頁核對。' };
+  }
   // A planning request needs a synthesized answer, not a raw timetable dump.
   if (/(規劃|安排|制定|拆成|讀書計畫|學習計畫)/.test(text) &&
       /(課表|空堂|學習|讀書|複習|報告)/.test(text)) return null;
