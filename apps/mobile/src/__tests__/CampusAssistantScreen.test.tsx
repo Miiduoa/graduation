@@ -1210,7 +1210,7 @@ test('course choices show reviewed class details, verify the selected ID, and ma
   expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未見繳交紀錄/ })).toBeTruthy();
   expect(view.getByRole('button', { name: /查看作業：練習二，已繳交/ })).toBeTruthy();
   expect(view.getByRole('button', { name: /查看作業：練習三，仍在收件 · 未見繳交紀錄/ })).toBeTruthy();
-  expect(view.queryByText('未繳交')).toBeNull();
+  expect(view.queryAllByRole('button', { name: /(?:已逾期|已停止收件) · 未繳交/ })).toHaveLength(0);
 });
 
 describe('class assignment follow-ups in the nuni timetable assistant', () => {
