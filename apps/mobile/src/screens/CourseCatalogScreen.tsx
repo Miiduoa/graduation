@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   Linking,
   Modal,
   Pressable,
@@ -26,6 +27,11 @@ import {
   type School,
 } from '@campus/shared/src';
 
+import {
+  isPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
+import { formatDateTime } from '../utils/format';
 import { Screen, Pill, Button, Card } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -67,12 +73,16 @@ function ChipRow<T extends string | number>(props: {
   onSelect: (v: T | undefined) => void;
 }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+    <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
       <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2, paddingRight: 16 }}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ selected: !props.selected }}
           onPress={() => props.onSelect(undefined)}
           style={{
             paddingHorizontal: 14,
+            minHeight: 44,
+            justifyContent: 'center',
             paddingVertical: 7,
             borderRadius: 16,
             borderWidth: 1,
@@ -87,9 +97,13 @@ function ChipRow<T extends string | number>(props: {
           return (
             <Pressable
               key={String(it.value)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
               onPress={() => props.onSelect(active ? undefined : it.value)}
               style={{
                 paddingHorizontal: 14,
+                minHeight: 44,
+                justifyContent: 'center',
                 paddingVertical: 7,
                 borderRadius: 16,
                 borderWidth: 1,
@@ -108,12 +122,28 @@ function ChipRow<T extends string | number>(props: {
 
 // ─── 子元件：篩選面板 ─────────────────────────────────────
 
+const Section = ({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) => (
+  <View style={{ gap: 6 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+      <Text style={{ fontWeight: '700', fontSize: 14, color: theme.colors.text }}>{title}</Text>
+      {hint ? <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{hint}</Text> : null}
+    </View>
+    {children}
+  </View>
+);
+
 function FilterPanel(props: {
   filter: CatalogFilter;
   onChange: (patch: Partial<CatalogFilter>) => void;
   onReset: () => void;
-  onSubmit: () => void;
-  loading: boolean;
 }) {
   const { filter } = props;
 
@@ -127,37 +157,23 @@ function FilterPanel(props: {
     return c.departments.map((d) => ({ value: d.value, label: d.label }));
   }, [filter.college]);
 
-  const Section = ({
-    title,
-    hint,
-    children,
-  }: {
-    title: string;
-    hint?: string;
-    children: React.ReactNode;
-  }) => (
-    <View style={{ gap: 6 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <Text style={{ fontWeight: '700', fontSize: 14, color: theme.colors.text }}>{title}</Text>
-        {hint ? <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{hint}</Text> : null}
-      </View>
-      {children}
-    </View>
-  );
-
   return (
     <View style={{ gap: 16, paddingBottom: 24 }}>
       <Section title="學期">
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', gap: 8, paddingRight: 16 }}>
             {buildCatalogSemesters().slice(0, 12).map((s) => {
               const active = filter.semester === s.code;
               return (
                 <Pressable
                   key={s.code}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
                   onPress={() => props.onChange({ semester: s.code })}
                   style={{
                     paddingHorizontal: 14,
+                    minHeight: 44,
+                    justifyContent: 'center',
                     paddingVertical: 8,
                     borderRadius: 18,
                     borderWidth: 1,
@@ -177,6 +193,7 @@ function FilterPanel(props: {
 
       <Section title="課名 / 教師 / 代號" hint="任一關鍵字">
         <TextInput
+          accessibilityLabel="篩選課程關鍵字"
           placeholder="例：演算法、王老師、IM3201"
           placeholderTextColor={theme.colors.muted}
           value={filter.keyword ?? ''}
@@ -265,16 +282,7 @@ function FilterPanel(props: {
         />
       </Section>
 
-      <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
-        <Button text="重設" kind="ghost" onPress={props.onReset} style={{ flex: 1 }} />
-        <Button
-          text={props.loading ? '查詢中…' : '送出查詢'}
-          onPress={props.onSubmit}
-          loading={props.loading}
-          kind="primary"
-          style={{ flex: 2 }}
-        />
-      </View>
+      <Button text="重設篩選條件" kind="ghost" onPress={props.onReset} />
     </View>
   );
 }
@@ -284,12 +292,14 @@ function FilterPanel(props: {
 function CourseCard(props: {
   course: CatalogCourse;
   canAddToSchedule: boolean;
-  onAdd: () => void;
-  onSyllabus: () => void;
+  added: boolean;
+  onAdd: () => Promise<void>;
+  onSyllabus?: () => void;
   conflict?: string | null;
   showRemain: boolean;
 }) {
   const c = props.course;
+  const [adding, setAdding] = useState(false);
   const typeTone =
     c.courseTypeKey === 'required'
       ? 'danger'
@@ -308,7 +318,7 @@ function CourseCard(props: {
         borderRadius: 14,
         borderWidth: 1,
         backgroundColor: theme.colors.surface,
-        borderColor: props.conflict ? '#D7001540' : theme.colors.border,
+        borderColor: props.conflict ? theme.colors.danger : theme.colors.border,
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
@@ -377,18 +387,19 @@ function CourseCard(props: {
           style={{
             padding: 8,
             borderRadius: 8,
-            backgroundColor: '#D7001511',
+            backgroundColor: theme.colors.dangerSoft,
             borderWidth: 1,
-            borderColor: '#D7001540',
+            borderColor: theme.colors.danger,
           }}
         >
-          <Text style={{ color: '#D70015', fontSize: 12 }}>⚠️ 與已選課衝堂：{props.conflict}</Text>
+          <Text style={{ color: theme.colors.danger, fontSize: 12 }}>⚠️ 與已選課衝堂：{props.conflict}</Text>
         </View>
       ) : null}
 
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
-        {c.syllabusUrl ? (
+        {props.onSyllabus && c.syllabusUrl ? (
           <Pressable
+            accessibilityRole="link"
             onPress={props.onSyllabus}
             style={{
               flex: 1,
@@ -404,16 +415,30 @@ function CourseCard(props: {
         ) : null}
         {props.canAddToSchedule ? (
           <Pressable
-            onPress={props.onAdd}
+            disabled={props.added || adding}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: props.added || adding, busy: adding }}
+            onPress={async () => {
+              setAdding(true);
+              try {
+                await props.onAdd();
+              } finally {
+                setAdding(false);
+              }
+            }}
             style={{
               flex: 1,
               paddingVertical: 10,
               borderRadius: 10,
-              backgroundColor: theme.colors.accent,
+              minHeight: 44,
+              justifyContent: 'center',
+              backgroundColor: props.added ? theme.colors.accentSoft : theme.colors.accent,
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>加入我的課表</Text>
+            <Text style={{ color: props.added ? theme.colors.accent : theme.colors.onAccent, fontSize: 13, fontWeight: '700' }}>
+              {props.added ? '已在本機課程清單' : adding ? '加入中…' : '加入本機課程清單'}
+            </Text>
           </Pressable>
         ) : null}
       </View>
@@ -465,7 +490,7 @@ function UnsupportedCourseCatalogScreen(props: {
             }}
           />
           {linkError ? (
-            <Text accessibilityRole="alert" style={{ color: '#D70015', fontSize: 12 }}>
+            <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 12 }}>
               {linkError}
             </Text>
           ) : null}
@@ -539,7 +564,8 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
 
   const [filter, setFilter] = useState<CatalogFilter>(initialFilter);
   const [pendingKeyword, setPendingKeyword] = useState(initialFilter.keyword ?? '');
-  const [showFilter, setShowFilter] = useState(false);
+  const [draftFilter, setDraftFilter] = useState<CatalogFilter | null>(null);
+  const querySequence = useRef(0);
   const [loading, setLoading] = useState(true); // 進畫面立刻 loading，避免閃白
   const [result, setResult] = useState<CatalogQueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -549,6 +575,8 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
     async (force = false, overrideFilter?: CatalogFilter) => {
       if (!isCurrent()) return;
       const f = overrideFilter ?? filter;
+      const sequence = ++querySequence.current;
+      const isLatest = () => isCurrent() && querySequence.current === sequence;
       setLoading(true);
       setError(null);
       try {
@@ -557,7 +585,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           limit: 300,
           schoolId: school.id,
         });
-        if (!isCurrent()) return;
+        if (!isLatest()) return;
         setResult(r);
         if (r.error) setError(r.error);
         analytics.logEvent?.('catalog_query', {
@@ -570,12 +598,11 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           schoolId: school.id,
         });
       } catch (err) {
-        if (!isCurrent()) return;
+        if (!isLatest()) return;
         setError(err instanceof Error ? err.message : '查詢失敗，請稍後再試');
       } finally {
-        if (isCurrent()) {
+        if (isLatest()) {
           setLoading(false);
-          setShowFilter(false);
           setHasRunOnce(true);
         }
       }
@@ -612,7 +639,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
   }, [schedule.courses]);
 
   const handleAddToSchedule = useCallback(
-    (course: CatalogCourse) => {
+    async (course: CatalogCourse) => {
       if (!isCurrent()) {
         Alert.alert('學校已切換', '目前選校已變更，請重新查詢後再加入課表。');
         return;
@@ -623,7 +650,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
         return;
       }
       try {
-        (schedule.addCourse as any)?.({
+        await schedule.addCourse({
           id: `catalog-${course.code}-${course.semester}`,
           code: course.code,
           name: course.name,
@@ -634,7 +661,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           schoolId: school.id,
         });
         if (!isCurrent()) return;
-        Alert.alert('已加入課表', `${course.name} 已加入我的課表`);
+        Alert.alert('已加入本機課程清單', course.name);
         analytics.logEvent?.('catalog_add_to_schedule', {
           code: course.code,
           schoolId: school.id,
@@ -647,6 +674,24 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
     [schedule, school.id, isCurrent],
   );
 
+  const applyFilter = (next: CatalogFilter) => {
+    Keyboard.dismiss();
+    setDraftFilter(null);
+    const applied = { ...next };
+    if (applied.keyword?.trim()) applied.keyword = applied.keyword.trim();
+    else delete applied.keyword;
+    setFilter(applied);
+    setPendingKeyword(applied.keyword ?? '');
+    setResult(null);
+    void runQuery(true, applied);
+  };
+  const openFilter = () => {
+    Keyboard.dismiss();
+    setDraftFilter({ ...filter, keyword: pendingKeyword.trim() });
+  };
+
+  const fetchingPaused = !isPuEcampusDataFetchEnabled();
+  const pausedResult = error === PU_ECAMPUS_DATA_PAUSED_MESSAGE;
   const currentSemLabel =
     buildCatalogSemesters().find((s) => s.code === filter.semester)?.label ??
     getCurrentCatalogSemester().label;
@@ -666,7 +711,6 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           borderColor: theme.colors.border,
           borderRadius: 12,
           paddingHorizontal: 12,
-          paddingVertical: 10,
         }}
       >
         <Ionicons name="search" size={18} color={theme.colors.muted} />
@@ -676,25 +720,35 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           placeholder={`搜尋 ${currentSemLabel} 課程、教師、代號`}
           placeholderTextColor={theme.colors.muted}
           returnKeyType="search"
-          onSubmitEditing={() => {
-            const f = { ...filter, keyword: pendingKeyword.trim() };
-            setFilter(f);
-            void runQuery(true, f);
-          }}
-          style={{ flex: 1, color: theme.colors.text, fontSize: 14, padding: 0 }}
+          accessibilityLabel="搜尋課程、教師或代號"
+          onSubmitEditing={() => applyFilter({ ...filter, keyword: pendingKeyword.trim() })}
+          style={{ flex: 1, minHeight: 48, color: theme.colors.text, fontSize: 14, padding: 0 }}
         />
-        {pendingKeyword ? (
-          <Pressable onPress={() => setPendingKeyword('')}>
+        {pendingKeyword || filter.keyword ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="清除搜尋關鍵字"
+            onPress={() => {
+              if (filter.keyword) applyFilter({ ...filter, keyword: '' });
+              else setPendingKeyword('');
+            }}
+            style={iconControl}
+          >
             <Ionicons name="close-circle" size={18} color={theme.colors.muted} />
           </Pressable>
         ) : null}
-        <Pressable onPress={() => setShowFilter(true)} hitSlop={8}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="開啟篩選條件"
+          onPress={openFilter}
+          style={iconControl}
+        >
           <Ionicons name="options-outline" size={20} color={theme.colors.accent} />
         </Pressable>
       </View>
 
       {/* 角色快捷 */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
         <View style={{ flexDirection: 'row', gap: 8, paddingRight: 16 }}>
           {roleConfig.quickActions.map((qa) => {
             const active =
@@ -709,17 +763,13 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
             return (
               <Pressable
                 key={qa.id}
-                onPress={() => {
-                  setPendingKeyword('');
-                  const f: CatalogFilter = {
-                    semester: filter.semester,
-                    ...(qa.defaultFilter ?? {}),
-                  };
-                  setFilter(f);
-                  void runQuery(true, f);
-                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => applyFilter({ semester: filter.semester, ...qa.defaultFilter })}
                 style={{
                   paddingHorizontal: 14,
+                  minHeight: 44,
+                  justifyContent: 'center',
                   paddingVertical: 8,
                   borderRadius: 18,
                   borderWidth: 1,
@@ -747,35 +797,55 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
       </ScrollView>
 
       {/* 狀態列 */}
-      {result ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      {result && (!error || (pausedResult && result.source === 'cache')) ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
           <Pill
             text={currentSemLabel}
             kind="muted"
             size="sm"
             icon="calendar"
           />
-          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-            {result.courses.length} 筆
-            {result.source === 'cache' ? '（快取）' : ''}
+          <Text style={{ color: theme.colors.muted, fontSize: 12, flexShrink: 1 }}>
+            {filter.keyword ? `「${filter.keyword}」 · ` : ''}{result.courses.length} 筆
+            {result.source === 'cache' ? ` · 本機紀錄 ${formatDateTime(result.fetchedAt)}` : ''}
           </Text>
         </View>
       ) : null}
 
-      {error ? (
+      {pausedResult ? (
+        <View style={{ padding: 14, gap: 8, borderRadius: 12, backgroundColor: theme.colors.surface2 }}>
+          <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '700' }}>
+            校方課綱更新已暫停
+          </Text>
+          <Text style={{ color: theme.colors.textSecondary, lineHeight: 21 }}>
+            {result?.source === 'cache'
+              ? '下方是這台裝置先前儲存的課程資料。'
+              : '這台裝置沒有儲存這組條件的課程資料。可以改用其他條件，或查看自己的課表。'}
+          </Text>
+          {result?.source !== 'cache' ? (
+            <Button
+              text="查看我的課表"
+              kind="outline"
+              onPress={() => {
+                safeNavigate(props.navigation, 'PersonalTimetable');
+              }}
+            />
+          ) : null}
+        </View>
+      ) : error ? (
         <View
           style={{
             padding: 10,
             borderRadius: 10,
-            backgroundColor: '#D7001511',
+            backgroundColor: theme.colors.dangerSoft,
             borderWidth: 1,
-            borderColor: '#D7001540',
+            borderColor: theme.colors.danger,
             flexDirection: 'row',
             gap: 8,
           }}
         >
-          <Ionicons name="alert-circle" size={16} color="#D70015" />
-          <Text style={{ color: '#D70015', fontSize: 12, flex: 1 }}>{error}</Text>
+          <Ionicons name="alert-circle" size={16} color={theme.colors.danger} />
+          <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 13, flex: 1 }}>{error}</Text>
         </View>
       ) : null}
     </View>
@@ -827,12 +897,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
         ].map((s) => (
           <Pressable
             key={s.kw}
-            onPress={() => {
-              setPendingKeyword(s.kw);
-              const f = { ...filter, keyword: s.kw };
-              setFilter(f);
-              void runQuery(true, f);
-            }}
+            onPress={() => applyFilter({ ...filter, keyword: s.kw })}
             style={{
               paddingHorizontal: 14,
               paddingVertical: 8,
@@ -870,7 +935,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
         系統使用了你目前的篩選條件。試著放寬條件、改變學期，或檢查是否拼錯字。
       </Text>
       <Pressable
-        onPress={() => setShowFilter(true)}
+        onPress={openFilter}
         style={{
           marginTop: 6,
           paddingHorizontal: 18,
@@ -879,7 +944,7 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
           backgroundColor: theme.colors.accent,
         }}
       >
-        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>調整條件</Text>
+        <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}>調整條件</Text>
       </Pressable>
     </View>
   );
@@ -887,13 +952,14 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
   return (
     <Screen
       title="課綱查詢"
-      subtitle={`${roleConfig.zhName} · 資料來自靜宜大學課綱查詢系統`}
+      subtitle={`${roleConfig.zhName} · ${fetchingPaused ? '查詢本機留存的靜宜課綱' : '資料來自靜宜大學課綱查詢系統'}`}
       noPadding
     >
       <FlatList
         data={result?.courses ?? []}
         keyExtractor={(c, idx) => `${c.code}-${idx}`}
-        ListHeaderComponent={renderHeader}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={renderHeader()}
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 24,
@@ -904,10 +970,10 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
             <View style={{ padding: 30, alignItems: 'center' }}>
               <ActivityIndicator color={theme.colors.accent} />
               <Text style={{ marginTop: 10, color: theme.colors.muted, fontSize: 12 }}>
-                正在連線校方系統…
+                {fetchingPaused ? '正在讀取本機課綱紀錄…' : '正在連線校方系統…'}
               </Text>
             </View>
-          ) : hasRunOnce ? (
+          ) : error ? null : hasRunOnce ? (
             renderEmpty()
           ) : (
             renderOnboarding()
@@ -916,7 +982,8 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
         onRefresh={() => runQuery(true)}
         refreshing={loading && (result?.courses?.length ?? 0) > 0}
         renderItem={({ item }) => {
-          const conflicts = roleConfig.canAddToSchedule
+          const added = schedule.courses.some((course) => course.id === `catalog-${item.code}-${item.semester}`);
+          const conflicts = roleConfig.canAddToSchedule && !added
             ? detectConflicts(item, existingScheduleCourses)
             : [];
           const conflictText = conflicts.length
@@ -928,8 +995,9 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
               canAddToSchedule={roleConfig.canAddToSchedule}
               showRemain={result?.showRemain ?? false}
               conflict={conflictText}
+              added={added}
               onAdd={() => handleAddToSchedule(item)}
-              onSyllabus={() => {
+              onSyllabus={fetchingPaused ? undefined : () => {
                 const u = item.syllabusUrl;
                 if (!u) return;
                 void linkingOpenWithPuTronClassGate(u).then((ok) => {
@@ -945,10 +1013,10 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
 
       {/* 進階篩選 Modal */}
       <Modal
-        visible={showFilter}
+        visible={draftFilter !== null}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setShowFilter(false)}
+        onRequestClose={() => setDraftFilter(null)}
       >
         <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
           <View
@@ -961,29 +1029,35 @@ function ProvidenceCourseCatalogScreen(props: CatalogScreenProps & {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Pressable onPress={() => setShowFilter(false)} hitSlop={8}>
+            <Pressable accessibilityRole="button" onPress={() => setDraftFilter(null)} style={iconControl}>
               <Text style={{ color: theme.colors.accent, fontSize: 16 }}>取消</Text>
             </Pressable>
             <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
               完整查詢條件
             </Text>
-            <Pressable onPress={() => setFilter(getDefaultCatalogFilter())} hitSlop={8}>
-              <Text style={{ color: theme.colors.muted, fontSize: 14 }}>清除</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => draftFilter && applyFilter(draftFilter)}
+              style={iconControl}
+            >
+              <Text style={{ color: theme.colors.accent, fontSize: 16, fontWeight: '700' }}>套用</Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <FilterPanel
-              filter={filter}
-              onChange={(patch) => setFilter((f) => ({ ...f, ...patch }))}
-              onReset={() => setFilter(getDefaultCatalogFilter())}
-              onSubmit={() => runQuery(true)}
-              loading={loading}
-            />
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16 }}>
+            {draftFilter ? (
+              <FilterPanel
+                filter={draftFilter}
+                onChange={(patch) => setDraftFilter((draft) => draft && { ...draft, ...patch })}
+                onReset={() => setDraftFilter(getDefaultCatalogFilter())}
+              />
+            ) : null}
           </ScrollView>
         </View>
       </Modal>
     </Screen>
   );
 }
+
+const iconControl = { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' } as const;
 
 export default CourseCatalogScreen;
