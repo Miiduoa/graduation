@@ -1224,6 +1224,41 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
   });
   beforeEach(() => usePlatformFixture('student-b'));
 
+  test('shows Taipei times both before and after confirmation and accepts just one tap while scheduling', async () => {
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse(checkedAt));
+    try {
+      const work = { ...result, assignments: [{ ...result.assignments[1], submittedAt: null }] };
+      const card = (value: object) => reply({ result: work, view: { kind: 'reminder', action: 'set',
+        ids: ['second'], minutes: 60, ...value } });
+      let finish!: (value: unknown) => void;
+      request.mockResolvedValueOnce(reply({ result: work }))
+        .mockResolvedValueOnce(card({ step: 'review', message: '請核對作業和提醒時間。' }))
+        .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+      const screen = render(<CampusAssistantScreen route={platformRoute} />);
+      fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
+      await act(async () => fireEvent.press(screen.getByText('送出問題')));
+      await act(async () => fireEvent.press(screen.getByRole('button', { name: '提醒我交這份' })));
+      expect(screen.getByText('台灣時間')).toBeTruthy();
+      expect(screen.getByText('截止時間 · 2026/11/6 下午8:00')).toBeTruthy();
+      expect(screen.getByLabelText('提醒時間，2026/11/6 下午7:00，台灣時間')).toBeTruthy();
+      expect(screen.getByText('提醒時間 · 2026/11/6 下午7:00')).toBeTruthy();
+      expect(screen.getByRole('radio', { name: '提前 1 小時', checked: true })).toBeTruthy();
+      expect(request.mock.calls[1][0].courseworkChoice).toBeUndefined();
+      const confirm = screen.getByRole('button', { name: '確認設定提醒' });
+      await act(async () => { fireEvent.press(confirm); fireEvent.press(confirm); });
+      expect(request).toHaveBeenCalledTimes(3);
+      expect(request.mock.calls[2][0].courseworkChoice).toEqual({ reminder: 'confirm', id: 'second' });
+      expect(screen.queryByRole('button', { name: '取消作業查詢' })).toBeNull();
+      await act(async () => finish(card({ step: 'result', next: 'remove', message: '已設定這份作業的手機提醒。' })));
+      expect(screen.getByText('已設定這份作業的手機提醒。')).toBeTruthy();
+      expect(screen.getAllByText('提醒時間 · 2026/11/6 下午7:00')).toHaveLength(2);
+      expect(screen.getByRole('button', { name: '取消這份作業的提醒' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '確認設定提醒' })).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   test('clarifies same-title receipts, preserves exact selection, keeps the time of the source read and opens that assignment', async () => {
     const navigate = jest.fn();
     request.mockResolvedValueOnce(reply())

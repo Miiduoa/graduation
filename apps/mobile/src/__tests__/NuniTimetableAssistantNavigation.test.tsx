@@ -2,7 +2,11 @@ import React from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
-import { act, cleanup, fireEvent, render, within } from '@testing-library/react-native/pure';
+import { act, cleanupAsync, fireEvent, fireEventAsync, render, renderAsync, within } from '@testing-library/react-native/pure';
+import * as Notifications from 'expo-notifications';
+import { PersonalEventReminderBridge } from '../components/PersonalEventReminderBridge';
+import { publicNavigationRef, markPublicNavigationReady, markPublicNavigationUnready } from '../app/publicNavigation';
+import { __resetPersonalEventReminderNavigationForTests } from '../services/personalEventReminderNavigation';
 import { NuniSessionProvider } from '../state/nuniSession';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
@@ -12,11 +16,25 @@ import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
 import type { StoredTimetable } from '../services/personalTimetable';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
+let mockSchoolSelectionReady = true;
 const mockSchool = { id: 'pu', name: '靜宜大學' };
 let mockStored: string | null;
 const mockRequest = jest.fn();
 const mockAssignmentBff = jest.fn();
 jest.unmock('@react-navigation/native');
+jest.mock('expo-notifications', () => ({
+  setNotificationHandler: jest.fn(),
+  addNotificationReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  addNotificationResponseReceivedListener: jest.fn(() => ({ remove: jest.fn() })),
+  getLastNotificationResponseAsync: jest.fn(),
+  clearLastNotificationResponseAsync: jest.fn(),
+  getPermissionsAsync: jest.fn(),
+  requestPermissionsAsync: jest.fn(),
+  getAllScheduledNotificationsAsync: jest.fn(async () => []),
+  scheduleNotificationAsync: jest.fn(),
+  cancelScheduledNotificationAsync: jest.fn(),
+  SchedulableTriggerInputTypes: { DATE: 'date' },
+}));
 jest.mock('expo-crypto', () => ({ randomUUID: () => '00000000-0000-4000-8000-000000000001' }));
 jest.mock('expo-secure-store', () => ({
   isAvailableAsync: async () => true,
@@ -29,7 +47,7 @@ jest.mock('../services/nuniClient', () => ({
   nuniBffRequest: (...args: unknown[]) => mockAssignmentBff(...args),
 }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: null, loading: false }) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool, selectionReady: mockSchoolSelectionReady }) }));
 jest.mock('../state/theme', () => ({
   useThemeMode: () => ({ mode: 'light' }),
   useTheme: () => require('../ui/theme').getCurrentTheme(),
@@ -77,8 +95,9 @@ beforeEach(async () => {
     })],
   ]);
 });
-afterEach(() => {
-  cleanup();
+afterEach(async () => {
+  await cleanupAsync();
+  mockSchoolSelectionReady = true;
   jest.restoreAllMocks();
   jest.useRealTimers();
   global.setTimeout = realSetTimeout;
@@ -325,4 +344,77 @@ test('after opening a namesake from an older list, a spoken receipt question fol
   expect(mockAssignmentBff).toHaveBeenCalledTimes(reads);
   fireEvent.press(screen.getByRole('button', { name: /查看作業：小考報告，已繳交/ }));
   expect(navigation.getCurrentRoute()?.params).toMatchObject({ workspaceId: course.id, assignmentId: secondId });
+});
+
+
+test('a confirmed reminder survives a cold start and takes the student to the exact submission area', async () => {
+  const { course, other, assignment } = await linkedWorkspaceFixture();
+  const scheduled: Notifications.NotificationRequestInput[] = [];
+  const permissions = jest.mocked(Notifications.getPermissionsAsync);
+  const schedule = jest.mocked(Notifications.scheduleNotificationAsync);
+  permissions.mockResolvedValue({ granted: false, canAskAgain: true } as Notifications.NotificationPermissionsStatus);
+  jest.mocked(Notifications.requestPermissionsAsync).mockResolvedValue({ granted: true } as Notifications.NotificationPermissionsStatus);
+  schedule.mockImplementation(async (request) => { scheduled.push(request); return request.identifier!; });
+  jest.mocked(Notifications.getAllScheduledNotificationsAsync).mockImplementation(async () =>
+    scheduled as Notifications.NotificationRequest[]);
+  const screen = await renderAsync(
+    <NuniSessionProvider><NavigationContainer><PreAuthStack /></NavigationContainer></NuniSessionProvider>,
+  );
+  await fireEventAsync.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  await fireEventAsync.press(await screen.findByText('現在有課嗎？'));
+  await fireEventAsync.press(await screen.findByRole('button', { name: '查這堂課的作業' }));
+  await fireEventAsync.press(await screen.findByRole('button', { name: '提醒我交這份' }));
+  const confirm = await screen.findByRole('button', { name: '確認設定提醒' });
+  expect(permissions).not.toHaveBeenCalled();
+  expect(schedule).not.toHaveBeenCalled();
+  await fireEventAsync.press(confirm);
+  await screen.findByText('已設定這份作業的手機提醒。');
+  expect(schedule).toHaveBeenCalledTimes(1);
+  expect(scheduled[0].trigger).toMatchObject({ date: new Date('2026-11-06T07:00:00Z') });
+  expect(scheduled[0].content.data).toEqual({ category: 'nuni_assignment_due', lookupToken: expect.any(String) });
+  await screen.unmountAsync();
+
+  const response = { notification: { request: scheduled[0] }, actionIdentifier: 'default' } as Notifications.NotificationResponse;
+  const last = jest.mocked(Notifications.getLastNotificationResponseAsync);
+  last.mockResolvedValue(response);
+  jest.mocked(Notifications.clearLastNotificationResponseAsync).mockImplementation(async () => { last.mockResolvedValue(null); });
+  // A delivered notification is no longer in the OS scheduled queue.
+  scheduled.length = 0;
+  jest.setSystemTime(new Date('2026-11-06T07:01:00Z'));
+  mockStored = JSON.stringify({
+    platformAccountId: account, sessionHandle: 'ps_' + 'b'.repeat(43),
+    expiresAt: Date.now() + 3_600_000, pendingLogout: false,
+  });
+  __resetPersonalEventReminderNavigationForTests();
+  markPublicNavigationUnready();
+  const unhandled = jest.fn();
+  mockSchoolSelectionReady = false;
+  const app = () => (
+    <NuniSessionProvider>
+      <PersonalEventReminderBridge />
+      <NavigationContainer ref={publicNavigationRef} onReady={markPublicNavigationReady} onUnhandledAction={unhandled}>
+        <PreAuthStack />
+      </NavigationContainer>
+    </NuniSessionProvider>
+  );
+  const restored = await renderAsync(app());
+  try {
+    await restored.findByRole('button', { name: '開啟課表助理' });
+    expect(publicNavigationRef.getCurrentRoute()?.name).toBe('LoginLanding');
+    expect(Notifications.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+    mockSchoolSelectionReady = true;
+    await restored.rerenderAsync(app());
+    await restored.findByLabelText('作業繳交區：小考報告');
+    expect(publicNavigationRef.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: {
+      tab: 'courses', workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account,
+    } });
+    expect(restored.getByText(assignment.instructions)).toBeTruthy();
+    expect(Notifications.clearLastNotificationResponseAsync).toHaveBeenCalled();
+    expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(other.id))).toBe(false);
+    expect(unhandled).not.toHaveBeenCalled();
+  } finally {
+    await restored.unmountAsync();
+    markPublicNavigationUnready();
+    __resetPersonalEventReminderNavigationForTests();
+  }
 });

@@ -15,6 +15,9 @@ jest.mock('../../firebase', () => ({
   getFunctionsInstance: () => ({}),
   isFirebaseMockMode: () => mockFake,
 }));
+jest.mock('../../services/nuniAssignmentReminders', () => ({
+  cancelNuniAssignmentReminder: jest.fn(), confirmNuniAssignmentReminder: jest.fn(),
+}));
 jest.mock('../../services/localLLMInference', () => ({
   localLLM: {
     getRuntimeAvailability: jest.fn(() => ({ available: true })),
@@ -958,6 +961,91 @@ describe('nuni class to coursework', () => {
       ...base(), courseworkChoice, messages: [
         { role: 'assistant', content: '課程作業', courseworkRead: previous }, { role: 'user', content: question },
       ],
+    });
+
+    describe('assignment reminder review', () => {
+      const native = jest.requireMock('../../services/nuniAssignmentReminders');
+      const upcoming = { ...row, dueAt: '2026-11-07T12:00:00+08:00' };
+      const list = { ...snapshot, assignments: [upcoming, { ...upcoming, id: 'b' }] };
+      const source = { ...read, result: list };
+      const review = async () => (await ask('提醒我交第二份', source)).courseworkRead!;
+      const confirm = { reminder: 'confirm' as const, id: 'b' };
+      const checkNative = () => native.confirmNuniAssignmentReminder.mockImplementation(
+        async (_target: unknown, intent: { recheck: () => Promise<boolean> }) => await intent.recheck() ? 'scheduled' : 'stale');
+
+      test('clarifies duplicate titles, binds ordinal and lead to the selected ID, and reserves writing for a review button', async () => {
+        const remote = openWork();
+        const pick = (await ask('提醒我交設計報告', source)).courseworkRead!;
+        expect(pick.view).toMatchObject({ step: 'choose', ids: ['a', 'b'] });
+        const exact = (await ask('第二份', pick)).courseworkRead!;
+        expect(exact.view).toMatchObject({ step: 'review', ids: ['b'], minutes: 60 });
+        const later = (await ask('提前 15 分鐘', exact)).courseworkRead!;
+        expect(later.view).toMatchObject({ minutes: 15, ids: ['b'] });
+        expect((await ask('確認設定提醒', later)).content).toContain('請按');
+        await ask('確認設定提醒', later, { ...confirm, id: 'a' });
+        await ask('確認設定提醒', pick, confirm);
+        const discard = (await ask('放棄設定', later)).courseworkRead!;
+        await ask('確認設定提醒', discard, confirm);
+        expect(remote).not.toHaveBeenCalled();
+        expect(native.confirmNuniAssignmentReminder).not.toHaveBeenCalled();
+        expect(native.cancelNuniAssignmentReminder).not.toHaveBeenCalled();
+      });
+
+      test('checks current assignments by ID, handles a duplicate confirmation and separately confirms cancellation', async () => {
+        const remote = openWork().mockResolvedValue({ ...list, assignments: [...list.assignments].reverse() });
+        checkNative();
+        const draft = await review();
+        const result = (await ask('確認設定提醒', draft, confirm)).courseworkRead!;
+        expect(native.confirmNuniAssignmentReminder).toHaveBeenCalledWith({ accountId: 'pa-student', schoolId: 'pu',
+          workspaceId: 'linked', assignmentId: 'b' }, expect.objectContaining({ dueAt: upcoming.dueAt, leadMinutes: 60 }));
+        expect(remote).toHaveBeenCalledTimes(1);
+        expect(result.view).toMatchObject({ step: 'result', ids: ['b'], minutes: 60, next: 'remove' });
+        await ask('確認設定提醒', result, confirm);
+        expect(native.confirmNuniAssignmentReminder).toHaveBeenCalledTimes(1);
+        const cancel = (await ask('取消這份作業的提醒', result)).courseworkRead!;
+        expect(cancel.view).toMatchObject({ step: 'cancel-review', ids: ['b'] });
+        expect(native.cancelNuniAssignmentReminder).not.toHaveBeenCalled();
+        native.cancelNuniAssignmentReminder.mockResolvedValue('cancelled');
+        expect((await ask('確認取消提醒', cancel, { reminder: 'remove', id: 'b' })).content).toContain('已取消');
+        expect(native.cancelNuniAssignmentReminder).toHaveBeenCalledWith({ accountId: 'pa-student', schoolId: 'pu',
+          workspaceId: 'linked', assignmentId: 'b' }, expect.any(Function));
+      });
+
+      test.each([{ dueAt: '2026-12-01T12:00:00+08:00' }, { submittedAt: stamp }, { state: 'closed' }])(
+        'does not schedule when the live assignment changed: %j', async (patch) => {
+          const fresh = { ...list, assignments: [{ ...upcoming, id: 'b', ...patch }] };
+          openWork().mockResolvedValue(fresh);
+          checkNative();
+          const result = await ask('確認設定提醒', await review(), confirm);
+          expect(result.content).toContain('已變更');
+          expect(result.courseworkRead?.result).toBe(fresh);
+          expect(result.courseworkRead?.view).toMatchObject({ step: 'dueAt' in patch ? 'review' : 'result' });
+        });
+
+      test.each([
+        ['denied', '系統設定', 'retry'], ['failed', '再試', 'retry'], ['unchanged', '已有相同時間', 'remove'],
+        ['unsupported', 'iOS 或 Android', undefined],
+      ])('reports the actual notification result and appropriate next action: %s', async (status, copy, next) => {
+        native.confirmNuniAssignmentReminder.mockResolvedValue(status);
+        const result = await ask('確認設定提醒', await review(), confirm);
+        expect(result.content).toContain(copy);
+        const view = result.courseworkRead?.view;
+        expect(view?.kind === 'reminder' && view.step === 'result' ? view.next : 'unexpected').toBe(next);
+      });
+
+      test('skips ineligible time choices and refuses a different user, dirty snapshot or a submitted assignment', async () => {
+        const soon = { ...upcoming, dueAt: new Date(Date.parse(stamp) + 30 * 60000).toISOString() };
+        expect((await ask('提醒我交這份', { ...read, result: { ...list, assignments: [soon] } })).courseworkRead?.view)
+          .toMatchObject({ step: 'review', minutes: 15 });
+        expect((await ask('提醒我交這份', { ...read, result: { ...list, assignments: [{ ...soon, submittedAt: stamp }] } })).content)
+          .toContain('已有繳交紀錄');
+        const draft = await review();
+        const other = await ask('確認', { ...draft, anchor: { ...draft.anchor, owner: 'nuni:someone' } }, confirm);
+        expect(other.courseworkRead).toBeUndefined();
+        const dirty = await ask('確認', { ...draft, changedAssignmentId: 'b' }, confirm);
+        expect(dirty.content).toContain('重新核對');
+        expect(native.confirmNuniAssignmentReminder).not.toHaveBeenCalled();
+      });
     });
 
     test('priority keeps tied open overdue items and next deadline includes exact now; projections never touch data sources', async () => {

@@ -2,9 +2,12 @@ import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import type { CourseworkChoice, CourseworkRead } from '../features/nuniCourseworkFollowUp';
+import { NuniCourseworkReminderCard } from './NuniCourseworkReminderCard';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 
 export function courseworkReplyTitle(read: CourseworkRead) {
+  if (read.view?.kind === 'reminder') return read.view.step === 'review' ? '確認作業提醒'
+    : read.view.step === 'cancel-review' ? '取消作業提醒' : '作業提醒';
   if (read.view?.kind === 'priority') return '優先處理的作業';
   if (read.view?.kind === 'receipt' || read.view?.kind === 'choose-receipt') return '作業繳交紀錄';
   return '課堂作業';
@@ -84,10 +87,15 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
     </View>
   );
   const { view } = read;
-  const choosing = view?.kind === 'choose-receipt';
+  const chooseReminder = view?.kind === 'reminder' && view.step === 'choose';
+  const choosing = view?.kind === 'choose-receipt' || chooseReminder;
   const outdated = !!read.changedAssignmentId;
   const assignmentsById = new Map(result.assignments.map((item) => [item.id, item]));
   const shown = view ? view.ids.map((id) => assignmentsById.get(id)).filter((item) => !!item) : result.assignments;
+  if (view?.kind === 'reminder' && !chooseReminder && shown.length === 1 && !outdated) return (
+    <NuniCourseworkReminderCard view={view} assignment={shown[0]} course={result.workspace.title}
+      busy={busy} latest={latest} onAsk={onAsk} onSelect={onSelect} />
+  );
   const receiptId = view?.kind === 'receipt' && shown.length === 1 ? shown[0].id : undefined;
   const refreshId = receiptId ?? (outdated ? (read.openedAssignmentId ?? read.changedAssignmentId) : undefined);
   const refreshItem = refreshId && assignmentsById.get(refreshId);
@@ -109,6 +117,8 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
         disabled={busy} onPress={() => onAsk('哪個最急？')} />}
       {canAsk && (!view || (view.kind === 'priority' && shown.length > 0)) && <AIButton label="我交了嗎？" variant="ghost"
         disabled={busy} onPress={() => onAsk('我交了嗎？')} />}
+      {canAsk && !choosing && shown.length > 0 && <AIButton label="提醒我交這份" variant="ghost"
+        disabled={busy} onPress={() => onAsk('提醒我交這份')} />}
       {actionable && view && <AIButton label="回到這門課的作業" variant="ghost"
         disabled={busy} onPress={() => onAsk('回到這門課的作業')} />}
     </View>
@@ -139,9 +149,9 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
         const statusLabel = receiptId && !item.submittedAt ? `尚無繳交紀錄 · ${item.state === 'closed' ? '已停止收件' : '仍在收件'}` : status;
         return (
           <Pressable key={item.id} accessibilityRole="button" disabled={disabled} accessibilityState={{ disabled }}
-            accessibilityLabel={choosing ? `選擇作業：第 ${index + 1} 份，${item.title}，${due}`
+            accessibilityLabel={choosing ? `${chooseReminder ? '選擇提醒作業' : '選擇作業'}：第 ${index + 1} 份，${item.title}，${due}`
               : `${latest ? '查看作業' : '查看先前的作業'}：${item.title}，${outdated ? '前次狀態 ' : ''}${status}，${due}${receipt ? `，繳交於 ${receipt}` : ''}`}
-            onPress={choosing ? () => onSelect({ assignmentId: item.id }, title)
+            onPress={choosing ? () => onSelect(chooseReminder ? { reminder: 'pick', id: item.id } : { assignmentId: item.id }, title)
               : () => onOpen(result.workspace.id, item.id)}
             style={({ pressed }) => ({ gap: 5, minHeight: 52, padding: 14, borderRadius: 12, borderWidth: 1,
               borderColor: aiTokens.border, backgroundColor: pressed ? aiTokens.aiSoft : aiTokens.panel })}>
@@ -150,7 +160,7 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
             <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '700' }}>{title}</Text>
             {receipt && <Text style={{ color: aiTokens.text, fontSize: 15 }}>繳交於 {receipt}（台灣時間）</Text>}
             <Text style={secondary}>{due}</Text>
-            <Text style={{ color: aiTokens.aiStrong, fontSize: 14 }}>{choosing ? '核對這份 ›' : '查看作業 ›'}</Text>
+            <Text style={{ color: aiTokens.aiStrong, fontSize: 14 }}>{chooseReminder ? '選擇這份 ›' : choosing ? '核對這份 ›' : '查看作業 ›'}</Text>
           </Pressable>
         );
       })}

@@ -112,6 +112,13 @@ export class NuniSessionController {
   private current(run: number) {
     return !this.disposed && run === this.generation;
   }
+  // A transient foreground refresh or offline verification must preserve the owner's local alarms.
+  localReminderOwner(): string | null | undefined {
+    if (this.loggingOut || this.state.pendingLogout) return null;
+    if (!this.storageRead || this.state.loading) return undefined;
+    const row = this.record;
+    return row && !row.pendingLogout && row.expiresAt > this.now() ? row.platformAccountId : null;
+  }
   /** Check a captured session for local reads without refreshing or exposing its credential. */
   isSessionCurrent = (accountId: string, context: string): boolean => {
     const { session, loading, error, pendingLogout } = this.state;

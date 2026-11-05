@@ -1,9 +1,10 @@
+import type { ReminderChoice } from './nuniCourseworkReminder';
 import { receiptView, type CourseworkView } from './nuniCourseworkSnapshot';
 import type { NuniClassCoursework, ReviewedWorkspaceCourse } from '../services/nuniClassCoursework';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { SavedClassRead } from '../services/savedClassQuery';
 
-export type CourseworkChoice = { classIndex: number } | { workspaceId: string } | { assignmentId: string } | { refreshAssignmentId: string };
+export type CourseworkChoice = { classIndex: number } | { workspaceId: string } | { assignmentId: string } | { refreshAssignmentId: string } | ReminderChoice;
 export type CourseworkRead = {
   anchor: SavedClassRead;
   checkedAt?: string;

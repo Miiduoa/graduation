@@ -758,8 +758,8 @@ function CourseScope({
           id={selected}
           classes={classes}
           classroom={classroom}
-          onAssignmentChanged={(assignmentId) => notifyNuniAssignmentChanged({
-            accountId: session.platformAccountId, context: session.context, workspaceId: selected, assignmentId,
+          onAssignmentChanged={(assignmentId, submitted) => notifyNuniAssignmentChanged({
+            accountId: session.platformAccountId, context: session.context, workspaceId: selected, assignmentId, submitted,
           })}
           onBack={() => {
             pendingSearchReturn.current = searchOffset.current;
@@ -1132,7 +1132,7 @@ function CourseDetail({
   id: string;
   classes: Classes;
   classroom: ReturnType<typeof createNuniClassroom>;
-  onAssignmentChanged(assignmentId: string): void;
+  onAssignmentChanged(assignmentId: string, submitted: boolean): void;
   onBack(): void;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -1444,7 +1444,7 @@ function CourseDetail({
   const saveActivity = (item: Activity) => {
     if ('instructions' in item) {
       assignmentRevision.current += 1;
-      onAssignmentChanged(item.id);
+      onAssignmentChanged(item.id, !!item.mySubmission);
     }
     result.commit(
       (current) =>

@@ -190,6 +190,9 @@ function AssistantConversation({
   const timetableOwner = platformTimetable ? `nuni:${platformTimetable.accountId}` : `firebase:${uid}`;
   const lastReply = messages.at(-1);
   const hasClass = !!(lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor)?.classes.length;
+  const reminderChoice = activeShortcut?.kind === 'coursework' && activeShortcut.choice && 'reminder' in activeShortcut.choice
+    ? activeShortcut.choice.reminder : undefined;
+  const updatingReminder = reminderChoice === 'confirm' || reminderChoice === 'remove';
   const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(draft, hasClass)));
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
@@ -603,7 +606,7 @@ function AssistantConversation({
               borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
               backgroundColor: aiTokens.panel, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
           />
-          {busy && mode === 'device' ? (
+          {updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
             <AIButton label={syncBusy ? '取消這次同步' : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
           ) : (
@@ -841,7 +844,7 @@ function AssistantConversation({
       ))}
       {busy && (
         <View onLayout={scrollToEntry}>
-          <AICard title={queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
+          <AICard title={updatingReminder ? '正在處理作業提醒…' : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
               {activeShortcut?.question ?? draft.trim()}
             </Text>

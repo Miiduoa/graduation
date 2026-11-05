@@ -5,6 +5,7 @@ type NuniAssignmentChange = {
   context: string;
   workspaceId: string;
   assignmentId: string;
+  submitted?: boolean;
 };
 
 const listeners = new Set<(change: NuniAssignmentChange) => void>();

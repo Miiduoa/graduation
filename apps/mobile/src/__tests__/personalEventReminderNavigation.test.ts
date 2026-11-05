@@ -18,6 +18,8 @@ const mockRootReady = jest.fn(() => false);
 const mockPublicReady = jest.fn(() => false);
 const mockPublicNavigate = jest.fn(() => true);
 const mockPublicTimetable = jest.fn((_params: unknown) => true);
+const mockPublicWorkspace = jest.fn();
+const mockAssignmentResolve = jest.fn();
 const mockResolve = jest.fn();
 let mockScope: { owner: string; schoolId: string } | null = null;
 
@@ -40,9 +42,13 @@ jest.mock('../app/rootNavigation', () => ({
 }));
 jest.mock('../app/publicNavigation', () => ({
   isPublicNavigationReady: () => mockPublicReady(),
+  publicNavigateNuniWorkspace: (params: unknown) => mockPublicWorkspace(params),
   publicNavigatePersonalCalendar: (...args: unknown[]) => mockPublicNavigate(...args),
   publicNavigatePersonalTimetable: (params: unknown) => mockPublicTimetable(params),
   subscribePublicNavigationReady: () => () => undefined,
+}));
+jest.mock('../services/nuniAssignmentReminders', () => ({
+  resolveNuniAssignmentReminderTap: (...args: unknown[]) => mockAssignmentResolve(...args),
 }));
 jest.mock('../services/personalEventReminders', () => ({
   resolvePersonalEventReminderTap: (...args: unknown[]) => mockResolve(...args),
@@ -252,4 +258,58 @@ test('the mounted bridge restores a platform tap and receives live taps without 
   expect(mockPublicTimetable).toHaveBeenCalledTimes(2);
   expect(mockRootNavigateNested).not.toHaveBeenCalled();
   view.unmount();
+});
+
+const assignmentTap = { notification: { request: {
+  identifier: 'os-assignment', content: { data: { category: 'nuni_assignment_due', lookupToken: 'opaque-token' } },
+} } };
+const assignmentScope = { ...platformScope, nuniContext: 'verified-session' };
+const assignmentTarget = { assignmentId: 'assignment-a', workspaceId: 'workspace-a' };
+
+test.each(['public', 'school'])('opens the exact nuni assignment once in the %s navigator', async (navigator) => {
+  mockAssignmentResolve.mockResolvedValue(assignmentTarget);
+  mockPublicWorkspace.mockReturnValue(true);
+  await expect(handlePersonalEventReminderResponse(assignmentTap)).resolves.toBe(false);
+  setPersonalEventReminderScopeProvider(() => assignmentScope);
+  (navigator === 'school' ? mockRootReady : mockPublicReady).mockReturnValue(true);
+  await Promise.all([flushPendingPersonalEventReminderTap(), handlePersonalEventReminderResponse(assignmentTap)]);
+  expect(mockAssignmentResolve).toHaveBeenCalledWith(assignmentTap.notification.request.content.data,
+    'os-assignment', { accountId: 'alice', schoolId: 'pu' });
+  const args = { tab: 'courses', ...assignmentTarget, assistantAccountId: 'alice' };
+  if (navigator === 'school') {
+    expect(mockRootNavigateNested).toHaveBeenCalledTimes(1);
+    expect(mockRootNavigateNested).toHaveBeenCalledWith('我的', 'NuniWorkspace', args);
+  } else {
+    expect(mockPublicWorkspace).toHaveBeenCalledTimes(1);
+    expect(mockPublicWorkspace).toHaveBeenCalledWith(args);
+  }
+});
+
+test.each([platformScope, firebaseScope, { owner: 'guest:device', schoolId: 'pu' }])(
+  'unverified assignment tap cannot look up a receipt for %p', async (scope) => {
+    mockPublicReady.mockReturnValue(true);
+    setPersonalEventReminderScopeProvider(() => scope);
+    const clear = jest.fn(async () => undefined);
+    await expect(handlePersonalEventReminderResponse(assignmentTap, { clearLastResponse: clear })).resolves.toBe(false);
+    expect(clear).toHaveBeenCalledWith(assignmentTap);
+    expect(mockAssignmentResolve).not.toHaveBeenCalled();
+    expect(mockPublicWorkspace).not.toHaveBeenCalled();
+  },
+);
+
+test.each([
+  { ...assignmentScope, schoolId: 'other' }, { ...assignmentScope, owner: 'nuni:bob' },
+  { ...assignmentScope, nuniContext: undefined }, { ...assignmentScope, nuniContext: 'new-session' },
+])('a pending receipt lookup cannot navigate after the scope or session changes', async (changed) => {
+  mockPublicReady.mockReturnValue(true);
+  setPersonalEventReminderScopeProvider(() => assignmentScope);
+  let finish!: (value: typeof assignmentTarget) => void;
+  mockAssignmentResolve.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const clear = jest.fn(async () => undefined);
+  const pending = handlePersonalEventReminderResponse(assignmentTap, { clearLastResponse: clear });
+  setPersonalEventReminderScopeProvider(() => changed);
+  finish(assignmentTarget);
+  await expect(pending).resolves.toBe(false);
+  expect(clear).toHaveBeenCalledWith(assignmentTap);
+  expect(mockPublicWorkspace).not.toHaveBeenCalled();
 });

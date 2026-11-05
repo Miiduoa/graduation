@@ -9,6 +9,8 @@ import React, {
 import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { subscribeNuniAssignmentChanges } from '../services/nuniAssignmentChanges';
+import { cancelSubmittedNuniAssignmentReminder, retainNuniAssignmentReminders } from '../services/nuniAssignmentReminders';
 import { nuniPlatformRequest } from '../services/nuniClient';
 import { requestGoogleCredential, clearGoogleCredentialState } from '../services/nuniGoogle';
 import { NuniSessionController, type NativeNuniState } from '../services/nuniSessionController';
@@ -50,13 +52,23 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(controller.state);
   useEffect(() => {
     controller.activate();
-    const unsubscribe = controller.subscribe(setState);
+    const unsubscribe = controller.subscribe((next) => {
+      setState(next);
+      const owner = controller.localReminderOwner();
+      if (owner !== undefined) void retainNuniAssignmentReminders(owner).catch(() => undefined);
+    });
+    const unsubscribeChanges = subscribeNuniAssignmentChanges((change) => {
+      if (change.submitted && controller.isSessionCurrent(change.accountId, change.context)) {
+        void cancelSubmittedNuniAssignmentReminder(change);
+      }
+    });
     void controller.refresh();
     const subscription = AppState.addEventListener('change', (next) => {
       if (next === 'active') void controller.refresh();
     });
     return () => {
       unsubscribe();
+      unsubscribeChanges();
       subscription.remove();
       controller.dispose();
     };

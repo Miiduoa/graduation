@@ -9,6 +9,7 @@ import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AssignmentRead } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
+import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
@@ -131,6 +132,15 @@ export async function askCampusAssistant(input: {
     const platform = input.platformTimetable;
     const owner = platform && `nuni:${platform.accountId}`;
     let choice = input.courseworkChoice;
+    if (platform && (choice ? 'reminder' in choice : lastReply?.courseworkRead?.view?.kind === 'reminder' || isCourseworkReminderQuestion(question))) {
+      const selected = choice && 'reminder' in choice ? choice : undefined;
+      const reminder = await abortableCampusRead(() => answerCourseworkReminder(lastReply?.courseworkRead,
+        question, platform, input.scope.schoolId, () => input.isCurrent() && platform.isCurrent() && !input.signal?.aborted,
+        input.courseworkRequests, selected), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      if (reminder) return { ...reminder, source: 'device', hasActions: false };
+    }
     if (platform && (!choice || 'assignmentId' in choice)) {
       const local = courseworkSnapshotAnswer(lastReply?.courseworkRead, question, platform.accountId,
         input.scope.schoolId, choice && 'assignmentId' in choice ? choice.assignmentId : undefined);

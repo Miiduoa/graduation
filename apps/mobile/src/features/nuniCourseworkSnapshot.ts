@@ -1,12 +1,12 @@
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { assignmentOrdinal } from '../services/assignmentResultPage';
 import type { NuniClassCoursework } from '../services/nuniClassCoursework';
+import type { ReminderView } from './nuniCourseworkReminder';
 import type { CourseworkRead } from './nuniCourseworkFollowUp';
 
 type Snapshot = Extract<NuniClassCoursework, { kind: 'assignments' }>;
 type Row = Snapshot['assignments'][number];
-export type CourseworkView = {
-  kind: 'priority' | 'choose-receipt' | 'receipt';
+export type CourseworkView = ({ kind: 'priority' | 'choose-receipt' | 'receipt' } | ReminderView) & {
   ids: string[];
   message: string;
   rankedAt?: string;
