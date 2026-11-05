@@ -191,7 +191,10 @@ function assertFailsOffMain(step) {
 }
 
 test('production workflows fail closed unless the run is on main', () => {
-  assert.equal(job.if, "github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'");
+  assert.equal(
+    job.if,
+    "github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'",
+  );
   assertFailsOffMain(job.steps[0]);
 
   const release = parseWorkflow('release.yml');
@@ -220,4 +223,34 @@ test('production workflows fail closed unless the run is on main', () => {
 
   const announcements = parseWorkflow('campus-announcement-sync.yml');
   assertFailsOffMain(announcements.jobs.sync.steps[0]);
+});
+
+test('assistant CI uses isolated frozen installs and gates summary and manual Firebase release', () => {
+  const assistant = workflow.jobs['test-nuni-assistant'];
+  assert.deepEqual(assistant.permissions, { contents: 'read' });
+  assert.equal(
+    assistant.steps.find((step) => step.name === 'Checkout').with['persist-credentials'],
+    false,
+  );
+  const setup = assistant.steps.find((step) => step.name === 'Setup Node.js');
+  assert.deepEqual(setup.with['cache-dependency-path'].trim().split('\n'), [
+    'pnpm-lock.yaml',
+    'scripts/nuni-assistant/pnpm-lock.yaml',
+  ]);
+  const commands = assistant.steps.map((step) => step.run).filter(Boolean);
+  assert.ok(commands.includes('pnpm install --frozen-lockfile'));
+  assert.ok(
+    commands.includes(
+      'pnpm --dir scripts/nuni-assistant install --ignore-workspace --frozen-lockfile',
+    ),
+  );
+  assert.ok(commands.includes('pnpm --dir scripts/nuni-assistant test'));
+  assert.notEqual(assistant['continue-on-error'], true);
+  assert.ok(job.needs.includes('test-nuni-assistant'));
+  assert.ok(workflow.jobs.summary.needs.includes('test-nuni-assistant'));
+  assert.ok(
+    workflow.jobs.summary.steps.some((step) =>
+      step.run?.includes('needs.test-nuni-assistant.result'),
+    ),
+  );
 });

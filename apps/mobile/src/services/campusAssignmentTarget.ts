@@ -12,7 +12,7 @@ export interface CampusAssignmentTarget {
   params: { groupId: string; assignmentId: string };
 }
 
-function displayTitle(value: string): string {
+export function campusAssignmentDisplayTitle(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, 130);
 }
 
@@ -32,9 +32,9 @@ export function resolveCampusAssignmentTarget(input: {
   const snapshot = validCampusSenseSnapshot(input.snapshot, input.scope, now);
   if (!snapshot || snapshot.assignments.status !== 'available' ||
       typeof input.assignment.title !== 'string' || !input.assignment.title.trim()) return null;
-  const title = displayTitle(input.assignment.title);
+  const title = campusAssignmentDisplayTitle(input.assignment.title);
   const matches = snapshot.assignments.items.filter((row) =>
-    displayTitle(row.title) === title &&
+    campusAssignmentDisplayTitle(row.title) === title &&
     row.groupName === (input.assignment.groupName ?? '') &&
     row.dueAt === (input.assignment.dueAt ?? null));
   // Same-title tasks must never pick whichever happens to appear first.

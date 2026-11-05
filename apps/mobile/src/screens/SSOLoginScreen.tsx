@@ -13,6 +13,10 @@ import { useFocusEffect, useNavigation, type NavigationProp } from '@react-navig
 
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
 import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
+import {
   TEACHER_LMS_UNAVAILABLE_COPY,
   isTeacherLmsUnavailableNotice,
 } from '@campus/shared/src/schoolLogin';
@@ -217,10 +221,16 @@ function SchoolLoginContent(
       console.warn('Student ID login error:', loginError);
       setStudentPwInput('');
       const message = loginError instanceof Error ? loginError.message : '';
+      const code =
+        loginError && typeof loginError === 'object' && 'code' in loginError
+          ? String((loginError as { code?: unknown }).code || '')
+          : '';
       setError(
         isTeacherLmsUnavailableNotice(message)
           ? TEACHER_LMS_UNAVAILABLE_COPY
-          : '學校帳號登入未完成，請確認帳號密碼與網路連線後重試。',
+          : code === PU_ECAMPUS_DATA_PAUSED_CODE || message === PU_ECAMPUS_DATA_PAUSED_MESSAGE
+            ? PU_ECAMPUS_DATA_PAUSED_MESSAGE
+            : '學校帳號登入未完成，請確認帳號密碼與網路連線後重試。',
       );
       setIsRetryable(true);
       setStep('error');

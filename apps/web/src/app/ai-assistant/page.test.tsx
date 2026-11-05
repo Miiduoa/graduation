@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { CampusDraftProvider, scopeStorageKey } from '@/components/CampusDraftProvider';
 import AssistantPage from './page';
 import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
@@ -54,6 +55,9 @@ vi.mock('./AgentCards', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  vi.stubEnv('CAMPUS_BACKEND', 'nuni');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
+  sessionStorage.clear();
   state.uid = 'alice';
   state.query = '';
   state.functionsConfigured = true;
@@ -65,9 +69,19 @@ beforeEach(() => {
     announcements: { status: 'available', items: [] },
   }));
 });
+afterEach(() => {
+  sessionStorage.clear();
+});
 function ask(content = '私人課表') {
   fireEvent.change(screen.getByLabelText('你的問題'), { target: { value: content } });
   fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+}
+function withCampusDraft(node: ReactNode) {
+  return (
+    <CampusDraftProvider uid="alice" schoolId="pu" ready>
+      {node}
+    </CampusDraftProvider>
+  );
 }
 
 it('uses the function name in the header instead of a school name before the school account is connected', () => {
@@ -89,6 +103,26 @@ it('requires sign-in and does not send a query from a shared link automatically'
   view.rerender(<AssistantPage />);
   expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('問題');
   expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('overwrites a preserved campus draft when the URL q differs', () => {
+  sessionStorage.setItem(
+    scopeStorageKey('alice', 'pu'),
+    JSON.stringify({ assistant: '舊草稿問題' }),
+  );
+  state.query = `q=${encodeURIComponent('深連結新問題')}`;
+  render(withCampusDraft(<AssistantPage />));
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('深連結新問題');
+});
+
+it('keeps a preserved campus draft when the URL has no q', () => {
+  sessionStorage.setItem(
+    scopeStorageKey('alice', 'pu'),
+    JSON.stringify({ assistant: '保留草稿' }),
+  );
+  state.query = 'campus=pu';
+  render(withCampusDraft(<AssistantPage />));
+  expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('保留草稿');
 });
 
 it('preserves input on backend failure and retries without inserting a fake answer', async () => {

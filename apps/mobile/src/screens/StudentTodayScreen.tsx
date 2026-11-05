@@ -20,10 +20,11 @@ import { rootNavigateNested } from '../app/rootNavigation';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
-import { navigateFromInboxTask } from '../services/inboxActions';
+import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
 import { hasTCSession } from '../services/tronClassClient';
 import {
   courseWorkNavForClass,
+  resolveTimetableClassroomNav,
   todayCourseWorkNavigateTarget,
   type TimetableClassroomDestination,
 } from '../hooks/timetableClassroomNav';
@@ -36,10 +37,10 @@ import {
   formatUpcomingDueLine,
   formatUpdatedAt,
   isDueWithinHours,
+  isSameTaipeiDay,
   isTodoOverdue,
   pickNextAction,
   sortTodayClasses,
-  sortTodayTodos,
   TODAY_COPY,
   type NextAction,
   type TodayClass,
@@ -83,8 +84,9 @@ export default function StudentTodayScreen() {
   const navigation = useNavigation();
   const bottom = useTabBarContentBottomPadding();
   const uid = auth.user?.uid;
-  const schoolId = auth.profile?.schoolId;
-  const scope = JSON.stringify([uid, schoolId, auth.profile?.role]);
+  const profile = auth.profile?.uid === uid ? auth.profile : null;
+  const schoolId = profile?.schoolId;
+  const scope = JSON.stringify([uid, schoolId, profile?.role]);
   const currentScope = useRef(scope);
   currentScope.current = scope;
   const [state, setState] = useState<HomeState>({ scope, status: 'loading' });
@@ -122,7 +124,7 @@ export default function StudentTodayScreen() {
           return;
         }
         const [{ tasks }, connected] = await Promise.all([
-          loadStudentHome(uid, schoolId),
+          loadStudentHome(uid, schoolId, 'today'),
           hasTCSession().catch(() => false),
         ]);
         if (request === generation.current && currentScope.current === scope) {
@@ -176,7 +178,6 @@ export default function StudentTodayScreen() {
 
   const action = pickNextAction(classes, todos, now);
   const classRows = sortTodayClasses(classes, now);
-  const todoRows = sortTodayTodos(todos) as TodoRow[];
   const todosExpanded = expandedTodoScope === scope;
   const firstLoad = unsigned
     ? timetableStatus === 'loading'
@@ -190,7 +191,7 @@ export default function StudentTodayScreen() {
     safeNavigate(navigation, target.screen, target.params);
   };
   const openTodo = (row: TodoRow, scrollToSubmit = false) => {
-    if (row.task) {
+    if (scrollToSubmit && row.task) {
       // The task carries its real assignment / quiz ID and destination.
       // If opening fails, the navigation helper explains why; never invent a submit ID.
       navigateFromInboxTask(navigation, row.task, {
@@ -200,20 +201,20 @@ export default function StudentTodayScreen() {
       });
       return;
     }
-    if (row.courseId) {
-      safeNavigate(navigation, 'CourseHub', {
-        groupId: row.courseId,
-        groupName: row.courseName,
-      });
-    }
+    const target = todayCourseWorkNavigateTarget(resolveTimetableClassroomNav({
+      // Inbox tasks already carry the real course/group ID; never infer it from a title.
+      linkedCourseId: row.courseId,
+      courseName: row.courseName,
+    }));
+    safeNavigate(navigation, target.screen, target.params);
   };
   const openWeek = () =>
     rootNavigateNested('學習', 'PersonalTimetable', termKey ? { term: termKey } : undefined);
   const openImport = () => rootNavigateNested('學習', 'PersonalImport', { kind: 'timetable' });
   const openQuickAction = (quick: MobileQuickAction) => {
-    if (quick.destination === '/classroom' && todoRows.length === 1) {
+    if (quick.destination === '/classroom' && todos.length === 1) {
       // Use the current user's real assignment or quiz, never fabricate a submit id.
-      openTodo(todoRows[0], true);
+      openTodo(todos[0], true);
       return;
     }
     safeNavigate(navigation, quick.route);
@@ -266,7 +267,7 @@ export default function StudentTodayScreen() {
               now={now}
               styles={s}
               onOpenClass={openCourse}
-              onOpenTodo={(todo) => openTodo(todo, true)}
+              onOpenTodo={openTodo}
               onOpenWeek={openWeek}
             />
             <QuickCampusEntry
@@ -287,7 +288,7 @@ export default function StudentTodayScreen() {
               onOpenTimetable={openWeek}
             />
             <TodoList
-              todos={todoRows}
+              todos={todos}
               expanded={todosExpanded}
               unsigned={unsigned}
               error={error}
@@ -337,7 +338,7 @@ function NextActionCard({
   now: Date;
   styles: ReturnType<typeof createStyles>;
   onOpenClass: (item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string }) => void;
-  onOpenTodo: (todo: TodoRow) => void;
+  onOpenTodo: (todo: TodoRow, scrollToSubmit?: boolean) => void;
   onOpenWeek: () => void;
 }) {
   const fade = useRef(new Animated.Value(1)).current;
@@ -401,26 +402,6 @@ function NextActionCard({
       </Animated.View>
     );
   }
-  if (action.type === 'allDone' && action.todo) {
-    const todo = action.todo as TodoRow;
-    return (
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => onOpenTodo(todo)}
-        style={({ pressed }) => [s.card, pressed && s.pressed]}
-        testID="next-action"
-      >
-        <Animated.View style={{ opacity: fade, flex: 1 }}>
-          <Text style={s.kind}>{TODAY_COPY.allClassesDone}</Text>
-          <Text style={s.headline}>{todo.title}</Text>
-          <Text style={s.meta}>{formatTodoDueLine(todo, now)}</Text>
-          <View style={s.cardButton}>
-            <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
-          </View>
-        </Animated.View>
-      </Pressable>
-    );
-  }
   if (action.type === 'class') {
     const classCta = action.class.courseId ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
     return (
@@ -441,33 +422,44 @@ function NextActionCard({
       </Pressable>
     );
   }
-  if (action.type !== 'assignment' && action.type !== 'overdue' && action.type !== 'upcoming')
-    return null;
   const todo = action.todo as TodoRow;
-  const overdue = action.type === 'overdue';
-  const kind = overdue
-    ? TODAY_COPY.overdue
-    : action.type === 'upcoming'
-      ? TODAY_COPY.nextAssignment
-      : TODAY_COPY.dueToday;
+  const kind = {
+    allDone: TODAY_COPY.allClassesDone,
+    assignment: todo.dueAt !== null && !isSameTaipeiDay(todo.dueAt, now.getTime())
+      ? '明天截止'
+      : TODAY_COPY.dueToday,
+    overdue: TODAY_COPY.overdue,
+    upcoming: todo.task?.kind === 'quiz' ? '下一個測驗' : TODAY_COPY.nextAssignment,
+  }[action.type];
   const meta =
     action.type === 'upcoming' ? formatUpcomingDueLine(todo) : formatTodoDueLine(todo, now);
+  const courseAction = todo.courseId?.trim() ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
+  const workAction = todo.task && resolveInboxAction(todo.task);
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={() => onOpenTodo(todo)}
-      style={({ pressed }) => [s.card, pressed && s.pressed]}
-      testID="next-action"
-    >
-      <Animated.View style={{ opacity: fade, flex: 1 }}>
-        <Text style={s.kind}>{kind}</Text>
-        <Text style={s.headline}>{todo.title}</Text>
-        <Text style={[s.meta, overdue ? s.metaDanger : null]}>{meta}</Text>
-        <View style={s.cardButton}>
-          <Text style={s.cardButtonText}>{TODAY_COPY.goSubmit}</Text>
-        </View>
-      </Animated.View>
-    </Pressable>
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${kind}，${todo.title}，${todo.courseName}，${meta}，${courseAction}`}
+        onPress={() => onOpenTodo(todo)}
+        style={({ pressed }) => [s.card, workAction && s.workCard, pressed && s.pressed]}
+        testID="next-action"
+      >
+        <Animated.View style={{ opacity: fade }}>
+          <Text style={s.kind}>{kind}</Text>
+          <Text style={s.headline}>{todo.title}</Text>
+          <Text style={[s.meta, action.type === 'overdue' && s.metaDanger]}>{meta}</Text>
+        </Animated.View>
+      </Pressable>
+      {workAction && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => onOpenTodo(todo, true)}
+          style={({ pressed }) => [s.cardButton, s.workButton, pressed && s.pressed]}
+        >
+          <Animated.Text style={[s.cardButtonText, { opacity: fade }]}>{workAction.label}</Animated.Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -688,6 +680,9 @@ const createStyles = () =>
       padding: 20,
       shadowOpacity: 0,
     },
+    // Leave room for the separate 44-point action, its gap, and the card padding.
+    workCard: { paddingBottom: 80 },
+    workButton: { position: 'absolute', bottom: 20, right: 20 },
     cardLight: {
       backgroundColor: theme.mode === 'dark' ? theme.colors.surface2 : CREAM,
       minHeight: 132,

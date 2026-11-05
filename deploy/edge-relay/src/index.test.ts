@@ -48,20 +48,21 @@ async function signedRelayRequest(
 }
 
 function requestWithPlacement(request: Request, placement: string): Request {
-  return new Proxy(request, {
-    get(target, prop, receiver) {
-      if (prop === 'headers') {
-        const headers = new Headers(target.headers);
-        headers.set('cf-placement', placement);
-        return headers;
-      }
-      if (prop === 'arrayBuffer') return () => target.arrayBuffer();
-      if (prop === 'clone') return () => requestWithPlacement(target.clone(), placement);
-      const value = Reflect.get(target, prop, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
+  const headers = new Headers(request.headers);
+  headers.set('cf-placement', placement);
+  return new Request(request, { headers });
 }
+
+it.each(['alcat.pu.edu.tw', 'MYPU.PU.EDU.TW.'])('blocks signed requests to paused E-campus host %s before forwarding', async (host) => {
+  const request = await signedRelayRequest(`https://${host}/`, { method: 'POST', body: 'test' });
+  const upstream = vi.fn(async () => new Response('unexpected upstream'));
+  vi.stubGlobal('fetch', upstream);
+  const response = await handleRelayRequest(request, {
+    RELAY_SECRET: SECRET, ALLOWED_HOSTS: '*.pu.edu.tw',
+  }, Date.now(), createMemoryNonceStore());
+  expect(response.status).toBe(404);
+  expect(upstream).not.toHaveBeenCalled();
+});
 
 it('returns 404 without a valid signature', async () => {
   const upstream = vi.fn(async () => new Response('should-not-run'));
@@ -89,7 +90,7 @@ it('rejects stale timestamps', async () => {
   const upstream = vi.fn(async () => new Response('should-not-run'));
   vi.stubGlobal('fetch', upstream);
   const request = await signedRelayRequest(
-    'https://alcat.pu.edu.tw/',
+    'https://relay-test.pu.edu.tw/',
     { method: 'GET' },
     Date.parse('2020-01-01T00:00:00Z'),
   );
@@ -101,7 +102,7 @@ it('rejects stale timestamps', async () => {
 it('returns 404 when the body is changed after signing', async () => {
   const upstream = vi.fn(async () => new Response('should-not-run'));
   vi.stubGlobal('fetch', upstream);
-  const signed = await signedRelayRequest('https://alcat.pu.edu.tw/index_check.php', {
+  const signed = await signedRelayRequest('https://relay-test.pu.edu.tw/index_check.php', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'uid=1110700321&upassword=secret',
@@ -115,7 +116,7 @@ it('returns 404 when the body is changed after signing', async () => {
 it('returns 404 when the Cookie header is changed after signing', async () => {
   const upstream = vi.fn(async () => new Response('should-not-run'));
   vi.stubGlobal('fetch', upstream);
-  const signed = await signedRelayRequest('https://mypu.pu.edu.tw/score_query/score_all.php', {
+  const signed = await signedRelayRequest('https://relay-test.pu.edu.tw/score_query/score_all.php', {
     method: 'GET',
     headers: { Cookie: 'PHPSESSID=mypu' },
   });
@@ -131,8 +132,8 @@ it('returns 404 when the same nonce is replayed inside the window', async () => 
   const upstream = vi.fn(async () => new Response('ok'));
   vi.stubGlobal('fetch', upstream);
   const store = createMemoryNonceStore();
-  const first = await signedRelayRequest('https://alcat.pu.edu.tw/', { method: 'GET' }, Date.now(), FIXED_NONCE);
-  const second = await signedRelayRequest('https://alcat.pu.edu.tw/', { method: 'GET' }, Date.now(), FIXED_NONCE);
+  const first = await signedRelayRequest('https://relay-test.pu.edu.tw/', { method: 'GET' }, Date.now(), FIXED_NONCE);
+  const second = await signedRelayRequest('https://relay-test.pu.edu.tw/', { method: 'GET' }, Date.now(), FIXED_NONCE);
   expect((await handleRelayRequest(first, { RELAY_SECRET: SECRET }, Date.now(), store)).status).toBe(200);
   expect((await handleRelayRequest(second, { RELAY_SECRET: SECRET }, Date.now(), store)).status).toBe(404);
   expect(upstream).toHaveBeenCalledTimes(1);
@@ -194,7 +195,7 @@ it('marks placement_miss when execution is not near Taiwan', async () => {
   });
   vi.stubGlobal('fetch', vi.fn(async () => new Response('ok')));
   const request = requestWithPlacement(
-    await signedRelayRequest('https://alcat.pu.edu.tw/', { method: 'GET' }, Date.now(), 'fedcba9876543210fedcba9876543210'),
+    await signedRelayRequest('https://relay-test.pu.edu.tw/', { method: 'GET' }, Date.now(), 'fedcba9876543210fedcba9876543210'),
     'remote-NRT',
   );
   const response = await handleRelayRequest(request, { RELAY_SECRET: SECRET }, Date.now(), createMemoryNonceStore());
@@ -219,11 +220,11 @@ it('accepts nested pu.edu.tw hosts and keeps redirect manual', async () => {
 
 it('normalizes trailing-dot FQDN targets before forwarding', async () => {
   const upstream = vi.fn(async (url: string) => {
-    expect(url).toBe('https://alcat.pu.edu.tw/index_check.php');
+    expect(url).toBe('https://relay-test.pu.edu.tw/index_check.php');
     return new Response('ok');
   });
   vi.stubGlobal('fetch', upstream);
-  const request = await signedRelayRequest('https://alcat.pu.edu.tw./index_check.php');
+  const request = await signedRelayRequest('https://relay-test.pu.edu.tw./index_check.php');
   const response = await handleRelayRequest(request, { RELAY_SECRET: SECRET }, Date.now(), createMemoryNonceStore());
   expect(response.status).toBe(200);
 });

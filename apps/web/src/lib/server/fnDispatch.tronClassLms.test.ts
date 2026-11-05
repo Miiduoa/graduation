@@ -157,6 +157,58 @@ it('uses activity announcements on 404 without marking the course as empty succe
   expect(source.fetchActivities).toHaveBeenCalledTimes(1);
 });
 
+it('keeps activity-only notices when the dedicated course announcement feed succeeds', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockResolvedValue({
+    ok: true,
+    value: [
+      { id: 40002, title: '補充公告', type: 'announcement', content: '新增課堂資訊' },
+      LMS_FIXTURE_MATERIAL,
+    ],
+  });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ id: 'course:10001:40001', source: 'course', title: '停課通知' }),
+    expect.objectContaining({ id: 'activity:10001:40002', source: 'activity', title: '補充公告' }),
+  ]);
+  expect(body.result.materials).toHaveLength(1);
+  expect(body.result.courseErrors).toEqual([]);
+  expect(source.fetchActivities).toHaveBeenCalledTimes(1);
+});
+
+it('deduplicates matching activity and course notices without hiding changed content', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchActivities).mockResolvedValue({
+    ok: true,
+    value: [
+      { ...LMS_FIXTURE_ANNOUNCEMENT, type: 'announcement' },
+      { ...LMS_FIXTURE_ANNOUNCEMENT, type: 'announcement', content: '不同的補充內容' },
+    ],
+  });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ id: 'course:10001:40001', content: '下週演習停課一次' }),
+    expect.objectContaining({ id: 'activity:10001:40001', content: '不同的補充內容' }),
+  ]);
+  expect(body.result.courseErrors).toEqual([]);
+});
+
+it('preserves activity notices and still reports a failed dedicated course feed', async () => {
+  const { request, source } = setup();
+  vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 503 });
+  vi.mocked(source.fetchActivities).mockResolvedValue({
+    ok: true,
+    value: [{ id: 40003, title: '臨時公告', type: 'announcement', content: '暫時由活動來源提供' }],
+  });
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.announcements).toEqual([
+    expect.objectContaining({ id: 'activity:10001:40003', source: 'activity' }),
+  ]);
+  expect(body.result.courseErrors).toEqual([
+    expect.objectContaining({ courseId: 10001, area: 'announcements', status: 503 }),
+  ]);
+});
+
 it('keeps ongoing homework when upcoming courses cannot be listed', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchCourses)
@@ -233,6 +285,189 @@ it('does not reuse an expired cache document and overwrites it', async () => {
   expect(source.fetchHomeworkPage).toHaveBeenCalled();
   expect((store.docs.get(CACHE) as { snapshot?: { fetchedAt?: string } } | undefined)?.snapshot?.fetchedAt)
     .not.toBe('2026-01-01T00:00:00.000Z');
+});
+
+it('does not serve another linked TronClass session\'s cached courses after reconnect', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+
+  const nextId = 'c'.repeat(32);
+  Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: nextId });
+  store.docs.set(`_puTronClassSessions/${nextId}`, {
+    ownerUid: UID, cookies: { session: 'new-lms-session' }, userId: 11,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  expect((await response.json()).result.cache.hit).toBe(false);
+  expect(source.fetchCourses).toHaveBeenCalledWith(
+    { session: 'new-lms-session' }, { userId: 11, status: 'ongoing' },
+  );
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(nextId);
+});
+
+it('invalidates legacy cache entries without a verified session binding', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE);
+  expect(cached?.sessionId).toBe(LMS_ID);
+  delete cached!.sessionId;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+});
+
+it('does not expose an otherwise fresh cache when its LMS session changes owner', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  Object.assign(store.docs.get(LMS)!, { ownerUid: 'another-owner' });
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const response = await request();
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+});
+
+it('rejects an in-flight course read when its linked session changes before completion', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  let release!: () => void;
+  vi.mocked(source.fetchActivities).mockImplementationOnce(() => new Promise((resolve) => {
+    release = () => resolve({ ok: true, value: [LMS_FIXTURE_MATERIAL] });
+  }));
+  const pending = request({ courseId: 10001 });
+  await vi.waitFor(() => expect(source.fetchActivities).toHaveBeenCalledTimes(1));
+
+  const nextId = 'd'.repeat(32);
+  Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: nextId });
+  store.docs.set(`_puTronClassSessions/${nextId}`, {
+    ownerUid: UID, cookies: { session: 'new-lms-session' }, userId: 11,
+    expiresAt: new Date(Date.now() + 60_000),
+  });
+  release();
+  const response = await pending;
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+  expect(store.docs.get(CACHE)?.extras).toEqual({});
+});
+
+it.each([
+  { scenario: 'homework-list cache hit', data: {} },
+  { scenario: 'course-contents cache hit', data: { courseId: 10001 } },
+  { scenario: 'cached list with an unknown course', data: { courseId: 99999 } },
+])('does not return $scenario after the linked session changes during cache lookup', async ({ data }) => {
+  const { request, source, store } = setup();
+  expect((await request(data)).status).toBe(200);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+
+  // Simulate a legitimate reconnect after the initial session check, while
+  // Firestore is returning the already saved cache. No school HTTP call occurs.
+  const originalDoc = store.db.doc.bind(store.db);
+  let switched = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      get: async () => {
+        const snapshot = await ref.get();
+        switched = true;
+        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+        return snapshot;
+      },
+    };
+  });
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchActivities).mockClear();
+  vi.mocked(source.fetchCourseAnnouncements).mockClear();
+  vi.mocked(source.fetchSiteAnnouncements).mockClear();
+
+  const response = await request(data);
+  expect(switched).toBe(true);
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+  expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+});
+
+it.each([
+  'expired extras and reconnect',
+  'invalid extras and reconnect',
+  'deleted LMS session',
+  'expired portal',
+])('rejects a cache hit with %s during cache lookup without writing or calling school sources', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  if (scenario === 'expired extras and reconnect') {
+    Object.assign((cached.extras as Record<string, object>)['10001'], { expiresAt: new Date(0).toISOString() });
+  } else if (scenario === 'invalid extras and reconnect') {
+    cached.extras = { '10001': { invalid: true } };
+  }
+  const cacheBefore = structuredClone(cached);
+  const writeCache = vi.fn();
+  const originalDoc = store.db.doc.bind(store.db);
+  let changed = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      set: writeCache,
+      get: async () => {
+        const snapshot = await ref.get();
+        changed = true;
+        if (scenario === 'deleted LMS session') {
+          store.docs.delete(LMS);
+        } else if (scenario === 'expired portal') {
+          Object.assign(store.docs.get(PORTAL)!, { expiresAt: new Date(0) });
+        } else {
+          Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+        }
+        return snapshot;
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(changed).toBe(true);
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(writeCache).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it('makes no LMS calls when the read-only feature flag is disabled', async () => {
+  const { request, source, store } = setup();
+  const doc = vi.spyOn(store.db, 'doc');
+  vi.stubEnv('SCHOOL_LMS_READONLY_ENABLED', 'false');
+  const response = await request({ courseId: 10001 });
+  expect(response.status).toBe(404);
+  expect(doc).not.toHaveBeenCalled();
+  expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
 });
 
 it.each([{ refresh: 'yes' }, { sessionId: LMS_ID }, { status: 'ongoing' }, { courseId: '10001' }, []])('rejects malformed bodies %j', async (data) => {

@@ -1,5 +1,7 @@
 # 靜宜校園 Edge Relay（Supabase）
 
+E 校園暫停期間，轉送端會在連線前阻擋 `alcat.pu.edu.tw` 與 `mypu.pu.edu.tw`，即使請求簽章有效且主機已列入白名單。
+
 靜宜防火牆封鎖部分 Cloudflare Workers 出口時，把 `alcat.pu.edu.tw`、`mypu.pu.edu.tw` 改走東京（`ap-northeast-1`）的 Supabase Edge Function。簽章協定與 `deploy/edge-relay` 相同，**protocol 直接引用那一份，不要再複製**。
 
 `identity.pu.edu.tw`、`tronclass.pu.edu.tw` 仍走 Cloudflare Worker；這支函式不要當成全部校園流量的唯一出口。
@@ -59,7 +61,7 @@ npx supabase functions deploy pu-edge-relay \
   --entrypoint deploy/supabase-relay/index.ts
 ```
 
-若 CLI 不收 `--entrypoint`，把 `index.ts` 連同它 import 的 `deploy/edge-relay/src/protocol.ts` 放到暫存函式目錄再部署，**不要手改 protocol**。
+若 CLI 不收 `--entrypoint`，將 `index.ts`、`deploy/edge-relay/src/protocol.ts` 和 `packages/shared/src/puEcampusDataPolicy.ts` 按原本的相對目錄打包，再部署。
 
 可選白名單（逗號分隔；預設 `*.pu.edu.tw`）：
 

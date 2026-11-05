@@ -43,7 +43,17 @@ export function useCoursePanel() {
   const current = new URL(location || `?${params.toString()}`, 'https://campus.local');
   const panel = resolveCoursePanel(current.search, current.hash);
   const listParams = new URLSearchParams();
-  for (const key of ['q', 'courses', 'task', 'taskCourse', 'campus', 'schoolId', 'school']) {
+  for (const key of [
+    'q',
+    'courses',
+    'task',
+    'taskCourse',
+    'campus',
+    'schoolId',
+    'school',
+    'from',
+    'code',
+  ]) {
     const value = current.searchParams.get(key);
     if (value) listParams.set(key, value);
   }

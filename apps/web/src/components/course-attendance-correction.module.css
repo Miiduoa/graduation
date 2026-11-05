@@ -111,3 +111,39 @@
   .header > button,
   .actions > button { width: 100%; }
 }
+
+.recovery {
+  margin-top: 20px;
+  padding: 18px;
+  max-width: 620px;
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.recovery h5 { margin: 0 0 8px; font-size: 16px; }
+.recovery p { margin: 0; font-size: 13px; line-height: 1.7; }
+.recovery dl { margin: 16px 0; display: grid; gap: 10px; }
+.recovery dl > div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; }
+.recovery dt { color: var(--muted); font-size: 13px; }
+.recovery dd { margin: 0; font-size: 14px; line-height: 1.6; }
+.recoveryAction {
+  min-height: 48px;
+  padding: 12px 18px;
+  margin-bottom: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.recoveryAction:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.recoveryAction:disabled { opacity: .65; cursor: wait; }
+@media (max-width: 560px) {
+  .recovery { padding: 14px; }
+  .recoveryAction { width: 100%; }
+}

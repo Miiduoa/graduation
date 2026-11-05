@@ -12,7 +12,7 @@ import { getAuthInstance, isFirebaseMockMode } from '../firebase';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 import type { CampusPlanStep } from './offlineCampusPlanner';
 
-import { resolveCampusAssignmentTarget } from './campusAssignmentTarget';
+import { campusAssignmentDisplayTitle as normalizeTitle, resolveCampusAssignmentTarget } from './campusAssignmentTarget';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import {
   adoptSubmittedAssignmentReminder, linkedReminderIdentifiers,
@@ -20,6 +20,7 @@ import {
   cancelSubmittedAssignmentReminder, clearSubmittedAssignmentReminders, resumeSubmittedAssignmentReminders,
 } from './submittedAssignmentReminders';
 
+export type ReminderAssignment = Pick<CampusPlanStep, 'evidence' | 'route' | 'title' | 'groupName' | 'dueAt'>;
 export type CampusReminderLead = 60 | 1440;
 export type CampusReminderOutcome = 'scheduled' | 'already-scheduled' | 'submitted' | 'inactive';
 
@@ -29,7 +30,7 @@ export interface CampusReminderScope {
 }
 export interface CampusReminderRequest {
   scope: CampusReminderScope;
-  step: CampusPlanStep;
+  step: ReminderAssignment;
   snapshot: CampusSenseSnapshot;
   leadMinutes: CampusReminderLead;
   isCurrent: () => boolean;
@@ -70,10 +71,6 @@ function checkAccount(
   }
 }
 
-function normalizeTitle(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 130);
-}
-
 function validateAssignment(
   req: CampusReminderRequest,
   now: number,
@@ -111,7 +108,7 @@ function validateAssignment(
 
 // Reading or cancelling an owned alarm may use its last known source even after the preview expires.
 function knownReminderSource(input: {
-  scope: CampusReminderScope; step: CampusPlanStep; snapshot?: CampusSenseSnapshot | null;
+  scope: CampusReminderScope; step: ReminderAssignment; snapshot?: CampusSenseSnapshot | null;
 }) {
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.userId !== input.scope.uid || snapshot.schoolId !== input.scope.schoolId ||
@@ -301,7 +298,7 @@ export async function scheduleCampusAssignmentReminder(
  */
 export async function getCampusAssignmentReminderStatus(input: {
   scope: CampusReminderScope;
-  step: CampusPlanStep;
+  step: ReminderAssignment;
   snapshot?: CampusSenseSnapshot | null;
   isCurrent: () => boolean;
   scheduledOnly?: boolean;
@@ -376,7 +373,7 @@ export function endCampusAssignmentReminderSignOutCleanup(): void {
 /** Only remove an alarm for the signed-in owner. This cannot touch other features. */
 export async function cancelCampusAssignmentReminder(input: {
   scope: CampusReminderScope;
-  step: CampusPlanStep;
+  step: ReminderAssignment;
   snapshot?: CampusSenseSnapshot | null;
   leadMinutes: CampusReminderLead;
   isCurrent: () => boolean;

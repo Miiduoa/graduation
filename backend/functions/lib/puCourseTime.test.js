@@ -1,3 +1,9 @@
+// Source-format integration cases use a controlled, enabled policy.
+jest.mock('../generated/shared/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('../generated/shared/puEcampusDataPolicy'),
+  assertPuEcampusDataFetchEnabled: jest.fn(),
+}));
+
 const { EventEmitter } = require('events');
 const https = require('https');
 const { parsePuCourseTime } = require('./puCourseTime');
