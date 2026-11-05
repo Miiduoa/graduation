@@ -175,3 +175,19 @@ test('does not reload or steal another screen\'s model after selection', async (
   expect(mockLoad).not.toHaveBeenCalled();
   expect(mockGenerate).toHaveBeenCalledTimes(1);
 });
+
+test('retains the publication window when the local selector resolves a notice paraphrase', async () => {
+  mockGenerate.mockResolvedValueOnce(selected([{ tool: 'announcements' }]));
+  const source = snapshot();
+  source.announcements.items = [
+    { title: '今天發布的公告', publishedAt: '2026-10-25T16:00:00Z' },
+    { title: '昨天發布的公告', publishedAt: '2026-10-25T15:59:59Z' },
+  ];
+  const reply = await askCampusAssistant({ ...request(), senseSnapshot: source,
+    messages: [{ role: 'user', content: 'Any school news today?' }] });
+  expect(reply.localReads?.[0].status).toBe('available');
+  expect(reply.content).toContain('今天發布的公告');
+  expect(reply.content).not.toContain('昨天發布的公告');
+  expect(mockGenerate).toHaveBeenCalledTimes(1);
+  expect(httpsCallable).not.toHaveBeenCalled();
+});

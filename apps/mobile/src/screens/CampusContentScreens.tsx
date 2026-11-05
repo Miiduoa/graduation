@@ -42,6 +42,7 @@ import {
   SUMMARY_NOTICE,
   verifiedOfficialAnnouncementUrl,
 } from '@campus/shared/src/campusAnnouncements';
+import { parseCampusAnnouncementSource } from '../services/campusAnnouncementSource';
 import { getRawAppEnv } from '../services/release';
 import { safeNavigate } from '../utils/safeNavigate';
 import { exportAndShareICalFile } from '../services/ical';
@@ -58,7 +59,7 @@ type Props = {
     goBack?: () => void;
     navigate?: (screen: string, params?: Record<string, unknown>) => void;
   };
-  route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string } };
+  route?: { params?: { id?: string; announcementId?: string; eventId?: string; source?: string; sourceKind?: string; schoolId?: string } };
 };
 
 function useContent<T>(
@@ -716,7 +717,16 @@ function CampusAnnouncementsContent({ navigation }: Props) {
 
 export function CampusAnnouncementDetailScreen({ navigation, route }: Props) {
   const id = route?.params?.id ?? route?.params?.announcementId ?? '';
-  const content = useContent(loadCampusAnnouncement, id, '', true);
+  const { sourceKind, schoolId } = route?.params ?? {};
+  const exact = sourceKind !== undefined;
+  const load = useCallback(async (currentSchool: string, itemId: string) => {
+    if (schoolId !== undefined && schoolId !== currentSchool) return null;
+    if (!exact) return loadCampusAnnouncement(currentSchool, itemId);
+    const source = parseCampusAnnouncementSource({ kind: sourceKind, id: itemId });
+    if (!source || schoolId === undefined) return null;
+    return loadCampusAnnouncement(currentSchool, itemId, source.kind);
+  }, [exact, sourceKind, schoolId]);
+  const content = useContent(load, id, JSON.stringify([sourceKind, schoolId]), !exact);
   const announcement = content.value;
   const [actionError, setActionError] = useState<{ scope: string; text: string } | null>(null);
   const openAttachment = async (url: string) => {

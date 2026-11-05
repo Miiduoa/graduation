@@ -5,11 +5,18 @@ import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 
-import type { AssignmentRead } from '../services/offlineCampusTools';
+import type { AnnouncementRead, AssignmentRead } from '../services/offlineCampusTools';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
+import { parseAssignmentDeadlineWindow } from '../services/assignmentDeadlineWindow';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 
-export type CampusAssistantMessage = { role: 'user' | 'assistant'; content: string; assignmentRead?: AssignmentRead; savedClassRead?: SavedClassRead };
+export type CampusAssistantMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  assignmentRead?: AssignmentRead;
+  announcementRead?: AnnouncementRead;
+  savedClassRead?: SavedClassRead;
+};
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
 
@@ -83,6 +90,7 @@ export async function askCampusAssistant(input: {
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
+  announcementRead?: AnnouncementRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -134,11 +142,25 @@ export async function askCampusAssistant(input: {
       const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass);
       return { ...answer, source: 'device', hasActions: false };
     }
+    let readQuestion = question;
+    if (previous?.role === 'assistant' && previous.announcementRead) {
+      const period = question.trim().replace(/^(?:那麼?|改看|改查)/u, '').replace(/(?:的呢|呢)?[？?！!。]*$/u, '').trim();
+      const window = parseAssignmentDeadlineWindow(period, Date.parse(snapshot.checkedAt));
+      if (window && window !== 'clarify' && window.label === period) {
+        const last = previous.announcementRead;
+        if (senseSnapshot?.announcements.status !== 'available' || senseSnapshot.userId !== last.userId ||
+            senseSnapshot.schoolId !== last.schoolId || senseSnapshot.checkedAt !== last.checkedAt) {
+          return { content: '上次的公告摘要已失效。請重新同步，再選擇要查的日期。',
+            tool: 'online-required', route: '/announcements', source: 'device', hasActions: false };
+        }
+        readQuestion = period + '發布了哪些校園公告？';
+      }
+    }
     const followUp = assignmentFollowUp(question, previous?.role === 'assistant' ? previous.assignmentRead : undefined,
       senseSnapshot, Date.parse(snapshot.checkedAt));
     const lookup = followUp && 'question' in followUp ? followUp : null;
     const localAnswer = followUp && 'reply' in followUp ? followUp.reply
-      : runOfflineCampusTool(lookup?.question ?? question, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
+      : runOfflineCampusTool(lookup?.question ?? readQuestion, snapshot, senseSnapshot, uid, lookup?.filter, lookup?.page);
     if (localAnswer) {
       return {
         content: localAnswer.content,
@@ -146,6 +168,7 @@ export async function askCampusAssistant(input: {
         source: 'device',
         tool: localAnswer.tool,
         route: localAnswer.route,
+        ...(localAnswer.announcementRead ? { announcementRead: localAnswer.announcementRead } : {}),
         ...(localAnswer.plan ? { plan: localAnswer.plan } : {}),
         ...(localAnswer.assignmentRead ? { assignmentRead: localAnswer.assignmentRead } : {}),
       };

@@ -115,7 +115,7 @@ export function formatOnDeviceSchoolPrompt(
           '；數量：' + (verifiedSense.assignments.count ?? '無法取得') +
           '；部分項目：' + JSON.stringify(verifiedSense.assignments.items.slice(0, 5)),
         '校園公告：' + verifiedSense.announcements.status +
-          '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4)),
+          '；部分項目：' + JSON.stringify(verifiedSense.announcements.items.slice(0, 4).map(({ title, publishedAt }) => ({ title, publishedAt }))),
         '不可把同步資料說成現在最新結果，不得執行任何寫入。',
       ].join('\n')
     : '此回合沒有主動同步且有效的校園資料，不可自行猜測個人作業、公告與申請狀態。';

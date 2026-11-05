@@ -644,3 +644,36 @@ test('a room follow-up from another scope never asks the local store to resolve 
   expect(result.savedClassRead).toBeUndefined();
   expect(result.content).not.toContain(classOccurrence.name);
 });
+
+test('keeps a date follow-up scoped to the observed announcement list without running a model', async () => {
+  jest.useFakeTimers({ now: new Date('2026-11-05T16:05:00Z') });
+  try {
+    const items = [
+      { title: '今日日程異動', publishedAt: '2026-11-05T16:01:00Z',
+        source: { kind: 'school-announcement' as const, id: 'today' } },
+      { title: '昨日選課公告', publishedAt: '2026-11-05T15:59:00Z',
+        source: { kind: 'legacy-announcement' as const, id: 'older' } },
+    ];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      announcements: { status: 'available' as const, items },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      schedule: { status: 'unavailable' as const, count: null } };
+    const args = { ...input(), mode: 'device' as const, senseSnapshot };
+    const first = await askCampusAssistant({ ...args, messages: [{ role: 'user', content: '今天發布了哪些校園公告？' }] });
+    expect(first.announcementRead?.items).toEqual([items[0]]);
+    const turns = [
+      { role: 'assistant' as const, content: first.content, announcementRead: first.announcementRead },
+      { role: 'user' as const, content: '那昨天呢？' },
+    ];
+    const second = await askCampusAssistant({ ...args, messages: turns });
+    expect(second.announcementRead?.items).toEqual([items[1]]);
+    expect(second.content).not.toContain(items[0].title);
+    const stale = await askCampusAssistant({ ...args, messages: turns, senseSnapshot: null });
+    expect(stale.tool).toBe('online-required');
+    expect(stale.content).not.toContain(items[1].title);
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});

@@ -1009,3 +1009,37 @@ test('an unresolved or active platform session cannot open the campus account ti
   expect(view.queryByText('查下一堂課')).toBeNull();
   expect(request).not.toHaveBeenCalled();
 });
+
+test.each([false, true])('today’s announcement shortcut uses the indicated source and opens the selected record (already synced: %s)', async (synced) => {
+  const title = '選課異動公告';
+  const items = [
+    { title, publishedAt: '2026-11-04T10:00:00Z', source: { kind: 'school-announcement' as const, id: 'same' } },
+    { title, publishedAt: '2026-11-04T11:00:00Z', source: { kind: 'legacy-announcement' as const, id: 'same' } },
+  ];
+  const checkedAt = new Date().toISOString();
+  const snapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+    announcements: { status: 'available' as const, items },
+    assignments: { status: 'unavailable' as const, count: null, items: [] },
+    schedule: { status: 'unavailable' as const, count: null } };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot);
+  request.mockResolvedValueOnce({ source: 'device', tool: 'campus-snapshot', content: title + '。' + title,
+    route: '/announcements', announcementRead: { userId: 'A', schoolId: 'pu', checkedAt, items, summary: '本次摘要列出 2 則公告。' } });
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['公告詳情'] }) };
+  const view = render(<CampusAssistantScreen navigation={navigation} />);
+  if (synced) {
+    openCampusTools(view);
+    await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+    fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  }
+  await act(async () => fireEvent.press(view.getByText(synced ? '查今日公告' : '同步並查今日公告')));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ mode: 'device', senseSnapshot: snapshot,
+    messages: [{ role: 'user', content: '今天發布了哪些校園公告？' }] }));
+  const button = view.getByRole('button', { name: /開啟公告，第 2 則/ });
+  fireEvent.press(button);
+  expect(navigation.navigate).toHaveBeenCalledWith('公告詳情', { sourceKind: 'legacy-announcement', id: 'same', schoolId: 'pu' });
+  openCampusTools(view);
+  fireEvent.press(view.getByText('清除本次校園摘要'));
+  fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  expect(view.queryByRole('button', { name: /開啟公告，第 2 則/ })).toBeNull();
+});

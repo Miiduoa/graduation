@@ -332,3 +332,64 @@ test.each(['校園活動計畫', '翻譯練習', '公告設計'])('quoted title 
   const reply = runOfflineCampusTool('「' + title + '」這份作業什麼時候交？', snapshot, source, 'alice');
   expect(reply?.assignmentRead?.items).toEqual([named]);
 });
+
+describe('announcement publication dates', () => {
+  const checkedAt = '2026-11-01T16:05:00Z'; // Monday 00:05 in Taipei
+  const context = { ...snapshot, checkedAt };
+  const notice = (title: string, publishedAt: string | null) => ({ title, publishedAt });
+  const sunday = notice('週日公告', '2026-11-01T15:59:59Z');
+  const monday = notice('週一零點公告', '2026-11-02T00:00:00+08:00');
+  const late = notice('最新一則', checkedAt);
+  const undated = notice('未提供日期', null);
+  const rows = [undated, sunday, monday, notice('晚於同步時間', '2026-11-02T00:06:00+08:00'), late];
+  const source = { ...authorizedSense, checkedAt, announcements: { status: 'available' as const, items: rows } };
+  const read = (question: string, uid = 'alice') => runOfflineCampusTool(question, context, source, uid);
+
+  test.each(['今天有哪些校園公告？', '本週發布了哪些公告？'])('%s includes only verified publications through the observed instant', (question) => {
+    const result = read(question);
+    expect(result).toMatchObject({ tool: 'campus-snapshot', route: '/announcements',
+      announcementRead: { userId: 'alice', schoolId: 'pu', checkedAt, items: [late, monday] } });
+    expect(result?.announcementRead?.summary).toContain('2 則');
+    expect(result?.announcementRead?.summary).toContain('1 則缺少發布日期');
+    expect(result?.announcementRead?.summary).not.toContain(late.title);
+    expect(result?.content).toContain('非即時查詢');
+    expect(result?.content).toContain('週一零點公告｜發布日期 2026/11/2');
+    expect(result?.content?.split('• ').slice(1).join('')).not.toMatch(/[0-9]{1,2}:[0-9]{2}/);
+    expect(result?.content).not.toMatch(/週日公告|晚於同步時間|未提供日期/);
+    expect(read('昨天發布了什麼公告')?.announcementRead?.items).toEqual([sunday]);
+  });
+
+  test('the original observation cut-off still applies if the query crosses midnight', () => {
+    const sourceBeforeMidnight = { ...source, checkedAt: '2026-11-01T15:59:59Z' };
+    const reply = runOfflineCampusTool('今天有哪些公告？', context, sourceBeforeMidnight, 'alice');
+    expect(reply?.announcementRead?.items).toEqual([]);
+    expect(reply?.content).toContain('摘要');
+    expect(reply?.content).not.toMatch(/全校|沒有新公告/);
+  });
+
+  test('unrestricted results retain undated entries last, distinct same-title rows, and all observed items', () => {
+    const same = notice(sunday.title, checkedAt);
+    const tenRows = [undated, sunday, same, ...Array.from({ length: 7 }, (_, i) => notice('公告' + i, checkedAt))];
+    const reply = runOfflineCampusTool('有哪些校園公告？', context, {
+      ...source, announcements: { status: 'available', items: tenRows },
+    }, 'alice');
+    expect(reply?.announcementRead?.items).toEqual([same, ...tenRows.slice(3), sunday, undated]);
+    expect(reply?.content).toContain('未提供日期｜發布日期未提供');
+    expect(reply?.content).toContain('10 則校園公告');
+  });
+
+  test('never broadens an ambiguous span, discloses a foreign summary, or attaches notice cards to mixed results', () => {
+    const ambiguous = read('昨天到今天有哪些公告？');
+    expect(ambiguous?.content).toContain('想查哪段時間');
+    expect(ambiguous?.announcementRead).toBeUndefined();
+    expect(read('今日公告', 'bob')?.content).not.toContain(late.title);
+    expect(read('今日公告', 'bob')?.tool).toBe('online-required');
+    expect(read('作業和公告有哪些？')?.announcementRead).toBeUndefined();
+    expect(read('幫我把公告翻成英文')?.announcementRead).toBeUndefined();
+    const unavailable = runOfflineCampusTool('今天有哪些公告', context, {
+      ...source, announcements: { status: 'unavailable', items: rows },
+    }, 'alice');
+    expect(unavailable?.tool).toBe('online-required');
+    expect(unavailable?.content).not.toContain(late.title);
+  });
+});

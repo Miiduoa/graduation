@@ -174,6 +174,35 @@ test.each([
   },
 );
 
+test('an exact announcement link loses its old content on school switch and never opens the same ID elsewhere', async () => {
+  const route = { params: { id: 'a1', sourceKind: 'legacy-announcement', schoolId: 'pu' } };
+  const view = render(<AnnouncementScreen route={route} />);
+  await view.findByText('公告全文');
+  expect(loadCampusAnnouncement).toHaveBeenCalledWith('pu', 'a1', 'legacy-announcement');
+  mockSchool = { id: 'ntu' };
+  view.rerender(<AnnouncementScreen route={route} />);
+  expect(view.queryByText('公告全文')).toBeNull();
+  await view.findByText('找不到這則公告，可能已移除或不屬於目前學校。');
+  expect(loadCampusAnnouncement).toHaveBeenCalledTimes(1);
+});
+
+test('an existing link with only a matching school hint keeps its ordinary lookup', async () => {
+  const view = render(<AnnouncementScreen route={{ params: { id: 'a1', schoolId: 'pu' } }} />);
+  await view.findByText('公告全文');
+  expect(loadCampusAnnouncement).toHaveBeenCalledWith('pu', 'a1');
+});
+
+test.each([
+  { id: 'a1', sourceKind: 'other', schoolId: 'pu' },
+  { id: 'a1', sourceKind: 'legacy-announcement' },
+  { id: 'a1', schoolId: 'ntu' },
+  { id: '../a1', sourceKind: 'school-announcement', schoolId: 'pu' },
+])('incomplete or invalid source routes do not fall through to a general lookup', async (params) => {
+  const view = render(<AnnouncementScreen route={{ params }} />);
+  await view.findByText('找不到這則公告，可能已移除或不屬於目前學校。');
+  expect(loadCampusAnnouncement).not.toHaveBeenCalled();
+});
+
 test('keeps cached announcements when a later Firestore read fails', async () => {
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('校方的新公告');
