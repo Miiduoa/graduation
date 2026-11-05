@@ -41,11 +41,13 @@ export interface CampusStudyAgenda {
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
+const taipeiDate = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
 export function taipeiDayNumber(timestamp: number): number {
   if (!Number.isFinite(timestamp) || !Number.isFinite(new Date(timestamp).getTime())) return NaN;
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(new Date(timestamp));
+  const parts = taipeiDate.formatToParts(new Date(timestamp));
   const number = (type: string) => Number(parts.find((part) => part.type === type)?.value);
   return Date.UTC(number('year'), number('month') - 1, number('day')) / DAY_MS;
 }
@@ -115,7 +117,7 @@ export function inspectCoursePeriods(courses: readonly AgendaCourse[]): {
   return { gaps, conflicts };
 }
 
-function confirmedTimestamp(value: string | null): number {
+export function confirmedTimestamp(value: string | null): number {
   // Date-only or offset-free text is not permission to invent a school deadline.
   if (typeof value !== 'string' || !/T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return NaN;
   return Date.parse(value);

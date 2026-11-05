@@ -1,3 +1,4 @@
+import { StudyAssignmentAssistant } from './StudyAssignmentAssistant';
 import { StudyDeadlineExport } from './StudyDeadlineExport';
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -129,6 +130,9 @@ export function StudyAgenda({
             重新讀取待辦
           </Text>
         </Pressable>
+      ) : null}
+      {data && !loading && !error && studentCourses.length > 0 ? (
+        <StudyAssignmentAssistant data={data} open={open} />
       ) : null}
       {data && !loading && !error ? (
         <StudyDeadlineExport

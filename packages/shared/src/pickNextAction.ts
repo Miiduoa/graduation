@@ -227,11 +227,18 @@ export function formatClassMeta(item: TodayClass): string {
   return place ? `${time}・${place}` : time;
 }
 
-function remainingHoursText(dueAt: number, nowMs: number): string {
-  const hours = Math.max(1, Math.round((dueAt - nowMs) / (60 * 60 * 1000)));
-  if (hours < 24) return `還剩 ${hours} 小時`;
-  const days = Math.round(hours / 24);
-  return `還剩 ${days} 天`;
+function remainingTimeText(milliseconds: number): string {
+  const minutes = Math.floor(milliseconds / 60_000);
+  if (minutes < 1) return '剩不到 1 分鐘';
+  if (minutes < 60) return `還剩 ${minutes} 分鐘`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const extraMinutes = minutes % 60;
+    return `還剩 ${hours} 小時${extraMinutes ? ` ${extraMinutes} 分鐘` : ''}`;
+  }
+  const days = Math.floor(hours / 24);
+  const extraHours = hours % 24;
+  return `還剩 ${days} 天${extraHours ? ` ${extraHours} 小時` : ''}`;
 }
 
 export function formatTodoDueLine(todo: TodayTodo, now: Date): string {
@@ -243,7 +250,9 @@ export function formatTodoDueLine(todo: TodayTodo, now: Date): string {
     if (days === null) return TODAY_COPY.overdue;
     return days >= 1 ? TODAY_COPY.overdueDays(days) : TODAY_COPY.overdue;
   }
-  return `${formatClock(todo.dueAt)} 截止・${remainingHoursText(todo.dueAt, nowMs)}`;
+  const clock = formatClock(todo.dueAt);
+  if (todo.dueAt === nowMs) return `現在截止（${clock}）`;
+  return `${clock} 截止・${remainingTimeText(todo.dueAt - nowMs)}`;
 }
 
 export function formatUpcomingDueLine(todo: TodayTodo): string {

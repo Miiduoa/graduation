@@ -13,6 +13,30 @@ export const NUNI_FOOD_LIMITS = {
   maxOptions: 20,
 } as const;
 
+export function canStartFoodOrder(location: T.NuniFoodLocationSummary): boolean {
+  return (
+    location.state === 'open' &&
+    location.merchantMode === 'full' &&
+    location.allowedActions.includes('view-menu')
+  );
+}
+
+export function foodQuoteProblem(
+  quote: T.NuniFoodQuoteProjection,
+  menuVersion: string | undefined,
+  at: number,
+) {
+  if (quote.state === 'consumed') return '這份報價已使用，請先查看訂單紀錄。';
+  if (quote.state === 'expired' || Date.parse(quote.expiresAt) <= at)
+    return '這次報價已過期，請確認取餐時間並重新計算金額。';
+  if (
+    (menuVersion && quote.menuVersion !== menuVersion) ||
+    !quote.allowedActions.includes('create-order')
+  )
+    return '店家的菜單或供應狀態已變更，請重新計算金額與確認庫存。';
+  return '';
+}
+
 type Fail = () => never;
 type Parser<T> = (value: unknown, fail: Fail) => T;
 const invalidInput: Fail = () => {
