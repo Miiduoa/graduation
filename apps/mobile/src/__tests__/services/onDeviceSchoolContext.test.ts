@@ -1,3 +1,4 @@
+import { nextSavedClasses } from '../../services/nextSavedClasses';
 import {
   collectOnDeviceSchoolContext,
   formatOnDeviceSchoolPrompt,
@@ -85,7 +86,7 @@ test('keeps the complete saved course set for offline tools, while limiting mode
   expect(prompt).toContain('不可據此判定某天沒課');
 });
 
-describe('next class from saved timetables and imports', () => {
+describe('class lookups from saved timetables and imports', () => {
   const now = '2026-11-05T00:00:00+08:00'; // Thursday, still Wednesday in UTC.
   const manual: StoredTimetable = {
     schoolId: 'pu', shareWithFriends: false, updatedAt: '2026-09-02T01:00:00Z',
@@ -131,6 +132,83 @@ describe('next class from saved timetables and imports', () => {
     expect((await query()).nextClasses?.[0]?.date).toBe('2026-11-12');
     jest.setSystemTime(new Date('2026-11-05T23:59:59+08:00'));
     expect((await query()).nextClasses?.[0]?.date).toBe('2026-11-12');
+  });
+
+  const current = (classFollowUp?: readonly SavedClassOccurrence[]) =>
+    collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu', includeCurrentClasses: true, classFollowUp })
+      .then((result) => result.timetable.currentClasses);
+
+  test('ongoing covers [start, end), includes staggered overlaps and does not replace the next class', async () => {
+    saveImports(original, { ...original, id: 'other', title: '英文', startTime: '09:00', endTime: '10:30' });
+    jest.setSystemTime(new Date('2026-11-05T08:09:59+08:00'));
+    expect(await current()).toEqual([]);
+    jest.setSystemTime(new Date('2026-11-05T08:10:00+08:00'));
+    const first = await current();
+    expect(first?.map((row) => row.courseId)).toEqual(['imported-db']);
+    jest.setSystemTime(new Date('2026-11-05T08:45:00+08:00'));
+    const both = await collectOnDeviceSchoolContext({
+      uid: 'alice', schoolId: 'pu', includeCurrentClasses: true, includeNextClasses: true,
+    });
+    expect(both.timetable.currentClasses).toEqual(first);
+    expect(both.timetable.nextClasses?.[0]?.courseId).toBe('other');
+    jest.setSystemTime(new Date('2026-11-05T09:45:00+08:00'));
+    expect((await current())?.map((row) => row.courseId)).toEqual(['imported-db', 'other']);
+    expect(await current(first)).toEqual(first);
+    jest.setSystemTime(new Date('2026-11-05T10:00:00+08:00'));
+    expect((await current())?.map((row) => row.courseId)).toEqual(['other']);
+    expect(await current(first)).toEqual([]);
+    jest.setSystemTime(new Date('2026-11-05T10:30:00+08:00'));
+    expect(await current()).toEqual([]);
+  });
+
+  test('cancellation and an overnight makeup change the actual date, time and room used for current class', async () => {
+    saveImports(original);
+    const cache = jest.mocked(loadOfflinePersonalTimetable);
+    cache.mockResolvedValue({ ...manual, classExceptions: [adjust({})] });
+    jest.setSystemTime(new Date('2026-11-05T08:30:00+08:00'));
+    expect(await current()).toEqual([]);
+    cache.mockResolvedValue({ ...manual, classExceptions: [adjust({
+      kind: 'move', date: '2026-11-06', startTime: '23:30', endDate: '2026-11-07', endTime: '01:15', location: '301',
+    })] });
+    jest.setSystemTime(new Date('2026-11-07T00:10:00+08:00'));
+    expect(await current()).toEqual([
+      expect.objectContaining({ courseId: 'imported-db', date: '2026-11-06', startTime: '23:30', endTime: '01:15', room: '301' }),
+    ]);
+    jest.setSystemTime(new Date('2026-11-07T01:15:00+08:00'));
+    expect(await current()).toEqual([]);
+  });
+
+  test('a short upcoming window includes a class on the next Taiwan date, up to the exact cutoff', () => {
+    const afterMidnight = { ...original, dayOfWeek: 5, startTime: '00:10', endTime: '01:00' };
+    const beforeMidnight = new Date('2026-11-05T23:50:00+08:00');
+    expect(nextSavedClasses([afterMidnight], 'pu', beforeMidnight, undefined, 20 * 60_000)).toEqual([
+      expect.objectContaining({ date: '2026-11-06', startTime: '00:10' }),
+    ]);
+    expect(nextSavedClasses([afterMidnight], 'pu', beforeMidnight, undefined, 20 * 60_000 - 1)).toEqual([]);
+  });
+
+  test('an overnight course crossing a term boundary is attributed to the term when it actually started', async () => {
+    saveImports(original, { ...original, id: 'spring', semester: '2' });
+    const moved = {
+      kind: 'move' as const, date: '2027-01-31', startTime: '23:30', endDate: '2027-02-01', endTime: '00:45',
+    };
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue({
+      ...manual, classExceptions: [adjust(moved)],
+    });
+    jest.setSystemTime(new Date('2027-02-01T00:20:00+08:00'));
+    expect(await current()).toEqual([expect.objectContaining({ courseId: 'imported-db', term: '115|1', date: '2027-01-31' })]);
+    jest.setSystemTime(new Date('2027-02-01T00:45:00+08:00'));
+    expect(await current()).toEqual([]);
+  });
+
+  test('current class does not turn unreadable records, missing clocks or an older term into free time', async () => {
+    expect(await current()).toBeUndefined();
+    saveImports({ ...original, academicYear: '114' });
+    expect(await current()).toBeUndefined();
+    saveImports({ ...original, startPeriod: 99 });
+    expect(await current()).toBeUndefined();
+    jest.mocked(loadPersonalImports).mockRejectedValue(new Error('unreadable'));
+    expect(await current()).toBeUndefined();
   });
 
   test('re-reads local cancellations, replacement dates and room changes on every lookup', async () => {

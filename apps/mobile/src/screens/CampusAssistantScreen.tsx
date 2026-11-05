@@ -6,7 +6,8 @@ import { AssistantConversationLayout, type AssistantPanel } from './AssistantCon
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
-import { SavedClassReplyCard } from './SavedClassReplyCard';
+import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
+import { AssistantClassNowHint } from './AssistantClassNowHint';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
@@ -36,6 +37,7 @@ import {
   type CampusSenseProgress,
 } from '../services/campusSenseSnapshot';
 
+const CURRENT_CLASS = '我現在有課嗎？';
 const NEXT_CLASS = '下一堂課是什麼？';
 const TODAY_BRIEF = '今天要先處理什麼？';
 const WEEK_BRIEF = '依手機課表與授權作業安排接下來七天的學習計畫';
@@ -102,7 +104,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
 }
 type AssistantShortcut =
   | { kind: 'brief'; question: typeof TODAY_BRIEF | typeof WEEK_BRIEF }
-  | { kind: 'next-class'; question: typeof NEXT_CLASS }
+  | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS }
   | { kind: 'selection'; question: string; checkedAt: string };
 
 function AssistantConversation({
@@ -550,16 +552,20 @@ function AssistantConversation({
           <AIButton label="改問手機助理" onPress={() => changeMode('device')} />
         </AICard>
       )}
-      {uid && mode === 'device' && messages.length === 0 && !busy && !error && !draft.trim() ? (
+      {panel === 'chat' && uid && mode === 'device' && messages.length === 0 && !busy && !error && !draft.trim() ? (
         <AICard title="我的課業安排">
-          <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
-            下一堂課直接看手機已存課表。整理今日重點與七天安排時，會同步已授權的作業與公告。
-          </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-            <AIButton label="查下一堂課" onPress={() => void send({ kind: 'next-class', question: NEXT_CLASS })} />
-            <AIButton label="整理今日重點" variant="ghost" onPress={() => void briefPlan(TODAY_BRIEF)} />
-            <AIButton label="規劃未來七天" variant="ghost" onPress={() => void briefPlan(WEEK_BRIEF)} />
-          </View>
+          <AssistantClassNowHint uid={uid} schoolId={schoolId}>
+            {(upcoming) => (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                {(upcoming ? [NEXT_CLASS, CURRENT_CLASS] as const : [CURRENT_CLASS, NEXT_CLASS] as const).map((question, order) => (
+                  <AIButton key={question} label={question === CURRENT_CLASS ? '現在有課嗎？' : '查下一堂課'}
+                    variant={order === 0 ? 'primary' : 'ghost'} onPress={() => void send({ kind: 'class', question })} />
+                ))}
+                <AIButton label="整理今日重點" variant="ghost" onPress={() => void briefPlan(TODAY_BRIEF)} />
+                <AIButton label="規劃未來七天" variant="ghost" onPress={() => void briefPlan(WEEK_BRIEF)} />
+              </View>
+            )}
+          </AssistantClassNowHint>
         </AICard>
       ) : null}
       {canAsk && messages.length === 0 && !busy && !error ? (
@@ -592,11 +598,10 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.savedClassRead?.focus === 'room' ? '上課教室'
-            : message.savedClassRead?.focus === 'time' ? '上課時間' : message.savedClassRead?.classes.length
-            ? (message.savedClassRead.classes.length > 1 ? '同時段有多堂課' : '下一堂課') : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+          <AICard title={message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
             {message.savedClassRead ? (
               <SavedClassReplyCard classes={message.savedClassRead.classes} updatedAt={message.savedClassRead.updatedAt} focus={message.savedClassRead.focus}
+                currentAt={message.savedClassRead.currentAt}
                 disabled={busy || syncBusy || !navigation?.navigate}
                 onOpen={(item) => {
                   if (!current() || message.savedClassRead?.uid !== uid || message.savedClassRead.schoolId !== schoolId) return;
@@ -673,8 +678,12 @@ function AssistantConversation({
                     : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
               </Text>
             )}
-            {!message.savedClassRead && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
-              <View style={{ marginTop: 12 }}>
+            {(!message.savedClassRead || !message.savedClassRead.classes.length) && !message.plan && !message.localReads?.length && message.route && VERIFIED_SERVICE_ROUTES[message.route] ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                {message.savedClassRead?.currentAt && index === messages.length - 1 && (
+                  <AIButton label="查下一堂課" disabled={busy || syncBusy}
+                    onPress={() => void send({ kind: 'class', question: NEXT_CLASS })} />
+                )}
                 <AIButton
                   label={'開啟' + VERIFIED_SERVICE_ROUTES[message.route].label}
                   variant="ghost"

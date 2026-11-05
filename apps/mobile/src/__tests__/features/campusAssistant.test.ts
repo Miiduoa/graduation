@@ -644,3 +644,103 @@ test('a room follow-up from another scope never asks the local store to resolve 
   expect(result.savedClassRead).toBeUndefined();
   expect(result.content).not.toContain(classOccurrence.name);
 });
+
+function withCurrent(classes: typeof classOccurrence[] | undefined) {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  collectOnDeviceSchoolContext.mockResolvedValueOnce({
+    schoolId: 'pu', checkedAt: '2026-11-05T03:30:00Z',
+    timetable: { source: 'saved-device-copy', updatedAt: null, courses: [], currentClasses: classes },
+  });
+}
+
+test.each(['我現在有課嗎？', '現在在上什麼課？', '請問這節是哪一門課？'])(
+  'answers a direct current-class question from checked local data: %s', async (content) => {
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    withCurrent([classOccurrence]);
+    const reply = await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+    expect(reply.savedClassRead).toMatchObject({ currentAt: '2026-11-05T03:30:00Z', classes: [classOccurrence] });
+    expect(reply.content).toContain('任垣 210');
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+  },
+);
+
+test('current class details stay anchored while asking explicitly for next starts a fresh lookup', async () => {
+  const initial = { role: 'user' as const, content: '我現在有課嗎？' };
+  withCurrent([classOccurrence]);
+  const first = await askCampusAssistant({ ...input(), mode: 'device', messages: [initial] });
+  const previous = { role: 'assistant' as const, ...first };
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  withCurrent([{ ...classOccurrence, room: '主顧 303' }]);
+  const detail = await askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content: '在哪間教室？' }] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).toMatchObject({ includeCurrentClasses: true, classFollowUp: [classOccurrence] });
+  expect(detail.savedClassRead).toMatchObject({ currentAt: first.savedClassRead?.currentAt, focus: 'room', classes: [{ room: '主顧 303' }] });
+  withCurrent([]);
+  const ended = await askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content: '那幾點下課？' }] });
+  expect(ended.savedClassRead).toBeUndefined();
+  expect(ended.content).toContain('原時段');
+  withUpcoming([{ ...classOccurrence, courseId: 'english', name: '英文' }]);
+  const next = await askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content: '下一堂課是什麼？' }] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+  expect(next.savedClassRead?.currentAt).toBeUndefined();
+  expect(next.content).toContain('英文');
+});
+
+test('only a verified empty current window offers a free-period answer', async () => {
+  const ask = () => askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '我現在有課嗎？' }] });
+  withCurrent([]);
+  const free = await ask();
+  expect(free).toMatchObject({ route: '/timetable', savedClassRead: { currentAt: '2026-11-05T03:30:00Z', classes: [] } });
+  expect(free.content).toContain('沒有排課');
+  withCurrent(undefined);
+  const unknown = await ask();
+  expect(unknown.savedClassRead).toBeUndefined();
+  expect(unknown.content).not.toContain('沒有排課');
+});
+
+test.each([
+  ['我現在這堂課在哪間教室？', 'room'],
+  ['我現在在哪裡上課？', 'room'],
+  ['現在幾點下課？', 'time'],
+  ['這堂課幾點下課？', 'time'],
+])('reads an explicitly referenced current class detail without previous chat: %s', async (content, focus) => {
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  withCurrent([classOccurrence]);
+  const result = await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+  expect(result.savedClassRead).toMatchObject({ currentAt: '2026-11-05T03:30:00Z', focus });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
+test('an explicit now overrides a future reference, while a demonstrative alone keeps that reference', async () => {
+  const future = { ...classOccurrence, name: '英文', courseId: 'english', startTime: '14:10', endTime: '15:00' };
+  const previous = { role: 'assistant' as const, content: '英文', savedClassRead: {
+    uid: 'A', schoolId: 'pu', updatedAt: null, classes: [future],
+  } };
+  const lookup = (content: string) => askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content }] });
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  withUpcoming([future]);
+  const follow = await lookup('這堂課幾點下課？');
+  expect(follow.savedClassRead).toMatchObject({ focus: 'time', classes: [future] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).toHaveProperty('classFollowUp', [future]);
+  withCurrent([classOccurrence]);
+  const now = await lookup('現在這堂課幾點下課？');
+  expect(now.savedClassRead).toMatchObject({ focus: 'time', classes: [classOccurrence] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+});
+
+test.each(['在哪裡？', '現在在哪裡？', '幾點下課？', '提醒我現在上課'])(
+  'does not infer a specific current class from an unrelated or unanchored question: %s', async (content) => {
+    await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('includeCurrentClasses');
+  },
+);
+
+test('an account switch while reading the current timetable discards the old account result', async () => {
+  withCurrent([classOccurrence]);
+  const pending = askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '我現在有課嗎？' }] });
+  mockUid = 'B';
+  await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});

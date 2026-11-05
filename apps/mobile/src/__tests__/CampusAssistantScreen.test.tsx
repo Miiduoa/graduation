@@ -50,6 +50,10 @@ jest.mock('../services/campusSenseSnapshot', () => ({
   ...jest.requireActual('../services/campusSenseSnapshot'),
   refreshCampusSenseSnapshot: jest.fn(),
 }));
+let mockUpcomingClass = false;
+jest.mock('../screens/AssistantClassNowHint', () => ({
+  AssistantClassNowHint: ({ children }: { children: (upcoming: boolean) => React.ReactNode }) => children(mockUpcomingClass),
+}));
 jest.mock('../screens/LegacyAssignmentReminders', () => ({ LegacyAssignmentReminders: () => null }));
 jest.mock('../services/campusAssignmentReminders', () => ({
   scheduleCampusAssignmentReminder: jest.fn(),
@@ -87,6 +91,7 @@ beforeEach(() => {
   jest.mocked(getCampusAssignmentReminderStatus).mockResolvedValue([]);
   mockUid = 'A';
   mockSchool = 'pu';
+  mockUpcomingClass = false;
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 });
@@ -985,6 +990,60 @@ test('the next-class shortcut opens the selected occurrence in its own term and 
   expect(view.queryByText('B203')).toBeNull();
 });
 
+test.each([false, true])('puts the imminent class first only when the timetable hint confirms it (%s)', (upcoming) => {
+  mockUpcomingClass = upcoming;
+  const view = render(<CampusAssistantScreen />);
+  const choices = view.getAllByRole('button', { name: /^(現在有課嗎？|查下一堂課)$/ });
+  expect(choices).toHaveLength(2);
+  expect(choices[0]).toBe(view.getByRole('button', { name: upcoming ? '查下一堂課' : '現在有課嗎？' }));
+});
+
+test('one tap on current class checks the device and can open a staggered overlap by its original start', async () => {
+  const navigate = jest.fn();
+  const first = { courseId: 'manual:a', term: '115|1', name: '資料結構', room: 'A301',
+    date: '2026-11-05', startTime: '09:10', endTime: '11:00' };
+  const second = { ...first, courseId: 'manual:b', name: '資料庫', room: 'B203', startTime: '10:10' };
+  request.mockResolvedValue({ content: '課程時段重疊', source: 'device', tool: 'saved-timetable',
+    savedClassRead: { uid: 'A', schoolId: 'pu', classes: [first, second], updatedAt: null, currentAt: '2026-11-05T02:25:00Z' } });
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '現在有課嗎？' })));
+  expect(request.mock.calls[0][0]).toMatchObject({ mode: 'device', messages: [{ role: 'user', content: '我現在有課嗎？' }] });
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  expect(view.getByText('這個時段有 2 堂課')).toBeTruthy();
+  expect(view.getByText('查詢時間 2026/11/5 上午10:25（台灣時間）')).toBeTruthy();
+  expect(view.queryByText('下一堂課')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: /在課表中查看資料庫.*10:10–11:00.*B203/ }));
+  expect(navigate).toHaveBeenCalledWith('學習', { screen: 'PersonalTimetable', params: {
+    schoolId: 'pu', courseId: second.courseId, date: second.date, term: second.term,
+    startAt: Date.parse('2026-11-05T10:10:00+08:00'), reminderScope: JSON.stringify({ owner: 'firebase:A', schoolId: 'pu' }),
+  } });
+});
+
+test('a verified free period offers the next class without erasing an unsent draft', async () => {
+  const navigate = jest.fn();
+  request.mockResolvedValueOnce({ content: '此時沒有排課', source: 'device', tool: 'saved-timetable',
+    route: '/timetable', savedClassRead: { uid: 'A', schoolId: 'pu', classes: [], updatedAt: null, currentAt: '2026-11-05T02:25:00Z' } })
+    .mockResolvedValueOnce({ content: '尚未排定接下來的課程', source: 'device', tool: 'saved-timetable', route: '/timetable' });
+  const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '現在有課嗎？' })));
+  expect(view.getByText('這個時段沒有排課')).toBeTruthy();
+  expect(view.getByText('查詢時間 2026/11/5 上午10:25（台灣時間）')).toBeTruthy();
+  expect(view.getByRole('button', { name: '開啟我的課表' })).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '準備明天的考試');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查下一堂課' })));
+  expect(request.mock.calls[1][0].messages.at(-1)).toEqual({ role: 'user', content: '下一堂課是什麼？' });
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('準備明天的考試');
+});
+
+test('unavailable evidence displays its explanation and offers the timetable without declaring a free period', async () => {
+  request.mockResolvedValue({ content: '這台手機目前無法確認這個時段的課程。', source: 'device', tool: 'saved-timetable', route: '/timetable' });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '現在有課嗎？' })));
+  expect(view.getByText('這台手機目前無法確認這個時段的課程。')).toBeTruthy();
+  expect(view.getByRole('button', { name: '開啟我的課表' })).toBeTruthy();
+  expect(view.queryByText('這個時段沒有排課')).toBeNull();
+});
+
 test('a failed next-class shortcut retries the original read in one tap', async () => {
   request.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({
     content: '請核對本學期與上課時間。', tool: 'saved-timetable', source: 'device', route: '/timetable',
@@ -1005,8 +1064,10 @@ test('an unresolved or active platform session cannot open the campus account ti
   mockPlatform = { loading: true };
   await act(async () => view.rerender(<CampusAssistantScreen />));
   expect(view.queryByText('查下一堂課')).toBeNull();
+  expect(view.queryByText('現在有課嗎？')).toBeNull();
   mockPlatform = { session: { platformAccountId: 'student-b' } };
   await act(async () => view.rerender(<CampusAssistantScreen />));
   expect(view.queryByText('查下一堂課')).toBeNull();
+  expect(view.queryByText('現在有課嗎？')).toBeNull();
   expect(request).not.toHaveBeenCalled();
 });

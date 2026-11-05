@@ -120,8 +120,9 @@ export async function askCampusAssistant(input: {
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
-      ...(classQuery ? { includeNextClasses: true } : {}),
-      ...((classQuery === 'room' || classQuery === 'time') && lastClass?.uid === uid &&
+      ...(classQuery?.window === 'current' && { includeCurrentClasses: true }),
+      ...(classQuery && classQuery.window !== 'current' && { includeNextClasses: true }),
+      ...(classQuery?.followUp && lastClass?.uid === uid &&
         lastClass.schoolId === input.scope.schoolId ? { classFollowUp: lastClass.classes } : {}),
     });
     scopeCheck(input, false);

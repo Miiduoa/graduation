@@ -1,8 +1,7 @@
-import { withClassExceptions } from '@campus/shared/src/timetable/classExceptions';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
-import { loadPersonalImports } from './personalImports';
-import { nextSavedClasses, type SavedClassOccurrence } from './nextSavedClasses';
-import { loadOfflinePersonalTimetable, personalTimetableRecords } from './personalTimetable';
+import { readAssistantTimetable } from './assistantTimetableSource';
+import { currentSavedClasses, nextSavedClasses, type SavedClassOccurrence } from './nextSavedClasses';
+import { loadOfflinePersonalTimetable } from './personalTimetable';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 
 export type { SavedClassOccurrence } from './nextSavedClasses';
@@ -15,6 +14,7 @@ export type OnDeviceSchoolContext = {
     source: 'saved-device-copy' | 'not-available';
     updatedAt: string | null;
     nextClasses?: SavedClassOccurrence[];
+    currentClasses?: SavedClassOccurrence[];
     courses: Array<{ name: string; day: number; start: number; end: number; room?: string }>;
   };
 };
@@ -30,6 +30,7 @@ export async function collectOnDeviceSchoolContext(
     schoolId: string;
     schoolName?: string | null;
     includeNextClasses?: boolean;
+    includeCurrentClasses?: boolean;
     classFollowUp?: readonly SavedClassOccurrence[];
   },
 ): Promise<OnDeviceSchoolContext> {
@@ -41,29 +42,26 @@ export async function collectOnDeviceSchoolContext(
   };
   if (!params.uid || !params.schoolId) return base;
   try {
-    const timetable = await loadOfflinePersonalTimetable(params.uid, params.schoolId);
-    const imported = params.includeNextClasses
-      ? (await loadPersonalImports({ owner: `firebase:${params.uid}`, schoolId: params.schoolId })).records
-          .filter((row) => row.kind === 'timetable' && row.schoolId === params.schoolId)
-      : [];
-    if (!timetable && !imported.length) return base;
+    const includeMeetings = params.includeCurrentClasses || params.includeNextClasses;
+    const source = includeMeetings ? await readAssistantTimetable(params.uid, params.schoolId) : null;
+    const timetable = includeMeetings ? source?.timetable : await loadOfflinePersonalTimetable(params.uid, params.schoolId);
+    if (!timetable && !source) return base;
     const schoolId = toPublicSchoolId(params.schoolId) || params.schoolId;
     if (timetable && toPublicSchoolId(timetable.schoolId) !== schoolId) return base;
-    const records = params.includeNextClasses
-      ? (timetable ? personalTimetableRecords(timetable, imported) : withClassExceptions(imported))
-          .map((row) => row.schoolId === schoolId ? row : { ...row, schoolId })
-      : [];
     const savedAt = timetable?.updatedAt;
-    let updatedAt = typeof savedAt === 'string' && Number.isFinite(Date.parse(savedAt)) ? savedAt : null;
-    for (const row of imported) {
-      if (!updatedAt || Date.parse(row.importedAt) > Date.parse(updatedAt)) updatedAt = row.importedAt;
-    }
+    const checked = new Date();
     return {
       ...base,
+      checkedAt: checked.toISOString(),
       timetable: {
         source: 'saved-device-copy',
-        updatedAt,
-        ...(params.includeNextClasses && { nextClasses: nextSavedClasses(records, schoolId, new Date(base.checkedAt), params.classFollowUp) }),
+        updatedAt: source?.updatedAt ?? (typeof savedAt === 'string' && Number.isFinite(Date.parse(savedAt)) ? savedAt : null),
+        ...(source && params.includeCurrentClasses && {
+          currentClasses: currentSavedClasses(source.records, source.schoolId, checked, params.classFollowUp),
+        }),
+        ...(source && params.includeNextClasses && {
+          nextClasses: nextSavedClasses(source.records, source.schoolId, checked, params.classFollowUp),
+        }),
         courses: (timetable?.courses || []).slice(0, 80).map((course) => ({
           name: String(course.name).slice(0, 48),
           day: course.day,
