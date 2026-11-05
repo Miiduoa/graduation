@@ -1,3 +1,4 @@
+import { isPuEcampusDataFetchEnabled, isPuEcampusDataHost } from '../../../packages/shared/src/puEcampusDataPolicy';
 import {
   isAllowedRelayTarget,
   isRelayPlacementMiss,
@@ -184,6 +185,7 @@ export async function handleRelayRequest(
   } catch {
     return reject();
   }
+  if (!isPuEcampusDataFetchEnabled() && isPuEcampusDataHost(parsed.hostname)) return reject();
 
   const bodyBytes = new Uint8Array(await request.arrayBuffer());
   const bodySha256 = await sha256Hex(bodyBytes);

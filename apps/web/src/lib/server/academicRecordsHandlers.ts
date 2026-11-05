@@ -1,6 +1,10 @@
 import type { CallableRequest } from './groupInviteHandlers';
 import { HttpsError } from './httpsError';
 import {
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
+import {
   deleteOwnedPuSessions,
   persistOwnedMypuCookies,
   publicCampusDataResult,
@@ -141,6 +145,11 @@ export function createAcademicRecordsHandler({
           ? await fetchers.grades(cookies, '', { mypuCookies: storedMypu })
           : await fetchers.courses(cookies, ''),
       );
+      if (result.code === PU_ECAMPUS_DATA_PAUSED_CODE) {
+        throw new HttpsError('unavailable', PU_ECAMPUS_DATA_PAUSED_MESSAGE, {
+          code: PU_ECAMPUS_DATA_PAUSED_CODE,
+        });
+      }
       if (result.code === 'session-expired') reconnect();
       if (result.success !== true || !Array.isArray(result[dataType])) unavailable();
       const nextMypu = dataType === 'grades' ? schoolSessionCookies(result.mypuCookies) : null;

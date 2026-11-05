@@ -10,6 +10,7 @@ import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
+import { PU_ECAMPUS_DATA_PAUSED_MESSAGE } from '@campus/shared/src/puEcampusDataPolicy';
 import { SCHOOL_LOGIN_BIND_HINT } from '@campus/shared/src/schoolLogin';
 import { safeNavigate } from '../utils/safeNavigate';
 import { applyTheme, createLightTheme, createDarkTheme, clearSchoolTheme } from '../ui/theme';
@@ -579,6 +580,16 @@ test('teacher LMS outage tells the user teacher login is temporarily unavailable
   await view.findByText('老師登入暫時無法使用');
   expect(view.getByRole('alert')).toHaveTextContent('老師登入暫時無法使用');
   expect(view.queryByText(/學校帳號登入未完成|請確認帳號密碼/)).toBeNull();
+});
+
+test('E-campus pause shows the pause notice instead of a credential failure', async () => {
+  jest.mocked(signInWithStudentId).mockRejectedValueOnce(new Error(PU_ECAMPUS_DATA_PAUSED_MESSAGE));
+  const view = render(<SSOLoginScreen />);
+  enterSchoolCredentials(view);
+  fireEvent.press(view.getByText('使用學號登入'));
+  await view.findByText(PU_ECAMPUS_DATA_PAUSED_MESSAGE);
+  expect(view.getByRole('alert')).toHaveTextContent(PU_ECAMPUS_DATA_PAUSED_MESSAGE);
+  expect(view.queryByText(/請確認帳號密碼/)).toBeNull();
 });
 
 test('legacy teacher LMS copy still shows the current teacher-unavailable notice', async () => {
