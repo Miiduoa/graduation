@@ -1513,8 +1513,10 @@ describe('campus story view receipts', () => {
         authorUid: 'author', schoolId: 'pu', expiresAt: Date.now() + 86_400_000,
       });
       for (const uid of ['author', 'alice', 'bob']) {
+        await db.doc(`users/${uid}`).set({ schoolId: 'pu' });
         await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
       }
+      await db.doc('users/outsider').set({ schoolId: 'other' });
       await db.doc('schools/other/members/outsider').set({ status: 'active' });
     });
   });
@@ -1556,6 +1558,28 @@ describe('campus story view receipts', () => {
     await assertFails(alice.doc('alice').delete());
   });
 
+  test('changing schools revokes access to old-school receipts even with an active membership', async () => {
+    const alice = dbFor('alice');
+    const author = views(dbFor('author'));
+    await assertSucceeds(views(alice).doc('alice').set(receipt('alice')));
+    await assertSucceeds(legacyViews(alice).doc('alice').set(receipt('alice')));
+    assert.equal((await assertSucceeds(author.limit(10).get())).size, 1);
+
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'author', 'bob']) {
+        await db.doc(`users/${uid}`).update({ schoolId: 'other' });
+        await db.doc(`schools/other/members/${uid}`).set({ status: 'active' });
+      }
+    });
+    await assertFails(author.orderBy('viewedAt', 'desc').limit(10).get({ source: 'server' }));
+    await assertFails(author.doc('alice').get({ source: 'server' }));
+    await assertFails(views(alice).doc('alice').get({ source: 'server' }));
+    await assertFails(legacyViews(alice).doc('alice').get({ source: 'server' }));
+    const bob = dbFor('bob');
+    await assertFails(views(bob).doc('bob').set(receipt('bob')));
+    await assertFails(legacyViews(bob).doc('bob').set(receipt('bob')));
+  });
+
   test('legacy clients can record and check themselves; nobody can list legacy receipts', async () => {
     const mine = legacyViews(dbFor('alice')).doc('alice');
     assert.equal((await assertSucceeds(mine.get())).exists, false);
@@ -1590,7 +1614,10 @@ describe('campus story view receipts', () => {
       await assertSucceeds(story(db).delete());
     }
     // Even the same author's new story at a different school has a separate audience.
-    await seedFirestore((db) => db.doc('schools/other/members/author').set({ status: 'active' }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/other/members/author').set({ status: 'active' });
+      await db.doc('users/author').update({ schoolId: 'other' });
+    });
     await publish('author', 'other');
     await assertFails(views(dbFor('author')).get());
     assert.equal((await assertSucceeds(views(dbFor('author'), 'other').get())).size, 0);
