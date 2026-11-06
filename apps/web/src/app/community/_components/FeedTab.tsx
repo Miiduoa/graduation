@@ -9,7 +9,7 @@
  *  - 貼文卡片：作者頭像、看板 chip、圖片 grid、點讚、留言、跳 /community/post/[id]
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { StoryViewer } from './StoryViewer';
 import { useStoryShelf } from './useStoryShelf';
@@ -30,8 +30,8 @@ import {
   removeCampusPostBookmark,
 } from '@/lib/community/bookmarks';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { fetchCampusPostPage, type CampusPostCursor } from '@/lib/community/feedPages';
 import {
-  fetchRecentCampusPosts,
   rankFeedPosts,
   toggleCampusPostLike,
   listBoards,
@@ -47,8 +47,6 @@ import {
 type FilterKey = (typeof FEED_FILTERS)[number];
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
-const FEED_PAGE_SIZE = 60;
-const FEED_MAX_READ = 240;
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: '✨' },
@@ -109,16 +107,26 @@ export function FeedTab(props: FeedTabProps) {
 function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const { schoolId, user } = props;
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
-  // A student can search older posts without discarding the current feed or keyword.
-  // The ref avoids re-running the full community loader when a single page is extended.
-  const feedLimitRef = useRef(FEED_PAGE_SIZE);
+  // The cursor follows server ordering, never the recommendation-ranked cards.
+  const feedCursorRef = useRef<CampusPostCursor | null>(null);
   const feedReadVersion = useRef(0);
   const moreInFlight = useRef(false);
   const [hasMorePosts, setHasMorePosts] = useState(false);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [morePostsError, setMorePostsError] = useState('');
   const [feedReadDenied, setFeedReadDenied] = useState(false);
+  const [pageMessage, setPageMessage] = useState('');
+  const pageStatusId = useId();
+  const pageStatusRef = useRef<HTMLParagraphElement>(null);
+  const loadMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const focusPageStatusRef = useRef(false);
   useEffect(() => () => { feedReadVersion.current += 1; }, []);
+  useLayoutEffect(() => {
+    if (!loadingMorePosts && focusPageStatusRef.current) {
+      focusPageStatusRef.current = false;
+      pageStatusRef.current?.focus();
+    }
+  }, [loadingMorePosts]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
@@ -166,7 +174,9 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
 
   const load = useCallback(async () => {
     const request = ++feedReadVersion.current;
-    // A refresh wins over an older "load more" request.
+    // Refresh starts a new traversal and invalidates an older page request.
+    feedCursorRef.current = null;
+    focusPageStatusRef.current = false;
     moreInFlight.current = false;
     setLoadingMorePosts(false);
     if (!schoolId || !user) {
@@ -177,18 +187,19 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       setHasMorePosts(false);
       return;
     }
-    const requestedLimit = feedLimitRef.current;
-    const [rows, boardList, subs, storyRows] = await Promise.all([
-      fetchRecentCampusPosts(schoolId, undefined, requestedLimit),
+    const [page, boardList, subs, storyRows] = await Promise.all([
+      fetchCampusPostPage(schoolId, null),
       listBoards(schoolId, 80),
       listSubscribedBoardIds(user.uid, schoolId),
       listActiveStoriesForSchool(schoolId, 80),
     ]);
     if (request !== feedReadVersion.current) return;
-    setPosts(rankFeedPosts(rows.filter((post) => post.schoolId === schoolId), Math.max(80, requestedLimit)));
-    setHasMorePosts(rows.length >= requestedLimit && requestedLimit < FEED_MAX_READ);
+    feedCursorRef.current = page.nextCursor;
+    setPosts(rankFeedPosts(page.posts.filter((post) => post.schoolId === schoolId), page.posts.length));
+    setHasMorePosts(page.hasMore);
     setFeedReadDenied(false);
     setMorePostsError('');
+    setPageMessage('');
     setBoards(boardList);
     setSubscribedIds(new Set(subs));
     setStories(groupStoriesByAuthor(storyRows, user.uid));
@@ -200,27 +211,44 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   );
 
   const loadMorePosts = async () => {
-    if (!schoolId || loading || refreshing || moreInFlight.current || !hasMorePosts) return;
-    const nextLimit = Math.min(feedLimitRef.current + FEED_PAGE_SIZE, FEED_MAX_READ);
+    if (!schoolId || loading || refreshing || moreInFlight.current || !hasMorePosts || !feedCursorRef.current) return;
+    const cursor = feedCursorRef.current;
     const request = ++feedReadVersion.current;
     moreInFlight.current = true;
     setLoadingMorePosts(true);
     setMorePostsError('');
     try {
-      const rows = await fetchRecentCampusPosts(schoolId, undefined, nextLimit);
+      const page = await fetchCampusPostPage(schoolId, cursor);
       if (request !== feedReadVersion.current) return;
-      feedLimitRef.current = nextLimit;
-      setPosts(rankFeedPosts(rows.filter((post) => post.schoolId === schoolId), Math.max(80, nextLimit)));
-      setHasMorePosts(rows.length >= nextLimit && nextLimit < FEED_MAX_READ);
+      feedCursorRef.current = page.nextCursor;
+      // Append new cards without replacing previous pages or their pending reactions.
+      // A repeated ID can occur if an existing document's ordering field changes.
+      setPosts((previous) => {
+        const ids = new Set(previous.map((post) => post.id));
+        const additions = page.posts.filter((post) => {
+          if (post.schoolId !== schoolId || ids.has(post.id)) return false;
+          ids.add(post.id);
+          return true;
+        });
+        return [...previous, ...rankFeedPosts(additions, additions.length)];
+      });
+      setHasMorePosts(page.hasMore);
+      setPageMessage(page.hasMore
+        ? '已載入下一頁，可繼續載入更早貼文。'
+        : '已讀到本次查詢的最後一頁。');
+      // If the focused button disappears on the last page, leave keyboard users
+      // at the result status. Never steal focus from a search they resumed typing.
+      focusPageStatusRef.current = !page.hasMore && document.activeElement === loadMoreButtonRef.current;
     } catch (cause) {
       if (request !== feedReadVersion.current) return;
       if (isPermissionDeniedError(cause)) {
-        // Revoked school access cannot leave old cached posts visible.
+        feedCursorRef.current = null;
         setPosts([]);
         setHasMorePosts(false);
+        setPageMessage('');
         setFeedReadDenied(true);
       } else {
-        // Keep the previous page and search so students can retry in place.
+        // Keep the previous cursor, cards and search so a retry requests the same page.
         setMorePostsError('載入更多貼文失敗，已保留原本的貼文與搜尋，請重試。');
       }
     } finally {
@@ -992,10 +1020,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         <div className={styles.feedEmptyActions}>
           {hasMorePosts && (
             <button
+              ref={loadMoreButtonRef}
               type="button"
               className="btn"
+              style={{ minHeight: 44, maxWidth: '100%', whiteSpace: 'normal' }}
               disabled={loadingMorePosts || refreshing}
               aria-busy={loadingMorePosts}
+              aria-describedby={pageStatusId}
               onClick={() => void loadMorePosts()}
             >
               {loadingMorePosts
@@ -1008,10 +1039,11 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           {morePostsError && <p className={styles.feedError} role="alert">{morePostsError}</p>}
         </div>
       )}
-      {!savedView && !selectedFeedLoading && !selectedFeedError &&
-        !hasMorePosts && feedLimitRef.current >= FEED_MAX_READ && (
-        <p className={styles.feedScope} role="status">
-          已達單次瀏覽上限 {FEED_MAX_READ} 篇；尚未提供跨全部歷史貼文的伺服器搜尋。
+      {!savedView && !selectedFeedLoading && !selectedFeedError && (
+        <p ref={pageStatusRef} id={pageStatusId} tabIndex={-1} className={styles.feedScope} role="status" aria-live="polite">
+          {loadingMorePosts ? '正在讀取下一頁…' : pageMessage || (hasMorePosts
+            ? '每次接續載入 60 則更早貼文；重新整理會回到最新一頁。'
+            : '已讀到本次查詢的最後一頁。')}
         </p>
       )}
     </div>
