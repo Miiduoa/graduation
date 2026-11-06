@@ -167,3 +167,11 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 將 `conversationMember()` 加入必須存在 canonical `users/{uid}` 文件的檢查，同時保留既有 `isActiveAccount()` 對刪除中、deleted、disabled、suspended、inactive 的拒絕。此路徑最多查詢兩份不同 Firestore 文件（canonical user 與 conversation），沒有超過 Cloud Storage Rules 的兩份文件上限；同一路徑重複查詢會由規則引擎快取。已新增兩種私訊附件路徑的隔離 emulator 回歸，驗證：只有殘留 `memberIds` 時，舊附件讀取及新附件寫入被拒絕；補回合法 active profile 時，合法讀取及上傳可用；再次刪掉 profile 後，同一個登入 context 再次被拒絕。
 
 **變更驗證：** 這一段更新所對應的程式與測試已推到安全分支，尚須以提交後精確 head 的 Firebase Storage emulator 及完整 CI 結果判定，未在此預先宣稱通過。此修補可能使只有殘留 conversation 成員清單、卻缺少 canonical profile 的 legacy 帳號無法存取私訊附件。正式發布前須盤點該類帳號並完成適當身分恢復與資料保留決策，不應恢復無 profile 的廣泛授權。其餘舊下載 URL、stories／events 兩文件查詢上限、GCS staging、正式 App 審查與 deployment 缺口維持開放。
+
+### 校園帳號狀態：Firestore 與 callable 的停權拒絕一致化
+
+進一步檢查發現 Storage 的 `isActiveAccount()` 已拒絕 `disabled`、`suspended`、`inactive` 與 `deleted`，但 Firestore `isSignedIn()` 只拒絕 `deleted`；包裝多數 callable 的 `accountLifecycle.assertAccountAvailable()` 也只拒絕 `deleted`。若 canonical `users/{uid}` 明確停權而校籍 membership 或過去取得的登入 token 仍有效，Firetore client 與部分 callable 原本仍可執行以 `isSignedIn` 為入口的操作。已同步擴充 Firestore 與 callable admission 的拒絕狀態，保留 `accountDeletionInProgress` 與匿名／新帳號既有邊界，也保留 callable 原本 `account-deletion` 機器可讀 reason，避免破壞既有客戶端契約。
+
+將 Firestore 現有帳號關閉測試從 2 個狀態擴充至 5 個，驗證個人資料、群組、學校權限的正常與拒絕路徑；將 callable guard 單元回歸擴充至 5 個狀態，確認 handler 不執行。這些案例屬新變更，須以精確提交的 Firestore emulator、Functions、完整 CI 結果驗收，不預先視為測試通過。Firestore 公開資料 `allow read: if true` 不受此登入狀態判斷影響。仍需獨立查核所有未採用 `isSignedIn` 或 `createAccountGuardedOnCall` 的授權入口，並確保停權流程原子更新 canonical user 與會員資料。
+
+此輪為隔離原始碼修補和新增測試，沒有修改正式資料、發布環境、金鑰、舊 token 或主線閘門。

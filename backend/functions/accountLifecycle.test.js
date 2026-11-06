@@ -6,7 +6,10 @@ function setup(data, exists = true) {
   const onCall = jest.fn((options, handler) => handler);
   return { get, onCall, guarded: createAccountGuardedOnCall({ onCall, getDb: () => db }) };
 }
-test.each([{ accountDeletionInProgress: true }, { status: 'deleted' }])(
+test.each([
+  { accountDeletionInProgress: true },
+  ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+])(
   'blocks %j before the business handler',
   async (profile) => {
     const { guarded } = setup(profile);

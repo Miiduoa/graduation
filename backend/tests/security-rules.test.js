@@ -49,7 +49,10 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
-  for (const accountState of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+  for (const accountState of [
+    { accountDeletionInProgress: true },
+    ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+  ]) {
     test(`deny new reads and writes for closing accounts ${JSON.stringify(accountState)}`, async () => {
       await seedFirestore(async (db) => {
         await db.doc('users/alice').set({ ...accountState, displayName: 'Alice' });
