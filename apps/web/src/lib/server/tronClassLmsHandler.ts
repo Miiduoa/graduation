@@ -361,8 +361,13 @@ function readCachedExtras(value: unknown, nowMs: number): {
 function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
+  const cache = record(row.cache);
+  // An old or partial cache document must not make the course page fail with a
+  // server error. Treat it as a miss so the live session can fetch fresh data.
   if (row.success !== true || row.ownerUid !== uid || row.schoolId !== 'pu' || row.source !== 'pu-tronclass' ||
     typeof row.fetchedAt !== 'string' || !Number.isFinite(Date.parse(row.fetchedAt)) ||
+    typeof cache.hit !== 'boolean' ||
+    typeof cache.expiresAt !== 'string' || !Number.isFinite(Date.parse(cache.expiresAt)) ||
     !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !Array.isArray(row.courseErrors)) return null;
