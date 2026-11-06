@@ -76,7 +76,7 @@ module.exports = onCall(
     const [scheduleResult, assignmentsResult, announcementsResult] = await Promise.allSettled([
       fetchAssistantTodaySchedule(uid, schoolId),
       fetchAssistantPendingAssignments(uid, schoolId),
-      fetchAssistantAnnouncements(schoolId),
+      fetchAssistantAnnouncements(schoolId, { forSnapshot: true }),
     ]);
 
     const schedule = summarizeSettled(scheduleResult, (value) => {
@@ -90,13 +90,23 @@ module.exports = onCall(
       (items) => summarizeAssignmentPage(items, { uid, schoolId }),
       { status: 'unavailable', count: null, items: [] });
 
-    const announcements = summarizeSettled(announcementsResult, (items) => ({
-      status: 'available',
-      items: (Array.isArray(items) ? items : []).slice(0, 8).map((item) => ({
-        title: String(item.title || '').slice(0, 140),
-        publishedAt: toIso(item.publishedAt),
-      })),
-    }), { status: 'unavailable', items: [] });
+    const announcements = summarizeSettled(announcementsResult, (items) => {
+      if (!Array.isArray(items)) throw new Error('Announcement source is unavailable');
+      const rows = [];
+      for (const item of items) {
+        if (typeof item?.title !== 'string' || !item.title.trim()) continue;
+        const kind = item.announcementKind;
+        const source = (kind === 'school-announcement' || kind === 'legacy-announcement') &&
+          typeof item.id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(item.id)
+          ? { kind, id: item.id } : null;
+        rows.push({
+          title: item.title.slice(0, 140), publishedAt: toIso(item.publishedAt),
+          ...(source ? { source } : {}),
+        });
+        if (rows.length === 8) break;
+      }
+      return { status: 'available', items: rows };
+    }, { status: 'unavailable', items: [] });
 
     await assertActiveSchoolMember(schoolId, uid);
     return { schoolId, checkedAt: new Date().toISOString(), schedule, assignments, announcements };

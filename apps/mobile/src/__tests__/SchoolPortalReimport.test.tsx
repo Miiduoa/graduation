@@ -1,3 +1,9 @@
+// Exercise the portal capture flow independently of the current E-campus pause.
+jest.mock('@campus/shared/src/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('@campus/shared/src/puEcampusDataPolicy'),
+  isPuEcampusDataFetchEnabled: () => true,
+}));
+
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';

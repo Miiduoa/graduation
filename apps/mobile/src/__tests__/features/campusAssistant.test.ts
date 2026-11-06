@@ -1,3 +1,6 @@
+import { resumeOpenedCoursework } from '../../features/nuniCourseworkSnapshot';
+import type { CourseworkRead, CourseworkChoice } from '../../features/nuniCourseworkFollowUp';
+import type { NuniClassCoursework } from '../../services/nuniClassCoursework';
 import { httpsCallable } from 'firebase/functions';
 import {
   askCampusAssistant,
@@ -11,6 +14,9 @@ jest.mock('../../firebase', () => ({
   getAuthInstance: () => ({ currentUser: mockUid ? { uid: mockUid } : null }),
   getFunctionsInstance: () => ({}),
   isFirebaseMockMode: () => mockFake,
+}));
+jest.mock('../../services/nuniAssignmentReminders', () => ({
+  cancelNuniAssignmentReminder: jest.fn(), confirmNuniAssignmentReminder: jest.fn(),
 }));
 jest.mock('../../services/localLLMInference', () => ({
   localLLM: {
@@ -558,6 +564,704 @@ test('pages through the same filtered deadlines across Taipei midnight without l
     expect(expired.tool).toBe('online-required');
     expect(expired.content).not.toContain('練習 17');
     expect(expired.assignmentRead).toBeUndefined();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(httpsCallable).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+const classOccurrence = {
+  courseId: 'manual:db', name: '資料庫', room: '任垣 210', date: '2026-11-05',
+  term: '115|1', startTime: '10:10', endTime: '12:00',
+};
+function withUpcoming(classes: typeof classOccurrence[] | undefined, checkedAt = '2026-11-05T01:55:00Z') {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  collectOnDeviceSchoolContext.mockResolvedValueOnce({
+    schoolId: 'pu', checkedAt,
+    timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [], nextClasses: classes },
+  });
+}
+
+test('finds the next class without a model and checks the same occurrence again for a room follow-up', async () => {
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  const question = { role: 'user' as const, content: '下一堂課是什麼？' };
+  withUpcoming([classOccurrence]);
+  const first = await askCampusAssistant({ ...input(), mode: 'device', messages: [question] });
+  expect(first.savedClassRead?.classes).toEqual([classOccurrence]);
+  const moved = { ...classOccurrence, room: '主顧 303' };
+  withUpcoming([moved]);
+  const reply = await askCampusAssistant({
+    ...input(), mode: 'device', messages: [
+      question, { role: 'assistant', ...first }, { role: 'user', content: '那堂課在哪間教室？' },
+    ],
+  });
+  expect(reply.savedClassRead).toMatchObject({ classes: [moved], focus: 'room' });
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0].classFollowUp).toEqual([classOccurrence]);
+  expect(reply.content).not.toContain(classOccurrence.room);
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test('a room follow-up does not silently switch to the new next class when the requested occurrence cannot be confirmed', async () => {
+  withUpcoming([{ ...classOccurrence, courseId: 'manual:other', room: 'C306' }]);
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device', messages: [
+      { role: 'assistant', content: '資料庫', savedClassRead: {
+        uid: 'A', schoolId: 'pu', updatedAt: null, classes: [classOccurrence],
+      } }, { role: 'user', content: '在哪間教室？' },
+    ],
+  });
+  expect(result).toMatchObject({ tool: 'saved-timetable', route: '/timetable' });
+  expect(result.savedClassRead).toBeUndefined();
+  expect(result.content).not.toMatch(/C306|任垣/);
+});
+
+test('today uses the Taiwan date and does not return tomorrow as a remaining class today', async () => {
+  withUpcoming([{ ...classOccurrence, date: '2026-11-06' }], '2026-11-05T15:58:00Z');
+  const reply = await askCampusAssistant({ ...input(), mode: 'device', messages: [
+    { role: 'user', content: '今天下一堂課是什麼？' },
+  ] });
+  expect(reply.content).toContain('今天剩下');
+  expect(reply.savedClassRead).toBeUndefined();
+});
+
+test.each(['翻譯「下一堂課是什麼」', '提醒我下一堂課要交作業', '明天所有的課表'])(
+  'a different request does not receive a next-class answer: %s', async (content) => {
+    const reply = await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+    expect(reply.savedClassRead).toBeUndefined();
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('includeNextClasses');
+  },
+);
+
+test('a room follow-up from another scope never asks the local store to resolve that reference', async () => {
+  withUpcoming([classOccurrence]);
+  const result = await askCampusAssistant({
+    ...input(), mode: 'device', messages: [
+      { role: 'assistant', content: '原課表', savedClassRead: {
+        uid: 'B', schoolId: 'other', updatedAt: null, classes: [classOccurrence],
+      } }, { role: 'user', content: '那在哪個教室？' },
+    ],
+  });
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+  expect(result.savedClassRead).toBeUndefined();
+  expect(result.content).not.toContain(classOccurrence.name);
+});
+
+function withCurrent(classes: typeof classOccurrence[] | undefined) {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  collectOnDeviceSchoolContext.mockResolvedValueOnce({
+    schoolId: 'pu', checkedAt: '2026-11-05T03:30:00Z',
+    timetable: { source: 'saved-device-copy', updatedAt: null, courses: [], currentClasses: classes },
+  });
+}
+
+test.each(['我現在有課嗎？', '現在在上什麼課？', '請問這節是哪一門課？'])(
+  'answers a direct current-class question from checked local data: %s', async (content) => {
+    jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+    withCurrent([classOccurrence]);
+    const reply = await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+    expect(reply.savedClassRead).toMatchObject({ currentAt: '2026-11-05T03:30:00Z', classes: [classOccurrence] });
+    expect(reply.content).toContain('任垣 210');
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+  },
+);
+
+test('current class details stay anchored while asking explicitly for next starts a fresh lookup', async () => {
+  const initial = { role: 'user' as const, content: '我現在有課嗎？' };
+  withCurrent([classOccurrence]);
+  const first = await askCampusAssistant({ ...input(), mode: 'device', messages: [initial] });
+  const previous = { role: 'assistant' as const, ...first };
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  withCurrent([{ ...classOccurrence, room: '主顧 303' }]);
+  const detail = await askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content: '在哪間教室？' }] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).toMatchObject({ includeCurrentClasses: true, classFollowUp: [classOccurrence] });
+  expect(detail.savedClassRead).toMatchObject({ currentAt: first.savedClassRead?.currentAt, focus: 'room', classes: [{ room: '主顧 303' }] });
+  withCurrent([]);
+  const ended = await askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content: '那幾點下課？' }] });
+  expect(ended.savedClassRead).toBeUndefined();
+  expect(ended.content).toContain('原時段');
+  withUpcoming([{ ...classOccurrence, courseId: 'english', name: '英文' }]);
+  const next = await askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content: '下一堂課是什麼？' }] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+  expect(next.savedClassRead?.currentAt).toBeUndefined();
+  expect(next.content).toContain('英文');
+});
+
+test('only a verified empty current window offers a free-period answer', async () => {
+  const ask = () => askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '我現在有課嗎？' }] });
+  withCurrent([]);
+  const free = await ask();
+  expect(free).toMatchObject({ route: '/timetable', savedClassRead: { currentAt: '2026-11-05T03:30:00Z', classes: [] } });
+  expect(free.content).toContain('沒有排課');
+  withCurrent(undefined);
+  const unknown = await ask();
+  expect(unknown.savedClassRead).toBeUndefined();
+  expect(unknown.content).not.toContain('沒有排課');
+});
+
+test.each([
+  ['我現在這堂課在哪間教室？', 'room'],
+  ['我現在在哪裡上課？', 'room'],
+  ['現在幾點下課？', 'time'],
+  ['這堂課幾點下課？', 'time'],
+])('reads an explicitly referenced current class detail without previous chat: %s', async (content, focus) => {
+  jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+  withCurrent([classOccurrence]);
+  const result = await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+  expect(result.savedClassRead).toMatchObject({ currentAt: '2026-11-05T03:30:00Z', focus });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
+test('an explicit now overrides a future reference, while a demonstrative alone keeps that reference', async () => {
+  const future = { ...classOccurrence, name: '英文', courseId: 'english', startTime: '14:10', endTime: '15:00' };
+  const previous = { role: 'assistant' as const, content: '英文', savedClassRead: {
+    uid: 'A', schoolId: 'pu', updatedAt: null, classes: [future],
+  } };
+  const lookup = (content: string) => askCampusAssistant({ ...input(), mode: 'device', messages: [previous, { role: 'user', content }] });
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  withUpcoming([future]);
+  const follow = await lookup('這堂課幾點下課？');
+  expect(follow.savedClassRead).toMatchObject({ focus: 'time', classes: [future] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).toHaveProperty('classFollowUp', [future]);
+  withCurrent([classOccurrence]);
+  const now = await lookup('現在這堂課幾點下課？');
+  expect(now.savedClassRead).toMatchObject({ focus: 'time', classes: [classOccurrence] });
+  expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+});
+
+test.each(['在哪裡？', '現在在哪裡？', '幾點下課？', '提醒我現在上課'])(
+  'does not infer a specific current class from an unrelated or unanchored question: %s', async (content) => {
+    await askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content }] });
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('includeCurrentClasses');
+  },
+);
+
+test('an account switch while reading the current timetable discards the old account result', async () => {
+  withCurrent([classOccurrence]);
+  const pending = askCampusAssistant({ ...input(), mode: 'device', messages: [{ role: 'user', content: '我現在有課嗎？' }] });
+  mockUid = 'B';
+  await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+describe('platform timetable without a school account', () => {
+  const platform = () => ({
+    ...input(), mode: 'device' as const, scope: { uid: '', schoolId: 'pu' },
+    platformTimetable: { accountId: 'pa-student', isCurrent: () => true },
+    messages: [{ role: 'user' as const, content: '我現在有課嗎？' }],
+  });
+
+  test('looks up the platform timetable and follows the verified occurrence without a local model or a Firebase call', async () => {
+    mockUid = null;
+    const request = platform();
+    withCurrent([classOccurrence]);
+    const reply = await askCampusAssistant(request);
+    expect(reply.savedClassRead).toMatchObject({ uid: '', owner: 'nuni:pa-student', classes: [classOccurrence] });
+    withCurrent([{ ...classOccurrence, room: '405' }]);
+    const followUp = await askCampusAssistant({ ...request, messages: [
+      { role: 'assistant', content: reply.content, savedClassRead: reply.savedClassRead },
+      { role: 'user', content: '在哪間教室？' },
+    ] });
+    expect(followUp.savedClassRead).toMatchObject({ owner: 'nuni:pa-student', focus: 'room' });
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).toMatchObject({
+      uid: '', platformTimetable: request.platformTimetable, classFollowUp: [classOccurrence],
+    });
+    expect(followUp.content).toContain('405');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+  });
+
+  test('never follows a different platform owner, even for otherwise identical class IDs', async () => {
+    withCurrent([classOccurrence]);
+    const reply = await askCampusAssistant({ ...platform(), messages: [
+      { role: 'assistant', content: '舊課', savedClassRead: {
+        uid: '', owner: 'nuni:other', schoolId: 'pu', updatedAt: null, currentAt: '2026-11-05T03:00:00Z', classes: [classOccurrence],
+      } }, { role: 'user', content: '在哪間教室？' },
+    ] });
+    expect(reply.savedClassRead).toBeUndefined();
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    expect(collectOnDeviceSchoolContext.mock.lastCall[0]).not.toHaveProperty('classFollowUp');
+    expect(reply.content).not.toContain(classOccurrence.room);
+  });
+
+  test('routes a new account to import and preserves the recovery route after a storage failure', async () => {
+    const request = platform();
+    expect((await askCampusAssistant(request)).route).toBe('/timetable/import');
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    collectOnDeviceSchoolContext.mockResolvedValueOnce({
+      checkedAt: new Date().toISOString(), schoolId: 'pu',
+      timetable: { source: 'unreadable', courses: [], updatedAt: null },
+    });
+    expect((await askCampusAssistant(request)).route).toBe('/timetable');
+  });
+
+  test('unrelated questions do not unlock Firebase, authorized snapshots or native inference', async () => {
+    const request = platform();
+    const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+    const reply = await askCampusAssistant({ ...request, messages: [{ role: 'user', content: '請幫我送出請假' }] });
+    expect(reply).toMatchObject({ source: 'device', tool: 'saved-timetable', hasActions: false });
+    expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+    await expect(askCampusAssistant({ ...request, mode: 'campus' })).rejects.toThrow('session changed');
+    await expect(askCampusAssistant({ ...request, scope: { uid: 'A', schoolId: 'pu' } })).rejects.toThrow('session changed');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+  });
+
+  test('a platform-only date follow-up cannot reuse the previous Firebase announcement read or snapshot', async () => {
+    mockUid = null;
+    const checkedAt = new Date().toISOString();
+    const items = [{ title: '舊帳號的公告', publishedAt: checkedAt,
+      source: { kind: 'school-announcement' as const, id: 'private-to-a' } }];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+      announcements: { status: 'available' as const, items },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      schedule: { status: 'unavailable' as const, count: null } };
+    const reply = await askCampusAssistant({ ...platform(), senseSnapshot, messages: [
+      { role: 'assistant', content: items[0].title, announcementRead: {
+        userId: 'A', schoolId: 'pu', checkedAt, items, summary: '1 則公告',
+      } },
+      { role: 'user', content: '那昨天呢？' },
+    ] });
+    expect(reply.announcementRead).toBeUndefined();
+    expect(reply.content).not.toContain(items[0].title);
+    expect(reply.route).not.toBe('/announcements');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  });
+
+  test('discards an answer when the verified platform session expires during the read', async () => {
+    withCurrent([classOccurrence]);
+    const request = platform();
+    const isCurrent = jest.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    await expect(askCampusAssistant({ ...request, platformTimetable: { ...request.platformTimetable, isCurrent } }))
+      .rejects.toThrow('session changed');
+    expect(httpsCallable).not.toHaveBeenCalled();
+    expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+  });
+});
+
+describe('nuni class to coursework', () => {
+  const transport = { request: jest.fn(), bffRequest: jest.fn() };
+  const openWork = () => jest.spyOn(require('../../services/nuniClassCoursework'), 'readNuniClassCoursework')
+    .mockResolvedValue({ kind: 'unlinked' });
+  const base = () => ({
+    ...input(), mode: 'device' as const, scope: { uid: '', schoolId: 'pu' }, courseworkRequests: transport,
+    platformTimetable: { accountId: 'pa-student', isCurrent: () => true },
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test.each([
+    ['這堂課有什麼作業？', 'current'],
+    ['我現在這堂課有作業嗎？', 'current'],
+    ['查下一堂課的作業', 'next'],
+    ['這堂課要交什麼作業？', 'current'],
+  ])('grounds the first-turn question before reading a workspace: %s', async (question, window) => {
+    const load = openWork();
+    if (window === 'current') withCurrent([classOccurrence]); else withUpcoming([classOccurrence]);
+    const reply = await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: question }] });
+    expect(reply.courseworkRead?.anchor.classes).toEqual([classOccurrence]);
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({
+      ...transport, occurrence: classOccurrence, accountId: 'pa-student', schoolId: 'pu',
+    }));
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  });
+
+  test('an empty current timetable yields a local answer with no workspace requests', async () => {
+    const load = openWork();
+    withCurrent([]);
+    const reply = await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: '這堂課有作業嗎' }] });
+    expect(reply.savedClassRead?.classes).toEqual([]);
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  test('a staggered overlap asks for a class first, resolving only the verified choice', async () => {
+    const load = openWork();
+    const lab = { ...classOccurrence, courseId: 'lab', room: 'H205' };
+    withCurrent([classOccurrence, lab]);
+    const question = { role: 'user' as const, content: '這堂課有什麼作業' };
+    const first = await askCampusAssistant({ ...base(), messages: [question] });
+    expect(first.courseworkRead?.result.kind).toBe('choose-class');
+    expect(load).not.toHaveBeenCalled();
+    const second = await askCampusAssistant({ ...base(), courseworkChoice: { classIndex: 1 },
+      messages: [question, { role: 'assistant', ...first }, { role: 'user', content: '第二堂' }],
+    });
+    expect(load.mock.calls[0][0]).toMatchObject({ occurrence: lab });
+    expect(second.courseworkRead?.anchor.classes).toEqual([lab]);
+  });
+
+  test('foreign anchors and stale workspace buttons never get assignment data', async () => {
+    const load = openWork();
+    const anchor = { uid: '', owner: 'nuni:pa-other', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    const messages = [{ role: 'assistant' as const, content: '查課', savedClassRead: anchor },
+      { role: 'user' as const, content: '這堂課有作業嗎？' }];
+    await askCampusAssistant({ ...base(), messages });
+    const previous = { role: 'assistant' as const, content: '選課',
+      courseworkRead: { anchor: { ...anchor, owner: 'nuni:pa-student' }, result: {
+        kind: 'choose' as const, workspaces: [{ id: 'one', title: classOccurrence.name }],
+      } } };
+    await askCampusAssistant({ ...base(), courseworkChoice: { workspaceId: 'forged' },
+      messages: [previous, { role: 'user', content: '選擇課程' }] });
+    expect(load).not.toHaveBeenCalled();
+    await askCampusAssistant({ ...base(), courseworkChoice: { workspaceId: 'one' },
+      messages: [previous, { role: 'user', content: '選擇課程' }] });
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ occurrence: classOccurrence, selectedWorkspaceId: 'one' }));
+  });
+  test.each(['有作業嗎？', '有什麼作業要交？', '作業呢？'])('only resolves a short spoken follow-up with a previous class: %s', async (question) => {
+    const load = openWork();
+    await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: question }] });
+    expect(load).not.toHaveBeenCalled();
+    const anchor = { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    await askCampusAssistant({ ...base(), messages: [
+      { role: 'assistant', content: '剛才選的課', courseworkRead: { anchor, selectedWorkspaceId: 'confirmed', result: {
+        kind: 'assignments', workspace: { id: 'confirmed', title: classOccurrence.name }, assignments: [], limited: false,
+      } } }, { role: 'user', content: question },
+    ] });
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ occurrence: classOccurrence, selectedWorkspaceId: 'confirmed' }));
+  });
+  test('retry keeps the chosen workspace, but asking about the next class resolves a fresh source', async () => {
+    const load = openWork().mockResolvedValue({ kind: 'unavailable' });
+    const anchor = { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    const reviewed = { schoolId: 'pu', academicYear: '115', semester: '1', className: '乙班', teacher: '林老師', courseCode: 'DB101' };
+    const previous = { role: 'assistant' as const, content: '選擇課程', courseworkRead: { anchor, result: {
+      kind: 'choose' as const, workspaces: [{ id: 'confirmed', title: classOccurrence.name, reviewed }],
+    } } };
+    const failed = await askCampusAssistant({ ...base(), courseworkChoice: { workspaceId: 'confirmed' },
+      messages: [previous, { role: 'user', content: '乙班' }] });
+    const retry = { role: 'assistant' as const, ...failed };
+    await askCampusAssistant({ ...base(), messages: [retry, { role: 'user', content: '這堂課有什麼作業？' }] });
+    expect(load.mock.lastCall?.[0]).toMatchObject({ selectedWorkspaceId: 'confirmed', expectedReviewed: reviewed });
+    const other = { ...classOccurrence, courseId: 'physics', name: '物理' };
+    withUpcoming([other]);
+    await askCampusAssistant({ ...base(), messages: [retry, { role: 'user', content: '下一堂課的作業呢？' }] });
+    expect(load.mock.lastCall?.[0]).toMatchObject({ occurrence: other, selectedWorkspaceId: undefined });
+  });
+  test('cancellation ends the local wait while a workspace response is still outstanding', async () => {
+    const stop = new AbortController();
+    let rejectLate!: (error: Error) => void;
+    openWork().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectLate = reject; }));
+    const anchor = { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null };
+    const pending = askCampusAssistant({ ...base(), signal: stop.signal, messages: [
+      { role: 'assistant', content: '查課', savedClassRead: anchor }, { role: 'user', content: '這堂課有什麼作業？' },
+    ] });
+    stop.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    rejectLate(new Error('network timeout'));
+  });
+  test.each(['翻譯「這堂課有什麼作業」', '提醒我明天交作業', '送出這堂課的作業', '所有課程的作業'])(
+    'does not read coursework for %s', async (question) => {
+      const load = openWork();
+      await askCampusAssistant({ ...base(), messages: [{ role: 'user', content: question }] });
+      expect(load).not.toHaveBeenCalled();
+    },
+  );
+  describe('follow-ups on an already read assignment list', () => {
+    const stamp = '2026-11-05T01:45:00Z';
+    beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(Date.parse(stamp)));
+    afterEach(() => jest.restoreAllMocks());
+    const row = { id: 'a', title: '設計報告', state: 'open' as const, submittedAt: null, dueAt: '2026-11-03T10:00:00+08:00' };
+    const snapshot: Extract<NuniClassCoursework, { kind: 'assignments' }> = {
+      kind: 'assignments', workspace: { id: 'linked', title: '資料庫' }, limited: true,
+      assignments: [row, { ...row, id: 'b', title: '讀書心得' },
+        { ...row, id: 'c', title: '今天的作業', dueAt: stamp },
+        { ...row, id: 'd', title: '設計報告', submittedAt: '2026-11-02T00:01:00Z' },
+        { ...row, id: 'e', title: '延伸作業', dueAt: null },
+        { ...row, id: 'f', title: '練習', state: 'closed', dueAt: '2026-10-01T00:00:00Z' }],
+    };
+    const read: CourseworkRead = {
+      checkedAt: stamp, anchor: { uid: '', owner: 'nuni:pa-student', schoolId: 'pu', classes: [classOccurrence], updatedAt: null },
+      result: snapshot,
+    };
+    const ask = (question: string, previous = read, courseworkChoice?: CourseworkChoice) => askCampusAssistant({
+      ...base(), courseworkChoice, messages: [
+        { role: 'assistant', content: '課程作業', courseworkRead: previous }, { role: 'user', content: question },
+      ],
+    });
+
+    describe('assignment reminder review', () => {
+      const native = jest.requireMock('../../services/nuniAssignmentReminders');
+      const upcoming = { ...row, dueAt: '2026-11-07T12:00:00+08:00' };
+      const list = { ...snapshot, assignments: [upcoming, { ...upcoming, id: 'b' }] };
+      const source = { ...read, result: list };
+      const review = async () => (await ask('提醒我交第二份', source)).courseworkRead!;
+      const confirm = { reminder: 'confirm' as const, id: 'b' };
+      const checkNative = () => native.confirmNuniAssignmentReminder.mockImplementation(
+        async (_target: unknown, intent: { recheck: () => Promise<boolean> }) => await intent.recheck() ? 'scheduled' : 'stale');
+
+      test('clarifies duplicate titles, binds ordinal and lead to the selected ID, and reserves writing for a review button', async () => {
+        const remote = openWork();
+        const pick = (await ask('提醒我交設計報告', source)).courseworkRead!;
+        expect(pick.view).toMatchObject({ step: 'choose', ids: ['a', 'b'] });
+        const exact = (await ask('第二份', pick)).courseworkRead!;
+        expect(exact.view).toMatchObject({ step: 'review', ids: ['b'], minutes: 60 });
+        const later = (await ask('提前 15 分鐘', exact)).courseworkRead!;
+        expect(later.view).toMatchObject({ minutes: 15, ids: ['b'] });
+        expect((await ask('確認設定提醒', later)).content).toContain('請按');
+        await ask('確認設定提醒', later, { ...confirm, id: 'a' });
+        await ask('確認設定提醒', pick, confirm);
+        const discard = (await ask('放棄設定', later)).courseworkRead!;
+        await ask('確認設定提醒', discard, confirm);
+        expect(remote).not.toHaveBeenCalled();
+        expect(native.confirmNuniAssignmentReminder).not.toHaveBeenCalled();
+        expect(native.cancelNuniAssignmentReminder).not.toHaveBeenCalled();
+      });
+
+      test('checks current assignments by ID, handles a duplicate confirmation and separately confirms cancellation', async () => {
+        const remote = openWork().mockResolvedValue({ ...list, assignments: [...list.assignments].reverse() });
+        checkNative();
+        const draft = await review();
+        const result = (await ask('確認設定提醒', draft, confirm)).courseworkRead!;
+        expect(native.confirmNuniAssignmentReminder).toHaveBeenCalledWith({ accountId: 'pa-student', schoolId: 'pu',
+          workspaceId: 'linked', assignmentId: 'b' }, expect.objectContaining({ dueAt: upcoming.dueAt, leadMinutes: 60 }));
+        expect(remote).toHaveBeenCalledTimes(1);
+        expect(result.view).toMatchObject({ step: 'result', ids: ['b'], minutes: 60, next: 'remove' });
+        await ask('確認設定提醒', result, confirm);
+        expect(native.confirmNuniAssignmentReminder).toHaveBeenCalledTimes(1);
+        const cancel = (await ask('取消這份作業的提醒', result)).courseworkRead!;
+        expect(cancel.view).toMatchObject({ step: 'cancel-review', ids: ['b'] });
+        expect(native.cancelNuniAssignmentReminder).not.toHaveBeenCalled();
+        native.cancelNuniAssignmentReminder.mockResolvedValue('cancelled');
+        expect((await ask('確認取消提醒', cancel, { reminder: 'remove', id: 'b' })).content).toContain('已取消');
+        expect(native.cancelNuniAssignmentReminder).toHaveBeenCalledWith({ accountId: 'pa-student', schoolId: 'pu',
+          workspaceId: 'linked', assignmentId: 'b' }, expect.any(Function));
+      });
+
+      test.each([{ dueAt: '2026-12-01T12:00:00+08:00' }, { submittedAt: stamp }, { state: 'closed' }])(
+        'does not schedule when the live assignment changed: %j', async (patch) => {
+          const fresh = { ...list, assignments: [{ ...upcoming, id: 'b', ...patch }] };
+          openWork().mockResolvedValue(fresh);
+          checkNative();
+          const result = await ask('確認設定提醒', await review(), confirm);
+          expect(result.content).toContain('已變更');
+          expect(result.courseworkRead?.result).toBe(fresh);
+          expect(result.courseworkRead?.view).toMatchObject({ step: 'dueAt' in patch ? 'review' : 'result' });
+        });
+
+      test.each([
+        ['denied', '系統設定', 'retry'], ['failed', '再試', 'retry'], ['unchanged', '已有相同時間', 'remove'],
+        ['unsupported', 'iOS 或 Android', undefined],
+      ])('reports the actual notification result and appropriate next action: %s', async (status, copy, next) => {
+        native.confirmNuniAssignmentReminder.mockResolvedValue(status);
+        const result = await ask('確認設定提醒', await review(), confirm);
+        expect(result.content).toContain(copy);
+        const view = result.courseworkRead?.view;
+        expect(view?.kind === 'reminder' && view.step === 'result' ? view.next : 'unexpected').toBe(next);
+      });
+
+      test('skips ineligible time choices and refuses a different user, dirty snapshot or a submitted assignment', async () => {
+        const soon = { ...upcoming, dueAt: new Date(Date.parse(stamp) + 30 * 60000).toISOString() };
+        expect((await ask('提醒我交這份', { ...read, result: { ...list, assignments: [soon] } })).courseworkRead?.view)
+          .toMatchObject({ step: 'review', minutes: 15 });
+        expect((await ask('提醒我交這份', { ...read, result: { ...list, assignments: [{ ...soon, submittedAt: stamp }] } })).content)
+          .toContain('已有繳交紀錄');
+        const draft = await review();
+        const other = await ask('確認', { ...draft, anchor: { ...draft.anchor, owner: 'nuni:someone' } }, confirm);
+        expect(other.courseworkRead).toBeUndefined();
+        const dirty = await ask('確認', { ...draft, changedAssignmentId: 'b' }, confirm);
+        expect(dirty.content).toContain('重新核對');
+        expect(native.confirmNuniAssignmentReminder).not.toHaveBeenCalled();
+      });
+    });
+
+    test('priority keeps tied open overdue items and next deadline includes exact now; projections never touch data sources', async () => {
+      const remote = openWork();
+      const urgent = await ask('哪個最急？');
+      expect(urgent.courseworkRead).toMatchObject({ checkedAt: stamp, result: { limited: true }, view: { kind: 'priority', ids: ['a', 'b'] } });
+      const next = await ask('下一個要截止的是哪個？', urgent.courseworkRead!);
+      expect(next.courseworkRead?.view).toMatchObject({ ids: ['c'] });
+      const receipt = await ask('我交了嗎？', next.courseworkRead!);
+      expect(receipt.courseworkRead?.view).toMatchObject({ kind: 'receipt', ids: ['c'] });
+      expect(receipt.content).toContain('仍在收件');
+      const list = await ask('回到這門課的作業', receipt.courseworkRead!);
+      expect(list.courseworkRead?.view).toBeUndefined();
+      expect(list.courseworkRead?.result).toBe(snapshot);
+      expect(remote).not.toHaveBeenCalled();
+      expect(require('../../services/onDeviceSchoolContext').collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+      expect(localLLM.generate).not.toHaveBeenCalled();
+    });
+    test('receipt asks for an exact item, resolves ordinals within a title collision, and preserves the receipt timestamp', async () => {
+      const remote = openWork();
+      const initial = await ask('我交了嗎？');
+      expect(initial.courseworkRead?.view?.kind).toBe('choose-receipt');
+      const collision = await ask('「設計報告」我交了嗎？', initial.courseworkRead!);
+      expect(collision.courseworkRead?.view?.ids).toEqual(['a', 'd']);
+      const byOrdinal = await ask('第二份', collision.courseworkRead!);
+      expect(byOrdinal.courseworkRead?.view).toMatchObject({ kind: 'receipt', ids: ['d'] });
+      expect(byOrdinal.content).toMatch(/2026\/11\/2.*8:01/);
+      const again = await ask('那這份交了沒？', byOrdinal.courseworkRead!);
+      expect(again.courseworkRead?.view?.ids).toEqual(['d']);
+      const byId = await ask('選擇', collision.courseworkRead!, { assignmentId: 'a' });
+      expect(byId.courseworkRead?.view?.ids).toEqual(['a']);
+      expect((await ask('選擇', collision.courseworkRead!, { assignmentId: 'b' })).courseworkRead).toBeUndefined();
+      expect(remote).not.toHaveBeenCalled();
+    });
+    test('an opened row is a referent but an explicit title takes precedence and returning to list forgets the open row', async () => {
+      const previous = { ...read, openedAssignmentId: 'd' };
+      expect((await ask('我交了嗎？', previous)).courseworkRead?.view?.ids).toEqual(['d']);
+      expect((await ask('讀書心得交了嗎？', previous)).courseworkRead?.view?.ids).toEqual(['b']);
+      const list = (await ask('回到這門課的作業', previous)).courseworkRead!;
+      expect((await ask('我交了嗎？', list)).courseworkRead?.view?.kind).toBe('choose-receipt');
+    });
+    test('an actual submission change forces a new read of the same assignment ID, even when two names are identical', async () => {
+      const freshRow = { ...row, submittedAt: '2026-11-05T02:00:00Z' };
+      const remote = openWork().mockResolvedValue({ ...snapshot, assignments: [snapshot.assignments[3], freshRow] });
+      const refreshed = await ask('我交了嗎？', { ...read, openedAssignmentId: 'a', changedAssignmentId: 'a' });
+      expect(remote.mock.lastCall?.[0]).toMatchObject({ expectedLinkedWorkspaceId: 'linked' });
+      expect(refreshed.courseworkRead?.view).toMatchObject({ ids: ['a'], kind: 'receipt' });
+      expect(refreshed.content).toMatch(/2026\/11\/5.*10:00/);
+      expect(refreshed.courseworkRead?.changedAssignmentId).toBeUndefined();
+      remote.mockResolvedValue({ ...snapshot, assignments: [snapshot.assignments[3]] });
+      const lost = await ask('重新核對', read, { refreshAssignmentId: 'a' });
+      expect(lost.courseworkRead?.result.kind).toBe('changed');
+      expect(lost.content).not.toContain('設計報告');
+    });
+    test('retry after a failed exact-item refresh stays on the same workspace and item', async () => {
+      const remote = openWork().mockResolvedValueOnce({ kind: 'unavailable' }).mockResolvedValueOnce(snapshot);
+      const failed = await ask('重新核對', read, { refreshAssignmentId: 'd' });
+      expect(failed.courseworkRead).toMatchObject({ result: { kind: 'unavailable' }, retryAssignmentId: 'd' });
+      const retry = await ask('這堂課有什麼作業？', failed.courseworkRead!);
+      expect(retry.courseworkRead?.view).toMatchObject({ kind: 'receipt', ids: ['d'] });
+      expect(remote.mock.lastCall?.[0]).toMatchObject({ expectedLinkedWorkspaceId: 'linked' });
+    });
+    test('dirty generic priority does not recommend stale data and unrecognized target IDs cannot cause a remote read', async () => {
+      const remote = openWork();
+      const dirty = { ...read, changedAssignmentId: 'a' };
+      expect((await ask('哪份最急？', dirty)).content).toContain('重新查詢');
+      expect((await ask('確認', dirty, { refreshAssignmentId: 'unknown' })).courseworkRead).toBeUndefined();
+      expect(remote).not.toHaveBeenCalled();
+    });
+    test('unknown deadlines do not outrank known ones and closed/submitted work never appears as pending', async () => {
+      const only = (index: number) => ({ ...read, result: { ...snapshot, assignments: [snapshot.assignments[index]] } });
+      expect((await ask('哪份最急？', only(4))).content).toContain('無法依截止時間排序');
+      expect((await ask('哪份快截止？', only(0))).courseworkRead?.view?.ids).toEqual([]);
+      expect((await ask('哪份最急？', only(5))).courseworkRead?.view?.ids).toEqual([]);
+      expect((await ask('哪份最急？', only(3))).courseworkRead?.view?.ids).toEqual([]);
+    });
+    test('elapsed deadlines do not stay upcoming while the source and submission timestamps remain unchanged', async () => {
+      const remote = openWork();
+      jest.mocked(Date.now).mockReturnValue(Date.parse('2026-11-06T01:45:00Z'));
+      const reply = await ask('哪個最快截止？');
+      expect(reply.courseworkRead).toMatchObject({ checkedAt: stamp, view: {
+        kind: 'priority', ids: [], rankedAt: '2026-11-06T01:45:00.000Z',
+      } });
+      expect(remote).not.toHaveBeenCalled();
+    });
+    test('opening a historical assignment cannot revive an omitted item or a later failed source as a receipt', () => {
+      const latest: CourseworkRead = { ...read, checkedAt: '2026-11-05T01:48:00Z',
+        result: { ...snapshot, assignments: [row] } };
+      const history = [{ courseworkRead: read }, { courseworkRead: latest }];
+      expect(resumeOpenedCoursework(history, read, 'd')).toMatchObject({
+        checkedAt: latest.checkedAt, view: { kind: 'choose-receipt', ids: [] },
+      });
+      const failed: CourseworkRead = { ...read, result: { kind: 'unavailable' }, expectedLinkedWorkspaceId: snapshot.workspace.id };
+      expect(resumeOpenedCoursework([...history, { courseworkRead: failed }], read, 'd')).toMatchObject({
+        result: { kind: 'unavailable' }, retryAssignmentId: 'd',
+      });
+    });
+    test.each([{ owner: 'nuni:other' }, { schoolId: 'ncku' }, { uid: 'legacy' }])('an invalid scope cannot project private coursework %j', async (patch) => {
+      const remote = openWork();
+      const wrong = { ...read, anchor: { ...read.anchor, ...patch } };
+      const reply = await ask('哪份最急？', wrong);
+      expect(reply.courseworkRead).toBeUndefined();
+      expect(reply.content).not.toContain('設計報告');
+      expect((await ask('確認', wrong, { refreshAssignmentId: 'a' })).courseworkRead).toBeUndefined();
+      expect(remote).not.toHaveBeenCalled();
+    });
+  });
+
+});
+
+test('keeps a date follow-up scoped to the observed announcement list without running a model', async () => {
+  jest.useFakeTimers({ now: new Date('2026-11-05T16:05:00Z') });
+  try {
+    const items = [
+      { title: '今日日程異動', publishedAt: '2026-11-05T16:01:00Z',
+        source: { kind: 'school-announcement' as const, id: 'today' } },
+      { title: '昨日選課公告', publishedAt: '2026-11-05T15:59:00Z',
+        source: { kind: 'legacy-announcement' as const, id: 'older' } },
+    ];
+    const senseSnapshot = { userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      announcements: { status: 'available' as const, items },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      schedule: { status: 'unavailable' as const, count: null } };
+    const args = { ...input(), mode: 'device' as const, senseSnapshot };
+    const first = await askCampusAssistant({ ...args, messages: [{ role: 'user', content: '今天發布了哪些校園公告？' }] });
+    expect(first.announcementRead?.items).toEqual([items[0]]);
+    const turns = [
+      { role: 'assistant' as const, content: first.content, announcementRead: first.announcementRead },
+      { role: 'user' as const, content: '那昨天呢？' },
+    ];
+    const second = await askCampusAssistant({ ...args, messages: turns });
+    expect(second.announcementRead?.items).toEqual([items[1]]);
+    expect(second.content).not.toContain(items[0].title);
+    const stale = await askCampusAssistant({ ...args, messages: turns, senseSnapshot: null });
+    expect(stale.tool).toBe('online-required');
+    expect(stale.content).not.toContain(items[1].title);
+    expect(mockCallable).not.toHaveBeenCalled();
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a date follow-up re-reads announcements from the current authorized snapshot without a model', async () => {
+  jest.useFakeTimers().setSystemTime(new Date('2026-11-01T16:04:00Z'));
+  try {
+    const scope = { ...input(), mode: 'device' as const };
+    const senseSnapshot = {
+      userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+      schedule: { status: 'unavailable' as const, count: null },
+      assignments: { status: 'unavailable' as const, count: null, items: [] },
+      announcements: { status: 'available' as const, items: [
+        { title: '昨日停水', publishedAt: '2026-11-01T15:59:00Z' },
+        { title: '今日復水', publishedAt: '2026-11-01T16:00:00Z' },
+      ] },
+    };
+    const initial = { role: 'user' as const, content: '今天有哪些公告？' };
+    const answer = await askCampusAssistant({ ...scope, senseSnapshot, messages: [initial] });
+    expect(answer.content).toContain('今日復水');
+    expect(answer.content).not.toContain('昨日停水');
+    const history = [initial, { role: 'assistant' as const, ...answer }];
+    const messages = [...history, { role: 'user' as const, content: '那昨天呢？' }];
+    const yesterday = await askCampusAssistant({ ...scope, senseSnapshot, messages });
+    expect(yesterday).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+    expect(yesterday.content).toContain('昨日停水');
+    expect(yesterday.content).not.toContain('今日復水');
+    for (const date of ['那最近七天呢？', '改看上個禮拜']) {
+      const otherPeriod = await askCampusAssistant({ ...scope, senseSnapshot,
+        messages: [...history, { role: 'user', content: date }] });
+      expect(otherPeriod).toMatchObject({ tool: 'campus-snapshot', route: '/announcements' });
+      expect(otherPeriod.content).toContain('昨日停水');
+    }
+    const timetable = await askCampusAssistant({ ...scope, senseSnapshot,
+      messages: [...history, { role: 'user', content: '那昨天的課表呢？' }] });
+    expect(timetable.route).toBe('/timetable');
+    jest.setSystemTime(new Date('2026-11-01T16:05:00Z'));
+    const replacement = { title: '修訂後的昨日公告', publishedAt: '2026-11-01T15:59:00Z' };
+    const refreshed = { ...senseSnapshot, checkedAt: new Date().toISOString(),
+      announcements: { ...senseSnapshot.announcements, items: [replacement] } };
+    const reread = await askCampusAssistant({ ...scope, senseSnapshot: refreshed, messages });
+    expect(reread.announcementRead).toMatchObject({ checkedAt: refreshed.checkedAt, items: [replacement] });
+    expect(reread.content).not.toContain('昨日停水');
+    for (const foreign of [{ userId: 'another-student' }, { schoolId: 'another-school' }]) {
+      const prior = { role: 'assistant' as const, ...answer, announcementRead: { ...answer.announcementRead!, ...foreign } };
+      const rejected = await askCampusAssistant({ ...scope, senseSnapshot: refreshed,
+        messages: [prior, { role: 'user', content: '那昨天呢？' }] });
+      expect(rejected.tool).toBe('online-required');
+      expect(rejected.announcementRead).toBeUndefined();
+      expect(rejected.content).not.toMatch(/修訂後的昨日公告|昨日停水|今日復水/);
+    }
+    jest.setSystemTime(new Date('2026-11-01T16:25:00Z'));
+    const expired = await askCampusAssistant({ ...scope, senseSnapshot, messages });
+    expect(expired).toMatchObject({ tool: 'online-required', route: '/announcements' });
+    expect(expired.content).not.toMatch(/昨日停水|今日復水/);
     expect(localLLM.generate).not.toHaveBeenCalled();
     expect(httpsCallable).not.toHaveBeenCalled();
   } finally {

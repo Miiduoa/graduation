@@ -28,6 +28,7 @@ import {
   personalSlotSelect,
   studyWindow,
   parseSpokenClock,
+  TRANSIT_COMPACT_MAX_BYTES,
 } from './tools';
 export { foodOrderIntent, scheduleIntent };
 export function writeIntent(question: string): boolean {
@@ -75,14 +76,19 @@ export function compactContext(raw: Obj): string {
   if (bytes(value) > 400) value.school = short(value.school, 24);
   return JSON.stringify(value);
 }
+function isTransitSummary(value: unknown): value is Obj {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && ('stops' in value || 'arrivals' in value);
+}
 export function toolSummary(raw: unknown, max?: number): string {
   raw = maskMessages(raw);
   const value: unknown = JSON.parse(JSON.stringify(raw, (key, v) =>
     ['submitted', 'overdue', 'source', 'completePageHref', 'start', 'end', 'coverage', 'unqueried', 'undated', 'updatedAt'].includes(key) && typeof v !== 'boolean' ? undefined : v,
   ));
-  const limit =
-    max ??
-    (value && typeof value === 'object' && ('pending' in value || 'schedule' in value) ? 900 : 550);
+  const transit = isTransitSummary(value);
+  const limit = transit
+    ? TRANSIT_COMPACT_MAX_BYTES
+    : max ??
+      (value && typeof value === 'object' && ('pending' in value || 'schedule' in value) ? 900 : 550);
   let truncated = false;
   for (let attempt = 0; attempt < 100 && bytes(value) > limit; attempt++) {
     let longest: unknown[] = [];
@@ -98,8 +104,10 @@ export function toolSummary(raw: unknown, max?: number): string {
     truncated = true;
   }
   if (bytes(value) > limit) {
-    let excerpt = clip(JSON.stringify(value), 400);
-    while (bytes({ truncated: true, excerpt }) > 600)
+    const excerptLimit = transit ? limit : 400;
+    const wrapperLimit = transit ? limit : 600;
+    let excerpt = clip(JSON.stringify(value), excerptLimit);
+    while (bytes({ truncated: true, excerpt }) > wrapperLimit)
       excerpt = clip(excerpt, Buffer.byteLength(excerpt) - 20);
     return JSON.stringify({ truncated: true, excerpt });
   }
@@ -113,7 +121,9 @@ function packedResults(
   return JSON.stringify(
     [...evidence, ...failed].map((e) => ({
       tool: e.tool,
-      result: JSON.parse(toolSummary(e.result, tight ? 400 : undefined)),
+      result: JSON.parse(
+        toolSummary(e.result, tight && e.tool !== 'get_transit' ? 400 : undefined),
+      ),
     })),
   );
 }
@@ -149,8 +159,14 @@ export async function run(input: RunInput) {
     input.question,
   );
   const relativeDate = /後天/.test(input.question) ? addDays(taipeiDate(now), 2)
-    : /明天|明晚/.test(input.question) ? addDays(taipeiDate(now), 1)
-    : /今天|今晚|今夜/.test(input.question) ? taipeiDate(now) : undefined;
+    : /明天|明晚|明早/.test(input.question) ? addDays(taipeiDate(now), 1)
+    : /今天|今晚|今夜|今早/.test(input.question) ? taipeiDate(now) : undefined;
+  const scheduledDate = input.question.match(
+    /(?:規劃|安排|排在|排到)\s*(?:在|到)?\s*(\d{4}-\d{2}-\d{2}|昨天|前天)(?!\d|\s*(?:截止|到期|要交))/,
+  )?.[1];
+  const planDay = scheduledDate === '昨天' ? addDays(taipeiDate(now), -1)
+    : scheduledDate === '前天' ? addDays(taipeiDate(now), -2)
+    : scheduledDate || relativeDate;
   const steps: Step[] = [];
   const evidence: { tool: string; result: unknown }[] = [];
   const failedResults: { tool: string; result: unknown }[] = [];
@@ -159,6 +175,7 @@ export async function run(input: RunInput) {
     stopReason = '',
     finalAnswer = '';
   let retried = false;
+  let queriedPlanDay: string | undefined;
   let toolFailures = 0;
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const log = (event: string, error?: unknown) =>
@@ -230,7 +247,7 @@ export async function run(input: RunInput) {
       const availableNames = [...names];
       let advertised = turn === 3 ? [] : schemas(availableNames);
       let requestMessages = messages;
-      if (evidence.length) requestMessages = [
+      if (evidence.length || failedResults.length) requestMessages = [
         ...messages.filter((m) => m.role !== 'tool' && !m.tool_calls),
         { role: 'user', content: '<results trust="untrusted">' + packedResults(evidence, failedResults, toolFailures > 0) + '</results>' },
       ];
@@ -363,7 +380,7 @@ export async function run(input: RunInput) {
       }
       // Bound multi-call responses, executing each in order within the same tool budget.
       const accepted = calls.slice(0, Math.max(0, 8 - steps.length));
-      messages.push({ role: 'assistant', content: null, tool_calls: accepted });
+      messages.push({ role: 'assistant', content: '', tool_calls: accepted });
       for (const call of accepted) {
         if (steps.length >= 8) {
           stopReason = 'TOOL_LIMIT';
@@ -378,9 +395,9 @@ export async function run(input: RunInput) {
           } catch {
             throw new V2Error(422, 'INVALID_TOOL_ARGUMENTS');
           }
-          if (relativeDate && ['propose_personal_event', 'propose_study_plan'].includes(call.function.name)) {
+          if (planDay && ['propose_personal_event', 'propose_study_plan'].includes(call.function.name)) {
             const event = args as Obj;
-            args = { ...event, date: relativeDate, ...(event.endDate ? { endDate: relativeDate } : {}) };
+            args = { ...event, date: planDay, ...(event.endDate ? { endDate: planDay } : {}) };
           }
           if (['reorder_last_food_order', 'propose_food_order'].includes(call.function.name)) {
             const event = args as Obj;
@@ -399,6 +416,8 @@ export async function run(input: RunInput) {
             4000,
           );
           response = value.value;
+          if (call.function.name === 'propose_study_plan' && typeof (args as Obj).date === 'string')
+            queriedPlanDay = String((args as Obj).date);
           evidence.push({ tool: call.function.name, result: response });
           if (scheduleIntent(input.question) && call.function.name === 'get_day_overview') {
             for (const done of [
@@ -530,8 +549,8 @@ export async function run(input: RunInput) {
       }
     }
     if (studyPlanSelect(input.question)) {
-      const day = relativeDate || taipeiDate(now);
-      const window = studyWindow(input.question, finalAnswer);
+      const day = planDay || queriedPlanDay || taipeiDate(now);
+      const window = studyWindow(input.question);
       await ensure('get_day_overview', { date: day });
       if (/吃|餐|飯/.test(input.question)) await ensure('get_dining', {});
       if (
@@ -554,7 +573,7 @@ export async function run(input: RunInput) {
       )
         await ensure('propose_personal_event', {
           title: '寫作業',
-          date: relativeDate || taipeiDate(now),
+          date: planDay || taipeiDate(now),
           allDay: false,
           startTime: window.from,
           endTime: window.to,
@@ -601,6 +620,19 @@ export async function run(input: RunInput) {
     finalAnswer = verifyProposalAnswer(finalAnswer, tools.cards, input.question);
     finalAnswer = alignFoodCardAnswer(finalAnswer, tools.cards);
     finalAnswer = alignStudyCardAnswer(finalAnswer, tools.cards);
+    if (scheduleIntent(input.question) && !tools.cards.some((card) => card.tool === 'propose_personal_event')) {
+      if (steps.some((step) => step.summary === 'EVENT_START_PASSED')) {
+        finalAnswer = '指定的開始時間已過，請換個時間再安排。';
+      } else if (evidence.some(({ tool, result }) => {
+        if (tool !== 'propose_study_plan') return false;
+        const row = result as Obj;
+        const plan = (row.data || row) as Obj;
+        return Array.isArray(plan.planned) && !plan.planned.length && Number(plan.unplanned) > 0;
+      })) {
+        finalAnswer = planningAnswer(evidence, tools.cards, input.question, now) +
+          '\n指定時段內找不到能在作業截止前完成的空檔，可以換個時段再安排。';
+      }
+    }
     if (/社團/.test(input.question))
       finalAnswer = keepClubNews(finalAnswer, evidence, tools.cards, input.question, now);
     if (!finalAnswer && evidence.length)

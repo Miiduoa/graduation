@@ -9,6 +9,7 @@ import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './ac
 import {
   addDays,
   bounded,
+  bytes,
   canonical,
   clock,
   date,
@@ -25,6 +26,14 @@ import {
   type Obj,
   type Task,
 } from './contracts';
+import {
+  TRANSIT_CITIES,
+  type TransitArrival,
+  type TransitCity,
+  type TransitFailure,
+  type TransitResult,
+  type TransitStop,
+} from '../../transit';
 const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
@@ -153,10 +162,126 @@ const definitions: Record<string, [Obj, string[]]> = {
     ['page'],
   ],
 };
+export const TRANSIT_COMPACT_MAX_BYTES = 2500;
+export type CompactTransitStop = Pick<TransitStop, 'id' | 'city' | 'name'>;
+export type CompactTransitArrival = Pick<
+  TransitArrival,
+  'route' | 'seconds' | 'stopName' | 'status' | 'scheduledAt' | 'destination'
+> & { minutes?: number };
+export type CompactTransitResult = {
+  href: '/bus';
+  status?: TransitResult['status'];
+  kind?: Exclude<TransitResult, { status: 'unavailable' }>['kind'];
+  reason?: TransitFailure;
+  limited?: boolean;
+  note?: string;
+  stops?: CompactTransitStop[];
+  arrivals?: CompactTransitArrival[];
+};
+function compactTransitText(value: unknown, max = 24): string | undefined {
+  if (typeof value !== 'string' || !value) return;
+  return value.length > max ? value.slice(0, max) : value;
+}
+function isTransitCity(value: unknown): value is TransitCity {
+  return typeof value === 'string' && Object.hasOwn(TRANSIT_CITIES, value);
+}
+function compactStop(stop: Pick<TransitStop, 'id' | 'city' | 'name'>): CompactTransitStop | undefined {
+  if (!stop.id || stop.id.length > 100) return;
+  const name = compactTransitText(stop.name, 40);
+  if (!name) return;
+  return { id: stop.id, city: stop.city, name };
+}
+function compactArrival(
+  arrival: Pick<TransitArrival, 'route' | 'seconds' | 'stopName' | 'status' | 'scheduledAt' | 'destination'>,
+): CompactTransitArrival | undefined {
+  const route = compactTransitText(arrival.route, 24);
+  if (!route) return;
+  if (arrival.seconds !== null && (typeof arrival.seconds !== 'number' || !Number.isFinite(arrival.seconds))) return;
+  if (arrival.status !== null && (typeof arrival.status !== 'number' || !Number.isInteger(arrival.status))) return;
+  const destination = compactTransitText(arrival.destination, 40) ?? '';
+  const out: CompactTransitArrival = {
+    route,
+    seconds: arrival.seconds,
+    destination,
+    status: arrival.status,
+  };
+  if (arrival.seconds != null && arrival.seconds >= 0) out.minutes = Math.ceil(arrival.seconds / 60);
+  const stopName = compactTransitText(arrival.stopName, 40);
+  if (stopName) out.stopName = stopName;
+  if (arrival.scheduledAt === null) out.scheduledAt = null;
+  else if (typeof arrival.scheduledAt === 'string' && arrival.scheduledAt) out.scheduledAt = arrival.scheduledAt;
+  return out;
+}
+function readCompactStop(item: unknown): CompactTransitStop | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+  const row = item as Partial<TransitStop>;
+  if (typeof row.id !== 'string' || !isTransitCity(row.city) || typeof row.name !== 'string') return;
+  return compactStop({ id: row.id, city: row.city, name: row.name });
+}
+function readCompactArrival(item: unknown): CompactTransitArrival | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+  const row = item as Partial<TransitArrival>;
+  if (typeof row.route !== 'string' || typeof row.destination !== 'string') return;
+  if (row.seconds !== null && typeof row.seconds !== 'number') return;
+  if (row.status !== null && typeof row.status !== 'number') return;
+  if (row.seconds === undefined || row.status === undefined) return;
+  return compactArrival({
+    route: row.route,
+    seconds: row.seconds,
+    destination: row.destination,
+    status: row.status,
+    stopName: row.stopName,
+    scheduledAt: row.scheduledAt,
+  });
+}
+function trimTransitPayload(result: CompactTransitResult): CompactTransitResult {
+  const next: CompactTransitResult = { ...result, stops: result.stops?.slice(), arrivals: result.arrivals?.slice() };
+  const shrink = (key: 'arrivals' | 'stops') => {
+    const list = next[key];
+    if (!list) return;
+    while (list.length && bytes(next) > TRANSIT_COMPACT_MAX_BYTES) {
+      list.pop();
+      next.limited = true;
+    }
+    if (!list.length) delete next[key];
+  };
+  shrink('arrivals');
+  shrink('stops');
+  return next;
+}
+export function compactTransitResult(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const row = raw as Obj;
+  const stops = Array.isArray(row.stops) ? row.stops.flatMap((item) => {
+    const stop = readCompactStop(item);
+    return stop ? [stop] : [];
+  }) : undefined;
+  const arrivals = Array.isArray(row.arrivals) ? row.arrivals.flatMap((item) => {
+    const arrival = readCompactArrival(item);
+    return arrival ? [arrival] : [];
+  }) : undefined;
+  const out: CompactTransitResult = { href: '/bus' };
+  if (row.status === 'ready' || row.status === 'unavailable') out.status = row.status;
+  if (row.kind === 'stops' || row.kind === 'arrivals' || row.kind === 'direct') out.kind = row.kind;
+  if (
+    row.reason === 'not-configured' ||
+    row.reason === 'invalid-query' ||
+    row.reason === 'rate-limited' ||
+    row.reason === 'upstream' ||
+    row.reason === 'network'
+  )
+    out.reason = row.reason;
+  if (typeof row.limited === 'boolean') out.limited = row.limited;
+  const note = compactTransitText(row.note, 40);
+  if (note) out.note = note;
+  if (stops) out.stops = stops;
+  if (arrivals) out.arrivals = arrivals;
+  return trimTransitPayload(out);
+}
 export function studyTitle(title: string): string {
   const clean = title
     .replace(/作[」』”"']\s*作業/g, '作業')
-    .replace(/[「」『』“”\"']/g, '')
+    .replace(/[「」『』“”"']/g, '')
     .replace(/^(?:寫作業[：:]?\s*|寫\s*)+/, '')
     .trim();
   return ('寫作業：' + clean.replace(/作業(?:作業)+/g, '作業')).slice(0, 120);
@@ -223,7 +348,7 @@ export function parseSpokenClock(text: string): string | undefined {
   const digital = text.match(/(\d{1,2})[:：](\d{2})/);
   if (digital) return parseClock(digital[1] + ':' + digital[2]);
   const spoken = text.match(
-    /(凌晨|早上|上午|中午|下午|傍晚|晚上|今晚|今夜|明晚)?\s*([零一二三四五六七八九十兩\d]{1,3})\s*點(半)?/,
+    /(凌晨|早上|上午|今早|明早|中午|下午|傍晚|晚上|今晚|今夜|明晚)?\s*([零一二三四五六七八九十兩\d]{1,3})\s*點(半)?/,
   );
   if (!spoken) return;
   const hour = chineseHour(spoken[2]);
@@ -235,7 +360,7 @@ export function parseSpokenClock(text: string): string | undefined {
       ? '晚上'
       : /下午|傍晚/.test(text)
         ? '下午'
-        : /上午|早上|凌晨/.test(text)
+        : /上午|早上|凌晨|今早|明早/.test(text)
           ? '上午'
           : '');
   if (
@@ -273,7 +398,7 @@ function clockRanges(text: string): { from: string; to: string }[] {
   return ranges;
 }
 const PERIODS: [RegExp, string, string][] = [
-  [/上午/, '08:00', '12:00'],
+  [/上午|早上|早晨|今早|明早/, '08:00', '12:00'],
   [/中午/, '11:00', '13:00'],
   [/晚上|今晚|今夜/, '18:00', '22:00'],
   [/下午/, '13:00', '18:00'],
@@ -482,7 +607,7 @@ export function calendar(ledger: Ledger, from: string, to: string) {
       allDay: r.allDay ?? !r.startTime,
     }));
 }
-export function freeTime(ledger: Ledger, args: Obj) {
+export function freeTime(ledger: Ledger, args: Obj, notBefore = -Infinity) {
   const day = date(args.date),
     from = String(args.from || '08:00'),
     to = String(args.to || '22:00'),
@@ -499,7 +624,7 @@ export function freeTime(ledger: Ledger, args: Obj) {
     }
   }
   if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
-  let cursor = start;
+  let cursor = Math.max(start, Math.ceil(notBefore / 60000) * 60000);
   const slots: { date: string; startTime: string; endTime: string; minutes: number }[] = [];
   const append = (a: number, b: number) => {
     if (b - a >= duration * 60000)
@@ -644,6 +769,8 @@ export function createTools(
     const l = await getLedger(),
       e = eventArgs(raw),
       [start, end] = eventInterval(e);
+    if (scheduleIntent(question) && (e.allDay ? end <= now : start < now))
+      return fail('EVENT_START_PASSED', 409);
     const classes = schedule(l, e.date, e.endDate || e.date);
     if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
     if (
@@ -817,7 +944,7 @@ export function createTools(
         const classes = schedule(l, day, day);
         let free: unknown;
         try {
-          free = freeTime(l, { date: day });
+          free = freeTime(l, { date: day }, day === taipeiDate(now) ? now : undefined);
         } catch {
           free = { incomplete: true, note: '課表或事件不完整，無法判定空檔' };
         }
@@ -913,10 +1040,12 @@ export function createTools(
       case 'get_notifications':
         return adapter.notifications(Number(a.limit || 5));
       case 'get_transit':
-        return adapter.transit({
-          ...a,
-          ...(a.action === 'campus' ? { schoolId: binding.schoolId } : {}),
-        });
+        return compactTransitResult(
+          await adapter.transit({
+            ...a,
+            ...(a.action === 'campus' ? { schoolId: binding.schoolId } : {}),
+          }),
+        );
       case 'get_campus_info':
         return {
           officialSource:
@@ -931,7 +1060,7 @@ export function createTools(
             a.kind === 'library' ? '請在校園地圖查圖書館；未提供步行時間' : '請以頁面最新資料為準',
         };
       case 'find_free_time':
-        return freeTime(await getLedger(), a);
+        return freeTime(await getLedger(), a, a.date === taipeiDate(now) ? now : undefined);
       case 'propose_personal_event':
         return propose(a);
       case 'propose_open_page': {
@@ -962,7 +1091,7 @@ export function createTools(
           return { planned: [], unplanned: 0, note: '目前期間沒有未交作業可安排' };
         if (String(a.from || '08:00') >= String(a.to || '22:00'))
           return { planned: [], unplanned: selected.length, note: '指定時段沒有可安排空檔' };
-        const slots = freeTime(await getLedger(), a).slots.map((s) => ({ ...s }));
+        const slots = freeTime(await getLedger(), a, now).slots;
         const minutes = Number(a.minMinutes || 60),
           planned: unknown[] = [];
         for (const task of selected) {
@@ -1143,8 +1272,10 @@ export function createTools(
         const from = parseClock(cleaned.from) || ranged?.from || window.from;
         const to = parseClock(cleaned.to) || ranged?.to || window.to;
         if (from && to) {
-          cleaned.from = from;
-          cleaned.to = to;
+          const requestedWindow = name === 'propose_study_plan' &&
+            (parseSpokenClock(question) || PERIODS.some(([pattern]) => pattern.test(question)));
+          cleaned.from = requestedWindow && from < window.from ? window.from : from;
+          cleaned.to = requestedWindow && to > window.to ? window.to : to;
         }
         if (cleaned.minMinutes !== undefined) {
           const minutes = Number(cleaned.minMinutes);

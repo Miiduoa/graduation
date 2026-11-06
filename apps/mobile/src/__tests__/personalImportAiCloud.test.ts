@@ -75,6 +75,19 @@ test('cloud succeeds with no native engine or downloaded model', async () => {
   expect(result.issues.some((issue) => issue.message.includes('目前使用雲端 AI'))).toBe(true);
 });
 
+test('detached timetable grid labels offer manual placement without a model guessing coordinates', async () => {
+  const result = await runMobilePersonalImportAi(
+    '節次 星期一 星期二 星期三\n1 資料庫 管理學\nA301',
+    { ...options, kind: 'timetable', source: { type: 'screenshot' } },
+    new AbortController().signal,
+    request,
+  );
+  expect(result.rows).toHaveLength(0);
+  expect(result.issues).toEqual([expect.objectContaining({ code: 'screenshot-grid-layout' })]);
+  expect(mockFetch).not.toHaveBeenCalled();
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
+
 test.each([
   [429, {}, '額度'],
   [503, { code: 'disabled' }, '尚未啟用'],
@@ -468,3 +481,29 @@ for (const delimiter of [',', '\t', '|', ';', '、']) {
     }
   }
 }
+
+test('keeps numeric weekdays across cloud batches with the original line numbers', async () => {
+  const header = '課程名稱,星期,開始節次,結束節次';
+  const courses = Array.from({ length: 9 }, (_, index) => `課程${index + 1},${index % 5 + 1},2,3`);
+  const source = [header, ...courses].join('\n');
+  mockFetch.mockImplementation(async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const rows = body.text.trim().split('\n').filter((line: string) => line !== header)
+      .map((evidence: string) => {
+        const [title, day] = evidence.split(',');
+        return { title, dayOfWeek: Number(day), startPeriod: '2', endPeriod: '3', evidence };
+      });
+    return response(200, {
+      sourceText: body.text, columnContext: body.columnContext,
+      output: JSON.stringify({ complete: true, rows }),
+    });
+  });
+  const result = await runMobilePersonalImportAi(
+    source, { ...options, kind: 'timetable' }, new AbortController().signal, request,
+  );
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(result.rows.map((course) => [course.dayOfWeek, course.source.line])).toEqual(
+    courses.map((_, index) => [index % 5 + 1, index + 2]),
+  );
+});

@@ -1,3 +1,10 @@
+// Exercise the existing transport/parser behavior with a controlled, enabled policy.
+// puScraper.pause.test.js verifies the real default policy never reaches these transports.
+jest.mock('./generated/shared/puEcampusDataPolicy', () => ({
+  ...jest.requireActual('./generated/shared/puEcampusDataPolicy'),
+  assertPuEcampusDataFetchEnabled: jest.fn(),
+}));
+
 const { EventEmitter } = require('events');
 const https = require('https');
 const { puLogin, puFetchCourses, puFetchGrades } = require('./puScraper');

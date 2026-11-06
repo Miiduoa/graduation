@@ -45,3 +45,15 @@ export function publicNavigatePersonalCalendar(params?: { eventId?: string }) {
   );
   return true;
 }
+
+export function publicNavigatePersonalTimetable(params: NonNullable<PreAuthStackParamList['PersonalTimetable']>) {
+  if (!isPublicNavigationReady()) return false;
+  publicNavigationRef.dispatch(CommonActions.navigate({ name: 'PersonalTimetable', params }));
+  return true;
+}
+
+export function publicNavigateNuniWorkspace(params: NonNullable<PreAuthStackParamList['NuniWorkspace']>) {
+  if (!isPublicNavigationReady()) return false;
+  publicNavigationRef.dispatch(CommonActions.navigate({ name: 'NuniWorkspace', params }));
+  return true;
+}

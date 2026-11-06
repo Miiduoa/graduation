@@ -1,5 +1,7 @@
 # 靜宜校園 Edge Relay
 
+E 校園暫停期間，轉送端會在連線前阻擋 `alcat.pu.edu.tw` 與 `mypu.pu.edu.tw`，即使請求簽章有效且主機已列入白名單。
+
 東京（Fly `nrt`）連 `*.pu.edu.tw` 會被靜宜防火牆丟包。這個 Cloudflare Worker 固定跑在台灣 `gcp:asia-east1`（實際 colo 為 TPE），把 nuni-web 的校園 HTTPS 請求轉出去。
 
 **預設關閉。** 沒設環境變數時，成績與 TronClass 維持原本的 `https.request`，學號登入維持 IPv4 直連，行為與 main 一致。

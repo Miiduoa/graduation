@@ -1,19 +1,15 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   collection,
-  addDoc,
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
-  increment,
   limit,
   orderBy,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from 'firebase/firestore';
 import { getDb } from '../firebase';
@@ -39,7 +35,11 @@ export type CampusStoryDoc = {
   viewCount?: number;
 };
 
-export async function publishStory(payload: {
+export function reserveStoryId(): string {
+  return doc(storiesCollection()).id;
+}
+
+export async function publishStory(storyId: string, payload: {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
@@ -50,8 +50,8 @@ export async function publishStory(payload: {
   poiName?: string | null;
   expiresAtMs: number;
 }): Promise<string> {
-  const db = getDb();
-  const ref = await addDoc(storiesCollection(db), {
+  const ref = doc(storiesCollection(), storyId);
+  const content = {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
@@ -60,10 +60,18 @@ export async function publishStory(payload: {
     bgColor: payload.bgColor ?? '#000000',
     poiId: payload.poiId ?? null,
     poiName: payload.poiName ?? null,
-    createdAt: serverTimestamp(),
-    expiresAt: payload.expiresAtMs,
-    viewCount: 0,
-  });
+  };
+  try {
+    await setDoc(ref, { ...content, createdAt: serverTimestamp(), expiresAt: payload.expiresAtMs, viewCount: 0 });
+  } catch (error) {
+    // If the first create was acknowledged only by the server, retrying the
+    // reserved ID is an update, which rules deny even to the original author.
+    if ((error as { code?: string }).code !== 'permission-denied') throw error;
+    const snapshot = await getDocFromServer(ref).catch(() => null);
+    const row = snapshot?.data();
+    if (!row || typeof row.expiresAt !== 'number' || row.expiresAt <= Date.now() ||
+        !Object.entries(content).every(([key, value]) => row[key] === value)) throw error;
+  }
   return ref.id;
 }
 
@@ -111,12 +119,6 @@ export async function markStoryViewed(storyId: string, viewerUid: string) {
     viewerUid,
     viewedAt: serverTimestamp(),
   });
-  // 累加 viewCount（best-effort）
-  try {
-    await updateDoc(doc(db, 'campusStories', storyId), { viewCount: increment(1) });
-  } catch {
-    /* ignore */
-  }
 }
 
 export async function deleteMyStory(storyId: string) {

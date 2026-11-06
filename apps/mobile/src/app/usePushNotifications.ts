@@ -7,10 +7,10 @@ import {
   syncPushTokenForUser,
 } from '../services/notifications';
 
-import { rootNavigateNested, rootNavigationRef } from './rootNavigation';
+import { isSchoolNavigationReady, rootNavigateNested, subscribeSchoolNavigationReady } from './rootNavigation';
 import { applyNotificationDestination } from '../utils/applyNotificationDestination';
 import { resolveNotificationDestination } from '../utils/notificationDestination';
-import { isPersonalEventReminderPayload } from '../services/personalEventReminderModel';
+import { personalReminderCategory } from '../services/personalReminderPayload';
 import type { UserRole } from '../data/types';
 
 type NavigationLike = {
@@ -19,19 +19,12 @@ type NavigationLike = {
   } | null;
 };
 
-type RemovableSubscription = {
-  remove: () => void;
-};
-
 type NotificationResponseLike = {
   notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
   actionIdentifier?: string;
 };
 
-function getNotificationResponseKey(response: {
-  notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
-  actionIdentifier?: string;
-}) {
+function getNotificationResponseKey(response: NotificationResponseLike) {
   const identifier = response.notification?.request?.identifier;
   const actionIdentifier = response.actionIdentifier ?? 'default';
   const data = response.notification?.request?.content?.data;
@@ -70,8 +63,6 @@ export function usePushNotifications(
   const schoolRef = useRef<string | null | undefined>(schoolId);
   roleRef.current = profileRole;
   schoolRef.current = schoolId;
-  const responseListener = useRef<RemovableSubscription | null>(null);
-  const lastHandledResponseKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,80 +87,61 @@ export function usePushNotifications(
   }, [uid]);
 
   useEffect(() => {
+    if (Platform.OS === 'web' || !uid) return;
     let cancelled = false;
-    lastHandledResponseKeyRef.current = null;
-    if (Platform.OS === 'web' || !uid) {
-      return () => {
-        cancelled = true;
-      };
-    }
+    let liveTapCount = 0;
+    let pending: NotificationResponseLike | null = null;
+    let lastHandledKey: string | null = null;
 
-    const handleResponse = async (
-      response: NotificationResponseLike,
-      options?: { clearLastResponse?: boolean },
-    ) => {
-      if (cancelled) return;
-      const rawPayload = response?.notification?.request?.content?.data;
-      // Personal local reminders have an independent consumer; ignore BEFORE dedup/nav/clear.
-      if (isPersonalEventReminderPayload(rawPayload)) return;
-
-      const responseKey = getNotificationResponseKey(response);
-      if (lastHandledResponseKeyRef.current === responseKey) {
-        if (options?.clearLastResponse) {
-          await clearLastNotificationResponseAsync().catch(() => void 0);
-        }
-        return;
-      }
-
-      if (!rootNavigationRef.isReady()) return;
-
-      lastHandledResponseKeyRef.current = responseKey;
-      // 使用當下 ref 的學校範圍，拒絕跨校成績等通知目的地。
-      navigateFromNotificationData(rawPayload, roleRef.current, schoolRef.current, uid);
-
-      if (options?.clearLastResponse) {
-        await clearLastNotificationResponseAsync().catch((error) => {
-          console.warn('[Notifications] Failed to clear last notification response:', error);
-        });
-      }
-    };
-
-    const tryHandleInitialResponse = async (attempt = 0) => {
-      try {
-        const response = await getLastNotificationResponseAsync();
-        if (!response || cancelled) return;
-
-        if (!rootNavigationRef.isReady()) {
-          if (attempt < 10) {
-            setTimeout(() => {
-              void tryHandleInitialResponse(attempt + 1);
-            }, 300);
-          }
+    const flush = () => {
+      if (cancelled || !pending || !isSchoolNavigationReady()) return;
+      const response = pending;
+      pending = null;
+      const key = getNotificationResponseKey(response);
+      const generation = liveTapCount;
+      if (key !== lastHandledKey) {
+        try {
+          navigateFromNotificationData(response.notification?.request?.content?.data, roleRef.current, schoolRef.current, uid);
+          lastHandledKey = key;
+        } catch (error) {
+          console.warn('[Notifications] Failed to handle notification response:', error);
           return;
         }
-
-        await handleResponse(response, { clearLastResponse: true });
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('[Notifications] Failed to restore initial notification response:', error);
-        }
       }
+      // The native last response is shared with the personal reminder handler.
+      void getLastNotificationResponseAsync().then((stored) => {
+        if (!cancelled && liveTapCount === generation && stored && getNotificationResponseKey(stored) === key) {
+          return clearLastNotificationResponseAsync();
+        }
+      }).catch((error) => {
+        if (!cancelled) console.warn('[Notifications] Failed to clear last notification response:', error);
+      });
     };
 
-    void tryHandleInitialResponse();
+    const queue = (response: NotificationResponseLike) => {
+      // A live tap owned by the other handler still supersedes our previous destination.
+      pending = personalReminderCategory(response.notification?.request?.content?.data) ? null : response;
+      flush();
+    };
 
-    responseListener.current = addNotificationResponseReceivedListener((response) => {
-      void handleResponse(response).catch((error) => {
-        console.warn('[Notifications] Failed to handle notification response:', error);
-      });
+    const sub = addNotificationResponseReceivedListener((response) => {
+      if (cancelled) return;
+      liveTapCount++;
+      queue(response);
     });
+    const unsubscribe = subscribeSchoolNavigationReady(flush);
+    if (!liveTapCount) {
+      void getLastNotificationResponseAsync().then((response) => {
+        if (!cancelled && !liveTapCount && response) queue(response);
+      }).catch((error) => {
+        if (!cancelled) console.warn('[Notifications] Failed to restore initial notification response:', error);
+      });
+    }
 
     return () => {
       cancelled = true;
-      if (responseListener.current) {
-        responseListener.current.remove();
-        responseListener.current = null;
-      }
+      unsubscribe();
+      sub.remove();
     };
   }, [uid, schoolId]);
 }

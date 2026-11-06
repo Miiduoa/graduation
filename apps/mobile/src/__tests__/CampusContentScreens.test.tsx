@@ -174,6 +174,35 @@ test.each([
   },
 );
 
+test('an exact announcement link loses its old content on school switch and never opens the same ID elsewhere', async () => {
+  const route = { params: { id: 'a1', sourceKind: 'legacy-announcement', schoolId: 'pu' } };
+  const view = render(<AnnouncementScreen route={route} />);
+  await view.findByText('公告全文');
+  expect(loadCampusAnnouncement).toHaveBeenCalledWith('pu', 'a1', 'legacy-announcement');
+  mockSchool = { id: 'ntu' };
+  view.rerender(<AnnouncementScreen route={route} />);
+  expect(view.queryByText('公告全文')).toBeNull();
+  await view.findByText('找不到這則公告，可能已移除或不屬於目前學校。');
+  expect(loadCampusAnnouncement).toHaveBeenCalledTimes(1);
+});
+
+test('an existing link with only a matching school hint keeps its ordinary lookup', async () => {
+  const view = render(<AnnouncementScreen route={{ params: { id: 'a1', schoolId: 'pu' } }} />);
+  await view.findByText('公告全文');
+  expect(loadCampusAnnouncement).toHaveBeenCalledWith('pu', 'a1');
+});
+
+test.each([
+  { id: 'a1', sourceKind: 'other', schoolId: 'pu' },
+  { id: 'a1', sourceKind: 'legacy-announcement' },
+  { id: 'a1', schoolId: 'ntu' },
+  { id: '../a1', sourceKind: 'school-announcement', schoolId: 'pu' },
+])('incomplete or invalid source routes do not fall through to a general lookup', async (params) => {
+  const view = render(<AnnouncementScreen route={{ params }} />);
+  await view.findByText('找不到這則公告，可能已移除或不屬於目前學校。');
+  expect(loadCampusAnnouncement).not.toHaveBeenCalled();
+});
+
 test('keeps cached announcements when a later Firestore read fails', async () => {
   const view = render(<AnnouncementsScreen navigation={navigation} />);
   await view.findByText('校方的新公告');
@@ -184,6 +213,41 @@ test('keeps cached announcements when a later Firestore read fails', async () =>
   expect(view.queryByText('學校網站暫時連不上')).toBeNull();
   expect(view.queryByText('請確認網路')).toBeNull();
   expect(view.queryByText('本站還沒接上這間學校的公告。')).toBeNull();
+});
+
+test('an official-only feed stays readable during refresh and can recover from an error', async () => {
+  const feed = {
+    announcements: [],
+    officialAnnouncements: [{ ...announcement, title: '教師研習' }],
+    sources: [],
+    allUnavailable: false,
+  };
+  const pending = deferred<void>();
+  jest
+    .mocked(loadCampusAnnouncementFeed)
+    .mockResolvedValueOnce(feed)
+    .mockReturnValueOnce(
+      pending.promise.then(() => {
+        throw new Error('offline');
+      }),
+    )
+    .mockResolvedValueOnce({
+      ...feed,
+      officialAnnouncements: [{ ...announcement, title: '更新的教師研習' }],
+    });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  fireEvent.press(await view.findByRole('button', { name: '查看全部公告' }));
+  fireEvent.press(view.getByText('更新公告'));
+  expect(view.getByText('教師研習')).toBeTruthy();
+  expect(view.queryByText('正在讀取')).toBeNull();
+  await act(async () => pending.resolve());
+  expect(view.getByText('最後更新 10/8 08:00，暫時讀不到新公告')).toBeTruthy();
+  fireEvent.press(view.getByText('教師研習'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'a1' });
+  fireEvent.press(view.getByText('更新公告'));
+  await view.findByText('更新的教師研習');
+  expect(view.queryByText('教師研習')).toBeNull();
+  expect(view.queryByText(/暫時讀不到新公告/)).toBeNull();
 });
 
 test('does not show unpublished copy before the first feed returns', async () => {
@@ -818,6 +882,45 @@ test('switching announcement views clears an unavailable category and preserves 
   expect(view.getByRole('button', { name: '篩選：全部 1' }).props.accessibilityState.selected).toBe(
     true,
   );
+});
+
+test('students can narrow all loaded results to pinned posts, then reset or change feeds', async () => {
+  const announcements = Array.from({ length: 32 }, (_, index) => ({
+    ...announcement,
+    id: `msg-${index}`,
+    title: `校園消息 ${index}`,
+    pinned: index >= 30,
+    category: index === 31 ? ('event' as const) : ('academic' as const),
+  }));
+  jest.mocked(loadCampusAnnouncementFeed).mockResolvedValueOnce({
+    announcements,
+    officialAnnouncements: announcements,
+    sources: [],
+    allUnavailable: false,
+  });
+  const view = render(<AnnouncementsScreen navigation={navigation} />);
+  await view.findByText('校園消息 0');
+  expect(view.queryByText('校園消息 31')).toBeNull();
+  const pressFilter = (label: string) =>
+    fireEvent.press(view.getByRole('button', { name: `篩選：${label}` }));
+  pressFilter('只看置頂（2）');
+  expect(view.queryByText('校園消息 0')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: /校園消息 31，置頂/ }));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, '公告詳情', { id: 'msg-31' });
+  pressFilter('教務');
+  expect(view.queryByText('校園消息 31')).toBeNull();
+  expect(view.getByText('校園消息 30')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋公告'), '校園消息 1');
+  expect(view.getByText('找不到符合的公告')).toBeTruthy();
+  expect(view.getByRole('button', { name: '篩選：只看置頂（0）' })).toBeSelected();
+  pressFilter('全部公告');
+  expect(view.getByLabelText('搜尋公告').props.value).toBe('校園消息 1');
+  expect(view.getByText('校園消息 1')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '清除公告搜尋' }));
+  pressFilter('只看置頂（2）');
+  fireEvent.press(view.getByRole('button', { name: '清除公告篩選' }));
+  expect(view.getByText('校園消息 0')).toBeTruthy();
+  expect(view.queryByText('校園消息 31')).toBeNull();
 });
 
 test.each(['school', 'account'] as const)(

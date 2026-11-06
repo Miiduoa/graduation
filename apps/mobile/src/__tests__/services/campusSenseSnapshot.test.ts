@@ -114,3 +114,26 @@ test('malformed authenticated responses are rejected rather than hallucinated', 
   await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true }))
     .rejects.toThrow('invalid-sense-response');
 });
+
+test('normalizes announcement destinations without requiring old servers to supply a source', async () => {
+  const base = envelope();
+  const notice = base.announcements.items[0];
+  const source = { kind: 'legacy-announcement', id: 'notice_1' };
+  mockCallable.mockResolvedValueOnce({ data: { ...base, announcements: { status: 'available',
+    items: [notice, { ...notice, source: { ...source, url: 'discard' } }],
+  } } });
+  const result = await refreshCampusSenseSnapshot({ scope, isCurrent: () => true });
+  expect(result.announcements.items).toEqual([notice, { ...notice, source }]);
+});
+
+test.each([
+  { kind: 'school-announcement', id: '../wrong' },
+  { kind: 'legacy-announcement', id: '%2F' },
+  { kind: 'another-collection', id: 'ok' },
+])('rejects an untrusted announcement destination', async (source) => {
+  const base = envelope();
+  mockCallable.mockResolvedValueOnce({ data: { ...base, announcements: { status: 'available',
+    items: [{ ...base.announcements.items[0], source }],
+  } } });
+  await expect(refreshCampusSenseSnapshot({ scope, isCurrent: () => true })).rejects.toThrow('invalid-sense-response');
+});

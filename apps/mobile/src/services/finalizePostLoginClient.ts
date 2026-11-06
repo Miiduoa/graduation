@@ -1,5 +1,10 @@
 import { httpsCallable } from 'firebase/functions';
 import type { FunctionsError } from 'firebase/functions';
+import {
+  isPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 
 import { getAuthInstance, getFunctionsInstance, hasUsableFirebaseConfig, isFirebaseMockMode } from '../firebase';
 import { loadMockAuthSession } from './mockAuth';
@@ -79,6 +84,13 @@ function parseCallableError(e: unknown): { code: string; message: string } {
 export async function tryCallFinalizePostLogin(
   semester?: string,
 ): Promise<FinalizePostLoginResponse | null> {
+  if (!isPuEcampusDataFetchEnabled()) {
+    return {
+      success: false,
+      errorCode: PU_ECAMPUS_DATA_PAUSED_CODE,
+      errorMessage: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+    };
+  }
   if (!hasUsableFirebaseConfig() || isFirebaseMockMode()) return null;
 
   const mock = await loadMockAuthSession().catch(() => null);

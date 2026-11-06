@@ -22,6 +22,11 @@ const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
 const { taipeiDateKey } = require('./lib/taipeiDay');
 const { sendWithCampusFetch, setCampusHttpFetch } = require('./lib/puCampusTransport');
+const {
+  assertPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_CODE,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} = require('./generated/shared/puEcampusDataPolicy');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -50,6 +55,16 @@ const TRANSIENT_NETWORK_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT',
   'UND_ERR_BODY_TIMEOUT',
 ]);
+
+function pausedFetchResult(error, fields) {
+  if (error?.code !== PU_ECAMPUS_DATA_PAUSED_CODE) return null;
+  return {
+    success: false,
+    ...fields,
+    code: PU_ECAMPUS_DATA_PAUSED_CODE,
+    error: PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+  };
+}
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
@@ -106,6 +121,8 @@ function hopTimeoutMs(deadlineAt) {
 }
 
 function httpsRequest(hostname, path, method, cookies, body, timeoutMs = REQUEST_TIMEOUT_MS) {
+  // Gate before both the relay and direct transport, including every redirect hop.
+  assertPuEcampusDataFetchEnabled();
   if (!CAMPUS_HOSTS.has(hostname) || !path.startsWith('/') || path.startsWith('//')) {
     return Promise.reject(new Error('Untrusted campus URL'));
   }
@@ -620,6 +637,8 @@ async function puLogin(uid, upassword) {
       studentName: nameMatch ? nameMatch[1] : undefined,
     };
   } catch (err) {
+    const paused = pausedFetchResult(err, { cookies: {} });
+    if (paused) return paused;
     console.error('[puLogin] Error:', err);
     return { success: false, cookies: {}, error: err.message };
   }
@@ -720,6 +739,8 @@ async function puFetchCourses(cookies, semester) {
       totalCredits,
     };
   } catch (err) {
+    const paused = pausedFetchResult(err, { courses: [] });
+    if (paused) return paused;
     console.error('[puFetchCourses] Error:', err);
     return { success: false, courses: [], error: err.message };
   }
@@ -749,6 +770,7 @@ async function puFetchGrades(cookies, semester, options = {}) {
           if (parsed) return { ...parsed, mypuCookies: cached.cookies };
         }
       } catch (error) {
+        if (error?.code === PU_ECAMPUS_DATA_PAUSED_CODE) throw error;
         logGradeEvent('stored_mypu_failed', error);
       }
     }
@@ -788,6 +810,7 @@ async function puFetchGrades(cookies, semester, options = {}) {
         }
       }
     } catch (e) {
+      if (e?.code === PU_ECAMPUS_DATA_PAUSED_CODE) throw e;
       logGradeEvent('score_sso_bridge_failed', e);
       bridgeTransient = isTransientCampusError(e);
     }
@@ -811,11 +834,14 @@ async function puFetchGrades(cookies, semester, options = {}) {
         ? { ...parsed, mypuCookies: nextCookies }
         : { ...(usableBridge || parsed), mypuCookies: nextCookies };
     } catch (error) {
+      if (error?.code === PU_ECAMPUS_DATA_PAUSED_CODE) throw error;
       if (usableBridge) return { ...usableBridge, mypuCookies: cookieJar(mypuCookies) };
       if (bridgeTransient) return { success: false, grades: [] };
       throw error;
     }
   } catch (err) {
+    const paused = pausedFetchResult(err, { grades: [] });
+    if (paused) return paused;
     logGradeEvent('grades_failed', err);
     return { success: false, grades: [] };
   }
@@ -928,6 +954,8 @@ async function puFetchAnnouncements(cookies) {
 
     return { success: true, announcements: extractAnnouncementsFromHtml(html) };
   } catch (err) {
+    const paused = pausedFetchResult(err, { announcements: [] });
+    if (paused) return paused;
     console.error('[puFetchAnnouncements] Error:', err);
     return { success: false, announcements: [], error: err.message };
   }
@@ -985,6 +1013,8 @@ async function puFetchAbsence(cookies) {
 
     return { success: true, absences };
   } catch (err) {
+    const paused = pausedFetchResult(err, { absences: [] });
+    if (paused) return paused;
     console.error('[puFetchAbsence] Error:', err);
     return { success: true, absences: [] };
   }
@@ -1003,7 +1033,8 @@ async function puFetchCreditSummary(cookies) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
     // A derived grade summary is not a verified graduation credit audit.
-    return buildDerivedCreditSummary(await puFetchGrades(cookies));
+    const grades = await puFetchGrades(cookies);
+    return pausedFetchResult(grades, { creditSummary: null }) || buildDerivedCreditSummary(grades);
   } catch (err) {
     console.error('[puFetchCreditSummary] Error:', err);
     return { success: false, creditSummary: null, error: err.message };
@@ -1049,6 +1080,8 @@ async function puFetchStudentInfo(cookies) {
       },
     };
   } catch (err) {
+    const paused = pausedFetchResult(err, { studentInfo: {} });
+    if (paused) return paused;
     console.error('[puFetchStudentInfo] Error:', err);
     return { success: false, studentInfo: {}, error: err.message };
   }

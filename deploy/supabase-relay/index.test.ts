@@ -51,6 +51,18 @@ async function signedRelayRequest(
   return new Request(RELAY_URL, { ...init, method, headers });
 }
 
+it.each(['alcat.pu.edu.tw', 'MYPU.PU.EDU.TW.'])('blocks signed requests to paused E-campus host %s before forwarding', async (host) => {
+  const request = await signedRelayRequest(`https://${host}/`, { method: 'POST', body: 'test' });
+  const upstream = vi.fn(async () => new Response('unexpected upstream'));
+  const loadSecret = vi.fn(async () => SECRET);
+  const response = await handleSupabaseRelayRequest(request, {
+    allowedHosts: '*.pu.edu.tw', fetch: upstream, loadSecret, nonceStore: createMemoryNonceStore(),
+  });
+  expect(loadSecret).not.toHaveBeenCalled();
+  expect(response.status).toBe(404);
+  expect(upstream).not.toHaveBeenCalled();
+});
+
 it('returns 404 without a valid HMAC signature and does not require a JWT', async () => {
   const upstream = vi.fn(async () => new Response('should-not-run'));
   const response = await handleSupabaseRelayRequest(new Request(RELAY_URL, { method: 'GET' }), {
@@ -66,7 +78,7 @@ it('forwards a signed campus request without an Authorization JWT', async () => 
   const logs: string[] = [];
   const log = vi.spyOn(console, 'log').mockImplementation((message) => logs.push(String(message)));
   const upstream = vi.fn(async (url: string, init?: RequestInit) => {
-    expect(url).toBe('https://alcat.pu.edu.tw/index_check.php');
+    expect(url).toBe('https://relay-test.pu.edu.tw/index_check.php');
     expect(init?.method).toBe('POST');
     expect(init?.redirect).toBe('manual');
     const headers = new Headers(init?.headers);
@@ -78,7 +90,7 @@ it('forwards a signed campus request without an Authorization JWT', async () => 
     out.append('Set-Cookie', 'b=2; Path=/');
     return new Response('ok', { status: 200, headers: out });
   });
-  const request = await signedRelayRequest('https://alcat.pu.edu.tw/index_check.php', {
+  const request = await signedRelayRequest('https://relay-test.pu.edu.tw/index_check.php', {
     method: 'POST',
     headers: { Cookie: 'SID=abc', 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'uid=1110700321&upassword=secret',
@@ -96,7 +108,7 @@ it('forwards a signed campus request without an Authorization JWT', async () => 
   expect(logs.join('\n')).not.toMatch(/password|SID=abc|unit-test-secret/i);
   expect(JSON.parse(logs[0] || '{}')).toMatchObject({
     msg: 'pu_edge_relay',
-    host: 'alcat.pu.edu.tw',
+    host: 'relay-test.pu.edu.tw',
     path: '/index_check.php',
     status: 200,
     colo: 'supabase-ap-northeast-1',
@@ -114,7 +126,7 @@ it('loads the HMAC secret from Vault RPC and caches it', async () => {
     return new Response('ok');
   });
   const first = await handleSupabaseRelayRequest(
-    await signedRelayRequest('https://mypu.pu.edu.tw/score_query/score_all.php'),
+    await signedRelayRequest('https://relay-test.pu.edu.tw/score_query/score_all.php'),
     {
       fetch: vault as unknown as typeof fetch,
       nonceStore: createMemoryNonceStore(),
@@ -126,7 +138,7 @@ it('loads the HMAC secret from Vault RPC and caches it', async () => {
   expect(vault.mock.calls[0]?.[0]).toBe('https://example.supabase.co/rest/v1/rpc/pu_edge_relay_secret');
   const second = await handleSupabaseRelayRequest(
     await signedRelayRequest(
-      'https://mypu.pu.edu.tw/score_query/score_all.php',
+      'https://relay-test.pu.edu.tw/score_query/score_all.php',
       {},
       Date.now(),
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -155,11 +167,11 @@ it('rejects hosts outside the allowlist and replayed nonces', async () => {
   expect(blocked.status).toBe(404);
 
   const first = await handleSupabaseRelayRequest(
-    await signedRelayRequest('https://alcat.pu.edu.tw/'),
+    await signedRelayRequest('https://relay-test.pu.edu.tw/'),
     { secret: SECRET, fetch: upstream as unknown as typeof fetch, nonceStore: store },
   );
   const replay = await handleSupabaseRelayRequest(
-    await signedRelayRequest('https://alcat.pu.edu.tw/'),
+    await signedRelayRequest('https://relay-test.pu.edu.tw/'),
     { secret: SECRET, fetch: upstream as unknown as typeof fetch, nonceStore: store },
   );
   expect(first.status).toBe(200);
@@ -169,7 +181,7 @@ it('rejects hosts outside the allowlist and replayed nonces', async () => {
 
 it('returns 502 when the campus host cannot be reached', async () => {
   const response = await handleSupabaseRelayRequest(
-    await signedRelayRequest('https://alcat.pu.edu.tw/'),
+    await signedRelayRequest('https://relay-test.pu.edu.tw/'),
     {
       secret: SECRET,
       nonceStore: createMemoryNonceStore(),

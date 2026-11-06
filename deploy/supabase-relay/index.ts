@@ -6,6 +6,7 @@
  * 關閉 Supabase JWT 驗證，只靠 HMAC 簽章；密鑰從 Vault
  * （public.pu_edge_relay_secret()，只有 service_role 能叫）讀，不寫在程式裡。
  */
+import { isPuEcampusDataFetchEnabled, isPuEcampusDataHost } from '../../packages/shared/src/puEcampusDataPolicy.ts';
 import {
   isAllowedRelayTarget,
   normalizeRelayTarget,
@@ -242,6 +243,7 @@ export async function handleSupabaseRelayRequest(
   } catch {
     return reject();
   }
+  if (!isPuEcampusDataFetchEnabled() && isPuEcampusDataHost(parsed.hostname)) return reject();
 
   const secret = (
     options.secret ||
