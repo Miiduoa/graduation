@@ -1120,7 +1120,7 @@ function setPlatformFixture(accountId: string, context = 'context-a') {
 
 test.each(['firebase', 'nuni'])('%s students can refine a saved timetable gap without retyping or syncing', async (account) => {
   const isNuni = account === 'nuni';
-  if (isNuni) usePlatformFixture('student-b');
+  if (isNuni) setPlatformFixture('student-b');
   const today = { day: 'today', minMinutes: 0, owner: isNuni ? 'nuni:student-b' : 'firebase:A',
     schoolId: 'pu', checkedAt: new Date().toISOString() };
   const tomorrow = { ...today, day: 'tomorrow' };
