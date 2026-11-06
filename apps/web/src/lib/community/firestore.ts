@@ -479,7 +479,7 @@ export function createStoryId(): string {
   return doc(storiesCol(getDb())).id;
 }
 
-export async function publishStory(payload: {
+export type StoryPublication = {
   storyId: string;
   schoolId: string;
   authorUid: string;
@@ -491,7 +491,13 @@ export async function publishStory(payload: {
   poiId?: string | null;
   poiName?: string | null;
   expiresAtMs: number;
-}): Promise<string> {
+};
+
+export async function publishStory(
+  payload: StoryPublication,
+  options: { signal?: AbortSignal; confirmFirst?: boolean } = {},
+): Promise<string> {
+  options.signal?.throwIfAborted();
   const db = getDb();
   const ref = doc(storiesCol(db), payload.storyId);
   const content = {
@@ -505,6 +511,15 @@ export async function publishStory(payload: {
     poiId: payload.poiId ?? null,
     poiName: payload.poiName ?? null,
   };
+  async function confirmed() {
+    const current = await getDocFromServer(ref).catch(() => null);
+    options.signal?.throwIfAborted();
+    const saved = current?.data();
+    return !!saved && !current?.metadata.hasPendingWrites && !current?.metadata.fromCache &&
+      Object.entries(content).every(([field, value]) => saved[field] === value);
+  }
+  if (options.confirmFirst && await confirmed()) return ref.id;
+  options.signal?.throwIfAborted();
   try {
     await setDoc(ref, {
       ...content,
@@ -513,18 +528,11 @@ export async function publishStory(payload: {
       viewCount: 0,
     });
   } catch (error) {
-    if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
-    // A committed create whose acknowledgement was lost is immutable on retry.
-    const current = await getDocFromServer(ref).catch(() => null);
-    const saved = current?.data();
-    if (
-      !saved ||
-      current?.metadata.hasPendingWrites ||
-      Object.entries(content).some(([field, value]) => saved[field] !== value)
-    ) {
-      throw error;
-    }
+    options.signal?.throwIfAborted();
+    // Both transport failures and immutable-write denials can follow a committed create.
+    if (!await confirmed()) throw error;
   }
+  options.signal?.throwIfAborted();
   return ref.id;
 }
 

@@ -45,7 +45,7 @@ export function reserveStoryId(): string {
   return doc(storiesCollection()).id;
 }
 
-export async function publishStory(storyId: string, payload: {
+export type StoryPublishPayload = {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
@@ -56,7 +56,16 @@ export async function publishStory(storyId: string, payload: {
   poiName?: string | null;
   expiresAtMs: number;
   allowReplies: boolean;
-}): Promise<string> {
+};
+
+export async function publishStory(storyId: string, payload: StoryPublishPayload, options: {
+  signal?: AbortSignal;
+  confirmFirst?: boolean;
+} = {}): Promise<string> {
+  const checkSignal = () => {
+    if (options.signal?.aborted) throw Object.assign(new Error('已停止等待發布結果。'), { code: 'cancelled' });
+  };
+  checkSignal();
   const ref = doc(storiesCollection(), storyId);
   const content = {
     allowReplies: payload.allowReplies,
@@ -69,17 +78,25 @@ export async function publishStory(storyId: string, payload: {
     poiId: payload.poiId ?? null,
     poiName: payload.poiName ?? null,
   };
+  const isPublished = async () => {
+    const snapshot = await getDocFromServer(ref).catch(() => null);
+    checkSignal();
+    const row = snapshot?.data();
+    return !!row && !snapshot?.metadata?.fromCache && !snapshot?.metadata?.hasPendingWrites &&
+      typeof row.expiresAt === 'number' && Number.isFinite(row.expiresAt) && row.expiresAt > 0 &&
+      Object.entries(content).every(([key, value]) => row[key] === value);
+  };
+  if (options.confirmFirst && await isPublished()) return ref.id;
+  checkSignal();
   try {
     await setDoc(ref, { ...content, createdAt: serverTimestamp(), expiresAt: payload.expiresAtMs, viewCount: 0 });
   } catch (error) {
-    // If the first create was acknowledged only by the server, retrying the
-    // reserved ID is an update, which rules deny even to the original author.
-    if ((error as { code?: string }).code !== 'permission-denied') throw error;
-    const snapshot = await getDocFromServer(ref).catch(() => null);
-    const row = snapshot?.data();
-    if (!row || typeof row.expiresAt !== 'number' || row.expiresAt <= Date.now() ||
-        !Object.entries(content).every(([key, value]) => row[key] === value)) throw error;
+    checkSignal();
+    // A create may have committed before its receipt was lost. Exact server
+    // confirmation also resolves an expired original without publishing again.
+    if (!await isPublished()) throw error;
   }
+  checkSignal();
   return ref.id;
 }
 

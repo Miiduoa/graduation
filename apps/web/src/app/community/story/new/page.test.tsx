@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import StoryComposePage from './page';
 
@@ -59,6 +59,13 @@ function chooseImage(file: File) {
   fireEvent.change(screen.getByLabelText('限動照片或影片'), { target: { files: [file] } });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
 it('publishes only once to the selected school with the signed-in author, palette and 24h expiry', async () => {
   mock.query = new URLSearchParams('uid=stranger&poiId=pu-library&schoolId=pu');
   render(<StoryComposePage />);
@@ -85,7 +92,7 @@ it('publishes only once to the selected school with the signed-in author, palett
     mediaUrl: null,
     bgColor: '#3e5169',
     expiresAtMs: expect.any(Number),
-  });
+  }, { signal: expect.any(AbortSignal), confirmFirst: false });
   expect(mock.publish.mock.calls[0][0].expiresAtMs - start).toBeGreaterThanOrEqual(86_400_000);
   expect(mock.publish.mock.calls[0][0].expiresAtMs - Date.now()).toBeLessThanOrEqual(86_400_000);
 });
@@ -102,15 +109,15 @@ it('keeps the caption, photo and reserved ID for retry after the document write 
   await screen.findByRole('alert');
   expect(mock.replace).not.toHaveBeenCalled();
   expect(screen.getByLabelText('照片說明（選填）')).toHaveProperty('value', '午後校園');
-  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
   await waitFor(() => expect(mock.replace).toHaveBeenCalledOnce());
   expect(mock.id).toHaveBeenCalledOnce();
-  expect(mock.upload).toHaveBeenCalledExactlyOnceWith({
+  expect(mock.upload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     schoolId: 'ncku',
     storyId: 'new-story',
     uid: 'student',
     file,
-  });
+  }));
   expect(mock.publish).toHaveBeenCalledTimes(2);
   expect(mock.publish.mock.calls[1][0]).toMatchObject({
     kind: 'image',
@@ -147,7 +154,7 @@ it('keeps the selected photo when a replacement is unreadable and releases super
   expect(screen.getByRole('button', { name: '發布限時動態' })).toHaveProperty('disabled', true);
 });
 
-it('reserves a fresh story for a different photo after an unsuccessful publication', async () => {
+it('confirms the original version before publishing a replacement photo with a fresh story ID', async () => {
   mock.id.mockReturnValueOnce('first-story').mockReturnValueOnce('replacement');
   mock.publish.mockRejectedValueOnce(new Error('offline'));
   mock.upload
@@ -161,16 +168,21 @@ it('reserves a fresh story for a different photo after an unsuccessful publicati
   const second = new File(['second'], 'second.png', { type: 'image/png' });
   chooseImage(second);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: '發布限時動態' })).toHaveProperty('disabled', false),
+    expect(screen.getByRole('button', { name: '確認／重試原版本' })).toHaveProperty('disabled', false),
   );
-  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
+  await screen.findByText('上一版已發布，修改後的草稿已保留。');
+  expect(mock.replace).not.toHaveBeenCalled();
+  expect(mock.upload).toHaveBeenCalledTimes(1);
+  expect(mock.publish.mock.calls[1][0]).toEqual(mock.publish.mock.calls[0][0]);
+  fireEvent.click(screen.getByRole('button', { name: '發布修改後的草稿' }));
   await waitFor(() => expect(mock.replace).toHaveBeenCalledOnce());
   expect(mock.upload.mock.calls[1][0]).toMatchObject({
     file: second,
     storyId: 'replacement',
     uid: 'student',
   });
-  expect(mock.publish.mock.calls[1][0]).toMatchObject({ mediaUrl: 'https://example.test/second' });
+  expect(mock.publish.mock.calls[2][0]).toMatchObject({ mediaUrl: 'https://example.test/second' });
 });
 
 it('discards a pending upload result after the selected school changes', async () => {
@@ -231,7 +243,7 @@ it('previews the decoded MP4, then retries the captioned video using the same up
   fireEvent.change(screen.getByLabelText('影片說明（選填）'), { target: { value: '社團彩排' } });
   fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
   await screen.findByRole('alert');
-  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
   await waitFor(() => expect(mock.replace).toHaveBeenCalledOnce());
   expect(mock.upload).toHaveBeenCalledTimes(1);
   expect(mock.id).toHaveBeenCalledTimes(1);
@@ -258,4 +270,238 @@ it.each([
   expect(screen.queryByLabelText('已選取的影片')).toBeNull();
   expect(screen.getByAltText('已選取的照片')).toBeTruthy();
   expect(mock.upload).not.toHaveBeenCalled();
+});
+
+it('shows byte progress, cancels in place and isolates a new upload from late callbacks', async () => {
+  const first = deferred<{ url: string; path: string }>();
+  const second = deferred<{ url: string; path: string }>();
+  mock.upload.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  mock.school = 'pu';
+  mock.query = new URLSearchParams('poiId=pu-library');
+  render(<StoryComposePage />);
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '原本的文字與設定' } });
+  fireEvent.click(screen.getByRole('button', { name: '灰藍' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: '允許同校成員私訊回覆' }));
+  chooseImage(new File(['0123456789'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  const location = screen.getByRole('button', { name: /移除地點/ }).textContent;
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const old = mock.upload.mock.calls[0][0];
+  act(() => old.onProgress({ bytesTransferred: 3, totalBytes: 10 }));
+  expect(screen.getByRole('progressbar', { name: '上傳照片進度' })).toHaveProperty('value', 3);
+  expect(screen.getByText('30%')).toBeTruthy();
+  const cancel = screen.getByRole('button', { name: '取消上傳' });
+  cancel.focus();
+  fireEvent.click(cancel);
+  expect(old.signal.aborted).toBe(true);
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('照片說明（選填）')));
+  expect(screen.getByLabelText('照片說明（選填）')).toHaveProperty('value', '原本的文字與設定');
+  expect(screen.getByRole('checkbox', { name: '允許同校成員私訊回覆' })).toHaveProperty('checked', false);
+  expect(screen.getByRole('button', { name: /移除地點/ }).textContent).toBe(location);
+  expect(screen.getByAltText('已選取的照片')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const current = mock.upload.mock.calls[1][0];
+  act(() => current.onProgress({ bytesTransferred: 2, totalBytes: 10 }));
+  act(() => {
+    old.onProgress({ bytesTransferred: 10, totalBytes: 10 });
+    old.onUploaded('schools/pu/stories/new-story/image');
+  });
+  await act(async () => first.resolve({ url: 'https://example.test/old', path: 'schools/pu/stories/new-story/image' }));
+  expect(screen.getByText('20%')).toBeTruthy();
+  expect(current.signal.aborted).toBe(false);
+  expect(mock.publish).not.toHaveBeenCalled();
+  await act(async () => second.resolve({ url: 'https://example.test/current', path: 'schools/pu/stories/new-story/image' }));
+  expect(mock.publish.mock.calls[0][0]).toMatchObject({
+    text: '原本的文字與設定', allowReplies: false, bgColor: '#3e5169', poiId: 'pu-library', mediaUrl: 'https://example.test/current',
+  });
+  expect(mock.replace).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a completed stage when cancelled after 100 percent while the URL is pending', async () => {
+  const first = deferred<{ url: string; path: string }>();
+  mock.upload.mockReturnValueOnce(first.promise);
+  render(<StoryComposePage />);
+  chooseImage(new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const old = mock.upload.mock.calls[0][0];
+  const path = 'schools/ncku/stories/new-story/image';
+  act(() => {
+    old.onUploaded(path);
+    old.onProgress({ bytesTransferred: 5, totalBytes: 5 });
+  });
+  expect(screen.getByText('100%')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消上傳' }));
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  await waitFor(() => expect(mock.replace).toHaveBeenCalledTimes(1));
+  expect(mock.upload.mock.calls[1][0]).toMatchObject({ uploadedPath: path, storyId: 'new-story' });
+  await act(async () => first.resolve({ url: 'https://example.test/late', path }));
+  expect(mock.publish).toHaveBeenCalledTimes(1);
+  expect(mock.publish.mock.calls[0][0].mediaUrl).toBe('https://example.test/image');
+});
+
+it('retries the fixed original payload twice and preserves later edits until a separate publication', async () => {
+  mock.id.mockReturnValueOnce('original').mockReturnValueOnce('edited');
+  mock.publish.mockRejectedValueOnce({ code: 'unavailable' }).mockRejectedValueOnce({ code: 'unavailable' });
+  render(<StoryComposePage />);
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '首次送出的版本' } });
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  await screen.findByRole('alert');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '確認／重試原版本' })));
+  const original = mock.publish.mock.calls[0][0];
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '後來修改的草稿' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: '允許同校成員私訊回覆' }));
+  fireEvent.click(screen.getByRole('button', { name: '暮紫' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
+  await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
+  await screen.findByText('上一版已發布，修改後的草稿已保留。');
+  expect(mock.publish.mock.calls.slice(0, 3).map((call) => call[0])).toEqual([original, original, original]);
+  expect(mock.publish.mock.calls.slice(1, 3).map((call) => call[1].confirmFirst)).toEqual([true, true]);
+  expect(mock.replace).not.toHaveBeenCalled();
+  expect(mock.id).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText('文字內容')).toHaveProperty('value', '後來修改的草稿');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('文字內容')));
+  fireEvent.click(screen.getByRole('button', { name: '發布修改後的草稿' }));
+  await waitFor(() => expect(mock.replace).toHaveBeenCalledTimes(1));
+  expect(mock.publish.mock.calls[3][0]).toMatchObject({ storyId: 'edited', text: '後來修改的草稿', allowReplies: false, bgColor: '#554661' });
+});
+
+it('can confirm the original photo after the edited draft is cleared completely', async () => {
+  mock.publish.mockRejectedValueOnce({ code: 'unavailable' });
+  render(<StoryComposePage />);
+  chooseImage(new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
+  const confirm = screen.getByRole('button', { name: '確認／重試原版本' });
+  expect(confirm).toHaveProperty('disabled', false);
+  fireEvent.click(confirm);
+  await screen.findByText('上一版已發布，修改後的草稿已保留。');
+  expect(mock.publish.mock.calls[1][0]).toEqual(mock.publish.mock.calls[0][0]);
+  expect(screen.getByLabelText('文字內容')).toHaveProperty('value', '');
+  expect(screen.getByRole('button', { name: '發布修改後的草稿' })).toHaveProperty('disabled', true);
+  expect(mock.replace).not.toHaveBeenCalled();
+});
+
+it.each(['account', 'school'])('aborts upload and hides old draft in the first commit after switching %s', async (scope) => {
+  const uploading = deferred<{ url: string; path: string }>();
+  mock.upload.mockReturnValueOnce(uploading.promise);
+  const view = render(<StoryComposePage />);
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '舊範圍的草稿' } });
+  chooseImage(new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const old = mock.upload.mock.calls[0][0];
+  if (scope === 'account') mock.uid = 'other-student';
+  else mock.school = 'tw-pu';
+  view.rerender(<StoryComposePage />);
+  expect(old.signal.aborted).toBe(true);
+  expect(screen.getByLabelText('文字內容')).toHaveProperty('value', '');
+  expect(screen.queryByAltText('已選取的照片')).toBeNull();
+  act(() => old.onProgress({ bytesTransferred: 5, totalBytes: 5 }));
+  await act(async () => uploading.resolve({ url: 'https://example.test/old', path: 'schools/ncku/stories/new-story/image' }));
+  expect(screen.queryByRole('progressbar')).toBeNull();
+  expect(mock.publish).not.toHaveBeenCalled();
+  expect(mock.replace).not.toHaveBeenCalled();
+});
+
+it('ignores a late publication receipt after an account change', async () => {
+  const publication = deferred<string>();
+  mock.publish.mockReturnValueOnce(publication.promise);
+  const view = render(<StoryComposePage />);
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '舊帳號發文' } });
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const signal = mock.publish.mock.calls[0][1].signal;
+  mock.uid = 'new-student';
+  view.rerender(<StoryComposePage />);
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '新帳號草稿' } });
+  await act(async () => publication.resolve('new-story'));
+  expect(signal.aborted).toBe(true);
+  expect(screen.getByLabelText('文字內容')).toHaveProperty('value', '新帳號草稿');
+  expect(mock.replace).not.toHaveBeenCalled();
+});
+
+it('remains usable after StrictMode effect cleanup and aborts an upload on unmount', async () => {
+  const uploading = deferred<{ url: string; path: string }>();
+  mock.upload.mockReturnValueOnce(uploading.promise);
+  const view = render(<StrictMode><StoryComposePage /></StrictMode>);
+  chooseImage(new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const old = mock.upload.mock.calls[0][0];
+  expect(old.signal.aborted).toBe(false);
+  view.unmount();
+  expect(old.signal.aborted).toBe(true);
+  await act(async () => uploading.resolve({ url: 'https://example.test/old', path: 'schools/ncku/stories/new-story/image' }));
+  expect(mock.publish).not.toHaveBeenCalled();
+  expect(mock.replace).not.toHaveBeenCalled();
+});
+
+it.each([
+  { phase: 'publishing', completion: 'success' },
+  { phase: 'publishing', completion: 'failure' },
+  { phase: 'confirming', completion: 'success' },
+  { phase: 'confirming', completion: 'failure' },
+])('stops waiting during $phase and ignores a late $completion while retrying the original', async ({ phase, completion }) => {
+  const old = deferred<string>();
+  const current = deferred<string>();
+  if (phase === 'confirming') mock.publish.mockRejectedValueOnce({ code: 'unavailable' });
+  mock.publish.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+  render(<StoryComposePage />);
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: '正在提交的原版本' } });
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  if (phase === 'confirming') {
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
+  }
+  const original = mock.publish.mock.calls[0][0];
+  const oldSignal = mock.publish.mock.lastCall![1].signal;
+  const stop = screen.getByRole('button', { name: '停止等待' });
+  stop.focus();
+  fireEvent.click(stop);
+  expect(oldSignal.aborted).toBe(true);
+  expect(screen.getByText('已停止等待，可稍後確認原版本是否發布。')).toBeTruthy();
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: '確認／重試原版本' })));
+  const edited = phase === 'confirming' && completion === 'success' ? '' : '等待期間修改的草稿';
+  fireEvent.change(screen.getByLabelText('文字內容'), { target: { value: edited } });
+  fireEvent.click(screen.getByRole('button', { name: '確認／重試原版本' }));
+  const currentSignal = mock.publish.mock.lastCall![1].signal;
+  await act(async () => {
+    if (completion === 'success') old.resolve('new-story');
+    else old.reject({ code: 'unavailable' });
+  });
+  expect(screen.getByText('正在確認或重試原版本…')).toBeTruthy();
+  expect(currentSignal.aborted).toBe(false);
+  expect(mock.replace).not.toHaveBeenCalled();
+  expect(mock.publish.mock.calls.every((call) => call[0] === original)).toBe(true);
+  await act(async () => current.resolve('new-story'));
+  expect(screen.getByText('上一版已發布，修改後的草稿已保留。')).toBeTruthy();
+  expect(screen.getByLabelText('文字內容')).toHaveProperty('value', edited);
+  expect(mock.id).toHaveBeenCalledTimes(1);
+  expect(mock.replace).not.toHaveBeenCalled();
+});
+
+it('describes a stop at the upload-to-publication boundary as stopping its pending confirmation', async () => {
+  const upload = deferred<{ url: string; path: string }>();
+  const publication = deferred<string>();
+  mock.upload.mockReturnValueOnce(upload.promise);
+  mock.publish.mockReturnValueOnce(publication.promise);
+  render(<StoryComposePage />);
+  chooseImage(new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  const previousButton = screen.getByRole('button', { name: '取消上傳' });
+  await act(async () => {
+    upload.resolve({ url: 'https://example.test/photo', path: 'schools/ncku/stories/new-story/image' });
+    await Promise.resolve();
+    expect(mock.publish).toHaveBeenCalledTimes(1);
+    fireEvent.click(previousButton);
+  });
+  expect(screen.getByText('已停止等待，可稍後確認原版本是否發布。')).toBeTruthy();
+  expect(mock.publish.mock.calls[0][1].signal.aborted).toBe(true);
+  await act(async () => publication.resolve('new-story'));
+  expect(mock.replace).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '確認／重試原版本' })).toHaveProperty('disabled', false);
 });

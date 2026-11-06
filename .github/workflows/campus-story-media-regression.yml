@@ -7,18 +7,36 @@ on:
       - 'feature/campus-story-video'
     paths:
       - 'apps/web/src/app/community/_components/StoryViewer*'
+      - 'apps/web/src/app/community/story/new/**'
+      - 'apps/web/src/lib/community/firestore.ts'
+      - 'apps/web/src/lib/community/media.ts'
+      - 'apps/web/src/lib/community/storyPublishing.test.ts'
       - 'apps/mobile/src/screens/social/CampusStoryViewer.tsx'
+      - 'apps/mobile/src/screens/social/StoryComposeScreen.tsx'
       - 'apps/mobile/src/__tests__/CampusStoryViewer.test.tsx'
+      - 'apps/mobile/src/__tests__/StoryComposeScreen.test.tsx'
+      - 'apps/mobile/src/__tests__/services/storyPublication.test.ts'
+      - 'apps/mobile/src/services/stories.ts'
+      - 'apps/mobile/src/services/mediaUpload.ts'
       - '.github/workflows/campus-story-media-regression.yml'
   pull_request:
     branches:
       - main
       - develop
-      - 'feat/story-private-replies'
+      - 'feat/story-*'
     paths:
       - 'apps/web/src/app/community/_components/StoryViewer*'
+      - 'apps/web/src/app/community/story/new/**'
+      - 'apps/web/src/lib/community/firestore.ts'
+      - 'apps/web/src/lib/community/media.ts'
+      - 'apps/web/src/lib/community/storyPublishing.test.ts'
       - 'apps/mobile/src/screens/social/CampusStoryViewer.tsx'
+      - 'apps/mobile/src/screens/social/StoryComposeScreen.tsx'
       - 'apps/mobile/src/__tests__/CampusStoryViewer.test.tsx'
+      - 'apps/mobile/src/__tests__/StoryComposeScreen.test.tsx'
+      - 'apps/mobile/src/__tests__/services/storyPublication.test.ts'
+      - 'apps/mobile/src/services/stories.ts'
+      - 'apps/mobile/src/services/mediaUpload.ts'
       - '.github/workflows/campus-story-media-regression.yml'
   workflow_dispatch:
 
@@ -31,7 +49,7 @@ concurrency:
 
 jobs:
   media-regression:
-    name: Photo retry and viewer regression
+    name: Story publishing and viewer regression
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -45,9 +63,21 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Web story viewer interaction tests
         run: pnpm --filter web exec vitest run src/app/community/_components/StoryViewer.test.tsx src/app/community/_components/StoryReply.test.tsx src/app/community/_components/StoryAudience.test.tsx
+      - name: Web story publishing and upload controls
+        run: pnpm --filter web exec vitest run src/app/community/story/new/page.test.tsx src/lib/community/storyPublishing.test.ts
       - name: Mobile story viewer interaction tests
         run: pnpm --filter mobile exec jest src/__tests__/CampusStoryViewer.test.tsx src/__tests__/StoryReply.test.tsx src/__tests__/StoryAudience.test.tsx --runInBand --ci
+      - name: Mobile story publishing and upload controls
+        run: pnpm --filter mobile exec jest src/__tests__/StoryComposeScreen.test.tsx src/__tests__/services/storyPublication.test.ts --runInBand --ci
       - name: Typecheck web viewer integration
         run: pnpm --filter web typecheck
       - name: Typecheck mobile viewer integration
         run: pnpm --filter mobile typecheck
+      - name: Lint web story publishing
+        run: pnpm --filter web exec eslint src/app/community/story/new/page.tsx src/app/community/story/new/page.test.tsx src/lib/community/firestore.ts src/lib/community/media.ts src/lib/community/storyPublishing.test.ts
+      - name: Build web story routes
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: mock-api-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: mock.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: mock-project

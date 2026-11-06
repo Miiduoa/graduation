@@ -35,14 +35,22 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { isProvidenceSchoolId } from '../../data/schoolIds';
 import { findSocialPoi } from '../../services/campusSocialPois';
 import { isFirebaseMockMode } from '../../firebase';
-import { publishStory, reserveStoryId } from '../../services/stories';
-import { storage } from '../../services/storage';
-import { uploadStoryImage, uploadStoryVideo, STORY_IMAGE_LIMIT, STORY_VIDEO_MAX_MS } from '../../services/mediaUpload';
+import { publishStory, reserveStoryId, type StoryPublishPayload } from '../../services/stories';
+import { storage, type UploadProgress } from '../../services/storage';
+import { uploadStoryImage, uploadStoryVideo, STORY_IMAGE_LIMIT, STORY_VIDEO_MAX_MS, type MediaUploadOptions } from '../../services/mediaUpload';
 
 const BG_COLORS = ['#0f172a', '#7c5dfa', '#0ea5e9', '#10b981', '#f97316', '#ef4444'];
 const TTL_24H = 24 * 3600 * 1000;
 const MAX_TEXT = 220;
 type Attachment = { kind: 'image'; uri: string; mime: string } | { kind: 'video'; uri: string; durationMs: number; selection: number };
+type StoryDraft = {
+  id: string;
+  uri: string | null;
+  url: string | null;
+  uploaded: boolean;
+  progress: UploadProgress | null;
+  submission: { payload: StoryPublishPayload; revision: number } | null;
+};
 
 export function StoryComposeScreen(props: any) {
   const { user, loading } = useAuth();
@@ -70,23 +78,39 @@ function StoryComposer(props: any) {
   const [bgColor, setBgColor] = useState(BG_COLORS[0]);
   const [poiId, setPoiId] = useState<string | null>(initialPoiId);
   const [poiName, setPoiName] = useState<string | null>(initialPoiName);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'uploading' | 'confirming' | 'published' | null>(null);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
+  const [notice, setNotice] = useState('');
+  const [modifiedDraft, setModifiedDraft] = useState(false);
+  const busy = phase !== null;
 
-  const publishing = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  const published = useRef(false);
+  const revision = useRef(0);
   const active = useRef(true);
-  const draft = useRef<{ id: string; uri: string | null; url: string | null } | null>(null);
+  const draft = useRef<StoryDraft | null>(null);
+  const original = draft.current?.submission;
   React.useLayoutEffect(() => {
     active.current = true;
-    return () => { active.current = false; };
+    return () => {
+      active.current = false;
+      request.current?.abort();
+      request.current = null;
+    };
   }, []);
 
   useEffect(() => {
-    if (initialPoiId) setPoiId(initialPoiId);
-    if (initialPoiName) setPoiName(initialPoiName);
+    if (initialPoiId && (initialPoiId !== poiId || initialPoiName !== poiName)) {
+      revision.current++;
+      setPoiId(initialPoiId);
+      setPoiName(initialPoiName);
+    }
   }, [initialPoiId, initialPoiName]);
 
+  const editingLocked = () => !!request.current || published.current;
+
   const pick = async (type: 'image' | 'video') => {
-    if (publishing.current) return;
+    if (editingLocked()) return;
     if (type === 'video' && !supportsStoryVideo) {
       Alert.alert('影片功能需要更新', '請更新 App，再選擇影片。');
       return;
@@ -97,17 +121,19 @@ function StoryComposer(props: any) {
       const file = await storage.pickImage(type === 'image'
         ? { quality: 0.85, aspect: [9, 16] }
         : { mediaTypes: 'videos', videoExportPreset: VideoExportPreset.H264_1280x720 });
-      if (!file || !active.current || selection.current !== seq || publishing.current) return;
+      if (!file || !active.current || selection.current !== seq || editingLocked()) return;
       if (type === 'image') {
         if (!file.type?.startsWith('image/') || file.size >= STORY_IMAGE_LIMIT) {
           Alert.alert('無法使用這張照片', '請選擇小於 10 MB 的圖片。');
           return;
         }
-        draft.current = null;
+        if (!draft.current?.submission) draft.current = null;
+        revision.current++;
         setMedia({ kind: 'image', uri: file.uri, mime: file.type });
       } else if (file.type !== STORY_VIDEO_CONTENT_TYPE || file.size >= STORY_VIDEO_MAX_BYTES || (file.durationMs ?? 0) > STORY_VIDEO_MAX_MS) {
         Alert.alert('無法使用這段影片', '請選擇 30 秒以內、小於 100 MB 的 MP4 影片。');
       } else {
+        revision.current++;
         setCandidate({ uri: file.uri, selection: seq });
       }
     } catch (e: any) {
@@ -130,13 +156,26 @@ function StoryComposer(props: any) {
   }, [candidate]);
 
   function clearMedia() {
+    if (editingLocked()) return;
     selection.current++;
-    draft.current = null;
+    if (!draft.current?.submission) draft.current = null;
+    revision.current++;
     setCandidate(null);
     setMedia(null);
   }
 
+  function cancelPublish() {
+    if (!request.current || published.current) return;
+    request.current?.abort();
+    request.current = null;
+    setPhase(null);
+    setNotice(draft.current?.submission
+      ? '已停止等待發布結果，草稿已保留。請確認／重試原版本。'
+      : '上傳已取消，草稿已保留。');
+  }
+
   const publish = async () => {
+    if (published.current) return;
     if (isFirebaseMockMode()) {
       Alert.alert('模擬模式', '無法寫入 Firestore');
       return;
@@ -147,55 +186,126 @@ function StoryComposer(props: any) {
       Alert.alert('請登入並選擇學校');
       return;
     }
-    if (kind === 'text' && !body.trim()) {
+    const confirmingOriginal = !!draft.current?.submission;
+    if (!confirmingOriginal && kind === 'text' && !body.trim()) {
       Alert.alert('請輸入文字');
       return;
     }
-    if (candidate || publishing.current) return;
-    publishing.current = true;
-    setBusy(true);
+    if ((!confirmingOriginal && candidate) || request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    const current = () => active.current && request.current === controller && !controller.signal.aborted;
+    const submittedRevision = revision.current;
+    setPhase(confirmingOriginal || !media ? 'confirming' : 'uploading');
+    setNotice('');
     try {
       const uri = media?.uri ?? null;
-      if (!draft.current || draft.current.uri !== uri) {
-        draft.current = { id: reserveStoryId(), uri, url: null };
+      if (!draft.current || (!confirmingOriginal && draft.current.uri !== uri)) {
+        draft.current = { id: reserveStoryId(), uri, url: null, uploaded: false, progress: null, submission: null };
       }
       const entry = draft.current;
-      if (media && !entry.url) {
-        entry.url = media.kind === 'video'
-          ? await uploadStoryVideo(sid, entry.id, uid, media.uri, media.durationMs)
-          : await uploadStoryImage(sid, entry.id, uid, media.uri, media.mime);
+      setProgress(entry.progress);
+      if (!entry.submission && media && !entry.url) {
+        const options: MediaUploadOptions = {
+          signal: controller.signal,
+          uploaded: entry.uploaded,
+          onProgress: (value) => {
+            if (!current()) return;
+            entry.progress = value;
+            setProgress(value);
+          },
+          onUploadComplete: () => {
+            if (current()) entry.uploaded = true;
+          },
+        };
+        const url = media.kind === 'video'
+          ? await uploadStoryVideo(sid, entry.id, uid, media.uri, media.durationMs, options)
+          : await uploadStoryImage(sid, entry.id, uid, media.uri, media.mime, options);
+        if (!current()) return;
+        entry.url = url;
       }
-      if (!active.current) return;
-      await publishStory(entry.id, {
-        allowReplies,
-        schoolId: sid,
-        authorUid: uid,
-        kind,
-        text: body.trim(),
-        mediaUrl: entry.url,
-        bgColor,
-        poiId,
-        poiName,
-        expiresAtMs: Date.now() + TTL_24H,
+      if (!current()) return;
+      if (!entry.submission) {
+        entry.submission = {
+          revision: submittedRevision,
+          payload: {
+            allowReplies,
+            schoolId: sid,
+            authorUid: uid,
+            kind,
+            text: body.trim(),
+            mediaUrl: entry.url,
+            bgColor,
+            poiId,
+            poiName,
+            expiresAtMs: Date.now() + TTL_24H,
+          },
+        };
+      }
+      const submission = entry.submission;
+      setPhase('confirming');
+      await publishStory(entry.id, submission.payload, {
+        signal: controller.signal,
+        confirmFirst: confirmingOriginal,
       });
 
-      if (!active.current) return;
+      if (!current()) return;
+      draft.current = null;
+      const expired = submission.payload.expiresAtMs <= Date.now();
+      if (revision.current !== submission.revision) {
+        setModifiedDraft(true);
+        setNotice(expired
+          ? '上一版已發布，現已到期。修改後的草稿已保留。'
+          : '上一版已發布，修改後的草稿已保留。');
+        return;
+      }
+      published.current = true;
+      setPhase('published');
+      setNotice(expired ? '原版本已發布並已到期。' : '限時動態已發布。');
       props?.navigation?.goBack?.();
-      Alert.alert('已發布限時動態', '同校成員可在接下來 24 小時內觀看。');
+      Alert.alert(expired ? '原版本已發布並已到期' : '已發布限時動態', expired
+        ? '可以建立新的限時動態。'
+        : '同校成員可在限時動態到期前觀看。');
     } catch (e: any) {
-      if (!active.current) return;
-      publishing.current = false;
-      setBusy(false);
+      if (!current()) return;
       const message = e?.code === 'permission-denied' || e?.code === 'storage/unauthorized'
         ? '目前沒有發布權限，請確認登入帳號與學校。'
         : e?.code || !e?.message ? '請確認網路連線後再試一次，草稿已保留。' : e.message;
+      setNotice(draft.current?.submission
+        ? '發布結果尚未確認。請確認／重試原版本，草稿已保留。'
+        : '上傳未完成，草稿已保留。');
       Alert.alert('發布失敗', message);
+    } finally {
+      if (request.current === controller) {
+        request.current = null;
+        if (!published.current) setPhase(null);
+      }
     }
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <ScrollView pointerEvents={busy ? 'none' : 'auto'} contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32 }}>
+      {!!notice && <Text accessibilityLiveRegion="polite" style={styles.publishNotice}>{notice}</Text>}
+      {(phase === 'uploading' || phase === 'confirming') && (
+        <View style={styles.publishProgress}>
+          <View accessible accessibilityRole={phase === 'uploading' ? 'progressbar' : undefined}
+            accessibilityLabel={phase === 'uploading' ? '限時動態上傳進度' : '正在確認發布結果'}
+            accessibilityValue={phase === 'uploading' && progress
+              ? { min: 0, max: 100, now: progress.percentage } : undefined}
+            accessibilityLiveRegion="polite" style={{ flex: 1 }}>
+            <Text style={styles.publishProgressText}>{phase === 'confirming'
+              ? '正在確認發布結果…'
+              : progress ? `上傳 ${progress.percentage}% · ${storage.formatFileSize(progress.loaded)} / ${storage.formatFileSize(progress.total)}`
+                : '正在準備上傳…'}</Text>
+          </View>
+          <Pressable accessibilityRole="button" style={styles.cancelPublish} onPress={cancelPublish}>
+            <Text style={styles.cancelPublishText}>{phase === 'uploading' ? '取消上傳' : '停止等待'}</Text>
+          </Pressable>
+        </View>
+      )}
+      <ScrollView pointerEvents={busy ? 'none' : 'auto'} accessibilityElementsHidden={busy}
+        importantForAccessibility={busy ? 'no-hide-descendants' : 'auto'}
+        contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32 }}>
         {/* ─── Type selector ─── */}
         <View style={styles.kindRow}>
           <Pressable style={[styles.kindBtn, kind === 'text' && styles.kindBtnOn]} disabled={busy} onPress={clearMedia}>
@@ -243,7 +353,7 @@ function StoryComposer(props: any) {
                   return;
                 }
                 selection.current++;
-                draft.current = null;
+                if (!draft.current?.submission) draft.current = null;
                 setMedia({ kind: 'video', ...candidate, durationMs });
                 setCandidate(null);
               }}
@@ -282,7 +392,12 @@ function StoryComposer(props: any) {
                 return (
                   <Pressable
                     key={c}
-                    onPress={() => setBgColor(c)}
+                    disabled={busy}
+                    onPress={() => {
+                      if (editingLocked()) return;
+                      if (bgColor !== c) revision.current++;
+                      setBgColor(c);
+                    }}
                     style={[styles.swatch, { backgroundColor: c, borderColor: on ? theme.colors.accent : 'rgba(0,0,0,0.15)', borderWidth: on ? 3 : 1 }]}
                     accessibilityLabel={`背景色 ${c}`}
                   />
@@ -295,7 +410,12 @@ function StoryComposer(props: any) {
         <Text style={styles.label}>文字內容</Text>
         <TextInput
           value={body}
-          onChangeText={(t) => setBody(t.slice(0, MAX_TEXT))}
+          onChangeText={(t) => {
+            if (editingLocked()) return;
+            const next = t.slice(0, MAX_TEXT);
+            if (body !== next) revision.current++;
+            setBody(next);
+          }}
           multiline
           editable={!busy}
           placeholder={kind === 'video' ? '為這段影片加上一句話（選填）' : kind === 'image' ? '為這張圖加上一句話（選填）' : '跟大家分享此刻⋯'}
@@ -308,7 +428,12 @@ function StoryComposer(props: any) {
           <View style={styles.poiChip}>
             <Ionicons name="location" size={12} color={theme.colors.accent} />
             <Text style={styles.poiChipTxt}>{poiName ?? poiId}</Text>
-            <Pressable onPress={() => { setPoiId(null); setPoiName(null); }} hitSlop={6}>
+            <Pressable disabled={busy} onPress={() => {
+              if (editingLocked()) return;
+              revision.current++;
+              setPoiId(null);
+              setPoiName(null);
+            }} hitSlop={6}>
               <Ionicons name="close-circle" size={14} color={theme.colors.muted} />
             </Pressable>
           </View>
@@ -320,15 +445,21 @@ function StoryComposer(props: any) {
             accessibilityLabel="允許同校成員私訊回覆"
             value={allowReplies}
             disabled={busy}
-            onValueChange={setAllowReplies}
+            onValueChange={(value) => {
+              if (editingLocked()) return;
+              if (allowReplies !== value) revision.current++;
+              setAllowReplies(value);
+            }}
           />
         </View>
 
-        <Pressable style={[styles.btn, (busy || candidate) && { opacity: 0.65 }]} disabled={busy || !!candidate} onPress={publish}>
-          {busy ? (
+        {!!original && <Text style={styles.hintMuted}>重新確認會沿用第一次送出的內容。現在的修改會保留成下一則草稿。</Text>}
+        <Pressable accessibilityRole="button" style={[styles.btn, (busy || (candidate && !original)) && { opacity: 0.65 }]}
+          disabled={busy || (!!candidate && !original)} onPress={publish}>
+          {phase === 'published' ? <Text style={styles.btnTx}>已發布</Text> : busy ? (
             <ActivityIndicator color={theme.colors.onAccent} />
           ) : (
-            <Text style={styles.btnTx}>發布限時動態</Text>
+            <Text style={styles.btnTx}>{original ? '確認／重試原版本' : modifiedDraft ? '發布修改後的草稿' : '發布限時動態'}</Text>
           )}
         </Pressable>
         <Text style={styles.hintMuted}>發布後，同校成員可在動態列和「即時」觀看 24 小時。</Text>
@@ -338,6 +469,11 @@ function StoryComposer(props: any) {
 }
 
 const createStyles = () => StyleSheet.create({
+  publishNotice: { color: theme.colors.text, paddingHorizontal: 16, paddingTop: 12, lineHeight: 22 },
+  publishProgress: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 8 },
+  publishProgressText: { color: theme.colors.text, fontSize: 14 },
+  cancelPublish: { minWidth: 44, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
+  cancelPublishText: { color: theme.colors.accent, fontWeight: '700' },
   label: { fontSize: 13, fontWeight: '700', color: theme.colors.text, marginTop: 12, marginBottom: 6 },
   counter: { textAlign: 'right', fontSize: 10, color: theme.colors.muted, marginTop: 4 },
 
