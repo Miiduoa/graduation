@@ -113,3 +113,12 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 ### Supabase CI 結構差異回歸
 
 提交 a4d4351d 的真實 Supabase CI 發現 SQL 測試使用的 ON CONFLICT(bucket_id,name) 在目前 Storage schema 沒有對應 arbiter。上游 migration 已移除此索引，原生測試 bootstrap 的額外 unique 掩蓋了差異。本輪移除測試專用的多餘 unique，先重現相同的 42P10，再讓兩個 upsert 案例使用兩邊都存在的 PRIMARY KEY(id)。預簽案例維持 sign_upload_url context，真正覆寫案例明確使用正常 upload context，拒絕判定仍要求 42501。四輪 53 SQL、53 HTTP 再次通過，真正 Storage API 的 upsert 案例持續由 CI 執行。
+
+
+## 2026-11-07：真實 PostgreSQL 附件回歸納入主 CI
+
+既有 `Web Tests` job 未設定 `NUNI_TEST_POSTGRES_PORT`，因此 `assignmentFileStore.postgres.test.ts` 的 7 項競態案例與 `assignmentFileService.test.ts` 的 6 項 PostgreSQL 變體未納入正式 Web CI 計數。本輪已調整 `.github/workflows/ci.yml`：在 `test-web` job 加入獨立 PostgreSQL 15 服務，使用僅供 CI 的 `box` 測試帳號與 `postgres` 測試資料庫，並在定向與完整 Web Vitest 執行時明確傳入 `NUNI_TEST_POSTGRES_PORT=5432` 及測試密碼。定向步驟先執行兩個附件套件，避免資料庫不可用時誤將略過當作通過；完整 Web 測試沿用先前的 coverage 步驟。
+
+**驗證狀態：** 修改已提交，但此變更的 GitHub CI 新提交結果尚待確認，不得把上輪在一次性本機 PG15 測得的 13／13 當作本提交的雲端 CI 成功。確認後需核對定向步驟實際執行 PostgreSQL 案例，且主 Web、Functions、CodeQL、Supabase、Python、Mobile 與適用 Maestro 均對應精確 head。若另有測試在 CI 出現競態超時，應先保留失敗證據並修復測試隔離／邏輯，而非停用案例。
+
+本次只修改 CI 測試環境與本文件；沒有執行正式資料庫 migration、下載 token 寫入、發布或 GitHub App 核可。先前列出的 GCS staging 憑證、舊網址撤權驗收、主線審查閘門及相依相容性缺口仍未解除。
