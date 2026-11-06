@@ -773,7 +773,7 @@ describe('手機取餐時間', () => {
     await openBasket(view);
     now.mockReturnValue(beforeMidnight + 60_000);
     await waitFor(
-      () => expect(view.getByText('預計取餐 2026/11/02 00:16（台灣時間）')).toBeTruthy(),
+      () => expect(view.queryByText('預計取餐 2026/11/02 00:16（台灣時間）')).toBeTruthy(),
       { timeout: 1500 },
     );
     now.mockReturnValue(beforeMidnight + 90_000);
