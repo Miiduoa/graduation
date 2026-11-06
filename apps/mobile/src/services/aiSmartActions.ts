@@ -33,6 +33,8 @@ import { computeRealtimeInsights } from './aiRealtimeAnalytics';
 
 // ─── Types ───────────────────────────────────────────────
 
+type SmartActionScope = { schoolId: string; userId?: string | null };
+
 export type SmartActionType =
   | 'query_grades'
   | 'query_schedule'
@@ -321,12 +323,12 @@ async function execQueryAttendance(): Promise<SmartActionResult> {
   return { success: true, action: 'query_attendance', title: '出席', data: lines.join('\n'), suggestions: ['哪些課要注意', '會影響成績嗎', '查課表'] };
 }
 
-async function execQueryAssignments(): Promise<SmartActionResult> {
+async function execQueryAssignments(scope?: SmartActionScope): Promise<SmartActionResult> {
   const [acts, todos, tcc, ctx] = await Promise.all([
     getAnyCachedTCActivities(),
     getAnyCachedTCTodos(),
     getAnyCachedTCCourses(),
-    resolveActivePostLoginContext(),
+    resolveActivePostLoginContext(scope),
   ]);
   const cm = new Map<number, string>();
   if (tcc) for (const c of tcc) cm.set(c.id, c.name);
@@ -472,7 +474,7 @@ async function execSuggestStudyPlan(): Promise<SmartActionResult> {
 
 // ─── Action Router ───────────────────────────────────────
 
-const HANDLERS: Record<SmartActionType, () => Promise<SmartActionResult>> = {
+const HANDLERS: Record<SmartActionType, (scope?: SmartActionScope) => Promise<SmartActionResult>> = {
   query_grades: execQueryGrades,
   query_schedule: execQuerySchedule,
   query_today_schedule: execQueryTodaySchedule,
@@ -528,10 +530,13 @@ const HANDLERS: Record<SmartActionType, () => Promise<SmartActionResult>> = {
 /**
  * 執行指定行動，回傳格式化結果。
  */
-export async function executeSmartAction(action: SmartActionType): Promise<SmartActionResult> {
+export async function executeSmartAction(
+  action: SmartActionType,
+  scope?: SmartActionScope,
+): Promise<SmartActionResult> {
   const handler = HANDLERS[action];
   if (!handler) return { success: false, action, title: '未知', data: `不支援：${action}` };
-  try { return await handler(); }
+  try { return await handler(scope); }
   catch (e: any) { return { success: false, action, title: '失敗', data: `執行失敗：${e?.message ?? '未知'}` }; }
 }
 
@@ -539,8 +544,11 @@ export async function executeSmartAction(action: SmartActionType): Promise<Smart
  * 偵測意圖 + 自動執行。
  * 回傳 null 表示無匹配意圖，由 AI 自由回答。
  */
-export async function detectAndExecuteSmartAction(message: string): Promise<SmartActionResult | null> {
+export async function detectAndExecuteSmartAction(
+  message: string,
+  scope?: SmartActionScope,
+): Promise<SmartActionResult | null> {
   const intents = detectIntents(message);
   if (intents.length === 0 || intents[0].confidence < 0.5) return null;
-  return executeSmartAction(intents[0].action);
+  return executeSmartAction(intents[0].action, scope);
 }

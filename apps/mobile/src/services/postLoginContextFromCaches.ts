@@ -1,7 +1,6 @@
 import { buildPostLoginContext, getPostLoginContext } from '../data/postLoginDataRouter';
 import type { PostLoginContext } from '../data/postLoginTypes';
 import type { UserRole } from '../state/auth';
-import { loadMockAuthSession } from './mockAuth';
 import {
   getAnyCachedAnnouncements,
   getAnyCachedCourses,
@@ -84,13 +83,15 @@ export async function syncPostLoginContextFromCaches(params: {
   }
 }
 
-/** 記憶體優先，否則讀 AsyncStorage（與目前學校 id 對齊）。 */
-export async function resolveActivePostLoginContext(): Promise<PostLoginContext | null> {
+/** 只讀取呼叫端目前帳號與學校的內容，記憶體優先。 */
+export async function resolveActivePostLoginContext(scope?: {
+  schoolId: string;
+  userId?: string | null;
+}): Promise<PostLoginContext | null> {
+  if (!scope?.userId || !scope.schoolId) return null;
   const mem = getInMemoryPostLoginContext();
-  if (mem) return mem;
-  const session = await loadMockAuthSession();
-  if (!session?.schoolId) return null;
-  return getPostLoginContext(session.schoolId);
+  if (mem?.uid === scope.userId && mem.schoolId === scope.schoolId) return mem;
+  return getPostLoginContext(scope.schoolId, scope.userId);
 }
 
 /** Tron 課程若為教師端，應設 isTeacher 或讓 teacherUserId === Firebase uid（adapter 需一致）。 */

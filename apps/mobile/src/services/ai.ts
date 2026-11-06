@@ -4027,7 +4027,7 @@ export async function chatWithLocalLLMStreaming(
     const insightsPrompt = await getCachedInsightsPrompt();
     if (insightsPrompt) context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
     if (lastMsg.length > 0 && lastMsg.length < 200) {
-      const actionResult = await detectAndExecuteSmartAction(lastMsg);
+      const actionResult = await detectAndExecuteSmartAction(lastMsg, context);
       if (actionResult?.success) {
         console.log(`[AI] Streaming smart action: ${actionResult.action}`);
         context = { ...context, _smartActionResult: actionResult };

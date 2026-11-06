@@ -510,7 +510,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   useLayoutEffect(() => {
     const uid = user?.uid;
     const held = getInMemoryPostLoginContext();
-    const validProfile = uid && profile?.uid === uid && !tokenExpired;
+    const validProfile = uid && profile?.uid === uid && !loading && !profileLoading && !tokenExpired;
     if (held && (!validProfile || held.uid !== uid || !isProvidenceSchoolId(readySchoolId) ||
         !isProvidenceSchoolId(profileSchoolId) || !isProvidenceSchoolId(held.schoolId))) {
       setInMemoryPostLoginContext(null);
@@ -520,7 +520,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     let active = true;
     let restored: Awaited<ReturnType<typeof getPostLoginContext>> = null;
     const auth = getAuthInstance();
-    void getPostLoginContext(profileSchoolId).then((ctx) => {
+    void getPostLoginContext(profileSchoolId, uid).then((ctx) => {
       if (active && auth.currentUser === user && !isSigningOutRef.current &&
           ctx?.origin === 'verified-school-login' && ctx.uid === uid && isProvidenceSchoolId(ctx.schoolId) &&
           !getInMemoryPostLoginContext()) {
@@ -534,7 +534,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       active = false;
       if (restored && getInMemoryPostLoginContext() === restored) setInMemoryPostLoginContext(null);
     };
-  }, [user, profile?.uid, readySchoolId, profileSchoolId, tokenExpired]);
+  }, [user, profile?.uid, readySchoolId, profileSchoolId, loading, profileLoading, tokenExpired]);
 
   const refreshProfile = useCallback(async () => {
     // ── 先檢查 mock auth session（hybrid login 使用 mock auth 即使有 Firebase config）──

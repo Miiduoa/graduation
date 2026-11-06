@@ -239,7 +239,7 @@ async function runPostLoginContextPipeline(p: {
   try {
     await syncPostLoginContextFromCaches(p);
     p.assertVerifiedSession?.();
-    await routePostLoginDataWithContext(p.schoolId);
+    await routePostLoginDataWithContext(p.schoolId, p.uid);
   } catch (e) {
     console.warn('[studentIdAuth] post-login context pipeline failed (continuing):', e);
   }
