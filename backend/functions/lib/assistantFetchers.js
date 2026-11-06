@@ -25,7 +25,7 @@ function database(deps = {}) {
   return deps.db || (deps.admin ? deps.admin.firestore() : getFirestore());
 }
 
-async function readSchoolRows(schoolId, collections, { order, limit, requiredField, deps = {} } = {}) {
+async function readSchoolRows(schoolId, collections, { order, limit, requiredField, skipIncomplete = false, withAnnouncementSource = false, deps = {} } = {}) {
   assertId(schoolId, 'schoolId');
   const db = database(deps);
   const school = db.collection('schools').doc(schoolId);
@@ -39,16 +39,22 @@ async function readSchoolRows(schoolId, collections, { order, limit, requiredFie
     // A failed authoritative read is not an empty collection and must not trigger fallback.
     const snapshot = await source.get();
     if (snapshot.empty) continue;
-    return snapshot.docs.map((entry) => {
+    const rows = [];
+    for (const entry of snapshot.docs) {
       const data = entry.data();
       if ((legacy && data.schoolId !== schoolId) || (data.schoolId != null && data.schoolId !== schoolId)) {
         throw new HttpsError('failed-precondition', 'School data does not match the requested school');
       }
       if (requiredField && (typeof data[requiredField] !== 'string' || !data[requiredField].trim())) {
+        if (skipIncomplete) continue;
         throw new HttpsError('failed-precondition', 'School data is incomplete');
       }
-      return { ...data, id: entry.id, schoolId };
-    });
+      rows.push({
+        ...data, id: entry.id, schoolId,
+        ...(withAnnouncementSource ? { announcementKind: legacy ? 'legacy-announcement' : 'school-announcement' } : {}),
+      });
+    }
+    return rows;
   }
   return [];
 }
@@ -75,9 +81,13 @@ async function fetchAnnouncementSources(schoolId, deps = {}) {
 
 async function fetchAssistantAnnouncements(schoolId, deps = {}) {
   const school = schoolConfig(schoolId);
-  if (school && !isPublicAnnouncementSchool(school)) return [];
+  if (school && !isPublicAnnouncementSchool(school)) {
+    if (deps.forSnapshot) throw new HttpsError('unavailable', SOURCE_UNAVAILABLE);
+    return [];
+  }
   const rows = await readSchoolRows(schoolId, ['announcements', 'announcements'], {
-    order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', deps,
+    order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title',
+    skipIncomplete: deps.forSnapshot, withAnnouncementSource: deps.forSnapshot, deps,
   });
   const sources = await fetchAnnouncementSources(schoolId, deps);
   const announcements = selectStudentAnnouncements(rows, sources);

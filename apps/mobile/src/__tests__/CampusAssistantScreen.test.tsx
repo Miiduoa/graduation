@@ -287,6 +287,29 @@ test('suggested questions fill an editable draft without calling the backend unt
   expect(request).not.toHaveBeenCalled();
 });
 
+test('shows one announcement shortcut and reuses the current account’s synced source when pressed', async () => {
+  const view = render(<CampusAssistantScreen />);
+  expect(view.getAllByRole('button', { name: /公告/ })).toHaveLength(1);
+  expect(view.getByRole('button', { name: '同步並查今日公告' })).toBeTruthy();
+  const source = {
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    announcements: { status: 'available' as const, items: [] },
+    assignments: { status: 'unavailable' as const, count: null, items: [] },
+    schedule: { status: 'unavailable' as const, count: null },
+  };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(source);
+  request.mockResolvedValueOnce({ source: 'device', content: '本次摘要中沒有今天的公告。', hasActions: false });
+  openCampusTools(view);
+  await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+  fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  expect(view.getAllByRole('button', { name: /公告/ })).toHaveLength(1);
+  expect(request).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查今日公告' })));
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ mode: 'device', senseSnapshot: source }));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+});
+
 test('assistant offers the existing service directly instead of inventing a transaction', async () => {
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen navigation={{ navigate }} />);
@@ -1116,6 +1139,28 @@ test('platform lookup, room follow-up and exact class link use the same nuni own
   expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
 });
 
+test('switching to a nuni timetable during announcement sync cannot expose the Firebase result or start a second sync', async () => {
+  const pending = deferred<Awaited<ReturnType<typeof refreshCampusSenseSnapshot>>>();
+  jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(pending.promise);
+  const view = render(<CampusAssistantScreen />);
+  fireEvent.press(view.getByText('同步並查今日公告'));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+
+  usePlatformFixture('student-b');
+  await act(async () => view.rerender(<CampusAssistantScreen route={platformRoute} />));
+  await act(async () => pending.resolve({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    announcements: { status: 'available', items: [{ title: '校園帳號的公告', publishedAt: null }] },
+    assignments: { status: 'unavailable', count: null, items: [] },
+    schedule: { status: 'unavailable', count: null },
+  }));
+  expect(view.getByText('課表助理')).toBeTruthy();
+  expect(view.queryByText(/查今日公告/)).toBeNull();
+  expect(view.queryByText('校園帳號的公告')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+});
+
 test('a platform session replacement discards pending results even for the same platform account', async () => {
   usePlatformFixture('student-b');
   const response = deferred<object>();
@@ -1318,4 +1363,38 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
     await act(async () => fireEvent.press(screen.getByRole('button', { name: '重新核對繳交紀錄' })));
     expect(request.mock.calls[1][0].courseworkChoice).toEqual({ refreshAssignmentId: 'first' });
   });
+});
+
+test.each([false, true])('today’s announcement shortcut uses the indicated source and opens the selected record (already synced: %s)', async (synced) => {
+  const title = '選課異動公告';
+  const items = [
+    { title, publishedAt: '2026-11-04T10:00:00Z', source: { kind: 'school-announcement' as const, id: 'same' } },
+    { title, publishedAt: '2026-11-04T11:00:00Z', source: { kind: 'legacy-announcement' as const, id: 'same' } },
+  ];
+  const checkedAt = new Date().toISOString();
+  const snapshot = { userId: 'A', schoolId: 'pu', checkedAt,
+    announcements: { status: 'available' as const, items },
+    assignments: { status: 'unavailable' as const, count: null, items: [] },
+    schedule: { status: 'unavailable' as const, count: null } };
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValueOnce(snapshot);
+  request.mockResolvedValueOnce({ source: 'device', tool: 'campus-snapshot', content: title + '。' + title,
+    route: '/announcements', announcementRead: { userId: 'A', schoolId: 'pu', checkedAt, items, summary: '本次摘要列出 2 則公告。' } });
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['公告詳情'] }) };
+  const view = render(<CampusAssistantScreen navigation={navigation} />);
+  if (synced) {
+    openCampusTools(view);
+    await act(async () => fireEvent.press(view.getByText('同步我的校園資料')));
+    fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  }
+  await act(async () => fireEvent.press(view.getByText(synced ? '查今日公告' : '同步並查今日公告')));
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(1);
+  expect(request).toHaveBeenCalledWith(expect.objectContaining({ mode: 'device', senseSnapshot: snapshot,
+    messages: [{ role: 'user', content: '今天發布了哪些校園公告？' }] }));
+  const button = view.getByRole('button', { name: /開啟公告，第 2 則/ });
+  fireEvent.press(button);
+  expect(navigation.navigate).toHaveBeenCalledWith('公告詳情', { sourceKind: 'legacy-announcement', id: 'same', schoolId: 'pu' });
+  openCampusTools(view);
+  fireEvent.press(view.getByText('清除本次校園摘要'));
+  fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  expect(view.queryByRole('button', { name: /開啟公告，第 2 則/ })).toBeNull();
 });
