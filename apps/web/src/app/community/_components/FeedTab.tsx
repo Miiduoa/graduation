@@ -248,6 +248,12 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         focusPageStatusRef.current = document.activeElement === loadMoreButtonRef.current;
         feedCursorRef.current = null;
         setPosts([]);
+        // The same revoked membership protected stories and board metadata.
+        setStories([]);
+        setBoards([]);
+        setSubscribedIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
         setHasMorePosts(false);
         setPageMessage('');
         setFeedReadDenied(true);
@@ -262,11 +268,18 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       }
     }
   };
-  const shelf = useStoryShelf(loading || error ? [] : stories, schoolId, user.uid);
+  const shelf = useStoryShelf(loading || error || feedReadDenied ? [] : stories, schoolId, user.uid);
 
   // hydrate display names for post authors + story authors
   useEffect(() => {
+    let live = true;
     (async () => {
+      // A late directory response must not restore identities after access revocation.
+      if (feedReadDenied) {
+        setNameByUid({});
+        setAvatarByUid({});
+        return;
+      }
       const uids = new Set<string>();
       [...posts, ...savedPosts].forEach((p) => {
         if (!p.anonymous && p.authorUid) uids.add(p.authorUid);
@@ -278,6 +291,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         return;
       }
       const profiles = await fetchSchoolDirectoryProfiles(schoolId, [...uids]);
+      if (!live) return;
       const n: Record<string, string> = {};
       const a: Record<string, string> = {};
       profiles.forEach((p) => {
@@ -287,7 +301,8 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       setNameByUid(n);
       setAvatarByUid(a);
     })().catch(() => {});
-  }, [posts, savedPosts, stories, schoolId]);
+    return () => { live = false; };
+  }, [posts, savedPosts, stories, schoolId, feedReadDenied]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};

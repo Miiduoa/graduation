@@ -816,6 +816,27 @@ test('mobile continuation revocation hides previously loaded school posts', asyn
   expect(view.queryByLabelText('載入更多貼文')).toBeNull();
 });
 
+test('mobile denied continuation removes the old-school story shelf and restores it only after revalidation', async () => {
+  const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
+    text: '舊校限時動態', expiresAt: Date.now() + 60_000 };
+  const rows = Array.from({ length: 60 }, (_, i) => ({ ...post, id: `recent-${i}` }));
+  const cursor = { schoolId: 'pu', document: { id: 'recent-59', ref: { parent: { path: 'schools/pu/campusPosts' } } } };
+  jest.mocked(fetchCampusPostPage)
+    .mockResolvedValueOnce({ posts: rows, nextCursor: cursor, hasMore: true } as any)
+    .mockRejectedValueOnce(Object.assign(new Error('revoked'), { code: 'permission-denied' }))
+    .mockResolvedValueOnce({ posts: rows, nextCursor: cursor, hasMore: true } as any);
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValue([story]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByLabelText('查看 小柏 的限時動態')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByLabelText('載入更多貼文')));
+  expect(view.getByText('校籍或貼文存取權限已變更，請重新驗證後載入。')).toBeTruthy();
+  expect(view.queryByLabelText('查看 小柏 的限時動態')).toBeNull();
+  expect(view.UNSAFE_getByType(FlatList).props.data).toEqual([]);
+  await act(async () => fireEvent.press(view.getByText('重新讀取動態')));
+  expect(await view.findByLabelText('查看 小柏 的限時動態')).toBeTruthy();
+});
+
 test('mobile continuation refuses duplicate taps and ignores an old school response', async () => {
   const rows = Array.from({ length: 60 }, (_, i) => ({ ...post, id: `recent-${i}` }));
   const firstCursor = { schoolId: 'pu', document: { id: 'recent-59', ref: { parent: { path: 'schools/pu/campusPosts' } } } };

@@ -505,6 +505,24 @@ it('hides previously loaded posts when load-more detects revoked school access',
   expect(screen.getByRole('button', { name: '重新驗證' })).toBeTruthy();
 });
 
+it('removes the story rail on a denied page and reloads it only after revalidation', async () => {
+  const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', expiresAt: Date.now() + 60_000,
+    kind: 'text', text: '舊校限時動態' };
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows())
+    .mockRejectedValueOnce(Object.assign(new Error('revoked'), { code: 'permission-denied' }))
+    .mockResolvedValueOnce(pageRows());
+  mocks.fetchStories.mockResolvedValue([story]);
+  mocks.groupStories.mockImplementation((rows) =>
+    rows.length ? [{ authorUid: 'bob', latestAt: Date.now(), stories: rows }] : []);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('button', { name: /Bob的限時動態/ });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多貼文' }));
+  await screen.findByText('校籍或貼文存取權限已變更，原本載入的貼文已清除。');
+  expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新驗證' }));
+  await screen.findByRole('button', { name: /Bob的限時動態/ });
+});
+
 it('finds the 241st post while keeping the selected search, filter and order', async () => {
   mocks.fetchPosts.mockResolvedValueOnce(pageRows(0)).mockResolvedValueOnce(pageRows(60))
     .mockResolvedValueOnce(pageRows(120)).mockResolvedValueOnce(pageRows(180))

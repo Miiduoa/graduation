@@ -278,9 +278,15 @@ function HomeFeedContent() {
     } catch (cause) {
       if (!active.current || loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
-        // A denied continuation must hide cards already read under the old membership.
+        // A denied continuation revokes the whole school feed, not only post cards.
+        // The story strip and author names were fetched under the same old access.
         feedCursor.current = null;
         setPosts([]);
+        setStories([]);
+        setBoards([]);
+        setSubscribedBoardIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
         setHasMore(false);
         setAccessDenied(true);
         setPageNotice('');
@@ -512,6 +518,12 @@ function HomeFeedContent() {
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A denied feed must not rehydrate author names from saved or stale cards.
+      if (accessDenied) {
+        setNameByUid({});
+        setAvatarByUid({});
+        return;
+      }
       // 把貼文作者 + Story 作者一起 hydrate（少一次 batch）
       const uids = new Set<string>();
       [...posts, ...savedPosts].forEach((p) => {
@@ -537,7 +549,7 @@ function HomeFeedContent() {
     return () => {
       cancelled = true;
     };
-  }, [posts, savedPosts, stories, school?.id]);
+  }, [posts, savedPosts, stories, school?.id, accessDenied]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};
