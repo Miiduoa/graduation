@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import {
   personalImportStorageKey,
@@ -36,13 +37,25 @@ import {
  */
 export function PersonalEventReminderBridge() {
   const scope = usePersonalImportScope();
+  const platform = useOptionalNuniSession();
+  const latestPlatform = useRef(platform);
+  latestPlatform.current = platform;
   const latest = useRef(scope);
   latest.current = scope;
   const previousScope = useRef(scope);
   const key = scope ? personalImportStorageKey(scope) : '';
 
   useEffect(() => {
-    setPersonalEventReminderScopeProvider(() => latest.current);
+    setPersonalEventReminderScopeProvider(() => {
+      const scoped = latest.current;
+      const auth = latestPlatform.current;
+      const session = auth?.session;
+      if (scoped && session && scoped.owner === `nuni:${session.platformAccountId}` &&
+          auth.isSessionCurrent(session.platformAccountId, session.context)) {
+        return { ...scoped, nuniContext: session.context };
+      }
+      return scoped;
+    });
     return () => setPersonalEventReminderScopeProvider(() => null);
   }, []);
 

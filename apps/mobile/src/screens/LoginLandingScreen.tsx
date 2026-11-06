@@ -22,6 +22,7 @@ export default function LoginLandingScreen() {
   const s = useThemeStyleSheet(createStyles);
   const [, refreshProviders] = useState(0);
   const schoolEntry = isSchoolLoginEntryAvailable(school.id);
+  const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
   useEffect(() => {
     let active = true;
     void loadSchoolLoginProviderKinds().then(() => {
@@ -54,13 +55,23 @@ export default function LoginLandingScreen() {
           </Pressable>
         </View>
         <View style={s.intro}>
-          <Text style={s.school}>課程・校園・每天的事</Text>
+          <Text style={s.school}>{platformReady ? `${school.name} · 我的課表` : '課程・校園・每天的事'}</Text>
           <Text accessibilityRole="header" style={s.heading}>
-            把自己的校園資料，整理在一起
+            {platformReady ? '下一堂課在哪裡？' : '把自己的校園資料，整理在一起'}
           </Text>
           <Text style={s.body}>
-            選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。
+            {platformReady ? '用這台手機儲存的課表，查現在或下一堂課的時間和教室。'
+              : '選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。'}
           </Text>
+          {platformReady && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => safeNavigate(navigation, 'NuniTimetableAssistant')}
+              style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+            >
+              <Text style={s.schoolButtonText}>開啟課表助理</Text>
+            </Pressable>
+          )}
         </View>
         <SchoolBrowsingControl />
         <View style={s.schoolPanel}>
@@ -113,7 +124,7 @@ export default function LoginLandingScreen() {
             onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
           >
             <Text style={s.buttonText}>
-              {auth.session && !auth.loading && !auth.error && !auth.pendingLogout
+              {platformReady
                 ? '回到我的 nuni'
                 : auth.loading
                   ? '確認 Google 帳號'

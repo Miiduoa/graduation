@@ -410,4 +410,7 @@ test('a failed import read does not report a class cancellation from a notificat
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('課表暫時讀不到，請重新讀取後核對上課時間。');
   expect(view.queryByText('這個時段目前沒有排這堂課，請查看調整紀錄。')).toBeNull();
+  fireEvent.press(view.getByText('重新核對這堂課'));
+  await view.findByText('2026-11-02 · 08:00–09:50 · 教室 303');
+  expect(loadPersonalTimetable).toHaveBeenLastCalledWith(null, 'ncku', 'nuni:account-a');
 });

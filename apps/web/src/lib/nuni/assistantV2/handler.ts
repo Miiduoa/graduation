@@ -205,7 +205,9 @@ export async function handleV2(request: NextRequest, action: string) {
     const response = jsonResponse(
       {
         error: code,
-        ...(PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
+        ...(code === 'EVENT_START_PASSED'
+          ? { message: '這個時段已經開始，請重新安排時間。' }
+          : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
       },
       status,
     );
