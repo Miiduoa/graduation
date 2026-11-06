@@ -380,3 +380,25 @@ it('keeps a platform session from skipping the explicitly chosen school account 
   expect(fetchMock).not.toHaveBeenCalledWith('/api/nuni/session', expect.anything());
   expect(replace).not.toHaveBeenCalled();
 });
+
+it.each([null, '/school/account', 'https://outside.example/login'])('returns a verified school session to its own account page (%j)', async (returnUrl) => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
+  search.current = new URLSearchParams({ method: 'school' });
+  if (returnUrl) search.current.set('returnUrl', returnUrl);
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true, family: 'campus-account' })));
+  render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/school/account'));
+  expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/auth/session']);
+});
+
+it('sends a pending school logout to the account recovery action', async () => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace });
+  search.current = new URLSearchParams({ method: 'school' });
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    authenticated: false, family: 'campus-account', logoutPending: true,
+  }), { status: 401 }));
+  render(<AccountPage />);
+  await waitFor(() => expect(replace).toHaveBeenCalledWith('/school/account'));
+});

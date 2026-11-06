@@ -8,6 +8,8 @@ export const ACCOUNT_LOGIN_TRANSACTION_KEY = 'campus.account-login.transaction';
 export const ACCOUNT_EXPIRES_AT_KEY = 'campus.account.expires-at';
 export const AUTH_SOURCE_KEY = 'campus.auth.source';
 
+const SCHOOL_CALLBACK_PATH = '/auth/account/callback';
+
 export const CLASS_WORKSPACE_HREF = '/auth/platform/class-workspace/join';
 
 export const SCHOOL_PROVIDER_LABELS: Record<string, string> = {
@@ -72,6 +74,7 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/profile',
   '/search',
   '/school-info',
+  '/school/account',
   '/settings',
   '/shops',
   '/social',
@@ -531,10 +534,44 @@ function sessionLooksSignedIn(body: Record<string, unknown>): boolean {
   return typeof body.platformAccountId === 'string' && body.platformAccountId.length > 0;
 }
 
+export type SchoolAccountSession = { status: 'active' | 'pending'; context: string | null };
+
+export async function readSchoolAccountSession(signal?: AbortSignal): Promise<SchoolAccountSession | null> {
+  const response = await fetch('/auth/session', { cache: 'no-store', credentials: 'same-origin', signal });
+  const session = await readJson(response);
+  if (!response.ok && response.status !== 401) throw new Error('School session unavailable');
+  const context = typeof session?.sessionContext === 'string' && session.sessionContext.trim() ? session.sessionContext : null;
+  if (session?.logoutPending === true || session?.pendingLogout === true) {
+    if (session.family !== 'campus-account') throw new Error('Unknown logout session');
+    return { status: 'pending', context };
+  }
+  if (session?.authenticated === false) return null;
+  if (!response.ok || session?.authenticated !== true) throw new Error('Invalid school session');
+  if (session.family !== 'campus-account') return null;
+  return { status: 'active', context };
+}
+
+export async function logoutSchoolAccount(expected: SchoolAccountSession): Promise<void> {
+  const current = await readSchoolAccountSession();
+  if (current) {
+    if (current.status !== expected.status || current.context !== expected.context ||
+        (current.status === 'active' && !current.context)) {
+      throw new Error('School account changed');
+    }
+    const receipt = await accountToken({ grantType: 'logout' });
+    if (receipt?.revoked !== true || await readSchoolAccountSession()) throw new Error('School logout unconfirmed');
+  }
+  try {
+    sessionStorage.removeItem(ACCOUNT_EXPIRES_AT_KEY);
+    if (sessionStorage.getItem(AUTH_SOURCE_KEY) === 'campus-account') sessionStorage.removeItem(AUTH_SOURCE_KEY);
+  } catch {
+    // The server already revoked the session even if browser storage is disabled.
+  }
+}
+
 async function readSessionAt(path: string): Promise<boolean> {
   const response = await fetch(path, { cache: 'no-store', credentials: 'same-origin' });
-  if (!response.ok) return false;
-  return sessionLooksSignedIn(await readJson(response));
+  return response.ok && sessionLooksSignedIn(await readJson(response));
 }
 
 export async function readExistingSession(schoolOnly = false): Promise<boolean> {
@@ -546,7 +583,7 @@ export async function readExistingSession(schoolOnly = false): Promise<boolean> 
     }
   }
   try {
-    return await readSessionAt('/auth/session');
+    return schoolOnly ? (await readSchoolAccountSession())?.status === 'active' : await readSessionAt('/auth/session');
   } catch {
     return false;
   }
@@ -557,6 +594,7 @@ function microsoftAuthorizeUrl(issuer: string): string {
   if (
     url.protocol !== 'https:' ||
     !MICROSOFT_HOSTS.has(url.hostname) ||
+    url.username || url.password || url.port ||
     url.search ||
     url.hash ||
     !/^\/[0-9a-f-]{36}\/v2\.0$/i.test(url.pathname)
@@ -566,15 +604,14 @@ function microsoftAuthorizeUrl(issuer: string): string {
   return `${url.origin}${url.pathname.replace(/\/v2\.0$/, '/oauth2/v2.0/authorize')}`;
 }
 
-function schoolAuthorizeUrl(transaction: Record<string, unknown>, challenge: string): string {
-  let endpoint: string;
+function schoolAuthorizationEndpoint(transaction: Record<string, unknown>): string {
   if (transaction.kind === 'google-workspace') {
     if (transaction.issuer !== 'https://accounts.google.com') {
       throw new AccountLoginError('學校登入設定無法驗證，請聯絡資訊中心。', 503, 'ACCOUNT_PROVIDER_INVALID');
     }
-    endpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
+    return 'https://accounts.google.com/o/oauth2/v2/auth';
   } else if (transaction.kind === 'microsoft-entra') {
-    endpoint = microsoftAuthorizeUrl(String(transaction.issuer));
+    return microsoftAuthorizeUrl(String(transaction.issuer));
   } else {
     throw new AccountLoginError(
       '這所學校的登入入口仍在完成安全設定，請先使用學校原有入口。',
@@ -582,7 +619,10 @@ function schoolAuthorizeUrl(transaction: Record<string, unknown>, challenge: str
       'CAMPUS_OIDC_DISCOVERY_REQUIRED',
     );
   }
-  const destination = new URL(endpoint);
+}
+
+function schoolAuthorizeUrl(transaction: Record<string, unknown>, challenge: string): string {
+  const destination = new URL(schoolAuthorizationEndpoint(transaction));
   destination.search = new URLSearchParams({
     response_type: 'code',
     client_id: String(transaction.clientId),
@@ -623,7 +663,7 @@ export async function startSchoolProvider(tenantId: string, kind: string, return
     ...body,
     state: randomState(),
     codeVerifier: verifier,
-    redirectUri: `${window.location.origin}/auth/account/callback`,
+    redirectUri: `${window.location.origin}${SCHOOL_CALLBACK_PATH}`,
     createdAt: Date.now(),
     returnPath: sanitizeReturnPath(returnPath),
   };
@@ -634,6 +674,7 @@ export async function startSchoolProvider(tenantId: string, kind: string, return
 async function accountToken(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   const response = await fetch('/auth/account/token', {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     cache: 'no-store',
@@ -653,13 +694,90 @@ function rememberAccountSession(expiresIn: unknown): void {
   if (!Number.isFinite(expiresIn) || Number(expiresIn) <= 0) {
     throw new AccountLoginError('這次登入已失效，請重新開始。', 401, 'ACCOUNT_CALLBACK_INVALID');
   }
+  const previousKeys = [
+    'campus.oidc.access-token', 'campus.oidc.id-token', 'campus.oidc.expires-at',
+    'campus.account.access-token', ACCOUNT_EXPIRES_AT_KEY,
+  ];
+  const previousSource = sessionStorage.getItem(AUTH_SOURCE_KEY);
+  if (previousSource === 'oidc' || previousSource === 'campus-account' ||
+      previousKeys.some((key) => sessionStorage.getItem(key))) {
+    // The legacy offline reader checks both the grant and the stamp captured
+    // by in-flight downloads. Replacing a school session invalidates both.
+    for (const key of ['campus:lms-offline-access-stamp', 'campus:lms-offline-access']) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // Browsers that disable local storage cannot read these grants.
+      }
+    }
+  }
   sessionStorage.removeItem('campus.oidc.transaction');
-  sessionStorage.removeItem('campus.oidc.access-token');
-  sessionStorage.removeItem('campus.oidc.id-token');
-  sessionStorage.removeItem('campus.oidc.expires-at');
-  sessionStorage.removeItem('campus.account.access-token');
+  for (const key of previousKeys) sessionStorage.removeItem(key);
   sessionStorage.setItem(ACCOUNT_EXPIRES_AT_KEY, String(Date.now() + Number(expiresIn) * 1000));
   sessionStorage.setItem(AUTH_SOURCE_KEY, 'campus-account');
+}
+
+function invalidSchoolCallback() {
+  return new AccountLoginError('這次登入已失效，請重新登入學校帳號。', 401, 'ACCOUNT_CALLBACK_INVALID');
+}
+
+function takeSchoolAuthorization(callbackUrl: string) {
+  const raw = sessionStorage.getItem(ACCOUNT_LOGIN_TRANSACTION_KEY);
+  sessionStorage.removeItem(ACCOUNT_LOGIN_TRANSACTION_KEY);
+  if (!raw) throw invalidSchoolCallback();
+
+  let transaction: Record<string, unknown>;
+  try {
+    transaction = JSON.parse(raw);
+  } catch {
+    throw invalidSchoolCallback();
+  }
+  // The server binds the exchange to its sealed provider transaction. Only the
+  // one-time code and the original PKCE verifier cross that boundary.
+  const callback = new URL(callbackUrl);
+  const redirectUri = `${window.location.origin}${SCHOOL_CALLBACK_PATH}`;
+  const params = callback.searchParams;
+  if (
+    !transaction || typeof transaction !== 'object' ||
+    callback.origin !== window.location.origin || callback.pathname !== SCHOOL_CALLBACK_PATH ||
+    callback.username || callback.password || callback.hash || transaction.redirectUri !== redirectUri ||
+    params.getAll('state').length !== 1 || typeof transaction.state !== 'string' ||
+    !/^[A-Za-z0-9_-]{43}$/.test(transaction.state) || params.get('state') !== transaction.state
+  ) throw invalidSchoolCallback();
+
+  const { createdAt, expiresInSeconds, codeVerifier, issuer } = transaction;
+  const now = Date.now();
+  if (
+    typeof createdAt !== 'number' || !Number.isSafeInteger(createdAt) || createdAt > now ||
+    typeof expiresInSeconds !== 'number' || !Number.isInteger(expiresInSeconds) ||
+    expiresInSeconds < 1 || expiresInSeconds > 600 || now - createdAt >= expiresInSeconds * 1000
+  ) throw invalidSchoolCallback();
+  if (
+    typeof codeVerifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(codeVerifier) ||
+    typeof transaction.tenantId !== 'string' || !transaction.tenantId.trim() ||
+    transaction.clientKind !== 'web' || typeof transaction.clientId !== 'string' || !transaction.clientId.trim() ||
+    typeof transaction.nonce !== 'string' || transaction.nonce.length < 32 || transaction.nonce.length > 128 ||
+    params.getAll('iss').length > 1 || (params.has('iss') && params.get('iss') !== issuer)
+  ) throw invalidSchoolCallback();
+  schoolAuthorizationEndpoint(transaction);
+  if (params.has('error')) {
+    if (params.getAll('error').length === 1 && params.get('error') === 'access_denied' && !params.has('code')) {
+      throw new AccountLoginError('這次學校登入已取消。', 401, 'ACCOUNT_CALLBACK_CANCELLED');
+    }
+    throw invalidSchoolCallback();
+  }
+  const code = params.get('code');
+  if (params.getAll('code').length !== 1 || !code?.trim() || code.length > 4000) throw invalidSchoolCallback();
+  const returnPath = sanitizeReturnPath(typeof transaction.returnPath === 'string' ? transaction.returnPath : null);
+  return { code, codeVerifier, returnPath };
+}
+
+export async function completeSchoolCallback(callbackUrl: string): Promise<void> {
+  const { code, codeVerifier, returnPath } = takeSchoolAuthorization(callbackUrl);
+  const result = await accountToken({ grantType: 'exchange', code, codeVerifier });
+  if (result?.authenticated !== true) throw invalidSchoolCallback();
+  rememberAccountSession(result.expiresIn);
+  window.location.replace(returnPath);
 }
 
 async function passkeyAssertion(challenge: Record<string, unknown>): Promise<{
