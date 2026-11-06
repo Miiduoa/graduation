@@ -358,7 +358,7 @@ function readCachedExtras(value: unknown, nowMs: number): {
   return { extras, pruned };
 }
 
-function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null {
+function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonlySnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const cache = record(row.cache);
@@ -367,7 +367,7 @@ function publicSnapshot(value: unknown, uid: string): LmsReadonlySnapshot | null
   if (row.success !== true || row.ownerUid !== uid || row.schoolId !== 'pu' || row.source !== 'pu-tronclass' ||
     typeof row.fetchedAt !== 'string' || !Number.isFinite(Date.parse(row.fetchedAt)) ||
     typeof cache.hit !== 'boolean' ||
-    typeof cache.expiresAt !== 'string' || !Number.isFinite(Date.parse(cache.expiresAt)) ||
+    typeof cache.expiresAt !== 'string' || !cacheStillFresh(cache.expiresAt, nowMs) ||
     !Array.isArray(row.courses) || !Array.isArray(row.contentsLoadedFor) ||
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !Array.isArray(row.courseErrors)) return null;
@@ -523,10 +523,10 @@ export function createTronClassLmsHandler({
 
       if (cached.exists && sessionVersion && cacheData?.sessionVersion === sessionVersion &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
-        cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid)) {
+        cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
         const pruned = readCachedExtras(cacheData.extras, now());
         extras = refresh ? {} : pruned.extras;
-        cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid)!);
+        cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid, now())!);
         shouldPruneExtras = !refresh && pruned.pruned;
       }
 
