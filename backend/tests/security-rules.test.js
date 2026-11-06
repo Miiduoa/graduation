@@ -1841,6 +1841,14 @@ describe('storage security rules', () => {
     await assertSucceeds(photo.getMetadata());
   });
 
+  test('campus media denies an orphaned membership without a canonical user profile', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'member' });
+    });
+    const file = testEnv.authenticatedContext('alice').storage().ref('schools/pu/campusPosts/orphan/photo.jpg');
+    await assertFails(uploadString(file, 'orphaned membership', 'image/jpeg'));
+  });
+
   for (const objectPath of [
     'conversations/chat/messages/one/photo.jpg',
     'conversations/chat/media/one/photo.jpg',
@@ -1852,6 +1860,7 @@ describe('storage security rules', () => {
       await seedFirestore(async (db) => {
         await db.doc('conversations/chat').set({ memberIds: ['alice', 'bob'] });
         for (const uid of ['alice', 'bob']) {
+          await db.doc('users/' + uid).set({ status: 'active' });
           await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
           await db.doc('groups/course/members/' + uid).set({ status: 'active' });
         }
