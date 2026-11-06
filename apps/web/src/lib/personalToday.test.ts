@@ -103,6 +103,17 @@ describe('personal timetable on Today', () => {
       ['first', true], ['long', true], ['parallel', true], ['second', true], ['after', false],
     ]);
   });
+  it('marks two disjoint classes wrapped by a longer meeting as conflicts', () => {
+    const at = (id: string, startTime: string, endTime: string) => row({ id, startTime, endTime });
+    const result = view([
+      at('late', '11:00', '11:30'),
+      at('long', '08:00', '12:00'),
+      at('early', '09:00', '10:00'),
+    ]);
+    expect(result.today.map((entry) => [entry.row.id, entry.conflict])).toEqual([
+      ['long', true], ['early', true], ['late', true],
+    ]);
+  });
   it('does not report a manual copy of an imported class as a timetable conflict', () => {
     const manual = row({ id: 'manual:course', teacher: ' 王老師 ', location: '教室 ３０３' });
     const imported = row({
