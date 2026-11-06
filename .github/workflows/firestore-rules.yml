@@ -57,7 +57,7 @@ jobs:
         run: pnpm test:rules
 
       - name: Verify server-side DM media token revocation and authorized delivery
-        run: pnpm --filter functions exec jest dmAttachmentDelivery.test.js --runInBand
+        run: pnpm --filter functions exec jest dmAttachmentDelivery.test.js dmAttachmentTokenMigration.test.js --runInBand
 
       - name: Verify mobile DM signed delivery and failure cases
         run: pnpm --filter mobile exec jest src/__tests__/services/dmAttachments.test.ts --runInBand
