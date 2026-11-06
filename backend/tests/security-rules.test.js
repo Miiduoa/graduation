@@ -1825,6 +1825,7 @@ describe('storage security rules', () => {
   test('closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ displayName: 'Alice' });
+      await db.doc('users/bob').set({ displayName: 'Bob', status: 'active' });
       await db.doc('conversations/private').set({ memberIds: ['alice', 'bob'] });
       await db.doc('repairRequests/one').set({ userId: 'alice' });
     });

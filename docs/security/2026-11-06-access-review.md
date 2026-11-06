@@ -181,3 +181,9 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 追查 Firestore `users/{uid}` 的更新規則，發現既有 affectedKeys 欄位清單保護 role、accountDeletionInProgress 等，但沒有保護 `status`。新提交將 `status` 納入禁止由客戶端修改／移除的權限欄位，不更動既有合法 displayName 和 notificationsEnabled 更新。現有權限欄位測試增加對缺少 status 的插入、已有 active status 的變更與移除三種拒絕斷言。此調整與停權判斷一致，避免客戶端竄改 canonical 帳號狀態。Admin SDK 伺服器對既有帳號的合法停權、恢復與刪除流程不使用 Firestore Security Rules 的 client update，因此不受此 denylist 影響。是否存在舊版客戶端直接操作該狀態欄位，仍待實機／版本相容性查核。
 
 以精確 head 的 Firebase emulator 與 CI 結果驗證；若仍在佇列或執行中，不將它記為已通過。正式環境資料與發布沒有變動。
+
+### 21:50 UTC 精確提交 CI 失敗與隔離 fixture 修正
+
+GitHub 精確 head `c86ad270` 的 [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42299579448) 實際執行 257 個 Firestore／Storage 模擬器案例，256 通過、1 失敗。新增兩個「孤兒 conversation member」測試均通過；唯一失敗是既有 `closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads` 在尾端斷言 Bob 仍可讀私人會話附件。該 fixture 只建立 Alice 的 canonical user 文件，Bob 有 conversation memberIds 卻無 `users/bob` 文件。新規則應拒絕缺少 canonical user 的 Bob，因此測試舊資料配置不再符合「合法 Bob」前提。
+
+本次只在該回歸的 seed 新增 `users/bob = {status:'active'}`，保留 Alice 停權後所有既有路徑的拒絕斷言，以及合法 Bob 的正常讀取斷言。沒有放寬 Storage 規則，也沒有移除任何新增失效案例。完整規則與其他工作在修補提交後重新執行，**尚待精確 head 結果，不視為已驗證成功**。
