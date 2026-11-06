@@ -313,7 +313,7 @@ function StorySlide({
         >
           {hasVideo ? (
             <StoryClip
-              key={story.id}
+              key={JSON.stringify([scope, story.mediaUrl])}
               uri={story.mediaUrl}
               playing={playbackActive}
               fill={fill}
@@ -510,26 +510,34 @@ function StoryClip({
 }) {
   const [muted, setMuted] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [positionSeconds, setPositionSeconds] = useState(0);
-  // Native callbacks may arrive after a swipe, close or pause.
-  const session = useMemo(() => ({ playing }), [playing]);
+  // Loading callbacks belong to one attempt, while completion also belongs to a playback session.
+  const session = useMemo(() => ({ playing, attempt }), [playing, attempt]);
   const current = React.useRef<typeof session | null>(null);
   React.useLayoutEffect(() => {
-    current.current = session;
+    current.current = failed ? null : session;
     return () => {
       current.current = null;
     };
-  }, [session]);
+  }, [session, failed]);
+  React.useLayoutEffect(() => {
+    fill.setValue(0);
+  }, [attempt, fill]);
   if (failed || !uri || !supportsStoryVideo) {
     return (
-      <View style={styles.clipStatus}>
+      <View pointerEvents="box-none" style={styles.clipStatus}>
         <Text style={styles.stepText}>影片暫時無法播放</Text>
         {uri && supportsStoryVideo && (
           <Pressable
             accessibilityRole="button"
             style={styles.step}
-            onPress={() => setFailed(false)}
+            onPress={() => {
+              onPause();
+              setAttempt((value) => value + 1);
+              setFailed(false);
+            }}
           >
             <Text style={styles.stepText}>重新載入影片</Text>
           </Pressable>
@@ -540,6 +548,7 @@ function StoryClip({
   return (
     <View style={styles.photo}>
       <StoryVideoPlayer
+        key={attempt}
         source={{ uri, overrideFileExtensionAndroid: 'mp4' }}
         style={styles.photo}
         accessibilityLabel="限時動態影片"
@@ -547,7 +556,8 @@ function StoryClip({
         isMuted={muted}
         isLooping={false}
         onError={() => {
-          if (!current.current) return;
+          if (current.current?.attempt !== attempt) return;
+          current.current = null;
           setMuted(true);
           setPositionSeconds(0);
           setDurationSeconds(0);
@@ -555,7 +565,7 @@ function StoryClip({
           onPause();
         }}
         onReadyForDisplay={({ status }) => {
-          if (current.current && status?.isLoaded && status.durationMillis)
+          if (current.current?.attempt === attempt && status?.isLoaded && status.durationMillis)
             setDurationSeconds(Math.ceil(status.durationMillis / 1000));
         }}
         onPlaybackStatusUpdate={(status) => {
@@ -620,7 +630,7 @@ const styles = StyleSheet.create({
   },
   clipTime: { color: '#fff', fontSize: 13, fontVariant: ['tabular-nums'] },
   sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, zIndex: 1 },
   photo: { width: '100%', height: '100%' },
   photoLoading: {
     ...StyleSheet.absoluteFillObject,
