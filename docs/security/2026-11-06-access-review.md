@@ -152,6 +152,6 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 
 對照兩組 storage 回歸發現，正常建立成功的 `schools/pu/campusPosts` 案例有 `users/alice` canonical 文件；共用覆寫案例只有 `schools/pu/members/alice`。為避免帳號已刪除、canonical 文件遺失而校籍 membership 孤留時繼續持舊 token 存取校園附件，這個 namespace 現在**明確要求 canonical user 文件存在**，並保留 `isActiveAccount()` 的停權狀態拒絕以及 `members/{uid}.status == active` 的跨校授權。此策略僅修改校園貼文附件，不擴大至未驗證的其他命名空間。
 
-更新既有「上傳不可被其他人覆寫」測試，使 Alice/Bob 都有真實 `status: active` 的 canonical 文件，維持首筆合法上傳成功、第二人覆寫與刪除失敗；新增無 canonical user 文件而學校 membership 留存時**必須拒絕新上傳**的負向案例。此方式不削弱授權來讓測試通過，但會讓歷史上只有學校 membership、未完成 user profile 建立的帳號暫時無法上傳／讀取該類私有校園附件。發布前須盤點、補齊真實 legacy 帳號的 canonical profile，不能盲目在正式環境打開規則。不同套件仍在各自隔離 emulator 中驗證。
+更新既有「上傳不可被其他人覆寫」測試，使 Alice/Bob 都有真實 `status: active` 的 canonical 文件，維持首筆合法上傳成功、第二人覆寫與刪除失敗；新增無 canonical user 文件而學校 membership 留存時**必須拒絕讀取既有檔案及新上傳**的負向案例；既有檔案由規則停用的 emulator fixture 預先建立。此方式不削弱授權來讓測試通過，但會讓歷史上只有學校 membership、未完成 user profile 建立的帳號暫時無法上傳／讀取該類私有校園附件。發布前須盤點、補齊真實 legacy 帳號的 canonical profile，不能盲目在正式環境打開規則。不同套件仍在各自隔離 emulator 中驗證。
 
 此修正推送後才可由精確 head 的 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 判斷結果；截至本段記錄時**尚未取得新版本完整 CI 成功結果**，沒有合併、正式資料修改或部署。
