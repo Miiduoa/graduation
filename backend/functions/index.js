@@ -35,6 +35,10 @@ const { createOrderHandler } = require('./createOrder');
 const { assertOnlineOrderingEnabled, isOrderAssistantAction } = require('./lib/onlineOrdering');
 const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
+const { createReplyToCampusStory } = require('./storyReplies');
+const { createDmAttachmentDelivery } = require('./dmAttachmentDelivery');
+const { createDmPhotos } = require('./dmPhotos');
+const { createDmConversations } = require('./dmConversations');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const {
@@ -2755,6 +2759,7 @@ exports.bulkUpdateSchoolAnnouncements = onCall(
 );
 
 exports.submitProductFeedback = onCall({ region: REGION }, createSubmitProductFeedback({ db }));
+exports.replyToCampusStory = onCall({ region: REGION }, createReplyToCampusStory({ db }));
 const {
   createCreateTimetableShareHandler,
   createRevokeTimetableShareHandler,
@@ -5858,3 +5863,18 @@ console.log('Firebase Cloud Functions loaded successfully');
 exports.clubAdmin = onCall({ region: REGION }, require('./clubAdmin').createClubAdmin({ db }));
 
 exports.clubRoster = onCall({ region: REGION }, require('./clubRoster').createClubRoster({ db }));
+
+// Server-side three-document authorization; Cloud Storage Rules have a two-document cap.
+const attachmentServices = {
+  db,
+  getBucket: () => require('firebase-admin/storage').getStorage().bucket(),
+};
+const legacyAttachmentDelivery = createDmAttachmentDelivery(attachmentServices);
+const dmPhotos = createDmPhotos(attachmentServices);
+const dmConversations = createDmConversations({ db });
+exports.prepareDmConversation = onCall({ region: REGION }, dmConversations.prepare);
+exports.sendDmText = onCall({ region: REGION }, dmConversations.sendText);
+exports.dmAttachmentDelivery = onCall({ region: REGION }, request =>
+  request.data?.action === 'uploadPhoto' || request.data?.folder === 'photos'
+    ? dmPhotos.delivery(request) : legacyAttachmentDelivery(request));
+exports.sendDmPhoto = onCall({ region: REGION }, dmPhotos.send);

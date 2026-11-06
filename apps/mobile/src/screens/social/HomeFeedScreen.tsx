@@ -214,12 +214,12 @@ function HomeFeedContent() {
       setStories(storyRows);
     } catch (cause) {
       if (loadVersion.current !== version) return;
+      setStories([]);
       if (isAccessDenied(cause)) {
         setAccessDenied(true);
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
-        setStories([]);
         setNameByUid({});
         setAvatarByUid({});
         setHasMore(false);

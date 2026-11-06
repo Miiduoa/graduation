@@ -94,10 +94,22 @@ service firebase.storage {
         );
     }
 
+    // A stale membership in a previous school does not grant access to DM attachments.
+    function isCurrentSchoolMemberStorage(schoolId) {
+      return schoolId is string
+        && schoolId.size() > 0
+        && isSchoolMemberStorage(schoolId)
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
+    }
+
     function conversationMember(conversationId) {
       return isActiveAccount()
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
-        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
+        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds
+        && isCurrentSchoolMemberStorage(
+          firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.get('schoolId', '')
+        );
     }
 
     function assignmentGroupId(assignmentId) {
@@ -211,8 +223,12 @@ service firebase.storage {
     }
 
     match /conversations/{conversationId}/messages/{messageId}/{fileName} {
-      allow read: if conversationMember(conversationId);
-      allow write: if conversationMember(conversationId) && isAllowedUpload() && maxSize(20);
+      // Direct SDK reads/writes require three distinct Firestore documents and
+      // exceed the production Storage Rules cap of TWO. Even an active member
+      // must use dmAttachmentDelivery (server-side authorization per request).
+      // Denying SDK metadata access also prevents issuing NEW Firebase tokens.
+      // Pre-existing download URLs remain valid until separately revoked.
+      allow read, write: if false;
     }
 
     match /bugreports/{reportId}/{fileName} {
@@ -245,18 +261,20 @@ service firebase.storage {
         return isAuthenticated()
           && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
       }
-      function isPublishedStory() {
-        let story = firestore.get(/databases/(default)/documents/campusStories/$(storyId)).data;
-        return story.schoolId == schoolId
-          && resource.metadata.ownerUid == story.authorUid
-          && story.mediaUrl is string && story.mediaUrl.size() > 0
-          && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
-            || (story.kind == 'video' && fileName == 'video' && resource.contentType == 'video/mp4'));
+      // Readers use mediaUrl from the school-scoped Firestore feed. Only the
+      // publisher needs the raw object to obtain that URL while composing.
+      function currentUploader() {
+        let profile = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+        return profile.get('schoolId', '') == schoolId
+          && profile.get('accountDeletionInProgress', false) != true
+          && profile.get('status', '') != 'deleted';
       }
-      allow get: if activeStoryMember()
-        && (resource.metadata.get('ownerUid', '') == request.auth.uid || isPublishedStory());
+      allow get: if isAuthenticated() && resource.metadata.get('ownerUid', '') == request.auth.uid
+        && activeStoryMember() && currentUploader();
       // Draft uploads may be retried until their Firestore story is published.
-      allow create, update: if activeStoryMember()
+      // A still-active record at the previous school cannot authorize new drafts.
+      // Check the current profile on writes too, not only on raw object reads.
+      allow create, update: if activeStoryMember() && currentUploader()
         && request.resource.metadata.ownerUid == request.auth.uid
         && (resource == null || resource.metadata.ownerUid == request.auth.uid)
         && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
@@ -266,8 +284,9 @@ service firebase.storage {
     }
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {
-      allow read: if conversationMember(conversationId);
-      allow write: if conversationMember(conversationId) && campusMediaOk();
+      // GCS V4 POST and one-minute signed GET are issued only by the
+      // authenticated dmAttachmentDelivery callable, not Storage SDK rules.
+      allow read, write: if false;
     }
 
     match /{allPaths=**} {

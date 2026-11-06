@@ -17,8 +17,10 @@ import {
   watchMessagingSession,
   watchPrivateConversations,
   watchConversationContents,
+  watchNewPrivateConversation,
   watchAccountNotifications,
   sendPrivateMessage,
+  sendPreparedPrivateMessage,
   newPrivateMessageId,
   markConversationRead,
   togglePrivateMessageReaction,
@@ -27,8 +29,10 @@ import {
   type MessagingSession,
   type MessagingFailure,
   type AccountNotification,
+  type PreparedPrivateConversation,
 } from '@/lib/privateMessages';
 import { isConversationUnread } from '@/lib/conversationAccess';
+import { DmPhotoComposer, DmPhotoMessage } from './DmPhotos';
 import styles from './messaging.module.css';
 
 type FeedState<T> = {
@@ -108,11 +112,15 @@ function StateNotice({ status, retry }: { status: string; retry: () => void }) {
 }
 export function MessagingShell({
   title,
+  subtitle,
   section = 'conversations',
+  returnUrl,
   children,
 }: {
   title: string;
+  subtitle?: string;
   section?: 'conversations' | 'notifications';
+  returnUrl?: string;
   children: (session: MessagingSession) => ReactNode;
 }) {
   const { user, loading } = useAuth();
@@ -130,9 +138,9 @@ export function MessagingShell({
     <SiteShell
       title={title}
       subtitle={
-        section === 'notifications'
+        subtitle ?? (section === 'notifications'
           ? '課程、活動與服務的新消息，都在這裡。'
-          : '接著上次的話題，與校園裡的人保持聯繫。'
+          : '接著上次的話題，與校園裡的人保持聯繫。')
       }
       schoolName={session ? findSchoolById(session.schoolId)?.name : undefined}
     >
@@ -153,7 +161,7 @@ export function MessagingShell({
             <p>登入學校帳號後，就能查看你的對話與通知。</p>
             <Link
               className={styles.primary}
-              href={`/login?returnUrl=${section === 'notifications' ? '%2Fmessages' : '%2Fdms'}`}
+              href={`/login?returnUrl=${encodeURIComponent(returnUrl ?? (section === 'notifications' ? '/messages' : '/dms'))}`}
             >
               前往登入
             </Link>
@@ -227,6 +235,9 @@ export function PrivateConversationList({ session }: { session: MessagingSession
           <p className={styles.muted}>只有目前帳號所屬學校、且你是成員的對話會出現在這裡。</p>
         </div>
         <div className={styles.inboxActions}>
+          <Link className={styles.primary} href="/dms/new">
+            新增訊息
+          </Link>
           <Link className={styles.button} href="/friends">
             尋找同學
           </Link>
@@ -314,7 +325,7 @@ export function PrivateConversationList({ session }: { session: MessagingSession
                 ? '可以試著改用對方姓名，或清除搜尋重新查看。'
                 : onlyUnread
                   ? '有新訊息時會出現在這個分類。'
-                  : '你可以從同校好友或已加入的群組開始交流。'}
+                  : '選一位同校同學，傳送文字或照片開始聊天。'}
             </p>
             <div className={styles.actions}>
               {search.trim() && (
@@ -328,8 +339,8 @@ export function PrivateConversationList({ session }: { session: MessagingSession
                 </button>
               )}
               {!search.trim() && !onlyUnread && (
-                <Link className={styles.primary} href="/friends">
-                  尋找同學
+                <Link className={styles.primary} href="/dms/new">
+                  新增訊息
                 </Link>
               )}
             </div>
@@ -341,19 +352,37 @@ export function PrivateConversationList({ session }: { session: MessagingSession
 export function PrivateConversationView({
   session,
   conversationId,
+  prepared,
 }: {
   session: MessagingSession;
   conversationId: string;
+  prepared?: PreparedPrivateConversation;
 }) {
+  const viewScope = JSON.stringify([session.uid, session.schoolId, conversationId, prepared?.peerUid]);
+  const attempt = useRef<{ scope: string; id: string; body: string; confirmed: boolean } | null>(null);
+  const [acknowledgedScope, setAcknowledgedScope] = useState<string | null>(null);
+  const established = !prepared || prepared.exists || acknowledgedScope === viewScope;
   const subscribe = useCallback(
     (
       receive: Parameters<typeof watchConversationContents>[2],
       fail: Parameters<typeof watchConversationContents>[3],
-    ) => watchConversationContents(session, conversationId, receive, fail),
-    [session, conversationId],
+    ) => {
+      const received: typeof receive = (contents) => {
+        const pending = attempt.current;
+        if (pending?.scope === viewScope && contents.messages.some((message) =>
+          message.id === pending.id && message.senderId === session.uid &&
+          message.type === 'text' && message.content === pending.body,
+        )) pending.confirmed = true;
+        receive(contents);
+      };
+      return established
+        ? watchConversationContents(session, conversationId, received, fail)
+        : watchNewPrivateConversation(session, prepared!, received, fail);
+    },
+    [session, conversationId, prepared, established, viewScope],
   );
   const { state, retry } = useFeed(
-    `${session.uid}:${session.schoolId}:${conversationId}`,
+    viewScope,
     subscribe,
   );
   const isCurrent = useCurrent(session);
@@ -366,17 +395,23 @@ export function PrivateConversationView({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const messageListRef = useRef<HTMLOListElement>(null);
+  const textInput = useRef<HTMLTextAreaElement>(null);
   const followsLatestRef = useRef(true);
   const lastVisibleRef = useRef<{ scope: string; messageId: string } | null>(null);
   const sendLock = useRef(false);
   const readLock = useRef(false);
   const reactionLock = useRef(false);
-  const attempt = useRef<{ id: string; body: string } | null>(null);
-  const currentConversation = useRef(conversationId);
+  const sendRequest = useRef<AbortController | null>(null);
+  const currentConversation = useRef(viewScope);
   useLayoutEffect(() => {
-    currentConversation.current = conversationId;
-  }, [conversationId]);
-  const active = () => isCurrent() && currentConversation.current === conversationId;
+    currentConversation.current = viewScope;
+    return () => sendRequest.current?.abort();
+  }, [viewScope]);
+  const active = () => isCurrent() && currentConversation.current === viewScope;
+  const photoScope = { viewerUid: session.uid, schoolId: session.schoolId, conversationId };
+  useEffect(() => {
+    if (prepared && state.status === 'ready') textInput.current?.focus();
+  }, [prepared, state.status]);
   const lastMessageId =
     state.status === 'ready' ? state.data?.messages.at(-1)?.id ?? '' : '';
   useLayoutEffect(() => {
@@ -412,6 +447,11 @@ export function PrivateConversationView({
     followsLatestRef.current = true;
     setShowJumpToLatest(false);
   };
+  const confirmedDelivery = () => {
+    if (!active()) return;
+    if (prepared) setAcknowledgedScope(viewScope);
+    jumpToLatest();
+  };
   const draftKey = `campus-one:dm-draft:${session.uid}:${session.schoolId}:${conversationId}`;
   // Keep draft state bound to its conversation: effects for a newly selected
   // conversation must never persist text from the previous account or thread.
@@ -435,24 +475,45 @@ export function PrivateConversationView({
       // Private browsing can block storage; the live draft remains editable.
     }
   }, [draftKey, draftState.scope, draftState.text]);
+  useLayoutEffect(() => {
+    const submission = attempt.current;
+    if (
+      sending || state.status !== 'ready' || submission?.scope !== viewScope ||
+      !submission.confirmed || getAuth()?.currentUser?.uid !== session.uid
+    ) return;
+    setDraftState((current) => current.scope === draftKey && current.text.trim() === submission.body
+      ? { scope: draftKey, text: '' } : current);
+    setFeedback('');
+    attempt.current = null;
+    if (prepared) setAcknowledgedScope(viewScope);
+  }, [draftKey, prepared, sending, session.uid, state, viewScope]);
   const send = async () => {
     const body = draft.trim();
     if (!body || body.length > 4000 || sendLock.current || state.status !== 'ready' || !active())
       return;
     sendLock.current = true;
+    const controller = new AbortController();
+    sendRequest.current = controller;
     setSending(true);
     setFeedback('');
     try {
-      if (!attempt.current || attempt.current.body !== body)
-        attempt.current = { id: newPrivateMessageId(conversationId), body };
-      await sendPrivateMessage(session, conversationId, attempt.current.id, body);
-      if (!active()) return;
+      if (!attempt.current || attempt.current.scope !== viewScope || attempt.current.body !== body)
+        attempt.current = { scope: viewScope, id: newPrivateMessageId(conversationId), body, confirmed: false };
+      const submission = attempt.current;
+      await (prepared
+        ? sendPreparedPrivateMessage(session, prepared, submission.id, body, controller.signal)
+        : sendPrivateMessage(session, conversationId, submission.id, body)
+      ).catch((error) => {
+        if (!submission.confirmed) throw error;
+      });
+      if (!active() || controller.signal.aborted) return;
       setDraft('');
       attempt.current = null;
-      jumpToLatest();
+      confirmedDelivery();
     } catch {
       if (active()) setFeedback('尚未確認送出，內容已保留。請重新連線後再試。');
     } finally {
+      if (sendRequest.current === controller) sendRequest.current = null;
       sendLock.current = false;
       if (active()) setSending(false);
     }
@@ -510,6 +571,7 @@ export function PrivateConversationView({
     <div className={styles.stack}>
       <div className={styles.toolbar}>
         <Link href="/dms">返回對話列表</Link>
+        {prepared && <Link href="/dms/new">更換收件人</Link>}
         <button className={styles.button} type="button" onClick={retry} disabled={sending}>
           重新連線
         </button>
@@ -519,11 +581,15 @@ export function PrivateConversationView({
         <>
           <div className={styles.chatHeader}>
             <div>
-              <p className={styles.overline}>對話內容</p>
-              <h2>{state.data.conversation.peerName || '訊息'}</h2>
-              <p className={styles.muted}>顯示最近 100 則訊息；搜尋僅查詢目前載入的內容。</p>
+              <p className={styles.overline}>{state.data.exists === false ? '開始對話' : '對話內容'}</p>
+              <h2>{state.data.conversation.peerName || '同學'}</h2>
+              <p className={styles.muted}>
+                {state.data.exists === false
+                  ? '傳送第一則訊息，向同學打聲招呼。'
+                  : '顯示最近 100 則訊息；搜尋僅查詢目前載入的內容。'}
+              </p>
             </div>
-            {isConversationUnread({
+            {state.data.exists !== false && (isConversationUnread({
               uid: session.uid,
               lastMessageAt: state.data.conversation.lastMessageAt,
               lastReadAt: state.data.conversation.lastReadAt,
@@ -534,9 +600,9 @@ export function PrivateConversationView({
               </button>
             ) : (
               <span className={styles.readIndicator}>對話已讀</span>
-            )}
+            ))}
           </div>
-          <div className={styles.toolbar}>
+          {state.data.exists !== false && <div className={styles.toolbar}>
             <label className={styles.field}>
               搜尋此對話
               <input
@@ -551,7 +617,7 @@ export function PrivateConversationView({
                 清除搜尋
               </button>
             )}
-          </div>
+          </div>}
           {showJumpToLatest && !messageSearch.trim() && (
             <div className={styles.jumpRow}>
               <button className={styles.jumpButton} type="button" onClick={jumpToLatest}>
@@ -579,13 +645,24 @@ export function PrivateConversationView({
                   key={row.id}
                   className={row.senderId === session.uid ? styles.mine : styles.theirs}
                 >
-                  <p>
-                    {row.recalled
-                      ? '訊息已收回'
-                      : row.type === 'text' || row.type === 'reply'
-                        ? row.content
-                        : '此類型訊息請在 App 中查看。'}
-                  </p>
+                  {!row.recalled && row.isStoryReply && (
+                    <small className={styles.messageMeta}>回覆了限時動態</small>
+                  )}
+                  {!row.recalled && row.type === 'image' && row.attachmentPath ? (
+                    <DmPhotoMessage
+                      key={JSON.stringify([session.uid, session.schoolId, conversationId, row.id, row.attachmentPath])}
+                      scope={{ ...photoScope, messageId: row.id }}
+                      path={row.attachmentPath}
+                    />
+                  ) : (
+                    <p>
+                      {row.recalled
+                        ? '訊息已收回'
+                        : row.type === 'text' || row.type === 'reply'
+                          ? row.content
+                          : '此類型訊息請在 App 中查看。'}
+                    </p>
+                  )}
                   <div className={styles.messageMeta}>
                     <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
                     {!row.recalled && (row.type === 'text' || row.type === 'reply') && (
@@ -623,7 +700,11 @@ export function PrivateConversationView({
               ))
             ) : (
               <li className={styles.empty}>
-                {messageSearch.trim() ? '找不到符合的訊息，試著調整關鍵字。' : '目前還沒有訊息。'}
+                {messageSearch.trim()
+                  ? '找不到符合的訊息，試著調整關鍵字。'
+                  : state.data.exists === false
+                    ? '傳送文字或照片，開始這段對話。'
+                    : '目前還沒有訊息。'}
               </li>
             )}
           </ol>
@@ -644,6 +725,7 @@ export function PrivateConversationView({
         <label className={styles.field}>
           訊息內容
           <textarea
+            ref={textInput}
             value={draft}
             maxLength={4000}
             rows={3}
@@ -658,6 +740,17 @@ export function PrivateConversationView({
             placeholder="輸入訊息，按 Cmd / Ctrl + Enter 傳送"
           />
         </label>
+        {state.status !== 'permission' && (
+          <DmPhotoComposer
+            key={draftKey}
+            scope={prepared ? { ...photoScope, peerUid: prepared.peerUid } : photoScope}
+            ready={state.status === 'ready'}
+            confirmedPhotos={state.status === 'ready' ? state.data?.messages.filter((message) =>
+              message.senderId === session.uid && message.type === 'image',
+            ) : undefined}
+            onSent={confirmedDelivery}
+          />
+        )}
         <div className={styles.row}>
           <small className={styles.muted}>
             {draft.length} / 4000 · 草稿保留在目前瀏覽器分頁

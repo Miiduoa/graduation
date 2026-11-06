@@ -35,6 +35,7 @@ test('uploads to the matching school and reserved document, keeping the image ty
   const id = reserveStoryId();
   const mediaUrl = await uploadStoryImage('pu', id, 'alice', 'file:///local.png', 'image/png');
   await publishStory(id, {
+    allowReplies: true,
     schoolId: 'pu',
     authorUid: 'alice',
     kind: 'image',
@@ -83,6 +84,7 @@ test('records a view without trying to modify the read-only story document', asy
 test('recovers a committed create after a lost response only for the same active story', async () => {
   const denied = Object.assign(new Error('denied'), { code: 'permission-denied' });
   const content = {
+    allowReplies: true,
     schoolId: 'pu',
     authorUid: 'alice',
     kind: 'image' as const,
@@ -100,6 +102,7 @@ test('recovers a committed create after a lost response only for the same active
   await expect(publishStory('reserved', draft)).resolves.toBe('reserved');
   for (const changed of [
     { text: '不同的貼文' },
+    { allowReplies: false },
     { authorUid: 'other' },
     { schoolId: 'other' },
     { mediaUrl: 'wrong' },

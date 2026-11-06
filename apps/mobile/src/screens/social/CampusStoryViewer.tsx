@@ -22,7 +22,10 @@ import {
   type CampusStoryDoc,
   type StoryAuthorGroup,
 } from '../../services/stories';
+import { isDemoUid } from '../../services/demoSession';
+import { useCampusSocialStackNav } from './CampusSocialNavContext';
 import { StoryAudiencePanel } from './StoryAudiencePanel';
+import { StoryReplyPanel } from './StoryReplyPanel';
 
 const STORY_DURATION = 7000;
 
@@ -96,7 +99,7 @@ export function useCampusStories(rows: CampusStoryDoc[], schoolId?: string, uid?
     },
     [schoolId, seen],
   );
-  return { groups, groupIndex, index, openGroup, selectStory, seen };
+  return { groups, groupIndex, index, openGroup, selectStory, seen, viewerUid: uid };
 }
 
 export function CampusStoryViewer({
@@ -109,10 +112,12 @@ export function CampusStoryViewer({
   const { groups, groupIndex, index, selectStory } = deck;
   const group = groups[groupIndex];
   const story = group?.stories[index];
-  if (!story || story.expiresAt! <= Date.now()) return null;
+  if (!deck.viewerUid || !story || story.expiresAt! <= Date.now()) return null;
   const previousGroup = groups[groupIndex - 1];
   return (
     <StorySlide
+      key={JSON.stringify([deck.viewerUid, story.schoolId])}
+      viewerUid={deck.viewerUid}
       story={story}
       group={group}
       index={index}
@@ -129,6 +134,7 @@ export function CampusStoryViewer({
 }
 
 type SlideProps = {
+  viewerUid: string;
   story: CampusStoryDoc;
   group: StoryAuthorGroup;
   index: number;
@@ -141,6 +147,7 @@ type SlideProps = {
 };
 
 function StorySlide({
+  viewerUid,
   story,
   group,
   index,
@@ -151,11 +158,22 @@ function StorySlide({
   nextAuthorId,
   selectStory,
 }: SlideProps) {
-  const [audienceFor, setAudienceFor] = useState<string | null>(null);
+  const [panelFor, setPanelFor] = useState<string | null>(null);
+  const navigation = useCampusSocialStackNav();
+  const [receipt, setReceipt] = useState<{ scope: string; conversationId: string } | null>(null);
+  const scope = JSON.stringify([story.authorUid, story.id]);
+  const canReply =
+    story.allowReplies === true &&
+    !group.isMine &&
+    !isDemoUid(viewerUid) &&
+    !isDemoUid(story.authorUid) &&
+    !isFirebaseMockMode();
+  const inspecting = group.isMine && panelFor === scope;
+  const replying = canReply && panelFor === scope;
+  if (panelFor !== null && panelFor !== scope) setPanelFor(null);
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
-  const inspecting = group.isMine && audienceFor === story.id;
-  const playbackActive = playing && !inspecting;
+  const playbackActive = playing && !inspecting && !replying;
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
   const hasVideo = story.kind === 'video';
@@ -213,18 +231,19 @@ function StorySlide({
   const nextLabel = nextId ? '下一則' : '看完了';
   const playLabel = playing ? '暫停播放' : hasVideo ? '播放影片' : '自動播放';
 
-  const back = () => setAudienceFor(null);
+  const back = () => setPanelFor(null);
   const safeArea = {
     paddingTop: Math.max(12, insets.top),
     paddingBottom: Math.max(12, insets.bottom),
   };
 
   return (
-    <Modal visible animationType="fade" onRequestClose={inspecting ? back : close}>
+    <Modal visible animationType="fade" onRequestClose={inspecting || replying ? back : close}>
       <View
-        accessibilityViewIsModal={!inspecting}
-        accessibilityElementsHidden={inspecting}
-        importantForAccessibility={inspecting ? 'no-hide-descendants' : 'auto'}
+        pointerEvents={replying ? 'none' : 'auto'}
+        accessibilityViewIsModal={!inspecting && !replying}
+        accessibilityElementsHidden={inspecting || replying}
+        importantForAccessibility={inspecting || replying ? 'no-hide-descendants' : 'auto'}
         onAccessibilityEscape={close}
         style={[styles.shell, safeArea, inspecting && styles.hidden]}
       >
@@ -329,13 +348,46 @@ function StorySlide({
           <Pressable
             accessibilityRole="button"
             style={styles.audienceButton}
-            onPress={() => setAudienceFor(story.id)}
+            onPress={() => setPanelFor(scope)}
           >
             <Ionicons name="eye-outline" color="#b8e7d4" size={18} />
             <Text style={styles.stepText}>誰看過</Text>
           </Pressable>
         ) : (
-          <Text style={styles.audienceNotice}>作者可查看誰看過</Text>
+          <View style={styles.replyActions}>
+            <Text style={styles.audienceNotice}>作者可查看誰看過</Text>
+            {canReply && receipt?.scope === scope && navigation && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="已送出私訊，查看對話"
+                style={styles.replyButton}
+                onPress={() => {
+                  close();
+                  navigation.navigate('訊息', {
+                    screen: 'Chat',
+                    params: { peerId: story.authorUid, conversationId: receipt.conversationId },
+                  });
+                }}
+              >
+                <Text accessibilityLiveRegion="polite" style={styles.stepText}>
+                  已送出 · 查看私訊
+                </Text>
+              </Pressable>
+            )}
+            {canReply && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`私訊回覆給${author}`}
+                style={styles.replyButton}
+                onPress={() => setPanelFor(scope)}
+              >
+                <Ionicons name="chatbubble-outline" color="#b8e7d4" size={16} />
+                <Text accessibilityLiveRegion="polite" style={styles.stepText}>
+                  {receipt?.scope === scope ? '再回覆' : '私訊回覆'}
+                </Text>
+              </Pressable>
+            )}
+          </View>
         )}
         <View style={styles.controls}>
           <Pressable
@@ -358,6 +410,20 @@ function StorySlide({
           </Pressable>
         </View>
       </View>
+      {canReply && (
+        <StoryReplyPanel
+          key={scope}
+          open={replying}
+          story={story}
+          viewerUid={viewerUid}
+          author={author}
+          onBack={back}
+          onSent={(conversationId) => {
+            setReceipt({ scope, conversationId });
+            back();
+          }}
+        />
+      )}
       {inspecting && (
         <View
           style={[styles.shell, safeArea]}
@@ -521,7 +587,25 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   hidden: { display: 'none' },
-  audienceNotice: { color: '#c2cbc8', fontSize: 13, textAlign: 'center', marginTop: 8 },
+  replyActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  replyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    backgroundColor: '#20342d',
+    borderRadius: 22,
+  },
+  audienceNotice: { color: '#c2cbc8', fontSize: 13 },
   audienceButton: {
     minHeight: 44,
     flexDirection: 'row',

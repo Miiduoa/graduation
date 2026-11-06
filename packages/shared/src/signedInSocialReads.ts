@@ -38,3 +38,17 @@ export function permissionDeniedError(): Error & { code: string } {
   error.code = 'permission-denied';
   return error;
 }
+
+/** Drop the sort only when Firestore reports that the query index is unavailable. */
+export async function readStoryQuery<T>(run: (ordered: boolean) => Promise<T>): Promise<T> {
+  try {
+    return await run(true);
+  } catch (cause) {
+    if (
+      !(cause instanceof Error) ||
+      !('code' in cause) || cause.code !== 'failed-precondition' ||
+      !/\bindex\b/i.test(cause.message)
+    ) throw cause;
+    return run(false);
+  }
+}

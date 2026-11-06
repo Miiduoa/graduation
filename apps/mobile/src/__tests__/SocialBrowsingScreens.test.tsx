@@ -4,6 +4,7 @@ import { feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
 import { ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
+import { RealtimeSocialScreen } from '../screens/social/RealtimeSocialScreen';
 import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
@@ -701,4 +702,35 @@ test('opens stories without navigating away, shows photo captions and steps betw
   expect(mockNavigate).not.toHaveBeenCalled();
   expect(listActiveStoriesForSchool).toHaveBeenCalledTimes(1);
   expect(markStoryViewed).not.toHaveBeenCalledWith('foreign', expect.anything());
+});
+
+test('an unsuccessful school refresh removes the old story from the viewer and feed', async () => {
+  const story = { id: 's1', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
+    text: '校園讀書會', expiresAt: Date.now() + 60000 };
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValueOnce([story]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
+  const view = render(<HomeFeedScreen />);
+  fireEvent.press(await view.findByLabelText('查看 小柏 的限時動態'));
+  expect(view.getByText('校園讀書會')).toBeTruthy();
+  jest.mocked(listActiveStoriesForSchool).mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+  expect(view.queryByText('校園讀書會')).toBeNull();
+  expect(view.queryByLabelText('查看 小柏 的限時動態')).toBeNull();
+});
+
+test('a late allowed read cannot restore the realtime grid after access is denied', async () => {
+  const story = { id: 's1', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
+    text: '校園讀書會', expiresAt: Date.now() + 60000 };
+  let finish!: (rows: typeof story[]) => void;
+  jest.mocked(listActiveStoriesForSchool)
+    .mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }))
+    .mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  const view = render(<RealtimeSocialScreen />);
+  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+  await act(async () => finish([story]));
+  expect(view.queryByText(story.text)).toBeNull();
+  const retry = view.getByText('重新讀取限時動態');
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValueOnce([story]);
+  await act(async () => fireEvent.press(retry));
+  expect(view.getByText(story.text)).toBeTruthy();
 });

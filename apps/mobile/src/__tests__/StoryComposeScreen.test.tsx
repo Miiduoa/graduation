@@ -60,6 +60,7 @@ test('retry uses the uploaded image and the same reserved story ID', async () =>
   expect(publishStory).toHaveBeenLastCalledWith(
     's1',
     expect.objectContaining({
+      allowReplies: true,
       kind: 'image',
       mediaUrl: 'https://example.com/photo',
       authorUid: 'alice',
@@ -162,3 +163,14 @@ test.each([
     expect(alert).toHaveBeenCalledWith('無法使用這段影片', expect.any(String));
   },
 );
+
+test('the author may turn off private replies for this story before publishing', async () => {
+  jest.mocked(publishStory).mockResolvedValue('s1');
+  const view = render(<StoryComposeScreen />);
+  const toggle = view.getByRole('switch', { name: '允許同校成員私訊回覆' });
+  expect(toggle.props.value).toBe(true);
+  fireEvent(toggle, 'valueChange', false);
+  fireEvent.changeText(view.getByPlaceholderText('跟大家分享此刻⋯'), '雨停了');
+  await act(async () => fireEvent.press(view.getByText('發布限時動態')));
+  expect(publishStory).toHaveBeenCalledWith('s1', expect.objectContaining({ allowReplies: false }));
+});
