@@ -89,7 +89,8 @@ export const setIdentity = (value) => {uid=value;};
 export const offline = () => disableNetwork(getDb());
 export const online = () => enableNetwork(getDb());
 export const cachedCount = async () => (await getDocsFromCache(query(collection(getDb(),'schools/pu/campusPosts'),orderBy('createdAt','desc'),orderBy(documentId(),'desc'),limit(60)))).size;
-export const getFns = () => {throw new Error('Functions are outside the feed-read fixture');};
+export const isFirebaseConfigured = () => true;
+export const getFunctionsInstance = () => {throw new Error('Functions are outside the feed-read fixture');};
 export const getStorage = () => {throw new Error('Storage is outside the feed-read fixture');};
 `);
   await writeFile(path.join(fixture, 'identity.ts'), `import {getAuth} from './firebase'; export const useAuth=()=>({user:getAuth().currentUser,loading:false});`);
@@ -139,7 +140,12 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
   });
   for (const file of Object.keys(built.metafile.inputs)) {
     if (!file.includes('node_modules') && !file.includes('.social-feed-browser-fixture')) {
-      report.sourceFiles[file] = createHash('sha256').update(await readFile(path.resolve(root,file))).digest('hex');
+      const bytes = await readFile(path.resolve(root,file));
+      report.sourceFiles[file] = createHash('sha256').update(bytes).digest('hex');
+      const target = path.resolve(output, 'sources', file);
+      assert.ok(target.startsWith(path.join(output, 'sources') + path.sep));
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, bytes);
     }
   }
   await writeFile(path.join(dist,'index.html'), `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校園舊貼文驗收</title><link rel="stylesheet" href="/entry.css"><style>body{margin:0;font-family:system-ui,"Noto Sans CJK TC",sans-serif;background:var(--bg)}main{max-width:760px;margin:auto;padding:12px;min-width:0}.fixture-note{color:var(--muted);font-size:12px}</style></head><body><main><h1>校園動態</h1><p class="fixture-note">隔離驗收 · 合成帳號與資料 · 非正式服務</p><div id="root"></div></main><script type="module" src="/entry.js"></script></body></html>`);
