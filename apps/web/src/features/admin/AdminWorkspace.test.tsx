@@ -931,6 +931,35 @@ it('preserves an unfinished report decision when leaving or refreshing is cancel
   expect(fetcher.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
 });
 
+it('allows cancelling or leaving a report draft after a failed reload while blocking writes', async () => {
+  window.history.replaceState(null, '', '/admin#reports/report-1');
+  let failed = false;
+  fetcher.mockImplementation(async () =>
+    failed ? new Response('{}', { status: 503 }) : ok({ items: [report] }),
+  );
+  render(<AdminWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '隱藏貼文' }));
+  fireEvent.change(screen.getByLabelText('處理原因'), { target: { value: '需要保留的處理理由' } });
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  failed = true;
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取檢舉' }));
+  await screen.findByRole('alert');
+  expect(screen.getByRole('button', { name: '確認隱藏貼文' })).toHaveProperty('disabled', true);
+  expect((screen.getByLabelText('處理原因') as HTMLTextAreaElement).value).toBe(
+    '需要保留的處理理由',
+  );
+  expect(screen.getByRole('button', { name: '返回檢舉列表' })).toHaveProperty('disabled', false);
+  expect(screen.getByRole('button', { name: '取消', exact: true })).toHaveProperty(
+    'disabled',
+    false,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '取消', exact: true }));
+  expect(screen.queryByLabelText('處理原因')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '返回檢舉列表' }));
+  expect(window.location.hash).toBe('#reports');
+  expect(fetcher.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
+});
+
 it('keeps a new board draft when cancellation is rejected and clears it after confirmed discard', async () => {
   window.history.replaceState(null, '', '/admin#boards');
   fetcher.mockImplementation(async (url: string) =>

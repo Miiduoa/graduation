@@ -209,7 +209,7 @@ function ReportDetail({
           </div>
           <div className={styles.actions}>
             <span className={styles.badge}>{stateLabels[report.state]}</span>
-            <Button onClick={onBack} disabled={!enabled || mutation.busy}>
+            <Button onClick={onBack} disabled={mutation.busy}>
               返回檢舉列表
             </Button>
           </div>
@@ -259,7 +259,7 @@ function ReportDetail({
                   確認{decision === 'hide' ? '隱藏貼文' : '駁回檢舉'}
                 </Button>
                 <Button
-                  disabled={!enabled || mutation.busy}
+                  disabled={mutation.busy}
                   onClick={() => {
                     setDecision(null);
                     setReason('');
