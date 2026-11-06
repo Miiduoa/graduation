@@ -108,12 +108,19 @@ async def check_mobile_navigation(page):
         return getComputedStyle(el).position === 'fixed'
             && Math.abs(rect.bottom - innerHeight) < 1;
     }'''), 'Mobile navigation is not docked to the viewport'
+    information = page.locator('details').filter(
+        has=page.locator('summary', has_text='關於 nuni')
+    )
+    if await information.count() and await information.get_attribute('open') is None:
+        await information.locator('summary').click()
     footer = page.get_by_role('navigation', name='網站資訊').get_by_role('link', name='設定')
+    await expect(footer).to_be_visible()
     await footer.scroll_into_view_if_needed()
     assert await footer.evaluate('''el => {
         const navigation = document.querySelector('nav[aria-label="主要導覽"]');
         return el.getBoundingClientRect().bottom <= navigation.getBoundingClientRect().top;
     }'''), 'Bottom navigation covers the last footer action'
+    await footer.click(trial=True)
 
 
 UNSIGNED_TODAY = '登入後，這裡會列出近期要處理的課程待辦。'
