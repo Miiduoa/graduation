@@ -795,6 +795,89 @@ describe('finding time between classes on the phone', () => {
       expect(result.content).toContain('重新問');
     });
 
+  test.each([[request, 'firebase:A'], [platform, 'nuni:student']] as const)(
+    'keeps the chosen day and duration while refining, clearing and changing the time window (%p)', async (base, owner) => {
+      const replies: Awaited<ReturnType<typeof askCampusAssistant>>[] = [];
+      const lookup = async (question: string, date = '2026-11-07') => {
+        readContext.mockResolvedValueOnce(snapshot(date, '13:00', '18:00'));
+        const previous = replies.at(-1);
+        const reply = await askCampusAssistant({ ...base, messages: [
+          ...(previous ? [{ role: 'assistant' as const, ...previous }] : []), ask(question),
+        ] });
+        replies.push(reply);
+        return reply;
+      };
+      const initial = await lookup('明天下午有一個半小時的空堂嗎？');
+      expect(initial.classGapRead).toMatchObject({ owner, day: 'tomorrow', part: 'afternoon', minMinutes: 90 });
+
+      const later = await lookup('改成下午三點半以後');
+      expect(later.classGapRead).toMatchObject({ day: 'tomorrow', minMinutes: 90, fromMinute: 930 });
+      expect(later.classGapRead).not.toHaveProperty('part');
+      expect(later.content).toContain('15:30–18:00（150 分鐘）');
+
+      const afternoon = await lookup('只看下午');
+      expect(afternoon.classGapRead).toMatchObject({ day: 'tomorrow', part: 'afternoon', minMinutes: 90 });
+      expect(afternoon.classGapRead).not.toHaveProperty('fromMinute');
+
+      const anyLength = await lookup('不限長度');
+      expect(anyLength.classGapRead).toMatchObject({ day: 'tomorrow', part: 'afternoon', minMinutes: 0 });
+
+      const twoDaysLater = await lookup('那後天有哪些空堂？', '2026-11-08');
+      expect(twoDaysLater.classGapRead).toMatchObject({ day: 'day-after-tomorrow', part: 'afternoon', minMinutes: 0 });
+      expect(readContext.mock.lastCall?.[0]).toMatchObject({ gapDay: 'day-after-tomorrow' });
+      expect(twoDaysLater.content).toContain('後天（11/08）');
+
+      const allDay = await lookup('全天', '2026-11-08');
+      expect(allDay.classGapRead).toMatchObject({ day: 'day-after-tomorrow', minMinutes: 0 });
+      expect(allDay.classGapRead).not.toHaveProperty('part');
+      expect(readContext).toHaveBeenCalledTimes(6);
+      expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+      expect(mockCallable).not.toHaveBeenCalled();
+    });
+
+  test('cancelling a refinement immediately releases the wait and ignores a late timetable answer', async () => {
+    let finish!: (value: unknown) => void;
+    readContext.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const controller = new AbortController();
+    const pending = askCampusAssistant({ ...request, signal: controller.signal, messages: [
+      { role: 'assistant', content: '明天下午空堂', classGapRead: {
+        owner: 'firebase:A', schoolId: 'pu', checkedAt, day: 'tomorrow', minMinutes: 30, part: 'afternoon' } },
+      ask('改成下午三點半以後'),
+    ] });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    readContext.mockResolvedValueOnce(snapshot('2026-11-07', '14:00', '16:00'));
+    const next = await askCampusAssistant({ ...request, messages: [ask('明天有哪些空堂？')] });
+    expect(next.content).toContain('14:00–16:00');
+    finish(snapshot('2026-11-07', '13:00', '18:00'));
+    expect(localLLM.generate).not.toHaveBeenCalled();
+    expect(mockCallable).not.toHaveBeenCalled();
+  });
+
+  test.each(['星期二有哪些空堂？', '明天三點半以後有哪些空堂？', '明天15:70以後有哪些空堂？'])(
+    'explains an unsupported or ambiguous gap lookup without asking a model to guess: %s', async (question) => {
+      const reply = await askCampusAssistant({ ...request, messages: [ask(question)] });
+      expect(reply.content).toContain('這次沒有套用');
+      expect(reply.classGapRead).toBeUndefined();
+      expect(readContext).not.toHaveBeenCalled();
+      expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+      expect(mockCallable).not.toHaveBeenCalled();
+    });
+
+  test.each(['那明天17:00以後有哪些空堂？', '只看17:00以後', '改成15:00到14:00'])(
+    'never treats a conflicting refinement as a fresh lookup that silently resets earlier bounds: %s', async (question) => {
+      const reply = await askCampusAssistant({ ...request, messages: [
+        { role: 'assistant', content: '明天16:00以前', classGapRead: {
+          owner: 'firebase:A', schoolId: 'pu', checkedAt, day: 'tomorrow', minMinutes: 90, untilMinute: 960 } },
+        ask(question),
+      ] });
+      expect(reply.content).toContain('這次沒有套用');
+      expect(reply.classGapRead).toBeUndefined();
+      expect(readContext).not.toHaveBeenCalled();
+      expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+      expect(mockCallable).not.toHaveBeenCalled();
+    });
+
   test('requires a new day after Taiwan midnight and drops a result when the account changes mid-read', async () => {
     readContext.mockResolvedValueOnce(snapshot('2026-11-06', '12:10', '12:55'));
     const reply = await askCampusAssistant({ ...request, messages: [

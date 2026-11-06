@@ -85,6 +85,7 @@ jobs:
             src/__tests__/NuniTimetableAssistantNavigation.test.tsx \
             src/__tests__/AssistantClassNowHint.test.tsx \
             src/__tests__/SavedClassReplyCard.test.tsx \
+            src/__tests__/ClassGapReplyCard.test.tsx \
             src/__tests__/CampusAssistantScreen.test.tsx \
             src/__tests__/CampusAssignmentWorkbench.test.tsx \
             src/__tests__/CampusAssignmentCoverage.test.tsx \

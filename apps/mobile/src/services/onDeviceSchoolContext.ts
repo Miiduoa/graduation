@@ -3,6 +3,7 @@ import { readAssistantTimetable, type PlatformTimetableAccess } from './assistan
 import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
 import { loadOfflinePersonalTimetable } from './personalTimetable';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
+import type { SavedClassGapQuery } from './savedClassGapQuery';
 
 export type { SavedClassOccurrence } from './nextSavedClasses';
 
@@ -33,7 +34,7 @@ export async function collectOnDeviceSchoolContext(
     platformTimetable?: PlatformTimetableAccess;
     includeNextClasses?: boolean;
     includeCurrentClasses?: boolean;
-    gapDay?: 'today' | 'tomorrow';
+    gapDay?: SavedClassGapQuery['day'];
     classFollowUp?: readonly SavedClassOccurrence[];
   },
 ): Promise<OnDeviceSchoolContext> {

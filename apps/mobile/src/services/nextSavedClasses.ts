@@ -55,7 +55,7 @@ function refreshSavedClasses(records: PersonalImportRecord[], schoolId: string, 
 
 type TimetableGroup = { term: string; rows: PersonalImportRecord[] };
 
-function timetableGroups(records: readonly PersonalImportRecord[]) {
+function timetableGroups(records: readonly PersonalImportRecord[], requirePlacedTerm?: string) {
   const groups = new Map<string, TimetableGroup>();
   for (const row of records) {
     const key = `${row.academicYear}|${row.semester}`;
@@ -70,8 +70,8 @@ function timetableGroups(records: readonly PersonalImportRecord[]) {
         return undefined;
       }
     }
-    // A course with no assigned weekday has no scheduled occurrence.
-    if (row.dayOfWeek) group.rows.push(row);
+    // Named class queries can skip unscheduled courses. Gaps need every row in the requested term.
+    if (row.dayOfWeek || group.term === requirePlacedTerm) group.rows.push(row);
   }
 
   return [...groups.values()];
@@ -96,11 +96,14 @@ function scheduledDay(groups: TimetableGroup[], schoolId: string, date: Date, in
 
 /** Remaining time between saved meetings on one Taiwan date. An unknown timetable cannot establish a gap. */
 export function savedClassGaps(
-  records: readonly PersonalImportRecord[], schoolId: string, now: Date, day: 'today' | 'tomorrow',
+  records: readonly PersonalImportRecord[], schoolId: string, now: Date, day: 'today' | 'tomorrow' | 'day-after-tomorrow',
 ): { startAt: number; endAt: number }[] | undefined {
-  const groups = timetableGroups(records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId));
+  const offset = day === 'today' ? 0 : day === 'tomorrow' ? 1 : 2;
+  const date = new Date(now.getTime() + offset * DAY);
+  const groups = timetableGroups(
+    records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId), academicTerm(date),
+  );
   if (!groups) return undefined;
-  const date = day === 'today' ? now : new Date(now.getTime() + DAY);
   const entries = scheduledDay(groups, schoolId, date, true);
   if (!entries) return undefined;
   const midnight = Date.parse(`${classDate(date)}T00:00:00+08:00`);
