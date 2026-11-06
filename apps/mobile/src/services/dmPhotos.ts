@@ -1,8 +1,9 @@
 import { File as NativeFile } from 'expo-file-system';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { deriveDmConversationId } from '../utils/conversationAccess';
 
-export type PhotoThread = { viewerUid: string; schoolId: string; conversationId: string };
+export type PhotoThread = { viewerUid: string; schoolId: string; conversationId: string; peerUid?: string };
 export type PhotoScope = PhotoThread & { messageId: string };
 export type LocalPhoto = { uri: string; contentType: string; size: number };
 type Grant = { url: string; expiresAt: string };
@@ -59,6 +60,10 @@ function checkSession(scope: PhotoScope, signal: AbortSignal) {
     isFirebaseMockMode() ||
     getAuthInstance().currentUser?.uid !== scope.viewerUid ||
     ![scope.viewerUid, scope.schoolId, scope.conversationId].every((id) => segment.test(id)) ||
+    (scope.peerUid !== undefined && (
+      !segment.test(scope.peerUid) || scope.peerUid === scope.viewerUid ||
+      scope.conversationId !== deriveDmConversationId(scope.schoolId, scope.viewerUid, scope.peerUid)
+    )) ||
     !/^[A-Za-z0-9_-]{20,64}$/.test(scope.messageId)
   )
     throw new Error('photo-session');

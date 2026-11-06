@@ -4,19 +4,24 @@ import {
   doc,
   FieldPath,
   getDocFromServer,
+  getDocsFromServer,
+  endAt,
   limit,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAt,
   where,
   type DocumentData,
   type SnapshotMetadata,
   type Transaction,
 } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { parseDmPhotoPath } from './dmPhotos';
-import { getAuth, getDb, isFirebaseConfigured } from './firebase';
+import { deriveDmConversationId } from './conversationAccess';
+import { getAuth, getDb, getFunctionsInstance, isFirebaseConfigured } from './firebase';
 import {
   courseHrefFromData,
   courseWorkHrefFromData,
@@ -56,6 +61,18 @@ export type PrivateMessage = {
 export type ConversationContents = {
   conversation: PrivateConversation;
   messages: PrivateMessage[];
+  exists?: boolean;
+};
+export type PrivateMessageRecipient = {
+  uid: string;
+  displayName: string;
+  department: string | null;
+};
+export type PreparedPrivateConversation = {
+  conversationId: string;
+  peerUid: string;
+  peerName: string | null;
+  exists: boolean;
 };
 export type AccountNotification = {
   id: string;
@@ -71,7 +88,9 @@ export type NotificationFeed = { notifications: AccountNotification[]; unscopedC
 type Fail = (reason: MessagingFailure) => void;
 function reason(error: unknown): MessagingFailure {
   if (error instanceof MessagingError) return error.reason;
-  return (error as { code?: string })?.code === 'permission-denied' ? 'permission' : 'unavailable';
+  return ['permission-denied', 'functions/permission-denied', 'functions/unauthenticated'].includes(
+    (error as { code?: string })?.code ?? '',
+  ) ? 'permission' : 'unavailable';
 }
 function key(value: string) {
   if (!value || value.includes('/')) throw new MessagingError('permission');
@@ -244,6 +263,153 @@ async function peerName(session: MessagingSession, uid: string): Promise<string 
   } catch {
     return null;
   }
+}
+
+export async function findPrivateMessageRecipients(
+  session: MessagingSession,
+  name: string,
+  signal: AbortSignal,
+): Promise<PrivateMessageRecipient[]> {
+  assertUser(session.uid);
+  const prefix = name.trim();
+  if (signal.aborted) throw new MessagingError('stale');
+  if (!prefix || prefix.length > 80) return [];
+  const snapshot = await getDocsFromServer(query(
+    collection(getDb(), 'schools', key(session.schoolId), 'directory'),
+    where('isDiscoverable', '==', true),
+    orderBy('displayName'),
+    startAt(prefix),
+    endAt(prefix + '\uf8ff'),
+    limit(20),
+  ));
+  assertUser(session.uid);
+  if (signal.aborted || !confirmed(snapshot.metadata)) throw new MessagingError('stale');
+  return snapshot.docs.flatMap((entry) => {
+    const row = entry.data();
+    const displayName = text(row.displayName).trim();
+    return entry.id !== session.uid && row.isDiscoverable === true && displayName ? [{
+      uid: entry.id,
+      displayName,
+      department: text(row.department) || null,
+    }] : [];
+  });
+}
+
+export async function preparePrivateConversation(
+  session: MessagingSession,
+  peerUid: string,
+  signal: AbortSignal,
+): Promise<PreparedPrivateConversation> {
+  assertUser(session.uid);
+  if (signal.aborted) throw new MessagingError('stale');
+  if (key(peerUid) === session.uid) throw new MessagingError('permission');
+  const conversationId = deriveDmConversationId(key(session.schoolId), session.uid, peerUid);
+  const call = httpsCallable<
+    { viewerUid: string; schoolId: string; peerUid: string },
+    { conversationId: string; peerUid: string; exists: boolean }
+  >(getFunctionsInstance(), 'prepareDmConversation');
+  try {
+    const { data } = await call({ viewerUid: session.uid, schoolId: session.schoolId, peerUid });
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    if (data?.conversationId !== conversationId || data.peerUid !== peerUid || typeof data.exists !== 'boolean') {
+      throw new MessagingError('permission');
+    }
+    const name = await peerName(session, peerUid);
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    return { conversationId, peerUid, exists: data.exists, peerName: name };
+  } catch (error) {
+    throw new MessagingError(reason(error));
+  }
+}
+
+export async function sendPreparedPrivateMessage(
+  session: MessagingSession,
+  prepared: PreparedPrivateConversation,
+  messageId: string,
+  content: string,
+  signal: AbortSignal,
+) {
+  assertUser(session.uid);
+  if (signal.aborted) throw new MessagingError('stale');
+  const body = content.trim();
+  if (!body || body.length > 4000 || !/^[A-Za-z0-9_-]{20,64}$/.test(messageId)) {
+    throw new MessagingError('unavailable');
+  }
+  if (prepared.peerUid === session.uid || prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
+    throw new MessagingError('permission');
+  }
+  const call = httpsCallable<
+    { viewerUid: string; schoolId: string; peerUid: string; conversationId: string; messageId: string; content: string },
+    { conversationId: string; messageId: string }
+  >(getFunctionsInstance(), 'sendDmText');
+  try {
+    const { data } = await call({
+      viewerUid: session.uid,
+      schoolId: session.schoolId,
+      peerUid: prepared.peerUid,
+      conversationId: prepared.conversationId,
+      messageId,
+      content: body,
+    });
+    assertUser(session.uid);
+    if (signal.aborted) throw new MessagingError('stale');
+    if (data?.conversationId !== prepared.conversationId || data.messageId !== messageId) {
+      throw new MessagingError('unavailable');
+    }
+  } catch (error) {
+    throw new MessagingError(reason(error));
+  }
+}
+
+export function watchNewPrivateConversation(
+  session: MessagingSession,
+  prepared: PreparedPrivateConversation,
+  receive: (contents: ConversationContents) => void,
+  fail: Fail,
+) {
+  assertUser(session.uid);
+  if (prepared.conversationId !== deriveDmConversationId(session.schoolId, session.uid, prepared.peerUid)) {
+    throw new MessagingError('permission');
+  }
+  if (prepared.exists) return watchConversationContents(session, prepared.conversationId, receive, fail);
+  let active = true;
+  let stopContents: (() => void) | undefined;
+  let stopInbox: (() => void) | undefined;
+  stopInbox = watchPrivateConversations(session, (rows) => {
+    if (!active || stopContents) return;
+    const existing = rows.find((row) => row.id === prepared.conversationId);
+    if (existing) {
+      if (existing.peerUid !== prepared.peerUid) {
+        fail('permission');
+        return;
+      }
+      stopContents = watchConversationContents(session, existing.id, receive, fail);
+      stopInbox?.();
+      return;
+    }
+    receive({
+      exists: false,
+      conversation: {
+        id: prepared.conversationId,
+        memberIds: [session.uid, prepared.peerUid],
+        peerUid: prepared.peerUid,
+        peerName: prepared.peerName,
+        preview: '',
+        lastMessageAt: null,
+        lastSenderId: null,
+        lastReadAt: null,
+      },
+      messages: [],
+    });
+  }, fail);
+  if (stopContents) stopInbox();
+  return () => {
+    active = false;
+    stopInbox?.();
+    stopContents?.();
+  };
 }
 export function watchPrivateConversations(
   session: MessagingSession,

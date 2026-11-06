@@ -33,6 +33,9 @@
   justify-content: space-between;
 }
 .toolbar a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--brand);
 }
 .field {
@@ -49,6 +52,7 @@
 .field input,
 .field textarea {
   width: 100%;
+  min-height: 44px;
   box-sizing: border-box;
   padding: 12px 14px;
   color: var(--text);
@@ -61,6 +65,8 @@
 }
 .button,
 .primary {
+  box-sizing: border-box;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -87,6 +93,8 @@
 }
 .button:focus-visible,
 .primary:focus-visible,
+.toolbar a:focus-visible,
+.conversation:focus-visible,
 .field input:focus-visible,
 .field textarea:focus-visible {
   outline: 3px solid var(--focus-ring);
@@ -509,3 +517,13 @@
 .photoActions { display: flex; gap: 8px; flex-wrap: wrap; }
 .photoActions button { min-height: 44px; }
 .chatPhoto { display: block; max-width: 100%; max-height: 48dvh; object-fit: contain; border-radius: var(--radius-sm); }
+
+.recipientSearch {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.recipientSearch .field { flex: 1 1 220px; }
+.recipientList { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.recipientDepartment { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }

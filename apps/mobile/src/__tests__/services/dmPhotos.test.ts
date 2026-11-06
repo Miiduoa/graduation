@@ -91,6 +91,26 @@ test('rejects oversized, remote, unsupported or changed local files before reque
   await expect(uploadDmPhoto(scope, local, signal())).rejects.toThrow('changed');
   expect(mockCall).not.toHaveBeenCalled();
 });
+
+test('binds a first photo upload and confirmation to the prepared canonical peer', async () => {
+  const first = { ...scope, conversationId: 'dm_pu_alice_bob', peerUid: 'bob' };
+  const firstPath = path.replace('/private/', '/dm_pu_alice_bob/');
+  jest.spyOn(FormData.prototype, 'append').mockImplementation(() => undefined);
+  mockCall.mockResolvedValueOnce({ data: {
+    method: 'POST', url: 'https://bucket.storage.googleapis.com/',
+    fields: { key: firstPath, 'Content-Type': local.contentType },
+    path: firstPath, mediaId: 'media', expiresAt: expiresAt(),
+  } });
+  (fetch as jest.Mock).mockResolvedValueOnce({ ok: true });
+  await expect(uploadDmPhoto(first, local, signal())).resolves.toBe(firstPath);
+  expect(mockCall).toHaveBeenCalledWith(expect.objectContaining({ ...first, action: 'uploadPhoto' }));
+  mockCall.mockResolvedValueOnce({ data: { conversationId: first.conversationId, messageId: first.messageId } });
+  await confirmDmPhoto(first, firstPath, signal());
+  expect(mockCall).toHaveBeenLastCalledWith({ ...first, path: firstPath });
+  mockCall.mockClear();
+  await expect(uploadDmPhoto({ ...first, peerUid: 'charlie' }, local, signal())).rejects.toThrow('session');
+  expect(mockCall).not.toHaveBeenCalled();
+});
 test.each([path, published.replace('/private/', '/other/'), signedUrl])(
   'refuses an unbound source before read (%s)',
   async (source) => {

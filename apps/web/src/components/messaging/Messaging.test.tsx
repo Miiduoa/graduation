@@ -29,7 +29,7 @@ const account = vi.hoisted(() => ({
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
 vi.mock('@/lib/firebase', () => ({ getAuth: () => ({ currentUser: account.user }) }));
 vi.mock('@/components/SiteShell', () => ({
-  SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+  SiteShell: ({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) => <main><p>{subtitle}</p>{children}</main>,
 }));
 vi.mock('@/lib/privateMessages', async (original) => {
   const actual = await original<typeof import('@/lib/privateMessages')>();
@@ -155,6 +155,7 @@ it('uses the authenticated account and real directory content instead of demo ro
   localStorage.setItem('demoRole', 'admin');
   render(<DmsListPage />);
   await screen.findByText('真實目錄姓名');
+  expect(screen.getByText('接著上次的話題，與校園裡的人保持聯繫。')).toBeTruthy();
   expect(screen.getByText('真實最近訊息')).toBeTruthy();
   expect(watchPrivateConversations).toHaveBeenCalledWith(
     { uid: 'alice', schoolId: 'pu' },
@@ -162,6 +163,7 @@ it('uses the authenticated account and real directory content instead of demo ro
     expect.any(Function),
   );
   expect(screen.queryByRole('button', { name: /^新對話|核准|刪除/ })).toBeNull();
+  expect(screen.getByRole('link', { name: '新增訊息' }).getAttribute('href')).toBe('/dms/new');
   expect(screen.getByRole('link', { name: /真實目錄姓名/ }).getAttribute('href')).toBe(
     '/dms/opaque_conversation_id_with_underscores',
   );
@@ -170,6 +172,7 @@ it('logged-out visitors do not subscribe to private data', async () => {
   account.user = null;
   render(<MessagesPage />);
   await screen.findByText('登入後查看訊息');
+  expect(screen.getByText('課程、活動與服務的新消息，都在這裡。')).toBeTruthy();
   expect(watchMessagingSession).not.toHaveBeenCalled();
   expect(watchAccountNotifications).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '通知' }).getAttribute('aria-current')).toBe('page');

@@ -5,7 +5,7 @@
  * 功能：即時訊息 / 打字指示器 / 已讀回執 / 圖片傳送
  *       訊息搜尋 / 滾動定位 / 日期分隔線 / 長按選單
  */
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   FlatList,
   Text,
@@ -33,7 +33,6 @@ import {
   collection,
   doc,
   getDoc,
-  setDoc,
   onSnapshot,
   orderBy,
   query,
@@ -50,7 +49,8 @@ import {
   toggleMessageReaction,
 } from '../services/messaging';
 import { DmPhotoComposer, DmPhotoMessage } from './DmPhotos';
-import { photoParts } from '../services/dmPhotos';
+import { photoParts, type PhotoScope } from '../services/dmPhotos';
+import { prepareDmConversation, sendDmText, watchNewDm } from '../services/dmConversations';
 import { deriveDmConversationId } from '../utils/conversationAccess';
 import {
   getPersona,
@@ -111,6 +111,13 @@ type ConvoMeta = {
   onlineUsers?: Record<string, any>;
 };
 
+type PeerPreparation = {
+  scope: string;
+  status: 'loading' | 'ready' | 'error';
+  exists?: boolean;
+  error?: string;
+};
+
 // ═══════ Helpers ═══════
 
 const dmId = deriveDmConversationId;
@@ -140,6 +147,11 @@ function shouldShowDateHeader(current: Msg, previous: Msg | undefined): boolean 
   const cd = current.createdAt?.toDate ? current.createdAt.toDate() : new Date(current.createdAt.seconds * 1000);
   const pd = previous.createdAt?.toDate ? previous.createdAt.toDate() : new Date(previous.createdAt.seconds * 1000);
   return cd.toDateString() !== pd.toDateString();
+}
+
+function matchesOutboundText(message: Msg, draft: DmOutboundDraft) {
+  return message.id === draft.id && message.senderId === draft.senderId &&
+    message.type === 'text' && message.content === draft.content;
 }
 
 // ═══════ Main Component ═══════
@@ -181,10 +193,13 @@ export function ChatScreen(props: any) {
   /** 畫面仍掛載時才更新 UI；失敗狀態落盤不依賴此旗標。 */
   const screenAliveRef = useRef(true);
   /**
-   * 跨對話切換的隔離鍵：每次 convoKey 變化都記錄目前生效的對話，
-   * 防止上一個對話遲到回來的 snapshot 把訊息塞回 state，導致看到別人的對話。
+   * 綁定帳號、學校與對話，撤銷權限後也拒絕遲到的訊息 callback。
    */
-  const activeConvoKeyRef = useRef<string | null>(null);
+  const activeConversationScopeRef = useRef<string | null>(null);
+  const activeTextAttempts = useRef(new Map<string, { draft: DmOutboundDraft; confirmed: boolean }>());
+  const textEditRevision = useRef(0);
+  const restoredTextDraft = useRef<{ scope: string; draft: DmOutboundDraft } | null>(null);
+  const confirmedPhotos = useRef<{ scope: string; rows: Msg[] } | null>(null);
 
   useEffect(() => {
     screenAliveRef.current = true;
@@ -194,12 +209,14 @@ export function ChatScreen(props: any) {
   }, []);
 
   const myUid = auth.user?.uid;
+  const peerRoute = !conversationIdParam && !!peerParam &&
+    !isFirebaseMockMode() && !isDemoPersonaUid(myUid) && !isDemoUid(myUid);
 
   const convoKey = useMemo(() => {
     if (conversationIdParam) return conversationIdParam;
-    if (!myUid || !peerId || !school.id) return null;
-    return dmId(school.id, myUid, peerId);
-  }, [conversationIdParam, myUid, peerId, school.id]);
+    if (!myUid || !peerParam || !school.id) return null;
+    return dmId(school.id, myUid, peerParam);
+  }, [conversationIdParam, myUid, peerParam, school.id]);
 
   const [verifiedPhotoThread, setVerifiedPhotoThread] = useState<string | null>(null);
   const [focused, setFocused] = useState(() => props?.navigation?.isFocused?.() ?? true);
@@ -211,10 +228,76 @@ export function ChatScreen(props: any) {
   }, [props?.navigation]);
 
   const sendScope = `${myUid ?? ''}:${school.id ?? ''}:${convoKey ?? ''}`;
+  const [displayScope, setDisplayScope] = useState(sendScope);
+  const displayCurrentScope = displayScope === sendScope;
+  const [preparation, setPreparation] = useState<PeerPreparation | null>(null);
+  const [prepareAttempt, setPrepareAttempt] = useState(0);
+  const peerTextRequests = useRef(new Set<AbortController>());
+  const peerPrepared = preparation?.scope === sendScope && preparation.status === 'ready';
+  const canSend = displayCurrentScope && (!peerRoute || peerPrepared);
+  const liveThread = !peerRoute || (peerPrepared && preparation.exists === true);
+  const messageAccessConfirmed = liveThread && verifiedPhotoThread === sendScope;
+  const prepareError = preparation?.scope === sendScope ? preparation.error : '';
+
+  useLayoutEffect(() => {
+    scopeRef.current = sendScope;
+    textEditRevision.current += 1;
+    restoredTextDraft.current = null;
+    confirmedPhotos.current = null;
+    return () => {
+      for (const request of peerTextRequests.current) request.abort();
+      peerTextRequests.current.clear();
+    };
+  }, [sendScope]);
+
+  const failPreparation = useCallback((error: any) => {
+    if (!screenAliveRef.current || scopeRef.current !== sendScope) return;
+    const denied = String(error?.code ?? '').endsWith('permission-denied');
+    setPreparation({
+      scope: sendScope,
+      status: 'error',
+      error: denied
+        ? '目前無法與此對象開啟私訊，請確認登入帳號與所屬學校。'
+        : '暫時無法確認這段對話，請檢查網路後重試。',
+    });
+    setVerifiedPhotoThread(null);
+  }, [sendScope]);
+
+  const markPeerThreadExists = useCallback(() => {
+    if (!peerRoute || !screenAliveRef.current || scopeRef.current !== sendScope) return;
+    setPreparation((current) => current?.scope === sendScope && current.status === 'ready' && !current.exists
+      ? { ...current, exists: true } : current);
+  }, [peerRoute, sendScope]);
 
   useEffect(() => {
-    scopeRef.current = sendScope;
-  }, [sendScope]);
+    if (!peerRoute || !myUid || !peerParam || !school.id) return;
+    const controller = new AbortController();
+    setPreparation({ scope: sendScope, status: 'loading' });
+    setVerifiedPhotoThread(null);
+    void prepareDmConversation({ viewerUid: myUid, schoolId: school.id, peerUid: peerParam }, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted || scopeRef.current !== sendScope) return;
+        setPreparation({ scope: sendScope, status: 'ready', exists: result.exists });
+        setVerifiedPhotoThread(sendScope);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) failPreparation(error);
+      });
+    return () => controller.abort();
+  }, [peerRoute, myUid, peerParam, school.id, sendScope, prepareAttempt, failPreparation]);
+
+  useEffect(() => {
+    if (!peerRoute || !peerPrepared || preparation.exists || !myUid || !peerParam || !convoKey) return;
+    try {
+      return watchNewDm(
+        { viewerUid: myUid, schoolId: school.id, peerUid: peerParam, conversationId: convoKey },
+        markPeerThreadExists,
+        failPreparation,
+      );
+    } catch (error) {
+      failPreparation(error);
+    }
+  }, [peerRoute, peerPrepared, preparation?.exists, myUid, peerParam, school.id, convoKey, markPeerThreadExists, failPreparation]);
 
   // 切帳號時清掉未確認草稿，避免把別人的未確認氣泡當成已送達。
   // 僅在 uid 真的變更時清進程內草稿；首次 mount 需保留以便離開再進房還原。
@@ -234,6 +317,11 @@ export function ChatScreen(props: any) {
   useEffect(() => {
     setSending(false);
     sendLockRef.current = false;
+    setMessages([]);
+    setUserNames({});
+    setAccessError(null);
+    setText('');
+    setDisplayScope(sendScope);
     if (!convoKey || !myUid) {
       setOutbound([]);
       return;
@@ -242,11 +330,12 @@ export function ChatScreen(props: any) {
     setOutbound(restored);
     const latest = latestOutboundDraft(restored, convoKey);
     if (latest && (latest.status === 'failed' || latest.status === 'unconfirmed')) {
+      restoredTextDraft.current = { scope: sendScope, draft: latest };
       setText(latest.content);
     } else {
       setText('');
     }
-  }, [convoKey, myUid]);
+  }, [convoKey, myUid, sendScope]);
 
   const persistOutbound = useCallback(
     (rows: DmOutboundDraft[]) => {
@@ -296,6 +385,8 @@ export function ChatScreen(props: any) {
         const snap = await getDoc(doc(db, 'conversations', conversationIdParam));
         if (cancelled) return;
         if (!snap.exists()) {
+          activeConversationScopeRef.current = null;
+          setMessages([]);
           setAccessError('找不到此對話。');
           return;
         }
@@ -308,6 +399,7 @@ export function ChatScreen(props: any) {
           new Set(mids).size !== 2 ||
           !mids.includes(myUid)
         ) {
+          activeConversationScopeRef.current = null;
           setAccessError('這不是目前帳號可存取的本校私訊。');
           setMessages([]);
           return;
@@ -317,6 +409,8 @@ export function ChatScreen(props: any) {
       } catch (e: any) {
         if (cancelled) return;
         if (e?.code === 'permission-denied') {
+          activeConversationScopeRef.current = null;
+          setMessages([]);
           setAccessError('你不是此對話的成員，無法檢視訊息。');
         }
       }
@@ -438,16 +532,16 @@ export function ChatScreen(props: any) {
     setMessages([]);
     setUserNames({});
     fetchedUids.current = new Set();
-    setAccessError(null);
 
-    if (!convoKey || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
+    if (!convoKey || !messageAccessConfirmed || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
       // demo 模式已在上方處理
       setLoading(false);
-      activeConvoKeyRef.current = null;
+      activeConversationScopeRef.current = null;
       return;
     }
 
-    activeConvoKeyRef.current = convoKey;
+    activeConversationScopeRef.current = sendScope;
+    let listening = true;
     setLoading(true);
     const ref = collection(db, 'conversations', convoKey, 'messages');
     const qy = query(ref, orderBy('createdAt', 'asc'));
@@ -456,15 +550,44 @@ export function ChatScreen(props: any) {
       qy,
       { includeMetadataChanges: true },
       (snapshot) => {
-        // 防呆：若 callback 抵達時 convoKey 已切換，直接丟棄，不把舊對話的訊息塞回 state。
-        if (activeConvoKeyRef.current !== convoKey) return;
+        if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
+        if (snapshot.metadata.fromCache) {
+          setMessages([]);
+          setUserNames({});
+          fetchedUids.current = new Set();
+          setLoading(false);
+          return;
+        }
+        if (snapshot.metadata.hasPendingWrites) return;
+        const confirmedDocs = snapshot.docs.filter((entry) => !entry.metadata.hasPendingWrites);
 
-        const rows = snapshot.docs.map((d) => ({
-          id: d.id,
+        const rows = confirmedDocs.map((d) => ({
           ...(d.data() as any),
+          id: d.id,
         })) as Msg[];
         // 僅 !hasPendingWrites（server 確認）才 prune／視為已送達；pending 維持送出中／未確認。
-        const confirmedIds = confirmedServerMessageIds(snapshot.docs);
+        const confirmedIds = confirmedServerMessageIds(confirmedDocs);
+        for (const row of rows) {
+          const attempt = activeTextAttempts.current.get(`${sendScope}:${row.id}`);
+          if (attempt) {
+            if (matchesOutboundText(row, attempt.draft)) attempt.confirmed = true;
+            else confirmedIds.delete(row.id);
+          }
+        }
+        if (myUid) {
+          for (const draft of readOutboundDrafts(convoKey, myUid)) {
+            if (!rows.some((row) => matchesOutboundText(row, draft))) confirmedIds.delete(draft.id);
+          }
+        }
+        const restored = restoredTextDraft.current;
+        if (restored?.scope === sendScope && rows.some((row) => matchesOutboundText(row, restored.draft))) {
+          restoredTextDraft.current = null;
+          setText('');
+        }
+        confirmedPhotos.current = {
+          scope: sendScope,
+          rows: rows.filter((row) => row.type === 'image' && row.senderId === myUid),
+        };
         setMessages(rows);
         setOutbound((prev) => {
           const next = pruneConfirmedOutbound(prev, confirmedIds);
@@ -502,17 +625,21 @@ export function ChatScreen(props: any) {
           fetchedUids.current.add(uid);
           fetchSchoolDirectoryProfiles(school.id, [uid], db)
             .then(([p]) => {
-              if (activeConvoKeyRef.current !== convoKey) return;
+              if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
               setUserNames((prev) => ({ ...prev, [uid]: p?.displayName ?? uid.slice(0, 8) }));
             })
             .catch(() => {
-              if (activeConvoKeyRef.current !== convoKey) return;
+              if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
               setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
             });
         });
       },
       (err: any) => {
-        if (activeConvoKeyRef.current !== convoKey) return;
+        if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
+        activeConversationScopeRef.current = null;
+        setMessages([]);
+        setUserNames({});
+        fetchedUids.current = new Set();
         if (err?.code === 'permission-denied') {
           setAccessError('你不是此對話的成員，無法檢視訊息。');
         } else {
@@ -523,31 +650,51 @@ export function ChatScreen(props: any) {
     );
 
     return () => {
-      if (activeConvoKeyRef.current === convoKey) {
-        activeConvoKeyRef.current = null;
+      listening = false;
+      if (activeConversationScopeRef.current === sendScope) {
+        activeConversationScopeRef.current = null;
       }
       unsub();
     };
-  }, [db, convoKey, myUid, school.id]);
+  }, [db, convoKey, myUid, school.id, messageAccessConfirmed, sendScope]);
 
   // ── 對方打字 & 在線狀態監聽 ──
   useEffect(() => {
     // 切換對話／對方時，先清掉上一個對象的打字／在線狀態
-    setVerifiedPhotoThread(null);
+    setVerifiedPhotoThread((current) => peerRoute && peerPrepared && current === sendScope ? current : null);
     setPeerTyping(false);
     setPeerOnline(false);
-    if (!convoKey || isFirebaseMockMode()) return;
+    if (!convoKey || !liveThread || isFirebaseMockMode()) return;
     let listening = true;
-    let verifiedPhotoMembers: string | null = null;
+    let receivedServerSnapshot = false;
+    let verifiedPhotoMembers: string | null = peerRoute && peerPrepared
+      ? JSON.stringify([myUid, peerParam].sort()) : null;
     const convoRef = doc(db, 'conversations', convoKey);
     const unsub = onSnapshot(
       convoRef,
       { includeMetadataChanges: true },
       (snap) => {
-        if (!listening) return;
+        if (!listening || scopeRef.current !== sendScope) return;
+        // The callable already confirmed this peer session. Initial local cache events
+        // must not erase a draft while its first successful send starts live listeners.
+        if (snap.metadata.fromCache && peerRoute && peerPrepared && !receivedServerSnapshot) return;
+        if (snap.metadata.fromCache) {
+          verifiedPhotoMembers = null;
+          setVerifiedPhotoThread(null);
+          activeConversationScopeRef.current = null;
+          setMessages([]);
+          setUserNames({});
+          fetchedUids.current = new Set();
+          return;
+        }
+        if (!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) receivedServerSnapshot = true;
         if (!snap.exists()) {
           verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);
+          activeConversationScopeRef.current = null;
+          setMessages([]);
+          setUserNames({});
+          fetchedUids.current = new Set();
           return;
         }
         const data = snap.data() as ConvoMeta;
@@ -559,24 +706,27 @@ export function ChatScreen(props: any) {
           !Array.isArray(data.memberIds) ||
           data.memberIds.length !== 2 ||
           new Set(data.memberIds).size !== 2 ||
-          !data.memberIds.includes(myUid)
+          !data.memberIds.includes(myUid) ||
+          (peerRoute && !data.memberIds.includes(peerParam))
         ) {
           verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);
+          activeConversationScopeRef.current = null;
           setMessages([]);
+          setUserNames({});
+          fetchedUids.current = new Set();
           setAccessError('這不是目前帳號可存取的本校私訊。');
           return;
         }
         const members = JSON.stringify([...data.memberIds].sort());
-        if (snap.metadata.fromCache) {
-          verifiedPhotoMembers = null;
-        } else if (!snap.metadata.hasPendingWrites) {
+        if (!snap.metadata.hasPendingWrites) {
           verifiedPhotoMembers = members;
         } else if (verifiedPhotoMembers !== members) {
           verifiedPhotoMembers = null;
         }
         // Local typing and presence writes keep the same server-confirmed photo session.
         setVerifiedPhotoThread(verifiedPhotoMembers ? sendScope : null);
+        if (!verifiedPhotoMembers) activeConversationScopeRef.current = null;
         // 打字狀態
         if (data.typingUsers && peerId && data.typingUsers[peerId]) {
           const ts = data.typingUsers[peerId];
@@ -593,9 +743,13 @@ export function ChatScreen(props: any) {
         }
       },
       (err: any) => {
-        if (!listening) return;
+        if (!listening || scopeRef.current !== sendScope) return;
         verifiedPhotoMembers = null;
         setVerifiedPhotoThread(null);
+        activeConversationScopeRef.current = null;
+        setMessages([]);
+        setUserNames({});
+        fetchedUids.current = new Set();
         if (err?.code === 'permission-denied') {
           setAccessError('你不是此對話的成員，無法檢視訊息。');
         }
@@ -605,11 +759,11 @@ export function ChatScreen(props: any) {
       listening = false;
       unsub();
     };
-  }, [db, convoKey, peerId, myUid, school.id, sendScope]);
+  }, [db, convoKey, peerId, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared]);
 
   // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {
-    if (!convoKey || !myUid || isFirebaseMockMode()) return;
+    if (!convoKey || !liveThread || !myUid || isFirebaseMockMode()) return;
     const convoRef = doc(db, 'conversations', convoKey);
     const updateOnline = () => {
       updateDoc(convoRef, {
@@ -620,50 +774,43 @@ export function ChatScreen(props: any) {
     updateOnline();
     const iv = setInterval(updateOnline, 30000);
     return () => clearInterval(iv);
-  }, [db, convoKey, myUid]);
+  }, [db, convoKey, myUid, liveThread]);
 
   // ── 打字指示器 ──
   const reportTyping = useCallback(() => {
-    if (!convoKey || !myUid || isFirebaseMockMode()) return;
+    if (!convoKey || !liveThread || !myUid || isFirebaseMockMode()) return;
     const convoRef = doc(db, 'conversations', convoKey);
     updateDoc(convoRef, { [`typingUsers.${myUid}`]: serverTimestamp() }).catch(() => {});
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
+      if (scopeRef.current !== sendScope) return;
       updateDoc(convoRef, { [`typingUsers.${myUid}`]: null }).catch(() => {});
     }, 4000);
-  }, [db, convoKey, myUid]);
+  }, [db, convoKey, myUid, liveThread, sendScope]);
+
+  useEffect(() => () => {
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = null;
+  }, [sendScope]);
 
   const handleTextChange = useCallback(
     (t: string) => {
+      textEditRevision.current += 1;
+      restoredTextDraft.current = null;
       setText(t);
       if (t.trim()) reportTyping();
     },
     [reportTyping],
   );
 
-  // ── 確保 conversation 存在 ──
-  const ensureConversation = async () => {
-    if (conversationIdParam || !myUid || !peerId || !convoKey || !school.id) return;
-    const convoRef = doc(db, 'conversations', convoKey);
-    const snap = await getDoc(convoRef);
-    if (!snap.exists()) {
-      await setDoc(convoRef, {
-        type: 'dm',
-        schoolId: school.id,
-        memberIds: [myUid, peerId].sort(),
-        createdAt: serverTimestamp(),
-        lastMessageText: '',
-        lastMessageAt: serverTimestamp(),
-        typingUsers: {},
-        onlineUsers: {},
-      });
-    }
-  };
-
   const dispatchOutbound = useCallback(
     async (draft: DmOutboundDraft) => {
       const scopeAtStart = `${myUid ?? ''}:${school.id ?? ''}:${draft.conversationId}`;
       const stillHere = () => screenAliveRef.current && scopeRef.current === scopeAtStart;
+      const editRevisionAtStart = textEditRevision.current;
+      const attemptKey = `${scopeAtStart}:${draft.id}`;
+      const attempt = { draft, confirmed: false };
+      activeTextAttempts.current.set(attemptKey, attempt);
       try {
         if (isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
           // Demo／mock：沿用固定 draft.id，重試不另建；不走會自產新 id 的 ds.sendMessage。
@@ -697,6 +844,23 @@ export function ChatScreen(props: any) {
                 ],
           );
           setOutbound(next);
+        } else if (peerRoute && peerParam) {
+          const controller = new AbortController();
+          peerTextRequests.current.add(controller);
+          try {
+            await sendDmText({
+              viewerUid: draft.senderId,
+              schoolId: school.id,
+              peerUid: peerParam,
+              conversationId: draft.conversationId,
+              messageId: draft.id,
+              content: draft.content,
+            }, controller.signal);
+            if (!stillHere()) return;
+            markPeerThreadExists();
+          } finally {
+            peerTextRequests.current.delete(controller);
+          }
         } else {
           await sendChatMessageIdempotent({
             conversationId: draft.conversationId,
@@ -739,6 +903,7 @@ export function ChatScreen(props: any) {
           }
         })();
       } catch (e: any) {
+        if (attempt.confirmed || accountUidRef.current !== draft.senderId) return;
         const kind = classifyDmSendFailure(e);
         const status = nextDmSendStatus(draft.status, kind === 'failed' ? 'known_failure' : 'uncertain');
         if (!status || status === 'delivered') return;
@@ -754,8 +919,11 @@ export function ChatScreen(props: any) {
           text: draft.content,
         });
         if (!stillHere()) return;
-        // 對齊網頁：失敗／未確認時把原文放回輸入框，保留同一則可重試。
-        setText(draft.content);
+        // 還原本次失敗原稿，並保留送出後繼續輸入的新內容。
+        if (textEditRevision.current === editRevisionAtStart) {
+          restoredTextDraft.current = { scope: scopeAtStart, draft };
+          setText(draft.content);
+        }
         setOutbound(next);
         try {
           const { aiBrain } = await import('../services/aiBrain');
@@ -768,14 +936,18 @@ export function ChatScreen(props: any) {
         } catch (brainErr) {
           console.warn('[ChatScreen] brain.observe failed:', brainErr);
         }
+      } finally {
+        if (activeTextAttempts.current.get(attemptKey) === attempt) {
+          activeTextAttempts.current.delete(attemptKey);
+        }
       }
     },
-    [myUid, peerId, school.id],
+    [myUid, peerId, peerParam, peerRoute, school.id, markPeerThreadExists],
   );
 
   const onRetryOutbound = useCallback(
     async (messageId: string) => {
-      if (!myUid || !convoKey) return;
+      if (!myUid || !convoKey || !canSend) return;
       const target = outbound.find((row) => row.id === messageId);
       if (!target || !canRetryDmSend(target.status)) return;
       if (retryLockRef.current.has(messageId)) return;
@@ -792,18 +964,17 @@ export function ChatScreen(props: any) {
         return next;
       });
       try {
-        await ensureConversation();
         await dispatchOutbound(draft);
       } finally {
         retryLockRef.current.delete(messageId);
       }
     },
-    [convoKey, dispatchOutbound, myUid, outbound, persistOutbound],
+    [convoKey, dispatchOutbound, myUid, outbound, persistOutbound, canSend],
   );
 
   // ── 發送訊息 ──
   const onSend = async () => {
-    if (!myUid || !convoKey || !text.trim()) return;
+    if (!myUid || !convoKey || !canSend || !text.trim()) return;
     if (!conversationIdParam && !peerId) return;
     if (sendLockRef.current || sending) return;
     const draftText = text.trim();
@@ -820,6 +991,7 @@ export function ChatScreen(props: any) {
         row.content === messageContent,
     );
     if (retryable) {
+      restoredTextDraft.current = null;
       setText('');
       await onRetryOutbound(retryable.id);
       return;
@@ -839,6 +1011,7 @@ export function ChatScreen(props: any) {
       status: 'sending',
       createdAtMs: Date.now(),
     };
+    restoredTextDraft.current = null;
     setText('');
     setOutbound((prev) => {
       const next = [...prev, draft];
@@ -846,16 +1019,18 @@ export function ChatScreen(props: any) {
       return next;
     });
     try {
-      await ensureConversation();
       await dispatchOutbound(draft);
     } finally {
-      sendLockRef.current = false;
-      if (screenAliveRef.current && scopeRef.current.endsWith(`:${convoKey}`)) setSending(false);
+      if (screenAliveRef.current && scopeRef.current === sendScope) {
+        sendLockRef.current = false;
+        setSending(false);
+      }
     }
   };
 
   // ── 搜尋過濾 ──
   const filteredMessages = useMemo(() => {
+    if (!displayCurrentScope) return [];
     const merged = mergeOutboundWithServerMessages(messages, outbound, convoKey ?? '').map((row) => {
       if ('local' in row && row.local) {
         const draft = row as DmOutboundDraft & { local: true };
@@ -875,7 +1050,7 @@ export function ChatScreen(props: any) {
     if (!searchQuery.trim()) return merged;
     const q = searchQuery.toLowerCase();
     return merged.filter((m) => (m.content ?? m.text ?? '').toLowerCase().includes(q));
-  }, [messages, outbound, searchQuery, convoKey]);
+  }, [messages, outbound, searchQuery, convoKey, displayCurrentScope]);
 
   // ── 已讀狀態顯示 ──
   const isRead = useCallback(
@@ -886,16 +1061,30 @@ export function ChatScreen(props: any) {
     [myUid],
   );
 
+  const hasConfirmedPhoto = (scope: PhotoScope, stagedPath: string) => {
+    if (
+      scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope ||
+      confirmedPhotos.current?.scope !== sendScope ||
+      scope.viewerUid !== myUid || scope.schoolId !== school.id || scope.conversationId !== convoKey ||
+      !photoParts(stagedPath, scope.conversationId, false)
+    ) return false;
+    const publishedPath = stagedPath.replace(/\/photo\.(jpg|png|webp)$/, '/sent.$1');
+    return confirmedPhotos.current.rows.some((row) =>
+      row.id === scope.messageId && row.senderId === scope.viewerUid && row.type === 'image' &&
+      row.attachmentPath === publishedPath,
+    );
+  };
+
   // ── Guard ──
   if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) return <ErrorState title="對話" subtitle="尚未登入" hint="請先登入" />;
   if (!convoKey) return <ErrorState title="對話" subtitle="無法開啟對話" hint="請從對話列表進入" />;
-  if (accessError) return <ErrorState title="對話" subtitle={accessError} hint="請從你的對話列表開啟對話" />;
+  if (displayCurrentScope && accessError) return <ErrorState title="對話" subtitle={accessError} hint="請從你的對話列表開啟對話" />;
 
   // ── Render ──
 
-  const photoThread = focused && verifiedPhotoThread === sendScope && (!peerParam || peerId === peerParam) &&
+  const photoThread = focused && verifiedPhotoThread === sendScope && canSend && (!peerParam || peerId === peerParam) &&
     myUid && school.id && !isFirebaseMockMode() && !isDemoPersonaUid(myUid) && !isDemoUid(myUid)
-    ? { viewerUid: myUid, schoolId: school.id, conversationId: convoKey } : null;
+    ? { viewerUid: myUid, schoolId: school.id, conversationId: convoKey, ...(peerRoute ? { peerUid: peerParam } : {}) } : null;
   const photoKey = JSON.stringify(photoThread);
   const renderMessage = ({ item, index }: { item: Msg; index: number }) => {
     const mine = item.senderId === myUid;
@@ -1051,7 +1240,28 @@ export function ChatScreen(props: any) {
         )}
 
         {/* 訊息列表 */}
-        {loading ? (
+        {peerRoute && !peerPrepared ? (
+          <View style={s.center}>
+            {prepareError ? (
+              <>
+                <Text accessibilityRole="alert" style={s.emptyText}>{prepareError}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新確認對話"
+                  style={[s.retryBtn, { marginTop: 16 }]}
+                  onPress={() => setPrepareAttempt((value) => value + 1)}
+                >
+                  <Text style={s.retryBtnText}>重新確認對話</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator size="large" color={theme.colors.accent} />
+                <Text accessibilityLiveRegion="polite" style={s.loadingText}>正在確認對話…</Text>
+              </>
+            )}
+          </View>
+        ) : loading ? (
           <View style={s.center}>
             <ActivityIndicator size="large" color={theme.colors.accent} />
             <Text style={s.loadingText}>載入訊息中...</Text>
@@ -1072,14 +1282,14 @@ export function ChatScreen(props: any) {
             ListEmptyComponent={
               <View style={s.center}>
                 <Ionicons name="chatbubble-outline" size={48} color={theme.colors.border} />
-                <Text style={s.emptyText}>尚無訊息，開始對話吧</Text>
+                <Text style={s.emptyText}>{peerRoute && !liveThread ? '傳送第一則訊息，或分享一張照片。' : '尚無訊息，開始對話吧'}</Text>
               </View>
             }
           />
         )}
 
         {/* 打字指示器 */}
-        {peerTyping && (
+        {displayCurrentScope && peerTyping && (
           <View style={s.typingBar}>
             <View style={s.typingDots}>
               <TypingDot delay={0} />
@@ -1091,9 +1301,9 @@ export function ChatScreen(props: any) {
         )}
 
         {/* 輸入區 */}
-        <DmPhotoComposer key={photoKey} thread={photoThread} barStyle={s.inputBar}>
+        <DmPhotoComposer key={photoKey} thread={photoThread} barStyle={s.inputBar} onSent={peerRoute ? markPeerThreadExists : undefined} hasConfirmedPhoto={hasConfirmedPhoto}>
           <TextInput
-            value={text}
+            value={displayCurrentScope ? text : ''}
             onChangeText={handleTextChange}
             placeholder="輸入訊息..."
             placeholderTextColor={theme.colors.muted}
@@ -1105,7 +1315,7 @@ export function ChatScreen(props: any) {
             accessibilityRole="button"
             accessibilityLabel={sending ? '訊息送出中' : '傳送訊息'}
             onPress={onSend}
-            disabled={!text.trim() || sending}
+            disabled={!text.trim() || sending || !canSend}
             style={({ pressed }) => [
               s.sendBtn,
               {

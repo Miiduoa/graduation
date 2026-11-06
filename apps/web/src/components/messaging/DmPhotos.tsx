@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
   confirmDmPhoto,
@@ -10,7 +10,7 @@ import {
   validDmPhoto,
   type PhotoScope,
 } from '@/lib/dmPhotos';
-import { newPrivateMessageId } from '@/lib/privateMessages';
+import { newPrivateMessageId, type PrivateMessage } from '@/lib/privateMessages';
 import styles from './messaging.module.css';
 
 function PhotoIcon() {
@@ -44,15 +44,22 @@ type PhotoDraft = {
 export function DmPhotoComposer({
   scope,
   ready,
+  confirmedPhotos,
   onSent,
 }: {
   scope: Omit<PhotoScope, 'messageId'>;
   ready: boolean;
+  confirmedPhotos?: readonly PrivateMessage[];
   onSent: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const request = useRef<AbortController | null>(null);
+  const request = useRef<{
+    controller: AbortController;
+    messageId: string;
+    publishedPath: string | undefined;
+    confirmed: boolean;
+  } | null>(null);
   const [draft, setDraft] = useState<PhotoDraft | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -64,7 +71,27 @@ export function DmPhotoComposer({
     },
     [previewUrl],
   );
-  useLayoutEffect(() => () => request.current?.abort(), []);
+  useLayoutEffect(() => () => request.current?.controller.abort(), []);
+  const finish = useCallback(() => {
+    setDraft(null);
+    setError('');
+    setSent(true);
+    onSent();
+    requestAnimationFrame(() => {
+      if (document.activeElement === document.body) opener.current?.focus();
+    });
+  }, [onSent]);
+  useLayoutEffect(() => {
+    const pending = request.current;
+    const publishedPath = pending?.publishedPath ?? draft?.uploadedPath?.replace(/\/photo\.(jpg|png|webp)$/, '/sent.$1');
+    const messageId = pending?.messageId ?? draft?.messageId;
+    if (!publishedPath || !confirmedPhotos?.some((message) =>
+      message.id === messageId && message.senderId === scope.viewerUid &&
+      message.type === 'image' && message.attachmentPath === publishedPath,
+    )) return;
+    if (pending) pending.confirmed = true;
+    else finish();
+  }, [confirmedPhotos, scope.viewerUid, sending, draft?.messageId, draft?.uploadedPath, finish]);
 
   function select(file?: File) {
     if (!file || !ready || request.current) return;
@@ -85,7 +112,13 @@ export function DmPhotoComposer({
   async function send() {
     if (!draft?.previewReady || !ready || request.current) return;
     const controller = new AbortController();
-    request.current = controller;
+    const pending = {
+      controller,
+      messageId: draft.messageId,
+      publishedPath: draft.uploadedPath?.replace(/\/photo\.(jpg|png|webp)$/, '/sent.$1'),
+      confirmed: false,
+    };
+    request.current = pending;
     setSending(true);
     setError('');
     const submission = { ...scope, messageId: draft.messageId };
@@ -93,13 +126,14 @@ export function DmPhotoComposer({
       const path =
         draft.uploadedPath ?? (await uploadDmPhoto(submission, draft.file, controller.signal));
       if (controller.signal.aborted) return;
+      pending.publishedPath = path.replace(/\/photo\.(jpg|png|webp)$/, '/sent.$1');
       // A lost acknowledgment retries only the message commit, with the same ID and object.
       if (!draft.uploadedPath) setDraft({ ...draft, uploadedPath: path });
-      await confirmDmPhoto(submission, path, controller.signal);
+      await confirmDmPhoto(submission, path, controller.signal).catch((error) => {
+        if (!pending.confirmed) throw error;
+      });
       if (controller.signal.aborted) return;
-      setDraft(null);
-      setSent(true);
-      onSent();
+      finish();
     } catch {
       if (!controller.signal.aborted) setError('照片尚未確認送出，可以重試。');
     } finally {
