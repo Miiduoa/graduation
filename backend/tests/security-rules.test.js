@@ -1845,7 +1845,12 @@ describe('storage security rules', () => {
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'member' });
     });
-    const file = testEnv.authenticatedContext('alice').storage().ref('schools/pu/campusPosts/orphan/photo.jpg');
+    const path = 'schools/pu/campusPosts/orphan/photo.jpg';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await uploadString(context.storage().ref(path), 'existing image', 'image/jpeg');
+    });
+    const file = testEnv.authenticatedContext('alice').storage().ref(path);
+    await assertFails(file.getMetadata());
     await assertFails(uploadString(file, 'orphaned membership', 'image/jpeg'));
   });
 
