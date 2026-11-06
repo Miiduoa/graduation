@@ -153,6 +153,53 @@ const definitions: Record<string, [Obj, string[]]> = {
     ['page'],
   ],
 };
+function compactTransitText(value: unknown, max = 24): string | undefined {
+  if (typeof value !== 'string' || !value) return;
+  return value.length > max ? value.slice(0, max) : value;
+}
+function compactTransitField(row: Obj, keys: string[]): Obj {
+  const out: Obj = {};
+  for (const key of keys) {
+    const value = row[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      const text = compactTransitText(value, key === 'reason' || key === 'note' ? 40 : 24);
+      if (text) out[key] = text;
+    } else out[key] = value;
+  }
+  return out;
+}
+export function compactTransitResult(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const row = raw as Obj;
+  const stops = Array.isArray(row.stops)
+    ? row.stops.slice(0, 4).map((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+        const stop = item as Obj;
+        const routes = Array.isArray(stop.routes)
+          ? stop.routes.slice(0, 4).map((route) => {
+              if (!route || typeof route !== 'object' || Array.isArray(route)) return route;
+              return compactTransitField(route as Obj, ['name', 'destination', 'direction']);
+            })
+          : undefined;
+        return {
+          ...compactTransitField(stop, ['name', 'minutes', 'place', 'heading']),
+          ...(routes ? { routes } : {}),
+        };
+      })
+    : undefined;
+  const arrivals = Array.isArray(row.arrivals)
+    ? row.arrivals.slice(0, 8).map((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+        return compactTransitField(item as Obj, ['route', 'name', 'minutes', 'destination', 'stop']);
+      })
+    : undefined;
+  const out = compactTransitField(row, ['status', 'kind', 'reason', 'limited', 'note']);
+  if (stops) out.stops = stops;
+  if (arrivals) out.arrivals = arrivals;
+  out.href = '/bus';
+  return out;
+}
 export function studyTitle(title: string): string {
   const clean = title
     .replace(/作[」』”"']\s*作業/g, '作業')
@@ -915,10 +962,12 @@ export function createTools(
       case 'get_notifications':
         return adapter.notifications(Number(a.limit || 5));
       case 'get_transit':
-        return adapter.transit({
-          ...a,
-          ...(a.action === 'campus' ? { schoolId: binding.schoolId } : {}),
-        });
+        return compactTransitResult(
+          await adapter.transit({
+            ...a,
+            ...(a.action === 'campus' ? { schoolId: binding.schoolId } : {}),
+          }),
+        );
       case 'get_campus_info':
         return {
           officialSource:
