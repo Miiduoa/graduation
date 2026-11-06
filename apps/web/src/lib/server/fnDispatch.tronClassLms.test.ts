@@ -329,6 +329,7 @@ it.each([
   { scenario: 'non-object nested cache', corrupted: 'broken' },
   { scenario: 'missing nested expiry', corrupted: { hit: false } },
   { scenario: 'unparseable nested expiry', corrupted: { hit: false, expiresAt: 'invalid' } },
+  { scenario: 'expired nested cache', corrupted: { hit: false, expiresAt: '2000-01-01T00:00:00.000Z' } },
   { scenario: 'invalid cache hit flag', corrupted: { hit: 'false', expiresAt: '2099-01-01T00:00:00.000Z' } },
 ])('refetches instead of failing when $scenario is stored', async ({ corrupted }) => {
   const { request, source, store } = setup();
