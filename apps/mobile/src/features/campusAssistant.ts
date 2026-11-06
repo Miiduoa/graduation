@@ -327,6 +327,11 @@ export async function askCampusAssistant(input: {
       throw new OnDeviceAssistantError('model-busy');
     }
 
+    // Native inference can consume private context before an eventual response is discarded.
+    // Recheck after the selector and shared engine state, immediately before sending it.
+    scopeCheck(input, false);
+    assertNotCancelled();
+
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
     // Reserve enough context for the instruction, trusted data and generated answer.
