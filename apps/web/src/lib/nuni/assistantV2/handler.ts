@@ -174,10 +174,18 @@ export async function handleV2(request: NextRequest, action: string) {
             input.max_completion_tokens +
             128;
           quota(Date.now(), amount);
-          const result = await provider(input);
-          tokens += result.usage.total_tokens - amount;
-          dailyTokens += result.usage.total_tokens - amount;
-          return result;
+          try {
+            const result = await provider(input);
+            tokens += result.usage.total_tokens - amount;
+            dailyTokens += result.usage.total_tokens - amount;
+            return result;
+          } catch (error) {
+            requests = Math.max(0, requests - 1);
+            dailyRequests = Math.max(0, dailyRequests - 1);
+            tokens = Math.max(0, tokens - amount);
+            dailyTokens = Math.max(0, dailyTokens - amount);
+            throw error;
+          }
         },
       });
       return jsonResponse({

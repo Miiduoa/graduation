@@ -162,6 +162,66 @@ it('rejects client system/tool memory and extra input, without invoking model', 
   expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain('QUESTION_MARKER');
 });
 
+it('does not keep local quota from a failed model follow-up so a retry is not 429', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 180000);
+  const f = fixtureAdapter();
+  const accountId = 'quota-refund-transit-account';
+  vi.mocked(createAdapter).mockReturnValue({
+    adapter: f.adapter,
+    principal: async () => ({ platformAccountId: accountId, isPlatformOperator: false }),
+    apiCalls: () => 0,
+  });
+  let failures = 0;
+  providerCall.mockImplementation(async (input: ModelInput) => {
+    const followUp = input.messages.some(
+      (m) => typeof m.content === 'string' && m.content.includes('<results'),
+    );
+    if (!followUp && input.tools?.length)
+      return {
+        message: {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 't1',
+              type: 'function',
+              function: { name: 'get_transit', arguments: '{"action":"campus"}' },
+            },
+          ],
+        },
+        usage: { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 },
+      };
+    if (++failures <= 2) throw providerError(400, '{"error":{"code":"invalid_request_error"}}');
+    return {
+      message: { role: 'assistant', content: '請至公車頁確認。' },
+      usage: { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 },
+    };
+  });
+  const body = {
+    schoolId: 'fixture-school',
+    conversationId: 'quota-refund-transit',
+    consent: true,
+    question: '公車交通' + '測'.repeat(220),
+    history: [],
+    routeToken: issueRoute(
+      {
+        account: accountId,
+        session: sessionContext(session),
+        conversationId: 'quota-refund-transit',
+        schoolId: 'fixture-school',
+      },
+      FIXTURE_SECRET,
+    ),
+  };
+  const first = await handleNuni(request('ask', body), ['assistant', 'ask']);
+  expect(first.status).toBe(200);
+  const second = await handleNuni(request('ask', body), ['assistant', 'ask']);
+  expect(second.status).toBe(200);
+  const third = await handleNuni(request('ask', body), ['assistant', 'ask']);
+  expect(third.status).not.toBe(429);
+  expect(third.status).toBe(200);
+  clock.mockRestore();
+});
+
 it('limits each account to three questions per minute and retains current-session validation', async () => {
   const f = fixtureAdapter(),
     principal = vi.fn(async () => ({ platformAccountId: account, isPlatformOperator: false }));

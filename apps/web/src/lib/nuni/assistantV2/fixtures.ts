@@ -236,9 +236,22 @@ export function fixtureAdapter(ordering = false) {
     }),
     transit: async () => ({
       status: 'ready',
-      arrivals: [{ route: '合成301', minutes: 8 }],
+      kind: 'arrivals',
+      fetchedAt: '2026-11-04T10:30:00+08:00',
+      arrivals: [
+        {
+          id: 'fixture-301',
+          route: '合成301',
+          direction: 0,
+          destination: '臺中車站',
+          status: 0,
+          seconds: 480,
+          updatedAt: '2026-11-04T02:30:00.000Z',
+          stopName: '靜宜大學',
+          scheduledAt: null,
+        },
+      ],
       source: 'fixture public data',
-      updatedAt: '2026-11-04T10:30:00+08:00',
       simulation: true,
     }),
     notifications: async (limit) => ({

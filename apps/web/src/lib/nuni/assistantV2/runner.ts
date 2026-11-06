@@ -82,7 +82,11 @@ export function toolSummary(raw: unknown, max?: number): string {
   ));
   const limit =
     max ??
-    (value && typeof value === 'object' && ('pending' in value || 'schedule' in value) ? 900 : 550);
+    (value && typeof value === 'object' && ('pending' in value || 'schedule' in value)
+      ? 900
+      : value && typeof value === 'object' && ('stops' in value || 'arrivals' in value)
+        ? 400
+        : 550);
   let truncated = false;
   for (let attempt = 0; attempt < 100 && bytes(value) > limit; attempt++) {
     let longest: unknown[] = [];
@@ -237,7 +241,7 @@ export async function run(input: RunInput) {
       const availableNames = [...names];
       let advertised = turn === 3 ? [] : schemas(availableNames);
       let requestMessages = messages;
-      if (evidence.length) requestMessages = [
+      if (evidence.length || failedResults.length) requestMessages = [
         ...messages.filter((m) => m.role !== 'tool' && !m.tool_calls),
         { role: 'user', content: '<results trust="untrusted">' + packedResults(evidence, failedResults, toolFailures > 0) + '</results>' },
       ];
@@ -370,7 +374,7 @@ export async function run(input: RunInput) {
       }
       // Bound multi-call responses, executing each in order within the same tool budget.
       const accepted = calls.slice(0, Math.max(0, 8 - steps.length));
-      messages.push({ role: 'assistant', content: null, tool_calls: accepted });
+      messages.push({ role: 'assistant', content: '', tool_calls: accepted });
       for (const call of accepted) {
         if (steps.length >= 8) {
           stopReason = 'TOOL_LIMIT';
