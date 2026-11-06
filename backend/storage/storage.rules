@@ -166,7 +166,7 @@ service firebase.storage {
 
     match /assignments/{assignmentId}/submissions/{userId}/{fileName} {
       allow read: if submissionOwner(assignmentId, userId) || canManageGroup(assignmentGroupId(assignmentId));
-      allow write: if submissionOwner(assignmentId, userId) && isAllowedUpload() && maxSize(50);
+      allow create: if resource == null && submissionOwner(assignmentId, userId) && isAllowedUpload() && maxSize(50);
     }
 
     match /lostfound/{itemId}/{fileName} {

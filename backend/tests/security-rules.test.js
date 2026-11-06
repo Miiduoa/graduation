@@ -8,6 +8,7 @@ const {
   initializeTestEnvironment,
 } = require('@firebase/rules-unit-testing');
 const { deleteField } = require('firebase/firestore');
+const { getBytes } = require('firebase/storage');
 
 const projectId = 'demo-campus-security';
 const firestoreRules = fs.readFileSync(
@@ -1648,6 +1649,49 @@ describe('firestore security rules', () => {
 });
 
 describe('storage security rules', () => {
+  for (const status of ['submitted', 'graded']) {
+    test(`a ${status} assignment attachment is immutable and remains private`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('groups/course').set({ schoolId: 'pu', type: 'course' });
+        await db.doc('assignments/work').set({ groupId: 'course' });
+        for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+          await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+          await db.doc(`groups/course/members/${uid}`).set({ status: 'active', role });
+        }
+      });
+      const objectPath = `assignments/work/submissions/alice/${status}-answer.pdf`;
+      const alice = testEnv.authenticatedContext('alice').storage();
+      const original = alice.ref(objectPath);
+      await assertSucceeds(uploadString(original, 'original answer', 'application/pdf'));
+      await seedFirestore(async (db) => {
+        await db.doc('groups/course/assignments/work/submissions/alice').set({
+          userId: 'alice', groupId: 'course', assignmentId: 'work', status,
+          attachments: [{ path: objectPath }], submittedAt: '2026-11-06T00:00:00.000Z',
+          ...(status === 'graded' ? { gradeScore: 90, gradePublished: true } : {}),
+        });
+      });
+
+      await assertFails(uploadString(original, 'changed after submission', 'application/pdf'));
+      await assertFails(original.updateMetadata({ contentDisposition: 'attachment; filename=changed.pdf' }));
+      await assertFails(original.delete());
+      await assertSucceeds(uploadString(
+        alice.ref(`assignments/work/submissions/alice/${status}-new-answer.pdf`), 'new answer', 'application/pdf',
+      ));
+      assert.equal(Buffer.from(await assertSucceeds(getBytes(original))).toString(), 'original answer');
+      const teacher = testEnv.authenticatedContext('teacher').storage().ref(objectPath);
+      assert.equal(Buffer.from(await assertSucceeds(getBytes(teacher))).toString(), 'original answer');
+      for (const context of [
+        testEnv.authenticatedContext('bob'),
+        testEnv.authenticatedContext('outsider'),
+        testEnv.unauthenticatedContext(),
+      ]) {
+        const other = context.storage().ref(objectPath);
+        await assertFails(getBytes(other));
+        await assertFails(uploadString(other, 'forged answer', 'application/pdf'));
+      }
+    });
+  }
+
   test('only a story draft owner can replace its photo before publication', async () => {
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({ status: 'active' });
