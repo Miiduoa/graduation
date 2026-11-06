@@ -22,7 +22,7 @@ type Analysis = {
   result?: CampusSemanticResult;
 };
 
-export function QuickCampusEntry() {
+export function QuickCampusEntry({ onAsk }: { onAsk?: ((phrase: string) => void) | null } = {}) {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const { user } = useAuth();
@@ -188,7 +188,11 @@ export function QuickCampusEntry() {
           ) : null}
           <div className={styles.footerLinks}>
             <Link href={searchHref}>搜尋更多服務</Link>
-            <Link href={assistantHref}>詢問校園助理</Link>
+            {onAsk ? (
+              <button type="button" onClick={() => onAsk(phrase)}>詢問校園助理</button>
+            ) : onAsk === undefined ? (
+              <Link href={assistantHref}>詢問校園助理</Link>
+            ) : null}
             <button type="button" onClick={() => updateQuery('')}>重新輸入</button>
           </div>
         </div>

@@ -275,7 +275,7 @@ export default function StudentTodayScreen() {
               uid={uid}
               schoolId={schoolId}
               onOpen={openQuickAction}
-              onAsk={(question) => safeNavigate(navigation, 'AIChat', { prompt: question })}
+              onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
             />
             <TodayClassList
               classes={classRows}

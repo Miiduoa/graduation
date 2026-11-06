@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -43,7 +43,11 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
+vi.mock('@/components/AppHeader', () => ({
+  AppHeader: ({ onOpenVoice }: { onOpenVoice: () => void }) => (
+    <header><button type="button" onClick={onOpenVoice}>頁首語音</button></header>
+  ),
+}));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
 vi.mock('@/lib/usePersonalTodayRecords', () => ({
   usePersonalTodayRecords: () => state.timetable,
@@ -932,3 +936,30 @@ it.each([
     expect(state.refresh).not.toHaveBeenCalled();
   },
 );
+
+it('starts Today dictation from the header and keeps an active recording running', async () => {
+  state.uid = null;
+  const start = vi.fn();
+  vi.stubGlobal('SpeechRecognition', class { start = start; abort = vi.fn(); });
+  try {
+    render(<HomePage />);
+    const mic = await screen.findByRole('button', { name: '使用語音輸入' });
+    const shortcut = screen.getByRole('button', { name: '頁首語音' });
+    fireEvent.click(shortcut);
+    expect(start).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(mic);
+    fireEvent.click(shortcut);
+    expect(start).toHaveBeenCalledOnce();
+    expect(mic.getAttribute('aria-pressed')).toBe('true');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('focuses the Today input from the header when the browser lacks speech recognition', async () => {
+  state.uid = null;
+  render(<HomePage />);
+  const input = await screen.findByRole('searchbox');
+  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  expect(document.activeElement).toBe(input);
+});

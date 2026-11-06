@@ -5,11 +5,14 @@ import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
+  type Dispatch,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -59,22 +62,30 @@ function requestError(error: unknown): string {
   return '這次未能取得回覆。你的問題已保留，請稍後重試。';
 }
 
-function AssistantConversation({
+export function AssistantConversation({
   userId,
   groupId,
   initialDraft,
   schoolId,
+  inline = false,
+  inlineDraft,
 }: {
   userId: string;
   groupId: string;
   initialDraft: string;
   schoolId: string;
+  inline?: boolean;
+  inlineDraft?: { text: string; setText: Dispatch<SetStateAction<string>> };
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const campusDraft = useOptionalCampusDraft('assistant');
   const [localDraft, setLocalDraft] = useState(initialDraft);
-  const draft = campusDraft.available ? campusDraft.text : localDraft;
-  const setDraft = campusDraft.available ? campusDraft.setText : setLocalDraft;
+  const sharedDraft = !inline && campusDraft.available ? campusDraft : undefined;
+  const draftState = sharedDraft ?? inlineDraft;
+  const draft = draftState?.text ?? localDraft;
+  const setDraft = draftState?.setText ?? setLocalDraft;
+  const instanceId = useId();
+  const idPrefix = inline ? `assistant-${instanceId}` : 'assistant';
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [senseRevision, setSenseRevision] = useState(0);
@@ -86,11 +97,11 @@ function AssistantConversation({
 
   useLayoutEffect(() => {
     // 網址 ?q= 有值且與現有草稿不同：以網址為準覆寫（明確深連結手遞）；無 q 才保留草稿。
-    if (!campusDraft.available || seededUrlDraft.current || !initialDraft) return;
+    if (!sharedDraft || seededUrlDraft.current || !initialDraft) return;
     seededUrlDraft.current = true;
-    if (campusDraft.text === initialDraft) return;
-    campusDraft.setText(initialDraft);
-  }, [campusDraft, initialDraft]);
+    if (sharedDraft.text === initialDraft) return;
+    sharedDraft.setText(initialDraft);
+  }, [initialDraft, sharedDraft]);
 
   useEffect(
     () => () => {
@@ -152,7 +163,7 @@ function AssistantConversation({
       if (!controller.signal.aborted && request.current === controller) {
         request.current = null;
         setPending(false);
-        composer.current?.focus();
+        if (!inline) composer.current?.focus();
       }
     }
   }
@@ -169,8 +180,11 @@ function AssistantConversation({
   }
 
   return (
-    <section className={styles.conversation} aria-label="校園助理對話">
-      {functionsReady && (
+    <section
+      className={inline ? `${styles.conversation} ${styles.inline}` : styles.conversation}
+      aria-label="校園助理對話"
+    >
+      {!inline && functionsReady && (
         <CampusSensePanel
           userId={userId}
           schoolId={schoolId}
@@ -196,7 +210,7 @@ function AssistantConversation({
           </button>
         )}
       </div>
-      {messages.length === 0 && !pending && (
+      {!inline && messages.length === 0 && !pending && (
         <div className={styles.empty}>
           <h2>{functionsReady ? '今天需要什麼幫忙？' : '雲端助理尚未啟用'}</h2>
           <p>
@@ -313,13 +327,13 @@ function AssistantConversation({
         </p>
       )}
       <form onSubmit={send} className={styles.composer} aria-label="傳送問題">
-        <label htmlFor="assistant-question">你的問題</label>
+        <label htmlFor={`${idPrefix}-question`}>你的問題</label>
         <textarea
           ref={composer}
-          id="assistant-question"
+          id={`${idPrefix}-question`}
           value={draft}
           maxLength={4000}
-          rows={3}
+          rows={inline ? 2 : 3}
           readOnly={pending || !functionsReady}
           disabled={!functionsReady}
           placeholder={functionsReady ? '例如：圖書館怎麼走？' : '雲端助理尚未啟用'}
@@ -333,7 +347,7 @@ function AssistantConversation({
               event.currentTarget.form?.requestSubmit();
             }
           }}
-          aria-describedby={error ? 'assistant-error' : 'assistant-note'}
+          aria-describedby={`${idPrefix}-${error ? 'error' : 'note'}`}
         />
         <div className={styles.voiceRow}>
           <VoiceDictationButton
@@ -347,12 +361,12 @@ function AssistantConversation({
           <span className={styles.note}>說完可修改文字，再送出。Enter 送出、Shift + Enter 換行。</span>
         </div>
         {error && (
-          <p id="assistant-error" role="alert" className={styles.error}>
+          <p id={`${idPrefix}-error`} role="alert" className={styles.error}>
             {error}
           </p>
         )}
         <div className={styles.submitRow}>
-          <p id="assistant-note" className={styles.note}>
+          <p id={`${idPrefix}-note`} className={styles.note}>
             {!functionsReady
               ? '尚未接上雲端函式服務，輸入與送出已停用。'
               : isWebOnlineOrderingEnabled()

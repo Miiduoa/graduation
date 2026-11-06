@@ -15,7 +15,13 @@ type Step = {
   answer?: string;
   simulation: boolean;
 };
-function Conversation({ context, schoolId }: { context: string; schoolId: string }) {
+type InlineDraft = { text: string; setText: (text: string) => void };
+export function Conversation({ context, schoolId, inlineDraft, onFreeformReady }: {
+  context: string;
+  schoolId: string;
+  inlineDraft?: InlineDraft;
+  onFreeformReady?: (ready: boolean) => void;
+}) {
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
@@ -57,6 +63,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
       .then((value) => {
         if (active) {
           setV2(value.version === 2);
+          onFreeformReady?.(value.version === 2 && value.enabled === true && value.ready === true);
           setReady(value.enabled === true);
           setProviderReady(value.ready === true);
           setFallback(value.fallback === true);
@@ -99,7 +106,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
       if (!signal.aborted) setPending(false);
     }
   }
-  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={providerReady} fallback={fallback} />;
+  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={ready && providerReady} fallback={fallback} inlineDraft={inlineDraft} />;
   return (
     <section aria-label="公開校園助理">
       <p>此助理目前提供公開資訊，尚未支援代辦寫入。私人課表、作業與借閱快照尚未支援。</p>
@@ -180,15 +187,19 @@ function V2Conversation({
   schoolId,
   ready,
   fallback,
+  inlineDraft,
 }: {
   context: string;
   schoolId: string;
   ready: boolean;
   fallback: boolean;
+  inlineDraft?: InlineDraft;
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
-  const [question, setQuestion] = useState('');
+  const [localQuestion, setLocalQuestion] = useState('');
+  const question = inlineDraft?.text ?? localQuestion;
+  const setQuestion = inlineDraft?.setText ?? setLocalQuestion;
   const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
@@ -227,7 +238,7 @@ function V2Conversation({
   }
   async function ask() {
     const current = question.trim();
-    if (!current || pending) return;
+    if (!current || !consent || !ready || pending) return;
     setPending(true);
     setError('');
     try {
@@ -298,6 +309,7 @@ function V2Conversation({
   }
   return (
     <AssistantThread
+      inline={!!inlineDraft}
       schoolId={schoolId}
       ready={ready}
       fallback={fallback}

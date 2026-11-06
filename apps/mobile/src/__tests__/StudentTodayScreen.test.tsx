@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { RefreshControl } from 'react-native';
+import { askCampusAssistant } from '../features/campusAssistant';
 import StudentTodayScreen from '../screens/StudentTodayScreen';
 import { loadStudentHome } from '../data/studentHome';
 import type { CourseSpace, InboxTask } from '../data/types';
@@ -27,6 +28,7 @@ const mockTimetable = {
   retry: jest.fn(),
 };
 
+jest.mock('../features/campusAssistant', () => ({ askCampusAssistant: jest.fn(), OnDeviceAssistantError: class extends Error {} }));
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
@@ -183,6 +185,31 @@ test.each(['account', 'school'])(
     expect(view.getByText('今天')).toBeTruthy();
   },
 );
+
+test.each(['account', 'school'])('drops assistant replies and in-flight dictation when the %s changes', async change => {
+  const ask = jest.mocked(askCampusAssistant);
+  const late = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
+  ask.mockResolvedValueOnce({ content: '上一個身分的課表', source: 'device', hasActions: false });
+  ask.mockReturnValueOnce(late.promise);
+  const view = render(<StudentTodayScreen />);
+  const input = await view.findByLabelText('說出或輸入想做的事');
+  fireEvent.changeText(input, '下一堂是什麼？');
+  await act(async () => fireEvent(input, 'submitEditing'));
+  expect(view.getByText('上一個身分的課表')).toBeTruthy();
+  fireEvent.changeText(input, '在哪裡？');
+  fireEvent.press(view.getByLabelText('詢問手機助理'));
+  const request = ask.mock.lastCall![0];
+  mockAuth = change === 'account'
+    ? { user: { uid: 'student-b' }, profile: { ...mockAuth.profile!, uid: 'student-b' } }
+    : { ...mockAuth, profile: { ...mockAuth.profile!, schoolId: 'school-b' } };
+  view.rerender(<StudentTodayScreen />);
+  await view.findByLabelText('說出或輸入想做的事');
+  expect(request.signal?.aborted).toBe(true);
+  expect(view.queryByText('上一個身分的課表')).toBeNull();
+  await act(async () => late.resolve({ content: '逾期的回答', source: 'device', hasActions: false }));
+  expect(view.queryByText('逾期的回答')).toBeNull();
+  expect(mockNavigate).not.toHaveBeenCalled();
+});
 
 test('a profile from the previous account cannot supply the school for coursework', async () => {
   mockAuth = { ...mockAuth, user: { uid: 'student-b' } };

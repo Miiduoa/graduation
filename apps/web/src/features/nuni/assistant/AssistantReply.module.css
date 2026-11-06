@@ -706,3 +706,24 @@
     opacity: 0.7;
   }
 }
+
+
+.inlineShell {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.inlineShell .log {
+  max-height: min(48dvh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+}
+
+.inlineShell .composerDock {
+  position: static;
+  padding: 0;
+  background: none;
+  backdrop-filter: none;
+}

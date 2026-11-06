@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
-import { QuickCampusEntry } from '@/components/QuickCampusEntry';
+import { TodayCampusEntry } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
@@ -24,6 +24,7 @@ const courseHref = (course: HomeCourse) =>
   course.href ?? `/course/${encodeURIComponent(course.id)}`;
 
 export default function HomePage() {
+  const voiceEntry = useRef<HTMLDivElement>(null);
   const hydrated = useClientHydrated();
   const { user, loading: authLoading } = useAuth();
   const nuni = useNuniSession();
@@ -238,9 +239,21 @@ export default function HomePage() {
       <a href="#today-content" className={styles.skip}>
         跳到主要內容
       </a>
-      <AppHeader />
+      <AppHeader onOpenVoice={() => {
+        const entry = voiceEntry.current;
+        const mic = entry?.querySelector<HTMLButtonElement>('button[data-voice-input]:not(:disabled)');
+        if (mic) {
+          mic.focus();
+          if (mic.getAttribute('aria-pressed') === 'false') mic.click();
+          return;
+        }
+        const field = entry?.querySelector<HTMLElement>('textarea:not(:disabled), input[type="search"]');
+        (field ?? entry)?.focus();
+      }} />
       <main id="today-content" className={styles.main} tabIndex={-1}>
-        <QuickCampusEntry />
+        <div id="today-voice-entry" ref={voiceEntry} tabIndex={-1}>
+          <TodayCampusEntry />
+        </div>
         {!sessionLoading && uid && !context ? (
           <p className={styles.notice}>
             E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>

@@ -17,7 +17,9 @@ import { LoginLink } from './LoginLink';
 import { currentReturnPath } from '@/lib/navigation';
 import { primaryNavigationSection } from '@/lib/primaryNavigation';
 
-function Header() {
+type HeaderProps = { onOpenVoice?: () => void };
+
+function Header({ onOpenVoice }: HeaderProps) {
   const pathname = usePathname();
   const params = useSearchParams();
   const hash = useLocationHash();
@@ -63,9 +65,9 @@ function Header() {
             type="button"
             className={headerStyles.voiceTrigger}
             aria-label="開啟校園語音 AI"
-            aria-controls="campus-voice-quick-panel"
-            aria-expanded={quickOpen}
-            onClick={() => setQuickOpen((opened) => !opened)}
+            aria-controls={onOpenVoice ? 'today-voice-entry' : 'campus-voice-quick-panel'}
+            aria-expanded={onOpenVoice ? undefined : quickOpen}
+            onClick={onOpenVoice ?? (() => setQuickOpen((opened) => !opened))}
           >
             <CampusIcon name="microphone" size={18} />
             <span>語音 AI</span>
@@ -190,7 +192,7 @@ function Header() {
     </>
   );
 }
-export function AppHeader() {
+export function AppHeader(props: HeaderProps) {
   return (
     <Suspense
       fallback={
@@ -205,7 +207,7 @@ export function AppHeader() {
         </header>
       }
     >
-      <Header />
+      <Header {...props} />
     </Suspense>
   );
 }
