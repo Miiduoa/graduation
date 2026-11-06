@@ -237,6 +237,8 @@
 .alert { border-color: var(--warning); }
 .alert p { margin: 4px 0; }
 .filters { margin-bottom: 17px; }
+.field + .filters { margin-top: 12px; }
+.historyActions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .filters button { font-size: 12px; min-height: 38px; padding: 7px 11px; }
 .requests { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .request { padding: 17px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); min-width: 0; }
@@ -262,6 +264,7 @@
 .details li > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .details strong { font-size: 13px; font-weight: 640; color: var(--text); }
 .details li span { flex-shrink: 0; }
+.notice, .requestId { overflow-wrap: anywhere; }
 .description { overflow-wrap: anywhere; white-space: pre-wrap; }
 .reviewGrid { display: grid; gap: 14px; }
 .reviewCard { border: 1px solid var(--border); border-radius: 16px; padding: 21px; background: var(--surface); }

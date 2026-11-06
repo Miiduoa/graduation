@@ -97,6 +97,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   const [detail, setDetail] = useState('');
   const [selection, setSelection] = useState<string[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [view, setView] = useState<LeavePageView<LeaveData>>(() =>
     initialLeavePageView(leaveApiEnabled),
@@ -106,8 +107,22 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   const idRef = useRef(newId());
   const busyRef = useRef(false);
   const activeRef = useRef(true);
+  const loadGeneration = useRef(0);
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (notice) noticeRef.current?.focus();
+  }, [notice]);
+
+  const revealSubmission = useCallback((id: string) => {
+    idRef.current = newId();
+    setFilter('all');
+    setExpanded(id);
+    setSearch('');
+    setNotice(`已建立 nuni 請假紀錄，站內單號 ${id}。請另外完成校方正式請假程序。`);
+  }, []);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     if (!leaveApiEnabled) {
       setView({ status: 'unavailable' });
       return;
@@ -120,15 +135,21 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
         loadPersonalTimetable(uid, schoolId),
         listMyLeaveRequests(uid, schoolId),
       ]));
-      if (!activeRef.current) return;
+      if (!activeRef.current || generation !== loadGeneration.current) return;
+      // A timed-out submission may already have reached the server.
+      if (myRecords.some((record) => record.id === idRef.current)) {
+        revealSubmission(idRef.current);
+      }
       setView(leavePageSuccess({
         timetable: leaveCourseOptions(myTimetable.courses),
         records: myRecords,
       }, myRecords.length === 0));
     } catch (error) {
-      if (activeRef.current) setView(leavePageFailureFromError(error));
+      if (activeRef.current && generation === loadGeneration.current) {
+        setView(leavePageFailureFromError(error));
+      }
     }
-  }, [uid, schoolId, leaveApiEnabled]);
+  }, [uid, schoolId, leaveApiEnabled, revealSubmission]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -154,7 +175,11 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   const datesOk = validLeaveDates(startDate, endDate);
   const openCount = records.filter((item) => item.status === 'pending' || item.status === 'partial').length;
   const completedCount = records.filter((item) => item.status === 'completed').length;
+  const query = search.trim().normalize('NFKC').toLowerCase();
   const visible = records.filter((item) => {
+    if (query && ![item.id, ...item.courses.map((course) => course.courseName)].some(
+      (value) => value.normalize('NFKC').toLowerCase().includes(query),
+    )) return false;
     if (filter === 'open') return item.status === 'pending' || item.status === 'partial';
     if (filter === 'completed') return item.status === 'completed';
     if (filter === 'withdrawn') return item.status === 'withdrawn';
@@ -181,7 +206,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
       setNotice('一次最多選擇 20 門課，請分開申請。');
       return;
     }
-    const duplicate = records.some((record) =>
+    const duplicate = records.find((record) =>
       record.status !== 'withdrawn' &&
       record.startDate === startDate &&
       record.endDate === endDate &&
@@ -189,23 +214,28 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
       record.courses.some((course) => selectedIds.includes(course.courseId)),
     );
     if (duplicate) {
-      setNotice('這段日期有同一門課的申請紀錄。請先查看下方紀錄，避免重複送出。');
+      setFilter('all');
+      setSearch('');
+      setExpanded(duplicate.id);
+      setNotice(`這段日期已有同一門課的申請，站內單號 ${duplicate.id}。請查看這筆紀錄。`);
       return;
     }
     busyRef.current = true;
+    loadGeneration.current++;
     setBusy(true);
     setNotice('');
     try {
       // Mirrors the existing appeal flow: the server checks a school-scoped timetable.
-      await ensureTimetableIndex(uid, schoolId, loaded.timetable);
-      await submitLeaveRequest(uid, {
+      await withLeaveLoadTimeout(ensureTimetableIndex(uid, schoolId, loaded.timetable));
+      if (!activeRef.current) return;
+      const result = await submitLeaveRequest(uid, {
         schoolId, requestId: idRef.current, startDate, endDate, kind, period,
         detail: detail.trim(), courseIds: selectedIds,
       });
-      idRef.current = newId();
+      if (!activeRef.current) return;
+      revealSubmission(result.id);
       setDetail('');
       setSelection(null);
-      setNotice('已建立 nuni 請假紀錄。請記得另外完成校方正式請假程序。');
       await load();
     } catch (error) {
       if (activeRef.current) setNotice(leaveRequestError(error));
@@ -219,12 +249,15 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   async function withdraw(id: string) {
     if (busyRef.current || !window.confirm('確定撤回這份尚未核閱的請假紀錄？')) return;
     busyRef.current = true;
+    loadGeneration.current++;
     setBusy(true);
     setNotice('');
     try {
       await withdrawLeaveRequest(uid, id);
       if (!activeRef.current) return;
-      setNotice('這份站內請假紀錄已撤回。若曾在學校系統申請，仍須另外處理。');
+      setFilter((current) => current === 'all' ? 'all' : 'withdrawn');
+      setExpanded(id);
+      setNotice(`站內單號 ${id} 已撤回。若曾在學校系統申請，仍須另外處理。`);
       await load();
     } catch (error) {
       if (activeRef.current) setNotice(leaveRequestError(error));
@@ -262,7 +295,9 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
           loginHref={'/login?returnUrl=' + encodeURIComponent('/leave')}
           onRetry={() => void load()}
         />
-        {notice && showWorkspace && <p role="status" aria-live="polite" className={styles.notice}>{notice}</p>}
+        {notice && (showWorkspace || view.status === 'error' || view.status === 'loading') && (
+          <p ref={noticeRef} tabIndex={-1} role="status" className={styles.notice}>{notice}</p>
+        )}
 
         {showWorkspace && (
           <>
@@ -275,11 +310,11 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
             <div className={styles.layout}>
               <section className={styles.panel} aria-labelledby="leave-new-title">
                 <div className={styles.sectionHead}>
-                  <div><p className={styles.kicker}>NEW REQUEST</p><h2 id="leave-new-title">新增請假</h2></div>
+                  <div><p className={styles.kicker}>NEW REQUEST</p><h2 id="leave-new-title" tabIndex={-1}>新增請假</h2></div>
                   <span className={styles.step}>01 — 03</span>
                 </div>
                 <div className={styles.form}>
-                  <fieldset className={styles.fieldset}>
+                  <fieldset className={styles.fieldset} disabled={busy}>
                     <legend>1. 請哪一天？</legend>
                     <div className={styles.quickDates}>
                       <button type="button" aria-pressed={startDate === today && endDate === today} onClick={() => setQuickDate(today)}>今天</button>
@@ -308,7 +343,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                     </div>
                   </fieldset>
 
-                  <fieldset className={styles.fieldset}>
+                  <fieldset className={styles.fieldset} disabled={busy}>
                     <legend>2. 會缺哪幾門課？</legend>
                     <p className={styles.help}>根據所選日期，預先勾選課表裡星期相符的課程；可以自行增減。</p>
                     {available.length === 0
@@ -330,7 +365,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                         </>}
                   </fieldset>
 
-                  <fieldset className={styles.fieldset}>
+                  <fieldset className={styles.fieldset} disabled={busy}>
                     <legend>3. 假別與補充說明</legend>
                     <div className={styles.kindGrid} role="group" aria-label="請假類型">
                       {LEAVE_KINDS.map((item) => (
@@ -352,8 +387,16 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
               <section className={styles.history} aria-labelledby="leave-history-title">
                 <div className={styles.sectionHead}>
                   <div><p className={styles.kicker}>YOUR REQUESTS</p><h2 id="leave-history-title">我的請假紀錄</h2></div>
-                  <button type="button" className={styles.refresh} disabled={busy} onClick={() => void load()}>更新</button>
+                  <div className={styles.historyActions}>
+                    <a className={styles.textLink} href="#leave-new-title">新增請假</a>
+                    <button type="button" className={styles.refresh} disabled={busy} onClick={() => void load()}>更新</button>
+                  </div>
                 </div>
+                {records.length > 0 && (
+                  <label className={styles.field}>搜尋最近 100 筆紀錄
+                    <input type="search" placeholder="輸入站內單號或課程名稱" value={search} onChange={(event) => setSearch(event.target.value)} />
+                  </label>
+                )}
                 <div className={styles.filters} role="group" aria-label="篩選請假紀錄">
                   {([
                     ['all', '全部'], ['open', '處理中'],
@@ -363,7 +406,12 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                   ))}
                 </div>
                 {visible.length === 0
-                  ? <div className={styles.empty}><strong>{view.status === 'empty' || filter === 'all' ? LEAVE_COPY.emptySubmit : '這個狀態沒有紀錄'}</strong><p>{LEAVE_COPY.emptySubmitHint}</p></div>
+                  ? <div className={styles.empty}>
+                      <strong>{!records.length ? LEAVE_COPY.emptySubmit : '沒有符合條件的紀錄'}</strong>
+                      {!records.length ? <p>{LEAVE_COPY.emptySubmitHint}</p> : (
+                        <button type="button" className={styles.refresh} onClick={() => { setSearch(''); setFilter('all'); }}>顯示全部紀錄</button>
+                      )}
+                    </div>
                   : <ul className={styles.requests}>
                       {visible.map((record) => {
                         const counts = countLeaveReviews(record.courses || []);
@@ -384,6 +432,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                           </div>
                           {isExpanded && (
                             <div className={styles.details}>
+                              <p className={styles.requestId}>站內單號 {record.id}</p>
                               {record.detail && <p className={styles.description}>你的說明：{record.detail}</p>}
                               <ul>
                                 {record.courses.map((course) => <li key={course.courseId}>
