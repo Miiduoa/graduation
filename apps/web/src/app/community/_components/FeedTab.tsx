@@ -11,9 +11,13 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { StoryViewer } from './StoryViewer';
+import { useStoryShelf } from './useStoryShelf';
 import styles from '../community.module.css';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
-import { selectCampusFeedPosts, type FeedFilter, type FeedOrder } from './feedView';
+import { selectCampusFeedPosts } from './feedView';
+import { FEED_FILTERS, FEED_ORDERS, feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
+import { useFeedChoice } from './useFeedChoice';
 import { listFollowingIds, followUser, unfollowUser } from '@/lib/community/follows';
 import Image from 'next/image';
 import { useAuth } from '@/components/AuthGuard';
@@ -40,7 +44,7 @@ import {
   type StoryAuthorGroup,
 } from '@/lib/community/firestore';
 
-type FilterKey = FeedFilter | 'saved';
+type FilterKey = (typeof FEED_FILTERS)[number];
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
 
@@ -105,9 +109,10 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
+  const shelf = useStoryShelf(stories, schoolId, user.uid);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<FilterKey>('all');
-  const [order, setOrder] = useState<FeedOrder>('recommended');
+  const [filter, setFilter] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'filter'), FEED_FILTERS);
+  const [order, setOrder] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
@@ -495,19 +500,15 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           </div>
           <span style={{ marginTop: 4, fontSize: 11, color: 'var(--muted)' }}>新增</span>
         </Link>
-        {stories
-          .filter((g) => g.authorUid !== user?.uid)
-          .map((g) => {
+        {shelf.groups.map((g) => {
+            const name = g.isMine ? '我的動態' : (nameByUid[g.authorUid] || '同學');
+            const seen = g.stories.every((s) => shelf.seen.has(s.id));
             const av = avatarByUid[g.authorUid];
             return (
               <button
                 key={g.authorUid}
                 type="button"
-                onClick={() => {
-                  // Web 上 Story viewer 走「即時」分頁完整體驗
-                  const ev = new CustomEvent('community:open-story', { detail: g.authorUid });
-                  window.dispatchEvent(ev);
-                }}
+                onClick={() => shelf.open(g)}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -517,14 +518,15 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   cursor: 'pointer',
                   minWidth: 68,
                 }}
-                aria-label={`查看 ${nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)} 的限時動態`}
+                aria-label={`${name}的限時動態，${seen ? '已看過' : '有新動態'}`}
               >
                 <div
                   style={{
                     width: 60,
                     height: 60,
                     borderRadius: '50%',
-                    border: '2px solid var(--brand)',
+                    border: seen ? '2px solid var(--border)' : '2px solid var(--brand)',
+                    boxShadow: 'inset 0 0 0 3px var(--surface)',
                     padding: 3,
                     display: 'flex',
                     alignItems: 'center',
@@ -560,12 +562,16 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)}
+                  {name}
                 </span>
               </button>
             );
           })}
       </div>
+
+      {shelf.viewer && <StoryViewer viewer={shelf.viewer}
+        author={shelf.viewer.group.isMine ? '我的動態' : (nameByUid[shelf.viewer.group.authorUid] || '同學')}
+        avatar={avatarByUid[shelf.viewer.group.authorUid]} />}
 
       {/* ── Filter chips ── */}
       <div className={styles.toolbar}>
