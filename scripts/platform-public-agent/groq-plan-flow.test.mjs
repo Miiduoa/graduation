@@ -1,0 +1,831 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { setImmediate } from 'node:timers';
+import process from 'node:process';
+import { admissionFixture, quotas, rejectsCode } from './fixtures.mjs';
+const load = (name) =>
+  import(pathToFileURL(join(process.env.PLATFORM_AGENT_COMPILED, `${name}.js`)).href);
+const { PlatformPublicTaskService } = await load('service');
+const { createGroqNavigationPlanner } = await load('groq-navigation-plan');
+const { createGroqServerTransport, createFreeAssuranceAttempt, isFreeAssuranceDenied } =
+  await load('groq-server-transport');
+const catalog = () => ({
+  schoolId: 'pu',
+  updatedAt: '2026-10-19',
+  label: '測試來源',
+  places: [
+    {
+      id: 'gate',
+      name: '校門',
+      lat: 24,
+      lng: 120,
+      sourceUrl: 'https://www.openstreetmap.org/way/1',
+    },
+    {
+      id: 'library',
+      name: '圖書館',
+      lat: 24.1,
+      lng: 120.1,
+      sourceUrl: 'https://www.openstreetmap.org/way/2',
+    },
+  ],
+});
+function fixture(overrides = {}) {
+  const f = admissionFixture(),
+    source = { value: catalog() },
+    seen = [];
+  const readPublicCatalog = async () => {
+    await source.beforeRead?.();
+    return globalThis.structuredClone(source.value);
+  };
+  const fetch = async (url, init) => {
+    seen.push({ url, body: JSON.parse(init.body) });
+    return new globalThis.Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content: JSON.stringify({ kind: 'route', fromId: 'gate', toId: 'library' }),
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const groqPlan = createGroqNavigationPlanner({
+    enabled: true,
+    fetch,
+    readPublicCatalog,
+    ...overrides,
+  });
+  const service = new PlatformPublicTaskService({
+    accounts: f.options.accounts,
+    ledger: f.ledger,
+    readPublicCatalog,
+    groqPlan,
+    clock: () => f.db.now,
+  });
+  const prepare = () =>
+    service.prepareGroq(f.authorization, {
+      schoolId: 'pu',
+      query: '從入口走去圖書館',
+      requestId: 'groq_flow_001',
+    });
+  const execute = async () => {
+    const p = await prepare();
+    const c = await service.confirm(f.authorization, { approved: true, request: p.request });
+    const result = await service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    });
+    return { p, c, result };
+  };
+  return { ...f, service, source, seen, prepare, execute };
+}
+test('provider disclosure and first approval precede a single model plan; second approval binds exact open operation', async () => {
+  const f = fixture(),
+    p = await f.prepare();
+  assert.equal(p.provider, 'groq');
+  assert.equal(p.model, 'openai/gpt-oss-120b');
+  assert.ok(p.dataScope.includes('公開地點名稱與 ID'));
+  assert.equal(f.seen.length, 0);
+  await rejectsCode(
+    f.service.confirm(f.authorization, { approved: false, request: p.request }),
+    'PUBLIC_AGENT_CONFIRMATION_REQUIRED',
+  );
+  assert.equal(f.seen.length, 0);
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  assert.equal(f.seen.length, 0);
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  const result = await f.service.execute(f.authorization, body);
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.result.receipt, {
+    kind: 'navigation-plan',
+    fromId: 'gate',
+    toId: 'library',
+    fromName: '校門',
+    toName: '圖書館',
+  });
+  assert.equal(f.seen.length, 1);
+  assert.deepEqual(quotas(f.db), [1, 1]);
+  const forwarded = JSON.stringify(f.seen[0].body);
+  assert.equal(forwarded.includes(f.authorization), false);
+  assert.equal(forwarded.includes('lat'), false);
+  assert.equal(forwarded.includes('校門'), true);
+  assert.deepEqual(await f.service.execute(f.authorization, body), result);
+  assert.equal(f.seen.length, 1);
+  const route = {
+    approved: true,
+    operationId: result.operationId,
+    request: p.request,
+    fromId: 'gate',
+    toId: 'library',
+  };
+  await rejectsCode(
+    f.service.route(f.authorization, { ...route, approved: false }),
+    'PUBLIC_AGENT_CONFIRMATION_REQUIRED',
+  );
+  await rejectsCode(
+    f.service.route(f.authorization, { ...route, fromId: 'library', toId: 'gate' }),
+    'PUBLIC_AGENT_INVALID_RESULT',
+  );
+  const verified = await f.service.route(f.authorization, route);
+  const url = new globalThis.URL(verified.receipt.url);
+  assert.equal(url.hostname, 'www.google.com');
+  assert.equal(url.searchParams.get('origin'), '24,120');
+  assert.equal(url.searchParams.get('destination'), '24.1,120.1');
+  await f.service.ack(f.authorization, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+    operationId: result.operationId,
+    approved: true,
+  });
+  await rejectsCode(f.service.route(f.authorization, route), 'PUBLIC_AGENT_OPERATION_NOT_FOUND');
+  await rejectsCode(f.service.read(f.authorization, p.request), 'PUBLIC_AGENT_OPERATION_NOT_FOUND');
+  await rejectsCode(f.service.execute(f.authorization, body), 'PUBLIC_AGENT_OPERATION_NOT_FOUND');
+});
+test('source change and cross account/session prevent reuse of the original suggestion', async () => {
+  const f = fixture(),
+    { p, result } = await f.execute();
+  const route = {
+    approved: true,
+    operationId: result.operationId,
+    request: p.request,
+    fromId: 'gate',
+    toId: 'library',
+  };
+  const other = f.register(f.db.actor(), 'b');
+  await assert.rejects(f.service.route(other, route));
+  const newSession = f.register(f.db.anotherSession(f.actor), 'c');
+  await assert.rejects(f.service.route(newSession, route));
+  f.source.value.places[1].lat += 0.02;
+  await rejectsCode(f.service.route(f.authorization, route), 'PUBLIC_AGENT_SOURCE_CHANGED');
+  assert.equal(f.seen.length, 1);
+});
+test('model quota refusal is terminal failed, never success or silent fallback', async () => {
+  const f = fixture({
+    fetch: async () =>
+      new globalThis.Response('{}', {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      }),
+  });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const failed = await f.service.execute(f.authorization, {
+    confirmationId: c.confirmationId,
+    request: p.request,
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.failureCode, 'FREE_QUOTA_UNAVAILABLE');
+  const state = await f.service.status(f.authorization, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+  });
+  assert.equal(state.status, 'failed');
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('a definitive free-only guard refusal records an unsent failure and never invokes provider on replay', async () => {
+  let sent = 0;
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected provider call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  const result = await f.service.execute(f.authorization, body);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(sent, 0);
+  assert.deepEqual(await f.service.execute(f.authorization, body), result);
+  assert.equal(sent, 0);
+  assert.deepEqual(quotas(f.db), [1, 1]);
+});
+test('guard errors and a late denial after timeout stay unknown without provider dispatch', async () => {
+  let sent = 0,
+    release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => {
+      await held;
+      return false;
+    },
+  });
+  const f = fixture({ transport, timeoutMs: 20 });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  await rejectsCode(f.service.execute(f.authorization, body), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+  assert.equal((await f.service.execute(f.authorization, body)).status, 'unknown');
+  assert.equal(sent, 0);
+});
+test('cancellation during a guard cannot turn its late false result into a definitive failure', async () => {
+  let sent = 0,
+    release,
+    entered;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => {
+      entered();
+      await held;
+      return false;
+    },
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const controller = new globalThis.AbortController();
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  const executing = f.service.execute(f.authorization, body, controller.signal);
+  await started;
+  controller.abort();
+  release();
+  await rejectsCode(executing, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+  assert.equal(sent, 0);
+});
+test('lost failure commit acknowledgement stays unknown until durable status is queried', async () => {
+  let sent = 0;
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  f.db.beforeAction = (action, values) => {
+    if (action === 'finalize-operation' && values[7] === 'FREE_ASSURANCE_UNAVAILABLE') {
+      f.db.loseCommitAck = true;
+      f.db.beforeAction = null;
+    }
+  };
+  const body = { confirmationId: c.confirmationId, request: p.request };
+  await rejectsCode(f.service.execute(f.authorization, body), 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  const durable = await f.service.read(f.authorization, p.request);
+  assert.equal(durable.status, 'failed');
+  assert.equal(durable.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(sent, 0);
+});
+test('cancellation while persisting a guard denial is unknown until durable status is queried', async () => {
+  let sent = 0,
+    release,
+    entered;
+  const holding = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const transport = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      sent++;
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({ transport });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  f.db.beforeAction = async (action, values) => {
+    if (action === 'finalize-operation' && values[7] === 'FREE_ASSURANCE_UNAVAILABLE') {
+      f.db.beforeAction = null;
+      entered();
+      await holding;
+    }
+  };
+  const controller = new globalThis.AbortController();
+  const executing = f.service.execute(
+    f.authorization,
+    {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    },
+    controller.signal,
+  );
+  await started;
+  controller.abort();
+  release();
+  await rejectsCode(executing, 'PUBLIC_AGENT_OUTCOME_UNKNOWN');
+  const durable = await f.service.read(f.authorization, p.request);
+  assert.equal(durable.status, 'failed');
+  assert.equal(durable.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(sent, 0);
+});
+test('guard exceptions and provider-fetch errors cannot forge an unsent denial', async () => {
+  const denied = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('unexpected');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  let proof;
+  const priorAttempt = createFreeAssuranceAttempt(
+    new globalThis.AbortController().signal,
+    'pago_11111111-1111-1111-1111-111111111111',
+  );
+  try {
+    await denied(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: '{}',
+        signal: new globalThis.AbortController().signal,
+      },
+      async () => {},
+      priorAttempt,
+    );
+  } catch (error) {
+    proof = error;
+  }
+  assert.equal(isFreeAssuranceDenied(proof, priorAttempt), true);
+  for (const fromGuard of [true, false]) {
+    let sent = 0;
+    const transport = createGroqServerTransport({
+      credential: 'synthetic-only',
+      freeOnlyGuard: async () => {
+        if (fromGuard) throw proof;
+        return true;
+      },
+      fetch: async () => {
+        sent++;
+        throw proof;
+      },
+    });
+    const f = fixture({ transport });
+    const p = await f.prepare();
+    const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+    await rejectsCode(
+      f.service.execute(f.authorization, {
+        confirmationId: c.confirmationId,
+        request: p.request,
+      }),
+      'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+    );
+    const state = await f.service.read(f.authorization, p.request);
+    assert.equal(state.status, 'unknown');
+    assert.equal(sent, fromGuard ? 0 : 1);
+  }
+});
+test('a denial proof from another operation cannot certify a later task', async () => {
+  let oldProof;
+  const priorAttempt = createFreeAssuranceAttempt(
+    new globalThis.AbortController().signal,
+    'pago_11111111-1111-1111-1111-111111111111',
+  );
+  const prior = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  try {
+    await prior(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        redirect: 'error',
+        cache: 'no-store',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: '{}',
+        signal: new globalThis.AbortController().signal,
+      },
+      async () => {},
+      priorAttempt,
+    );
+  } catch (error) {
+    oldProof = error;
+  }
+  assert.equal(isFreeAssuranceDenied(oldProof, priorAttempt), true);
+  let providerCalls = 0;
+  const f = fixture({
+    transport: async () => {
+      providerCalls++;
+      throw oldProof;
+    },
+  });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    f.service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+  assert.equal(providerCalls, 1);
+});
+test('same-attempt custom transport cannot rethrow a denial after a simulated dispatch', async () => {
+  let dispatched = 0;
+  const canonical = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture({
+    transport: async (url, init, beforeSend, attempt) => {
+      let proof;
+      try {
+        await canonical(url, init, beforeSend, attempt);
+      } catch (error) {
+        proof = error;
+      }
+      dispatched++;
+      throw proof;
+    },
+  });
+  const p = await f.prepare();
+  const c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    f.service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal(dispatched, 1);
+  assert.equal((await f.service.read(f.authorization, p.request)).status, 'unknown');
+});
+test('same-attempt custom planner cannot rethrow a denial after a simulated dispatch', async () => {
+  let dispatched = 0;
+  const canonical = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture();
+  const readPublicCatalog = async () => globalThis.structuredClone(f.source.value);
+  const trusted = createGroqNavigationPlanner({
+    enabled: true,
+    transport: canonical,
+    readPublicCatalog,
+  });
+  const serviceOptions = {
+    accounts: f.options.accounts,
+    ledger: f.ledger,
+    clock: () => f.db.now,
+    readPublicCatalog,
+    groqPlan: async (_input, signal, beforeSend, attempt) => {
+      let proof;
+      try {
+        await canonical(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            method: 'POST',
+            redirect: 'error',
+            cache: 'no-store',
+            headers: { accept: 'application/json', 'content-type': 'application/json' },
+            body: '{}',
+            signal,
+          },
+          () => beforeSend(signal),
+          attempt,
+        );
+      } catch (error) {
+        proof = error;
+      }
+      dispatched++;
+      serviceOptions.groqPlan = trusted;
+      throw proof;
+    },
+  };
+  const service = new PlatformPublicTaskService(serviceOptions);
+  const p = await service.prepareGroq(f.authorization, {
+    schoolId: 'pu',
+    query: '從入口走去圖書館',
+    requestId: 'custom_planner_01',
+  });
+  const c = await service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  assert.equal(dispatched, 1);
+  assert.equal((await service.read(f.authorization, p.request)).status, 'unknown');
+});
+test('canonical planner captures its transport and ignores later option replacement', async () => {
+  let dispatched = 0;
+  const canonical = createGroqServerTransport({
+    credential: 'synthetic-only',
+    fetch: async () => {
+      throw new Error('must not call');
+    },
+    freeOnlyGuard: async () => false,
+  });
+  const f = fixture();
+  const readPublicCatalog = async () => globalThis.structuredClone(f.source.value);
+  const options = { enabled: true, transport: canonical, readPublicCatalog };
+  const planner = createGroqNavigationPlanner(options);
+  options.transport = async () => {
+    dispatched++;
+    throw new Error('unexpected');
+  };
+  const service = new PlatformPublicTaskService({
+    accounts: f.options.accounts,
+    ledger: f.ledger,
+    clock: () => f.db.now,
+    readPublicCatalog,
+    groqPlan: planner,
+  });
+  const p = await service.prepareGroq(f.authorization, {
+    schoolId: 'pu',
+    query: '從入口走去圖書館',
+    requestId: 'captured_transport_01',
+  });
+  const c = await service.confirm(f.authorization, { approved: true, request: p.request });
+  const result = await service.execute(f.authorization, {
+    confirmationId: c.confirmationId,
+    request: p.request,
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failureCode, 'FREE_ASSURANCE_UNAVAILABLE');
+  assert.equal(dispatched, 0);
+});
+test('timeout after admission stays unknown even when the model returns late', async () => {
+  let release,
+    called = 0;
+  const wait = new Promise((resolve) => {
+    release = resolve;
+  });
+  const f = fixture({
+    timeoutMs: 20,
+    fetch: async () => {
+      called++;
+      await wait;
+      return new globalThis.Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: '{"kind":"route","fromId":"gate","toId":"library"}',
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  const p = await f.prepare(),
+    c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    f.service.execute(f.authorization, { confirmationId: c.confirmationId, request: p.request }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  const state = await f.service.status(f.authorization, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+  });
+  assert.equal(state.status, 'unknown');
+  assert.equal(called, 1);
+  await rejectsCode(
+    f.service.ack(f.authorization, {
+      task: 'public-campus-navigation',
+      schoolId: 'pu',
+      operationId: state.operationId,
+      approved: true,
+    }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+});
+
+test('definitive unclear and malformed provider responses become explicit failures requiring acknowledgement', async () => {
+  const answers = [
+    {
+      content: JSON.stringify({ kind: 'unclear', fromId: null, toId: null }),
+      failure: 'DESTINATION_UNCLEAR',
+    },
+    {
+      content: '{"kind":"route","fromId":"gate","fromId":"library","toId":"library"}',
+      failure: 'INVALID_PROVIDER_RESPONSE',
+    },
+  ];
+  for (const answer of answers) {
+    let calls = 0;
+    const f = fixture({
+      fetch: async () => {
+        calls++;
+        return new globalThis.Response(
+          JSON.stringify({
+            choices: [
+              { finish_reason: 'stop', message: { role: 'assistant', content: answer.content } },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+    const p = await f.prepare(),
+      c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+    const failed = await f.service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    });
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.failureCode, answer.failure);
+    assert.equal(calls, 1);
+    const again = await f.service.execute(f.authorization, {
+      confirmationId: c.confirmationId,
+      request: p.request,
+    });
+    assert.equal(again.status, 'failed');
+    assert.equal(calls, 1);
+    assert.deepEqual(quotas(f.db), [1, 1]);
+    const blocked = await f.service.prepareGroq(f.authorization, {
+      schoolId: 'pu',
+      query: '從入口走去圖書館',
+      requestId: 'another_request_01',
+    });
+    await rejectsCode(
+      f.service.confirm(f.authorization, { approved: true, request: blocked.request }),
+      'PUBLIC_AGENT_OPEN_OPERATION',
+    );
+    assert.equal(
+      (
+        await f.service.ack(f.authorization, {
+          task: 'public-campus-navigation',
+          schoolId: 'pu',
+          operationId: failed.operationId,
+          approved: true,
+        })
+      ).status,
+      'acknowledged',
+    );
+  }
+});
+test('a lost failure commit acknowledgement remains unknown to caller and cannot double debit', async () => {
+  let f;
+  f = fixture({
+    fetch: async () => {
+      f.db.loseCommitAck = true;
+      return new globalThis.Response('{}', {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  const p = await f.prepare(),
+    c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await rejectsCode(
+    f.service.execute(f.authorization, { confirmationId: c.confirmationId, request: p.request }),
+    'PUBLIC_AGENT_OUTCOME_UNKNOWN',
+  );
+  const state = await f.service.status(f.authorization, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+  });
+  assert.equal(state.status, 'failed');
+  assert.deepEqual(quotas(f.db), [1, 1]);
+  const restarted = f.make();
+  const replay = await restarted.status(f.actor, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+  });
+  assert.deepEqual(replay, state);
+  const next = await f.service.prepareGroq(f.authorization, {
+    schoolId: 'pu',
+    query: '從入口走去圖書館',
+    requestId: 'after_lost_ack_01',
+  });
+  await rejectsCode(
+    f.service.confirm(f.authorization, { approved: true, request: next.request }),
+    'PUBLIC_AGENT_OPEN_OPERATION',
+  );
+});
+
+test('Groq stays unavailable when the server has not selected an executor', async () => {
+  const f = admissionFixture();
+  const service = new PlatformPublicTaskService({
+    accounts: f.options.accounts,
+    ledger: f.ledger,
+    readPublicCatalog: async () => catalog(),
+  });
+  await rejectsCode(
+    service.prepareGroq(f.authorization, {
+      schoolId: 'pu',
+      query: '從入口走去圖書館',
+      requestId: 'disabled_groq_01',
+    }),
+    'PUBLIC_AGENT_EXECUTOR_UNAVAILABLE',
+  );
+});
+
+test('edited confirmation and stale source cannot dispatch to Groq', async () => {
+  const f = fixture(),
+    p = await f.prepare();
+  const edited = globalThis.structuredClone(p.request);
+  edited.data.query = '另外一個地點';
+  await assert.rejects(f.service.confirm(f.authorization, { approved: true, request: edited }));
+  const extra = globalThis.structuredClone(p.request);
+  extra.data.consent.model = 'other';
+  await assert.rejects(f.service.confirm(f.authorization, { approved: true, request: extra }));
+  const old = globalThis.structuredClone(p.request);
+  delete old.data.consent.model;
+  await assert.rejects(f.service.confirm(f.authorization, { approved: true, request: old }));
+  assert.equal(p.request.data.consent.model, p.model);
+  f.source.value.places[0].lat += 0.001;
+  await rejectsCode(
+    f.service.confirm(f.authorization, { approved: true, request: p.request }),
+    'PUBLIC_AGENT_SOURCE_CHANGED',
+  );
+  assert.equal(f.seen.length, 0);
+  assert.deepEqual(quotas(f.db), []);
+});
+
+test('the caller cannot substitute a different query or session after confirmation', async () => {
+  const f = fixture(),
+    p = await f.prepare(),
+    c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  const edited = globalThis.structuredClone(p.request);
+  edited.data.query = edited.data.consent.query = '不同的地點';
+  await assert.rejects(
+    f.service.execute(f.authorization, { confirmationId: c.confirmationId, request: edited }),
+  );
+  const other = f.register(f.db.actor(), 'b');
+  await assert.rejects(
+    f.service.execute(other, { confirmationId: c.confirmationId, request: p.request }),
+  );
+  assert.equal(f.seen.length, 0);
+  assert.deepEqual(quotas(f.db), []);
+});
+
+test('session revoked during final public-source read stops outbound call before fetch', async () => {
+  const f = fixture();
+  let reads = 0,
+    revoked = false;
+  const resolve = f.options.accounts.resolveSession;
+  f.options.accounts.resolveSession = async (auth) => {
+    if (revoked) throw Object.assign(new Error('revoked'), { code: 'PLATFORM_SESSION_INVALID' });
+    return resolve(auth);
+  };
+  f.source.beforeRead = async () => {
+    reads++;
+    if (reads === 6) revoked = true;
+  };
+  const p = await f.prepare(),
+    c = await f.service.confirm(f.authorization, { approved: true, request: p.request });
+  await assert.rejects(
+    f.service.execute(f.authorization, { confirmationId: c.confirmationId, request: p.request }),
+  );
+  assert.equal(revoked, true);
+  assert.equal(f.seen.length, 0);
+  revoked = false;
+  const state = await f.service.status(f.authorization, {
+    task: 'public-campus-navigation',
+    schoolId: 'pu',
+  });
+  assert.ok(['unknown', 'pending'].includes(state.status));
+});

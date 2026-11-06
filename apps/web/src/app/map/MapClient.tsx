@@ -16,6 +16,7 @@ import {
   type MapLocation,
 } from './mapService';
 import styles from './map.module.css';
+import { PublicNavigationTask, type PublicTaskPort } from './PublicNavigationTask';
 import {
   hasBundledCampusPlaces,
   isBusStopLocation,
@@ -34,7 +35,7 @@ import {
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
 } from '@campus/shared/src/campusMapLookup';
 
-type MapProps = { school: string; schoolName?: string; route?: string; focus?: string };
+type MapProps = { publicTask?: PublicTaskPort; school: string; schoolName?: string; route?: string; focus?: string };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
 
 export default function MapClient(props: MapProps) {
@@ -57,6 +58,7 @@ export default function MapClient(props: MapProps) {
 }
 
 function MapContent({
+  publicTask,
   school,
   schoolName,
   route,
@@ -320,6 +322,7 @@ function MapContent({
 
   return (
     <div className={`pageStack ${styles.page}`} data-map-first-screen="true">
+      {publicTask && publicTask.schoolId === school && <PublicNavigationTask port={publicTask} />}
       {routeStart && !routeLocations && (
         <p className={styles.notice} role="status">
           已設定「{routeStart.name}」為起點。請選擇其他地點，再按「設為終點」。
