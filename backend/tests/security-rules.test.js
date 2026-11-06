@@ -1935,57 +1935,41 @@ describe('storage security rules', () => {
     await assertFails(putPhoto('schools/other/stories/another-draft/image', 'closing account new'));
   });
 
-  test('DM attachments reject a transferred member with stale old-school access', async () => {
+  test('DM Storage SDK cannot reissue durable URLs or upload, including for otherwise valid members', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ schoolId: 'pu' });
       await db.doc('users/bob').set({ schoolId: 'pu' });
       await db.doc('schools/pu/members/alice').set({ status: 'active' });
       await db.doc('schools/pu/members/bob').set({ status: 'active' });
-      await db.doc('conversations/private').set({ schoolId: 'pu', memberIds: ['alice', 'bob'] });
+      await db.doc('conversations/private').set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
     });
-
-    const alice = testEnv.authenticatedContext('alice').storage();
-    const bob = testEnv.authenticatedContext('bob').storage();
-    const outsider = testEnv.authenticatedContext('outsider').storage();
-    // Both historical message attachments and the newer media location use this gate.
     const files = [
       'conversations/private/messages/one/file.pdf',
       'conversations/private/media/one/file.pdf',
     ];
-
     for (const file of files) {
-      await assertSucceeds(uploadString(alice.ref(file), 'original attachment', 'application/pdf'));
-      await assertSucceeds(bob.ref(file).getMetadata());
-      await assertFails(outsider.ref(file).getMetadata());
+      // Simulate a legacy object or a signed GCS POST, which bypasses Firebase
+      // Storage Rules. Do NOT mistake this seed operation for a client upload.
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await uploadString(ctx.storage().ref(file), 'existing attachment', 'application/pdf');
+      });
+      for (const who of ['alice', 'bob', 'outsider']) {
+        const sdk = testEnv.authenticatedContext(who).storage().ref(file);
+        await assertFails(sdk.getMetadata());
+        await assertFails(sdk.getDownloadURL());
+        await assertFails(uploadString(sdk, 'unauthorized overwrite', 'application/pdf'));
+      }
     }
-
-    // A student's old school member record can remain active during a transfer.
-    await seedFirestore(async (db) => {
-      await db.doc('users/bob').set({ schoolId: 'other' });
-    });
+    // The callable (separately tested) checks conversation, school profile
+    // and active school membership on EVERY request. The SDK must never
+    // downgrade to the previous three-document rule, even after a transfer.
+    await seedFirestore(async db => db.doc('users/bob').set({ schoolId: 'other' }));
     for (const file of files) {
-      await assertFails(bob.ref(file).getMetadata());
-      await assertFails(uploadString(bob.ref(file), 'unauthorized replacement', 'application/pdf'));
-      await assertSucceeds(alice.ref(file).getMetadata());
-    }
-
-    await seedFirestore(async (db) => {
-      await db.doc('users/bob').set({ schoolId: 'pu' });
-      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
-    });
-    for (const file of files) {
-      await assertFails(bob.ref(file).getMetadata());
-    }
-
-    await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-    });
-    for (const file of files) {
-      await assertSucceeds(bob.ref(file).getMetadata());
+      await assertFails(testEnv.authenticatedContext('bob').storage().ref(file).getDownloadURL());
     }
   });
 
-  test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
+  test('closing and deleted accounts cannot use client SDK access for private files', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ displayName: 'Alice', schoolId: 'pu' });
       await db.doc('users/bob').set({ schoolId: 'pu' });
@@ -2000,8 +1984,18 @@ describe('storage security rules', () => {
       'printjobs/alice/one/file.pdf', 'conversations/private/messages/one/file.pdf',
       'conversations/private/media/one/file.pdf', 'repairs/one/photo.jpg',
     ];
+    const dmPaths = privatePaths.filter((file) => file.startsWith('conversations/'));
     for (const file of privatePaths) {
-      await assertSucceeds(uploadString(storage.ref(file), 'fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
+      if (dmPaths.includes(file)) {
+        await testEnv.withSecurityRulesDisabled(async (ctx) =>
+          uploadString(ctx.storage().ref(file), 'legacy attachment', 'application/pdf'));
+      } else {
+        await assertSucceeds(uploadString(storage.ref(file), 'fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
+      }
+    }
+    for (const file of dmPaths) {
+      await assertFails(storage.ref(file).getMetadata());
+      await assertFails(uploadString(storage.ref(file), 'new attachment', 'application/pdf'));
     }
     await assertFails(uploadString(storage.ref('health/alice/one/program.exe'), 'fixture', 'application/x-msdownload'));
     for (const state of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
@@ -2014,7 +2008,8 @@ describe('storage security rules', () => {
       await assertFails(uploadString(storage.ref('lostfound/one/photo.jpg'), 'image', 'image/jpeg'));
       await assertFails(uploadString(storage.ref('bugreports/one/photo.jpg'), 'image', 'image/jpeg'));
     }
-    await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
+    // Existing private object bytes do not become readable via raw SDK paths.
+    await assertFails(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
   });
 
   test('deny print uploads for another user', async () => {
