@@ -7,7 +7,7 @@ import { readPersonalImportDraft, readPersonalImportPartialDraft, writePersonalI
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
-import { isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
 import { formatSemester } from '@/lib/academicRecords';
@@ -17,7 +17,7 @@ import courseStyles from './schoolCourses.module.css';
 
 type SearchResult =
   | { status: 'loading' | 'error'; query: string }
-  | { status: 'ready'; query: string; courses: PublicCatalogCourse[]; truncated: boolean };
+  | { status: 'ready'; query: string; courses: PublicCatalogCourse[]; truncated: boolean; fetchedAt?: string };
 
 function CatalogCourse({ course, schoolId, importHref, review }: {
   course: PublicCatalogCourse;
@@ -145,7 +145,7 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       if (!response.ok) throw new Error();
       const data = await response.json();
       if (!isPublicCourseCatalog(data, schoolId)) throw new Error('Invalid catalog');
-      if (!controller.signal.aborted) setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated });
+      if (!controller.signal.aborted) setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated, fetchedAt: data.fetchedAt });
     } catch {
       if (!controller.signal.aborted) setResult({ status: 'error', query: term });
     } finally {
@@ -177,6 +177,7 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
             {result.courses.length ? `顯示${term}${result.courses.length} 筆開課資料。` : `這次查詢沒有找到${term}課程。`}
             {result.truncated ? '符合條件的課程超過顯示上限，可改用課號或老師姓名縮小範圍。' : null}
           </p>
+          {result.fetchedAt && <p>校方資料擷取：{formatPublicCatalogFetchedAt(result.fetchedAt)}（台灣時間；非校方更新時間）</p>}
           {result.courses.length > 0 && (
             <ul className={courseStyles.courses}>
               {result.courses.map((course) => (

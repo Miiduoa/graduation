@@ -43,7 +43,7 @@ const nthuCourse = {
 };
 function nthuJson(courses: unknown[] = [nthuCourse]) {
   return { ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
-    schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json', fetchedAt: '2026-11-06T08:00:00.000Z',
     truncated: false, courses,
   }) };
 }
@@ -59,6 +59,7 @@ test('NTHU preserves classroom pairs and provides reviewed CSV import without wr
     fireEvent.press(view.getByText('查詢課程'));
     expect(await view.findByText('分析化學專題')).toBeTruthy();
     expect(view.getByText('星期一 3、4 節 · 10:10–12:00 · 教室甲')).toBeTruthy();
+    expect(view.getByText('校方資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）')).toBeTruthy();
     expect(view.getByText('星期四 5、6 節 · 13:20–15:10 · 教室乙')).toBeTruthy();
     expect(fetchSource).toHaveBeenCalledWith('https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES', expect.objectContaining({ credentials: 'omit' }));
     fireEvent.press(view.getByText('複製課表匯入資料'));

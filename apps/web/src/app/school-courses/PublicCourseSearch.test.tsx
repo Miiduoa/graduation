@@ -39,7 +39,7 @@ const nthuCourse: PublicCatalogCourse = {
 };
 const nthuProps = { schoolId: 'nthu' as const, schoolName: '國立清華大學', schoolSearch: '?campus=nthu' };
 function response(courses: PublicCatalogCourse[], extra = {}) {
-  return Response.json({ schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/', truncated: false, courses, ...extra });
+  return Response.json({ schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/', fetchedAt: '2026-11-06T08:00:00.000Z', truncated: false, courses, ...extra });
 }
 function submit(query: string) {
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
@@ -61,6 +61,7 @@ it('searches the public endpoint, distinguishes sections and copies a school-sco
   const rows = await screen.findAllByRole('listitem');
   expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=ncnu&q=005076', expect.objectContaining({ credentials: 'omit' }));
   expect(rows).toHaveLength(2);
+  expect(screen.getByText('校方資料擷取：2026-11-06 16:00（台灣時間；非校方更新時間）')).toBeTruthy();
   expect(rows[0].textContent).toContain('115 學年度第 1 學期 · 課號 005076 · 班別 a');
   expect(rows[0].textContent).toContain('星期五 b、c、d 節');
   expect(rows[1].textContent).toMatch(/班別 b.*校方節次未提供/);
