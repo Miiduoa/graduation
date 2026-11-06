@@ -25,7 +25,7 @@ function CatalogCourse({ course, importHref, review }: {
 }) {
   const [notice, setNotice] = useState('');
   const [copy, setCopy] = useState<'idle' | 'copied' | 'manual'>('idle');
-  const meetings = ncnuCourseMeetings(course.time);
+  const meetings = ncnuCourseMeetings(course.time, course.semester);
   const csv = ncnuTimetableImportCsv(course);
 
   async function copyCourse() {
@@ -72,7 +72,7 @@ function CatalogCourse({ course, importHref, review }: {
 export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { schoolId: PublicCourseCatalogResponse['schoolId']; schoolName: string; schoolSearch: string }) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
-  const pending = useRef<AbortController | null>(null);
+  const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
   const importHref = campusServiceHref('/import?kind=timetable', schoolSearch);
@@ -98,15 +98,27 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
     router.push(importHref + '#import-review');
     return '';
   }
-  useEffect(() => () => pending.current?.abort(), []);
+  useEffect(() => () => {
+    if (!pending.current) return;
+    pending.current.controller.abort();
+    clearTimeout(pending.current.timer);
+  }, []);
   const catalog = resolveOfficialCourseQueryLink(schoolId);
 
   async function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const term = query.trim();
-    pending.current?.abort();
+    if (pending.current) {
+      pending.current.controller.abort();
+      clearTimeout(pending.current.timer);
+    }
     const controller = new AbortController();
-    pending.current = controller;
+    const timer = setTimeout(() => {
+      if (pending.current?.controller !== controller || controller.signal.aborted) return;
+      controller.abort();
+      setResult({ status: 'error', query: term });
+    }, 25_000);
+    pending.current = { controller, timer };
     setResult({ status: 'loading', query: term });
     try {
       const params = new URLSearchParams({ schoolId });
@@ -120,6 +132,8 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       if (!controller.signal.aborted) setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated });
     } catch {
       if (!controller.signal.aborted) setResult({ status: 'error', query: term });
+    } finally {
+      clearTimeout(timer);
     }
   }
 
