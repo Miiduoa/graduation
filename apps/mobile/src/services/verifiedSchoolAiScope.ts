@@ -9,6 +9,10 @@ export type VerifiedSchoolAiScope = Readonly<{
 
 let activeScope: VerifiedSchoolAiScope | null = null;
 
+export function revokeVerifiedSchoolAiScope(): void {
+  activeScope = null;
+}
+
 /** 由成功的學校登入綁定，其檢查包含登入輪次、Firebase 使用者與校務 session。 */
 export function bindVerifiedSchoolAiScope(context: PostLoginContext, assertCurrent: () => void): void {
   if (context.origin !== 'verified-school-login' || !isProvidenceSchoolId(context.schoolId)) return;
@@ -18,7 +22,11 @@ export function bindVerifiedSchoolAiScope(context: PostLoginContext, assertCurre
 }
 
 export function isVerifiedSchoolAiScopeCurrent(scope: VerifiedSchoolAiScope): boolean {
-  if (activeScope !== scope || getInMemoryPostLoginContext() !== scope.context) return false;
+  const current = getInMemoryPostLoginContext();
+  // 個人資料刷新會經 JSON 還原同一份 PLC，登入輪次仍由 assertCurrent 驗證。
+  if (activeScope !== scope || !current || current.origin !== scope.context.origin ||
+      current.uid !== scope.context.uid || current.schoolId !== scope.context.schoolId ||
+      current.builtAt !== scope.context.builtAt) return false;
   try {
     scope.assertCurrent();
     return true;

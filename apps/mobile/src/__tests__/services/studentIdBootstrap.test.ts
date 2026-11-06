@@ -598,6 +598,11 @@ test('verified AI scope uses the actual school-login user and session revocation
     const scope = getVerifiedSchoolAiScope(identity);
     expect(scope?.context).toBe(context);
 
+    memory.mockReturnValue(null);
+    expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+    memory.mockReturnValue(JSON.parse(JSON.stringify(context)));
+    expect(getVerifiedSchoolAiScope(identity)).toBe(scope);
+
     mockAuth.currentUser = { ...mockSchoolUser };
     expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
     mockAuth.currentUser = mockSchoolUser;
