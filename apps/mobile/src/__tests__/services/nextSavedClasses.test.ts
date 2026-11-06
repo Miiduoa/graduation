@@ -1,10 +1,10 @@
 import { classMeetingKey, type PersonalImportRecord } from '@campus/shared';
 import { savedClassGaps } from '../../services/nextSavedClasses';
 
-function meeting(id: string, startTime: string, endTime: string): PersonalImportRecord {
+function meeting(id: string, startTime: string, endTime: string, dayOfWeek = 5): PersonalImportRecord {
   return {
     id, title: id, schoolId: 'pu', kind: 'timetable', academicYear: '115', semester: '1',
-    dayOfWeek: 5, startTime, endTime, batchId: 'import', importedAt: '2026-11-01T00:00:00Z',
+    dayOfWeek, startTime, endTime, batchId: 'import', importedAt: '2026-11-01T00:00:00Z',
     source: { type: 'paste', rawText: '', line: 1 },
   };
 }
@@ -60,5 +60,34 @@ test('a previous-term class ending after midnight bounds the first gap of the ne
   const now = new Date('2027-01-31T23:30:00+08:00');
   expect(savedClassGaps(rows, 'pu', now, 'tomorrow')).toEqual([{
     startAt: Date.parse('2027-02-01T01:15:00+08:00'), endAt: Date.parse('2027-02-01T14:00:00+08:00'),
+  }]);
+});
+
+test('a previous weekday cannot invent a free period before the first class or on a single-class day', () => {
+  const thursday = meeting('週四', '14:00', '15:00', 4);
+  const fridayMorning = meeting('週五上午', '10:00', '11:00');
+  const fridayAfternoon = meeting('週五下午', '14:00', '15:00');
+  expect(savedClassGaps([thursday, fridayMorning, fridayAfternoon], 'pu', new Date(at('08:00')), 'today')).toEqual([
+    { startAt: at('11:00'), endAt: at('14:00') },
+  ]);
+  expect(savedClassGaps(
+    [first, last, meeting('週六專題', '10:00', '12:00', 6)],
+    'pu', new Date(at('10:00')), 'tomorrow',
+  )).toEqual([]);
+});
+
+test('Friday-to-Saturday and Sunday-to-Monday gaps stay on the requested weekday', () => {
+  const saturday = [
+    meeting('週六上午', '10:00', '11:00', 6), meeting('週六下午', '14:00', '15:00', 6),
+  ];
+  expect(savedClassGaps([first, last, ...saturday], 'pu', new Date(at('10:00')), 'tomorrow')).toEqual([
+    { startAt: Date.parse('2026-11-07T11:00:00+08:00'), endAt: Date.parse('2026-11-07T14:00:00+08:00') },
+  ]);
+  const sundayNight = new Date('2026-11-08T21:00:00+08:00');
+  expect(savedClassGaps([
+    meeting('週日', '09:00', '12:00', 7),
+    meeting('週一上午', '09:00', '10:00', 1), meeting('週一下午', '13:00', '15:00', 1),
+  ], 'pu', sundayNight, 'tomorrow')).toEqual([{
+    startAt: Date.parse('2026-11-09T10:00:00+08:00'), endAt: Date.parse('2026-11-09T13:00:00+08:00'),
   }]);
 });

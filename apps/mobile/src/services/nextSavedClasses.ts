@@ -103,13 +103,16 @@ export function savedClassGaps(
   const date = day === 'today' ? now : new Date(now.getTime() + DAY);
   const entries = scheduledDay(groups, schoolId, date, true);
   if (!entries) return undefined;
-  if (entries.length < 2) return [];
+  const midnight = Date.parse(`${classDate(date)}T00:00:00+08:00`);
+  // buildPersonalToday also lists the previous weekday; gaps only use meetings that occupy this date.
+  const onDay = entries.filter((entry) => entry.endAt > midnight && entry.startAt < midnight + DAY);
+  if (onDay.length < 2) return [];
 
-  entries.sort((a, b) => a.startAt - b.startAt);
+  onDay.sort((a, b) => a.startAt - b.startAt);
   const gaps: { startAt: number; endAt: number }[] = [];
-  let busyUntil = entries[0].endAt;
-  for (let i = 1; i < entries.length; i++) {
-    const entry = entries[i];
+  let busyUntil = onDay[0].endAt;
+  for (let i = 1; i < onDay.length; i++) {
+    const entry = onDay[i];
     const startAt = Math.max(busyUntil, now.getTime());
     if (startAt < entry.startAt) gaps.push({ startAt, endAt: entry.startAt });
     busyUntil = Math.max(busyUntil, entry.endAt);
