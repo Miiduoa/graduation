@@ -5,8 +5,13 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { MAX_PERIOD_SLOTS } = require('./generated/shared/timetable/schoolPeriods');
 
+const {
+  publicTimetableMeta: publicMeta,
+  publicTimetableCourses: publicCourses,
+  readPublicTimetableShare,
+} = require('./generated/shared/timetable/publicShare');
+
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_COURSES = 80;
 
 function text(value, maximum, field) {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > maximum) {
@@ -87,50 +92,6 @@ function cleanCourse(input = {}) {
     color: ['violet', 'blue', 'mint', 'orange', 'pink', 'lime', 'gray'].includes(input.color)
       ? input.color
       : 'gray',
-  };
-}
-
-function publicMeta(input) {
-  const meta = {};
-  const textLimits = { school: 80, year: 12, semester: 12, className: 80, title: 80 };
-  for (const [key, limit] of Object.entries(textLimits)) {
-    if (typeof input?.[key] === 'string') meta[key] = input[key].trim().slice(0, limit);
-  }
-  if (Number.isFinite(input?.credits)) meta.credits = Math.max(0, Math.min(60, input.credits));
-  return meta;
-}
-
-function publicCourses(courses) {
-  return Array.isArray(courses)
-    ? courses.slice(0, MAX_COURSES).map((course) => cleanCourse({ ...course, teacher: '' }))
-    : [];
-}
-
-async function readPublicTimetableShare(db, token) {
-  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(token)) {
-    return { status: 400, body: { code: 'invalid', error: '分享碼不正確。' } };
-  }
-  const snapshot = await db.collection('timetableShares').doc(token).get();
-  if (!snapshot.exists) {
-    return { status: 404, body: { code: 'missing', error: '這份分享不存在或已撤回。' } };
-  }
-  const data = snapshot.data();
-  if (data.revoked !== false) {
-    return { status: 410, body: { code: 'revoked', error: '這份分享已撤回。' } };
-  }
-  const expires = data.expiresAt?.toMillis?.();
-  if (!Number.isFinite(expires) || expires <= Date.now()) {
-    return { status: 410, body: { code: 'expired', error: '這份分享已過期。' } };
-  }
-  return {
-    status: 200,
-    body: {
-      schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
-      name: typeof data.name === 'string' ? data.name : '課表',
-      courses: publicCourses(data.courses),
-      meta: publicMeta(data.meta),
-      expiresAt: new Date(expires).toISOString(),
-    },
   };
 }
 

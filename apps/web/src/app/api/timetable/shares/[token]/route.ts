@@ -1,5 +1,5 @@
 import { getFirebaseAdmin } from '@/lib/server/firebaseAdmin';
-import { readPublicTimetableShare } from '../../../../../../../../backend/functions/personalCampus.js';
+import { readPublicTimetableShare } from '@campus/shared/src/timetable/publicShare';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
