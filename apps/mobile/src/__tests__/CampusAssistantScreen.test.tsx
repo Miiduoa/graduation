@@ -1515,6 +1515,122 @@ test('replanning keeps the old checklist and unsent draft without trusting saved
   expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(true);
 });
 
+function planWithComparisonEvidence(newer = false): CampusEvidencePlan {
+  const plan = resumablePlan();
+  plan.checkedAt = newer ? new Date().toISOString() : plan.checkedAt;
+  if (newer) {
+    plan.steps[0].dueAt = '2026-11-07T15:59:00.000Z';
+    plan.steps[0].detail = '資料庫｜11/7 23:59 截止。';
+    plan.content = '重新核對後的學習計畫。';
+  }
+  plan.comparisonBasis = {
+    assignments: { status: 'complete', checkedAt: plan.checkedAt, total: 1,
+      items: [{ identity: ['database', 'report'], title: plan.steps[0].title,
+        groupName: '資料庫', dueAt: plan.steps[0].dueAt! }],
+    },
+    timetableUpdatedAt: null,
+  };
+  return plan;
+}
+
+async function openSavedPlanForReplanning() {
+  let view = render(<CampusAssistantScreen />);
+  await askForSavedPlan(view, planWithComparisonEvidence());
+  view.unmount();
+  request.mockClear();
+  view = render(<CampusAssistantScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '等一下問公車');
+  fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
+  fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
+  await act(async () => fireEvent.press(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' })));
+  jest.mocked(refreshCampusSenseSnapshot).mockResolvedValue({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 1,
+      items: [{ title: '資料庫期末報告', groupName: '資料庫', dueAt: '2026-11-07T15:59:00.000Z',
+        source: { kind: 'group-assignment', groupId: 'database', assignmentId: 'report' } }],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+    announcements: { status: 'unavailable', items: [] },
+  });
+  return view;
+}
+
+test('replanning shows deadline changes, opens the exact original and saves a separate unchecked plan', async () => {
+  const view = await openSavedPlanForReplanning();
+  const plan = planWithComparisonEvidence(true);
+  request.mockResolvedValueOnce({ content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '依目前資料重新規劃' })));
+  expect(view.getByText('這次調整了什麼')).toBeTruthy();
+  expect(view.getByText('截止時間有變動。請開啟作業頁核對。')).toBeTruthy();
+  expect(view.getByText('資料庫｜資料庫期末報告\n截止 2026/11/6 23:59')).toBeTruthy();
+  expect(view.getByText('資料庫｜資料庫期末報告\n截止 2026/11/7 23:59')).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('等一下問公車');
+  expect(request.mock.calls.at(-1)[0].messages).toEqual([{ role: 'user', content: '今天要先處理什麼？' }]);
+  expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy();
+
+  fireEvent.press(view.getByRole('button', { name: '查看原計畫' }));
+  expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(true);
+  fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '儲存這份計畫' })));
+  expect(view.getByRole('button', { name: '繼續已儲存的計畫（2）' })).toBeTruthy();
+  openCampusTools(view);
+  expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(true);
+  fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
+  expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(false);
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+});
+
+test('retrying a failed saved-plan refresh retains the original comparison target', async () => {
+  const view = await openSavedPlanForReplanning();
+  const plan = planWithComparisonEvidence(true);
+  request.mockRejectedValueOnce(new Error('temporary read failure'))
+    .mockResolvedValueOnce({ content: plan.content, source: 'device', hasActions: false, plan });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '依目前資料重新規劃' })));
+  expect(view.queryByText('這次調整了什麼')).toBeNull();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新整理今日重點' })));
+  expect(view.getByText('這次調整了什麼')).toBeTruthy();
+  expect(view.getByRole('button', { name: '查看原計畫' })).toBeTruthy();
+  expect(refreshCampusSenseSnapshot).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('等一下問公車');
+});
+
+test.each(['account', 'school', 'cancel', 'signout'] as const)('a late replan cannot publish saved evidence after %s changes', async (change) => {
+  const view = await openSavedPlanForReplanning();
+  const plan = planWithComparisonEvidence(true);
+  const pending = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
+  request.mockReturnValueOnce(pending.promise);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '依目前資料重新規劃' })));
+  expect(request).toHaveBeenCalledTimes(1);
+  const guard = request.mock.calls[0][0];
+  if (change === 'account' || change === 'school') {
+    if (change === 'account') mockUid = 'B'; else mockSchool = 'nthu';
+    view.rerender(<CampusAssistantScreen />);
+  } else if (change === 'cancel') {
+    fireEvent.press(view.getByRole('button', { name: '停止本機回答' }));
+  } else {
+    await act(async () => { await beginSavedCampusPlansSignOutCleanup(); endSavedCampusPlansSignOutCleanup(); });
+  }
+  expect(guard.signal.aborted || !guard.isCurrent()).toBe(true);
+  await act(async () => pending.resolve({ content: plan.content, source: 'device', hasActions: false, plan }));
+  expect(view.queryByText('這次調整了什麼')).toBeNull();
+  expect(view.queryByText('重新核對後的學習計畫。')).toBeNull();
+  expect(view.queryByRole('button', { name: '查看原計畫' })).toBeNull();
+});
+
+test('revoking the saved-plan session removes a comparison that is already displayed', async () => {
+  const view = await openSavedPlanForReplanning();
+  const plan = planWithComparisonEvidence(true);
+  request.mockResolvedValueOnce({ content: plan.content, source: 'device', hasActions: false, plan });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '依目前資料重新規劃' })));
+  expect(view.getByText('這次調整了什麼')).toBeTruthy();
+  await act(async () => { await beginSavedCampusPlansSignOutCleanup(); endSavedCampusPlansSignOutCleanup(); });
+  expect(view.queryByText('這次調整了什麼')).toBeNull();
+  expect(view.queryByRole('button', { name: '查看原計畫' })).toBeNull();
+});
+
 test('a failed sign-out revokes saved-plan UI and an explicit reload can save again', async () => {
   const view = render(<CampusAssistantScreen />);
   await askForSavedPlan(view);

@@ -12,6 +12,7 @@ import type {
   CampusPlanRoute,
   CampusPlanStep,
 } from './offlineCampusPlanner';
+import type { CampusPlanComparisonBasis } from './campusPlanComparison';
 
 type Row = Record<string, unknown>;
 
@@ -150,18 +151,52 @@ function agenda(value: unknown): CampusStudyAgenda {
     ignoredCourses: number(item.ignoredCourses, 0, 80), outsideWindow };
 }
 
+function comparisonBasis(value: unknown): CampusPlanComparisonBasis {
+  const basis = row(value);
+  const assignments = row(basis.assignments);
+  const status = choice(assignments.status, ['complete', 'partial', 'unavailable'] as const);
+  const checkedAt = assignments.checkedAt === null ? null : savedPlanTimestamp(assignments.checkedAt);
+  const total = assignments.total === null ? null : number(assignments.total, 0, Number.MAX_SAFE_INTEGER);
+  const items = list(assignments.items, 400, (value) => {
+    const item = row(value);
+    let identity: [string, string] | null = null;
+    if (item.identity !== null) {
+      if (!Array.isArray(item.identity) || item.identity.length !== 2) return invalid();
+      const parts = Array.from(item.identity, (part) => text(part, 128));
+      if (parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return invalid();
+      identity = [parts[0], parts[1]];
+    }
+    return { identity, ...assignment(item) };
+  });
+  if (status === 'unavailable') {
+    if (checkedAt !== null || total !== null || items.length) return invalid();
+  } else if (!checkedAt || (total !== null && total < items.length) ||
+      (status === 'complete' && total !== items.length)) return invalid();
+  return {
+    assignments: { status, checkedAt, total, items },
+    timetableUpdatedAt: basis.timetableUpdatedAt === null ? null : savedPlanTimestamp(basis.timetableUpdatedAt),
+  };
+}
+
 /** Project data rather than restoring arbitrary fields as future tool authority. */
 export function copyCampusEvidencePlan(value: unknown): CampusEvidencePlan {
   const item = row(value);
   const steps = list(item.steps, 5, step);
   if (!steps.length || new Set(steps.map((entry) => entry.id)).size !== steps.length) return invalid();
+  const checkedAt = savedPlanTimestamp(item.checkedAt);
+  const savedAgenda = item.agenda !== undefined ? agenda(item.agenda) : undefined;
+  const basis = item.comparisonBasis !== undefined ? comparisonBasis(item.comparisonBasis) : undefined;
+  if (basis && ((savedAgenda && savedAgenda.assignmentsAvailable !== (basis.assignments.status !== 'unavailable')) ||
+      (basis.assignments.checkedAt && Date.parse(basis.assignments.checkedAt) > Date.parse(checkedAt) + 30_000) ||
+      (savedAgenda && !savedAgenda.timetableAvailable && basis.timetableUpdatedAt !== null))) return invalid();
   return {
     title: text(item.title, 240),
     overview: text(item.overview, 4000),
-    checkedAt: savedPlanTimestamp(item.checkedAt),
+    checkedAt,
     steps,
     limitations: list(item.limitations, 8, (value) => text(value, 2000)),
-    ...(item.agenda !== undefined ? { agenda: agenda(item.agenda) } : {}),
+    ...(savedAgenda ? { agenda: savedAgenda } : {}),
+    ...(basis ? { comparisonBasis: basis } : {}),
     content: text(item.content, 120_000),
   };
 }

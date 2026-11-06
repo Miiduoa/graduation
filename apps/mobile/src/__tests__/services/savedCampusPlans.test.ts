@@ -13,6 +13,7 @@ import {
   type SavedCampusPlanScope,
 } from '../../services/savedCampusPlans';
 import type { CampusEvidencePlan } from '../../services/offlineCampusPlanner';
+import { buildOfflineCampusPlan } from '../../services/offlineCampusPlanner';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -153,6 +154,78 @@ test('unconfirmed date text stays unknown in a saved undated assignment', async 
   plan.agenda!.outsideWindow = [{ title: '日期未確認', groupName: '', dueAt: '2026-11-10', reason: 'undated' }];
   const result = await saveCampusPlan(scope, { question, plan }, session());
   expect(result[0].plan.agenda!.outsideWindow[0].dueAt).toBeNull();
+});
+
+function comparableSample(): CampusEvidencePlan {
+  const plan = sample();
+  plan.comparisonBasis = {
+    assignments: { status: 'complete', checkedAt: '2026-11-06T00:59:00.000Z', total: 1,
+      items: [{ identity: ['database', 'report'], title: plan.steps[0].title,
+        groupName: '資料庫系統', dueAt: plan.steps[0].dueAt! }],
+    },
+    timetableUpdatedAt: '2026-11-05T12:00:00.000Z',
+  };
+  return plan;
+}
+
+test('comparison evidence survives restart while unknown authority fields are discarded', async () => {
+  const plan = comparableSample();
+  Object.assign(plan.comparisonBasis!, { authToken: 'secret', execute: true });
+  Object.assign(plan.comparisonBasis!.assignments.items[0], { submitted: true, url: 'https://private.invalid/task' });
+  const saved = await saveCampusPlan(scope, { question, plan }, session());
+  await setCampusPlanStepDone(scope, saved[0].id, 'assignment-0', true, session());
+  const restored = await readSavedCampusPlans(scope, session());
+  expect(restored[0].plan).toEqual(comparableSample());
+  expect(restored[0].completedStepIds).toEqual(['assignment-0']);
+  expect([...persisted.values()][0]).not.toMatch(/authToken|execute|submitted|private.invalid/);
+  restored[0].plan.comparisonBasis!.assignments.items[0].identity![0] = 'other-course';
+  expect((await readSavedCampusPlans(scope, session()))[0].plan.comparisonBasis!.assignments.items[0].identity)
+    .toEqual(['database', 'report']);
+});
+
+test('a previously supported full assignment list remains saveable with comparison evidence', async () => {
+  const checkedAt = '2026-11-06T01:00:00.000Z';
+  const items = Array.from({ length: 400 }, (_, index) => ({
+    title: '資'.repeat(40) + index, groupName: '資料庫', dueAt: '2026-11-06T15:59:00.000Z',
+    source: { kind: 'group-assignment' as const, groupId: 'database', assignmentId: 'report-' + index },
+  }));
+  const plan = buildOfflineCampusPlan({ question, uid: 'student-a',
+    context: { checkedAt, schoolId: 'pu', schoolName: '靜宜大學',
+      timetable: { source: 'not-available', updatedAt: null, courses: [] } },
+    snapshot: { userId: 'student-a', schoolId: 'pu', checkedAt,
+      schedule: { status: 'unavailable', count: null },
+      assignments: { status: 'available', count: 400, items,
+        coverage: { complete: true, reason: 'complete', pages: 8 } },
+      announcements: { status: 'unavailable', items: [] },
+    },
+  })!;
+  const saved = await saveCampusPlan(scope, { question, plan }, session());
+  const restored = await readSavedCampusPlans(scope, session());
+  expect(saved).toHaveLength(1);
+  expect(restored[0].plan.comparisonBasis!.assignments.items).toHaveLength(400);
+  expect(restored[0].plan.agenda!.days[0].deadlines).toHaveLength(400);
+  expect(restored[0].plan.comparisonBasis!.assignments.items[399].identity).toEqual(['database', 'report-399']);
+});
+
+test.each([
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.total = 0; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.total = 2; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.status = 'unavailable'; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.checkedAt = null; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.checkedAt = '2026-11-07T01:00:00Z'; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.items[0].identity = ['bad/id', 'report']; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.items[0].identity = ['report'] as never; },
+  (plan: CampusEvidencePlan) => { const identity = Array(2); identity[1] = 'report'; plan.comparisonBasis!.assignments.items[0].identity = identity as never; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.assignments.items[0].dueAt = '2026-11-08'; },
+  (plan: CampusEvidencePlan) => { plan.comparisonBasis!.timetableUpdatedAt = 'unknown'; },
+])('malformed comparison evidence cannot replace an existing saved plan (%#)', async (change) => {
+  await saveCampusPlan(scope, { question, plan: sample() }, session());
+  const before = persisted.get(savedCampusPlansStorageKey(scope));
+  const changed = comparableSample();
+  change(changed);
+  await expect(saveCampusPlan(scope, { question, plan: changed }, session())).rejects.toMatchObject({ code: 'invalid-plan' });
+  expect(persisted.get(savedCampusPlansStorageKey(scope))).toBe(before);
+  expect((await readSavedCampusPlans(scope, session()))[0].plan).toEqual(sample());
 });
 
 test.each([

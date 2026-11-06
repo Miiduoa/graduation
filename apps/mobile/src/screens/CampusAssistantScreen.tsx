@@ -33,11 +33,14 @@ import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusAnnouncementRows } from './CampusAnnouncementRows';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
+import { CampusPlanComparisonCard } from './CampusPlanComparisonCard';
 import { SavedCampusPlansPanel } from './SavedCampusPlansPanel';
 import { useSavedCampusPlans } from '../state/useSavedCampusPlans';
+import { createSavedCampusPlanSession, subscribeSavedCampusPlanInvalidation } from '../services/savedCampusPlans';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 import type { CampusEvidencePlan, CampusPlanRoute } from '../services/offlineCampusPlanner';
+import { compareCampusPlans, type CampusPlanComparison } from '../services/campusPlanComparison';
 import {
   CAMPUS_SENSE_MAX_AGE_MS,
   refreshCampusSenseSnapshot,
@@ -132,7 +135,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   );
 }
 type AssistantShortcut =
-  | { kind: 'brief'; question: string }
+  | { kind: 'brief'; question: string; savedPlanId?: string }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
   | { kind: 'selection'; question: string; checkedAt: string };
@@ -163,6 +166,8 @@ function AssistantConversation({
       requiresService?: boolean;
       source?: CampusAssistantMode;
       plan?: CampusEvidencePlan;
+      planComparison?: CampusPlanComparison;
+      originalPlanId?: string;
       localReads?: LocalCampusReadResult[];
       proposals?: CampusAgentWriteProposal[];
     }>
@@ -177,6 +182,7 @@ function AssistantConversation({
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
   const [panel, setPanel] = useState<AssistantPanel>('chat');
+  const [openedSavedPlan, setOpenedSavedPlan] = useState<{ id: string; request: number } | null>(null);
   const chatScroll = useRef<ScrollView>(null);
   const lastRevealed = useRef(-1);
   const [deviceCheck, setDeviceCheck] = useState(0);
@@ -187,6 +193,7 @@ function AssistantConversation({
   const mounted = useRef(true);
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
+  const replanInFlight = useRef<AbortController | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const canAsk = mode === 'device' || Boolean(uid);
   const timetableOwner = platformTimetable ? `nuni:${platformTimetable.accountId}` : `firebase:${uid}`;
@@ -234,6 +241,18 @@ function AssistantConversation({
   const savedPlanScope = useMemo(() => canSavePlans ? { owner: `firebase:${uid}`, schoolId } : null,
     [canSavePlans, uid, schoolId]);
   const savedPlans = useSavedCampusPlans(savedPlanScope, current);
+  useEffect(() => subscribeSavedCampusPlanInvalidation(() => {
+    if (!mounted.current || !isScopeCurrent()) return;
+    replanInFlight.current?.abort();
+    setOpenedSavedPlan(null);
+    setMessages((previous) => previous.map((message) => {
+      if (!message.planComparison) return message;
+      const reply = { ...message };
+      delete reply.planComparison;
+      delete reply.originalPlanId;
+      return reply;
+    }));
+  }), [isScopeCurrent]);
   useEffect(() => {
     if (platformTimetable) return;
     let active = true;
@@ -300,12 +319,20 @@ function AssistantConversation({
       }
     }
   };
-  const briefPlan = async (question: string) => {
+  const briefPlan = async (question: string, savedPlanId?: string) => {
     if (!uid || lock.current || syncLock.current || !current()) return;
+    const original = savedPlanId ? savedPlans.plans.find((saved) => saved.id === savedPlanId) : undefined;
+    if (savedPlanId && !original) {
+      setError('原計畫已不在清單中，請重新開啟已儲存計畫。');
+      return;
+    }
+    // Sign-out can revoke saved data before the account itself changes.
+    const savedSession = original ? createSavedCampusPlanSession(current) : null;
+    const planCurrent = () => current() && (!savedSession || savedSession());
     lock.current = true;
     syncLock.current = true;
     setBusy(true);
-    setActiveShortcut({ kind: 'brief', question });
+    setActiveShortcut({ kind: 'brief', question, ...(savedPlanId ? { savedPlanId } : {}) });
     setPanel('chat');
     setSyncBusy(true);
     setSyncProgress(null);
@@ -313,19 +340,20 @@ function AssistantConversation({
     setSenseError('');
     const controller = new AbortController();
     inFlight.current = controller;
+    if (original) replanInFlight.current = controller;
     try {
       let snapshot: CampusSenseSnapshot | null = null;
       try {
         snapshot = await refreshCampusSenseSnapshot({
           scope: { uid, schoolId },
-          isCurrent: current,
+          isCurrent: planCurrent,
           signal: controller.signal,
           onProgress: progressFor(controller),
         });
-        if (!current() || controller.signal.aborted) return;
+        if (!planCurrent() || controller.signal.aborted) return;
         setSense(snapshot);
       } catch (syncError) {
-        if (!current()) return;
+        if (!planCurrent()) return;
         if (controller.signal.aborted) { cancelledSync(); return; }
         // A permission or contract failure revokes reliance on any prior summary.
         const transient = isTransientCampusSyncError(syncError);
@@ -337,7 +365,7 @@ function AssistantConversation({
             ? '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。'
             : '校園權限或資料無法驗證，已捨棄校園摘要；僅能使用手機內已保存的個人課表。');
       }
-      if (!current() || controller.signal.aborted) return;
+      if (!planCurrent() || controller.signal.aborted) return;
       setSyncBusy(false);
       setSyncProgress(null);
       const next: CampusAssistantMessage[] = [
@@ -350,11 +378,11 @@ function AssistantConversation({
         senseSnapshot: snapshot,
         messages: next,
         mode: 'device',
-        isCurrent: current,
+        isCurrent: planCurrent,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      if (current()) {
+      if (planCurrent()) {
         setMessages([
           ...next,
           {
@@ -365,6 +393,10 @@ function AssistantConversation({
             tool: reply.tool,
             route: reply.route,
             plan: reply.plan,
+            ...(original && reply.plan ? {
+              planComparison: compareCampusPlans(original.plan, reply.plan),
+              originalPlanId: original.id,
+            } : {}),
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
@@ -374,11 +406,12 @@ function AssistantConversation({
         setActiveShortcut(null);
       }
     } catch {
-      if (current() && !controller.signal.aborted) {
+      if (planCurrent() && !controller.signal.aborted) {
         setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型。');
       }
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
+      if (replanInFlight.current === controller) replanInFlight.current = null;
       lock.current = false;
       syncLock.current = false;
       if (current()) {
@@ -499,6 +532,8 @@ function AssistantConversation({
     <>
       {canSavePlans ? (
         <SavedCampusPlansPanel
+          key={openedSavedPlan?.request ?? 'saved-plans'}
+          initialExpandedId={openedSavedPlan?.id}
           plans={savedPlans.plans}
           loading={savedPlans.loading}
           busy={busy || syncBusy || savedPlans.busy}
@@ -506,7 +541,7 @@ function AssistantConversation({
           onRetry={savedPlans.retry}
           onDelete={(id) => { void savedPlans.remove(id); }}
           onToggleStep={(id, stepId, done) => { void savedPlans.toggle(id, stepId, done); }}
-          onReplan={(saved) => { if (current()) void briefPlan(saved.question); }}
+          onReplan={(saved) => { if (current()) void briefPlan(saved.question, saved.id); }}
           onOpenRoute={(route) => {
             if (current() && !lock.current && !syncLock.current) {
               safeNavigate(navigation, VERIFIED_SERVICE_ROUTES[route].route);
@@ -813,6 +848,18 @@ function AssistantConversation({
             )}
             {message.plan ? (
               <>
+                {message.planComparison ? (
+                  <CampusPlanComparisonCard
+                    comparison={message.planComparison}
+                    disabled={busy || syncBusy || savedPlans.busy}
+                    onOpenOriginal={message.originalPlanId && savedPlans.plans.some((saved) => saved.id === message.originalPlanId)
+                      ? () => {
+                        if (!current() || lock.current || syncLock.current || !message.originalPlanId) return;
+                        setOpenedSavedPlan((previous) => ({ id: message.originalPlanId!, request: (previous?.request ?? 0) + 1 }));
+                        setPanel('tools');
+                      } : undefined}
+                  />
+                ) : null}
                 <CampusEvidencePlanCard
                 plan={message.plan}
                 disabled={busy || syncBusy}
@@ -983,7 +1030,8 @@ function AssistantConversation({
                 : activeShortcut.question === TODAY_BRIEF ? '重新整理今日重點'
                 : activeShortcut.question === WEEK_BRIEF ? '重新規劃未來七天' : '重試這次規劃'} variant="ghost"
               disabled={busy || syncBusy}
-              onPress={() => void (activeShortcut.kind === 'brief' ? briefPlan(activeShortcut.question) : send(activeShortcut))} />
+              onPress={() => void (activeShortcut.kind === 'brief'
+                ? briefPlan(activeShortcut.question, activeShortcut.savedPlanId) : send(activeShortcut))} />
           ) : null}
         </View>
       ) : null}

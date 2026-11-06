@@ -2,6 +2,7 @@ import asyncio
 import functools
 import http.server
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -75,15 +76,74 @@ async def scenario(browser, port, width, mode):
         {'kind': 'replan', 'id': 'week-study', 'completed': ['assignment-0']},
     ], events
 
+    preview = page.get_by_test_id('comparison-preview')
+    await expect(preview.get_by_role('heading', name='這次調整了什麼', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('原計畫整理：2026/11/06 23:58（台灣時間）', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('本次整理：2026/11/07 10:15（台灣時間）', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('2026/11/06 23:59 截止', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('2026/11/07 18:00 截止', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('本次摘要未列出，不能判定已繳交或已取消。', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('本次只取得部分課程摘要，未列出的作業不能當作已繳交或已取消。', exact=True).first).to_be_visible()
+    await expect(preview.get_by_text('部分課程資料還沒同步', exact=True)).to_have_count(0)
+    await expect(preview.get_by_role('checkbox')).to_have_count(0)
+    comparison_geometry = await geometry(page)
+    await preview.scroll_into_view_if_needed()
+    await page.screenshot(path=str(ROOT / f'{label}-comparison.png'), full_page=True)
+
+    expand_changes = preview.get_by_role('button', name='查看全部 8 項', exact=True)
+    await expect(expand_changes).to_have_attribute('aria-expanded', 'false')
+    await expand_changes.focus()
+    await expect(expand_changes).to_be_focused()
+    await expand_changes.press('Enter')
+    collapse_changes = preview.get_by_role('button', name='收起調整清單', exact=True)
+    await expect(collapse_changes).to_have_attribute('aria-expanded', 'true')
+    await expect(preview.get_by_text('部分課程資料還沒同步', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('InterdisciplinaryCampusSystemsResearchAndCrossSchoolInformationManagementFinalPresentation', exact=True)).to_be_visible()
+    comparison_expanded_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-comparison-expanded.png'), full_page=True)
+    await collapse_changes.focus()
+    await expect(collapse_changes).to_be_focused()
+    await collapse_changes.press('Enter')
+    await expect(expand_changes).to_have_attribute('aria-expanded', 'false')
+    await expect(preview.get_by_text('部分課程資料還沒同步', exact=True)).to_have_count(0)
+
+    open_original = preview.get_by_role('button', name='查看原計畫', exact=True)
+    await open_original.focus()
+    await expect(open_original).to_be_focused()
+    await open_original.press('Enter')
+    await expect(preview).to_have_count(0)
+    await expect(checkbox).to_have_attribute('aria-checked', 'true')
+    await expect(page.get_by_text('已處理 1 / 3', exact=True)).to_be_visible()
+
     await page.get_by_role('button', name=re.compile(r'^查看明日學習行動')).click()
     await expect(checkbox).to_have_count(0)
     await expect(page.get_by_role('checkbox', name='我已處理：核對已儲存課表', exact=True)).to_have_attribute('aria-checked', 'true')
+    await page.get_by_role('button', name='依目前資料重新規劃', exact=True).click()
+    await expect(preview.get_by_text('目前沒有足夠資料可比對，請先查看下方說明。', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('這份舊計畫沒有逐日資料，無法完整比對課表與作業期限；請重新核對課程頁。', exact=True)).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'沒有變動|沒有差異|沒有列出可確認的調整'))).to_have_count(0)
+    await expect(preview.get_by_role('button', name=re.compile(r'^查看全部'))).to_have_count(0)
+    legacy_geometry = await geometry(page)
+    await preview.scroll_into_view_if_needed()
+    await page.screenshot(path=str(ROOT / f'{label}-comparison-legacy.png'), full_page=True)
+    await preview.get_by_role('button', name='查看原計畫', exact=True).click()
+    await expect(preview).to_have_count(0)
+    await expect(page.get_by_role('checkbox', name='我已處理：核對已儲存課表', exact=True)).to_have_attribute('aria-checked', 'true')
+    comparison_events = await page.evaluate('window.qaEvents.slice(3)')
+    assert comparison_events == [
+        {'kind': 'original', 'id': 'week-study'},
+        {'kind': 'replan', 'id': 'tomorrow-study', 'completed': ['timetable-review']},
+        {'kind': 'original', 'id': 'tomorrow-study'},
+    ], comparison_events
     assert not page_errors, page_errors
     assert not external_requests, external_requests
 
     result = {'scenario': label, 'events': events, 'pageErrors': page_errors, 'externalRequests': external_requests,
-              'expandedGeometry': expanded_geometry, 'confirmationGeometry': confirmation_geometry}
-    for current in [expanded_geometry, confirmation_geometry]:
+              'expandedGeometry': expanded_geometry, 'confirmationGeometry': confirmation_geometry,
+              'comparisonEvents': comparison_events, 'comparisonGeometry': comparison_geometry,
+              'comparisonExpandedGeometry': comparison_expanded_geometry, 'legacyComparisonGeometry': legacy_geometry,
+              'fixtureScope': 'Real presentation components with synthetic comparison and plan data; no school, storage or live-agent verification.'}
+    for current in [expanded_geometry, confirmation_geometry, comparison_geometry, comparison_expanded_geometry, legacy_geometry]:
         assert current['documentWidth'] <= width, current
         assert not current['smallControls'], current['smallControls']
         assert not current['clipped'], current['clipped']
@@ -99,7 +159,9 @@ async def main():
     results = []
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
+            browser = await playwright.chromium.launch(
+                headless=True, executable_path=os.environ.get('QA_CHROMIUM_EXECUTABLE'),
+            )
             for width, mode in [(390, 'light'), (320, 'dark')]:
                 results.append(await scenario(browser, port, width, mode))
             await browser.close()

@@ -16,6 +16,7 @@ type Props = {
   onToggleStep: (id: string, stepId: string, done: boolean) => void;
   onReplan: (saved: SavedCampusPlan) => void;
   onOpenRoute: (route: CampusPlanRoute) => void;
+  initialExpandedId?: string;
 };
 
 const taipeiTimestamp = new Intl.DateTimeFormat('zh-TW', {
@@ -38,10 +39,10 @@ function planDates(saved: SavedCampusPlan): string {
 
 /** Saved plans are personal checklists, never restored authorization snapshots. */
 export function SavedCampusPlansPanel({
-  plans, loading, busy, error, onRetry, onDelete, onToggleStep, onReplan, onOpenRoute,
+  plans, loading, busy, error, onRetry, onDelete, onToggleStep, onReplan, onOpenRoute, initialExpandedId,
 }: Props) {
   useSyncExternalStore(subscribeToTheme, getThemeVersion, getThemeVersion);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedId ?? null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const locked = busy || loading;
   return (
@@ -148,7 +149,7 @@ export function SavedCampusPlansPanel({
                       onPress={() => { if (!locked) onReplan(saved); }}
                     />
                     <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
-                      以現在為基準建立新計畫，這份計畫與處理進度會保留。
+                      以現在為基準整理新計畫，再核對有哪些變動。這份計畫與處理進度會保留。
                     </Text>
                     {confirmingDelete ? (
                       <View style={{ padding: 12, gap: 10, borderRadius: 10, backgroundColor: aiTokens.dangerSoft }}>
