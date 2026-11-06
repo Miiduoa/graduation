@@ -74,6 +74,7 @@ export type DormWorkspace = {
   milestones: DormMilestone[];
   parcels: DormParcel[];
   laundryEndAt: number | null;
+  laundryReminder: boolean;
 };
 
 export const DORM_CHECKLISTS: ReadonlyArray<{
@@ -158,6 +159,7 @@ export function emptyDormWorkspace(): DormWorkspace {
     milestones: [],
     parcels: [],
     laundryEndAt: null,
+    laundryReminder: false,
   };
 }
 
@@ -298,6 +300,7 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
     milestones,
     parcels,
     laundryEndAt: laundryEndAt || null,
+    laundryReminder: !!laundryEndAt && value.laundryReminder === true,
   };
 }
 
