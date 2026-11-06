@@ -325,6 +325,31 @@ it.each(['sessionId', 'sessionVersion'])('refetches a legacy cache missing %s', 
 });
 
 it.each([
+  { scenario: 'missing nested cache', corrupted: undefined },
+  { scenario: 'non-object nested cache', corrupted: 'broken' },
+  { scenario: 'missing nested expiry', corrupted: { hit: false } },
+  { scenario: 'unparseable nested expiry', corrupted: { hit: false, expiresAt: 'invalid' } },
+  { scenario: 'invalid cache hit flag', corrupted: { hit: 'false', expiresAt: '2099-01-01T00:00:00.000Z' } },
+])('refetches instead of failing when $scenario is stored', async ({ corrupted }) => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const existing = store.docs.get(CACHE)!;
+  (existing.snapshot as Record<string, unknown>).cache = corrupted;
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.homework).toHaveLength(2);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect((store.docs.get(CACHE)!.snapshot as { cache: { expiresAt: string } }).cache.expiresAt)
+    .toMatch(/^\\d{4}-\\d{2}-\\d{2}T/);
+});
+
+it.each([
   { cookies: { session: 'new-cookie' }, userId: 10 },
   { cookies: { session: 'lms-secret' }, userId: 11 },
 ])('discards homework and course extras after an in-place LMS rotation to %j', async (session) => {
