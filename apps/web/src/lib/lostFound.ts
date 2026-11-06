@@ -10,6 +10,7 @@ import {
   type DocumentSnapshot,
 } from 'firebase/firestore';
 import { permissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { readLostFoundPhotos, type LostFoundPhoto } from './lostFoundPhotos';
 import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
 
 export type LostFoundItem = {
@@ -29,7 +30,7 @@ export type LostFoundItem = {
   resolvedAt?: string;
   schoolId: string;
   contactInfo?: string;
-  imageUrl?: string;
+  photos?: LostFoundPhoto[];
   /** True when the document lives under schools/{schoolId}/lostFound. */
   canonical: boolean;
 };
@@ -334,7 +335,7 @@ function readItem(
     resolvedAt: optionalDateValue(row.resolvedAt),
     schoolId,
     contactInfo: normalizeContact(row.contactInfo),
-    imageUrl: typeof row.imageUrl === 'string' ? row.imageUrl : undefined,
+    photos: readLostFoundPhotos(row.imageUrls, row.imageUrl),
     canonical,
   };
 }

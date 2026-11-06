@@ -12,6 +12,7 @@ import {
   validateLostFoundForm,
   type LostFoundFormErrors,
 } from '@/components/lost-found/LostFoundForm';
+import { LostFoundGallery } from '@/components/lost-found/LostFoundPhotos';
 import styles from '@/components/lost-found/LostFound.module.css';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
@@ -478,6 +479,9 @@ function LostFoundDetailPageContent({
               {item.location}
               {item.date ? ` · ${formatLostFoundCalendarDate(item.date)}` : ''}
             </p>
+            {item.photos?.length ? (
+              <LostFoundGallery key={item.id} photos={item.photos} title={item.title} />
+            ) : null}
             <p>{item.description}</p>
             {item.contactInfo ? (
               <p>
@@ -487,7 +491,6 @@ function LostFoundDetailPageContent({
             ) : (
               <p className={styles.muted}>未提供聯絡方式</p>
             )}
-            {item.imageUrl ? <p className={styles.muted}>此則含既有圖片連結。</p> : null}
 
             {legacyReadOnly ? (
               <p className={styles.notice} role="status">
