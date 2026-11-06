@@ -363,7 +363,7 @@ test('landing exposes school-scoped public service entries for guests', async ()
   expect(view.getByTestId('public-Dormitory')).toBeTruthy();
   expect(view.getByTestId('public-Career')).toBeTruthy();
   expect(view.getByText(/查看國立成功大學課綱或校方課程查詢入口/)).toBeTruthy();
-  expect(view.getByText(/前往國立成功大學住宿相關校方入口/)).toBeTruthy();
+  expect(view.getByText(/國立成功大學.*報修管道/)).toBeTruthy();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
