@@ -176,10 +176,11 @@ function StorySlide({
   const playbackActive = playing && !inspecting && !replying;
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
+  const [imageAttempt, setImageAttempt] = useState(0);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
   const imageFailed = hasImage && failedImage === story.id;
-  const ready = !hasImage || loadedImage === story.id || imageFailed;
+  const ready = !hasImage || (loadedImage === story.id && !imageFailed);
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
@@ -303,19 +304,37 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={story.id}
+              key={`${story.id}:${imageAttempt}`}
               source={{ uri: story.mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
               onLoad={() => setLoadedImage(story.id)}
-              onError={() => setFailedImage(story.id)}
+              onError={() => {
+                setFailedImage(story.id);
+                setPlaying(false);
+              }}
             />
           ) : (
             <ScrollView key={story.id} contentContainerStyle={styles.centerText}>
               <Text style={styles.storyText}>
                 {imageFailed ? '照片暫時無法顯示' : story.text || '（無內容）'}
               </Text>
+              {imageFailed && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新載入照片"
+                  style={[styles.step, { alignSelf: 'center', marginTop: 16 }]}
+                  onPress={() => {
+                    setPlaying(false);
+                    setFailedImage('');
+                    setLoadedImage('');
+                    setImageAttempt((attempt) => attempt + 1);
+                  }}
+                >
+                  <Text style={styles.stepText}>重新載入照片</Text>
+                </Pressable>
+              )}
             </ScrollView>
           )}
           <Pressable

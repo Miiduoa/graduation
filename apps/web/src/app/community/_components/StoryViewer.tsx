@@ -31,11 +31,13 @@ export function StoryViewer({
   const [hidden, setHidden] = useState(() => document.hidden);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
+  const [mediaAttempt, setMediaAttempt] = useState(0);
   const story = viewer.group.stories[viewer.index]!;
   const photo = story.kind === 'image' && !!story.mediaUrl;
   const video = story.kind === 'video';
   const media = photo || video;
   const failedVideo = video && (!story.mediaUrl || failedId === story.id);
+  const failedPhoto = photo && failedId === story.id;
   const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
   const canReply =
     story.allowReplies === true &&
@@ -50,12 +52,21 @@ export function StoryViewer({
     !panelOpen &&
     !hidden &&
     !video &&
-    (!photo || loadedId === story.id || failedId === story.id);
+    (!photo || loadedId === story.id) &&
+    !failedPhoto;
   const onNext = useRef(viewer.next);
   useEffect(() => {
     onNext.current = viewer.next;
   }, [viewer.next]);
   const remaining = useRef(DWELL_MS);
+
+  function retryMedia() {
+    // Keep the same signed URL; appending a cache buster could invalidate its signature.
+    setAuto(false);
+    setLoadedId(null);
+    setFailedId(null);
+    setMediaAttempt((attempt) => attempt + 1);
+  }
 
   useEffect(() => {
     const element = dialog.current;
@@ -233,7 +244,7 @@ export function StoryViewer({
         >
           {video && story.mediaUrl && failedId !== story.id ? (
             <video
-              key={story.id}
+              key={`${scope}:${mediaAttempt}`}
               ref={videoElement}
               className={styles.photo}
               src={story.mediaUrl}
@@ -258,24 +269,33 @@ export function StoryViewer({
               }}
             />
           ) : video ? (
-            <p role="status" className={styles.unavailable}>
-              這段影片暫時無法播放。
-            </p>
+            <div role="status" className={styles.mediaError}>
+              <p>這段影片暫時無法播放。</p>
+              {story.mediaUrl && (
+                <button type="button" onClick={retryMedia}>重新載入影片</button>
+              )}
+            </div>
           ) : photo && failedId !== story.id ? (
             <Image
               unoptimized
               loading="eager"
               width={900}
               height={1600}
-              key={story.id}
+              key={`${scope}:${mediaAttempt}`}
               className={styles.photo}
               src={story.mediaUrl!}
               alt="限時動態照片"
               onLoad={() => setLoadedId(story.id)}
-              onError={() => setFailedId(story.id)}
+              onError={() => {
+                setFailedId(story.id);
+                setAuto(false);
+              }}
             />
           ) : photo ? (
-            <p className={styles.unavailable}>照片暫時無法顯示</p>
+            <div role="status" className={styles.mediaError}>
+              <p>照片暫時無法顯示</p>
+              <button type="button" onClick={retryMedia}>重新載入照片</button>
+            </div>
           ) : null}
           {!!story.text && <p className={media ? styles.caption : styles.text}>{story.text}</p>}
         </div>
@@ -311,7 +331,7 @@ export function StoryViewer({
             <button
               type="button"
               aria-pressed={auto}
-              disabled={failedVideo}
+              disabled={failedVideo || failedPhoto}
               onClick={() => setAuto((v) => !v)}
             >
               {video ? (auto ? '停止連播' : '連續播放') : auto ? '暫停' : '自動播放'}

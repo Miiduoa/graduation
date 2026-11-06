@@ -224,3 +224,25 @@
   color: #fff;
   font-size: 0.8rem;
 }
+
+.mediaError {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px;
+  text-align: center;
+}
+.mediaError p { margin: 0; }
+.mediaError button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 12px;
+  background: #263d34;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}

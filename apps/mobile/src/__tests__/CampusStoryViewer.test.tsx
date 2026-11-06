@@ -83,6 +83,31 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('a failed photo pauses its countdown and can be retried without losing the story', () => {
+    const expiresAt = Date.now() + 100_000;
+    const view = render(
+      <Shelf rows={[
+        { ...common, id: 'photo', kind: 'image', createdAt: 1, mediaUrl: 'https://example.com/photo.jpg', expiresAt },
+        { ...common, id: 'next', text: '下一則文字', createdAt: 2, expiresAt },
+      ]} />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    fireEvent.press(view.getByLabelText('自動播放'));
+    fireEvent(view.getByLabelText('限時動態照片'), 'error');
+    expect(view.getByText('照片暫時無法顯示')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    fireEvent.press(view.getByLabelText('重新載入照片'));
+    expect(view.getByLabelText('限時動態照片').props.source.uri).toBe('https://example.com/photo.jpg');
+    fireEvent(view.getByLabelText('限時動態照片'), 'load');
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    fireEvent.press(view.getByLabelText('自動播放'));
+    act(() => jest.advanceTimersByTime(7_100));
+    expect(view.getByText('下一則文字')).toBeTruthy();
+    view.unmount();
+  });
+
   test('a muted clip uses the native end event rather than the photo timer and keeps its caption', () => {
     const expiresAt = Date.now() + 100_000;
     const view = render(
