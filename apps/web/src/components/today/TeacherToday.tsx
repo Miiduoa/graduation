@@ -6,6 +6,7 @@ import { TodayClassRows } from './TodayClassRows';
 import { buildPersonalToday } from '@campus/shared';
 import {
   formatTodayHeaderDate,
+  TODAY_COPY,
   formatTodoDueLine,
   sortTodayClasses,
   sortTodayTodos,
@@ -59,9 +60,8 @@ export function TeacherToday({
   return (
     <div className={styles.screen} data-testid="teacher-today">
       <header className={styles.header}>
-        <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
         <h1 className={styles.title}>今天</h1>
-        <p className={styles.updated}>授課日程</p>
+        <p className={styles.date}>{formatTodayHeaderDate(now)}</p>
       </header>
       {unsigned ? (
         <>
@@ -71,9 +71,14 @@ export function TeacherToday({
       ) : (
         <div className={styles.flow}>
           <section className={styles.section} aria-labelledby="teacher-class-title">
-            <h2 id="teacher-class-title" className={styles.sectionTitle}>
-              {TODAY_FLOW_CLASS_TITLE}
-            </h2>
+            <div className={styles.sectionHeading}>
+              <h2 id="teacher-class-title" className={styles.sectionTitle}>
+                {TODAY_FLOW_CLASS_TITLE}
+              </h2>
+              <Link className={styles.sectionLink} href={timetableHref}>
+                {TODAY_COPY.viewFullTimetable}
+              </Link>
+            </div>
             {sortedClasses.length === 0 ? (
               <p className={styles.empty}>
                 今天沒有排課。 <Link href={timetableHref}>查看課表</Link>
@@ -85,7 +90,6 @@ export function TeacherToday({
             )}
           </section>
 
-          {assistant}
           <section className={styles.section} aria-labelledby="teacher-grading-title">
             <h2 id="teacher-grading-title" className={styles.sectionTitle}>
               {TEACHER_TODAY_GRADING_TITLE}
@@ -137,6 +141,7 @@ export function TeacherToday({
               </ul>
             )}
           </section>
+          {assistant}
         </div>
       )}
     </div>

@@ -46,7 +46,7 @@ function Header({ onOpenVoice }: HeaderProps) {
   const checking = !hydrated || loading || nuni.loading;
   return (
     <>
-      <header className={headerStyles.header} data-campus-navigation="true">
+      <header className={headerStyles.header + (onOpenVoice ? ' ' + headerStyles.today : '')} data-campus-navigation="true">
         <Link href={href('/')} className={headerStyles.brand} aria-label="nuni">
           <span className={headerStyles.mark} aria-hidden>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -196,7 +196,7 @@ export function AppHeader(props: HeaderProps) {
   return (
     <Suspense
       fallback={
-        <header className={headerStyles.header} data-campus-navigation="true">
+        <header className={headerStyles.header + (props.onOpenVoice ? ' ' + headerStyles.today : '')} data-campus-navigation="true">
           <Link href="/" className={headerStyles.brand} aria-label="nuni">
             <span className={headerStyles.mark} aria-hidden="true">
               {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Animated,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -8,8 +7,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -42,7 +41,6 @@ import {
   pickNextAction,
   sortTodayClasses,
   TODAY_COPY,
-  type NextAction,
   type TodayClass,
   type TodayTodo,
 } from '@campus/shared/src/pickNextAction';
@@ -176,8 +174,11 @@ export default function StudentTodayScreen() {
     return () => clearTimeout(timer);
   }, [todos]);
 
-  const action = pickNextAction(classes, todos, now);
   const classRows = sortTodayClasses(classes, now);
+  const workAction = pickNextAction([], todos, now);
+  const nextTodo = 'todo' in workAction ? workAction.todo : null;
+  const firstTodo = todos.find(item => item.id === nextTodo?.id);
+  const todoRows = firstTodo ? [firstTodo, ...todos.filter(item => item.id !== firstTodo.id)] : todos;
   const todosExpanded = expandedTodoScope === scope;
   const firstLoad = unsigned
     ? timetableStatus === 'loading'
@@ -243,8 +244,7 @@ export default function StudentTodayScreen() {
   );
   const todoSection = (
     <TodoList
-      todos={todos}
-      showUrgentAction={action.type === 'class'}
+      todos={todoRows}
       expanded={todosExpanded}
       unsigned={unsigned}
       error={error}
@@ -261,7 +261,7 @@ export default function StudentTodayScreen() {
   );
 
   return (
-    <SafeAreaView style={s.page} edges={['top']}>
+    <SafeAreaView style={s.page} edges={['top']} testID="student-today">
       <ScrollView
         ref={scrollRef}
         keyboardShouldPersistTaps="handled"
@@ -302,17 +302,9 @@ export default function StudentTodayScreen() {
           <TodaySkeleton styles={s} />
         ) : (
           <>
-            <NextActionCard
-              action={action}
-              unsigned={unsigned}
-              todosError={error}
-              timetableReady={timetableStatus === 'ready'}
-              now={now}
-              styles={s}
-              onOpenClass={openCourse}
-              onOpenTodo={openTodo}
-              onOpenWeek={openWeek}
-            />
+            {urgentWorkFirst && todoSection}
+            {scheduleSection}
+            {!urgentWorkFirst && todoSection}
             <QuickCampusEntry
               key={scope}
               uid={uid}
@@ -320,9 +312,6 @@ export default function StudentTodayScreen() {
               onOpen={openQuickAction}
               onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
             />
-            {urgentWorkFirst && todoSection}
-            {scheduleSection}
-            {!urgentWorkFirst && todoSection}
           </>
         )}
       </ScrollView>
@@ -333,159 +322,10 @@ export default function StudentTodayScreen() {
 function TodaySkeleton({ styles: s }: { styles: ReturnType<typeof createStyles> }) {
   return (
     <View accessibilityState={{ busy: true }} testID="today-skeleton">
-      <View style={s.skeletonCard} />
+      <View style={s.skeletonHeading} />
       <View style={s.skeletonLine} />
       <View style={s.skeletonLine} />
       <View style={s.skeletonLine} />
-    </View>
-  );
-}
-
-function NextActionCard({
-  action,
-  unsigned,
-  todosError,
-  timetableReady,
-  now,
-  styles: s,
-  onOpenClass,
-  onOpenTodo,
-  onOpenWeek,
-}: {
-  action: NextAction;
-  unsigned: boolean;
-  todosError: boolean;
-  timetableReady: boolean;
-  now: Date;
-  styles: ReturnType<typeof createStyles>;
-  onOpenClass: (item: TodayClass & { courseWorkNav?: TimetableClassroomDestination; courseCode?: string }) => void;
-  onOpenTodo: (todo: TodoRow, scrollToSubmit?: boolean) => void;
-  onOpenWeek: () => void;
-}) {
-  const fade = useRef(new Animated.Value(1)).current;
-  const key =
-    unsigned && action.type !== 'class'
-      ? 'unsigned'
-      : action.type === 'class'
-        ? `class:${action.class.id}`
-        : action.type === 'assignment'
-          ? `todo:${action.todo.id}`
-          : action.type === 'upcoming'
-            ? `upcoming:${action.todo.id}`
-            : action.type === 'overdue'
-              ? `overdue:${action.todo.id}`
-              : action.type === 'allDone'
-                ? `done:${action.todo?.id ?? ''}`
-                : 'empty';
-  const prev = useRef(key);
-  useEffect(() => {
-    if (prev.current === key) return;
-    const from = prev.current;
-    prev.current = key;
-    const content = (value: string) =>
-      value.startsWith('class:') ||
-      value.startsWith('todo:') ||
-      value.startsWith('upcoming:') ||
-      value.startsWith('overdue:') ||
-      value.startsWith('done:');
-    if (!content(from) || !content(key)) {
-      fade.setValue(1);
-      return;
-    }
-    fade.setValue(0);
-    const anim = Animated.timing(fade, { toValue: 1, duration: 150, useNativeDriver: false });
-    anim.start();
-    return () => anim.stop();
-  }, [fade, key]);
-
-  if (unsigned && action.type !== 'class') {
-    return (
-      <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
-        <Text style={s.lightHeadline}>{TODAY_COPY.unsigned}</Text>
-      </Animated.View>
-    );
-  }
-  if (action.type === 'empty') {
-    if (todosError || !timetableReady) return null;
-    return (
-      <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
-        <Text style={s.lightHeadline}>{TODAY_COPY.emptyDay}</Text>
-        <Pressable accessibilityRole="button" onPress={onOpenWeek} style={s.lightButton}>
-          <Text style={s.lightButtonText}>{TODAY_COPY.viewWeek}</Text>
-        </Pressable>
-      </Animated.View>
-    );
-  }
-  if (action.type === 'allDone' && !action.todo) {
-    return (
-      <Animated.View style={[s.cardLight, { opacity: fade }]} testID="next-action">
-        <Text style={s.lightHeadline}>{TODAY_COPY.allClassesDone}</Text>
-      </Animated.View>
-    );
-  }
-  if (action.type === 'class') {
-    const ongoing = action.class.startAt <= now.getTime() && action.class.endAt > now.getTime();
-    const classTime = `${formatClock(action.class.startAt)}–${formatClock(action.class.endAt)}`;
-    const classCta = action.class.courseId ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
-    return (
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => onOpenClass(action.class)}
-        style={({ pressed }) => [s.card, pressed && s.pressed]}
-        testID="next-action"
-      >
-        <Animated.View style={{ opacity: fade, flex: 1 }}>
-          <View style={s.focusLine}>
-            <Text style={s.kind}>{ongoing ? '上課中' : TODAY_COPY.nextClass}</Text>
-            <Text style={s.cardLink}>{classCta}</Text>
-          </View>
-          <Text style={s.headline}>{action.class.title}</Text>
-          <Text style={s.meta}>{[classTime, action.class.location.trim()].filter(Boolean).join(' · ')}</Text>
-        </Animated.View>
-      </Pressable>
-    );
-  }
-  const todo = action.todo as TodoRow;
-  const kind = {
-    allDone: TODAY_COPY.allClassesDone,
-    assignment: todo.dueAt !== null && !isSameTaipeiDay(todo.dueAt, now.getTime())
-      ? '明天截止'
-      : TODAY_COPY.dueToday,
-    overdue: TODAY_COPY.overdue,
-    upcoming: todo.task?.kind === 'quiz' ? '下一個測驗' : TODAY_COPY.nextAssignment,
-  }[action.type];
-  const meta =
-    action.type === 'upcoming' ? formatUpcomingDueLine(todo) : formatTodoDueLine(todo, now);
-  const courseAction = todo.courseId?.trim() ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
-  const workAction = todo.task && resolveInboxAction(todo.task);
-  return (
-    <View style={s.workLayout}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${kind}，${todo.title}，${todo.courseName}，${meta}，${courseAction}`}
-        onPress={() => onOpenTodo(todo)}
-        style={({ pressed }) => [s.workDetails, pressed && s.pressed]}
-        testID="next-action"
-      >
-        <Animated.View style={{ opacity: fade }}>
-          <View style={s.focusLine}>
-            <Text style={s.kind}>{kind}</Text>
-            <Text style={s.cardLink}>{courseAction}</Text>
-          </View>
-          <Text style={s.headline}>{todo.title}</Text>
-          {!!todo.courseName && <Text style={s.courseName}>{todo.courseName}</Text>}
-          <Text style={[s.meta, action.type === 'overdue' && s.metaDanger]}>{meta}</Text>
-        </Animated.View>
-      </Pressable>
-      {workAction && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => onOpenTodo(todo, true)}
-          style={({ pressed }) => [s.cardButton, pressed && s.pressed]}
-        >
-          <Animated.Text style={[s.cardButtonText, { opacity: fade }]}>{workAction.label}</Animated.Text>
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -510,12 +350,14 @@ function TodayClassList({
   onOpenTimetable: () => void;
 }) {
   const visible = classes.slice(0, 4);
-  const extra = classes.length > 4;
   return (
     <View style={s.section}>
-      <Text accessibilityRole="header" style={s.sectionTitle}>
-        今天課表
-      </Text>
+      <View style={s.sectionHeader}>
+        <Text accessibilityRole="header" style={s.sectionTitle}>今天課表</Text>
+        <Pressable accessibilityRole="button" onPress={onOpenTimetable} style={s.textButton}>
+          <Text style={s.link}>{TODAY_COPY.viewFullTimetable}</Text>
+        </Pressable>
+      </View>
       {status === 'loading' ? (
         <>
           <View style={s.skeletonLine} />
@@ -543,10 +385,25 @@ function TodayClassList({
         <View style={s.list}>
           {visible.map((item, index) => {
             const ended = item.endAt <= now.getTime();
+            const ongoing = !ended && item.startAt <= now.getTime();
+            const label = ongoing
+              ? '上課中'
+              : ended
+                ? '已結束'
+                : index === 0
+                  ? TODAY_COPY.nextClass
+                  : '';
             return (
               <Pressable
                 key={item.id}
                 accessibilityRole="button"
+                accessibilityLabel={[
+                  label,
+                  item.title,
+                  formatClock(item.startAt) + ' 至 ' + formatClock(item.endAt),
+                  item.location || '教室未填',
+                ].filter(Boolean).join('，')}
+                accessibilityHint={item.courseId ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse}
                 onPress={() => onOpenClass(item)}
                 style={({ pressed }) => [
                   s.row,
@@ -555,21 +412,21 @@ function TodayClassList({
                 ]}
               >
                 <View style={s.timeColumn}>
-                  <Text style={s.time}>{formatClock(item.startAt)}</Text>
-                  <Text style={s.rowMeta}>{ended ? '已結束' : formatClock(item.endAt)}</Text>
+                  <Text style={[s.time, ended && s.endedTitle]}>{formatClock(item.startAt)}</Text>
+                  <Text style={s.rowMeta}>{formatClock(item.endAt)}</Text>
                 </View>
                 <View style={s.rowBody}>
+                  {!!label && <Text style={[s.classStatus, ongoing && s.ongoing]}>{label}</Text>}
                   <Text style={[s.rowTitle, ended && s.endedTitle]}>{item.title}</Text>
                   <Text style={s.rowMeta}>{item.location || '教室未填'}</Text>
                 </View>
+                <Ionicons name="chevron-forward" size={16} color={s.rowMeta.color} />
               </Pressable>
             );
           })}
-          {extra ? (
-            <Pressable accessibilityRole="button" onPress={onOpenTimetable} style={s.more}>
-              <Text style={s.link}>{TODAY_COPY.viewFullTimetable}</Text>
-            </Pressable>
-          ) : null}
+          {classes.length > visible.length && (
+            <Text style={s.rowMeta}>還有 {classes.length - visible.length} 堂課，可在完整課表查看。</Text>
+          )}
         </View>
       )}
     </View>
@@ -578,7 +435,6 @@ function TodayClassList({
 
 function TodoList({
   todos,
-  showUrgentAction,
   expanded,
   unsigned,
   error,
@@ -591,7 +447,6 @@ function TodoList({
   onRetry,
 }: {
   todos: TodoRow[];
-  showUrgentAction: boolean;
   expanded: boolean;
   unsigned: boolean;
   error: boolean;
@@ -631,9 +486,10 @@ function TodoList({
           {visible.map((item, index) => {
             const overdue = isTodoOverdue(item, now);
             const soon = isDueWithinHours(item, now, 6);
-            const due = formatTodoDueLine(item, now);
-            const direct = showUrgentAction && index === 0 && item.task && isDueWithinHours(item, now, 24)
-              ? resolveInboxAction(item.task) : null;
+            const due = item.dueAt !== null && !overdue && !isSameTaipeiDay(item.dueAt, now.getTime())
+              ? formatUpcomingDueLine(item)
+              : formatTodoDueLine(item, now);
+            const direct = item.task ? resolveInboxAction(item.task) : null;
             return (
               <View key={item.id} style={[s.todoRow, index > 0 && s.rowBorder, leaving.has(item.id) && s.leaving]}>
                 <Pressable
@@ -645,10 +501,8 @@ function TodoList({
                 >
                   <View style={s.rowBody}>
                     <Text style={s.rowTitle}>{item.title}</Text>
-                    <Text style={s.rowMeta}>
-                      {item.courseName ? item.courseName + ' · ' : ''}
-                      <Text style={overdue ? s.overdue : soon ? s.dueSoon : undefined}>{due}</Text>
-                    </Text>
+                    {!!item.courseName && <Text style={s.rowMeta}>{item.courseName}</Text>}
+                    <Text style={[s.rowMeta, overdue ? s.overdue : soon ? s.dueSoon : undefined]}>{due}</Text>
                   </View>
                 </Pressable>
                 {direct && (
@@ -678,21 +532,30 @@ function TodoList({
   );
 }
 
-const CREAM = '#FFFDF8';
-const BRAND = '#314D40';
+const createStyles = () => {
+  const dark = theme.mode === 'dark';
+  const text = dark ? '#F2F3F1' : '#252729';
+  const muted = dark ? '#A5AAA7' : '#686C70';
+  const border = dark ? '#292B2D' : '#E6E7E8';
 
-const createStyles = () =>
-  StyleSheet.create({
-    page: { flex: 1, backgroundColor: theme.colors.bg },
-    dayHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-    dateBlock: { flexShrink: 1, alignItems: 'flex-end' },
+  return StyleSheet.create({
+    page: { flex: 1, backgroundColor: dark ? theme.colors.bg : '#FFFFFF' },
+    dayHeader: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 4,
+    },
+    dateBlock: { flexShrink: 1, alignItems: 'flex-end', gap: 2 },
     content: {
       paddingHorizontal: 20,
       paddingTop: 22,
       width: '100%',
       maxWidth: 680,
       alignSelf: 'center',
-      gap: 20,
+      gap: 24,
     },
     studentCard: {
       flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14,
@@ -700,139 +563,93 @@ const createStyles = () =>
     },
     studentCardLabel: { fontSize: 15, fontWeight: '600', color: theme.colors.text },
     date: {
-      color: theme.colors.textSecondary,
-      fontSize: 14,
-      lineHeight: 20,
-      fontWeight: '600',
+      color: muted,
+      fontSize: 13,
+      lineHeight: 19,
       fontVariant: ['tabular-nums'],
     },
     heading: {
-      color: theme.colors.text,
+      color: text,
       fontSize: 28,
-      lineHeight: 34,
+      lineHeight: 36,
       fontWeight: '700',
     },
     updated: {
-      color: theme.colors.muted,
-      fontSize: 13,
+      color: muted,
+      fontSize: 12,
       lineHeight: 18,
       fontVariant: ['tabular-nums'],
     },
-    card: {
-      backgroundColor: BRAND,
-      borderRadius: 14,
-      padding: 18,
-    },
-    focusLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
-    cardLink: { color: CREAM, fontSize: 13, lineHeight: 18, fontWeight: '600', textDecorationLine: 'underline' },
-    workLayout: { backgroundColor: BRAND, borderRadius: 14, overflow: 'hidden' },
-    workDetails: { padding: 18 },
-    courseName: { color: CREAM, fontSize: 14, lineHeight: 21 },
-    cardLight: {
-      backgroundColor: theme.mode === 'dark' ? theme.colors.surface2 : CREAM,
-      minHeight: 64,
-      borderRadius: 14,
-      padding: 18,
-    },
-    kind: { color: 'rgba(255,255,255,0.72)', fontSize: 13, lineHeight: 18, fontWeight: '600' },
-    headline: { color: '#FFFFFF', fontSize: 24, lineHeight: 31, fontWeight: '700', marginTop: 8 },
-    lightHeadline: {
-      color: theme.colors.text,
-      fontSize: 20,
-      lineHeight: 26,
-      fontWeight: '700',
-    },
-    meta: {
-      color: 'rgba(255,255,255,0.72)',
-      fontSize: 13,
-      lineHeight: 18,
-      marginTop: 6,
-      fontVariant: ['tabular-nums'],
-    },
-    cardButton: {
-      alignSelf: 'flex-start',
-      marginHorizontal: 18,
-      marginBottom: 14,
-      minHeight: 44,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      borderRadius: 9,
-      backgroundColor: CREAM,
-      justifyContent: 'center',
-    },
-    cardButtonText: { color: BRAND, fontSize: 15, fontWeight: '700' },
-    lightButton: {
-      marginTop: 16,
-      alignSelf: 'flex-end',
-      height: 44,
-      minHeight: 44,
-      paddingHorizontal: 16,
-      borderRadius: 12,
-      backgroundColor: BRAND,
-      justifyContent: 'center',
-    },
-    lightButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-    section: { gap: 8 },
-    sectionTitle: {
-      color: theme.colors.text,
-      fontSize: 18,
-      lineHeight: 24,
-      fontWeight: '700',
-    },
-    list: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: theme.colors.border,
-    },
-    row: {
-      minHeight: 56,
-      paddingVertical: 9,
+    section: { gap: 2 },
+    sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
       gap: 12,
     },
-    rowBorder: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: theme.colors.border,
+    sectionTitle: {
+      color: muted,
+      fontSize: 14,
+      lineHeight: 22,
+      fontWeight: '500',
     },
-    timeColumn: { minWidth: 54, flexShrink: 0, gap: 2 },
+    list: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: border },
+    row: {
+      minHeight: 68,
+      paddingVertical: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+    },
+    rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: border },
+    timeColumn: { minWidth: 52, flexShrink: 0, gap: 3 },
     time: {
-      color: theme.colors.text,
-      fontWeight: '600',
-      fontSize: 13,
-      lineHeight: 18,
+      color: text,
+      fontWeight: '500',
+      fontSize: 15,
+      lineHeight: 21,
       fontVariant: ['tabular-nums'],
     },
+    classStatus: { color: muted, fontSize: 12, lineHeight: 17 },
+    ongoing: { color: theme.colors.accent, fontWeight: '600' },
     todoRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10 },
     todoBody: { flexGrow: 1, flexShrink: 1, flexBasis: 160 },
-    inlineAction: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8 },
-    rowBody: { flex: 1, minWidth: 0, gap: 2 },
-    rowTitle: { color: theme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
+    inlineAction: {
+      minHeight: 44,
+      minWidth: 44,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 8,
+    },
+    rowBody: { flex: 1, minWidth: 0, gap: 3 },
+    rowTitle: { color: text, fontSize: 16, lineHeight: 23, fontWeight: '600' },
     rowMeta: {
-      color: theme.colors.muted,
+      color: muted,
       fontSize: 13,
-      lineHeight: 18,
+      lineHeight: 19,
       fontVariant: ['tabular-nums'],
     },
-    dueSoon: { color: theme.colors.accent, fontWeight: '700' },
-    overdue: { color: theme.colors.danger, fontWeight: '700' },
-    metaDanger: { color: '#FFD9D0', fontWeight: '700' },
-    endedTitle: { color: theme.colors.muted },
+    dueSoon: { color: theme.colors.accent, fontWeight: '600' },
+    overdue: { color: theme.colors.danger, fontWeight: '600' },
+    endedTitle: { color: muted },
     leaving: { opacity: 0 },
-    more: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
-    empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 18 },
+    more: { minHeight: 44, justifyContent: 'center' },
+    empty: { color: muted, fontSize: 14, lineHeight: 22, paddingVertical: 8 },
     textButton: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
-    link: { color: theme.colors.accent, fontWeight: '600', fontSize: 13, lineHeight: 18 },
-    skeletonCard: {
-      height: 132,
-      borderRadius: 16,
+    link: { color: theme.colors.accent, fontWeight: '500', fontSize: 13, lineHeight: 19 },
+    skeletonHeading: {
+      width: '30%',
+      height: 20,
+      borderRadius: 3,
       backgroundColor: theme.colors.surface2,
-      marginBottom: 12,
+      marginBottom: 20,
     },
     skeletonLine: {
-      height: 16,
-      borderRadius: 8,
+      height: 40,
+      borderRadius: 3,
       backgroundColor: theme.colors.surface2,
-      marginBottom: 10,
+      marginBottom: 16,
     },
-    pressed: { opacity: 0.86 },
+    pressed: { opacity: 0.65 },
   });
+};
