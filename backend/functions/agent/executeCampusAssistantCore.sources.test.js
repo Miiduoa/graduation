@@ -279,6 +279,46 @@ test('the actual callable completes a model reply with real compose, tools, scop
   ]);
 });
 
+test('a contained tool run records its decision without saving a conversation or proposing actions', async () => {
+  mockDocuments.set('users/alice', { primarySchoolId: 'pu', role: 'student' });
+  mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+  const securityEvent = { action: 'stop_tool_run', reason: 'tool_not_allowed' };
+  mockModel.mockResolvedValue({
+    provider: 'groq',
+    content: '這次操作超出你的授權範圍，已停止。',
+    securityEvent,
+    transcriptMessages: [],
+    cards: [],
+    toolsInvoked: [],
+  });
+
+  const result = await askCampusAssistant.run({
+    auth: { uid: 'alice', token: { role: 'student' } },
+    data: {
+      messages: [{ role: 'user', content: '查公告' }],
+      context: { schoolId: 'pu', sessionId: 'contained-run' },
+    },
+  });
+
+  expect(result.run.status).toBe('blocked');
+  expect(result.evaluation.reason).toBe('stopped unauthorized tool request');
+  expect(result.actions).toEqual([]);
+  expect(result.cards).toEqual([]);
+  expect(result.citations).toEqual([]);
+  expect(result.clarifyingQuestion).toBeNull();
+  expect(mockWrites.some(({ path }) => path.includes('/assistantTranscripts/'))).toBe(false);
+  expect(mockWrites).toContainEqual(expect.objectContaining({
+    path: `users/alice/agentRuns/${result.run.runId}`,
+    data: expect.objectContaining({
+      status: 'blocked',
+      actionProposals: [],
+      steps: expect.arrayContaining([expect.objectContaining({
+        tool: 'security_containment', input: {}, output: securityEvent,
+      })]),
+    }),
+  }));
+});
+
 test('a reused session starts with the current turn after a change of school', async () => {
   mockDocuments.set('users/alice', { primarySchoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });

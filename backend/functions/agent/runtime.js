@@ -431,15 +431,18 @@ async function runCampusAssistantWithAgentRuntime(request) {
   const response = { ...responseRest };
   delete response.modelTrace;
 
-  const evaluation = await evaluateAnswer({
-    userQuestion: lastUserMessage,
-    answerText: response.content,
-    intentConfidence: intentMeta.confidence,
-  });
+  const runStatus = modelTrace?.securityEvent ? 'blocked' : 'completed';
+  const evaluation = runStatus === 'blocked'
+    ? { score: 1, needsUserReview: false, reason: 'stopped unauthorized tool request' }
+    : await evaluateAnswer({
+      userQuestion: lastUserMessage,
+      answerText: response.content,
+      intentConfidence: intentMeta.confidence,
+    });
 
   let actionQueueId = null;
   let clarifyingQuestion = null;
-  if (intentMeta.confidence < 0.62 && lastUserMessage) {
+  if (runStatus === 'completed' && intentMeta.confidence < 0.62 && lastUserMessage) {
     clarifyingQuestion = '你想查的是公告、作業截止，還是今天的課程與課表呢？也可以換個說法再問一次。';
   }
 
@@ -474,7 +477,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     error: response.error,
     usage: response.usage,
     debug: response.debug,
-    run: { runId, status: 'completed' },
+    run: { runId, status: runStatus },
     intent: {
       name: intentMeta.name,
       confidence: intentMeta.confidence,
@@ -524,7 +527,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
           runId,
           userId: uid,
           schoolId,
-          status: 'completed',
+          status: runStatus,
           intent,
           steps,
           toolCalls: steps,

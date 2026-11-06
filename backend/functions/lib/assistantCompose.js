@@ -219,7 +219,7 @@ async function buildModelBackedAssistantResponse({
       actions: [],
       assistantToolsUsed: Array.isArray(modelResult.toolsInvoked) ? modelResult.toolsInvoked : [],
       cards: Array.isArray(modelResult.cards) ? modelResult.cards : [],
-      citations: [
+      citations: modelResult.securityEvent ? [] : [
         ...knowledgeChunks.slice(0, 3).map((chunk) => ({
           type: chunk.scope === 'group' ? 'course' : 'system',
           id: chunk.sourceId || chunk.id,

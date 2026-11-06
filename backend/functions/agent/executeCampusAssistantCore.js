@@ -446,11 +446,15 @@ async function executeCampusAssistantCore({
       console.warn('[AI] model call failed:', error?.message || error);
       modelBacked = { modelResult: { provider: 'none', errors: [{ message: error?.message || String(error) }] }, response: null };
     }
+    if (modelBacked.modelResult?.securityEvent) {
+      await recordStep('security_containment', {}, modelBacked.modelResult.securityEvent, 0);
+    }
     modelTrace = {
       provider: modelBacked.modelResult?.provider || 'none',
       model: modelBacked.modelResult?.model || null,
       usage: modelBacked.modelResult?.usage || null,
       errors: modelBacked.modelResult?.errors || [],
+      securityEvent: modelBacked.modelResult?.securityEvent || null,
     };
     if (modelBacked.response) {
       response.content = modelBacked.response.content;
