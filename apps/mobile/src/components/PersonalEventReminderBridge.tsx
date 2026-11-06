@@ -11,6 +11,7 @@ import {
   reconcilePersonalEventReminders,
 } from '../services/personalEventReminders';
 import {
+  discardPendingPersonalEventReminderTap,
   flushPendingPersonalEventReminderTap,
   handlePersonalEventReminderResponse,
   notifyPersonalEventReminderScopeResolved,
@@ -131,13 +132,16 @@ export function PersonalEventReminderBridge() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
     let cancelled = false;
+    let liveTapCount = 0;
+    let readingInitial = false;
 
     const clearIfSame = async (expected: {
       notification?: { request?: { identifier?: string; content?: { data?: unknown } } };
       actionIdentifier?: string;
     }) => {
+      const generation = liveTapCount;
       const current = await getLastNotificationResponseAsync();
-      if (!current) return;
+      if (!current || cancelled || generation !== liveTapCount) return;
       const currentData = current.notification?.request?.content?.data;
       const expectedData = expected.notification?.request?.content?.data;
       const currentId = current.notification?.request?.identifier;
@@ -155,17 +159,24 @@ export function PersonalEventReminderBridge() {
       actionIdentifier?: string;
     }) => {
       if (cancelled) return;
+      liveTapCount++;
       const data = response.notification?.request?.content?.data;
-      if (!personalReminderCategory(data)) return;
+      if (!personalReminderCategory(data)) {
+        discardPendingPersonalEventReminderTap();
+        return;
+      }
       void handlePersonalEventReminderResponse(response, {
         clearLastResponse: (expected) => clearIfSame(expected),
       }).catch(() => undefined);
     };
 
     const tryInitial = async () => {
+      // Once the listener has seen a tap, readiness only retries the queued destination.
+      if (liveTapCount || readingInitial) return;
+      readingInitial = true;
       try {
         const response = await getLastNotificationResponseAsync();
-        if (!response || cancelled) return;
+        if (!response || cancelled || liveTapCount) return;
         const data = response.notification?.request?.content?.data;
         if (!personalReminderCategory(data)) return;
         await handlePersonalEventReminderResponse(response, {
@@ -173,13 +184,13 @@ export function PersonalEventReminderBridge() {
         });
       } catch {
         /* Cold-start restore is best-effort; flush on readiness still runs. */
+      } finally {
+        readingInitial = false;
       }
     };
 
+    const sub = addNotificationResponseReceivedListener(onResponse);
     void tryInitial();
-    const sub = addNotificationResponseReceivedListener((response) => {
-      onResponse(response);
-    });
     const unsubReady = subscribePersonalEventReminderNavigationReady(() => {
       void flushPendingPersonalEventReminderTap({
         clearLastResponse: (expected) => clearIfSame(expected),
