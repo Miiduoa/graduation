@@ -94,6 +94,29 @@ function scheduledDay(groups: TimetableGroup[], schoolId: string, date: Date, in
   return entries;
 }
 
+/** Remaining time between saved meetings on one Taiwan date. An unknown timetable cannot establish a gap. */
+export function savedClassGaps(
+  records: readonly PersonalImportRecord[], schoolId: string, now: Date, day: 'today' | 'tomorrow',
+): { startAt: number; endAt: number }[] | undefined {
+  const groups = timetableGroups(records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId));
+  if (!groups) return undefined;
+  const date = day === 'today' ? now : new Date(now.getTime() + DAY);
+  const entries = scheduledDay(groups, schoolId, date, true);
+  if (!entries) return undefined;
+  if (entries.length < 2) return [];
+
+  entries.sort((a, b) => a.startAt - b.startAt);
+  const gaps: { startAt: number; endAt: number }[] = [];
+  let busyUntil = entries[0].endAt;
+  for (let i = 1; i < entries.length; i++) {
+    const entry = entries[i];
+    const startAt = Math.max(busyUntil, now.getTime());
+    if (startAt < entry.startAt) gaps.push({ startAt, endAt: entry.startAt });
+    busyUntil = Math.max(busyUntil, entry.endAt);
+  }
+  return gaps;
+}
+
 function addressableClasses(entries: PersonalTodayEntry[]) {
   const classes = entries.map(classOccurrence);
   // Separate makeup meetings may have the same deep link and cannot be selected reliably.

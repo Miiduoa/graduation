@@ -49,6 +49,7 @@ const NEXT_CLASS = '下一堂課是什麼？';
 const CLASS_ROOM = '在哪間教室？';
 const CLASS_END = '幾點下課？';
 const CLASS_WORK = '這堂課有什麼作業？';
+const TODAY_GAPS = '今天有哪些空堂？';
 const TODAY_ANNOUNCEMENTS = '今天發布了哪些校園公告？';
 const TODAY_BRIEF = '今天要先處理什麼？';
 const WEEK_BRIEF = '依手機課表與授權作業安排接下來七天的學習計畫';
@@ -136,6 +137,7 @@ type AssistantShortcut =
   | { kind: 'brief'; question: SyncQuestion }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
+  | { kind: 'gap'; question: string }
   | { kind: 'selection'; question: string; checkedAt: string };
 
 function AssistantConversation({
@@ -195,6 +197,7 @@ function AssistantConversation({
   const hasClass = !!(lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor)?.classes.length;
   const reminderChoice = activeShortcut?.kind === 'coursework' && activeShortcut.choice && 'reminder' in activeShortcut.choice
     ? activeShortcut.choice.reminder : undefined;
+  const queryingGaps = activeShortcut?.kind === 'gap';
   const updatingReminder = reminderChoice === 'confirm' || reminderChoice === 'remove';
   const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(draft, hasClass)));
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
@@ -365,6 +368,7 @@ function AssistantConversation({
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
+            classGapRead: reply.classGapRead,
             announcementRead: reply.announcementRead,
           },
         ]);
@@ -412,13 +416,13 @@ function AssistantConversation({
         mode,
         ...(mode === 'device' ? { signal: controller.signal } : {}),
       });
-      const anchor = reply.savedClassRead ?? reply.courseworkRead?.anchor;
-      if (platformTimetable && anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
+      const anchor = reply.classGapRead ?? (platformTimetable ? reply.savedClassRead ?? reply.courseworkRead?.anchor : undefined);
+      if (anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
         if (current()) setError('無法核對這筆課表，請再查一次。');
         return;
       }
       if (controller.signal.aborted && current()) {
-        setError(platformTimetable ? '已取消查詢。' : '已停止本機回答。');
+        setError(shortcut?.kind === 'gap' ? '已取消空堂查詢。' : platformTimetable ? '已取消查詢。' : '已停止本機回答。');
         return;
       }
       if (current()) {
@@ -437,6 +441,7 @@ function AssistantConversation({
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
+            classGapRead: reply.classGapRead,
             courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
             announcementRead: reply.announcementRead,
             proposals: reply.proposals,
@@ -447,7 +452,9 @@ function AssistantConversation({
       }
     } catch (failure) {
       if (current()) {
-        if (platformTimetable) {
+        if (shortcut?.kind === 'gap') {
+          setError(controller.signal.aborted ? '已取消空堂查詢。' : '暫時無法讀取手機課表，請再試一次。');
+        } else if (platformTimetable) {
           setError(controller.signal.aborted ? '已取消查詢。' : '暫時無法取得這次查詢，可以再試一次。');
         } else if (failure instanceof OnDeviceAssistantError) {
           if (failure.code === 'model-required') {
@@ -627,7 +634,7 @@ function AssistantConversation({
               backgroundColor: aiTokens.panel, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
           />
           {updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
-            <AIButton label={syncBusy ? '取消這次同步' : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
+            <AIButton label={syncBusy ? '取消這次同步' : queryingWork ? '取消作業查詢' : queryingGaps ? '取消空堂查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
           ) : (
             <AIButton label={busy ? '正在查詢…' : error && !activeShortcut ? '重試查詢' : '送出問題'}
@@ -650,6 +657,8 @@ function AssistantConversation({
                   <AIButton key={question} label={question === CURRENT_CLASS ? '現在有課嗎？' : '查下一堂課'}
                     variant={order === 0 ? 'primary' : 'ghost'} onPress={() => void send({ kind: 'class', question })} />
                 ))}
+                {!!schoolId && <AIButton label="查今日空堂" variant="ghost" disabled={syncBusy}
+                  onPress={() => void send({ kind: 'gap', question: TODAY_GAPS })} />}
                 {uid ? <>
                   <AIButton label="整理今日重點" variant="ghost" onPress={() => void briefPlan(TODAY_BRIEF)} />
                   <AIButton label="規劃未來七天" variant="ghost" onPress={() => void briefPlan(WEEK_BRIEF)} />
@@ -698,6 +707,25 @@ function AssistantConversation({
           backgroundColor: aiTokens.aiSoft }}>
           <Text style={{ color: aiTokens.textSecondary, fontSize: 12 }}>你的問題</Text>
           <Text selectable style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>{message.content}</Text>
+        </View>
+      ) : message.classGapRead ? (
+        <View key={index} onLayout={(event) => revealReply(index, event)}>
+          <AICard title={message.classGapRead.day === 'today' ? '今日空堂' : '明日空堂'}>
+            <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>{message.content}</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {index === messages.length - 1 && <>
+                <AIButton label={message.classGapRead.day === 'today' ? '改查明天' : '改查今天'}
+                  variant="ghost" disabled={busy || syncBusy}
+                  onPress={() => void send({ kind: 'gap', question: message.classGapRead?.day === 'today' ? '那明天呢？' : '那今天呢？' })} />
+                {message.classGapRead.minMinutes < 60 && (
+                  <AIButton label="只看一小時以上" variant="ghost" disabled={busy || syncBusy}
+                    onPress={() => void send({ kind: 'gap', question: '至少一小時呢？' })} />
+                )}
+              </>}
+              {navigation?.navigate && <AIButton label="開啟我的課表" variant="ghost" disabled={busy || syncBusy}
+                onPress={() => current() && safeNavigate(navigation, 'PersonalTimetable')} />}
+            </View>
+          </AICard>
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
@@ -879,7 +907,7 @@ function AssistantConversation({
       ))}
       {busy && (
         <View onLayout={scrollToEntry}>
-          <AICard title={updatingReminder ? '正在處理作業提醒…' : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
+          <AICard title={updatingReminder ? '正在處理作業提醒…' : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : queryingGaps ? '正在查手機課表的空堂…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
               {activeShortcut?.question ?? draft.trim()}
             </Text>

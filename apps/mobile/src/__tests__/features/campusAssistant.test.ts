@@ -751,6 +751,86 @@ test('an account switch while reading the current timetable discards the old acc
   expect(mockCallable).not.toHaveBeenCalled();
 });
 
+describe('finding time between classes on the phone', () => {
+  const checkedAt = '2026-11-06T03:00:00Z';
+  const request = { ...input(), mode: 'device' as const };
+  const platform = { ...request, scope: { uid: '', schoolId: 'pu' },
+    platformTimetable: { accountId: 'student', isCurrent: () => true } };
+  const ask = (content: string) => ({ role: 'user' as const, content });
+  const readContext = jest.mocked(require('../../services/onDeviceSchoolContext').collectOnDeviceSchoolContext);
+  const snapshot = (day: string, start: string, end: string) => ({ schoolId: 'pu', checkedAt,
+    timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [], classGaps: [{
+      startAt: Date.parse(day + 'T' + start + ':00+08:00'), endAt: Date.parse(day + 'T' + end + ':00+08:00'),
+    }] } });
+
+  test.each([[request, 'firebase:A'], [platform, 'nuni:student']] as const)(
+    'uses the account timetable without a model and rereads it when refining the search (%p)', async (base, owner) => {
+      jest.mocked(localLLM.getRuntimeAvailability).mockReturnValue({ available: false });
+      readContext.mockResolvedValueOnce(snapshot('2026-11-06', '12:10', '12:55'));
+      const first = await askCampusAssistant({ ...base, messages: [ask('今天還有半小時的空堂嗎？')] });
+      expect(first.classGapRead).toEqual({ owner, schoolId: 'pu', checkedAt, day: 'today', minMinutes: 30 });
+      expect(first.content).toContain('12:10');
+      readContext.mockResolvedValueOnce(snapshot('2026-11-07', '09:10', '10:00'));
+      const second = await askCampusAssistant({ ...base, messages: [{ role: 'assistant', ...first }, ask('那明天呢？')] });
+      expect(readContext.mock.lastCall?.[0]).toMatchObject({ gapDay: 'tomorrow' });
+      expect(second.content).toContain('09:10');
+      expect(second.content).not.toContain('12:10');
+      expect(second.classGapRead).toMatchObject({ day: 'tomorrow', minMinutes: 30 });
+      readContext.mockResolvedValueOnce(snapshot('2026-11-07', '10:15', '11:30'));
+      const longer = await askCampusAssistant({ ...base, messages: [{ role: 'assistant', ...second }, ask('至少一小時呢？')] });
+      expect(longer.classGapRead).toMatchObject({ day: 'tomorrow', minMinutes: 60 });
+      expect(longer.content).toContain('10:15');
+      expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+      expect(mockCallable).not.toHaveBeenCalled();
+    });
+
+  test.each([['nuni:another', 'pu'], ['nuni:student', 'other']])(
+    'does not reuse a gap query from owner %s and school %s', async (owner, schoolId) => {
+      const result = await askCampusAssistant({ ...platform, messages: [
+        { role: 'assistant', content: '舊時段', classGapRead: { owner, schoolId, checkedAt, day: 'today', minMinutes: 30 } },
+        ask('那明天呢？'),
+      ] });
+      expect(readContext).not.toHaveBeenCalled();
+      expect(result.classGapRead).toBeUndefined();
+      expect(result.content).toContain('重新問');
+    });
+
+  test('requires a new day after Taiwan midnight and drops a result when the account changes mid-read', async () => {
+    readContext.mockResolvedValueOnce(snapshot('2026-11-06', '12:10', '12:55'));
+    const reply = await askCampusAssistant({ ...request, messages: [
+      { role: 'assistant', content: '課間空堂', classGapRead: {
+        owner: 'firebase:A', schoolId: 'pu', checkedAt: '2026-11-05T15:59:59Z', day: 'today', minMinutes: 0 } },
+      ask('至少一小時呢？'),
+    ] });
+    expect(reply.content).toContain('換日');
+    expect(reply.classGapRead).toBeUndefined();
+    readContext.mockResolvedValueOnce(snapshot('2026-11-06', '12:10', '12:55'));
+    const pending = askCampusAssistant({ ...request, messages: [ask('今天有哪些空堂？')] });
+    mockUid = 'B';
+    await expect(pending).rejects.toMatchObject({ code: 'session-changed' });
+  });
+
+  test('requires a signed-in timetable owner before reading a private schedule', async () => {
+    const reply = await askCampusAssistant({ ...request, scope: { schoolId: 'pu', uid: '' },
+      messages: [ask('今天有哪些空堂？')] });
+    expect(reply.content).toContain('登入');
+    expect(reply.classGapRead).toBeUndefined();
+    expect(readContext).not.toHaveBeenCalled();
+  });
+
+  test('offers import only for a missing platform timetable', async () => {
+    const messages = [ask('今天有哪些空堂？')];
+    const missing = await askCampusAssistant({ ...platform, messages });
+    expect(missing.route).toBe('/timetable/import');
+    expect(missing.classGapRead).toBeUndefined();
+    readContext.mockResolvedValueOnce({ schoolId: 'pu', checkedAt,
+      timetable: { source: 'unreadable', updatedAt: null, courses: [] } });
+    const unreadable = await askCampusAssistant({ ...platform, messages });
+    expect(unreadable.route).toBe('/timetable');
+    expect(unreadable.classGapRead).toBeUndefined();
+  });
+});
+
 describe('platform timetable without a school account', () => {
   const platform = () => ({
     ...input(), mode: 'device' as const, scope: { uid: '', schoolId: 'pu' },

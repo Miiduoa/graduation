@@ -1,6 +1,6 @@
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
-import { currentSavedClasses, nextSavedClasses, type SavedClassOccurrence } from './nextSavedClasses';
+import { currentSavedClasses, nextSavedClasses, savedClassGaps, type SavedClassOccurrence } from './nextSavedClasses';
 import { loadOfflinePersonalTimetable } from './personalTimetable';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 
@@ -15,6 +15,7 @@ export type OnDeviceSchoolContext = {
     updatedAt: string | null;
     nextClasses?: SavedClassOccurrence[];
     currentClasses?: SavedClassOccurrence[];
+    classGaps?: { startAt: number; endAt: number }[];
     courses: Array<{ name: string; day: number; start: number; end: number; room?: string }>;
   };
 };
@@ -32,6 +33,7 @@ export async function collectOnDeviceSchoolContext(
     platformTimetable?: PlatformTimetableAccess;
     includeNextClasses?: boolean;
     includeCurrentClasses?: boolean;
+    gapDay?: 'today' | 'tomorrow';
     classFollowUp?: readonly SavedClassOccurrence[];
   },
 ): Promise<OnDeviceSchoolContext> {
@@ -41,7 +43,7 @@ export async function collectOnDeviceSchoolContext(
     schoolName: (params.schoolName || '').trim().slice(0, 90),
     timetable: { source: 'not-available', updatedAt: null, courses: [] },
   };
-  const includeMeetings = params.includeCurrentClasses || params.includeNextClasses;
+  const includeMeetings = params.includeCurrentClasses || params.includeNextClasses || !!params.gapDay;
   if (!params.schoolId || (params.platformTimetable ? !includeMeetings : !params.uid)) return base;
   try {
     const source = includeMeetings ? await readAssistantTimetable(params.uid, params.schoolId, params.platformTimetable) : null;
@@ -63,6 +65,9 @@ export async function collectOnDeviceSchoolContext(
         ...(source && params.includeNextClasses && {
           nextClasses: nextSavedClasses(source.records, source.schoolId, checked, params.classFollowUp),
         }),
+        ...(source && params.gapDay && {
+          classGaps: savedClassGaps(source.records, source.schoolId, checked, params.gapDay),
+        }),
         courses: (timetable?.courses || []).slice(0, 80).map((course) => ({
           name: String(course.name).slice(0, 48),
           day: course.day,
@@ -73,8 +78,8 @@ export async function collectOnDeviceSchoolContext(
       },
     };
   } catch {
-    // A storage failure is distinct from an empty platform account that can start an import.
-    if (params.platformTimetable) base.timetable.source = 'unreadable';
+    // A failed read should offer a retry, not tell the student to import again.
+    if (params.platformTimetable || params.gapDay) base.timetable.source = 'unreadable';
     return base;
   }
 }
