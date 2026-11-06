@@ -83,7 +83,10 @@ service firebase.storage {
     }
 
     function conversationMember(conversationId) {
+      // Conversation memberIds may survive account deletion; require a live canonical profile.
+      // Storage rules can access only two unique Firestore documents per request.
       return isActiveAccount()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
         && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
     }
