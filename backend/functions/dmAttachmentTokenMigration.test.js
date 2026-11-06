@@ -90,7 +90,7 @@ test('scan is bounded, paginated and does not mutate without execution confirmat
   };
   const items = [];
   const result = await scanDmTokens(bucket, { maxObjects: 3, onItem: (item) => items.push(item) });
-  expect(result).toEqual({ scanned: 3, skipped: 1, clean: 0, wouldRevoke: 2, revoked: 0, truncated: false });
+  expect(result).toEqual({ scanned: 3, skipped: 1, clean: 0, wouldRevoke: 2, revoked: 0, truncated: false, nextPageToken: null });
   expect(items).toHaveLength(3);
   expect(bucket.getFiles).toHaveBeenCalledTimes(2);
   expect(one.setMetadata).not.toHaveBeenCalled();
@@ -98,13 +98,32 @@ test('scan is bounded, paginated and does not mutate without execution confirmat
   expect(other.getMetadata).not.toHaveBeenCalled();
 });
 
+test('bounded scan returns a continuation cursor instead of silently skipping later objects', async () => {
+  const one = fileWithToken('conversations/dm/media/one/file.png').file;
+  const two = fileWithToken('conversations/dm/media/two/file.png').file;
+  const bucket = {
+    getFiles: jest.fn(async (q) => q.pageToken
+      ? [[two], null]
+      : [[one], { pageToken: 'next-page' }]),
+  };
+  const first = await scanDmTokens(bucket, { maxObjects: 1 });
+  expect(first).toMatchObject({ scanned: 1, truncated: true, nextPageToken: 'next-page' });
+  const second = await scanDmTokens(bucket, { maxObjects: 1, pageToken: first.nextPageToken });
+  expect(second).toMatchObject({ scanned: 1, truncated: false, nextPageToken: null });
+  expect(bucket.getFiles.mock.calls[1][0]).toMatchObject({
+    prefix: 'conversations/', autoPaginate: false, pageToken: 'next-page',
+  });
+});
+
 test('CLI defaults to dry-run and requires exact bucket confirmation to mutate', () => {
   expect(args(['--bucket', 'campus.appspot.com'])).toEqual({
-    bucketName: 'campus.appspot.com', path: undefined, execute: false, maxObjects: 100,
+    bucketName: 'campus.appspot.com', path: undefined, execute: false, maxObjects: 100, pageToken: undefined,
   });
   expect(() => args(['--bucket', 'campus.appspot.com', '--execute'])).toThrow('EXACT');
   expect(() => args(['--bucket', 'campus.appspot.com', '--execute', '--confirm-bucket', 'other.app'])).toThrow('EXACT');
   expect(() => args(['--bucket', 'campus.appspot.com', '--path', '../invalid'])).toThrow('Only');
   expect(() => args(['--bucket', 'campus.appspot.com', '--max-objects', '5000'])).toThrow('1 to 1000');
+  expect(() => args(['--bucket', 'campus.appspot.com', '--page-token', 'x', '--path', 'conversations/dm/media/id/file'])).toThrow('cannot');
+  expect(args(['--bucket', 'campus.appspot.com', '--page-token', 'page2']).pageToken).toBe('page2');
   expect(args(['--bucket', 'campus.appspot.com', '--execute', '--confirm-bucket', 'campus.appspot.com']).execute).toBe(true);
 });
