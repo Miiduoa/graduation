@@ -14,7 +14,10 @@ import * as ImagePicker from 'expo-image-picker';
 const mockSend = jest.fn();
 let mockViewer = 'alice';
 let mockSchool = 'pu';
-jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(),
+  UIImagePickerPreferredAssetRepresentationMode: { Compatible: 'compatible' },
+}));
 jest.mock('expo-crypto', () => ({ randomUUID: () => 'photo_message_00000001' }));
 jest.mock('../services/dmPhotos', () => ({
   ...jest.requireActual('../services/dmPhotos'),
@@ -428,6 +431,9 @@ test('local preview is removable and retries reuse one upload and the same messa
   expect(view.queryByLabelText('加入照片')).toBeNull();
   verifyPhotoChat();
   await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
+  expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith(
+    expect.objectContaining({ preferredAssetRepresentationMode: 'compatible' }),
+  );
   expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
   expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
   fireEvent.press(view.getByLabelText('移除照片'));

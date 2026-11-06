@@ -53,6 +53,7 @@ export function DmPhotoComposer({
     try {
       const picked = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
         allowsEditing: false,
         quality: 1,
       });
