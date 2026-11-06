@@ -538,6 +538,7 @@ export function ChatScreen(props: any) {
     setPeerOnline(false);
     if (!convoKey || isFirebaseMockMode()) return;
     let listening = true;
+    let verifiedPhotoMembers: string | null = null;
     const convoRef = doc(db, 'conversations', convoKey);
     const unsub = onSnapshot(
       convoRef,
@@ -545,6 +546,7 @@ export function ChatScreen(props: any) {
       (snap) => {
         if (!listening) return;
         if (!snap.exists()) {
+          verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);
           return;
         }
@@ -559,12 +561,22 @@ export function ChatScreen(props: any) {
           new Set(data.memberIds).size !== 2 ||
           !data.memberIds.includes(myUid)
         ) {
+          verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);
           setMessages([]);
           setAccessError('這不是目前帳號可存取的本校私訊。');
           return;
         }
-        setVerifiedPhotoThread(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites ? sendScope : null);
+        const members = JSON.stringify([...data.memberIds].sort());
+        if (snap.metadata.fromCache) {
+          verifiedPhotoMembers = null;
+        } else if (!snap.metadata.hasPendingWrites) {
+          verifiedPhotoMembers = members;
+        } else if (verifiedPhotoMembers !== members) {
+          verifiedPhotoMembers = null;
+        }
+        // Local typing and presence writes keep the same server-confirmed photo session.
+        setVerifiedPhotoThread(verifiedPhotoMembers ? sendScope : null);
         // 打字狀態
         if (data.typingUsers && peerId && data.typingUsers[peerId]) {
           const ts = data.typingUsers[peerId];
@@ -582,6 +594,7 @@ export function ChatScreen(props: any) {
       },
       (err: any) => {
         if (!listening) return;
+        verifiedPhotoMembers = null;
         setVerifiedPhotoThread(null);
         if (err?.code === 'permission-denied') {
           setAccessError('你不是此對話的成員，無法檢視訊息。');
