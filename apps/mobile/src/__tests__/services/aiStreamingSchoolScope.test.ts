@@ -110,6 +110,20 @@ test('insight caching is reusable only within the same verified login', async ()
   expect(computeRealtimeInsights).toHaveBeenCalledTimes(3);
 });
 
+test('profile refresh pauses enrichment and restores the same live login cache after JSON hydration', async () => {
+  const identity = { userId: 'owner-a', schoolId: 'pu' };
+  const context = getInMemoryPostLoginContext();
+  await stream(identity);
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(null);
+  await stream(identity);
+  expect(computeRealtimeInsights).toHaveBeenCalledTimes(1);
+  expect(detectAndExecuteSmartAction).toHaveBeenCalledTimes(1);
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(JSON.parse(JSON.stringify(context)));
+  await stream(identity);
+  expect(computeRealtimeInsights).toHaveBeenCalledTimes(1);
+  expect(detectAndExecuteSmartAction).toHaveBeenCalledTimes(2);
+});
+
 test.each(['realtime', 'cross', 'briefing'] as const)('stops enrichment when its session expires during %s computation', async (stage) => {
   const started = deferred<void>();
   const waiting = deferred<never>();

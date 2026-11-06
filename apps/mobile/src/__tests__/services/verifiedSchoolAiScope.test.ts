@@ -4,6 +4,7 @@ import {
   bindVerifiedSchoolAiScope,
   getVerifiedSchoolAiScope,
   isVerifiedSchoolAiScopeCurrent,
+  revokeVerifiedSchoolAiScope,
 } from '../../services/verifiedSchoolAiScope';
 
 jest.mock('../../services/postLoginContextHolder', () => ({
@@ -14,6 +15,7 @@ const identity = { userId: 'owner-a', schoolId: 'pu' };
 let context: PostLoginContext;
 
 beforeEach(() => {
+  revokeVerifiedSchoolAiScope();
   context = {
     uid: identity.userId, schoolId: identity.schoolId, origin: 'verified-school-login',
     roles: {
@@ -26,9 +28,14 @@ beforeEach(() => {
 });
 
 test('a matching persisted or caller-supplied context cannot establish a live school session', () => {
-  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
-  bindVerifiedSchoolAiScope({ ...context, origin: undefined }, () => {});
-  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  jest.isolateModules(() => {
+    const holder = require('../../services/postLoginContextHolder') as typeof import('../../services/postLoginContextHolder');
+    const fresh = require('../../services/verifiedSchoolAiScope') as typeof import('../../services/verifiedSchoolAiScope');
+    jest.mocked(holder.getInMemoryPostLoginContext).mockReturnValue(JSON.parse(JSON.stringify(context)));
+    expect(fresh.getVerifiedSchoolAiScope(identity)).toBeNull();
+    fresh.bindVerifiedSchoolAiScope({ ...context, origin: undefined }, () => {});
+    expect(fresh.getVerifiedSchoolAiScope(identity)).toBeNull();
+  });
 });
 
 test('a verified session is usable only for its exact owner, school, and in-memory context', () => {
@@ -41,8 +48,32 @@ test('a verified session is usable only for its exact owner, school, and in-memo
   expect(getVerifiedSchoolAiScope({ schoolId: 'pu' })).toBeNull();
   expect(getVerifiedSchoolAiScope()).toBeNull();
 
-  jest.mocked(getInMemoryPostLoginContext).mockReturnValue({ ...context });
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(null);
   expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
+});
+
+test('the same verified snapshot can resume after a profile refresh while its live session is valid', () => {
+  bindVerifiedSchoolAiScope(context, () => {});
+  const scope = getVerifiedSchoolAiScope(identity)!;
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(null);
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  const restored: PostLoginContext = JSON.parse(JSON.stringify(context));
+  expect(restored).not.toBe(context);
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(restored);
+  expect(getVerifiedSchoolAiScope(identity)).toBe(scope);
+});
+
+test.each([
+  { uid: 'owner-b' },
+  { schoolId: 'nthu' },
+  { origin: undefined },
+  { builtAt: '2000-01-01T00:00:00.000Z' },
+])('rejects a restored context with changed identity, origin, or snapshot %j', (changed) => {
+  bindVerifiedSchoolAiScope(context, () => {});
+  const scope = getVerifiedSchoolAiScope(identity)!;
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue({ ...context, ...changed });
+  expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
 });
 
 test.each(['user', 'session', 'generation'] as const)('revokes the scope when its %s changes', (changed) => {
@@ -60,6 +91,7 @@ test.each(['user', 'session', 'generation'] as const)('revokes the scope when it
   if (changed === 'user') currentUser = { uid: identity.userId };
   if (changed === 'session') currentSession = { backendOwnerUid: identity.userId };
   if (changed === 'generation') generation++;
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(JSON.parse(JSON.stringify(context)));
   expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
   expect(getVerifiedSchoolAiScope(identity)).toBeNull();
 });
@@ -70,4 +102,15 @@ test('a new verified login invalidates an earlier scope even for the same accoun
   bindVerifiedSchoolAiScope(context, () => {});
   expect(isVerifiedSchoolAiScopeCurrent(previous)).toBe(false);
   expect(getVerifiedSchoolAiScope(identity)).not.toBe(previous);
+});
+
+test('explicit revocation immediately invalidates captured reads and survives JSON restoration', () => {
+  bindVerifiedSchoolAiScope(context, () => {});
+  const scope = getVerifiedSchoolAiScope(identity)!;
+  revokeVerifiedSchoolAiScope();
+  expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(JSON.parse(JSON.stringify(context)));
+  revokeVerifiedSchoolAiScope();
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
 });

@@ -20,7 +20,11 @@
  * 重點：AI 端只能透過此 registry 呼叫工具；不再直接碰 Firestore / DataSource。
  */
 
-import { getDataSource, hasDataSource } from '../data/source';
+import { getDataSource, getDataSourceEvidence, hasDataSource } from '../data/source';
+import { isProvidenceSchoolId, toPublicSchoolId } from '@campus/shared/src/schoolIds';
+import { planStudy, homeworkToPlannerTask, examToPlannerTask, type PlannerTask } from '@campus/shared/src/lms/studyPlanner';
+import { simulateWhatIf, type WhatIfOverride } from '@campus/shared/src/lms/gradePredictor';
+import { planNotifications } from '@campus/shared/src/lms/notificationPlanner';
 import {
   getPuDiningCafeterias,
   getPuDiningMenuItems,
@@ -33,7 +37,10 @@ import type {
   MenuItem,
 } from '../data/types';
 import type { LearnedSkill } from '../data/puAIAgentData';
-import { getCloudFunctionRegion, getFirebaseApp, getFunctionsInstance } from '../firebase';
+import {
+  getAuthInstance, getCloudFunctionRegion, getFirebaseApp, getFunctionsInstance,
+  hasUsableFirebaseConfig, isFirebaseMockMode,
+} from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 import {
   executeTool as executeLegacyTool,
@@ -47,7 +54,15 @@ import {
 } from './demoOrdering';
 import { reviewDemoLeaveRequest } from './demoLeaveReview';
 import { getDemoUserStory } from '../data/demoUserStories';
+import {
+  getDemoCoursesForUid, getDemoScoreItemsByCourse, getDemoHomeworksByCourse, getDemoExamsByCourse,
+} from '../data/demoCoursesMock';
 import { sendDemoMessageAsAgent } from './demoMessageAgent';
+import { AI_DATA_INVENTORY } from './aiDataInventory';
+import { isDevelopmentDemoSession } from './release';
+import { buildLearningWorkspace } from '../features/learningWorkspace';
+import { getInboxIntent, getInboxUrgency } from '../utils/campusOs';
+import { getVerifiedSchoolAiScope, isVerifiedSchoolAiScopeCurrent } from './verifiedSchoolAiScope';
 
 // ════════════════════════════════════════════════════════════
 // Stage 1：標準化型別契約
@@ -195,6 +210,182 @@ function makeMissingInfo(
     isDraft: false,
     missingInfo: fields,
   };
+}
+
+const ACADEMIC_SNAPSHOT_TOOLS = new Set([
+  'grade_predict_what_if', 'study_plan_today', 'urgent_notifications',
+  'ai_full_context', 'ai_data_inventory',
+]);
+
+function isExplicitAcademicDemo(ctx: ToolExecutionContext): boolean {
+  if (!isDevelopmentDemoSession(ctx.userId)) return false;
+  const persona = ctx.userId ? getDemoUserStory(ctx.userId) : null;
+  return !!persona && toPublicSchoolId(persona.schoolId) === toPublicSchoolId(ctx.schoolId);
+}
+
+async function executeScopedAcademicTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  ctx: ToolExecutionContext,
+): Promise<StandardToolResult> {
+  const userId = ctx.userId;
+  const schoolId = ctx.schoolId;
+  const canonicalSchoolId = toPublicSchoolId(schoolId);
+  const evidence = getDataSourceEvidence();
+  if (!userId || !canonicalSchoolId || canonicalSchoolId === 'all' ||
+      !hasDataSource() || evidence?.sourceLabel !== 'real') {
+    return makeFailure(toolName, 'precondition_failed', '學習資料來源尚未連線，請確認登入帳號與校園後再試。');
+  }
+
+  const { getHybridSourceStatus } = require('../data/hybridSource') as typeof import('../data/hybridSource');
+  if (toPublicSchoolId(getHybridSourceStatus().schoolContextId) !== canonicalSchoolId) {
+    return makeFailure(toolName, 'precondition_failed', '目前所選校園已更新，請確認校園後重新查詢。');
+  }
+  const source = getDataSource();
+  const verifiedScope = getVerifiedSchoolAiScope(ctx);
+  if (evidence.mode === 'hybrid' && isProvidenceSchoolId(schoolId) && !verifiedScope) {
+    return makeFailure(toolName, 'precondition_failed', '目前校務資料尚未驗證，請重新登入所選校園後再試。');
+  }
+  const auth = hasUsableFirebaseConfig() && !isFirebaseMockMode() ? getAuthInstance() : null;
+  const firebaseUser = auth?.currentUser;
+  if (auth && firebaseUser?.uid !== userId) {
+    return makeFailure(toolName, 'precondition_failed', '帳號已更新，請重新查詢學習資料。');
+  }
+  const isCurrent = () => ctx.userId === userId && ctx.schoolId === schoolId &&
+    toPublicSchoolId(getHybridSourceStatus().schoolContextId) === canonicalSchoolId &&
+    hasDataSource() && getDataSource() === source && getDataSourceEvidence() === evidence &&
+    evidence.sourceLabel === 'real' && (!auth || auth.currentUser === firebaseUser) &&
+    (!verifiedScope || isVerifiedSchoolAiScopeCurrent(verifiedScope));
+  const changed = () => makeFailure(toolName, 'precondition_failed', '帳號、校園或資料來源已更新，請重新查詢。');
+
+  try {
+    const rows = await source.listCourseSpaces(userId, schoolId);
+    if (!isCurrent()) return changed();
+    const courses = rows.filter((course) => course.groupId &&
+      (!course.schoolId || toPublicSchoolId(course.schoolId) === canonicalSchoolId));
+
+    if (toolName === 'grade_predict_what_if') {
+      const courseId = String(args.courseId ?? '');
+      const course = courses.find((row) => [row.id, row.groupId, row.courseId].includes(courseId));
+      if (!course) {
+        return makeFailure(toolName, 'not_found', '目前校園的已加入課程中找不到這門課，請從課程頁確認課程。');
+      }
+      const gradebook = await source.getCourseGradebook(course.groupId);
+      if (!isCurrent()) return changed();
+      if (!gradebook?.assignments.length || gradebook.assignments.some((item) =>
+        !Number.isFinite(item.weight) || item.weight < 0) ||
+        gradebook.assignments.every((item) => item.weight === 0)) {
+        return makeFailure(toolName, 'precondition_failed', '這門課尚未提供可用的評分權重，請先到課程成績頁確認配分。');
+      }
+      const ownRow = gradebook.rows.find((row) => row.uid === userId);
+      const items = gradebook.assignments.map((assignment) => {
+        const entry = ownRow?.assignmentBreakdown.find((row) => row.assignmentId === assignment.id);
+        const score = assignment.gradesPublished && typeof entry?.grade === 'number' &&
+          Number.isFinite(entry.grade) && entry.grade >= 0 && entry.grade <= 100 ? entry.grade : null;
+        return { id: assignment.id, title: assignment.title, weight: assignment.weight, score, graded: score !== null };
+      });
+      let overrides: unknown = args.overrides ?? [];
+      if (typeof overrides === 'string') {
+        try { overrides = overrides.trim() ? JSON.parse(overrides) : []; }
+        catch { overrides = null; }
+      }
+      if (!Array.isArray(overrides) || overrides.some((item) =>
+        !item || !items.some((entry) => entry.id === item.itemId) ||
+        typeof item.assumedScore !== 'number' || !Number.isFinite(item.assumedScore) ||
+        item.assumedScore < 0 || item.assumedScore > 100)) {
+        return makeMissingInfo(toolName, [{
+          field: 'overrides', prompt: '請選擇這門課的評分項目，並提供 0 到 100 的假設分數。',
+        }], false);
+      }
+      if (items.every((item) => item.score === null) && overrides.length === 0) {
+        return makeMissingInfo(toolName, [{
+          field: 'overrides', prompt: '目前尚無你的已公開分數，請指定評分項目與假設分數來試算。',
+        }], false);
+      }
+      const result = simulateWhatIf(items, overrides as WhatIfOverride[]);
+      return {
+        success: true, toolName, isWrite: false, isDraft: false,
+        summary: `${course.name}依課程評分權重試算 ${result.likelyCase ?? '—'} 分，範圍 ${result.worstCase}–${result.bestCase} 分。`,
+        data: { ...result, letterGrade: null, source: 'scoped-data-source', schoolId, courseId: course.groupId },
+      };
+    }
+
+    const inbox = await source.listInboxTasks(userId, schoolId);
+    if (!isCurrent()) return changed();
+    const workspace = buildLearningWorkspace(courses, inbox);
+    const pending = workspace.tasks.filter((task) =>
+      (task.kind === 'assignment' || task.kind === 'quiz') && getInboxIntent(task) === 'submit');
+    const urgent = workspace.tasks
+      .filter((task) => getInboxIntent(task) !== 'review')
+      .map((task) => ({
+        id: task.id, kind: task.kind, severity: getInboxUrgency(task),
+        title: task.title, body: task.subtitle, courseId: task.groupId, courseName: task.groupName,
+      }))
+      .filter((task) => task.severity === 'critical' || task.severity === 'high');
+    if (toolName === 'urgent_notifications') {
+      return {
+        success: true, toolName, isWrite: false, isDraft: false,
+        summary: `所選校園的課程待辦中有 ${urgent.length} 則優先提醒。`,
+        data: urgent.slice(0, 8),
+      };
+    }
+    const tasks: PlannerTask[] = pending.map((task) => ({
+      id: task.id, courseId: task.groupId, courseName: task.groupName, title: task.title,
+      kind: task.kind === 'quiz' ? 'quiz' : 'homework',
+      dueAt: task.dueAt instanceof Date && Number.isFinite(task.dueAt.getTime()) ? task.dueAt.toISOString() : null,
+      estimatedMinutes: 25, importance: 50,
+    }));
+    const plan = planStudy(tasks, { dailyBudgetMinutes: Number(args.dailyBudgetMinutes ?? 240) || 240 });
+    const studyPlan = {
+      summary: plan.summary,
+      pomodoroCount: plan.pomodoros.length,
+      totalMinutes: plan.totalEstimatedMinutes,
+      priorityCount: plan.prioritized.length,
+      topTasks: plan.prioritized.slice(0, 5).map((task) => ({
+        title: task.title, courseName: task.courseName, urgency: task.urgency, reason: task.reason,
+      })),
+    };
+    if (toolName === 'study_plan_today') {
+      return {
+        success: true, toolName, isWrite: false, isDraft: false,
+        summary: plan.summary + (tasks.length ? ' 每項先安排 25 分鐘，可依實際工作量調整。' : ''),
+        data: { ...studyPlan, source: 'scoped-data-source', schoolId },
+      };
+    }
+    const courseSummary = courses.map((course) => ({ id: course.groupId, name: course.name }));
+    if (toolName === 'ai_data_inventory') {
+      return {
+        success: true, toolName, isWrite: false, isDraft: false,
+        summary: `已載入所選校園 ${courses.length} 門已加入課程與 ${workspace.tasks.length} 項課程待辦。`,
+        data: {
+          source: 'scoped-data-source', userId, schoolId,
+          domains: AI_DATA_INVENTORY.map((entry) => {
+            if (entry.key === 'courses') return {
+              key: entry.key, label: '已加入課程', status: 'loaded', scope: 'joined_course_memberships',
+              fields: ['id', 'name'],
+            };
+            if (entry.key === 'notifications') return {
+              key: entry.key, label: '課程待辦優先提醒', status: 'loaded', scope: 'course_inbox',
+              fields: ['id', 'kind', 'severity', 'title', 'body', 'courseId', 'courseName'],
+            };
+            return { key: entry.key, label: entry.label, status: 'not_loaded' };
+          }),
+          snapshot: { courses: courseSummary, notifications: urgent },
+        },
+      };
+    }
+    return {
+      success: true, toolName, isWrite: false, isDraft: false,
+      summary: `${courses.length} 門已加入課程 · ${pending.length} 項學習待辦 · ${urgent.length} 則優先提醒`,
+      data: {
+        source: 'scoped-data-source', user: { uid: userId, schoolId, role: ctx.role ?? 'student' },
+        courses: courseSummary, today: studyPlan, urgentNotifications: urgent,
+      },
+    };
+  } catch {
+    if (!isCurrent()) return changed();
+    return makeFailure(toolName, 'execution_failed', '目前無法讀取所選校園的學習資料，請稍後再試。');
+  }
 }
 
 function asString(v: unknown): string {
@@ -1890,7 +2081,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     fields: [
       {
         name: 'courseId',
-        description: '課程 ID（71378 / 71282 / 71240 / 71393 / 77418）',
+        description: '目前校園已加入課程的 ID',
         type: 'string',
         required: true,
         promptIfMissing: '想試算哪門課？',
@@ -1902,10 +2093,12 @@ const TOOL_SPECS: readonly ToolSpec[] = [
       },
     ],
     handler: async (args, ctx) => {
+      if (!isExplicitAcademicDemo(ctx)) return executeScopedAcademicTool('grade_predict_what_if', args, ctx);
       try {
-        const { simulateWhatIf } = await import('@campus/shared');
-        const { getDemoScoreItemsByCourse } = await import('../data/demoCoursesMock');
         const courseId = Number(String(args.courseId).replace(/^tc:/, ''));
+        if (!getDemoCoursesForUid(ctx.userId).some((course) => course.id === courseId)) {
+          return makeFailure('grade_predict_what_if', 'not_found', '目前示範身分沒有這門課的評分資料。');
+        }
         const items = getDemoScoreItemsByCourse(courseId).map((s) => ({
           id: String(s.id),
           title: s.name,
@@ -1928,7 +2121,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
         return {
           success: true,
           toolName: 'grade_predict_what_if',
-          summary: `預估總成績 ${result.likelyCase ?? '—'}%（${result.letterGrade ?? '—'}） · 範圍 ${result.worstCase}-${result.bestCase}`,
+          summary: `示範資料｜預估總成績 ${result.likelyCase ?? '—'}%（${result.letterGrade ?? '—'}） · 範圍 ${result.worstCase}-${result.bestCase}`,
           data: result,
           isWrite: false,
           isDraft: false,
@@ -1958,17 +2151,10 @@ const TOOL_SPECS: readonly ToolSpec[] = [
       },
     ],
     handler: async (args, ctx) => {
+      if (!isExplicitAcademicDemo(ctx)) return executeScopedAcademicTool('study_plan_today', args, ctx);
       try {
-        const { planStudy, homeworkToPlannerTask, examToPlannerTask } = await import(
-          '@campus/shared'
-        );
-        const {
-          DEMO_COURSES,
-          getDemoHomeworksByCourse,
-          getDemoExamsByCourse,
-        } = await import('../data/demoCoursesMock');
         const tasks: any[] = [];
-        for (const c of DEMO_COURSES) {
+        for (const c of getDemoCoursesForUid(ctx.userId)) {
           for (const hw of getDemoHomeworksByCourse(c.id)) {
             tasks.push(
               homeworkToPlannerTask({
@@ -2002,7 +2188,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
         return {
           success: true,
           toolName: 'study_plan_today',
-          summary: plan.summary,
+          summary: `示範資料｜${plan.summary}`,
           data: {
             summary: plan.summary,
             pomodoroCount: plan.pomodoros.length,
@@ -2077,19 +2263,15 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   // urgent_notifications：拉學生今天的 critical / high 通知
   {
     name: 'urgent_notifications',
-    description: '拉學生現在所有 critical / high 級別通知（作業到期、考試、教室異動等）。',
+    description: '依目前帳號與校園的課程待辦，列出 critical / high 級別提醒。',
     kind: 'read',
     allowedRoles: ALL_ROLES,
     fields: [],
     handler: async (args, ctx) => {
+      if (!isExplicitAcademicDemo(ctx)) return executeScopedAcademicTool('urgent_notifications', args, ctx);
       try {
-        const { planNotifications } = await import('@campus/shared');
-        const {
-          DEMO_COURSES,
-          getDemoHomeworksByCourse,
-          getDemoExamsByCourse,
-        } = await import('../data/demoCoursesMock');
-        const homeworks = DEMO_COURSES.flatMap((c) =>
+        const courses = getDemoCoursesForUid(ctx.userId);
+        const homeworks = courses.flatMap((c) =>
           getDemoHomeworksByCourse(c.id).map((hw) => ({
             id: hw.id,
             courseId: hw.courseId,
@@ -2099,7 +2281,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
             submitted: hw.submitted,
           })),
         );
-        const exams = DEMO_COURSES.flatMap((c) =>
+        const exams = courses.flatMap((c) =>
           getDemoExamsByCourse(c.id).map((e) => ({
             id: e.id,
             courseId: e.courseId,
@@ -2118,7 +2300,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
         return {
           success: true,
           toolName: 'urgent_notifications',
-          summary: `${urgent.length} 條立即注意`,
+          summary: `示範資料｜${urgent.length} 條立即注意`,
           data: urgent.slice(0, 8).map((n) => ({
             kind: n.kind,
             severity: n.severity,
@@ -2199,26 +2381,27 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   // ai_full_context：拉學生整體現況，給 AI 對話用
   {
     name: 'ai_full_context',
-    description: '一次拉學生在 APP 內整體現況（5 門課、待辦、通知、錯題本、預估成績）。',
+    description: '讀取目前帳號與校園的已加入課程、學習待辦與優先提醒。',
     kind: 'read',
     allowedRoles: ALL_ROLES,
     fields: [],
     handler: async (args, ctx) => {
+      if (!isExplicitAcademicDemo(ctx)) return executeScopedAcademicTool('ai_full_context', args, ctx);
       try {
-        const { buildFullAIContext, contextToCompactJson } = await import(
-          './aiContextBuilder'
-        );
-        const fullCtx = await buildFullAIContext({
-          uid: ctx.userId ?? 'demo',
-          schoolId: ctx.schoolId ?? null,
-          displayName: undefined,
-          role: ctx.role ?? 'student',
-        });
+        const courses = getDemoCoursesForUid(ctx.userId);
+        const pending = courses.flatMap((course) => getDemoHomeworksByCourse(course.id)
+          .filter((homework) => !homework.submitted)
+          .map((homework) => ({ courseName: course.name, title: homework.title, dueAt: homework.dueAt })));
         return {
           success: true,
           toolName: 'ai_full_context',
-          summary: `${fullCtx.courses.length} 門課 · ${fullCtx.studyPlan.priorityCount} 待辦 · ${fullCtx.atRiskCourses.length} 風險`,
-          data: contextToCompactJson(fullCtx),
+          summary: `示範資料｜${courses.length} 門課 · ${pending.length} 項待繳作業`,
+          data: {
+            source: 'demo',
+            user: { uid: ctx.userId, schoolId: ctx.schoolId },
+            courses: courses.map((course) => ({ id: course.id, name: course.name, instructor: course.instructor })),
+            pendingAssignments: pending,
+          },
           isWrite: false,
           isDraft: false,
         };
@@ -2235,33 +2418,24 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   // ai_data_inventory：列出 APP 內所有 domain 與 AI 整合狀態
   {
     name: 'ai_data_inventory',
-    description: '列出 APP 全部 domain（課程/餐廳/圖書館/...) 與 AI 整合狀態。AI 可知道自己掌握什麼資料。',
+    description: '列出目前帳號與校園已載入的學習資料，以及各領域的資料載入狀態。',
     kind: 'read',
     allowedRoles: ALL_ROLES,
     fields: [],
     handler: async (args, ctx) => {
+      if (!isExplicitAcademicDemo(ctx)) return executeScopedAcademicTool('ai_data_inventory', args, ctx);
       try {
-        const { AI_DATA_INVENTORY, aiDataInventoryStats, buildWideAISnapshot, wideSnapshotToPromptLine } = await import(
-          './aiDataInventory'
-        );
-        const stats = aiDataInventoryStats();
-        const snap = await buildWideAISnapshot({ uid: ctx.userId ?? 'demo', schoolId: ctx.schoolId ?? null });
+        const courses = getDemoCoursesForUid(ctx.userId);
         return {
           success: true,
           toolName: 'ai_data_inventory',
-          summary: wideSnapshotToPromptLine(snap),
+          summary: `示範資料｜已載入 ${courses.length} 門示範課程。`,
           data: {
-            stats,
-            coverage: stats.coverage,
-            byLevel: stats.byLevel,
-            domains: AI_DATA_INVENTORY.map((e) => ({
-              key: e.key,
-              label: e.label,
-              level: e.level,
-              roles: e.roles,
-              aiKnowledge: e.aiKnowledge,
-            })),
-            snapshot: snap.domains,
+            source: 'demo',
+            domains: AI_DATA_INVENTORY.map((entry) => entry.key === 'courses'
+              ? { key: entry.key, label: '示範課程', status: 'loaded', scope: 'demo_persona', fields: ['id', 'name'] }
+              : { key: entry.key, label: entry.label, status: 'not_loaded' }),
+            snapshot: { courses: courses.map((course) => ({ id: course.id, name: course.name })) },
           },
           isWrite: false,
           isDraft: false,
@@ -2410,7 +2584,9 @@ export async function executeToolStandard(
     typeof ctx.userId === 'string' &&
     ctx.userId.startsWith('demo_') &&
     (roleName === 'alumni' || roleName === 'guest');
-  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride) {
+  const demoAcademicRoleOverride = ACADEMIC_SNAPSHOT_TOOLS.has(spec.name) &&
+    roleName === 'guest' && isExplicitAcademicDemo(ctx);
+  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride && !demoAcademicRoleOverride) {
     return makeFailure(
       spec.name,
       'role_denied',

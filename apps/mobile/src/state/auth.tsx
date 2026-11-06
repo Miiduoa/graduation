@@ -37,6 +37,7 @@ import { clearUserScopedStorage } from '../services/scopedStorage';
 import { puCacheClearAll } from '../data/puDataCache';
 import { clearPUCache } from '../services/puDataCache';
 import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+import { revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
 import { clearPUSession } from '../services/studentIdAuth';
 import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 import {
@@ -774,12 +775,15 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       success: boolean;
       hadCleanupErrors: boolean;
     }> => {
+      const currentUserId = hasUsableFirebaseConfig()
+        ? getAuthInstance().currentUser?.uid ?? null
+        : currentUserRef.current?.uid ?? null;
+      const expectedAccountUid = expectedUid ?? currentUserId;
       const assertExpectedAccount = (allowSignedOut = false) => {
-        if (!expectedUid) return;
         const currentUid = hasUsableFirebaseConfig()
-          ? getAuthInstance().currentUser?.uid
-          : currentUserRef.current?.uid;
-        if (currentUid !== expectedUid && !(allowSignedOut && !currentUid)) {
+          ? getAuthInstance().currentUser?.uid ?? null
+          : currentUserRef.current?.uid ?? null;
+        if (currentUid !== expectedAccountUid && !(allowSignedOut && currentUid === null)) {
           throw new Error('The account changed before sign out completed');
         }
       };
@@ -791,9 +795,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       }
 
       isSigningOutRef.current = true;
-      const currentUserId = hasUsableFirebaseConfig()
-        ? getAuthInstance().currentUser?.uid
-        : user?.uid;
+      revokeVerifiedSchoolAiScope();
 
       // 先清理本地資料，再登出
       // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
@@ -809,18 +811,18 @@ export function AuthProvider(props: { children: React.ReactNode }) {
           console.warn('[auth] Campus Agent local reminder cleanup failed:', e);
           throw e;
         }),
-        clearAllCache().catch((e) => {
+        clearAllCache(() => assertExpectedAccount()).catch((e) => {
           console.warn('[auth] clearAllCache failed:', e);
           throw e;
         }),
-        clearAllOfflineData().catch((e) => {
+        clearAllOfflineData(() => assertExpectedAccount()).catch((e) => {
           console.warn('[auth] clearAllOfflineData failed:', e);
           throw e;
         }),
-        clearUserScopedStorage({
-          uid: currentUserId ?? null,
-          schoolId: profile?.schoolId ?? null,
-        }).catch((e) => {
+        clearUserScopedStorage(
+          { uid: currentUserId, schoolId: profile?.schoolId ?? null },
+          () => assertExpectedAccount(),
+        ).catch((e) => {
           console.warn('[auth] Scoped storage cleanup failed:', e);
           throw e;
         }),
@@ -914,7 +916,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         }
       }
     },
-    [profile?.schoolId, user?.uid],
+    [profile?.schoolId],
   );
 
   const handleSignOutWithWarning = useCallback(async (): Promise<boolean> => {
