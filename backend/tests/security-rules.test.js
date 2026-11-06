@@ -1787,7 +1787,7 @@ describe('storage security rules', () => {
     }
   });
 
-  test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
+  test('closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ displayName: 'Alice' });
       await db.doc('conversations/private').set({ memberIds: ['alice', 'bob'] });
@@ -1803,7 +1803,10 @@ describe('storage security rules', () => {
       await assertSucceeds(uploadString(storage.ref(file), 'fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
     }
     await assertFails(uploadString(storage.ref('health/alice/one/program.exe'), 'fixture', 'application/x-msdownload'));
-    for (const state of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+    for (const state of [
+      { accountDeletionInProgress: true },
+      ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+    ]) {
       await seedFirestore(async (db) => db.doc('users/alice').set(state));
       for (const file of privatePaths) {
         await assertFails(storage.ref(file).getMetadata());
@@ -1814,6 +1817,28 @@ describe('storage security rules', () => {
       await assertFails(uploadString(storage.ref('bugreports/one/photo.jpg'), 'image', 'image/jpeg'));
     }
     await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
+  });
+
+  test('school campus media rejects stale school membership after account suspension', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'member' });
+    });
+    const storage = testEnv.authenticatedContext('alice').storage();
+    const photo = storage.ref('schools/pu/campusPosts/one/photo.jpg');
+    await assertSucceeds(uploadString(photo, 'original image', 'image/jpeg'));
+    await assertSucceeds(photo.getMetadata());
+
+    for (const status of ['disabled', 'suspended', 'inactive', 'deleted']) {
+      await seedFirestore(async (db) => db.doc('users/alice').set({ status }));
+      await assertFails(photo.getMetadata());
+      await assertFails(uploadString(
+        storage.ref(`schools/pu/campusPosts/${status}/photo.jpg`),
+        'blocked image', 'image/jpeg',
+      ));
+    }
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+    await assertSucceeds(photo.getMetadata());
   });
 
   for (const objectPath of [
