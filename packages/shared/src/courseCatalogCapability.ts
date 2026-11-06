@@ -8,7 +8,7 @@ import { resolveSchoolPublicServices } from './schoolPublicServices';
  * Public course links are verified separately;
  * those links are not evidence of private academic / in-app catalog capability.
  */
-export type CourseCatalogProviderId = 'pu-mypu' | 'ncnu-public';
+export type CourseCatalogProviderId = 'pu-mypu' | 'ncnu-public' | 'nthu-public';
 
 export type CourseCatalogCapability = {
   providerId: CourseCatalogProviderId;
@@ -36,6 +36,12 @@ const INTEGRATED_CATALOG_BY_PUBLIC_ID = Object.assign(
       schoolId: 'ncnu',
       label: '暨南大學本學期開設課程',
       officialQueryUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall',
+    },
+    nthu: {
+      providerId: 'nthu-public' as const,
+      schoolId: 'nthu',
+      label: '清華大學課程查詢系統',
+      officialQueryUrl: 'https://curricul.site.nthu.edu.tw/p/406-1208-290365,r7880.php?Lang=zh-tw',
     },
   },
 );
@@ -107,6 +113,7 @@ export function unsupportedCourseCatalogMessage(
   schoolName?: string | null,
 ): string {
   if (schoolId === 'ncnu') return '請開啟「暨大開課查詢」搜尋本學期公開課程。';
+  if (schoolId === 'nthu') return '請開啟「清大開課查詢」搜尋本學期公開課程。';
   const resolvedName =
     (typeof schoolName === 'string' && schoolName.trim()) ||
     findSchoolById(toPublicSchoolId(schoolId) ?? undefined)?.name ||

@@ -1,0 +1,177 @@
+import React from 'react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
+import { queryCatalog } from '../services/courseCatalogClient';
+
+let mockSchoolId = 'ncnu';
+const setBrowsingSchoolId = (value: string) => { mockSchoolId = value; };
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchoolId, name: mockSchoolId } }) }));
+jest.mock('../state/auth', () => ({ useAuth: () => ({ user: null, profile: null }) }));
+jest.mock('../state/schedule', () => ({ useSchedule: () => ({ courses: [] }) }));
+jest.mock('../services/courseCatalogClient', () => ({ queryCatalog: jest.fn() }));
+jest.mock('../services/analytics', () => ({ analytics: {} }));
+jest.mock('../services/tronClassWebUiGate', () => ({}));
+jest.mock('../services/tronClassDataEnabled', () => ({}));
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('../ui/navigationTheme', () => ({
+  useTabBarContentBottomPadding: () => 0, TAB_BAR_CONTENT_BOTTOM_PADDING: 0,
+}));
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.mocked(Clipboard.setStringAsync).mockResolvedValue(true);
+  jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+});
+afterEach(() => { jest.restoreAllMocks(); });
+
+function ncnuJson(courses: unknown[], schoolId = 'ncnu') {
+  return { ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+    schoolId, sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall',
+    truncated: false, courses,
+  }) };
+}
+const ncnuDatabaseCourse = {
+  code: '130032', section: '0', title: '資料庫管理系統', department: '資管系', teacher: '', time: '4efg',
+  room: '管268', semester: '1151', credits: '3.0',
+};
+const nthuCourse = {
+  code: '11510AES 520300', section: '00', title: '分析化學專題', department: 'AES', teacher: '王老師',
+  time: 'M3M4\nR5R6', room: '教室甲\n教室乙', semester: '1151', credits: '3',
+  meetings: [{ time: 'M3M4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' }],
+};
+function nthuJson(courses: unknown[] = [nthuCourse]) {
+  return { ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+    schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    truncated: false, courses,
+  }) };
+}
+test('NTHU preserves classroom pairs and provides reviewed CSV import without writing private records', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const fetchSource = jest.fn().mockResolvedValue(nthuJson());
+  const navigation = { navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalImport'] }) };
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen navigation={navigation} />);
+    fireEvent.changeText(view.getByLabelText('搜尋清大課程'), 'AES');
+    fireEvent.press(view.getByText('查詢課程'));
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
+    expect(view.getByText('星期一 3、4 節 · 10:10–12:00 · 教室甲')).toBeTruthy();
+    expect(view.getByText('星期四 5、6 節 · 13:20–15:10 · 教室乙')).toBeTruthy();
+    expect(fetchSource).toHaveBeenCalledWith('https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES', expect.objectContaining({ credentials: 'omit' }));
+    fireEvent.press(view.getByText('複製課表匯入資料'));
+    expect(await view.findByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeTruthy();
+    const csv = jest.mocked(Clipboard.setStringAsync).mock.calls[0][0];
+    expect(csv).toContain('11510AES 520300');
+    expect(csv).toContain('教室甲');
+    expect(csv).toContain('教室乙');
+    expect(csv).toContain('13:20');
+    fireEvent.press(view.getByText('前往課表匯入'));
+    expect(navigation.navigate).toHaveBeenCalledWith('PersonalImport', undefined);
+    expect(queryCatalog).not.toHaveBeenCalled();
+  } finally { globalThis.fetch = original; }
+});
+
+test('NTHU clipboard rejection retains selectable import data and unscheduled courses stay readable', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  jest.mocked(Clipboard.setStringAsync).mockRejectedValueOnce(new Error('unavailable'));
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson([nthuCourse, {
+      ...nthuCourse, code: '11510AES 520301', section: '01', title: '待公告時間課程',
+      time: '', room: '', meetings: [],
+    }]));
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    await view.findByText('分析化學專題');
+    expect(view.getByText('待公告時間課程')).toBeTruthy();
+    expect(view.getByText('上課時間未提供')).toBeTruthy();
+    expect(view.getAllByText('複製課表匯入資料')).toHaveLength(1);
+    fireEvent.press(view.getByText('複製課表匯入資料'));
+    expect((await view.findByLabelText('可複製的課表資料')).props.value).toContain('11510AES 520300');
+  } finally { globalThis.fetch = original; }
+});
+
+test('switching between public campuses aborts the old request and ignores its late reply', async () => {
+  setBrowsingSchoolId('ncnu');
+  const original = globalThis.fetch;
+  let finish!: (data: ReturnType<typeof ncnuJson>) => void;
+  const fetchSource = jest.fn().mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValueOnce(nthuJson());
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: '資料庫' } } }} />);
+    await waitFor(() => expect(fetchSource).toHaveBeenCalledTimes(1));
+    setBrowsingSchoolId('nthu');
+    view.rerender(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
+    expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+    await act(async () => { finish(ncnuJson([ncnuDatabaseCourse])); });
+    expect(view.queryByText('資料庫管理系統')).toBeNull();
+  } finally { globalThis.fetch = original; }
+});
+
+test('a pending catalog response times out and allows retry with the same keyword', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  jest.useFakeTimers();
+  const fetchSource = jest.fn().mockReturnValueOnce(new Promise(() => {})).mockResolvedValueOnce(nthuJson());
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen />);
+    fireEvent.changeText(view.getByLabelText('搜尋清大課程'), 'AES');
+    fireEvent.press(view.getByText('查詢課程'));
+    await act(async () => { jest.advanceTimersByTime(25_000); });
+    expect(view.getByText('暫時無法讀取清大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+    expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+    await act(async () => { fireEvent.press(view.getByText('重新查詢')); });
+    expect(view.getByText('分析化學專題')).toBeTruthy();
+    view.unmount();
+  } finally { globalThis.fetch = original; jest.useRealTimers(); }
+});
+
+test('NCNU guest catalog opens directly and supports code search, empty results and the official guest link', async () => {
+  setBrowsingSchoolId('ncnu');
+  const original = globalThis.fetch;
+  const fetchSource = jest.fn().mockResolvedValueOnce(ncnuJson([ncnuDatabaseCourse])).mockResolvedValueOnce(ncnuJson([]));
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen />);
+    const input = await view.findByLabelText('搜尋暨大課程');
+    fireEvent.changeText(input, '130032');
+    fireEvent.press(view.getByText('查詢課程'));
+    expect(await view.findByText('資料庫管理系統')).toBeTruthy();
+    expect(view.getByText('星期四 e、f、g 節 · 13:30–16:20 · 管268')).toBeTruthy();
+    expect(fetchSource).toHaveBeenCalledWith('https://nuni.tw/api/public-course-catalog?schoolId=ncnu&q=130032', expect.objectContaining({ credentials: 'omit' }));
+    fireEvent.changeText(input, '其他');
+    fireEvent.press(view.getByText('查詢課程'));
+    expect(await view.findByText('找不到「其他」的開課資料。')).toBeTruthy();
+    fireEvent.press(view.getByText('開啟暨大官方課程目錄'));
+    expect(Linking.openURL).toHaveBeenCalledWith('https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall');
+    expect(queryCatalog).not.toHaveBeenCalled();
+  } finally { globalThis.fetch = original; }
+});
+
+test('NCNU late response is cancelled on school switch and a different-campus payload fails closed', async () => {
+  setBrowsingSchoolId('ncnu');
+  const original = globalThis.fetch;
+  let finish!: (data: ReturnType<typeof ncnuJson>) => void;
+  const fetchSource = jest.fn().mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValueOnce(ncnuJson([ncnuDatabaseCourse], 'pu'));
+  try {
+    globalThis.fetch = fetchSource;
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: '資料庫' } } }} />);
+    await waitFor(() => expect(fetchSource).toHaveBeenCalledTimes(1));
+    setBrowsingSchoolId('ncku');
+    view.rerender(<CourseCatalogScreen />);
+    await waitFor(() => expect(view.queryByLabelText('搜尋暨大課程')).toBeNull());
+    expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+    await act(async () => { finish(ncnuJson([ncnuDatabaseCourse])); });
+    expect(view.queryByText('資料庫管理系統')).toBeNull();
+    setBrowsingSchoolId('ncnu');
+    view.rerender(<CourseCatalogScreen route={{ params: { filter: { keyword: '資料庫' } } }} />);
+    expect(await view.findByText('暫時無法讀取暨大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+    expect(view.queryByText('資料庫管理系統')).toBeNull();
+  } finally { globalThis.fetch = original; }
+});

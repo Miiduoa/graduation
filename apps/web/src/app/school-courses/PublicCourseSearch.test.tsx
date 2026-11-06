@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PublicCourseSearch } from './PublicCourseSearch';
-import type { PublicCatalogCourse } from '@campus/shared/src/publicCourseCatalog';
+import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 
@@ -31,6 +31,13 @@ const course: PublicCatalogCourse = {
   department: '諮人系', room: 'A307系會議室', time: '5bcd', credits: '3.0',
 };
 const props = { schoolId: 'ncnu' as const, schoolName: '國立暨南國際大學', schoolSearch: '?campus=ncnu' };
+const nthuCourse: PublicCatalogCourse = {
+  semester: '1151', code: '11510AES 520300', section: '00', title: '環境化學',
+  department: 'AES', teacher: '董瑞安\tDOONG, RUEY-AN', credits: '3',
+  time: 'M3M4\nF3F4', room: 'BMES醫環618\nBMES醫環501',
+  meetings: [{ time: 'M3M4', room: 'BMES醫環618' }, { time: 'F3F4', room: 'BMES醫環501' }],
+};
+const nthuProps = { schoolId: 'nthu' as const, schoolName: '國立清華大學', schoolSearch: '?campus=nthu' };
 function response(courses: PublicCatalogCourse[], extra = {}) {
   return Response.json({ schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/', truncated: false, courses, ...extra });
 }
@@ -156,10 +163,11 @@ it('round-trips exact weekdays, school period letters, section and term through 
 });
 
 
-async function chooseCourse() {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([{ ...course, time: '3cd4i' }])));
-  const view = render(<PublicCourseSearch {...props} />);
-  submit('005076');
+async function chooseCourse(schoolId: PublicCourseCatalogResponse['schoolId'] = 'ncnu') {
+  const selected = schoolId === 'nthu' ? nthuCourse : { ...course, time: '3cd4i' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([selected], { schoolId })));
+  const view = render(<PublicCourseSearch {...(schoolId === 'nthu' ? nthuProps : props)} />);
+  submit(selected.code);
   fireEvent.click(await screen.findByRole('button', { name: '帶入課表核對' }));
   return view;
 }
@@ -175,7 +183,10 @@ it('prepares both meetings for the current owner and opens the review section wi
   expect(readPersonalImports(importContext.scope)).toEqual([]);
 });
 
-it.each(['full', 'partial', 'corrupt', 'wrong-school', 'unconfirmed', 'storage-error'])('preserves existing work and offers manual copy when %s', async (reason) => {
+it.each((['ncnu', 'nthu'] as const).flatMap((schoolId) =>
+  ['full', 'partial', 'corrupt', 'wrong-school', 'unconfirmed', 'storage-error'].map((reason) => ({ schoolId, reason })),
+))('preserves existing $schoolId work and offers manual copy when $reason', async ({ schoolId, reason }) => {
+  importContext.scope.schoolId = schoolId;
   const scope = importContext.scope;
   const existing: PersonalImportDraft = { kind: 'grades', year: '115', semester: '1', text: '自己的成績草稿', source: { type: 'paste' }, rows: [], excluded: [], parseIssues: [], backup: null };
   if (reason === 'full') writePersonalImportDraft(scope, existing);
@@ -187,7 +198,7 @@ it.each(['full', 'partial', 'corrupt', 'wrong-school', 'unconfirmed', 'storage-e
   const partial = sessionStorage.getItem(personalImportPartialDraftKey(scope));
   const failed = reason === 'storage-error' ? vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); }) : null;
   try {
-    await chooseCourse();
+    await chooseCourse(schoolId);
     expect(push).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(personalImportDraftKey(scope))).toBe(full);
     expect(sessionStorage.getItem(personalImportPartialDraftKey(scope))).toBe(partial);
@@ -196,8 +207,10 @@ it.each(['full', 'partial', 'corrupt', 'wrong-school', 'unconfirmed', 'storage-e
   } finally { failed?.mockRestore(); }
 });
 
-it('restores the prepared draft in the actual import review workspace', async () => {
-  const view = await chooseCourse();
+it.each(['ncnu', 'nthu'] as const)('restores the prepared %s draft in the actual import review workspace', async (schoolId) => {
+  importContext.scope.schoolId = schoolId;
+  const selected = schoolId === 'nthu' ? nthuCourse : course;
+  const view = await chooseCourse(schoolId);
   const href = push.mock.calls[0][0];
   view.unmount();
   window.history.replaceState(null, '', href);
@@ -205,8 +218,70 @@ it('restores the prepared draft in the actual import review workspace', async ()
     const { PersonalImportCenter } = await import('@/components/imports/PersonalImportCenter');
     render(<PersonalImportCenter />);
     const review = await screen.findByRole('region', { name: '核對匯入資料' });
-    expect(within(review).getAllByDisplayValue(course.title.normalize('NFKC'))).toHaveLength(2);
-    expect(within(review).getAllByDisplayValue(course.code)).toHaveLength(2);
+    expect(within(review).getAllByDisplayValue(selected.title.normalize('NFKC'))).toHaveLength(2);
+    expect(within(review).getAllByDisplayValue(selected.code)).toHaveLength(2);
+    if (schoolId === 'nthu') {
+      expect(within(review).getByDisplayValue('BMES醫環618')).toBeTruthy();
+      expect(within(review).getByDisplayValue('BMES醫環501')).toBeTruthy();
+      expect(within(review).getAllByDisplayValue('10:10')).toHaveLength(2);
+      expect(within(review).getAllByDisplayValue('12:00')).toHaveLength(2);
+    }
     expect(readPersonalImports(importContext.scope)).toEqual([]);
   } finally { window.history.replaceState(null, '', '/'); }
+});
+
+it('keeps each NTHU meeting paired with its room and prepares the draft for the current owner', async () => {
+  importContext.scope = { owner: 'platform:alice', schoolId: 'nthu' };
+  const fetcher = vi.fn().mockResolvedValue(response([nthuCourse], { schoolId: 'nthu' }));
+  vi.stubGlobal('fetch', fetcher);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const view = render(<PublicCourseSearch {...nthuProps} />);
+  submit('環境化學');
+  expect(await screen.findByRole('heading', { name: '環境化學' })).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=nthu&q=' + encodeURIComponent('環境化學'), expect.objectContaining({ credentials: 'omit' }));
+  expect(screen.getByText('星期一 3、4 節 · 10:10–12:00 · BMES醫環618')).toBeTruthy();
+  expect(screen.getByText('星期五 3、4 節 · 10:10–12:00 · BMES醫環501')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '複製課表匯入資料' }));
+  expect((await screen.findByRole('link', { name: '前往課表匯入' })).getAttribute('href')).toBe('/import?kind=timetable&campus=nthu');
+  const copied = parsePersonalImport(writeText.mock.calls[0][0], { kind: 'timetable', schoolId: 'nthu', academicYear: '', semester: '' });
+  expect(copied.issues.filter(issue => issue.severity === 'error')).toEqual([]);
+  expect(copied.rows.map(row => [row.dayOfWeek, row.location, row.startTime, row.endTime])).toEqual([
+    [1, 'BMES醫環618', '10:10', '12:00'], [5, 'BMES醫環501', '10:10', '12:00'],
+  ]);
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  importContext.scope = { owner: 'platform:bob', schoolId: 'nthu' };
+  view.rerender(<PublicCourseSearch {...nthuProps} />);
+  fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+  expect(push).toHaveBeenCalledWith('/import?kind=timetable&campus=nthu#import-review');
+  const draft = readPersonalImportDraft(importContext.scope);
+  expect(draft?.source.name).toBe('國立清華大學本學期開設課程');
+  expect(draft?.rows.map(row => [row.courseCode, row.className, row.dayOfWeek, row.location])).toEqual([
+    ['11510AES 520300', '00', 1, 'BMES醫環618'], ['11510AES 520300', '00', 5, 'BMES醫環501'],
+  ]);
+  expect(readPersonalImportDraft({ owner: 'platform:alice', schoolId: 'nthu' })).toBeNull();
+  expect(readPersonalImportDraft({ owner: 'platform:bob', schoolId: 'ncnu' })).toBeNull();
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
+});
+
+it('keeps unpublished NTHU meeting times visible without importing only the known portion', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([{
+    ...nthuCourse, meetings: [{ time: 'M3M4', room: 'BMES醫環618' }, { time: '', room: 'BMES醫環501' }],
+  }], { schoolId: 'nthu' })));
+  render(<PublicCourseSearch {...nthuProps} />);
+  submit('環境化學');
+  expect(await screen.findByText('M3M4 · BMES醫環618')).toBeTruthy();
+  expect(screen.getByText('時間未提供 · BMES醫環501')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '複製課表匯入資料' })).toBeNull();
+});
+
+it.each(['ncnu', 'nthu'] as const)('rejects a valid reply from the other public school while browsing %s', async (schoolId) => {
+  const otherSchool = schoolId === 'nthu' ? 'ncnu' : 'nthu';
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([otherSchool === 'nthu' ? nthuCourse : course], { schoolId: otherSchool })));
+  render(<PublicCourseSearch {...(schoolId === 'nthu' ? nthuProps : props)} />);
+  submit('');
+  const alert = await screen.findByRole('alert');
+  expect(within(alert).getByRole('link', { name: '校方課程目錄' }).getAttribute('href')).toContain(`.${schoolId}.edu.tw/`);
+  expect(screen.queryByRole('listitem')).toBeNull();
 });

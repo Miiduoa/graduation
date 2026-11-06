@@ -56,7 +56,9 @@ describe('NCNU public guest catalog', () => {
     const fetchSource = vi.fn();
     vi.stubGlobal('fetch', fetchSource);
     const { GET } = await import('./route');
-    for (const params of ['q=x', 'schoolId=pu', 'schoolId=all', 'schoolId=ncnu&schoolId=pu', 'schoolId=ncnu&q=x&q=y', 'schoolId=ncnu&q=' + 'a'.repeat(81)]) {
+    for (const params of ['q=x', 'schoolId=pu', 'schoolId=all', 'schoolId=constructor', 'schoolId=ncnu&schoolId=pu',
+      'schoolId=nthu&schoolId=ncnu', 'schoolId=nthu&q=x&q=y', 'schoolId=nthu&q=' + 'a'.repeat(81),
+      'schoolId=ncnu&q=x&q=y', 'schoolId=ncnu&q=' + 'a'.repeat(81)]) {
       expect((await GET(request(params))).status).toBe(400);
     }
     expect(fetchSource).not.toHaveBeenCalled();
@@ -96,5 +98,49 @@ describe('NCNU public guest catalog', () => {
       expect(await response.json()).not.toHaveProperty('courses');
     }
     expect(fetchSource).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('school-scoped public course catalog dispatch', () => {
+  beforeEach(() => { vi.resetModules(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it('keeps NCNU and NTHU results and caches separate, with no caller credentials in upstream requests', async () => {
+    const nthu = [{
+      科號: '11510AES 520300', 課程中文名稱: '環境化學', 課程英文名稱: 'Environment Chemistry', 學分數: '3',
+      授課教師: '董瑞安\tDOONG, RUEY-AN\n', 教室與上課時間: 'BMES醫環618\tM3M4\nBMES醫環501\tF3F4\n', 停開註記: '',
+    }];
+    const fetchSource = vi.fn().mockImplementation((url: string) => url.endsWith('.json')
+      ? new Response(JSON.stringify(nthu), { headers: { 'Content-Type': 'text/plain' } }) : csv());
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET } = await import('./route');
+    for (const schoolId of ['nthu', 'ncnu', 'nthu']) {
+      const result = await GET(request('schoolId=' + schoolId));
+      expect(result.status).toBe(200);
+      expect(result.headers.get('Cache-Control')).toBe('no-store');
+      const body = await result.json();
+      expect(body.schoolId).toBe(schoolId);
+      expect(body.courses[0].title).toBe(schoolId === 'nthu' ? '環境化學' : '普通心理學');
+    }
+    expect(fetchSource).toHaveBeenCalledTimes(2);
+    for (const [, options] of fetchSource.mock.calls) {
+      expect(options).toMatchObject({ credentials: 'omit', redirect: 'error' });
+      expect(Object.keys(options.headers)).toEqual(['Accept']);
+    }
+  });
+
+  it('reports the correct school when one source fails while the other remains available', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('.json')) throw new Error('offline');
+      return csv();
+    }));
+    const { GET } = await import('./route');
+    const nthu = await GET(request('schoolId=nthu&q=資料庫'));
+    expect(nthu.status).toBe(502);
+    expect(nthu.headers.get('Cache-Control')).toBe('no-store');
+    expect(await nthu.json()).toEqual({ error: '暫時無法讀取清華大學課程資料，請稍後再試。' });
+    const ncnu = await GET(request('schoolId=ncnu&q=000001'));
+    expect(ncnu.status).toBe(200);
+    expect((await ncnu.json()).schoolId).toBe('ncnu');
   });
 });
