@@ -145,3 +145,13 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 本次將 membership 判斷簡化為單次 `firestore.get(...).data.status == 'active'`。文件不存在時評估拒絕，不再另做 `exists()`；`isActiveAccount()` 對已存在帳號的 `deleted/disabled/suspended/inactive` 拒絕保持不變。原有合法建立、不可覆寫、停權與撤權回歸均保留，沒有為了讓 CI 變綠而停用案例。這是有待在新精確 head 的 emulator CI 實測的修補，**不能在執行前宣稱通過**。
 
 **重要剩餘風險：** `isActiveAccount()` 仍為兼容 legacy 無 canonical user 文件的身分而允許缺少 `users/{uid}` 文件的 token。若刪除／停權程序只移除 user 文件卻留下 active school membership，可能延遲撤權；需在實際 deletion workflow 驗證清除學校 membership，或以可信的單一權限來源改造這一資料模型。在完成驗證前不得宣稱所有已刪帳號的舊 token 都已撤銷。此輪未修改正式資料或執行正式發布。
+
+### 21:14 UTC 再驗與正式收斂
+
+第一次最小化相同 membership 的 `exists + get` 為單次 `get`，但精確 head `8503c10b` 的 [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42294746416) **仍在相同合法建立案例失敗**（250/251），因此先前「僅因重複查詢上限」的原因假設未被驗證，不視為已解決。這一輪繼續追查缺失的前置條件，而不是跳過測試。
+
+對照兩組 storage 回歸發現，正常建立成功的 `schools/pu/campusPosts` 案例有 `users/alice` canonical 文件；共用覆寫案例只有 `schools/pu/members/alice`。為避免帳號已刪除、canonical 文件遺失而校籍 membership 孤留時繼續持舊 token 存取校園附件，這個 namespace 現在**明確要求 canonical user 文件存在**，並保留 `isActiveAccount()` 的停權狀態拒絕以及 `members/{uid}.status == active` 的跨校授權。此策略僅修改校園貼文附件，不擴大至未驗證的其他命名空間。
+
+更新既有「上傳不可被其他人覆寫」測試，使 Alice/Bob 都有真實 `status: active` 的 canonical 文件，維持首筆合法上傳成功、第二人覆寫與刪除失敗；新增無 canonical user 文件而學校 membership 留存時**必須拒絕新上傳**的負向案例。此方式不削弱授權來讓測試通過，但會讓歷史上只有學校 membership、未完成 user profile 建立的帳號暫時無法上傳／讀取該類私有校園附件。發布前須盤點、補齊真實 legacy 帳號的 canonical profile，不能盲目在正式環境打開規則。不同套件仍在各自隔離 emulator 中驗證。
+
+此修正推送後才可由精確 head 的 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 判斷結果；截至本段記錄時**尚未取得新版本完整 CI 成功結果**，沒有合併、正式資料修改或部署。
