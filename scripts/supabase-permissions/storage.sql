@@ -10,6 +10,7 @@
 \set assignment_a 'd9000000-0000-4000-8000-000000000001'
 \set assignment_b 'd9000000-0000-4000-8000-000000000002'
 \set assignment_next 'd9000000-0000-4000-8000-000000000003'
+\set first_object 'e9000000-0000-4000-8000-000000000001'
 \set first_path :course_a '/' :assignment_a '/' :student '/first.pdf'
 \set next_path :course_a '/' :assignment_a '/' :student '/second.pdf'
 \set peer_path :course_a '/' :assignment_a '/' :peer '/peer.pdf'
@@ -82,8 +83,8 @@ select pg_temp.expect_denied(format(
   'insert into storage.objects(bucket_id,name,owner) values (%L,%L,%L)',
   'submissions', :'first_path', :'student'), 'signed upload tokens cannot be issued for new paths');
 select pg_temp.expect_denied(format(
-  'insert into storage.objects(bucket_id,name,owner) values (%L,%L,%L) on conflict(bucket_id,name) do update set owner=excluded.owner',
-  'submissions', :'first_path', :'student'), 'signed upsert tokens cannot be issued before the file exists');
+  'insert into storage.objects(id,bucket_id,name,owner) values (%L,%L,%L,%L) on conflict(id) do update set owner=excluded.owner',
+  :'first_object', 'submissions', :'first_path', :'student'), 'signed upsert tokens cannot be issued before the file exists');
 select set_config('storage.operation', '', true);
 select pg_temp.expect_denied(format(
   'insert into storage.objects(bucket_id,name,owner) values (%L,%L,%L)',
@@ -94,12 +95,12 @@ select pg_temp.expect_denied(format(
   'submissions', :'first_path', :'student'), 'uploads with unknown operation context are denied');
 select set_config('storage.operation', 'storage.object.upload', true);
 select pg_temp.expect_count(format(
-  'with inserted as (insert into storage.objects(bucket_id,name,owner) values (%L,%L,%L) returning 1) select count(*) from inserted',
-  'submissions', :'first_path', :'student'), 1, 'active student uploads a new own attachment');
+  'with inserted as (insert into storage.objects(id,bucket_id,name,owner) values (%L,%L,%L,%L) returning 1) select count(*) from inserted',
+  :'first_object', 'submissions', :'first_path', :'student'), 1, 'active student uploads a new own attachment');
 select pg_temp.expect_count(format(
   'with inserted as (insert into storage.objects(bucket_id,name,owner) values (%L,%L,%L) returning 1) select count(*) from inserted',
   'submissions', :'next_path', :'student'), 1, 'new filenames support later versions');
-select pg_temp.expect_count(format('select count(*) from storage.objects where name=%L', :'first_path'), 1, 'owner reads own attachment');
+select pg_temp.expect_count(format('select count(*) from storage.objects where id=%L and name=%L', :'first_object', :'first_path'), 1, 'owner reads own attachment');
 select pg_temp.expect_count(format('select count(*) from storage.objects where name=%L', :'peer_path'), 0, 'owner cannot read peer attachment');
 select pg_temp.expect_count(format('select count(*) from storage.objects where name=%L', :'mismatched_path'), 0, 'historical mismatched path is hidden from owner');
 
@@ -149,9 +150,12 @@ select pg_temp.expect_count(format(
 select pg_temp.expect_count(format(
   'with removed as (delete from storage.objects where name=%L returning 1) select count(*) from removed',
   :'first_path'), 0, 'owner cannot remove an uploaded object');
+-- The shared id primary key reliably exercises the UPDATE arm. Storage releases
+-- may use a partial/versioned name index instead of a (bucket_id,name) arbiter.
+select set_config('storage.operation', 'storage.object.upload', true);
 select pg_temp.expect_denied(format(
-  'insert into storage.objects(bucket_id,name,owner) values (%L,%L,%L) on conflict(bucket_id,name) do update set owner=excluded.owner',
-  'submissions', :'first_path', :'student'), 'upsert cannot replace an uploaded object');
+  'insert into storage.objects(id,bucket_id,name,owner) values (%L,%L,%L,%L) on conflict(id) do update set owner=excluded.owner',
+  :'first_object', 'submissions', :'first_path', :'student'), 'upsert cannot replace an uploaded object');
 
 -- PostgREST has no Storage operation. Only trigger-internal checks can read here.
 select set_config('storage.operation', '', true);

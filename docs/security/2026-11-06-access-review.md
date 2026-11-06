@@ -87,3 +87,17 @@ Supabase 一次性 stack 追加 10 個真實 Storage HTTP 子情境，包含 byt
 本機 security advisors 發現四個未固定 search_path 的內部函式。新增 `20261106131129_pin_internal_function_search_paths.sql`，只為 `_quiz_normalize_answer(text,jsonb)`、`_quiz_answer_correct(text,jsonb,jsonb)`、`quiz_attempts_before_insert_guard()` 及 `set_updated_at()` 固定 `pg_catalog, public, pg_temp`。identity arguments、SECURITY INVOKER 與原本 volatility 均核對，四個新 catalog 斷言在原版先失敗，修補後隨四輪完整資料庫測試通過。
 
 Advisors 從 1 ERROR、6 WARN 降為 1 ERROR、2 WARN。剩餘 ERROR 是既有的 SECURITY DEFINER 公開課程目錄，專案已明確固定公開欄位及公開／未封存條件，匿名 API 測試驗證 enrollment_code、owner_id 無法外露。兩個 WARN 是原生 PostgreSQL 測試環境的 pgcrypto、pg_trgm 位於 public，實際 Supabase 預裝 extension 的位置須依 CI stack 核對。
+
+### Hono 相依修補與稽核限制
+
+現有 MCP SDK 1.32.2 支援 Hono Node adapter 的 1.x 及 2.x，但專案 override 固定在受公告影響的 1.19.17。本輪將這個限定相依更新至修補版 2.1.3，Node >=20 的要求符合專案範圍。鎖檔只有六行替換，官方 tarball SHA-512 與 registry integrity 核對相符，workspace importers 均相同。一般解析工作區進度過慢後，使用已核對的官方 package metadata 產生這個節點的最小變更，再由 pnpm 10.28.2 的 frozen/offline lockfile 檢查確認。[Hono 官方安全公告](https://github.com/advisories/GHSA-rmxm-3fg6-px4f)
+
+既有 dependency compatibility 檔案擴充後 5/5 通過，涵蓋真實 MCP JSON／SSE HTTP、session、notification 202、auth context、關閉流程與 ESM export。本機使用 Node 22.15.0 及隔離下載的 Hono 2.1.3，CI 使用乾淨安裝與固定 Node 22.23.4。
+
+最近一次成功取得的工作區 audit 有 0 high／critical、9 個 moderate 受影響版本及 1 個 low，對應 5 個 moderate 公告。本輪修補後的完整直接重掃遭自動核准審查拒絕，理由為送出依賴名稱與版本清單到 npm registry 需要更明確的授權。Hono 修補已依官方公告與本機鎖檔確認，完整重新 audit 尚未取得，沒有將推算的減少數字列為新掃描結果。
+
+其餘依賴的唯讀追蹤顯示，現有 uuid 呼叫主要為 v4，該公告描述的是自訂 buffer 的 v3／v5／v6 邊界。OpenTelemetry Core 的已查得路徑是 Firebase CLI／PubSub 的 trace-context。glob、minimatch 主要位於 CLI、Expo 與 Jest 工具鏈，但有界測試確認 minimatch 在 optimizationLevel 2 會放大特定 pattern，仍保留後續修補需求。deepmerge 的 low 告警位於手機 Jest 設定相依。這些結論代表已檢查的呼叫路徑，套件告警仍維持可見。
+
+### Supabase CI 結構差異回歸
+
+提交 a4d4351d 的真實 Supabase CI 發現 SQL 測試使用的 ON CONFLICT(bucket_id,name) 在目前 Storage schema 沒有對應 arbiter。上游 migration 已移除此索引，原生測試 bootstrap 的額外 unique 掩蓋了差異。本輪移除測試專用的多餘 unique，先重現相同的 42P10，再讓兩個 upsert 案例使用兩邊都存在的 PRIMARY KEY(id)。預簽案例維持 sign_upload_url context，真正覆寫案例明確使用正常 upload context，拒絕判定仍要求 42501。四輪 53 SQL、53 HTTP 再次通過，真正 Storage API 的 upsert 案例持續由 CI 執行。

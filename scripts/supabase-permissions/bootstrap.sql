@@ -76,7 +76,6 @@ create table storage.objects (
   bucket_id text references storage.buckets(id),
   name text,
   owner uuid,
-  unique (bucket_id, name),
   created_at timestamptz not null default now()
 );
 alter table storage.objects enable row level security;
