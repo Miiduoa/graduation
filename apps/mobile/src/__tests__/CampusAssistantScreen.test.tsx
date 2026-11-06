@@ -1221,7 +1221,7 @@ test('the nuni course action opens a specific assignment and keeps a typed draft
   fireEvent.changeText(input, '保留我的草稿');
   await act(async () => fireEvent.press(screen.getByRole('button', { name: '查這堂課的作業' })));
   expect(input.props.value).toBe('保留我的草稿');
-  fireEvent.press(screen.getByRole('button', { name: /查看作業：小考報告，已停止收件 · 未繳交/ }));
+  fireEvent.press(screen.getByRole('button', { name: /查看作業：小考報告，已停止收件 · 未見繳交紀錄/ }));
   expect(navigate).toHaveBeenCalledWith('NuniWorkspace', {
     tab: 'courses', workspaceId: 'work-id', assignmentId: 'assign-id', assistantAccountId: 'student-b',
   });
@@ -1243,6 +1243,7 @@ test('course choices show reviewed class details, verify the selected ID, and ma
     assignments: [
       { id: 'one', title: '練習一', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: null },
       { id: 'two', title: '練習二', state: 'open', dueAt: '2026-11-04T04:00:00Z', submittedAt: '2026-11-04T00:00:00Z' },
+      { id: 'three', title: '練習三', state: 'open', dueAt: '2026-11-06T04:00:00Z', submittedAt: null },
     ],
   }));
   const view = render(<CampusAssistantScreen route={platformRoute} />);
@@ -1250,8 +1251,10 @@ test('course choices show reviewed class details, verify the selected ID, and ma
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await act(async () => fireEvent.press(view.getByRole('button', { name: /資料結構.*115學年度.*乙班.*林老師/ })));
   expect(request.mock.calls[1][0].courseworkChoice).toEqual({ workspaceId: 'second' });
-  expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未繳交/ })).toBeTruthy();
+  expect(view.getByRole('button', { name: /查看作業：練習一，已逾期 · 未見繳交紀錄/ })).toBeTruthy();
   expect(view.getByRole('button', { name: /查看作業：練習二，已繳交/ })).toBeTruthy();
+  expect(view.getByRole('button', { name: /查看作業：練習三，仍在收件 · 未見繳交紀錄/ })).toBeTruthy();
+  expect(view.queryAllByRole('button', { name: /(?:已逾期|已停止收件) · 未繳交/ })).toHaveLength(0);
 });
 
 describe('class assignment follow-ups in the nuni timetable assistant', () => {
