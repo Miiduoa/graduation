@@ -7,6 +7,7 @@ import {
 import { classMeetingKey, type ClassException, type PersonalImportRecord } from '@campus/shared';
 import { loadPersonalImports } from '../../services/personalImports';
 import { loadOfflinePersonalTimetable, type StoredTimetable } from '../../services/personalTimetable';
+import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 jest.mock('../../services/personalTimetable', () => ({
   ...jest.requireActual('../../services/personalTimetable'),
@@ -84,6 +85,35 @@ test('keeps the complete saved course set for offline tools, while limiting mode
   expect(prompt).not.toContain('測試課程12');
   expect(prompt).toContain('尚有 4 門未列出');
   expect(prompt).toContain('不可據此判定某天沒課');
+});
+
+test('only includes an authorized and fresh campus snapshot for its original account', async () => {
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const saved: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 專屬作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const containsPrivateTitle = (value: CampusSenseSnapshot, owner = local) =>
+    formatOnDeviceSchoolPrompt(owner, value).includes('Alice 專屬作業');
+
+  expect(local.ownerUid).toBe('alice');
+  expect(containsPrivateTitle(saved)).toBe(true);
+  expect(containsPrivateTitle({ ...saved, userId: 'bob' })).toBe(false);
+  expect(containsPrivateTitle({ ...saved, schoolId: 'ncku' })).toBe(false);
+  expect(containsPrivateTitle({
+    ...saved, checkedAt: new Date(Date.now() - 16 * 60_000).toISOString(),
+  })).toBe(false);
+  expect(containsPrivateTitle({
+    ...saved, checkedAt: new Date(Date.now() + 31_000).toISOString(),
+  })).toBe(false);
+  expect(containsPrivateTitle(saved, { ...local, ownerUid: undefined })).toBe(false);
+  expect(formatOnDeviceSchoolPrompt(local, { ...saved, userId: 'bob' }))
+    .toContain('此回合沒有主動同步且有效的校園資料');
 });
 
 describe('class lookups from saved timetables and imports', () => {
