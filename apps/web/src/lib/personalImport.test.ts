@@ -693,6 +693,47 @@ describe('iCalendar import keeps dates and recurrence semantics explicit', () =>
     });
   });
 
+  it('keeps colons in quoted property parameters separate from the event text', () => {
+    const parsed = parsePersonalImport(
+      calendar([
+        'SUMMARY;ALTREP="cid:brief@example.org";LANGUAGE=zh-TW:實習說明會:報到',
+        'LOCATION;ALTREP="https://campus.example/rooms;a=1":主顧樓',
+        'DTSTART;VALUE=DATE:20261020',
+      ].join('\r\n')),
+      events,
+    );
+    expect(errors(parsed.issues)).toEqual([]);
+    expect(parsed.rows[0]).toMatchObject({ title: '實習說明會:報到', location: '主顧樓' });
+  });
+
+  it('reads the date type and timezone only from actual parameter names', () => {
+    const parsed = parsePersonalImport(
+      calendar([
+        'SUMMARY:實習說明會',
+        'DTSTART;X-NOTE="https://campus.example/;VALUE=DATE;";tzid="Asia/Taipei":20261020T180000',
+        'DTEND;X-NOTE="ignore;Tzid=UTC;";TZID=Asia/Taipei:20261020T200000',
+      ].join('\r\n')),
+      events,
+    );
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.rows[0]).toMatchObject({ date: '2026-10-20', startTime: '18:00', endTime: '20:00' });
+  });
+
+  it('still flags floating and unsupported times when quoted text mentions a supported zone', () => {
+    const parsed = parsePersonalImport(
+      calendar([
+        'SUMMARY:實習說明會',
+        'DTSTART;X-NOTE="a;TZID=Asia/Taipei;b":20261020T180000',
+        'DTEND;X-NOTE="a;TZID=Asia/Taipei;b";TZID="America/New_York":20261020T200000',
+      ].join('\r\n')),
+      events,
+    );
+    expect(parsed.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'floating-calendar-time', severity: 'warning' }),
+      expect.objectContaining({ code: 'unsupported-calendar-timezone', severity: 'error' }),
+    ]));
+  });
+
   it('preserves all-day exclusive end dates without creating midnight clock times', () => {
     const parsed = parsePersonalImport(
       calendar('SUMMARY:連假\r\nDTSTART;VALUE=DATE:20261020\r\nDTEND;VALUE=DATE:20261023'),

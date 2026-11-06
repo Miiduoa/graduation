@@ -2,17 +2,33 @@ import { createPersonalImportId } from './records';
 import { isPersonalImportDate, isPersonalImportTime } from './validation';
 import type { ImportIssue, PersonalImportOptions, PersonalImportRow } from './types';
 
-type CalendarProperty = { name: string; parameters: string; value: string };
+type CalendarProperty = { name: string; parameters: string[]; value: string };
 const unescapeText = (value: string) =>
   value.replace(/\\([nN,;\\])/g, (_, character: string) =>
     /[nN]/.test(character) ? '\n' : character,
   );
-const property = (line: string): CalendarProperty | undefined => {
-  const match = /^([A-Z0-9-]+)((?:;[^:]*)?):(.*)$/i.exec(line);
-  return match
-    ? { name: match[1].toUpperCase(), parameters: match[2], value: match[3] }
-    : undefined;
-};
+function property(line: string): CalendarProperty | undefined {
+  const name = /^[A-Z0-9-]+(?=[;:])/i.exec(line)?.[0];
+  if (!name) return;
+  // Colons and semicolons inside a quoted parameter belong to its value.
+  const parameters: string[] = [];
+  let parameterStart = name.length + 1;
+  let quoted = false;
+  for (let i = name.length; i < line.length; i++) {
+    const character = line[i];
+    if (character === '"') quoted = !quoted;
+    if (quoted || (character !== ';' && character !== ':')) continue;
+    if (i > parameterStart) parameters.push(line.slice(parameterStart, i));
+    if (character === ':') return { name: name.toUpperCase(), parameters, value: line.slice(i + 1) };
+    parameterStart = i + 1;
+  }
+}
+
+function parameterValue(item: CalendarProperty, name: string): string | undefined {
+  const prefix = name + '=';
+  const parameter = item.parameters.find((part) => part.slice(0, prefix.length).toUpperCase() === prefix);
+  return parameter?.slice(prefix.length).replace(/^"(.*)"$/, '$1');
+}
 
 /** Parses calendar evidence only. Recurrences and unknown timezone rules must be resolved by the user. */
 export function parsePersonalImportCalendar(
@@ -47,7 +63,7 @@ export function parsePersonalImportCalendar(
     const dateField = end ? 'endDate' : 'date';
     const timeField = end ? 'endTime' : 'startTime';
     const dateOnly =
-      /(?:^|;)VALUE=DATE(?:;|$)/i.test(item.parameters) || /^\d{8}$/.test(item.value);
+      parameterValue(item, 'VALUE')?.toUpperCase() === 'DATE' || /^\d{8}$/.test(item.value);
     if (dateOnly) {
       const match = /^(\d{4})(\d{2})(\d{2})$/.exec(item.value);
       if (!match) {
@@ -69,8 +85,8 @@ export function parsePersonalImportCalendar(
       addIssue('mixed-calendar-date', '全天活動的結束值含有時間，請確認。');
     const isoDate = `${match[1]}-${match[2]}-${match[3]}`;
     const clock = `${match[4]}:${match[5]}`;
-    const zone = /(?:^|;)TZID=(?:"([^"]+)"|([^;]+))/i.exec(item.parameters);
-    const timezone = zone?.[1] ?? zone?.[2] ?? calendarTimezone;
+    const zone = parameterValue(item, 'TZID');
+    const timezone = zone || calendarTimezone;
     current[dateField] = isoDate;
     current[timeField] = clock;
     if (match[6] && match[6] !== '00')
