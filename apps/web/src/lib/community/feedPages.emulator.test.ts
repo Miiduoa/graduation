@@ -9,8 +9,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { getDb } from '@/lib/firebase';
 import { fetchRecentCampusPosts } from './firestore';
 import { fetchCampusPostPage, type CampusPostCursor } from './feedPages';
+import { getDb as getMobileDb } from '../../../../mobile/src/firebase';
+import { fetchCampusPostPage as fetchMobileCampusPostPage } from '../../../../mobile/src/services/feedPages';
 
 vi.mock('@/lib/firebase', () => ({ getDb: vi.fn() }));
+vi.mock('../../../../mobile/src/firebase', () => ({ getDb: vi.fn() }));
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST || '';
 const localEmulator = /^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$/.test(emulatorHost);
 if (process.env.REQUIRE_FEED_EMULATOR === '1' && !localEmulator) {
@@ -57,6 +60,7 @@ describeEmulator('campus feed cursor pagination with repository rules', () => {
     });
     alice = environment.authenticatedContext('alice').firestore() as unknown as Firestore;
     vi.mocked(getDb).mockReset().mockReturnValue(alice);
+    vi.mocked(getMobileDb).mockReset().mockReturnValue(alice);
   });
 
   it('finds all 245 posts exactly once, including timestamp ties and posts past the previous cap', async () => {
@@ -155,6 +159,53 @@ describeEmulator('campus feed cursor pagination with repository rules', () => {
     vi.mocked(getDb).mockReturnValue(environment.authenticatedContext('charlie').firestore() as unknown as Firestore);
     await expect(fetchCampusPostPage('other', first.nextCursor)).rejects.toMatchObject({ code: 'invalid-argument' });
     expect((await fetchCampusPostPage('other')).posts.map((post) => post.id)).toEqual(['private']);
+  });
+
+  it('native feed service uses the real SDK to page all 245 school posts exactly once', async () => {
+    const ids: string[] = [];
+    const sizes: number[] = [];
+    let cursor: Awaited<ReturnType<typeof fetchMobileCampusPostPage>>['nextCursor'] = null;
+    let hasMore = true;
+    while (hasMore && sizes.length < 6) {
+      const page = await fetchMobileCampusPostPage('pu', cursor);
+      ids.push(...page.posts.map((post) => post.id));
+      sizes.push(page.posts.length);
+      cursor = page.nextCursor;
+      hasMore = page.hasMore;
+    }
+    expect(sizes).toEqual([60, 60, 60, 60, 5]);
+    expect(new Set(ids).size).toBe(245);
+    expect(ids[0]).toBe('post-244');
+    expect(ids.at(-1)).toBe('post-000');
+    expect(hasMore).toBe(false);
+  });
+
+  it('native feed SDK blocks cached offline continuation and rejected membership, then recovers', async () => {
+    const first = await fetchMobileCampusPostPage('pu');
+    const cached = await getDocsFromCache(query(
+      collection(alice, 'schools/pu/campusPosts'),
+      orderBy('createdAt', 'desc'), orderBy(documentId(), 'desc'), limit(60),
+    ));
+    expect(cached.size).toBe(60);
+    await disableNetwork(alice);
+    try {
+      await expect(fetchMobileCampusPostPage('pu', first.nextCursor))
+        .rejects.toMatchObject({ code: 'unavailable' });
+    } finally { await enableNetwork(alice); }
+    expect((await fetchMobileCampusPostPage('pu', first.nextCursor)).posts[0].id).toBe('post-184');
+    await environment.withSecurityRulesDisabled(async context => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await expect(fetchMobileCampusPostPage('pu', first.nextCursor))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    await environment.withSecurityRulesDisabled(async context => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'active' });
+    });
+    expect((await fetchMobileCampusPostPage('pu', first.nextCursor)).posts[0].id).toBe('post-184');
+    vi.mocked(getMobileDb).mockReturnValue(environment.authenticatedContext('charlie').firestore() as unknown as Firestore);
+    await expect(fetchMobileCampusPostPage('other', first.nextCursor))
+      .rejects.toMatchObject({ code: 'invalid-argument' });
+    expect((await fetchMobileCampusPostPage('other')).posts.map(row => row.id)).toEqual(['private']);
   });
 
   it('handles an exact 60-item feed with one final empty page', async () => {
