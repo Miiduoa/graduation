@@ -184,3 +184,13 @@ test.each([
   fireEvent.press(view.getByText(title));
   expect(safeNavigate).toHaveBeenCalledWith(navigation, route, undefined, expect.any(Object));
 });
+
+test('站內點餐的訂單和 App 校園餐廳的訂單有各自的入口', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '訂單紀錄');
+  fireEvent.press(view.getByText('站內點餐'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'NuniWorkspace', { tab: 'food' }, expect.any(Object));
+  fireEvent.press(view.getByText('我的訂單'));
+  expect(safeNavigate).toHaveBeenLastCalledWith(navigation, 'StudentOrders', undefined, expect.any(Object));
+});

@@ -35,6 +35,7 @@ import {
   useFoodClient,
   useFoodLoad,
   useFoodMutation,
+  type FoodClient,
 } from './NuniFoodUi';
 import { foodPageIntro } from '@campus/shared/src/foodPageCopy';
 import { isMobileOnlineOrderingEnabled } from '../../utils/onlineOrdering';
@@ -60,11 +61,6 @@ export function NuniFood() {
 function FoodAccount({ context }: { context: string }) {
   const client = useFoodClient(context);
   const [selected, select] = useNuniDraftState<Selection | null>('food:selected-realm', null);
-  const loader = useCallback(
-    async () => ({ public: await client.listRealms(), orders: await client.listOrderRealms() }),
-    [client],
-  );
-  const resource = useFoodLoad(loader);
   const orderingOn = isMobileOnlineOrderingEnabled();
   const active = selected && (orderingOn || selected.mode === 'orders') ? selected : null;
   if (active)
@@ -79,40 +75,49 @@ function FoodAccount({ context }: { context: string }) {
   return (
     <ScrollView contentContainerStyle={page}>
       <FoodText title>點餐與取餐</FoodText>
-      <FoodText>{foodPageIntro(isMobileOnlineOrderingEnabled())}</FoodText>
-      <FoodReadState resource={resource} />
-      {resource.data ? (
-        <>
-          {orderingOn ? (
-            <>
-              <FoodText title>選擇用餐校區</FoodText>
-              {resource.data.public
-                .filter((realm) => realm.services.includes('food'))
-                .map((realm) => (
-                  <FoodButton
-                    key={realm.tenantId}
-                    onPress={() => select({ ...realm, mode: 'menu' })}
-                  >{`查看餐點：${realm.name}`}</FoodButton>
-                ))}
-              {!resource.data.public.some((realm) => realm.services.includes('food')) ? (
-                <FoodText>目前沒有開放接單的門市。</FoodText>
-              ) : null}
-            </>
-          ) : null}
-          <FoodText title>我的訂單</FoodText>
-          <FoodText>店家暫停接新單時，仍可從這裡查看原有訂單。</FoodText>
-          {resource.data.orders.map((realm) => (
-            <FoodButton
-              key={realm.tenantId}
-              onPress={() => select({ ...realm, mode: 'orders' })}
-            >{`訂單紀錄：${realm.name}`}</FoodButton>
-          ))}
-          {!resource.data.orders.length ? <FoodText>目前沒有訂單紀錄。</FoodText> : null}
-        </>
-      ) : null}
+      <FoodText>{foodPageIntro(orderingOn)}</FoodText>
+      {orderingOn ? <DiningRealms client={client} onSelect={select} /> : null}
+      <OrderRealms client={client} onSelect={select} />
     </ScrollView>
   );
 }
+
+type RealmChoicesProps = { client: FoodClient; onSelect(selection: Selection): void };
+
+function DiningRealms({ client, onSelect }: RealmChoicesProps) {
+  const resource = useFoodLoad(client.listRealms);
+  const realms = resource.data?.filter((realm) => realm.services.includes('food'));
+  return (
+    <>
+      <FoodText title>選擇用餐校區</FoodText>
+      <FoodReadState resource={resource} reloadLabel="重新讀取用餐校區" />
+      {realms?.map((realm) => (
+        <FoodButton key={realm.tenantId} onPress={() => onSelect({ ...realm, mode: 'menu' })}>
+          {`查看餐點：${realm.name}`}
+        </FoodButton>
+      ))}
+      {realms?.length === 0 ? <FoodText>目前沒有開放接單的門市。</FoodText> : null}
+    </>
+  );
+}
+
+function OrderRealms({ client, onSelect }: RealmChoicesProps) {
+  const resource = useFoodLoad(client.listOrderRealms);
+  return (
+    <>
+      <FoodText title>我的訂單</FoodText>
+      <FoodText>店家暫停接新單時，仍可從這裡查看原有訂單。</FoodText>
+      <FoodReadState resource={resource} reloadLabel="重新讀取訂單校區" />
+      {resource.data?.map((realm) => (
+        <FoodButton key={realm.tenantId} onPress={() => onSelect({ ...realm, mode: 'orders' })}>
+          {`訂單紀錄：${realm.name}`}
+        </FoodButton>
+      ))}
+      {resource.data?.length === 0 ? <FoodText>目前沒有訂單紀錄。</FoodText> : null}
+    </>
+  );
+}
+
 function FoodRealm({
   context,
   selection,
@@ -132,9 +137,20 @@ function FoodRealm({
     null,
   );
   const orderingOn = isMobileOnlineOrderingEnabled();
-  const [storedMode, setMode] = useState(selection.mode);
-  const mode = orderingOn ? storedMode : 'orders';
-  const [cursor, setCursor] = useState<string | undefined>();
+  const [list, setList] = useState<{ mode: Selection['mode']; cursors: string[] }>({
+    mode: selection.mode,
+    cursors: [],
+  });
+  const mode = orderingOn ? list.mode : 'orders';
+  const cursors = mode === list.mode ? list.cursors : [];
+  const cursor = cursors.at(-1);
+  const scroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  }, [mode, cursor]);
+  const changeMode = (next: Selection['mode']) => {
+    if (next !== list.mode) setList({ mode: next, cursors: [] });
+  };
   const loader = useCallback(
     async () =>
       mode === 'menu'
@@ -166,8 +182,11 @@ function FoodRealm({
         orderId={orderId}
         onBack={() => {
           selectOrder(null);
-          setMode('orders');
-          void resource.load();
+          if (mode === 'orders') void resource.load();
+          else {
+            selectLocation(null);
+            changeMode('orders');
+          }
         }}
       />
     );
@@ -182,32 +201,28 @@ function FoodRealm({
         onOrder={selectOrder}
       />
     );
+  const nextCursor = resource.data?.value.nextCursor;
   return (
-    <ScrollView contentContainerStyle={page}>
+    <ScrollView ref={scroll} contentContainerStyle={page}>
       <FoodButton onPress={onBack}>返回用餐校區</FoodButton>
       <FoodText title>{selection.name}</FoodText>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         {orderingOn ? (
           <FoodButton
             selected={mode === 'menu'}
-            onPress={() => {
-              setCursor(undefined);
-              setMode('menu');
-            }}
+            onPress={() => changeMode('menu')}
           >
             餐點門市
           </FoodButton>
         ) : null}
         <FoodButton
           selected={mode === 'orders'}
-          onPress={() => {
-            setCursor(undefined);
-            setMode('orders');
-          }}
+          onPress={() => changeMode('orders')}
         >
           我的訂單
         </FoodButton>
       </View>
+      {cursor || nextCursor ? <FoodText status>{`第 ${cursors.length + 1} 頁`}</FoodText> : null}
       <FoodReadState resource={resource} />
       {resource.data?.kind === 'menu' ? (
         <>
@@ -231,7 +246,9 @@ function FoodRealm({
             </FoodCard>
           ))}
           {!resource.data.value.locations.length ? (
-            <FoodText>目前沒有開放的門市；已有訂單可至「我的訂單」查詢。</FoodText>
+            <FoodText>
+              {cursor ? '這一頁沒有門市，可以返回上一頁。' : '目前沒有開放的門市，已有訂單可至「我的訂單」查詢。'}
+            </FoodText>
           ) : null}
         </>
       ) : null}
@@ -251,14 +268,19 @@ function FoodRealm({
             </FoodCard>
           ))}
           {!resource.data.value.orders.length ? (
-            <FoodText>這個校區目前沒有你的訂單。</FoodText>
+            <FoodText>{cursor ? '這一頁沒有訂單，可以返回上一頁。' : '這個校區目前沒有你的訂單。'}</FoodText>
           ) : null}
         </>
       ) : null}
-      {resource.data?.value.nextCursor ? (
-        <FoodButton onPress={() => setCursor(resource.data!.value.nextCursor)}>下一頁</FoodButton>
+      {cursor ? (
+        <FoodButton onPress={() => setList({ mode, cursors: cursors.slice(0, -1) })}>上一頁</FoodButton>
       ) : null}
-      {cursor ? <FoodButton onPress={() => setCursor(undefined)}>回到第一頁</FoodButton> : null}
+      {nextCursor && !cursors.includes(nextCursor) ? (
+        <FoodButton onPress={() => setList({ mode, cursors: [...cursors, nextCursor] })}>下一頁</FoodButton>
+      ) : null}
+      {cursors.length > 1 ? (
+        <FoodButton onPress={() => setList({ mode, cursors: [] })}>回到第一頁</FoodButton>
+      ) : null}
     </ScrollView>
   );
 }

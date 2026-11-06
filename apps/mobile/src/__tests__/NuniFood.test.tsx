@@ -383,7 +383,67 @@ test('closed online ordering keeps existing orders and does not open a new meal'
   expect(await view.findByRole('button', { name: '查看訂單 order-one' })).toBeTruthy();
   expect(view.queryByRole('button', { name: '餐點門市' })).toBeNull();
   expect(view.queryByRole('button', { name: /選餐/ })).toBeNull();
+  expect(mockRequest.mock.calls.map(([path]) => path)).not.toContain('realms');
+  expect(mockRequest.mock.calls.map(([path]) => path)).not.toContain(`${realm}/locations`);
+  expect(writes()).toHaveLength(0);
 });
+test.each([
+  ['realms', '訂單紀錄：第一校區', '重新讀取用餐校區', '查看餐點：第一校區', 'food-order-realms'],
+  ['food-order-realms', '查看餐點：第一校區', '重新讀取訂單校區', '訂單紀錄：第一校區', 'realms'],
+])('校區來源 %s 失敗仍可使用另一份清單，並單獨重試', async (failed, available, retry, restored, other) => {
+  hasOrder = true;
+  let offline = true;
+  mockRequest.mockImplementation(async (path, context, input) => {
+    if (offline && path === failed) throw new NuniError(0, 'NETWORK_ERROR');
+    return respond(path, context, input);
+  });
+  const view = render(ui());
+  expect(await view.findByRole('button', { name: available })).toBeTruthy();
+  expect(await view.findByText('目前無法讀取，請確認連線後重試。')).toBeTruthy();
+  expect(view.queryByRole('button', { name: restored })).toBeNull();
+  offline = false;
+  fireEvent.press(view.getByRole('button', { name: retry }));
+  expect(await view.findByRole('button', { name: restored })).toBeTruthy();
+  expect(mockRequest.mock.calls.filter(([path]) => path === other)).toHaveLength(1);
+});
+
+test.each(['menu', 'orders'])('校區 %s 清單可逐頁返回，切換清單從第一頁開始', async (mode) => {
+  hasOrder = true;
+  const isMenu = mode === 'menu';
+  const pathToPage = `${realm}/${isMenu ? 'locations' : 'orders'}`;
+  const seenCursors: Array<string | undefined> = [];
+  mockRequest.mockImplementation(async (path, context, input, _options, query) => {
+    if (path !== pathToPage || input) return respond(path, context, input);
+    const cursor = query?.cursor;
+    seenCursors.push(cursor);
+    if (cursor === 'third') throw new NuniError(0, 'NETWORK_ERROR');
+    const name = cursor ? '第二頁餐坊' : '首頁餐坊';
+    return {
+      ...(isMenu ? { locations: [{ ...location(), name }] } : { orders: [{ ...summary(), locationName: name }] }),
+      nextCursor: cursor ? 'third' : 'second',
+    };
+  });
+  const view = render(ui());
+  fireEvent.press(await view.findByRole('button', { name: isMenu ? '查看餐點：第一校區' : '訂單紀錄：第一校區' }));
+  await view.findByText('首頁餐坊');
+  fireEvent.press(view.getByRole('button', { name: '下一頁' }));
+  await view.findByText('第二頁餐坊');
+  fireEvent.press(view.getByRole('button', { name: '下一頁' }));
+  await view.findByText('目前無法讀取，請確認連線後重試。');
+  expect(view.getByText('第 3 頁')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '上一頁' }));
+  await view.findByText('第二頁餐坊');
+  expect(view.getByText('第 2 頁')).toBeTruthy();
+  expect(seenCursors).toEqual([undefined, 'second', 'third', 'second']);
+  fireEvent.press(view.getByRole('button', { name: isMenu ? '我的訂單' : '餐點門市' }));
+  await view.findByText('餐坊');
+  expect(view.queryByRole('button', { name: '上一頁' })).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: isMenu ? '餐點門市' : '我的訂單' }));
+  await view.findByText('首頁餐坊');
+  expect(seenCursors.at(-1)).toBeUndefined();
+  expect(writes()).toHaveLength(0);
+});
+
 test('student selects required options, reviews whole TWD quote and explicitly places an onsite order', async () => {
   const view = render(ui());
   await fillQuote(view);
@@ -713,7 +773,7 @@ describe('手機取餐時間', () => {
     await openBasket(view);
     now.mockReturnValue(beforeMidnight + 60_000);
     await waitFor(
-      () => expect(view.getByText('預計取餐 2026/11/02 00:16（台灣時間）')).toBeTruthy(),
+      () => expect(view.queryByText('預計取餐 2026/11/02 00:16（台灣時間）')).toBeTruthy(),
       { timeout: 1500 },
     );
     now.mockReturnValue(beforeMidnight + 90_000);
