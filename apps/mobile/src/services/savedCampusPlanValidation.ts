@@ -76,6 +76,7 @@ function step(value: unknown): CampusPlanStep {
   const evidence = choice(item.evidence, Object.keys(ROUTES) as CampusPlanEvidence[]);
   const route = choice(item.route, ['/classroom', '/timetable', '/announcements'] as const);
   if (route !== ROUTES[evidence] || (item.dueAt !== undefined && evidence !== 'authorized-assignments')) return invalid();
+  // Deliberately omit runtime nuniSource. A saved plan is display evidence, not an action context.
   return {
     id: text(item.id, 100),
     title: text(item.title, 240),
@@ -106,6 +107,7 @@ function course(value: unknown): AgendaCourse {
 function assignment(value: unknown, undated = false): AgendaAssignment {
   const item = row(value);
   if (undated && item.dueAt !== null && (typeof item.dueAt !== 'string' || item.dueAt.length > 40)) return invalid();
+  // Both dated and outside-window rows discard any live target hint on save and restore.
   return {
     title: text(item.title, 240),
     groupName: text(item.groupName, 160, true),

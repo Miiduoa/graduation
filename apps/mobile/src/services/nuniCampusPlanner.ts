@@ -11,6 +11,7 @@ import { scheduledSavedClasses } from './nextSavedClasses';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanStep } from './offlineCampusPlanner';
 import type { CampusPlanComparisonBasis } from './campusPlanComparison';
 import { savedPlanTimestamp } from './savedCampusPlanValidation';
+import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
 
 type TimetableSource = Awaited<ReturnType<typeof readAssistantTimetable>>;
 type PlanInput = {
@@ -30,6 +31,7 @@ type Assignment = {
   groupName: string;
   dueAt: string | null;
   pending: boolean;
+  nuniSource?: NuniPlanAssignmentSource;
 };
 type AssignmentSource = {
   basis: CampusPlanComparisonBasis['assignments'];
@@ -172,12 +174,19 @@ async function readAssignments(input: PlanInput, records: PersonalImportRecord[]
           continue;
         }
         if (assignments.length >= 100) { limitedAssignments = true; incomplete = true; }
+        const scope = courseScope(rows[0]);
+        const oneScope = rows.every((row) => sameCourseScope(courseScope(row), scope));
         successful++;
         fetched.set(workspace.id, assignments.slice(0, 100).map((item) => ({
           workspaceId: workspace.id, id: item.id,
           title: label(item.title, 240), groupName: label(workspace.title, 160),
           dueAt: confirmedTime(item.dueAt),
           pending: item.state === 'open' && item.mySubmission === null,
+          ...(oneScope ? { nuniSource: {
+            accountId: input.platformTimetable.accountId, schoolId,
+            academicYear: scope.academicYear, semester: scope.semester,
+            workspaceId: workspace.id, assignmentId: item.id,
+          } } : {}),
         })));
       } catch (error) {
         assertCurrent(input);
@@ -255,7 +264,9 @@ export async function buildNuniCampusPlan(input: PlanInput): Promise<CampusEvide
       if (!sameSource(source, fresh)) return null;
     }
     const agenda = buildCampusStudyAgenda({ window, now, courses: null,
-      assignments: assignments.basis.status === 'unavailable' ? null : assignments.pending.map(({ title, groupName, dueAt }) => ({ title, groupName, dueAt })) });
+      assignments: assignments.basis.status === 'unavailable' ? null : assignments.pending.map(({ title, groupName, dueAt, nuniSource }) => ({
+        title, groupName, dueAt, ...(nuniSource ? { nuniSource } : {}),
+      })) });
     const dated = agenda.days.map((day) => source ? scheduledSavedClasses(source.records, schoolId, day.date) : undefined);
     const hasTimetable = !!source && dated.every((entries) => entries !== undefined && entries.length <= MAX_DAILY_CLASSES);
     agenda.timetableAvailable = hasTimetable;
@@ -321,6 +332,7 @@ export async function buildNuniCampusPlan(input: PlanInput): Promise<CampusEvide
           : '來源未提供可核對的截止時間，請先向課程頁確認') + '。' + preparation + '請開啟 nuni 課程核對最新狀態。',
         priority: priority(item.dueAt, now), evidence: 'authorized-assignments', route: '/classroom',
         ...(item.dueAt ? { dueAt: item.dueAt } : {}), groupName: item.groupName,
+        ...(item.nuniSource ? { nuniSource: item.nuniSource } : {}),
       };
     });
     const conflicts = canSuggestStudy ? clockDays.flatMap(({ day, availability }) => availability.conflicts

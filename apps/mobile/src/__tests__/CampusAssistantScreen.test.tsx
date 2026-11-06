@@ -9,6 +9,8 @@ import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } from '../services/campusAssignmentReminders';
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import { beginSavedCampusPlansSignOutCleanup, endSavedCampusPlansSignOutCleanup } from '../services/savedCampusPlans';
+import { readNuniPlanAssignmentTarget, type NuniPlanAssignmentSource } from '../services/nuniPlanAssignmentTarget';
+jest.mock('../services/nuniPlanAssignmentTarget', () => ({ readNuniPlanAssignmentTarget: jest.fn() }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => require('crypto').randomUUID() }));
 const mockClose = jest.fn();
 let mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
@@ -92,6 +94,7 @@ beforeEach(async () => {
   // clearAllMocks does not clear queued mockResolvedValueOnce implementations.
   // Prevent a pending result from one navigation test reaching another account.
   request.mockReset();
+  jest.mocked(readNuniPlanAssignmentTarget).mockReset();
   jest.mocked(confirmCampusAgentWrite).mockReset();
   jest.mocked(refreshCampusSenseSnapshot).mockReset();
   jest.mocked(scheduleCampusAssignmentReminder).mockReset();
@@ -1708,6 +1711,80 @@ test('platform plan links open the nuni workspace and never a Firebase course or
   expect(getCampusAssignmentReminderStatus).not.toHaveBeenCalled();
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });
+
+const planAssignmentSource: NuniPlanAssignmentSource = {
+  accountId: 'pa_00000000-0000-4000-8000-000000000001', schoolId: 'pu', academicYear: '115', semester: '1',
+  workspaceId: 'cw_00000000-0000-4000-8000-000000000001',
+  assignmentId: 'cwa_00000000-0000-4000-8000-000000000001',
+};
+const planAssignmentParams = { tab: 'courses' as const, workspaceId: planAssignmentSource.workspaceId,
+  assignmentId: planAssignmentSource.assignmentId, assistantAccountId: planAssignmentSource.accountId };
+function liveNuniPlan(): CampusEvidencePlan {
+  const plan = resumablePlan();
+  plan.steps[0].nuniSource = { ...planAssignmentSource };
+  return plan;
+}
+
+test('a live platform plan retries the same precise assignment, preserves the draft and never restores its action from storage', async () => {
+  setPlatformFixture(planAssignmentSource.accountId);
+  const navigate = jest.fn();
+  const navigation = { navigate, getState: () => ({ routeNames: ['NuniWorkspace', 'PersonalTimetable', 'CoursesHome'] }) };
+  const lookup = jest.mocked(readNuniPlanAssignmentTarget);
+  lookup.mockResolvedValueOnce({ kind: 'unavailable' }).mockResolvedValueOnce({ kind: 'ready', params: planAssignmentParams });
+  let view = render(<CampusAssistantScreen route={platformRoute} navigation={navigation} />);
+  await askForSavedPlan(view, liveNuniPlan());
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '等一下再問明天的公車');
+  expect(lookup).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查看這份作業' })));
+  expect(navigate).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對這份作業' })));
+  expect(lookup).toHaveBeenCalledTimes(2);
+  expect(lookup.mock.calls[0][0]).toMatchObject({ source: planAssignmentSource,
+    accountId: planAssignmentSource.accountId, schoolId: 'pu' });
+  expect(lookup.mock.calls[1][0].source).toEqual(planAssignmentSource);
+  expect(navigate).toHaveBeenCalledWith('NuniWorkspace', planAssignmentParams);
+  expect(navigate).toHaveBeenCalledTimes(1);
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('等一下再問明天的公車');
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  view.unmount();
+  view = render(<CampusAssistantScreen route={platformRoute} navigation={navigation} />);
+  await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
+  fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
+  fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
+  expect(view.queryByRole('button', { name: '查看這份作業' })).toBeNull();
+  expect(view.getByRole('button', { name: '開啟課程與作業核對' })).toBeTruthy();
+  expect(lookup).toHaveBeenCalledTimes(2);
+});
+
+test.each(['account', 'context', 'school', 'logout', 'unmount'])(
+  'a precise plan assignment cannot navigate after its %s changes during verification', async (change) => {
+    setPlatformFixture(planAssignmentSource.accountId);
+    const navigate = jest.fn();
+    const navigation = { navigate, getState: () => ({ routeNames: ['NuniWorkspace'] }) };
+    const pending = deferred<Awaited<ReturnType<typeof readNuniPlanAssignmentTarget>>>();
+    jest.mocked(readNuniPlanAssignmentTarget).mockReturnValueOnce(pending.promise);
+    const view = render(<CampusAssistantScreen route={platformRoute} navigation={navigation} />);
+    await askForSavedPlan(view, liveNuniPlan());
+    await act(async () => fireEvent.press(view.getByRole('button', { name: '查看這份作業' })));
+    const captured = jest.mocked(readNuniPlanAssignmentTarget).mock.calls[0][0];
+    expect(captured.isCurrent()).toBe(true);
+    if (change === 'unmount') view.unmount();
+    else {
+      if (change === 'account') setPlatformFixture('pa_00000000-0000-4000-8000-000000000002');
+      else if (change === 'context') setPlatformFixture(planAssignmentSource.accountId, 'replacement-context');
+      else if (change === 'school') mockSchool = 'nthu';
+      else mockPlatform = null;
+      await act(async () => view.rerender(<CampusAssistantScreen route={platformRoute} navigation={navigation} />));
+    }
+    expect(captured.isCurrent()).toBe(false);
+    expect(captured.signal?.aborted).toBe(true);
+    await act(async () => pending.resolve({ kind: 'ready', params: planAssignmentParams }));
+    expect(navigate).not.toHaveBeenCalled();
+    expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  },
+);
 
 test('platform saved plans stay separate from a Firebase account with the same id and from other campuses', async () => {
   mockUid = 'student-b';

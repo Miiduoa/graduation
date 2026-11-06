@@ -361,6 +361,124 @@ async def clock_scenario(browser, port, width, mode):
             'fixtureScope': 'Real clock availability calculations and presentation components with synthetic occurrences and representative preparation-step text; no live planner policy, authentication, school linkage, data fetch, storage or device verification.'}
 
 
+async def assignment_scenario(browser, port, width, mode):
+    label = f'{width}-{mode}-assignment'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    page_errors = []
+    external_requests = []
+    page.on('pageerror', lambda error: page_errors.append(str(error)))
+    page.on('request', lambda request: external_requests.append(request.url) if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=assignment', wait_until='networkidle')
+    preview = page.get_by_test_id('assignment-plan-preview')
+    await expect(preview.get_by_text('從計畫核對原始作業', exact=True)).to_be_visible()
+    await expect(page.get_by_text(re.compile(r'來源、核對回覆與導覽皆為合成控制'))).to_be_visible()
+    actions = preview.get_by_role('button', name='查看這份作業', exact=True)
+    await expect(actions).to_have_count(2)
+    await expect(preview.get_by_text('開啟前會重新核對帳號、課程與作業；不會自動送出。', exact=True)).to_have_count(2)
+    progress = preview.get_by_role('checkbox', name=re.compile(r'^我已處理：資訊管理實務'))
+    await expect(progress).to_have_attribute('aria-checked', 'false')
+    assert await page.evaluate('window.qaEvents') == []
+    initial_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-ready.png'), full_page=True)
+
+    await actions.first.focus()
+    await expect(actions.first).to_be_focused()
+    await actions.first.press('Enter')
+    checking = preview.get_by_role('button', name='正在核對作業…', exact=True)
+    await expect(checking).to_be_disabled()
+    await page.keyboard.press('Enter')
+    assert len(await page.evaluate('window.qaEvents')) == 1
+    await expect(progress).to_have_attribute('aria-checked', 'false')
+    checking_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-checking.png'), full_page=True)
+
+    await page.evaluate("window.qaSettleAssignmentRead('unavailable')")
+    await expect(preview.get_by_role('alert')).to_have_text(
+        '暫時無法核對這份作業，請稍後重試，或從課程與作業入口確認。')
+    retry = preview.get_by_role('button', name='重新核對這份作業', exact=True)
+    await expect(retry).to_be_enabled()
+    generic = preview.get_by_role('button', name='開啟課程與作業核對', exact=True)
+    await expect(generic).to_be_enabled()
+    await generic.focus()
+    await expect(generic).to_be_focused()
+    await generic.press('Enter')
+    unavailable_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-unavailable.png'), full_page=True)
+
+    await retry.focus()
+    await expect(retry).to_be_focused()
+    await retry.press('Enter')
+    await expect(checking).to_be_disabled()
+    await page.evaluate("window.qaSettleAssignmentRead('ready')")
+    await expect(preview.get_by_role('alert')).to_have_count(0)
+    await expect(actions).to_have_count(2)
+    await expect(progress).to_have_attribute('aria-checked', 'false')
+
+    # The expanded daily deadline must retain the same exact live source.
+    await actions.nth(1).focus()
+    await expect(actions.nth(1)).to_be_focused()
+    await actions.nth(1).press('Enter')
+    await expect(checking).to_be_disabled()
+    await page.evaluate("window.qaSettleAssignmentRead('ready')")
+    await expect(actions).to_have_count(2)
+
+    # Outside-window work has a different source; an unavailable target cannot
+    # silently open the already verified item with a similar title or course.
+    outside = preview.get_by_role('button', name='查看其他 1 項作業', exact=True)
+    await outside.focus()
+    await expect(outside).to_be_focused()
+    await outside.press('Enter')
+    await expect(preview.get_by_text('企業資源規劃跨校協作專題資料蒐集', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('截止時間未確認', exact=True)).to_be_visible()
+    await expect(actions).to_have_count(3)
+    outside_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-outside.png'), full_page=True)
+    await actions.last.focus()
+    await expect(actions.last).to_be_focused()
+    await actions.last.press('Enter')
+    await expect(checking).to_be_disabled()
+    await page.evaluate("window.qaSettleAssignmentRead('changed')")
+    await expect(preview.get_by_role('alert')).to_have_text(
+        '作業來源或課程連結已變更，請重新核對，或從課程與作業入口確認。')
+    await expect(retry).to_be_enabled()
+    await expect(generic).to_be_enabled()
+    await expect(progress).to_have_attribute('aria-checked', 'false')
+    changed_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-changed-outside.png'), full_page=True)
+
+    source = {
+        'accountId': 'pa_11111111-1111-4111-8111-111111111111', 'schoolId': 'pu', 'academicYear': '115', 'semester': '1',
+        'workspaceId': 'cw_11111111-1111-4111-8111-111111111111',
+        'assignmentId': 'cwa_11111111-1111-4111-8111-111111111111',
+    }
+    opened = {'kind': 'assignment-navigation', 'route': 'NuniWorkspace', 'params': {
+        'tab': 'courses', 'workspaceId': source['workspaceId'], 'assignmentId': source['assignmentId'],
+        'assistantAccountId': source['accountId'],
+    }}
+    events = await page.evaluate('window.qaEvents')
+    assert events == [
+        {'kind': 'assignment-read', 'source': source},
+        {'kind': 'open-route', 'route': '/classroom'},
+        {'kind': 'assignment-read', 'source': source}, opened,
+        {'kind': 'assignment-read', 'source': source}, opened,
+        {'kind': 'assignment-read', 'source': {**source,
+            'workspaceId': 'cw_22222222-2222-4222-8222-222222222222',
+            'assignmentId': 'cwa_22222222-2222-4222-8222-222222222222'}},
+    ], events
+    assert not page_errors, page_errors
+    assert not external_requests, external_requests
+    for current in [initial_geometry, checking_geometry, unavailable_geometry, outside_geometry, changed_geometry]:
+        assert current['documentWidth'] <= width, current
+        assert not current['smallControls'], current['smallControls']
+        assert not current['clipped'], current['clipped']
+    await page.close()
+    return {'scenario': label, 'events': events, 'pageErrors': page_errors, 'externalRequests': external_requests,
+            'initialGeometry': initial_geometry, 'checkingGeometry': checking_geometry,
+            'unavailableGeometry': unavailable_geometry, 'outsideGeometry': outside_geometry,
+            'changedGeometry': changed_geometry,
+            'fixtureScope': 'Real CampusEvidencePlanCard and NuniPlanAssignmentOpenButton with synthetic live-source metadata, controlled reader outcomes and navigation callbacks; no planner, fresh authorization, account transition, destination, network, storage or native-device verification.'}
+
+
 async def main():
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -376,6 +494,7 @@ async def main():
                 results.append(await scenario(browser, port, width, mode))
                 results.append(await platform_scenario(browser, port, width, mode))
                 results.append(await clock_scenario(browser, port, width, mode))
+                results.append(await assignment_scenario(browser, port, width, mode))
             await browser.close()
     finally:
         server.shutdown()

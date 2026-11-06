@@ -1,4 +1,5 @@
 import { inspectCampusClockAvailability } from './campusClockAvailability';
+import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
 
 /** Pure, read-only calendar calculations over context already verified by the caller. */
 export interface AgendaCourse {
@@ -12,6 +13,8 @@ export interface AgendaAssignment {
   title: string;
   groupName: string;
   dueAt: string | null;
+  /** Kept only in the live result; persistence projects this source hint out. */
+  nuniSource?: NuniPlanAssignmentSource;
 }
 export interface PeriodInterval { start: number; end: number }
 export interface StudyWindow {

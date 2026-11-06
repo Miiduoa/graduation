@@ -5,10 +5,12 @@ import { SavedCampusPlansPanel } from '../../../apps/mobile/src/screens/SavedCam
 import { CampusPlanComparisonCard } from '../../../apps/mobile/src/screens/CampusPlanComparisonCard';
 import { CampusEvidencePlanCard } from '../../../apps/mobile/src/screens/CampusEvidencePlanCard';
 import { NuniStudyPlanActions } from '../../../apps/mobile/src/screens/NuniStudyPlanActions';
+import { NuniPlanAssignmentOpenButton, type NuniPlanAssignmentOpenContext } from '../../../apps/mobile/src/screens/NuniPlanAssignmentOpenButton';
 import { applyTheme, theme } from '../../../apps/mobile/src/ui/theme';
 import type { SavedCampusPlan } from '../../../apps/mobile/src/services/savedCampusPlans';
 import type { CampusPlanComparison } from '../../../apps/mobile/src/services/campusPlanComparison';
 import type { CampusEvidencePlan } from '../../../apps/mobile/src/services/offlineCampusPlanner';
+import type { NuniPlanAssignmentSource } from '../../../apps/mobile/src/services/nuniPlanAssignmentTarget';
 
 const mode = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light';
 applyTheme(mode);
@@ -101,7 +103,12 @@ const replannedPlan: CampusEvidencePlan = {
     detail: '資料庫系統｜截止 11/7 18:00。請開啟課程頁核對。' }],
 };
 
-declare global { interface Window { qaEvents: unknown[] } }
+declare global {
+  interface Window {
+    qaEvents: unknown[];
+    qaSettleAssignmentRead?: (kind: 'ready' | 'unavailable' | 'changed') => void;
+  }
+}
 window.qaEvents = [];
 function App() {
   const [plans, setPlans] = useState([first, second]);
@@ -266,6 +273,77 @@ function PlatformPlanningApp({ clock = false }: { clock?: boolean }) {
   </View>;
 }
 
+const assignmentSource: NuniPlanAssignmentSource = {
+  accountId: 'pa_11111111-1111-4111-8111-111111111111', schoolId: 'pu', academicYear: '115', semester: '1',
+  workspaceId: 'cw_11111111-1111-4111-8111-111111111111',
+  assignmentId: 'cwa_11111111-1111-4111-8111-111111111111',
+};
+const outsideAssignmentSource: NuniPlanAssignmentSource = {
+  ...assignmentSource, workspaceId: 'cw_22222222-2222-4222-8222-222222222222',
+  assignmentId: 'cwa_22222222-2222-4222-8222-222222222222',
+};
+const assignmentPlan: CampusEvidencePlan = {
+  ...clockToday, title: '從計畫核對原始作業',
+  steps: [{ ...clockToday.steps[0], nuniSource: assignmentSource }],
+  agenda: {
+    ...clockToday.agenda!,
+    days: clockToday.agenda!.days.map((day) => ({
+      ...day, deadlines: day.deadlines.map((task) => ({ ...task, nuniSource: assignmentSource })),
+    })),
+    outsideWindow: clockToday.agenda!.outsideWindow.map((task) => ({ ...task, nuniSource: outsideAssignmentSource })),
+  },
+};
+
+// The production button and card are real. Only their injected reader and
+// navigation are controlled here; the navigation integration suite covers the
+// real planner, source checks, account guard and destination separately.
+const assignmentContext: NuniPlanAssignmentOpenContext = {
+  accountId: assignmentSource.accountId, schoolId: assignmentSource.schoolId, isCurrent: () => true,
+  request: async () => { throw new Error('The browser fixture must not read a platform source'); },
+  bffRequest: async () => { throw new Error('The browser fixture must not read assignment content'); },
+  readTarget: async (input) => {
+    window.qaEvents.push({ kind: 'assignment-read', source: input.source });
+    return new Promise((resolve) => {
+      window.qaSettleAssignmentRead = (kind) => {
+        delete window.qaSettleAssignmentRead;
+        resolve(kind === 'ready' ? { kind, params: {
+          tab: 'courses', workspaceId: input.source.workspaceId,
+          assignmentId: input.source.assignmentId, assistantAccountId: input.accountId,
+        } } : { kind });
+      };
+    });
+  },
+};
+const assignmentNavigation = {
+  getState: () => ({ routeNames: ['NuniWorkspace'] }),
+  navigate: (route: string, params?: Record<string, unknown>) => {
+    window.qaEvents.push({ kind: 'assignment-navigation', route, params });
+  },
+};
+
+function AssignmentPlanningApp() {
+  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
+  return <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 12 }}>
+    <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>課業助理</Text>
+    <View testID="assignment-plan-preview">
+      <CampusEvidencePlanCard plan={assignmentPlan} disabled={false}
+        progress={{ completedStepIds, onToggleStep: (stepId, done) => {
+          window.qaEvents.push({ kind: 'toggle', stepId, done });
+          setCompletedStepIds(done ? [stepId] : []);
+        } }}
+        onOpenRoute={(route) => { window.qaEvents.push({ kind: 'open-route', route }); }}
+        renderAssignmentAction={(assignment) => (
+          <NuniPlanAssignmentOpenButton assignment={assignment} context={assignmentContext}
+            navigation={assignmentNavigation} disabled={false} />
+        )} />
+    </View>
+    <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
+      測試畫面：使用正式卡片與作業按鈕；來源、核對回覆與導覽皆為合成控制。本情境只驗證顯示與互動，未連接平台，也未載入作業接收頁。
+    </Text>
+  </View>;
+}
+
 const scenario = new URLSearchParams(location.search).get('scenario');
-createRoot(document.getElementById('root')!).render(scenario === 'platform' || scenario === 'clock'
-  ? <PlatformPlanningApp clock={scenario === 'clock'} /> : <App />);
+createRoot(document.getElementById('root')!).render(scenario === 'assignment' ? <AssignmentPlanningApp />
+  : scenario === 'platform' || scenario === 'clock'
+    ? <PlatformPlanningApp clock={scenario === 'clock'} /> : <App />);
