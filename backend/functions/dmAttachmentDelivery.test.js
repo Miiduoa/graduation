@@ -31,8 +31,23 @@ function fixture() {
       },
     }),
   };
+  let stored = {
+    size: '512', contentType: 'application/pdf', generation: '10', metageneration: '3',
+    metadata: { firebaseStorageDownloadTokens: 'OLD_SECRET', preserved: 'yes' },
+  };
   const file = {
-    getMetadata: jest.fn(async () => [{ size: '512', contentType: 'application/pdf', metadata: { firebaseStorageDownloadTokens: 'OLD_SECRET' } }]),
+    getMetadata: jest.fn(async () => [stored]),
+    setMetadata: jest.fn(async (patch, options) => {
+      if (Number(options?.ifMetagenerationMatch) !== Number(stored.metageneration)) {
+        throw Object.assign(new Error('stale metadata'), { code: 412 });
+      }
+      const metadata = { ...stored.metadata };
+      if (patch.metadata?.firebaseStorageDownloadTokens === null) {
+        delete metadata.firebaseStorageDownloadTokens;
+      }
+      stored = { ...stored, metageneration: String(Number(stored.metageneration) + 1), metadata };
+      return [stored];
+    }),
     getSignedUrl: jest.fn(async () => ['https://storage.test/signed?X-Goog-Expires=60']),
     generateSignedPostPolicyV4: jest.fn(async () => [{ url: 'https://storage.test/post', fields: { key: 'signed-key' } }]),
   };
@@ -50,6 +65,11 @@ test('server authorization checks conversation, current school profile, and acti
     'conversations/private', 'users/alice', 'schools/pu/members/alice',
   ]);
   expect(bucket.file).toHaveBeenCalledWith('conversations/private/media/one/file.pdf');
+  expect(file.setMetadata).toHaveBeenCalledWith(
+    { metadata: { firebaseStorageDownloadTokens: null } },
+    { ifMetagenerationMatch: 3 },
+  );
+  expect(file.getMetadata).toHaveBeenCalledTimes(2);
   expect(file.getSignedUrl).toHaveBeenCalledWith({
     version: 'v4', action: 'read', expires: 1234567000000 + MINUTE_MS,
   });
@@ -160,6 +180,41 @@ test('upload is refused after transfer, even before creating any policy', async 
   await expect(call({ action: 'upload', contentType: 'application/pdf', size: 300 }))
     .rejects.toMatchObject({ code: 'permission-denied' });
   expect(file.generateSignedPostPolicyV4).not.toHaveBeenCalled();
+});
+
+
+test('token-free legacy member can still read without modifying object metadata', async () => {
+  const { call, file } = fixture();
+  file.getMetadata.mockResolvedValueOnce([{
+    generation: '10', size: '512', contentType: 'application/pdf', metadata: { preserved: 'yes' },
+  }]);
+  await expect(call({}, 'bob')).resolves.toHaveProperty('url');
+  expect(file.setMetadata).not.toHaveBeenCalled();
+  expect(file.getSignedUrl).toHaveBeenCalledTimes(1);
+});
+
+test('GCS metadata race fails closed: no stale Firebase token can be exposed by a signed GET', async () => {
+  const { call, file } = fixture();
+  file.setMetadata.mockRejectedValueOnce(Object.assign(new Error('precondition failed'), { code: 412 }));
+  await expect(call()).rejects.toMatchObject({ code: 412 });
+  expect(file.getSignedUrl).not.toHaveBeenCalled();
+});
+
+test('GCS metadata deletion must be verified before an otherwise-authorized read', async () => {
+  const { call, file } = fixture();
+  file.setMetadata.mockImplementationOnce(async () => [{}]); // storage kept the old token
+  await expect(call()).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(file.getSignedUrl).not.toHaveBeenCalled();
+});
+
+test('object with download token but no metageneration cannot receive a signed read', async () => {
+  const { call, file } = fixture();
+  file.getMetadata.mockResolvedValueOnce([{
+    size: '512', contentType: 'application/pdf', metadata: { firebaseStorageDownloadTokens: 'OLD_SECRET' },
+  }]);
+  await expect(call()).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(file.setMetadata).not.toHaveBeenCalled();
+  expect(file.getSignedUrl).not.toHaveBeenCalled();
 });
 
 test('limits and paths match the existing legacy media storage model', () => {
