@@ -80,16 +80,14 @@ export async function fetchRecentCampusPosts(
   lim = 30,
 ): Promise<CampusPostDoc[]> {
   const db = getDb();
-  try {
-    const filters = boardId ? [where('boardId', '==', boardId)] : [];
-    const qb = query(postsCol(db, schoolId), ...filters, orderBy('createdAt', 'desc'), limit(lim));
-    const snap = await getDocs(qb);
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusPostDoc, 'id'>) }));
-  } catch {
-    const filters = boardId ? [where('boardId', '==', boardId)] : [];
-    const snap = await getDocs(query(postsCol(db, schoolId), ...filters, limit(Math.min(lim, 25))));
-    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CampusPostDoc, 'id'>) }));
-  }
+  const filters = boardId ? [where('boardId', '==', boardId)] : [];
+  const qb = query(postsCol(db, schoolId), ...filters, orderBy('createdAt', 'desc'), limit(lim));
+  // A successful page must reflect current server authorization and the requested
+  // ordered window. Cached or unordered fallback results can hide revoked access
+  // or turn a failed extension into a misleading end-of-feed result.
+  // Let the caller distinguish permission failures from retryable network/index errors.
+  const snap = await getDocsFromServer(qb);
+  return snap.docs.map((d) => ({ ...(d.data() as Omit<CampusPostDoc, 'id'>), id: d.id }));
 }
 
 export function rankFeedPosts(posts: CampusPostDoc[], topN = 40): CampusPostDoc[] {
