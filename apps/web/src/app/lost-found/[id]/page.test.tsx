@@ -83,6 +83,31 @@ beforeEach(() => {
   vi.mocked(resolveLostFoundItem).mockReset();
 });
 
+it('opens with the campus photo and waits for a click before connecting to an external host', async () => {
+  const detail = { ...owned, photos: [
+    { src: 'https://firebasestorage.googleapis.com/v0/b/campus.test/o/bag.jpg', host: 'firebasestorage.googleapis.com', campusHosted: true },
+    { src: 'https://photos.example/corner.jpg', host: 'photos.example', campusHosted: false },
+    { src: 'https://other.example/handle.jpg', host: 'other.example', campusHosted: false },
+  ] };
+  vi.mocked(getLostFoundItem).mockResolvedValueOnce(detail);
+  await renderDetail();
+  expect((await screen.findByRole('img')).getAttribute('src')).toBe(detail.photos[0].src);
+  fireEvent.click(screen.getByRole('button', { name: '下一張' }));
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByText('photos.example')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '載入外部照片' }));
+  const image = screen.getByRole('img');
+  expect(image.getAttribute('referrerpolicy')).toBe('no-referrer');
+  expect(image.getAttribute('src')).toBe(detail.photos[1].src);
+  fireEvent.error(image);
+  expect(screen.getByText('這張照片暫時無法顯示。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新載入照片' }));
+  expect(screen.getByRole('img').getAttribute('src')).toBe(detail.photos[1].src);
+  fireEvent.click(screen.getByRole('button', { name: '下一張' }));
+  expect(screen.queryByRole('img')).toBeNull();
+  expect(screen.getByText('other.example')).toBeTruthy();
+});
+
 it('shows owner edit and confirm-resolve, and confirms authoritative resolve receipt', async () => {
   await renderDetail();
   expect(await screen.findByText('黑色雨傘')).toBeTruthy();

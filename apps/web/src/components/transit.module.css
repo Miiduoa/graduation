@@ -683,9 +683,63 @@
 .arrivalList li > div { display: grid; gap: 4px; }
 .arrivalList .note { margin: 0; }
 .routeHeading { margin: 24px 0 12px; font-size: 15px; }
+.signHint, .signCaption { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .catalogRoutes { list-style: none; padding: 0; margin: 0; }
-.catalogRoutes li { display: grid; grid-template-columns: minmax(64px, .6fr) minmax(0, 1fr); gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border, #dae1dc); line-height: 1.6; overflow-wrap: anywhere; }
-.catalogRoutes li > span { color: var(--muted, #5f6d68); font-size: 14px; }
+.catalogRoutes li { border-bottom: 1px solid var(--border); }
+.catalogRoutes button {
+  display: grid;
+  grid-template-columns: fit-content(36%) 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 4px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.catalogRoutes button:hover { background: var(--panel); }
+.catalogRoutes button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -3px; }
+.catalogRoutes strong {
+  min-width: min(3.5em, 100%);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--brand);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.catalogRoutes button > span { line-height: 1.5; font-size: 14px; }
+.catalogRoutes svg { color: var(--muted); }
+.destinationSign {
+  color: #ffd079;
+  background: #161c1b;
+  border: 2px solid #404b47;
+  border-radius: 10px;
+  padding: clamp(16px, 4vw, 32px);
+  overflow-wrap: anywhere;
+}
+.signHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #52605a;
+  color: #e1e8df;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.signHeader > span:first-child { display: flex; align-items: center; gap: 8px; }
+.signHeader svg, .signHeader > span:last-child { flex-shrink: 0; }
+.signNumber { display: block; margin: 20px 0 8px; font-size: clamp(38px, 10vw, 72px); line-height: 1.15; font-weight: 750; font-variant-numeric: tabular-nums; }
+.signDestination { margin: 0; font-size: clamp(24px, 6vw, 38px); line-height: 1.35; font-weight: 650; }
+.signDestination > span { margin-inline-end: .5em; font-size: .55em; }
+.signCaption { margin: 12px 0 0; }
 .message a, .note a { text-decoration: underline !important; text-underline-offset: 3px; }
 .route { font-size: 20px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .campusNext { min-width: 0; padding: 24px; }

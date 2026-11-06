@@ -31,6 +31,7 @@ import {
 import { replaceServiceListQuery, type ServiceListSearchParams } from '@/lib/serviceListNavigation';
 import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { LostFoundThumbnail } from '@/components/lost-found/LostFoundPhotos';
 import styles from '@/components/lost-found/LostFound.module.css';
 
 /** Bound DOM rows; filters still run over the complete loaded collection. */
@@ -302,8 +303,10 @@ function LostFoundPageContent({
                       <h2>
                         <Link
                           className={styles.link}
+                          aria-label={item.title}
                           href={`/lost-found/${encodeURIComponent(item.id)}?${listQuery}`}
                         >
+                          {item.photos?.length ? <LostFoundThumbnail photos={item.photos} /> : null}
                           {item.title}
                         </Link>
                       </h2>
