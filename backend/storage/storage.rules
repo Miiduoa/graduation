@@ -268,7 +268,9 @@ service firebase.storage {
       allow get: if isAuthenticated() && resource.metadata.get('ownerUid', '') == request.auth.uid
         && activeStoryMember() && currentUploader();
       // Draft uploads may be retried until their Firestore story is published.
-      allow create, update: if activeStoryMember()
+      // A still-active record at the previous school cannot authorize new drafts.
+      // Check the current profile on writes too, not only on raw object reads.
+      allow create, update: if activeStoryMember() && currentUploader()
         && request.resource.metadata.ownerUid == request.auth.uid
         && (resource == null || resource.metadata.ownerUid == request.auth.uid)
         && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
