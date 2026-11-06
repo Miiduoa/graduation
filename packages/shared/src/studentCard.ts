@@ -60,5 +60,5 @@ export function getStudentCardService(
 
 export const STUDENT_CARD_TTL_MS = 60_000;
 export function isStudentCardToken(value: unknown): value is string {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{32}$/.test(value);
+  return typeof value === 'string' && value.length === 32 && /^[A-Za-z0-9_-]{32}$/.test(value);
 }

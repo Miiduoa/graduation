@@ -31,6 +31,12 @@ import {
   type StudentCardCode,
 } from '../services/studentCard';
 import { isDemoUid } from '../services/demoSession';
+import {
+  beginStudentCardNfcPresentation,
+  getStudentCardNfcCapabilities,
+  StudentCardNfcError,
+} from '../services/studentCardNfc';
+import { StudentCardNfc } from '../components/StudentCardNfc';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
@@ -52,14 +58,11 @@ function Action({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [s.button, secondary && s.secondary, pressed && s.pressed]}
     >
-      <Ionicons
-        name={icon}
-        size={20}
-        color={secondary ? theme.colors.text : '#FFFFFF'}
-      />
+      <Ionicons name={icon} size={20} color={secondary ? theme.colors.text : '#FFFFFF'} />
       <Text style={[s.buttonText, secondary && s.secondaryText]}>{label}</Text>
     </Pressable>
   );
@@ -70,22 +73,43 @@ function Presentation({
   schoolId,
   schoolName,
   studentId,
-  requestCode,
+  mode,
   onClose,
 }: {
   user: User;
   schoolId: string;
   schoolName: string;
   studentId: string;
-  requestCode: boolean;
+  mode: 'number' | 'code' | 'nfc';
   onClose: () => void;
 }) {
   const { width } = useWindowDimensions();
   const [code, setCode] = useState<StudentCardCode | null>(null);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now);
+  const [transport, setTransport] = useState<'qr' | 'nfc'>(mode === 'nfc' ? 'nfc' : 'qr');
+  const [canPresentNfc, setCanPresentNfc] = useState(mode === 'nfc');
+  const [nfcReady, setNfcReady] = useState(false);
+  const [nfcError, setNfcError] = useState('');
+  const [shown, setShown] = useState(false);
+  const [nfcAttempt, setNfcAttempt] = useState(0);
   const openedAt = useRef(now);
   const s = useThemeStyleSheet(createStyles);
+  const requestCode = mode !== 'number';
+  useEffect(() => {
+    if (!requestCode) return;
+    let mounted = true;
+    void getStudentCardNfcCapabilities()
+      .then((capability) => {
+        if (mounted) setCanPresentNfc(capability.canPresent && capability.enabled);
+      })
+      .catch(() => {
+        if (mounted) setCanPresentNfc(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [requestCode]);
   useEffect(() => {
     if (!requestCode) return;
     const controller = new AbortController();
@@ -114,6 +138,37 @@ function Presentation({
     };
   }, [requestCode, schoolId, user]);
 
+  useEffect(() => {
+    if (!shown || transport !== 'nfc' || !code) return;
+    const controller = new AbortController();
+    setNfcReady(false);
+    setNfcError('');
+    const frame = requestAnimationFrame(() => {
+      void beginStudentCardNfcPresentation(code, controller.signal, () => {
+        if (!controller.signal.aborted) {
+          controller.abort();
+          setNfcReady(false);
+          setNfcError('感應已停止，請重新開啟或使用 QR Code。');
+        }
+      })
+        .then(() => {
+          if (!controller.signal.aborted) setNfcReady(true);
+        })
+        .catch((reason: unknown) => {
+          if (!controller.signal.aborted)
+            setNfcError(
+              reason instanceof StudentCardNfcError
+                ? reason.message
+                : '無法開啟感應，請改用 QR Code。',
+            );
+        });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      controller.abort();
+    };
+  }, [code, transport, shown, nfcAttempt]);
+
   const endsAt = code?.expiresAt ?? openedAt.current + STUDENT_CARD_TTL_MS;
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 500);
@@ -126,13 +181,20 @@ function Presentation({
   const seconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
   const visibleCode = requestCode && seconds > 0 ? code : null;
   return (
-    <Modal visible onRequestClose={onClose} animationType="none" presentationStyle="fullScreen">
+    <Modal
+      visible
+      onRequestClose={onClose}
+      onShow={() => setShown(true)}
+      testID="student-card-presentation"
+      animationType="none"
+      presentationStyle="fullScreen"
+    >
       <SafeAreaView style={s.presentation} accessibilityViewIsModal>
         <ScrollView contentContainerStyle={s.sheet}>
           <Text style={s.sheetBrand}>CAMPUS ONE</Text>
           <Text style={s.sheetSchool}>{schoolName}</Text>
           <Text accessibilityRole="header" style={s.sheetTitle}>
-            {requestCode ? '學號驗證碼' : '出示學號'}
+            {requestCode ? (transport === 'nfc' ? 'NFC 感應出示' : '學號驗證碼') : '出示學號'}
           </Text>
           {requestCode && !code && !error && (
             <ActivityIndicator accessibilityLabel="正在取得驗證碼" color="#183F36" />
@@ -142,7 +204,7 @@ function Presentation({
               {error}
             </Text>
           ) : null}
-          {visibleCode ? (
+          {visibleCode && transport === 'qr' ? (
             <View accessible accessibilityLabel="供對方掃描的限時學號驗證碼" style={s.qr}>
               <QRCode
                 value={`https://nuni.tw/student-card/verify#${visibleCode.token}`}
@@ -153,16 +215,71 @@ function Presentation({
               />
             </View>
           ) : null}
+          {visibleCode && transport === 'nfc' && (
+            <View style={s.nfcPresentation}>
+              <View style={s.nfcRing} accessible={false}>
+                <Ionicons name="radio-outline" size={54} color="#183F36" />
+              </View>
+              <Text accessibilityLiveRegion="polite" style={s.nfcTitle}>
+                {nfcError ? '感應尚未開啟' : nfcReady ? '靠近對方手機' : '正在開啟感應…'}
+              </Text>
+              <Text accessibilityRole={nfcError ? 'alert' : undefined} style={s.sheetNote}>
+                {nfcError || '請對方在 nuni 開啟「感應核對」，再靠近這支手機背面。'}
+              </Text>
+              {!nfcReady && !nfcError && (
+                <ActivityIndicator color="#183F36" accessibilityLabel="正在開啟感應" />
+              )}
+              {nfcReady && <Text style={s.nfcStatus}>感應出示已開啟</Text>}
+              {nfcError && (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setNfcAttempt((value) => value + 1)}
+                  style={s.retryNfc}
+                >
+                  <Text style={s.transportText}>重新開啟感應</Text>
+                </Pressable>
+              )}
+            </View>
+          )}
           {(!requestCode || visibleCode) && (
             <>
               <Text style={s.number}>{code?.studentId ?? studentId}</Text>
               <Text style={s.sheetNote}>
                 {requestCode
-                  ? '請對方掃描並核對學號末碼。每組驗證碼限用一次。'
+                  ? transport === 'nfc'
+                    ? '請以對方手機顯示的核對結果為準。'
+                    : '請對方掃描並核對學號末碼。每組驗證碼限用一次。'
                   : '個人檔案學號 · 未經校方核驗'}
               </Text>
               <Text style={s.countdown}>{seconds} 秒後收起</Text>
+              {requestCode && (
+                <View style={s.expiryTrack} accessible={false}>
+                  <View
+                    style={[s.expiryProgress, { width: `${Math.min(100, (seconds / 60) * 100)}%` }]}
+                  />
+                </View>
+              )}
             </>
+          )}
+          {visibleCode && (canPresentNfc || transport === 'nfc') && (
+            <View style={s.transports} accessibilityRole="tablist">
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: transport === 'nfc' }}
+                onPress={() => setTransport('nfc')}
+                style={[s.transport, transport === 'nfc' && s.transportSelected]}
+              >
+                <Text style={s.transportText}>NFC 感應</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: transport === 'qr' }}
+                onPress={() => setTransport('qr')}
+                style={[s.transport, transport === 'qr' && s.transportSelected]}
+              >
+                <Text style={s.transportText}>QR Code</Text>
+              </Pressable>
+            </View>
           )}
         </ScrollView>
         <Pressable accessibilityRole="button" onPress={onClose} style={s.close}>
@@ -193,14 +310,15 @@ export default function StudentCardScreen() {
     toPublicSchoolId(school.id) !== schoolId
   )
     issue = '請切回帳號所屬的學校，再開啟學生證。';
+  if (!focused) return null;
   if (issue || !user || !profile || !schoolId)
     return (
       <ScrollView style={s.page} contentContainerStyle={s.content}>
         <Text style={s.body}>{issue}</Text>
+        {ready && <StudentCardNfc key={JSON.stringify([user?.uid, schoolId])} />}
         {ready && schoolId && <OfficialService key={schoolId} schoolId={schoolId} />}
       </ScrollView>
     );
-  if (!focused) return null;
   return (
     <Wallet
       key={JSON.stringify([user.uid, school.id, profile.studentId])}
@@ -225,16 +343,14 @@ function Wallet({
 }) {
   const s = useThemeStyleSheet(createStyles);
   const bottom = useTabBarContentBottomPadding();
-  const [show, setShow] = useState<'number' | 'code' | null>(null);
+  const [show, setShow] = useState<'number' | 'code' | 'nfc' | null>(null);
   const close = React.useCallback(() => setShow(null), []);
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') close();
     });
-    const blur = AppState.addEventListener('blur', close);
     return () => {
       sub.remove();
-      blur.remove();
     };
   }, [close]);
   const studentId = profile.studentId?.trim() ?? '';
@@ -280,6 +396,7 @@ function Wallet({
           />
         ) : null}
       </View>
+      <StudentCardNfc onPresent={demo ? undefined : () => setShow('nfc')} />
       <OfficialService schoolId={schoolId} />
       {show && (
         <Presentation
@@ -287,7 +404,7 @@ function Wallet({
           schoolId={schoolId}
           schoolName={schoolName}
           studentId={studentId}
-          requestCode={show === 'code'}
+          mode={show}
           onClose={close}
         />
       )}
@@ -396,6 +513,63 @@ const createStyles = () =>
     },
     sheetNote: { color: '#40574D', fontSize: 15, textAlign: 'center' },
     countdown: { color: '#40574D', fontSize: 14, fontVariant: ['tabular-nums'] },
+    expiryTrack: {
+      width: 120,
+      height: 3,
+      backgroundColor: '#D8E3D8',
+      borderRadius: 2,
+      overflow: 'hidden',
+    },
+    expiryProgress: { height: '100%', backgroundColor: '#416557' },
+    nfcPresentation: { alignItems: 'center', gap: 18, paddingVertical: 12 },
+    nfcRing: {
+      width: 128,
+      height: 128,
+      borderRadius: 64,
+      borderWidth: 1,
+      borderColor: '#CBDCCF',
+      backgroundColor: '#E8EFE5',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    nfcTitle: { color: '#102D24', fontSize: 26, fontWeight: '700', textAlign: 'center' },
+    nfcStatus: {
+      color: '#183F36',
+      fontSize: 13,
+      fontWeight: '600',
+      backgroundColor: '#DBE8DC',
+      borderRadius: 20,
+      paddingVertical: 7,
+      paddingHorizontal: 14,
+    },
+    retryNfc: {
+      minHeight: 44,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#BACDBF',
+    },
+    transports: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+      padding: 4,
+      borderRadius: 14,
+      backgroundColor: '#E3EAE0',
+      marginTop: 8,
+    },
+    transport: {
+      minHeight: 44,
+      minWidth: 108,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 11,
+    },
+    transportSelected: { backgroundColor: '#FFFFFF' },
+    transportText: { color: '#183F36', fontWeight: '600', fontSize: 14 },
     close: {
       backgroundColor: '#163D34',
       minHeight: 50,
