@@ -12,7 +12,6 @@ import { useNuniSession } from '@/features/nuni/Session';
 import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
 import {
-  accountReturnHref,
   adminLoginHref,
   currentPageReturnPath,
   OPEN_SCHOOL_REASON,
@@ -144,7 +143,7 @@ function SchoolReviewContent({ context }: { context: string }) {
       );
       if (!isCurrent()) return;
       if (pending.status === 401) {
-        window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
+        window.location.replace(adminLoginHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (pending.status === 403) {
@@ -160,7 +159,7 @@ function SchoolReviewContent({ context }: { context: string }) {
       const ops = await adminFetch('schools', 'GET', undefined, context);
       if (!isCurrent()) return;
       if (ops.status === 401) {
-        window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
+        window.location.replace(adminLoginHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (ops.status === 403) {
@@ -211,7 +210,7 @@ function SchoolReviewContent({ context }: { context: string }) {
       );
       if (!isCurrent()) return;
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
+        window.location.replace(adminLoginHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (!result.ok) throw new Error('審核沒有完成，請稍後再試。');
@@ -245,7 +244,7 @@ function SchoolReviewContent({ context }: { context: string }) {
       );
       if (!isCurrent()) return;
       if (response.status === 401) {
-        window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
+        window.location.replace(adminLoginHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (!response.ok) throw new Error('目前無法確認校方管理員。');
@@ -283,7 +282,7 @@ function SchoolReviewContent({ context }: { context: string }) {
       );
       if (!isCurrent()) return;
       if (check.status === 401) {
-        window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
+        window.location.replace(adminLoginHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (!check.ok) throw new Error('校方管理員資料無法重新確認，尚未開通。');
@@ -303,7 +302,7 @@ function SchoolReviewContent({ context }: { context: string }) {
       );
       if (!isCurrent()) return;
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(SCHOOL_REVIEW_PATH));
+        window.location.replace(adminLoginHref(SCHOOL_REVIEW_PATH));
         return;
       }
       if (!result.ok) throw new Error('開放沒有完成，請稍後再試。');

@@ -15,6 +15,8 @@ export function platformDestination(value?: string | null): string {
       '/settings',
       '/social',
       '/classroom',
+      '/auth/platform/class-workspace/join',
+      '/auth/platform/class-workspace/new',
       '/classroom/account',
       '/classroom/grades',
       '/admin',

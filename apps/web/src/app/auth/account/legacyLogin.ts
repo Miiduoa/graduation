@@ -62,6 +62,8 @@ const ALLOWED_RETURN_PATHS = new Set([
   '/map',
   '/me',
   '/merchant',
+  '/merchant/apply',
+  '/merchant/workspace',
   '/messages',
   '/orders',
   '/privacy',
@@ -531,11 +533,13 @@ async function readSessionAt(path: string): Promise<boolean> {
   return sessionLooksSignedIn(await readJson(response));
 }
 
-export async function readExistingSession(): Promise<boolean> {
-  try {
-    if (await readSessionAt('/api/nuni/session')) return true;
-  } catch {
-    // School-issued sessions still live on the old /auth/session endpoint.
+export async function readExistingSession(schoolOnly = false): Promise<boolean> {
+  if (!schoolOnly) {
+    try {
+      if (await readSessionAt('/api/nuni/session')) return true;
+    } catch {
+      // School-issued sessions still live on the old /auth/session endpoint.
+    }
   }
   try {
     return await readSessionAt('/auth/session');

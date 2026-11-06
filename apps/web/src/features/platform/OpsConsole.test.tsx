@@ -1044,7 +1044,7 @@ it.each(extraOperations)(
     await submitReview(button);
     await waitFor(() =>
       expect(replace).toHaveBeenCalledWith(
-        `/auth/account?returnUrl=${encodeURIComponent(`/admin/ops?tab=${tab}`)}`,
+        `/admin/login?returnUrl=${encodeURIComponent(`/admin/ops?tab=${tab}`)}`,
       ),
     );
   },

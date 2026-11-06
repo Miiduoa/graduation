@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
+import MerchantApplyPage from '@/app/merchant/apply/page';
+import MerchantLocationsPage from '@/app/merchant/workspace/page';
 import { MerchantWorkspace } from './MerchantWorkspace';
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     pendingLogout: false,
     error: '',
     refresh: vi.fn(),
+    logout: vi.fn(),
   },
   request: vi.fn(),
 }));
@@ -67,7 +70,7 @@ beforeEach(() => {
   mocks.request.mockImplementation(respond);
 });
 async function fillApplication() {
-  await screen.findByText('你還沒有送出進駐申請。');
+  await screen.findByLabelText('申請場域');
   fireEvent.change(screen.getByLabelText('申請場域'), { target: { value: 'campus-one' } });
   fireEvent.change(screen.getByLabelText('校區／營運區域'), { target: { value: 'main-campus' } });
   const fields = {
@@ -90,6 +93,44 @@ it('returns new and existing accounts to the merchant task without self-assignin
   );
   expect(mocks.request).not.toHaveBeenCalled();
 });
+it.each([
+  [MerchantApplyPage, '/merchant/apply'],
+  [MerchantLocationsPage, '/merchant/workspace'],
+] as const)('preserves the selected merchant page when sign-in is required', (Page, path) => {
+  mocks.auth.session = null;
+  render(<Page />);
+  expect(screen.getByRole('link', { name: '登入或建立帳號' }).getAttribute('href')).toBe(
+    `/login?returnUrl=${encodeURIComponent(path)}`,
+  );
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it('lets a new applicant submit without a workspace and continue to their receipt', async () => {
+  render(<MerchantApplyPage />);
+  await fillApplication();
+  expect(mocks.request.mock.calls.map(([path]) => path)).toEqual(['merchant-onboarding-programs']);
+  fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
+  const receipt = await screen.findByRole('link', { name: '查看收件進度' });
+  expect(receipt.getAttribute('href')).toBe('/merchant/workspace');
+  expect(screen.queryByRole('button', { name: '送出進駐申請' })).toBeNull();
+});
+
+it('shows existing applications independently of open enrollment and offers account recovery', async () => {
+  mocks.request.mockImplementation((path) => {
+    if (path === 'merchant-applications') return Promise.resolve({ applications: [application] });
+    if (path === 'merchant-workspaces') return Promise.resolve({ workspaces: [] });
+    throw new Error('Enrollment unavailable');
+  });
+  render(<MerchantLocationsPage />);
+  await screen.findByRole('heading', { name: '測試餐坊／學生餐廳' });
+  expect(screen.queryByLabelText('申請場域')).toBeNull();
+  expect(screen.getByRole('link', { name: '申請新門市' }).getAttribute('href')).toBe(
+    '/merchant/apply',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '登出並切換店家帳號' }));
+  expect(mocks.auth.logout).toHaveBeenCalledOnce();
+});
+
 it('submits only the applicant information and displays the confirmed receipt', async () => {
   render(<MerchantWorkspace />);
   await fillApplication();
