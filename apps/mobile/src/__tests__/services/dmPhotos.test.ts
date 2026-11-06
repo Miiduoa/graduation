@@ -1,5 +1,6 @@
 import { confirmDmPhoto, localPhoto, openDmPhoto, uploadDmPhoto } from '../../services/dmPhotos';
 import { httpsCallable } from 'firebase/functions';
+import { Request as NativeFetchRequest } from 'whatwg-fetch';
 
 let mockUid = 'alice';
 let mockFileSize = 21;
@@ -27,7 +28,7 @@ const scope = {
 const path = 'conversations/private/photos/media/photo.png';
 const published = path.replace('photo.png', 'sent.png');
 const local = { uri: 'file:///photo.png', contentType: 'image/png', size: 21 };
-const signedUrl = 'https://storage.googleapis.com/bucket/' + published + '?X-Goog-Signature=1';
+const signedUrl = 'https://storage.googleapis.com/bucket/' + published + '?generation=123&X-Goog-Signature=1';
 const expiresAt = () => new Date(Date.now() + 60_000).toISOString();
 const signal = () => new AbortController().signal;
 const original = global.fetch;
@@ -107,7 +108,7 @@ test.each([
   await expect(openDmPhoto(scope, published, signal())).rejects.toThrow();
   expect(fetch).not.toHaveBeenCalled();
 });
-test('asks for fresh message-bound access and downloads bytes without storing the signed link', async () => {
+test('asks for message-bound access and downloads in-memory bytes with the native signed URL unchanged', async () => {
   const expires = expiresAt();
   mockCall.mockResolvedValueOnce({ data: { url: signedUrl, expiresAt: expires } });
   (fetch as jest.Mock).mockResolvedValueOnce({
@@ -122,7 +123,9 @@ test('asks for fresh message-bound access and downloads bytes without storing th
     mediaId: 'media',
     fileName: 'sent.png',
   });
-  expect(fetch).toHaveBeenCalledWith(signedUrl, expect.objectContaining({ cache: 'no-store' }));
+  expect(fetch).toHaveBeenCalledWith(signedUrl, expect.objectContaining({ headers: { 'Cache-Control': 'no-store' } }));
+  const [url, init] = jest.mocked(fetch).mock.calls[0];
+  expect(new NativeFetchRequest(url, init).url).toBe(signedUrl);
   expect(photo).toEqual({ uri: 'data:image/png;base64,UE5H', expiresAt: Date.parse(expires) });
 });
 test('account changes, aborted requests and expired grants are denied before fetching', async () => {

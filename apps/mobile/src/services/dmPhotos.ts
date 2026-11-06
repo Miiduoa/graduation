@@ -162,9 +162,9 @@ export async function openDmPhoto(scope: PhotoScope, path: string, signal: Abort
     throw new Error('photo-read');
   const result = await fetch(data.url, {
     signal,
-    cache: 'no-store',
     credentials: 'omit',
     redirect: 'error',
+    // Native fetch's cache option appends a query parameter, invalidating the GCS signature.
     headers: { 'Cache-Control': 'no-store' },
   });
   if (!result.ok) throw new Error('photo-download');

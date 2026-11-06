@@ -406,9 +406,17 @@ const published = staged.replace('photo.png', 'sent.png');
 function photoChat(conversationId = photoConvo) {
   return <ChatScreen route={{ params: { conversationId, peerId: 'bob' } }} navigation={{ setOptions: jest.fn() }} />;
 }
-function verifyPhotoChat(fromCache = false, hasPendingWrites = false) {
+function verifyPhotoChat(
+  fromCache = false,
+  hasPendingWrites = false,
+  data: Record<string, unknown> = {},
+) {
   const handler = mockSnapshotHandlers.get(`conversations/${photoConvo}`);
-  act(() => handler({ exists: () => true, metadata: { fromCache, hasPendingWrites }, data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }) }));
+  act(() => handler({
+    exists: () => true,
+    metadata: { fromCache, hasPendingWrites },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'], ...data }),
+  }));
 }
 function pickPhoto() {
   jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValue({
@@ -441,7 +449,9 @@ test('local preview is removable and retries reuse one upload and the same messa
   await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
   await act(async () => fireEvent.press(view.getByText('傳送照片')));
   expect(view.getByText('尚未確認送達，照片已保留。')).toBeTruthy();
-  await act(async () => fireEvent.press(view.getByText('重新傳送照片')));
+  await act(async () => {
+    fireEvent.press(view.getByText('重新傳送照片'));
+  });
   expect(view.getByText('照片傳送中…')).toBeTruthy();
   expect(view.queryByText('照片已傳送')).toBeNull();
   expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
@@ -449,6 +459,59 @@ test('local preview is removable and retries reuse one upload and the same messa
   expect(jest.mocked(Photos.confirmDmPhoto).mock.calls.map(args => args.slice(0, 2))).toEqual([[scope, staged], [scope, staged]]);
   await act(async () => ack());
   expect(view.getByText('照片已傳送')).toBeTruthy();
+  expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
+});
+
+test('pending typing and presence writes preserve a verified photo draft and in-flight send', async () => {
+  pickPhoto();
+  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
+  let ack!: () => void;
+  jest.mocked(Photos.confirmDmPhoto).mockReset().mockImplementation(() => new Promise(done => { ack = done; }));
+  const view = render(photoChat());
+  verifyPhotoChat();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('加入照片'));
+  });
+  fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '搭配照片的文字');
+  verifyPhotoChat(false, true, { typingUsers: { alice: { seconds: 12 } } });
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(view.getByDisplayValue('搭配照片的文字')).toBeTruthy();
+  verifyPhotoChat();
+  await act(async () => {
+    fireEvent.press(view.getByText('傳送照片'));
+  });
+  verifyPhotoChat(false, true, {
+    onlineUsers: { alice: { seconds: 20 } },
+    lastReadBy: { alice: { seconds: 20 } },
+  });
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(view.getByText('照片傳送中…')).toBeTruthy();
+  expect(jest.mocked(Photos.uploadDmPhoto).mock.calls[0][2].aborted).toBe(false);
+  verifyPhotoChat();
+  await act(async () => ack());
+  expect(view.getByText('照片已傳送')).toBeTruthy();
+  expect(view.getByDisplayValue('搭配照片的文字')).toBeTruthy();
+  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  { name: 'pending member change', fromCache: false, hasPendingWrites: true, data: { memberIds: ['alice', 'charlie'] } },
+  { name: 'cache-only snapshot', fromCache: true, hasPendingWrites: false, data: {} },
+])('$name clears a photo draft and requires fresh server confirmation', async ({ fromCache, hasPendingWrites, data }) => {
+  pickPhoto();
+  const view = render(photoChat());
+  verifyPhotoChat();
+  await act(async () => {
+    fireEvent.press(view.getByLabelText('加入照片'));
+  });
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  verifyPhotoChat(fromCache, hasPendingWrites, data);
+  expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  verifyPhotoChat(false, true);
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  verifyPhotoChat();
+  expect(view.getByLabelText('加入照片')).toBeTruthy();
   expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
 });
 
@@ -461,7 +524,9 @@ test.each(['account', 'school', 'thread'])('switching %s discards a private draf
   expect(view.queryByLabelText('加入照片')).toBeNull();
   verifyPhotoChat();
   await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
-  await act(async () => fireEvent.press(view.getByText('傳送照片')));
+  await act(async () => {
+    fireEvent.press(view.getByText('傳送照片'));
+  });
   if (kind === 'account') mockViewer = 'other';
   if (kind === 'school') mockSchool = 'another';
   view.rerender(photoChat(kind === 'thread' ? 'other-thread' : photoConvo));
