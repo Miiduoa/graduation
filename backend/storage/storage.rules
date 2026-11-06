@@ -223,8 +223,12 @@ service firebase.storage {
     }
 
     match /conversations/{conversationId}/messages/{messageId}/{fileName} {
-      allow read: if conversationMember(conversationId);
-      allow write: if conversationMember(conversationId) && isAllowedUpload() && maxSize(20);
+      // Direct SDK reads/writes require three distinct Firestore documents and
+      // exceed the production Storage Rules cap of TWO. Even an active member
+      // must use dmAttachmentDelivery (server-side authorization per request).
+      // Denying SDK metadata access also prevents issuing NEW Firebase tokens.
+      // Pre-existing download URLs remain valid until separately revoked.
+      allow read, write: if false;
     }
 
     match /bugreports/{reportId}/{fileName} {
@@ -280,8 +284,9 @@ service firebase.storage {
     }
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {
-      allow read: if conversationMember(conversationId);
-      allow write: if conversationMember(conversationId) && campusMediaOk();
+      // GCS V4 POST and one-minute signed GET are issued only by the
+      // authenticated dmAttachmentDelivery callable, not Storage SDK rules.
+      allow read, write: if false;
     }
 
     match /{allPaths=**} {
