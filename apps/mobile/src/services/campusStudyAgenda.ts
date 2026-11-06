@@ -1,3 +1,5 @@
+import { inspectCampusClockAvailability } from './campusClockAvailability';
+
 /** Pure, read-only calendar calculations over context already verified by the caller. */
 export interface AgendaCourse {
   name: string;
@@ -22,12 +24,20 @@ export interface AgendaDeadline extends AgendaAssignment {
   timeLabel: string;
   overdue: boolean;
 }
+export interface AgendaScheduledClass {
+  name: string;
+  room: string;
+  startAt: string;
+  endAt: string;
+}
 export interface CampusAgendaDay {
   date: string;
   label: string;
   courses: AgendaCourse[];
   gaps: PeriodInterval[];
   conflicts: PeriodInterval[];
+  /** Dated clock occurrences. An empty array means a known day without saved meetings; absence keeps the period format. */
+  scheduledClasses?: AgendaScheduledClass[];
   deadlines: AgendaDeadline[];
 }
 export interface CampusStudyAgenda {
@@ -169,16 +179,70 @@ export function buildCampusStudyAgenda(input: {
   };
 }
 
+const scheduledTime = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
+
+/** Preserve the full occurrence across midnight instead of turning clock times into period numbers. */
+export function scheduledClassTimeLabel<T extends Pick<AgendaScheduledClass, 'startAt' | 'endAt'>>(course: T, dayDate: string): string {
+  const start = confirmedTimestamp(course.startAt);
+  const end = confirmedTimestamp(course.endAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > DAY_MS) return '時間未確認';
+  const endpoint = (value: number) => {
+    const parts = scheduledTime.formatToParts(new Date(value));
+    const part = (name: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === name)?.value ?? '';
+    const year = part('year').padStart(4, '0');
+    const month = part('month');
+    const day = part('day');
+    const fraction = new Date(value).getUTCMilliseconds();
+    const seconds = part('second') !== '00' || fraction ? ':' + part('second') : '';
+    return {
+      date: year + '-' + month + '-' + day,
+      year,
+      monthDay: Number(month) + '/' + Number(day),
+      time: part('hour') + ':' + part('minute') + seconds + (fraction ? '.' + String(fraction).padStart(3, '0') : ''),
+    };
+  };
+  const first = endpoint(start);
+  const last = endpoint(end);
+  const includeDate = first.date !== dayDate || last.date !== dayDate;
+  const includeYear = first.year !== last.year || first.year !== dayDate.slice(0, 4);
+  const label = (value: ReturnType<typeof endpoint>) =>
+    (includeDate ? (includeYear ? value.year + '/' : '') + value.monthDay + ' ' : '') + value.time;
+  return label(first) + '–' + label(last);
+}
+
 export function formatCampusStudyAgenda(agenda: CampusStudyAgenda): string[] {
   return agenda.days.map((day) => {
+    const scheduled = day.scheduledClasses;
+    const availability = scheduled === undefined ? undefined : inspectCampusClockAvailability(
+      agenda.timetableAvailable && agenda.ignoredCourses === 0 ? scheduled : null, day.date,
+    );
     const classes = !agenda.timetableAvailable ? '課表來源不可用'
-      : day.courses.length ? day.courses.map((course) => course.name + '（' + periodLabel(course) + '）').join('、')
+      : scheduled !== undefined ? scheduled.length
+        ? scheduled.map((course) => course.name + '（' + scheduledClassTimeLabel(course, day.date) + '）').join('、')
+        : '課表副本未排課，並非已確認空閒'
+        : day.courses.length ? day.courses.map((course) => course.name + '（' + periodLabel(course) + '）').join('、')
       : '課表副本未排課，並非已確認空閒';
     const tasks = !agenda.assignmentsAvailable ? '作業來源不可用'
       : day.deadlines.length ? day.deadlines.map((item) => item.title + ' ' + item.timeLabel + ' 截止' + (item.overdue ? '（期限已過，需核對）' : '')).join('、')
       : '已同步摘要未列出當日截止作業';
+    const clockNotes: string[] = [];
+    if (availability && agenda.timetableAvailable) {
+      if (!availability.valid) {
+        clockNotes.push('鐘點課表無法完整核對，暫不推算課間時段或重疊。');
+      } else {
+        if (availability.conflicts.length) clockNotes.push('課表重疊：' +
+          availability.conflicts.map((interval) => scheduledClassTimeLabel(interval, day.date)).join('、') + '，請先核對正式課表');
+        if (availability.gaps.length) clockNotes.push('課間時段（依保存課表）：' +
+          availability.gaps.map((interval) => scheduledClassTimeLabel(interval, day.date)).join('、') + '（尚未排除私人行程與通勤）');
+        else if (scheduled?.length) clockNotes.push('已保存課程之間沒有可列出的課間時段。');
+      }
+    }
     return day.label + '：' + classes + '；' + tasks +
-      (day.gaps.length ? '；副本課間空堂：' + day.gaps.map(periodLabel).join('、') : '') +
-      (day.conflicts.length ? '；課表重疊：' + day.conflicts.map(periodLabel).join('、') : '');
+      (clockNotes.length ? '；' + clockNotes.join('；') : '') +
+      (scheduled === undefined && day.gaps.length ? '；副本課間空堂：' + day.gaps.map(periodLabel).join('、') : '') +
+      (scheduled === undefined && day.conflicts.length ? '；課表重疊：' + day.conflicts.map(periodLabel).join('、') : '');
   });
 }

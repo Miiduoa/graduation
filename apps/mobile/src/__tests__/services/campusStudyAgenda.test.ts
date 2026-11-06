@@ -1,6 +1,6 @@
 import {
   buildCampusStudyAgenda, formatCampusStudyAgenda, inspectCoursePeriods,
-  resolveStudyWindow, type AgendaCourse,
+  resolveStudyWindow, scheduledClassTimeLabel, type AgendaCourse, type AgendaScheduledClass, type CampusStudyAgenda,
 } from '../../services/campusStudyAgenda';
 import { buildOfflineCampusPlan } from '../../services/offlineCampusPlanner';
 import type { OnDeviceSchoolContext } from '../../services/onDeviceSchoolContext';
@@ -26,6 +26,17 @@ const snapshot: CampusSenseSnapshot = {
 function agenda(question = '未來七天') {
   return buildCampusStudyAgenda({ window: resolveStudyWindow(question, now)!, now,
     courses: context.timetable.courses, assignments: snapshot.assignments.items });
+}
+
+const clockClass = (name: string, start: string, end: string): AgendaScheduledClass => ({
+  name, room: '', startAt: '2026-11-08T' + start + '+08:00', endAt: '2026-11-08T' + end + '+08:00',
+});
+function clockAgenda(classes: AgendaScheduledClass[]): CampusStudyAgenda {
+  const sunday = Date.parse('2026-11-08T00:00:00+08:00');
+  const result = buildCampusStudyAgenda({ window: resolveStudyWindow('未來七天', sunday)!, now: sunday, courses: [], assignments: null });
+  for (const day of result.days) day.scheduledClasses = [];
+  result.days[0].scheduledClasses = classes;
+  return result;
 }
 
 test('retains all seven calendar dates and more than the first day with classes', () => {
@@ -149,6 +160,91 @@ test('rejects invalid or unbounded calendar windows', () => {
   expect(resolveStudyWindow('本週', NaN)).toBeNull();
   expect(() => buildCampusStudyAgenda({ window: { startDay: 0, endDay: 1000, title: '' }, now, courses: [], assignments: [] }))
     .toThrow('Invalid study window');
+});
+
+test('dated Sunday and overnight meetings keep their full times and derive only between-class intervals', () => {
+  const sunday = Date.parse('2026-11-08T00:00:00Z');
+  const result: CampusStudyAgenda = buildCampusStudyAgenda({
+    window: resolveStudyWindow('未來七天', sunday)!, now: sunday, courses: [], assignments: null,
+  });
+  for (const day of result.days) day.scheduledClasses = [];
+  const overnight = { name: '跨夜實作', room: 'B201', startAt: '2026-11-08T15:30:00Z', endAt: '2026-11-09T01:00:00+08:00' };
+  result.days[0].scheduledClasses = [
+    { name: '週日補課', room: 'A301', startAt: '2026-11-08T09:10:00+08:00', endAt: '2026-11-08T03:00:00Z' }, overnight,
+  ];
+  result.days[1].scheduledClasses = [{ ...overnight }];
+  const lines = formatCampusStudyAgenda(result);
+  expect(lines[0]).toContain('11/8（週日）：週日補課（09:10–11:00）');
+  expect(lines[0]).toContain('跨夜實作（11/8 23:30–11/9 01:00）');
+  expect(lines[1]).toContain('跨夜實作（11/8 23:30–11/9 01:00）');
+  expect(lines[2]).toContain('課表副本未排課，並非已確認空閒');
+  expect(lines.join('\n')).not.toMatch(/第 \d|副本課間空堂|課表重疊/);
+  expect(lines[0]).toContain('課間時段（依保存課表）：11:00–23:30（尚未排除私人行程與通勤）');
+  expect(lines[1]).not.toContain('課間時段（依保存課表）：');
+  expect(lines[0]).toContain('作業來源不可用');
+});
+
+test('clock labels retain year changes and sub-minute changes instead of rounding two different meetings together', () => {
+  expect(scheduledClassTimeLabel({ name: '跨年課程', room: '',
+    startAt: '2026-12-31T15:30:00Z', endAt: '2027-01-01T01:00:00+08:00',
+  }, '2027-01-01')).toBe('2026/12/31 23:30–2027/1/1 01:00');
+  expect(scheduledClassTimeLabel({ name: '精確時間', room: '',
+    startAt: '2026-11-08T01:10:00Z', endAt: '2026-11-08T03:00:15.500Z',
+  }, '2026-11-08')).toBe('09:10–11:00:15.500');
+});
+
+test('plain-text clock summaries derive nested overlaps and bounded gaps without modifying or persisting derived fields', () => {
+  const result = clockAgenda([
+    clockClass('外層課程', '09:00:00', '12:00:00'), clockClass('內層課程', '09:30:00', '11:00:00'),
+    clockClass('緊接課程', '12:00:00', '13:00:00'), clockClass('下午課程', '14:00:00', '15:00:00'),
+  ]);
+  const before = JSON.stringify(result);
+  const line = formatCampusStudyAgenda(result)[0];
+  expect(line).toContain('課表重疊：09:30–11:00，請先核對正式課表');
+  expect(line).toContain('課間時段（依保存課表）：13:00–14:00（尚未排除私人行程與通勤）');
+  expect(line).not.toContain('11:00–12:00');
+  expect(line).not.toContain('00:00–09:00');
+  expect(result.days[0]).toMatchObject({ gaps: [], conflicts: [] });
+  expect(JSON.stringify(result)).toBe(before);
+});
+
+test('plain-text gap and overlap labels preserve sub-minute and clipped midnight boundaries', () => {
+  const result = clockAgenda([
+    clockClass('上午一', '08:30:00', '09:30:15.250'), clockClass('上午二', '10:00:45.500', '11:00:00'),
+    { name: '跨夜一', room: '', startAt: '2026-11-08T23:30:00+08:00', endAt: '2026-11-09T00:30:00+08:00' },
+    { name: '跨夜二', room: '', startAt: '2026-11-08T23:45:15.250+08:00', endAt: '2026-11-09T00:15:30.500+08:00' },
+  ]);
+  result.days[1].scheduledClasses = [
+    ...result.days[0].scheduledClasses!.slice(2),
+    { name: '凌晨課程', room: '', startAt: '2026-11-09T01:00:00+08:00', endAt: '2026-11-09T01:30:00+08:00' },
+  ];
+  const lines = formatCampusStudyAgenda(result);
+  expect(lines[0]).toContain('課間時段（依保存課表）：09:30:15.250–10:00:45.500、11:00–23:30');
+  expect(lines[0]).toContain('課表重疊：11/8 23:45:15.250–11/9 00:00');
+  expect(lines[1]).toContain('課表重疊：00:00–00:15:30.500');
+  expect(lines[1]).toContain('課間時段（依保存課表）：00:30–01:00');
+});
+
+test.each([{ courses: [] }, { courses: [clockClass('一堂', '09:00:00', '10:00:00')] },
+  { courses: [clockClass('第一堂', '09:00:00', '10:00:00'), clockClass('第二堂', '10:00:00', '11:00:00')] }])(
+  'empty, single and touching clock schedules cannot create before/after-class free time (%#)', ({ courses }) => {
+    const line = formatCampusStudyAgenda(clockAgenda(courses))[0];
+    expect(line).not.toMatch(/課間時段（依保存課表）：|課表重疊：/);
+    expect(line).toContain(courses.length ? '已保存課程之間沒有可列出的課間時段。' : '課表副本未排課，並非已確認空閒');
+  },
+);
+
+test.each(['unplaced', 'invalid-clock', 'unavailable'] as const)('plain-text summaries do not invent clock availability with %s evidence', (kind) => {
+  const result = clockAgenda([
+    clockClass('上午', '09:00:00', '12:00:00'), clockClass('重疊', '11:00:00', '13:00:00'),
+    clockClass('下午', '14:00:00', '15:00:00'),
+  ]);
+  if (kind === 'unplaced') result.ignoredCourses = 1;
+  else if (kind === 'invalid-clock') result.days[0].scheduledClasses![0].startAt = '2026-11-08T09:00:00';
+  else result.timetableAvailable = false;
+  const line = formatCampusStudyAgenda(result)[0];
+  expect(line).not.toMatch(/課間時段（依保存課表）：|課表重疊：/);
+  expect(line).toContain(kind === 'unavailable' ? '課表來源不可用' : '鐘點課表無法完整核對，暫不推算課間時段或重疊。');
 });
 
 test('interval results agree with an independent occupancy reference over 200 deterministic cases', () => {

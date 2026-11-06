@@ -838,6 +838,53 @@ describe('platform timetable without a school account', () => {
     messages: [{ role: 'user' as const, content: '我現在有課嗎？' }],
   });
 
+  test('routes a platform study plan through its own authorized sources without Firebase snapshots, model setup or follow-up grants', async () => {
+    mockUid = null;
+    const plan = { title: '七日計畫', overview: '平台來源', checkedAt: '2026-11-06T01:00:00Z',
+      steps: [{ id: 'verify', title: '核對課程', detail: '查看 nuni 課程', evidence: 'verification' as const,
+        priority: 'verify' as const, route: '/classroom' as const }], limitations: [], content: '已依 nuni 課表與作業整理' };
+    const planner = jest.spyOn(require('../../services/nuniCampusPlanner'), 'buildNuniCampusPlan').mockResolvedValue(plan);
+    try {
+      const request = platform();
+      const courseworkRequests = { request: jest.fn(), bffRequest: jest.fn() };
+      const reply = await askCampusAssistant({ ...request, courseworkRequests,
+        messages: [{ role: 'user', content: '幫我安排未來七天的課表與作業' }] });
+      expect(reply).toEqual({ source: 'device', tool: 'campus-plan', hasActions: false, content: plan.content, plan });
+      expect(planner).toHaveBeenCalledWith({
+        question: '幫我安排未來七天的課表與作業', schoolId: 'pu', platformTimetable: request.platformTimetable,
+        ...courseworkRequests, isCurrent: request.isCurrent, signal: undefined,
+      });
+      expect(reply).not.toHaveProperty('assignmentRead');
+      expect(reply).not.toHaveProperty('courseworkRead');
+      expect(require('../../services/onDeviceSchoolContext').collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+      expect(httpsCallable).not.toHaveBeenCalled();
+      expect(localLLM.getRuntimeAvailability).not.toHaveBeenCalled();
+    } finally { planner.mockRestore(); }
+  });
+
+  test('a discarded platform plan cannot surface as a successful empty plan', async () => {
+    const planner = jest.spyOn(require('../../services/nuniCampusPlanner'), 'buildNuniCampusPlan').mockResolvedValue(null);
+    try {
+      await expect(askCampusAssistant({ ...platform(), messages: [{ role: 'user', content: '下週學習計畫' }] }))
+        .rejects.toMatchObject({ code: 'session-changed' });
+      expect(httpsCallable).not.toHaveBeenCalled();
+      expect(localLLM.generate).not.toHaveBeenCalled();
+    } finally { planner.mockRestore(); }
+  });
+
+  test('cancellation ends the platform planner wait without waiting for transport completion', async () => {
+    const planner = jest.spyOn(require('../../services/nuniCampusPlanner'), 'buildNuniCampusPlan')
+      .mockImplementation(() => new Promise(() => {}));
+    try {
+      const controller = new AbortController();
+      const pending = askCampusAssistant({ ...platform(), signal: controller.signal,
+        messages: [{ role: 'user', content: '未來七天的學習計畫' }] });
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+      expect(localLLM.generate).not.toHaveBeenCalled();
+    } finally { planner.mockRestore(); }
+  });
+
   test('looks up the platform timetable and follows the verified occurrence without a local model or a Firebase call', async () => {
     mockUid = null;
     const request = platform();

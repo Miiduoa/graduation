@@ -18,6 +18,8 @@ export type SavedCampusPlan = {
 export const SAVED_CAMPUS_PLAN_LIMIT = 12;
 const PREFIX = makeScopedStoragePrefix('assistant-plans-v1');
 const MAX_PLAN_BYTES = 200_000;
+// Source identities add bounded display evidence without reducing the existing plan allowance.
+const MAX_COMPARISON_BYTES = 350_000;
 const MAX_STORE_BYTES = 900_000;
 const SESSION_EPOCH = Symbol('saved-campus-plan-session');
 export type SavedCampusPlanSession = (() => boolean) & { readonly [SESSION_EPOCH]: number };
@@ -129,7 +131,11 @@ function questionText(value: unknown): string {
 function planCopy(value: unknown): CampusEvidencePlan {
   try {
     const plan = copyCampusEvidencePlan(value);
-    if (!withinBytes(JSON.stringify(plan), MAX_PLAN_BYTES)) throw new Error('oversized-plan');
+    const { comparisonBasis, ...content } = plan;
+    if (!withinBytes(JSON.stringify(content), MAX_PLAN_BYTES) ||
+        (comparisonBasis && !withinBytes(JSON.stringify(comparisonBasis), MAX_COMPARISON_BYTES))) {
+      throw new Error('oversized-plan');
+    }
     return plan;
   } catch {
     throw new SavedCampusPlansError('invalid-plan');

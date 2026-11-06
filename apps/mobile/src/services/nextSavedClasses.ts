@@ -120,6 +120,18 @@ export function savedClassGaps(
   return gaps;
 }
 
+/** Actual meetings intersecting this Taiwan date, including saved single-day changes. */
+export function scheduledSavedClasses(
+  records: readonly PersonalImportRecord[], schoolId: string, date: string,
+): PersonalTodayEntry[] | undefined {
+  if (!validClassDate(date)) return undefined;
+  const scoped = records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId);
+  if (!scoped.length) return [];
+  const groups = timetableGroups(scoped);
+  if (!groups) return undefined;
+  return scheduledDay(groups, schoolId, new Date(`${date}T12:00:00+08:00`), true);
+}
+
 function addressableClasses(entries: PersonalTodayEntry[]) {
   const classes = entries.map(classOccurrence);
   // Separate makeup meetings may have the same deep link and cannot be selected reliably.

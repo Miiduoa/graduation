@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
@@ -56,6 +56,7 @@ export function CampusEvidencePlanCard({
     isCurrent: () => boolean;
   };
 }) {
+  const [showAllLimitations, setShowAllLimitations] = useState(false);
   const assignmentAction = (assignment: CampusAssignmentIdentity) => !historical && reminderContext && navigation ? (
     <CampusAssignmentOpenButton
       assignment={assignment}
@@ -166,9 +167,23 @@ export function CampusEvidencePlanCard({
         />
       ) : null}
       {plan.limitations.length ? (
-        <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
-          資料限制：{plan.limitations.slice(0, 3).join(' ')}
-        </Text>
+        <View style={{ gap: 8 }}>
+          <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
+            資料限制：{(showAllLimitations ? plan.limitations : plan.limitations.slice(0, 3)).join(' ')}
+          </Text>
+          {plan.limitations.length > 3 ? (
+            <Pressable accessibilityRole="button"
+              accessibilityLabel={showAllLimitations ? '收起資料限制' : `查看全部 ${plan.limitations.length} 項資料限制`}
+              accessibilityState={{ expanded: showAllLimitations, disabled }} aria-expanded={showAllLimitations}
+              disabled={disabled} onPress={() => setShowAllLimitations((value) => !value)}
+              style={{ minHeight: 44, padding: 10, borderWidth: 1, borderColor: aiTokens.border, borderRadius: 10,
+                justifyContent: 'center', opacity: disabled ? 0.5 : 1 }}>
+              <Text style={{ color: aiTokens.textSecondary, fontSize: 13, lineHeight: 20 }}>
+                {showAllLimitations ? '收起資料限制' : `查看全部 ${plan.limitations.length} 項資料限制`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );

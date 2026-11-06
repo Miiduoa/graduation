@@ -144,7 +144,7 @@ test('replanning uses the selected copy without removing it or clearing existing
   const input = props([saved]);
   const view = render(<SavedCampusPlansPanel {...input} />);
   expand(view);
-  expect(view.getByText('以現在為基準建立新計畫，這份計畫與處理進度會保留。')).toBeTruthy();
+  expect(view.getByText('以現在為基準整理新計畫，再核對有哪些變動。這份計畫與處理進度會保留。')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '依目前資料重新規劃' }));
   expect(input.onReplan).toHaveBeenCalledWith(saved);
   expect(view.getByText('已處理 1 / 3')).toBeTruthy();

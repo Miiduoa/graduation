@@ -14,6 +14,10 @@ import { cancelSubmittedNuniAssignmentReminder, retainNuniAssignmentReminders } 
 import { nuniPlatformRequest } from '../services/nuniClient';
 import { requestGoogleCredential, clearGoogleCredentialState } from '../services/nuniGoogle';
 import { NuniSessionController, type NativeNuniState } from '../services/nuniSessionController';
+import {
+  beginSavedCampusPlansSignOutCleanup,
+  endSavedCampusPlansSignOutCleanup,
+} from '../services/savedCampusPlans';
 
 const KEY = 'campus-one.nuni.native-session.v1';
 type Auth = NativeNuniState &
@@ -38,6 +42,10 @@ function createController() {
       read: async () => (await AsyncStorage.getItem(`${KEY}.logout-pending`)) !== null,
       mark: () => AsyncStorage.setItem(`${KEY}.logout-pending`, '1'),
       clear: () => AsyncStorage.removeItem(`${KEY}.logout-pending`),
+    },
+    savedPlansCleanup: {
+      begin: beginSavedCampusPlansSignOutCleanup,
+      end: endSavedCampusPlansSignOutCleanup,
     },
     request: nuniPlatformRequest,
     credential: requestGoogleCredential,

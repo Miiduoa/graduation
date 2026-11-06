@@ -17,6 +17,7 @@ import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { taipeiDayNumber } from '../services/campusStudyAgenda';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
+import { isNuniCampusPlanningQuestion } from '../services/nuniCampusPlanner';
 
 type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; checkedAt: string };
 
@@ -153,6 +154,17 @@ export async function askCampusAssistant(input: {
     const platform = input.platformTimetable;
     const owner = platform && `nuni:${platform.accountId}`;
     let choice = input.courseworkChoice;
+    if (platform && !choice && isNuniCampusPlanningQuestion(question)) {
+      const { buildNuniCampusPlan } = require('../services/nuniCampusPlanner') as typeof import('../services/nuniCampusPlanner');
+      const plan = await abortableCampusRead(() => buildNuniCampusPlan({
+        question, schoolId: input.scope.schoolId, platformTimetable: platform,
+        ...input.courseworkRequests, isCurrent: input.isCurrent, signal: input.signal,
+      }), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      if (!plan) throw new OnDeviceAssistantError('session-changed');
+      return { content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan };
+    }
     if (platform && (choice ? 'reminder' in choice : lastReply?.courseworkRead?.view?.kind === 'reminder' || isCourseworkReminderQuestion(question))) {
       const selected = choice && 'reminder' in choice ? choice : undefined;
       const reminder = await abortableCampusRead(() => answerCourseworkReminder(lastReply?.courseworkRead,
@@ -206,7 +218,7 @@ export async function askCampusAssistant(input: {
     }
     if (platform && !classQuery && !gapQuery) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
-        content: '可以問「我現在有課嗎？」、「下一堂課在哪裡？」或「今天有哪些空堂？」。查到課程後，也可以接著問教室與下課時間。' };
+        content: '可以問「幫我安排未來七天的課表與作業」、「我現在有課嗎？」、「下一堂課在哪裡？」或「今天有哪些空堂？」。查到課程後，也可以接著問教室與下課時間。' };
     }
     const snapshot = await collectOnDeviceSchoolContext({
       uid,
