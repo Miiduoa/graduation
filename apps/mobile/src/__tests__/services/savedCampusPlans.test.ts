@@ -14,6 +14,7 @@ import {
 } from '../../services/savedCampusPlans';
 import type { CampusEvidencePlan } from '../../services/offlineCampusPlanner';
 import { buildOfflineCampusPlan } from '../../services/offlineCampusPlanner';
+import { buildCampusStudyAgenda, formatCampusStudyAgenda, resolveStudyWindow } from '../../services/campusStudyAgenda';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -61,6 +62,28 @@ function sample(title = '資料庫報告'): CampusEvidencePlan {
   };
 }
 
+function clockSample(): CampusEvidencePlan {
+  const checkedAt = '2026-11-08T00:00:00Z';
+  const now = Date.parse(checkedAt);
+  const agenda = buildCampusStudyAgenda({ window: resolveStudyWindow('未來七天', now)!, now, courses: [], assignments: null });
+  for (const day of agenda.days) day.scheduledClasses = [];
+  const overnight = { name: '跨夜實作', room: 'B201', startAt: '2026-11-08T15:30:00Z', endAt: '2026-11-09T01:00:00+08:00' };
+  agenda.days[0].scheduledClasses = [
+    { name: '週日補課', room: 'A301', startAt: '2026-11-08T09:10:00+08:00', endAt: '2026-11-08T03:00:00Z' },
+    overnight,
+  ];
+  agenda.days[1].scheduledClasses = [{ ...overnight }];
+  return {
+    title: '七日鐘點安排', overview: '依個人保存的課表逐日核對。', checkedAt,
+    steps: [{ id: 'timetable-review', title: '核對個人課表', detail: '週日 09:10–11:00 補課，跨夜實作另列完整日期。',
+      evidence: 'saved-timetable', priority: 'normal', route: '/timetable' }],
+    limitations: ['課表副本不等於校方即時資料。'], agenda,
+    comparisonBasis: { timetableUpdatedAt: '2026-11-07T08:00:00Z',
+      assignments: { status: 'unavailable', total: null, checkedAt: null, items: [] } },
+    content: formatCampusStudyAgenda(agenda).join('\n'),
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
@@ -96,6 +119,77 @@ test('a new repository session restores the full dated plan and personal progres
   expect(restored[0]).toEqual({ ...saved[0], updatedAt: expect.any(String), completedStepIds: ['assignment-0'] });
   restored[0].plan.steps[0].title = '外部修改';
   expect((await readSavedCampusPlans(scope, session()))[0].plan.steps[0].title).toBe('資料庫報告');
+});
+
+test('a nuni clock plan survives real serialization with Sunday, overnight dates, offsets and explicitly empty days', async () => {
+  const platformScope = { owner: 'nuni:student-a', schoolId: 'pu' };
+  const plan = clockSample();
+  Object.assign(plan.agenda!.days[0].scheduledClasses![0], { authToken: 'secret', url: 'https://private.invalid/class', canWrite: true });
+  const saved = await saveCampusPlan(platformScope, { question: '安排未來七天', plan }, session());
+  await setCampusPlanStepDone(platformScope, saved[0].id, 'timetable-review', true, session());
+  const restored = await readSavedCampusPlans(platformScope, session());
+  expect(restored[0].plan).toEqual(clockSample());
+  expect(restored[0].completedStepIds).toEqual(['timetable-review']);
+  expect(restored[0].plan.agenda!.days[2].scheduledClasses).toEqual([]);
+  expect(restored[0].plan.agenda!.days[0].scheduledClasses![0].startAt).toBe('2026-11-08T09:10:00+08:00');
+  expect(restored[0].plan.content).toContain('11/8 23:30–11/9 01:00');
+  expect(persisted.get(savedCampusPlansStorageKey(platformScope))).not.toMatch(/authToken|canWrite|private.invalid/);
+  restored[0].plan.agenda!.days[0].scheduledClasses![0].name = '外部修改';
+  expect((await readSavedCampusPlans(platformScope, session()))[0].plan).toEqual(clockSample());
+});
+
+test('clock bounds retain all 80 daily occurrences and allow an exactly 24-hour meeting', async () => {
+  const plan = clockSample();
+  const meeting = { name: '課'.repeat(240), room: '室'.repeat(240),
+    startAt: '2026-11-08T00:00:00+08:00', endAt: '2026-11-09T00:00:00+08:00' };
+  for (const day of plan.agenda!.days) day.scheduledClasses = [];
+  plan.agenda!.days[0].scheduledClasses = Array.from({ length: 80 }, () => ({ ...meeting }));
+  await saveCampusPlan(scope, { question, plan }, session());
+  const restored = (await readSavedCampusPlans(scope, session()))[0].plan;
+  expect(restored.agenda!.days[0].scheduledClasses).toHaveLength(80);
+  expect(restored.agenda!.days[0].scheduledClasses![79]).toEqual(meeting);
+  expect(restored.agenda!.days[1].scheduledClasses).toEqual([]);
+});
+
+test.each<[string, (plan: CampusEvidencePlan) => void]>([
+  ['offset-free start', (plan) => { plan.agenda!.days[0].scheduledClasses![0].startAt = '2026-11-08T09:10:00'; }],
+  ['date-only end', (plan) => { plan.agenda!.days[0].scheduledClasses![0].endAt = '2026-11-08'; }],
+  ['invalid calendar date', (plan) => { plan.agenda!.days[0].scheduledClasses![0].startAt = '2026-02-30T09:10:00+08:00'; }],
+  ['invalid timezone offset', (plan) => { plan.agenda!.days[0].scheduledClasses![0].startAt = '2026-11-08T09:10:00+14:30'; }],
+  ['zero duration', (plan) => { const item = plan.agenda!.days[0].scheduledClasses![0]; item.endAt = item.startAt; }],
+  ['negative duration', (plan) => { plan.agenda!.days[0].scheduledClasses![0].endAt = '2026-11-08T01:00:00Z'; }],
+  ['over 24 hours', (plan) => { plan.agenda!.days[0].scheduledClasses![0].endAt = '2026-11-09T01:10:00.001Z'; }],
+  ['ending at this day midnight', (plan) => { Object.assign(plan.agenda!.days[0].scheduledClasses![0],
+    { startAt: '2026-11-07T15:00:00Z', endAt: '2026-11-07T16:00:00Z' }); }],
+  ['starting at next day midnight', (plan) => { Object.assign(plan.agenda!.days[0].scheduledClasses![0],
+    { startAt: '2026-11-08T16:00:00Z', endAt: '2026-11-08T17:00:00Z' }); }],
+  ['empty name', (plan) => { plan.agenda!.days[0].scheduledClasses![0].name = ' '; }],
+  ['oversized name', (plan) => { plan.agenda!.days[0].scheduledClasses![0].name = '課'.repeat(241); }],
+  ['oversized room', (plan) => { plan.agenda!.days[0].scheduledClasses![0].room = '室'.repeat(241); }],
+  ['missing room', (plan) => { plan.agenda!.days[0].scheduledClasses![0].room = undefined as never; }],
+  ['81 meetings', (plan) => { const day = plan.agenda!.days[0]; day.scheduledClasses = Array(81).fill(day.scheduledClasses![0]); }],
+  ['sparse meetings', (plan) => { const day = plan.agenda!.days[0]; const rows = Array(2); rows[1] = day.scheduledClasses![0]; day.scheduledClasses = rows; }],
+  ['nonarray meetings', (plan) => { plan.agenda!.days[0].scheduledClasses = {} as never; }],
+  ['null meetings', (plan) => { plan.agenda!.days[0].scheduledClasses = null as never; }],
+  ['mixed period courses', (plan) => { plan.agenda!.days[0].courses = [{ name: '舊節次', day: 0, start: 1, end: 2 }]; }],
+  ['mixed period gaps', (plan) => { plan.agenda!.days[0].gaps = [{ start: 3, end: 4 }]; }],
+  ['mixed period conflicts', (plan) => { plan.agenda!.days[0].conflicts = [{ start: 1, end: 2 }]; }],
+  ['mixed day formats', (plan) => { delete plan.agenda!.days[1].scheduledClasses; }],
+  ['unavailable with clock data', (plan) => { plan.agenda!.timetableAvailable = false; }],
+  ['unavailable with empty clock arrays', (plan) => {
+    plan.agenda!.timetableAvailable = false;
+    plan.comparisonBasis!.timetableUpdatedAt = null;
+    for (const day of plan.agenda!.days) day.scheduledClasses = [];
+  }],
+])('invalid clock evidence cannot overwrite existing saved progress: %s', async (_label, change) => {
+  const saved = await saveCampusPlan(scope, { question, plan: sample() }, session());
+  await setCampusPlanStepDone(scope, saved[0].id, 'assignment-0', true, session());
+  const before = persisted.get(savedCampusPlansStorageKey(scope));
+  const plan = clockSample();
+  change(plan);
+  await expect(saveCampusPlan(scope, { question, plan }, session())).rejects.toMatchObject({ code: 'invalid-plan' });
+  expect(persisted.get(savedCampusPlansStorageKey(scope))).toBe(before);
+  expect((await readSavedCampusPlans(scope, session()))[0].completedStepIds).toEqual(['assignment-0']);
 });
 
 test('keys keep account kind, campus and punctuation distinct and use no global fallback', async () => {

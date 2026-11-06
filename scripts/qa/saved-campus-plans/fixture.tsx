@@ -4,6 +4,7 @@ import { View, Text } from 'react-native';
 import { SavedCampusPlansPanel } from '../../../apps/mobile/src/screens/SavedCampusPlansPanel';
 import { CampusPlanComparisonCard } from '../../../apps/mobile/src/screens/CampusPlanComparisonCard';
 import { CampusEvidencePlanCard } from '../../../apps/mobile/src/screens/CampusEvidencePlanCard';
+import { NuniStudyPlanActions } from '../../../apps/mobile/src/screens/NuniStudyPlanActions';
 import { applyTheme, theme } from '../../../apps/mobile/src/ui/theme';
 import type { SavedCampusPlan } from '../../../apps/mobile/src/services/savedCampusPlans';
 import type { CampusPlanComparison } from '../../../apps/mobile/src/services/campusPlanComparison';
@@ -141,4 +142,69 @@ function App() {
     </Text>
   </View>;
 }
-createRoot(document.getElementById('root')!).render(<App />);
+
+// Platform planning uses the real action and plan components with synthetic,
+// dated clock occurrences. It does not exercise login, school linkage or fetches.
+const longPlatformCourse = 'InterdisciplinaryCampusSystemsResearchAndCrossSchoolInformationManagementFinalPresentation';
+const overnightClass = {
+  name: '跨夜資料整理與小組討論', room: '資訊大樓協作研究室',
+  startAt: '2026-11-08T15:30:00.000Z', endAt: '2026-11-08T16:30:00.000Z',
+};
+const platformWeek: CampusEvidencePlan = {
+  title: '未來七天課業計畫', overview: '依手機保存的課表與部分平台課堂作業整理。',
+  checkedAt: '2026-11-08T00:00:00.000Z', content: '先核對平台課表日期，再安排作業。',
+  limitations: [
+    '本次只取得部分 nuni 課堂作業，未列出的作業不能當作已完成。',
+    '尚未連接校務資料，這份計畫只使用平台來源與手機課表副本。',
+    '已略過 1 筆時間未確認的課程，請回課表頁核對。',
+    '部分課堂尚未連結作業來源，缺少的資料不代表沒有作業。',
+  ],
+  steps: [{ id: 'timetable-review', title: '核對這週的課程與作業',
+    detail: '課程使用保存的日期與鐘點；請確認調課與課程連結，資料缺漏時先回原頁核對。',
+    evidence: 'saved-timetable', priority: 'verify', route: '/timetable' }],
+  agenda: {
+    timetableAvailable: true, assignmentsAvailable: true, ignoredCourses: 1,
+    days: Array.from({ length: 7 }, (_, index) => ({
+      date: `2026-11-${String(8 + index).padStart(2, '0')}`,
+      label: `11/${8 + index}（週${['日', '一', '二', '三', '四', '五', '六'][index]}）`,
+      courses: [], gaps: [], conflicts: [],
+      scheduledClasses: index === 0 ? [
+        { name: longPlatformCourse, room: '資訊管理大樓 401 跨校協作教室',
+          startAt: '2026-11-08T01:10:00.000Z', endAt: '2026-11-08T02:00:00.000Z' },
+        overnightClass,
+      ] : index === 1 ? [overnightClass] : [],
+      deadlines: index === 0 ? [{
+        title: '資訊管理實務與跨校協作研究方法：期末共同專題資料整合報告',
+        groupName: '資訊管理實務', dueAt: '2026-11-08T15:59:00.000Z',
+        timeLabel: '23:59', overdue: false,
+      }] : [],
+    })),
+    outsideWindow: [{ title: '企業資源規劃跨校協作專題資料蒐集', groupName: '企業資源規劃',
+      dueAt: null, reason: 'undated' }],
+  },
+};
+const platformToday: CampusEvidencePlan = {
+  ...platformWeek, title: '今日課業重點',
+  agenda: { ...platformWeek.agenda!, days: platformWeek.agenda!.days.slice(0, 1) },
+};
+
+function PlatformPlanningApp() {
+  const [selection, setSelection] = useState<'today' | 'week' | null>(null);
+  return <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 12 }}>
+    <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>課業助理</Text>
+    <NuniStudyPlanActions disabled={false}
+      onToday={() => { window.qaEvents.push({ kind: 'today' }); setSelection('today'); }}
+      onWeek={() => { window.qaEvents.push({ kind: 'week' }); setSelection('week'); }} />
+    {selection ? <View testID="platform-plan-preview">
+      <CampusEvidencePlanCard plan={selection === 'today' ? platformToday : platformWeek} disabled={false}
+        onOpenRoute={(route) => { window.qaEvents.push({ kind: 'open-route', route }); }} />
+    </View> : null}
+    <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
+      測試畫面：日期、課程與作業皆為合成範例，只驗證正式元件顯示與操作；未連線登入或取得平台、校務資料。
+    </Text>
+  </View>;
+}
+
+createRoot(document.getElementById('root')!).render(
+  new URLSearchParams(location.search).get('scenario') === 'platform' ? <PlatformPlanningApp /> : <App />,
+);

@@ -58,12 +58,18 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     },
   );
   const credential = jest.fn(async () => 'verified-by-server-id-token');
+  const clearCredential = jest.fn(async () => {});
+  const savedPlansCleanup = {
+    begin: jest.fn(async () => {}),
+    end: jest.fn(() => {}),
+  };
   const controller = new NuniSessionController({
     storage,
     logoutFence,
+    savedPlansCleanup,
     request,
     credential,
-    clearCredential: jest.fn(async () => {}),
+    clearCredential,
     now,
   });
   return {
@@ -72,6 +78,8 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     logoutFence,
     request,
     credential,
+    clearCredential,
+    savedPlansCleanup,
     persisted: () => persisted,
     fenced: () => fenced,
   };
@@ -480,4 +488,187 @@ it('binds a merchant settings PUT to the current account and aborts it on logout
   expect(last[3]?.aborted).toBe(true);
   update.resolve({ readinessVersion: 2 });
   await rejected;
+});
+
+it('fences saved plans synchronously and attempts server revocation before a pending local cleanup completes', async () => {
+  const { controller, storage, request, savedPlansCleanup, fenced } = setup(stored());
+  const cleanup = deferred<void>();
+  savedPlansCleanup.begin.mockReturnValueOnce(cleanup.promise);
+  const logout = controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(1);
+  expect(storage.read).not.toHaveBeenCalled();
+  for (let i = 0; i < 20 && !request.mock.calls.length; i++) await Promise.resolve();
+  expect(request).toHaveBeenCalledWith('logout', handle, {}, expect.any(AbortSignal));
+  expect(fenced()).toBe(true);
+  expect(storage.clear).not.toHaveBeenCalled();
+  expect(savedPlansCleanup.end).not.toHaveBeenCalled();
+  expect(controller.state).toMatchObject({ session: null, loading: true, pendingLogout: true });
+  cleanup.resolve();
+  await logout;
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(1);
+  expect(controller.state).toEqual({ session: null, loading: false, error: '', pendingLogout: false });
+});
+
+it.each(['rejected', 'thrown'] as const)('keeps failed saved-plan cleanup retryable (%s) while still revoking the server session', async (failure) => {
+  const { controller, savedPlansCleanup, clearCredential, request, persisted, fenced } = setup(stored());
+  await controller.refresh();
+  if (failure === 'thrown') savedPlansCleanup.begin.mockImplementationOnce(() => { throw new Error('disk'); });
+  else savedPlansCleanup.begin.mockRejectedValueOnce(new Error('disk'));
+  clearCredential.mockRejectedValueOnce(new Error('Google chooser'));
+  await controller.logout();
+  expect(request).toHaveBeenCalledWith('logout', handle, {}, expect.any(AbortSignal));
+  expect(clearCredential).toHaveBeenCalledTimes(1);
+  expect(controller.state).toEqual({
+    session: null, loading: false, pendingLogout: true,
+    error: '手機內的已儲存計畫尚未清除，請重試登出。',
+  });
+  expect(fenced()).toBe(true);
+  expect(JSON.parse(persisted()!).pendingLogout).toBe(true);
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(1);
+  await controller.refresh();
+  expect(controller.state.error).toContain('已儲存計畫尚未清除');
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_OUT_REQUIRED' });
+  await controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(2);
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(2);
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(false);
+  expect(controller.state).toEqual({ session: null, loading: false, error: '', pendingLogout: false });
+});
+
+it('preserves a pending cleanup across restart even after the secure credential is absent', async () => {
+  const first = setup();
+  await first.controller.refresh();
+  first.savedPlansCleanup.begin.mockRejectedValueOnce(new Error('local cleanup failed'));
+  await first.controller.logout();
+  expect(first.persisted()).toBeNull();
+  expect(first.fenced()).toBe(true);
+  const second = setup(first.persisted(), first.fenced());
+  await second.controller.refresh();
+  expect(second.controller.state).toMatchObject({ session: null, pendingLogout: true });
+  expect(second.logoutFence.clear).not.toHaveBeenCalled();
+  expect(second.request).not.toHaveBeenCalled();
+  await expect(second.controller.signIn()).rejects.toMatchObject({ code: 'SIGN_OUT_REQUIRED' });
+  await second.controller.logout();
+  expect(second.savedPlansCleanup.begin).toHaveBeenCalledTimes(1);
+  expect(second.fenced()).toBe(false);
+  expect(second.controller.state.pendingLogout).toBe(false);
+});
+
+it('retains the secure pending marker when the independent fence and saved-plan cleanup fail', async () => {
+  const first = setup(stored());
+  await first.controller.refresh();
+  first.logoutFence.mark.mockRejectedValue(new Error('AsyncStorage unavailable'));
+  first.savedPlansCleanup.begin.mockRejectedValueOnce(new Error('plans unavailable'));
+  await first.controller.logout();
+  expect(first.request).toHaveBeenCalledWith('logout', handle, {}, expect.any(AbortSignal));
+  expect(first.fenced()).toBe(false);
+  expect(JSON.parse(first.persisted()!).pendingLogout).toBe(true);
+  expect(first.storage.clear).not.toHaveBeenCalled();
+  const second = setup(first.persisted(), first.fenced());
+  await second.controller.refresh();
+  expect(second.controller.state.pendingLogout).toBe(true);
+  expect(second.request).not.toHaveBeenCalled();
+  await second.controller.logout();
+  expect(second.persisted()).toBeNull();
+  expect(second.controller.state.pendingLogout).toBe(false);
+});
+
+it('does not mislabel a failed fence removal as Google credential cleanup and retries without a session', async () => {
+  const { controller, logoutFence, savedPlansCleanup, persisted, fenced } = setup(stored());
+  await controller.refresh();
+  logoutFence.clear.mockRejectedValueOnce(new Error('disk unavailable'));
+  await controller.logout();
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(true);
+  expect(controller.state.pendingLogout).toBe(true);
+  expect(controller.state.error).toContain('請重試');
+  expect(controller.state.error).not.toContain('Google');
+  await controller.refresh();
+  expect(controller.state.pendingLogout).toBe(true);
+  await controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(2);
+  expect(controller.state.error).toBe('');
+  expect(fenced()).toBe(false);
+});
+
+it('completes saved-plan cleanup even when the server cannot confirm logout', async () => {
+  const { controller, request, savedPlansCleanup, clearCredential, fenced } = setup(stored());
+  await controller.refresh();
+  request.mockRejectedValueOnce(new NuniError(0, 'NETWORK_ERROR'));
+  await controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(1);
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(1);
+  expect(clearCredential).toHaveBeenCalledTimes(1);
+  expect(fenced()).toBe(true);
+  expect(controller.state.pendingLogout).toBe(true);
+});
+
+it('a late token exchange cannot clear the fence for failed saved-plan cleanup', async () => {
+  const { controller, request, savedPlansCleanup, logoutFence, fenced } = setup();
+  await controller.refresh();
+  const late = deferred<unknown>();
+  request.mockImplementation(async (path) =>
+    path === 'login-transactions' ? transaction : path === 'sessions' ? late.promise : { signedOut: true },
+  );
+  const login = controller.signIn();
+  const rejected = expect(login).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  for (let i = 0; i < 40 && !request.mock.calls.some(([path]) => path === 'sessions'); i++) await Promise.resolve();
+  expect(request.mock.calls.some(([path]) => path === 'sessions')).toBe(true);
+  savedPlansCleanup.begin.mockRejectedValueOnce(new Error('disk'));
+  await controller.logout();
+  late.resolve({ ...principal, sessionHandle: handle, expiresInSeconds: 3600 });
+  await rejected;
+  expect(request).toHaveBeenCalledWith('logout', handle, {});
+  expect(logoutFence.clear).not.toHaveBeenCalled();
+  expect(fenced()).toBe(true);
+  expect(controller.state).toMatchObject({ session: null, pendingLogout: true });
+  expect(controller.state.error).toContain('已儲存計畫尚未清除');
+  await controller.logout();
+  expect(fenced()).toBe(false);
+});
+
+it('keeps the Google-only error distinct after the session and saved plans are cleared', async () => {
+  const { controller, clearCredential, persisted, fenced } = setup(stored());
+  await controller.refresh();
+  clearCredential.mockRejectedValueOnce(new Error('chooser'));
+  await controller.logout();
+  expect(controller.state).toEqual({
+    session: null, loading: false, pendingLogout: false,
+    error: '已登出；裝置上的 Google 帳號選擇狀態尚未清除。',
+  });
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(false);
+});
+
+it('removes a late pending-credential fallback write when logout finishes while that write is in flight', async () => {
+  const { controller, storage, savedPlansCleanup, persisted, fenced } = setup();
+  await controller.refresh();
+  const write = storage.write.getMockImplementation()!;
+  const loginWrite = deferred<void>();
+  const fallbackWrite = deferred<void>();
+  const cleanup = deferred<void>();
+  storage.write
+    .mockImplementationOnce(async (value) => { await loginWrite.promise; await write(value); })
+    .mockImplementationOnce(write)
+    .mockImplementationOnce(async (value) => { await fallbackWrite.promise; await write(value); });
+  const login = controller.signIn();
+  const rejected = expect(login).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  for (let i = 0; i < 40 && storage.write.mock.calls.length < 1; i++) await Promise.resolve();
+  expect(storage.write).toHaveBeenCalledTimes(1);
+  savedPlansCleanup.begin.mockReturnValueOnce(cleanup.promise);
+  const logout = controller.logout();
+  for (let i = 0; i < 40 && storage.write.mock.calls.length < 2; i++) await Promise.resolve();
+  expect(storage.write).toHaveBeenCalledTimes(2);
+  loginWrite.resolve();
+  for (let i = 0; i < 40 && storage.write.mock.calls.length < 3; i++) await Promise.resolve();
+  expect(storage.write).toHaveBeenCalledTimes(3);
+  cleanup.resolve();
+  await logout;
+  expect(persisted()).toBeNull();
+  fallbackWrite.resolve();
+  await rejected;
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(false);
+  expect(controller.state).toMatchObject({ session: null, pendingLogout: false });
 });

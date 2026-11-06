@@ -1,6 +1,10 @@
-import { classDate, validateClassException, sameClassMeeting } from '../timetable/classExceptions';
+import {
+  classDate,
+  classMeetingTimes,
+  displayedClassMeetingKey,
+  validateClassException,
+} from '../timetable/classExceptions';
 import type { PersonalImportRecord } from './types';
-import { periodProfileForSchool, periodTimes } from '../timetable/schoolPeriods';
 
 export type PersonalTodayEntry = {
   row: PersonalImportRecord;
@@ -13,10 +17,23 @@ export type PersonalTodayEntry = {
   endAt: number;
 };
 
-function minutes(clock: string | undefined): number | null {
-  if (!clock || !/^([01]\d|2[0-3]):[0-5]\d$/.test(clock)) return null;
-  const [hour, minute] = clock.split(':').map(Number);
-  return hour * 60 + minute;
+const DAY_MS = 86_400_000;
+
+function occurrenceKey(entry: PersonalTodayEntry): string {
+  return JSON.stringify([
+    entry.originalDate, entry.startAt, entry.endAt, displayedClassMeetingKey(entry.row),
+  ]);
+}
+
+function preferImportedMeetings(entries: PersonalTodayEntry[]): PersonalTodayEntry[] {
+  const isManual = (entry: PersonalTodayEntry) => entry.row.id.startsWith('manual:');
+  if (!entries.some(isManual)) return entries;
+  const imported = new Set(entries.filter((entry) => !isManual(entry)).map(occurrenceKey));
+  return entries.filter((entry) => !isManual(entry) || !imported.has(occurrenceKey(entry)));
+}
+
+function isClock(clock: string | undefined): clock is string {
+  return clock !== undefined && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(clock);
 }
 
 const termKey = (row: PersonalImportRecord) => `${row.academicYear}|${row.semester}`;
@@ -60,19 +77,21 @@ export function buildPersonalToday(
   const activeTerm = terms.some((term) => term.key === options.termKey)
     ? options.termKey!
     : (terms[0]?.key ?? '');
-  const profile = periodProfileForSchool(options.schoolId);
-  const times = profile ? periodTimes(profile) : [];
-  const today: PersonalTodayEntry[] = [];
+  const occurrences: PersonalTodayEntry[] = [];
   let unplacedCount = 0;
   const date = classDate(options.now);
   const midnight = Date.parse(`${date}T00:00:00+08:00`);
+  const nearbyDays = [-1, 0, 1].map((offset) => {
+    const day = new Date(taipei.getTime() + offset * DAY_MS);
+    return { date: day.toISOString().slice(0, 10), weekday: day.getUTCDay() || 7 };
+  });
   for (const original of rows.filter((row) => termKey(row) === activeTerm)) {
-    const explicit = !!(original.startTime || original.endTime);
-    const baseStart = explicit ? original.startTime : times[(original.startPeriod ?? 0) - 1]?.[0];
-    const baseEnd = explicit ? original.endTime : times[(original.endPeriod ?? 0) - 1]?.[1];
-    const start = minutes(baseStart), end = minutes(baseEnd);
-    if (!Number.isInteger(original.dayOfWeek) || original.dayOfWeek! < 1 ||
-      original.dayOfWeek! > 7 || start === null || end === null || start >= end) {
+    const [baseStart, baseEnd] = classMeetingTimes(original);
+    const courseWeekday = original.dayOfWeek ?? 0;
+    if (
+      !Number.isInteger(courseWeekday) || courseWeekday < 1 || courseWeekday > 7 ||
+      !isClock(baseStart) || !isClock(baseEnd) || baseStart >= baseEnd
+    ) {
       unplacedCount++;
       continue;
     }
@@ -83,16 +102,15 @@ export function buildPersonalToday(
       startDate: string, endDate = startDate, originalDate = startDate) => {
       const startAt = Date.parse(`${startDate}T${startTime}:00+08:00`);
       const endAt = Date.parse(`${endDate}T${endTime}:00+08:00`);
-      if (startAt >= midnight + 172800000 || endAt <= midnight - 86400000) return;
-      today.push({ row, originalDate, startTime, endTime, startAt, endAt, conflict: false,
+      if (startAt >= midnight + 2 * DAY_MS || endAt <= midnight - DAY_MS) return;
+      occurrences.push({ row, originalDate, startTime, endTime, startAt, endAt, conflict: false,
         status: options.now.getTime() >= endAt ? 'ended' : options.now.getTime() >= startAt ? 'ongoing' : 'upcoming' });
     };
-    for (const offset of [-1, 0, 1]) {
-      const day = classDate(new Date(midnight + offset * 86400000));
-      const dayOfWeek = new Date(`${day}T12:00:00+08:00`).getUTCDay() || 7;
-      const change = exceptions.find((item) => item.originalDate === day);
-      if (original.dayOfWeek === dayOfWeek && (!change || change.kind === 'room')) {
-        append(change ? { ...original, location: change.location } : original, baseStart!, baseEnd!, day);
+    for (const day of nearbyDays) {
+      if (courseWeekday !== day.weekday) continue;
+      const change = exceptions.find((item) => item.originalDate === day.date);
+      if (!change || change.kind === 'room') {
+        append(change ? { ...original, location: change.location } : original, baseStart, baseEnd, day.date);
       }
     }
     for (const item of exceptions.filter((value) => value.kind === 'move')) {
@@ -100,36 +118,30 @@ export function buildPersonalToday(
         item.startTime!, item.endTime!, item.date!, item.endDate || item.date!, item.originalDate);
     }
   }
-  // A course entered by hand and later imported is one class when its complete
-  // displayed details agree. Keep the imported record's provenance; differing
-  // teachers or rooms still require the user's conflict review.
-  const distinctToday = today.filter((entry) =>
-    !entry.row.id.startsWith('manual:') || !today.some((other) =>
-      !other.row.id.startsWith('manual:') &&
-      entry.originalDate === other.originalDate &&
-      entry.startAt === other.startAt &&
-      entry.endAt === other.endAt &&
-      sameClassMeeting(entry.row, other.row),
-    ),
-  );
-  distinctToday.sort(
+  const meetings = preferImportedMeetings(occurrences).sort(
     (a, b) =>
       a.startAt - b.startAt ||
       a.endAt - b.endAt ||
       a.row.id.localeCompare(b.row.id),
   );
-  for (const entry of distinctToday) {
-    entry.conflict = distinctToday.some(
-      (other) =>
-        other !== entry && entry.startAt < other.endAt && other.startAt < entry.endAt,
-    );
+  // In start order, the latest end seen so far also catches nested meetings.
+  let latestEnding: PersonalTodayEntry | undefined;
+  for (const entry of meetings) {
+    if (latestEnding && entry.startAt < latestEnding.endAt) {
+      latestEnding.conflict = true;
+      entry.conflict = true;
+    }
+    if (!latestEnding || entry.endAt > latestEnding.endAt) latestEnding = entry;
   }
+  const todayMeetings = meetings.filter(
+    (entry) => entry.startAt < midnight + DAY_MS && entry.endAt > midnight,
+  );
   return {
     terms,
     termKey: activeTerm,
-    today: distinctToday.filter((entry) => entry.startAt < midnight + 86400000 && entry.endAt > midnight),
+    today: todayMeetings,
     unplacedCount,
     weekday,
-    nextId: distinctToday.find((entry) => entry.startAt < midnight + 86400000 && entry.endAt > midnight && entry.status !== 'ended')?.row.id ?? null,
+    nextId: todayMeetings.find((entry) => entry.status !== 'ended')?.row.id ?? null,
   };
 }

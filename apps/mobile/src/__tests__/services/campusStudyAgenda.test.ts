@@ -1,6 +1,6 @@
 import {
   buildCampusStudyAgenda, formatCampusStudyAgenda, inspectCoursePeriods,
-  resolveStudyWindow, type AgendaCourse,
+  resolveStudyWindow, scheduledClassTimeLabel, type AgendaCourse, type CampusStudyAgenda,
 } from '../../services/campusStudyAgenda';
 import { buildOfflineCampusPlan } from '../../services/offlineCampusPlanner';
 import type { OnDeviceSchoolContext } from '../../services/onDeviceSchoolContext';
@@ -149,6 +149,35 @@ test('rejects invalid or unbounded calendar windows', () => {
   expect(resolveStudyWindow('本週', NaN)).toBeNull();
   expect(() => buildCampusStudyAgenda({ window: { startDay: 0, endDay: 1000, title: '' }, now, courses: [], assignments: [] }))
     .toThrow('Invalid study window');
+});
+
+test('dated Sunday and overnight meetings use Taiwan clock times without period or gap claims', () => {
+  const sunday = Date.parse('2026-11-08T00:00:00Z');
+  const result: CampusStudyAgenda = buildCampusStudyAgenda({
+    window: resolveStudyWindow('未來七天', sunday)!, now: sunday, courses: [], assignments: null,
+  });
+  for (const day of result.days) day.scheduledClasses = [];
+  const overnight = { name: '跨夜實作', room: 'B201', startAt: '2026-11-08T15:30:00Z', endAt: '2026-11-09T01:00:00+08:00' };
+  result.days[0].scheduledClasses = [
+    { name: '週日補課', room: 'A301', startAt: '2026-11-08T09:10:00+08:00', endAt: '2026-11-08T03:00:00Z' }, overnight,
+  ];
+  result.days[1].scheduledClasses = [{ ...overnight }];
+  const lines = formatCampusStudyAgenda(result);
+  expect(lines[0]).toContain('11/8（週日）：週日補課（09:10–11:00）');
+  expect(lines[0]).toContain('跨夜實作（11/8 23:30–11/9 01:00）');
+  expect(lines[1]).toContain('跨夜實作（11/8 23:30–11/9 01:00）');
+  expect(lines[2]).toContain('課表副本未排課，並非已確認空閒');
+  expect(lines.join('\n')).not.toMatch(/第 \d|副本課間空堂|課表重疊/);
+  expect(lines[0]).toContain('作業來源不可用');
+});
+
+test('clock labels retain year changes and sub-minute changes instead of rounding two different meetings together', () => {
+  expect(scheduledClassTimeLabel({ name: '跨年課程', room: '',
+    startAt: '2026-12-31T15:30:00Z', endAt: '2027-01-01T01:00:00+08:00',
+  }, '2027-01-01')).toBe('2026/12/31 23:30–2027/1/1 01:00');
+  expect(scheduledClassTimeLabel({ name: '精確時間', room: '',
+    startAt: '2026-11-08T01:10:00Z', endAt: '2026-11-08T03:00:15.500Z',
+  }, '2026-11-08')).toBe('09:10–11:00:15.500');
 });
 
 test('interval results agree with an independent occupancy reference over 200 deterministic cases', () => {

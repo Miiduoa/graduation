@@ -63,6 +63,7 @@ jobs:
         run: |
           pnpm --filter mobile exec jest \
             src/__tests__/services/offlineCampusPlanner.test.ts \
+            src/__tests__/services/nuniCampusPlanner.test.ts \
             src/__tests__/services/campusPlanComparison.test.ts \
             src/__tests__/services/savedCampusPlans.test.ts \
             src/__tests__/services/campusStudyAgenda.test.ts \
@@ -82,6 +83,7 @@ jobs:
             src/__tests__/services/onDeviceSchoolContext.test.ts \
             src/__tests__/NativeLoginLifecycle.test.tsx \
             src/__tests__/nuniSession.test.ts \
+            src/__tests__/NuniSessionProvider.test.tsx \
             src/__tests__/NuniTimetableAssistantNavigation.test.tsx \
             src/__tests__/AssistantClassNowHint.test.tsx \
             src/__tests__/SavedClassReplyCard.test.tsx \

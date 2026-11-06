@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { CampusStudyAgendaCard } from '../screens/CampusStudyAgendaCard';
 import { CampusEvidencePlanCard } from '../screens/CampusEvidencePlanCard';
-import { buildCampusStudyAgenda, resolveStudyWindow } from '../services/campusStudyAgenda';
+import { buildCampusStudyAgenda, resolveStudyWindow, type CampusStudyAgenda } from '../services/campusStudyAgenda';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 const now = Date.parse('2026-10-27T07:00:00Z');
@@ -80,4 +80,44 @@ test('the existing evidence plan card renders the complete agenda without requir
   expect(view.getByText('逐日安排')).toBeTruthy();
   expect(view.getByLabelText('11/2（週一）逐日安排')).toBeTruthy();
   expect(view.queryByText('確認設定本機提醒')).toBeNull();
+});
+
+test('clock days count each saved occurrence and show Sunday and overnight times without inventing periods', () => {
+  const sunday = Date.parse('2026-11-08T00:00:00Z');
+  const agenda: CampusStudyAgenda = buildCampusStudyAgenda({
+    window: resolveStudyWindow('未來七天', sunday)!, now: sunday, courses: [], assignments: null,
+  });
+  for (const day of agenda.days) day.scheduledClasses = [];
+  const overnight = { name: '專題實作', room: 'B201', startAt: '2026-11-08T15:30:00Z', endAt: '2026-11-08T17:00:00Z' };
+  agenda.days[0].scheduledClasses = [
+    { name: '專題實作', room: 'A301', startAt: '2026-11-08T09:10:00+08:00', endAt: '2026-11-08T03:00:00Z' },
+    overnight, { ...overnight },
+  ];
+  agenda.days[1].scheduledClasses = [{ ...overnight }, { ...overnight }];
+  const navigate = jest.fn();
+  const view = render(<CampusStudyAgendaCard agenda={agenda} disabled={false} onOpenRoute={navigate} />);
+  expect(view.getByText('3 堂課 · 作業未知')).toBeTruthy();
+  expect(view.getByText('09:10–11:00｜專題實作 · A301')).toBeTruthy();
+  expect(view.getAllByText('11/8 23:30–11/9 01:00｜專題實作 · B201')).toHaveLength(2);
+  fireEvent.press(view.getByLabelText('11/9（週一）逐日安排'));
+  expect(view.getByText('2 堂課 · 作業未知')).toBeTruthy();
+  expect(view.getAllByText('11/8 23:30–11/9 01:00｜專題實作 · B201')).toHaveLength(4);
+  expect(view.queryByText(/第 \d/)).toBeNull();
+  expect(view.queryByText(/副本課間空堂|課表重疊：/)).toBeNull();
+  expect(view.getByText(/未推算空堂/)).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+test('an explicitly empty clock day is distinct from an unread timetable', () => {
+  const agenda = buildCampusStudyAgenda({ window: resolveStudyWindow('今天', now)!, now, courses: [], assignments: [] });
+  agenda.days[0].scheduledClasses = [];
+  const view = render(<CampusStudyAgendaCard agenda={agenda} disabled={false} />);
+  expect(view.getByText('0 堂課 · 0 項截止')).toBeTruthy();
+  expect(view.getByText('課表副本未排課，並非已確認整天有空。')).toBeTruthy();
+  delete agenda.days[0].scheduledClasses;
+  agenda.timetableAvailable = false;
+  view.rerender(<CampusStudyAgendaCard agenda={agenda} disabled={false} />);
+  expect(view.getByText('課表未知 · 0 項截止')).toBeTruthy();
+  expect(view.getByText('課表來源不可用，無法判定這天是否有課。')).toBeTruthy();
+  expect(view.queryByText('課表副本未排課，並非已確認整天有空。')).toBeNull();
 });

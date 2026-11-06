@@ -151,6 +151,109 @@ async def scenario(browser, port, width, mode):
     return result
 
 
+async def platform_scenario(browser, port, width, mode):
+    label = f'{width}-{mode}-platform'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    page_errors = []
+    external_requests = []
+    page.on('pageerror', lambda error: page_errors.append(str(error)))
+    page.on('request', lambda request: external_requests.append(request.url) if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=platform', wait_until='networkidle')
+    await expect(page.get_by_role('heading', name='課業助理', exact=True)).to_be_visible()
+    await expect(page.get_by_text('依這個帳號保存的課表安排時間，並連線核對已連結的 nuni 課堂作業。未連結或讀取不完整的部分會另外標示。', exact=True)).to_be_visible()
+    today = page.get_by_role('button', name='整理今日重點', exact=True)
+    week = page.get_by_role('button', name='規劃未來七天', exact=True)
+    await expect(today).to_be_enabled()
+    await expect(week).to_be_enabled()
+    initial_geometry = await geometry(page)
+    await today.focus()
+    await expect(today).to_be_focused()
+    await today.press('Enter')
+    preview = page.get_by_test_id('platform-plan-preview')
+    await expect(preview.get_by_text('今日課業重點', exact=True)).to_be_visible()
+    await expect(preview.get_by_role('button', name=re.compile(r'逐日安排$'))).to_have_count(1)
+    await expect(preview.get_by_text(re.compile(r'^09:10–10:00｜InterdisciplinaryCampusSystemsResearchAndCrossSchoolInformationManagementFinalPresentation'))).to_be_visible()
+    await expect(preview.get_by_text('11/8 23:30–11/9 00:30｜跨夜資料整理與小組討論 · 資訊大樓協作研究室', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('23:59 截止 · 資訊管理實務', exact=True)).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'尚未連接校務資料'))).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'本次只取得部分 nuni 課堂作業'))).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'第\s*\d+.*節|副本課間空堂'))).to_have_count(0)
+    today_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-today.png'), full_page=True)
+
+    await week.focus()
+    await expect(week).to_be_focused()
+    await week.press('Enter')
+    await expect(preview.get_by_text('未來七天課業計畫', exact=True)).to_be_visible()
+    await expect(preview.get_by_role('button', name=re.compile(r'逐日安排$'))).to_have_count(7)
+    sunday = preview.get_by_role('button', name='11/8（週日）逐日安排', exact=True)
+    monday = preview.get_by_role('button', name='11/9（週一）逐日安排', exact=True)
+    await expect(sunday).to_have_attribute('aria-expanded', 'true')
+    await expect(monday).to_have_attribute('aria-expanded', 'false')
+    await monday.focus()
+    await expect(monday).to_be_focused()
+    await monday.press('Enter')
+    await expect(monday).to_have_attribute('aria-expanded', 'true')
+    await expect(preview.get_by_text('11/8 23:30–11/9 00:30｜跨夜資料整理與小組討論 · 資訊大樓協作研究室', exact=True)).to_have_count(2)
+    await expect(preview.get_by_text(re.compile(r'未推算空堂，也未排除私人行程'))).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'第\s*\d+.*節|副本課間空堂'))).to_have_count(0)
+    week_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-week.png'), full_page=True)
+
+    outside = preview.get_by_role('button', name='查看其他 1 項作業', exact=True)
+    await outside.focus()
+    await expect(outside).to_be_focused()
+    await outside.press('Enter')
+    await expect(preview.get_by_text('截止時間未確認', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('企業資源規劃跨校協作專題資料蒐集', exact=True)).to_be_visible()
+    outside_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-incomplete.png'), full_page=True)
+    fourth_limitation = preview.get_by_text(re.compile(r'部分課堂尚未連結作業來源，缺少的資料不代表沒有作業。'))
+    await expect(fourth_limitation).to_have_count(0)
+    expand_limitations = preview.get_by_role('button', name='查看全部 4 項資料限制', exact=True)
+    await expect(expand_limitations).to_have_attribute('aria-expanded', 'false')
+    await expand_limitations.focus()
+    await expect(expand_limitations).to_be_focused()
+    await expand_limitations.press('Enter')
+    collapse_limitations = preview.get_by_role('button', name='收起資料限制', exact=True)
+    await expect(collapse_limitations).to_have_attribute('aria-expanded', 'true')
+    await expect(fourth_limitation).to_be_visible()
+    limitations_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-limitations-expanded.png'), full_page=True)
+    await collapse_limitations.focus()
+    await expect(collapse_limitations).to_be_focused()
+    await collapse_limitations.press('Enter')
+    await expect(expand_limitations).to_have_attribute('aria-expanded', 'false')
+    await expect(fourth_limitation).to_have_count(0)
+    await preview.get_by_role('button', name='收起其他 1 項作業', exact=True).press('Enter')
+    await expect(preview.get_by_text('截止時間未確認', exact=True)).to_have_count(0)
+    await monday.focus()
+    await monday.press('Enter')
+    await expect(monday).to_have_attribute('aria-expanded', 'false')
+    await preview.get_by_role('button', name='開啟我的課表核對', exact=True).click()
+    await today.focus()
+    await today.press('Enter')
+    await expect(preview.get_by_text('今日課業重點', exact=True)).to_be_visible()
+    await expect(preview.get_by_role('button', name=re.compile(r'逐日安排$'))).to_have_count(1)
+    events = await page.evaluate('window.qaEvents')
+    assert events == [
+        {'kind': 'today'}, {'kind': 'week'},
+        {'kind': 'open-route', 'route': '/timetable'}, {'kind': 'today'},
+    ], events
+    assert not page_errors, page_errors
+    assert not external_requests, external_requests
+    for current in [initial_geometry, today_geometry, week_geometry, outside_geometry, limitations_geometry]:
+        assert current['documentWidth'] <= width, current
+        assert not current['smallControls'], current['smallControls']
+        assert not current['clipped'], current['clipped']
+    await page.close()
+    return {'scenario': label, 'events': events, 'pageErrors': page_errors, 'externalRequests': external_requests,
+            'initialGeometry': initial_geometry, 'todayGeometry': today_geometry,
+            'weekGeometry': week_geometry, 'incompleteGeometry': outside_geometry,
+            'limitationsExpandedGeometry': limitations_geometry,
+            'fixtureScope': 'Real NuniStudyPlanActions, CampusEvidencePlanCard and CampusStudyAgendaCard with synthetic dated courses and partial assignments; no login, school linkage, source fetch, storage or live-agent verification.'}
+
+
 async def main():
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -164,6 +267,7 @@ async def main():
             )
             for width, mode in [(390, 'light'), (320, 'dark')]:
                 results.append(await scenario(browser, port, width, mode))
+                results.append(await platform_scenario(browser, port, width, mode))
             await browser.close()
     finally:
         server.shutdown()

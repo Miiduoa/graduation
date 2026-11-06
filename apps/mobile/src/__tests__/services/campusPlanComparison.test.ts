@@ -46,6 +46,17 @@ function assignmentChanges(before: CampusEvidencePlan, after: CampusEvidencePlan
   return compareCampusPlans(before, after).changes.filter((change) => change.category === 'assignment');
 }
 
+function clockPlan(): CampusEvidencePlan {
+  const result = plan([]);
+  for (const day of result.agenda!.days) {
+    day.courses = [];
+    day.scheduledClasses = [];
+  }
+  result.agenda!.days[0].scheduledClasses = [{ name: '資料庫', room: 'A301',
+    startAt: '2026-11-06T01:10:00Z', endAt: '2026-11-06T03:00:00Z' }];
+  return result;
+}
+
 test('compares every source row, including tasks omitted from the summary steps', () => {
   const before = plan(Array.from({ length: 7 }, (_, index) => assignment({
     identity: ['course-a', 'report-' + index], title: '報告 ' + index,
@@ -327,6 +338,79 @@ test('same-name class duplicates retain their multiplicity when comparing a date
   expect(changes[0].category).toBe('timetable');
   expect(changes[0].before?.split('\n')).toHaveLength(2);
   expect(changes[0].after?.split('\n')).toHaveLength(1);
+});
+
+test('clock meetings with equivalent offsets and reordered copies remain unchanged', () => {
+  const before = clockPlan();
+  before.agenda!.days[0].scheduledClasses!.push({ name: '資料庫', room: 'B301',
+    startAt: '2026-11-06T05:10:00Z', endAt: '2026-11-06T07:00:00Z' });
+  const after = later(before);
+  after.agenda!.days[0].scheduledClasses = [
+    { name: '資料庫', room: 'B301', startAt: '2026-11-06T13:10:00+08:00', endAt: '2026-11-06T15:00:00+08:00' },
+    { name: '資料庫', room: 'A301', startAt: '2026-11-05T20:10:00-05:00', endAt: '2026-11-06T11:00:00+08:00' },
+  ];
+  expect(compareCampusPlans(before, after)).toMatchObject({ changes: [], comparableDates: 2 });
+});
+
+test('clock time and room changes display actual times, including changes within a minute', () => {
+  const before = clockPlan();
+  const after = later(before);
+  Object.assign(after.agenda!.days[0].scheduledClasses![0], {
+    startAt: '2026-11-06T01:40:00Z', endAt: '2026-11-06T03:00:15.500Z', room: 'B501',
+  });
+  expect(compareCampusPlans(before, after).changes).toEqual([
+    expect.objectContaining({ category: 'timetable', kind: 'changed',
+      before: '09:10–11:00｜資料庫 · A301', after: '09:40–11:00:15.500｜資料庫 · B501' }),
+  ]);
+});
+
+test('identical clock meetings retain duplicate counts rather than matching by name', () => {
+  const before = clockPlan();
+  before.agenda!.days[0].scheduledClasses!.push(clone(before.agenda!.days[0].scheduledClasses![0]));
+  const after = later(before);
+  after.agenda!.days[0].scheduledClasses!.pop();
+  const changes = compareCampusPlans(before, after).changes;
+  expect(changes).toHaveLength(1);
+  expect(changes[0]).toMatchObject({ category: 'timetable', kind: 'changed' });
+  expect(changes[0].before?.split('\n')).toHaveLength(2);
+  expect(changes[0].after?.split('\n')).toHaveLength(1);
+});
+
+test('an overnight Sunday meeting remains dated in both daily comparisons', () => {
+  const before = clockPlan();
+  const overnight = { name: '跨夜實作', room: 'A301', startAt: '2026-11-08T15:30:00Z', endAt: '2026-11-08T17:00:00Z' };
+  before.agenda!.days = [
+    { date: '2026-11-08', label: '11/8（週日）', courses: [], gaps: [], conflicts: [], deadlines: [], scheduledClasses: [{ ...overnight }] },
+    { date: '2026-11-09', label: '11/9（週一）', courses: [], gaps: [], conflicts: [], deadlines: [], scheduledClasses: [{ ...overnight }] },
+  ];
+  const after = later(before);
+  for (const day of after.agenda!.days) day.scheduledClasses![0].endAt = '2026-11-09T01:30:00+08:00';
+  const result = compareCampusPlans(before, after);
+  expect(result.comparableDates).toBe(2);
+  expect(result.changes).toEqual(['2026/11/08', '2026/11/09'].map((date) => expect.objectContaining({
+    category: 'timetable', title: date + ' 課表有差異',
+    before: '11/8 23:30–11/9 01:00｜跨夜實作 · A301', after: '11/8 23:30–11/9 01:30｜跨夜實作 · A301',
+  })));
+});
+
+test.each([false, true])('legacy period and clock schemas are incomparable, including empty days (%s)', (empty) => {
+  const before = plan([]);
+  if (empty) before.agenda!.days[0].courses = [];
+  const after = later(clockPlan());
+  if (empty) after.agenda!.days[0].scheduledClasses = [];
+  const result = compareCampusPlans(before, after);
+  expect(result.comparableDates).toBe(0);
+  expect(result.changes).toEqual([expect.objectContaining({ category: 'source', kind: 'unverifiable',
+    title: '課表時間格式無法對照', detail: expect.stringContaining('未以同名猜測同一堂課') })]);
+});
+
+test('an unread clock source cannot be treated as an empty schedule', () => {
+  const before = clockPlan();
+  const after = later(before);
+  after.agenda!.timetableAvailable = false;
+  for (const day of after.agenda!.days) delete day.scheduledClasses;
+  expect(compareCampusPlans(before, after)).toMatchObject({ comparableDates: 0,
+    changes: [expect.objectContaining({ category: 'source', kind: 'unverifiable', title: '課表來源無法核對' })] });
 });
 
 test('a missing timetable source never becomes an empty or cancelled class day', () => {

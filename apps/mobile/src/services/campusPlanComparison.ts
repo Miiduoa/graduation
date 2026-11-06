@@ -1,4 +1,4 @@
-import { periodLabel, type AgendaCourse } from './campusStudyAgenda';
+import { periodLabel, scheduledClassTimeLabel, type AgendaCourse, type AgendaScheduledClass } from './campusStudyAgenda';
 import type { CampusEvidencePlan, CampusPlanRoute } from './offlineCampusPlanner';
 
 /** Saved evidence is for comparison only. It never restores permission to open or change a record. */
@@ -213,6 +213,17 @@ function courseText(courses: AgendaCourse[]): string {
     .map((course) => periodLabel(course) + '｜' + course.name + (course.room ? ' · ' + course.room : '')).join('\n');
 }
 
+function scheduledClassKey(course: AgendaScheduledClass): string {
+  return JSON.stringify([course.name, timestamp(course.startAt), timestamp(course.endAt), course.room]);
+}
+
+function scheduledClassText(courses: AgendaScheduledClass[], date: string): string {
+  if (!courses.length) return '這份手機課表副本未列課程';
+  return [...courses].sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt) ||
+    Date.parse(a.endAt) - Date.parse(b.endAt) || scheduledClassKey(a).localeCompare(scheduledClassKey(b)))
+    .map((course) => scheduledClassTimeLabel(course, date) + '｜' + course.name + (course.room ? ' · ' + course.room : '')).join('\n');
+}
+
 function dateRange(dates: string[]): string {
   const formatted = dates.map((date) => date.replace(/-/g, '/'));
   return formatted.length > 1 ? formatted[0] + '–' + formatted[formatted.length - 1] : formatted[0];
@@ -251,16 +262,34 @@ function compareTimetable(before: CampusEvidencePlan, after: CampusEvidencePlan,
   if (previous.ignoredCourses || current.ignoredCourses) {
     result.limitations.push('課表含未排時段或格式不完整的課程，只核對已列出的課程。');
   }
-  result.comparableDates = commonDates.length;
+  const incompatibleDates: string[] = [];
   for (const date of commonDates) {
-    const oldCourses = previousDays.get(date)!.courses;
-    const newCourses = currentDays.get(date)!.courses;
+    const oldDay = previousDays.get(date)!;
+    const newDay = currentDays.get(date)!;
+    const oldScheduled = oldDay.scheduledClasses;
+    const newScheduled = newDay.scheduledClasses;
+    if ((oldScheduled !== undefined) !== (newScheduled !== undefined)) {
+      incompatibleDates.push(date);
+      continue;
+    }
+    result.comparableDates += 1;
+    const clockFormat = oldScheduled !== undefined && newScheduled !== undefined;
+    const oldKeys = clockFormat ? oldScheduled.map(scheduledClassKey) : oldDay.courses.map(courseKey);
+    const newKeys = clockFormat ? newScheduled.map(scheduledClassKey) : newDay.courses.map(courseKey);
     // Keep duplicate counts. Two same-name courses must not collapse into one meeting.
-    if (JSON.stringify(oldCourses.map(courseKey).sort()) === JSON.stringify(newCourses.map(courseKey).sort())) continue;
+    if (JSON.stringify(oldKeys.sort()) === JSON.stringify(newKeys.sort())) continue;
     result.changes.push({
       id: 'timetable:' + date, category: 'timetable', kind: 'changed', title: date.replace(/-/g, '/') + ' 課表有差異',
-      before: courseText(oldCourses), after: courseText(newCourses),
+      before: clockFormat ? scheduledClassText(oldScheduled, date) : courseText(oldDay.courses),
+      after: clockFormat ? scheduledClassText(newScheduled, date) : courseText(newDay.courses),
       detail: '這天的手機課表副本內容不同，請核對正式課表與教室。', route: '/timetable',
+    });
+  }
+  if (incompatibleDates.length) {
+    result.changes.push({
+      id: 'source:timetable-format', category: 'source', kind: 'unverifiable', title: '課表時間格式無法對照',
+      detail: '共同日期中有 ' + incompatibleDates.length + ' 天使用不同時間格式：一份是節次，一份是鐘點。未換算節次，也未以同名猜測同一堂課。',
+      route: '/timetable',
     });
   }
   const oldTime = timestamp(before.comparisonBasis?.timetableUpdatedAt ?? null);
