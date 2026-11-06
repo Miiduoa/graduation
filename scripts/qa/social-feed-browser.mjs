@@ -64,7 +64,7 @@ try {
         schoolId: 'pu', boardId: 'public', authorUid: 'bob', anonymous: false,
         title: i === 4 ? '上學期的專題集合' : `校園貼文 ${i}`,
         content: '合成驗收資料：保留搜尋條件，接續找回較舊的校園討論。',
-        createdAt: new Date(1700000000000 + Math.floor(i / 7) * 1000), likes: 0, likedBy: [],
+        createdAt: new Date(1700000000000 + Math.floor(i / 7) * 1000), likes: i === 243 ? 1 : 0, likedBy: [],
       });
     }
     batch.set(db.doc('schools/other/campusPosts/other-only'), {
@@ -325,6 +325,16 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
         const cards=[...document.querySelectorAll('article')];
         return document.querySelector('input[type=search]').value==='' && cards.length===245 &&
           new Set(cards.map(card=>card.querySelector('h3')?.textContent)).size===245;
+      });
+      await check('long-list:recommendation may reorder same-timestamp posts',()=>
+        document.querySelector('article h3')?.textContent==='校園貼文 243');
+      await clickButton('最新');
+      await check('long-list:latest matches SDK createdAt and document-ID order',()=>{
+        const titles=[...document.querySelectorAll('article h3')].map(heading=>heading.textContent);
+        return titles.length===245 && titles.every((title,position)=>{
+          const index=244-position;
+          return title===(index===4?'上學期的專題集合':'校園貼文 '+index);
+        });
       });
       await check('long-list:browser can defer offscreen card rendering',()=>{
         const cards=[...document.querySelectorAll('article')];
