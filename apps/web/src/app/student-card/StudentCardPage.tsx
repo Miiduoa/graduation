@@ -327,13 +327,16 @@ function Presentation({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useRef(onClose);
-  close.current = onClose;
   const [code, setCode] = useState<CardCode | null>(null);
   const [error, setError] = useState('');
-  const [now, setNow] = useState(Date.now);
-  const started = useRef(now);
-  const expiresAt = code?.expiresAt ?? started.current + STUDENT_CARD_TTL_MS;
+  const [started] = useState(Date.now);
+  const [now, setNow] = useState(started);
+  const expiresAt = code?.expiresAt ?? started + STUDENT_CARD_TTL_MS;
   const remaining = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+
+  useEffect(() => {
+    close.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const element = dialog.current!;
