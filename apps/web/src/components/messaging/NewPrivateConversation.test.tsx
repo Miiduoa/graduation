@@ -392,7 +392,7 @@ it('keeps focus in the text draft when a photo finishes while the user is typing
   input.focus();
   fireEvent.change(input, { target: { value: '照片傳送時繼續寫' } });
   await act(async () => receipt.resolve());
-  await act(async () => new Promise((resolve) => requestAnimationFrame(resolve)));
+  await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   expect(document.activeElement).toBe(input);
   expect(input).toHaveProperty('value', '照片傳送時繼續寫');
 });
