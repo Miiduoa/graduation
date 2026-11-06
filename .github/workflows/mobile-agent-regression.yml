@@ -67,6 +67,7 @@ jobs:
             src/__tests__/services/campusPlanComparison.test.ts \
             src/__tests__/services/savedCampusPlans.test.ts \
             src/__tests__/services/campusStudyAgenda.test.ts \
+            src/__tests__/services/campusClockAvailability.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/campusAssignmentTarget.test.ts \
             src/__tests__/services/campusAssignmentPreview.test.ts \

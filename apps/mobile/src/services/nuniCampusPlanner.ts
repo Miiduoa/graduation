@@ -5,7 +5,8 @@ import { createCourseAccess, type CourseTransport } from '@campus/shared/src/cou
 import { createNuniClasses, NuniError, type NuniAssignment, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
-import { buildCampusStudyAgenda, formatCampusStudyAgenda, resolveStudyWindow, taipeiDayNumber } from './campusStudyAgenda';
+import { buildCampusStudyAgenda, formatCampusStudyAgenda, resolveStudyWindow, scheduledClassTimeLabel, taipeiDayNumber } from './campusStudyAgenda';
+import { inspectCampusClockAvailability, selectCampusClockStudySlot, type CampusClockInterval } from './campusClockAvailability';
 import { scheduledSavedClasses } from './nextSavedClasses';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanStep } from './offlineCampusPlanner';
 import type { CampusPlanComparisonBasis } from './campusPlanComparison';
@@ -39,6 +40,7 @@ const DAY = 86_400_000;
 const MAX_WORKSPACES = 12;
 const MAX_ASSIGNMENTS = 400;
 const MAX_DAILY_CLASSES = 80;
+const CLASS_BUFFER = 10 * 60_000;
 
 export function isNuniCampusPlanningQuestion(question: string): boolean {
   const planning = /安排|規劃|計畫|今日重點|今天要做|今天要先|今天先做|今天該做|先處理|先完成|優先順序|待辦摘要|校園摘要|本週重點|這週重點|接下來七天|未來七天|讀書進度|怎麼分配/.test(question);
@@ -263,12 +265,33 @@ export async function buildNuniCampusPlan(input: PlanInput): Promise<CampusEvide
         startAt: new Date(entry.startAt).toISOString(), endAt: new Date(entry.endAt).toISOString(),
       }));
     });
+    const unplacedCourses = source?.records.filter((row) => {
+      if (row.kind !== 'timetable' || row.dayOfWeek) return false;
+      try {
+        const scope = courseScope(row);
+        return scope.schoolId === schoolId && terms.has(`${scope.academicYear}|${scope.semester}`);
+      } catch { return false; }
+    }).length ?? 0;
+    agenda.ignoredCourses = Math.min(unplacedCourses, MAX_DAILY_CLASSES);
+    const clockDays = agenda.days.map((day) => ({
+      day, availability: inspectCampusClockAvailability(day.scheduledClasses, day.date),
+    }));
+    const canSuggestStudy = hasTimetable && !unplacedCourses && clockDays.every(({ availability }) => availability.valid);
+    // Only time between known classes is considered. Leave room to move between classes,
+    // keep suggestions in daytime, and never treat a blank day as permission to fill it.
+    let studyGaps: CampusClockInterval[] = canSuggestStudy ? clockDays.flatMap(({ day, availability }) =>
+      availability.gaps.flatMap((gap) => {
+        const start = Math.max(Date.parse(gap.startAt) + CLASS_BUFFER, Date.parse(day.date + 'T08:00:00+08:00'));
+        const end = Math.min(Date.parse(gap.endAt) - CLASS_BUFFER, Date.parse(day.date + 'T22:00:00+08:00'));
+        return end > start ? [{ startAt: new Date(start).toISOString(), endAt: new Date(end).toISOString() }] : [];
+      })) : [];
     const limitations = [...assignments.limitations];
-    if (source?.records.some((row) => !row.dayOfWeek)) limitations.push('部分課程尚未填寫上課星期，未排入每日課表；作業仍依已連結課程核對。');
+    if (unplacedCourses) limitations.push('部分本期課程尚未填寫上課星期，未排入每日課表，本次不建議準備時段；作業仍依已連結課程核對。');
     if (!hasTimetable) limitations.push(source
       ? '課表的學期、上課時間或資料筆數無法完整核對，本次不列課表，請開啟課表頁確認。'
       : '這台手機沒有可核對的本帳號、本校課表副本，請先匯入或保存課表。');
     else limitations.push('課表使用手機保存的時間與單日調整，未向校方即時查證；沒有排課不代表已確認空閒。');
+    if (canSuggestStudy) limitations.push('準備建議只取 08:00–22:00 的課間時段，課前後各保留 10 分鐘，每次先安排 30 分鐘；未核對通勤與私人行程，也不代表能在 30 分鐘內完成作業。這些是建議，尚未建立行事曆事件。');
     limitations.push('本次只納入已連結 nuni 課程的作業，不含小考、公告或其他校務系統；已繳交與已關閉作業不列為待辦。');
     const relevant = assignments.pending.filter((item) => {
       if (!item.dueAt) return true;
@@ -277,13 +300,41 @@ export async function buildNuniCampusPlan(input: PlanInput): Promise<CampusEvide
       return due < now || (dueDay >= window.startDay && dueDay < window.endDay);
     }).sort((a, b) => (a.dueAt ? Date.parse(a.dueAt) : Infinity) - (b.dueAt ? Date.parse(b.dueAt) : Infinity) ||
       a.workspaceId.localeCompare(b.workspaceId) || a.id.localeCompare(b.id));
-    const steps: CampusPlanStep[] = relevant.slice(0, 3).map((item) => ({
-      id: `nuni-${item.workspaceId}-${item.id}`, title: item.title,
-      detail: item.groupName + '｜' + (item.dueAt ? `截止 ${dateLabel(item.dueAt)}；${Date.parse(item.dueAt) < now ? '期限已過，請先核對補交方式' : '依期限安排作業進度'}`
-        : '來源未提供可核對的截止時間，請先向課程頁確認') + '。請開啟 nuni 課程核對最新狀態。',
-      priority: priority(item.dueAt, now), evidence: 'authorized-assignments', route: '/classroom',
-      ...(item.dueAt ? { dueAt: item.dueAt } : {}), groupName: item.groupName,
-    }));
+    const steps: CampusPlanStep[] = relevant.slice(0, 3).map((item) => {
+      const due = item.dueAt ? Date.parse(item.dueAt) : NaN;
+      let preparation = '';
+      if (canSuggestStudy && due > now) {
+        const slot = selectCampusClockStudySlot({ valid: true, gaps: studyGaps, conflicts: [] }, now, due);
+        if (slot) {
+          const day = agenda.days.find((entry) => taipeiDayNumber(Date.parse(slot.startAt)) ===
+            Date.parse(entry.date + 'T00:00:00Z') / DAY)!;
+          preparation = `建議先用 ${day.label} ${scheduledClassTimeLabel({ ...slot, name: '', room: '' }, day.date)}（30 分鐘）準備這份作業，再依進度調整。`;
+          // Consume the selected slot so distinct tasks never receive the same time.
+          studyGaps = studyGaps.map((gap) => Date.parse(gap.startAt) <= Date.parse(slot.startAt) &&
+            Date.parse(gap.endAt) >= Date.parse(slot.endAt) ? { ...gap, startAt: slot.endAt } : gap)
+            .filter((gap) => Date.parse(gap.endAt) > Date.parse(gap.startAt));
+        } else preparation = '本次沒有找到符合條件的 30 分鐘課間準備時段，請另行安排。';
+      }
+      return {
+        id: `nuni-${item.workspaceId}-${item.id}`, title: item.title,
+        detail: item.groupName + '｜' + (item.dueAt ? `截止 ${dateLabel(item.dueAt)}；${due < now ? '期限已過，請先核對補交方式' : '依期限安排作業進度'}`
+          : '來源未提供可核對的截止時間，請先向課程頁確認') + '。' + preparation + '請開啟 nuni 課程核對最新狀態。',
+        priority: priority(item.dueAt, now), evidence: 'authorized-assignments', route: '/classroom',
+        ...(item.dueAt ? { dueAt: item.dueAt } : {}), groupName: item.groupName,
+      };
+    });
+    const conflicts = canSuggestStudy ? clockDays.flatMap(({ day, availability }) => availability.conflicts
+      .map((interval) => `${day.label} ${scheduledClassTimeLabel({ ...interval, name: '', room: '' }, day.date)}`)) : [];
+    if (conflicts.length) {
+      // Keep elapsed and imminent deadlines ahead of timetable housekeeping.
+      const afterUrgent = steps.findIndex((step) => step.priority !== 'overdue' && step.priority !== 'urgent');
+      steps.splice(afterUrgent < 0 ? steps.length : afterUrgent, 0, {
+        id: 'nuni-timetable-conflicts', title: '先核對課表重疊時段',
+        detail: conflicts.slice(0, 3).join('、') + (conflicts.length > 3 ? `，另有 ${conflicts.length - 3} 段重疊` : '') +
+          '。保存的課程在這些時間重疊，請先確認調課或重複匯入；準備建議已避開所有已排課程。',
+        priority: 'verify', evidence: 'saved-timetable', route: '/timetable',
+      });
+    }
     if (hasTimetable) {
       const first = agenda.days.find((day) => day.scheduledClasses?.length);
       if (first) steps.push({ id: 'nuni-timetable-review', title: `${first.label}課表與課前準備`,

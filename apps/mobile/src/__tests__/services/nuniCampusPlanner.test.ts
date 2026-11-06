@@ -265,6 +265,7 @@ test('a late-listed workspace urgent pending task survives the 400-row cap ahead
   expect(result.comparisonBasis?.assignments.status).toBe('partial');
   expect(result.comparisonBasis?.assignments.items[0].identity).toEqual([workspace(5).id, assignment(999).id]);
   expect(result.steps[0]).toMatchObject({ title: '下一堂前截止的急件', priority: 'urgent' });
+  expect(result.steps[1].id).toBe('nuni-timetable-conflicts');
   expect(result.agenda?.days[0].deadlines).toHaveLength(1);
 });
 
@@ -345,6 +346,147 @@ test('an unreadable or over-limit daily timetable never turns incomplete dates i
   read.mockResolvedValue(source(...Array.from({ length: 81 }, (_, n) => record(1, { id: `row-${n}` }))));
   result = await plan();
   expect(result.agenda?.timetableAvailable).toBe(false);
+  expect(copyCampusEvidencePlan(result)).toEqual(result);
+});
+
+function clockRecords(firstEnd = '10:00', secondStart = '13:00') {
+  return [
+    record(1, { title: '上午課程', startTime: '09:00', endTime: firstEnd }),
+    record(2, { title: '下午課程', startTime: secondStart, endTime: '15:00', linkedCourseId: workspace().id }),
+  ];
+}
+
+test('suggests distinct buffered preparation slots in deadline order and preserves them in the saved plan', async () => {
+  read.mockResolvedValue(source(...clockRecords()));
+  input.bffRequest.mockResolvedValue({ assignments: [
+    assignment(3, { dueAt: '2026-11-06T11:40:00+08:00' }),
+    assignment(1, { dueAt: '2026-11-06T10:40:00+08:00' }),
+    assignment(2, { dueAt: '2026-11-06T11:10:00+08:00' }),
+  ] });
+  const result = await plan();
+  const tasks = result.steps.filter((step) => step.evidence === 'authorized-assignments');
+  expect(tasks.map((step) => step.title)).toEqual(['作業 1', '作業 2', '作業 3']);
+  expect(tasks[0].detail).toContain('11/6（週五） 10:10–10:40（30 分鐘）');
+  expect(tasks[1].detail).toContain('11/6（週五） 10:40–11:10（30 分鐘）');
+  expect(tasks[2].detail).toContain('11/6（週五） 11:10–11:40（30 分鐘）');
+  expect(result.content).toContain(tasks[1].detail);
+  expect(result.limitations.join(' ')).toMatch(/08:00–22:00.*各保留 10 分鐘.*私人行程.*不代表能在 30 分鐘內完成.*尚未建立行事曆/);
+  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  const scope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
+  const session = createSavedCampusPlanSession(() => true);
+  const saved = await saveCampusPlan(scope, { question, plan: result }, session);
+  await setCampusPlanStepDone(scope, saved[0].id, tasks[0].id, true, session);
+  const restored = await readSavedCampusPlans(scope, createSavedCampusPlanSession(() => true));
+  expect(restored[0].plan.steps).toEqual(result.steps);
+  expect(restored[0].completedStepIds).toEqual([tasks[0].id]);
+});
+
+test('rounds a preparation start forward from the current instant without moving the deadline', async () => {
+  read.mockResolvedValue(source(...clockRecords()));
+  input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { dueAt: '2026-11-06T10:50:00+08:00' })] });
+  const result = await plan({ now: Date.parse('2026-11-06T10:17:09+08:00') });
+  expect(result.steps[0].detail).toContain('10:20–10:50（30 分鐘）');
+  expect(result.steps[0].dueAt).toBe('2026-11-06T10:50:00+08:00');
+});
+
+test.each([
+  ['a deadline before the first complete slot', '13:00', '2026-11-06T10:39:59+08:00'],
+  ['a short interval after class buffers', '10:35', '2026-11-06T23:59:00+08:00'],
+])('explains the lack of a usable slot for %s', async (_, secondStart, dueAt) => {
+  read.mockResolvedValue(source(...clockRecords('10:00', secondStart)));
+  input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { dueAt })] });
+  const result = await plan();
+  expect(result.steps[0].detail).toContain('本次沒有找到符合條件的 30 分鐘課間準備時段');
+  expect(result.steps[0].detail).not.toContain('建議先用');
+});
+
+test.each([null, '2026-11-06T08:59:00+08:00', '2026-11-06T09:00:00+08:00'])(
+  'does not invent a preparation period for an unknown or elapsed deadline: %s', async (dueAt) => {
+    read.mockResolvedValue(source(...clockRecords()));
+    input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { dueAt })] });
+    const result = await plan();
+    expect(result.steps[0].detail).not.toMatch(/建議先用|本次沒有找到/);
+    expect(result.steps[0].detail).toMatch(dueAt ? /核對最新狀態/ : /來源未提供可核對的截止時間/);
+  },
+);
+
+test('a lone class does not create a preparation slot before or after the school day', async () => {
+  const result = await plan();
+  expect(result.steps[0].detail).toContain('本次沒有找到符合條件的 30 分鐘課間準備時段');
+  expect(result.steps[0].detail).not.toContain('建議先用');
+});
+
+test('only suggests daytime slots and leaves the late evening outside the preparation window', async () => {
+  read.mockResolvedValue(source(
+    record(1, { startTime: '06:00', endTime: '06:30' }),
+    record(2, { startTime: '09:00', endTime: '10:00', linkedCourseId: workspace().id }),
+  ));
+  let result = await plan({ now: Date.parse('2026-11-06T06:00:00+08:00') });
+  expect(result.steps[0].detail).toContain('08:00–08:30（30 分鐘）');
+  read.mockResolvedValue(source(
+    record(1, { startTime: '18:00', endTime: '19:00' }),
+    record(2, { startTime: '23:00', endTime: '23:30', linkedCourseId: workspace().id }),
+  ));
+  result = await plan({ now: Date.parse('2026-11-06T21:45:00+08:00') });
+  expect(result.steps[0].detail).not.toContain('建議先用');
+  expect(result.steps[0].detail).toContain('本次沒有找到符合條件');
+});
+
+test('an unplaced current course suppresses suggestions but an earlier term does not hide known intervals', async () => {
+  read.mockResolvedValue(source(...clockRecords(), record(3, { dayOfWeek: undefined, linkedCourseId: workspace().id })));
+  let result = await plan();
+  expect(result.agenda?.ignoredCourses).toBe(1);
+  expect(result.steps[0].detail).not.toContain('建議先用');
+  expect(result.limitations.join(' ')).toContain('本次不建議準備時段');
+  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  read.mockResolvedValue(source(...clockRecords(), record(3, { academicYear: '114', dayOfWeek: undefined, linkedCourseId: workspace().id })));
+  result = await plan();
+  expect(result.agenda?.ignoredCourses).toBe(0);
+  expect(result.steps[0].detail).toContain('10:10–10:40（30 分鐘）');
+});
+
+test('puts nested clock conflicts first and never schedules a task inside the enclosing class', async () => {
+  read.mockResolvedValue(source(...clockRecords('12:00', '14:00'),
+    record(3, { title: '重疊課程', startTime: '10:00', endTime: '10:30', linkedCourseId: workspace().id })));
+  input.bffRequest.mockResolvedValue({ assignments: [1, 2, 3].map((id) =>
+    assignment(id, { dueAt: '2026-11-10T23:59:00+08:00' })) });
+  const result = await plan();
+  expect(result.steps).toHaveLength(5);
+  expect(result.steps[0]).toMatchObject({ id: 'nuni-timetable-conflicts', priority: 'verify', route: '/timetable' });
+  expect(result.steps[0].detail).toContain('11/6（週五） 10:00–10:30');
+  expect(result.steps[1].detail).toContain('12:10–12:40（30 分鐘）');
+  expect(result.steps[2].detail).toContain('12:40–13:10（30 分鐘）');
+  expect(result.steps[3].detail).toContain('13:10–13:40（30 分鐘）');
+  expect(copyCampusEvidencePlan(result)).toEqual(result);
+});
+
+test('replanning uses the new class occurrence while leaving the saved preparation proposal unchanged', async () => {
+  read.mockResolvedValue(source(...clockRecords()));
+  const previous = await plan();
+  const original = JSON.stringify(previous);
+  read.mockResolvedValue(source(...clockRecords('11:00')));
+  const latest = await plan({ now: now + 60_000 });
+  expect(previous.steps[0].detail).toContain('10:10–10:40（30 分鐘）');
+  expect(latest.steps[0].detail).toContain('11:10–11:40（30 分鐘）');
+  expect(compareCampusPlans(previous, latest).changes.some((change) => change.category === 'timetable')).toBe(true);
+  expect(JSON.stringify(previous)).toBe(original);
+});
+
+test('partial assignment coverage only proposes time for observed tasks and keeps the missing source visible', async () => {
+  read.mockResolvedValue(source(...clockRecords(),
+    record(3, { title: '另一門課', dayOfWeek: 6, linkedCourseId: workspace(2).id })));
+  input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+    ? { workspaces: [workspace(), workspace(2)] } : reviewed(String(body?.workspaceId)));
+  input.bffRequest.mockImplementation(async (path) => {
+    if (path.includes(workspace(2).id)) throw new NuniError(403, 'FORBIDDEN');
+    return { assignments: [assignment()] };
+  });
+  const result = await plan();
+  expect(result.agenda?.ignoredCourses).toBe(0);
+  expect(result.comparisonBasis?.assignments.status).toBe('partial');
+  expect(result.steps.filter((step) => step.evidence === 'authorized-assignments')).toHaveLength(1);
+  expect(result.steps[0].detail).toContain('10:10–10:40（30 分鐘）');
+  expect(result.limitations.join(' ')).toContain('缺資料不代表已完成');
   expect(copyCampusEvidencePlan(result)).toEqual(result);
 });
 

@@ -178,6 +178,9 @@ async def platform_scenario(browser, port, width, mode):
     await expect(preview.get_by_text(re.compile(r'尚未連接校務資料'))).to_be_visible()
     await expect(preview.get_by_text(re.compile(r'本次只取得部分 nuni 課堂作業'))).to_be_visible()
     await expect(preview.get_by_text(re.compile(r'第\s*\d+.*節|副本課間空堂'))).to_have_count(0)
+    await expect(preview.get_by_text('鐘點課表無法完整核對，暫不推算課間時段或重疊。', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('課間時段（依保存課表）', exact=True)).to_have_count(0)
+    await expect(preview.get_by_role('alert').filter(has_text='課表重疊：')).to_have_count(0)
     today_geometry = await geometry(page)
     await page.screenshot(path=str(ROOT / f'{label}-today.png'), full_page=True)
 
@@ -195,7 +198,9 @@ async def platform_scenario(browser, port, width, mode):
     await monday.press('Enter')
     await expect(monday).to_have_attribute('aria-expanded', 'true')
     await expect(preview.get_by_text('11/8 23:30–11/9 00:30｜跨夜資料整理與小組討論 · 資訊大樓協作研究室', exact=True)).to_have_count(2)
-    await expect(preview.get_by_text(re.compile(r'未推算空堂，也未排除私人行程'))).to_be_visible()
+    await expect(preview.get_by_text('鐘點課表無法完整核對，暫不推算課間時段或重疊。', exact=True)).to_have_count(2)
+    await expect(preview.get_by_text('課間時段（依保存課表）', exact=True)).to_have_count(0)
+    await expect(preview.get_by_role('alert').filter(has_text='課表重疊：')).to_have_count(0)
     await expect(preview.get_by_text(re.compile(r'第\s*\d+.*節|副本課間空堂'))).to_have_count(0)
     week_geometry = await geometry(page)
     await page.screenshot(path=str(ROOT / f'{label}-week.png'), full_page=True)
@@ -254,6 +259,108 @@ async def platform_scenario(browser, port, width, mode):
             'fixtureScope': 'Real NuniStudyPlanActions, CampusEvidencePlanCard and CampusStudyAgendaCard with synthetic dated courses and partial assignments; no login, school linkage, source fetch, storage or live-agent verification.'}
 
 
+async def clock_scenario(browser, port, width, mode):
+    label = f'{width}-{mode}-clock'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    page_errors = []
+    external_requests = []
+    page.on('pageerror', lambda error: page_errors.append(str(error)))
+    page.on('request', lambda request: external_requests.append(request.url) if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=clock', wait_until='networkidle')
+    today = page.get_by_role('button', name='整理今日重點', exact=True)
+    await today.focus()
+    await expect(today).to_be_focused()
+    await today.press('Enter')
+    preview = page.get_by_test_id('platform-plan-preview')
+    await expect(preview.get_by_text('今日課業重點', exact=True)).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'建議先用 11/8（週日） 10:10–10:40（30 分鐘）準備這份作業，再依進度調整。'))).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'尚未建立行事曆事件'))).to_be_visible()
+    await expect(preview.get_by_text('課間時段（依保存課表）', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('10:00–23:30', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('尚未排除私人行程、通勤或課表更新，安排前請自行核對。', exact=True)).to_be_visible()
+    await expect(preview.get_by_role('alert').filter(has_text='課表重疊：')).to_have_count(0)
+    today_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-today-gap.png'), full_page=True)
+
+    week = page.get_by_role('button', name='規劃未來七天', exact=True)
+    await week.focus()
+    await expect(week).to_be_focused()
+    await week.press('Enter')
+    await expect(preview.get_by_role('button', name=re.compile(r'逐日安排$'))).to_have_count(7)
+    sunday = preview.get_by_role('button', name='11/8（週日）逐日安排', exact=True)
+    await expect(sunday).to_have_attribute('aria-expanded', 'true')
+    await sunday.focus()
+    await sunday.press('Enter')
+    await expect(sunday).to_have_attribute('aria-expanded', 'false')
+    tuesday = preview.get_by_role('button', name='11/10（週二）逐日安排', exact=True)
+    await expect(tuesday).to_have_attribute('aria-expanded', 'false')
+    await tuesday.focus()
+    await expect(tuesday).to_be_focused()
+    await tuesday.press('Enter')
+    await expect(tuesday).to_have_attribute('aria-expanded', 'true')
+    await expect(preview.get_by_role('alert')).to_have_text(
+        '課表重疊：09:30–11:00、11/10 23:45–11/11 00:00。請先核對正式課表，不能當作可安排的空堂。')
+    await expect(preview.get_by_text('13:00–14:00', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('15:00–23:30', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('11:00–12:00', exact=True)).to_have_count(0)
+    await expect(preview.get_by_text('12:00–13:00｜接續工作坊的課程 · 資訊大樓 302', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('尚未排除私人行程、通勤或課表更新，安排前請自行核對。', exact=True)).to_be_visible()
+    nested_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-nested-overlap.png'), full_page=True)
+
+    await tuesday.focus()
+    await tuesday.press('Enter')
+    await expect(tuesday).to_have_attribute('aria-expanded', 'false')
+    wednesday = preview.get_by_role('button', name='11/11（週三）逐日安排', exact=True)
+    await wednesday.focus()
+    await expect(wednesday).to_be_focused()
+    await wednesday.press('Enter')
+    await expect(wednesday).to_have_attribute('aria-expanded', 'true')
+    await expect(preview.get_by_role('alert')).to_have_text(
+        '課表重疊：00:00–00:15。請先核對正式課表，不能當作可安排的空堂。')
+    await expect(preview.get_by_text('11/10 23:30–11/11 00:30｜跨夜專題工作坊 · 資訊大樓協作研究室', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('00:30–01:00', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('尚未排除私人行程、通勤或課表更新，安排前請自行核對。', exact=True)).to_be_visible()
+    overnight_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-overnight.png'), full_page=True)
+
+    await wednesday.focus()
+    await wednesday.press('Enter')
+    await expect(wednesday).to_have_attribute('aria-expanded', 'false')
+    thursday = preview.get_by_role('button', name='11/12（週四）逐日安排', exact=True)
+    await thursday.focus()
+    await expect(thursday).to_be_focused()
+    await thursday.press('Enter')
+    await expect(thursday).to_have_attribute('aria-expanded', 'true')
+    await expect(preview.get_by_text('09:00–10:00｜相鄰第一堂課 · 資訊大樓 301', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('10:00–11:00｜相鄰第二堂課 · 資訊大樓 301', exact=True)).to_be_visible()
+    await expect(preview.get_by_text('已保存課程之間沒有可列出的課間時段。', exact=True)).to_be_visible()
+    await expect(preview.get_by_role('alert')).to_have_count(0)
+    await expect(preview.get_by_text('課間時段（依保存課表）', exact=True)).to_have_count(0)
+    await expect(thursday).not_to_contain_text('有課表重疊')
+    adjacent_geometry = await geometry(page)
+    await page.screenshot(path=str(ROOT / f'{label}-adjacent.png'), full_page=True)
+    await preview.get_by_role('button', name='核對個人課表', exact=True).press('Enter')
+    await preview.get_by_role('button', name='開啟課程與作業核對', exact=True).press('Enter')
+    events = await page.evaluate('window.qaEvents')
+    assert events == [
+        {'kind': 'today'}, {'kind': 'week'},
+        {'kind': 'open-route', 'route': '/timetable'},
+        {'kind': 'open-route', 'route': '/classroom'},
+    ], events
+    assert not page_errors, page_errors
+    assert not external_requests, external_requests
+    for current in [today_geometry, nested_geometry, overnight_geometry, adjacent_geometry]:
+        assert current['documentWidth'] <= width, current
+        assert not current['smallControls'], current['smallControls']
+        assert not current['clipped'], current['clipped']
+    await page.close()
+    return {'scenario': label, 'events': events, 'pageErrors': page_errors, 'externalRequests': external_requests,
+            'todayGeometry': today_geometry, 'nestedGeometry': nested_geometry,
+            'overnightGeometry': overnight_geometry, 'adjacentGeometry': adjacent_geometry,
+            'fixtureScope': 'Real clock availability calculations and presentation components with synthetic occurrences and representative preparation-step text; no live planner policy, authentication, school linkage, data fetch, storage or device verification.'}
+
+
 async def main():
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -268,6 +375,7 @@ async def main():
             for width, mode in [(390, 'light'), (320, 'dark')]:
                 results.append(await scenario(browser, port, width, mode))
                 results.append(await platform_scenario(browser, port, width, mode))
+                results.append(await clock_scenario(browser, port, width, mode))
             await browser.close()
     finally:
         server.shutdown()

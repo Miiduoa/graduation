@@ -11,6 +11,8 @@ on:
       - 'apps/mobile/src/screens/AssistantConversationLayout.tsx'
       - 'apps/mobile/src/screens/CampusAssistantScreen.tsx'
       - 'apps/mobile/src/services/campusPlanComparison.ts'
+      - 'apps/mobile/src/services/campusStudyAgenda.ts'
+      - 'apps/mobile/src/services/campusClockAvailability.ts'
       - 'apps/mobile/src/screens/CampusStudyAgendaCard.tsx'
       - 'apps/mobile/src/ui/aiFirst.tsx'
       - 'apps/mobile/src/ui/theme.ts'

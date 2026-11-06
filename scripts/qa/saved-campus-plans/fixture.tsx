@@ -188,23 +188,84 @@ const platformToday: CampusEvidencePlan = {
   agenda: { ...platformWeek.agenda!, days: platformWeek.agenda!.days.slice(0, 1) },
 };
 
-function PlatformPlanningApp() {
+// The production agenda derives gaps and conflicts from these occurrences.
+// Nested and touching courses deliberately rule out a false 11:00–12:00 gap.
+const clockOverlapClasses = [
+  { name: '跨課程研究與資料整合工作坊', room: '資訊大樓 301',
+    startAt: '2026-11-10T01:00:00.000Z', endAt: '2026-11-10T04:00:00.000Z' },
+  { name: '工作坊內的專題短講', room: '資訊大樓 301',
+    startAt: '2026-11-10T01:30:00.000Z', endAt: '2026-11-10T02:00:00.000Z' },
+  { name: '緊接短講的小組討論', room: '資訊大樓 301',
+    startAt: '2026-11-10T02:00:00.000Z', endAt: '2026-11-10T03:00:00.000Z' },
+  { name: '接續工作坊的課程', room: '資訊大樓 302',
+    startAt: '2026-11-10T04:00:00.000Z', endAt: '2026-11-10T05:00:00.000Z' },
+  { name: '下午資料分析實作', room: '資訊大樓 401',
+    startAt: '2026-11-10T06:00:00.000Z', endAt: '2026-11-10T07:00:00.000Z' },
+];
+const clockOvernightClasses = [
+  { name: '跨夜專題工作坊', room: '資訊大樓協作研究室',
+    startAt: '2026-11-10T15:30:00.000Z', endAt: '2026-11-10T16:30:00.000Z' },
+  { name: '跨夜報告討論', room: '線上課堂',
+    startAt: '2026-11-10T15:45:00.000Z', endAt: '2026-11-10T16:15:00.000Z' },
+];
+const clockWeek: CampusEvidencePlan = {
+  ...platformWeek,
+  overview: '以保存的鐘點課表核對課間時段與重疊，並顯示作業準備建議。',
+  limitations: [
+    '課表是手機保存的副本，尚未排除私人行程、通勤及臨時調課。',
+    '準備建議只取 08:00–22:00 的課間時段，課前後各保留 10 分鐘，每次先安排 30 分鐘；未核對通勤與私人行程，也不代表能在 30 分鐘內完成作業。這些是建議，尚未建立行事曆事件。',
+    '本次只納入已連結課程的作業，其他校務來源仍須自行核對。',
+  ],
+  // Representative planner output, not a second implementation of slot policy.
+  steps: [{ id: 'assignment-clock-preparation',
+    title: '資訊管理實務與跨校協作研究方法：期末共同專題資料整合報告',
+    detail: '資訊管理實務｜截止 11/8 23:59。建議先用 11/8（週日） 10:10–10:40（30 分鐘）準備這份作業，再依進度調整。請開啟 nuni 課程核對最新狀態。',
+    evidence: 'authorized-assignments', priority: 'urgent', route: '/classroom',
+    dueAt: '2026-11-08T15:59:00.000Z', groupName: '資訊管理實務',
+  }, ...platformWeek.steps],
+  agenda: {
+    ...platformWeek.agenda!, ignoredCourses: 0,
+    days: platformWeek.agenda!.days.map((day, index) => ({
+      ...day,
+      scheduledClasses: index === 2 ? [...clockOverlapClasses, ...clockOvernightClasses]
+        : index === 3 ? [...clockOvernightClasses,
+          { name: '凌晨實作收尾', room: '資訊大樓協作研究室',
+            startAt: '2026-11-10T17:00:00.000Z', endAt: '2026-11-10T17:30:00.000Z' }]
+          : index === 4 ? [
+            { name: '相鄰第一堂課', room: '資訊大樓 301',
+              startAt: '2026-11-12T01:00:00.000Z', endAt: '2026-11-12T02:00:00.000Z' },
+            { name: '相鄰第二堂課', room: '資訊大樓 301',
+              startAt: '2026-11-12T02:00:00.000Z', endAt: '2026-11-12T03:00:00.000Z' },
+          ] : day.scheduledClasses,
+    })),
+  },
+};
+const clockToday: CampusEvidencePlan = {
+  ...clockWeek, title: '今日課業重點',
+  agenda: { ...clockWeek.agenda!, days: clockWeek.agenda!.days.slice(0, 1) },
+};
+
+function PlatformPlanningApp({ clock = false }: { clock?: boolean }) {
   const [selection, setSelection] = useState<'today' | 'week' | null>(null);
+  const todayPlan = clock ? clockToday : platformToday;
+  const weekPlan = clock ? clockWeek : platformWeek;
   return <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 12 }}>
     <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>課業助理</Text>
     <NuniStudyPlanActions disabled={false}
       onToday={() => { window.qaEvents.push({ kind: 'today' }); setSelection('today'); }}
       onWeek={() => { window.qaEvents.push({ kind: 'week' }); setSelection('week'); }} />
     {selection ? <View testID="platform-plan-preview">
-      <CampusEvidencePlanCard plan={selection === 'today' ? platformToday : platformWeek} disabled={false}
+      <CampusEvidencePlanCard plan={selection === 'today' ? todayPlan : weekPlan} disabled={false}
         onOpenRoute={(route) => { window.qaEvents.push({ kind: 'open-route', route }); }} />
     </View> : null}
     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
-      測試畫面：日期、課程與作業皆為合成範例，只驗證正式元件顯示與操作；未連線登入或取得平台、校務資料。
+      {clock
+        ? '測試畫面：課程、期限與準備建議皆為合成範例；課間與重疊由正式計算元件呈現。未驗證即時規劃、登入或真實平台、校務資料。'
+        : '測試畫面：日期、課程與作業皆為合成範例，只驗證正式元件顯示與操作；未連線登入或取得平台、校務資料。'}
     </Text>
   </View>;
 }
 
-createRoot(document.getElementById('root')!).render(
-  new URLSearchParams(location.search).get('scenario') === 'platform' ? <PlatformPlanningApp /> : <App />,
-);
+const scenario = new URLSearchParams(location.search).get('scenario');
+createRoot(document.getElementById('root')!).render(scenario === 'platform' || scenario === 'clock'
+  ? <PlatformPlanningApp clock={scenario === 'clock'} /> : <App />);

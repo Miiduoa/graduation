@@ -1,3 +1,5 @@
+import { inspectCampusClockAvailability } from './campusClockAvailability';
+
 /** Pure, read-only calendar calculations over context already verified by the caller. */
 export interface AgendaCourse {
   name: string;
@@ -183,7 +185,7 @@ const scheduledTime = new Intl.DateTimeFormat('en-US', {
 });
 
 /** Preserve the full occurrence across midnight instead of turning clock times into period numbers. */
-export function scheduledClassTimeLabel(course: AgendaScheduledClass, dayDate: string): string {
+export function scheduledClassTimeLabel<T extends Pick<AgendaScheduledClass, 'startAt' | 'endAt'>>(course: T, dayDate: string): string {
   const start = confirmedTimestamp(course.startAt);
   const end = confirmedTimestamp(course.endAt);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > DAY_MS) return '時間未確認';
@@ -214,6 +216,9 @@ export function scheduledClassTimeLabel(course: AgendaScheduledClass, dayDate: s
 export function formatCampusStudyAgenda(agenda: CampusStudyAgenda): string[] {
   return agenda.days.map((day) => {
     const scheduled = day.scheduledClasses;
+    const availability = scheduled === undefined ? undefined : inspectCampusClockAvailability(
+      agenda.timetableAvailable && agenda.ignoredCourses === 0 ? scheduled : null, day.date,
+    );
     const classes = !agenda.timetableAvailable ? '課表來源不可用'
       : scheduled !== undefined ? scheduled.length
         ? scheduled.map((course) => course.name + '（' + scheduledClassTimeLabel(course, day.date) + '）').join('、')
@@ -223,7 +228,20 @@ export function formatCampusStudyAgenda(agenda: CampusStudyAgenda): string[] {
     const tasks = !agenda.assignmentsAvailable ? '作業來源不可用'
       : day.deadlines.length ? day.deadlines.map((item) => item.title + ' ' + item.timeLabel + ' 截止' + (item.overdue ? '（期限已過，需核對）' : '')).join('、')
       : '已同步摘要未列出當日截止作業';
+    const clockNotes: string[] = [];
+    if (availability && agenda.timetableAvailable) {
+      if (!availability.valid) {
+        clockNotes.push('鐘點課表無法完整核對，暫不推算課間時段或重疊。');
+      } else {
+        if (availability.conflicts.length) clockNotes.push('課表重疊：' +
+          availability.conflicts.map((interval) => scheduledClassTimeLabel(interval, day.date)).join('、') + '，請先核對正式課表');
+        if (availability.gaps.length) clockNotes.push('課間時段（依保存課表）：' +
+          availability.gaps.map((interval) => scheduledClassTimeLabel(interval, day.date)).join('、') + '（尚未排除私人行程與通勤）');
+        else if (scheduled?.length) clockNotes.push('已保存課程之間沒有可列出的課間時段。');
+      }
+    }
     return day.label + '：' + classes + '；' + tasks +
+      (clockNotes.length ? '；' + clockNotes.join('；') : '') +
       (scheduled === undefined && day.gaps.length ? '；副本課間空堂：' + day.gaps.map(periodLabel).join('、') : '') +
       (scheduled === undefined && day.conflicts.length ? '；課表重疊：' + day.conflicts.map(periodLabel).join('、') : '');
   });
