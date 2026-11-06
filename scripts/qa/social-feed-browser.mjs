@@ -269,6 +269,50 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       });
     } catch(error) {report.errors.push(label+': '+error.message);await snapshot(label+'-failure.png').catch(()=>{});}
   }
+  // Keep a full historical list on-screen instead of filtering down to one result.
+  // These checks use the same real SDK pages and verify that deferred offscreen
+  // rendering does not break keyboard access or the first/last card on return.
+  for (const [width,height,theme] of [[320,720,'light'],[390,844,'dark'],[1366,900,'light']]) {
+    const label=width+'-'+theme+':long-list';
+    try {
+      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+      await begin('?theme='+theme+'&case=long-list-'+width);
+      for (const count of [120,180,240,245]) {
+        await clickButton('載入更多貼文'); await awaitCount(count);
+      }
+      await check(label+':all 245 cards and unique titles remain in the document',()=>{
+        const cards=[...document.querySelectorAll('article')];
+        return cards.length===245 && new Set(cards.map(card=>card.querySelector('h3')?.textContent)).size===245;
+      });
+      await check(label+':native offscreen rendering is deferred',()=>{
+        const cards=[...document.querySelectorAll('article')];
+        return cards.every(card=>{
+          const style=getComputedStyle(card);
+          return style.contentVisibility==='auto' && style.containIntrinsicBlockSize.includes('320px');
+        });
+      });
+      await call(()=>document.querySelectorAll('article')[244].scrollIntoView({block:'center',behavior:'instant'}));
+      await sleep(180);
+      await check(label+':oldest card paints and its post link accepts focus',()=>{
+        const card=document.querySelectorAll('article')[244];
+        const rect=card.getBoundingClientRect();
+        const link=card.querySelector('a[href^="/community/post/"]');
+        const hit=document.elementFromPoint(Math.max(1,rect.left+20),Math.min(innerHeight-1,rect.top+20));
+        link?.focus({preventScroll:true});
+        return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!hit && (card===hit || card.contains(hit)) && document.activeElement===link;
+      });
+      await snapshot(width+'-'+theme+'-long-tail.png');
+      await call(()=>document.querySelectorAll('article')[0].scrollIntoView({block:'center',behavior:'instant'}));
+      await sleep(180);
+      await check(label+':first card remains readable after scrolling back',()=>{
+        const card=document.querySelector('article');
+        const rect=card.getBoundingClientRect();
+        return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!card.querySelector('h3')?.textContent;
+      });
+      await check(label+':no horizontal overflow while all cards are loaded',()=>document.documentElement.scrollWidth<=innerWidth+1);
+      await snapshot(width+'-'+theme+'-long-return.png');
+    } catch(error) {report.errors.push(label+': '+error.message);await snapshot(width+'-'+theme+'-long-failure.png').catch(()=>{});}
+  }
   // A real authorized result is held after the SDK completes, not replaced with a fake page.
   try {
     await begin('?case=focus-moved');await search('上學期的專題集合');
@@ -308,4 +352,4 @@ finally {
 }
 const failures=report.checks.filter(row=>!row.pass);
 console.log('FEED_BROWSER_SUMMARY',JSON.stringify({sourceHead:report.sourceHead,checks:report.checks.length,failures,errors:report.errors,screenshots:report.screenshots,flows:report.flows.map(({requests,...flow})=>({...flow,pageSizes:requests.filter(r=>r.ids).map(r=>r.ids.length)}))}));
-if(report.errors.length || failures.length || report.checks.length<32)process.exitCode=1;
+if(report.errors.length || failures.length || report.checks.length<47)process.exitCode=1;

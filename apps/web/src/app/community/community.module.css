@@ -411,6 +411,14 @@
   border-radius: var(--radius-lg);
   transition: border-color var(--motion-fast) ease;
 }
+/* Older loaded cards stay in the document for search and keyboard navigation.
+   Supported browsers can skip rendering cards that are far outside the viewport. */
+@supports (content-visibility: auto) {
+  .feedCard {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 320px;
+  }
+}
 .feedCard:hover,
 .feedCard:focus-within { border-color: var(--border-strong); }
 .feedCard :is(button, a):focus-visible,
