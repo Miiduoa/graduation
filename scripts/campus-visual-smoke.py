@@ -115,8 +115,8 @@ async def check_mobile_navigation(page):
 
 
 UNSIGNED_TODAY = '登入後，這裡會列出近期要處理的課程待辦。'
-TODAY_FLOW_CLASS_TITLE = '下一堂課'
-TODAY_FLOW_WORK_TITLE = '今日／即將到期作業'
+TODAY_FLOW_CLASS_TITLE = '今日課表'
+TODAY_FLOW_WORK_TITLE = '課程待辦'
 TODAY_NOTIFY_TITLE = '未讀通知'
 TODAY_DATE = re.compile(r'^\d{1,2}月\d{1,2}日 週[日一二三四五六]$')
 OLD_ACCOUNT_COPY = [

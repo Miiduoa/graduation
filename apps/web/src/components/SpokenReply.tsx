@@ -124,6 +124,7 @@ export function SpokenReply({
         <button
           type="button"
           disabled={disabled || !text.trim()}
+          data-voice-playback
           aria-pressed={playing}
           onClick={toggle}
         >

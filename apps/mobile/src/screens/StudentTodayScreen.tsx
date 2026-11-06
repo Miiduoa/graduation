@@ -30,7 +30,6 @@ import {
 } from '../hooks/timetableClassroomNav';
 import { useTodayTimetableData } from '../hooks/useTodayTimetableData';
 import {
-  formatClassMeta,
   formatClock,
   formatTodayHeaderDate,
   formatTodoDueLine,
@@ -228,6 +227,38 @@ export default function StudentTodayScreen() {
     }
   };
 
+  const urgentWorkFirst = todos.some(todo => isDueWithinHours(todo, now, 24) || isTodoOverdue(todo, now));
+  const scheduleSection = (
+    <TodayClassList
+      classes={classRows}
+      status={timetableStatus}
+      now={now}
+      styles={s}
+      onOpenClass={openCourse}
+      onRetry={() => void retryTimetable()}
+      onImport={openImport}
+      onOpenTimetable={openWeek}
+    />
+  );
+  const todoSection = (
+    <TodoList
+      todos={todos}
+      showUrgentAction={action.type === 'class'}
+      expanded={todosExpanded}
+      unsigned={unsigned}
+      error={error}
+      lmsUnconnected={lmsUnconnected}
+      leavingIds={leavingIds}
+      now={now}
+      styles={s}
+      onOpen={openTodo}
+      onToggleExpanded={() =>
+        setExpandedTodoScope((previous) => (previous === scope ? null : scope))
+      }
+      onRetry={() => void load()}
+    />
+  );
+
   return (
     <SafeAreaView style={s.page} edges={['top']}>
       <ScrollView
@@ -248,12 +279,12 @@ export default function StudentTodayScreen() {
           />
         }
       >
-        <View>
-          <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
-          <Text accessibilityRole="header" style={s.heading}>
-            今天
-          </Text>
-          {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
+        <View style={s.dayHeader}>
+          <Text accessibilityRole="header" style={s.heading}>今天</Text>
+          <View style={s.dateBlock}>
+            <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
+            {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
+          </View>
         </View>
         {firstLoad ? (
           <TodaySkeleton styles={s} />
@@ -277,31 +308,9 @@ export default function StudentTodayScreen() {
               onOpen={openQuickAction}
               onOpenAssistantRoute={(route) => safeNavigate(navigation, route)}
             />
-            <TodayClassList
-              classes={classRows}
-              status={timetableStatus}
-              now={now}
-              styles={s}
-              onOpenClass={openCourse}
-              onRetry={() => void retryTimetable()}
-              onImport={openImport}
-              onOpenTimetable={openWeek}
-            />
-            <TodoList
-              todos={todos}
-              expanded={todosExpanded}
-              unsigned={unsigned}
-              error={error}
-              lmsUnconnected={lmsUnconnected}
-              leavingIds={leavingIds}
-              now={now}
-              styles={s}
-              onOpen={openTodo}
-              onToggleExpanded={() =>
-                setExpandedTodoScope((previous) => (previous === scope ? null : scope))
-              }
-              onRetry={() => void load()}
-            />
+            {urgentWorkFirst && todoSection}
+            {scheduleSection}
+            {!urgentWorkFirst && todoSection}
           </>
         )}
       </ScrollView>
@@ -403,6 +412,8 @@ function NextActionCard({
     );
   }
   if (action.type === 'class') {
+    const ongoing = action.class.startAt <= now.getTime() && action.class.endAt > now.getTime();
+    const classTime = `${formatClock(action.class.startAt)}–${formatClock(action.class.endAt)}`;
     const classCta = action.class.courseId ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
     return (
       <Pressable
@@ -412,12 +423,12 @@ function NextActionCard({
         testID="next-action"
       >
         <Animated.View style={{ opacity: fade, flex: 1 }}>
-          <Text style={s.kind}>{TODAY_COPY.nextClass}</Text>
-          <Text style={s.headline}>{action.class.title}</Text>
-          <Text style={s.meta}>{formatClassMeta(action.class)}</Text>
-          <View style={s.cardButton}>
-            <Text style={s.cardButtonText}>{classCta}</Text>
+          <View style={s.focusLine}>
+            <Text style={s.kind}>{ongoing ? '上課中' : TODAY_COPY.nextClass}</Text>
+            <Text style={s.cardLink}>{classCta}</Text>
           </View>
+          <Text style={s.headline}>{action.class.title}</Text>
+          <Text style={s.meta}>{[classTime, action.class.location.trim()].filter(Boolean).join(' · ')}</Text>
         </Animated.View>
       </Pressable>
     );
@@ -436,17 +447,21 @@ function NextActionCard({
   const courseAction = todo.courseId?.trim() ? TODAY_COPY.viewCourse : TODAY_COPY.findCourse;
   const workAction = todo.task && resolveInboxAction(todo.task);
   return (
-    <View>
+    <View style={s.workLayout}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${kind}，${todo.title}，${todo.courseName}，${meta}，${courseAction}`}
         onPress={() => onOpenTodo(todo)}
-        style={({ pressed }) => [s.card, workAction && s.workCard, pressed && s.pressed]}
+        style={({ pressed }) => [s.workDetails, pressed && s.pressed]}
         testID="next-action"
       >
         <Animated.View style={{ opacity: fade }}>
-          <Text style={s.kind}>{kind}</Text>
+          <View style={s.focusLine}>
+            <Text style={s.kind}>{kind}</Text>
+            <Text style={s.cardLink}>{courseAction}</Text>
+          </View>
           <Text style={s.headline}>{todo.title}</Text>
+          {!!todo.courseName && <Text style={s.courseName}>{todo.courseName}</Text>}
           <Text style={[s.meta, action.type === 'overdue' && s.metaDanger]}>{meta}</Text>
         </Animated.View>
       </Pressable>
@@ -454,7 +469,7 @@ function NextActionCard({
         <Pressable
           accessibilityRole="button"
           onPress={() => onOpenTodo(todo, true)}
-          style={({ pressed }) => [s.cardButton, s.workButton, pressed && s.pressed]}
+          style={({ pressed }) => [s.cardButton, pressed && s.pressed]}
         >
           <Animated.Text style={[s.cardButtonText, { opacity: fade }]}>{workAction.label}</Animated.Text>
         </Pressable>
@@ -524,13 +539,15 @@ function TodayClassList({
                 style={({ pressed }) => [
                   s.row,
                   index > 0 && s.rowBorder,
-                  ended && s.ended,
                   pressed && s.pressed,
                 ]}
               >
-                <Text style={s.time}>{formatClock(item.startAt)}</Text>
+                <View style={s.timeColumn}>
+                  <Text style={s.time}>{formatClock(item.startAt)}</Text>
+                  <Text style={s.rowMeta}>{ended ? '已結束' : formatClock(item.endAt)}</Text>
+                </View>
                 <View style={s.rowBody}>
-                  <Text style={s.rowTitle}>{item.title}</Text>
+                  <Text style={[s.rowTitle, ended && s.endedTitle]}>{item.title}</Text>
                   <Text style={s.rowMeta}>{item.location || '教室未填'}</Text>
                 </View>
               </Pressable>
@@ -549,6 +566,7 @@ function TodayClassList({
 
 function TodoList({
   todos,
+  showUrgentAction,
   expanded,
   unsigned,
   error,
@@ -561,6 +579,7 @@ function TodoList({
   onRetry,
 }: {
   todos: TodoRow[];
+  showUrgentAction: boolean;
   expanded: boolean;
   unsigned: boolean;
   error: boolean;
@@ -568,7 +587,7 @@ function TodoList({
   leavingIds: string[];
   now: Date;
   styles: ReturnType<typeof createStyles>;
-  onOpen: (todo: TodoRow) => void;
+  onOpen: (todo: TodoRow, scrollToSubmit?: boolean) => void;
   onToggleExpanded: () => void;
   onRetry: () => void;
 }) {
@@ -600,26 +619,33 @@ function TodoList({
           {visible.map((item, index) => {
             const overdue = isTodoOverdue(item, now);
             const soon = isDueWithinHours(item, now, 6);
+            const due = formatTodoDueLine(item, now);
+            const direct = showUrgentAction && index === 0 && item.task && isDueWithinHours(item, now, 24)
+              ? resolveInboxAction(item.task) : null;
             return (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${item.title}，${item.courseName}`}
-                onPress={() => onOpen(item)}
-                style={({ pressed }) => [
-                  s.row,
-                  index > 0 && s.rowBorder,
-                  leaving.has(item.id) && s.leaving,
-                  pressed && s.pressed,
-                ]}
-              >
-                <View style={s.rowBody}>
-                  <Text style={s.rowTitle}>{item.title}</Text>
-                  <Text style={[s.rowMeta, overdue ? s.overdue : soon ? s.dueSoon : null]}>
-                    {item.courseName} · {formatTodoDueLine(item, now)}
-                  </Text>
-                </View>
-              </Pressable>
+              <View key={item.id} style={[s.todoRow, index > 0 && s.rowBorder, leaving.has(item.id) && s.leaving]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.title}，${item.courseName}`}
+                  accessibilityValue={{ text: due }}
+                  onPress={() => onOpen(item)}
+                  style={({ pressed }) => [s.row, s.todoBody, pressed && s.pressed]}
+                >
+                  <View style={s.rowBody}>
+                    <Text style={s.rowTitle}>{item.title}</Text>
+                    <Text style={s.rowMeta}>
+                      {item.courseName ? item.courseName + ' · ' : ''}
+                      <Text style={overdue ? s.overdue : soon ? s.dueSoon : undefined}>{due}</Text>
+                    </Text>
+                  </View>
+                </Pressable>
+                {direct && (
+                  <Pressable accessibilityRole="button" accessibilityLabel={`${direct.label}，${item.title}`}
+                    onPress={() => onOpen(item, true)} style={({ pressed }) => [s.inlineAction, pressed && s.pressed]}>
+                    <Text style={s.link}>{direct.label}</Text>
+                  </Pressable>
+                )}
+              </View>
             );
           })}
           {extra > 0 ? (
@@ -646,18 +672,21 @@ const BRAND = '#314D40';
 const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
+    dayHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+    dateBlock: { flexShrink: 1, alignItems: 'flex-end' },
     content: {
       paddingHorizontal: 20,
       paddingTop: 22,
       width: '100%',
       maxWidth: 680,
       alignSelf: 'center',
-      gap: 28,
+      gap: 20,
     },
     date: {
-      color: theme.colors.muted,
-      fontSize: 13,
-      lineHeight: 18,
+      color: theme.colors.textSecondary,
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: '600',
       fontVariant: ['tabular-nums'],
     },
     heading: {
@@ -671,26 +700,25 @@ const createStyles = () =>
       fontSize: 13,
       lineHeight: 18,
       fontVariant: ['tabular-nums'],
-      marginTop: 4,
     },
     card: {
       backgroundColor: BRAND,
-      minHeight: 132,
-      borderRadius: 16,
-      padding: 20,
-      shadowOpacity: 0,
+      borderRadius: 14,
+      padding: 18,
     },
-    // Leave room for the separate 44-point action, its gap, and the card padding.
-    workCard: { paddingBottom: 80 },
-    workButton: { position: 'absolute', bottom: 20, right: 20 },
+    focusLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+    cardLink: { color: CREAM, fontSize: 13, lineHeight: 18, fontWeight: '600', textDecorationLine: 'underline' },
+    workLayout: { backgroundColor: BRAND, borderRadius: 14, overflow: 'hidden' },
+    workDetails: { padding: 18 },
+    courseName: { color: CREAM, fontSize: 14, lineHeight: 21 },
     cardLight: {
       backgroundColor: theme.mode === 'dark' ? theme.colors.surface2 : CREAM,
-      minHeight: 132,
-      borderRadius: 16,
-      padding: 20,
+      minHeight: 64,
+      borderRadius: 14,
+      padding: 18,
     },
     kind: { color: 'rgba(255,255,255,0.72)', fontSize: 13, lineHeight: 18, fontWeight: '600' },
-    headline: { color: '#FFFFFF', fontSize: 20, lineHeight: 26, fontWeight: '700', marginTop: 6 },
+    headline: { color: '#FFFFFF', fontSize: 24, lineHeight: 31, fontWeight: '700', marginTop: 8 },
     lightHeadline: {
       color: theme.colors.text,
       fontSize: 20,
@@ -705,13 +733,14 @@ const createStyles = () =>
       fontVariant: ['tabular-nums'],
     },
     cardButton: {
-      marginTop: 16,
-      alignSelf: 'flex-end',
-      height: 44,
+      alignSelf: 'flex-start',
+      marginHorizontal: 18,
+      marginBottom: 14,
       minHeight: 44,
       paddingHorizontal: 16,
-      borderRadius: 12,
-      backgroundColor: '#FFFFFF',
+      paddingVertical: 8,
+      borderRadius: 9,
+      backgroundColor: CREAM,
       justifyContent: 'center',
     },
     cardButtonText: { color: BRAND, fontSize: 15, fontWeight: '700' },
@@ -728,21 +757,18 @@ const createStyles = () =>
     lightButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
     section: { gap: 8 },
     sectionTitle: {
-      color: theme.colors.muted,
-      fontSize: 13,
-      lineHeight: 18,
-      fontWeight: '600',
-      textTransform: 'none',
+      color: theme.colors.text,
+      fontSize: 18,
+      lineHeight: 24,
+      fontWeight: '700',
     },
     list: {
-      backgroundColor: theme.mode === 'dark' ? theme.colors.surface : CREAM,
-      borderRadius: 12,
-      overflow: 'hidden',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
     },
     row: {
       minHeight: 56,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingVertical: 9,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
@@ -751,13 +777,17 @@ const createStyles = () =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: theme.colors.border,
     },
+    timeColumn: { minWidth: 54, flexShrink: 0, gap: 2 },
     time: {
-      width: 52,
-      color: theme.colors.muted,
+      color: theme.colors.text,
+      fontWeight: '600',
       fontSize: 13,
       lineHeight: 18,
       fontVariant: ['tabular-nums'],
     },
+    todoRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 10 },
+    todoBody: { flexGrow: 1, flexShrink: 1, flexBasis: 160 },
+    inlineAction: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8 },
     rowBody: { flex: 1, minWidth: 0, gap: 2 },
     rowTitle: { color: theme.colors.text, fontSize: 16, lineHeight: 22, fontWeight: '600' },
     rowMeta: {
@@ -769,7 +799,7 @@ const createStyles = () =>
     dueSoon: { color: theme.colors.accent, fontWeight: '700' },
     overdue: { color: theme.colors.danger, fontWeight: '700' },
     metaDanger: { color: '#FFD9D0', fontWeight: '700' },
-    ended: { opacity: 0.48 },
+    endedTitle: { color: theme.colors.muted },
     leaving: { opacity: 0 },
     more: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
     empty: { color: theme.colors.muted, fontSize: 13, lineHeight: 18 },

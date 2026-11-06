@@ -1415,4 +1415,16 @@
 
 .sourceStatus p {
   margin: 4px 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+}
+
+.sourceStatus .loadedStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

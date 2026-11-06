@@ -14,10 +14,10 @@ import {
 import { interpretMobileCampusRequest } from '../services/campusIntentClient';
 
 const favorites = [
-  { label: '課表', phrase: '我的課表', icon: 'calendar-outline' as const },
-  { label: '交作業', phrase: '我要交作業', icon: 'document-text-outline' as const },
-  { label: '公車', phrase: '公車到站時間', icon: 'bus-outline' as const },
-  { label: '餐廳', phrase: '校園餐廳', icon: 'restaurant-outline' as const },
+  { label: '課表', phrase: '我的課表' },
+  { label: '交作業', phrase: '我要交作業' },
+  { label: '公車', phrase: '公車到站時間' },
+  { label: '餐廳', phrase: '校園餐廳' },
 ];
 
 type AskFailure = OnDeviceAssistantError['code'] | 'unknown';
@@ -169,22 +169,10 @@ export function QuickCampusEntry({
   return (
     <View
       style={{
-        borderColor: colors.border,
-        borderWidth: 1,
-        borderRadius: 18,
-        backgroundColor: colors.surface,
-        padding: 16,
-        gap: 13,
+        gap: 8,
       }}
-      accessibilityLabel="快速開始"
+      accessibilityLabel="校園助理與常用服務"
     >
-      <View style={{ gap: 4 }}>
-        <Text style={{ ...typography.h3, color: colors.text }}>想做什麼？</Text>
-        <Text style={{ ...typography.bodySmall, color: colors.muted }}>
-          {canAsk ? '用鍵盤的麥克風口述，或直接打字。校園助理會在這裡回答。' : '輸入想做的事，尋找校園服務。'}
-        </Text>
-      </View>
-
       {earlierTurns > 0 && (
         <View style={{ gap: 8 }}>
           <Pressable
@@ -222,36 +210,24 @@ export function QuickCampusEntry({
           )}
         </View>
       )}
-      {canAsk && !phrase && suggestedQuestions.length > 0 && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {suggestedQuestions.map(question => (
-            <Pressable key={question} accessibilityRole="button" accessibilityLabel={'詢問手機助理，' + question}
-              onPress={() => void ask(question)}
-              style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 6, paddingHorizontal: 12,
-                borderRadius: radius.lg, backgroundColor: colors.surface2 }}>
-              <Ionicons name="chatbubble-outline" size={16} color={colors.accent} />
-              <Text style={{ ...typography.bodySmall, color: colors.accent }}>{question}</Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
           borderWidth: 1,
           borderColor: colors.border,
-          backgroundColor: colors.bg,
+          backgroundColor: colors.surface,
           borderRadius: radius.lg,
           paddingLeft: 12,
           paddingRight: 6,
           gap: 8,
         }}
       >
-        <Ionicons name="search-outline" size={20} color={colors.muted} />
+        <Ionicons name={canAsk ? 'chatbubble-outline' : 'search-outline'} size={19} color={colors.accent} />
         <TextInput
           accessibilityLabel="說出或輸入想做的事"
-          placeholder={lastReply ? '接著問…' : '例如：下一堂課在哪裡？'}
+          accessibilityHint={canAsk ? '可使用鍵盤聽寫，送出後在這裡查看回答。' : '輸入需求，尋找校園服務。'}
+          placeholder={lastReply ? '接著問…' : canAsk ? '問校園助理，或用鍵盤口述' : '找校園服務'}
           placeholderTextColor={colors.muted}
           autoCorrect={false}
           autoCapitalize="none"
@@ -325,6 +301,11 @@ export function QuickCampusEntry({
           </Text>
         </Pressable>
       )}
+      {!!phrase && signedIn && !asking && (
+        <Text style={{ ...typography.caption, color: colors.muted }}>
+          手機助理在裝置上回答。選擇雲端搜尋會傳送這次輸入的文字。
+        </Text>
+      )}
       {modelBusy && (
         <Text accessibilityLiveRegion="polite" style={{ color: colors.muted, ...typography.bodySmall }}>
           正在理解你的目標；不會自動執行任何操作。
@@ -332,7 +313,16 @@ export function QuickCampusEntry({
       )}
 
       {!phrase ? (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 4 }}>
+          {canAsk && suggestedQuestions.map(question => (
+            <Pressable key={question} accessibilityRole="button" accessibilityLabel={'詢問手機助理，' + question}
+              onPress={() => void ask(question)}
+              style={{ justifyContent: 'center', minHeight: 44, paddingRight: 6 }}>
+              <Text style={{ ...typography.bodySmall, fontWeight: '600', color: colors.accent }}>
+                {lastReply ? question : '現在的課'}
+              </Text>
+            </Pressable>
+          ))}
           {favorites.map((favorite) => (
             <Pressable
               key={favorite.label}
@@ -343,12 +333,10 @@ export function QuickCampusEntry({
                 if (action) open(action);
               }}
               style={({ pressed }) => ({
-                flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 44,
-                borderRadius: 999, paddingHorizontal: 13, borderWidth: 1,
-                borderColor: colors.border, backgroundColor: pressed ? colors.surface2 : colors.bg,
+                minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center',
+                borderRadius: radius.sm, paddingHorizontal: 4, backgroundColor: pressed ? colors.surface2 : 'transparent',
               })}
             >
-              <Ionicons name={favorite.icon} size={17} color={colors.accent} />
               <Text style={{ ...typography.bodySmall, fontWeight: '600', color: colors.text }}>
                 {favorite.label}
               </Text>
@@ -430,9 +418,7 @@ export function QuickCampusEntry({
           ) : null}
         </View>
       )}
-      <Text style={{ ...typography.caption, color: colors.muted }}>
-        手機助理在裝置上回答。選擇「用雲端 AI 找相關服務」才會把這次輸入的文字傳給雲端模型。
-      </Text>
+
     </View>
   );
 }

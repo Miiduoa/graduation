@@ -189,13 +189,11 @@ async function links(owner: string, schoolId = 'ntu', title = TITLE) {
   await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(`${owner}|${schoolId}`));
   const hero = await screen.findByTestId('next-action');
   await waitFor(() => expect(hero.textContent).toContain(title));
-  const heroHrefs = within(hero)
-    .getAllByRole('link')
-    .map((a) => a.getAttribute('href'));
+  const heroHref = within(hero).getByRole('link').getAttribute('href');
   const listHref = within(screen.getByTestId('today-classes'))
     .getByRole('link', { name: new RegExp(title) })
     .getAttribute('href');
-  return { heroHrefs, listHref };
+  return { heroHref, listHref };
 }
 
 function expectActionLabel(fallback: boolean) {
@@ -227,7 +225,7 @@ it.each([
     const view = render(<App />);
     const found = await links(owner, schoolId);
     expectActionLabel(true);
-    const firstHref = found.heroHrefs[0]!;
+    const firstHref = found.heroHref!;
     const destination = new URL(firstHref, 'https://fixture.invalid');
     state.pathname = destination.pathname;
     state.search = destination.search.slice(1);
@@ -235,7 +233,7 @@ it.each([
     await waitFor(() => expect(screen.getByTestId('scope').textContent).not.toBe('loading'));
     const afterScope = screen.getByTestId('scope').textContent;
     const expected = `/timetable?campus=${schoolId}`;
-    expect(found.heroHrefs).toEqual([expected, expected]);
+    expect(found.heroHref).toBe(expected);
     expect(found.listHref).toBe(expected);
     expect(afterScope).toBe(`${owner}|${schoolId}`);
   },
@@ -256,7 +254,7 @@ it.each([
     render(<App />);
     const found = await links(owner);
     expectActionLabel(false);
-    expect(found.heroHrefs).toEqual([expectedHref, expectedHref]);
+    expect(found.heroHref).toBe(expectedHref);
     expect(found.listHref).toBe(expectedHref);
   },
 );
@@ -267,7 +265,7 @@ it('uses the current campus when an imported course reference is invalid', async
   render(<App />);
   const found = await links(owner);
   expectActionLabel(true);
-  expect(found.heroHrefs).toEqual(['/timetable?campus=ntu', '/timetable?campus=ntu']);
+  expect(found.heroHref).toBe('/timetable?campus=ntu');
   expect(found.listHref).toBe('/timetable?campus=ntu');
 });
 
@@ -281,14 +279,14 @@ it('keeps each campus course and fallback isolated through NTU–NCKU–NTU navi
   state.search = 'campus=ncku';
   view.rerender(<App />);
   const ncku = await links(owner, 'ncku', '成大合成課程');
-  expect(ncku.heroHrefs).toEqual(['/timetable?campus=ncku', '/timetable?campus=ncku']);
+  expect(ncku.heroHref).toBe('/timetable?campus=ncku');
   expect(ncku.listHref).toBe('/timetable?campus=ncku');
   expect(screen.queryByText('台大合成課程')).toBeNull();
 
   state.search = 'campus=ntu';
   view.rerender(<App />);
   const ntu = await links(owner, 'ntu', '台大合成課程');
-  expect(ntu.heroHrefs).toEqual(['/timetable?campus=ntu', '/timetable?campus=ntu']);
+  expect(ntu.heroHref).toBe('/timetable?campus=ntu');
   expect(ntu.listHref).toBe('/timetable?campus=ntu');
   expect(screen.queryByText('成大合成課程')).toBeNull();
 });

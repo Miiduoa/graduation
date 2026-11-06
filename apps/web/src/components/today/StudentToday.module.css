@@ -9,12 +9,14 @@
 }
 
 .header {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 3px 12px;
 }
 
 .date {
+  grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
@@ -32,7 +34,8 @@
 }
 
 .updated {
-  margin: 4px 0 0;
+  margin: 0;
+  text-align: end;
   color: var(--muted);
   font-size: var(--font-body-sm-size);
   line-height: 1.4;
@@ -43,8 +46,7 @@
 .cardLight {
   position: relative;
   width: 100%;
-  min-height: 132px;
-  padding: 20px;
+  padding: clamp(16px, 3vw, 24px);
   border-radius: 16px;
   box-shadow: none;
   display: flex;
@@ -69,8 +71,13 @@
 }
 
 .card {
-  background: var(--today-brand);
-  color: var(--on-brand);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-inline-start: 4px solid var(--today-brand);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .cardLight {
@@ -84,7 +91,7 @@
   font-size: var(--font-body-sm-size);
   line-height: 1.4;
   font-weight: 600;
-  color: color-mix(in srgb, var(--on-brand) 82%, transparent);
+  color: var(--today-brand);
 }
 
 .cardLight .kind {
@@ -96,13 +103,14 @@
   font-size: var(--font-h2-size);
   line-height: 1.3;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .meta {
   margin: 6px 0 0;
   font-size: var(--font-body-sm-size);
   line-height: 1.4;
-  color: color-mix(in srgb, var(--on-brand) 82%, transparent);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -111,19 +119,18 @@
 }
 
 .metaDanger {
-  color: color-mix(in srgb, var(--on-brand) 88%, var(--danger));
+  color: var(--danger);
   font-weight: 700;
 }
 
 .action {
-  margin-top: auto;
-  align-self: flex-end;
+  align-self: center;
   min-height: 44px;
   padding: 10px 16px;
   border-radius: 12px;
   border: 0;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--today-brand);
+  color: var(--on-brand);
   font-size: var(--font-body-size);
   line-height: 1.4;
   font-weight: 700;
@@ -133,8 +140,14 @@
 }
 
 .cardLight .action {
-  background: var(--today-brand);
-  color: var(--on-brand);
+  margin-top: 10px;
+  align-self: flex-start;
+}
+.classAction::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
 }
 
 .fade {
@@ -151,11 +164,10 @@
   }
 }
 
-.columns,
 .flow {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 24px;
   align-items: stretch;
   width: 100%;
   min-width: 0;
@@ -183,10 +195,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  background: var(--today-cream, #fffdf8);
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  overflow: hidden;
 }
 
 .row,
@@ -196,7 +204,7 @@
   gap: 12px;
   min-height: 56px;
   min-width: 0;
-  padding: 8px 16px;
+  padding: 8px 4px;
   text-decoration: none;
   color: inherit;
   background: transparent;
@@ -211,21 +219,37 @@
   border-top: 0.5px solid var(--border);
 }
 
-.list li + li .withTime {
-  box-shadow: inset calc(var(--font-body-sm-size) * 4) 0 0 var(--today-cream, #fffdf8);
-}
-
 .ended {
-  opacity: 0.48;
+  color: var(--muted);
 }
 
 .time {
-  flex: 0 0 4em;
-  width: 4em;
+  flex: 0 0 auto;
+  min-width: 5ch;
+  display: grid;
+  padding-inline-end: 12px;
+  border-inline-end: 2px solid var(--border);
   font-size: var(--font-body-sm-size);
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 650;
+}
+.time small,
+.classStatus {
+  font-size: 0.75rem;
   color: var(--muted);
+  font-weight: 500;
+}
+.classStatus {
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+.current .classStatus,
+.current .time {
+  color: var(--today-brand);
+  border-color: var(--today-brand);
+  font-weight: 700;
 }
 
 .rowBody {
@@ -265,6 +289,16 @@
   font-size: var(--font-body-sm-size);
   line-height: 1.4;
   font-weight: 600;
+}
+.scheduleActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.scheduleActions .more {
+  width: auto;
+  border: 0;
 }
 
 .empty {
@@ -323,11 +357,25 @@
 .more:hover {
   background: var(--accent-soft);
 }
+.screen :is(a, button):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (min-width: 840px) {
+  .planner {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .planner > :last-child {
+    grid-column: 1 / -1;
+  }
+}
 
 @media (max-width: 760px) {
-  .columns,
   .flow {
-    gap: 4px;
+    gap: 18px;
   }
 
   .section {

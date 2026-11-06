@@ -1,6 +1,15 @@
 'use client';
 
-import { lazy, Suspense, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { areFunctionsConfigured } from '@/lib/functionsUrl';
@@ -10,7 +19,7 @@ import { useAuth } from './AuthGuard';
 import { LoginLink } from './LoginLink';
 import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
-import styles from './QuickCampusEntry.module.css';
+import styles from './TodayCampusEntry.module.css';
 
 const NuniConversation = lazy(async () => ({
   default: (await import('@/features/nuni/Assistant')).Conversation,
@@ -31,27 +40,24 @@ function TodayConversation({ account, schoolId }: { account: Account; schoolId: 
   const draft = { text, setText };
 
   return (
-    <section className={styles.entry} aria-label="今天的校園助理">
-      <div>
-        <div className={styles.todayHeading}>
-          <h2>問校園助理</h2>
-          <button
-            type="button"
-            className={styles.serviceToggle}
-            aria-expanded={searchOpen}
-            aria-controls={searchId}
-            onClick={() => setSearchOpen(!searchOpen)}
-          >
-            <CampusIcon name="search" size={16} />找校園服務
-          </button>
-        </div>
-        {canAsk && (
-          <p className={styles.subtitle}>可以打字或開啟麥克風聽寫。聽寫時，瀏覽器可能會使用語音服務。</p>
-        )}
+    <section className={styles.conversation} aria-label="今天的校園助理">
+      <div className={styles.tools}>
+        {canAsk && <p className={styles.hint}>語音聽寫可能由瀏覽器的語音服務處理。</p>}
+        <button
+          type="button"
+          className={styles.serviceToggle}
+          aria-expanded={searchOpen}
+          aria-controls={searchId}
+          onClick={() => setSearchOpen(!searchOpen)}
+        >
+          <CampusIcon name="search" size={16} />
+          找校園服務
+        </button>
       </div>
       <div id={searchId} hidden={!searchOpen}>
         {searchOpen && (
           <QuickCampusEntry
+            compact
             onAsk={
               canAsk
                 ? (phrase) => {
@@ -133,6 +139,7 @@ export function TodayCampusEntry() {
           <p className={styles.hint}>請先從頁首選擇學校，就能在這裡詢問校園助理。</p>
         ) : null}
         <QuickCampusEntry
+          compact
           key={JSON.stringify([uid, session?.context, campus.schoolId])}
           onAsk={null}
         />
@@ -151,5 +158,70 @@ export function TodayCampusEntry() {
       account={account}
       schoolId={campus.schoolId}
     />
+  );
+}
+
+export type TodayVoiceHandle = { openVoice(): void };
+
+export function TodayAssistantDisclosure({
+  ref,
+  onOpenChange,
+}: {
+  ref: Ref<TodayVoiceHandle>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const disclosure = useRef<HTMLDetailsElement>(null);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openVoice() {
+        const panel = disclosure.current;
+        if (!panel) return;
+        panel.open = true;
+        onOpenChange(true);
+        const composer = panel.querySelector('form[aria-label="傳送問題"]') ?? panel;
+        const microphone = composer.querySelector<HTMLButtonElement>(
+          '[data-voice-input]:not(:disabled)',
+        );
+        if (microphone) {
+          microphone.focus();
+          if (microphone.getAttribute('aria-pressed') === 'false') microphone.click();
+          return;
+        }
+        const field = composer.querySelector<HTMLElement>(
+          'textarea:not(:disabled), input[type="search"]',
+        );
+        (field ?? panel.querySelector('summary'))?.focus();
+      },
+    }),
+    [onOpenChange],
+  );
+
+  return (
+    <details
+      ref={disclosure}
+      id="today-voice-entry"
+      className={styles.disclosure}
+      onToggle={({ currentTarget: panel, target }) => {
+        if (target !== panel) return;
+        onOpenChange(panel.open);
+        if (panel.open) return;
+        panel
+          .querySelectorAll<HTMLButtonElement>(
+            '[data-voice-input][aria-pressed="true"], [data-voice-playback][aria-pressed="true"]',
+          )
+          .forEach((button) => button.click());
+      }}
+    >
+      <summary className={styles.trigger}>
+        <CampusIcon name="social" size={20} />
+        <strong>校園助理</strong>
+        <span className={styles.triggerHint}>打字或語音詢問</span>
+      </summary>
+      <div className={styles.body}>
+        <TodayCampusEntry />
+      </div>
+    </details>
   );
 }
