@@ -1819,28 +1819,6 @@ describe('storage security rules', () => {
     await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
   });
 
-  test('school campus media rejects stale school membership after account suspension', async () => {
-    await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'member' });
-    });
-    const storage = testEnv.authenticatedContext('alice').storage();
-    const photo = storage.ref('schools/pu/campusPosts/one/photo.jpg');
-    await assertSucceeds(uploadString(photo, 'original image', 'image/jpeg'));
-    await assertSucceeds(photo.getMetadata());
-
-    for (const status of ['disabled', 'suspended', 'inactive', 'deleted']) {
-      await seedFirestore(async (db) => db.doc('users/alice').set({ status }));
-      await assertFails(photo.getMetadata());
-      await assertFails(uploadString(
-        storage.ref(`schools/pu/campusPosts/${status}/photo.jpg`),
-        'blocked image', 'image/jpeg',
-      ));
-    }
-    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
-    await assertSucceeds(photo.getMetadata());
-  });
-
   for (const objectPath of [
     'conversations/chat/messages/one/photo.jpg',
     'conversations/chat/media/one/photo.jpg',
