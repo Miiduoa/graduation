@@ -56,7 +56,9 @@ export function selectCampusFeedPosts(
     ].join(' ').toLocaleLowerCase();
     return searchable.includes(query);
   });
-  // Match the server cursor's createdAt desc, documentId desc ordering even\n  // when recommendation ranking rearranged posts sharing a timestamp.\n  if (options.order === 'latest') {
+  // Match the server cursor's createdAt desc, documentId desc ordering even
+  // when recommendation ranking rearranged posts sharing a timestamp.
+  if (options.order === 'latest') {
     return [...filtered].sort(
       (a, b) =>
         createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt) ||

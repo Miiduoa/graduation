@@ -55,7 +55,9 @@ export function selectMobileFeedPosts(posts: CampusPostDoc[], options: Options):
     ].join(' ').toLocaleLowerCase().includes(query);
   });
   // 推薦次序沿用載入時的排列，搜尋／篩選只做過濾、不重排。
-  // The cursor sorts equal-timestamp documents by ID descending; reproduce\n  // that order instead of inheriting their recommendation ranking.\n  return options.order === 'latest'
+  // The cursor sorts equal-timestamp documents by ID descending; reproduce
+  // that order instead of inheriting their recommendation ranking.
+  return options.order === 'latest'
     ? [...matched].sort((a, b) =>
       timestamp(b.createdAt) - timestamp(a.createdAt) ||
       (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
