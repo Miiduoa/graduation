@@ -34,7 +34,13 @@
 
 部署時先更新含舊連結讀取路由的 Web 及兩個課表分享寫入入口，再發布限制直接讀取的 Firestore 規則。Storage 規則、Cloud Functions 與 Supabase migration 也都需要各自發布。既有繳交紀錄保留原時間，本次未嘗試回推歷史繳交時間。
 
-本機 RAG 使用嵌入式 ChromaDB。1.5.9 仍有上游重大公告，雲端鎖檔未包含此套件。現有邊界測試確認 FastAPI 沒有掛載 Chroma HTTP API，本輪未驗證完整的本機 ML 相依圖。[上游安全公告](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c)
+本機 RAG 使用嵌入式 ChromaDB。1.5.9 仍有上游重大公告，雲端鎖檔未包含此套件。現有邊界測試確認 FastAPI 沒有掛載 Chroma HTTP API，程式碼追蹤也尚未找到遠端使用者能控制 collection 模型設定的完整路徑。完整本機 ML 相依圖仍待驗證。[上游安全公告](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c)
+
+第三輪檢查官方 PyPI 的 Chroma 1.5.9 wheel 並核對 SHA256，確認 collection 設定和 schema 皆可能重建 embedding function。修補在任何查詢、索引或刪除之前，檢查原始設定只使用既有預設模型，並明確固定 Rust backend，避免環境變數選到含 pickle 載入路徑的 legacy Python backend。自訂 persisted embedding、非空 CMEK 與未知 schema 根欄位會拒絕操作，檔案內容與資料庫均不自動轉換。
+
+RAG 新增 8 個測試方法，套用在原始 indexer 時有 31 個拒絕斷言失敗，修補後全部通過。測試使用不會載入模型的替身，同時驗證預設、空設定、舊 HNSW JSON 與名稱為 embedding_function 的正常 metadata。完整 Python 套件現為 71/71 通過。這些結果涵蓋應用程式防禦，上游 critical 公告仍保留追蹤。
+
+Chroma 持久化 CI 的 seed 與 rollback 使用固定提交 `1bca9d770e996106c4a495442d16bba9d413f455` 的舊版應用程式及 Chroma 0.5.23。候選版本以目前程式、Chroma 1.5.9 與兩個 NumPy 版本驗證遷移、重啟及重新寫入。原始備份會按 SHA256 核對，再由舊版程式讀取還原副本。原生遷移結果須以這項 CI 的最新提交結果確認。
 
 Firebase 作業附件採建立後不可變更的策略。現有 Firebase Web 與手機送交流程使用文字，程式庫中的 Nuni 檔案送交另走獨立 BFF。這項規則修補保護既有附件內容，資料庫作業測試則驗證繳交紀錄中的本文與附件路徑。Supabase Storage 的附件物件變更仍需獨立驗證。
 
