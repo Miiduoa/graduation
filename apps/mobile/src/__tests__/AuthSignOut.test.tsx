@@ -18,7 +18,7 @@ jest.mock('firebase/auth', () => ({
   onAuthStateChanged: () => () => undefined,
   signOut: jest.fn(),
 }));
-jest.mock('../data/postLoginDataRouter', () => ({ buildPostLoginContext: jest.fn() }));
+jest.mock('../data/postLoginDataRouter', () => ({ getPostLoginContext: jest.fn(async () => null), buildPostLoginContext: jest.fn() }));
 jest.mock('../services/campusAssignmentReminders', () => ({
   beginCampusAssignmentReminderSignOutCleanup: () => mockBeginReminderCleanup(),
   endCampusAssignmentReminderSignOutCleanup: () => mockEndReminderCleanup(),
@@ -44,7 +44,7 @@ jest.mock('../services/puDataCache', () => ({
   getAnyCachedCourses: jest.fn(),
   getAnyCachedTCCourses: jest.fn(),
 }));
-jest.mock('../services/postLoginContextHolder', () => ({ setInMemoryPostLoginContext: jest.fn() }));
+jest.mock('../services/postLoginContextHolder', () => ({ getInMemoryPostLoginContext: jest.fn(() => null), setInMemoryPostLoginContext: jest.fn() }));
 jest.mock('../services/studentIdAuth', () => ({ clearPUSession: jest.fn() }));
 jest.mock('../services/clearOwnedPuCampusSessions', () => ({
   clearOwnedPuCampusSessions: jest.fn().mockResolvedValue(undefined),

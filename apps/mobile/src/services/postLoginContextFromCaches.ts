@@ -20,12 +20,14 @@ import {
  * 寫入 @pu_cache_v1: 與記憶體。不觸發舊版 routePostLoginData 的 EventBus。
  */
 export async function syncPostLoginContextFromCaches(params: {
+  assertVerifiedSession?: () => void;
   uid: string;
   schoolId: string;
   role: UserRole;
   email?: string | null;
 }): Promise<PostLoginContext | null> {
   try {
+    params.assertVerifiedSession?.();
     const [puResult, tcList, todos, puAnnouncements] = await Promise.all([
       getAnyCachedCourses(),
       getAnyCachedTCCourses(),
@@ -56,7 +58,9 @@ export async function syncPostLoginContextFromCaches(params: {
       publishedAt: a.date?.trim() ? a.date : new Date().toISOString(),
     }));
 
+    params.assertVerifiedSession?.();
     const ctx = await buildPostLoginContext({
+      ...(params.assertVerifiedSession && { origin: 'verified-school-login' as const }),
       uid: params.uid,
       schoolId: params.schoolId,
       userDoc: {
@@ -71,6 +75,7 @@ export async function syncPostLoginContextFromCaches(params: {
       puAnnouncements: announcements.length ? announcements : null,
     });
 
+    params.assertVerifiedSession?.();
     setInMemoryPostLoginContext(ctx);
     return ctx;
   } catch (e) {

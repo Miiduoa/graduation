@@ -65,6 +65,7 @@ jest.mock('../app/rootNavigation', () => ({
 jest.mock('../state/school', () => ({
   useSchool: () => ({
     school: mockSchool,
+    schoolId: mockSchool.id,
     selection: { code: 'PU', schoolId: mockSchool.id },
     selectionReady: mockSchoolSelectionReady,
   }),

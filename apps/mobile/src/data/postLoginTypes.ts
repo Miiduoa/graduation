@@ -62,6 +62,7 @@ export interface NormalizedAssignment {
 
 // ─── postLoginContext：router 產出的「統一視角」 ─────────────────────────────
 export interface PostLoginContext {
+  origin?: 'verified-school-login';
   uid: string;
   schoolId: string;
   roles: ResolvedRoles;

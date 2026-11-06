@@ -230,18 +230,15 @@ import { syncPostLoginContextFromCaches } from './postLoginContextFromCaches';
 import { routePostLoginData, routePostLoginDataWithContext } from './postLoginDataRouter';
 
 async function runPostLoginContextPipeline(p: {
+  assertVerifiedSession?: () => void;
   uid: string;
   schoolId: string;
   role: UserRole;
   email: string;
 }): Promise<void> {
   try {
-    await syncPostLoginContextFromCaches({
-      uid: p.uid,
-      schoolId: p.schoolId,
-      role: p.role,
-      email: p.email,
-    });
+    await syncPostLoginContextFromCaches(p);
+    p.assertVerifiedSession?.();
     await routePostLoginDataWithContext(p.schoolId);
   } catch (e) {
     console.warn('[studentIdAuth] post-login context pipeline failed (continuing):', e);
@@ -719,10 +716,8 @@ async function handleBackendLoginSuccess(
   assertCurrent();
 
   await runPostLoginContextPipeline({
-    uid: result.uid,
-    schoolId: result.schoolId,
-    role: result.role,
-    email: result.email,
+    uid: result.uid, schoolId: result.schoolId, role: result.role, email: result.email,
+    ...(requester && !data.localMock ? { assertVerifiedSession: assertCurrent } : {}),
   });
   assertCurrent();
 
