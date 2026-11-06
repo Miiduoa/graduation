@@ -42,7 +42,7 @@ test('NCNU guest catalog opens directly and supports code search, empty results 
     fireEvent.changeText(input, '130032');
     fireEvent.press(view.getByText('查詢課程'));
     expect(await view.findByText('資料庫管理系統')).toBeTruthy();
-    expect(view.getByText('星期四 e、f、g 節 · 管268')).toBeTruthy();
+    expect(view.getByText('星期四 e、f、g 節 · 13:30–16:20 · 管268')).toBeTruthy();
     expect(fetchSource).toHaveBeenCalledWith('https://nuni.tw/api/public-course-catalog?schoolId=ncnu&q=130032', expect.objectContaining({ credentials: 'omit' }));
     fireEvent.changeText(input, '其他');
     fireEvent.press(view.getByText('查詢課程'));

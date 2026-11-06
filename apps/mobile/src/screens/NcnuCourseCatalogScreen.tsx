@@ -91,7 +91,7 @@ export function NcnuCourseCatalogScreen({ initialQuery = '' }: { initialQuery?: 
           </Text>}
         </View>}
         renderItem={({ item }) => {
-          const meetings = ncnuCourseMeetings(item.time);
+          const meetings = ncnuCourseMeetings(item.time, item.semester);
           return <Card title={item.title} subtitle={`課號 ${item.code} · 班別 ${item.section || '未提供'}`}>
             <Text style={body}>{[item.department, item.teacher, item.credits && item.credits + ' 學分'].filter(Boolean).join(' · ')}</Text>
             <Text style={body}>{meetings?.map(meeting => meeting.label).join('、') || (item.time ? '校方節次 ' + item.time : '上課時間未提供')}{item.room ? ' · ' + item.room : ''}</Text>

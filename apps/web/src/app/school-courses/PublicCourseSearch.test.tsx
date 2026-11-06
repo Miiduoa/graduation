@@ -38,7 +38,10 @@ function submit(query: string) {
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
   fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 it('searches the public endpoint, distinguishes sections and copies a school-scoped reviewable row', async () => {
   const fetcher = vi.fn().mockResolvedValue(response([course, { ...course, section: 'b', time: '' }]));
@@ -90,6 +93,50 @@ it('handles malformed or wrong-campus replies as failure, retries, and explains 
   expect(fetcher.mock.calls[1][1].signal.aborted).toBe(true);
 });
 
+it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and ignores the late result', async (stage) => {
+  vi.useFakeTimers();
+  let finish!: () => void;
+  const delayed = new Promise<unknown>((resolve) => {
+    finish = () => resolve(stage === 'fetch' ? response([course]) : {
+      schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/', truncated: false, courses: [course],
+    });
+  });
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  await act(async () => { submit('005076'); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(24_999); });
+  expect(screen.getByRole('status').textContent).toContain('正在查詢');
+  expect(screen.getByRole('button', { name: '查詢課程' }).hasAttribute('disabled')).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(screen.getByRole('alert')).toBeTruthy();
+  const retry = screen.getByRole('button', { name: '重新查詢' });
+  expect(retry.hasAttribute('disabled')).toBe(false);
+  await act(async () => { fireEvent.click(retry); });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1][0]).toBe(fetcher.mock.calls[0][0]);
+  expect(screen.getByRole('status').textContent).toContain('沒有找到「005076」課程');
+  await act(async () => { finish(); });
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('沒有找到「005076」課程');
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('clears the request deadline when a pending search is unmounted', async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn().mockReturnValue(new Promise<Response>(() => undefined));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} />);
+  await act(async () => { submit('005076'); });
+  expect(vi.getTimerCount()).toBe(1);
+  view.unmount();
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('round-trips exact weekdays, school period letters, section and term through the real importer', () => {
   const csv = ncnuTimetableImportCsv({ ...course, time: '3cd4i' });
   const imported = parsePersonalImport(csv!, { kind: 'timetable', schoolId: 'ncnu', academicYear: '999', semester: '2' });
@@ -98,7 +145,8 @@ it('round-trips exact weekdays, school period letters, section and term through 
   expect(imported.rows[0]).toMatchObject({ ...row, dayOfWeek: 3, periodLabel: 'cd' });
   expect(imported.rows[1]).toMatchObject({ ...row, dayOfWeek: 4, periodLabel: 'i' });
   expect(imported.issues.filter(issue => issue.severity === 'error')).toEqual([]);
-  expect(imported.rows[0].startTime).toBeUndefined();
+  expect(imported.rows[0]).toMatchObject({ startTime: '10:10', endTime: '12:00' });
+  expect(imported.rows[1]).toMatchObject({ startTime: '17:30', endTime: '18:20' });
   expect(imported.rows[1].startPeriod).toBeUndefined();
   expect(ncnuCourseMeetings('7z')?.[0].label).toBe('星期日 z 節');
   expect(ncnuTimetableImportCsv({ ...course, semester: '未提供' })).toBeNull();
