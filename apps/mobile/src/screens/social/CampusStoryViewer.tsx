@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   AppState,
   Easing,
@@ -174,12 +175,28 @@ function StorySlide({
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
   const playbackActive = playing && !inspecting && !replying;
-  const [loadedImage, setLoadedImage] = useState('');
-  const [failedImage, setFailedImage] = useState('');
+  const [imageAttempt, setImageAttempt] = useState(0);
+  const imageSession = useMemo(
+    () => ({ key: JSON.stringify([scope, story.kind, story.mediaUrl, imageAttempt]) }),
+    [scope, story.kind, story.mediaUrl, imageAttempt],
+  );
+  const [imageResult, setImageResult] = useState<{
+    session: typeof imageSession;
+    status: 'loaded' | 'failed';
+  } | null>(null);
+  const currentImage = React.useRef<typeof imageSession | null>(null);
+  React.useLayoutEffect(() => {
+    currentImage.current = imageSession;
+    return () => {
+      currentImage.current = null;
+    };
+  }, [imageSession]);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && failedImage === story.id;
-  const ready = !hasImage || loadedImage === story.id || imageFailed;
+  const imageLoaded = imageResult?.session === imageSession && imageResult.status === 'loaded';
+  const imageFailed =
+    hasImage && imageResult?.session === imageSession && imageResult.status === 'failed';
+  const ready = !hasImage || imageLoaded;
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
@@ -271,7 +288,9 @@ function StorySlide({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={playLabel}
-            style={styles.iconButton}
+            accessibilityState={{ disabled: imageFailed }}
+            disabled={imageFailed}
+            style={[styles.iconButton, imageFailed && styles.disabled]}
             onPress={() => setPlaying((value) => !value)}
           >
             <Ionicons name={playing ? 'pause' : 'play'} color="white" size={20} />
@@ -294,7 +313,7 @@ function StorySlide({
         >
           {hasVideo ? (
             <StoryClip
-              key={story.id}
+              key={JSON.stringify([scope, story.mediaUrl])}
               uri={story.mediaUrl}
               playing={playbackActive}
               fill={fill}
@@ -303,34 +322,73 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={story.id}
+              key={imageSession.key}
               source={{ uri: story.mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
-              onLoad={() => setLoadedImage(story.id)}
-              onError={() => setFailedImage(story.id)}
+              onLoad={() => {
+                if (currentImage.current === imageSession)
+                  setImageResult({ session: imageSession, status: 'loaded' });
+              }}
+              onError={() => {
+                if (currentImage.current !== imageSession) return;
+                // Ignore queued native callbacks after a failure, retry, or navigation.
+                currentImage.current = null;
+                setImageResult({ session: imageSession, status: 'failed' });
+                setPlaying(false);
+              }}
             />
           ) : (
             <ScrollView key={story.id} contentContainerStyle={styles.centerText}>
               <Text style={styles.storyText}>
                 {imageFailed ? '照片暫時無法顯示' : story.text || '（無內容）'}
               </Text>
+              {imageFailed && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="重新載入照片"
+                  style={[styles.step, { alignSelf: 'center', marginTop: 16 }]}
+                  onPress={() => {
+                    setPlaying(false);
+                    setImageAttempt((attempt) => attempt + 1);
+                  }}
+                >
+                  <Text style={styles.stepText}>重新載入照片</Text>
+                </Pressable>
+              )}
             </ScrollView>
           )}
-          <Pressable
-            accessible={false}
-            importantForAccessibility="no"
-            disabled={!previousId}
-            style={[styles.tapZone, { left: 0 }]}
-            onPress={() => previousId && selectStory(previousId)}
-          />
-          <Pressable
-            accessible={false}
-            importantForAccessibility="no"
-            style={[styles.tapZone, { right: 0 }]}
-            onPress={() => selectStory(nextId ?? null)}
-          />
+          {!imageFailed && (
+            <>
+              <Pressable
+                accessible={false}
+                importantForAccessibility="no"
+                disabled={!previousId}
+                style={[styles.tapZone, { left: 0 }]}
+                onPress={() => previousId && selectStory(previousId)}
+              />
+              <Pressable
+                accessible={false}
+                importantForAccessibility="no"
+                style={[styles.tapZone, { right: 0 }]}
+                onPress={() => selectStory(nextId ?? null)}
+              />
+            </>
+          )}
+          {hasImage && !imageLoaded && !imageFailed && (
+            <View
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel="照片載入中"
+              accessibilityLiveRegion="polite"
+              pointerEvents="none"
+              style={styles.photoLoading}
+            >
+              <ActivityIndicator color="#fff" />
+              <Text style={styles.stepText}>照片載入中…</Text>
+            </View>
+          )}
         </View>
         {((hasImage || hasVideo) && story.text) || story.poiName ? (
           <ScrollView
@@ -452,26 +510,34 @@ function StoryClip({
 }) {
   const [muted, setMuted] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [durationSeconds, setDurationSeconds] = useState(0);
   const [positionSeconds, setPositionSeconds] = useState(0);
-  // Native callbacks may arrive after a swipe, close or pause.
-  const session = useMemo(() => ({ playing }), [playing]);
+  // Loading callbacks belong to one attempt, while completion also belongs to a playback session.
+  const session = useMemo(() => ({ playing, attempt }), [playing, attempt]);
   const current = React.useRef<typeof session | null>(null);
   React.useLayoutEffect(() => {
-    current.current = session;
+    current.current = failed ? null : session;
     return () => {
       current.current = null;
     };
-  }, [session]);
+  }, [session, failed]);
+  React.useLayoutEffect(() => {
+    fill.setValue(0);
+  }, [attempt, fill]);
   if (failed || !uri || !supportsStoryVideo) {
     return (
-      <View style={styles.clipStatus}>
+      <View pointerEvents="box-none" style={styles.clipStatus}>
         <Text style={styles.stepText}>影片暫時無法播放</Text>
         {uri && supportsStoryVideo && (
           <Pressable
             accessibilityRole="button"
             style={styles.step}
-            onPress={() => setFailed(false)}
+            onPress={() => {
+              onPause();
+              setAttempt((value) => value + 1);
+              setFailed(false);
+            }}
           >
             <Text style={styles.stepText}>重新載入影片</Text>
           </Pressable>
@@ -482,6 +548,7 @@ function StoryClip({
   return (
     <View style={styles.photo}>
       <StoryVideoPlayer
+        key={attempt}
         source={{ uri, overrideFileExtensionAndroid: 'mp4' }}
         style={styles.photo}
         accessibilityLabel="限時動態影片"
@@ -489,7 +556,8 @@ function StoryClip({
         isMuted={muted}
         isLooping={false}
         onError={() => {
-          if (!current.current) return;
+          if (current.current?.attempt !== attempt) return;
+          current.current = null;
           setMuted(true);
           setPositionSeconds(0);
           setDurationSeconds(0);
@@ -497,7 +565,7 @@ function StoryClip({
           onPause();
         }}
         onReadyForDisplay={({ status }) => {
-          if (current.current && status?.isLoaded && status.durationMillis)
+          if (current.current?.attempt === attempt && status?.isLoaded && status.durationMillis)
             setDurationSeconds(Math.ceil(status.durationMillis / 1000));
         }}
         onPlaybackStatusUpdate={(status) => {
@@ -562,8 +630,14 @@ const styles = StyleSheet.create({
   },
   clipTime: { color: '#fff', fontSize: 13, fontVariant: ['tabular-nums'] },
   sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, zIndex: 1 },
   photo: { width: '100%', height: '100%' },
+  photoLoading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
     color: 'white',

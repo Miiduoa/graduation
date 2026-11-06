@@ -1,5 +1,5 @@
 import React from 'react';
-import { AppState, Pressable, Text } from 'react-native';
+import { Animated, AppState, Pressable, Text } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusStoryViewer, useCampusStories } from '../screens/social/CampusStoryViewer';
 import type { CampusStoryDoc } from '../services/stories';
@@ -83,6 +83,183 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
+  test('a failed photo keeps its caption and resumes only its remaining time after an explicit play', () => {
+    const expiresAt = Date.now() + 100_000;
+    const mediaUrl = 'https://example.com/photo.jpg?signature=original';
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'photo',
+            kind: 'image',
+            text: '社團合照',
+            createdAt: 1,
+            mediaUrl,
+            expiresAt,
+          },
+          { ...common, id: 'next', text: '下一則文字', createdAt: 2, expiresAt },
+        ]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByLabelText('照片載入中')).toBeTruthy();
+    fireEvent(view.getByLabelText('限時動態照片'), 'load');
+    expect(view.queryByLabelText('照片載入中')).toBeNull();
+    fireEvent.press(view.getByLabelText('自動播放'));
+    act(() => jest.advanceTimersByTime(3000));
+    fireEvent(view.getByLabelText('限時動態照片'), 'error');
+    expect(view.getByText('照片暫時無法顯示')).toBeTruthy();
+    expect(view.getByText('社團合照')).toBeTruthy();
+    expect(view.getByLabelText('自動播放').props.accessibilityState.disabled).toBe(true);
+    expect(
+      view.UNSAFE_queryAllByType(Pressable).filter((button) => button.props.accessible === false),
+    ).toHaveLength(0);
+    expect(view.getByRole('button', { name: '下一則' })).toBeTruthy();
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    fireEvent.press(view.getByLabelText('重新載入照片'));
+    expect(view.getByLabelText('限時動態照片').props.source.uri).toBe(mediaUrl);
+    expect(view.getByLabelText('照片載入中')).toBeTruthy();
+    fireEvent(view.getByLabelText('限時動態照片'), 'load');
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    fireEvent.press(view.getByLabelText('自動播放'));
+    act(() => jest.advanceTimersByTime(3999));
+    expect(view.getByText('社團合照')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(1));
+    expect(view.getByText('下一則文字')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('late callbacks from a failed image cannot complete or fail its replacement', () => {
+    const expiresAt = Date.now() + 100_000;
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'photo',
+            kind: 'image',
+            createdAt: 1,
+            mediaUrl: 'https://example.com/a.jpg',
+            expiresAt,
+          },
+          { ...common, id: 'next', text: '下一則文字', createdAt: 2, expiresAt },
+        ]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    const original = view.getByLabelText('限時動態照片');
+    const lateLoad = original.props.onLoad;
+    const lateError = original.props.onError;
+    fireEvent(original, 'error');
+    act(() => lateLoad());
+    expect(view.getByText('照片暫時無法顯示')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重新載入照片'));
+    const replacement = view.getByLabelText('限時動態照片');
+    expect(replacement).not.toBe(original);
+    act(() => {
+      lateLoad();
+      lateError();
+    });
+    expect(view.getByLabelText('限時動態照片')).toBe(replacement);
+    expect(view.getByLabelText('照片載入中')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('自動播放'));
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    fireEvent(replacement, 'load');
+    act(() => jest.advanceTimersByTime(7000));
+    expect(view.getByText('下一則文字')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('changing a photo URL waits for the new image and ignores the previous native callbacks', () => {
+    const expiresAt = Date.now() + 100_000;
+    const rows: CampusStoryDoc[] = [
+      {
+        ...common,
+        id: 'photo',
+        kind: 'image',
+        createdAt: 1,
+        mediaUrl: 'https://example.com/old.jpg',
+        expiresAt,
+      },
+      { ...common, id: 'next', text: '下一則文字', createdAt: 2, expiresAt },
+    ];
+    const view = render(<Shelf rows={rows} />);
+    fireEvent.press(view.getByText('開啟bob'));
+    const original = view.getByLabelText('限時動態照片');
+    const lateLoad = original.props.onLoad;
+    const lateError = original.props.onError;
+    fireEvent(original, 'load');
+    fireEvent.press(view.getByLabelText('自動播放'));
+    act(() => jest.advanceTimersByTime(2000));
+    view.rerender(
+      <Shelf rows={[{ ...rows[0]!, mediaUrl: 'https://example.com/new.jpg' }, rows[1]!]} />,
+    );
+    const replacement = view.getByLabelText('限時動態照片');
+    expect(replacement.props.source.uri).toBe('https://example.com/new.jpg');
+    act(() => {
+      lateLoad();
+      lateError();
+    });
+    expect(view.getByLabelText('照片載入中')).toBeTruthy();
+    expect(view.getByLabelText('暫停播放')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    fireEvent(replacement, 'load');
+    act(() => jest.advanceTimersByTime(4999));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    act(() => jest.advanceTimersByTime(1));
+    expect(view.getByText('下一則文字')).toBeTruthy();
+    view.unmount();
+  });
+
+  test('returning to the same story starts a new image session and dismissal retires its callbacks', () => {
+    const expiresAt = Date.now() + 100_000;
+    const view = render(
+      <Shelf
+        rows={[
+          {
+            ...common,
+            id: 'photo',
+            kind: 'image',
+            createdAt: 1,
+            mediaUrl: 'https://example.com/a.jpg',
+            expiresAt,
+          },
+          { ...common, id: 'next', text: '下一則文字', createdAt: 2, expiresAt },
+        ]}
+      />,
+    );
+    fireEvent.press(view.getByText('開啟bob'));
+    const original = view.getByLabelText('限時動態照片');
+    const lateLoad = original.props.onLoad;
+    const lateError = original.props.onError;
+    fireEvent(original, 'load');
+    fireEvent.press(view.getByLabelText('自動播放'));
+    fireEvent.press(view.getByText('下一則'));
+    act(() => lateError());
+    expect(view.getByLabelText('暫停播放')).toBeTruthy();
+    fireEvent.press(view.getByText('上一則'));
+    act(() => {
+      lateLoad();
+      lateError();
+    });
+    expect(view.getByLabelText('照片載入中')).toBeTruthy();
+    act(() => jest.advanceTimersByTime(8_000));
+    expect(view.queryByText('下一則文字')).toBeNull();
+    const current = view.getByLabelText('限時動態照片');
+    const afterClose = current.props.onLoad;
+    fireEvent.press(view.getByLabelText('關閉限時動態'));
+    act(() => afterClose());
+    expect(view.queryByLabelText('限時動態照片')).toBeNull();
+    fireEvent.press(view.getByText('開啟bob'));
+    expect(view.getByLabelText('照片載入中')).toBeTruthy();
+    view.unmount();
+  });
+
   test('a muted clip uses the native end event rather than the photo timer and keeps its caption', () => {
     const expiresAt = Date.now() + 100_000;
     const view = render(
@@ -146,7 +323,9 @@ describe('story playback clock', () => {
     view.unmount();
   });
 
-  test('a failed video retains navigation and can be loaded again muted', () => {
+  test('a retried video starts paused and muted, resets progress, and ignores retired native callbacks', () => {
+    const progress = jest.spyOn(Animated.Value.prototype, 'setValue');
+    const mediaUrl = 'https://example.com/v.mp4?signature=original';
     const view = render(
       <Shelf
         rows={[
@@ -154,20 +333,116 @@ describe('story playback clock', () => {
             ...common,
             id: 'v',
             kind: 'video',
-            mediaUrl: 'https://example.com/v',
+            mediaUrl,
             expiresAt: Date.now() + 100_000,
           },
         ]}
       />,
     );
-    fireEvent.press(view.getByText('開啟bob'));
-    fireEvent.press(view.getByLabelText('播放影片'));
-    fireEvent(view.getByLabelText('限時動態影片'), 'error', 'decode');
-    expect(view.getByText('影片暫時無法播放')).toBeTruthy();
-    fireEvent.press(view.getByText('重新載入影片'));
-    expect(view.getByLabelText('限時動態影片').props.shouldPlay).toBe(false);
-    fireEvent.press(view.getByText('看完了'));
-    expect(view.queryByLabelText('限時動態影片')).toBeNull();
-    view.unmount();
+    try {
+      fireEvent.press(view.getByText('開啟bob'));
+      fireEvent.press(view.getByLabelText('播放影片'));
+      fireEvent.press(view.getByLabelText('開啟影片聲音'));
+      const original = view.getByLabelText('限時動態影片');
+      const lateError = original.props.onError;
+      const lateReady = original.props.onReadyForDisplay;
+      const lateStatus = original.props.onPlaybackStatusUpdate;
+      fireEvent(original, 'readyForDisplay', {
+        status: { isLoaded: true, durationMillis: 12_000 },
+      });
+      fireEvent(original, 'playbackStatusUpdate', {
+        isLoaded: true,
+        durationMillis: 12_000,
+        positionMillis: 6000,
+      });
+      expect(view.getByText('6 / 12 秒')).toBeTruthy();
+      fireEvent(original, 'error', 'decode');
+      expect(view.getByText('影片暫時無法播放')).toBeTruthy();
+      // A play request made while the error is shown must not autoplay the retry.
+      fireEvent.press(view.getByLabelText('播放影片'));
+      progress.mockClear();
+      fireEvent.press(view.getByText('重新載入影片'));
+      const replacement = view.getByLabelText('限時動態影片');
+      expect(replacement).not.toBe(original);
+      expect(replacement.props.shouldPlay).toBe(false);
+      expect(replacement.props.isMuted).toBe(true);
+      expect(replacement.props.source.uri).toBe(mediaUrl);
+      expect(progress).toHaveBeenCalledWith(0);
+      act(() => {
+        lateError('late decode failure');
+        lateReady({ status: { isLoaded: true, durationMillis: 99_000 } });
+        lateStatus({ isLoaded: true, didJustFinish: true });
+      });
+      expect(view.getByLabelText('限時動態影片')).toBe(replacement);
+      expect(view.getByText('載入影片…')).toBeTruthy();
+      fireEvent.press(view.getByLabelText('播放影片'));
+      act(() => lateStatus({ isLoaded: true, didJustFinish: true }));
+      expect(view.getByLabelText('限時動態影片')).toBe(replacement);
+      fireEvent.press(view.getByText('看完了'));
+      expect(view.queryByLabelText('限時動態影片')).toBeNull();
+    } finally {
+      view.unmount();
+      progress.mockRestore();
+    }
+  });
+
+  test('replacing a video URL resets its player and rejects callbacks from the old source', () => {
+    const progress = jest.spyOn(Animated.Value.prototype, 'setValue');
+    const story: CampusStoryDoc = {
+      ...common,
+      id: 'video',
+      kind: 'video',
+      text: '排練影片',
+      mediaUrl: 'https://example.com/old.mp4',
+      expiresAt: Date.now() + 100_000,
+    };
+    const view = render(<Shelf rows={[story]} />);
+    try {
+      fireEvent.press(view.getByText('開啟bob'));
+      fireEvent.press(view.getByLabelText('播放影片'));
+      fireEvent.press(view.getByLabelText('開啟影片聲音'));
+      const original = view.getByLabelText('限時動態影片');
+      const lateError = original.props.onError;
+      const lateReady = original.props.onReadyForDisplay;
+      const lateStatus = original.props.onPlaybackStatusUpdate;
+      fireEvent(original, 'readyForDisplay', {
+        status: { isLoaded: true, durationMillis: 12_000 },
+      });
+      fireEvent(original, 'playbackStatusUpdate', {
+        isLoaded: true,
+        durationMillis: 12_000,
+        positionMillis: 6000,
+      });
+      progress.mockClear();
+      view.rerender(<Shelf rows={[{ ...story, mediaUrl: 'https://example.com/new.mp4' }]} />);
+      const replacement = view.getByLabelText('限時動態影片');
+      expect(replacement).not.toBe(original);
+      expect(replacement.props.source.uri).toBe('https://example.com/new.mp4');
+      expect(replacement.props.isMuted).toBe(true);
+      expect(replacement.props.shouldPlay).toBe(true);
+      expect(progress).toHaveBeenCalledWith(0);
+      act(() => {
+        lateReady({ status: { isLoaded: true, durationMillis: 99_000 } });
+        lateError('late decode failure');
+        lateStatus({ isLoaded: true, didJustFinish: true });
+      });
+      expect(view.getByLabelText('限時動態影片')).toBe(replacement);
+      expect(view.getByText('載入影片…')).toBeTruthy();
+      expect(view.getByText('排練影片')).toBeTruthy();
+      fireEvent(replacement, 'readyForDisplay', {
+        status: { isLoaded: true, durationMillis: 18_000 },
+      });
+      fireEvent(replacement, 'playbackStatusUpdate', {
+        isLoaded: true,
+        durationMillis: 18_000,
+        positionMillis: 3000,
+      });
+      expect(view.getByText('3 / 18 秒')).toBeTruthy();
+      fireEvent(replacement, 'playbackStatusUpdate', { isLoaded: true, didJustFinish: true });
+      expect(view.queryByLabelText('限時動態影片')).toBeNull();
+    } finally {
+      view.unmount();
+      progress.mockRestore();
+    }
   });
 });
