@@ -21,7 +21,10 @@ type Analysis = {
   result?: CampusSemanticResult;
 };
 
-export function QuickCampusEntry({ onAsk }: { onAsk?: ((phrase: string) => void) | null } = {}) {
+export function QuickCampusEntry({ onAsk, compact = false }: {
+  onAsk?: ((phrase: string) => void) | null;
+  compact?: boolean;
+} = {}) {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const { user } = useAuth();
@@ -84,15 +87,19 @@ export function QuickCampusEntry({ onAsk }: { onAsk?: ((phrase: string) => void)
   }
 
   return (
-    <section className={styles.entry} aria-labelledby="quick-entry-title">
+    <section className={compact ? styles.compactEntry : styles.entry} aria-labelledby="quick-entry-title">
       <div className={styles.heading}>
-        <div>
-          <p className={styles.eyebrow}>快速開始</p>
-          <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
-          <p className={styles.subtitle}>
-            說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
-          </p>
-        </div>
+        {compact ? (
+          <h2 id="quick-entry-title" className={styles.compactHeading}>搜尋服務</h2>
+        ) : (
+          <div>
+            <p className={styles.eyebrow}>快速開始</p>
+            <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
+            <p className={styles.subtitle}>
+              說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
+            </p>
+          </div>
+        )}
         <Link className={styles.allServices} href={searchHref}>
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>

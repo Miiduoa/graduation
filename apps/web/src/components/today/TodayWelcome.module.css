@@ -12,17 +12,8 @@
   min-width: 0;
 }
 
-.label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--brand);
-  font-size: var(--font-label-size);
-  font-weight: 650;
-}
-
 .intro h2 {
-  margin: 16px 0 12px;
+  margin: 0 0 8px;
   font-size: calc(clamp(1.5rem, 2.2vw, 2rem) + var(--font-h1-size) - 1.5rem);
   line-height: 1.3;
   letter-spacing: -0.035em;
@@ -41,7 +32,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
 .primary,
@@ -82,7 +73,7 @@
 }
 
 .signIn {
-  margin: 20px 0 0;
+  margin: 10px 0 0;
   font-size: var(--font-body-sm-size);
   line-height: 1.7;
   color: var(--muted);
@@ -135,15 +126,13 @@
 }
 
 .shortcut {
-  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 16px;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 6px;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border-bottom: 1px solid var(--border);
   text-decoration: none;
   color: var(--text);
 }
@@ -172,14 +161,6 @@
   line-height: 1.6;
 }
 
-.arrow {
-  position: absolute;
-  right: 14px;
-  top: 13px;
-  color: var(--muted);
-  font-size: 1rem;
-}
-
 .welcome a:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
@@ -198,12 +179,9 @@
 
   .intro,
   .shortcuts {
-    padding: 24px;
+    padding: 18px;
   }
 
-  .shortcut {
-    gap: 10px;
-  }
 }
 
 @media (max-width: 360px) {
@@ -217,6 +195,7 @@
   }
 
   .shortcut {
-    padding: 12px;
+    gap: 6px;
+    padding-inline: 0;
   }
 }

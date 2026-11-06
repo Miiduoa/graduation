@@ -205,37 +205,17 @@
   line-height: 1.5;
 }
 
-.todayHeading {
-  display: flex;
+.compactEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.compactEntry .heading {
+  flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 2px 12px;
 }
-.todayHeading h2 {
+.compactEntry .compactHeading {
   margin: 0;
-  color: var(--text);
-  font-size: clamp(21px, 3vw, 28px);
-  letter-spacing: -0.035em;
-}
-.serviceToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 44px;
-  padding: 0 4px;
-  border: 0;
-  color: var(--brand);
-  background: transparent;
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-.serviceToggle:hover,
-.serviceToggle[aria-expanded='true'] {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.entry > div:has(> .entry) > .entry {
-  margin-bottom: 0;
+  font-size: 16px;
 }

@@ -943,9 +943,12 @@ it('starts Today dictation from the header and keeps an active recording running
   vi.stubGlobal('SpeechRecognition', class { start = start; abort = vi.fn(); });
   try {
     render(<HomePage />);
-    const mic = await screen.findByRole('button', { name: '使用語音輸入' });
+    const panel = screen.getByText('打字或語音詢問').closest('details')!;
+    expect(panel.open).toBe(false);
     const shortcut = screen.getByRole('button', { name: '頁首語音' });
     fireEvent.click(shortcut);
+    expect(panel.open).toBe(true);
+    const mic = await screen.findByRole('button', { name: '停止語音輸入' });
     expect(start).toHaveBeenCalledOnce();
     expect(document.activeElement).toBe(mic);
     fireEvent.click(shortcut);
@@ -959,7 +962,26 @@ it('starts Today dictation from the header and keeps an active recording running
 it('focuses the Today input from the header when the browser lacks speech recognition', async () => {
   state.uid = null;
   render(<HomePage />);
-  const input = await screen.findByRole('searchbox');
   fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  const input = await screen.findByRole('searchbox');
   expect(document.activeElement).toBe(input);
+});
+
+it('keeps the active question on screen while a late course load resolves the teacher view', async () => {
+  let finish!: (result: HomeData) => void;
+  vi.mocked(loadHomeData).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  render(<HomePage />);
+  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  const question = await screen.findByRole('searchbox');
+  fireEvent.change(question, { target: { value: '我今天要去哪間教室？' } });
+  await act(async () => finish(data('資料庫', {
+    courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
+    tasks: [],
+  })));
+  expect(screen.getByRole('searchbox')).toBe(question);
+  expect((question as HTMLInputElement).value).toBe('我今天要去哪間教室？');
+  const summary = screen.getByText('打字或語音詢問').closest('summary')!;
+  fireEvent.click(summary);
+  await screen.findByTestId('teacher-today');
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
 });

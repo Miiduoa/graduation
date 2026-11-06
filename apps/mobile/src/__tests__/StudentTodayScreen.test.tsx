@@ -672,6 +672,22 @@ test('a class starting soon keeps the urgent quiz visible in the collapsed list 
   const view = render(<StudentTodayScreen />);
   await view.findByText(TODAY_COPY.nextClass);
   expect(view.getByRole('button', { name: '期中考，資料結構' })).toBeVisible();
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('待處理')).toBeLessThan(headings.indexOf('今天課表'));
+  fireEvent.press(view.getByRole('button', { name: '去作答，期中考' }));
+  expect(mockNavigate).toHaveBeenCalledWith('學習', { screen: 'QuizTaking',
+    params: { groupId: 'course-a', groupName: '資料結構', quizId: 'quiz-42', dueAt: dueAt.toISOString() } });
   expect(view.getByText(TODAY_COPY.moreTodos(11))).toBeVisible();
   expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();
+});
+
+test('distinguishes a class in progress and shows the timetable before non-urgent work', async () => {
+  mockTimetable.classes = [todayClass({ startAt: Date.parse('2026-11-03T07:50:00+08:00'),
+    endAt: Date.parse('2026-11-03T08:40:00+08:00') })];
+  const view = render(<StudentTodayScreen />);
+  expect(await view.findByText('上課中')).toBeVisible();
+  expect(view.queryByText(TODAY_COPY.nextClass)).toBeNull();
+  expect(view.getByText('07:50–08:40 · 主顧 303')).toBeVisible();
+  const headings = view.getAllByRole('header').map(node => node.props.children);
+  expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('待處理'));
 });

@@ -1,16 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { buildPersonalToday } from '@campus/shared';
 import {
-  formatClassMeta,
+  formatClock,
   formatTodayHeaderDate,
   formatTodoDueLine,
   formatUpcomingDueLine,
   formatUpdatedAt,
   isDueWithinHours,
   isTodoOverdue,
+  isSameTaipeiDay,
   pickNextAction,
   sortTodayClasses,
   sortTodayTodos,
@@ -21,10 +22,7 @@ import {
 } from '@campus/shared/src/pickNextAction';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { usePersonalTodayRecords } from '@/lib/usePersonalTodayRecords';
-import {
-  TODAY_FLOW_CLASS_TITLE,
-  TODAY_FLOW_WORK_TITLE,
-} from '@/lib/todayCourseWork';
+import { TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE } from '@/lib/todayCourseWork';
 import {
   assignmentHref,
   assignmentSubmitHref,
@@ -33,11 +31,13 @@ import {
 } from '@/lib/todayScreen';
 import styles from './StudentToday.module.css';
 import { TodayUnreadNotifications } from './TodayUnreadNotifications';
+import { TodayClassRows } from './TodayClassRows';
 import { TodayWelcome } from './TodayWelcome';
 
 export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigned-scope';
 
 type Props = {
+  assistant?: ReactNode;
   scopeKey?: string;
   now: Date | null;
   updatedAt: Date | null;
@@ -58,6 +58,7 @@ type Props = {
 };
 
 type BoundProps = {
+  assistant?: ReactNode;
   now: Date | null;
   updatedAt: Date | null;
   signedIn: boolean;
@@ -79,8 +80,6 @@ export function StudentToday(props: Props) {
   const action = pickNextAction(props.classes, props.todos, now);
   const classes = sortTodayClasses(props.classes, now);
   const todos = sortTodayTodos(props.todos);
-  const visibleClasses = classes.slice(0, 4);
-  const extraClasses = classes.length > 4;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -121,49 +120,48 @@ export function StudentToday(props: Props) {
       </header>
       {props.skeleton ? (
         <TodaySkeleton />
+      ) : props.unsigned && action.type !== 'class' ? (
+        <TodayWelcome
+          importHref={props.importHref}
+          timetableHref={props.timetableHref}
+          hasTimetable={props.timetableStatus === 'ready'}
+        />
       ) : (
-        <>
-          {props.unsigned && action.type !== 'class' ? (
-            <TodayWelcome
-              importHref={props.importHref}
-              timetableHref={props.timetableHref}
-              hasTimetable={props.timetableStatus === 'ready'}
-            />
-          ) : (
-            <NextActionCard
-              key={`action:${props.scopeKey ?? ''}`}
-              action={action}
-              unsigned={props.unsigned}
-              todosError={props.todosError}
-              timetableStatus={props.timetableStatus}
-              lmsUnconnected={props.lmsUnconnected}
-              now={now}
-              weekHref={props.weekHref}
-            />
-          )}
-          <div className={styles.flow} data-testid="today-unified-flow">
-            <TodayClassList
-              classes={visibleClasses}
-              extra={extraClasses}
-              status={props.timetableStatus}
-              now={now}
-              onRetry={props.onRetryTimetable}
-              importHref={props.importHref}
-              timetableHref={props.timetableHref}
-            />
-            <TodoList
-              key={`todos:${props.scopeKey ?? ''}`}
-              todos={todos}
-              unsigned={props.unsigned}
-              error={props.todosError}
-              lmsUnconnected={props.lmsUnconnected}
-              leavingTodoIds={props.leavingTodoIds}
-              now={now}
-              onRetry={props.onRetryTodos}
-            />
-            <TodayUnreadNotifications unsigned={props.unsigned} />
-          </div>
-        </>
+        <NextActionCard
+          key={`action:${props.scopeKey ?? ''}`}
+          action={action}
+          unsigned={props.unsigned}
+          todosError={props.todosError}
+          timetableStatus={props.timetableStatus}
+          lmsUnconnected={props.lmsUnconnected}
+          now={now}
+          weekHref={props.weekHref}
+        />
+      )}
+      {props.assistant}
+      {!props.skeleton && (
+        <div className={`${styles.flow} ${styles.planner}`} data-testid="today-unified-flow">
+          <TodayClassList
+            key={props.scopeKey}
+            classes={classes}
+            status={props.timetableStatus}
+            now={now}
+            onRetry={props.onRetryTimetable}
+            importHref={props.importHref}
+            timetableHref={props.timetableHref}
+          />
+          <TodoList
+            key={`todos:${props.scopeKey ?? ''}`}
+            todos={todos}
+            unsigned={props.unsigned}
+            error={props.todosError}
+            lmsUnconnected={props.lmsUnconnected}
+            leavingTodoIds={props.leavingTodoIds}
+            now={now}
+            onRetry={props.onRetryTodos}
+          />
+          <TodayUnreadNotifications unsigned={props.unsigned} />
+        </div>
       )}
     </div>
   );
@@ -366,12 +364,17 @@ function NextActionBody({
     const href = courseHref === '/timetable' ? weekHref : courseHref;
     return (
       <>
-        <Link href={href} className={styles.cardMain}>
-          <p className={styles.kind}>{TODAY_COPY.nextClass}</p>
+        <div className={styles.cardMain}>
+          <p className={styles.kind}>
+            {action.class.startAt <= now.getTime() ? '上課中' : TODAY_COPY.nextClass}
+          </p>
           <p className={styles.headline}>{action.class.title}</p>
-          <p className={styles.meta}>{formatClassMeta(action.class)}</p>
-        </Link>
-        <Link className={styles.action} href={href}>
+          <p className={styles.meta}>
+            {formatClock(action.class.startAt)}–{formatClock(action.class.endAt)} ·{' '}
+            {action.class.location || '教室未填'}
+          </p>
+        </div>
+        <Link className={`${styles.action} ${styles.classAction}`} href={href}>
           {courseHref === '/timetable' ? TODAY_COPY.viewWeek : TODAY_COPY.viewCourse}
         </Link>
       </>
@@ -389,7 +392,9 @@ function NextActionBody({
             ? TODAY_COPY.overdue
             : action.type === 'upcoming'
               ? TODAY_COPY.nextAssignment
-              : TODAY_COPY.dueToday}
+              : action.todo.dueAt !== null && !isSameTaipeiDay(action.todo.dueAt, now.getTime())
+                ? '明天截止'
+                : TODAY_COPY.dueToday}
         </p>
         <p className={styles.headline}>{action.todo.title}</p>
         <p className={`${styles.meta} ${action.type === 'overdue' ? styles.metaDanger : ''}`}>
@@ -427,7 +432,6 @@ function isContentKey(key: string): boolean {
 
 function TodayClassList({
   classes,
-  extra,
   status,
   now,
   onRetry,
@@ -435,7 +439,6 @@ function TodayClassList({
   timetableHref,
 }: {
   classes: TodayClass[];
-  extra: boolean;
   status: TimetableStatus;
   now: Date;
   onRetry: () => void;
@@ -443,7 +446,11 @@ function TodayClassList({
   timetableHref: string;
 }) {
   return (
-    <section className={styles.section} aria-labelledby="today-class-title" data-testid="today-classes">
+    <section
+      className={styles.section}
+      aria-labelledby="today-class-title"
+      data-testid="today-classes"
+    >
       <h2 id="today-class-title" className={styles.sectionTitle}>
         {TODAY_FLOW_CLASS_TITLE}
       </h2>
@@ -478,35 +485,7 @@ function TodayClassList({
       ) : classes.length === 0 ? (
         <p className={styles.empty}>今天沒有排課。</p>
       ) : (
-        <ul className={styles.list}>
-          {classes.map((item) => {
-            const ended = item.endAt <= now.getTime();
-            const courseHref = courseWeekHref(item.courseId);
-            const href = courseHref === '/timetable' ? timetableHref : courseHref;
-            return (
-              <li key={item.id}>
-                <Link
-                  href={href}
-                  className={`${styles.row} ${styles.withTime} ${ended ? styles.ended : ''}`}
-                  style={{ minHeight: 56 }}
-                >
-                  <span className={styles.time}>{formatClassMeta(item).split('・')[0]}</span>
-                  <span className={styles.rowBody}>
-                    <span className={styles.rowTitle}>{item.title}</span>
-                    <span className={styles.rowMeta}>{item.location || '教室未填'}</span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-          {extra ? (
-            <li>
-              <Link className={styles.more} href={timetableHref}>
-                {TODAY_COPY.viewFullTimetable}
-              </Link>
-            </li>
-          ) : null}
-        </ul>
+        <TodayClassRows classes={classes} now={now} timetableHref={timetableHref} />
       )}
     </section>
   );
@@ -630,6 +609,7 @@ export function StudentTodayPage(props: BoundProps) {
   const classes = todayClassesFromSchedule(schedule.today, now);
   return (
     <StudentToday
+      assistant={props.assistant}
       scopeKey={records.scopeKey}
       now={props.now}
       updatedAt={props.updatedAt}

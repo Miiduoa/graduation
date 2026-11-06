@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
-import { TodayCampusEntry } from '@/components/TodayCampusEntry';
+import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
@@ -24,7 +24,7 @@ const courseHref = (course: HomeCourse) =>
   course.href ?? `/course/${encodeURIComponent(course.id)}`;
 
 export default function HomePage() {
-  const voiceEntry = useRef<HTMLDivElement>(null);
+  const voiceEntry = useRef<TodayVoiceHandle>(null);
   const hydrated = useClientHydrated();
   const { user, loading: authLoading } = useAuth();
   const nuni = useNuniSession();
@@ -42,6 +42,14 @@ export default function HomePage() {
         : null;
   const sessionLoading = !hydrated || authLoading || nuni.loading;
   const blocked = nuni.pendingLogout || (!!nuni.error && !uid);
+  const assistantScope = JSON.stringify([owner, school?.selectedSchoolId, blocked]);
+  const [openAssistantScope, setOpenAssistantScope] = useState<string | null>(null);
+  const handleAssistantToggle = useCallback((open: boolean) => {
+    setOpenAssistantScope(open ? assistantScope : null);
+  }, [assistantScope]);
+  if (openAssistantScope !== null && openAssistantScope !== assistantScope) {
+    setOpenAssistantScope(null);
+  }
   type Source = 'nuni' | 'school';
   type Section = { data?: HomeData; error?: string; loading: boolean; updatedAt?: Date };
   const [sections, setSections] = useState<{
@@ -211,7 +219,11 @@ export default function HomePage() {
   ];
   if (!owner || sessionLoading || blocked || !sources.length) {
     if (presentation) setPresentation(null);
-  } else if (sources.every((source) => rows[source] && !rows[source]?.loading)) {
+  } else if (
+    // A role change would unmount the open conversation.
+    openAssistantScope !== assistantScope &&
+    sources.every((source) => rows[source] && !rows[source]?.loading)
+  ) {
     const nextTeacherOnly =
       !!teaching.length &&
       !studying.length &&
@@ -234,36 +246,20 @@ export default function HomePage() {
   const lmsUnconnected =
     signedIn && !!data && !error && !loading && !failed && data.courses.length === 0;
 
+  const assistant = (
+    <TodayAssistantDisclosure
+      key={assistantScope}
+      ref={voiceEntry}
+      onOpenChange={handleAssistantToggle}
+    />
+  );
   return (
     <div className={styles.page}>
       <a href="#today-content" className={styles.skip}>
         跳到主要內容
       </a>
-      <AppHeader onOpenVoice={() => {
-        const entry = voiceEntry.current?.querySelector<HTMLElement>('form[aria-label="傳送問題"]') ?? voiceEntry.current;
-        const mic = entry?.querySelector<HTMLButtonElement>('button[data-voice-input]:not(:disabled)');
-        if (mic) {
-          mic.focus();
-          if (mic.getAttribute('aria-pressed') === 'false') mic.click();
-          return;
-        }
-        const field = entry?.querySelector<HTMLElement>('textarea:not(:disabled), input[type="search"]');
-        (field ?? entry)?.focus();
-      }} />
+      <AppHeader onOpenVoice={() => voiceEntry.current?.openVoice()} />
       <main id="today-content" className={styles.main} tabIndex={-1}>
-        <div id="today-voice-entry" ref={voiceEntry} tabIndex={-1}>
-          <TodayCampusEntry />
-        </div>
-        {!sessionLoading && uid && !context ? (
-          <p className={styles.notice}>
-            E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>
-          </p>
-        ) : null}
-        {isTeacherRole(role) && (
-          <p className={styles.notice}>
-            <Link href="/teacher">課務申訴審核 →</Link> 看學生送來的課程申訴。
-          </p>
-        )}
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
             <h2 id="session-title">
@@ -283,6 +279,7 @@ export default function HomePage() {
           </section>
         ) : teacherOnly ? (
           <TeacherTodayPage
+            assistant={assistant}
             now={now}
             unsigned={!signedIn}
             teachingCourses={teaching}
@@ -290,6 +287,7 @@ export default function HomePage() {
           />
         ) : (
           <StudentTodayPage
+            assistant={assistant}
             now={now}
             updatedAt={updatedAt}
             signedIn={signedIn}
@@ -309,6 +307,17 @@ export default function HomePage() {
               );
             }}
           />
+        )}
+        {blocked && assistant}
+        {!sessionLoading && uid && !context ? (
+          <p className={styles.notice}>
+            E 校園與 TronClass 的學校來源已停用。<Link href="/classroom">前往 nuni 課程</Link>
+          </p>
+        ) : null}
+        {isTeacherRole(role) && (
+          <p className={styles.notice}>
+            <Link href="/teacher">課務申訴審核 →</Link> 看學生送來的課程申訴。
+          </p>
         )}
         {signedIn ? (
           <div className={styles.sourceStatuses} aria-label="課程來源狀態">
@@ -341,7 +350,9 @@ export default function HomePage() {
                           </button>
                         </>
                       ) : (
-                        <p>{source === 'nuni' ? 'nuni' : '校園'}課程已讀取。</p>
+                        <p className={styles.loadedStatus}>
+                          {source === 'nuni' ? 'nuni 課程已更新。' : '校園課程已更新。'}
+                        </p>
                       )}
                     </div>
                   </section>

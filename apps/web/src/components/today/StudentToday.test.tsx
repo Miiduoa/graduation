@@ -70,16 +70,52 @@ function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
   return render(todayElement(overrides));
 }
 
-it('shows the next class on the only solid card', () => {
+it('shows the next class with its time range, room and course link', () => {
   view({ classes: [klass()], todos: [todo()] });
   const card = screen.getByTestId('next-action');
   expect(card.textContent).toContain(TODAY_COPY.nextClass);
   expect(card.textContent).toContain('資料庫系統');
-  expect(card.textContent).toContain('10:10・管理大樓 M302');
+  expect(card.textContent).toContain('10:10–12:00 · 管理大樓 M302');
   expect(screen.getByRole('link', { name: TODAY_COPY.viewCourse }).getAttribute('href')).toBe(
     '/course/cs-db#week',
   );
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
+});
+
+it('keeps the assistant mounted after the primary action while the day finishes loading', () => {
+  const assistant = <input aria-label="助理草稿測試" defaultValue="" />;
+  const result = view({ skeleton: true, assistant });
+  const draft = screen.getByRole('textbox');
+  fireEvent.change(draft, { target: { value: '下一堂課在哪裡？' } });
+  result.rerender(todayElement({ classes: [klass()], assistant }));
+  expect(screen.getByRole('textbox')).toBe(draft);
+  expect(draft.compareDocumentPosition(screen.getByTestId('next-action')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect(draft.compareDocumentPosition(screen.getByTestId('today-classes')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('marks a class in progress and expands the rest of the day without leaving Today', () => {
+  const classes = Array.from({ length: 5 }, (_, i) => klass({
+    id: 'class-' + i, title: '課程 ' + i,
+    startAt: now.getTime() + (i - 1) * 3_600_000,
+    endAt: now.getTime() + (i - 1) * 3_600_000 + 50 * 60_000,
+  }));
+  view({ classes });
+  const list = within(screen.getByTestId('today-classes'));
+  expect(within(screen.getByTestId('next-action')).getByText('上課中')).toBeTruthy();
+  expect(list.getByRole('link', { name: /課程 1.*上課中/ })).toBeTruthy();
+  expect(list.queryByText('課程 0')).toBeNull();
+  fireEvent.click(list.getByRole('button', { name: '再看 1 堂課' }));
+  expect(list.getByRole('link', { name: /課程 0.*已結束/ })).toBeTruthy();
+  expect(list.getByRole('link', { name: TODAY_COPY.viewFullTimetable }).getAttribute('href')).toBe('/timetable?campus=pu');
+  fireEvent.click(list.getByRole('button', { name: '收起課程' }));
+  expect(list.queryByText('課程 0')).toBeNull();
+});
+
+it('labels an overnight deadline with its Taipei calendar day', () => {
+  view({ now: new Date('2026-10-25T22:00:00+08:00'), todos: [todo({
+    dueAt: Date.parse('2026-10-26T08:00:00+08:00'),
+  })] });
+  expect(within(screen.getByTestId('next-action')).getByText('明天截止')).toBeTruthy();
 });
 
 it('orders the unified flow as classes, due work, then unread notifications', () => {
