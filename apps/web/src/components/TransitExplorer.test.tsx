@@ -146,7 +146,7 @@ it('draws the next live bus on a stop line and does not invent a bus for timetab
   expect(track.getAttribute('data-status')).toBe('soon');
   expect(track.getAttribute('aria-label')).toMatch(/162 號公車，往 沙鹿火車站，還有 \d+ 站，約 3 分/);
   expect(screen.getByText('快到')).toBeTruthy();
-  expect(screen.getByText('你在這裡')).toBeTruthy();
+  expect(screen.getByText('候車站')).toBeTruthy();
   expect(screen.getByText('英才路')).toBeTruthy();
   expect(screen.getByTestId('campus-approach-bus')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '301 往 嘉陽高中 12 分' }));
@@ -736,14 +736,20 @@ it('groups campus stops with student names and never shows stop codes', async ()
   expect(screen.queryByText(/站牌代碼/)).toBeNull();
 });
 
-it('keeps long route badges on one line and fits the stop-mode bar on a 350px board', () => {
+it('fits route details and direction controls when the physical board narrows', () => {
   const css = readFileSync(path.join(process.cwd(), 'src/components/transit.module.css'), 'utf8');
+  const sharedBoard = css.match(/(?:^|\n)\.board \{[^}]*\}/)?.[0] ?? '';
+  expect(sharedBoard).not.toMatch(/(?:border|box-shadow|container):/);
+  expect(css).toMatch(/\.physicalBoard \{[^}]*container: campus-board \/ inline-size;/);
   expect(css).toMatch(/\.routeBadge \{[\s\S]*?white-space: nowrap;/);
-  expect(css).toMatch(/grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
+  expect(css).toMatch(/\.physicalArrival \.arrivalRow \{[^}]*grid-template-columns: minmax\(3.5rem, max-content\) minmax\(0, 1fr\) auto;/);
+  expect(css).toMatch(/\.arrivalRow \{[^}]*grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
   expect(css).toMatch(/\.campusFirst > \.modeBar button \{[\s\S]*?flex: 1 1 0;/);
   expect(css).toMatch(/\.rowCopy strong \{[^}]*white-space: nowrap;/);
   expect(css).toMatch(/\.rowCopy strong \{[^}]*text-overflow: ellipsis;/);
-  expect(css).not.toMatch(/\.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/@container campus-board \(max-width: 30rem\) \{[\s\S]*?\.physicalArrival \.routeBadge \{[^}]*max-width: 100%;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/@container campus-board \(max-width: 30rem\) \{[\s\S]*?\.physicalArrival \.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/@container campus-board \(max-width: 20rem\) \{[\s\S]*?\.arrivalRow \{ grid-template-columns: minmax\(0, 1fr\);/);
   expect(css).toMatch(/\.arrivals \{[^}]*scroll-margin-top: 24px;/);
   expect(css).toMatch(/\.arrivals \{[^}]*overflow-anchor: none;/);
   expect(css).toMatch(/\.arrivalBlock \{[^}]*scroll-margin-top: 24px;/);
@@ -754,7 +760,7 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(transferBadge).not.toMatch(/text-overflow: ellipsis;/);
   expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.transferRow \.routeBadge \{[\s\S]*?font-size: 11px;/);
   expect(css).toMatch(/\.approach \{[^}]*position: sticky;/);
-  expect(css).toMatch(/\.approach \{[^}]*top: 44px;/);
+  expect(css).toMatch(/\.approach \{[^}]*top: max\(58px, calc\(1.3125rem \+ 26px\)\);/);
 });
 
 it('lets a Providence student type or tap a destination and see the next direct bus on the first screen', async () => {
