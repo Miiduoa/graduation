@@ -14,7 +14,8 @@ function transcriptRef(uid, sessionId) {
 
 function sanitizeMessageForStore(msg) {
   if (!msg || typeof msg !== 'object') return null;
-  if (msg.role === 'system') return null;
+  // Evidence is rebuilt for each request and must never become a stored user turn.
+  if (msg.role === 'system' || msg.name === 'campus_reference_data') return null;
   const role = msg.role;
   if (!['user', 'assistant', 'tool'].includes(role)) return null;
   const out = { role };

@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  buildAgentReferenceMessage,
   buildAgentSystemPrompt,
   callAssistantModelWithTools,
 } = require('../assistantAgent');
@@ -172,12 +173,10 @@ async function buildModelBackedAssistantResponse({
     schoolId,
     actorRole,
     permissionScope,
-    structuredContext,
-    knowledgeChunks,
-    webAnswer,
     toolPromptSection,
     writeFewShotBlock,
   });
+  const referenceMessage = buildAgentReferenceMessage({ structuredContext, knowledgeChunks, webAnswer });
 
   const userSlice = normalizeAssistantText(lastUserMessage).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS);
   const prior = await loadConversationMessages(uid, sessionId, schoolId);
@@ -192,7 +191,7 @@ async function buildModelBackedAssistantResponse({
   }
 
   const modelResult = await callAssistantModelWithTools({
-    messages: [{ role: 'system', content: systemPrompt }, ...history],
+    messages: [{ role: 'system', content: systemPrompt }, referenceMessage, ...history],
     toolCtx: toolCtx && typeof toolCtx === 'object' ? toolCtx : {},
     signal,
   });

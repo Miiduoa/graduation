@@ -90,8 +90,32 @@ describe('personal timetable on Today', () => {
     ];
     expect(view(records)).toMatchObject({ today: [], unplacedCount: 2 });
   });
+  it('marks each class inside a longer meeting, including identical slots, up to its end', () => {
+    const at = (id: string, startTime: string, endTime: string) => row({ id, startTime, endTime });
+    const result = view([
+      at('after', '12:00', '13:00'),
+      at('second', '10:00', '11:00'),
+      at('first', '08:00', '09:00'),
+      at('long', '08:00', '12:00'),
+      at('parallel', '10:00', '11:00'),
+    ]);
+    expect(result.today.map((entry) => [entry.row.id, entry.conflict])).toEqual([
+      ['first', true], ['long', true], ['parallel', true], ['second', true], ['after', false],
+    ]);
+  });
+  it('marks two disjoint classes wrapped by a longer meeting as conflicts', () => {
+    const at = (id: string, startTime: string, endTime: string) => row({ id, startTime, endTime });
+    const result = view([
+      at('late', '11:00', '11:30'),
+      at('long', '08:00', '12:00'),
+      at('early', '09:00', '10:00'),
+    ]);
+    expect(result.today.map((entry) => [entry.row.id, entry.conflict])).toEqual([
+      ['long', true], ['early', true], ['late', true],
+    ]);
+  });
   it('does not report a manual copy of an imported class as a timetable conflict', () => {
-    const manual = row({ id: 'manual:course', teacher: '王老師', location: '教室 303' });
+    const manual = row({ id: 'manual:course', teacher: ' 王老師 ', location: '教室 ３０３' });
     const imported = row({
       id: 'imported', teacher: '王老師', location: '教室 303',
       startPeriod: undefined, endPeriod: undefined, startTime: '08:00', endTime: '09:50',
@@ -101,6 +125,10 @@ describe('personal timetable on Today', () => {
       today: [{ row: { id: 'imported' }, conflict: false }],
     });
     expect(view([imported, manual]).today).toHaveLength(1);
+    const secondImport = { ...imported, id: 'second-import' };
+    expect(view([manual, imported, secondImport]).today.map((entry) => entry.row.id)).toEqual([
+      'imported', 'second-import',
+    ]);
   });
   it('still reports same-name classes with different teachers or rooms as conflicts', () => {
     for (const details of [{ teacher: '另一位老師' }, { location: '另一間教室' }]) {
