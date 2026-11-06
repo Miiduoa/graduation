@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AdminWorkspace } from './AdminWorkspace';
 import { AdminLogin } from './AdminLogin';
@@ -618,28 +618,41 @@ it('does not create a public board without an eligible school or a valid name', 
 });
 
 it('opens with scoped responsibilities and server-backed pending work', async () => {
-  fetcher.mockImplementation(async (url: string) =>
-    url.includes('/reports?')
-      ? ok({ items: [report] })
-      : ok({
-          schools: [
-            tenant,
-            {
-              ...tenant,
-              kind: 'application',
-              tenantId: null,
-              applicationId: 'pending-a',
-              displayName: '待審學校',
-              lifecycle: 'pending',
-            },
-          ],
-        }),
-  );
+  fetcher.mockImplementation(async (url: string) => {
+    if (url.includes('/reports?')) return ok({ items: [report] });
+    if (url.includes('/school-applications?'))
+      return ok({
+        applications: [
+          {
+            id: 'pending-a',
+            displayName: '待審學校',
+            state: 'pending',
+            proposedTenantId: 'school-two',
+            proposedEmailDomain: 'example.test',
+            contactName: '校方窗口',
+            contactEmail: 'school@example.test',
+            justification: '申請校園服務接入',
+            tenantId: null,
+            tenantState: null,
+            createdAt: '2026-11-06T08:00:00.000Z',
+            decidedAt: null,
+          },
+        ],
+      });
+    if (url.endsWith('/class-workspace-affiliation-applications')) return ok({ applications: [] });
+    if (url.endsWith('/merchants'))
+      return ok({ interest: [], applications: [], catalog: [], honesty: '本次載入' });
+    return ok({ schools: [tenant] });
+  });
   render(<AdminWorkspace />);
   expect(screen.getByRole('heading', { name: '管理範圍與權責' })).toBeTruthy();
   await screen.findByText('待審學校');
-  expect(screen.getByText(/1 件申請待審核/)).toBeTruthy();
-  expect(screen.getByText(/本次列出 1 件待處理檢舉/)).toBeTruthy();
+  expect(
+    within(screen.getByRole('region', { name: '學校申請' })).getByLabelText('已載入 1 件'),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole('region', { name: '社群檢舉' })).getByLabelText('已載入 1 件'),
+  ).toBeTruthy();
   expect(screen.queryByRole('link', { name: '課程系統管理' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '處理社群檢舉' }));
   expect(screen.getByLabelText('檢舉狀態')).toBeTruthy();
@@ -648,14 +661,21 @@ it('opens with scoped responsibilities and server-backed pending work', async ()
 it('does not turn failed overview reads into zero pending tasks and retries safely', async () => {
   fetcher.mockResolvedValue(new Response('{}', { status: 503 }));
   render(<AdminWorkspace />);
-  await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
-  expect(screen.queryByText(/0 件申請待審核/)).toBeNull();
-  expect(screen.queryByText(/本次列出 0 件/)).toBeNull();
-  fetcher.mockImplementation(async (url: string) =>
-    url.includes('/reports?') ? ok({ items: [] }) : ok({ schools: [tenant] }),
-  );
+  await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(5));
+  expect(screen.queryByLabelText('已載入 0 件')).toBeNull();
+  fetcher.mockImplementation(async (url: string) => {
+    if (url.includes('/reports?')) return ok({ items: [] });
+    if (
+      url.includes('/school-applications?') ||
+      url.endsWith('/class-workspace-affiliation-applications')
+    )
+      return ok({ applications: [] });
+    if (url.endsWith('/merchants'))
+      return ok({ interest: [], applications: [], catalog: [], honesty: '本次載入' });
+    return ok({ schools: [tenant] });
+  });
   fireEvent.click(screen.getByRole('button', { name: '更新待辦' }));
-  await screen.findByText(/本次列出 0 件待處理檢舉/);
+  await screen.findByText('目前沒有待處理的社群檢舉。');
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
@@ -804,7 +824,9 @@ it('moves from a selected school to its staff without losing the school context'
   fireEvent.click(await screen.findByRole('button', { name: '管理第一學校' }));
   fireEvent.click(screen.getAllByRole('button', { name: '查看校方授權' })[0]);
   await waitFor(() => expect(window.location.hash).toBe('#people/school-one'));
-  expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-one');
+  expect(((await screen.findByLabelText('選擇學校')) as HTMLSelectElement).value).toBe(
+    'school-one',
+  );
   fireEvent.click((await screen.findAllByRole('button', { name: '查看學校設定' }))[0]);
   await waitFor(() => expect(window.location.hash).toBe('#schools/school-one'));
 });
@@ -872,15 +894,85 @@ it('preserves the selected school while navigating between settings and authoriz
   window.history.replaceState(null, '', '/admin#schools/school-one');
   render(<AdminWorkspace />);
   await screen.findByRole('button', { name: '返回學校列表' });
-  expect(screen.getByRole('link', { name: '校方授權作業' }).getAttribute('href')).toBe(
-    '/admin/ops?tab=people&school=school-one',
-  );
+  expect(screen.queryByRole('link', { name: '校方授權作業' })).toBeNull();
   fireEvent.click(screen.getAllByRole('button', { name: '查看校方授權' })[0]);
   await waitFor(() => expect(window.location.hash).toBe('#people/school-one'));
   expect(screen.getAllByRole('button', { name: '查看學校設定' })[0]).toBeTruthy();
   fireEvent.click(screen.getAllByRole('button', { name: '查看學校設定' })[0]);
   await waitFor(() => expect(window.location.hash).toBe('#schools/school-one'));
   expect(screen.getByRole('button', { name: '返回學校列表' })).toBeTruthy();
+});
+
+it('preserves an unfinished report decision when leaving or refreshing is cancelled', async () => {
+  window.history.replaceState(null, '', '/admin#reports/report-1');
+  fetcher.mockImplementation(async (url: string) =>
+    url.includes('/reports?') ? ok({ items: [report] }) : ok({ schools: [tenant] }),
+  );
+  render(<AdminWorkspace />);
+  fireEvent.click(await screen.findByRole('button', { name: '隱藏貼文' }));
+  fireEvent.change(screen.getByLabelText('處理原因'), {
+    target: { value: '尚未完成核對的處理理由' },
+  });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button', { name: '學校管理' }));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(window.location.hash).toBe('#reports/report-1');
+  expect((screen.getByLabelText('處理原因') as HTMLTextAreaElement).value).toBe(
+    '尚未完成核對的處理理由',
+  );
+  const reads = fetcher.mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取檢舉' }));
+  expect(fetcher.mock.calls).toHaveLength(reads);
+  expect(confirm).toHaveBeenCalledTimes(2);
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: '返回檢舉列表' }));
+  expect(window.location.hash).toBe('#reports');
+  expect(screen.queryByLabelText('處理原因')).toBeNull();
+  expect(fetcher.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
+});
+
+it('keeps a new board draft when cancellation is rejected and clears it after confirmed discard', async () => {
+  window.history.replaceState(null, '', '/admin#boards');
+  fetcher.mockImplementation(async (url: string) =>
+    url.endsWith('/boards')
+      ? ok({ items: [] })
+      : ok({ schools: [{ ...tenant, lifecycle: 'provisioned' }] }),
+  );
+  render(<AdminWorkspace />);
+  fireEvent.click(screen.getByRole('button', { name: '建立公開看板' }));
+  await screen.findByRole('option', { name: '第一學校' });
+  fireEvent.change(screen.getByLabelText('看板名稱'), { target: { value: '尚未完成的看板' } });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button', { name: '取消建立' }));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect((screen.getByLabelText('看板名稱') as HTMLInputElement).value).toBe('尚未完成的看板');
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: '取消建立' }));
+  expect(screen.queryByLabelText('看板名稱')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '建立公開看板' }));
+  expect((screen.getByLabelText('看板名稱') as HTMLInputElement).value).toBe('');
+  expect(fetcher.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0);
+});
+
+it('protects a school draft when a client-side header link would leave the workspace', async () => {
+  window.history.replaceState(null, '', '/admin#schools/school-one');
+  fetcher.mockImplementation(async (url: string) =>
+    url.endsWith('/proxy')
+      ? ok(inactiveProxy)
+      : ok({ schools: [{ ...tenant, lifecycle: 'provisioned' }] }),
+  );
+  render(<AdminWorkspace />);
+  fireEvent.change(await screen.findByLabelText('學校名稱'), { target: { value: '未儲存的校名' } });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const link = document.createElement('a');
+  link.href = '/';
+  document.body.append(link);
+  const navigation = new MouseEvent('click', { bubbles: true, cancelable: true });
+  act(() => link.dispatchEvent(navigation));
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(navigation.defaultPrevented).toBe(true);
+  expect((screen.getByLabelText('學校名稱') as HTMLInputElement).value).toBe('未儲存的校名');
+  link.remove();
 });
 
 it('does not read management data while logout confirmation is pending', () => {
@@ -890,13 +982,27 @@ it('does not read management data while logout confirmation is pending', () => {
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('links the overview directly to the correct operational tasks', async () => {
+it('opens operational tasks in the same workbench instead of sending the operator to a second console', async () => {
   render(<AdminWorkspace />);
-  expect((await screen.findByRole('link', { name: /校方成員與授權/ })).getAttribute('href'))
-    .toBe('/admin/ops?tab=people');
-  expect(screen.getByRole('link', { name: /店家申請審核/ }).getAttribute('href'))
-    .toBe('/admin/ops?tab=merchants');
-  expect(
-    screen.getAllByRole('link', { name: /課班掛靠/ }).map((link) => link.getAttribute('href')),
-  ).toContain('/admin/ops?tab=affiliation');
+  fireEvent.click(screen.getByRole('button', { name: '校方成員與授權' }));
+  expect(window.location.pathname + window.location.hash).toBe('/admin#people');
+  expect(screen.getByRole('heading', { level: 1, name: '校方人員與授權' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '店家管理' }));
+  expect(window.location.pathname + window.location.hash).toBe('/admin#merchants');
+  fireEvent.click(screen.getByRole('button', { name: '課班掛靠' }));
+  expect(window.location.pathname + window.location.hash).toBe('/admin#affiliation');
+  expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
 });
+
+it.each(['school', 'tenantId'])(
+  'migrates an old people URL without losing its %s selection',
+  async (key) => {
+    window.history.replaceState(null, '', `/admin/ops?tab=people&${key}=school-one`);
+    render(<AdminWorkspace />);
+    expect(window.location.pathname + window.location.hash).toBe('/admin#people/school-one');
+    expect(((await screen.findByLabelText('選擇學校')) as HTMLSelectElement).value).toBe(
+      'school-one',
+    );
+    expect(screen.queryByRole('heading', { name: '完整管理台' })).toBeNull();
+  },
+);
