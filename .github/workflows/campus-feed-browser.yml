@@ -55,6 +55,12 @@ jobs:
           GCLOUD_PROJECT: demo-campus-feed-browser
           TZ: Asia/Taipei
         run: pnpm exec firebase emulators:exec --project demo-campus-feed-browser --only firestore "node scripts/qa/social-feed-browser.mjs"
+      - name: Historical list scrolling in a clean SDK session
+        env:
+          GCLOUD_PROJECT: demo-campus-feed-browser
+          TZ: Asia/Taipei
+          FEED_BROWSER_MODE: long-list
+        run: pnpm exec firebase emulators:exec --project demo-campus-feed-browser --only firestore "node scripts/qa/social-feed-browser.mjs"
       - name: Preserve browser evidence on success or failure
         if: always()
         uses: actions/upload-artifact@v4

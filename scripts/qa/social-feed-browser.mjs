@@ -14,7 +14,8 @@ const root = process.cwd();
 const web = path.join(root, 'apps/web');
 const fixture = path.join(web, '.social-feed-browser-fixture');
 const dist = path.join(fixture, 'dist');
-const output = path.join(root, 'artifacts/campus-feed-browser');
+const longListMode = process.env.FEED_BROWSER_MODE === 'long-list';
+const output = path.join(root, 'artifacts/campus-feed-browser', longListMode ? 'long-list' : 'standard');
 const projectId = 'demo-campus-feed-browser';
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST || '';
 assert.match(emulatorHost, /^(?:127\.0\.0\.1|localhost):\d{1,5}$/, 'Refusing non-local Firestore');
@@ -239,6 +240,7 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
     await until(()=>call(expected=>window.__fixtureToken===expected && document.querySelectorAll('article').length===60,token),'first authorized page');
     await until(()=>call(()=>!document.body.textContent.includes('正在讀取追蹤')),'following read');
   }
+  if (!longListMode) {
   for(const [width,height,theme] of [[320,720,'light'],[390,844,'light'],[390,844,'dark'],[1366,900,'light']]) {
     const label=width+'-'+theme;
     try {
@@ -267,45 +269,6 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
         const rows=window.__feedRequests; const denied=rows.findIndex(r=>r.code==='unavailable');
         return denied>=0 && rows[denied].cursor===rows[denied+1]?.cursor;
       });
-      // Reuse the same 245 real SDK results to stress the entire on-screen list.
-      // No extra emulator sessions are needed after the offline/retry journey.
-      if (label==='320-light') {
-        await call(()=>{const input=document.querySelector('input[type=search]');input.focus();input.select();});
-        await send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
-        await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
-        await until(()=>call(()=>document.querySelector('input[type=search]')?.value==='' && document.querySelectorAll('article').length===245),'full historical list after clearing search');
-        await check(label+':clearing search restores all 245 unique post cards',()=>{
-          const cards=[...document.querySelectorAll('article')];
-          return document.querySelector('input[type=search]').value==='' && cards.length===245 &&
-            new Set(cards.map(card=>card.querySelector('h3')?.textContent)).size===245;
-        });
-        await check(label+':offscreen rendering is deferred without removing posts',()=>{
-          const cards=[...document.querySelectorAll('article')];
-          return cards.every(card=>{
-            const style=getComputedStyle(card);
-            return style.contentVisibility==='auto' && style.containIntrinsicBlockSize.includes('320px');
-          });
-        });
-        await call(()=>document.querySelectorAll('article')[244].scrollIntoView({block:'center',behavior:'instant'}));
-        await sleep(180);
-        await check(label+':oldest card paints and its post link accepts focus',()=>{
-          const card=document.querySelectorAll('article')[244],rect=card.getBoundingClientRect();
-          const link=card.querySelector('a[href^="/community/post/"]');
-          const hit=document.elementFromPoint(Math.max(1,rect.left+20),Math.min(innerHeight-1,rect.top+20));
-          link?.focus({preventScroll:true});
-          return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!hit &&
-            (card===hit || card.contains(hit)) && document.activeElement===link;
-        });
-        await snapshot('320-light-long-tail.png');
-        await call(()=>document.querySelectorAll('article')[0].scrollIntoView({block:'center',behavior:'instant'}));
-        await sleep(180);
-        await check(label+':first card remains readable after returning',()=>{
-          const card=document.querySelector('article'),rect=card.getBoundingClientRect();
-          return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!card.querySelector('h3')?.textContent;
-        });
-        await check(label+':long list has no horizontal overflow',()=>document.documentElement.scrollWidth<=innerWidth+1);
-        await snapshot('320-light-long-return.png');
-      }
     } catch(error) {report.errors.push(label+': '+error.message);await snapshot(label+'-failure.png').catch(()=>{});}
   }
   // A real authorized result is held after the SDK completes, not replaced with a fake page.
@@ -335,6 +298,55 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
     await call(()=>{window.__holdFeedPage=false;window.__releaseFeedPage();});await sleep(100);
     await check('late previous-school page cannot repopulate the new scope',()=>document.querySelectorAll('article').length===1 && document.querySelector('article h3').textContent==='另一校的專屬貼文' && !document.body.textContent.includes('校園貼文 184'));
   } catch(error) {report.errors.push('authorization: '+error.message);}
+  } else {
+    // One separate Chrome and SDK session exercises all loaded cards.
+    // This avoids keeping the prior offline test's long-polling channels alive.
+    try {
+      await send('Emulation.setDeviceMetricsOverride',{width:320,height:720,deviceScaleFactor:1,mobile:false});
+      await begin('?theme=light&case=long-list');
+      await search('上學期的專題集合');
+      for (const count of [120,180,240,245]) {
+        await focusMore();await key('Enter','Enter',13);await awaitCount(count);
+      }
+      await check('long-list:old post is found through real SDK pagination',()=>
+        document.querySelector('article h3')?.textContent==='上學期的專題集合' && document.querySelectorAll('article').length===1);
+      await call(()=>{const input=document.querySelector('input[type=search]');input.focus();input.select();});
+      await send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
+      await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
+      await until(()=>call(()=>document.querySelector('input[type=search]')?.value==='' && document.querySelectorAll('article').length===245),'all 245 posts visible');
+      await check('long-list:clearing search restores all 245 unique cards',()=>{
+        const cards=[...document.querySelectorAll('article')];
+        return document.querySelector('input[type=search]').value==='' && cards.length===245 &&
+          new Set(cards.map(card=>card.querySelector('h3')?.textContent)).size===245;
+      });
+      await check('long-list:browser can defer offscreen card rendering',()=>{
+        const cards=[...document.querySelectorAll('article')];
+        return cards.every(card=>{
+          const style=getComputedStyle(card);
+          return style.contentVisibility==='auto' && style.containIntrinsicBlockSize.includes('320px');
+        });
+      });
+      await call(()=>document.querySelectorAll('article')[244].scrollIntoView({block:'center',behavior:'instant'}));
+      await sleep(180);
+      await check('long-list:oldest card paints and its post link accepts focus',()=>{
+        const card=document.querySelectorAll('article')[244],rect=card.getBoundingClientRect();
+        const link=card.querySelector('a[href^="/community/post/"]');
+        const hit=document.elementFromPoint(Math.max(1,rect.left+20),Math.min(innerHeight-1,rect.top+20));
+        link?.focus({preventScroll:true});
+        return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!hit &&
+          (card===hit || card.contains(hit)) && document.activeElement===link;
+      });
+      await snapshot('320-long-tail.png');
+      await call(()=>document.querySelectorAll('article')[0].scrollIntoView({block:'center',behavior:'instant'}));
+      await sleep(180);
+      await check('long-list:first card is readable after scrolling back',()=>{
+        const card=document.querySelector('article'),rect=card.getBoundingClientRect();
+        return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!card.querySelector('h3')?.textContent;
+      });
+      await check('long-list:no horizontal overflow with all cards',()=>document.documentElement.scrollWidth<=innerWidth+1);
+      await snapshot('320-long-return.png');
+    } catch(error) {report.errors.push('long-list: '+error.message);await snapshot('long-list-failure.png').catch(()=>{});}
+  }
   await writeFile(path.join(output,'chrome.log'),chromeLog);
 } catch(error) {report.errors.push(error.stack || String(error));}
 finally {
@@ -347,4 +359,4 @@ finally {
 }
 const failures=report.checks.filter(row=>!row.pass);
 console.log('FEED_BROWSER_SUMMARY',JSON.stringify({sourceHead:report.sourceHead,checks:report.checks.length,failures,errors:report.errors,screenshots:report.screenshots,flows:report.flows.map(({requests,...flow})=>({...flow,pageSizes:requests.filter(r=>r.ids).map(r=>r.ids.length)}))}));
-if(report.errors.length || failures.length || report.checks.length<37)process.exitCode=1;
+if(report.errors.length || failures.length || report.checks.length<(longListMode ? 6 : 32))process.exitCode=1;
