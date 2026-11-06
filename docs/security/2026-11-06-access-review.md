@@ -159,3 +159,11 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 ### 同一檔名的跨案例隔離檢查
 
 再次查核精確 head `3bcdb64b` 的 GitHub [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42295543338)，在明確建立 `users/alice,bob` 且增加孤兒校籍的負面回歸後，252 個模擬器案例仍有 1 個失敗：共用覆寫案例的首筆合法 `schools/pu/campusPosts/one/photo.jpg` 上傳被拒絕。新孤兒校籍拒絕讀取及寫入案例、停權與恢復案例均通過。`one/photo.jpg` 同時被前一個「停權帳號校園貼文附件」案例建立過，雖然共用 beforeEach 有 clearStorage，本輪將共用覆寫案例改用獨立 `replacement-proof/photo.jpg` 路徑，避免不同測試共用同一物件名稱。原來的「合法建立成功、他人不可覆寫、不可編輯 metadata、不可刪除」斷言沒有移除。此為跨測試隔離的待驗證假設；若新 CI 仍失敗，須保留證據進一步查權限前置資料、條件執行或模擬器資料清理，不能直接宣稱已修補。
+
+### 會話附件：canonical user 刪除後的殘留會員授權
+
+本輪在原 PR #517 進一步檢查 `conversations/{conversationId}/messages` 與 `conversations/{conversationId}/media` 的 Storage 規則。`conversationMember()` 原先允許 `users/{uid}` 文件不存在，而若 `conversations/{id}.memberIds` 殘留舊 UID，仍可能憑先前簽發且尚有效的登入 token 讀取既有私訊附件或上傳新檔案。這不同於已公開的 Firebase Storage bearer 下載 URL；下載 URL 撤銷另有遷移流程，不能被本次 SDK 規則變更替代。
+
+將 `conversationMember()` 加入必須存在 canonical `users/{uid}` 文件的檢查，同時保留既有 `isActiveAccount()` 對刪除中、deleted、disabled、suspended、inactive 的拒絕。此路徑最多查詢兩份不同 Firestore 文件（canonical user 與 conversation），沒有超過 Cloud Storage Rules 的兩份文件上限；同一路徑重複查詢會由規則引擎快取。已新增兩種私訊附件路徑的隔離 emulator 回歸，驗證：只有殘留 `memberIds` 時，舊附件讀取及新附件寫入被拒絕；補回合法 active profile 時，合法讀取及上傳可用；再次刪掉 profile 後，同一個登入 context 再次被拒絕。
+
+**變更驗證：** 這一段更新所對應的程式與測試已推到安全分支，尚須以提交後精確 head 的 Firebase Storage emulator 及完整 CI 結果判定，未在此預先宣稱通過。此修補可能使只有殘留 conversation 成員清單、卻缺少 canonical profile 的 legacy 帳號無法存取私訊附件。正式發布前須盤點該類帳號並完成適當身分恢復與資料保留決策，不應恢復無 profile 的廣泛授權。其餘舊下載 URL、stories／events 兩文件查詢上限、GCS staging、正式 App 審查與 deployment 缺口維持開放。
