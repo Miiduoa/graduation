@@ -254,7 +254,7 @@ export default function HomePage() {
     />
   );
   return (
-    <div className={styles.page}>
+    <div className={styles.page + ' ' + styles.todayPage}>
       <a href="#today-content" className={styles.skip}>
         跳到主要內容
       </a>
@@ -408,7 +408,10 @@ export default function HomePage() {
             accountId={accountId}
           />
         ) : null}
-        <SiteFooter />
+        <details className={styles.siteInformation}>
+          <summary>關於 nuni</summary>
+          <SiteFooter />
+        </details>
       </main>
     </div>
   );

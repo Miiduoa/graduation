@@ -83,7 +83,7 @@ function UnreadFeed({
 
   return (
     <section
-      className={styles.section}
+      className={styles.section + ' ' + styles.notifications}
       aria-labelledby="today-notify-title"
       data-testid="today-notifications"
     >

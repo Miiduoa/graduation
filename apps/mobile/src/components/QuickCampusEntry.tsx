@@ -58,6 +58,10 @@ export function QuickCampusEntry({
 }) {
   useThemeVersion();
   const { colors, radius, typography } = theme;
+  const dark = theme.mode === 'dark';
+  const textColor = dark ? '#F2F3F1' : '#252729';
+  const mutedColor = dark ? '#A5AAA7' : '#686C70';
+  const borderColor = dark ? '#292B2D' : '#E6E7E8';
   const [query, setQuery] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<CampusAssistantMessage[]>([]);
@@ -170,6 +174,9 @@ export function QuickCampusEntry({
     <View
       style={{
         gap: 8,
+        borderTopWidth: 1,
+        borderTopColor: borderColor,
+        paddingTop: 20,
       }}
       accessibilityLabel="校園助理與常用服務"
     >
@@ -177,6 +184,7 @@ export function QuickCampusEntry({
         <View style={{ gap: 8 }}>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={historyOpen ? '收合先前問答' : `查看前 ${earlierTurns} 組問答`}
             aria-expanded={historyOpen}
             onPress={() => setHistoryOpen(value => !value)}
             style={{ alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }}
@@ -188,18 +196,18 @@ export function QuickCampusEntry({
           </Pressable>
           {historyOpen && history.slice(0, -2).map((message, index) => (
             <View key={index} style={{ gap: 2 }}>
-              <Text style={{ ...typography.caption, color: colors.muted }}>
+              <Text style={{ ...typography.caption, color: mutedColor }}>
                 {message.role === 'user' ? `第 ${index / 2 + 1} 問` : '校園助理'}
               </Text>
-              <Text selectable style={{ ...typography.bodySmall, color: colors.text }}>{message.content}</Text>
+              <Text selectable style={{ ...typography.bodySmall, color: textColor }}>{message.content}</Text>
             </View>
           ))}
         </View>
       )}
       {lastQuestion && lastReply && (
-        <View style={{ gap: 6, padding: 12, borderRadius: radius.lg, backgroundColor: colors.surface2 }}>
-          <Text style={{ ...typography.caption, color: colors.muted }}>{lastQuestion.content}</Text>
-          <Text accessibilityLiveRegion="polite" selectable style={{ ...typography.body, color: colors.text }}>
+        <View style={{ gap: 8, paddingVertical: 8 }}>
+          <Text style={{ ...typography.caption, color: mutedColor }}>{lastQuestion.content}</Text>
+          <Text accessibilityLiveRegion="polite" selectable style={{ ...typography.body, color: textColor }}>
             {lastReply.content}
           </Text>
           {replyAction && onOpenAssistantRoute && (
@@ -214,21 +222,19 @@ export function QuickCampusEntry({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          borderWidth: 1,
-          borderColor: colors.border,
-          backgroundColor: colors.surface,
-          borderRadius: radius.lg,
+          backgroundColor: dark ? '#151617' : '#F5F6F7',
+          borderRadius: radius.md,
           paddingLeft: 12,
           paddingRight: 6,
           gap: 8,
         }}
       >
-        <Ionicons name={canAsk ? 'chatbubble-outline' : 'search-outline'} size={19} color={colors.accent} />
+        <Ionicons name={canAsk ? 'chatbubble-outline' : 'search-outline'} size={18} color={mutedColor} />
         <TextInput
           accessibilityLabel="說出或輸入想做的事"
           accessibilityHint={canAsk ? '可使用鍵盤聽寫，送出後在這裡查看回答。' : '輸入需求，尋找校園服務。'}
-          placeholder={lastReply ? '接著問…' : canAsk ? '問校園助理，或用鍵盤口述' : '找校園服務'}
-          placeholderTextColor={colors.muted}
+          placeholder={lastReply ? '接著問…' : canAsk ? '問校園助理…' : '找校園服務'}
+          placeholderTextColor={mutedColor}
           autoCorrect={false}
           autoCapitalize="none"
           maxLength={160}
@@ -237,7 +243,7 @@ export function QuickCampusEntry({
           value={query}
           onChangeText={update}
           onSubmitEditing={() => void ask()}
-          style={{ flex: 1, minWidth: 0, minHeight: 50, paddingVertical: 10, fontSize: 15, color: colors.text }}
+          style={{ flex: 1, minWidth: 0, minHeight: 48, paddingVertical: 10, fontSize: 15, color: textColor }}
         />
         {query.length > 0 && !asking ? (
           <Pressable
@@ -246,7 +252,7 @@ export function QuickCampusEntry({
             onPress={() => update('')}
             style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Ionicons name="close-circle-outline" size={21} color={colors.muted} />
+            <Ionicons name="close-circle-outline" size={21} color={mutedColor} />
           </Pressable>
         ) : null}
       </View>
@@ -265,7 +271,7 @@ export function QuickCampusEntry({
       )}
       {askError && (
         <View>
-          <Text accessibilityRole="alert" style={{ ...typography.bodySmall, color: colors.text }}>
+          <Text accessibilityRole="alert" style={{ ...typography.bodySmall, color: textColor }}>
             {deviceErrors[askError] || '暫時無法回答，請再試一次。'}
           </Text>
           {askError === 'model-required' && onOpenAssistantRoute && (
@@ -296,18 +302,18 @@ export function QuickCampusEntry({
             opacity: modelBusy ? 0.55 : 1,
           }}
         >
-          <Text style={{ color: colors.text, ...typography.bodySmall, fontWeight: '600' }}>
+          <Text style={{ color: textColor, ...typography.bodySmall, fontWeight: '600' }}>
             {modelBusy ? 'AI 正在理解…' : '用雲端 AI 找相關服務'}
           </Text>
         </Pressable>
       )}
       {!!phrase && signedIn && !asking && (
-        <Text style={{ ...typography.caption, color: colors.muted }}>
+        <Text style={{ ...typography.caption, color: mutedColor }}>
           手機助理在裝置上回答。選擇雲端搜尋會傳送這次輸入的文字。
         </Text>
       )}
       {modelBusy && (
-        <Text accessibilityLiveRegion="polite" style={{ color: colors.muted, ...typography.bodySmall }}>
+        <Text accessibilityLiveRegion="polite" style={{ color: mutedColor, ...typography.bodySmall }}>
           正在理解你的目標；不會自動執行任何操作。
         </Text>
       )}
@@ -318,7 +324,7 @@ export function QuickCampusEntry({
             <Pressable key={question} accessibilityRole="button" accessibilityLabel={'詢問手機助理，' + question}
               onPress={() => void ask(question)}
               style={{ justifyContent: 'center', minHeight: 44, paddingRight: 6 }}>
-              <Text style={{ ...typography.bodySmall, fontWeight: '600', color: colors.accent }}>
+              <Text style={{ ...typography.bodySmall, fontWeight: '500', color: lastReply ? colors.accent : mutedColor }}>
                 {lastReply ? question : '現在的課'}
               </Text>
             </Pressable>
@@ -337,7 +343,7 @@ export function QuickCampusEntry({
                 borderRadius: radius.sm, paddingHorizontal: 4, backgroundColor: pressed ? colors.surface2 : 'transparent',
               })}
             >
-              <Text style={{ ...typography.bodySmall, fontWeight: '600', color: colors.text }}>
+              <Text style={{ ...typography.bodySmall, fontWeight: '500', color: mutedColor }}>
                 {favorite.label}
               </Text>
             </Pressable>
@@ -346,29 +352,29 @@ export function QuickCampusEntry({
       ) : (
         <View style={{ gap: 10 }}>
           {semantic?.source === 'model' ? (
-            <View style={{ gap: 5, padding: 12, borderRadius: 12, backgroundColor: colors.surface2 }}>
-              <Text style={{ ...typography.bodySmall, color: colors.text, fontWeight: '700' }}>
+            <View style={{ gap: 5, paddingVertical: 12 }}>
+              <Text style={{ ...typography.bodySmall, color: textColor, fontWeight: '700' }}>
                 {semantic.status === 'clarify' ? '需要再確認' : 'AI 理解的需求'}
               </Text>
-              <Text style={{ ...typography.bodySmall, color: colors.text }}>{semantic.summary}</Text>
+              <Text style={{ ...typography.bodySmall, color: textColor }}>{semantic.summary}</Text>
               {semantic.clarifyingQuestion ? (
-                <Text style={{ ...typography.bodySmall, color: colors.muted }}>{semantic.clarifyingQuestion}</Text>
+                <Text style={{ ...typography.bodySmall, color: mutedColor }}>{semantic.clarifyingQuestion}</Text>
               ) : null}
             </View>
           ) : null}
           {(shown?.status === 'error' || semantic?.status === 'unavailable') && (
-            <Text style={{ ...typography.bodySmall, color: colors.muted }}>
+            <Text style={{ ...typography.bodySmall, color: mutedColor }}>
               AI 暫時無法使用，以下是基本關鍵字捷徑，不是 AI 理解結果。
             </Text>
           )}
           {!signedIn && (
-            <Text style={{ ...typography.bodySmall, color: colors.muted }}>
+            <Text style={{ ...typography.bodySmall, color: mutedColor }}>
               目前使用基本捷徑；登入後可使用 AI 分析複合需求。
             </Text>
           )}
           {suggestions.length ? (
             <>
-              <Text style={{ ...typography.caption, color: colors.muted }}>
+              <Text style={{ ...typography.caption, color: mutedColor }}>
                 {semanticActions ? 'AI 建議下一步' : '基本快速入口'}
               </Text>
               {suggestions.map((action) => (
@@ -378,29 +384,29 @@ export function QuickCampusEntry({
                   accessibilityLabel={'前往' + action.label}
                   onPress={() => open(action)}
                   style={({ pressed }) => ({
-                    flexDirection: 'row', alignItems: 'center', padding: 13,
-                    gap: 10, minHeight: 58, borderRadius: 12, borderWidth: 1,
-                    borderColor: colors.border,
-                    backgroundColor: pressed ? colors.surface3 : colors.surface2,
+                    flexDirection: 'row', alignItems: 'center', paddingVertical: 13,
+                    gap: 10, minHeight: 58, borderBottomWidth: 1,
+                    borderBottomColor: borderColor,
+                    opacity: pressed ? 0.65 : 1,
                   })}
                 >
                   <View style={{ flex: 1, gap: 2 }}>
-                    <Text style={{ ...typography.body, fontWeight: '600', color: colors.text }}>
+                    <Text style={{ ...typography.body, fontWeight: '600', color: textColor }}>
                       {action.label}
                     </Text>
-                    <Text style={{ ...typography.caption, color: colors.muted }}>
+                    <Text style={{ ...typography.caption, color: mutedColor }}>
                       {action.description}
                     </Text>
                     {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
                       <View key={preview.destination} style={{
                         marginTop: 7, paddingTop: 8,
-                        borderTopColor: colors.border, borderTopWidth: 1, gap: 3,
+                        borderTopColor: borderColor, borderTopWidth: 1, gap: 3,
                       }}>
-                        <Text style={{ ...typography.caption, color: colors.muted }}>
+                        <Text style={{ ...typography.caption, color: mutedColor }}>
                           {preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}
                         </Text>
                         {preview.items.map((item, index) => (
-                          <Text key={index} style={{ ...typography.caption, color: colors.text }}>
+                          <Text key={index} style={{ ...typography.caption, color: textColor }}>
                             {item.title}{item.detail ? ' · ' + item.detail : ''}
                           </Text>
                         ))}
@@ -412,7 +418,7 @@ export function QuickCampusEntry({
               ))}
             </>
           ) : semantic?.status !== 'clarify' ? (
-            <Text style={{ ...typography.bodySmall, color: colors.muted }}>
+            <Text style={{ ...typography.bodySmall, color: mutedColor }}>
               尚未找到對應服務，可以補充需求或詢問助理。
             </Text>
           ) : null}

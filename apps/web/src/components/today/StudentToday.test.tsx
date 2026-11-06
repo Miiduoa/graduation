@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { TODAY_COPY, type TodayClass, type TodayTodo } from '@campus/shared/src/pickNextAction';
@@ -70,19 +70,24 @@ function view(overrides: Partial<ComponentProps<typeof StudentToday>> = {}) {
   return render(todayElement(overrides));
 }
 
-it('shows the next class with its time range, room and course link', () => {
-  view({ classes: [klass()], todos: [todo()] });
-  const card = screen.getByTestId('next-action');
-  expect(card.textContent).toContain(TODAY_COPY.nextClass);
-  expect(card.textContent).toContain('資料庫系統');
-  expect(card.textContent).toContain('10:10–12:00 · 管理大樓 M302');
-  expect(screen.getByRole('link', { name: TODAY_COPY.viewCourse }).getAttribute('href')).toBe(
-    '/course/cs-db#week',
-  );
+it('shows the next class once in the timetable with a keyboard-accessible destination', () => {
+  view({ classes: [klass()] });
+  const row = screen.getByTestId('next-action');
+  expect(within(screen.getByTestId('today-classes')).getByTestId('next-action')).toBe(row);
+  expect(row.textContent).toContain(TODAY_COPY.nextClass);
+  expect(row.textContent).toContain('10:10');
+  expect(row.textContent).toContain('12:00');
+  expect(row.textContent).toContain('管理大樓 M302');
+  expect(screen.getAllByText('資料庫系統')).toHaveLength(1);
+  const link = within(row).getByRole('link', { name: /資料庫系統.*看課程/ });
+  expect(link.getAttribute('href')).toBe('/course/cs-db#week');
+  expect(within(row).getAllByRole('link')).toHaveLength(1);
+  link.focus();
+  expect(document.activeElement).toBe(link);
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
 });
 
-it('keeps the assistant mounted after the primary action while the day finishes loading', () => {
+it('keeps the assistant mounted after the planner while the day finishes loading', () => {
   const assistant = <input aria-label="助理草稿測試" defaultValue="" />;
   const result = view({ skeleton: true, assistant });
   const draft = screen.getByRole('textbox');
@@ -90,7 +95,8 @@ it('keeps the assistant mounted after the primary action while the day finishes 
   result.rerender(todayElement({ classes: [klass()], assistant }));
   expect(screen.getByRole('textbox')).toBe(draft);
   expect(draft.compareDocumentPosition(screen.getByTestId('next-action')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-  expect(draft.compareDocumentPosition(screen.getByTestId('today-classes')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(draft.compareDocumentPosition(screen.getByTestId('today-classes')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  expect((draft as HTMLInputElement).value).toBe('下一堂課在哪裡？');
 });
 
 it('marks a class in progress and expands the rest of the day without leaving Today', () => {
@@ -102,10 +108,10 @@ it('marks a class in progress and expands the rest of the day without leaving To
   view({ classes });
   const list = within(screen.getByTestId('today-classes'));
   expect(within(screen.getByTestId('next-action')).getByText('上課中')).toBeTruthy();
-  expect(list.getByRole('link', { name: /課程 1.*上課中/ })).toBeTruthy();
+  expect(list.getByRole('link', { name: /(?=.*課程 1)(?=.*上課中)/ })).toBeTruthy();
   expect(list.queryByText('課程 0')).toBeNull();
   fireEvent.click(list.getByRole('button', { name: '再看 1 堂課' }));
-  expect(list.getByRole('link', { name: /課程 0.*已結束/ })).toBeTruthy();
+  expect(list.getByRole('link', { name: /(?=.*課程 0)(?=.*已結束)/ })).toBeTruthy();
   expect(list.getByRole('link', { name: TODAY_COPY.viewFullTimetable }).getAttribute('href')).toBe('/timetable?campus=pu');
   fireEvent.click(list.getByRole('button', { name: '收起課程' }));
   expect(list.queryByText('課程 0')).toBeNull();
@@ -116,6 +122,9 @@ it('labels an overnight deadline with its Taipei calendar day', () => {
     dueAt: Date.parse('2026-10-26T08:00:00+08:00'),
   })] });
   expect(within(screen.getByTestId('next-action')).getByText('明天截止')).toBeTruthy();
+  expect(screen.getByTestId('next-action').querySelector(`.${styles.rowDeadline}`)?.textContent).toBe(
+    '10/26 週一 08:00 截止',
+  );
 });
 
 it('orders the unified flow as classes, due work, then unread notifications', () => {
@@ -126,7 +135,7 @@ it('orders the unified flow as classes, due work, then unread notifications', ()
     .map((heading) => heading.textContent);
   expect(sections.slice(0, 2)).toEqual([TODAY_FLOW_CLASS_TITLE, TODAY_FLOW_WORK_TITLE]);
   expect(within(flow).getByTestId('today-notifications')).toBeTruthy();
-  expect(within(flow).getByTestId('today-classes').querySelector('a')?.getAttribute('href')).toBe(
+  expect(within(flow).getByTestId('next-action').querySelector('a')?.getAttribute('href')).toBe(
     '/course/cs-db#week',
   );
   expect(within(flow).getByTestId('today-work-list').querySelector('a')?.getAttribute('href')).toBe(
@@ -134,7 +143,7 @@ it('orders the unified flow as classes, due work, then unread notifications', ()
   );
 });
 
-it('uses the assignment card when the next class is later and work is due within 24 hours', () => {
+it('puts the due-work row before later classes and keeps one task with separate detail and submit links', () => {
   view({
     now: new Date('2026-10-25T08:00:00+08:00'),
     classes: [
@@ -145,10 +154,23 @@ it('uses the assignment card when the next class is later and work is due within
     ],
     todos: [todo()],
   });
-  expect(screen.getByTestId('next-action').textContent).toContain(TODAY_COPY.dueToday);
-  expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
-    '/course/cs-db#assignment-hw-3-submit',
-  );
+  const row = screen.getByTestId('next-action');
+  expect(within(screen.getByTestId('today-work-list')).getByTestId('next-action')).toBe(row);
+  expect(row.textContent).toContain(TODAY_COPY.dueToday);
+  expect(screen.getAllByText('作業三 繳交')).toHaveLength(1);
+  const headings = within(screen.getByTestId('today-unified-flow'))
+    .getAllByRole('heading', { level: 2 })
+    .map((heading) => heading.textContent);
+  expect(headings.slice(0, 2)).toEqual([TODAY_FLOW_WORK_TITLE, TODAY_FLOW_CLASS_TITLE]);
+  const detail = within(row).getByRole('link', { name: /作業三 繳交/ });
+  const submit = within(row).getByRole('link', { name: TODAY_COPY.goSubmit });
+  expect(detail.getAttribute('href')).toBe('/course/cs-db#assignment-hw-3');
+  expect(submit.getAttribute('href')).toBe('/course/cs-db#assignment-hw-3-submit');
+  expect(detail.contains(submit)).toBe(false);
+  detail.focus();
+  expect(document.activeElement).toBe(detail);
+  submit.focus();
+  expect(document.activeElement).toBe(submit);
 });
 
 it('shows the unsigned sentence when the student is not signed in', () => {
@@ -214,7 +236,7 @@ it('shows upcoming work due after 24 hours as the next assignment, not due today
   expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit })).toBeTruthy();
 });
 
-it('puts the earliest overdue item on the main card instead of the empty-day sentence', () => {
+it('puts the earliest overdue item at the top of the work list with its deadline', () => {
   view({
     now: new Date('2026-10-25T02:00:00+08:00'),
     classes: [],
@@ -232,7 +254,9 @@ it('puts the earliest overdue item on the main card instead of the empty-day sen
   expect(card.textContent).toContain(TODAY_COPY.overdue);
   expect(card.textContent).toContain('作業三 繳交');
   expect(card.textContent).toContain(TODAY_COPY.overdueDays(2));
-  expect(card.querySelector(`.${styles.metaDanger}`)).toBeTruthy();
+  expect(card.querySelector(`.${styles.overdue} .${styles.rowDeadline}`)?.textContent).toContain(
+    TODAY_COPY.overdueDays(2),
+  );
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
   expect(screen.getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
     '/course/cs-db#assignment-hw-3-submit',
@@ -280,19 +304,19 @@ it('opens the remaining tasks in place and keeps each original course destinatio
     ),
   });
   const list = within(screen.getByTestId('today-work-list'));
-  expect(list.getAllByRole('link')).toHaveLength(3);
+  expect(list.getAllByRole('link', { name: /待辦 \d/ })).toHaveLength(3);
   const expand = list.getByRole('button', { name: '還有 2 件' });
   expect(expand.getAttribute('aria-expanded')).toBe('false');
   fireEvent.click(expand);
-  expect(list.getAllByRole('link')).toHaveLength(5);
+  expect(list.getAllByRole('link', { name: /待辦 \d/ })).toHaveLength(5);
   expect(list.getByRole('link', { name: /待辦 5/ }).getAttribute('href')).toBe(
     '/course/cs-db#assignment-work-4',
   );
   fireEvent.click(list.getByRole('button', { name: '收起待辦' }));
-  expect(list.getAllByRole('link')).toHaveLength(3);
+  expect(list.getAllByRole('link', { name: /待辦 \d/ })).toHaveLength(3);
 });
 
-it('shows undated work and uses the platform task anchor on the next-action card', () => {
+it('shows undated work and uses the platform task anchor on the focused task row', () => {
   const href = '/classroom/course/cw_123#assignment-final-report';
   view({ todos: [todo({ dueAt: null, href })] });
   expect(screen.queryByText(TODAY_COPY.emptyDay)).toBeNull();
@@ -346,7 +370,7 @@ it('updates the current class room and destination when the class identifier sta
   const card = screen.getByTestId('next-action');
   expect(card.textContent).toContain('新教室 201');
   expect(card.textContent).not.toContain('管理大樓 M302');
-  expect(within(card).getByRole('link', { name: TODAY_COPY.viewCourse }).getAttribute('href')).toBe(
+  expect(within(card).getByRole('link', { name: /看課程$/ }).getAttribute('href')).toBe(
     '/course/cs-new#week',
   );
 });
@@ -371,19 +395,48 @@ it('drops the previous action immediately on sign-out and on a different account
   expect(screen.queryByText('新校園待辦')).toBeNull();
 });
 
-it('keeps the transition between different tasks within the same scope', async () => {
+it('replaces the focused task immediately when the open work changes in the same scope', () => {
   const page = view({ scopeKey: 'account-a:pu', todos: [todo()] });
   page.rerender(
     todayElement({
       scopeKey: 'account-a:pu',
-      todos: [todo({ id: 'hw-new', title: '下一份作業' })],
+      todos: [todo({ id: 'hw-new', title: '下一份作業', href: '/course/cs-db#assignment-hw-new' })],
     }),
   );
-  expect(screen.getByTestId('next-action').className).toContain(styles.fadeOut);
-  await waitFor(() =>
-    expect(screen.getByTestId('next-action').textContent).toContain('下一份作業'),
+  const row = screen.getByTestId('next-action');
+  expect(row.textContent).toContain('下一份作業');
+  expect(screen.queryByText('作業三 繳交')).toBeNull();
+  expect(within(row).getByRole('link', { name: TODAY_COPY.goSubmit }).getAttribute('href')).toBe(
+    '/course/cs-db#assignment-hw-new-submit',
   );
-  expect(screen.getByTestId('next-action').textContent).not.toContain('作業三 繳交');
+});
+
+it('keeps an imminent lesson first when there is also a deadline today', () => {
+  view({ classes: [klass()], todos: [todo()] });
+  const flow = screen.getByTestId('today-unified-flow');
+  const headings = within(flow).getAllByRole('heading', { level: 2 });
+  expect(headings.slice(0, 2).map((heading) => heading.textContent)).toEqual([
+    TODAY_FLOW_CLASS_TITLE,
+    TODAY_FLOW_WORK_TITLE,
+  ]);
+  expect(within(screen.getByTestId('today-classes')).getByTestId('next-action')).toBeTruthy();
+  expect(within(screen.getByTestId('today-work-list')).queryByTestId('next-action')).toBeNull();
+  expect(screen.getAllByText('作業三 繳交')).toHaveLength(1);
+});
+
+it('keeps the selected due-soon task visible ahead of older overdue work', () => {
+  view({
+    todos: [
+      todo({ id: 'old-work', title: '較早逾期待辦', dueAt: now.getTime() - 86_400_000 }),
+      todo({ id: 'due-soon', title: '即將截止待辦', dueAt: now.getTime() + 3_600_000 }),
+    ],
+  });
+  const row = screen.getByTestId('next-action');
+  expect(row.textContent).toContain('即將截止待辦');
+  const list = within(screen.getByTestId('today-work-list'));
+  expect(list.getAllByRole('link', { name: /待辦/ })[0].textContent).toContain('即將截止待辦');
+  expect(screen.getAllByText('較早逾期待辦')).toHaveLength(1);
+  expect(screen.getAllByText('即將截止待辦')).toHaveLength(1);
 });
 
 it('keeps one welcome area without duplicate login copy when the guest campus changes', () => {
