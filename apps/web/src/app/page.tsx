@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
 import { QuickCampusEntry } from '@/components/QuickCampusEntry';
+import { StudentCardEntry } from '@/components/StudentCardEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
@@ -240,6 +241,7 @@ export default function HomePage() {
       </a>
       <AppHeader />
       <main id="today-content" className={styles.main} tabIndex={-1}>
+        <StudentCardEntry />
         <QuickCampusEntry />
         {!sessionLoading && uid && !context ? (
           <p className={styles.notice}>

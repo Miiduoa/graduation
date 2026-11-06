@@ -1,0 +1,75 @@
+.page {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--bg);
+  color: var(--text);
+}
+.panel {
+  width: min(100%, 28rem);
+  padding: clamp(24px, 7vw, 40px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+}
+.mast {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.mast strong {
+  font-size: 1.4rem;
+  color: var(--brand);
+  letter-spacing: -0.05em;
+}
+.panel h1 {
+  font-size: clamp(1.6rem, 7vw, 2.15rem);
+  margin: 28px 0 12px;
+  line-height: 1.25;
+}
+.panel p,
+.panel footer {
+  color: var(--muted);
+  line-height: 1.65;
+}
+.receipt {
+  margin: 24px 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--brand);
+}
+.receipt dt {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.receipt dd {
+  margin: 4px 0 12px;
+  font-weight: 700;
+  font-size: 1.25rem;
+}
+.button {
+  min-height: 48px;
+  width: 100%;
+  margin-top: 16px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--on-brand);
+  background: var(--brand);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.panel footer {
+  padding-top: 18px;
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}

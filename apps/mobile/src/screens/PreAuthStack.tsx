@@ -60,6 +60,7 @@ export function PreAuthStack() {
       <Stack.Screen name="Map" component={GoogleMapsLikeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Library" component={LibraryAiFirstScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LibraryCatalog" component={LibraryCatalogScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentCard" getComponent={() => require('./StudentCardScreen').default} options={{ title: '數位學生證' }} />
       <Stack.Screen name="SchoolInfo" component={SchoolInfoScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="BusSchedule"

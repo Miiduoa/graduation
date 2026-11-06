@@ -14,6 +14,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       Library: 'library',
       LibraryCatalog: 'library/catalog',
       SchoolInfo: 'school-info',
+      StudentCard: 'student-card',
       BusSchedule: 'bus',
       公告總覽: 'announcements',
       公告詳情: 'announcement/:id',
