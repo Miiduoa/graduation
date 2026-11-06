@@ -1787,6 +1787,38 @@ describe('storage security rules', () => {
     }
   });
 
+  for (const objectPath of [
+    'conversations/orphan/messages/one/private.pdf',
+    'conversations/orphan/media/one/private.pdf',
+  ]) {
+    test(`orphaned conversation membership cannot access attachments at ${objectPath}`, async () => {
+      await seedFirestore(async (db) => {
+        // Keep stale memberIds while the canonical user document is absent.
+        await db.doc('conversations/orphan').set({ memberIds: ['alice', 'bob'] });
+      });
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await uploadString(context.storage().ref(objectPath), 'private bytes', 'application/pdf');
+      });
+      const alice = testEnv.authenticatedContext('alice').storage();
+      const existing = alice.ref(objectPath);
+      const fresh = alice.ref(objectPath.replace('private.pdf', 'new.pdf'));
+      await assertFails(getBytes(existing));
+      await assertFails(uploadString(fresh, 'orphan write', 'application/pdf'));
+
+      await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+      await assertSucceeds(getBytes(existing));
+      await assertSucceeds(uploadString(fresh, 'allowed write', 'application/pdf'));
+
+      // Removing only the profile must revoke the same previously issued token.
+      await seedFirestore(async (db) => db.doc('users/alice').delete());
+      await assertFails(existing.getMetadata());
+      await assertFails(uploadString(
+        alice.ref(objectPath.replace('private.pdf', 'after-deletion.pdf')),
+        'stale token', 'application/pdf',
+      ));
+    });
+  }
+
   test('closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ displayName: 'Alice' });
