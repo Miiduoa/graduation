@@ -99,7 +99,9 @@ it('does not treat the live alcat login page as maintenance', async () => {
 it('treats a visible maintenance page without a login form as closed', async () => {
   expect(campusPageHasLoginForm(ALCAT_MAINTENANCE_HTML)).toBe(false);
   expect(campusPageLooksClosed(ALCAT_MAINTENANCE_HTML)).toBe(true);
-  const fetchMock = vi.fn(async () => htmlResponse(200, ALCAT_MAINTENANCE_HTML));
+  const fetchMock = vi.fn<(url: string) => Promise<Response>>(
+    async () => htmlResponse(200, ALCAT_MAINTENANCE_HTML),
+  );
   const gateway = createPuCampusGateway({ fetch: fetchMock });
   await expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
     kind: 'closed',
