@@ -1,4 +1,5 @@
 import { mockSchools, normalizeSchoolQuery, searchSchools } from '@campus/shared/src/schools';
+import { classroomLoginHref, CREATE_PATH, JOIN_PATH } from '@/features/platform/constants';
 import { collapseInternalPathHash, loginHref, sanitizeInternalPath } from '@/lib/navigation';
 
 export const ACCOUNT_API_ORIGIN = 'https://api.nuni.tw';
@@ -308,6 +309,9 @@ export function campusOneLoginHref(search: ReturnSearch): string | null {
   const destination = allowedReturnPath(params.get('returnUrl') ?? params.get('next'));
   if (!destination) return null;
   const parsed = new URL(destination, 'https://nuni.invalid');
+  if (parsed.pathname === JOIN_PATH || parsed.pathname === CREATE_PATH) {
+    return classroomLoginHref(destination);
+  }
   if (
     isLegacyAccountPath(parsed.pathname) ||
     (!parsed.search && !parsed.hash && LEGACY_SIMPLE_RETURN_PATHS.has(parsed.pathname))
@@ -694,31 +698,6 @@ async function passkeyAssertion(challenge: Record<string, unknown>): Promise<{
   };
 }
 
-async function finishSignedIn(returnPath: string): Promise<void> {
-  const href = sanitizeReturnPath(returnPath);
-  let role = 'student';
-  try {
-    const response = await fetch('/auth/platform/session', { cache: 'no-store' });
-    const session = response.ok ? await readJson(response) : null;
-    if (session?.hasSchoolIssuedRole === true) {
-      await fetch('/auth/platform/school-issued-session', { method: 'POST', cache: 'no-store' }).catch(() => undefined);
-    }
-    if (session?.hasApprovedMerchant === true && session?.hasSchoolIssuedRole !== true) role = 'merchant';
-    else if (session?.hasSchoolIssuedRole === true) role = 'teacher';
-  } catch {
-    role = 'student';
-  }
-  const form = new FormData();
-  form.set('role', role);
-  form.set('returnUrl', href);
-  try {
-    await fetch('/auth/shell-role', { method: 'POST', body: form, redirect: 'manual' });
-  } catch {
-    /* keep the destination even if the shell cookie cannot be written */
-  }
-  window.location.replace(href);
-}
-
 export async function signInWithPasskey(tenantId: string, returnPath: string): Promise<void> {
   const challenge = await accountToken({ grantType: 'passkey-challenge', tenantId });
   const assertion = await passkeyAssertion(challenge);
@@ -732,5 +711,7 @@ export async function signInWithPasskey(tenantId: string, returnPath: string): P
     signature: assertion.signature,
   });
   rememberAccountSession(result.expiresIn);
-  await finishSignedIn(returnPath);
+  // The passkey exchange already established the school session. A separate
+  // platform cookie in this browser can belong to a different person.
+  window.location.replace(sanitizeReturnPath(returnPath));
 }
