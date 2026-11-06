@@ -14,8 +14,11 @@ const root = process.cwd();
 const web = path.join(root, 'apps/web');
 const fixture = path.join(web, '.social-feed-browser-fixture');
 const dist = path.join(fixture, 'dist');
-const longListMode = process.env.FEED_BROWSER_MODE === 'long-list';
-const output = path.join(root, 'artifacts/campus-feed-browser', longListMode ? 'long-list' : 'standard');
+const browserMode = process.env.FEED_BROWSER_MODE || 'discovery';
+assert.ok(['discovery', 'authorization', 'long-list'].includes(browserMode), 'Unknown browser scenario');
+const longListMode = browserMode === 'long-list';
+const authMode = browserMode === 'authorization';
+const output = path.join(root, 'artifacts/campus-feed-browser', browserMode);
 const projectId = 'demo-campus-feed-browser';
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST || '';
 assert.match(emulatorHost, /^(?:127\.0\.0\.1|localhost):\d{1,5}$/, 'Refusing non-local Firestore');
@@ -240,7 +243,7 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
     await until(()=>call(expected=>window.__fixtureToken===expected && document.querySelectorAll('article').length===60,token),'first authorized page');
     await until(()=>call(()=>!document.body.textContent.includes('正在讀取追蹤')),'following read');
   }
-  if (!longListMode) {
+  if (!longListMode && !authMode) {
   for(const [width,height,theme] of [[320,720,'light'],[390,844,'light'],[390,844,'dark'],[1366,900,'light']]) {
     const label=width+'-'+theme;
     try {
@@ -271,6 +274,10 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       });
     } catch(error) {report.errors.push(label+': '+error.message);await snapshot(label+'-failure.png').catch(()=>{});}
   }
+  } else if (authMode) {
+  // Run authorization and delayed-result races with a fresh SDK session.
+  // A long sequence of offline toggles otherwise exhausts emulator long-polling
+  // clients in some CI runners before the membership denial can be evaluated.
   // A real authorized result is held after the SDK completes, not replaced with a fake page.
   try {
     await begin('?case=focus-moved');await search('上學期的專題集合');
@@ -359,4 +366,4 @@ finally {
 }
 const failures=report.checks.filter(row=>!row.pass);
 console.log('FEED_BROWSER_SUMMARY',JSON.stringify({sourceHead:report.sourceHead,checks:report.checks.length,failures,errors:report.errors,screenshots:report.screenshots,flows:report.flows.map(({requests,...flow})=>({...flow,pageSizes:requests.filter(r=>r.ids).map(r=>r.ids.length)}))}));
-if(report.errors.length || failures.length || report.checks.length<(longListMode ? 6 : 32))process.exitCode=1;
+if(report.errors.length || failures.length || report.checks.length<(longListMode ? 6 : authMode ? 4 : 28))process.exitCode=1;
