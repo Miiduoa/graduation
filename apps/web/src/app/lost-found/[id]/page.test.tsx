@@ -113,6 +113,7 @@ it('shows owner edit and confirm-resolve, and confirms authoritative resolve rec
   expect(await screen.findByText('黑色雨傘')).toBeTruthy();
   expect(screen.getByText(/聯絡方式會顯示給所有已登入使用者/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '編輯' }));
+  expect(screen.getByTestId('lost-found-tag').contains(screen.getByLabelText('標題'))).toBe(false);
   fireEvent.change(screen.getByLabelText('標題'), { target: { value: '黑色折疊傘' } });
   vi.mocked(updateLostFoundItem).mockResolvedValueOnce({
     ...owned,
