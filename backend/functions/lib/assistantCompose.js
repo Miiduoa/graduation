@@ -124,7 +124,9 @@ async function buildModelBackedAssistantResponse({
   uid = null,
   sessionId = null,
   writePermissions = null,
+  signal,
 }) {
+  signal?.throwIfAborted();
   const {
     isAssistantWriteToolAllowed,
   } = require('./assistantWritePermissions');
@@ -179,6 +181,7 @@ async function buildModelBackedAssistantResponse({
 
   const userSlice = normalizeAssistantText(lastUserMessage).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS);
   const prior = await loadConversationMessages(uid, sessionId, schoolId);
+  signal?.throwIfAborted();
   const history = prior.map((message) => ({
     ...message,
     content: String(message.content ?? '').slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS),
@@ -191,10 +194,13 @@ async function buildModelBackedAssistantResponse({
   const modelResult = await callAssistantModelWithTools({
     messages: [{ role: 'system', content: systemPrompt }, ...history],
     toolCtx: toolCtx && typeof toolCtx === 'object' ? toolCtx : {},
+    signal,
   });
+  signal?.throwIfAborted();
 
   if (uid && sessionId && modelResult.transcriptMessages?.length) {
     await saveConversationMessages(uid, sessionId, schoolId, modelResult.transcriptMessages);
+    signal?.throwIfAborted();
   }
 
   if (!modelResult?.content) {
