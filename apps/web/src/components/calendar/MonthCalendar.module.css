@@ -120,6 +120,7 @@
   opacity: 0.6;
 }
 .grid .date {
+  position: relative;
   display: block;
   width: 2.25rem;
   min-height: 2.25rem;
@@ -134,7 +135,14 @@
 .grid .date[aria-pressed='true'] {
   color: var(--calendar-ink);
   background: #e9eddf;
-  box-shadow: inset 0 0 0 2px var(--calendar-ink);
+}
+.grid .date[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--calendar-ink);
+  border-radius: inherit;
+  pointer-events: none;
 }
 .grid .event {
   display: block;
@@ -173,6 +181,44 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+@keyframes calendarPageTurn {
+  from {
+    opacity: 0.55;
+    transform: perspective(800px) rotateX(-4deg) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(800px) rotateX(0deg) translateY(0);
+  }
+}
+
+@keyframes calendarDateCircle {
+  from {
+    opacity: 0.25;
+    transform: scale(0.82) rotate(-12deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :global(:root[data-reduced-motion='false']) .calendar {
+    transform-origin: center top;
+    animation: calendarPageTurn 280ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  :global(:root[data-reduced-motion='false']) .date[aria-pressed='true']::after {
+    animation: calendarDateCircle 180ms ease-out;
+  }
+  :global(:root[data-reduced-motion='false']) .grid button {
+    transition: background-color 140ms ease, transform 140ms ease;
+  }
+  :global(:root[data-reduced-motion='false']) .grid button:active:not(:disabled) {
+    transform: translateY(1px);
+  }
 }
 
 @media (max-width: 540px) {
