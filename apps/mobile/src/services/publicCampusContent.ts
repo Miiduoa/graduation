@@ -23,6 +23,7 @@ import {
   selectStudentAnnouncements,
   SOURCE_UNAVAILABLE_TEXT,
 } from '@campus/shared/src/campusAnnouncements';
+import { parseCampusAnnouncementSource, type CampusAnnouncementSource } from './campusAnnouncementSource';
 import { getRawAppEnv } from './release';
 
 type SourceDocument = { id: string; data: () => Record<string, unknown> };
@@ -243,28 +244,29 @@ function event(document: SourceDocument, schoolId: string): ClubEvent {
   };
 }
 
-async function loadDetail<T>(
-  schoolId: string,
-  id: string,
-  name: 'announcements' | 'events',
-  normalize: (document: SourceDocument, schoolId: string) => T,
-): Promise<T | null> {
-  const db = sourceDb(schoolId);
-  if (!id || id.includes('/')) return null;
-  let snapshot = await getDocFromServer(doc(db, 'schools', schoolId, name, id));
-  if (!snapshot.exists()) {
-    snapshot = await getDocFromServer(doc(db, name, id));
-    if (!snapshot.exists() || snapshot.data().schoolId !== schoolId) return null;
-  }
-  return normalize({ id: snapshot.id, data: () => snapshot.data()! }, schoolId);
-}
-
 export const loadCampusAnnouncements = async (schoolId: string) =>
   (await loadCampusAnnouncementFeed(schoolId)).announcements;
-export const loadCampusAnnouncement = async (schoolId: string, id: string) => {
-  const item = await loadDetail(schoolId, id, 'announcements', announcement);
-  return item?.visible === false ? null : item;
-};
+
+export async function loadCampusAnnouncement(
+  schoolId: string, id: string, sourceKind?: CampusAnnouncementSource['kind'],
+): Promise<Announcement | null> {
+  if (!id || id.includes('/')) return null;
+  if (sourceKind !== undefined && !parseCampusAnnouncementSource({ kind: sourceKind, id })) return null;
+  const db = sourceDb(schoolId);
+  if (sourceKind !== 'legacy-announcement') {
+    const scoped = await getDocFromServer(doc(db, 'schools', schoolId, 'announcements', id));
+    if (scoped.exists()) {
+      const item = announcement(scoped, schoolId);
+      return item.visible === false ? null : item;
+    }
+    if (sourceKind === 'school-announcement') return null;
+  }
+  const legacy = await getDocFromServer(doc(db, 'announcements', id));
+  if (!legacy.exists() || legacy.data().schoolId !== schoolId) return null;
+  const item = announcement(legacy, schoolId);
+  return item.visible === false ? null : item;
+}
+
 export type CampusEventSource = 'school-club-events' | 'school-events' | 'legacy-events';
 export type CampusEvent = ClubEvent & { source: CampusEventSource };
 export type CampusEventCursor = {

@@ -25,7 +25,7 @@ function database(deps = {}) {
   return deps.db || (deps.admin ? deps.admin.firestore() : getFirestore());
 }
 
-async function readSchoolRows(schoolId, collections, { order, limit, requiredField, deps = {} } = {}) {
+async function readSchoolRows(schoolId, collections, { order, limit, requiredField, withAnnouncementSource = false, deps = {} } = {}) {
   assertId(schoolId, 'schoolId');
   const db = database(deps);
   const school = db.collection('schools').doc(schoolId);
@@ -47,7 +47,10 @@ async function readSchoolRows(schoolId, collections, { order, limit, requiredFie
       if (requiredField && (typeof data[requiredField] !== 'string' || !data[requiredField].trim())) {
         throw new HttpsError('failed-precondition', 'School data is incomplete');
       }
-      return { ...data, id: entry.id, schoolId };
+      return {
+        ...data, id: entry.id, schoolId,
+        ...(withAnnouncementSource ? { announcementKind: legacy ? 'legacy-announcement' : 'school-announcement' } : {}),
+      };
     });
   }
   return [];
@@ -75,9 +78,12 @@ async function fetchAnnouncementSources(schoolId, deps = {}) {
 
 async function fetchAssistantAnnouncements(schoolId, deps = {}) {
   const school = schoolConfig(schoolId);
-  if (school && !isPublicAnnouncementSchool(school)) return [];
+  if (school && !isPublicAnnouncementSchool(school)) {
+    if (deps.forSnapshot) throw new HttpsError('unavailable', SOURCE_UNAVAILABLE);
+    return [];
+  }
   const rows = await readSchoolRows(schoolId, ['announcements', 'announcements'], {
-    order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', deps,
+    order: ['publishedAt', 'desc'], limit: 20, requiredField: 'title', withAnnouncementSource: deps.forSnapshot, deps,
   });
   const sources = await fetchAnnouncementSources(schoolId, deps);
   const announcements = selectStudentAnnouncements(rows, sources);

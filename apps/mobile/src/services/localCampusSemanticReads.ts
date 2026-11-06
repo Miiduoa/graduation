@@ -1,6 +1,6 @@
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
-import { runOfflineCampusTool } from './offlineCampusTools';
+import { readSyncedAnnouncements, runOfflineCampusTool } from './offlineCampusTools';
 import {
   localCampusReadPrompt, localCampusReadQuery, parseLocalCampusReadPlan,
   type LocalReadMessage, type LocalCampusReadResult,
@@ -44,7 +44,10 @@ export async function resolveLocalCampusSemanticReads(input: {
     const sense = validCampusSenseSnapshot(input.snapshot, scope, now);
     const context = { ...input.context, checkedAt: new Date(now).toISOString() };
     const query = localCampusReadQuery(call);
-    const answer = runOfflineCampusTool(query.question, context, sense, input.uid);
+    // The selector chooses the source. Only the user's words can set a publication window.
+    const answer = call.tool === 'announcements' && plan.calls.length === 1
+      ? readSyncedAnnouncements(input.messages[input.messages.length - 1].content, now, sense)
+      : runOfflineCampusTool(query.question, context, sense, input.uid);
     const available = call.tool === 'timetable'
       ? context.timetable.source === 'saved-device-copy'
       : call.tool === 'assignments' ? sense?.assignments.status === 'available'

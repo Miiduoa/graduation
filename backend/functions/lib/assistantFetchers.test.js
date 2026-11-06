@@ -57,6 +57,18 @@ test('reads current announcement producers and preserves document identity and t
   ]);
 });
 
+test.each(['school-announcement', 'legacy-announcement'])(
+  'derives the requested snapshot reference from the actual %s read', async (kind) => {
+    const path = kind === 'legacy-announcement' ? 'announcements' : 'schools/pu/announcements';
+    mockDocuments.set(path, [row('noticeA', {
+      schoolId: 'pu', title: '課務公告', publishedAt: new Date(), id: 'forged-id',
+      announcementKind: 'forged-kind', source: '教務處',
+    })]);
+    const items = await fetchAssistantAnnouncements('pu', { forSnapshot: true });
+    expect(items[0]).toMatchObject({ id: 'noticeA', announcementKind: kind, source: '教務處' });
+  },
+);
+
 test('hides stale scrape rows when a source is down and fails with 暫時抓不到 when nothing remains', async () => {
   mockDocuments.set('schools/pu/announcements', [
     row('stale', {
@@ -96,6 +108,9 @@ test.each(['', 'staging', 'production'])(
       row('demo', { title: '示範公告', origin: 'public_scrape', sourceId: 'demo' }),
     ]);
     await expect(fetchAssistantAnnouncements('tw-demo-uni')).resolves.toEqual([]);
+    await expect(fetchAssistantAnnouncements('tw-demo-uni', { forSnapshot: true })).rejects.toMatchObject({
+      code: 'unavailable',
+    });
     expect(mockReads).toEqual([]);
     if (previous == null) delete process.env.APP_ENV;
     else process.env.APP_ENV = previous;

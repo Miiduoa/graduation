@@ -30,6 +30,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 import { getMobileQuickActions } from '../services/quickCampusActions';
 import type { CampusAgentWriteProposal, CampusAgentWriteTool } from '../features/campusAssistantActions';
 import { CampusAgentActionReview } from './CampusAgentActionReview';
+import { CampusAnnouncementRows } from './CampusAnnouncementRows';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
@@ -48,6 +49,7 @@ const NEXT_CLASS = '下一堂課是什麼？';
 const CLASS_ROOM = '在哪間教室？';
 const CLASS_END = '幾點下課？';
 const CLASS_WORK = '這堂課有什麼作業？';
+const TODAY_ANNOUNCEMENTS = '今天發布了哪些校園公告？';
 const TODAY_BRIEF = '今天要先處理什麼？';
 const WEEK_BRIEF = '依手機課表與授權作業安排接下來七天的學習計畫';
 
@@ -127,8 +129,9 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
     />
   );
 }
+type SyncQuestion = typeof TODAY_BRIEF | typeof WEEK_BRIEF | typeof TODAY_ANNOUNCEMENTS;
 type AssistantShortcut =
-  | { kind: 'brief'; question: typeof TODAY_BRIEF | typeof WEEK_BRIEF }
+  | { kind: 'brief'; question: SyncQuestion }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
   | { kind: 'selection'; question: string; checkedAt: string };
@@ -158,10 +161,8 @@ function AssistantConversation({
     Array<CampusAssistantMessage & {
       requiresService?: boolean;
       source?: CampusAssistantMode;
-      tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
       plan?: CampusEvidencePlan;
       localReads?: LocalCampusReadResult[];
-      route?: string;
       proposals?: CampusAgentWriteProposal[];
     }>
   >([]);
@@ -196,6 +197,8 @@ function AssistantConversation({
   const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(draft, hasClass)));
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
+  const latestSense = useRef(currentSense);
+  latestSense.current = currentSense;
   useEffect(() => {
     if (!sense) return;
     const syncedAt = Date.parse(sense.checkedAt);
@@ -292,7 +295,7 @@ function AssistantConversation({
       }
     }
   };
-  const briefPlan = async (question: typeof TODAY_BRIEF | typeof WEEK_BRIEF) => {
+  const briefPlan = async (question: SyncQuestion) => {
     if (!uid || lock.current || syncLock.current || !current()) return;
     lock.current = true;
     syncLock.current = true;
@@ -360,6 +363,7 @@ function AssistantConversation({
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
+            announcementRead: reply.announcementRead,
           },
         ]);
         setActiveShortcut(null);
@@ -432,6 +436,7 @@ function AssistantConversation({
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
             courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
+            announcementRead: reply.announcementRead,
             proposals: reply.proposals,
           },
         ]);
@@ -468,6 +473,14 @@ function AssistantConversation({
       lock.current = false;
       if (current()) setBusy(false);
     }
+  };
+  const openAnnouncement = (item: CampusSenseSnapshot['announcements']['items'][number], checkedAt: string) => {
+    if (!current() || lock.current || syncLock.current || !item.source) return;
+    const verified = validCampusSenseSnapshot(latestSense.current, { uid, schoolId });
+    if (verified?.checkedAt !== checkedAt || verified.announcements.status !== 'available') return;
+    const source = verified.announcements.items.find((row) => row.source?.kind === item.source?.kind &&
+      row.source?.id === item.source?.id && row.title === item.title)?.source;
+    if (source) safeNavigate(navigation, '公告詳情', { id: source.id, sourceKind: source.kind, schoolId });
   };
   const scrollToEntry = (event: LayoutChangeEvent) => {
     chatScroll.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - 8), animated: false });
@@ -549,6 +562,11 @@ function AssistantConversation({
             cancelledSync();
           }}
           assignmentContext={{ userId: uid, schoolId, isCurrent: current, navigation }}
+          onOpenAnnouncement={navigation?.navigate && currentSense
+            ? (item) => openAnnouncement(item, currentSense.checkedAt) : undefined}
+          onOpenAnnouncements={navigation?.navigate ? () => {
+            if (current() && !lock.current && !syncLock.current) safeNavigate(navigation, '公告總覽');
+          } : undefined}
           onSync={() => void syncCampus()}
           onBrief={() => void briefPlan(TODAY_BRIEF)}
           onWeekBrief={() => void briefPlan(WEEK_BRIEF)}
@@ -633,6 +651,10 @@ function AssistantConversation({
                 {uid ? <>
                   <AIButton label="整理今日重點" variant="ghost" onPress={() => void briefPlan(TODAY_BRIEF)} />
                   <AIButton label="規劃未來七天" variant="ghost" onPress={() => void briefPlan(WEEK_BRIEF)} />
+                  <AIButton label={currentSense?.announcements.status === 'available' ? '查今日公告' : '同步並查今日公告'}
+                    variant="ghost" onPress={() => void (currentSense?.announcements.status === 'available'
+                      ? send({ kind: 'selection', question: TODAY_ANNOUNCEMENTS, checkedAt: currentSense.checkedAt })
+                      : briefPlan(TODAY_ANNOUNCEMENTS))} />
                 </> : null}
               </View>
             )}
@@ -677,7 +699,9 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.courseworkRead ? courseworkReplyTitle(message.courseworkRead) : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
+          <AICard title={message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
+            : message.announcementRead ? '校園公告'
+            : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
             {platformTimetable && message.courseworkRead ? (
               <NuniCourseworkReply read={message.courseworkRead} latest={index === messages.length - 1}
                 busy={busy || syncBusy}
@@ -718,6 +742,15 @@ function AssistantConversation({
                     reminderScope: JSON.stringify({ owner: timetableOwner, schoolId }),
                   });
                 }} />
+            ) : message.announcementRead ? (
+              <View style={{ gap: 10 }}>
+                <Text selectable style={{ color: aiTokens.text, lineHeight: 24 }}>{message.announcementRead.summary}</Text>
+                <CampusAnnouncementRows items={message.announcementRead.items} disabled={busy || syncBusy}
+                  onOpenAnnouncement={navigation?.navigate && currentSense &&
+                    message.announcementRead.userId === uid && message.announcementRead.schoolId === schoolId &&
+                    message.announcementRead.checkedAt === currentSense.checkedAt
+                    ? (item) => openAnnouncement(item, currentSense.checkedAt) : undefined} />
+              </View>
             ) : message.localReads?.length ? (
               <CampusLocalReadResults
                 results={message.localReads}
@@ -888,6 +921,7 @@ function AssistantConversation({
           <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{error}</Text>
           {activeShortcut && (activeShortcut.kind !== 'selection' || activeShortcut.checkedAt === currentSense?.checkedAt) ? (
             <AIButton label={activeShortcut.kind !== 'brief' ? `重試「${activeShortcut.question}」`
+                : activeShortcut.question === TODAY_ANNOUNCEMENTS ? '重新查今日公告'
                 : activeShortcut.question === TODAY_BRIEF ? '重新整理今日重點' : '重新規劃未來七天'} variant="ghost"
               disabled={busy || syncBusy}
               onPress={() => void (activeShortcut.kind === 'brief' ? briefPlan(activeShortcut.question) : send(activeShortcut))} />
