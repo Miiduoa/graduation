@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import test from 'node:test';
+import { createTestToken } from './harness.mjs';
 
 // Exercise the real HTTP/PostgREST boundary used by supabase-js. This intentionally
 // uses no SDK mocks and no hosted project credentials. It does not exercise Auth,
@@ -19,6 +19,7 @@ const ids = {
   courseA: uuid('10000000', 1), courseB: uuid('10000000', 2),
   assignmentA: uuid('20000000', 1), assignmentB: uuid('20000000', 2),
   assignmentNew: uuid('20000000', 3),
+  assignmentAttachment: uuid('20000000', 5),
   submissionA: uuid('30000000', 1), submissionB: uuid('30000000', 2),
   submissionOutside: uuid('30000000', 3), submissionLate: uuid('30000000', 4),
   quizGradeItem: uuid('50000000', 3),
@@ -33,12 +34,8 @@ const ids = {
   pairA: uuid('f1000000', 1), pairB: uuid('f1000000', 2), pairOutside: uuid('f1000000', 3), pairExpired: uuid('f1000000', 4),
 };
 function token(identity) {
-  const now = Math.floor(Date.now() / 1000);
-  const claims = { role: identity === 'service' ? 'service_role' : identity === 'anon' ? 'anon' : 'authenticated', iat: now, exp: now + 3600 };
-  if (ids[identity]) Object.assign(claims, { sub: ids[identity], aud: 'authenticated' });
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const unsigned = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
-  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+  const role = identity === 'service' ? 'service_role' : identity === 'anon' ? 'anon' : 'authenticated';
+  return createTestToken(secret, role, ids[identity]);
 }
 async function request(identity, path, { method = 'GET', body, prefer } = {}) {
   const headers = { Authorization: `Bearer ${token(identity)}`, Accept: 'application/json' };
@@ -504,6 +501,27 @@ test('submission receipts use server time and grading freezes the submitted work
   denied(await request('b', `submissions?id=eq.${first.id}`, { method: 'PATCH', body: { storage_path: 'other-file' } }));
   const final = succeeds(await request('b', `submissions?id=eq.${first.id}&select=body_text,storage_path,grade,submitted_at`))[0];
   assert.deepEqual(final, { body_text: 'Second version', storage_path: null, grade: 75, submitted_at: revised.submitted_at });
+});
+
+test('Data API validates uploaded attachment ownership and preserves teacher grading', async () => {
+  const ownPath = `${ids.courseA}/${ids.assignmentAttachment}/${ids.a}/receipt.pdf`;
+  const peerPath = `${ids.courseA}/${ids.assignmentAttachment}/${ids.b}/receipt.pdf`;
+  const body = { assignment_id: ids.assignmentAttachment, student_id: ids.a, storage_path: ownPath };
+  for (const storage_path of [peerPath, `${ownPath}.missing`]) {
+    denied(await request('a', 'submissions', { method: 'POST', body: { ...body, storage_path } }));
+  }
+  const receipt = succeeds(await request('a', 'submissions?select=id,storage_path', {
+    method: 'POST', body, prefer: 'return=representation',
+  }))[0];
+  assert.equal(receipt.storage_path, ownPath);
+  denied(await request('a', `submissions?id=eq.${receipt.id}`, {
+    method: 'PATCH', body: { storage_path: peerPath },
+  }));
+  const graded = succeeds(await request('teacher', `submissions?id=eq.${receipt.id}&select=grade,storage_path`, {
+    method: 'PATCH', body: { grade: 90, graded_at: new Date().toISOString(), graded_by: ids.teacher },
+    prefer: 'return=representation',
+  }))[0];
+  assert.deepEqual(graded, { grade: 90, storage_path: ownPath });
 });
 
 test('course search and playback respect unpublished and scheduled material', async () => {

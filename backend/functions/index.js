@@ -14,6 +14,7 @@ const { readSecretValue } = require('./secretParams');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+const { getStorage } = require('firebase-admin/storage');
 const https = require('https');
 const nodeCrypto = require('crypto');
 const {
@@ -47,6 +48,7 @@ const { canonicalizePuStudentId, createPuTronClassRefresher } = require('./puTro
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
+const { createPrivateGroupFileHandler } = require('./privateGroupFiles');
 const directorySync = require('./directorySync');
 const { getAuth: getAdminAuth } = require('firebase-admin/auth');
 const {
@@ -2784,6 +2786,14 @@ exports.revokeTimetableShare = onCall({ region: REGION }, createRevokeTimetableS
 exports.getTimetableShare = onRequest(
   { region: REGION, cors: true },
   createGetTimetableShareHandler({ db }),
+);
+exports.privateGroupFile = onRequest(
+  { region: REGION, cors: getCorsOrigins(), timeoutSeconds: 120 },
+  createPrivateGroupFileHandler({
+    db,
+    bucket: () => getStorage().bucket(),
+    verifyIdToken: (token, checkRevoked) => getAdminAuth().verifyIdToken(token, checkRevoked),
+  }),
 );
 const eventRegistrationHandlers = createEventRegistrationHandlers({ db });
 exports.getEventRegistrations = onCall({ region: REGION }, eventRegistrationHandlers.getEventRegistrations);
