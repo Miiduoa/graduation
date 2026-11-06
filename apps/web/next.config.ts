@@ -124,7 +124,12 @@ const nextConfig: NextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(self)' },
         ],
       },
-      ...['/merchant', '/merchant/workspace'].map((source) => ({
+      ...[
+        '/merchant',
+        '/merchant/workspace',
+        '/course/:courseId/attendance',
+        '/teacher/course/:courseId/attendance',
+      ].map((source) => ({
         source,
         headers: [
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },

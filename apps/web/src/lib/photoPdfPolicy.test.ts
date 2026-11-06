@@ -24,7 +24,12 @@ it('keeps camera permission gated and blob previews scoped to classroom routes',
     for (const flag of ['', 'false', 'TRUE', '1', 'true']) {
       vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', flag);
       const rules = await config.headers!();
-      for (const pathname of ['/classroom', '/classroom/course', '/classroom-other', '/merchant', '/']) {
+      const scanPages = ['/merchant', '/merchant/workspace', '/course/c1/attendance', '/teacher/course/c1/attendance'];
+      const paths = [
+        ...scanPages, '/', '/classroom', '/classroom/course', '/classroom-other',
+        '/merchant/workspace/settings', '/course/c1', '/teacher/course/c1/gradebook', '/course/c1/attendance/report',
+      ];
+      for (const pathname of paths) {
         const effective = new Map<string, string>();
         for (const rule of rules) {
           if (getPathMatch(rule.source)(pathname)) {
@@ -33,10 +38,10 @@ it('keeps camera permission gated and blob previews scoped to classroom routes',
         }
         const classroom = pathname === '/classroom' || pathname.startsWith('/classroom/');
         expect(effective.get('Content-Security-Policy')?.includes('object-src blob:')).toBe(classroom);
-        expect(effective.get('Permissions-Policy')?.includes('microphone=(self)')).toBe(pathname === '/');
-        if (classroom) {
-          expect(effective.get('Permissions-Policy')?.includes('camera=(self)')).toBe(flag === 'true');
-        }
+        const permissions = effective.get('Permissions-Policy');
+        const allowCamera = scanPages.includes(pathname) || (classroom && flag === 'true');
+        expect(permissions).toContain(allowCamera ? 'camera=(self)' : 'camera=()');
+        expect(permissions).toContain(pathname === '/' ? 'microphone=(self)' : 'microphone=()');
       }
     }
   } finally {
