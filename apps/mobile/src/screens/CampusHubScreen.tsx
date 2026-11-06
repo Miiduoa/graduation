@@ -20,6 +20,7 @@ type ServiceItem = {
   label: string;
   description: string;
   screen: string;
+  params?: { tab: 'food' };
   keywords: string[];
 };
 const frequentServices: ServiceItem[] = [
@@ -141,9 +142,17 @@ const sections: Array<{ title: string; items: ServiceItem[] }> = [
       {
         icon: 'ic_restaurant',
         label: '我的訂單',
-        description: '查看取餐號碼、進度與歷次訂餐紀錄',
+        description: '查看 App 校園餐廳的取餐號碼、進度與訂餐紀錄',
         screen: 'StudentOrders',
         keywords: ['取餐', '訂單狀態', '訂單紀錄', '訂單進度', '餐點訂單'],
+      },
+      {
+        icon: 'ic_store_merchant',
+        label: '站內點餐',
+        description: '查看 nuni 平台的門市與訂單紀錄',
+        screen: 'NuniWorkspace',
+        params: { tab: 'food' },
+        keywords: ['站內訂單', '站內取餐', '平台點餐', '平台訂單'],
       },
       {
         icon: 'ic_payment_card',
@@ -229,12 +238,12 @@ function CampusDirectory({ schoolId, navigation }: { schoolId: string; navigatio
   const quickActions = keyword
     ? getMobileQuickActions(query).filter(
         (action) => !filtered.some((section) =>
-          section.items.some((item) => item.screen === action.route)),
+          section.items.some((item) => item.screen === action.route && !item.params)),
       )
     : [];
   const openService = (item: ServiceItem) => {
     Keyboard.dismiss();
-    safeNavigate(navigation, item.screen, undefined, {
+    safeNavigate(navigation, item.screen, item.params, {
       fallbackMessage: `「${item.label}」目前無法開啟。`,
     });
   };
