@@ -2495,6 +2495,14 @@
       "anon": false
     },
     {
+      "signature": "protect_submission_attachment()",
+      "name": "protect_submission_attachment",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
       "signature": "protect_submission_grading()",
       "name": "protect_submission_grading",
       "trigger": true,

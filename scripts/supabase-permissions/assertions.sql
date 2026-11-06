@@ -249,6 +249,7 @@ insert into expected_functions values
   ('public.playable_material_course(uuid)', false, false),
   ('public.protect_profile_role()', false, false),
   ('public.protect_quiz_answer_grading()', false, false),
+  ('public.protect_submission_attachment()', false, false),
   ('public.protect_submission_grading()', false, false),
   ('public.push_notification_abandon_alert()', false, false),
   ('public.quiz_attempts_before_insert_guard()', false, false),
@@ -294,7 +295,26 @@ begin
       raise exception 'Unexpected routine ACL: %',f.signature;
     end if;
   end loop;
-  raise notice 'Passed 246 application function-role ACL assertions';
+  raise notice 'Passed 249 application function-role ACL assertions';
+end $$;
+
+-- Internal helpers and invoker triggers use a fixed, trusted lookup order.
+do $$
+declare signature text;
+begin
+  foreach signature in array array[
+    'public._quiz_normalize_answer(text,jsonb)',
+    'public._quiz_answer_correct(text,jsonb,jsonb)',
+    'public.quiz_attempts_before_insert_guard()',
+    'public.set_updated_at()'
+  ] loop
+    if not exists (
+      select 1 from pg_proc p where p.oid = signature::regprocedure
+        and p.proconfig @> array['search_path=pg_catalog, public, pg_temp']
+    ) then
+      raise exception 'Unexpected internal function search_path: %', signature;
+    end if;
+  end loop;
 end $$;
 
 -- Worker mutation RPCs must not inherit EXECUTE through PUBLIC or the old

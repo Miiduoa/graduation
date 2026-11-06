@@ -78,36 +78,10 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
-    function isGroupMember(groupId) {
-      return isAuthenticated()
-        && firestore.exists(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
-    }
-
-    function canManageGroup(groupId) {
-      return isGroupMember(groupId)
-        && (
-          firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin'
-          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
-          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
-          || firestore.get(/databases/(default)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
-        );
-    }
-
     function conversationMember(conversationId) {
       return isActiveAccount()
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
         && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
-    }
-
-    function assignmentGroupId(assignmentId) {
-      return firestore.get(/databases/(default)/documents/assignments/$(assignmentId)).data.groupId;
-    }
-
-    function submissionOwner(assignmentId, userId) {
-      return isOwner(userId)
-        && firestore.exists(/databases/(default)/documents/assignments/$(assignmentId))
-        && isGroupMember(assignmentGroupId(assignmentId));
     }
 
     function canManageEventAsset(eventId) {
@@ -152,21 +126,16 @@ service firebase.storage {
     }
 
     match /groups/{groupId}/{fileName} {
-      allow read: if isGroupMember(groupId);
-      allow write: if fileName.matches('^cover\\.[A-Za-z0-9]+$')
-        && canManageGroup(groupId)
-        && isValidImage()
-        && maxSize(5);
+      // privateGroupFile checks current account, school and group membership server-side.
+      allow read, write: if false;
     }
 
     match /groups/{groupId}/posts/{postId}/{fileName} {
-      allow read: if isGroupMember(groupId);
-      allow create: if resource == null && isGroupMember(groupId) && isAllowedUpload() && maxSize(20);
+      allow read, write: if false;
     }
 
     match /assignments/{assignmentId}/submissions/{userId}/{fileName} {
-      allow read: if submissionOwner(assignmentId, userId) || canManageGroup(assignmentGroupId(assignmentId));
-      allow create: if resource == null && submissionOwner(assignmentId, userId) && isAllowedUpload() && maxSize(50);
+      allow read, write: if false;
     }
 
     match /lostfound/{itemId}/{fileName} {

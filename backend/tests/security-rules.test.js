@@ -1650,7 +1650,7 @@ describe('firestore security rules', () => {
 
 describe('storage security rules', () => {
   for (const status of ['submitted', 'graded']) {
-    test(`a ${status} assignment attachment is immutable and remains private`, async () => {
+    test(`a ${status} assignment attachment requires the authorized server endpoint`, async () => {
       await seedFirestore(async (db) => {
         await db.doc('groups/course').set({ schoolId: 'pu', type: 'course' });
         await db.doc('assignments/work').set({ groupId: 'course' });
@@ -1662,7 +1662,9 @@ describe('storage security rules', () => {
       const objectPath = `assignments/work/submissions/alice/${status}-answer.pdf`;
       const alice = testEnv.authenticatedContext('alice').storage();
       const original = alice.ref(objectPath);
-      await assertSucceeds(uploadString(original, 'original answer', 'application/pdf'));
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await uploadString(context.storage().ref(objectPath), 'original answer', 'application/pdf');
+      });
       await seedFirestore(async (db) => {
         await db.doc('groups/course/assignments/work/submissions/alice').set({
           userId: 'alice', groupId: 'course', assignmentId: 'work', status,
@@ -1674,12 +1676,12 @@ describe('storage security rules', () => {
       await assertFails(uploadString(original, 'changed after submission', 'application/pdf'));
       await assertFails(original.updateMetadata({ contentDisposition: 'attachment; filename=changed.pdf' }));
       await assertFails(original.delete());
-      await assertSucceeds(uploadString(
+      await assertFails(uploadString(
         alice.ref(`assignments/work/submissions/alice/${status}-new-answer.pdf`), 'new answer', 'application/pdf',
       ));
-      assert.equal(Buffer.from(await assertSucceeds(getBytes(original))).toString(), 'original answer');
+      await assertFails(getBytes(original));
       const teacher = testEnv.authenticatedContext('teacher').storage().ref(objectPath);
-      assert.equal(Buffer.from(await assertSucceeds(getBytes(teacher))).toString(), 'original answer');
+      await assertFails(getBytes(teacher));
       for (const context of [
         testEnv.authenticatedContext('bob'),
         testEnv.authenticatedContext('outsider'),
@@ -1689,6 +1691,37 @@ describe('storage security rules', () => {
         await assertFails(getBytes(other));
         await assertFails(uploadString(other, 'forged answer', 'application/pdf'));
       }
+    });
+  }
+
+  for (const objectPath of ['groups/course/cover.jpg', 'groups/course/posts/one/private.pdf']) {
+    test(`private group files require the authorized server endpoint at ${objectPath}`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('groups/course').set({ schoolId: 'pu' });
+        for (const [uid, role] of [['alice', 'member'], ['teacher', 'instructor']]) {
+          await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+          await db.doc(`groups/course/members/${uid}`).set({ status: 'active', role });
+        }
+      });
+      const contentType = objectPath.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf';
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await uploadString(context.storage().ref(objectPath), 'private bytes', contentType);
+      });
+      for (const context of [
+        testEnv.authenticatedContext('alice'), testEnv.authenticatedContext('teacher'),
+        testEnv.authenticatedContext('outsider'), testEnv.unauthenticatedContext(),
+      ]) {
+        const file = context.storage().ref(objectPath);
+        await assertFails(getBytes(file));
+        await assertFails(file.getMetadata());
+        await assertFails(file.getDownloadURL());
+        await assertFails(uploadString(file, 'replaced', contentType));
+        await assertFails(file.updateMetadata({ customMetadata: { firebaseStorageDownloadTokens: 'forged' } }));
+        await assertFails(file.delete());
+      }
+      await assertFails(uploadString(
+        testEnv.authenticatedContext('teacher').storage().ref(`${objectPath}.new`), 'new bytes', contentType,
+      ));
     });
   }
 
@@ -1787,7 +1820,6 @@ describe('storage security rules', () => {
     'conversations/chat/messages/one/photo.jpg',
     'conversations/chat/media/one/photo.jpg',
     'schools/pu/campusPosts/one/photo.jpg',
-    'groups/course/posts/one/photo.jpg',
     'lostfound/one/photo.jpg',
     'bugreports/one/photo.jpg',
   ]) {
