@@ -1055,6 +1055,21 @@ async function callAssistantModelWithTools({
     toolCallsTrace.push({ name, args, output });
   }
 
+  function stopToolRun(result, reason) {
+    return {
+      provider: result.provider,
+      model: result.model,
+      usage: result.usage,
+      content: '這次操作超出你的授權範圍，已停止。請確認帳號或助理權限後再試。',
+      toolCalls: [],
+      transcriptMessages: [],
+      toolsInvoked,
+      toolCallsTrace,
+      cards: [],
+      securityEvent: { action: 'stop_tool_run', reason },
+    };
+  }
+
   let currentMessages = [...messages];
 
   for (let round = 0; round < maxRounds; round += 1) {
@@ -1077,25 +1092,30 @@ async function callAssistantModelWithTools({
     // Cap tool_calls before scheduling work (no existing max_tool_calls in codebase).
     const scheduledCalls = result.toolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
 
+    // Inspect the whole bounded batch before allowing any sibling call to run.
+    const forbiddenCalls = scheduledCalls.filter((call) => !allowedToolNames.has(call?.function?.name));
+    if (forbiddenCalls.length > 0) {
+      for (const call of forbiddenCalls) {
+        const name = call?.function?.name;
+        recordToolCall(typeof name === 'string' ? name.slice(0, 80) : '', {}, {
+          success: false,
+          error: 'tool not available in this model request',
+          errorCode: 'tool_not_allowed',
+        });
+      }
+      return stopToolRun(result, 'tool_not_allowed');
+    }
+
     const assistantMsg = {
       role: 'assistant',
       content: result.content || null,
       tool_calls: scheduledCalls,
     };
 
+    let authorizationDenied = false;
     const toolResults = await Promise.all(
       scheduledCalls.map(async (call) => {
-        const name = call?.function?.name;
-        // Model output cannot grant access to tools omitted from this request.
-        if (!allowedToolNames.has(name)) {
-          const errOut = {
-            success: false,
-            error: 'tool not available in this model request',
-            errorCode: 'tool_not_allowed',
-          };
-          recordToolCall(typeof name === 'string' ? name.slice(0, 80) : '', {}, errOut);
-          return { role: 'tool', tool_call_id: call?.id, content: JSON.stringify(errOut) };
-        }
+        const name = call.function.name;
         recordToolName(name);
         const raw = call?.function?.arguments;
         const rawStr = raw == null ? '' : String(raw);
@@ -1133,6 +1153,12 @@ async function callAssistantModelWithTools({
             content: JSON.stringify(output),
           };
         } catch (e) {
+          if (e?.code === 'permission-denied' || e?.code === 'unauthenticated') {
+            authorizationDenied = true;
+            const errOut = { success: false, errorCode: 'authorization_denied' };
+            recordToolCall(name, {}, errOut);
+            return { role: 'tool', tool_call_id: call.id, content: JSON.stringify(errOut) };
+          }
           const errOut = { error: String(e?.message || e).slice(0, 200) };
           recordToolCall(name, args, errOut);
           return {
@@ -1144,6 +1170,7 @@ async function callAssistantModelWithTools({
       }),
     );
 
+    if (authorizationDenied) return stopToolRun(result, 'authorization_denied');
     currentMessages = [...currentMessages, assistantMsg, ...toolResults];
   }
 

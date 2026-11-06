@@ -5,14 +5,14 @@ on:
     paths:
       - 'backend/functions/agent/**'
       - 'scripts/security/assistant-defense-drill.test.cjs'
-      - 'scripts/security/fixtures/assistant-prompt-challenge.json'
+      - 'scripts/security/fixtures/assistant-prompt-challenge*.json'
       - '.github/workflows/assistant-defense-drill.yml'
   push:
     branches: [main]
     paths:
       - 'backend/functions/agent/**'
       - 'scripts/security/assistant-defense-drill.test.cjs'
-      - 'scripts/security/fixtures/assistant-prompt-challenge.json'
+      - 'scripts/security/fixtures/assistant-prompt-challenge*.json'
       - '.github/workflows/assistant-defense-drill.yml'
   schedule:
     - cron: '17 21 * * 1'
