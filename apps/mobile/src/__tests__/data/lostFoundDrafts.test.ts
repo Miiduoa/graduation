@@ -12,6 +12,7 @@ import {
   loadLostFoundDraft,
   loadLostFoundPending,
   lostFoundDraftStorageKey,
+  lostFoundPendingStorageKey,
   rememberCreateDocumentId,
   saveLostFoundDraft,
   saveLostFoundPending,
@@ -131,4 +132,20 @@ test('identity-gated clears never remove another intent or create index pointer'
   expect(await loadCreateDocumentId('alice', 'pu')).toBe('draft-1');
   await forgetCreateDocumentIdIfMatches('alice', 'pu', 'draft-1');
   expect(await loadCreateDocumentId('alice', 'pu')).toBeNull();
+});
+
+test.each([undefined, ''])('preserves contactInfo %p in stored retry fields', async (contactInfo) => {
+  const retryFields = { ...fields, contactInfo, reporterId: 'outside-the-form' };
+  await saveLostFoundPending(scope, {
+    version: 1,
+    action: 'create',
+    documentId: scope.itemKey,
+    fields: retryFields,
+  });
+
+  const raw = await AsyncStorage.getItem(lostFoundPendingStorageKey(scope));
+  const storedFields = JSON.parse(raw!).fields;
+  expect(storedFields).not.toHaveProperty('reporterId');
+  if (contactInfo === undefined) expect(storedFields).not.toHaveProperty('contactInfo');
+  else expect(storedFields.contactInfo).toBe('');
 });
