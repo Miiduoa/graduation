@@ -439,7 +439,6 @@ async function executeCampusAssistantCore({
     let modelBacked;
     try {
       modelBacked = await withModelTimeout(buildModelBackedAssistantResponse({
-      rawMessages,
       lastUserMessage,
       schoolId,
       actorRole,

@@ -5,7 +5,6 @@ const {
   callAssistantModelWithTools,
 } = require('../assistantAgent');
 
-const CAMPUS_ASSISTANT_MESSAGE_WINDOW = 20;
 const CAMPUS_ASSISTANT_MESSAGE_CHARS = 4000;
 const { tools } = require('../agent/tools/registry');
 const agentCases = require('../agent/cases.json');
@@ -114,7 +113,6 @@ function webSourcesToCitations(sources) {
 }
 
 async function buildModelBackedAssistantResponse({
-  rawMessages,
   lastUserMessage,
   schoolId,
   actorRole,
@@ -179,45 +177,15 @@ async function buildModelBackedAssistantResponse({
     writeFewShotBlock,
   });
 
-  const norm = (s) => String(s || '').trim();
   const userSlice = normalizeAssistantText(lastUserMessage).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS);
-
-  let history = [];
-
-  if (uid && sessionId) {
-    const prior = await loadConversationMessages(uid, sessionId);
-    if (prior.length > 0) {
-      history = prior.map((m) => {
-        const row = {
-          role: m.role,
-          content: m.content != null ? String(m.content).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS) : '',
-        };
-        if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-          row.tool_calls = m.tool_calls;
-        }
-        if (m.tool_call_id != null) {
-          row.tool_call_id = String(m.tool_call_id);
-        }
-        return row;
-      });
-      const last = history[history.length - 1];
-      if (!last || last.role !== 'user' || norm(last.content) !== norm(userSlice)) {
-        history.push({ role: 'user', content: userSlice });
-      }
-    }
-  }
-
-  if (history.length === 0) {
-    history = rawMessages
-      .slice(-CAMPUS_ASSISTANT_MESSAGE_WINDOW)
-      .filter((message) => message?.role === 'user' || message?.role === 'assistant')
-      .map((message) => ({
-        role: message.role,
-        content: normalizeAssistantText(message.content).slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS),
-      }));
-    if (history.length === 0 || history[history.length - 1].role !== 'user') {
-      history.push({ role: 'user', content: userSlice });
-    }
+  const prior = await loadConversationMessages(uid, sessionId, schoolId);
+  const history = prior.map((message) => ({
+    ...message,
+    content: String(message.content ?? '').slice(0, CAMPUS_ASSISTANT_MESSAGE_CHARS),
+  }));
+  const last = history.at(-1);
+  if (last?.role !== 'user' || last.content.trim() !== userSlice) {
+    history.push({ role: 'user', content: userSlice });
   }
 
   const modelResult = await callAssistantModelWithTools({
@@ -226,7 +194,7 @@ async function buildModelBackedAssistantResponse({
   });
 
   if (uid && sessionId && modelResult.transcriptMessages?.length) {
-    await saveConversationMessages(uid, sessionId, modelResult.transcriptMessages);
+    await saveConversationMessages(uid, sessionId, schoolId, modelResult.transcriptMessages);
   }
 
   if (!modelResult?.content) {

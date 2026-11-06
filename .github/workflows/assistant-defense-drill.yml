@@ -1,0 +1,40 @@
+name: Assistant prompt-injection drill
+
+on:
+  pull_request:
+    paths:
+      - 'backend/functions/agent/**'
+      - 'scripts/security/assistant-defense-drill.test.cjs'
+      - 'scripts/security/fixtures/assistant-prompt-challenge.json'
+      - '.github/workflows/assistant-defense-drill.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/functions/agent/**'
+      - 'scripts/security/assistant-defense-drill.test.cjs'
+      - 'scripts/security/fixtures/assistant-prompt-challenge.json'
+      - '.github/workflows/assistant-defense-drill.yml'
+  schedule:
+    - cron: '17 21 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '22.23.4'
+          package-manager-cache: false
+      - name: Replay synthetic probes without network access
+        run: |
+          # Create a disconnected network namespace, then drop privileges before running project code.
+          sudo unshare --net -- setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups --no-new-privs \
+            "$(command -v node)" --test scripts/security/assistant-defense-drill.test.cjs

@@ -16,12 +16,38 @@ const { executeCampusAssistantCore } = require('./executeCampusAssistantCore');
 const { runTool } = require('./tools/registry');
 const { getIntentWritePlan } = require('./intentWritePlan');
 const {
-  sanitizeAssistantMessagesForRuntime,
+  redactSensitiveText,
   isPromptInjectionAttempt,
   isThirdPartyPiiStoreAttempt,
   isSelfHarmRiskMessage,
   isWellbeingTopic,
 } = require('./safety');
+
+// Handle questions about a suspicious message locally; quoted or reported text
+// never grants authority to run a tool. Check separate instructions on their own.
+const quotedPassage = /「[^」]+」|『[^』]+』|“[^”]+”|«[^»]+»|"[^"]+"|(?<!\w)'[^']+'(?!\w)/u;
+const reportedSpeech = /(?:叫我|要我|要求我|讓我|让我)|\b(?:asked|asks|told|tells) me to\b/iu;
+const cyberRisk = /(?:釣魚|钓鱼|詐騙|诈骗|防詐|防诈|危險|危险|phishing|scam|dangerous|unsafe)/iu;
+const asksForAdvice = /(?:為何|为何|為什麼|为什么|怎麼|怎么|如何|哪|嗎|吗|是否|是不是|[?？])|\b(?:why|how|whether|should|is this|is that)\b/iu;
+const obeyInstruction = /(?:照做|照著做|照着做|照辦|照办)|\b(?:do (?:it|that)|follow (?:it|those instructions)|carry it out)\b/iu;
+
+function classifyPromptRisk(text) {
+  const quote = text.length <= 2000 ? text.match(quotedPassage)?.[0] : null;
+  const quotedAttack = quote && isPromptInjectionAttempt(quote.slice(1, -1));
+  if (!quotedAttack && !isPromptInjectionAttempt(text)) return null;
+  if (text.length > 2000) return 'blocked';
+
+  const outside = quotedAttack ? text.replace(quote, ' ') : text;
+  if (!cyberRisk.test(outside) || !asksForAdvice.test(outside)) return 'blocked';
+  const clauses = outside.split(/[。！？.!?；;，,\n]|(?:然後|然后|接著|接着|並且|并且|另外|也請|也请|\b(?:and then|also|instead)\b)/iu);
+  if (!quotedAttack && !clauses.some((clause) => reportedSpeech.test(clause))) return 'blocked';
+  for (const clause of clauses) {
+    if (obeyInstruction.test(clause)) return 'blocked';
+    if (!quotedAttack && reportedSpeech.test(clause)) continue;
+    if (isPromptInjectionAttempt(clause)) return 'blocked';
+  }
+  return 'safety_question';
+}
 
 function buildSafetyEnvelope({
   runId,
@@ -126,8 +152,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     windowMs: 5 * 60 * 1000,
   });
 
-  const incomingMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
-  const rawMessages = sanitizeAssistantMessagesForRuntime(incomingMessages);
+  const rawLastUserMessage = normalizeAssistantText(getLastUserMessage(request.data?.messages));
   const context =
     request.data?.context && typeof request.data.context === 'object' ? { ...request.data.context } : {};
   let sessionId = context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null;
@@ -136,9 +161,21 @@ async function runCampusAssistantWithAgentRuntime(request) {
     context.sessionId = sessionId;
   }
   const timeZone = context.timezone || 'Asia/Taipei';
-  const lastUserMessage = normalizeAssistantText(getLastUserMessage(rawMessages));
-  const rawLastUserMessage = normalizeAssistantText(getLastUserMessage(incomingMessages));
-  if (isPromptInjectionAttempt(rawLastUserMessage)) {
+  if (isSelfHarmRiskMessage(rawLastUserMessage)) {
+    return buildWellbeingEnvelope(runId, rawLastUserMessage);
+  }
+  const promptRisk = classifyPromptRisk(rawLastUserMessage);
+  if (promptRisk === 'safety_question') {
+    return buildSafetyEnvelope({
+      runId,
+      status: 'completed',
+      intentName: 'security_guidance',
+      intentSource: 'reported_request_guard',
+      content: '這類訊息可能想取得登入憑證，或讓助理跳過權限檢查。請用學校官網公布的聯絡方式查證。若已提供密碼或權杖，請從官方網站變更密碼或撤銷權杖，再向校方通報。',
+      evaluationReason: 'answered a reported suspicious request with local safety guidance',
+    });
+  }
+  if (promptRisk === 'blocked') {
     return buildSafetyEnvelope({
       runId,
       intentName: 'security_block',
@@ -160,9 +197,10 @@ async function runCampusAssistantWithAgentRuntime(request) {
       evaluationReason: 'blocked third-party PII storage attempt',
     });
   }
-  if (isSelfHarmRiskMessage(rawLastUserMessage) || isWellbeingTopic(rawLastUserMessage)) {
+  if (isWellbeingTopic(rawLastUserMessage)) {
     return buildWellbeingEnvelope(runId, rawLastUserMessage);
   }
+  const lastUserMessage = redactSensitiveText(rawLastUserMessage);
   let intentMeta = classifyIntent(lastUserMessage);
   if (intentMeta.name === 'submit_repair_request' && isDormRepairStatusQueryMessage(lastUserMessage)) {
     intentMeta = {
@@ -351,7 +389,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     ...request,
     data: {
       ...request.data,
-      messages: rawMessages,
+      messages: [{ role: 'user', content: lastUserMessage }],
       context,
     },
   };

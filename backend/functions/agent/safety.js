@@ -1,5 +1,7 @@
 'use strict';
 
+const { resemblesInjection } = require('./promptRisk');
+
 /**
  * PII redactor — 將敏感資訊以 placeholder 遮蔽。
  * 設計原則：寧可多遮，不放原文進 model context；audit log 也只記摘要。
@@ -41,23 +43,14 @@ function isThirdPartyPiiStoreAttempt(text) {
   return hasStoreVerb && hasOthersName && hasPii;
 }
 
-function sanitizeAssistantMessagesForRuntime(messages) {
-  if (!Array.isArray(messages)) return [];
-  return messages.map((message) => {
-    if (!message || typeof message !== 'object') return message;
-    if (typeof message.content !== 'string') return message;
-    return {
-      ...message,
-      content: redactSensitiveText(message.content),
-    };
-  });
-}
-
 /**
  * 偵測：Prompt 注入 / 角色越獄 / system prompt 洩漏 / 越權資料讀取。
  */
 function isPromptInjectionAttempt(text) {
-  const s = String(text ?? '').toLowerCase();
+  const s = String(text ?? '').normalize('NFKC')
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, '')
+    .replace(/\s+/gu, ' ')
+    .toLowerCase();
   return (
     /忽略.{0,12}(前面|以上|所有|系統|指示|規則|限制|提示)/.test(s) ||
     /(ignore|forget|discard|disregard|override|bypass).{0,24}(previous|above|system|instruction|rule|policy|prompt|guideline)/i.test(s) ||
@@ -65,7 +58,8 @@ function isPromptInjectionAttempt(text) {
     /\b(dan|jailbreak|越獄模式|無限制模式|developer mode|do anything now|sudo mode|root mode)\b/i.test(s) ||
     /(列出|顯示|dump|print|show|export|reveal).{0,24}(uid|使用者|所有用戶|所有使用者|token|secret|api[\s_-]?key|系統提示|password|帳密)/i.test(s) ||
     /(假裝你是|你現在是|pretend\s+you\s+are|act\s+as|roleplay\s+as).{0,30}(不受限|無限制|沒有規則|no\s+(?:rules|restrictions|limits))/i.test(s) ||
-    /(你不准回我不知道|你必須回答|你一定要|你不能拒絕|you must answer|you cannot refuse)/i.test(s)
+    /(你不准回我不知道|你必須回答|你一定要|你不能拒絕|you must answer|you cannot refuse)/i.test(s) ||
+    resemblesInjection(s)
   );
 }
 
@@ -95,7 +89,6 @@ function isWellbeingTopic(text) {
 
 module.exports = {
   redactSensitiveText,
-  sanitizeAssistantMessagesForRuntime,
   isPromptInjectionAttempt,
   isThirdPartyPiiStoreAttempt,
   isSelfHarmRiskMessage,
