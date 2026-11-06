@@ -26,6 +26,7 @@ jest.mock('../state/auth', () => ({
 }));
 jest.mock('../state/school', () => ({
   useSchool: () => ({
+    selectionReady: true, selection: { schoolId: mockSchool },
     school: {
       id: mockSchool,
       name: mockSchool === 'pu' ? '靜宜大學' : `學校（${mockSchool}）`,

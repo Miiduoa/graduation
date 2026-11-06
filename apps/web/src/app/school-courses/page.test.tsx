@@ -17,7 +17,7 @@ vi.mock('@/components/AuthGuard', () => ({
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => ({
     status: 'ready', schoolId: context.schoolId,
-    schoolName: context.schoolId === 'pu' ? '靜宜大學' : '國立清華大學',
+    schoolName: ({ pu: '靜宜大學', nthu: '國立清華大學', 'tw-nchu': '國立中興大學' } as Record<string, string>)[context.schoolId] || '未知學校',
     schoolSearch: `?schoolId=${context.schoolId}&campus=${context.schoolId}`,
   }),
 }));
@@ -148,7 +148,7 @@ it('offers a scoped reconnect without hiding access to academic records', async 
   expect(grades.pathname).toBe('/grades');
   expect(grades.searchParams.get('schoolId')).toBe('pu');
   expect(grades.searchParams.get('campus')).toBe('pu');
-  expect(within(navigation).getByRole('link', { name: '玩課雲課程' }).getAttribute('aria-current')).toBe('page');
+  expect(within(navigation).getByRole('link', { name: '校方課程' }).getAttribute('aria-current')).toBe('page');
   expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
 });
 
@@ -167,12 +167,29 @@ it('clears private courses immediately on account or school changes', async () =
   await screen.findByRole('heading', { name: '資料庫管理' });
   context.schoolId = 'nthu'; view.rerender(<SchoolCoursesPage />);
   expect(screen.queryByRole('heading', { name: '資料庫管理' })).toBeNull();
-  expect(screen.getByRole('heading', { name: '這所學校的課堂連線尚未接通' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '清大 eLearn ↗' }).getAttribute('href')).toBe('https://elearn.nthu.edu.tw/');
+  expect(screen.getByRole('link', { name: '清大 eeclass ↗' }).getAttribute('href')).toBe('https://eeclass.nthu.edu.tw/');
   expect(loadTronClassCourses).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('link', { name: '前往 WOW Class ↗' })).toBeNull();
   context.schoolId = 'pu'; context.uid = null; view.rerender(<SchoolCoursesPage />);
   expect(screen.getByText('需要學校帳號')).toBeTruthy();
   expect(loadTronClassCourses).toHaveBeenCalledTimes(1);
+});
+
+it('opens the selected catalog and carries that campus into personal timetable import', () => {
+  context.uid = null;
+  context.schoolId = 'tw-nchu';
+  const view = render(<SchoolCoursesPage />);
+  expect(screen.getByRole('link', { name: '中興大學課程查詢系統 ↗' }).getAttribute('href')).toBe('https://onepiece.nchu.edu.tw/cofsys/plsql/crseqry_home');
+  const href = screen.getByRole('link', { name: '匯入我的課表' }).getAttribute('href');
+  const url = new URL(href!, 'https://campus.local');
+  expect(url.pathname).toBe('/import');
+  expect(url.searchParams.get('kind')).toBe('timetable');
+  expect(url.searchParams.get('campus')).toBe('tw-nchu');
+  context.schoolId = 'other-campus';
+  view.rerender(<SchoolCoursesPage />);
+  expect(screen.queryByRole('link', { name: /中興|興大/ })).toBeNull();
+  expect(loadTronClassCourses).not.toHaveBeenCalled();
 });
 
 it('does not read school data for guests or while their account is unresolved', () => {
@@ -203,5 +220,5 @@ it('does not expose a response for another account even if a loader misbehaves',
 it('keeps the readonly course link when enabled', async () => {
   render(<SchoolLmsReadonlyProvider enabled={true}><SchoolCoursesPage /></SchoolLmsReadonlyProvider>);
   await screen.findByRole('heading', { name: '資料庫管理' });
-  expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100');
+  expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100&campus=pu');
 });

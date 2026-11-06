@@ -1,3 +1,4 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
@@ -18,7 +19,7 @@ import { assignmentFollowUp } from '../services/assignmentFollowUp';
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory';
   route?: string;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
@@ -101,7 +102,7 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
+  tool?: CampusAssistantMessage['tool'];
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
@@ -135,6 +136,10 @@ export async function askCampusAssistant(input: {
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
     const question = messages[messages.length - 1].content;
+    const contact = getSchoolContactAnswer(input.scope.schoolId, question, input.schoolName);
+    if (contact && !input.courseworkChoice) {
+      return { content: contact, source: 'device', hasActions: false, tool: 'school-directory' };
+    }
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;
