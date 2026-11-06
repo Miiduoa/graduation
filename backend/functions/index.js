@@ -37,6 +37,7 @@ const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
 const { createReplyToCampusStory } = require('./storyReplies');
 const { createDmAttachmentDelivery } = require('./dmAttachmentDelivery');
+const { createDmPhotos } = require('./dmPhotos');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const {
@@ -5863,7 +5864,13 @@ exports.clubAdmin = onCall({ region: REGION }, require('./clubAdmin').createClub
 exports.clubRoster = onCall({ region: REGION }, require('./clubRoster').createClubRoster({ db }));
 
 // Server-side three-document authorization; Cloud Storage Rules have a two-document cap.
-exports.dmAttachmentDelivery = onCall({ region: REGION }, createDmAttachmentDelivery({
+const attachmentServices = {
   db,
   getBucket: () => require('firebase-admin/storage').getStorage().bucket(),
-}));
+};
+const legacyAttachmentDelivery = createDmAttachmentDelivery(attachmentServices);
+const dmPhotos = createDmPhotos(attachmentServices);
+exports.dmAttachmentDelivery = onCall({ region: REGION }, request =>
+  request.data?.action === 'uploadPhoto' || request.data?.folder === 'photos'
+    ? dmPhotos.delivery(request) : legacyAttachmentDelivery(request));
+exports.sendDmPhoto = onCall({ region: REGION }, dmPhotos.send);

@@ -983,6 +983,17 @@ describe('firestore security rules', () => {
     await assertSucceeds(plain.set(message));
     await assertFails(plain.update({ storyReplyTo: origin }));
     await assertFails(alice.doc(path + '/messages/forged').set({ ...message, storyReplyTo: origin }));
+    const forgedPhoto = { type: 'image', attachmentPath: path + '/photos/draft/sent.png', attachmentGeneration: '1' };
+    await assertFails(alice.doc(path + '/messages/fake-photo').set({ ...message, ...forgedPhoto }));
+    await assertFails(plain.update(forgedPhoto));
+    const photoPath = path + '/messages/published-photo';
+    await seedFirestore(db => db.doc(photoPath).set({ ...message, ...forgedPhoto }));
+    const published = alice.doc(photoPath);
+    await assertFails(published.update({ recalledAt: null }));
+    await assertSucceeds(published.update({ recalledAt: require('firebase/firestore').serverTimestamp() }));
+    await assertFails(published.update({ recalledAt: null }));
+    await assertFails(published.update({ recalledAt: deleteField() }));
+    await assertSucceeds(bob.doc(photoPath).update({ readBy: ['alice', 'bob'] }));
     await assertSucceeds(bob.doc(path + '/messages/reply').get());
     await assertFails(other.doc(path + '/messages/reply').get());
   });

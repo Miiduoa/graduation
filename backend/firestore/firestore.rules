@@ -870,7 +870,7 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if isConversationMember(conversationId);
         allow create: if isConversationMember(conversationId)
-          && !('storyReplyTo' in request.resource.data)
+          && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
           && request.resource.data.senderId == request.auth.uid;
         allow update: if isConversationMember(conversationId)
           && request.resource.data.senderId == resource.data.senderId
@@ -882,6 +882,9 @@ service cloud.firestore {
             || (
               resource.data.senderId == request.auth.uid
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recalledAt', 'updatedAt'])
+              && (!('attachmentPath' in resource.data) || (
+                !('recalledAt' in resource.data) && request.resource.data.recalledAt == request.time
+              ))
             )
             || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'updatedAt'])
           );

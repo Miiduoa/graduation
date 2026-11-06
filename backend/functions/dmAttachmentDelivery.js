@@ -158,4 +158,4 @@ function createDmAttachmentDelivery({ db, getBucket, now = Date.now, newId = ran
   };
 }
 
-module.exports = { authorize, attachmentPath, createDmAttachmentDelivery, uploadLimit, MINUTE_MS };
+module.exports = { authorize, attachmentPath, createDmAttachmentDelivery, uploadLimit, MINUTE_MS, segment };
