@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   adoption:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
