@@ -28,11 +28,11 @@ import { shouldBlockForNoLogin, isDemoUid } from '../../services/demoSession';
 import { useSchool } from '../../state/school';
 import { getDb, isFirebaseMockMode } from '../../firebase';
 import {
-  fetchRecentCampusPosts,
   rankFeedPosts,
   toggleCampusPostLike,
   type CampusPostDoc,
 } from '../../services/feed';
+import { fetchCampusPostPage, type CampusPostCursor } from '../../services/feedPages';
 import { listBoards, listSubscribedBoardIds, type CampusBoard } from '../../services/boards';
 import { listFollowingIds, followUser, unfollowUser } from '../../services/follows';
 import {
@@ -46,7 +46,6 @@ import { CampusStoryViewer, useCampusStories } from './CampusStoryViewer';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 import {
   describeMobileFeedSearchRecovery,
-  mobileFeedHasMorePages,
   mobileFeedSearchScopeLabel,
   MOBILE_FEED_PAGE_SIZE,
   selectMobileFeedPosts,
@@ -147,9 +146,12 @@ function HomeFeedContent() {
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(uid, school?.id, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(uid, school?.id, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
-  const [pageLimit, setPageLimit] = useState(MOBILE_FEED_PAGE_SIZE);
+  const feedCursor = useRef<CampusPostCursor | null>(null);
+  const nextPageInFlight = useRef(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState('');
+  const [pageNotice, setPageNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -185,8 +187,13 @@ function HomeFeedContent() {
   const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
   const loadVersion = useRef(0);
 
-  const load = useCallback(async (limit: number = MOBILE_FEED_PAGE_SIZE) => {
+  const load = useCallback(async () => {
     const version = ++loadVersion.current;
+    feedCursor.current = null;
+    nextPageInFlight.current = false;
+    setLoadingMore(false);
+    setPageError('');
+    setPageNotice('');
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
@@ -195,28 +202,28 @@ function HomeFeedContent() {
         setSubscribedBoardIds(new Set());
         setStories([]);
         setHasMore(false);
-        setPageLimit(MOBILE_FEED_PAGE_SIZE);
         return;
       }
-      const [rows, boardList, subs, storyRows] = await Promise.all([
-        fetchRecentCampusPosts(school.id, undefined, limit),
+      const [page, boardList, subs, storyRows] = await Promise.all([
+        fetchCampusPostPage(school.id),
         listBoards(school.id, 80),
         listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }),
         listActiveStoriesForSchool(school.id, 80, { throwOnError: true }),
       ]);
-      if (loadVersion.current !== version) return;
+      if (!active.current || loadVersion.current !== version) return;
+      feedCursor.current = page.nextCursor;
       setAccessDenied(false);
-      setPageLimit(limit);
-      setHasMore(mobileFeedHasMorePages(rows.length, MOBILE_FEED_PAGE_SIZE) && rows.length >= limit);
-      setPosts(rankFeedPosts(rows, Math.max(80, limit)));
+      setHasMore(page.hasMore);
+      setPosts(rankFeedPosts(page.posts.filter((row) => row.schoolId === school.id), page.posts.length));
       setBoards(boardList);
       setSubscribedBoardIds(new Set(subs));
       setStories(storyRows);
     } catch (cause) {
-      if (loadVersion.current !== version) return;
+      if (!active.current || loadVersion.current !== version) return;
       setStories([]);
       if (isAccessDenied(cause)) {
         setAccessDenied(true);
+        feedCursor.current = null;
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
@@ -226,7 +233,7 @@ function HomeFeedContent() {
       }
       setLoadError('暫時無法更新校園動態。請確認網路與登入狀態，再試一次。');
     } finally {
-      if (loadVersion.current === version) {
+      if (active.current && loadVersion.current === version) {
         setLoading(false);
         setRefreshing(false);
         setLoadingMore(false);
@@ -238,14 +245,57 @@ function HomeFeedContent() {
     setRefreshing(true);
     setBookmarkRevision((prev) => prev + 1);
     setFollowingRevision((prev) => prev + 1);
-    await load(MOBILE_FEED_PAGE_SIZE);
+    await load();
   }, [load]);
 
   const onLoadMoreForSearch = useCallback(async () => {
-    if (loadingMore || refreshing || loading || isOffline) return;
+    const schoolId = school?.id;
+    const cursor = feedCursor.current;
+    if (!schoolId || !auth.user?.uid || !cursor || !hasMore ||
+        nextPageInFlight.current || refreshing || loading || isOffline || accessDenied) return;
+    const version = ++loadVersion.current;
+    nextPageInFlight.current = true;
     setLoadingMore(true);
-    await load(pageLimit + MOBILE_FEED_PAGE_SIZE);
-  }, [isOffline, load, loading, loadingMore, pageLimit, refreshing]);
+    setPageError('');
+    setPageNotice('');
+    try {
+      const page = await fetchCampusPostPage(schoolId, cursor);
+      if (!active.current || loadVersion.current !== version) return;
+      feedCursor.current = page.nextCursor;
+      setPosts((previous) => {
+        const ids = new Set(previous.map((row) => row.id));
+        const additions = page.posts.filter((row) => {
+          if (row.schoolId !== schoolId || ids.has(row.id)) return false;
+          ids.add(row.id);
+          return true;
+        });
+        return [...previous, ...rankFeedPosts(additions, additions.length)];
+      });
+      setHasMore(page.hasMore);
+      setPageNotice(page.hasMore
+        ? '已載入下一頁，可繼續找更早貼文。'
+        : '已讀到本次查詢的最後一頁。');
+    } catch (cause) {
+      if (!active.current || loadVersion.current !== version) return;
+      if (isAccessDenied(cause)) {
+        // A denied continuation must hide cards already read under the old membership.
+        feedCursor.current = null;
+        setPosts([]);
+        setHasMore(false);
+        setAccessDenied(true);
+        setPageNotice('');
+        setLoadError('校籍或貼文存取權限已變更，請重新驗證後載入。');
+      } else {
+        // Keep cards, search and the exact cursor so retry requests the same page.
+        setPageError('載入更多貼文失敗，已保留搜尋與原有貼文，請恢復連線後重試。');
+      }
+    } finally {
+      if (active.current && loadVersion.current === version) {
+        nextPageInFlight.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }, [school?.id, auth.user?.uid, hasMore, refreshing, loading, isOffline, accessDenied]);
 
   React.useEffect(() => {
     const uid = auth.user?.uid;
@@ -573,9 +623,9 @@ function HomeFeedContent() {
   useFocusEffect(useCallback(() => {
     if (returningFromComposer.current) {
       returningFromComposer.current = false;
-      void load(pageLimit);
+      void load();
     }
-  }, [load, pageLimit]));
+  }, [load]));
 
   const goStoryCompose = () => {
     returningFromComposer.current = true;
@@ -769,6 +819,11 @@ function HomeFeedContent() {
                     title={searchRecovery.title}
                     subtitle={searchRecovery.subtitle}
                   />
+                  {!!pageError && (
+                    <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+                      {pageError}
+                    </Text>
+                  )}
                   {loadingMore ? (
                     <View style={{ alignItems: 'center', paddingVertical: 8 }}>
                       <ActivityIndicator color={theme.colors.accent} />
@@ -780,7 +835,7 @@ function HomeFeedContent() {
                         key={action.id}
                         accessibilityRole="button"
                         accessibilityLabel={action.label}
-                        disabled={action.id === 'load-more' && (loadingMore || isOffline)}
+                        accessibilityState={{ disabled: action.id === 'load-more' && (loadingMore || isOffline) }}
                         onPress={() => runSearchRecovery(action.id)}
                         style={{
                           minHeight: 44,
@@ -825,6 +880,40 @@ function HomeFeedContent() {
                 }
               />
             )
+          }
+          ListFooterComponent={
+            !savedView && !discoveryUnavailable && (hasMore || loadingMore || pageError || pageNotice) && visiblePosts.length > 0 ? (
+              <View style={{ paddingHorizontal: 14, paddingVertical: 16, gap: 10 }}>
+                {!!pageError && (
+                  <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+                    {pageError}
+                  </Text>
+                )}
+                {!!pageNotice && (
+                  <Text accessibilityLiveRegion="polite" style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                    {pageNotice}
+                  </Text>
+                )}
+                {hasMore && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={pageError ? '重試載入此頁' : '載入更多貼文'}
+                    accessibilityState={{ disabled: loadingMore || isOffline }}
+                    onPress={() => void onLoadMoreForSearch()}
+                    style={{
+                      minHeight: 44, alignItems: 'center', justifyContent: 'center',
+                      borderRadius: theme.radius.md, backgroundColor: theme.colors.accent,
+                      opacity: loadingMore || isOffline ? 0.6 : 1,
+                    }}
+                  >
+                    <Text style={{ fontWeight: '700', color: theme.colors.onAccent }}>
+                      {loadingMore ? '正在載入…' : pageError ? '重試載入此頁' : '載入更多貼文'}
+                    </Text>
+                  </Pressable>
+                )}
+                {loadingMore && <ActivityIndicator color={theme.colors.accent} />}
+              </View>
+            ) : null
           }
           renderItem={({ item }) => {
             const uid = auth.user?.uid;

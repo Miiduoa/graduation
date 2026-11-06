@@ -1,0 +1,46 @@
+name: Campus mobile feed cursor regression
+
+on:
+  push:
+    branches: ['feat/social-feed-older-search-20261106']
+    paths:
+      - 'apps/mobile/src/screens/social/HomeFeedScreen.tsx'
+      - 'apps/mobile/src/services/feedPages.ts'
+      - 'apps/mobile/src/__tests__/feedPages.test.ts'
+      - 'apps/mobile/src/__tests__/SocialBrowsingScreens.test.tsx'
+      - '.github/workflows/campus-mobile-feed-cursor.yml'
+  pull_request:
+    branches: ['feat/story-media-in-place-retry-20261106', main]
+    paths:
+      - 'apps/mobile/src/screens/social/HomeFeedScreen.tsx'
+      - 'apps/mobile/src/services/feedPages.ts'
+      - 'apps/mobile/src/__tests__/feedPages.test.ts'
+      - 'apps/mobile/src/__tests__/SocialBrowsingScreens.test.tsx'
+      - '.github/workflows/campus-mobile-feed-cursor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-feed-cursor-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-feed:
+    name: Mobile feed cursor and retry
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - name: Install from lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Mobile feed screen and service regression
+        run: pnpm --filter mobile exec jest src/__tests__/SocialBrowsingScreens.test.tsx src/__tests__/feedDiscoveryModel.test.ts src/__tests__/feedPages.test.ts --runInBand --silent
+      - name: Mobile typecheck
+        run: pnpm --filter mobile typecheck

@@ -8,6 +8,7 @@ import { RealtimeSocialScreen } from '../screens/social/RealtimeSocialScreen';
 import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
+import { fetchCampusPostPage } from '../services/feedPages';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
 import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
@@ -58,6 +59,23 @@ jest.mock('../ui/components', () => ({
 }));
 jest.mock('../hooks/useNetworkStatus', () => ({
   useNetworkStatus: () => ({ isOffline: mockOffline }),
+}));
+// The existing screen regression fixtures supply arrays. Adapt them at the
+// SDK boundary; the separate service suite tests the real cursor query.
+jest.mock('../services/feedPages', () => ({
+  fetchCampusPostPage: jest.fn(async (schoolId: string, cursor: any = null) => {
+    const mockFeed = jest.requireMock('../services/feed').fetchRecentCampusPosts as jest.Mock;
+    const rows = await mockFeed(schoolId, undefined, cursor ? 120 : 60);
+    const page = cursor && rows.length > 60 ? rows.slice(60, 120) : rows;
+    return {
+      posts: page,
+      hasMore: page.length === 60,
+      nextCursor: page.length ? {
+        schoolId,
+        document: { id: page[page.length - 1].id, ref: { parent: { path: `schools/${schoolId}/campusPosts` } } },
+      } : null,
+    };
+  }),
 }));
 jest.mock('../services/feed', () => ({
   fetchRecentCampusPosts: jest.fn(),
@@ -331,7 +349,7 @@ test('empty search results offer load-more, clear-filters and board or realtime 
   expect(view.queryByText('找不到符合的貼文')).toBeTruthy();
 });
 
-test('empty search recovery load-more raises the fetch limit and navigation CTAs re-enter', async () => {
+test('empty search recovery continues a page cursor and navigation CTAs re-enter', async () => {
   const page = Array.from({ length: 60 }, (_, index) => ({
     ...post,
     id: `post-${index}`,
@@ -349,7 +367,7 @@ test('empty search recovery load-more raises the fetch limit and navigation CTAs
     .mockResolvedValueOnce(wider);
   const view = render(<HomeFeedScreen />);
   expect(await view.findByText('已載入 60 則 · 顯示 60 則')).toBeTruthy();
-  expect(fetchRecentCampusPosts).toHaveBeenLastCalledWith('pu', undefined, 60);
+  expect(fetchCampusPostPage).toHaveBeenLastCalledWith('pu');
 
   fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '完全找不到');
   expect(await view.findByLabelText('再載入更多後繼續找')).toBeTruthy();
@@ -357,7 +375,7 @@ test('empty search recovery load-more raises the fetch limit and navigation CTAs
   await act(async () => {
     fireEvent.press(view.getByLabelText('再載入更多後繼續找'));
   });
-  expect(fetchRecentCampusPosts).toHaveBeenLastCalledWith('pu', undefined, 120);
+  expect((jest.mocked(fetchCampusPostPage).mock.calls[1][1] as any).document.id).toBe('post-59');
   expect(await view.findByText('搜尋範圍：已載入的 120 篇貼文 · 顯示 0 則')).toBeTruthy();
 
   await act(async () => {
@@ -733,4 +751,88 @@ test('a late allowed read cannot restore the realtime grid after access is denie
   jest.mocked(listActiveStoriesForSchool).mockResolvedValueOnce([story]);
   await act(async () => fireEvent.press(retry));
   expect(view.getByText(story.text)).toBeTruthy();
+});
+
+
+test('mobile cursor finds a post after page 240 without replacing the old cards or the query', async () => {
+  const rows = (start: number) => Array.from({ length: 60 }, (_, i) => ({
+    ...post, id: `older-${start + i}`, title: `校園貼文 ${start + i}`,
+  }));
+  const cursor = (id: string) => ({
+    schoolId: 'pu', document: { id, ref: { parent: { path: 'schools/pu/campusPosts' } } },
+  });
+  const pages = [rows(0), rows(60), rows(120), rows(180), [{ ...post, id: 'target-241', title: '第241篇專題筆記' }]];
+  const sdk = jest.mocked(fetchCampusPostPage);
+  pages.forEach((items, i) => sdk.mockResolvedValueOnce({
+    posts: items,
+    hasMore: i < 4,
+    nextCursor: i < 4 ? cursor(items[items.length - 1].id) : null,
+  } as any));
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText('已載入 60 則 · 顯示 60 則')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '第241篇');
+  for (const count of [120, 180, 240]) {
+    await act(async () => fireEvent.press(view.getByLabelText('再載入更多後繼續找')));
+    expect(view.getByText(`搜尋範圍：已載入的 ${count} 篇貼文 · 顯示 0 則`)).toBeTruthy();
+  }
+  await act(async () => fireEvent.press(view.getByLabelText('再載入更多後繼續找')));
+  expect(view.getByText('第241篇專題筆記')).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('第241篇');
+  expect(sdk).toHaveBeenCalledTimes(5);
+  expect(sdk.mock.calls.slice(1).map((call) => (call[1] as any).document.id))
+    .toEqual(['older-59', 'older-119', 'older-179', 'older-239']);
+});
+
+test('mobile continuation failure retries exactly the same page and retains search', async () => {
+  const rows = Array.from({ length: 60 }, (_, i) => ({ ...post, id: `recent-${i}`, title: `第${i}篇` }));
+  const firstCursor = { schoolId: 'pu', document: { id: 'recent-59', ref: { parent: { path: 'schools/pu/campusPosts' } } } };
+  jest.mocked(fetchCampusPostPage)
+    .mockResolvedValueOnce({ posts: rows, nextCursor: firstCursor, hasMore: true } as any)
+    .mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }))
+    .mockResolvedValueOnce({ posts: [{ ...post, id: 'target', title: '找到了舊筆記' }], nextCursor: null, hasMore: false } as any);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText('已載入 60 則 · 顯示 60 則');
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '找到了');
+  await act(async () => fireEvent.press(view.getByLabelText('再載入更多後繼續找')));
+  expect(view.getByText('載入更多貼文失敗，已保留搜尋與原有貼文，請恢復連線後重試。')).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('找到了');
+  await act(async () => fireEvent.press(view.getByLabelText('再載入更多後繼續找')));
+  expect(view.getByText('找到了舊筆記')).toBeTruthy();
+  expect(jest.mocked(fetchCampusPostPage).mock.calls[1][1]).toBe(firstCursor);
+  expect(jest.mocked(fetchCampusPostPage).mock.calls[2][1]).toBe(firstCursor);
+});
+
+test('mobile continuation revocation hides previously loaded school posts', async () => {
+  const rows = Array.from({ length: 60 }, (_, i) => ({ ...post, id: `recent-${i}` }));
+  const firstCursor = { schoolId: 'pu', document: { id: 'recent-59', ref: { parent: { path: 'schools/pu/campusPosts' } } } };
+  jest.mocked(fetchCampusPostPage)
+    .mockResolvedValueOnce({ posts: rows, nextCursor: firstCursor, hasMore: true } as any)
+    .mockRejectedValueOnce(Object.assign(new Error('revoked'), { code: 'permission-denied' }));
+  const view = render(<HomeFeedScreen />);
+  await view.findByText('已載入 60 則 · 顯示 60 則');
+  await act(async () => fireEvent.press(view.getByLabelText('載入更多貼文')));
+  expect(view.getByText('校籍或貼文存取權限已變更，請重新驗證後載入。')).toBeTruthy();
+  expect(view.UNSAFE_getByType(FlatList).props.data).toEqual([]);
+  expect(view.queryByLabelText('載入更多貼文')).toBeNull();
+});
+
+test('mobile continuation refuses duplicate taps and ignores an old school response', async () => {
+  const rows = Array.from({ length: 60 }, (_, i) => ({ ...post, id: `recent-${i}` }));
+  const firstCursor = { schoolId: 'pu', document: { id: 'recent-59', ref: { parent: { path: 'schools/pu/campusPosts' } } } };
+  let resolveOld!: (value: any) => void;
+  jest.mocked(fetchCampusPostPage)
+    .mockResolvedValueOnce({ posts: rows, nextCursor: firstCursor, hasMore: true } as any)
+    .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+    .mockResolvedValueOnce({ posts: [{ ...post, schoolId: 'other', id: 'other', title: '他校新頁' }], nextCursor: null, hasMore: false } as any);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText('已載入 60 則 · 顯示 60 則');
+  fireEvent.press(view.getByLabelText('載入更多貼文'));
+  fireEvent.press(view.getByLabelText('載入更多貼文'));
+  expect(fetchCampusPostPage).toHaveBeenCalledTimes(2);
+  mockSchoolId = 'other';
+  view.rerender(<HomeFeedScreen />);
+  expect(await view.findByText('他校新頁')).toBeTruthy();
+  await act(async () => resolveOld({ posts: [{ ...post, id: 'old-late', title: '舊校延遲結果' }], hasMore: false, nextCursor: null }));
+  expect(view.queryByText('舊校延遲結果')).toBeNull();
+  expect(view.getByText('他校新頁')).toBeTruthy();
 });
