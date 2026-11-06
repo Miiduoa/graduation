@@ -75,6 +75,19 @@ it('posts signed fields before the file under the correct object and conceals th
   expect(sent.body.get('file').name).toBe('photo.jpg');
 });
 
+it('passes the approved first-message peer through photo upload and confirmation', async () => {
+  const initial = { ...scope, peerUid: 'bob' };
+  api.call.mockResolvedValueOnce({
+    data: { url, expiresAt: expiry(), path: draft, method: 'POST', mediaId: 'abc', fields: { key: draft } },
+  }).mockResolvedValueOnce({ data: { conversationId: scope.conversationId, messageId: scope.messageId } });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+  const s = signal();
+  const uploaded = await uploadDmPhoto(initial, file(), s);
+  await confirmDmPhoto(initial, uploaded, s);
+  expect(api.call.mock.calls[0][0]).toMatchObject({ ...initial, action: 'uploadPhoto' });
+  expect(api.call.mock.calls[1][0]).toEqual({ ...initial, path: draft });
+});
+
 it('never uploads after the viewer changes or to a grant with the wrong object key', async () => {
   const post = vi.fn();
   vi.stubGlobal('fetch', post);

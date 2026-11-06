@@ -1,7 +1,7 @@
 const { createHash } = require('node:crypto');
-const { FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { MINUTE_MS, segment } = require('./dmAttachmentDelivery');
+const { dmMessageSession, inDmConversation, writeDmMessage } = require('./dmConversations');
 
 const filenames = new Map([
   ['image/jpeg', 'photo.jpg'],
@@ -13,72 +13,11 @@ const denied = () => new HttpsError('permission-denied', '目前無法存取這�
 const invalid = () =>
   new HttpsError('invalid-argument', '請選擇小於 10 MB 的 JPG、PNG 或 WebP 照片。');
 
-function photoSession(request) {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', '請先登入。');
-  const { conversationId, schoolId, viewerUid, messageId } = request.data || {};
-  if (viewerUid !== uid) throw denied();
-  if (
-    ![uid, conversationId, schoolId].every(segment) ||
-    typeof messageId !== 'string' ||
-    !/^[A-Za-z0-9_-]{20,64}$/.test(messageId)
-  )
-    throw invalid();
-  return { uid, conversationId, schoolId, messageId };
-}
-
 function photoFolder(conversationId, senderId, messageId) {
   const mediaId = createHash('sha256')
     .update(JSON.stringify([senderId, messageId]))
     .digest('hex');
   return `conversations/${conversationId}/photos/${mediaId}`;
-}
-
-// Read membership, blocking and the message in the same transaction as any inbox update.
-function inPhotoThread(db, session, action) {
-  const { uid, conversationId, schoolId, messageId } = session;
-  const thread = db.collection('conversations').doc(conversationId);
-  const message = thread.collection('messages').doc(messageId);
-  return db.runTransaction(async (tx) => {
-    const [threadSnap, messageSnap] = await tx.getAll(thread, message);
-    const row = threadSnap.data();
-    const ids = row?.memberIds;
-    if (
-      row?.type !== 'dm' ||
-      row.schoolId !== schoolId ||
-      !Array.isArray(ids) ||
-      ids.length !== 2 ||
-      !ids.includes(uid) ||
-      ids[0] === ids[1] ||
-      !ids.every(segment)
-    )
-      throw denied();
-    const [first, second] = ids.map((id) => db.collection('users').doc(id));
-    const members = db.collection('schools').doc(schoolId).collection('members');
-    const blocks = db.collection('friendBlocks');
-    const [a, b, ma, mb, ...blocked] = await tx.getAll(
-      first,
-      second,
-      members.doc(ids[0]),
-      members.doc(ids[1]),
-      first.collection('blockedUsers').doc(ids[1]),
-      second.collection('blockedUsers').doc(ids[0]),
-      blocks.doc(`${ids[0]}_${ids[1]}`),
-      blocks.doc(`${ids[1]}_${ids[0]}`),
-    );
-    if (
-      ![a, b].every(
-        (snap) =>
-          snap.data()?.schoolId === schoolId &&
-          snap.data().status !== 'deleted' &&
-          snap.data().accountDeletionInProgress !== true,
-      ) ||
-      ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
-      blocked.some((snap) => snap.exists)
-    )
-      throw denied();
-    return action(messageSnap.data(), tx, thread, message);
-  });
 }
 
 function generation(metadata) {
@@ -149,7 +88,7 @@ async function publishPhoto(bucket, path, publishedPath, mime, session) {
 
 function createDmPhotos({ db, getBucket, now = Date.now }) {
   async function delivery(request) {
-    const session = photoSession(request);
+    const session = dmMessageSession(request);
     const { uid, conversationId, messageId } = session;
     const { action, size, fileName, contentType, mediaId } = request.data;
     if (action === 'uploadPhoto') {
@@ -161,9 +100,14 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
         size > MAX_BYTES
       )
         throw invalid();
-      await inPhotoThread(db, session, (existing) => {
-        if (existing) throw denied();
-      });
+      await inDmConversation(
+        db,
+        session,
+        ({ existing }) => {
+          if (existing) throw denied();
+        },
+        { allowMissing: true },
+      );
       const folder = photoFolder(conversationId, uid, messageId);
       const path = `${folder}/${fileName}`;
       const fields = {
@@ -197,7 +141,7 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
     )
       throw invalid();
     const path = `conversations/${conversationId}/photos/${mediaId}/${fileName}`;
-    const version = await inPhotoThread(db, session, (row) => {
+    const version = await inDmConversation(db, session, ({ existing: row }) => {
       if (
         row?.type !== 'image' ||
         row.recalledAt ||
@@ -215,7 +159,7 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
   }
 
   async function send(request) {
-    const session = photoSession(request);
+    const session = dmMessageSession(request);
     const { uid, conversationId, messageId } = session;
     const { path } = request.data;
     const folder = photoFolder(conversationId, uid, messageId);
@@ -223,46 +167,38 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
     if (!entry) throw invalid();
     const publishedPath = folder + '/' + entry[1].replace('photo.', 'sent.');
     const receipt = { conversationId, messageId };
-    function replay(row) {
+    function replay({ existing: row }) {
       if (!row) return false;
       if (row.senderId !== uid || row.type !== 'image' || row.attachmentPath !== publishedPath) {
         throw new HttpsError('already-exists', '這個訊息編號已使用。');
       }
       return true;
     }
-    if (await inPhotoThread(db, session, replay)) return receipt;
+    if (await inDmConversation(db, session, replay, { allowMissing: true })) return receipt;
     let published;
     try {
       published = await publishPhoto(getBucket(), path, publishedPath, entry[0], session);
     } catch (error) {
       // A parallel attempt can finish and remove the staging object before this read.
       if (Number(error?.code) !== 404) throw error;
-      if (await inPhotoThread(db, session, replay)) return receipt;
+      if (await inDmConversation(db, session, replay, { allowMissing: true })) return receipt;
       throw new HttpsError('not-found', '找不到已上傳的照片。');
     }
     const { version, draft } = published;
-    await inPhotoThread(db, session, (row, tx, thread, message) => {
-      if (replay(row)) return;
-      const stamp = FieldValue.serverTimestamp();
-      const photo = {
-        conversationId,
-        senderId: uid,
-        type: 'image',
-        content: '照片',
-        attachmentPath: publishedPath,
-        attachmentGeneration: version,
-        readBy: [uid],
-        createdAt: stamp,
-      };
-      tx.create(message, photo);
-      tx.update(thread, {
-        lastMessage: { id: messageId, ...photo },
-        lastMessageText: '照片',
-        lastMessageSenderId: uid,
-        lastMessageAt: stamp,
-        updatedAt: stamp,
-      });
-    });
+    await inDmConversation(
+      db,
+      session,
+      (context) => {
+        if (replay(context)) return;
+        writeDmMessage(context, session, {
+          type: 'image',
+          content: '照片',
+          attachmentPath: publishedPath,
+          attachmentGeneration: version,
+        });
+      },
+      { allowMissing: true },
+    );
     // The committed message always points to the immutable copy. A cleanup failure
     // cannot turn a delivered message into a failed send or delete a subsequent upload.
     await draft.delete().catch(() => {});

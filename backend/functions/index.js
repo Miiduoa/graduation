@@ -38,6 +38,7 @@ const { createSubmitProductFeedback } = require('./productFeedback');
 const { createReplyToCampusStory } = require('./storyReplies');
 const { createDmAttachmentDelivery } = require('./dmAttachmentDelivery');
 const { createDmPhotos } = require('./dmPhotos');
+const { createDmConversations } = require('./dmConversations');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const {
@@ -5870,6 +5871,9 @@ const attachmentServices = {
 };
 const legacyAttachmentDelivery = createDmAttachmentDelivery(attachmentServices);
 const dmPhotos = createDmPhotos(attachmentServices);
+const dmConversations = createDmConversations({ db });
+exports.prepareDmConversation = onCall({ region: REGION }, dmConversations.prepare);
+exports.sendDmText = onCall({ region: REGION }, dmConversations.sendText);
 exports.dmAttachmentDelivery = onCall({ region: REGION }, request =>
   request.data?.action === 'uploadPhoto' || request.data?.folder === 'photos'
     ? dmPhotos.delivery(request) : legacyAttachmentDelivery(request));

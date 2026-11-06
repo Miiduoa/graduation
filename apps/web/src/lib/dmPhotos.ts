@@ -6,6 +6,7 @@ export type PhotoScope = {
   schoolId: string;
   conversationId: string;
   messageId: string;
+  peerUid?: string;
 };
 const extensions = new Map([
   ['image/jpeg', 'jpg'],

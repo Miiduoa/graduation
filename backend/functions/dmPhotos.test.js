@@ -1,4 +1,5 @@
 const { createDmPhotos } = require('./dmPhotos');
+const { createDmConversations } = require('./dmConversations');
 const { transactionStore } = require('./testSupport/transactionStore');
 const { initializeApp, cert, deleteApp } = require('firebase-admin/app');
 const { getStorage } = require('firebase-admin/storage');
@@ -8,9 +9,16 @@ const messageId = 'photo-message-for-test-01';
 const session = { schoolId: 'pu', conversationId: 'thread', viewerUid: 'alice', messageId };
 const png = Buffer.from('89504e470d0a1a0a0000000d', 'hex');
 
-function fixture() {
+function fixture({ conversationId = 'thread', createThread = true } = {}) {
   const store = transactionStore([
-    ['conversations/thread', { type: 'dm', schoolId: 'pu', memberIds: ['bob', 'alice'] }],
+    ...(createThread
+      ? [
+          [
+            'conversations/' + conversationId,
+            { type: 'dm', schoolId: 'pu', memberIds: ['bob', 'alice'] },
+          ],
+        ]
+      : []),
     ...['alice', 'bob', 'other'].flatMap((uid) => [
       ['users/' + uid, { schoolId: 'pu' }],
       ['schools/pu/members/' + uid, { status: 'active' }],
@@ -53,7 +61,7 @@ function fixture() {
   const bucket = { file };
   const services = createDmPhotos({ db: store.db, getBucket: () => bucket });
   const invoke = (handler, uid, data) =>
-    handler({ auth: { uid }, data: { ...session, viewerUid: uid, ...data } });
+    handler({ auth: { uid }, data: { ...session, conversationId, viewerUid: uid, ...data } });
   const upload = (data = {}) =>
     invoke(services.delivery, 'alice', {
       action: 'uploadPhoto',
@@ -199,6 +207,144 @@ test('rechecks both students at publication and issuance, including block and sc
   }
   f.docs.set('schools/pu/members/alice', { status: 'inactive' });
   await expect(f.read(mediaId)).rejects.toMatchObject({ code: 'permission-denied' });
+});
+
+test('a first photo creates the canonical thread only when it is sent with the validated peer', async () => {
+  const conversationId = 'dm_pu_alice_bob';
+  const thread = 'conversations/' + conversationId;
+  const f = fixture({ conversationId, createThread: false });
+  await expect(f.upload()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(f.policy).not.toHaveBeenCalled();
+  const { path, mediaId } = await f.upload({ peerUid: 'bob' });
+  expect(f.docs.has(thread)).toBe(false);
+  await expect(f.read(mediaId, 'bob', { peerUid: 'alice' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  f.stage(path);
+  await expect(f.send(path)).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(f.copy).not.toHaveBeenCalled();
+  expect(await f.send(path, { peerUid: 'bob' })).toEqual({ conversationId, messageId });
+  expect(f.docs.get(thread)).toMatchObject({
+    type: 'dm',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
+    lastMessage: { id: messageId, type: 'image', content: '照片' },
+  });
+  expect(f.docs.get(`${thread}/messages/${messageId}`).attachmentPath).toBe(
+    path.replace('photo.', 'sent.'),
+  );
+  expect(await f.read(mediaId)).toHaveProperty('url');
+  expect(await f.send(path, { peerUid: 'bob' })).toEqual({ conversationId, messageId });
+});
+
+test.each([
+  { peerUid: 'alice' },
+  { peerUid: 'other' },
+  { peerUid: 'bob', conversationId: 'forged-thread' },
+])('new photo mode rejects a forged pair or conversation before signing %j', async (data) => {
+  const f = fixture({ conversationId: 'dm_pu_alice_bob', createThread: false });
+  await expect(f.upload(data)).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(f.policy).not.toHaveBeenCalled();
+  expect([...f.docs.keys()].some((key) => key.startsWith('conversations/'))).toBe(false);
+});
+
+test('a first photo rechecks changed access after copying and leaves no empty thread on denial', async () => {
+  const conversationId = 'dm_pu_alice_bob';
+  const thread = 'conversations/' + conversationId;
+  const f = fixture({ conversationId, createThread: false });
+  const { path } = await f.upload({ peerUid: 'bob' });
+  f.stage(path);
+  const copy = f.copy.getMockImplementation();
+  f.copy.mockImplementationOnce(async (...args) => {
+    await copy(...args);
+    f.docs.set('friendBlocks/bob_alice', {});
+  });
+  await expect(f.send(path, { peerUid: 'bob' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  expect(f.docs.has(thread)).toBe(false);
+  expect(f.docs.has(`${thread}/messages/${messageId}`)).toBe(false);
+  f.docs.delete('friendBlocks/bob_alice');
+  await f.send(path, { peerUid: 'bob' });
+  expect(f.docs.get(thread).lastMessage.id).toBe(messageId);
+});
+
+test('a failed first photo commit can retry without creating an empty inbox entry', async () => {
+  const conversationId = 'dm_pu_alice_bob';
+  const thread = 'conversations/' + conversationId;
+  const f = fixture({ conversationId, createThread: false });
+  const { path } = await f.upload({ peerUid: 'bob' });
+  f.stage(path);
+  const copy = f.copy.getMockImplementation();
+  f.copy.mockImplementationOnce(async (...args) => {
+    await copy(...args);
+    f.failNextCommit();
+  });
+  await expect(f.send(path, { peerUid: 'bob' })).rejects.toThrow('commit unavailable');
+  expect(f.docs.has(thread)).toBe(false);
+  expect(f.docs.has(`${thread}/messages/${messageId}`)).toBe(false);
+  expect(await f.send(path, { peerUid: 'bob' })).toEqual({ conversationId, messageId });
+});
+
+test('a text delivered during the first photo upload shares the same thread and preserves newer previews on replay', async () => {
+  const conversationId = 'dm_pu_alice_bob';
+  const thread = 'conversations/' + conversationId;
+  const f = fixture({ conversationId, createThread: false });
+  const text = createDmConversations({ db: f.db });
+  const request = {
+    auth: { uid: 'alice' },
+    data: {
+      viewerUid: 'alice',
+      schoolId: 'pu',
+      peerUid: 'bob',
+      conversationId,
+      messageId: 'first-text-message-00001',
+      content: '這是剛才的照片',
+    },
+  };
+  const { path } = await f.upload({ peerUid: 'bob' });
+  f.stage(path);
+  const copy = f.copy.getMockImplementation();
+  f.copy.mockImplementationOnce(async (...args) => {
+    await copy(...args);
+    await text.sendText(request);
+  });
+  await f.send(path, { peerUid: 'bob' });
+  const latest = f.docs.get(thread);
+  expect(latest).toMatchObject({ memberIds: ['alice', 'bob'], lastMessage: { id: messageId } });
+  expect(await text.sendText(request)).toEqual({
+    conversationId,
+    messageId: request.data.messageId,
+  });
+  expect(f.docs.get(thread)).toEqual(latest);
+  expect([...f.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(2);
+  expect(
+    [...f.docs.keys()].filter(
+      (key) => key.startsWith('conversations/') && !key.includes('/messages/'),
+    ),
+  ).toHaveLength(1);
+});
+
+test('an orphan photo cannot be used to prepare another upload, read or recover a missing conversation', async () => {
+  const conversationId = 'dm_pu_alice_bob';
+  const thread = 'conversations/' + conversationId;
+  const f = fixture({ conversationId, createThread: false });
+  const { path, mediaId } = await f.upload({ peerUid: 'bob' });
+  f.docs.set(`${thread}/messages/${messageId}`, {
+    senderId: 'alice',
+    type: 'image',
+    attachmentPath: path.replace('photo.', 'sent.'),
+  });
+  await expect(f.upload({ peerUid: 'bob' })).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(f.send(path, { peerUid: 'bob' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  await expect(f.read(mediaId, 'bob', { peerUid: 'alice' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  expect(f.docs.has(thread)).toBe(false);
+  expect(f.copy).not.toHaveBeenCalled();
+  expect(f.sign).not.toHaveBeenCalled();
 });
 
 test('the Google SDK signs the exact stage key, file type, size, uploader and request ID', async () => {

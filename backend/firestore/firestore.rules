@@ -115,6 +115,20 @@ service cloud.firestore {
         && isCurrentSchoolMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.get('schoolId', ''));
     }
 
+    function isDirectMessageUnblocked(conversationId) {
+      let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+      let members = conversation.get('memberIds', []);
+      return conversation.get('type', '') != 'dm' || (
+        members is list && members.size() == 2
+        && members[0] is string && members[1] is string
+        && members[0] != members[1]
+        && !exists(/databases/$(database)/documents/users/$(members[0])/blockedUsers/$(members[1]))
+        && !exists(/databases/$(database)/documents/users/$(members[1])/blockedUsers/$(members[0]))
+        && !exists(/databases/$(database)/documents/friendBlocks/$(members[0] + '_' + members[1]))
+        && !exists(/databases/$(database)/documents/friendBlocks/$(members[1] + '_' + members[0]))
+      );
+    }
+
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
     function profileName(uid) {
       return exists(/databases/$(database)/documents/users/$(uid))
@@ -863,6 +877,13 @@ service cloud.firestore {
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.memberIds
         && isCurrentSchoolMember(resource.data.get('schoolId', ''))
+        && request.resource.data.get('type', '') == resource.data.get('type', '')
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'lastMessage', 'lastMessageText', 'lastMessageType',
+            'lastMessageAt', 'lastMessageSenderId', 'updatedAt'
+          ]) || isDirectMessageUnblocked(conversationId)
+        )
         && request.resource.data.schoolId == resource.data.schoolId
         && request.resource.data.memberIds == resource.data.memberIds;
       allow delete: if false;
@@ -870,6 +891,7 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if isConversationMember(conversationId);
         allow create: if isConversationMember(conversationId)
+          && isDirectMessageUnblocked(conversationId)
           && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
           && request.resource.data.senderId == request.auth.uid;
         allow update: if isConversationMember(conversationId)
@@ -1925,7 +1947,8 @@ service cloud.firestore {
       allow read: if isConversationMember(resource.data.conversationId);
       allow create: if isSignedIn()
         && request.resource.data.senderId == request.auth.uid
-        && isConversationMember(request.resource.data.conversationId);
+        && isConversationMember(request.resource.data.conversationId)
+        && isDirectMessageUnblocked(request.resource.data.conversationId);
       allow update: if isConversationMember(resource.data.conversationId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'updatedAt'])
         && request.auth.uid in request.resource.data.readBy;

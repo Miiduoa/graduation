@@ -31,10 +31,14 @@ export function DmPhotoComposer({
   thread,
   barStyle,
   children,
+  onSent,
+  hasConfirmedPhoto,
 }: {
   thread: PhotoThread | null;
   barStyle: StyleProp<ViewStyle>;
   children: React.ReactNode;
+  onSent?: () => void;
+  hasConfirmedPhoto?: (scope: PhotoScope, stagedPath: string) => boolean;
 }) {
   const s = useThemeStyleSheet(styles);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -43,6 +47,14 @@ export function DmPhotoComposer({
   const [sent, setSent] = useState(false);
   const request = useRef<AbortController | null>(null);
   useLayoutEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    if (pending || !error || !thread || !draft?.uploadedPath) return;
+    if (!hasConfirmedPhoto?.({ ...thread, messageId: draft.messageId }, draft.uploadedPath)) return;
+    setDraft(null);
+    setError('');
+    setSent(true);
+    onSent?.();
+  }, [pending, error, thread, draft, hasConfirmedPhoto, onSent]);
 
   async function pick() {
     if (!thread || request.current) return;
@@ -75,21 +87,25 @@ export function DmPhotoComposer({
     setError('');
     setPending(true);
     const scope = { ...thread, messageId: draft.messageId };
+    let path = draft.uploadedPath;
     try {
-      const path =
-        draft.uploadedPath ?? (await uploadDmPhoto(scope, draft.photo, controller.signal));
+      if (!path) path = await uploadDmPhoto(scope, draft.photo, controller.signal);
       if (controller.signal.aborted) return;
       if (!draft.uploadedPath) setDraft({ ...draft, uploadedPath: path });
       await confirmDmPhoto(scope, path, controller.signal);
-      if (controller.signal.aborted) return;
-      setDraft(null);
-      setSent(true);
     } catch {
-      if (!controller.signal.aborted) setError('尚未確認送達，照片已保留。');
+      if (controller.signal.aborted || !path || !hasConfirmedPhoto?.(scope, path)) {
+        if (!controller.signal.aborted) setError('尚未確認送達，照片已保留。');
+        return;
+      }
     } finally {
       request.current = null;
       if (!controller.signal.aborted) setPending(false);
     }
+    if (controller.signal.aborted) return;
+    setDraft(null);
+    setSent(true);
+    onSent?.();
   }
 
   return (
