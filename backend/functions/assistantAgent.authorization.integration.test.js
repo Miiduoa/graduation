@@ -74,34 +74,41 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-test('an actual role-denied tool stops the batch before another real tool can read data', async () => {
-  const dispatch = jest.spyOn(registry, 'runTool');
-  const fetchImpl = model([
-    call('quiz', 'draftQuizFromBank', {
-      schoolId: 'other-school',
-      bankId: 'private-bank',
-      courseSpaceId: 'private-course',
-      title: 'private-draft-title',
-      count: 1,
-    }),
-    call('menu', 'getCafeteriaMenu', { cafeteriaId: 'later-read' }),
-  ]);
+test.each(['draftQuizFromBank', 'upsertQuestionBank', 'upsertRubric'])(
+  'the retired %s writer stops the batch before any real tool can read data',
+  async (name) => {
+    const dispatch = jest.spyOn(registry, 'runTool');
+    const fetchImpl = model([
+      call('quiz', name, {
+        schoolId: 'other-school',
+        bankId: 'private-bank',
+        courseSpaceId: 'private-course',
+        title: 'private-draft-title',
+        count: 1,
+      }),
+      call('menu', 'getCafeteriaMenu', { cafeteriaId: 'later-read' }),
+    ]);
 
-  const result = await run(fetchImpl);
+    const result = await run(fetchImpl);
 
-  expect(dispatch).toHaveBeenCalledTimes(1);
-  expect(result.securityEvent).toEqual({ action: 'stop_tool_run', reason: 'authorization_denied' });
-  expect(result.toolCallsTrace).toEqual([
-    { name: 'draftQuizFromBank', args: {}, output: { success: false, errorCode: 'authorization_denied' } },
-  ]);
-  expect(result.transcriptMessages).toEqual([]);
-  expect(result.cards).toEqual([]);
-  expect(fetchImpl).toHaveBeenCalledTimes(1);
-  expect(mockReads).toEqual([permissionPath]);
-  expect(mockWrite).not.toHaveBeenCalled();
-  expect(JSON.stringify(result)).not.toContain('private-');
-  expect(globalThis.fetch).not.toHaveBeenCalled();
-});
+    expect(registry.byName.has(name)).toBe(false);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).tools.some((tool) => tool.function.name === name)).toBe(false);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(result.securityEvent).toEqual({ action: 'stop_tool_run', reason: 'tool_not_allowed' });
+    expect(result.toolCallsTrace).toEqual([
+      { name, args: {}, output: {
+        success: false, errorCode: 'tool_not_allowed', error: 'tool not available in this model request',
+      } },
+    ]);
+    expect(result.transcriptMessages).toEqual([]);
+    expect(result.cards).toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mockReads).toEqual([permissionPath]);
+    expect(mockWrite).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('private-');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  },
+);
 
 test('revoking order permission after tool publication stops dispatch and a later request can recover', async () => {
   mockDocuments.set(permissionPath, { createOrder: true });

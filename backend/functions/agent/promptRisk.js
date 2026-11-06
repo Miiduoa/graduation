@@ -56,31 +56,38 @@ const examples = {
     'how long should an administrator passphrase be',
     '請說明管理員密碼的長度要求',
     'do not suspend your safety restrictions',
+    'write the steps for rotating a private signing key',
+    'do not write the private signing key in your reply',
   ],
 };
 
 // Extract intent and object separately so paraphrases in either language can
 // share evidence with an example. The labels come only from the fixed corpus.
 const features = {
-  credential: /credential|password|passphrase|(?:signing|private|secret) key|access token|bearer (?:token|string)|密碼|通行碼|通關(?:字串|密語)|憑證|權杖|私鑰|金鑰/u,
-  privileged: /admin|private|server|production|\broot\b|bearer (?:token|string)|管理員|後台|伺服器|私鑰/u,
-  otherPerson: /another (?:student|user)|someone else|(?:另一|另外一)(?:位|名|個)?(?:同學|學生|使用者)|其他同學|別人|他人的/u,
-  transfer: /\b(?:send|paste|give|copy|forward|tell|output|return|email|slip|insert|embed)\b|傳給|貼到|貼給|複製到|交給|寄給|寄到|丟給|給我|列印|匯出|唸出|念出|讀出|(?:密碼|通行碼|權杖|私鑰)(?:的?(?:值|內容))?是(?:多少|什麼)/u,
+  credential: /credential|password|passphrase|(?:signing|private|secret) key|secret (?:used )?to sign|access token|bearer (?:token|string)|密碼|通行碼|通關(?:字串|密語)|憑證|權杖|私鑰|金鑰/u,
+  privileged: /admin|private|server|production|database|secret (?:used )?to sign|\broot\b|bearer (?:token|string)|管理(?:員|帳號)|後台|伺服器|資料庫|私(?:鑰|密)/u,
+  otherPerson: /(?:another|the other) (?:student|user)|someone else|(?:另一|另外一)(?:位|名|個)?(?:同學|學生|使用者)|其他同學|別人|他人的/u,
+  transfer: /\b(?:send|paste|give|copy|forward|tell|output|return|email|slip|insert|embed|write|read|include|retrieve)\b|傳給|貼到|貼給|貼上|告訴|複製到|交給|寄給|寄到|丟給|給我|列印|匯出|唸出|念出|讀出|(?:密碼|通行碼|權杖|私鑰)(?:的?(?:值|內容))?是(?:多少|什麼)/u,
   recipient: /\bme\b|into (?:this|your)|to my|給我|回覆裡|我的信箱/u,
-  instruction: /instruction|command|safeguard|safety check|guardrail|polic(?:y|ies)|restriction|指令|安全規範|安全限制|政策檢查|防護|命令|你(?:的|(?:原本)?(?:該|應該|必須|要)遵?守的)(?:規矩|規則)/u,
+  instruction: /instruction|command|safeguard|safety check|guardrail|polic(?:y|ies)|restriction|checks?.{0,100}(?:tools?|permissions?)|指令|安全規範|安全限制|政策檢查|防護|命令|系統規則|行為規範|平台.{0,12}約束|工具使用的限制|你(?:的|(?:原本)?(?:該|應該|必須|要)遵?守的)(?:規矩|規則)/u,
   override: new RegExp([
     '(?:set|put) .{0,40}aside',
     '(?:forget|ignore|skip) (?:(?:every|prior|previous|all|your|the|current|existing|safety) ){0,5}(?:safeguard|check|restriction|guardrail)',
-    '(?:treat|regard|consider).{0,80}(?:void|invalid|optional|nonexistent)',
+    '(?:treat|regard|consider).{0,80}(?:void|invalid|optional|nonexistent|expired)',
     '(?:guardrails?|safeguards?) (?:are|is) (?:on a break|off)',
+    'switch off.{0,24}(?:checks?|guardrails?|safeguards?)',
+    '(?:my|user) (?:messages?|requests?|instructions?).{0,40}outrank',
+    '(?:我|使用者).{0,24}(?:話|訊息|要求).{0,40}(?:更高優先|優先於)',
+    '解除.{0,30}(?:限制|檢查)',
+    '(?:約束|規範|規則).{0,12}(?:失效|作廢)',
     'suspend|disable|放在一旁|放下|不(?:要|用|必)?遵守|暫停|停用防護|擱著|擱置',
     '(?:當作|視為).{0,40}(?:從來沒有|不存在|無效|作廢)',
   ].join('|'), 'u'),
-  extract: /word for word|verbatim|hidden|逐字|隱藏/u,
+  extract: /word for word|verbatim|hidden|unmasked|\bexact\b|逐字|隱藏|原文|完整內容/u,
   help: /\bhow (?:can|do|to|long)|\bwhy|\bexplain|\bwhere|如何|怎麼|報告|說明|為什麼|解釋|教學|指南|\bguide\b/u,
-  recovery: /rotate|revoke|re(?:set|cover)|chang(?:e|ing)|report|rotation|重設|重置|輪替|撤銷|保管|通報|復原/u,
+  recovery: /rotat(?:e|ing|ion)|revoke|re(?:set|cover)|chang(?:e|ing)|report|重設|重置|輪替|撤銷|保管|通報|檢舉|復原/u,
   metadata: /(?:password|passphrase).{0,20}(?:length|requirements|format)|(?:密碼|通行碼).{0,8}(?:長度|幾碼|格式|要求|規則)/u,
-  prevention: /(?:never|do not|don’t|don't) (?:send|paste|give|share|treat|regard|consider|disable|suspend)|(?:不(?:要|該|應該?|能)|別)把|不要.{0,12}(?:傳給|貼出)/u,
+  prevention: /(?:never|do not|don’t|don't) (?:send|paste|give|share|treat|regard|consider|disable|suspend|write|read|include|retrieve|switch off|let)|(?:不(?:要|該|應該?|能)|別)把|不要.{0,12}(?:傳給|貼出|解除|讓)|遮(?:掉|蔽)|without (?:revealing|exposing)/u,
   example: /dummy|example|fictional|假的|範例|假想/u,
 };
 

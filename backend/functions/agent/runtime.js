@@ -28,7 +28,7 @@ const {
 // never grants authority to run a tool. Check separate instructions on their own.
 const quotedPassage = /「[^」]+」|『[^』]+』|“[^”]+”|«[^»]+»|"[^"]+"|(?<!\w)'[^']+'(?!\w)/u;
 const reportedSpeech = /(?:叫我|要我|要求我|讓我|让我)|\b(?:asked|asks|told|tells) me to\b/iu;
-const cyberRisk = /(?:釣魚|钓鱼|詐騙|诈骗|防詐|防诈|危險|危险|phishing|scam|dangerous|unsafe)/iu;
+const cyberRisk = /(?:釣魚|钓鱼|詐騙|诈骗|防詐|防诈|危險|危险|檢舉|通報|phishing|scam|dangerous|unsafe)|\b(?:report|flag)\b/iu;
 const asksForAdvice = /(?:為何|为何|為什麼|为什么|怎麼|怎么|如何|哪|嗎|吗|是否|是不是|[?？])|\b(?:why|how|whether|should|is this|is that)\b/iu;
 const obeyInstruction = /(?:照做|照著做|照着做|照辦|照办)|\b(?:do (?:it|that)|follow (?:it|those instructions)|carry it out)\b/iu;
 

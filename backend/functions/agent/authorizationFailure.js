@@ -8,7 +8,9 @@ const DENIED_RESULT_CODES = new Set([
 ]);
 
 function isAuthorizationFailure(error) {
-  return error?.code === 'permission-denied' || error?.code === 'unauthenticated';
+  // Firestore uses gRPC codes while callable handlers use Firebase error names.
+  return error?.code === 'permission-denied' || error?.code === 'unauthenticated' ||
+    error?.code === 7 || error?.code === 16;
 }
 
 // Some tools return a failed receipt instead of throwing an HttpsError.

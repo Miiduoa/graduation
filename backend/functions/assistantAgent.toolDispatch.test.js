@@ -212,7 +212,7 @@ test('a later model round cannot turn instructions from tool content into an unl
   expect(result.cards).toEqual([]);
 });
 
-test.each(['permission-denied', 'unauthenticated'])(
+test.each(['permission-denied', 'unauthenticated', 7, 16])(
   'an authorization rejection stops further planning and hides private error details: %s',
   async (code) => {
     const dispatch = jest.spyOn(registry, 'runTool').mockRejectedValue(
@@ -239,7 +239,7 @@ test('a transient tool error remains recoverable', async () => {
   expect(result.securityEvent).toBeUndefined();
 });
 
-test.each(['permission-denied', 'unauthenticated'])(
+test.each(['permission-denied', 'unauthenticated', 7, 16])(
   'waits for a pending authorization check before starting its sibling: %s',
   async (code) => {
     let started;
