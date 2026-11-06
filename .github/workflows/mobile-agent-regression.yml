@@ -63,6 +63,7 @@ jobs:
         run: |
           pnpm --filter mobile exec jest \
             src/__tests__/services/offlineCampusPlanner.test.ts \
+            src/__tests__/services/savedCampusPlans.test.ts \
             src/__tests__/services/campusStudyAgenda.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/campusAssignmentTarget.test.ts \
@@ -86,6 +87,7 @@ jobs:
             src/__tests__/AssistantClassNowHint.test.tsx \
             src/__tests__/SavedClassReplyCard.test.tsx \
             src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/SavedCampusPlansPanel.test.tsx \
             src/__tests__/CampusAssignmentWorkbench.test.tsx \
             src/__tests__/CampusAssignmentCoverage.test.tsx \
             src/__tests__/CampusAssignmentHandoff.test.tsx \
