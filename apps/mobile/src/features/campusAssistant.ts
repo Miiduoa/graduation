@@ -8,12 +8,16 @@ import type { LocalCampusReadResult } from '../services/localCampusToolProtocol'
 import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AnnouncementRead, AssignmentRead, OfflineCampusToolResult } from '../services/offlineCampusTools';
+import { answerSavedClassGapQuery, savedClassGapFollowUp, savedClassGapQuery, type SavedClassGapQuery } from '../services/savedClassGapQuery';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
+import { taipeiDayNumber } from '../services/campusStudyAgenda';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
+
+type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; checkedAt: string };
 
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
@@ -23,6 +27,7 @@ export type CampusAssistantMessage = {
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
+  classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
 };
 export type CampusAssistantScope = { uid: string; schoolId: string };
@@ -106,6 +111,7 @@ export async function askCampusAssistant(input: {
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
+  classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
   announcementRead?: AnnouncementRead;
   route?: string;
@@ -181,15 +187,28 @@ export async function askCampusAssistant(input: {
       assertNotCancelled();
       return { ...work, source: 'device', hasActions: false };
     }
-    if (platform && !classQuery) {
+    const previousGap = lastReply?.classGapRead;
+    const gapFollowUp = previousGap && savedClassGapFollowUp(question, previousGap);
+    const gapQuery = gapFollowUp || savedClassGapQuery(question);
+    const gapOwner = owner || (uid && `firebase:${uid}`);
+    if (gapQuery && !gapOwner) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
-        content: '可以問「我現在有課嗎？」或「下一堂課在哪裡？」。查到課程後，也可以接著問教室與下課時間。' };
+        content: '請先登入帳號並儲存個人課表，再查課間空堂。' };
+    }
+    if (previousGap && gapFollowUp && (previousGap.owner !== gapOwner || previousGap.schoolId !== input.scope.schoolId)) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false,
+        content: '帳號或學校已變更。請重新問「今天有哪些空堂？」來查目前的課表。' };
+    }
+    if (platform && !classQuery && !gapQuery) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false,
+        content: '可以問「我現在有課嗎？」、「下一堂課在哪裡？」或「今天有哪些空堂？」。查到課程後，也可以接著問教室與下課時間。' };
     }
     const snapshot = await collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
       ...(platform && { platformTimetable: platform }),
+      ...(gapQuery && { gapDay: gapQuery.day }),
       ...(classQuery?.window === 'current' && { includeCurrentClasses: true }),
       ...(classQuery && classQuery.window !== 'current' && { includeNextClasses: true }),
       ...(classQuery?.followUp && lastClass?.uid === uid && lastClass.owner === owner &&
@@ -200,6 +219,20 @@ export async function askCampusAssistant(input: {
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
+    if (gapQuery) {
+      if (gapFollowUp && previousGap && taipeiDayNumber(Date.parse(previousGap.checkedAt)) !== taipeiDayNumber(Date.parse(snapshot.checkedAt))) {
+        return { source: 'device', tool: 'saved-timetable', hasActions: false,
+          content: '現在已經換日，請重新問「今天有哪些空堂？」或「明天有哪些空堂？」。' };
+      }
+      const answer = answerSavedClassGapQuery(gapQuery, snapshot);
+      return {
+        ...answer, source: 'device', hasActions: false,
+        ...(platform && snapshot.timetable.source === 'not-available' && { route: '/timetable/import' }),
+        ...(snapshot.timetable.classGaps && { classGapRead: {
+          ...gapQuery, owner: gapOwner, schoolId: input.scope.schoolId, checkedAt: snapshot.checkedAt,
+        } }),
+      };
+    }
     if (classQuery) {
       const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass, owner);
       return { ...answer, source: 'device', hasActions: false };

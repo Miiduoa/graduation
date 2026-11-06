@@ -112,6 +112,18 @@ describe('class lookups from saved timetables and imports', () => {
   beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date(now)); });
   afterEach(() => { jest.useRealTimers(); });
 
+  test.each([false, true])('reads class gaps from the selected account and applies a cancellation (platform: %p)', async (platform) => {
+    const params = { uid: platform ? '' : 'alice', schoolId: 'pu', gapDay: 'today' as const,
+      ...(platform && { platformTimetable: { accountId: 'alice', isCurrent: () => true } }) };
+    const later = { ...original, id: 'lab', title: '實驗課', startTime: '13:00', endTime: '14:00' };
+    saveImports(original, later);
+    const { timetable: before } = await collectOnDeviceSchoolContext(params);
+    expect(loadPersonalImports).toHaveBeenCalledWith({ owner: platform ? 'nuni:alice' : 'firebase:alice', schoolId: 'pu' });
+    expect(before.classGaps).toEqual([{ startAt: Date.parse('2026-11-05T10:00:00+08:00'), endAt: Date.parse('2026-11-05T13:00:00+08:00') }]);
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue({ ...manual, classExceptions: [adjust({})] });
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([]);
+  });
+
   test('deduplicates manual and imported copies, retaining every class with the earliest start', async () => {
     jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
     saveImports(original, { ...original, id: 'other', title: '英文', location: '210' });

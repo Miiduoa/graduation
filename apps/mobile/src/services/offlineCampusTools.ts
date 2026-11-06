@@ -487,6 +487,12 @@ export function runOfflineCampusTool(
   // A planning request needs a synthesized answer, not a raw timetable dump.
   if (/(規劃|安排|制定|拆成|讀書計畫|學習計畫)/.test(text) &&
       /(課表|空堂|學習|讀書|複習|報告)/.test(text)) return null;
+  // The weekly period list cannot verify a time limit or a date-specific opening.
+  if (/空堂|空檔|空閒時段/.test(text) &&
+      /分鐘|小時|鐘頭|[早晚]上|[上中下]午|午休|凌晨|[點時][:半前後]|[0-9一二三四五六七八九十]點|\d[:：]\d|[昨前後]天|下[週周]|[年月號]|今天.{0,3}明天/.test(text)) {
+    return { tool: 'saved-timetable', route: '/timetable',
+      content: '這個條件需要核對實際上課時間。可以問「今天下午有半小時的空堂嗎？」或開啟「我的課表」查看指定時段。' };
+  }
   const wantsTimetable = /課表|有課|沒課|上課|哪幾堂|哪些課|幾堂課|空堂|空檔|課程時間/.test(text);
   if (!wantsTimetable) return null;
 
