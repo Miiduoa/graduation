@@ -36,7 +36,7 @@ export default function LoginLandingScreen() {
   }, [hasSchool]);
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
-      <ScrollView contentContainerStyle={s.content}>
+      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <View style={s.brandRow}>
           <View
             style={s.brandMark}
