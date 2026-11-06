@@ -441,7 +441,9 @@ test('local preview is removable and retries reuse one upload and the same messa
   await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
   await act(async () => fireEvent.press(view.getByText('傳送照片')));
   expect(view.getByText('尚未確認送達，照片已保留。')).toBeTruthy();
-  await act(async () => fireEvent.press(view.getByText('重新傳送照片')));
+  await act(async () => {
+    fireEvent.press(view.getByText('重新傳送照片'));
+  });
   expect(view.getByText('照片傳送中…')).toBeTruthy();
   expect(view.queryByText('照片已傳送')).toBeNull();
   expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
@@ -461,7 +463,9 @@ test.each(['account', 'school', 'thread'])('switching %s discards a private draf
   expect(view.queryByLabelText('加入照片')).toBeNull();
   verifyPhotoChat();
   await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
-  await act(async () => fireEvent.press(view.getByText('傳送照片')));
+  await act(async () => {
+    fireEvent.press(view.getByText('傳送照片'));
+  });
   if (kind === 'account') mockViewer = 'other';
   if (kind === 'school') mockSchool = 'another';
   view.rerender(photoChat(kind === 'thread' ? 'other-thread' : photoConvo));
