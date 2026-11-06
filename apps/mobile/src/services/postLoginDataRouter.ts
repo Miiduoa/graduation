@@ -570,8 +570,8 @@ function primaryRoleToUserRole(primary: PrimaryRole): UserRole {
  * 在 buildPostLoginContext 已寫入快取後呼叫：依 PostLoginContext 發 `post_login_context_ready`
  *（與舊版 `post_login_data_routed` 分開，避免同一輪登入重複計數）。
  */
-export async function routePostLoginDataWithContext(schoolId: string): Promise<void> {
-  const ctx = await getPostLoginContext(schoolId);
+export async function routePostLoginDataWithContext(schoolId: string, uid: string): Promise<void> {
+  const ctx = await getPostLoginContext(schoolId, uid);
   if (!ctx) {
     console.log('[postLoginDataRouter] routePostLoginDataWithContext: no PostLoginContext, skip');
     return;
