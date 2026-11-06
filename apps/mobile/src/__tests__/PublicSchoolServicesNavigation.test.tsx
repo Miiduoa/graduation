@@ -566,6 +566,24 @@ test('a school without configured sources shows honest unsupported states withou
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
+test('NTHU guests can enter the public course search with the selected-school official catalog', async () => {
+  setBrowsingSchoolId('nthu');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-CourseCatalog'));
+  await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('CourseCatalog'));
+  expect(view.getByText('清大開課查詢')).toBeTruthy();
+  expect(view.getByLabelText('搜尋清大課程')).toBeTruthy();
+  expect(queryCatalog).not.toHaveBeenCalled();
+  expect(view.queryByTestId('school-login-form')).toBeNull();
+  await act(async () => {
+    fireEvent.press(view.getByText('開啟清大官方課程目錄'));
+  });
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    'https://curricul.site.nthu.edu.tw/p/406-1208-290365,r7880.php?Lang=zh-tw',
+  );
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
 test('switching school while public navigation is active keeps selected-school context', async () => {
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-Health'));

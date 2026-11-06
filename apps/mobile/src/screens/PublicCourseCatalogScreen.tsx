@@ -38,6 +38,7 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
       setCopied(true);
       setManualCopy(false);
     } catch {
+      setCopied(false);
       setManualCopy(true);
     }
   }
