@@ -28,6 +28,7 @@ import {
   personalSlotSelect,
   studyWindow,
   parseSpokenClock,
+  TRANSIT_COMPACT_MAX_BYTES,
 } from './tools';
 export { foodOrderIntent, scheduleIntent };
 export function writeIntent(question: string): boolean {
@@ -75,18 +76,19 @@ export function compactContext(raw: Obj): string {
   if (bytes(value) > 400) value.school = short(value.school, 24);
   return JSON.stringify(value);
 }
+function isTransitSummary(value: unknown): value is Obj {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && ('stops' in value || 'arrivals' in value);
+}
 export function toolSummary(raw: unknown, max?: number): string {
   raw = maskMessages(raw);
   const value: unknown = JSON.parse(JSON.stringify(raw, (key, v) =>
     ['submitted', 'overdue', 'source', 'completePageHref', 'start', 'end', 'coverage', 'unqueried', 'undated', 'updatedAt'].includes(key) && typeof v !== 'boolean' ? undefined : v,
   ));
-  const limit =
-    max ??
-    (value && typeof value === 'object' && ('pending' in value || 'schedule' in value)
-      ? 900
-      : value && typeof value === 'object' && ('stops' in value || 'arrivals' in value)
-        ? 400
-        : 550);
+  const transit = isTransitSummary(value);
+  const limit = transit
+    ? TRANSIT_COMPACT_MAX_BYTES
+    : max ??
+      (value && typeof value === 'object' && ('pending' in value || 'schedule' in value) ? 900 : 550);
   let truncated = false;
   for (let attempt = 0; attempt < 100 && bytes(value) > limit; attempt++) {
     let longest: unknown[] = [];
@@ -102,8 +104,10 @@ export function toolSummary(raw: unknown, max?: number): string {
     truncated = true;
   }
   if (bytes(value) > limit) {
-    let excerpt = clip(JSON.stringify(value), 400);
-    while (bytes({ truncated: true, excerpt }) > 600)
+    const excerptLimit = transit ? limit : 400;
+    const wrapperLimit = transit ? limit : 600;
+    let excerpt = clip(JSON.stringify(value), excerptLimit);
+    while (bytes({ truncated: true, excerpt }) > wrapperLimit)
       excerpt = clip(excerpt, Buffer.byteLength(excerpt) - 20);
     return JSON.stringify({ truncated: true, excerpt });
   }
@@ -117,7 +121,9 @@ function packedResults(
   return JSON.stringify(
     [...evidence, ...failed].map((e) => ({
       tool: e.tool,
-      result: JSON.parse(toolSummary(e.result, tight ? 400 : undefined)),
+      result: JSON.parse(
+        toolSummary(e.result, tight && e.tool !== 'get_transit' ? 400 : undefined),
+      ),
     })),
   );
 }
