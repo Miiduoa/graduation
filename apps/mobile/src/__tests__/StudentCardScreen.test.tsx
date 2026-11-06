@@ -147,7 +147,11 @@ test('NFC and QR share the issued credential and switching to QR stops native pr
     canPresent: true,
     enabled: true,
   });
-  const code = { token: 'n'.repeat(32), studentId: 'S0003141', expiresAt: Date.now() + 55_000 };
+  const code = {
+    token: 'n'.repeat(32),
+    studentId: 'S1234567890123456789012345678901',
+    expiresAt: Date.now() + 55_000,
+  };
   jest.mocked(requestStudentCardCode).mockResolvedValue(code);
   const v = render(<StudentCardScreen />);
   await act(async () => {});
@@ -160,6 +164,7 @@ test('NFC and QR share the issued credential and switching to QR stops native pr
   );
   const signal = jest.mocked(beginStudentCardNfcPresentation).mock.calls[0][1]!;
   expect(v.getByText('感應出示已開啟')).toBeTruthy();
+  expect(v.getByText(code.studentId)).toHaveStyle({ maxWidth: '100%' });
   expect(v.queryByText(`https://nuni.tw/student-card/verify#${code.token}`)).toBeNull();
   await act(async () => fireEvent.press(v.getByText('QR Code')));
   expect(signal.aborted).toBe(true);

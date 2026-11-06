@@ -506,6 +506,7 @@ const createStyles = () =>
     qr: { borderRadius: 16, backgroundColor: '#FFFFFF', padding: 2, marginVertical: 4 },
     number: {
       color: '#102D24',
+      maxWidth: '100%',
       fontSize: 32,
       fontWeight: '700',
       textAlign: 'center',
