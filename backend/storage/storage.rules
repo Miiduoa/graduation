@@ -11,7 +11,8 @@ service firebase.storage {
       return isAuthenticated()
         && (!firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
           || (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accountDeletionInProgress', false) != true
-            && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', '') != 'deleted'));
+            && !(firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', '')
+              in ['deleted', 'disabled', 'suspended', 'inactive'])));
     }
 
     function isOwner(userId) {
@@ -48,7 +49,9 @@ service firebase.storage {
     }
 
     function isSchoolMemberStorage(schoolId) {
-      return isAuthenticated()
+      // School membership may remain active after account suspension.
+      // This path uses at most two Firestore lookups (account and school member).
+      return isActiveAccount()
         && firestore.exists(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid))
         && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
