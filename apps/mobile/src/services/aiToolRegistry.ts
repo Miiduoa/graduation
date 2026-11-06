@@ -1152,7 +1152,7 @@ function wrapLegacyResult(
     summary: raw.summary ?? (raw.success ? '完成' : raw.error ?? '失敗'),
     data: raw.data,
     error: raw.error,
-    errorCode: raw.success ? undefined : 'execution_failed',
+    errorCode: raw.success ? undefined : raw.error === 'school_scope_unverified' ? 'precondition_failed' : 'execution_failed',
     isWrite: isWriteSemantic,
     isDraft,
     choiceMenu: raw.choiceMenu,

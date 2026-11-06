@@ -227,6 +227,7 @@ async function tryBackendUnifiedLogin(
 
 import { seedTestData } from './testSeedData';
 import { syncPostLoginContextFromCaches } from './postLoginContextFromCaches';
+import { bindVerifiedSchoolAiScope } from './verifiedSchoolAiScope';
 import { routePostLoginData, routePostLoginDataWithContext } from './postLoginDataRouter';
 
 async function runPostLoginContextPipeline(p: {
@@ -237,8 +238,9 @@ async function runPostLoginContextPipeline(p: {
   email: string;
 }): Promise<void> {
   try {
-    await syncPostLoginContextFromCaches(p);
+    const context = await syncPostLoginContextFromCaches(p);
     p.assertVerifiedSession?.();
+    if (context && p.assertVerifiedSession) bindVerifiedSchoolAiScope(context, p.assertVerifiedSession);
     await routePostLoginDataWithContext(p.schoolId, p.uid);
   } catch (e) {
     console.warn('[studentIdAuth] post-login context pipeline failed (continuing):', e);
