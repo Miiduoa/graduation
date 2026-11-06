@@ -175,3 +175,9 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 將 Firestore 現有帳號關閉測試從 2 個狀態擴充至 5 個，驗證個人資料、群組、學校權限的正常與拒絕路徑；將 callable guard 單元回歸擴充至 5 個狀態，確認 handler 不執行。這些案例屬新變更，須以精確提交的 Firestore emulator、Functions、完整 CI 結果驗收，不預先視為測試通過。Firestore 公開資料 `allow read: if true` 不受此登入狀態判斷影響。仍需獨立查核所有未採用 `isSignedIn` 或 `createAccountGuardedOnCall` 的授權入口，並確保停權流程原子更新 canonical user 與會員資料。
 
 此輪為隔離原始碼修補和新增測試，沒有修改正式資料、發布環境、金鑰、舊 token 或主線閘門。
+
+### 將 canonical 帳號狀態標記改為伺服器管理
+
+追查 Firestore `users/{uid}` 的更新規則，發現既有 affectedKeys 欄位清單保護 role、accountDeletionInProgress 等，但沒有保護 `status`。新提交將 `status` 納入禁止由客戶端修改／移除的權限欄位，不更動既有合法 displayName 和 notificationsEnabled 更新。現有權限欄位測試增加對缺少 status 的插入、已有 active status 的變更與移除三種拒絕斷言。此調整與停權判斷一致，避免客戶端竄改 canonical 帳號狀態。Admin SDK 伺服器對既有帳號的合法停權、恢復與刪除流程不使用 Firestore Security Rules 的 client update，因此不受此 denylist 影響。是否存在舊版客戶端直接操作該狀態欄位，仍待實機／版本相容性查核。
+
+以精確 head 的 Firebase emulator 與 CI 結果驗證；若仍在佇列或執行中，不將它記為已通過。正式環境資料與發布沒有變動。

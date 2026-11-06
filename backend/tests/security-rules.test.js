@@ -2684,6 +2684,7 @@ describe('P1 authorization: users role authority fields', () => {
       await db.doc('users/bob').set({
         displayName: 'Bob',
         role: 'student',
+        status: 'active',
         primaryRole: 'student',
         postLoginRoles: ['student'],
         teachingRoles: [],
@@ -2712,6 +2713,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ orgRoles: ['schoolAdmin'] }));
     await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(alice.update({ role: 'admin' }));
+    await assertFails(alice.update({ status: 'active' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
     await assertFails(bob.update({ postLoginRoles: ['admin', 'teacher'] }));
@@ -2719,6 +2721,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ orgRoles: ['schoolAdmin'] }));
     await assertFails(bob.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(bob.update({ role: 'teacher' }));
+    await assertFails(bob.update({ status: 'disabled' }));
 
     await assertFails(bob.update({ primaryRole: deleteField() }));
     await assertFails(bob.update({ postLoginRoles: deleteField() }));
@@ -2726,6 +2729,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ orgRoles: deleteField() }));
     await assertFails(bob.update({ lastPostLoginResolvedAt: deleteField() }));
     await assertFails(bob.update({ role: deleteField() }));
+    await assertFails(bob.update({ status: deleteField() }));
     await assertFails(bob.update({ notificationDeliveryDisabled: deleteField() }));
     await assertFails(bob.update({ accountDeletionInProgress: deleteField() }));
     await assertFails(alice.update({ notificationDeliveryDisabled: true }));

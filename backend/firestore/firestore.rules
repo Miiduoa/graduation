@@ -1165,6 +1165,7 @@ service cloud.firestore {
       allow update: if isSelf(uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'role',
+          'status',
           'primaryRole',
           'postLoginRoles',
           'teachingRoles',
