@@ -23,7 +23,6 @@ import { useNuniSession } from '@/features/nuni/Session';
 import common from '@/app/servicePages.module.css';
 import admin from '@/features/admin/Admin.module.css';
 import {
-  accountReturnHref,
   adminLoginHref,
   currentPageReturnPath,
   OPS_PATH,
@@ -396,7 +395,7 @@ function PeopleAddForm({
           .then((result) => {
             if (!isCurrent()) return;
             if (result.status === 401) {
-              window.location.replace(accountReturnHref(`${OPS_PATH}?tab=people`));
+              window.location.replace(adminLoginHref(`${OPS_PATH}?tab=people`));
               return;
             }
             if (!result.ok) throw new Error('加人沒有完成，請稍後再試。');
@@ -532,7 +531,7 @@ function MerchantsTab({ context }: { context: string }) {
       );
       if (!isCurrent()) return false;
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(OPS_PATH + '?tab=merchants'));
+        window.location.replace(adminLoginHref(OPS_PATH + '?tab=merchants'));
         return false;
       }
       if (result.status === 409) {
@@ -705,7 +704,7 @@ function AffiliationTab({ context }: { context: string }) {
         const result = await adminFetch('class-workspace-affiliation-applications', 'GET', undefined, context);
         if (!isCurrent()) return;
         if (result.status === 401) {
-          window.location.replace(accountReturnHref(OPS_PATH + '?tab=affiliation'));
+          window.location.replace(adminLoginHref(OPS_PATH + '?tab=affiliation'));
           return;
         }
         if (result.status === 403) {
@@ -750,7 +749,7 @@ function AffiliationTab({ context }: { context: string }) {
       );
       if (!isCurrent()) return false;
       if (result.status === 401) {
-        window.location.replace(accountReturnHref(OPS_PATH + '?tab=affiliation'));
+        window.location.replace(adminLoginHref(OPS_PATH + '?tab=affiliation'));
         return false;
       }
       if (result.status === 409) {

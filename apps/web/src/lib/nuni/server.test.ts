@@ -446,6 +446,10 @@ describe('Nuni Google authorization code flow', () => {
   it.each([
     '/social?campus=tw-pu',
     '/merchant',
+    '/merchant/apply',
+    '/merchant/workspace',
+    '/auth/platform/class-workspace/join',
+    '/auth/platform/class-workspace/new',
     '/map?school=pu&focus=library#route',
     '/bus?school=pu',
     '/announcements/news-123?schoolId=tw-pu',
@@ -477,11 +481,12 @@ describe('Nuni Google authorization code flow', () => {
       request('auth/platform/start?returnUrl=%2Fmerchant', { post: {} }),
     );
     const location = new URL(result.headers.get('location')!);
+    expect(location.pathname).toBe('/login');
     expect(location.searchParams.get('returnUrl')).toBe('/merchant');
     expect(location.searchParams.get('issue')).toBe('unavailable');
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it.each(['/merchant?application=current', 'https://attacker.example'])(
+  it.each(['/merchant?application=current', '/merchant/workspace', '/merchant/apply', 'https://attacker.example'])(
     'only keeps the trusted safe transaction destination after cancellation: %s',
     async (target) => {
       const login = {
@@ -500,6 +505,7 @@ describe('Nuni Google authorization code flow', () => {
       );
       const destination = new URL(result.headers.get('location')!);
       expect(destination.origin).toBe('https://nuni.tw');
+      expect(destination.pathname).toBe(target.startsWith('/') ? '/login' : '/classroom/login');
       expect(destination.searchParams.get('returnUrl')).toBe(
         target.startsWith('/') ? target : null,
       );

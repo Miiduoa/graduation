@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { safeNavigate } from '../utils/safeNavigate';
+import type { ServiceScreenProps } from './UnavailableFeatureScreen';
 import { Screen, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import { MerchantHubScreen } from './MerchantHubScreen';
@@ -30,7 +32,7 @@ function savedCopy(stored: 'cloud' | 'local', message: string) {
   return stored === 'cloud' ? message : `已記在本站。${message}`;
 }
 
-export default function ShopDockScreen() {
+export default function ShopDockScreen({ navigation }: ServiceScreenProps = {}) {
   const auth = useAuth();
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('pending');
   const assignments = (auth.profile?.merchantAssignments ?? []).filter((item) => item.status === 'active');
@@ -45,30 +47,38 @@ export default function ShopDockScreen() {
 
   return (
     <Screen title="店家工作台" subtitle="菜單、店面主頁與營業時間寫進本店資料。金流還沒接到，這裡不會收款。">
-      <View style={{ flexDirection: 'row', paddingHorizontal: 12, gap: 8 }}>
-        {TABS.map((item) => (
-          <Pressable
-            key={item.key}
-            onPress={() => setTab(item.key)}
-            style={{
-              paddingVertical: 10,
-              paddingHorizontal: 12,
-              borderBottomWidth: 2,
-              borderBottomColor: tab === item.key ? theme.colors.accent : 'transparent',
-            }}
-          >
-            <Text style={{ color: tab === item.key ? theme.colors.text : theme.colors.muted, fontWeight: '700' }}>
-              {tabLabel(item.key, item.label)}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {shop && (
+        <View style={{ flexDirection: 'row', paddingHorizontal: 12, gap: 8 }}>
+          {TABS.map((item) => (
+            <Pressable
+              key={item.key}
+              onPress={() => setTab(item.key)}
+              style={{
+                paddingVertical: 10,
+                paddingHorizontal: 12,
+                borderBottomWidth: 2,
+                borderBottomColor: tab === item.key ? theme.colors.accent : 'transparent',
+              }}
+            >
+              <Text style={{ color: tab === item.key ? theme.colors.text : theme.colors.muted, fontWeight: '700' }}>
+                {tabLabel(item.key, item.label)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       {assignments.length === 0 ? (
         <View style={{ padding: 16 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '700', marginBottom: 8 }}>這間店還沒接到訂單系統</Text>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', marginBottom: 8 }}>這個帳號尚未獲指派門市</Text>
           <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            這間店還沒接上訂單系統，所以沒有待接單。菜單與營業時間也還沒開放給這支帳號改。
+            店員請向門市負責人確認工作帳號與所屬門市。若你是進駐申請人，請使用原申請的 Google 帳號。
           </Text>
+          {navigation && (
+            <Button
+              text="前往店家進駐與門市管理"
+              onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'merchant' })}
+            />
+          )}
         </View>
       ) : tab === 'pending' || tab === 'kitchen' ? (
         // 待接單只列還沒接的，出餐只列接了還沒取的；兩邊都是即時監聽，同一張單只會在一邊

@@ -57,7 +57,9 @@ it('shows the unsigned entry without the old preview card or long copy', async (
   render(<AccountPage />);
   expect(await screen.findByRole('button', { name: '登入校園帳號' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '登入' })).toBeTruthy();
-  expect(screen.getByText('請用學校核發的帳號登入。')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).getAttribute('href')).toBe('/merchant/apply');
+  expect(screen.getByRole('link', { name: '查看申請或進入門市' }).getAttribute('href')).toBe('/merchant/workspace');
+  expect(screen.getByRole('link', { name: '平台管理員登入' }).getAttribute('href')).toBe('/admin/login');
   expect(await screen.findByRole('button', { name: '用 Google 繼續' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '尋找學校' })).toBeTruthy();
   expect(screen.queryByRole('link', { name: '尋找學校' })).toBeNull();
@@ -218,6 +220,8 @@ it.each([
   '/settings?section=appearance&campus=nthu',
   '/events/evt-1?schoolId=pu&campus=pu&source=school-club-events#registration',
   '/school-info?campus=ncku#contact',
+  '/merchant/apply',
+  '/merchant/workspace',
   '/admin/ops#people',
   '/admin/school-review#pending',
 ])('sends a signed-in visitor back to %s without losing task context', async (returnPath) => {
@@ -359,4 +363,20 @@ it.each(['available', 'status', 'supplemental-status'])('keeps unavailable and t
   expect(await screen.findByText('這所學校還沒有開放建立帳號。開放的時間要看學校那邊的安排。')).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '靜宜大學' })).toBeNull();
   expect(screen.queryByRole('button', { name: '使用學校 Google 帳號' })).toBeNull();
+});
+
+it('keeps a platform session from skipping the explicitly chosen school account sign-in', async () => {
+  const replace = vi.fn();
+  vi.stubGlobal('location', { ...window.location, replace, origin: 'https://nuni.tw' });
+  search.current = new URLSearchParams({ method: 'school' });
+  fetchMock.mockImplementation(async (url) => new Response(JSON.stringify({
+    authenticated: url === '/api/nuni/session',
+  }), { status: 200 }));
+
+  render(<AccountPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '登入校園帳號' }));
+  expect(screen.getByLabelText('學校配發的信箱')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '用 Google 繼續' })).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalledWith('/api/nuni/session', expect.anything());
+  expect(replace).not.toHaveBeenCalled();
 });

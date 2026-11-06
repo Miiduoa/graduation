@@ -178,6 +178,15 @@ it('keeps an explicit school reconnect when handing off an academic task', () =>
   expect(login.searchParams.get('returnUrl')).toBe(destination);
 });
 
+it.each(['join', 'new'])('returns a bookmarked class %s action through its platform login', (action) => {
+  const destination = `/auth/platform/class-workspace/${action}?campus=nthu`;
+  const href = campusOneLoginHref(new URLSearchParams({ next: destination + '&token=private' }));
+  const login = new URL(href!, 'https://nuni.tw');
+  expect(login.pathname).toBe('/classroom/login');
+  expect(login.searchParams.get('returnUrl')).toBe(destination);
+  expect(platformDestination(login.searchParams.get('returnUrl'))).toBe(destination);
+});
+
 it.each([
   ['/grades?tab=semester&tab=feedback&campus=pu', '/grades?tab=semester&campus=pu'],
   ['/timetable?campus=nthu#personal-timetable', '/timetable?campus=nthu#personal-timetable'],
@@ -197,7 +206,7 @@ it.each([
   '/life',
   '/search',
   '/auth/platform',
-  '/auth/platform/class-workspace/join',
+  '/auth/platform/class-workspace/join/unknown',
   '/auth/platform/ops?tab=review#pending',
   '/auth/platform/school-review/tenant-1',
   '/privacy/deletion-status',
@@ -306,7 +315,6 @@ it.each(['#reading', '#registration', '#assignment-hw-3', '#%E9%96%B1%E8%AE%80']
 });
 
 it.each([
-  ['/auth/platform/class-workspace/join?campus=nthu', '/auth/platform/class-workspace/join'],
   ['/auth/platform/class-workspace/cw_11111111-1111-4111-8111-111111111111?campus=nthu#materials', '/'],
   ['/auth/platform/ops?create=school#form', '/'],
   ['/auth/platform/school-review?campus=pu', '/auth/platform/school-review'],

@@ -340,7 +340,7 @@ it('redirects to account login when the nuni session is gone', async () => {
   render(<SchoolReview />);
   await waitFor(() =>
     expect(replace).toHaveBeenCalledWith(
-      `/auth/account?returnUrl=${encodeURIComponent('/admin/school-review')}`,
+      `/admin/login?returnUrl=${encodeURIComponent('/admin/school-review')}`,
     ),
   );
   expect(String(fetcher.mock.calls[0][0])).toContain('/api/platform-admin/');

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { AccountRoleLinks } from '@/components/AccountRoleLinks';
 import { useSearchParams } from 'next/navigation';
 import {
   CLASS_WORKSPACE_HREF,
@@ -58,6 +59,7 @@ function GoogleMark() {
 
 export function AccountEntry() {
   const search = useSearchParams();
+  const schoolOnly = search.get('method') === 'school';
   const returnPath = readReturnPath(search);
   const campusLogin = campusOneLoginHref(search);
   const [gate, setGate] = useState<'checking' | 'unsigned'>('checking');
@@ -86,7 +88,7 @@ export function AccountEntry() {
       return;
     }
     const ignore = new AbortController();
-    void readExistingSession().then((signedIn) => {
+    void readExistingSession(schoolOnly).then((signedIn) => {
       if (ignore.signal.aborted) return;
       if (signedIn) {
         window.location.replace(returnPath);
@@ -95,7 +97,7 @@ export function AccountEntry() {
       setGate('unsigned');
     });
     return () => ignore.abort();
-  }, [campusLogin, returnPath]);
+  }, [campusLogin, returnPath, schoolOnly]);
 
   useEffect(() => {
     if (campusLogin) return;
@@ -103,7 +105,7 @@ export function AccountEntry() {
   }, [campusLogin]);
 
   useEffect(() => {
-    if (campusLogin) return;
+    if (campusLogin || schoolOnly) return;
     const ignore = new AbortController();
     void listPlatformProviderKinds()
       .then((kinds) => {
@@ -113,7 +115,7 @@ export function AccountEntry() {
         if (!ignore.signal.aborted) setGoogleReady(false);
       });
     return () => ignore.abort();
-  }, [campusLogin]);
+  }, [campusLogin, schoolOnly]);
 
   useEffect(() => {
     if (asking) queryField.current?.focus();
@@ -216,7 +218,11 @@ export function AccountEntry() {
     <div className={styles.page}>
       <main className={styles.main}>
         <h1 className={styles.title}>登入</h1>
-        <p className={styles.note}>請用學校核發的帳號登入。</p>
+        <p className={styles.note}>
+          {schoolOnly
+            ? '校方人員請用學校核發的帳號登入。承辦權限由校方指派。'
+            : '有校園帳號可以向學校驗證身分。店家、課班成員也可以用自己的 Google 帳號註冊或登入。'}
+        </p>
         <section className={styles.actions} aria-label="登入方式">
           <button
             type="button"
@@ -226,7 +232,7 @@ export function AccountEntry() {
           >
             {busy && school?.available ? '正在前往…' : '登入校園帳號'}
           </button>
-          {googleReady ? (
+          {!schoolOnly && googleReady ? (
             <button
               type="button"
               className={`btn ${styles.google}`}
@@ -336,6 +342,7 @@ export function AccountEntry() {
             </div>
           ) : null}
         </section>
+        {!schoolOnly && <AccountRoleLinks />}
       </main>
       <footer className={styles.footer}>
         <nav aria-label="公開資訊">
