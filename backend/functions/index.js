@@ -36,6 +36,7 @@ const { assertOnlineOrderingEnabled, isOrderAssistantAction } = require('./lib/o
 const { createOrderStatusHandlers } = require('./orderTransitions');
 const { createSubmitProductFeedback } = require('./productFeedback');
 const { createReplyToCampusStory } = require('./storyReplies');
+const { createDmAttachmentDelivery } = require('./dmAttachmentDelivery');
 const { createEventRegistrationHandlers, prepareRegistrationPolicy } = require('./eventRegistration');
 const { readRealtimeBusCache } = require('./busArrivals');
 const {
@@ -5860,3 +5861,9 @@ console.log('Firebase Cloud Functions loaded successfully');
 exports.clubAdmin = onCall({ region: REGION }, require('./clubAdmin').createClubAdmin({ db }));
 
 exports.clubRoster = onCall({ region: REGION }, require('./clubRoster').createClubRoster({ db }));
+
+// Server-side three-document authorization; Cloud Storage Rules have a two-document cap.
+exports.dmAttachmentDelivery = onCall({ region: REGION }, createDmAttachmentDelivery({
+  db,
+  getBucket: () => require('firebase-admin/storage').getStorage().bucket(),
+}));
