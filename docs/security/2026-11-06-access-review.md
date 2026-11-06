@@ -122,3 +122,16 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 **驗證狀態：** 修改已提交，但此變更的 GitHub CI 新提交結果尚待確認，不得把上輪在一次性本機 PG15 測得的 13／13 當作本提交的雲端 CI 成功。確認後需核對定向步驟實際執行 PostgreSQL 案例，且主 Web、Functions、CodeQL、Supabase、Python、Mobile 與適用 Maestro 均對應精確 head。若另有測試在 CI 出現競態超時，應先保留失敗證據並修復測試隔離／邏輯，而非停用案例。
 
 本次只修改 CI 測試環境與本文件；沒有執行正式資料庫 migration、下載 token 寫入、發布或 GitHub App 核可。先前列出的 GCS staging 憑證、舊網址撤權驗收、主線審查閘門及相依相容性缺口仍未解除。
+
+
+## 2026-11-07：Storage 停權狀態與校園貼文附件存取
+
+本輪讀取完整的 GitHub 精確 head `358a9fd8`，其 CI、CodeQL、Supabase permission migrations、Python、Mobile Agent Regression 與適用 Maestro 都顯示成功；審查紀錄與未解決 review thread 目前均為空，但指定 App `nuni-merge-gate` 的「審查通過」尚未出現。main `cacea7e6`，分支相較 main ahead 12 / behind 2，新的主線整合仍待獨立驗證。
+
+從 Storage 規則查得另一項授權一致性缺口：原 `isActiveAccount()` 對明確設為 `disabled`、`suspended`、`inactive` 的帳號不拒絕（只擋 `deleted` 與刪除程序）；`schools/{schoolId}/campusPosts` 原先只看學校成員文件，對保留 `active` 的舊校籍資料未檢查帳號狀態。此缺口可使停權身分持舊 ID token 在規則允許的私人附件與校園貼文路徑繼續讀取或上傳。新增的規則將這四種終止狀態視為拒絕；校園貼文用相同帳號檢查，保持未建立 users 文件的既有相容情境。
+
+回歸補強 `backend/tests/security-rules.test.js`：原關閉帳號私人檔案測試增加 disabled、suspended、inactive 三種狀態，覆蓋 temp、health、printjobs、兩類私訊及報修附件的讀寫拒絕；獨立校園貼文附件案例涵蓋正常寫入／讀取、停權後的舊物件讀取與新物件上傳拒絕，以及恢復 active 後正常讀取。原規則對非 deleted 狀態及保留校籍的路徑缺少這些拒絕條件；本輪變更提交後的 Firebase 模擬器／主 CI 以新精確 head 的執行結果為準，未將先前 CI 綠燈當成此修補已驗證。
+
+**剩餘邊界：** 校園限時動態讀取目前同時查學校成員及 story 文件，部分公告／活動編輯路徑同時查目標與學校管理員文件；Firebase Storage 規則的 Firestore 文件查詢上限限制了直接再加一份 user 文件的方法。此輪不在這些路徑套用會導致合法請求全面拒絕的第三份文件查詢；後續應比照私有群組檔案的 HTTP 授權入口或調整權限資料模型，單獨對停權及撤權做模擬器驗收。真 GCS staging 與既有 token 移除、Supabase 已簽發 URL、minimatch 相容性、正式發布條件仍未解除。
+
+本輪變更只包含 Storage 規則、隔離測試及本紀錄；沒有寫入正式資料、清理真實 token、改動正式金鑰或部署。
