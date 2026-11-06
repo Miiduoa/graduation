@@ -43,12 +43,15 @@ describe('student card identity', () => {
     expect(getStudentCardService('thu')?.url).toContain('page.line.me');
     expect(getStudentCardService('__proto__')).toBeNull();
     expect(isStudentCardToken('a'.repeat(31))).toBe(false);
+    expect(isStudentCardToken('a'.repeat(32))).toBe(true);
+    expect(isStudentCardToken('a'.repeat(32) + '\n')).toBe(false);
   });
 });
 
 it.each([
   ['present', '{"schoolId":"pu"}', 401],
   ['verify', '{"token":"x"}', 400],
+  ['verify', JSON.stringify({ token: 'x'.repeat(32) + '\n' }), 400],
   ['verify', '[]', 400],
   ['verify', 'x'.repeat(1025), 413],
 ] as const)('rejects invalid %s requests without caching (%#)', async (action, body, expected) => {
