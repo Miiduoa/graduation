@@ -20,6 +20,7 @@ const SCHOOL_NAMES: Record<string, string> = {
   ntpu: '國立臺北大學',
   ntu: '國立臺灣大學',
   nthu: '國立清華大學',
+  nycu: '國立陽明交通大學',
 };
 
 let mockBrowsingSchoolId = 'ncku';
@@ -542,7 +543,7 @@ test('Career wrapper keeps route.name for resolver and only offers registered pu
 });
 
 test('a school without configured sources shows honest unsupported states without inventing links', async () => {
-  setBrowsingSchoolId('nthu');
+  setBrowsingSchoolId('nycu');
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-Health'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Health'));
