@@ -1,9 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  isLostFoundWriteFields,
+  newLostFoundFields,
+  pickLostFoundFields,
+  type LostFoundWriteFields,
+} from '@campus/shared/src/lostFoundFields';
+import {
   decodeRevision,
   encodeRevision,
   type LostFoundRevision,
-  type LostFoundWriteFields,
 } from './lostFoundMeta';
 import { taiwanCalendarDay } from './lostFoundDates';
 
@@ -71,20 +76,6 @@ export function lostFoundCreateIndexKey(uid: string, schoolId: string) {
   return createIndexKey(uid, schoolId);
 }
 
-function isWriteFields(value: unknown): value is LostFoundWriteFields {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
-  return (
-    (row.type === 'lost' || row.type === 'found') &&
-    typeof row.title === 'string' &&
-    typeof row.description === 'string' &&
-    typeof row.category === 'string' &&
-    typeof row.location === 'string' &&
-    typeof row.date === 'string' &&
-    (row.contactInfo === undefined || typeof row.contactInfo === 'string')
-  );
-}
-
 function parseRevisionField(value: unknown): LostFoundRevision | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -118,7 +109,7 @@ function parseDraft(raw: string, scope: LostFoundDraftScope): LostFoundFormDraft
     typeof row.documentId !== 'string' ||
     !row.documentId ||
     row.documentId.includes('/') ||
-    !isWriteFields(row)
+    !isLostFoundWriteFields(row)
   ) {
     throw new LostFoundStorageError('草稿資料已損毀，畫面內容仍保留；請手動確認後再送出。');
   }
@@ -135,13 +126,7 @@ function parseDraft(raw: string, scope: LostFoundDraftScope): LostFoundFormDraft
   return {
     version: 1,
     documentId: row.documentId,
-    type: row.type,
-    title: row.title,
-    description: row.description,
-    category: row.category,
-    location: row.location,
-    date: row.date,
-    contactInfo: row.contactInfo,
+    ...pickLostFoundFields(row),
     expectedRevision,
   };
 }
@@ -161,7 +146,7 @@ function parsePending(raw: string): LostFoundPendingIntent {
     typeof row.documentId !== 'string' ||
     !row.documentId ||
     row.documentId.includes('/') ||
-    (row.fields !== undefined && !isWriteFields(row.fields))
+    (row.fields !== undefined && !isLostFoundWriteFields(row.fields))
   ) {
     throw new LostFoundStorageError('待確認操作資料已損毀；請先重新讀取物品狀態。');
   }
@@ -174,17 +159,7 @@ function parsePending(raw: string): LostFoundPendingIntent {
     action: row.action,
     documentId: row.documentId,
     expectedRevision,
-    fields: row.fields
-      ? {
-          type: row.fields.type,
-          title: row.fields.title,
-          description: row.fields.description,
-          category: row.fields.category,
-          location: row.fields.location,
-          date: row.fields.date,
-          contactInfo: row.fields.contactInfo,
-        }
-      : undefined,
+    fields: row.fields ? pickLostFoundFields(row.fields) : undefined,
   };
 }
 
@@ -194,13 +169,7 @@ function serializeDraft(scope: LostFoundDraftScope, draft: LostFoundFormDraft) {
     uid: scope.uid,
     schoolId: scope.schoolId,
     documentId: draft.documentId,
-    type: draft.type,
-    title: draft.title,
-    description: draft.description,
-    category: draft.category,
-    location: draft.location,
-    date: draft.date,
-    contactInfo: draft.contactInfo,
+    ...pickLostFoundFields(draft),
     expectedRevision: draft.expectedRevision ?? null,
     expectedRevisionEncoded: encodeRevision(draft.expectedRevision ?? null),
   });
@@ -213,17 +182,7 @@ function serializePending(intent: LostFoundPendingIntent) {
     documentId: intent.documentId,
     expectedRevision: intent.expectedRevision ?? null,
     expectedRevisionEncoded: encodeRevision(intent.expectedRevision ?? null),
-    fields: intent.fields
-      ? {
-          type: intent.fields.type,
-          title: intent.fields.title,
-          description: intent.fields.description,
-          category: intent.fields.category,
-          location: intent.fields.location,
-          date: intent.fields.date,
-          contactInfo: intent.fields.contactInfo,
-        }
-      : undefined,
+    fields: intent.fields ? pickLostFoundFields(intent.fields) : undefined,
   });
 }
 
@@ -446,13 +405,5 @@ export async function forgetCreateDocumentIdIfMatches(
 }
 
 export function emptyLostFoundFields(type: 'lost' | 'found' = 'lost'): LostFoundWriteFields {
-  return {
-    type,
-    title: '',
-    description: '',
-    category: 'other',
-    location: '',
-    date: taiwanCalendarDay(),
-    contactInfo: '',
-  };
+  return newLostFoundFields(taiwanCalendarDay(), type);
 }

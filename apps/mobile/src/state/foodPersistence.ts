@@ -199,11 +199,4 @@ export async function listFoodPendingScopes(accountId: string): Promise<string[]
   return serialized(accountId, () => readIndex(accountId));
 }
 
-export const FOOD_TERMINAL_STATES = new Set([
-  'fulfilled',
-  'canceled',
-  'rejected',
-  'payment-expired',
-]);
-
-export const FOOD_POLL_MS = 10_000;
+export { FOOD_POLL_MS, FOOD_TERMINAL_STATES } from '@campus/shared/src/foodOrderGuidance';
