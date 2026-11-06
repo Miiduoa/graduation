@@ -385,6 +385,8 @@ async def scenarios(browser, report):
     await expect(page.get_by_text("已為青禾科技大學新增校方授權。", exact=True)).to_be_visible()
     await page.get_by_role("button", name="結束代操作", exact=True).click()
     await expect(account).to_be_disabled()
+    await expect(page.get_by_text("已結束代操作。", exact=True)).to_be_visible()
+    await expect(page.get_by_role("button", name="開始 15 分鐘代操作", exact=True)).to_be_enabled()
     await expect(page).to_have_url(ORIGIN + "/admin#people/school-a")
     assert [row["path"] for row in fixture.writes] == [
         "/api/platform-admin/schools/school-a/proxy/start",
