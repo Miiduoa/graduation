@@ -86,9 +86,39 @@ it('replaces markers when equal-length source data changes and treats tooltip na
   expect(select).toHaveBeenCalledWith(namedPlace);
 });
 
+it('selects a focused marker with Enter or Space and retains its focus after selection', async () => {
+  const select = vi.fn();
+  const view = render(
+    <MapCanvas locations={[library, gate]} selected={null} route={null} onSelect={select} />,
+  );
+  await waitFor(() =>
+    expect(view.container.querySelectorAll('.leaflet-marker-icon')).toHaveLength(2),
+  );
+  const marker = view.container.querySelector<HTMLElement>('[data-map-location-id="library"]')!;
+  marker.focus();
+  fireEvent.keyDown(marker, { key: 'Enter' });
+  expect(select).toHaveBeenLastCalledWith(library);
+
+  const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+  fireEvent(marker, space);
+  expect(space.defaultPrevented).toBe(true);
+  expect(select).toHaveBeenCalledTimes(2);
+  fireEvent.keyDown(marker, { key: ' ', repeat: true });
+  expect(select).toHaveBeenCalledTimes(2);
+
+  view.rerender(
+    <MapCanvas locations={[library, gate]} selected={library} route={null} onSelect={select} />,
+  );
+  expect(document.activeElement).toBe(
+    view.container.querySelector('[data-map-location-id="library"]'),
+  );
+});
+
 it('requests retina tiles and invalidates size after the map is created', async () => {
   const invalidateSize = vi.spyOn(L.Map.prototype, 'invalidateSize');
-  render(<MapCanvas locations={[library]} selected={null} route={null} onSelect={vi.fn()} />);
+  render(
+    <MapCanvas schoolName="靜宜大學" locations={[library]} selected={null} route={null} onSelect={vi.fn()} />,
+  );
   await waitFor(() => expect(vi.mocked(L.map)).toHaveBeenCalled());
   expect(vi.mocked(L.map).mock.calls.at(-1)?.[1]).toMatchObject({ fadeAnimation: false });
   const map = vi.mocked(L.map).mock.results.at(-1)!.value as L.Map;
@@ -103,6 +133,7 @@ it('requests retina tiles and invalidates size after the map is created', async 
   expect(screen.getByRole('region', { name: '校園地點地圖' }).getAttribute('data-map-canvas')).toBe(
     'true',
   );
+  expect(screen.getByText('靜宜大學').closest('[aria-hidden="true"]')).toBeTruthy();
 });
 
 it('keeps the location list usable when tiles fail and recreates the map on retry', async () => {
