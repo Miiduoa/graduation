@@ -148,6 +148,13 @@ const nextConfig: NextConfig = {
           ]
         : []),
       {
+        source: '/auth/account/callback',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
+      {
         source: '/sso-callback',
         headers: [
           { key: 'Cache-Control', value: 'no-store, max-age=0' },

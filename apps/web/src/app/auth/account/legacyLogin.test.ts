@@ -425,6 +425,18 @@ it('searches schools by name through the existing find-school search endpoint', 
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
 });
 
+it.each([
+  [{ authenticated: true, family: 'campus-account' }, true],
+  [{ authenticated: true, family: 'oidc' }, false],
+  [{ authenticated: true, platformAccountId: 'pa_existing' }, false],
+  [{ authenticated: false, family: 'campus-account' }, false],
+] as const)('checks only the school BFF session family for staff sign-in', async (session, expected) => {
+  fetchMock.mockResolvedValueOnce(Response.json(session));
+  await expect(readExistingSession(true)).resolves.toBe(expected);
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0][0]).toBe('/auth/session');
+});
+
 it('treats nuni session as signed in before falling back to /auth/session', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(JSON.stringify({ authenticated: true, platformAccountId: 'pa_1' }), {

@@ -15,6 +15,7 @@ import {
   looksLikeSchoolEmail,
   passkeyAvailable,
   readExistingSession,
+  readSchoolAccountSession,
   readReturnPath,
   searchSchoolsByName,
   signInWithPasskey,
@@ -60,8 +61,8 @@ function GoogleMark() {
 export function AccountEntry() {
   const search = useSearchParams();
   const schoolOnly = search.get('method') === 'school';
-  const returnPath = readReturnPath(search);
-  const campusLogin = campusOneLoginHref(search);
+  const returnPath = schoolOnly ? '/school/account' : readReturnPath(search);
+  const campusLogin = schoolOnly ? null : campusOneLoginHref(search);
   const [gate, setGate] = useState<'checking' | 'unsigned'>('checking');
   const [query, setQuery] = useState('');
   const [school, setSchool] = useState<DiscoveredSchool | null>(null);
@@ -88,10 +89,15 @@ export function AccountEntry() {
       return;
     }
     const ignore = new AbortController();
-    void readExistingSession(schoolOnly).then((signedIn) => {
+    const destination = schoolOnly
+      ? readSchoolAccountSession(ignore.signal).then((session) =>
+          session?.status === 'pending' ? '/school/account' : session ? returnPath : null,
+        ).catch(() => null)
+      : readExistingSession().then((signedIn) => signedIn ? returnPath : null);
+    void destination.then((path) => {
       if (ignore.signal.aborted) return;
-      if (signedIn) {
-        window.location.replace(returnPath);
+      if (path) {
+        window.location.replace(path);
         return;
       }
       setGate('unsigned');
