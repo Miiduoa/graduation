@@ -1857,7 +1857,7 @@ describe('storage security rules', () => {
   for (const objectPath of [
     'conversations/chat/messages/one/photo.jpg',
     'conversations/chat/media/one/photo.jpg',
-    'schools/pu/campusPosts/one/photo.jpg',
+    'schools/pu/campusPosts/replacement-proof/photo.jpg',
     'lostfound/one/photo.jpg',
     'bugreports/one/photo.jpg',
   ]) {
