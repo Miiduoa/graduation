@@ -769,6 +769,36 @@ describe('iCalendar import keeps dates and recurrence semantics explicit', () =>
     expect(errors(parsed.issues)).toContainEqual(expect.objectContaining({ code: 'invalid-time' }));
   });
 
+  it('keeps an event or alarm timezone from shifting unrelated events', () => {
+    const text = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'SUMMARY:說明會', 'DTSTART:20261020T180000', 'DTEND:20261020T200000',
+      'BEGIN:VALARM', 'X-WR-TIMEZONE:UTC', 'END:VALARM', 'END:VEVENT',
+      'BEGIN:VEVENT', 'X-WR-TIMEZONE:UTC', 'SUMMARY:社團迎新',
+      'DTSTART:20261021T180000', 'DTEND:20261021T200000', 'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const floating = parsePersonalImport(text, events);
+    expect(floating.rows.map((row) => [row.date, row.startTime])).toEqual([
+      ['2026-10-20', '18:00'], ['2026-10-21', '18:00'],
+    ]);
+    expect(floating.issues.filter((issue) => issue.code === 'floating-calendar-time')).toHaveLength(4);
+    const withZone = text.replace('END:VCALENDAR', 'X-WR-TIMEZONE:Asia/Taipei\r\nEND:VCALENDAR');
+    const zoned = parsePersonalImport(withZone, events);
+    expect(zoned.issues).toEqual([]);
+    expect(zoned.rows.map((row) => row.startTime)).toEqual(['18:00', '18:00']);
+  });
+
+  it('reads a separate default timezone for each calendar in the file', () => {
+    const event = 'SUMMARY:說明會\r\nDTSTART:20261020T180000\r\nDTEND:20261020T190000';
+    const utc = calendar(event).replace('VERSION:2.0', 'VERSION:2.0\r\nX-WR-TIMEZONE:UTC');
+    const parsed = parsePersonalImport(utc + '\r\n' + calendar(event), events);
+    expect(parsed.rows.map((row) => [row.date, row.startTime])).toEqual([
+      ['2026-10-21', '02:00'], ['2026-10-20', '18:00'],
+    ]);
+    expect(parsed.issues.filter((issue) => issue.code === 'floating-calendar-time')).toHaveLength(2);
+  });
+
   it('does not treat a calendar file as grades or timetable text', () => {
     const parsed = parsePersonalImport(
       calendar('SUMMARY:校慶\r\nDTSTART;VALUE=DATE:20261020'),
