@@ -92,22 +92,20 @@ module.exports = onCall(
 
     const announcements = summarizeSettled(announcementsResult, (items) => {
       if (!Array.isArray(items)) throw new Error('Announcement source is unavailable');
-      return {
-        status: 'available',
-        items: items.slice(0, 8).map((item) => {
-          if (typeof item?.title !== 'string' || !item.title.trim()) {
-            throw new Error('Announcement source is incomplete');
-          }
-          const kind = item.announcementKind;
-          const source = (kind === 'school-announcement' || kind === 'legacy-announcement') &&
-            typeof item.id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(item.id)
-            ? { kind, id: item.id } : null;
-          return {
-            title: item.title.slice(0, 140), publishedAt: toIso(item.publishedAt),
-            ...(source ? { source } : {}),
-          };
-        }),
-      };
+      const rows = [];
+      for (const item of items) {
+        if (typeof item?.title !== 'string' || !item.title.trim()) continue;
+        const kind = item.announcementKind;
+        const source = (kind === 'school-announcement' || kind === 'legacy-announcement') &&
+          typeof item.id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(item.id)
+          ? { kind, id: item.id } : null;
+        rows.push({
+          title: item.title.slice(0, 140), publishedAt: toIso(item.publishedAt),
+          ...(source ? { source } : {}),
+        });
+        if (rows.length === 8) break;
+      }
+      return { status: 'available', items: rows };
     }, { status: 'unavailable', items: [] });
 
     await assertActiveSchoolMember(schoolId, uid);

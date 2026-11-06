@@ -57,6 +57,17 @@ test('reads current announcement producers and preserves document identity and t
   ]);
 });
 
+test('snapshot announcement reads skip a row missing title and keep the rest', async () => {
+  mockDocuments.set('schools/pu/announcements', [
+    row('ok', { schoolId: 'pu', title: '選課時程', publishedAt: new Date('2026-10-30T00:00:00Z') }),
+    row('blank', { schoolId: 'pu', title: ' ', publishedAt: new Date('2026-10-29T00:00:00Z') }),
+    row('also', { schoolId: 'pu', title: '停課公告', publishedAt: new Date('2026-10-28T00:00:00Z') }),
+  ]);
+  const items = await fetchAssistantAnnouncements('pu', { forSnapshot: true });
+  expect(items.map((entry) => entry.id)).toEqual(['ok', 'also']);
+  await expect(fetchAssistantAnnouncements('pu')).rejects.toMatchObject({ code: 'failed-precondition' });
+});
+
 test.each(['school-announcement', 'legacy-announcement'])(
   'derives the requested snapshot reference from the actual %s read', async (kind) => {
     const path = kind === 'legacy-announcement' ? 'announcements' : 'schools/pu/announcements';
