@@ -1,8 +1,9 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
+const { createRequire } = require('node:module');
 const path = require('node:path');
-const { Storage: CloudStorage } = require('@google-cloud/storage');
+const { Storage: CloudStorage } = createRequire(require.resolve('firebase-admin/storage'))('@google-cloud/storage');
 const { revokePrivateGroupFileTokens } = require('./privateGroupFilesMigration');
 const { parseCli, getAdminBucket, runCli, main } = require('../../scripts/revoke-private-group-file-tokens.cjs');
 
@@ -36,7 +37,7 @@ function fixture(entries = [[COVER, metadata()]]) {
       const names = [...objects.keys()].filter((name) => name.startsWith(prefix)).sort();
       const start = Number(pageToken || 0);
       const page = names.slice(start, start + maxResults).map((name) => ({
-        name, metadata: { generation: '1', metageneration: '1', metadata: { [TOKEN_KEY]: 'stale' } },
+        name, metadata: { generation: objects.get(name)?.generation, metageneration: '1', metadata: { [TOKEN_KEY]: 'stale' } },
       }));
       return [page, start + maxResults < names.length ? { pageToken: String(start + maxResults) } : null];
     }),
@@ -88,7 +89,7 @@ test('defaults to dry-run and paginates only the three private namespaces', asyn
   expect(bucket.getFiles).toHaveBeenCalledTimes(5);
   for (const [query] of bucket.getFiles.mock.calls) {
     expect(['groups/', 'assignments/']).toContain(query.prefix);
-    expect(query).toMatchObject({ autoPaginate: false, maxResults: 1 });
+    expect(query).toMatchObject({ versions: true, autoPaginate: false, maxResults: 1 });
   }
   for (const file of files.values()) {
     expect(file.getMetadata).toHaveBeenCalledTimes(1);
@@ -105,12 +106,14 @@ test('apply removes only token metadata using the freshly read exact generation 
     expect(bucket.file).toHaveBeenCalledWith(name);
     expect(file.setMetadata).toHaveBeenCalledWith(
       { metadata: { [TOKEN_KEY]: null, author: 'alice' } },
-      { ifGenerationMatch: '9007199254740993', ifMetagenerationMatch: '7' },
+      { generation: '9007199254740993', ifGenerationMatch: '9007199254740993', ifMetagenerationMatch: '7' },
     );
     expect(objects.get(name)).toEqual(metadata({
       metadata: { author: 'alice' }, metageneration: '8',
     }));
     expect(file.getMetadata).toHaveBeenCalledTimes(2);
+    expect(file.getMetadata).toHaveBeenNthCalledWith(1, { generation: '9007199254740993' });
+    expect(file.getMetadata).toHaveBeenNthCalledWith(2, { generation: '9007199254740993' });
   }
   const second = await revokePrivateGroupFileTokens({ bucket, apply: true });
   expect(second).toMatchObject({ candidates: 0, revoked: 0, failures: 0 });
@@ -122,6 +125,34 @@ test('uses current metadata when the listing still advertises a removed token', 
   expect(await revokePrivateGroupFileTokens({ bucket, apply: true })).toMatchObject({ candidates: 0, revoked: 0 });
   expect(files.get(COVER).getMetadata).toHaveBeenCalledTimes(1);
   expect(files.get(COVER).setMetadata).not.toHaveBeenCalled();
+});
+
+test('rejects an invalid listing generation before reading or changing an object', async () => {
+  for (const value of [undefined, null, '', '0', '-1', '1.5', false, Number.MAX_SAFE_INTEGER + 1]) {
+    for (const apply of [false, true]) {
+      const { bucket } = fixture();
+      bucket.getFiles.mockResolvedValueOnce([[{ name: COVER, generation: 12, metadata: { generation: value } }], null])
+        .mockResolvedValueOnce([[], null]);
+      expect(await revokePrivateGroupFileTokens({ bucket, apply })).toMatchObject({
+        matched: 1, candidates: 0, revoked: 0, failures: 1,
+      });
+      expect(bucket.file).not.toHaveBeenCalled();
+    }
+  }
+});
+
+test.each([true, false])('rejects fresh metadata for another generation, token present=%s', async (hasToken) => {
+  const { bucket } = fixture();
+  const file = bucket.file(COVER);
+  file.getMetadata.mockResolvedValue([metadata({
+    generation: '9007199254740994',
+    metadata: hasToken ? { [TOKEN_KEY]: TOKEN } : { author: 'alice' },
+  })]);
+  expect(await revokePrivateGroupFileTokens({ bucket, apply: true })).toMatchObject({
+    candidates: 0, revoked: 0, conflicts: 0, failures: 1,
+  });
+  expect(file.getMetadata).toHaveBeenCalledWith({ generation: '9007199254740993' });
+  expect(file.setMetadata).not.toHaveBeenCalled();
 });
 
 test('CLI fails when a successful PATCH leaves the token in current metadata', async () => {
@@ -159,11 +190,12 @@ test('requires a successful fresh read of the same token-free object after PATCH
 test.each(['generation', 'metageneration'])('requires valid %s before dry-run or apply', async (field) => {
   for (const value of [undefined, null, '', '0', '-1', '1.5', 'NaN', false, 0, Number.MAX_SAFE_INTEGER + 1]) {
     for (const apply of [false, true]) {
-      const { bucket, files } = fixture([[COVER, metadata({ [field]: value })]]);
+      const { bucket } = fixture([[COVER, metadata({ [field]: value })]]);
+      const file = bucket.file(COVER);
       expect(await revokePrivateGroupFileTokens({ bucket, apply })).toMatchObject({
-        candidates: 1, revoked: 0, failures: 1,
+        candidates: field === 'generation' ? 0 : 1, revoked: 0, failures: 1,
       });
-      expect(files.get(COVER).setMetadata).not.toHaveBeenCalled();
+      expect(file.setMetadata).not.toHaveBeenCalled();
     }
   }
 });
@@ -171,14 +203,15 @@ test.each(['generation', 'metageneration'])('requires valid %s before dry-run or
 test('passes numeric safe generations as precise decimal preconditions', async () => {
   const { bucket, files } = fixture([[COVER, metadata({ generation: 12, metageneration: 3 })]]);
   expect(await revokePrivateGroupFileTokens({ bucket, apply: true })).toMatchObject({ revoked: 1 });
-  expect(files.get(COVER).setMetadata.mock.calls[0][1]).toEqual({ ifGenerationMatch: '12', ifMetagenerationMatch: '3' });
+  expect(files.get(COVER).setMetadata.mock.calls[0][1]).toEqual({ generation: '12', ifGenerationMatch: '12', ifMetagenerationMatch: '3' });
 });
 
 test('rejects malformed metadata instead of treating it as a clean object', async () => {
   for (const value of [null, [], 'invalid', metadata({ metadata: [] }), metadata({ metadata: 'invalid' })]) {
-    const { bucket, files } = fixture([[COVER, value]]);
+    const { bucket } = fixture([[COVER, value]]);
+    const file = bucket.file(COVER);
     expect(await revokePrivateGroupFileTokens({ bucket, apply: true })).toMatchObject({ revoked: 0, failures: 1 });
-    expect(files.get(COVER).setMetadata).not.toHaveBeenCalled();
+    expect(file.setMetadata).not.toHaveBeenCalled();
   }
 });
 
@@ -212,23 +245,73 @@ test('does not read even a valid private path returned outside its listed prefix
   expect(bucket.file).not.toHaveBeenCalled();
 });
 
-test('actual GCS SDK serializes both preconditions as PATCH query parameters', async () => {
+test('Admin GCS SDK revokes paginated live and noncurrent generations using exact selectors and CAS', async () => {
   const storage = new CloudStorage({ projectId: 'demo-private-files', apiEndpoint: 'http://127.0.0.1:1' });
-  storage.request = jest.fn((options, callback) => callback(null, { metadata: { author: 'alice' } }));
-  const realFile = storage.bucket('demo-private-files.appspot.com').file(COVER);
-  realFile.getMetadata = jest.fn()
-    .mockResolvedValueOnce([metadata()])
-    .mockResolvedValueOnce([metadata({ metadata: { author: 'alice' }, metageneration: '8' })]);
-  const { bucket } = fixture();
-  bucket.file.mockReturnValue(realFile);
-  expect(await revokePrivateGroupFileTokens({ bucket, apply: true })).toMatchObject({ revoked: 1, failures: 0 });
-  const request = storage.request.mock.calls[0][0];
-  expect(request).toMatchObject({
-    method: 'PATCH',
-    qs: { ifGenerationMatch: '9007199254740993', ifMetagenerationMatch: '7' },
-    json: { metadata: { author: 'alice', [TOKEN_KEY]: null } },
+  const versions = [
+    { live: false, value: metadata({ name: COVER, generation: '9007199254740993' }) },
+    { live: true, value: metadata({ name: COVER, generation: '9007199254740995' }) },
+    { live: false, value: metadata({ name: POST, generation: '9007199254740997' }) },
+  ];
+  // Replace only the transport boundary. Listing, File creation and query serialization use the Admin SDK dependency.
+  storage.request = jest.fn((options, callback) => {
+    const query = options.qs;
+    if (options.uri.endsWith('/o')) {
+      const matching = versions.filter((entry) => entry.value.name.startsWith(query.prefix)
+        && (query.versions || entry.live));
+      const offset = Number(query.pageToken || 0);
+      const page = matching.slice(offset, offset + query.maxResults);
+      return callback(null, {
+        items: page.map((entry) => structuredClone(entry.value)),
+        ...(offset + page.length < matching.length ? { nextPageToken: String(offset + page.length) } : {}),
+      });
+    }
+    const name = decodeURIComponent(options.uri.split('/o/')[1]);
+    const entry = versions.find((candidate) => candidate.value.name === name
+      && (query.generation === undefined ? candidate.live : candidate.value.generation === query.generation));
+    if (!entry) return callback(Object.assign(new Error('Synthetic version missing'), { code: 404 }));
+    if (options.method === 'PATCH') {
+      if (query.ifGenerationMatch !== entry.value.generation
+        || query.ifMetagenerationMatch !== entry.value.metageneration) {
+        return callback(Object.assign(new Error('Synthetic CAS conflict'), { code: 412 }));
+      }
+      for (const [key, value] of Object.entries(options.json.metadata)) {
+        if (value === null) delete entry.value.metadata[key];
+        else entry.value.metadata[key] = value;
+      }
+      entry.value.metageneration = String(BigInt(entry.value.metageneration) + 1n);
+    }
+    return callback(null, structuredClone(entry.value));
   });
-  expect(request.qs).not.toHaveProperty('preconditionOpts');
+  const bucket = storage.bucket('demo-private-files.appspot.com');
+  expect(await revokePrivateGroupFileTokens({ bucket, apply: true, pageSize: 1 })).toEqual({
+    dryRun: false, listed: 3, matched: 3, candidates: 3, revoked: 3, conflicts: 0, failures: 0,
+  });
+  const requests = storage.request.mock.calls.map(([request]) => request);
+  const listings = requests.filter((request) => request.uri.endsWith('/o'));
+  expect(listings).toHaveLength(4);
+  for (const request of listings) {
+    expect(request.qs).toMatchObject({ versions: true, autoPaginate: false, maxResults: 1 });
+    expect(['groups/', 'assignments/']).toContain(request.qs.prefix);
+  }
+  for (const { value } of versions) {
+    expect(value.metadata).toEqual({ author: 'alice' });
+    expect(value.metageneration).toBe('8');
+    const calls = requests.filter((request) => request.qs.generation === value.generation);
+    expect(calls).toHaveLength(3);
+    expect(calls[0].method).not.toBe('PATCH');
+    expect(calls[1]).toMatchObject({
+      method: 'PATCH',
+      qs: { generation: value.generation, ifGenerationMatch: value.generation, ifMetagenerationMatch: '7' },
+      json: { metadata: { author: 'alice', [TOKEN_KEY]: null } },
+    });
+    expect(calls[2].method).not.toBe('PATCH');
+    expect(calls[1].qs).not.toHaveProperty('preconditionOpts');
+  }
+  storage.request.mockClear();
+  expect(await revokePrivateGroupFileTokens({ bucket, apply: true, pageSize: 1 })).toMatchObject({
+    listed: 3, candidates: 0, revoked: 0, failures: 0,
+  });
+  expect(storage.request.mock.calls.every(([request]) => request.method !== 'PATCH')).toBe(true);
 });
 
 test('requires explicit CLI targets and defaults to dry-run', async () => {

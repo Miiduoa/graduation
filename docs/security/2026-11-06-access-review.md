@@ -1,6 +1,6 @@
 # Campus One 權限與輸入安全測試紀錄
 
-檢查基準為 `main` 的 `5bf3c43f85b6bbfdd413373551011db25b00f07e`。第三輪已合併 `main` 的 `09d11b7b69132d3048d0d6fa84ef5200afee4374`，課表匯入的 52 項相關測試通過。攻擊案例使用合成帳號與測試資料，涵蓋 Firebase 模擬器、Web 請求處理程式，以及 PostgreSQL 15.19 與 PostgREST 16.5 的本機 HTTP 介面。本次未對正式站或學校系統發送攻擊流量。
+檢查基準為 `main` 的 `5bf3c43f85b6bbfdd413373551011db25b00f07e`。第三輪已合併 `main` 的 `0bbb08ef7aadc46d6c0b462f69a39ad3f141bc43`，課表與 Today 相關四個套件 57/57、手機匯入頁 80/80 在 Node 22.23.4 通過。攻擊案例使用合成帳號與測試資料，涵蓋 Firebase 模擬器、Web 請求處理程式，以及 PostgreSQL 15.19 與 PostgREST 16.5 的本機 HTTP 介面。本次未對正式站或學校系統發送攻擊流量。
 
 | 檢查項目 | 修補前的重現結果 | 修補後的驗證 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 - Web 回歸涵蓋串流上限、SAML 回呼、返回網址、課表建立和舊分享連結，八個套件共 175 項通過。後續課表共用模組調整另通過 5 項路由測試，Functions 測試擴充至 20 項，在 Node 20.19.0 與 22.23.4 皆通過，涵蓋真實 Timestamp、到期邊界、異常資料與缺少課程 ID 的相容性。
 - Nuni 商家與課程 API 七個套件共 182/182 通過，其中新增 7 項，驗證偽造身分標頭、上游權限拒絕、失效 session 與待登出狀態。測試呼叫實際 BFF handler，外部 HTTP 連線使用替身，上游資料庫權限採原始碼審查。這輪的修改集中於測試。兩個修改檔的 ESLint 及定向 TypeScript 檢查皆通過。
 - 使用一次性的本機資料庫，可執行 `node scripts/supabase-permissions/run-local.mjs`。本輪四次 HTTP 套件各 52/52 通過，涵蓋全新安裝、從歷史結構升級，以及重建前後。另有每輪 2,499 項 relation ACL 與 246 項函式權限檢查。
-- 使用專案指定的 pnpm 10.28.2 與 Functions 獨立鎖檔執行依賴稽核。三個範圍均無已知高風險或重大公告。全工作區有 5 筆中度、1 筆低度公告，正式依賴子集有 3 筆中度、1 筆低度，Functions 正式依賴有 2 筆中度，範圍間有重疊。
+- 第二輪使用專案指定的 pnpm 10.28.2 與 Functions 獨立鎖檔執行依賴稽核。當時三個範圍均無已知高風險或重大公告，全工作區有 5 筆中度、1 筆低度公告。第三輪 Hono 修補後的實際 CI 報告列於下方，範圍間有重疊。
 - 雲端 Python AI 服務按雜湊安裝鎖定的 50 個套件，pip-audit 回報無已知漏洞。助理工具寫入權限、身分驗證、監聽介面與啟動邊界等 63 項測試通過。新增測試以替身涵蓋報修、訂餐及提醒三種工具，確認各自的設定、缺少身分、下一次呼叫前撤銷權限及讀取設定失敗的情況。
 - Gitleaks 對基準 Git 歷史依專案既有排除清單掃描，沒有新增命中。另對原始碼快照獨立掃描的 13 筆命中，為 Firebase 用戶端設定、雜湊、儲存鍵及測試用識別碼。未查詢正式金鑰限制或管理後台。
 
@@ -60,7 +60,11 @@ Firebase 作業附件採建立後不可變更的策略。現有 Firebase Web 與
 
 ### Firebase 舊下載權杖
 
-`scripts/revoke-private-group-file-tokens.cjs` 預設 dry-run，要求明確 project 與 bucket。工具分頁掃描兩個固定 prefix，再由共用路徑解析器限縮為三個私人 namespace。加上 `--apply` 後，只清除下載 token 並保留其他 metadata。寫入同時比對 generation 與 metageneration，隨後重新讀取確認生效。衝突、驗證失敗或任何讀寫失敗皆會使 CLI 回傳非零，輸出僅包含目標與統計。
+`scripts/revoke-private-group-file-tokens.cjs` 預設 dry-run，要求明確 project 與 bucket。工具以 `versions: true` 分頁掃描兩個固定 prefix，再由共用路徑解析器限縮為三個私人 namespace，逐一處理目前與非目前版本。加上 `--apply` 後，只清除下載 token 並保留其他 metadata。寫入同時比對 generation 與 metageneration，隨後重新讀取同一版本確認生效。衝突、驗證失敗或任何讀寫失敗皆會使 CLI 回傳非零，輸出僅包含目標與統計。
+
+追加檢查確認，GCS 非目前版本具有獨立 metadata，普通列表會略過這些版本。原清理程式在三版本合成案例中回報成功 1 筆、失敗 0 筆，另外兩個版本仍保留 token metadata。修補改用列舉結果的原始 `metadata.generation` 字串，於 metadata GET、PATCH 及驗證 GET 明示相同 generation。取得的版本不符時，即使回應沒有 token 也記錄失敗。這項重現確認版本 metadata 清理漏項，Firebase bearer URL 對 generation 參數的實際支援仍待 staging 確認。[GCS 版本 metadata](https://docs.cloud.google.com/storage/docs/object-versioning#noncurrent_object_metadata)
+
+Firebase Admin 實際依賴的 `@google-cloud/storage 8.4.0` 會將 `File.generation` 轉為 Number，合成值 `9007199254740993` 因而失去精度。回歸測試使用該 SDK 的公開 API，僅替換 transport，確認原始字串能完整傳入三次請求與兩項 CAS。測試亦涵蓋同名目前／非目前版本、只有非目前版本的檔案、逐筆分頁、metadata 保留與重跑冪等性。相同測試套用修補前程式得到 8 failed／14 passed，修補後 22/22 通過。[GCS 版本列舉與 selector](https://docs.cloud.google.com/storage/docs/json_api/v1/objects/list)
 
 Firebase CLI 15.34.1 的 Storage emulator 缺少 GCS generation precondition 實作，metadata PATCH 也不會清除其獨立的 downloadTokens 陣列。整合測試因此驗證 canonical 授權、正常 HTTP 讀寫及清理未生效時的錯誤回報，GCS SDK 序列化測試另外確認版本條件有送到請求。真正 Cloud Storage 的原子競爭與舊 token 失效，仍需隔離 staging bucket 驗收。
 
@@ -78,9 +82,13 @@ Storage 的預簽上傳會在授權檢查後，使用提升權限的寫入路徑
 
 ### 本輪驗證狀態
 
-私有附件 handler 54/54、HTTP adapter 15/15、token migration 19/19，以及真實 Node socket transport 4/4，共 92 項合跑通過。後者使用實際 onRequest wrapper 與 function registry，包含 11 MiB binary 上傳、撤權及驗證期間與上傳途中斷線，確認後續正常請求可立即成功。新增的 5 項 Firebase emulator 與更新後 15 項 Storage 規則案例已接入 `pnpm test:rules`。本機執行環境恢復後缺少 emulator JAR，這兩組以最新 PR CI 的結果完成核驗。
+私有附件 handler 54/54、HTTP adapter 15/15、token migration 22/22，以及真實 Node socket transport 4/4，共 95 項在 Node 22.23.4 合跑通過。後者使用實際 onRequest wrapper 與 function registry，包含 11 MiB binary 上傳、撤權及驗證期間與上傳途中斷線，確認後續正常請求可立即成功。新增的 5 項 Firebase emulator 與更新後 15 項 Storage 規則案例已接入 `pnpm test:rules`。提交 `1ef078d2` 的 CI 已取得完整 Node emulator 250/250 與 Web emulator 32/32，新增案例均有執行。
 
-Supabase 一次性 stack 追加 10 個真實 Storage HTTP 子情境，包含 bytes 讀寫、PUT/upsert、刪除、單筆及批次簽名 URL、路徑綁定，以及持有相同 JWT 的學生與教師撤權。這些測試隨既有 Supabase CI 的全新、重建及升級情境執行。本機的原生 PostgreSQL runner 已取得四輪 53 SQL 與 53 PostgREST HTTP 全綠，真正的 Storage HTTP 結果以 CI 為準。
+Supabase 一次性 stack 追加 10 個真實 Storage HTTP 子情境，包含 bytes 讀寫、PUT/upsert、刪除、單筆及批次簽名 URL、路徑綁定，以及持有相同 JWT 的學生與教師撤權。提交 `1ef078d2` 的 CI 在全新、第二次重建、歷史升級三個情境中，各完成 53 Storage SQL、53 PostgREST HTTP 與 10 個真實 Storage HTTP 子情境，全數通過且沒有略過。本機的原生 PostgreSQL runner 另取得四輪 53 SQL 與 53 PostgREST HTTP 全綠。[Supabase 整合結果](https://github.com/Miiduoa/graduation/actions/runs/42232908690)
+
+同一提交的主 CI 已完成 Functions 124 套件共 1,760 項、Web 10,143 項與 Assistant HTTP 13 項。Web 40 項略過中，32 項在上述 emulator 工作執行，7 項需要 `NUNI_TEST_POSTGRES_PORT`，另 1 項為主線既有停用測試。兩個需要 archived source 的部署來源檢查亦維持條件式略過。Web 容器建置後實際啟動，`/health/live` 與 `/search` 驗證通過。版本清理追加修補的完整 CI 與 Maestro 狀態以 PR 的精確 head 紀錄為準。[主 CI](https://github.com/Miiduoa/graduation/actions/runs/42232908763)
+
+針對 PostgreSQL 條件式測試，使用一次性 PG15 補跑 assignmentFileStore 7/7 與 assignmentFileService 36/36，合計 43/43 通過。後者另含 6 項在 CI 環境變數缺少時未加入清單的 PG 變體，因此共補足 13 項真實 PG 案例。資料索引使用真實 PostgreSQL，附件 bytes 與上游平台使用既有合成 fixture。既有 CI 尚未接入這組資料庫條件，測試後已移除暫存 cluster。
 
 ### 資料庫函式安全檢查
 
@@ -94,9 +102,13 @@ Advisors 從 1 ERROR、6 WARN 降為 1 ERROR、2 WARN。剩餘 ERROR 是既有�
 
 既有 dependency compatibility 檔案擴充後 5/5 通過，涵蓋真實 MCP JSON／SSE HTTP、session、notification 202、auth context、關閉流程與 ESM export。本機使用 Node 22.15.0 及隔離下載的 Hono 2.1.3，CI 使用乾淨安裝與固定 Node 22.23.4。
 
-最近一次成功取得的工作區 audit 有 0 high／critical、9 個 moderate 受影響版本及 1 個 low，對應 5 個 moderate 公告。本輪修補後的完整直接重掃遭自動核准審查拒絕，理由為送出依賴名稱與版本清單到 npm registry 需要更明確的授權。Hono 修補已依官方公告與本機鎖檔確認，完整重新 audit 尚未取得，沒有將推算的減少數字列為新掃描結果。
+本輪本機直接重掃遭自動核准審查拒絕，理由為送出依賴名稱與版本清單到 npm registry 需要更明確的授權。後續沿用專案既有 CI 的 audit 工作，提交 `1ef078d2` 已取得三份實際政策報告。workspace-prod 為 0 critical、0 high、3 moderate、1 low，workspace-all 為 0 critical、0 high、4 moderate、1 low，functions-prod 為 0 critical、0 high、2 moderate、0 low。數量是公告項目，範圍之間有重疊。
 
-其餘依賴的唯讀追蹤顯示，現有 uuid 呼叫主要為 v4，該公告描述的是自訂 buffer 的 v3／v5／v6 邊界。OpenTelemetry Core 的已查得路徑是 Firebase CLI／PubSub 的 trace-context。glob、minimatch 主要位於 CLI、Expo 與 Jest 工具鏈，但有界測試確認 minimatch 在 optimizationLevel 2 會放大特定 pattern，仍保留後續修補需求。deepmerge 的 low 告警位於手機 Jest 設定相依。這些結論代表已檢查的呼叫路徑，套件告警仍維持可見。
+其餘依賴的唯讀追蹤顯示，現有 uuid 呼叫主要為 v4，該公告描述的是自訂 buffer 的 v3／v5／v6 邊界。OpenTelemetry Core 的已查得路徑是 Firebase CLI／PubSub 的 trace-context。deepmerge 的 low 告警位於手機 Jest 設定相依。這些結論代表已檢查的呼叫路徑，套件告警仍維持可見。
+
+glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，包含 Firestore 經 google-gax／gaxios、rimraf、glob 的正式 optional 依賴。核對精確官方 tarball 後，尚未找到 google-gax／gaxios 執行時呼叫 rimraf，亦尚未找到應用請求可達的 pattern 入口。有界測試確認 minimatch 在 optimizationLevel 2 會放大特定 pattern，因此仍保留修補需求。
+
+隔離相容性測試確認，單獨將 minimatch 換成 11.0.1 會使 glob 10.5.0／13.0.0 的正常兩檔查詢回傳空集合。Functions 全域 brace-expansion 1.1.21 override 也與其獨立 npm dev 圖中的 minimatch 10.2.6 具名 expand API 不相容。後續調整須協同 glob、minimatch 與 brace-expansion，並驗證兩套鎖檔、ESLint、Jest、Expo 與使用 `npm ci --ignore-scripts` 的 Firebase／Fly 封裝。
 
 ### Supabase CI 結構差異回歸
 

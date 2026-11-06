@@ -57,7 +57,7 @@ async function revokePrivateGroupFileTokens({ bucket, apply = false, pageSize = 
       let files, nextQuery;
       try {
         [files, nextQuery] = await bucket.getFiles({
-          prefix, autoPaginate: false, maxResults: pageSize,
+          prefix, versions: true, autoPaginate: false, maxResults: pageSize,
           ...(pageToken ? { pageToken } : {}),
         });
         if (!Array.isArray(files)) throw new Error('Invalid listing');
@@ -72,14 +72,20 @@ async function revokePrivateGroupFileTokens({ bucket, apply = false, pageSize = 
         if (!scope || !PRIVATE_KINDS.has(scope.kind) || !scope.path.startsWith(prefix)) continue;
         summary.matched += 1;
         try {
-          // Listing metadata may be stale. Read the latest live object without a generation selector.
+          // The raw metadata preserves generation precision that File.generation can lose.
+          // Refresh this exact version, including noncurrent objects, before applying CAS.
+          const generation = generationPrecondition(listed?.metadata?.generation);
+          const selector = { generation };
           const file = bucket.file(scope.path);
-          const [metadata] = await file.getMetadata();
+          const [metadata] = await file.getMetadata(selector);
           const custom = readCustomMetadata(metadata);
+          if (generationPrecondition(metadata.generation) !== generation) {
+            throw new Error('Object generation does not match the listing');
+          }
           if (!Object.hasOwn(custom, TOKEN_KEY)) continue;
           summary.candidates += 1;
           const conditions = {
-            ifGenerationMatch: generationPrecondition(metadata.generation),
+            generation, ifGenerationMatch: generation,
             ifMetagenerationMatch: generationPrecondition(metadata.metageneration),
           };
           if (apply) {
@@ -87,7 +93,7 @@ async function revokePrivateGroupFileTokens({ bucket, apply = false, pageSize = 
             // These preconditions are flat options on File#setMetadata.
             await file.setMetadata({ metadata: { ...custom, [TOKEN_KEY]: null } }, conditions);
             // A successful PATCH is insufficient if the storage backend retains bearer tokens.
-            const [current] = await file.getMetadata();
+            const [current] = await file.getMetadata(selector);
             const remaining = readCustomMetadata(current);
             if (generationPrecondition(current.generation) !== conditions.ifGenerationMatch
               || Object.hasOwn(remaining, TOKEN_KEY)) {
