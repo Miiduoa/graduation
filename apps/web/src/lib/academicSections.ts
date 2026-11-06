@@ -9,10 +9,10 @@ export const ACADEMIC_SECTIONS = STUDENT_ACADEMIC_SECTIONS.map((section) => ({
   readonly label: (typeof STUDENT_ACADEMIC_SECTIONS)[number]['label'];
 }>;
 
-/** 玩課雲（WOW Class／TronClass）唯讀入口；名稱統一為「玩課雲」。 */
+/** 校方學習平臺入口；各校平臺名稱在選定校園後顯示。 */
 export const ACADEMIC_LMS_SECTIONS = [
-  { path: '/school-courses', label: '玩課雲課程' },
-  { path: '/school-lms', label: '玩課雲作業' },
+  { path: '/school-courses', label: '校方課程' },
+  { path: '/school-lms', label: '校方作業與教材' },
 ] as const;
 
 export type AcademicSectionPath =

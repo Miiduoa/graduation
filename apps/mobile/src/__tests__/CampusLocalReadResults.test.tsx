@@ -7,7 +7,7 @@ import type { LocalCampusReadResult } from '../services/localCampusToolProtocol'
 
 let mockUid = 'A';
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: { uid: mockUid } }) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ selectionReady: true, selection: { schoolId: 'pu' }, school: { id: 'pu', name: '靜宜大學' } }) }));
 jest.mock('../features/campusAssistant', () => ({
   askCampusAssistant: jest.fn(),
   OnDeviceAssistantError: class extends Error {},

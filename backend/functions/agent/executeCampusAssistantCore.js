@@ -2,6 +2,9 @@
 
 const { getFirestore } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../authz');
+const { getSchoolContactAnswer } = require('../generated/shared/schoolContactAnswer');
+const { PUBLIC_SCHOOL_INFO_CATALOG_URL, PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE } =
+  require('../generated/shared/publicSchoolInfo');
 const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../lib/onlineOrdering');
 const {
   answerWithServerWebSearch,
@@ -258,7 +261,6 @@ async function executeCampusAssistantCore({
     response.debug.permissionScope = permissionScope;
     response.debug.actorRole = actorRole;
     response.debug.source = source;
-    response.debug.freshness = freshness;
     response.debug.modelProvider = modelTrace.provider;
     response.debug.model = modelTrace.model;
     if (modelTrace.errors?.length) response.debug.modelErrors = modelTrace.errors.slice(0, 2);
@@ -343,6 +345,20 @@ async function executeCampusAssistantCore({
       const deniedEarly = await ensureWriteToolAllowed(writePlan.toolName);
       if (deniedEarly) return deniedEarly;
     }
+  }
+
+  const contactAnswer = getSchoolContactAnswer(schoolId, lastUserMessage);
+  if (contactAnswer) {
+    response.content = contactAnswer;
+    response.citations = webSourcesToCitations([{
+      title: '教育部大專校院名錄',
+      url: PUBLIC_SCHOOL_INFO_CATALOG_URL,
+    }]);
+    response.debug.sourcesUsed = response.citations.length;
+    response.debug.route = 'school_directory';
+    response.debug.freshness = 'snapshot';
+    response.debug.snapshotDate = PUBLIC_SCHOOL_INFO_SNAPSHOT_DATE;
+    return finalizeResponse();
   }
 
   if (shouldUseServerWebSearch(lastUserMessage, intent)) {

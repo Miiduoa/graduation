@@ -48,13 +48,15 @@ def should_use_web_search(query: str) -> bool:
     return bool(WEB_PATTERNS.search(query))
 
 
-def _route_answer(query: str) -> tuple[str, list[WebSource]] | None:
+def _route_answer(query: str, school_id: str | None = None) -> tuple[str, list[WebSource]] | None:
     if not re.search(r"(怎麼去|如何到|怎麼到|路線|公車|導航|交通)", query):
         return None
 
     cleaned = re.sub(r"^(請問|幫我|搜尋|查詢)", "", query).strip("？?。！! ")
     explicit = re.search(r"(?:從|自)([^到去，。？！?]{2,24})(?:到|去)([^，。？！?]{2,30})", cleaned)
-    origin = re.sub(r"(怎麼|如何|要|想)$", "", explicit.group(1)).strip() if explicit else "靜宜大學"
+    origin = re.sub(r"(怎麼|如何|要|想)$", "", explicit.group(1)).strip() if explicit else None
+    if not origin and school_id in ("pu", "tw-pu"):
+        origin = "靜宜大學"
     destination = explicit.group(2).strip() if explicit else re.sub(
         r"^(我)?(要|想)?(怎麼|如何)(去|到)|怎麼走|路線|導航|交通",
         "",
@@ -64,19 +66,21 @@ def _route_answer(query: str) -> tuple[str, list[WebSource]] | None:
     if len(destination) < 2:
         return None
 
-    url = "https://www.google.com/maps/dir/?" + urlencode(
-        {"api": "1", "origin": origin, "destination": destination, "travelmode": "transit"}
-    )
+    params = {"api": "1", "destination": destination, "travelmode": "transit"}
+    if origin:
+        params["origin"] = origin
+    url = "https://www.google.com/maps/dir/?" + urlencode(params)
+    route_label = f"{origin} → {destination}" if origin else f"前往{destination}（可在地圖選擇出發地）"
     sources = [
         WebSource(
             title="Google Maps 大眾運輸路線",
             url=url,
             source="Google Maps",
-            snippet=f"從 {origin} 到 {destination} 的即時大眾運輸路線。",
+            snippet=f"大眾運輸路線：{route_label}",
         )
     ]
 
-    if re.search(r"靜宜|静宜|providence", origin, re.I) and re.search(
+    if origin and re.fullmatch(r"(?:靜宜|静宜)(?:大學)?|Providence University", origin, re.I) and re.search(
         r"台中車站|臺中車站|台中火車站|臺中火車站", destination
     ):
         sources.insert(
@@ -91,22 +95,30 @@ def _route_answer(query: str) -> tuple[str, list[WebSource]] | None:
 
     content = "\n".join(
         [
-            f"路線查詢：{origin} → {destination}",
-            "靜宜大學到臺中車站可先看 300 路公車；其他目的地請用 Google Maps 以現在時間確認最新轉乘。",
+            f"路線查詢：{route_label}",
+            "請開啟地圖確認班次與轉乘時間。",
             f"Google Maps: {url}",
         ]
     )
     return content, sources[:4]
 
 
-async def _fetch_weather(query: str, client: httpx.AsyncClient) -> tuple[str, list[WebSource]] | None:
+async def _fetch_weather(query: str, client: httpx.AsyncClient, school_id: str | None = None) -> tuple[str, list[WebSource]] | None:
     if not re.search(r"(天氣|氣溫|下雨|帶傘|雨具|天候)", query):
         return None
 
-    if re.search(r"靜宜|静宜|沙鹿", query):
+    place = re.sub(
+        r"今天|現在|目前|請問|幫我|查詢|一下|會不會|要不要|天氣|氣溫|下雨|帶傘|雨具|天候|"
+        r"如何|怎麼樣|怎樣|需要|的|會|嗎|[？?！!。，、\s]", "", query,
+    )
+    if place in ("靜宜", "静宜", "靜宜大學", "静宜大學", "沙鹿", "沙鹿區") or (
+        not place and school_id in ("pu", "tw-pu")
+    ):
         name, lat, lon = "台中市沙鹿區靜宜大學", 24.226, 120.563
-    else:
+    elif place in ("台中", "臺中", "台中市", "臺中市"):
         name, lat, lon = "台中市", 24.1477, 120.6736
+    else:
+        return "目前無法確認查詢地點的即時天氣，可至中央氣象署選擇所在鄉鎮查詢。", []
 
     params = urlencode(
         {
@@ -201,16 +213,16 @@ async def _fetch_duckduckgo(query: str, client: httpx.AsyncClient) -> list[WebSo
     return sources
 
 
-async def search_public_web(query: str) -> tuple[str, list[WebSource]]:
+async def search_public_web(query: str, *, school_id: str | None = None) -> tuple[str, list[WebSource]]:
     if not should_use_web_search(query):
         return "", []
 
-    route = _route_answer(query)
+    route = _route_answer(query, school_id)
     if route:
         return route
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(7.0, connect=3.0)) as client:
-        weather = await _fetch_weather(query, client)
+        weather = await _fetch_weather(query, client, school_id)
         if weather:
             return weather
 

@@ -1,3 +1,5 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
+import { formatPublicSchoolAddress, publicSchoolInfoDirectory } from '@campus/shared/src/publicSchoolInfo';
 import {
   buildCheckBusOfflineMessage,
   buildSchoolScopedEmergencyFallback,
@@ -68,3 +70,37 @@ test('assistant identity and agent prompt do not claim PU for other schools', ()
   expect(prompt).not.toContain('靜宜小幫手');
   expect(prompt).toContain('不可把其他學校');
 });
+
+test('every bundled institution answers its own address, switchboard and official website with MOE provenance', () => {
+  const schools = Object.values(publicSchoolInfoDirectory);
+  expect(schools.length).toBe(138);
+  for (const school of schools) {
+    const answer = getSchoolContactAnswer(school.id, '請問學校的聯絡方式？', school.name);
+    expect(answer).toContain(school.name);
+    expect(answer).toContain(formatPublicSchoolAddress(school));
+    expect(answer).toContain(school.telephone);
+    expect(answer).toContain(school.websiteUrl);
+    expect(answer).toContain('教育部');
+  }
+});
+
+test('switches campuses and resolves explicit legacy IDs without reusing names or addresses', () => {
+  const ask = (schoolId: string, userText: string) => buildSchoolScopedEmergencyFallback({ schoolId, userText })?.content;
+  expect(ask('tw-pu', '學校地址在哪裡？')).toContain('臺中市沙鹿區');
+  expect(ask('tw-nchu', '本校的總機電話')).toContain(publicSchoolInfoDirectory.nchu.telephone);
+  expect(ask('nthu', '國立清華大學的官方網站是什麼？')).toContain(publicSchoolInfoDirectory.nthu.websiteUrl);
+  expect(getSchoolContactAnswer('nthu', '如何聯絡學校？')).toContain(publicSchoolInfoDirectory.nthu.telephone);
+  expect(getSchoolContactAnswer('nthu', '學校地址', '靜宜大學')).toBeNull();
+  expect(getSchoolContactAnswer('other', '學校地址')).toBeNull();
+  expect(getSchoolContactAnswer(null, '學校地址')).toBeNull();
+});
+
+test.each(['我的電話', '學校教務處電話', '學校圖書館官網', '學校緊急聯絡電話', '校安中心電話',
+  '學校地址和我的住址', '國立清華大學的總機', '請問清大電話', '學校官網怎麼操作', '如何聯絡學校的老師',
+  '總機電話是什麼意思', '幫我翻譯學校地址', '學校第一校區地址', '我的地址在哪裡'])(
+  'does not use the selected institution switchboard or address for %s', (question) => {
+    expect(getSchoolContactAnswer('pu', question)).toBeNull();
+    expect(buildSchoolScopedEmergencyFallback({ schoolId: 'pu', userText: question })?.content ?? '')
+      .not.toMatch(/2632-?8001|台灣大道七段 200 號/);
+  },
+);
