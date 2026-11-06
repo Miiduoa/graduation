@@ -83,6 +83,7 @@ export function SavedCampusPlansPanel({
                 accessibilityLabel={(expanded ? '收起' : '查看') + saved.plan.title + '，' + dates + '，' + progress}
                 accessibilityHint="查看儲存時的計畫內容與個人處理進度"
                 accessibilityState={{ expanded, disabled: locked }}
+                aria-expanded={expanded}
                 disabled={locked}
                 onPress={() => {
                   if (locked) return;

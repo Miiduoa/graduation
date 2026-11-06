@@ -137,6 +137,7 @@ export function CampusEvidencePlanCard({
                 accessibilityRole="checkbox"
                 accessibilityLabel={'我已處理：' + step.title}
                 accessibilityState={{ checked: done, disabled }}
+                aria-checked={done}
                 disabled={disabled}
                 onPress={() => progress.onToggleStep(step.id, !done)}
                 style={{ minHeight: 44, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}
