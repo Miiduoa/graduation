@@ -95,6 +95,28 @@ test('NTHU clipboard rejection retains selectable import data and unscheduled co
   } finally { globalThis.fetch = original; }
 });
 
+test.each(['false', 'rejection'])('a clipboard %s after a successful copy clears the success message and preserves manual copy', async (failure) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const clipboard = jest.mocked(Clipboard.setStringAsync).mockResolvedValueOnce(true);
+  if (failure === 'false') clipboard.mockResolvedValueOnce(false);
+  else clipboard.mockRejectedValueOnce(new Error('unavailable'));
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson());
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    await view.findByText('分析化學專題');
+    fireEvent.press(view.getByText('複製課表匯入資料'));
+    expect(await view.findByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeTruthy();
+    fireEvent.press(view.getByText('複製課表匯入資料'));
+    const fallback = await view.findByLabelText('可複製的課表資料');
+    expect(view.queryByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeNull();
+    expect(clipboard).toHaveBeenCalledTimes(2);
+    expect(fallback.props.children).toBe(clipboard.mock.calls[0][0]);
+    expect(fallback.props.selectable).toBe(true);
+    expect(view.getByText('前往課表匯入')).toBeTruthy();
+  } finally { globalThis.fetch = original; }
+});
+
 test('switching between public campuses aborts the old request and ignores its late reply', async () => {
   setBrowsingSchoolId('ncnu');
   const original = globalThis.fetch;

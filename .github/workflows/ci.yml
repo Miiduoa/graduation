@@ -275,6 +275,9 @@ jobs:
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food
 
+      - name: Test shared school catalogs and personal imports
+        run: node --test --test-concurrency=1 packages/shared/tests/schools.test.cjs packages/shared/tests/ncnuCourseSchedule.test.cjs packages/shared/tests/nthuCourseSchedule.test.cjs packages/shared/tests/personalImportCloud.test.cjs
+
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
 
