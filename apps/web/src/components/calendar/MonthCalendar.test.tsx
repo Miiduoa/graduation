@@ -30,6 +30,8 @@ it('顯示每日名稱、展開更多、選日期及沿用事件物件', () => {
       disabled={false}
     />,
   );
+  expect(screen.getByRole('heading', { name: '2024 / 03' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '2024-03 月格，週日起始' }).tabIndex).toBe(0);
   expect(screen.getByRole('button', { name: records[0].title })).toBeTruthy();
   expect(screen.queryByText('合成2')).toBeNull();
   fireEvent.click(screen.getByText('還有 1 筆'));
