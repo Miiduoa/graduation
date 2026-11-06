@@ -7,9 +7,9 @@ import type { PersonalImportScope } from '../services/personalImports';
 export function usePersonalImportScope(): PersonalImportScope | null {
   const legacy = useAuth();
   const platform = useNuniSession();
-  const { school } = useSchool();
+  const { school, selectionReady } = useSchool();
   const unresolved = !!(
-    legacy.loading ||
+    selectionReady === false || legacy.loading ||
     platform.loading ||
     platform.pendingLogout ||
     platform.error

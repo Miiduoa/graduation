@@ -1,6 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { parseCampusAssignmentSource, type CampusAssignmentSource } from './campusAssignmentSource';
+import { parseCampusAnnouncementSource, type CampusAnnouncementSource } from './campusAnnouncementSource';
 import { abortableCampusRead } from './abortableCampusRead';
 
 export type SenseSourceStatus = 'available' | 'unavailable';
@@ -18,7 +19,7 @@ export interface CampusSenseSnapshot {
   };
   announcements: {
     status: SenseSourceStatus;
-    items: Array<{ title: string; publishedAt: string | null }>;
+    items: Array<{ title: string; publishedAt: string | null; source?: CampusAnnouncementSource }>;
   };
 }
 
@@ -131,7 +132,12 @@ function parseSnapshot(payload: unknown, userId: string, schoolId: string): Pars
         ? announcements.items.slice(0, 12).map((item: unknown) => {
             const row = record(item);
             if (!row) throw new Error('invalid-sense-response');
-            return { title: requiredText(row.title, 140), publishedAt: dateString(row.publishedAt) };
+            const source = row.source === undefined ? null : parseCampusAnnouncementSource(row.source);
+            if (row.source !== undefined && !source) throw new Error('invalid-sense-response');
+            return {
+              title: requiredText(row.title, 140), publishedAt: dateString(row.publishedAt),
+              ...(source ? { source } : {}),
+            };
           }) : [],
     },
   };

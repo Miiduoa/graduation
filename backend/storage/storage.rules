@@ -241,8 +241,25 @@ service firebase.storage {
     }
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
-      allow read: if isSchoolMemberStorage(schoolId);
-      allow write: if isSchoolMemberStorage(schoolId)
+      function activeStoryMember() {
+        return isAuthenticated()
+          && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
+      }
+      function isPublishedStory() {
+        let story = firestore.get(/databases/(default)/documents/campusStories/$(storyId)).data;
+        return story.schoolId == schoolId
+          && resource.metadata.ownerUid == story.authorUid
+          && story.mediaUrl is string && story.mediaUrl.size() > 0
+          && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
+            || (story.kind == 'video' && resource.contentType.matches('video/.*')));
+      }
+      allow get: if activeStoryMember()
+        && (resource.metadata.get('ownerUid', '') == request.auth.uid || isPublishedStory());
+      // Draft uploads may be retried until their Firestore story is published.
+      allow create, update: if activeStoryMember()
+        && request.resource.metadata.ownerUid == request.auth.uid
+        && (resource == null || resource.metadata.ownerUid == request.auth.uid)
+        && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
         && (isValidImage() && maxSize(10) || isValidVideo() && maxSize(100));
     }
 

@@ -1500,6 +1500,68 @@ describe('firestore security rules', () => {
 });
 
 describe('storage security rules', () => {
+  test('only a story draft owner can replace its photo before publication', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+    });
+    const path = 'schools/pu/stories/story-1/image';
+    const alice = testEnv.authenticatedContext('alice');
+    const bob = testEnv.authenticatedContext('bob');
+    const other = testEnv.authenticatedContext('outsider');
+    const upload = (actor, ownerUid) => actor.storage().ref(path).putString('photo', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid },
+    });
+
+    await assertFails(upload(other, 'outsider'));
+    await assertFails(upload(bob, 'alice'));
+    await assertSucceeds(upload(alice, 'alice'));
+    await assertSucceeds(upload(alice, 'alice'));
+    await assertFails(upload(bob, 'bob'));
+    await assertFails(upload(bob, 'alice'));
+    await assertSucceeds(alice.storage().ref(path).getMetadata());
+    await assertFails(bob.storage().ref(path).getMetadata());
+    await assertFails(bob.storage().ref('schools/pu/stories/story-1').listAll());
+    await assertFails(other.storage().ref(path).getMetadata());
+    const mediaUrl = await assertSucceeds(alice.storage().ref(path).getDownloadURL());
+    await assertSucceeds(alice.firestore().doc('campusStories/story-1').set({
+      schoolId: 'pu', authorUid: 'alice', kind: 'image', mediaUrl, expiresAt: Date.now() + 86_400_000,
+    }));
+    await assertSucceeds(bob.storage().ref(path).getMetadata());
+    await assertFails(upload(alice, 'alice'));
+  });
+
+  test('other members can read only the published story author’s matching media', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/other/members/alice').set({ status: 'active' });
+    });
+    const alice = testEnv.authenticatedContext('alice');
+    const bob = testEnv.authenticatedContext('bob');
+    for (const [id, story] of [
+      ['photo-removed', { kind: 'text', text: '改發純文字', mediaUrl: null }],
+      ['text-with-url', { kind: 'text' }],
+      ['no-media-url', { mediaUrl: '' }],
+      ['other-author', { authorUid: 'bob' }],
+      ['other-campus', { schoolId: 'other' }],
+      ['video-document-for-photo', { kind: 'video' }],
+    ]) {
+      const path = `schools/pu/stories/${id}/image`;
+      const file = alice.storage().ref(path);
+      await assertSucceeds(file.putString('photo', 'raw', {
+        contentType: 'image/jpeg', customMetadata: { ownerUid: 'alice' },
+      }));
+      const mediaUrl = await assertSucceeds(file.getDownloadURL());
+      const author = story.authorUid === 'bob' ? bob : alice;
+      await assertSucceeds(author.firestore().doc(`campusStories/${id}`).set({
+        schoolId: 'pu', authorUid: 'alice', kind: 'image', mediaUrl,
+        expiresAt: Date.now() + 86_400_000, ...story,
+      }));
+      await assertFails(bob.storage().ref(path).getMetadata());
+    }
+  });
+
   test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ displayName: 'Alice' });

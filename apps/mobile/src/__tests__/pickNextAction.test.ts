@@ -100,3 +100,17 @@ test('今天沒課且超過 24 小時才截止的未交是下一件作業，不�
   expect(TODAY_COPY.nextAssignment).toBe('下一件作業');
   expect(pickNextAction([], [], now)).toEqual({ type: 'empty' });
 });
+
+test.each([
+  [0, '現在截止（02:00）'],
+  [59, '02:00 截止・剩不到 1 分鐘'],
+  [60, '02:01 截止・還剩 1 分鐘'],
+  [3599, '02:59 截止・還剩 59 分鐘'],
+  [3600, '03:00 截止・還剩 1 小時'],
+  [5999, '03:39 截止・還剩 1 小時 39 分鐘'],
+  [86399, '01:59 截止・還剩 23 小時 59 分鐘'],
+  [86400, '02:00 截止・還剩 1 天'],
+  [129600, '14:00 截止・還剩 1 天 12 小時'],
+] as const)('距截止 %i 秒時保留台北時間與倒數精度', (seconds, expected) => {
+  expect(formatTodoDueLine(todo({ dueAt: now.getTime() + seconds * 1000 }), now)).toBe(expected);
+});

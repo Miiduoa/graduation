@@ -5,7 +5,12 @@ import {
   type PersonalImportRow,
   type PeriodProfileId,
 } from '@campus/shared';
-import { REVIEW_DAYS, reviewCellRows, reviewPeriods } from '@campus/shared/src/imports/reviewGrid';
+import {
+  REVIEW_DAYS,
+  reviewCellRows,
+  reviewPeriods,
+  rowsOutsideReviewGrid,
+} from '@campus/shared/src/imports/reviewGrid';
 import { theme } from '../ui/theme';
 
 export function TimetableReviewGrid({
@@ -23,8 +28,40 @@ export function TimetableReviewGrid({
   onEdit(row: PersonalImportRow): void;
   onAdd(day: number, period: number): void;
 }) {
+  const periods = reviewPeriods(rows, profile);
+  const outside = rowsOutsideReviewGrid(rows, periods);
   return (
     <View style={{ gap: 8 }}>
+      {outside.length > 0 && (
+        <View style={{ gap: 6 }}>
+          <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '700' }}>
+            週格以外的課程 · {outside.length} 筆
+          </Text>
+          <Text style={{ color: theme.colors.muted }}>
+            這些課程仍在草稿中。點選課名可核對星期與上課時間。
+          </Text>
+          {outside.map(({ row, detail }) => (
+            <Pressable
+              key={row.id}
+              accessibilityRole="button"
+              disabled={disabled}
+              accessibilityLabel={`修正${row.title || '未命名課程'}，${detail}`}
+              onPress={() => onEdit(row)}
+              style={{
+                minHeight: 48,
+                padding: 10,
+                borderRadius: 8,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              <Text style={{ fontWeight: '600', color: theme.colors.text }}>
+                {row.title || '未命名課程'}
+              </Text>
+              <Text style={{ color: theme.colors.muted }}>{detail}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <Text style={{ color: theme.colors.text }}>
         週課表核對：左右滑動，點課程修正、點空格補課。跨節課可拆分。
       </Text>
@@ -38,7 +75,7 @@ export function TimetableReviewGrid({
               </Text>
             ))}
           </View>
-          {reviewPeriods(rows, profile).map((period) => (
+          {periods.map((period) => (
             <View key={period.index} style={{ flexDirection: 'row' }}>
               <Text style={{ width: 48, color: theme.colors.text }}>{period.label}</Text>
               {REVIEW_DAYS.map((day, index) => {
@@ -56,7 +93,13 @@ export function TimetableReviewGrid({
                           disabled={disabled}
                           accessibilityLabel={`修正星期${day}第${period.label}節 ${row.title || '未命名課程'}`}
                           onPress={() => onEdit(row)}
-                          style={{ minHeight: 54, padding: 8 }}
+                          style={{
+                            minHeight: 54,
+                            padding: 8,
+                            backgroundColor: theme.colors.accentSoft,
+                            borderLeftWidth: 3,
+                            borderColor: theme.colors.accent,
+                          }}
                         >
                           <Text style={{ color: theme.colors.text }}>
                             {row.title || '名稱待填'}

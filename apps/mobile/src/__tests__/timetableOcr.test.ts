@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { PERSONAL_IMPORT_IMAGE_UNREADABLE } from '@campus/shared';
@@ -7,6 +8,8 @@ test('ocr page loads tesseract from bundled files', () => {
   expect(TIMETABLE_OCR_HTML).not.toMatch(/jsdelivr|tessdata\.projectnaptha|cdn\./);
   expect(TIMETABLE_OCR_HTML).toContain('tesseract.min.js');
   expect(TIMETABLE_OCR_HTML).toContain('worker.min.js');
+  expect(TIMETABLE_OCR_HTML).toContain('ruled-timetable-grid.js');
+  expect(existsSync(path.resolve(__dirname, '../../assets/ocr/ruled-timetable-grid.bin'))).toBe(true);
   expect(TIMETABLE_OCR_HTML).toContain("langPath: 'lang'");
   expect(TIMETABLE_OCR_HTML).toContain('chi_tra+eng');
   expect(TIMETABLE_OCR_HTML).toContain('recognizeTimetable');
@@ -26,4 +29,10 @@ test('ocr page loads tesseract from bundled files', () => {
 test('ocr error keeps a kind so the screen can stay honest', () => {
   const error = new TimetableOcrError('辨識程式未能載入，請改貼文字。', 'unavailable');
   expect(error.kind).toBe('unavailable');
+});
+
+test('bundled Expo grid reader matches the shared recognizer', () => {
+  execFileSync(process.execPath, [
+    path.resolve(__dirname, '../../../../scripts/import-ai/build-mobile-grid.mjs'), '--check',
+  ]);
 });

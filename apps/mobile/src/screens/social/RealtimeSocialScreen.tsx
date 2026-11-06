@@ -13,18 +13,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  FlatList,
   Image,
   RefreshControl,
   Pressable,
   ActivityIndicator,
   StyleSheet,
   Alert,
-  Modal,
   Dimensions,
   ScrollView,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../state/auth';
@@ -35,10 +33,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { getDb, isFirebaseMockMode } from '../../firebase';
 import {
   listActiveStoriesForSchool,
-  markStoryViewed,
-  groupStoriesByAuthor,
   type CampusStoryDoc,
-  type StoryAuthorGroup,
 } from '../../services/stories';
 import { heartbeatCheckIn, peersAtPoi, clearPresence } from '../../services/checkins';
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
@@ -50,6 +45,7 @@ import {
   type SocialPoi,
   type SocialPoiCategory,
 } from '../../services/campusSocialPois';
+import { CampusStoryViewer, useCampusStories } from './CampusStoryViewer';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 
 type PeerProfile = {
@@ -68,15 +64,20 @@ const POI_CAT_ICON: Record<SocialPoiCategory, keyof typeof Ionicons.glyphMap> = 
   transit: 'bus-outline',
 };
 
-export function RealtimeSocialScreen({
-  requestedAuthorUid,
-  requestedSchoolId,
-  onRequestConsumed,
-}: {
+type StoryRequest = {
   requestedAuthorUid?: string;
   requestedSchoolId?: string;
   onRequestConsumed?: () => void;
-} = {}) {
+};
+
+export function RealtimeSocialScreen(props: StoryRequest = {}) {
+  const { user, loading } = useAuth();
+  const { school } = useSchool();
+  if (loading) return <ActivityIndicator />;
+  return <RealtimeSocialContent key={JSON.stringify([user?.uid, school?.id])} {...props} />;
+}
+
+function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onRequestConsumed }: StoryRequest) {
   const styles = useThemeStyleSheet(createStyles);
   const injected = useCampusSocialStackNav();
   const fb = useNavigation<any>();
@@ -88,31 +89,28 @@ export function RealtimeSocialScreen({
 
   const pois = useMemo(() => getSocialPoiList(), []);
   const [selectedPoi, setSelectedPoi] = useState<string>(defaultSocialPoiId());
-  const [storyGroups, setStoryGroups] = useState<StoryAuthorGroup[]>([]);
+  const [storyRows, setStoryRows] = useState<CampusStoryDoc[]>([]);
+  const storyDeck = useCampusStories(storyRows, school?.id, uid);
+  const { groups: storyGroups, openGroup } = storyDeck;
   const [storiesLoading, setStoriesLoading] = useState(true);
   const [peers, setPeers] = useState<PeerProfile[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [heartbeatSession, setHeartbeatSession] = useState<string | null>(null);
-  const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(null);
   const [storyNotice, setStoryNotice] = useState('');
-  useEffect(() => {
-    setViewerState(null);
-    setStoryNotice('');
-  }, [school?.id, uid]);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
   const refreshStories = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id) {
-      setStoryGroups([]);
+    if (isFirebaseMockMode() || !school?.id || !uid) {
+      setStoryRows([]);
       return;
     }
     const rows = await listActiveStoriesForSchool(school.id, 80);
-    setStoryGroups(groupStoriesByAuthor(rows, uid));
+    setStoryRows(rows);
   }, [school?.id, uid]);
 
   const refreshPeers = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id) {
+    if (isFirebaseMockMode() || !school?.id || !uid) {
       setPeers([]);
       return;
     }
@@ -207,52 +205,39 @@ export function RealtimeSocialScreen({
     }
   };
 
-  const openStoryGroup = (g: StoryAuthorGroup) => {
-    setViewerState({ group: g, index: 0 });
-    const story = g.stories[0];
-    if (story && uid && !isFirebaseMockMode()) void markStoryViewed(story.id, uid).catch(() => {});
-  };
-
+  const consumedRequest = React.useRef('');
   useEffect(() => {
-    if (!requestedAuthorUid || storiesLoading) return;
-    const group =
-      requestedSchoolId === school?.id
-        ? storyGroups.find(
-            (entry) =>
-              entry.authorUid === requestedAuthorUid &&
-              entry.stories.length > 0 &&
-              entry.stories.every((story) => story.schoolId === school?.id),
-          )
-        : undefined;
-    if (group?.stories.length) {
-      setViewerState({ group, index: 0 });
-      const story = group.stories[0];
-      if (uid && !isFirebaseMockMode()) {
-        void markStoryViewed(story.id, uid).catch(() => {});
-      }
+    if (!requestedAuthorUid) {
+      consumedRequest.current = '';
+      return;
+    }
+    const request = JSON.stringify([requestedSchoolId, requestedAuthorUid]);
+    if (storiesLoading || consumedRequest.current === request) return;
+    consumedRequest.current = request;
+    const group = requestedSchoolId === school?.id ? storyGroups.find(g => g.authorUid === requestedAuthorUid) : undefined;
+    if (group) {
+      openGroup(group);
       setStoryNotice('');
     } else {
       setStoryNotice('這則限時動態可能已到期或移除。');
     }
     onRequestConsumed?.();
-  }, [requestedAuthorUid, requestedSchoolId, school?.id, storiesLoading, storyGroups, uid, onRequestConsumed]);
+  }, [requestedAuthorUid, requestedSchoolId, school?.id, storiesLoading, storyGroups, openGroup, onRequestConsumed]);
 
-  const advanceStory = (delta: number) => {
-    setViewerState((prev) => {
-      if (!prev) return prev;
-      const nextIndex = prev.index + delta;
-      if (nextIndex < 0 || nextIndex >= prev.group.stories.length) return null;
-      const story = prev.group.stories[nextIndex];
-      if (story && uid && !isFirebaseMockMode()) void markStoryViewed(story.id, uid).catch(() => {});
-      return { group: prev.group, index: nextIndex };
-    });
-  };
+  const returningFromComposer = React.useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (returningFromComposer.current) {
+      returningFromComposer.current = false;
+      void refreshStories();
+    }
+  }, [refreshStories]));
 
   const openCompose = () => {
     if (!auth.user) {
       Alert.alert('請先登入');
       return;
     }
+    returningFromComposer.current = true;
     nav?.navigate?.('StoryCompose' as never, { poiId: selectedPoi, poiName: findSocialPoi(selectedPoi)?.name });
   };
 
@@ -347,10 +332,10 @@ export function RealtimeSocialScreen({
           </Text>
         )}
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: theme.space.lg, paddingHorizontal: 14 }}>
-          <Text style={[styles.section, { flex: 1, paddingHorizontal: 0 }]}>校園 Story</Text>
+          <Text style={[styles.section, { flex: 1, paddingHorizontal: 0 }]}>校園限時動態</Text>
           <Pressable onPress={openCompose} style={styles.storyComposeBtn} accessibilityRole="button">
             <Ionicons name="add" size={16} color={theme.colors.onAccent} />
-            <Text style={styles.storyComposeTxt}>發 Story</Text>
+            <Text style={styles.storyComposeTxt}>新增限時動態</Text>
           </Pressable>
         </View>
 
@@ -358,7 +343,7 @@ export function RealtimeSocialScreen({
           <ActivityIndicator style={{ marginTop: theme.space.md }} color={theme.colors.accent} />
         ) : storyGroups.length === 0 ? (
           <Text style={[styles.softMuted, { paddingHorizontal: 14 }]}>
-            目前沒有未過期的 Story，點右上「發 Story」分享此刻。
+            目前沒有限時動態。分享第一則校園近況吧。
           </Text>
         ) : (
           <View style={[styles.storyGrid, { paddingHorizontal: 14 }]}>
@@ -369,7 +354,7 @@ export function RealtimeSocialScreen({
                 <Pressable
                   key={g.authorUid}
                   style={styles.storyCard}
-                  onPress={() => openStoryGroup(g)}
+                  onPress={() => openGroup(g)}
                   accessibilityRole="button"
                 >
                   {isImage ? (
@@ -397,7 +382,7 @@ export function RealtimeSocialScreen({
                       </View>
                     )}
                     <Text numberOfLines={1} style={styles.storyAuthorName}>
-                      {g.isMine ? '我的 Story' : nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)}
+                      {g.isMine ? '我的限時動態' : nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)}
                     </Text>
                     {g.stories.length > 1 ? (
                       <Text style={styles.storyCount}>· {g.stories.length}</Text>
@@ -410,91 +395,8 @@ export function RealtimeSocialScreen({
         )}
       </ScrollView>
 
-      <StoryViewerModal
-        state={viewerState}
-        onClose={() => setViewerState(null)}
-        onAdvance={advanceStory}
-      />
+      <CampusStoryViewer deck={storyDeck} names={nameByUid} />
     </View>
-  );
-}
-
-// ─── Story Viewer Modal（全螢幕） ───────────────────────────
-
-function StoryViewerModal(props: {
-  state: { group: StoryAuthorGroup; index: number } | null;
-  onClose: () => void;
-  onAdvance: (delta: number) => void;
-}) {
-  const styles = useThemeStyleSheet(createStyles);
-  const { state, onClose, onAdvance } = props;
-  if (!state) return null;
-  const story = state.group.stories[state.index];
-  if (!story) return null;
-  const total = state.group.stories.length;
-  const screenW = Dimensions.get('window').width;
-
-  return (
-    <Modal visible animationType="fade" transparent onRequestClose={onClose}>
-      <Pressable style={styles.viewerBackdrop} onPress={onClose}>
-        <Pressable style={styles.viewerInner} onPress={(e) => e.stopPropagation?.()}>
-          {/* 進度條 */}
-          <View style={styles.viewerProgressBar}>
-            {Array.from({ length: total }).map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.viewerProgressSegment,
-                  i < state.index && { backgroundColor: '#ffffff' },
-                  i === state.index && { backgroundColor: '#ffffffcc' },
-                ]}
-              />
-            ))}
-          </View>
-
-          {/* 內容（圖片或文字） */}
-          <View style={styles.viewerCanvas}>
-            {story.kind === 'image' && story.mediaUrl ? (
-              <Image source={{ uri: story.mediaUrl }} style={styles.viewerImage} resizeMode="contain" />
-            ) : (
-              <View
-                style={[
-                  styles.viewerText,
-                  { backgroundColor: story.bgColor || '#0f172a' },
-                ]}
-              >
-                <Text style={styles.viewerTextTxt}>{story.text || '（無內容）'}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* 左右切換 hit zones */}
-          <Pressable
-            style={[styles.viewerHitLeft, { width: screenW * 0.35 }]}
-            onPress={() => onAdvance(-1)}
-            accessibilityLabel="上一則"
-          />
-          <Pressable
-            style={[styles.viewerHitRight, { width: screenW * 0.55 }]}
-            onPress={() => onAdvance(+1)}
-            accessibilityLabel="下一則"
-          />
-
-          {/* 關閉鈕 */}
-          <Pressable style={styles.viewerClose} onPress={onClose} hitSlop={10}>
-            <Ionicons name="close" size={22} color="#fff" />
-          </Pressable>
-
-          {/* 底部資訊 */}
-          {story.poiName ? (
-            <View style={styles.viewerMeta}>
-              <Ionicons name="location" size={12} color="#fff" />
-              <Text style={styles.viewerMetaTxt}>{story.poiName}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </Pressable>
-    </Modal>
   );
 }
 
@@ -618,45 +520,6 @@ const createStyles = () => StyleSheet.create({
   storyAuthorName: { fontSize: 12, color: theme.colors.text, fontWeight: '700', flex: 1 },
   storyCount: { fontSize: 11, color: theme.colors.textSecondary },
 
-  viewerBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    justifyContent: 'center',
-    padding: 12,
-  },
-  viewerInner: { flex: 1, justifyContent: 'center' },
-  viewerProgressBar: {
-    flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 8,
-    marginTop: 30,
-  },
-  viewerProgressSegment: {
-    flex: 1,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-  },
-  viewerCanvas: { flex: 1, marginTop: 12, justifyContent: 'center' },
-  viewerImage: { width: '100%', height: '100%' },
-  viewerText: { flex: 1, padding: 24, justifyContent: 'center', borderRadius: theme.radius.md },
-  viewerTextTxt: { color: '#fff', fontSize: 22, lineHeight: 32, fontWeight: '700', textAlign: 'center' },
-  viewerHitLeft: { position: 'absolute', top: 60, bottom: 60, left: 0 },
-  viewerHitRight: { position: 'absolute', top: 60, bottom: 60, right: 0 },
-  viewerClose: { position: 'absolute', top: 36, right: 16, padding: 8 },
-  viewerMeta: {
-    position: 'absolute',
-    bottom: 28,
-    left: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
-  viewerMetaTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });
 
 export default RealtimeSocialScreen;

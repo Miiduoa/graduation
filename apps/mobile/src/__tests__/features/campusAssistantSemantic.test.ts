@@ -175,3 +175,29 @@ test('does not reload or steal another screen\'s model after selection', async (
   expect(mockLoad).not.toHaveBeenCalled();
   expect(mockGenerate).toHaveBeenCalledTimes(1);
 });
+
+test('retains the publication window when the local selector resolves a notice paraphrase', async () => {
+  mockGenerate.mockResolvedValueOnce(selected([{ tool: 'announcements' }]));
+  const source = snapshot();
+  source.announcements.items = [
+    { title: '今天發布的公告', publishedAt: '2026-10-25T16:00:00Z' },
+    { title: '昨天發布的公告', publishedAt: '2026-10-25T15:59:59Z' },
+  ];
+  const reply = await askCampusAssistant({ ...request(), senseSnapshot: source,
+    messages: [{ role: 'user', content: 'Any school news today?' }] });
+  expect(reply.localReads?.[0].status).toBe('available');
+  expect(reply.content).toContain('今天發布的公告');
+  expect(reply.content).not.toContain('昨天發布的公告');
+  expect(mockGenerate).toHaveBeenCalledTimes(1);
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test.each(['幫我翻譯這則公告', '我有哪些私訊通知？'])('%s does not give the model unrelated synced titles', async (content) => {
+  mockGenerate.mockResolvedValueOnce({ content: '請提供要處理的內容。', finishReason: 'stop' });
+  const result = await askCampusAssistant({ ...request(), messages: [{ role: 'user', content }] });
+  expect(result.localReads).toBeUndefined();
+  expect(mockGenerate).toHaveBeenCalledTimes(1);
+  const { formatOnDeviceSchoolPrompt } = require('../../services/onDeviceSchoolContext');
+  expect(formatOnDeviceSchoolPrompt).toHaveBeenCalledWith(expect.anything(), null);
+  expect(httpsCallable).not.toHaveBeenCalled();
+});

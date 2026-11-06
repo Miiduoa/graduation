@@ -1,11 +1,13 @@
 'use client';
 import Link from 'next/link';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
+import { AssistantThread } from './assistant/AssistantThread';
+import type { V2Card, V2Turn } from './assistant/types';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -14,8 +16,10 @@ type Step = {
   simulation: boolean;
 };
 function Conversation({ context, schoolId }: { context: string; schoolId: string }) {
+  const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
+  const [fallback, setFallback] = useState(false);
   const [step, setStep] = useState<Step | null>(null);
   const [source, setSource] = useState('');
   const [href, setHref] = useState('');
@@ -52,8 +56,10 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
     void request('capability')
       .then((value) => {
         if (active) {
+          setV2(value.version === 2);
           setReady(value.enabled === true);
           setProviderReady(value.ready === true);
+          setFallback(value.fallback === true);
         }
       })
       .catch((e) => {
@@ -93,6 +99,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
       if (!signal.aborted) setPending(false);
     }
   }
+  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={providerReady} fallback={fallback} />;
   return (
     <section aria-label="公開校園助理">
       <p>此助理目前提供公開資訊，尚未支援代辦寫入。私人課表、作業與借閱快照尚未支援。</p>
@@ -168,6 +175,146 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
     </section>
   );
 }
+function V2Conversation({
+  context,
+  schoolId,
+  ready,
+  fallback,
+}: {
+  context: string;
+  schoolId: string;
+  ready: boolean;
+  fallback: boolean;
+}) {
+  const conversation = useRef(crypto.randomUUID());
+  const [consent, setConsent] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [turns, setTurns] = useState<V2Turn[]>([]);
+  const [states, setStates] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const routeToken = useRef<string | undefined>(undefined);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const active = new AbortController();
+    controller.current = active;
+    return () => active.abort();
+  }, []);
+  async function send(action: string, input: object) {
+    const signal = controller.current!.signal;
+    const response = await fetch('/api/nuni/assistant/' + action, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      signal,
+      headers: { 'Content-Type': 'application/json', 'X-Campus-Session': context },
+      body: JSON.stringify({ schoolId, conversationId: conversation.current, ...input }),
+    });
+    const result = await response.json();
+    if (!response.ok)
+      throw new Error(
+        typeof result.message === 'string' && result.message
+          ? result.message
+          : response.status === 409
+            ? '資料或登入狀態已變更，請重新提議。'
+            : response.status === 429
+              ? '已達查詢預算，請稍後再試。'
+              : '查詢未完成，請稍後再試。',
+      );
+    if (signal.aborted) throw new Error('已取消');
+    return result;
+  }
+  async function ask() {
+    const current = question.trim();
+    if (!current || pending) return;
+    setPending(true);
+    setError('');
+    try {
+      const history = turns.slice(-6).flatMap((t) => [
+        { role: 'user', content: t.question },
+        { role: 'assistant', content: t.reply.answer },
+      ]);
+      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      if (reply.bootstrap) {
+        conversation.current = reply.conversationId;
+        routeToken.current = reply.routeToken;
+        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      }
+      if (reply.cards.length)
+        setStates((s) => ({
+          ...s,
+          ...Object.fromEntries(
+            turns
+              .flatMap((t) => t.reply.cards)
+              .filter((c) => !s[c.mutationId])
+              .map((c) => [c.mutationId, '已被新提議取代']),
+          ),
+        }));
+      setTurns((t) => [...t, { question: current, reply }]);
+      setQuestion('');
+    } catch (e) {
+      if (!controller.current?.signal.aborted)
+        setError(e instanceof Error ? e.message : '查詢失敗');
+    } finally {
+      if (!controller.current?.signal.aborted) setPending(false);
+    }
+  }
+  async function execute(cards: V2Card[]) {
+    setPending(true);
+    setError('');
+    try {
+      for (const card of cards) {
+        const result = await send('confirm', { token: card.token, args: card.args });
+        setStates((s) => ({
+          ...s,
+          [card.mutationId]:
+            result.href || (card.tool === 'propose_food_order' ? '已送出訂單' : '已加入個人行事曆'),
+        }));
+      }
+    } catch (e) {
+      if (!controller.current?.signal.aborted)
+        setError(e instanceof Error ? e.message : '確認失敗');
+    } finally {
+      if (!controller.current?.signal.aborted) setPending(false);
+    }
+  }
+  async function cancel(turn: V2Turn, cardIndex: number) {
+    setPending(true);
+    try {
+      const card = turn.reply.cards[cardIndex];
+      const affected =
+        card.tool === 'propose_personal_event' ? turn.reply.cards.slice(cardIndex) : [card];
+      for (const c of affected) await send('cancel', { token: c.token, args: c.args });
+      setStates((s) => ({
+        ...s,
+        ...Object.fromEntries(affected.map((c) => [c.mutationId, '已取消'])),
+      }));
+    } catch {
+      setError('撤銷未完成，請重試。');
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <AssistantThread
+      schoolId={schoolId}
+      ready={ready}
+      fallback={fallback}
+      consent={consent}
+      onConsent={setConsent}
+      question={question}
+      onQuestion={setQuestion}
+      turns={turns}
+      states={states}
+      pending={pending}
+      error={error}
+      onAsk={() => void ask()}
+      onConfirm={(cards) => void execute(cards)}
+      onCancel={(turn, index) => void cancel(turn, index)}
+    />
+  );
+}
 function AssistantRoute() {
   const auth = useNuniSession();
   const search = useSearchParams();
@@ -190,9 +337,10 @@ function AssistantRoute() {
     />
   );
 }
-export function Assistant() {
+export function Assistant({ children }: { children?: ReactNode }) {
   return (
-    <SiteShell title="助理" subtitle="查詢公開校園資訊與站內服務入口。">
+    <SiteShell title="助理" subtitle="查詢課表、作業、餐點與校園服務。">
+      {children}
       <Suspense fallback={<p>載入中…</p>}>
         <AssistantRoute />
       </Suspense>

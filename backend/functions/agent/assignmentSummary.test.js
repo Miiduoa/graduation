@@ -105,3 +105,57 @@ test('failed course reads disclose neither partial assignment data nor route ref
   const result = await snapshotHandler(request);
   expect(result.assignments).toEqual({ status: 'unavailable', count: null, items: [] });
 });
+
+test('serializes only a supported announcement location and public summary fields', async () => {
+  const notice = {
+    id: 'notice_1', title: '選課時程', announcementKind: 'school-announcement', body: 'long body',
+    publishedAt: '2026-10-30T09:00:00Z',
+  };
+  mockAnnouncements.mockResolvedValue([notice, { ...notice, id: '../wrong' }, { ...notice, announcementKind: 'other' }]);
+  const result = await snapshotHandler(request);
+  const summary = { title: '選課時程', publishedAt: '2026-10-30T09:00:00.000Z' };
+  expect(mockAnnouncements).toHaveBeenCalledWith('pu', { forSnapshot: true });
+  expect(result.announcements.items).toEqual([
+    { ...summary, source: { kind: 'school-announcement', id: 'notice_1' } }, summary, summary,
+  ]);
+});
+
+test.each([{ value: null }, { value: {} }])(
+  'reports non-list announcement data as unavailable', async ({ value }) => {
+    mockAnnouncements.mockResolvedValue(value);
+    const result = await snapshotHandler(request);
+    expect(result.announcements).toEqual({ status: 'unavailable', items: [] });
+    expect(result.assignments.status).toBe('available');
+  },
+);
+
+test('skips announcements missing a title and still returns the rest of the snapshot', async () => {
+  const notice = {
+    id: 'notice_1', title: '選課時程', announcementKind: 'school-announcement',
+    publishedAt: '2026-10-30T09:00:00Z',
+  };
+  mockAnnouncements.mockResolvedValue([
+    notice,
+    { ...notice, id: 'notice_blank', title: ' ' },
+    null,
+    { ...notice, id: 'notice_2', title: '停課公告', publishedAt: '2026-10-29T09:00:00Z' },
+  ]);
+  const result = await snapshotHandler(request);
+  expect(result.announcements).toEqual({
+    status: 'available',
+    items: [
+      { title: '選課時程', publishedAt: '2026-10-30T09:00:00.000Z', source: { kind: 'school-announcement', id: 'notice_1' } },
+      { title: '停課公告', publishedAt: '2026-10-29T09:00:00.000Z', source: { kind: 'school-announcement', id: 'notice_2' } },
+    ],
+  });
+  expect(result.assignments.status).toBe('available');
+});
+
+test.each([{ value: [null] }, { value: [{ title: ' ' }] }])(
+  'keeps an announcement snapshot available after skipping incomplete rows %j', async ({ value }) => {
+    mockAnnouncements.mockResolvedValue(value);
+    const result = await snapshotHandler(request);
+    expect(result.announcements).toEqual({ status: 'available', items: [] });
+    expect(result.assignments.status).toBe('available');
+  },
+);

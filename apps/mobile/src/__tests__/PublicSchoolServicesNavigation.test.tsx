@@ -1,10 +1,12 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
-import { Linking } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert, Linking } from 'react-native';
 import { PreAuthStack } from '../screens/PreAuthStack';
+import { getDefaultCatalogFilter } from '../data/courseCatalogConstants';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
-import { queryCatalog, type CatalogCourse } from '../services/courseCatalogClient';
+import { queryCatalog, toPersonalCourseDraft, type CatalogCourse, type CatalogQueryResult } from '../services/courseCatalogClient';
 import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
@@ -67,10 +69,11 @@ jest.mock('../state/nuniSession', () => ({
   useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
   useOptionalNuniSession: () => null,
 }));
+const mockAddCourse = jest.fn();
 jest.mock('../state/schedule', () => ({
   useSchedule: () => ({
     courses: [],
-    addCourse: jest.fn(),
+    addCourse: mockAddCourse,
     removeCourse: jest.fn(),
     updateCourse: jest.fn(),
   }),
@@ -151,6 +154,7 @@ beforeEach(() => {
     tokenExpired: false,
   };
   setSchoolLoginProviderKinds(['school-issued']);
+  mockAddCourse.mockReset();
   jest.mocked(queryCatalog).mockReset();
   jest.mocked(queryCatalog).mockResolvedValue({
     courses: [],
@@ -182,19 +186,21 @@ test.each(['guest', 'student'])('catalog search handoff keeps explicit criteria 
   expect(view.getByDisplayValue('IM301')).toBeTruthy();
 });
 
+const catalogCourse: CatalogCourse = {
+  semester: '1151', code: 'IM302', name: '新的搜尋課程', nameEn: '',
+  courseType: '必修', courseTypeKey: 'required', credits: 3,
+  department: '資訊管理學系', classOffered: '', teacher: '授課教師', teacherEmail: '',
+  timePlaceRaw: '', slots: [], capacity: 50, enrolled: 30, remaining: 20,
+  language: '中文', languageKey: null, syllabusUrl: null, notes: '', tags: [], raw: {},
+};
+
 test('catalog refreshes a new incoming search and ignores the earlier response', async () => {
   setBrowsingSchoolId('pu');
   let resolveFirst!: (value: Awaited<ReturnType<typeof queryCatalog>>) => void;
   jest.mocked(queryCatalog).mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }));
-  const course: CatalogCourse = {
-    semester: '1151', code: 'IM302', name: '新的搜尋課程', nameEn: '',
-    courseType: '必修', courseTypeKey: 'required', credits: 3,
-    department: '資訊管理學系', classOffered: '', teacher: '授課教師', teacherEmail: '',
-    timePlaceRaw: '', slots: [], capacity: 50, enrolled: 30, remaining: 20,
-    language: '中文', languageKey: null, syllabusUrl: null, notes: '', tags: [], raw: {},
-  };
+
   jest.mocked(queryCatalog).mockResolvedValueOnce({
-    filter: { semester: '1151', keyword: 'IM302' }, courses: [course], totalCount: 1,
+    filter: { semester: '1151', keyword: 'IM302' }, courses: [catalogCourse], totalCount: 1,
     source: 'live', fetchedAt: Date.now(), showRemain: false,
   });
   const view = render(<CourseCatalogScreen route={{ params: { filter: { semester: '1151', keyword: 'IM301' } } }} />);
@@ -204,11 +210,135 @@ test('catalog refreshes a new incoming search and ignores the earlier response',
   expect(view.getByDisplayValue('IM302')).toBeTruthy();
   await act(async () => { resolveFirst({
     filter: { semester: '1151', keyword: 'IM301' },
-    courses: [{ ...course, code: 'IM301', name: '上一筆搜尋的過期結果' }], totalCount: 1,
+    courses: [{ ...catalogCourse, code: 'IM301', name: '上一筆搜尋的過期結果' }], totalCount: 1,
     source: 'live', fetchedAt: Date.now(), showRemain: false,
   }); });
   expect(view.queryByText('上一筆搜尋的過期結果')).toBeNull();
   expect(view.getByText('新的搜尋課程')).toBeTruthy();
+});
+
+test('the catalog keeps its input mounted and only shows the last submitted search', async () => {
+  setBrowsingSchoolId('pu');
+  let resolveFirst!: (value: CatalogQueryResult) => void;
+  jest.mocked(queryCatalog).mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }));
+  jest.mocked(queryCatalog).mockResolvedValueOnce({
+    filter: { semester: '1151', keyword: '演算法' }, courses: [catalogCourse], totalCount: 1,
+    source: 'live', fetchedAt: Date.now(), showRemain: false,
+  });
+  const view = render(<CourseCatalogScreen route={{ params: { filter: { semester: '1151' } } }} />);
+  const search = view.getByLabelText('搜尋課程、教師或代號');
+  fireEvent.changeText(search, '演算');
+  expect(view.getByDisplayValue('演算') === search).toBe(true);
+  fireEvent.changeText(search, '演算法');
+  fireEvent(search, 'submitEditing');
+  expect(await view.findByText(catalogCourse.name)).toBeTruthy();
+
+  fireEvent.press(view.getByLabelText('開啟篩選條件'));
+  await act(async () => resolveFirst({
+    filter: { semester: '1151' }, courses: [], totalCount: 0,
+    source: 'live', fetchedAt: Date.now(), showRemain: false, error: '過期的回應',
+  }));
+  expect(view.getByLabelText('篩選課程關鍵字')).toBeTruthy();
+  fireEvent.press(view.getByText('取消'));
+  expect(view.getByText(catalogCourse.name)).toBeTruthy();
+  expect(view.queryByText('過期的回應')).toBeNull();
+});
+
+test('cancel discards draft filters and clearing a submitted keyword keeps the other filters', async () => {
+  setBrowsingSchoolId('pu');
+  const filter = { semester: '1151', keyword: '英文', weekday: 1 };
+  const view = render(<CourseCatalogScreen route={{ params: { filter } }} />);
+  await view.findByText('查無符合條件的課程');
+  fireEvent.press(view.getByLabelText('開啟篩選條件'));
+  const draft = view.getByLabelText('篩選課程關鍵字');
+  fireEvent.changeText(draft, '統');
+  expect(view.getByLabelText('篩選課程關鍵字') === draft).toBe(true);
+  fireEvent.changeText(draft, '統計');
+  fireEvent.press(view.getByText('週二'));
+  fireEvent.press(view.getByText('取消'));
+  expect(view.getByDisplayValue('英文')).toBeTruthy();
+  expect(queryCatalog).toHaveBeenCalledTimes(1);
+
+  fireEvent.press(view.getByLabelText('開啟篩選條件'));
+  expect(view.getByLabelText('篩選課程關鍵字').props.value).toBe('英文');
+  expect(view.getByRole('button', { name: '週一' }).props.accessibilityState.selected).toBe(true);
+  fireEvent.changeText(view.getByLabelText('篩選課程關鍵字'), '統計');
+  fireEvent.press(view.getByText('週二'));
+  fireEvent.press(view.getByText('套用'));
+  expect(await view.findByDisplayValue('統計')).toBeTruthy();
+  expect(jest.mocked(queryCatalog).mock.calls[1][0]).toEqual({ ...filter, keyword: '統計', weekday: 2 });
+  fireEvent.press(view.getByLabelText('清除搜尋關鍵字'));
+  await view.findByText('查無符合條件的課程');
+  expect(jest.mocked(queryCatalog).mock.calls[2][0]).toEqual({ semester: '1151', weekday: 2 });
+  expect(view.getByLabelText('搜尋課程、教師或代號').props.value).toBe('');
+});
+
+test('a conflicting catalog course reports failure only after the timetable responds', async () => {
+  setBrowsingSchoolId('pu');
+  mockSchoolAuth = { ...mockSchoolAuth, user: { uid: 'student-a' },
+    profile: { uid: 'student-a', schoolId: 'pu', role: 'student' } };
+  const alert = jest.spyOn(Alert, 'alert');
+  let rejectAdd!: (reason: Error) => void;
+  mockAddCourse.mockReturnValueOnce(new Promise((_, reject) => { rejectAdd = reject; }));
+  const slot = { dayOfWeek: 1, startTime: '09:10', endTime: '10:00', location: '任垣 101' };
+  jest.mocked(toPersonalCourseDraft).mockReturnValueOnce({
+    ...catalogCourse, schedule: [slot],
+  });
+  jest.mocked(queryCatalog).mockResolvedValueOnce({
+    filter: { semester: '1151' }, courses: [catalogCourse], totalCount: 1,
+    source: 'live', fetchedAt: Date.now(), showRemain: false,
+  });
+  const view = render(<CourseCatalogScreen />);
+  fireEvent.press(await view.findByText('加入本機課程清單'));
+  expect(mockAddCourse).toHaveBeenCalledWith(expect.objectContaining({ schedule: [slot] }));
+  expect(view.getByText('加入中…')).toBeTruthy();
+  expect(alert).not.toHaveBeenCalled();
+  await act(async () => rejectAdd(new Error('課程時間有衝突')));
+  expect(alert.mock.calls).toEqual([['加入失敗', '課程時間有衝突']]);
+  expect(view.getByText('加入本機課程清單')).toBeTruthy();
+});
+
+test('paused catalog search reads the exact saved query and clearing returns to its original cache without network', async () => {
+  setBrowsingSchoolId('pu');
+  const originalFetch = globalThis.fetch;
+  const fetchSpy = jest.fn().mockRejectedValue(new Error('unexpected network request'));
+  const realClient = jest.requireActual<typeof import('../services/courseCatalogClient')>('../services/courseCatalogClient');
+  jest.mocked(queryCatalog).mockImplementation(realClient.queryCatalog);
+  const filter = { ...getDefaultCatalogFilter(), courseType: 'general' };
+  const key = `@course_catalog:v3:pu:${JSON.stringify(filter)}`;
+  const cached = {
+    filter, courses: [{ ...catalogCourse, syllabusUrl: 'https://mypu.pu.edu.tw/example' }], totalCount: 1,
+    source: 'live', fetchedAt: Date.now() - 7 * 86_400_000, showRemain: false,
+  };
+  await AsyncStorage.setItem(key, JSON.stringify(cached));
+  try {
+    const { view, navigation, onUnhandledAction } = renderPublicStack();
+    globalThis.fetch = fetchSpy;
+    fireEvent.press(await view.findByTestId('public-CourseCatalog'));
+    expect(await view.findByText(catalogCourse.name)).toBeTruthy();
+    expect(view.getByText('校方課綱更新已暫停')).toBeTruthy();
+    expect(view.getByText(/1 筆 · 本機紀錄/)).toBeTruthy();
+    expect(view.queryByText('查看課綱')).toBeNull();
+    const search = view.getByLabelText('搜尋課程、教師或代號');
+    fireEvent.changeText(search, '未儲存的關鍵字');
+    fireEvent(search, 'submitEditing');
+    expect(await view.findByText(/沒有儲存這組條件/)).toBeTruthy();
+    fireEvent.press(view.getByText('查看我的課表'));
+    await view.findByTestId('personal-timetable-screen');
+    expect(navigation.getCurrentRoute()?.name).toBe('PersonalTimetable');
+    act(() => navigation.goBack());
+    await view.findByText(/沒有儲存這組條件/);
+    expect(onUnhandledAction).not.toHaveBeenCalled();
+    expect(view.queryByText('重試')).toBeNull();
+    expect(view.queryByText(/查無符合條件/)).toBeNull();
+    fireEvent.press(view.getByLabelText('清除搜尋關鍵字'));
+    expect(await view.findByText(catalogCourse.name)).toBeTruthy();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(Linking.openURL).not.toHaveBeenCalled();
+  } finally {
+    globalThis.fetch = originalFetch;
+    await AsyncStorage.removeItem(key);
+  }
 });
 
 function renderPublicStack() {
@@ -400,6 +530,6 @@ test('PU guest CourseCatalog may query publicly but does not offer schedule muta
   expect(catalogCall[1]?.schoolId).toBe('pu');
   expect(await view.findByText('公開通識課程')).toBeTruthy();
   expect(view.getByText(/訪客/)).toBeTruthy();
-  expect(view.queryByText('加入我的課表')).toBeNull();
+  expect(view.queryByText('加入本機課程清單')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });

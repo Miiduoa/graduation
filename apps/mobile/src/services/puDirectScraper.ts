@@ -29,6 +29,11 @@ import type {
   PuAcademicYearRanking,
   PuCreditAuditCategorySummary,
 } from "@campus/shared/src";
+import {
+  assertPuEcampusDataFetchEnabled,
+  isPuEcampusDataFetchEnabled,
+  PU_ECAMPUS_DATA_PAUSED_MESSAGE,
+} from '@campus/shared/src/puEcampusDataPolicy';
 
 // ─── Constants ───────────────────────────────────────────
 
@@ -419,6 +424,7 @@ async function nativeFetch(
   url: string,
   options: { method?: string; body?: string; contentType?: string; timeoutMs?: number } = {},
 ): Promise<{ html: string; status: number }> {
+  assertPuEcampusDataFetchEnabled();
   const headers: Record<string, string> = { ...COMMON_HEADERS };
   if (options.body && options.contentType) headers['Content-Type'] = options.contentType;
 
@@ -458,6 +464,9 @@ export async function puLogin(
   uid: string,
   password: string,
 ): Promise<{ success: boolean; session: PUSession | null; error?: string }> {
+  if (!isPuEcampusDataFetchEnabled()) {
+    return { success: false, session: null, error: PU_ECAMPUS_DATA_PAUSED_MESSAGE };
+  }
   try {
     if (!uid || !password) return { success: false, session: null, error: '請輸入學號和密碼' };
 
@@ -1263,6 +1272,7 @@ export async function puFetchCreditAudit(
   _session: PUSession,
 ): Promise<{ success: boolean; data: PuCreditAuditPayload | null; error?: string }> {
   try {
+    assertPuEcampusDataFetchEnabled();
     console.log("[puFetchCreditAudit v2] Starting comprehensive fetch...");
 
     // ── Parallel fetch all tabs ──

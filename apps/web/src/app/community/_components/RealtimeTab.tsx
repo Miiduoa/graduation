@@ -11,6 +11,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { StoryViewer } from './StoryViewer';
+import { useStoryShelf } from './useStoryShelf';
 import { CommunityLoadError, useCommunityLoad } from './useCommunityLoad';
 import { useAuth } from '@/components/AuthGuard';
 import {
@@ -27,7 +29,6 @@ import {
   fetchSchoolDirectoryProfiles,
   listActiveStoriesForSchool,
   groupStoriesByAuthor,
-  markStoryViewed,
   type StoryAuthorGroup,
 } from '@/lib/community/firestore';
 
@@ -56,9 +57,7 @@ export function RealtimeTab(props: { schoolId: string }) {
   const [checkingIn, setCheckingIn] = useState(false);
   const checkInFlight = useRef(false);
   const checkedInHere = heartbeatSession?.poiId === selectedPoi;
-  const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(
-    null,
-  );
+  const shelf = useStoryShelf(storyGroups, schoolId, user?.uid);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
@@ -137,23 +136,6 @@ export function RealtimeTab(props: { schoolId: string }) {
       checkInFlight.current = false;
       setCheckingIn(false);
     }
-  };
-
-  const openStoryGroup = (g: StoryAuthorGroup) => {
-    setViewerState({ group: g, index: 0 });
-    const story = g.stories[0];
-    if (story && user?.uid) void markStoryViewed(story.id, user.uid).catch(() => {});
-  };
-
-  const advance = (delta: number) => {
-    setViewerState((prev) => {
-      if (!prev) return prev;
-      const next = prev.index + delta;
-      if (next < 0 || next >= prev.group.stories.length) return null;
-      const s = prev.group.stories[next];
-      if (s && user?.uid) void markStoryViewed(s.id, user.uid).catch(() => {});
-      return { group: prev.group, index: next };
-    });
   };
 
   if (error) return <CommunityLoadError message={error} retry={refresh} />;
@@ -341,7 +323,7 @@ export function RealtimeTab(props: { schoolId: string }) {
         <div className="card" style={{ padding: 18, textAlign: 'center', color: 'var(--muted)' }}>
           載入中…
         </div>
-      ) : storyGroups.length === 0 ? (
+      ) : shelf.groups.length === 0 ? (
         <div
           className="card"
           style={{ padding: 18, color: 'var(--muted)', fontSize: 13, textAlign: 'center' }}
@@ -357,14 +339,14 @@ export function RealtimeTab(props: { schoolId: string }) {
             marginTop: 10,
           }}
         >
-          {storyGroups.map((g) => {
+          {shelf.groups.map((g) => {
             const latest = g.stories[g.stories.length - 1] ?? g.stories[0];
             const isImage = latest?.kind === 'image' && latest.mediaUrl;
             return (
               <button
                 key={g.authorUid}
                 type="button"
-                onClick={() => openStoryGroup(g)}
+                onClick={() => shelf.open(g)}
                 style={{
                   position: 'relative',
                   aspectRatio: '9/14',
@@ -471,187 +453,9 @@ export function RealtimeTab(props: { schoolId: string }) {
         </div>
       )}
 
-      {viewerState && (
-        <StoryViewer state={viewerState} onClose={() => setViewerState(null)} onAdvance={advance} />
-      )}
-    </div>
-  );
-}
-
-function StoryViewer(props: {
-  state: { group: StoryAuthorGroup; index: number };
-  onClose: () => void;
-  onAdvance: (delta: number) => void;
-}) {
-  const { state, onClose, onAdvance } = props;
-  const story = state.group.stories[state.index];
-  if (!story) return null;
-  const total = state.group.stories.length;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        background: 'rgba(0,0,0,0.92)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 360,
-          aspectRatio: '9/16',
-          position: 'relative',
-          background: story.kind === 'image' ? '#000' : story.bgColor || '#0f172a',
-          borderRadius: 16,
-          overflow: 'hidden',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* progress segments */}
-        <div
-          style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            right: 12,
-            display: 'flex',
-            gap: 4,
-            zIndex: 2,
-          }}
-        >
-          {Array.from({ length: total }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                flex: 1,
-                height: 3,
-                borderRadius: 2,
-                background:
-                  i < state.index
-                    ? '#fff'
-                    : i === state.index
-                      ? 'rgba(255,255,255,0.7)'
-                      : 'rgba(255,255,255,0.25)',
-              }}
-            />
-          ))}
-        </div>
-
-        {/* content */}
-        {story.kind === 'image' && story.mediaUrl ? (
-          <img
-            src={story.mediaUrl}
-            alt=""
-            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-          />
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 28,
-              boxSizing: 'border-box',
-            }}
-          >
-            <span
-              style={{
-                color: '#fff',
-                fontSize: 22,
-                lineHeight: 1.5,
-                fontWeight: 700,
-                textAlign: 'center',
-              }}
-            >
-              {story.text || '（無內容）'}
-            </span>
-          </div>
-        )}
-
-        {/* left/right hit zones */}
-        <button
-          type="button"
-          aria-label="上一則"
-          onClick={() => onAdvance(-1)}
-          style={{
-            position: 'absolute',
-            top: 60,
-            bottom: 60,
-            left: 0,
-            width: '35%',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        />
-        <button
-          type="button"
-          aria-label="下一則"
-          onClick={() => onAdvance(+1)}
-          style={{
-            position: 'absolute',
-            top: 60,
-            bottom: 60,
-            right: 0,
-            width: '55%',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        />
-
-        {/* close */}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="關閉"
-          style={{
-            position: 'absolute',
-            top: 24,
-            right: 16,
-            zIndex: 3,
-            width: 32,
-            height: 32,
-            borderRadius: '50%',
-            background: 'rgba(0,0,0,0.4)',
-            color: '#fff',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: 18,
-          }}
-        >
-          ×
-        </button>
-
-        {story.poiName && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 20,
-              left: 16,
-              padding: '6px 12px',
-              background: 'rgba(0,0,0,0.4)',
-              borderRadius: 999,
-              color: '#fff',
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            📍 {story.poiName}
-          </div>
-        )}
-      </div>
+      {shelf.viewer && <StoryViewer viewer={shelf.viewer}
+        author={shelf.viewer.group.isMine ? '我的動態' : (nameByUid[shelf.viewer.group.authorUid] || '同學')}
+        avatar={avatarByUid[shelf.viewer.group.authorUid]} />}
     </div>
   );
 }

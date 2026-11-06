@@ -3,11 +3,19 @@ import { act, renderHook, waitFor } from '@testing-library/react-native';
 const mockRootNavigateNested = jest.fn(() => true);
 const mockApply = jest.fn(() => true);
 const mockResolve = jest.fn();
+const mockReady = jest.fn(() => true);
+const mockReadyListeners = new Set<() => void>();
 const listeners: Array<(response: unknown) => void> = [];
 
 jest.mock('../app/rootNavigation', () => ({
   rootNavigateNested: (...args: unknown[]) => mockRootNavigateNested(...args),
-  rootNavigationRef: { isReady: () => true },
+  rootNavigationRef: { isReady: () => mockReady() },
+  isSchoolNavigationReady: () => mockReady(),
+  subscribeSchoolNavigationReady: (listener: () => void) => {
+    mockReadyListeners.add(listener);
+    if (mockReady()) listener();
+    return () => mockReadyListeners.delete(listener);
+  },
 }));
 jest.mock('../utils/applyNotificationDestination', () => ({
   applyNotificationDestination: (...args: unknown[]) => mockApply(...args),
@@ -28,6 +36,7 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
 }));
 
+import * as notices from '../services/notifications';
 import {
   navigateFromNotificationData,
   usePushNotifications,
@@ -36,6 +45,9 @@ import {
 beforeEach(() => {
   jest.clearAllMocks();
   listeners.length = 0;
+  mockReady.mockReturnValue(true);
+  mockReadyListeners.clear();
+  jest.mocked(notices.getLastNotificationResponseAsync).mockReset().mockResolvedValue(null);
   mockResolve.mockReturnValue({
     ok: true,
     mode: 'nested',
@@ -140,7 +152,10 @@ test('hook handleResponse passes the live schoolId from SchoolNavigation args', 
   expect(mockApply).toHaveBeenCalled();
 });
 
-test('personal event reminder payloads are ignored before dedup navigation and clear', async () => {
+test.each([
+  { type: 'personal_event_reminder_v1', v: 1, t: 'tok', g: 1 },
+  { category: 'personal_class_occurrence', courseId: 'manual:c1' },
+])('personal local reminder payloads are ignored before dedup navigation and clear', async (data) => {
   const {
     clearLastNotificationResponseAsync,
   } = require('../services/notifications') as {
@@ -156,12 +171,7 @@ test('personal event reminder payloads are ignored before dedup navigation and c
         request: {
           identifier: 'per-evtrem.tok',
           content: {
-            data: {
-              type: 'personal_event_reminder_v1',
-              v: 1,
-              t: 'tok',
-              g: 1,
-            },
+            data,
           },
         },
       },
@@ -178,10 +188,9 @@ test('personal event reminder payloads are ignored before dedup navigation and c
 test('前景與冷啟動點本機提醒均直達作業，跨帳號只回課程頁', async () => {
   const real = jest.requireActual('../utils/notificationDestination') as typeof import('../utils/notificationDestination');
   mockResolve.mockImplementation(real.resolveNotificationDestination);
-  const notices = require('../services/notifications') as typeof import('../services/notifications');
   const payload = { type: 'local_assignment_due_v2', uid: 'alice', schoolId: 'pu', groupId: 'course', assignmentId: 'work' };
   const response = { notification: { request: { identifier: 'local-work', content: { data: payload } } } };
-  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValueOnce(response as never);
+  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValueOnce(response as never).mockResolvedValueOnce(response as never);
   const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
   await waitFor(() => expect(mockApply).toHaveBeenCalledWith(expect.objectContaining({
     screen: 'HomeworkSubmit', params: { groupId: 'course', assignmentId: 'work', fromReminder: true },
@@ -197,4 +206,81 @@ test('前景與冷啟動點本機提醒均直達作業，跨帳號只回課程�
   await act(async () => listeners[listeners.length - 1]!(response));
   expect(mockApply).toHaveBeenLastCalledWith(expect.objectContaining({ screen: 'LearnHome' }), { role: 'student' });
   other.unmount();
+});
+
+const push = (id: string) => ({ notification: { request: {
+  identifier: id, content: { data: { type: 'grade', gradeId: id, schoolId: 'pu' } },
+} } });
+const personal = { notification: { request: {
+  identifier: 'nuni.assignment.due.token', content: { data: { category: 'nuni_assignment_due', lookupToken: 'token' } },
+} } };
+type NativeResponse = NonNullable<Awaited<ReturnType<typeof notices.getLastNotificationResponseAsync>>>;
+
+function deferredLast() {
+  let finish!: (response: NativeResponse) => void;
+  jest.mocked(notices.getLastNotificationResponseAsync)
+    .mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  return (response: ReturnType<typeof push>) => finish(response as NativeResponse);
+}
+
+test('a live personal tap prevents a delayed startup push from navigating or clearing the OS response', async () => {
+  const finish = deferredLast();
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await act(async () => { listeners[0]!(personal); finish(push('old')); });
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(notices.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+  view.unmount();
+});
+
+test('opens only the latest school push when navigation becomes ready after a newer live tap', async () => {
+  mockReady.mockReturnValue(false);
+  const finish = deferredLast();
+  const latest = push('latest');
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await act(async () => { listeners[0]!(push('intermediate')); listeners[0]!(latest); });
+  expect(mockResolve).not.toHaveBeenCalled();
+  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValue(latest as NativeResponse);
+  mockReady.mockReturnValue(true);
+  await act(async () => {
+    mockReadyListeners.forEach((listener) => listener());
+    mockReadyListeners.forEach((listener) => listener());
+    finish(push('old'));
+  });
+  expect(mockResolve).toHaveBeenCalledTimes(1);
+  expect(mockResolve).toHaveBeenCalledWith({ data: latest.notification.request.content.data }, { role: 'student', schoolId: 'pu' });
+  expect(notices.clearLastNotificationResponseAsync).toHaveBeenCalledTimes(1);
+  view.unmount();
+});
+
+test('a personal tap supersedes a queued generic push without clearing another handler’s response', async () => {
+  mockReady.mockReturnValue(false);
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await act(async () => { listeners[0]!(push('queued')); listeners[0]!(personal); });
+  mockReady.mockReturnValue(true);
+  await act(async () => { mockReadyListeners.forEach((listener) => listener()); });
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(notices.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+  view.unmount();
+});
+
+test('a stale native read cannot clear the personal response that followed a restored generic push', async () => {
+  const initial = push('restored');
+  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValueOnce(initial as NativeResponse);
+  const finish = deferredLast();
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await waitFor(() => expect(mockApply).toHaveBeenCalledTimes(1));
+  await act(async () => { listeners[0]!(personal); finish(initial); });
+  expect(notices.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+  view.unmount();
+});
+
+test('clears only an exact OS response match even if a newer personal tap has not reached the listener', async () => {
+  const initial = push('restored');
+  jest.mocked(notices.getLastNotificationResponseAsync)
+    .mockResolvedValueOnce(initial as NativeResponse)
+    .mockResolvedValueOnce(personal as NativeResponse);
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await waitFor(() => expect(mockApply).toHaveBeenCalledTimes(1));
+  expect(notices.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
+  view.unmount();
 });
