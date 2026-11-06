@@ -136,6 +136,7 @@ function AccountWorkspace({
   const [loadError, setLoadError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [applyingAgain, setApplyingAgain] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [submitError, setSubmitError] = useState('');
@@ -317,6 +318,26 @@ function AccountWorkspace({
         <h2>已收到進駐申請</h2>
         <p role="status">{notice}</p>
         <Link href="/merchant/workspace">查看收件進度</Link>
+      </section>
+    );
+  }
+  if (
+    view === 'apply' &&
+    !applyingAgain &&
+    !loading &&
+    !loadError &&
+    overview?.applications.length
+  ) {
+    return (
+      <section className={styles.panel}>
+        <h2>這個帳號已有進駐申請</h2>
+        <p>你可以查看各筆申請的審核結果與補件說明。如果要新設另一間門市，可以再送一份申請。</p>
+        <div className={styles.entryActions}>
+          <Link className="btn primary" href="/merchant/workspace">
+            查看申請進度
+          </Link>
+          <Button onClick={() => setApplyingAgain(true)}>申請另一間門市</Button>
+        </div>
       </section>
     );
   }

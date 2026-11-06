@@ -134,7 +134,7 @@ export async function loadMerchantOverview(
 ) {
   const [programs, applications, workspaces] = await Promise.all([
     view === 'workspace' ? { programs: [] } : transport('merchant-onboarding-programs'),
-    view === 'apply' ? { applications: [] } : transport('merchant-applications'),
+    transport('merchant-applications'),
     view === 'apply' ? { workspaces: [] } : transport('merchant-workspaces'),
   ]);
   return {

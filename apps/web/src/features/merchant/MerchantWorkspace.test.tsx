@@ -108,11 +108,29 @@ it.each([
 it('lets a new applicant submit without a workspace and continue to their receipt', async () => {
   render(<MerchantApplyPage />);
   await fillApplication();
-  expect(mocks.request.mock.calls.map(([path]) => path)).toEqual(['merchant-onboarding-programs']);
+  expect(mocks.request.mock.calls.map(([path]) => path)).toEqual([
+    'merchant-onboarding-programs',
+    'merchant-applications',
+  ]);
   fireEvent.click(screen.getByRole('button', { name: '送出進駐申請' }));
   const receipt = await screen.findByRole('link', { name: '查看收件進度' });
   expect(receipt.getAttribute('href')).toBe('/merchant/workspace');
   expect(screen.queryByRole('button', { name: '送出進駐申請' })).toBeNull();
+});
+
+it('lets a returning applicant check progress before starting a second application', async () => {
+  mocks.request.mockImplementation((path, context, input) =>
+    path === 'merchant-applications'
+      ? Promise.resolve({ applications: [application] })
+      : respond(path, context, input),
+  );
+  render(<MerchantApplyPage />);
+  expect((await screen.findByRole('link', { name: '查看申請進度' })).getAttribute('href')).toBe(
+    '/merchant/workspace',
+  );
+  expect(screen.queryByLabelText('申請場域')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '申請另一間門市' }));
+  expect(screen.getByLabelText('申請場域')).toBeTruthy();
 });
 
 it('shows existing applications independently of open enrollment and offers account recovery', async () => {
