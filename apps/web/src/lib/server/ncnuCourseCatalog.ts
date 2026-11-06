@@ -65,7 +65,9 @@ export async function searchNcnuCourseCatalog(query: string): Promise<PublicCour
     next.rows.catch(() => { next.expires = Date.now() + 15_000; });
   }
   const terms = normalize(query).trim().split(/\s+/).filter(Boolean);
-  const { rows, fetchedAt } = await snapshot.rows;
+  const currentSnapshot = snapshot;
+  if (!currentSnapshot) throw new Error('Public catalog snapshot unavailable');
+  const { rows, fetchedAt } = await currentSnapshot.rows;
   const matches = rows.filter(row => {
     const text = normalize([row.code, row.title, row.department, row.teacher, row.room].join(' '));
     return terms.every(term => text.includes(term));

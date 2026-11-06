@@ -54,7 +54,7 @@ function parseCatalog(json: string): CatalogEntry[] {
   });
 }
 
-async function loadCourses(): Promise<CatalogEntry[]> {
+async function loadCourses(): Promise<{ rows: CatalogEntry[]; fetchedAt: string }> {
   const response = await fetch(JSON_URL, {
     headers: { Accept: 'application/json, text/plain' },
     redirect: 'error',
@@ -83,7 +83,9 @@ export async function searchNthuCourseCatalog(query: string): Promise<PublicCour
     next.rows.catch(() => { next.expires = Date.now() + 15_000; });
   }
   const terms = normalize(query).trim().split(/\s+/).filter(Boolean);
-  const { rows, fetchedAt } = await snapshot.rows;
+  const currentSnapshot = snapshot;
+  if (!currentSnapshot) throw new Error('Public catalog snapshot unavailable');
+  const { rows, fetchedAt } = await currentSnapshot.rows;
   const matches = rows.filter(row => terms.every(term => row.searchText.includes(term)));
   return {
     schoolId: 'nthu', sourceUrl: JSON_URL, fetchedAt,
