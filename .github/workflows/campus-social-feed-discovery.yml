@@ -5,9 +5,10 @@ on:
     branches:
       - 'feat/social-feed-older-search-20261106'
     paths:
-      - 'apps/web/src/app/community/_components/FeedTab.tsx'
-      - 'apps/web/src/app/community/_components/FeedTab.following.test.tsx'
+      - 'apps/web/src/app/community/_components/FeedTab*'
+      - 'apps/web/src/app/community/_components/feedView*'
       - 'apps/web/src/lib/community/firestore*'
+      - 'apps/web/src/lib/community/feedPages*'
       - 'backend/firestore/firestore.rules'
       - '.github/workflows/campus-social-feed-discovery.yml'
   pull_request:
@@ -15,9 +16,10 @@ on:
       - main
       - 'feat/story-media-in-place-retry-20261106'
     paths:
-      - 'apps/web/src/app/community/_components/FeedTab.tsx'
-      - 'apps/web/src/app/community/_components/FeedTab.following.test.tsx'
+      - 'apps/web/src/app/community/_components/FeedTab*'
+      - 'apps/web/src/app/community/_components/feedView*'
       - 'apps/web/src/lib/community/firestore*'
+      - 'apps/web/src/lib/community/feedPages*'
       - 'backend/firestore/firestore.rules'
       - '.github/workflows/campus-social-feed-discovery.yml'
   workflow_dispatch:
@@ -49,12 +51,12 @@ jobs:
         id: install
         run: pnpm install --frozen-lockfile
       - name: Feed discovery interaction, model and service tests
-        run: pnpm --filter web exec vitest run src/app/community/_components/FeedTab.following.test.tsx src/app/community/_components/feedView.test.ts src/lib/community/firestore.feedRead.test.ts
+        run: pnpm --filter web exec vitest run src/app/community/_components/FeedTab.following.test.tsx src/app/community/_components/feedView.test.ts src/lib/community/firestore.feedRead.test.ts src/lib/community/feedPages.test.ts
       - name: Real SDK and repository rules in an isolated emulator
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           REQUIRE_FEED_EMULATOR: '1'
-        run: pnpm exec firebase emulators:exec --project demo-campus-feed-read --only firestore "pnpm --filter web exec vitest run src/lib/community/firestore.feedRead.emulator.test.ts"
+        run: pnpm exec firebase emulators:exec --project demo-campus-feed-read --only firestore "pnpm --filter web exec vitest run src/lib/community/firestore.feedRead.emulator.test.ts src/lib/community/feedPages.emulator.test.ts"
       - name: Web typecheck
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm --filter web typecheck
