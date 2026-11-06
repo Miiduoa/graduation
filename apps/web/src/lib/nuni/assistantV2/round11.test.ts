@@ -3,7 +3,16 @@ import { expect, it } from 'vitest';
 import { bytes, type Message, type ModelInput, type Obj } from './contracts';
 import { formatProviderMessages, groqModel, providerError } from './groq';
 import { run } from './runner';
-import { compactTransitResult, createTools } from './tools';
+import { searchTaichungCatalog } from '../../transit-catalog';
+import type { TransitArrival, TransitResult, TransitStop } from '../../transit';
+import {
+  compactTransitResult,
+  createTools,
+  TRANSIT_COMPACT_MAX_BYTES,
+  type CompactTransitArrival,
+  type CompactTransitResult,
+  type CompactTransitStop,
+} from './tools';
 import {
   fixtureAdapter,
   fixtureBinding as binding,
@@ -26,25 +35,59 @@ const transitCall = {
   usage,
 };
 
-function hugeTransit() {
+function providenceStops(): TransitStop[] {
+  return searchTaichungCatalog({ action: 'campus', schoolId: 'pu' }).stops;
+}
+
+function extraStops(count: number): TransitStop[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: 'TCOD_extra_' + String(i).padStart(2, '0') + 'ffffffffffffffffffffffffffffffff',
+    name: '其他站' + i,
+    city: 'Taichung',
+    lat: 24.226,
+    lon: 120.577,
+    distance: null,
+    source: 'taichung-open-data',
+    catalogDate: '2026-10-18T04:00:00.000Z',
+    routes: Array.from({ length: 24 }, (_, r) => ({
+      name: 'R' + r,
+      direction: '去',
+      destination: '合成終點'.repeat(12),
+    })),
+  }));
+}
+
+function campusStopsResult(extra: TransitStop[] = []): TransitResult {
+  const campus = searchTaichungCatalog({ action: 'campus', schoolId: 'pu' });
   return {
     status: 'ready',
     kind: 'stops',
+    limited: extra.length > 0 || campus.limited,
     fetchedAt: '2026-11-06T00:00:00+08:00',
+    stops: [...campus.stops, ...extra],
+  };
+}
+
+function sampleArrival(overrides: Partial<TransitArrival> = {}): TransitArrival {
+  const stop = providenceStops()[0]!;
+  return {
+    id: stop.id + ':301:0',
+    route: '301',
+    direction: 0,
+    destination: '臺中車站',
+    status: 0,
+    seconds: 480,
+    updatedAt: '2026-11-06T00:00:00.000Z',
+    stopName: stop.name,
+    scheduledAt: '2026-11-06T01:10:00.000Z',
+    ...overrides,
+  };
+}
+
+function hugeTransit() {
+  return {
+    ...campusStopsResult(extraStops(40)),
     source: 'x'.repeat(4000),
-    stops: Array.from({ length: 40 }, (_, i) => ({
-      id: 'TCOD_' + i,
-      name: '靜宜大學站' + i,
-      lat: 24.226,
-      lon: 120.577,
-      source: 'taichung-open-data',
-      routes: Array.from({ length: 24 }, (_, r) => ({
-        name: 'R' + r,
-        direction: '去',
-        destination: '合成終點'.repeat(12),
-        extra: 'y'.repeat(400),
-      })),
-    })),
   };
 }
 
@@ -171,15 +214,85 @@ it('flattens a failed get_transit result instead of sending null tool messages',
   expect(requests).toHaveLength(2);
 });
 
+it('keeps official campus stop id and city for all Providence catalog stops', async () => {
+  const campus = providenceStops();
+  expect(campus).toHaveLength(16);
+  const f = fixtureAdapter();
+  f.adapter.transit = async () => campusStopsResult();
+  const value = (await createTools(f.adapter, binding, secret, now, true).call('get_transit', {
+    action: 'campus',
+  })).value as CompactTransitResult;
+  const stops = value.stops as CompactTransitStop[];
+  expect(stops).toHaveLength(16);
+  expect(stops.map((stop) => stop.id)).toEqual(campus.map((stop) => stop.id));
+  expect(stops.every((stop) => stop.city === 'Taichung' && stop.name.includes('靜宜大學'))).toBe(true);
+  expect(JSON.stringify(value)).not.toMatch(/"lat"|"lon"|taichung-open-data|catalogDate|24\.226/);
+  expect(bytes(value)).toBeLessThan(TRANSIT_COMPACT_MAX_BYTES);
+  expect(compactTransitResult(campusStopsResult())).toEqual(value);
+});
+
+it('keeps official arrival seconds and derived minutes', async () => {
+  const arrival = sampleArrival();
+  const raw: TransitResult = {
+    status: 'ready',
+    kind: 'arrivals',
+    fetchedAt: '2026-11-06T00:00:00+08:00',
+    arrivals: [
+      arrival,
+      sampleArrival({
+        id: arrival.id + ':368',
+        route: '368',
+        seconds: 90,
+        destination: '沙鹿火車站',
+        scheduledAt: null,
+      }),
+    ],
+    routeStops: [{ routeUid: 'TXG301', subRouteUid: 'TXG301', routeName: '301', direction: 0, stops: [] }],
+  };
+  const f = fixtureAdapter();
+  f.adapter.transit = async () => raw;
+  const value = (await createTools(f.adapter, binding, secret, now, true).call('get_transit', {
+    action: 'arrivals',
+    city: 'Taichung',
+    stopId: arrival.id.split(':')[0],
+  })).value as CompactTransitResult;
+  const rows = value.arrivals as CompactTransitArrival[];
+  expect(rows).toEqual([
+    {
+      route: '301',
+      seconds: 480,
+      minutes: 8,
+      stopName: arrival.stopName,
+      status: 0,
+      scheduledAt: '2026-11-06T01:10:00.000Z',
+      destination: '臺中車站',
+    },
+    {
+      route: '368',
+      seconds: 90,
+      minutes: 2,
+      stopName: arrival.stopName,
+      status: 0,
+      scheduledAt: null,
+      destination: '沙鹿火車站',
+    },
+  ]);
+  expect(JSON.stringify(value)).not.toMatch(/updatedAt|routeStops|TXG301/);
+  expect(bytes(value)).toBeLessThan(TRANSIT_COMPACT_MAX_BYTES);
+});
+
 it('compacts oversized get_transit payloads before the next model call', async () => {
+  const campus = providenceStops();
   const f = fixtureAdapter();
   f.adapter.transit = async () => hugeTransit();
   const value = (await createTools(f.adapter, binding, secret, now, true).call('get_transit', {
     action: 'campus',
-  })).value as Obj;
-  expect(JSON.stringify(value)).not.toMatch(/TCOD_|taichung-open-data|24\.226/);
-  expect((value.stops as unknown[]).length).toBeLessThanOrEqual(4);
-  expect(bytes(value)).toBeLessThan(2500);
+  })).value as CompactTransitResult;
+  const stops = value.stops as CompactTransitStop[];
+  expect(stops.map((stop) => stop.id)).toEqual(expect.arrayContaining(campus.map((stop) => stop.id)));
+  expect(stops.every((stop) => stop.city === 'Taichung' && typeof stop.id === 'string' && stop.id.startsWith('TCOD_'))).toBe(true);
+  expect(JSON.stringify(value)).not.toMatch(/taichung-open-data|24\.226|"lat"|"lon"|合成終點/);
+  expect(bytes(value)).toBeLessThan(TRANSIT_COMPACT_MAX_BYTES);
   expect(compactTransitResult(hugeTransit())).toEqual(value);
 
   const requests: ModelInput[] = [];
@@ -200,7 +313,7 @@ it('compacts oversized get_transit payloads before the next model call', async (
     },
   });
   expect(bytes(requests[1]!.messages)).toBeLessThan(4000);
-  expect(JSON.stringify(requests[1]!.messages)).not.toContain('TCOD_');
+  expect(JSON.stringify(requests[1]!.messages)).not.toMatch(/taichung-open-data|24\.226/);
 });
 
 it('keeps a partial transit answer when the follow-up model call is rejected', async () => {

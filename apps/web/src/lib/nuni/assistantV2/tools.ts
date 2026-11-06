@@ -9,6 +9,7 @@ import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './ac
 import {
   addDays,
   bounded,
+  bytes,
   canonical,
   clock,
   date,
@@ -25,6 +26,14 @@ import {
   type Obj,
   type Task,
 } from './contracts';
+import {
+  TRANSIT_CITIES,
+  type TransitArrival,
+  type TransitCity,
+  type TransitFailure,
+  type TransitResult,
+  type TransitStop,
+} from '../../transit';
 const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
@@ -153,52 +162,121 @@ const definitions: Record<string, [Obj, string[]]> = {
     ['page'],
   ],
 };
+export const TRANSIT_COMPACT_MAX_BYTES = 2500;
+export type CompactTransitStop = Pick<TransitStop, 'id' | 'city' | 'name'>;
+export type CompactTransitArrival = Pick<
+  TransitArrival,
+  'route' | 'seconds' | 'stopName' | 'status' | 'scheduledAt' | 'destination'
+> & { minutes?: number };
+export type CompactTransitResult = {
+  href: '/bus';
+  status?: TransitResult['status'];
+  kind?: Exclude<TransitResult, { status: 'unavailable' }>['kind'];
+  reason?: TransitFailure;
+  limited?: boolean;
+  note?: string;
+  stops?: CompactTransitStop[];
+  arrivals?: CompactTransitArrival[];
+};
 function compactTransitText(value: unknown, max = 24): string | undefined {
   if (typeof value !== 'string' || !value) return;
   return value.length > max ? value.slice(0, max) : value;
 }
-function compactTransitField(row: Obj, keys: string[]): Obj {
-  const out: Obj = {};
-  for (const key of keys) {
-    const value = row[key];
-    if (value === undefined || value === null) continue;
-    if (typeof value === 'string') {
-      const text = compactTransitText(value, key === 'reason' || key === 'note' ? 40 : 24);
-      if (text) out[key] = text;
-    } else out[key] = value;
-  }
+function isTransitCity(value: unknown): value is TransitCity {
+  return typeof value === 'string' && Object.hasOwn(TRANSIT_CITIES, value);
+}
+function compactStop(stop: Pick<TransitStop, 'id' | 'city' | 'name'>): CompactTransitStop | undefined {
+  if (!stop.id || stop.id.length > 100) return;
+  const name = compactTransitText(stop.name, 40);
+  if (!name) return;
+  return { id: stop.id, city: stop.city, name };
+}
+function compactArrival(
+  arrival: Pick<TransitArrival, 'route' | 'seconds' | 'stopName' | 'status' | 'scheduledAt' | 'destination'>,
+): CompactTransitArrival | undefined {
+  const route = compactTransitText(arrival.route, 24);
+  if (!route) return;
+  if (arrival.seconds !== null && (typeof arrival.seconds !== 'number' || !Number.isFinite(arrival.seconds))) return;
+  if (arrival.status !== null && (typeof arrival.status !== 'number' || !Number.isInteger(arrival.status))) return;
+  const destination = compactTransitText(arrival.destination, 40) ?? '';
+  const out: CompactTransitArrival = {
+    route,
+    seconds: arrival.seconds,
+    destination,
+    status: arrival.status,
+  };
+  if (arrival.seconds != null && arrival.seconds >= 0) out.minutes = Math.ceil(arrival.seconds / 60);
+  const stopName = compactTransitText(arrival.stopName, 40);
+  if (stopName) out.stopName = stopName;
+  if (arrival.scheduledAt === null) out.scheduledAt = null;
+  else if (typeof arrival.scheduledAt === 'string' && arrival.scheduledAt) out.scheduledAt = arrival.scheduledAt;
   return out;
+}
+function readCompactStop(item: unknown): CompactTransitStop | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+  const row = item as Partial<TransitStop>;
+  if (typeof row.id !== 'string' || !isTransitCity(row.city) || typeof row.name !== 'string') return;
+  return compactStop({ id: row.id, city: row.city, name: row.name });
+}
+function readCompactArrival(item: unknown): CompactTransitArrival | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+  const row = item as Partial<TransitArrival>;
+  if (typeof row.route !== 'string' || typeof row.destination !== 'string') return;
+  if (row.seconds !== null && typeof row.seconds !== 'number') return;
+  if (row.status !== null && typeof row.status !== 'number') return;
+  if (row.seconds === undefined || row.status === undefined) return;
+  return compactArrival({
+    route: row.route,
+    seconds: row.seconds,
+    destination: row.destination,
+    status: row.status,
+    stopName: row.stopName,
+    scheduledAt: row.scheduledAt,
+  });
+}
+function trimTransitPayload(result: CompactTransitResult): CompactTransitResult {
+  const next: CompactTransitResult = { ...result, stops: result.stops?.slice(), arrivals: result.arrivals?.slice() };
+  const shrink = (key: 'arrivals' | 'stops') => {
+    const list = next[key];
+    if (!list) return;
+    while (list.length && bytes(next) > TRANSIT_COMPACT_MAX_BYTES) {
+      list.pop();
+      next.limited = true;
+    }
+    if (!list.length) delete next[key];
+  };
+  shrink('arrivals');
+  shrink('stops');
+  return next;
 }
 export function compactTransitResult(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const row = raw as Obj;
-  const stops = Array.isArray(row.stops)
-    ? row.stops.slice(0, 4).map((item) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-        const stop = item as Obj;
-        const routes = Array.isArray(stop.routes)
-          ? stop.routes.slice(0, 4).map((route) => {
-              if (!route || typeof route !== 'object' || Array.isArray(route)) return route;
-              return compactTransitField(route as Obj, ['name', 'destination', 'direction']);
-            })
-          : undefined;
-        return {
-          ...compactTransitField(stop, ['name', 'minutes', 'place', 'heading']),
-          ...(routes ? { routes } : {}),
-        };
-      })
-    : undefined;
-  const arrivals = Array.isArray(row.arrivals)
-    ? row.arrivals.slice(0, 8).map((item) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-        return compactTransitField(item as Obj, ['route', 'name', 'minutes', 'destination', 'stop']);
-      })
-    : undefined;
-  const out = compactTransitField(row, ['status', 'kind', 'reason', 'limited', 'note']);
+  const stops = Array.isArray(row.stops) ? row.stops.flatMap((item) => {
+    const stop = readCompactStop(item);
+    return stop ? [stop] : [];
+  }) : undefined;
+  const arrivals = Array.isArray(row.arrivals) ? row.arrivals.flatMap((item) => {
+    const arrival = readCompactArrival(item);
+    return arrival ? [arrival] : [];
+  }) : undefined;
+  const out: CompactTransitResult = { href: '/bus' };
+  if (row.status === 'ready' || row.status === 'unavailable') out.status = row.status;
+  if (row.kind === 'stops' || row.kind === 'arrivals' || row.kind === 'direct') out.kind = row.kind;
+  if (
+    row.reason === 'not-configured' ||
+    row.reason === 'invalid-query' ||
+    row.reason === 'rate-limited' ||
+    row.reason === 'upstream' ||
+    row.reason === 'network'
+  )
+    out.reason = row.reason;
+  if (typeof row.limited === 'boolean') out.limited = row.limited;
+  const note = compactTransitText(row.note, 40);
+  if (note) out.note = note;
   if (stops) out.stops = stops;
   if (arrivals) out.arrivals = arrivals;
-  out.href = '/bus';
-  return out;
+  return trimTransitPayload(out);
 }
 export function studyTitle(title: string): string {
   const clean = title
