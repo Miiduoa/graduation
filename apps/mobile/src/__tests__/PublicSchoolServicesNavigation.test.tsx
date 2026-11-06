@@ -3,6 +3,8 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Linking } from 'react-native';
+import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
+import { dormStorageKey, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { getDefaultCatalogFilter } from '../data/courseCatalogConstants';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
@@ -428,6 +430,82 @@ test('guest Dormitory provides an editable personal workspace without claiming s
   expect(view.getByText('新增問題')).toBeTruthy();
   expect(view.queryByTestId('school-login-form')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('residents can open the current school repair channel without saving and later record a case number', async () => {
+  setBrowsingSchoolId('ntou');
+  const key = dormStorageKey('guest', 'ntou');
+  await AsyncStorage.removeItem(key);
+  const network = resolveDormRepairRoute('ntou', 'network');
+  const general = resolveDormRepairRoute('ntou', 'other');
+  if (!network || !general) throw new Error('Missing NTOU repair routes');
+  const { view } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-Dormitory'));
+  fireEvent.press(await view.findByText('設備問題'));
+  fireEvent.press(await view.findByText(general.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
+  expect(await AsyncStorage.getItem(key)).toBeNull();
+
+  fireEvent.press(view.getByText('已自行確認處理完成'));
+  fireEvent.press(view.getByText('宿舍網路無法連線'));
+  fireEvent.press(view.getByText(network.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
+  expect(await AsyncStorage.getItem(key)).toBeNull();
+  fireEvent.press(view.getByText('儲存紀錄'));
+  fireEvent.press(await view.findByText('編輯'));
+  fireEvent.changeText(view.getByLabelText('校方案號（選填）'), '  CASE-168  ');
+  fireEvent.press(view.getByText('儲存紀錄'));
+  expect(await view.findByText('校方案號：CASE-168')).toBeTruthy();
+  fireEvent.press(view.getByText(network.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
+  const stored = normalizeDormWorkspace(JSON.parse((await AsyncStorage.getItem(key))!));
+  expect(stored.repairs).toHaveLength(1);
+  expect(stored.repairs[0]).toMatchObject({ reference: 'CASE-168', category: 'network', status: 'draft' });
+
+  fireEvent.press(view.getByText('編輯'));
+  fireEvent.press(view.getByText('水電與漏水'));
+  fireEvent.press(view.getByText('儲存紀錄'));
+  await view.findByText('編輯');
+  fireEvent.press(view.getByText('查海大修繕處理狀況'));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
+  expect(view.queryByText(general.label)).toBeNull();
+
+  act(() => setBrowsingSchoolId('ncku'));
+  fireEvent.press(await view.findByText('設備問題'));
+  await view.findByText('＋ 記錄問題');
+  expect(view.queryByText('校方案號：CASE-168')).toBeNull();
+  expect(view.queryByText(network.label)).toBeNull();
+  await AsyncStorage.removeItem(key);
+});
+
+test('changing residence does not reroute an existing repair to the new hall', async () => {
+  setBrowsingSchoolId('pu');
+  const key = dormStorageKey('guest', 'pu');
+  const location = '希嘉學苑 302';
+  const previousHall = resolveDormRepairRoute('pu', 'water', location);
+  const currentHall = resolveDormRepairRoute('pu', 'water', '思高學苑');
+  if (!previousHall || !currentHall) throw new Error('Missing PU repair routes');
+  expect(previousHall.detail).toContain('11245');
+  expect(currentHall.detail).toContain('11254');
+  await AsyncStorage.setItem(key, JSON.stringify({
+    building: '思高學苑', repairs: [{ id: 'leak', title: '洗手台漏水', category: 'water', location }],
+  }));
+  const { view } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-Dormitory'));
+  fireEvent.press(await view.findByText('設備問題'));
+  fireEvent.press(await view.findByText(previousHall.label));
+  expect(view.getByText(previousHall.detail)).toBeTruthy();
+  expect(Linking.openURL).toHaveBeenLastCalledWith(previousHall.url);
+  fireEvent.press(view.getByText('編輯'));
+  fireEvent.changeText(view.getByLabelText('位置'), '思高學苑 103');
+  expect(view.getByText(currentHall.detail)).toBeTruthy();
+  fireEvent.press(view.getByText(currentHall.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(currentHall.url);
+  fireEvent.press(view.getByText('取消'));
+  expect(view.queryByText(currentHall.detail)).toBeNull();
+  fireEvent.press(view.getByText(previousHall.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(previousHall.url);
+  await AsyncStorage.removeItem(key);
 });
 
 test('PU guest Dormitory guide displays verified reference details without claiming live bed availability', async () => {

@@ -37,12 +37,15 @@ export const DORM_REPAIR_SHORTCUTS: ReadonlyArray<{
   { category: 'furniture', title: '門窗或家具損壞' },
 ];
 
+export const DORM_REPAIR_REFERENCE_LIMIT = 80;
+
 export type DormRepair = {
   id: string;
   category: DormRepairCategory;
   title: string;
   location: string;
   description: string;
+  reference?: string; // Receipt entered by the resident after contacting the provider.
   status: DormRepairStatus;
   createdAt: number;
   updatedAt: number;
@@ -223,7 +226,9 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
       const title = boundedText(row.title, 90);
       if (!id || !/^[a-zA-Z0-9_-]+$/.test(id) || used.has(id) || !title) continue;
       used.add(id);
+      const reference = boundedText(row.reference, DORM_REPAIR_REFERENCE_LIMIT);
       repairs.push({
+        ...(reference ? { reference } : {}),
         id,
         category: repairCategories.includes(row.category as DormRepairCategory)
           ? (row.category as DormRepairCategory)
