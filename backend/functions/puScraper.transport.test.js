@@ -159,6 +159,12 @@ describe('PU course document recognition', () => {
     ['truncated course row', `<table>${header}<tr><td>IM01</td><td>資管</td><td>資料庫</td></tr></table>`],
     ['unrecognizable credits', `<table>${header}<tr><td>IM01</td><td>資管</td><td>資料庫</td><td>必修</td><td>unknown</td><td>二 3</td><td></td></tr></table>`],
     ['empty message only in script', '<script>const emptyText = "本學期尚未選課";</script><p>課程查詢版面已更新</p>'],
+    ['empty message in an unclosed script', '<script>本學期尚未選課'],
+    ['empty message in an unclosed style', '<style>本學期尚未選課'],
+    ['empty message in an unclosed template', '<template>本學期尚未選課'],
+    ['empty message in an unclosed comment', '<!-- <p>本學期尚未選課</p>'],
+    ['empty message in a hidden element', '<section hidden><p>本學期尚未選課</p></section>'],
+    ['empty message in an aria-hidden element', '<section aria-hidden="true"><p>本學期尚未選課</p></section>'],
   ])('fails closed for %s instead of inventing an empty timetable', async (_label, document) => {
     mockRequests(() => ({ html: student + document }));
     const result = await puFetchCourses({ SID: 'fixture-session' });
@@ -170,6 +176,8 @@ describe('PU course document recognition', () => {
     ['recognized table with zero rows', `<table>${header}</table>`],
     ['explicit empty row', `<table>${header}<tr><td colspan="7">本學期無選課資料</td></tr></table>`],
     ['explicit empty page', '<p>本學期尚未選課</p>'],
+    ['multiline empty message inside a visible container', '<section><h1>課程查詢</h1><p>本學期\n 尚未選課</p></section>'],
+    ['entity-encoded empty message', '<p>本學期&#x5C1A;未選課</p>'],
   ])('preserves a legitimate %s', async (_label, document) => {
     mockRequests(() => ({ html: student + document }));
     await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
@@ -183,6 +191,17 @@ describe('PU course document recognition', () => {
       <table><tr><td>其他查詢</td></tr></table>` }));
     await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
       success: true, courses: [{ code: 'IM01', name: '資料庫', credits: 3 }],
+    });
+  });
+
+  test('extracts visible course text with an HTML parser and decodes entities once', async () => {
+    mockRequests(() => ({ html: student + `<table>${header}
+      <tr><td>IM01</td><td>資管</td><td>資料庫 &amp; <b>&#x6574;&#x5408;</b> &amp;lt;課程&amp;gt;
+        <!-- 註解課名 --><script>隱藏腳本</script><style>隱藏樣式</style>
+        <template>隱藏範本</template><span hidden>隱藏課名</span>
+      </td><td>必修</td><td>3</td><td>另行公告</td><td></td></tr></table>` }));
+    await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
+      success: true, courses: [{ code: 'IM01', name: '資料庫 & 整合 &lt;課程&gt;', nameEn: '' }],
     });
   });
 });

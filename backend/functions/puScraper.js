@@ -304,15 +304,10 @@ function getFollowRedirect(hostname, path, cookies, maxRedirects = 3, extra = {}
 // HTML helpers
 // ---------------------------------------------------------------------------
 
-/** Strip HTML tags from a string */
+/** Extract normalized visible text from an HTML fragment. */
 function stripTags(html) {
-  return html
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
+  return puVisibleTextParts(parseFragment(html))
+    .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -373,9 +368,7 @@ function isPuEmptyCourseMessage(text) {
 
 function hasPuEmptyCourseMessage(html) {
   // 只接受頁面上的明確無課文字，不把腳本中的空狀態文案當作校務結果。
-  const visible = html.replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
-  return visible.split(/<[^>]+>/).some(text => isPuEmptyCourseMessage(stripTags(text)));
+  return puVisibleTextParts(parseFragment(html)).some(isPuEmptyCourseMessage);
 }
 
 function looksLikePuLoginPage(html) {
@@ -1046,17 +1039,17 @@ const PROFILE_NON_TEXT = new Set([
   '#comment', 'script', 'style', 'template', 'noscript', 'input', 'textarea', 'select', 'button',
 ]);
 
-function puProfileText(node) {
-  if (PROFILE_NON_TEXT.has(node.nodeName)) return '';
-  if (node.nodeName === '#text') return node.value;
+function puVisibleTextParts(node) {
+  if (PROFILE_NON_TEXT.has(node.nodeName)) return [];
+  if (node.nodeName === '#text') return [node.value];
   if (
     node.attrs?.some(({ name, value }) =>
       name === 'hidden' ||
       (name === 'aria-hidden' && value.toLowerCase() === 'true') ||
       (name === 'style' && /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i.test(value)),
     )
-  ) return '';
-  return (node.childNodes || []).map(puProfileText).join(' ');
+  ) return [];
+  return (node.childNodes || []).flatMap(puVisibleTextParts);
 }
 
 function studentNumberFromProfile(text) {
@@ -1081,7 +1074,7 @@ async function puFetchStudentInfo(cookies) {
 
     const html = res.data;
     const source = new URL(res.url);
-    const profileText = puProfileText(parseFragment(html));
+    const profileText = puVisibleTextParts(parseFragment(html)).join(' ');
     if (
       source.origin !== `https://${ALCAT_HOST}` ||
       source.pathname !== COURSE_RESULT_PATH ||
