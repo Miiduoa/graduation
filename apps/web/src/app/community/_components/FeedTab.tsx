@@ -47,6 +47,8 @@ import {
 type FilterKey = (typeof FEED_FILTERS)[number];
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
+const FEED_PAGE_SIZE = 60;
+const FEED_MAX_READ = 240;
 
 const FILTERS: { key: FilterKey; label: string; icon: string }[] = [
   { key: 'all', label: '全部', icon: '✨' },
@@ -107,6 +109,16 @@ export function FeedTab(props: FeedTabProps) {
 function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const { schoolId, user } = props;
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
+  // A student can search older posts without discarding the current feed or keyword.
+  // The ref avoids re-running the full community loader when a single page is extended.
+  const feedLimitRef = useRef(FEED_PAGE_SIZE);
+  const feedReadVersion = useRef(0);
+  const moreInFlight = useRef(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [morePostsError, setMorePostsError] = useState('');
+  const [feedReadDenied, setFeedReadDenied] = useState(false);
+  useEffect(() => () => { feedReadVersion.current += 1; }, []);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
@@ -153,20 +165,30 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
 
   const load = useCallback(async () => {
+    const request = ++feedReadVersion.current;
+    // A refresh wins over an older "load more" request.
+    moreInFlight.current = false;
+    setLoadingMorePosts(false);
     if (!schoolId || !user) {
       setPosts([]);
       setBoards([]);
       setStories([]);
       setSubscribedIds(new Set());
+      setHasMorePosts(false);
       return;
     }
+    const requestedLimit = feedLimitRef.current;
     const [rows, boardList, subs, storyRows] = await Promise.all([
-      fetchRecentCampusPosts(schoolId, undefined, 60),
+      fetchRecentCampusPosts(schoolId, undefined, requestedLimit),
       listBoards(schoolId, 80),
       listSubscribedBoardIds(user.uid, schoolId),
       listActiveStoriesForSchool(schoolId, 80),
     ]);
-    setPosts(rankFeedPosts(rows, 80));
+    if (request !== feedReadVersion.current) return;
+    setPosts(rankFeedPosts(rows.filter((post) => post.schoolId === schoolId), Math.max(80, requestedLimit)));
+    setHasMorePosts(rows.length >= requestedLimit && requestedLimit < FEED_MAX_READ);
+    setFeedReadDenied(false);
+    setMorePostsError('');
     setBoards(boardList);
     setSubscribedIds(new Set(subs));
     setStories(groupStoriesByAuthor(storyRows, user.uid));
@@ -176,6 +198,38 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     load,
     '暫時無法讀取校園動態，請確認連線後重試。',
   );
+
+  const loadMorePosts = async () => {
+    if (!schoolId || loading || refreshing || moreInFlight.current || !hasMorePosts) return;
+    const nextLimit = Math.min(feedLimitRef.current + FEED_PAGE_SIZE, FEED_MAX_READ);
+    const request = ++feedReadVersion.current;
+    moreInFlight.current = true;
+    setLoadingMorePosts(true);
+    setMorePostsError('');
+    try {
+      const rows = await fetchRecentCampusPosts(schoolId, undefined, nextLimit);
+      if (request !== feedReadVersion.current) return;
+      feedLimitRef.current = nextLimit;
+      setPosts(rankFeedPosts(rows.filter((post) => post.schoolId === schoolId), Math.max(80, nextLimit)));
+      setHasMorePosts(rows.length >= nextLimit && nextLimit < FEED_MAX_READ);
+    } catch (cause) {
+      if (request !== feedReadVersion.current) return;
+      if (isPermissionDeniedError(cause)) {
+        // Revoked school access cannot leave old cached posts visible.
+        setPosts([]);
+        setHasMorePosts(false);
+        setFeedReadDenied(true);
+      } else {
+        // Keep the previous page and search so students can retry in place.
+        setMorePostsError('載入更多貼文失敗，已保留原本的貼文與搜尋，請重試。');
+      }
+    } finally {
+      if (request === feedReadVersion.current) {
+        moreInFlight.current = false;
+        setLoadingMorePosts(false);
+      }
+    }
+  };
   const shelf = useStoryShelf(loading || error ? [] : stories, schoolId, user.uid);
 
   // hydrate display names for post authors + story authors
@@ -453,7 +507,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const selectedFeedLoading = loading ||
     (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ||
     (followingView && (followingLoading || (!validFollowing && !followingError)));
-  const selectedFeedError = (savedView && bookmarksError) || (followingView && followingError);
+  const selectedFeedError = (savedView && bookmarksError) || (followingView && followingError) || (feedReadDenied ? '貼文權限已失效' : '');
 
   return (
     <div className={styles.feedColumn}>
@@ -692,6 +746,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         </div>
       )}
 
+      {feedReadDenied && (
+        <div className={styles.feedError} role="alert">
+          校籍或貼文存取權限已變更，原本載入的貼文已清除。
+          <button type="button" onClick={() => void refresh()}>重新驗證</button>
+        </div>
+      )}
+
       {/* ── Posts ── */}
       {selectedFeedLoading ? (
         <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }} role="status">
@@ -925,6 +986,33 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             );
           })}
         </div>
+      )}
+      {!savedView && !selectedFeedLoading && !selectedFeedError &&
+        (hasMorePosts || loadingMorePosts || !!morePostsError) && (
+        <div className={styles.feedEmptyActions}>
+          {hasMorePosts && (
+            <button
+              type="button"
+              className="btn"
+              disabled={loadingMorePosts || refreshing}
+              aria-busy={loadingMorePosts}
+              onClick={() => void loadMorePosts()}
+            >
+              {loadingMorePosts
+                ? '正在載入更多貼文…'
+                : search.trim() && visible.length === 0
+                  ? '再載入更多後繼續找'
+                  : '載入更多貼文'}
+            </button>
+          )}
+          {morePostsError && <p className={styles.feedError} role="alert">{morePostsError}</p>}
+        </div>
+      )}
+      {!savedView && !selectedFeedLoading && !selectedFeedError &&
+        !hasMorePosts && feedLimitRef.current >= FEED_MAX_READ && (
+        <p className={styles.feedScope} role="status">
+          已達單次瀏覽上限 {FEED_MAX_READ} 篇；尚未提供跨全部歷史貼文的伺服器搜尋。
+        </p>
       )}
     </div>
   );

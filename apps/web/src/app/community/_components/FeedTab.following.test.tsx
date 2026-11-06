@@ -440,3 +440,58 @@ it('hides a previously loaded story while retrying a rejected server read', asyn
   await act(async () => pending.resolve([]));
   expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
 });
+
+
+it('finds an older campus post after loading another page without clearing the search', async () => {
+  const recent = Array.from({ length: 60 }, (_, index) => ({
+    ...bob, id: `recent-${index}`, title: `近期貼文 ${index}`,
+  }));
+  const older = { ...bob, id: 'older-post', title: '上學期的專題集合' };
+  mocks.fetchPosts.mockImplementation(async (_school: string, _board: unknown, pageSize: number) =>
+    pageSize === 60 ? recent : [...recent, older]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '上學期的專題集合' } });
+  expect(screen.getByText('找不到符合的貼文')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByText('上學期的專題集合');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('上學期的專題集合');
+  expect(mocks.fetchPosts).toHaveBeenCalledWith('pu', undefined, 120);
+  expect(screen.queryByText('近期貼文 0')).toBeNull();
+});
+
+it('keeps the existing post and search after a failed page request and retries in place', async () => {
+  const recent = Array.from({ length: 60 }, (_, index) => ({
+    ...bob, id: `recent-${index}`, title: `近期貼文 ${index}`,
+  }));
+  mocks.fetchPosts
+    .mockResolvedValueOnce(recent)
+    .mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }))
+    .mockResolvedValueOnce([...recent, { ...bob, id: 'older', title: '找回舊貼文' }]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '找回舊貼文' } });
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByRole('alert');
+  expect(screen.getByText(/載入更多貼文失敗，已保留/)).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('找回舊貼文');
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByText('找回舊貼文');
+  expect(mocks.fetchPosts).toHaveBeenCalledTimes(3);
+});
+
+it('hides previously loaded posts when load-more detects revoked school access', async () => {
+  const recent = Array.from({ length: 60 }, (_, index) => ({
+    ...bob, id: `recent-${index}`, title: `近期貼文 ${index}`,
+  }));
+  mocks.fetchPosts
+    .mockResolvedValueOnce(recent)
+    .mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.click(screen.getByRole('button', { name: '載入更多貼文' }));
+  await screen.findByText('校籍或貼文存取權限已變更，原本載入的貼文已清除。');
+  expect(screen.queryByText('近期貼文 0')).toBeNull();
+  expect(screen.queryByText('載入更多貼文')).toBeNull();
+  expect(screen.getByRole('button', { name: '重新驗證' })).toBeTruthy();
+});

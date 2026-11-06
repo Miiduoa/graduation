@@ -1,0 +1,45 @@
+name: Campus social feed discovery regression
+
+on:
+  push:
+    branches:
+      - 'feat/social-feed-older-search-20261106'
+    paths:
+      - 'apps/web/src/app/community/_components/FeedTab.tsx'
+      - 'apps/web/src/app/community/_components/FeedTab.following.test.tsx'
+      - '.github/workflows/campus-social-feed-discovery.yml'
+  pull_request:
+    branches:
+      - main
+      - 'feat/story-media-in-place-retry-20261106'
+    paths:
+      - 'apps/web/src/app/community/_components/FeedTab.tsx'
+      - 'apps/web/src/app/community/_components/FeedTab.following.test.tsx'
+      - '.github/workflows/campus-social-feed-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: social-feed-discovery-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-feed:
+    name: Older-post search and retry
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - name: Install from lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Feed discovery interaction and model tests
+        run: pnpm --filter web exec vitest run src/app/community/_components/FeedTab.following.test.tsx src/app/community/_components/feedView.test.ts
+      - name: Web typecheck
+        run: pnpm --filter web typecheck
