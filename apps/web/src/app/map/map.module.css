@@ -352,6 +352,14 @@
     transform: translateY(1px);
   }
 }
+:global(html:not([data-reduced-motion='false'])) .map :global(.leaflet-zoom-animated) {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map :global(.leaflet-zoom-animated) {
+    transition: none !important;
+  }
+}
 @media (forced-colors: active) {
   .mapFrame,
   .page .detail {

@@ -33,11 +33,43 @@ export default function MapCanvas({
     let active = true;
     let map: LeafletMap | null = null;
     let resize: ResizeObserver | null = null;
+    let stopWatchingMotion: (() => void) | undefined;
     void import('leaflet')
       .then((L) => {
         if (!active) return;
-        map = L.map(container, { zoomControl: false, fadeAnimation: false });
-        L.control.zoom({ zoomInTitle: '放大地圖', zoomOutTitle: '縮小地圖' }).addTo(map);
+        const createdMap = L.map(container, { zoomControl: false, fadeAnimation: false });
+        map = createdMap;
+        const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const motionEnabled = () =>
+          document.documentElement.dataset.reducedMotion === 'false' && !systemMotion.matches;
+        const motionDefaults = {
+          inertia: createdMap.options.inertia,
+          zoomAnimation: createdMap.options.zoomAnimation,
+          zoomAnimationThreshold: createdMap.options.zoomAnimationThreshold,
+        };
+        // Leaflet's keyboard handler calls panBy directly without an animation option.
+        const panBy = createdMap.panBy.bind(createdMap);
+        createdMap.panBy = (offset, options) =>
+          panBy(offset, motionEnabled() ? options : { ...options, animate: false });
+        const applyMotion = () => {
+          const enabled = motionEnabled();
+          createdMap.options.inertia = enabled && motionDefaults.inertia;
+          createdMap.options.zoomAnimation = enabled && motionDefaults.zoomAnimation;
+          createdMap.options.zoomAnimationThreshold = enabled ? motionDefaults.zoomAnimationThreshold : 0;
+          if (!enabled && Number.isFinite(createdMap.getZoom())) createdMap.stop();
+        };
+        const motionObserver = new MutationObserver(applyMotion);
+        motionObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-reduced-motion'],
+        });
+        systemMotion.addEventListener('change', applyMotion);
+        applyMotion();
+        stopWatchingMotion = () => {
+          motionObserver.disconnect();
+          systemMotion.removeEventListener('change', applyMotion);
+        };
+        L.control.zoom({ zoomInTitle: '放大地圖', zoomOutTitle: '縮小地圖' }).addTo(createdMap);
         // OSM raster is free and keyless. detectRetina loads z+1 tiles at 2x.
         // 3x screens still only get 2x bitmaps; a sharp vector layer would need a
         // new engine (for example OpenFreeMap + MapLibre) rather than a paid key.
@@ -50,21 +82,22 @@ export default function MapCanvas({
         tiles.on('tileerror', () => {
           if (active) setError(true);
         });
-        tiles.addTo(map);
-        map.invalidateSize();
+        tiles.addTo(createdMap);
+        createdMap.invalidateSize();
         if (typeof ResizeObserver !== 'undefined') {
           resize = new ResizeObserver(() => {
-            map?.invalidateSize();
+            createdMap.invalidateSize();
           });
           resize.observe(container);
         }
-        setRuntime({ map, L });
+        setRuntime({ map: createdMap, L });
       })
       .catch(() => {
         if (active) setError(true);
       });
     return () => {
       active = false;
+      stopWatchingMotion?.();
       resize?.disconnect();
       map?.remove();
     };
