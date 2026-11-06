@@ -2471,6 +2471,14 @@
       "anon": false
     },
     {
+      "signature": "playable_material_course(uuid)",
+      "name": "playable_material_course",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
       "signature": "protect_profile_role()",
       "name": "protect_profile_role",
       "trigger": true,

@@ -8,6 +8,7 @@ const {
   initializeTestEnvironment,
 } = require('@firebase/rules-unit-testing');
 const { deleteField } = require('firebase/firestore');
+const { getBytes } = require('firebase/storage');
 
 const projectId = 'demo-campus-security';
 const firestoreRules = fs.readFileSync(
@@ -765,6 +766,70 @@ describe('firestore security rules', () => {
     await assertFails(bob.collectionGroup('orders').where('userId', '==', 'alice').get());
   });
 
+  describe('campus post authorship and votes', () => {
+    const post = (uid) => testEnv.authenticatedContext(uid).firestore().doc('schools/pu/campusPosts/one');
+    const fresh = { schoolId: 'pu', boardId: 'general', title: 'Notes', anonymous: false,
+      authorUid: 'alice', createdAt: new Date(), likedBy: [], likes: 0 };
+    beforeEach(async () => {
+      await seedFirestore(async (admin) => {
+        await admin.doc('schools/pu/boards/general').set({ mods: ['mod'] });
+        for (const uid of ['alice', 'bob', 'mod']) {
+          await admin.doc('schools/pu/members/' + uid).set({ status: 'active', role: 'member' });
+        }
+      });
+    });
+
+    test('creation cannot attribute likes to other students', async () => {
+      await assertFails(post('alice').set({ ...fresh, likes: 1, likedBy: ['bob'] }));
+      await assertSucceeds(post('alice').set(fresh));
+    });
+
+    test('authors and moderators can edit content without changing public identity', async () => {
+      await assertSucceeds(post('alice').set(fresh));
+      for (const uid of ['alice', 'mod']) {
+        await assertSucceeds(post(uid).update({ title: 'Edited by ' + uid }));
+        for (const patch of [{ authorUid: 'bob' }, { schoolId: 'other' }, { anonymous: true }, { aliasSnapshot: 'bob' }]) {
+          await assertFails(post(uid).update(patch));
+        }
+      }
+      const reply = (uid) => post(uid).collection('replies').doc('one');
+      await assertFails(reply('alice').set({ anonymous: 'false', authorUid: 'alice', content: 'Reply' }));
+      await assertFails(reply('alice').set({ anonymous: false, authorUid: 'alice', schoolId: 'other', content: 'Reply' }));
+      await assertSucceeds(reply('alice').set({ anonymous: false, authorUid: 'alice', content: 'Reply' }));
+      for (const uid of ['alice', 'mod']) {
+        await assertSucceeds(reply(uid).update({ content: 'Edited by ' + uid }));
+        for (const patch of [{ authorUid: 'bob' }, { schoolId: 'other' }, { anonymous: true }, { aliasSnapshot: 'bob' }]) {
+          await assertFails(reply(uid).update(patch));
+        }
+      }
+      const anonymous = post('alice').parent.doc('anonymous');
+      const { authorUid, ...unattributed } = fresh;
+      await assertSucceeds(anonymous.set({ ...unattributed, anonymous: true, aliasSnapshot: '匿名同學' }));
+      const moderated = post('mod').parent.doc('anonymous');
+      await assertSucceeds(moderated.update({ title: 'Updated' }));
+      await assertFails(moderated.update({ authorUid: 'bob' }));
+      await assertSucceeds(moderated.delete());
+    });
+
+    test('adding or removing a like cannot swap another voter', async () => {
+      await assertSucceeds(post('alice').set(fresh));
+      await assertSucceeds(post('mod').update({ likes: 1, likedBy: ['mod'] }));
+      await assertFails(post('bob').update({ likes: 2, likedBy: ['alice', 'bob'] }));
+      await assertSucceeds(post('bob').update({ likes: 2, likedBy: ['mod', 'bob'] }));
+      await assertFails(post('bob').update({ likes: 1, likedBy: ['alice'] }));
+      await assertSucceeds(post('bob').update({ likes: 1, likedBy: ['mod'] }));
+    });
+
+    test('post owners and moderators cannot bypass vote checks through content edits', async () => {
+      await assertSucceeds(post('alice').set(fresh));
+      for (const uid of ['alice', 'mod']) {
+        await assertFails(post(uid).update({ title: 'Edited', likes: 20, likedBy: ['bob'] }));
+        await assertFails(post(uid).update({ likedBy: ['bob'] }));
+      }
+      await assertSucceeds(post('alice').update({ likes: 1, likedBy: ['alice'] }));
+    });
+  });
+
   test('deny group post impersonation on create', async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });
@@ -783,6 +848,52 @@ describe('firestore security rules', () => {
         kind: 'discussion',
       }),
     );
+  });
+
+  describe('group discussion edits', () => {
+    const postPath = 'groups/course/posts/first';
+    const commentPath = postPath + '/comments/first';
+    beforeEach(async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('groups/course').set({ schoolId: 'pu' });
+        for (const [uid, role] of [['alice', 'member'], ['teacher', 'instructor']]) {
+          await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+          await db.doc('groups/course/members/' + uid).set({ status: 'active', role });
+        }
+      });
+      const db = testEnv.authenticatedContext('alice').firestore();
+      await assertSucceeds(db.doc(postPath).set({ authorId: 'alice', kind: 'post', title: 'Lecture notes' }));
+      await assertSucceeds(db.doc(commentPath).set({ authorId: 'alice', body: 'Page two' }));
+    });
+
+    test('a member cannot promote their post to an announcement', async () => {
+      const post = testEnv.authenticatedContext('alice').firestore().doc(postPath);
+      await assertSucceeds(post.update({ title: 'Revised lecture notes' }));
+      await assertFails(post.update({ kind: 'announcement' }));
+      const teacher = testEnv.authenticatedContext('teacher').firestore().doc(postPath);
+      await assertSucceeds(teacher.update({ kind: 'announcement' }));
+      await assertFails(post.update({ title: 'Class cancelled' }));
+      await assertFails(post.delete());
+    });
+
+    test('editing cannot transfer authorship', async () => {
+      const post = testEnv.authenticatedContext('alice').firestore().doc(postPath);
+      await assertFails(post.update({ authorId: 'teacher' }));
+      const comment = testEnv.authenticatedContext('teacher').firestore().doc(commentPath);
+      await assertSucceeds(comment.update({ body: 'Moderated' }));
+      await assertFails(comment.update({ authorId: 'teacher' }));
+    });
+
+    for (const membership of ['groups/course/members/alice', 'schools/pu/members/alice']) {
+      test('revoking ' + membership + ' ends edits and deletes on existing posts and comments', async () => {
+        const db = testEnv.authenticatedContext('alice').firestore();
+        await seedFirestore((admin) => admin.doc(membership).update({ status: 'inactive' }));
+        for (const target of [postPath, commentPath]) {
+          await assertFails(db.doc(target).update({ body: 'Changed after revocation' }));
+          await assertFails(db.doc(target).delete());
+        }
+      });
+    }
   });
 
   test('deny group comment impersonation on create', async () => {
@@ -818,6 +929,44 @@ describe('firestore security rules', () => {
           authorId: 'bob',
         }),
     );
+  });
+
+  test('classroom questions accept only the current member’s own vote', async () => {
+    const { arrayRemove, arrayUnion, increment } = require('firebase/firestore');
+    await seedFirestore(async (admin) => {
+      await admin.doc('groups/course/liveSessions/current').set({ schemaVersion: 2, active: true });
+      await admin.doc('groups/course').set({ schoolId: 'pu' });
+      for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+        await admin.doc('groups/course/members/' + uid).set({ status: 'active', role });
+        await admin.doc('schools/pu/members/' + uid).set({ status: 'active' });
+      }
+    });
+    const question = (uid) => testEnv.authenticatedContext(uid).firestore().doc('groups/course/liveSessions/current/questions/one');
+    const fresh = { authorId: 'alice', text: 'Page two?', createdAt: new Date(), answered: false, upvotes: 0, upvotedBy: [] };
+    await assertFails(question('alice').set({ ...fresh, upvotes: 2, upvotedBy: ['bob', 'teacher'] }));
+    await assertFails(question('alice').set({ ...fresh, answered: true }));
+    await assertSucceeds(question('alice').set(fresh));
+    const bob = question('bob');
+    await assertFails(bob.update({ authorId: 'bob' }));
+    await assertFails(bob.update({ answered: true }));
+    await assertFails(bob.update({ upvotes: 1, upvotedBy: ['teacher'] }));
+    await assertSucceeds(bob.update({ upvotes: increment(1), upvotedBy: arrayUnion('bob') }));
+    await assertFails(question('alice').update({ upvotes: 2, upvotedBy: ['teacher', 'alice'] }));
+    await assertFails(bob.update({ upvotes: 99, upvotedBy: ['bob'] }));
+    await assertSucceeds(question('teacher').update({ answered: true }));
+    await assertSucceeds(bob.update({ upvotes: increment(-1), upvotedBy: arrayRemove('bob') }));
+    for (const state of [{ schemaVersion: 2, active: false }, { active: true }, null]) {
+      await seedFirestore(async (admin) => {
+        const session = admin.doc('groups/course/liveSessions/current');
+        if (state) await session.set(state);
+        else await session.delete();
+      });
+      await assertFails(bob.update({ upvotes: increment(1), upvotedBy: arrayUnion('bob') }));
+      await assertFails(bob.parent.doc('new').set({ ...fresh, authorId: 'bob' }));
+      const moderate = question('teacher').update({ answered: false });
+      if (state?.schemaVersion === 2) await assertSucceeds(moderate);
+      else await assertFails(moderate);
+    }
   });
 
   test('deny live question impersonation on create', async () => {
@@ -1500,6 +1649,49 @@ describe('firestore security rules', () => {
 });
 
 describe('storage security rules', () => {
+  for (const status of ['submitted', 'graded']) {
+    test(`a ${status} assignment attachment is immutable and remains private`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('groups/course').set({ schoolId: 'pu', type: 'course' });
+        await db.doc('assignments/work').set({ groupId: 'course' });
+        for (const [uid, role] of [['alice', 'member'], ['bob', 'member'], ['teacher', 'instructor']]) {
+          await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+          await db.doc(`groups/course/members/${uid}`).set({ status: 'active', role });
+        }
+      });
+      const objectPath = `assignments/work/submissions/alice/${status}-answer.pdf`;
+      const alice = testEnv.authenticatedContext('alice').storage();
+      const original = alice.ref(objectPath);
+      await assertSucceeds(uploadString(original, 'original answer', 'application/pdf'));
+      await seedFirestore(async (db) => {
+        await db.doc('groups/course/assignments/work/submissions/alice').set({
+          userId: 'alice', groupId: 'course', assignmentId: 'work', status,
+          attachments: [{ path: objectPath }], submittedAt: '2026-11-06T00:00:00.000Z',
+          ...(status === 'graded' ? { gradeScore: 90, gradePublished: true } : {}),
+        });
+      });
+
+      await assertFails(uploadString(original, 'changed after submission', 'application/pdf'));
+      await assertFails(original.updateMetadata({ contentDisposition: 'attachment; filename=changed.pdf' }));
+      await assertFails(original.delete());
+      await assertSucceeds(uploadString(
+        alice.ref(`assignments/work/submissions/alice/${status}-new-answer.pdf`), 'new answer', 'application/pdf',
+      ));
+      assert.equal(Buffer.from(await assertSucceeds(getBytes(original))).toString(), 'original answer');
+      const teacher = testEnv.authenticatedContext('teacher').storage().ref(objectPath);
+      assert.equal(Buffer.from(await assertSucceeds(getBytes(teacher))).toString(), 'original answer');
+      for (const context of [
+        testEnv.authenticatedContext('bob'),
+        testEnv.authenticatedContext('outsider'),
+        testEnv.unauthenticatedContext(),
+      ]) {
+        const other = context.storage().ref(objectPath);
+        await assertFails(getBytes(other));
+        await assertFails(uploadString(other, 'forged answer', 'application/pdf'));
+      }
+    });
+  }
+
   test('only a story draft owner can replace its photo before publication', async () => {
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({ status: 'active' });
@@ -1590,6 +1782,31 @@ describe('storage security rules', () => {
     }
     await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
   });
+
+  for (const objectPath of [
+    'conversations/chat/messages/one/photo.jpg',
+    'conversations/chat/media/one/photo.jpg',
+    'schools/pu/campusPosts/one/photo.jpg',
+    'groups/course/posts/one/photo.jpg',
+    'lostfound/one/photo.jpg',
+    'bugreports/one/photo.jpg',
+  ]) {
+    test('a shared upload cannot be replaced at ' + objectPath, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('conversations/chat').set({ memberIds: ['alice', 'bob'] });
+        for (const uid of ['alice', 'bob']) {
+          await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+          await db.doc('groups/course/members/' + uid).set({ status: 'active' });
+        }
+      });
+      const original = testEnv.authenticatedContext('alice').storage().ref(objectPath);
+      const other = testEnv.authenticatedContext('bob').storage().ref(objectPath);
+      await assertSucceeds(uploadString(original, 'original', 'image/jpeg'));
+      await assertFails(uploadString(other, 'replaced', 'image/jpeg'));
+      await assertFails(other.updateMetadata({ contentDisposition: 'attachment' }));
+      await assertFails(other.delete());
+    });
+  }
 
   test('deny print uploads for another user', async () => {
     const storage = testEnv.authenticatedContext('alice').storage();
@@ -2137,9 +2354,15 @@ describe('attendance transactions on Firestore', () => {
     currentTime = Date.now();
     notifications = 0;
     handlers = createLiveSessionHandlers({ db, now: () => currentTime, notifyStarted: async () => { notifications++; } });
-    await db.doc(base).set({ name: '交易測試課程' });
-    await db.doc(`${base}/members/teacher`).set({ role: 'instructor', status: 'active' });
-    for (const uid of ['alice', 'bob', 'carol']) await db.doc(`${base}/members/${uid}`).set({ role: 'student', status: 'active', displayName: uid });
+    const batch = db.batch();
+    batch.set(db.doc(base), { name: '交易測試課程', type: 'course', schoolId: 'school-one' });
+    for (const uid of ['teacher', 'alice', 'bob', 'carol']) {
+      batch.set(db.doc(`schools/school-one/members/${uid}`), { status: 'active' });
+      batch.set(db.doc(`${base}/members/${uid}`), {
+        role: uid === 'teacher' ? 'instructor' : 'student', status: 'active', displayName: uid,
+      });
+    }
+    await batch.commit();
   });
   after(async () => { if (app) await deleteApp(app); });
 
@@ -2248,6 +2471,27 @@ describe('attendance transactions on Firestore', () => {
     const retry = await handlers.startLiveSession(startRequest());
     assert.equal(retry.active, false);
     assert.equal(retry.reused, true);
+  });
+
+  test('revoked school membership blocks receipt replay, new check-ins and instructor changes', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const first = await handlers.joinLiveSession(request(session));
+    const attendance = sessionDoc(session, 'attendanceSessions');
+    const batch = db.batch();
+    for (const uid of ['alice', 'bob', 'teacher']) {
+      batch.update(db.doc(`schools/school-one/members/${uid}`), { status: 'inactive' });
+      batch.set(db.doc(`schools/other-school/members/${uid}`), { status: 'active' });
+    }
+    await batch.commit();
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'permission-denied' });
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'permission-denied' });
+    await assert.rejects(handlers.startLiveSession(startRequest()), { code: 'permission-denied' });
+    await assert.rejects(handlers.endLiveSession(request(session, 'teacher')), { code: 'permission-denied' });
+    assert.equal((await sessionDoc(session, 'liveSessions').get()).data().active, true);
+    assert.equal((await attendance.get()).data().attendeeCount, 1);
+    const records = await attendance.collection('attendanceRecords').get();
+    assert.deepEqual(records.docs.map((doc) => doc.id), ['alice']);
+    assert.equal(records.docs[0].data().checkedInAt.toDate().toISOString(), first.checkedInAt);
   });
 
   test('revocation and token expiry are checked before any new attendance write', async () => {
@@ -2801,19 +3045,31 @@ test('public timetable shares are readable until they expire or are revoked', as
   const past = new Date(Date.now() - 1000);
   await seedFirestore(async (db) => {
     await db.doc('timetableShares/live').set({
-      ownerUid: 'alice', revoked: false, expiresAt: future, courses: [], name: '課表',
+      publicSchemaVersion: 1, revoked: false, expiresAt: future, courses: [], name: '課表',
     });
     await db.doc('timetableShares/old').set({
-      ownerUid: 'alice', revoked: false, expiresAt: past, courses: [], name: '課表',
+      publicSchemaVersion: 1, revoked: false, expiresAt: past, courses: [], name: '課表',
     });
     await db.doc('timetableShares/gone').set({
-      ownerUid: 'alice', revoked: true, expiresAt: future, courses: [], name: '課表',
+      publicSchemaVersion: 1, revoked: true, expiresAt: future, courses: [], name: '課表',
     });
+    await db.doc('timetableShares/unknown-state').set({ publicSchemaVersion: 1, expiresAt: future });
+    await db.doc('timetableShares/malformed-state').set({ publicSchemaVersion: 1, revoked: 'false', expiresAt: future });
   });
   const guest = testEnv.unauthenticatedContext().firestore();
   await assertSucceeds(guest.doc('timetableShares/live').get());
   await assertFails(guest.doc('timetableShares/old').get());
   await assertFails(guest.doc('timetableShares/gone').get());
+  await assertFails(guest.doc('timetableShares/unknown-state').get());
+  await assertFails(guest.doc('timetableShares/malformed-state').get());
+  await seedFirestore(async (db) => {
+    await db.doc('timetableShares/legacy').set({
+      ownerUid: 'alice', revoked: false, expiresAt: future, courses: [{ name: 'Math', studentId: 'fixture' }],
+      meta: { email: 'alice@example.test' }, name: '課表',
+    });
+  });
+  await assertFails(guest.doc('timetableShares/legacy').get());
+  await assertFails(guest.doc('timetableShares/legacy').update({ publicSchemaVersion: 1 }));
   await assertFails(guest.doc('timetableShares/live').set({ name: 'x' }));
   await assertFails(guest.collection('timetableShares').get());
   await seedFirestore(async (db) => db.doc('timetableShareOwners/live').set({ ownerUid: 'alice' }));

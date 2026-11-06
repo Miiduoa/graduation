@@ -246,6 +246,7 @@ insert into expected_functions values
   ('public.my_dashboard()', true, false),
   ('public.notify_course_members(uuid,text,text)', true, false),
   ('public.pick_random_student(uuid)', true, false),
+  ('public.playable_material_course(uuid)', false, false),
   ('public.protect_profile_role()', false, false),
   ('public.protect_quiz_answer_grading()', false, false),
   ('public.protect_submission_grading()', false, false),
@@ -293,7 +294,7 @@ begin
       raise exception 'Unexpected routine ACL: %',f.signature;
     end if;
   end loop;
-  raise notice 'Passed 243 application function-role ACL assertions';
+  raise notice 'Passed 246 application function-role ACL assertions';
 end $$;
 
 -- Worker mutation RPCs must not inherit EXECUTE through PUBLIC or the old
