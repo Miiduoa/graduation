@@ -161,7 +161,7 @@ service firebase.storage {
 
     match /groups/{groupId}/posts/{postId}/{fileName} {
       allow read: if isGroupMember(groupId);
-      allow write: if isGroupMember(groupId) && isAllowedUpload() && maxSize(20);
+      allow create: if resource == null && isGroupMember(groupId) && isAllowedUpload() && maxSize(20);
     }
 
     match /assignments/{assignmentId}/submissions/{userId}/{fileName} {
@@ -171,7 +171,7 @@ service firebase.storage {
 
     match /lostfound/{itemId}/{fileName} {
       allow read: if true;
-      allow write: if isActiveAccount() && isValidImage() && maxSize(10);
+      allow create: if resource == null && isActiveAccount() && isValidImage() && maxSize(10);
     }
 
     match /printjobs/{userId}/{jobId}/{fileName} {
@@ -212,12 +212,12 @@ service firebase.storage {
 
     match /conversations/{conversationId}/messages/{messageId}/{fileName} {
       allow read: if conversationMember(conversationId);
-      allow write: if conversationMember(conversationId) && isAllowedUpload() && maxSize(20);
+      allow create: if resource == null && conversationMember(conversationId) && isAllowedUpload() && maxSize(20);
     }
 
     match /bugreports/{reportId}/{fileName} {
       allow read: if isAdmin();
-      allow write: if isActiveAccount() && isValidImage() && maxSize(10);
+      allow create: if resource == null && isActiveAccount() && isValidImage() && maxSize(10);
     }
 
     match /repairs/{requestId}/{fileName} {
@@ -237,7 +237,7 @@ service firebase.storage {
 
     match /schools/{schoolId}/campusPosts/{postId}/{fileName} {
       allow read: if isSchoolMemberStorage(schoolId);
-      allow write: if isSchoolMemberStorage(schoolId) && campusMediaOk();
+      allow create: if resource == null && isSchoolMemberStorage(schoolId) && campusMediaOk();
     }
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
@@ -265,7 +265,7 @@ service firebase.storage {
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {
       allow read: if conversationMember(conversationId);
-      allow write: if conversationMember(conversationId) && campusMediaOk();
+      allow create: if resource == null && conversationMember(conversationId) && campusMediaOk();
     }
 
     match /{allPaths=**} {

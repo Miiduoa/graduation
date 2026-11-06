@@ -109,6 +109,42 @@ describe('personal timetable share', () => {
     expect(after.statusCode).toBe(410);
   });
 
+  test('never copies private timetable metadata to the public share document', async () => {
+    const docs = new Map([
+      ['users/alice/schools/pu/personalTimetable/current', {
+        schoolId: 'pu',
+        courses: [{ name: '資料庫' }],
+        meta: { title: '114-1', credits: 3, studentId: 'private-id', email: 'private@example.test' },
+      }],
+    ]);
+    const { token } = await createCreateTimetableShareHandler({ db: mockDb(docs) })({
+      auth: { uid: 'alice' }, data: { schoolId: 'pu' },
+    });
+
+    expect(docs.get(`timetableShares/${token}`).publicSchemaVersion).toBe(1);
+    expect(docs.get(`timetableShares/${token}`).meta).toEqual({ title: '114-1', credits: 3 });
+  });
+
+  test('projects metadata on anonymous reads of legacy shares', async () => {
+    const docs = new Map([
+      ['timetableShares/old-link', {
+        name: '舊課表', revoked: false, ownerUid: 'private-owner',
+        courses: [{ name: '國文', teacher: 'private-teacher', studentId: 'private-id' }],
+        meta: { school: 'PU', className: { email: 'private@example.test' }, studentId: 'private-id' },
+        expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+      }],
+    ]);
+    const response = makeRes();
+    await createGetTimetableShareHandler({ db: mockDb(docs) })(
+      { method: 'GET', query: { token: 'old-link' } }, response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.meta).toEqual({ school: 'PU' });
+    expect(response.body.courses[0].name).toBe('國文');
+    expect(JSON.stringify(response.body)).not.toContain('private-');
+  });
+
   test('same user shares PU and NTU school-scoped courses and meta separately', async () => {
     const docs = new Map([
       [

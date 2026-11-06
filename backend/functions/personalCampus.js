@@ -90,13 +90,47 @@ function cleanCourse(input = {}) {
   };
 }
 
-function publicShare(data) {
+function publicMeta(input) {
+  const meta = {};
+  const textLimits = { school: 80, year: 12, semester: 12, className: 80, title: 80 };
+  for (const [key, limit] of Object.entries(textLimits)) {
+    if (typeof input?.[key] === 'string') meta[key] = input[key].trim().slice(0, limit);
+  }
+  if (Number.isFinite(input?.credits)) meta.credits = Math.max(0, Math.min(60, input.credits));
+  return meta;
+}
+
+function publicCourses(courses) {
+  return Array.isArray(courses)
+    ? courses.slice(0, MAX_COURSES).map((course) => cleanCourse({ ...course, teacher: '' }))
+    : [];
+}
+
+async function readPublicTimetableShare(db, token) {
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(token)) {
+    return { status: 400, body: { code: 'invalid', error: '分享碼不正確。' } };
+  }
+  const snapshot = await db.collection('timetableShares').doc(token).get();
+  if (!snapshot.exists) {
+    return { status: 404, body: { code: 'missing', error: '這份分享不存在或已撤回。' } };
+  }
+  const data = snapshot.data();
+  if (data.revoked !== false) {
+    return { status: 410, body: { code: 'revoked', error: '這份分享已撤回。' } };
+  }
+  const expires = data.expiresAt?.toMillis?.();
+  if (!Number.isFinite(expires) || expires <= Date.now()) {
+    return { status: 410, body: { code: 'expired', error: '這份分享已過期。' } };
+  }
   return {
-    schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
-    name: data.name || '課表',
-    courses: Array.isArray(data.courses) ? data.courses : [],
-    meta: data.meta || {},
-    expiresAt: data.expiresAt?.toDate?.()?.toISOString?.() || null,
+    status: 200,
+    body: {
+      schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
+      name: typeof data.name === 'string' ? data.name : '課表',
+      courses: publicCourses(data.courses),
+      meta: publicMeta(data.meta),
+      expiresAt: new Date(expires).toISOString(),
+    },
   };
 }
 
@@ -107,9 +141,7 @@ function createCreateTimetableShareHandler({ db }) {
     const schoolId = requireSchoolId(request.data?.schoolId);
     const record = await loadShareableTimetable(db, uid, schoolId);
     // 分享出去的資料不帶老師姓名
-    const courses = Array.isArray(record.courses)
-      ? record.courses.slice(0, MAX_COURSES).map((course) => ({ ...cleanCourse(course), teacher: '' }))
-      : [];
+    const courses = publicCourses(record.courses);
     if (!courses.length) throw new HttpsError('failed-precondition', '課表是空的，沒有可分享的內容。');
     const token = nodeCrypto.randomBytes(16).toString('base64url');
     const expiresAt = Timestamp.fromMillis(Date.now() + SHARE_TTL_MS);
@@ -122,7 +154,8 @@ function createCreateTimetableShareHandler({ db }) {
       schoolId,
       name: optionalText(record.meta?.title || request.data?.name, 40) || '課表',
       courses,
-      meta: record.meta || {},
+      meta: publicMeta(record.meta),
+      publicSchemaVersion: 1,
       createdAt: FieldValue.serverTimestamp(),
       expiresAt,
       revoked: false,
@@ -162,31 +195,14 @@ function createGetTimetableShareHandler({ db }) {
       return;
     }
     const token = String(req.query?.token || req.body?.token || '').trim();
-    if (!token || token.length > 80 || token.includes('/')) {
-      res.status(400).json({ error: '分享碼不正確。' });
-      return;
-    }
-    const snapshot = await db.collection('timetableShares').doc(token).get();
-    if (!snapshot.exists) {
-      res.status(404).json({ error: '這份分享不存在或已撤回。' });
-      return;
-    }
-    const data = snapshot.data();
-    if (data.revoked === true) {
-      res.status(410).json({ error: '這份分享已撤回。' });
-      return;
-    }
-    const expires = data.expiresAt?.toMillis?.() || 0;
-    if (!expires || expires <= Date.now()) {
-      res.status(410).json({ error: '這份分享已過期。' });
-      return;
-    }
-    res.status(200).json(publicShare(data));
+    const { status, body } = await readPublicTimetableShare(db, token);
+    res.status(status).json(body);
   };
 }
 
 module.exports = {
   cleanCourse,
+  readPublicTimetableShare,
   createCreateTimetableShareHandler,
   createRevokeTimetableShareHandler,
   createGetTimetableShareHandler,

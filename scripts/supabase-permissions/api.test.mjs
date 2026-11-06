@@ -477,3 +477,65 @@ test('service webhook RPCs can claim, acknowledge, and enqueue without direct ou
   assert.ok(row.delivered_at);
   assert.equal(succeeds(await rpc('service', ...workerCalls[6])), 1);
 });
+
+test('submission receipts use server time and grading freezes the submitted work', async () => {
+  const target = `submissions?id=eq.${ids.submissionLate}`;
+  const forgedTime = '2000-01-01T00:00:00Z';
+  const receipt = () => request('a', target + '&select=body_text,submitted_at,storage_path');
+  const original = succeeds(await receipt())[0];
+  succeeds(await request('a', target, { method: 'PATCH', body: { submitted_at: forgedTime } }));
+  assert.equal(succeeds(await rpc('a', 'apply_late_penalty', { p_submission_id: ids.submissionLate })), 64);
+  assert.deepEqual(succeeds(await receipt())[0], original);
+
+  const body = { assignment_id: ids.assignmentNew, student_id: ids.b, body_text: 'First version', submitted_at: forgedTime };
+  const upsert = (data) => request('b', 'submissions?on_conflict=assignment_id,student_id&select=id,submitted_at', {
+    method: 'POST', body: data, prefer: 'resolution=merge-duplicates,return=representation',
+  });
+  const first = succeeds(await upsert(body))[0];
+  assert.ok(Date.parse(first.submitted_at) > Date.parse(forgedTime));
+  const revised = succeeds(await upsert({ ...body, body_text: 'Second version' }))[0];
+  assert.ok(Date.parse(revised.submitted_at) >= Date.parse(first.submitted_at));
+  const graded = succeeds(await request('teacher', `submissions?id=eq.${first.id}&select=submitted_at`, {
+    method: 'PATCH', body: { grade: 75, graded_at: new Date().toISOString(), graded_by: ids.teacher },
+    prefer: 'return=representation',
+  }))[0];
+  assert.equal(graded.submitted_at, revised.submitted_at);
+  denied(await upsert({ ...body, body_text: 'Post-grading replacement' }));
+  denied(await request('b', `submissions?id=eq.${first.id}`, { method: 'PATCH', body: { storage_path: 'other-file' } }));
+  const final = succeeds(await request('b', `submissions?id=eq.${first.id}&select=body_text,storage_path,grade,submitted_at`))[0];
+  assert.deepEqual(final, { body_text: 'Second version', storage_path: null, grade: 75, submitted_at: revised.submitted_at });
+});
+
+test('course search and playback respect unpublished and scheduled material', async () => {
+  const title = 'Release boundary fixture';
+  const search = (who) => rpc(who, 'search_course', { p_course_id: ids.courseA, p_query: title });
+  for (const visibility of [{ is_published: false }, { publish_at: '2100-01-01T00:00:00Z' }]) {
+    const id = succeeds(await request('teacher', 'course_materials?select=id', {
+      method: 'POST', body: { course_id: ids.courseA, title, created_by: ids.teacher, ...visibility },
+      prefer: 'return=representation',
+    }))[0].id;
+    assert.deepEqual(succeeds(await request('a', `course_materials?id=eq.${id}&select=id`)), []);
+    assert.deepEqual(succeeds(await search('a')), []);
+    assert.deepEqual(values(succeeds(await search('teacher')), 'record_id'), [id]);
+    const issue = () => rpc('a', 'issue_media_play_token', { p_material_id: id });
+    denied(await issue());
+    succeeds(await request('teacher', `course_materials?id=eq.${id}`, {
+      method: 'PATCH', body: { is_published: true, publish_at: null },
+    }));
+    assert.deepEqual(values(succeeds(await search('a')), 'record_id'), [id]);
+    assert.deepEqual(succeeds(await search('outsider')), []);
+    const token = succeeds(await issue())[0].token;
+    succeeds(await request('teacher', `course_materials?id=eq.${id}`, { method: 'PATCH', body: { is_published: false } }));
+    assert.equal(succeeds(await rpc('a', 'consume_media_play_token', { p_token: token })), false);
+    succeeds(await request('teacher', `course_materials?id=eq.${id}`, { method: 'DELETE' }));
+  }
+});
+
+test('a playback token is consumed only once across concurrent requests', async () => {
+  const id = uuid('70000000', 1);
+  const token = succeeds(await rpc('a', 'issue_media_play_token', { p_material_id: id }))[0].token;
+  const consume = (who) => rpc(who, 'consume_media_play_token', { p_token: token });
+  assert.equal(succeeds(await consume('b')), false);
+  const results = await Promise.all(Array.from({ length: 8 }, () => consume('a')));
+  assert.equal(results.filter((r) => succeeds(r)).length, 1);
+});
