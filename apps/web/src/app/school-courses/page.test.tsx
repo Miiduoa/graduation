@@ -17,7 +17,7 @@ vi.mock('@/components/AuthGuard', () => ({
 vi.mock('@/lib/useCampusBrowseContext', () => ({
   useCampusBrowseContext: () => ({
     status: 'ready', schoolId: context.schoolId,
-    schoolName: ({ pu: '靜宜大學', nthu: '國立清華大學', 'tw-nchu': '國立中興大學' } as Record<string, string>)[context.schoolId] || '未知學校',
+    schoolName: ({ ncnu: '國立暨南國際大學', pu: '靜宜大學', nthu: '國立清華大學', 'tw-nchu': '國立中興大學' } as Record<string, string>)[context.schoolId] || '未知學校',
     schoolSearch: `?schoolId=${context.schoolId}&campus=${context.schoolId}`,
   }),
 }));
@@ -33,7 +33,7 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   }),
 }));
 vi.mock('@/components/SchoolAccountRequired', () => ({ SchoolAccountRequired: () => <p>需要學校帳號</p> }));
-vi.mock('next/navigation', () => ({ usePathname: () => '/school-courses', useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/school-courses', useSearchParams: () => new URLSearchParams() }));
 vi.mock('@/lib/tronClassCourses', () => ({ loadTronClassCourses: vi.fn() }));
 vi.mock('@/lib/academicClient', () => ({
   AcademicConnectionError: class extends Error {
@@ -221,4 +221,26 @@ it('keeps the readonly course link when enabled', async () => {
   render(<SchoolLmsReadonlyProvider enabled={true}><SchoolCoursesPage /></SchoolLmsReadonlyProvider>);
   await screen.findByRole('heading', { name: '資料庫管理' });
   expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100&campus=pu');
+});
+
+it('clears the public search immediately on campus change without opening a private school session', async () => {
+  const pending = vi.fn(() => new Promise<Response>(() => {}));
+  vi.stubGlobal('fetch', pending);
+  try {
+    context.uid = null;
+    context.schoolId = 'ncnu';
+    const view = render(<SchoolCoursesPage />);
+    fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
+    expect(screen.getByText(/正在查詢開課資料/)).toBeTruthy();
+    context.schoolId = 'nthu';
+    view.rerender(<SchoolCoursesPage />);
+    expect(screen.queryByRole('search', { name: '搜尋校方開課資料' })).toBeNull();
+    expect(screen.getByRole('link', { name: '清大 eLearn ↗' })).toBeTruthy();
+    context.schoolId = 'ncnu';
+    view.rerender(<SchoolCoursesPage />);
+    expect(screen.queryByText(/正在查詢開課資料/)).toBeNull();
+    expect(loadTronClassCourses).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
