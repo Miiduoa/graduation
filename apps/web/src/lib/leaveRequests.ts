@@ -1,12 +1,13 @@
 'use client';
 
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
+import { collection, documentId, getDocs, getDocsFromServer, limit, orderBy, query, where } from 'firebase/firestore';
 import {
   courseOfferingId, periodEnd, periodProfileForSchool, periodStart,
   type PersonalCourse,
 } from '@campus/shared';
 import { getAuth, getCloudFunctionUrl, getDb, isFirebaseConfigured } from '@/lib/firebase';
 import { FunctionsUnconfiguredError } from '@/lib/functionsUrl';
+import { parseLeaveRequestId } from '@/lib/leaveRequestLink';
 import {
   leaveFailureCopy,
   leavePageFailureFromError,
@@ -244,6 +245,36 @@ export async function listMyLeaveRequests(uid: string, schoolId: string): Promis
     .filter((doc) => doc.data().source === 'campus-one' && Array.isArray(doc.data().courses))
     .map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRequest))
     .sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
+}
+
+export async function getMyLeaveRequest(
+  uid: string, schoolId: string, requestId: string,
+): Promise<LeaveRequest | null> {
+  assertCloudUser(uid);
+  if (!parseLeaveRequestId(requestId) || !/^[a-z0-9_-]{1,80}$/.test(schoolId)) {
+    throw withCallableCode('請假單號或學校格式不正確。', 'INVALID_ARGUMENT');
+  }
+  // Keep the query constrained to this account, school and source.
+  const result = await withLeaveLoadTimeout(getDocsFromServer(query(
+    collection(getDb(), 'leaveRequests'),
+    where('uid', '==', uid),
+    where('schoolId', '==', schoolId),
+    where('source', '==', 'campus-one'),
+    where(documentId(), '==', requestId),
+    limit(1),
+  ))).catch((error: unknown) => {
+    assertCloudUser(uid);
+    throw error;
+  });
+  assertCloudUser(uid);
+  const row = result.docs[0];
+  if (!row) return null;
+  const data = row.data();
+  if (row.id !== requestId || data.uid !== uid || data.schoolId !== schoolId || data.source !== 'campus-one') {
+    return null;
+  }
+  if (!Array.isArray(data.courses)) throw new Error('請假紀錄資料不完整');
+  return { ...data, id: row.id } as LeaveRequest;
 }
 
 export async function submitLeaveRequest(

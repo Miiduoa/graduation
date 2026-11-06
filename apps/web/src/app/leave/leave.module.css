@@ -265,6 +265,8 @@
 .details strong { font-size: 13px; font-weight: 640; color: var(--text); }
 .details li span { flex-shrink: 0; }
 .notice, .requestId { overflow-wrap: anywhere; }
+.lookup { margin: 18px 0; scroll-margin-top: 90px; overflow-wrap: anywhere; }
+.lookup:focus { outline: 3px solid var(--brand); outline-offset: 3px; }
 .description { overflow-wrap: anywhere; white-space: pre-wrap; }
 .reviewGrid { display: grid; gap: 14px; }
 .reviewCard { border: 1px solid var(--border); border-radius: 16px; padding: 21px; background: var(--surface); }
