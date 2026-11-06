@@ -459,3 +459,18 @@ it('hides readonly homework by default and restores it when enabled', () => {
     '/school-lms',
   );
 });
+
+it('continues a filtered menu search in the directory while keeping only the campus context', () => {
+  navigation.search = 'schoolId=nthu&session=old&q=old&category=account';
+  render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  const links = screen.getAllByRole('link').length - 1;
+  expect(screen.getByRole('status').textContent).toBe(`找到 ${links} 項服務`);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '借書 & 續借' } });
+  const directory = new URL(screen.getByRole('link', { name: /尋找校園服務/ }).getAttribute('href')!, window.location.origin);
+  expect(directory.pathname).toBe('/search');
+  expect(Object.fromEntries(directory.searchParams)).toEqual({
+    schoolId: 'nthu', q: '借書 & 續借', category: 'campus',
+  });
+});

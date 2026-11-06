@@ -108,6 +108,15 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
+    name: '教材收藏',
+    text: '開啟這台裝置上以目前帳號收藏的課程教材',
+    href: '/classroom/material-bookmarks',
+    access: 'platform',
+    keywords: '書籤 教材收藏 我的收藏 此裝置收藏 bookmark saved',
+    category: 'study',
+    parentHref: '/classroom',
+  },
+  {
     name: lmsLabel('/school-courses'),
     text: '開啟所選學校的學習平臺，查看課堂、教材與作業',
     href: '/school-courses',
@@ -232,6 +241,15 @@ export const CAMPUS_SERVICES = [
     parentHref: '/food',
   },
   {
+    name: 'App 餐廳訂單',
+    text: '查看在 App 餐廳下的訂單、取餐號碼與店家接單進度',
+    href: '/orders',
+    access: 'school',
+    keywords: '我的訂單 餐廳訂單 訂單紀錄 取餐號碼 orders',
+    category: 'campus',
+    parentHref: '/food',
+  },
+  {
     name: '宿舍',
     text: '自主管理宿舍備忘、報修紀錄、入住退宿清單與洗衣計時',
     href: '/dormitory',
@@ -345,7 +363,10 @@ function isSecondary(service: CampusService) {
 
 /** 含主入口與次級選項（供路由判斷、快捷意圖查找）。 */
 export function flattenCampusServices(schoolLmsEnabled = false) {
-  return CAMPUS_SERVICES.filter((service) => schoolLmsEnabled || service.href !== '/school-lms');
+  return CAMPUS_SERVICES.filter((service) =>
+    (schoolLmsEnabled || service.href !== '/school-lms') &&
+    (service.href !== '/orders' || isWebOnlineOrderingEnabled()),
+  );
 }
 
 export function presentCampusService<T extends { href: string; text: string; name?: string }>(
@@ -372,6 +393,29 @@ export function secondaryCampusServices(parentHref: string, schoolLmsEnabled = f
   return flattenCampusServices(schoolLmsEnabled)
     .filter((service) => isSecondary(service) && service.parentHref === parentHref)
     .map(presentCampusService);
+}
+
+export function writeCampusServiceFilters(
+  params: URLSearchParams,
+  query: string,
+  category: ServiceCategory | 'all',
+) {
+  if (query) params.set('q', query);
+  else params.delete('q');
+  if (category === 'all') params.delete('category');
+  else params.set('category', category);
+}
+
+export function countCampusSearchResults(
+  matches: readonly CampusService[],
+  browsing: boolean,
+  schoolLmsEnabled: boolean,
+) {
+  if (!browsing) return matches.length;
+  return matches.reduce(
+    (count, service) => count + 1 + secondaryCampusServices(service.href, schoolLmsEnabled).length,
+    0,
+  );
 }
 
 export function searchCampusServices(

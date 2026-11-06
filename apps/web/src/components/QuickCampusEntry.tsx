@@ -10,8 +10,7 @@ import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavi
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { VoiceDictationButton } from './VoiceDictationButton';
 import { CampusIcon } from './CampusIcon';
-import { getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
-import { visibleCampusServices } from '@/lib/campusServices';
+import { resolveCampusActions, getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import styles from './QuickCampusEntry.module.css';
 
@@ -46,10 +45,7 @@ export function QuickCampusEntry({ onAsk }: { onAsk?: ((phrase: string) => void)
   const active = analysis?.phrase === phrase && analysis.scope === scope ? analysis : null;
   const aiResult = active?.state === 'ready' ? active.result : null;
   const semanticActions = aiResult?.status === 'understood'
-    ? aiResult.destinations.flatMap((href) => {
-        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
-        return service ? [service] : [];
-      })
+    ? resolveCampusActions(aiResult.destinations, schoolLmsEnabled)
     : null;
   const actions = semanticActions || getQuickCampusActions(phrase, schoolLmsEnabled);
   const route = (href: string) => campusServiceHref(href, campusSearch);
@@ -97,7 +93,7 @@ export function QuickCampusEntry({ onAsk }: { onAsk?: ((phrase: string) => void)
             說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
           </p>
         </div>
-        <Link className={styles.allServices} href={route('/search')}>
+        <Link className={styles.allServices} href={searchHref}>
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
       </div>
@@ -167,7 +163,7 @@ export function QuickCampusEntry({ onAsk }: { onAsk?: ((phrase: string) => void)
                     <span>
                       <strong>{action.name}</strong>
                       <small>{action.text}</small>
-                      {aiResult?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
+                      {aiResult?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
                         <span key={preview.destination} className={styles.serviceSnapshot}>
                           <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
                           {preview.items.map((item, index) => (

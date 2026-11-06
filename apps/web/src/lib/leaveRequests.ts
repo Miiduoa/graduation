@@ -163,15 +163,17 @@ export function leaveRequestError(error: unknown): string {
   if (code.includes('already-exists')) return '申請已存在，請重新整理確認。';
   const failure = leavePageFailureFromError(error);
   if (failure.status === 'forbidden') return '目前沒有這所學校或這門課的操作權限。';
-  if (failure.status !== 'error' || failure.reason === 'network' || failure.reason === 'timeout') {
+  if (failure.status !== 'error') {
     return leaveFailureCopy('submit', failure);
   }
-  return '目前無法確認操作是否完成，請先重新整理紀錄，再決定是否重試。';
+  if (failure.reason === 'network') return '連線中斷，尚未確認這次操作是否完成。請先更新請假紀錄。';
+  return '尚未確認這次操作是否完成。請先更新請假紀錄，再決定是否重試。';
 }
 
 function assertCloudUser(uid: string) {
-  if (!isFirebaseConfigured() || !uid || getAuth()?.currentUser?.uid !== uid) {
-    throw new Error('請先登入學校帳號。');
+  if (!isFirebaseConfigured()) throw new FunctionsUnconfiguredError('請假服務尚未接通');
+  if (!uid || getAuth()?.currentUser?.uid !== uid) {
+    throw withCallableCode('請先登入學校帳號。', 'UNAUTHENTICATED');
   }
 }
 
@@ -197,12 +199,14 @@ async function callLeaveFn<Input extends Record<string, unknown>, Output>(
 ): Promise<Output> {
   const user = getAuth()?.currentUser;
   if (!user) throw withCallableCode('請先登入學校帳號。', 'UNAUTHENTICATED');
-  const idToken = await user.getIdToken();
+  const idToken = await withLeaveLoadTimeout(user.getIdToken());
+  assertCloudUser(user.uid);
   const response = await fetch(getCloudFunctionUrl(name), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
     body: JSON.stringify({ data }),
     cache: 'no-store',
+    signal: AbortSignal.timeout(15000),
   });
   const payload = (await response.json()) as {
     error?: { status?: unknown; message?: unknown };
