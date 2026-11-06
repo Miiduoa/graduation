@@ -49,6 +49,8 @@ import {
   sendChatMessageIdempotent,
   toggleMessageReaction,
 } from '../services/messaging';
+import { DmPhotoComposer, DmPhotoMessage } from './DmPhotos';
+import { photoParts } from '../services/dmPhotos';
 import { deriveDmConversationId } from '../utils/conversationAccess';
 import {
   getPersona,
@@ -88,7 +90,7 @@ type Msg = {
   type?: 'text' | 'image' | 'file' | 'system';
   createdAt?: any;
   readBy?: string[];
-  imageUrl?: string;
+  attachmentPath?: string;
   fileName?: string;
   fileUrl?: string;
   reactions?: Record<string, string[]>;
@@ -198,6 +200,15 @@ export function ChatScreen(props: any) {
     if (!myUid || !peerId || !school.id) return null;
     return dmId(school.id, myUid, peerId);
   }, [conversationIdParam, myUid, peerId, school.id]);
+
+  const [verifiedPhotoThread, setVerifiedPhotoThread] = useState<string | null>(null);
+  const [focused, setFocused] = useState(() => props?.navigation?.isFocused?.() ?? true);
+  useEffect(() => {
+    const nav = props?.navigation;
+    const focus = nav?.addListener?.('focus', () => setFocused(true));
+    const blur = nav?.addListener?.('blur', () => setFocused(false));
+    return () => { focus?.(); blur?.(); };
+  }, [props?.navigation]);
 
   const sendScope = `${myUid ?? ''}:${school.id ?? ''}:${convoKey ?? ''}`;
 
@@ -522,14 +533,21 @@ export function ChatScreen(props: any) {
   // ── 對方打字 & 在線狀態監聽 ──
   useEffect(() => {
     // 切換對話／對方時，先清掉上一個對象的打字／在線狀態
+    setVerifiedPhotoThread(null);
     setPeerTyping(false);
     setPeerOnline(false);
     if (!convoKey || isFirebaseMockMode()) return;
+    let listening = true;
     const convoRef = doc(db, 'conversations', convoKey);
     const unsub = onSnapshot(
       convoRef,
+      { includeMetadataChanges: true },
       (snap) => {
-        if (!snap.exists()) return;
+        if (!listening) return;
+        if (!snap.exists()) {
+          setVerifiedPhotoThread(null);
+          return;
+        }
         const data = snap.data() as ConvoMeta;
         if (
           !myUid ||
@@ -541,10 +559,12 @@ export function ChatScreen(props: any) {
           new Set(data.memberIds).size !== 2 ||
           !data.memberIds.includes(myUid)
         ) {
+          setVerifiedPhotoThread(null);
           setMessages([]);
           setAccessError('這不是目前帳號可存取的本校私訊。');
           return;
         }
+        setVerifiedPhotoThread(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites ? sendScope : null);
         // 打字狀態
         if (data.typingUsers && peerId && data.typingUsers[peerId]) {
           const ts = data.typingUsers[peerId];
@@ -561,13 +581,18 @@ export function ChatScreen(props: any) {
         }
       },
       (err: any) => {
+        if (!listening) return;
+        setVerifiedPhotoThread(null);
         if (err?.code === 'permission-denied') {
           setAccessError('你不是此對話的成員，無法檢視訊息。');
         }
       },
     );
-    return () => unsub();
-  }, [db, convoKey, peerId, myUid, school.id]);
+    return () => {
+      listening = false;
+      unsub();
+    };
+  }, [db, convoKey, peerId, myUid, school.id, sendScope]);
 
   // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {
@@ -855,11 +880,17 @@ export function ChatScreen(props: any) {
 
   // ── Render ──
 
+  const photoThread = focused && verifiedPhotoThread === sendScope && (!peerParam || peerId === peerParam) &&
+    myUid && school.id && !isFirebaseMockMode() && !isDemoPersonaUid(myUid) && !isDemoUid(myUid)
+    ? { viewerUid: myUid, schoolId: school.id, conversationId: convoKey } : null;
+  const photoKey = JSON.stringify(photoThread);
   const renderMessage = ({ item, index }: { item: Msg; index: number }) => {
     const mine = item.senderId === myUid;
     const showDate = shouldShowDateHeader(item, filteredMessages[index - 1]);
     const senderName = mine ? '我' : (userNames[item.senderId] ?? item.senderId.slice(0, 8));
     const read = isRead(item);
+    const canOpenPhoto = photoThread && !item.recalledAt && item.type === 'image' &&
+      /^[A-Za-z0-9_-]{20,64}$/.test(item.id) && photoParts(item.attachmentPath, convoKey);
 
     return (
       <View>
@@ -895,6 +926,7 @@ export function ChatScreen(props: any) {
             actions.push({ text: '取消', style: 'cancel' });
             Alert.alert('訊息', undefined, actions as any);
           }}
+          accessible={canOpenPhoto ? false : undefined}
           delayLongPress={380}
           style={[s.bubble, mine ? s.bubbleMine : s.bubblePeer]}
         >
@@ -905,9 +937,11 @@ export function ChatScreen(props: any) {
                 回覆了限時動態
               </Text>
             )}
-            <Text style={[s.msgText, mine ? s.msgTextMine : s.msgTextPeer]}>
-              {item.recalledAt ? '訊息已撤回' : item.content ?? item.text}
-            </Text>
+            {canOpenPhoto ? <DmPhotoMessage key={JSON.stringify([photoKey, item.id, item.attachmentPath])}
+              scope={{ ...photoThread!, messageId: item.id }} path={item.attachmentPath!} /> :
+              <Text style={[s.msgText, mine ? s.msgTextMine : s.msgTextPeer]}>
+                {item.recalledAt ? '訊息已撤回' : item.content ?? item.text}
+              </Text>}
           </View>
           {item.reactions &&
             Object.keys(item.reactions).length > 0 && (
@@ -1044,7 +1078,7 @@ export function ChatScreen(props: any) {
         )}
 
         {/* 輸入區 */}
-        <View style={s.inputBar}>
+        <DmPhotoComposer key={photoKey} thread={photoThread} barStyle={s.inputBar}>
           <TextInput
             value={text}
             onChangeText={handleTextChange}
@@ -1077,7 +1111,7 @@ export function ChatScreen(props: any) {
               />
             )}
           </Pressable>
-        </View>
+        </DmPhotoComposer>
       </KeyboardAvoidingView>
     </Screen>
   );

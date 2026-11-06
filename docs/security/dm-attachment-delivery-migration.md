@@ -4,10 +4,18 @@
 
 ## 權限與流量分界
 
-- 私訊附件儲存在 `conversations/{conversationId}/messages/{messageId}/{fileName}`（舊）或 `conversations/{conversationId}/media/{mediaId}/{fileName}`（新）。
+- 既有私訊附件儲存在 `conversations/{conversationId}/messages/{messageId}/{fileName}` 或 `conversations/{conversationId}/media/{mediaId}/{fileName}`。新版聊天室傳送的照片使用下方的 `photos` 路徑。
 - **Firebase Storage Rules 對這兩種路徑禁止直接 SDK 讀寫**，避免一次讀取三份 Firestore 文件而超過規則的兩份文件限制。
 - `dmAttachmentDelivery` callable 每次檢查 Firebase Auth、DM 雙方名單、當前學校的使用者資料與有效會員資格，再提供有效期 60 秒的 GCS V4 POST 或 GET。新訊息只應儲存物件 `path`，不能儲存短效 URL、POST policy 或長效 Firebase 下載 URL。
 - **已簽發的 60 秒 GCS GET/POST 仍是 bearer capability**：身分被撤銷後，舊簽章可能在到期前繼續使用。若產品要求零延遲撤銷，必須改為逐次身分核對的下載代理／串流，不能宣稱短效簽章提供即時撤銷。
+
+## 聊天室照片的發布與讀取
+
+1. 選取照片後，客戶端為這次傳送保留一組訊息 ID。`dmAttachmentDelivery` 的 `uploadPhoto` 操作核對兩人的校籍及雙向封鎖狀態，簽發只能寫入 `conversations/{conversationId}/photos/{mediaId}/photo.{ext}` 的短效表單。
+2. `sendDmPhoto` 核對暫存檔的上傳者、訊息 ID、格式、大小和檔頭。它把指定版本複製到同一資料夾的 `sent.{ext}`，以 GCS 的 `ifGenerationMatch: 0` 保護已發布的物件。在 Firestore 交易裡重新核對權限，寫入訊息和收件匣摘要。訊息只存物件路徑與版本。確認送達後重試相同 ID 不會新增訊息。
+3. 收件人點「查看照片」時，伺服器核對對話、訊息、校籍和封鎖狀態，再對指定版本簽發 60 秒 GET。撤回會拒絕新的讀取授權。物件使用 `private, no-store`，已發出的連結仍可能在有效期內開啟。
+
+正式驗收需以專用測試 bucket、實際網頁來源與兩支手機走完相簿選圖、POST、確認送達、讀取、撤回和過期。用同一張尚未過期的表單重送不同圖片後，收件人應仍讀到原本的位元組。另需盤點中斷上傳留下的 `photo.*`、失敗交易留下的複本，再訂定清理方式，避免刪到仍有訊息引用的 `sent.*`。
 
 ## 仍存在的舊版風險
 

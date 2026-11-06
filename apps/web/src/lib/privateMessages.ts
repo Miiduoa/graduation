@@ -15,6 +15,7 @@ import {
   type SnapshotMetadata,
   type Transaction,
 } from 'firebase/firestore';
+import { parseDmPhotoPath } from './dmPhotos';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
 import {
   courseHrefFromData,
@@ -49,6 +50,7 @@ export type PrivateMessage = {
   createdAt: string | null;
   recalled: boolean;
   isStoryReply?: boolean;
+  attachmentPath?: string;
   reactions?: Record<string, string[]>;
 };
 export type ConversationContents = {
@@ -122,7 +124,8 @@ export function parseConversation(
     memberIds: members,
     peerUid: members.find((uid) => uid !== session.uid)!,
     peerName: null,
-    preview: text(row.lastMessageText) || text(row.lastMessage?.content),
+    preview: row.lastMessage?.type === 'image' || row.lastMessageType === 'image'
+      ? '照片' : text(row.lastMessageText) || text(row.lastMessage?.content),
     lastMessageAt: messageTime(row.lastMessageAt ?? row.updatedAt),
     lastSenderId: text(row.lastMessageSenderId) || text(row.lastMessage?.senderId) || null,
     lastReadAt: messageTime(object(row.lastReadBy)[session.uid]),
@@ -150,11 +153,13 @@ function parseMessage(
   )
     throw new MessagingError('permission');
   const storyRef = object(row.storyReplyTo);
-  if (typeof row.content !== 'string') throw new MessagingError('unavailable');
+  if (row.type !== 'image' && typeof row.content !== 'string') throw new MessagingError('unavailable');
   return {
     id,
     senderId: row.senderId,
-    content: row.content,
+    content: row.type === 'image' ? '照片' : row.content,
+    attachmentPath: row.type === 'image' && !row.recalledAt && parseDmPhotoPath(row.attachmentPath, conversation.id)
+      ? row.attachmentPath : undefined,
     type: text(row.type) || 'text',
     createdAt: messageTime(row.createdAt),
     recalled: !!row.recalledAt,

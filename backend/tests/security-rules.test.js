@@ -1979,6 +1979,8 @@ describe('storage security rules', () => {
     const files = [
       'conversations/private/messages/one/file.pdf',
       'conversations/private/media/one/file.pdf',
+      'conversations/private/photos/one/photo.png',
+      'conversations/private/photos/one/sent.png',
     ];
     for (const file of files) {
       // Simulate a legacy object or a signed GCS POST, which bypasses Firebase

@@ -530,3 +530,18 @@ it('recognizes a story reply only when its author is the other member of the DM'
   const parsed = receive.mock.lastCall![0] as { messages: { id: string; isStoryReply: boolean }[] };
   expect(parsed.messages.filter((m) => m.isStoryReply).map((m) => m.id)).toEqual(['message-1']);
 });
+
+it('retains only a published photo path in the current DM and strips legacy image URLs from message content', () => {
+  const receive = vi.fn();
+  watchConversationContents(session, 'conversation-1', receive, vi.fn());
+  listener('conversations/conversation-1').receive(document('conversation-1', conversation()));
+  const path = 'conversations/conversation-1/photos/hash/sent.jpg';
+  const legacy = 'https://example.com/photo.jpg?token=secret';
+  const rows = [{ attachmentPath: path }, { attachmentPath: legacy }, { attachmentPath: path, recalledAt: 'then' },
+    { attachmentPath: path.replace('conversation-1', 'other') }];
+  listener('conversations/conversation-1/messages').receive(querySnapshot(rows.map((row, i) =>
+    document('image' + i, message({ type: 'image', content: legacy, mediaUrl: legacy, ...row })))));
+  const parsed = receive.mock.lastCall![0].messages;
+  expect(parsed.filter((m: { attachmentPath?: string }) => m.attachmentPath)).toEqual([expect.objectContaining({ id: 'image0', attachmentPath: path })]);
+  expect(JSON.stringify(parsed)).not.toContain('token=secret');
+});

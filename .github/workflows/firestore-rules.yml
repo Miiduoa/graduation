@@ -13,6 +13,11 @@ on:
       - 'apps/mobile/src/services/dmAttachments.ts'
       - 'apps/mobile/src/services/mediaUpload.ts'
       - 'apps/mobile/src/__tests__/services/dmAttachments.test.ts'
+      - 'apps/**/[dD]mPhotos*'
+      - 'apps/mobile/src/screens/ChatScreen.tsx'
+      - 'apps/mobile/src/__tests__/ChatScreen.dmSend.test.tsx'
+      - 'apps/web/src/components/messaging/Messaging*.tsx'
+      - 'apps/web/src/lib/privateMessages*.ts'
       - 'firebase.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -60,10 +65,16 @@ jobs:
         run: pnpm --filter functions exec jest dmAttachmentDelivery.test.js dmAttachmentTokenMigration.test.js dmPhotos.test.js --runInBand
 
       - name: Verify mobile DM signed delivery and failure cases
-        run: pnpm --filter mobile exec jest src/__tests__/services/dmAttachments.test.ts --runInBand
+        run: pnpm --filter mobile exec jest src/__tests__/services/dmAttachments.test.ts src/__tests__/services/dmPhotos.test.ts src/__tests__/ChatScreen.dmSend.test.tsx --runInBand
+
+      - name: Verify web private photo send, retry and access
+        run: pnpm --filter web exec vitest run src/lib/dmPhotos.test.ts src/lib/privateMessages.test.ts src/components/messaging/Messaging.test.tsx
 
       - name: Typecheck mobile attachment integration
         run: pnpm --filter mobile typecheck
+
+      - name: Typecheck web attachment integration
+        run: pnpm --filter web typecheck
 
       - name: Preserve failed emulator diagnostics
         if: failure()

@@ -29,6 +29,7 @@ import {
   type AccountNotification,
 } from '@/lib/privateMessages';
 import { isConversationUnread } from '@/lib/conversationAccess';
+import { DmPhotoComposer, DmPhotoMessage } from './DmPhotos';
 import styles from './messaging.module.css';
 
 type FeedState<T> = {
@@ -377,6 +378,7 @@ export function PrivateConversationView({
     currentConversation.current = conversationId;
   }, [conversationId]);
   const active = () => isCurrent() && currentConversation.current === conversationId;
+  const photoScope = { viewerUid: session.uid, schoolId: session.schoolId, conversationId };
   const lastMessageId =
     state.status === 'ready' ? state.data?.messages.at(-1)?.id ?? '' : '';
   useLayoutEffect(() => {
@@ -582,13 +584,21 @@ export function PrivateConversationView({
                   {!row.recalled && row.isStoryReply && (
                     <small className={styles.messageMeta}>回覆了限時動態</small>
                   )}
-                  <p>
-                    {row.recalled
-                      ? '訊息已收回'
-                      : row.type === 'text' || row.type === 'reply'
-                        ? row.content
-                        : '此類型訊息請在 App 中查看。'}
-                  </p>
+                  {!row.recalled && row.type === 'image' && row.attachmentPath ? (
+                    <DmPhotoMessage
+                      key={JSON.stringify([session.uid, session.schoolId, conversationId, row.id, row.attachmentPath])}
+                      scope={{ ...photoScope, messageId: row.id }}
+                      path={row.attachmentPath}
+                    />
+                  ) : (
+                    <p>
+                      {row.recalled
+                        ? '訊息已收回'
+                        : row.type === 'text' || row.type === 'reply'
+                          ? row.content
+                          : '此類型訊息請在 App 中查看。'}
+                    </p>
+                  )}
                   <div className={styles.messageMeta}>
                     <time dateTime={row.createdAt ?? undefined}>{time(row.createdAt)}</time>
                     {!row.recalled && (row.type === 'text' || row.type === 'reply') && (
@@ -661,6 +671,9 @@ export function PrivateConversationView({
             placeholder="輸入訊息，按 Cmd / Ctrl + Enter 傳送"
           />
         </label>
+        {state.status !== 'permission' && (
+          <DmPhotoComposer key={draftKey} scope={photoScope} ready={state.status === 'ready'} onSent={jumpToLatest} />
+        )}
         <div className={styles.row}>
           <small className={styles.muted}>
             {draft.length} / 4000 · 草稿保留在目前瀏覽器分頁
