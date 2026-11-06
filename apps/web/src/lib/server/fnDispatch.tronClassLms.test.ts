@@ -346,7 +346,7 @@ it.each([
   expect(source.fetchCourses).toHaveBeenCalledTimes(2);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
   expect((store.docs.get(CACHE)!.snapshot as { cache: { expiresAt: string } }).cache.expiresAt)
-    .toMatch(/^\\d{4}-\\d{2}-\\d{2}T/);
+    .toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
 });
 
 it.each([
