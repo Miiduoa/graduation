@@ -418,7 +418,11 @@ async def scenarios(browser, report):
     fixtures.append(fixture)
     page = await new_page(browser, fixture, report, 320, 720)
     await page.goto(f"{ORIGIN}/admin?theme=dark#merchants")
-    merchant = page.locator("article").filter(has=page.get_by_role("button", name="核准進件", exact=True)).first
+    merchant = page.get_by_role(
+        "article",
+        name="慢慢食堂／學生生活館二樓共享餐飲空間與戶外取餐窗口店家進件",
+        exact=True,
+    )
     await merchant.get_by_role("button", name="核准進件", exact=True).click()
     await expect(merchant.get_by_label("審核理由", exact=True)).to_be_focused()
     assert not fixture.writes, "Merchant approval must first show a confirmation form"

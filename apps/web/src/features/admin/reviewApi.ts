@@ -102,7 +102,7 @@ export function parseSchoolApplication(value: unknown): AdminSchoolApplication {
     tenantState:
       row.tenantState === null
         ? null
-        : enumeration(row.tenantState, ['provisioned', 'open', 'suspended']),
+        : enumeration(row.tenantState, ['provisioned', 'open', 'suspended'] as const),
   };
   if ((result.tenantId === null) !== (result.tenantState === null)) invalid();
   if (result.state === 'approved' && result.tenantId === null) invalid();

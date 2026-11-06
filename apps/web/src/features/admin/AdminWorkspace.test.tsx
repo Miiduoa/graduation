@@ -949,11 +949,8 @@ it('allows cancelling or leaving a report draft after a failed reload while bloc
     '需要保留的處理理由',
   );
   expect(screen.getByRole('button', { name: '返回檢舉列表' })).toHaveProperty('disabled', false);
-  expect(screen.getByRole('button', { name: '取消', exact: true })).toHaveProperty(
-    'disabled',
-    false,
-  );
-  fireEvent.click(screen.getByRole('button', { name: '取消', exact: true }));
+  expect(screen.getByRole('button', { name: '取消' })).toHaveProperty('disabled', false);
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(screen.queryByLabelText('處理原因')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '返回檢舉列表' }));
   expect(window.location.hash).toBe('#reports');
