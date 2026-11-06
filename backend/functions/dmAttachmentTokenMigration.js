@@ -43,17 +43,17 @@ async function migrateDmToken(file, { execute = false } = {}) {
 }
 
 /** Bounded, resumable-by-rerun scan. Defaults to 100 objects; never auto-runs mutations. */
-async function scanDmTokens(bucket, { execute = false, maxObjects = 100, onItem = () => {} } = {}) {
+async function scanDmTokens(bucket, { execute = false, maxObjects = 100, pageToken: startPageToken, onItem = () => {} } = {}) {
   if (!bucket?.getFiles || !Number.isSafeInteger(maxObjects) || maxObjects < 1 || maxObjects > 1000) {
     throw new Error('Invalid GCS bucket or maxObjects (1–1000)');
   }
-  const summary = { scanned: 0, skipped: 0, clean: 0, wouldRevoke: 0, revoked: 0, truncated: false };
-  let pageToken;
+  const summary = { scanned: 0, skipped: 0, clean: 0, wouldRevoke: 0, revoked: 0, truncated: false, nextPageToken: null };
+  let pageToken = startPageToken;
   do {
     const query = { prefix: 'conversations/', autoPaginate: false, maxResults: Math.min(100, maxObjects - summary.scanned) };
     if (pageToken) query.pageToken = pageToken;
     const [files, next] = await bucket.getFiles(query);
-    if (!Array.isArray(files)) throw new Error('GCS listing did not return files');
+    if (!Array.isArray(files) || files.length > query.maxResults) throw new Error('Invalid GCS page size');
     for (const file of files) {
       if (summary.scanned >= maxObjects) break;
       const result = await migrateDmToken(file, { execute });
@@ -67,6 +67,7 @@ async function scanDmTokens(bucket, { execute = false, maxObjects = 100, onItem 
     pageToken = next?.pageToken;
     if (summary.scanned >= maxObjects) {
       summary.truncated = Boolean(pageToken);
+      summary.nextPageToken = pageToken || null;
       break;
     }
     if (!files.length && pageToken === query.pageToken) throw new Error('GCS listing cursor made no progress');
