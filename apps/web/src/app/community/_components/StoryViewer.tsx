@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { openModalSession } from '@/components/ui/modalSession';
+import { StoryAudience } from './StoryAudience';
 import type { useStoryShelf } from './useStoryShelf';
 import styles from './StoryViewer.module.css';
 
@@ -22,8 +23,10 @@ export function StoryViewer({
   const closeButton = useRef<HTMLButtonElement>(null);
   const videoElement = useRef<HTMLVideoElement>(null);
   const videoBar = useRef<HTMLElement>(null);
+  const beforeAudience = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
   const gesture = useRef<{ x: number; y: number; pointerId: number } | null>(null);
   const [auto, setAuto] = useState(false);
+  const [audienceFor, setAudienceFor] = useState<string | null>(null);
   const [hidden, setHidden] = useState(() => document.hidden);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
@@ -32,8 +35,15 @@ export function StoryViewer({
   const video = story.kind === 'video';
   const media = photo || video;
   const failedVideo = video && (!story.mediaUrl || failedId === story.id);
+  const scope = JSON.stringify([story.schoolId, story.authorUid, story.id]);
+  const audienceOpen = viewer.isOwner && audienceFor === scope;
+  if (audienceFor !== null && !audienceOpen) setAudienceFor(null);
   const running =
-    auto && !hidden && !video && (!photo || loadedId === story.id || failedId === story.id);
+    auto &&
+    !audienceOpen &&
+    !hidden &&
+    !video &&
+    (!photo || loadedId === story.id || failedId === story.id);
   const onNext = useRef(viewer.next);
   useEffect(() => {
     onNext.current = viewer.next;
@@ -55,13 +65,23 @@ export function StoryViewer({
         if (live && !(error instanceof DOMException && error.name === 'AbortError')) setAuto(false);
       });
     }
-    if (auto && !document.hidden) play();
-    else element?.pause();
+    const saved = beforeAudience.current;
+    if (audienceOpen && element) {
+      if (saved?.element !== element) {
+        beforeAudience.current = { element, playing: !element.paused && !element.ended };
+      }
+      element.pause();
+    } else {
+      const shouldPlay = saved?.element === element ? saved.playing : auto;
+      beforeAudience.current = null;
+      if (shouldPlay && !document.hidden) play();
+      else element?.pause();
+    }
     function sync() {
       setHidden(document.hidden);
       if (!element) return;
       if (document.hidden) {
-        resumeOnReturn = auto && !element.paused && !element.ended;
+        resumeOnReturn = !audienceOpen && auto && !element.paused && !element.ended;
         element.pause();
       } else if (resumeOnReturn) {
         resumeOnReturn = false;
@@ -73,7 +93,7 @@ export function StoryViewer({
       live = false;
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [auto, failedVideo, story.id]);
+  }, [auto, audienceOpen, failedVideo, story.id]);
 
   useEffect(() => {
     remaining.current = DWELL_MS;
@@ -96,10 +116,11 @@ export function StoryViewer({
       aria-modal="true"
       onCancel={(e) => {
         e.preventDefault();
-        viewer.close();
+        if (!audienceOpen) viewer.close();
       }}
       onKeyDown={(e) => {
         if (
+          audienceOpen ||
           e.altKey ||
           e.metaKey ||
           e.ctrlKey ||
@@ -222,7 +243,7 @@ export function StoryViewer({
                 }
               }}
               onEnded={() => {
-                if (auto && !document.hidden) viewer.next();
+                if (auto && !audienceOpen && !document.hidden) viewer.next();
               }}
               onError={() => {
                 setFailedId(story.id);
@@ -252,6 +273,18 @@ export function StoryViewer({
           {!!story.text && <p className={media ? styles.caption : styles.text}>{story.text}</p>}
         </div>
         <footer className={styles.footer}>
+          {viewer.isOwner && (
+            <button
+              className={styles.audienceButton}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={audienceOpen}
+              onClick={() => setAudienceFor(scope)}
+            >
+              誰看過
+            </button>
+          )}
+          {!viewer.isOwner && <small className={styles.receiptNotice}>作者可查看誰看過</small>}
           {story.poiName && <span className={styles.location}>{story.poiName}</span>}
           <nav aria-label="限時動態播放控制" className={styles.controls}>
             <button type="button" disabled={!viewer.hasPrevious} onClick={viewer.previous}>
@@ -271,6 +304,9 @@ export function StoryViewer({
           </nav>
         </footer>
       </div>
+      {audienceOpen && (
+        <StoryAudience key={scope} story={story} onClose={() => setAudienceFor(null)} />
+      )}
     </dialog>
   );
 }

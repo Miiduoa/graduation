@@ -99,6 +99,15 @@ service cloud.firestore {
         );
     }
 
+    // An active old-school membership alone must not permit access after transfer.
+    function isCurrentSchoolMember(schoolId) {
+      return schoolId is string
+        && schoolId.size() > 0
+        && isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
+    }
+
     function isConversationMember(conversationId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/conversations/$(conversationId))
@@ -1738,13 +1747,34 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
       allow update: if false;
 
+      function story() {
+        return get(/databases/$(database)/documents/campusStories/$(storyId)).data;
+      }
+      function canAccessReceipts() {
+        let parent = story();
+        return isCurrentSchoolMember(parent.schoolId)
+          && parent.expiresAt is number && parent.expiresAt > request.time.toMillis();
+      }
+      function validOwnReceipt(viewerUid) {
+        return request.auth.uid == viewerUid
+          && request.resource.data.keys().hasOnly(['viewerUid', 'viewedAt'])
+          && request.resource.data.viewerUid == viewerUid
+          && request.resource.data.viewedAt == request.time;
+      }
+
+      // Old receipts lack author/school provenance. A reused story ID must never expose them.
       match /storyViews/{viewerUid} {
-        allow read: if isSignedIn()
-          && isSchoolMember(get(/databases/$(database)/documents/campusStories/$(storyId)).data.schoolId);
-        allow create: if isSignedIn()
-          && viewerUid == request.auth.uid
-          && isSchoolMember(get(/databases/$(database)/documents/campusStories/$(storyId)).data.schoolId);
-        allow delete, update: if false;
+        allow get: if canAccessReceipts() && request.auth.uid == viewerUid;
+        allow create: if canAccessReceipts() && validOwnReceipt(viewerUid);
+      }
+
+      match /schools/{schoolId}/authors/{authorUid}/views/{viewerUid} {
+        function currentAudience() {
+          return canAccessReceipts() && story().schoolId == schoolId && story().authorUid == authorUid;
+        }
+        allow get: if currentAudience() && (request.auth.uid == viewerUid || request.auth.uid == authorUid);
+        allow list: if currentAudience() && request.auth.uid == authorUid;
+        allow create: if currentAudience() && viewerUid != authorUid && validOwnReceipt(viewerUid);
       }
     }
 

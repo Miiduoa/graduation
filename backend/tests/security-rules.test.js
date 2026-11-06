@@ -1499,6 +1499,149 @@ describe('firestore security rules', () => {
   });
 });
 
+describe('campus story view receipts', () => {
+  const { serverTimestamp } = require('firebase/firestore');
+  const views = (db, school = 'pu', author = 'author') =>
+    db.collection(`campusStories/story-1/schools/${school}/authors/${author}/views`);
+  const legacyViews = (db) => db.collection('campusStories/story-1/storyViews');
+  const dbFor = (uid) => testEnv.authenticatedContext(uid).firestore();
+  const receipt = (viewerUid) => ({ viewerUid, viewedAt: serverTimestamp() });
+
+  beforeEach(async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('campusStories/story-1').set({
+        authorUid: 'author', schoolId: 'pu', expiresAt: Date.now() + 86_400_000,
+      });
+      for (const uid of ['author', 'alice', 'bob']) {
+        await db.doc(`users/${uid}`).set({ schoolId: 'pu' });
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+      }
+      await db.doc('users/outsider').set({ schoolId: 'other' });
+      await db.doc('schools/other/members/outsider').set({ status: 'active' });
+    });
+  });
+
+  test('only the author can page the list; a viewer can get their own receipt', async () => {
+    for (const uid of ['alice', 'bob']) {
+      const ref = views(dbFor(uid)).doc(uid);
+      assert.equal((await assertSucceeds(ref.get())).exists, false);
+      await assertSucceeds(ref.set(receipt(uid)));
+      assert.equal((await assertSucceeds(ref.get())).data().viewerUid, uid);
+    }
+    const author = views(dbFor('author'));
+    const firstPage = await assertSucceeds(author.orderBy('viewedAt', 'desc').limit(1).get());
+    const nextPage = await assertSucceeds(author.orderBy('viewedAt', 'desc')
+      .startAfter(firstPage.docs[0]).limit(1).get());
+    assert.deepEqual([firstPage.docs[0].id, nextPage.docs[0].id].sort(), ['alice', 'bob']);
+    await assertSucceeds(author.doc('alice').get());
+
+    const alice = views(dbFor('alice'));
+    await assertFails(alice.doc('bob').get());
+    await assertFails(alice.orderBy('viewedAt', 'desc').limit(1).get());
+    await assertFails(alice.where('viewerUid', '==', 'alice').get());
+    for (const db of [dbFor('outsider'), testEnv.unauthenticatedContext().firestore()]) {
+      await assertFails(views(db).doc('alice').get());
+      await assertFails(views(db).get());
+      await assertFails(views(db).doc('outsider').set(receipt('outsider')));
+    }
+  });
+
+  test('new receipts bind the document, viewer identity and timestamp to the request', async () => {
+    const alice = views(dbFor('alice'));
+    await assertFails(views(dbFor('author')).doc('author').set(receipt('author')));
+    await assertFails(alice.doc('bob').set(receipt('bob')));
+    await assertFails(alice.doc('alice').set(receipt('bob')));
+    await assertFails(alice.doc('alice').set({ viewerUid: 'alice', viewedAt: new Date(0) }));
+    await assertFails(alice.doc('alice').set({ ...receipt('alice'), displayName: 'Bob' }));
+    await assertSucceeds(alice.doc('alice').set(receipt('alice')));
+    await assertFails(alice.doc('alice').update({ viewedAt: serverTimestamp() }));
+    await assertFails(alice.doc('alice').delete());
+  });
+
+  test('changing schools revokes access to old-school receipts even with an active membership', async () => {
+    const alice = dbFor('alice');
+    const author = views(dbFor('author'));
+    await assertSucceeds(views(alice).doc('alice').set(receipt('alice')));
+    await assertSucceeds(legacyViews(alice).doc('alice').set(receipt('alice')));
+    assert.equal((await assertSucceeds(author.limit(10).get())).size, 1);
+
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'author', 'bob']) {
+        await db.doc(`users/${uid}`).update({ schoolId: 'other' });
+        await db.doc(`schools/other/members/${uid}`).set({ status: 'active' });
+      }
+    });
+    await assertFails(author.orderBy('viewedAt', 'desc').limit(10).get({ source: 'server' }));
+    await assertFails(author.doc('alice').get({ source: 'server' }));
+    await assertFails(views(alice).doc('alice').get({ source: 'server' }));
+    await assertFails(legacyViews(alice).doc('alice').get({ source: 'server' }));
+    const bob = dbFor('bob');
+    await assertFails(views(bob).doc('bob').set(receipt('bob')));
+    await assertFails(legacyViews(bob).doc('bob').set(receipt('bob')));
+  });
+
+  test('legacy clients can record and check themselves; nobody can list legacy receipts', async () => {
+    const mine = legacyViews(dbFor('alice')).doc('alice');
+    assert.equal((await assertSucceeds(mine.get())).exists, false);
+    await assertSucceeds(mine.set(receipt('alice')));
+    assert.equal((await assertSucceeds(mine.get())).data().viewerUid, 'alice');
+    for (const uid of ['author', 'alice', 'outsider']) {
+      await assertFails(legacyViews(dbFor(uid)).get());
+    }
+    await assertFails(legacyViews(dbFor('author')).doc('alice').get());
+    assert.equal((await assertSucceeds(views(dbFor('author')).get())).size, 0);
+  });
+
+  test('recreating a deleted story in another author or school cannot inherit its audience', async () => {
+    const story = (db) => db.doc('campusStories/story-1');
+    const publish = async (uid, schoolId) => assertSucceeds(story(dbFor(uid)).set({
+      schoolId, authorUid: uid, expiresAt: Date.now() + 86_400_000,
+    }));
+    await assertSucceeds(views(dbFor('alice')).doc('alice').set(receipt('alice')));
+    await assertSucceeds(legacyViews(dbFor('alice')).doc('alice').set(receipt('alice')));
+    await assertSucceeds(story(dbFor('author')).delete());
+
+    // A schoolmate or an outsider who saw the old ID can reuse it as their own.
+    for (const [uid, schoolId] of [['bob', 'pu'], ['outsider', 'other']]) {
+      const db = dbFor(uid);
+      await publish(uid, schoolId);
+      await assertFails(views(db).get());
+      await assertFails(views(db).doc('alice').get());
+      await assertFails(views(db).doc(uid).set(receipt(uid)));
+      await assertFails(legacyViews(db).doc('alice').get());
+      const newAudience = views(db, schoolId, uid);
+      assert.equal((await assertSucceeds(newAudience.get())).size, 0);
+      await assertSucceeds(story(db).delete());
+    }
+    // Even the same author's new story at a different school has a separate audience.
+    await seedFirestore(async (db) => {
+      await db.doc('schools/other/members/author').set({ status: 'active' });
+      await db.doc('users/author').update({ schoolId: 'other' });
+    });
+    await publish('author', 'other');
+    await assertFails(views(dbFor('author')).get());
+    assert.equal((await assertSucceeds(views(dbFor('author'), 'other').get())).size, 0);
+  });
+
+  test('expired stories and revoked school memberships cannot access receipts', async () => {
+    await seedFirestore(async (db) => {
+      await views(db).doc('alice').set(receipt('alice'));
+      await db.doc('schools/pu/members/author').update({ status: 'inactive' });
+      await db.doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await assertFails(views(dbFor('author')).get());
+    await assertFails(views(dbFor('alice')).doc('alice').get());
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/author').update({ status: 'active' });
+      await db.doc('schools/pu/members/alice').update({ status: 'active' });
+      await db.doc('campusStories/story-1').update({ expiresAt: Date.now() - 1 });
+    });
+    await assertFails(views(dbFor('author')).get());
+    await assertFails(views(dbFor('alice')).doc('alice').get());
+    await assertFails(views(dbFor('bob')).doc('bob').set(receipt('bob')));
+  });
+});
+
 describe('storage security rules', () => {
   test('only a story draft owner can replace its photo before publication', async () => {
     await seedFirestore(async (db) => {
