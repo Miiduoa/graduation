@@ -26,6 +26,8 @@ export function usePersonalImportScope() {
   const scope: PersonalImportScope = { owner, schoolId: school?.selectedSchoolId || 'personal' };
   return {
     scope,
+    canPrepareSchoolDraft: !loading && !auth.error && !nuni?.error && !nuni?.pendingLogout &&
+      school?.catalogStatus === 'ready' && school.selectedSchool?.id === scope.schoolId,
     scopeKey: personalImportsStorageKey(scope),
     loading,
     schoolName: school?.selectedSchool?.name || '未指定校園',
