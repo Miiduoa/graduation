@@ -1,4 +1,6 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
 import { ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
@@ -7,7 +9,7 @@ import { CommunityScreen } from '../screens/CommunityScreen';
 import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
-import { listActiveStoriesForSchool } from '../services/stories';
+import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
 import { listFollowingIds, followUser } from '../services/follows';
 import {
   listCampusPostBookmarkIds,
@@ -71,8 +73,9 @@ jest.mock('../services/boards', () => ({
   CAMPUS_BOARD_TYPE_LABEL: { department: '系所', course: '課程', topic: '主題', anon: '匿名' },
 }));
 jest.mock('../services/stories', () => ({
+  ...jest.requireActual('../services/stories'),
   listActiveStoriesForSchool: jest.fn(async () => []),
-  groupStoriesByAuthor: () => [],
+  markStoryViewed: jest.fn(async () => {}),
 }));
 jest.mock('../services/campusPostBookmarks', () => ({
   listCampusPostBookmarkIds: jest.fn(async () => []),
@@ -122,7 +125,8 @@ const screens = [
   },
 ];
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
   mockOffline = false;
   jest.clearAllMocks();
   mockNavigate.mockReset();
@@ -599,4 +603,102 @@ test.each([
   await act(async () => fireEvent.press(view.getByLabelText(retry)));
   expect(await view.findByText(count)).toBeTruthy();
   expect(view.getByText(post.title)).toBeTruthy();
+});
+
+test('remembers feed controls only for the same account and school and clears the search on return', async () => {
+  const first = render(<HomeFeedScreen />);
+  await first.findByLabelText('圖文分類');
+  await act(async () => {
+    fireEvent.press(first.getByLabelText('圖文分類'));
+    fireEvent.press(first.getByLabelText('最新'));
+    fireEvent.changeText(first.getByLabelText('搜尋本校貼文'), '個人關鍵字');
+  });
+  first.unmount();
+  const view = render(<HomeFeedScreen />);
+  await act(async () => {});
+  expect(view.getByLabelText('圖文分類').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('最新').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('');
+  const values = await AsyncStorage.multiGet(await AsyncStorage.getAllKeys());
+  expect(values.map(([, value]) => value).sort()).toEqual(['latest', 'media']);
+
+  mockSchoolId = 'ncku';
+  view.rerender(<HomeFeedScreen />);
+  await act(async () => {});
+  expect(view.getByLabelText('全部分類').props.accessibilityState.selected).toBe(true);
+  mockUser = { uid: 'dana' };
+  mockSchoolId = 'pu';
+  view.rerender(<HomeFeedScreen />);
+  await act(async () => {});
+  expect(view.getByLabelText('推薦').props.accessibilityState.selected).toBe(true);
+  expect(view.getByLabelText('全部分類').props.accessibilityState.selected).toBe(true);
+});
+
+test('a late filter read cannot undo a tap while an untouched sort choice still restores', async () => {
+  const key = feedChoiceKey('alice', 'pu', 'filter')!;
+  let release!: (value: string) => void;
+  const delayed = new Promise<string>((resolve) => { release = resolve; });
+  await jest.mocked(AsyncStorage.getItem).withImplementation(
+    (requested) => requested === key ? delayed : Promise.resolve('latest'),
+    async () => {
+      const view = render(<HomeFeedScreen />);
+      await view.findByLabelText('圖文分類');
+      await act(async () => { fireEvent.press(view.getByLabelText('圖文分類')); });
+      await act(async () => { release('following'); });
+      expect(view.getByLabelText('圖文分類').props.accessibilityState.selected).toBe(true);
+      expect(view.getByLabelText('最新').props.accessibilityState.selected).toBe(true);
+    },
+  );
+});
+
+test('a delayed previous account and unavailable storage do not change the new account’s controls', async () => {
+  const previous = feedChoiceKey('alice', 'pu', 'filter')!;
+  let release!: (value: string) => void;
+  const delayed = new Promise<string>((resolve) => { release = resolve; });
+  await jest.mocked(AsyncStorage.getItem).withImplementation(
+    (key) => key === previous ? delayed : Promise.reject(new Error('unavailable')),
+    async () => {
+      const view = render(<HomeFeedScreen />);
+      await view.findByLabelText('圖文分類');
+      mockUser = { uid: 'dana' };
+      view.rerender(<HomeFeedScreen />);
+      await act(async () => { release('following'); });
+      expect(view.getByLabelText('全部分類').props.accessibilityState.selected).toBe(true);
+      await jest.mocked(AsyncStorage.setItem).withImplementation(
+        () => Promise.reject(new Error('unavailable')),
+        async () => {
+          await act(async () => { fireEvent.press(view.getByLabelText('圖文分類')); });
+          expect(view.getByLabelText('圖文分類').props.accessibilityState.selected).toBe(true);
+        },
+      );
+    },
+  );
+});
+
+
+test('opens stories without navigating away, shows photo captions and steps between authors', async () => {
+  const common = { schoolId: 'pu', kind: 'text' as const, expiresAt: Date.now() + 3600_000 };
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValue([
+    { ...common, id: 'c1', authorUid: 'classmate', text: '球場見', createdAt: 1 },
+    { ...common, id: 'b1', authorUid: 'bob', text: '社課開場', createdAt: 2 },
+    { ...common, id: 'b2', authorUid: 'bob', kind: 'image', mediaUrl: 'https://cdn.example/p.jpg', text: '器材位置', createdAt: 3 },
+    { ...common, id: 'foreign', schoolId: 'other', authorUid: 'outsider', text: '其他學校內容', createdAt: 5 },
+  ]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
+  const view = render(<HomeFeedScreen />);
+  fireEvent.changeText(await view.findByLabelText('搜尋本校貼文'), '社課');
+  fireEvent.press(await view.findByLabelText('查看 小柏 的限時動態'));
+  expect(view.getByText('社課開場')).toBeTruthy();
+  expect(view.getByRole('button', { name: '上一則' })).toBeDisabled();
+  fireEvent.press(view.getByText('下一則'));
+  expect(view.getByText('器材位置')).toBeTruthy();
+  fireEvent.press(view.getByText('下一則'));
+  expect(view.getByText('球場見')).toBeTruthy();
+  fireEvent.press(view.getByText('上一則'));
+  expect(view.getByText('器材位置')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('關閉限時動態'));
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('社課');
+  expect(mockNavigate).not.toHaveBeenCalled();
+  expect(listActiveStoriesForSchool).toHaveBeenCalledTimes(1);
+  expect(markStoryViewed).not.toHaveBeenCalledWith('foreign', expect.anything());
 });

@@ -3,7 +3,6 @@
  *
  * - 路徑分流：
  *     campus/posts/{schoolId}/{uid}/{ts}.jpg
- *     campus/stories/{schoolId}/{uid}/{ts}.jpg
  *     campus/replies/{schoolId}/{uid}/{ts}.jpg
  * - 與 firebase.ts 內既有的 `uploadAvatar` 共用相同 Storage instance，避免重複連線。
  * - 只走真實 Firebase；Mock Mode 下會丟 Error，由呼叫端決定怎麼處理（多半是禁用按鈕）。
@@ -11,7 +10,7 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getStorageInstance, isFirebaseMockMode } from '../firebase';
 
-export type CampusMediaScope = 'posts' | 'stories' | 'replies';
+export type CampusMediaScope = 'posts' | 'replies';
 
 export type UploadedCampusMedia = {
   url: string;

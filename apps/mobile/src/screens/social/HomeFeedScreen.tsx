@@ -16,7 +16,7 @@ import {
   ScrollView,
   Dimensions,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme, shadowStyle } from '../../ui/theme';
@@ -37,12 +37,12 @@ import { listBoards, listSubscribedBoardIds, type CampusBoard } from '../../serv
 import { listFollowingIds, followUser, unfollowUser } from '../../services/follows';
 import {
   listActiveStoriesForSchool,
-  groupStoriesByAuthor,
   type StoryAuthorGroup,
   type CampusStoryDoc,
 } from '../../services/stories';
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
 import { toDate } from '../../utils/format';
+import { CampusStoryViewer, useCampusStories } from './CampusStoryViewer';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 import {
   describeMobileFeedSearchRecovery,
@@ -50,7 +50,6 @@ import {
   mobileFeedSearchScopeLabel,
   MOBILE_FEED_PAGE_SIZE,
   selectMobileFeedPosts,
-  type MobileFeedOrder,
   type MobileFeedRecoveryActionId,
 } from './feedDiscoveryModel';
 import {
@@ -60,8 +59,10 @@ import {
   removeCampusPostBookmark,
 } from '../../services/campusPostBookmarks';
 import { useNetworkStatus } from '../../hooks/useNetworkStatus';
+import { FEED_FILTERS, FEED_ORDERS, feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
+import { useFeedChoice } from './useFeedChoice';
 
-type FilterKey = 'all' | 'following' | 'subscribed' | 'media' | 'saved';
+type FilterKey = (typeof FEED_FILTERS)[number];
 const EMPTY_SAVED_POSTS: CampusPostDoc[] = [];
 const EMPTY_FOLLOWING_IDS: ReadonlySet<string> = new Set();
 
@@ -137,11 +138,14 @@ function HomeFeedContent() {
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [subscribedBoardIds, setSubscribedBoardIds] = useState<Set<string>>(new Set());
-  const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
+  const [storyRows, setStories] = useState<CampusStoryDoc[]>([]);
+  const storyDeck = useCampusStories(storyRows, school?.id, auth.user?.uid);
+  const stories = storyDeck.groups;
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
-  const [filter, setFilter] = useState<FilterKey>('all');
-  const [order, setOrder] = useState<MobileFeedOrder>('recommended');
+  const uid = isDemoUid(auth.user?.uid) || isFirebaseMockMode() ? null : auth.user?.uid;
+  const [filter, setFilter] = useFeedChoice(feedChoiceKey(uid, school?.id, 'filter'), FEED_FILTERS);
+  const [order, setOrder] = useFeedChoice(feedChoiceKey(uid, school?.id, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
   const [pageLimit, setPageLimit] = useState(MOBILE_FEED_PAGE_SIZE);
   const [hasMore, setHasMore] = useState(false);
@@ -207,7 +211,7 @@ function HomeFeedContent() {
       setPosts(rankFeedPosts(rows, Math.max(80, limit)));
       setBoards(boardList);
       setSubscribedBoardIds(new Set(subs));
-      setStories(groupStoriesByAuthor(storyRows, auth.user.uid));
+      setStories(storyRows);
     } catch (cause) {
       if (loadVersion.current !== version) return;
       if (isAccessDenied(cause)) {
@@ -533,7 +537,6 @@ function HomeFeedContent() {
   };
 
   const openCommunityTab = (tab: 'boards' | 'realtime') => {
-    // 與 openStoryGroup 一致用 navigate，避免同值 setParams 不重觸 CommunityScreen effect。
     nav?.navigate?.('CampusSocialScreen' as never, { initialTab: tab } as never);
   };
 
@@ -566,7 +569,16 @@ function HomeFeedContent() {
     nav?.navigate?.('PostCompose' as never);
   };
 
+  const returningFromComposer = React.useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (returningFromComposer.current) {
+      returningFromComposer.current = false;
+      void load(pageLimit);
+    }
+  }, [load, pageLimit]));
+
   const goStoryCompose = () => {
+    returningFromComposer.current = true;
     nav?.navigate?.('StoryCompose' as never);
   };
 
@@ -638,12 +650,13 @@ function HomeFeedContent() {
             <>
             <FeedHeader
               stories={stories}
+              seen={storyDeck.seen}
               avatarByUid={avatarByUid}
               nameByUid={nameByUid}
               myUid={auth.user.uid}
               filter={filter}
               onSelectFilter={selectFilter}
-              onOpenStoryGroup={(grp) => openStoryGroup(grp, nav, school?.id)}
+              onOpenStoryGroup={storyDeck.openGroup}
               onComposeStory={goStoryCompose}
               onComposePost={goCompose}
             />
@@ -977,6 +990,8 @@ function HomeFeedContent() {
         />
       )}
 
+      <CampusStoryViewer deck={storyDeck} names={nameByUid} />
+
       {/* FAB：右下角 + 發文 */}
       <Pressable
         accessibilityRole="button"
@@ -999,6 +1014,7 @@ function HomeFeedContent() {
 
 function FeedHeader(props: {
   stories: StoryAuthorGroup[];
+  seen: ReadonlySet<string>;
   avatarByUid: Record<string, string>;
   nameByUid: Record<string, string>;
   myUid: string;
@@ -1011,6 +1027,7 @@ function FeedHeader(props: {
   const styles = useThemeStyleSheet(createStyles);
   const {
     stories,
+    seen,
     avatarByUid,
     nameByUid,
     myUid,
@@ -1036,7 +1053,7 @@ function FeedHeader(props: {
             style={styles.storyItem}
             onPress={() => myGroup ? onOpenStoryGroup(myGroup) : onComposeStory()}
             accessibilityRole="button"
-            accessibilityLabel={myGroup ? '查看我的 Story' : '發布 Story'}
+            accessibilityLabel={myGroup ? '查看我的限時動態' : '發布限時動態'}
           >
             <View style={[styles.storyRing, styles.storyAddRing]}>
               {myGroup ? (
@@ -1054,7 +1071,7 @@ function FeedHeader(props: {
               )}
             </View>
             <Text numberOfLines={1} style={styles.storyName}>
-              {myGroup ? '我的 Story' : '新增'}
+              {myGroup ? '我的限時動態' : '新增'}
             </Text>
           </Pressable>
           {!!myGroup && (
@@ -1062,7 +1079,7 @@ function FeedHeader(props: {
               style={styles.storyItem}
               onPress={onComposeStory}
               accessibilityRole="button"
-              accessibilityLabel="新增 Story"
+              accessibilityLabel="新增限時動態"
             >
               <View style={[styles.storyRing, styles.storyAddRing]}>
                 <View style={[styles.storyImg, styles.storyAddInner]}>
@@ -1074,15 +1091,17 @@ function FeedHeader(props: {
           )}
           {others.map((g) => {
             const av = avatarByUid[g.authorUid];
+            const allSeen = g.stories.every(story => seen.has(story.id));
             return (
               <Pressable
                 key={g.authorUid}
                 style={styles.storyItem}
                 onPress={() => onOpenStoryGroup(g)}
                 accessibilityRole="button"
-                accessibilityLabel={`查看 ${nameByUid[g.authorUid] ?? '同學'} 的 Story`}
+                accessibilityHint={allSeen ? '已看完，可重新觀看' : '從第一則未讀限時動態開始'}
+                accessibilityLabel={`查看 ${nameByUid[g.authorUid] ?? '同學'} 的限時動態`}
               >
-                <View style={styles.storyRing}>
+                <View style={[styles.storyRing, allSeen && { borderColor: theme.colors.border }]}>
                   {av ? (
                     <Image source={{ uri: av }} style={styles.storyImg} />
                   ) : (
@@ -1150,18 +1169,6 @@ function MediaGrid({ uris }: { uris: string[] }) {
       ))}
     </View>
   );
-}
-
-// ─── 開啟 Story group → 全螢幕 viewer ─────────────────────
-
-function openStoryGroup(grp: StoryAuthorGroup, nav: any, schoolId?: string) {
-  if (!grp.stories.length || !schoolId || !grp.stories.every((story) => story.schoolId === schoolId)) return;
-  // Open the existing full-screen story viewer within the same school context.
-  nav?.navigate?.('CampusSocialScreen' as never, {
-    initialTab: 'realtime',
-    storyAuthorUid: grp.authorUid,
-    storySchoolId: schoolId,
-  });
 }
 
 const createStyles = () => StyleSheet.create({
