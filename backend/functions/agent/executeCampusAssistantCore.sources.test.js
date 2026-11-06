@@ -319,6 +319,123 @@ test('a contained tool run records its decision without saving a conversation or
   }));
 });
 
+describe('authorization failures inside the real core stop the callable', () => {
+  const uid = 'core-authorization-reader';
+  const repairId = 'repair-fixture-001';
+  const sessionId = 'core-authorization-session';
+
+  beforeEach(() => {
+    mockDocuments.set(`users/${uid}`, { schoolId: 'pu', role: 'student' });
+    mockDocuments.set(`schools/pu/members/${uid}`, { status: 'active' });
+    mockDocuments.set(`users/${uid}/settings/assistantPermissions`, { renewBook: true });
+  });
+
+  function ask(message) {
+    return askCampusAssistant.run({
+      auth: { uid, token: { role: 'student' } },
+      data: {
+        messages: [{ role: 'user', content: message }],
+        context: { schoolId: 'pu', sessionId },
+      },
+    });
+  }
+
+  function expectContained(result) {
+    expect(result.run.status).toBe('blocked');
+    expect(result.actions).toEqual([]);
+    expect(result.cards).toEqual([]);
+    expect(result.citations).toEqual([]);
+    expect(result.evaluation.reason).toBe('stopped unauthorized tool request');
+    expect(mockWrites.some(({ path }) => path.includes('/assistantTranscripts/'))).toBe(false);
+    expect(mockWrites).toContainEqual(expect.objectContaining({
+      path: `users/${uid}/agentRuns/${result.run.runId}`,
+      data: expect.objectContaining({
+        status: 'blocked',
+        errorCode: 'authorization_denied',
+        steps: expect.arrayContaining([expect.objectContaining({
+          tool: 'security_containment',
+          output: { action: 'stop_tool_run', reason: 'authorization_denied' },
+        })]),
+      }),
+    }));
+    expect(JSON.stringify({ result, writes: mockWrites })).not.toContain('private-denial-detail');
+  }
+
+  const readers = [
+    ['leave status', '查我的請假狀態', 'leaveRequests'],
+    ['repair detail', `查我的報修狀態，單號：${repairId}`, `schools/pu/repairRequests/${repairId}`],
+    ['repair list', '我的報修', 'schools/pu/repairRequests'],
+    ['library loan selection', '幫我續借快到期的書', `users/${uid}/schools/pu/libraryLoans`],
+  ];
+
+  test.each(readers.flatMap(([label, message, path]) =>
+    ['permission-denied', 'unauthenticated'].map((code) => [label, code, message, path]),
+  ))('%s propagates %s without fallback or a private error log', async (_label, code, message, path) => {
+    mockDocuments.set(path, Object.assign(new Error('private-denial-detail'), { code }));
+    const warning = jest.spyOn(console, 'warn');
+    try {
+      const result = await ask(message);
+
+      expectContained(result);
+      expect(mockReads.some((read) => read.path === path)).toBe(true);
+      expect(mockModel).not.toHaveBeenCalled();
+      expect(JSON.stringify(warning.mock.calls)).not.toContain('private-denial-detail');
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test.each(['permission-denied', 'unauthenticated'])(
+    'compose %s cannot become an ordinary model failure or expose its error',
+    async (code) => {
+      mockModel.mockRejectedValue(Object.assign(new Error('private-denial-detail'), { code }));
+      const warning = jest.spyOn(console, 'warn');
+      try {
+        const result = await ask('查公告');
+
+        expectContained(result);
+        expect(mockModel).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(warning.mock.calls)).not.toContain('private-denial-detail');
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test('a repair owned by another account yields a contained run without the private record', async () => {
+    mockDocuments.set(`schools/pu/repairRequests/${repairId}`, {
+      userId: 'another-student', description: 'private-denial-detail', room: 'private-denial-detail',
+    });
+
+    const result = await ask(`查我的報修狀態，單號：${repairId}`);
+
+    expectContained(result);
+    expect(mockModel).not.toHaveBeenCalled();
+  });
+
+  test('a missing repair remains a normal not-found response', async () => {
+    const result = await ask(`查我的報修狀態，單號：${repairId}`);
+
+    expect(result.run.status).toBe('completed');
+    expect(result.content).toContain('找不到這筆報修');
+    expect(mockModel).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['查我的請假狀態', 'leaveRequests', '目前無法讀取請假紀錄'],
+    [`查我的報修狀態，單號：${repairId}`, `schools/pu/repairRequests/${repairId}`, '暫時讀不到這筆報修狀態'],
+    ['我的報修', 'schools/pu/repairRequests', '暫時讀不到報修列表'],
+    ['幫我續借快到期的書', `users/${uid}/schools/pu/libraryLoans`, '目前找不到可續借的借閱紀錄'],
+  ])('an ordinary reader outage keeps the existing recovery response: %s', async (message, path, copy) => {
+    mockDocuments.set(path, new Error('temporary-reader-outage'));
+    const result = await ask(message);
+
+    expect(result.run.status).toBe('completed');
+    expect(result.content).toContain(copy);
+    expect(mockModel).not.toHaveBeenCalled();
+  });
+});
+
 test('a reused session starts with the current turn after a change of school', async () => {
   mockDocuments.set('users/alice', { primarySchoolId: 'pu', role: 'student' });
   mockDocuments.set('schools/pu/members/alice', { status: 'active' });
@@ -695,6 +812,57 @@ test('the actual callable accepts the 4000-character Web question and preserves 
   expect(result.run.status).toBe('completed');
   expect(mockModel.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
   expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500), { schoolId: 'pu' });
+});
+
+test('a timed-out model cannot save a late answer into the next conversation', async () => {
+  jest.useFakeTimers();
+  const previousTimeout = process.env.ASSISTANT_MODEL_TIMEOUT_MS;
+  process.env.ASSISTANT_MODEL_TIMEOUT_MS = '20';
+  mockDocuments.set('users/alice', { schoolId: 'pu', role: 'student' });
+  mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+  let finishModel;
+  mockModel.mockImplementationOnce(() => new Promise((resolve) => { finishModel = resolve; }));
+
+  try {
+    const pending = executeCampusAssistantCore({
+      request: {
+        auth: { uid: 'alice', token: { role: 'student' } },
+        data: {
+          messages: [{ role: 'user', content: '查詢校園公開資料' }],
+          context: { schoolId: 'pu', sessionId: 'cancelled-session' },
+        },
+      },
+      runId: 'cancelled-model-run',
+      startedAt: Date.now(),
+      routingIntent: 'general',
+    });
+    await jest.advanceTimersByTimeAsync(25);
+    const result = await pending;
+    expect(result.content).not.toContain('late-private-answer');
+    expect(mockModel).toHaveBeenCalledTimes(1);
+    expect(mockModel.mock.calls[0][0].signal?.aborted).toBe(true);
+
+    // The transport intentionally ignores cancellation, as a slow SDK may do.
+    finishModel({
+      provider: 'test-model',
+      content: 'late-private-answer',
+      transcriptMessages: [
+        { role: 'user', content: '查詢校園公開資料' },
+        { role: 'assistant', content: 'late-private-answer' },
+      ],
+      errors: [],
+      cards: [],
+    });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(mockWrites.some(({ path }) => path.includes('/assistantTranscripts/'))).toBe(false);
+    expect(JSON.stringify(mockWrites)).not.toContain('late-private-answer');
+    expect(mockModel).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.ASSISTANT_MODEL_TIMEOUT_MS;
+    else process.env.ASSISTANT_MODEL_TIMEOUT_MS = previousTimeout;
+    jest.useRealTimers();
+  }
 });
 
 describe('線上點餐關著時，助理不會留下訂單或下單按鈕', () => {

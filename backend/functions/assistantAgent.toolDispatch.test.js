@@ -239,6 +239,66 @@ test('a transient tool error remains recoverable', async () => {
   expect(result.securityEvent).toBeUndefined();
 });
 
+test.each(['permission-denied', 'unauthenticated'])(
+  'waits for a pending authorization check before starting its sibling: %s',
+  async (code) => {
+    let started;
+    let rejectFirst;
+    const firstStarted = new Promise((resolve) => { started = resolve; });
+    const firstResult = new Promise((_resolve, reject) => { rejectFirst = reject; });
+    const dispatch = jest.spyOn(registry, 'runTool')
+      .mockImplementationOnce(() => { started(); return firstResult; })
+      .mockResolvedValue({ success: true, unexpectedWrite: true });
+    const fetchImpl = modelWithCalls([
+      toolCall('first', 'getTodaySchedule'),
+      toolCall('later', 'reflectOnGap'),
+    ]);
+    const pending = run(fetchImpl);
+    await firstStarted;
+    const callsBeforeDecision = dispatch.mock.calls.length;
+    rejectFirst(Object.assign(new Error('private-denial-details'), { code }));
+    const result = await pending;
+
+    expect(callsBeforeDecision).toBe(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.toolsInvoked).toEqual(['getTodaySchedule']);
+    expect(result.securityEvent?.reason).toBe('authorization_denied');
+    expect(JSON.stringify(result)).not.toMatch(/private-denial-details|unexpectedWrite/);
+  },
+);
+
+test('a later denial withholds earlier private results and parameters from the stopped trace', async () => {
+  jest.spyOn(registry, 'runTool')
+    .mockResolvedValueOnce({ assignmentTitle: 'private-assignment-title' })
+    .mockRejectedValueOnce(Object.assign(new Error('private-denial-details'), { code: 'permission-denied' }));
+  const fetchImpl = modelWithCalls([
+    toolCall('first', 'getAssignments', { preferredGroupId: 'private-group-id' }),
+    toolCall('second', 'getTodaySchedule'),
+  ]);
+
+  const result = await run(fetchImpl);
+
+  expect(result.toolCallsTrace[0]).toEqual({ name: 'getAssignments', args: {}, output: { status: 'withheld' } });
+  expect(JSON.stringify(result)).not.toMatch(/private-assignment-title|private-group-id|private-denial-details/);
+  expect(result.transcriptMessages).toEqual([]);
+  expect(result.cards).toEqual([]);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  { success: true, errorCode: 'role_denied' },
+  { success: false, errorCode: 'not_found' },
+  { note: 'permission-denied', summary: 'unauthenticated' },
+])('only an explicit failed authorization receipt triggers containment: %j', async (receipt) => {
+  jest.spyOn(registry, 'runTool').mockResolvedValue(receipt);
+  const fetchImpl = modelWithCalls([toolCall('read', 'getTodaySchedule')]);
+  const result = await run(fetchImpl);
+  expect(result.securityEvent).toBeUndefined();
+  expect(result.toolCallsTrace[0].output).toEqual(receipt);
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+
 test('a stopped run does not restrict a later legitimate request', async () => {
   const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue({ status: 'unavailable' });
   const stopped = await run(modelWithCalls([toolCall('blocked', 'submitLeaveRequest')]));

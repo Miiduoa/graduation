@@ -3,6 +3,7 @@ const { parseFragment } = require('parse5');
 const { zodToJsonSchema } = require('zod-to-json-schema');
 const { z } = require('zod');
 const { MAX_TOTAL_UTF8_BYTES, utf8ByteLength } = require('./agent/inputLimits');
+const { isAuthorizationFailure, isAuthorizationDeniedResult } = require('./agent/authorizationFailure');
 const {
   resolveRouteOrigin,
   isProvidenceOriginLabel,
@@ -22,7 +23,7 @@ const MAX_TOOL_ARGUMENTS_UTF8_BYTES = MAX_TOTAL_UTF8_BYTES;
 const MAX_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
 /** Cap non-2xx provider error body prefix kept for diagnostics (cancel rest). */
 const MAX_PROVIDER_ERROR_PREFIX_BYTES = 2 * 1024;
-/** Cap tool_calls scheduled per model round before Promise.all. */
+/** Cap tool calls dispatched per model round. */
 const MAX_TOOL_CALLS_PER_ROUND = 8;
 const NON_CONTENT_HTML_ELEMENTS = new Set(['script', 'style', 'template', 'noscript']);
 
@@ -222,8 +223,19 @@ function normalizeAssistantActions(actions, permissionScope = 'school_public') {
   return actions.map((action) => normalizeAssistantAction(action, permissionScope)).filter(Boolean);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function parseRetryAfter(headers, attempt) {
@@ -358,15 +370,17 @@ async function readResponseErrorPrefix(
 
 async function fetchJson(
   url,
-  { fetchImpl = globalThis.fetch, timeoutMs = WEB_TIMEOUT_MS, ...options } = {},
+  { fetchImpl = globalThis.fetch, timeoutMs = WEB_TIMEOUT_MS, signal, ...options } = {},
 ) {
+  signal?.throwIfAborted();
   if (typeof fetchImpl !== 'function') return null;
   const controller = new AbortController();
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, {
       ...options,
-      signal: controller.signal,
+      signal: requestSignal,
       headers: {
         Accept: 'application/json',
         'Accept-Language': 'zh-TW,zh-Hant;q=0.9,zh;q=0.8,en;q=0.5',
@@ -374,9 +388,14 @@ async function fetchJson(
         ...(options.headers || {}),
       },
     });
+    if (requestSignal.aborted) await cancelResponseBody(response);
+    requestSignal.throwIfAborted();
     if (!response.ok) return null;
-    return await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
+    const data = await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
+    requestSignal.throwIfAborted();
+    return data;
   } catch {
+    signal?.throwIfAborted();
     return null;
   } finally {
     clearTimeout(timeout);
@@ -797,18 +816,24 @@ async function callOpenAiCompatChat({
   model,
   messages,
   tools = [],
+  signal,
 }) {
+  signal?.throwIfAborted();
   if (!apiKey || !model || typeof fetchImpl !== 'function') return null;
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    signal?.throwIfAborted();
     const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
+      signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(toOpenAiCompatBody(messages, model, tools)),
     });
+    if (signal?.aborted) await cancelResponseBody(response);
+    signal?.throwIfAborted();
 
     if (response.status === 429 || response.status >= 500) {
       lastError = {
@@ -816,16 +841,18 @@ async function callOpenAiCompatChat({
         retryAfterMs: parseRetryAfter(response.headers, attempt),
       };
       await cancelResponseBody(response);
-      await sleep(lastError.retryAfterMs);
+      await sleep(lastError.retryAfterMs, signal);
       continue;
     }
 
     if (!response.ok) {
       const body = await readResponseErrorPrefix(response);
+      signal?.throwIfAborted();
       throw new Error(`${provider} failed: HTTP ${response.status} ${body.slice(0, 160)}`);
     }
 
     const data = await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
+    signal?.throwIfAborted();
     const message = data?.choices?.[0]?.message;
     const rawToolCalls = message?.tool_calls;
     const toolCalls =
@@ -844,7 +871,8 @@ async function callOpenAiCompatChat({
   throw new Error(`${provider} rate limited or unavailable: ${lastError?.status || 'unknown'}`);
 }
 
-async function callGeminiGenerate({ fetchImpl = globalThis.fetch, apiKey, model, messages }) {
+async function callGeminiGenerate({ fetchImpl = globalThis.fetch, apiKey, model, messages, signal }) {
+  signal?.throwIfAborted();
   if (!apiKey || !model || typeof fetchImpl !== 'function') return null;
   const system = messages
     .filter((message) => message.role === 'system')
@@ -860,6 +888,7 @@ async function callGeminiGenerate({ fetchImpl = globalThis.fetch, apiKey, model,
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const response = await fetchImpl(url, {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: system ? { parts: [{ text: system }] } : undefined,
@@ -870,18 +899,22 @@ async function callGeminiGenerate({ fetchImpl = globalThis.fetch, apiKey, model,
       },
     }),
   });
+  if (signal?.aborted) await cancelResponseBody(response);
+  signal?.throwIfAborted();
 
   if (response.status === 429) {
     await cancelResponseBody(response);
-    await sleep(parseRetryAfter(response.headers, 0));
+    await sleep(parseRetryAfter(response.headers, 0), signal);
     return null;
   }
   if (!response.ok) {
     const body = await readResponseErrorPrefix(response);
+    signal?.throwIfAborted();
     throw new Error(`gemini failed: HTTP ${response.status} ${body.slice(0, 160)}`);
   }
 
   const data = await readResponseJsonBounded(response, MAX_PROVIDER_RESPONSE_BYTES);
+  signal?.throwIfAborted();
   return {
     provider: 'gemini',
     model,
@@ -895,7 +928,9 @@ async function callAssistantModel({
   toolDefs,
   fetchImpl = globalThis.fetch,
   providerOrder = parseProviderOrder(),
+  signal,
 }) {
+  signal?.throwIfAborted();
   const errors = [];
 
   if (Array.isArray(toolDefs) && toolDefs.length > 0) {
@@ -910,11 +945,14 @@ async function callAssistantModel({
           model: env('GROQ_MODEL', env('OPENAI_COMPAT_MODEL', DEFAULT_GROQ_MODEL)),
           messages,
           tools: toolDefs,
+          signal,
         });
+        signal?.throwIfAborted();
         if (result && (result.toolCalls?.length > 0 || result.content)) {
           return { ...result, errors };
         }
       } catch (error) {
+        signal?.throwIfAborted();
         errors.push({ provider: 'groq', message: error?.message || String(error) });
       }
     }
@@ -928,11 +966,14 @@ async function callAssistantModel({
         model: env('OLLAMA_MODEL', OLLAMA_DEFAULT_MODEL),
         messages,
         tools: toolDefs,
+        signal,
       });
+      signal?.throwIfAborted();
       if (result && (result.toolCalls?.length > 0 || result.content)) {
         return { ...result, errors };
       }
     } catch (error) {
+      signal?.throwIfAborted();
       errors.push({ provider: 'ollama', message: error?.message || String(error) });
     }
     return {
@@ -946,6 +987,7 @@ async function callAssistantModel({
   }
 
   for (const provider of providerOrder) {
+    signal?.throwIfAborted();
     try {
       if (provider === 'groq' && env('GROQ_API_KEY')) {
         const result = await callOpenAiCompatChat({
@@ -956,7 +998,9 @@ async function callAssistantModel({
           model: env('GROQ_MODEL', env('OPENAI_COMPAT_MODEL', DEFAULT_GROQ_MODEL)),
           messages,
           tools: [],
+          signal,
         });
+        signal?.throwIfAborted();
         if (result?.content) return { ...result, errors };
       }
 
@@ -966,10 +1010,13 @@ async function callAssistantModel({
           apiKey: env('GEMINI_API_KEY') || env('GOOGLE_API_KEY'),
           model: env('GEMINI_MODEL', 'gemini-2.5-flash'),
           messages,
+          signal,
         });
+        signal?.throwIfAborted();
         if (result?.content) return { ...result, errors };
       }
     } catch (error) {
+      signal?.throwIfAborted();
       errors.push({ provider, message: error?.message || String(error) });
     }
   }
@@ -984,9 +1031,12 @@ async function callAssistantModel({
       model: env('OLLAMA_MODEL', OLLAMA_DEFAULT_MODEL),
       messages,
       tools: [],
+      signal,
     });
+    signal?.throwIfAborted();
     if (result?.content) return { ...result, errors };
   } catch (error) {
+    signal?.throwIfAborted();
     errors.push({ provider: 'ollama', message: error?.message || String(error) });
   }
 
@@ -1009,7 +1059,9 @@ async function callAssistantModelWithTools({
   fetchImpl = globalThis.fetch,
   providerOrder = parseProviderOrder(),
   maxRounds = 3,
+  signal,
 }) {
+  signal?.throwIfAborted();
   const { tools, runTool } = require('./agent/tools/registry');
   const {
     createDefaultAssistantWritePermissions,
@@ -1024,12 +1076,14 @@ async function callAssistantModelWithTools({
       toolCtx && typeof toolCtx === 'object' ? toolCtx.uid : null,
     );
   } catch (error) {
+    signal?.throwIfAborted();
     // 無 Admin app／讀取失敗：fail closed，不把草稿下單工具暴露給模型。
     console.warn(
       '[assistantAgent] write permissions unavailable; denying proposeOrder:',
       error?.message || error,
     );
   }
+  signal?.throwIfAborted();
   // 需確認寫入工具不給模型；草稿下單另依餐廳下單開關。
   const toolDefs = buildToolDefinitions(
     tools.filter((t) => {
@@ -1056,6 +1110,19 @@ async function callAssistantModelWithTools({
   }
 
   function stopToolRun(result, reason) {
+    const containedTrace = toolCallsTrace.map(({ name, output }) => {
+      let safeOutput = { status: 'withheld' };
+      if (output?.errorCode === 'tool_not_allowed') {
+        safeOutput = {
+          success: false,
+          error: 'tool not available in this model request',
+          errorCode: 'tool_not_allowed',
+        };
+      } else if (output?.errorCode === 'authorization_denied') {
+        safeOutput = { success: false, errorCode: 'authorization_denied' };
+      }
+      return { name, args: {}, output: safeOutput };
+    });
     return {
       provider: result.provider,
       model: result.model,
@@ -1064,7 +1131,7 @@ async function callAssistantModelWithTools({
       toolCalls: [],
       transcriptMessages: [],
       toolsInvoked,
-      toolCallsTrace,
+      toolCallsTrace: containedTrace,
       cards: [],
       securityEvent: { action: 'stop_tool_run', reason },
     };
@@ -1073,12 +1140,15 @@ async function callAssistantModelWithTools({
   let currentMessages = [...messages];
 
   for (let round = 0; round < maxRounds; round += 1) {
+    signal?.throwIfAborted();
     const result = await callAssistantModel({
       messages: currentMessages,
       toolDefs,
       fetchImpl,
       providerOrder,
+      signal,
     });
+    signal?.throwIfAborted();
 
     if (!result.toolCalls || result.toolCalls.length === 0) {
       const transcriptMessages = [...currentMessages];
@@ -1089,7 +1159,7 @@ async function callAssistantModelWithTools({
       return { ...result, transcriptMessages, toolsInvoked, toolCallsTrace, cards };
     }
 
-    // Cap tool_calls before scheduling work (no existing max_tool_calls in codebase).
+    // Bound the batch before validating or dispatching model-generated calls.
     const scheduledCalls = result.toolCalls.slice(0, MAX_TOOL_CALLS_PER_ROUND);
 
     // Inspect the whole bounded batch before allowing any sibling call to run.
@@ -1112,75 +1182,83 @@ async function callAssistantModelWithTools({
       tool_calls: scheduledCalls,
     };
 
-    let authorizationDenied = false;
-    const toolResults = await Promise.all(
-      scheduledCalls.map(async (call) => {
-        const name = call.function.name;
-        recordToolName(name);
-        const raw = call?.function?.arguments;
-        const rawStr = raw == null ? '' : String(raw);
+    const toolResults = [];
+    // Await each call so an authorization failure prevents later siblings from
+    // starting. Earlier completed calls still rely on their own write guards.
+    for (const call of scheduledCalls) {
+      signal?.throwIfAborted();
+      const name = call.function.name;
+      recordToolName(name);
+      const raw = call?.function?.arguments;
+      const rawStr = raw == null ? '' : String(raw);
 
-        if (utf8ByteLength(rawStr) > MAX_TOOL_ARGUMENTS_UTF8_BYTES) {
-          const errOut = { error: 'tool arguments too large' };
-          recordToolCall(name, {}, errOut);
-          return {
-            role: 'tool',
-            tool_call_id: call.id,
-            content: JSON.stringify(errOut),
-          };
+      if (utf8ByteLength(rawStr) > MAX_TOOL_ARGUMENTS_UTF8_BYTES) {
+        const errOut = { error: 'tool arguments too large' };
+        recordToolCall(name, {}, errOut);
+        toolResults.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(errOut),
+        });
+        continue;
+      }
+
+      let args;
+      try {
+        args = rawStr.trim() ? JSON.parse(rawStr) : {};
+      } catch {
+        const errOut = { error: 'malformed tool arguments' };
+        recordToolCall(name, {}, errOut);
+        toolResults.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(errOut),
+        });
+        continue;
+      }
+
+      try {
+        const output = await runTool(name, toolCtx, args);
+        signal?.throwIfAborted();
+        if (isAuthorizationDeniedResult(output)) {
+          recordToolCall(name, {}, { success: false, errorCode: 'authorization_denied' });
+          return stopToolRun(result, 'authorization_denied');
         }
-
-        let args;
-        try {
-          args = rawStr.trim() ? JSON.parse(rawStr) : {};
-        } catch {
-          const errOut = { error: 'malformed tool arguments' };
-          recordToolCall(name, {}, errOut);
-          return {
-            role: 'tool',
-            tool_call_id: call.id,
-            content: JSON.stringify(errOut),
-          };
+        recordToolCall(name, args, output);
+        toolResults.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(output),
+        });
+      } catch (e) {
+        signal?.throwIfAborted();
+        if (isAuthorizationFailure(e)) {
+          recordToolCall(name, {}, { success: false, errorCode: 'authorization_denied' });
+          return stopToolRun(result, 'authorization_denied');
         }
+        const errOut = { error: String(e?.message || e).slice(0, 200) };
+        recordToolCall(name, args, errOut);
+        toolResults.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify(errOut),
+        });
+      }
+    }
 
-        try {
-          if (!name) throw new Error('missing tool name');
-          const output = await runTool(name, toolCtx, args);
-          recordToolCall(name, args, output);
-          return {
-            role: 'tool',
-            tool_call_id: call.id,
-            content: JSON.stringify(output),
-          };
-        } catch (e) {
-          if (e?.code === 'permission-denied' || e?.code === 'unauthenticated') {
-            authorizationDenied = true;
-            const errOut = { success: false, errorCode: 'authorization_denied' };
-            recordToolCall(name, {}, errOut);
-            return { role: 'tool', tool_call_id: call.id, content: JSON.stringify(errOut) };
-          }
-          const errOut = { error: String(e?.message || e).slice(0, 200) };
-          recordToolCall(name, args, errOut);
-          return {
-            role: 'tool',
-            tool_call_id: call.id,
-            content: JSON.stringify(errOut),
-          };
-        }
-      }),
-    );
-
-    if (authorizationDenied) return stopToolRun(result, 'authorization_denied');
     currentMessages = [...currentMessages, assistantMsg, ...toolResults];
   }
 
   const finalOrder = currentMessages.some((m) => m.role === 'tool') ? ['groq'] : providerOrder;
+  signal?.throwIfAborted();
   const finalResult = await callAssistantModel({
     messages: currentMessages,
     toolDefs: undefined,
     fetchImpl,
     providerOrder: finalOrder,
+    signal,
   });
+  signal?.throwIfAborted();
   const transcriptMessages = [...currentMessages];
   if (finalResult.content) {
     transcriptMessages.push({ role: 'assistant', content: finalResult.content });
