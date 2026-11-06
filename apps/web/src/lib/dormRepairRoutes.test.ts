@@ -36,9 +36,12 @@ it('resolves a single Providence hall in the recorded location without guessing 
 it('routes operator-run halls within their own university and keeps NTU network faults out of the equipment form', () => {
   expect(resolveDormRepairRoute('ncku', 'air', '太子學舍 201')?.url).toBe('https://nckudorm.prince.com.tw/Member_Repair.aspx');
   expect(resolveDormRepairRoute('ntu', 'air', '水源A棟 201')?.url).toBe('https://ntudorm.prince.com.tw/Member_Repair.aspx');
+  expect(resolveDormRepairRoute('ntu', 'air', '修齊會館')?.url).toBe('https://ntudorm.prince.com.tw/Member_Repair.aspx');
   expect(resolveDormRepairRoute('ntu', 'network', '水源A棟 201')?.url).toContain('ccnet.ntu.edu.tw/');
-  expect(resolveDormRepairRoute('tw-nchu', 'electric', '南投宿舍')?.url).toBe('tel:0492317574');
-  expect(resolveDormRepairRoute('tw-nchu', 'network', '南投宿舍')?.url).toBe('tel:0492317574');
+  for (const location of ['南投宿舍', '松園二館', '松園十二館', '松園 2 館', '松園１２館 303']) {
+    expect(resolveDormRepairRoute('tw-nchu', 'electric', location)?.url).toBe('tel:0492317574');
+    expect(resolveDormRepairRoute('tw-nchu', 'network', location)?.url).toBe('tel:0492317574');
+  }
 });
 
 it('only offers a status lookup when documented for that channel', () => {

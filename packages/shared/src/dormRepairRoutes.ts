@@ -96,7 +96,7 @@ export function resolveDormRepairRoute(
         label: '查看臺大宿網報修窗口', detail: '自建宿舍先找該舍網管。太子學舍請洽一樓服務台資訊工讀生。',
         url: 'https://ccnet.ntu.edu.tw/ccnet/dorm.php?page=responsibility',
       };
-      if (/太子|(?:長興|水源)(?:舍區|學舍|宿舍|[ABC]棟)/i.test(location)) return {
+      if (/太子|修齊會館|(?:長興|水源)(?:舍區|學舍|宿舍|[ABC]棟)/i.test(location)) return {
         label: '開啟臺大太子學舍修繕報修', detail: '登入太子學舍會員服務，登記寢室或公共設備故障。可在同頁查看最近報修紀錄。',
         url: 'https://ntudorm.prince.com.tw/Member_Repair.aspx', trackingLabel: '查太子學舍報修紀錄', trackingUrl: 'https://ntudorm.prince.com.tw/Member_Repair.aspx',
       };
@@ -115,7 +115,7 @@ export function resolveDormRepairRoute(
       };
     case 'tw-nchu':
     case 'nchu':
-      if (location.includes('南投')) return {
+      if (/南投|松園\s*(?:2|12|二|十二)\s*館/.test(location.normalize('NFKC'))) return {
         label: '致電興大南投宿舍服務中心', detail: '南投宿舍的設備和網路問題都可撥 049-231-7574 聯絡服務中心。',
         url: 'tel:0492317574',
       };
