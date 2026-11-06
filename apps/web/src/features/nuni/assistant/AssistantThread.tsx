@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { useEffect, useId, useRef } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
@@ -21,6 +22,7 @@ export function AssistantThread({
   pending,
   error,
   onAsk,
+  onStop,
   onConfirm,
   onCancel,
 }: {
@@ -37,6 +39,7 @@ export function AssistantThread({
   pending: boolean;
   error: string;
   onAsk: () => void;
+  onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
 }) {
@@ -79,6 +82,14 @@ export function AssistantThread({
     onQuestion(phrase);
     field.current?.focus();
   }
+  const consentControl = (
+    <label className={styles.consent}>
+      <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
+      同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+      Groq
+      {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
+    </label>
+  );
   return (
     <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
       {!inline && (
@@ -96,12 +107,12 @@ export function AssistantThread({
           模型目前無法使用。
         </p>
       ) : null}
-      <label className={styles.consent}>
-        <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
-        同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
-        Groq
-        {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
-      </label>
+      {inline && turns.length > 0 && consent ? (
+        <details className={styles.consentSettings}>
+          <summary>本次對話的資料使用設定</summary>
+          {consentControl}
+        </details>
+      ) : consentControl}
       <div ref={log} className={styles.log} role="log" aria-busy={pending || undefined}>
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
@@ -125,7 +136,11 @@ export function AssistantThread({
             </div>
             <div className={`${styles.row} ${styles.rowAssistant}`}>
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
-                <AssistantMarkdown text={turn.reply.answer} />
+                {inline ? (
+                  <SpokenReply text={turn.reply.answer} disabled={pending}>
+                    <AssistantMarkdown text={turn.reply.answer} />
+                  </SpokenReply>
+                ) : <AssistantMarkdown text={turn.reply.answer} />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
@@ -193,7 +208,7 @@ export function AssistantThread({
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder="輸入問題"
+            placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
             onChange={(e) => onQuestion(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -211,10 +226,33 @@ export function AssistantThread({
               }}
             />
           )}
-          <button className={styles.send} disabled={!consent || !ready || pending || !question.trim()}>
-            送出
-          </button>
+          {onStop ? (
+            <button
+              key="stop"
+              type="button"
+              className={styles.send}
+              onClick={() => {
+                onStop();
+                field.current?.focus();
+              }}
+            >
+              停止回答
+            </button>
+          ) : (
+            <button key="send" className={styles.send} disabled={!consent || !ready || pending || !question.trim()}>
+              送出
+            </button>
+          )}
         </form>
+        {inline && ready && !turns.length && !question && !pending && (
+          <div className={styles.chips} aria-label="試著問">
+            {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (
+              <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
+                {phrase}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
@@ -15,7 +15,7 @@ type Step = {
   answer?: string;
   simulation: boolean;
 };
-type InlineDraft = { text: string; setText: (text: string) => void };
+type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
 export function Conversation({ context, schoolId, inlineDraft, onFreeformReady }: {
   context: string;
   schoolId: string;
@@ -202,17 +202,21 @@ function V2Conversation({
   const setQuestion = inlineDraft?.setText ?? setLocalQuestion;
   const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState(false);
+  const [operation, setOperation] = useState<'ask' | 'card' | null>(null);
+  const pending = operation !== null;
+  const activeAsk = useRef<AbortController | null>(null);
   const [error, setError] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => {
     const active = new AbortController();
     controller.current = active;
-    return () => active.abort();
+    return () => {
+      active.abort();
+      activeAsk.current?.abort();
+    };
   }, []);
-  async function send(action: string, input: object) {
-    const signal = controller.current!.signal;
+  async function send(action: string, input: object, signal = controller.current!.signal) {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
       credentials: 'same-origin',
@@ -238,19 +242,24 @@ function V2Conversation({
   }
   async function ask() {
     const current = question.trim();
-    if (!current || !consent || !ready || pending) return;
-    setPending(true);
+    if (!current || !consent || !ready || pending || activeAsk.current) return;
+    const request = new AbortController();
+    activeAsk.current = request;
+    setOperation('ask');
     setError('');
     try {
       const history = turns.slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: t.reply.answer },
       ]);
-      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      const query = () => send('ask', {
+        question: current, history, consent, routeToken: routeToken.current,
+      }, request.signal);
+      let reply = await query();
       if (reply.bootstrap) {
         conversation.current = reply.conversationId;
         routeToken.current = reply.routeToken;
-        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+        reply = await query();
       }
       if (reply.cards.length)
         setStates((s) => ({
@@ -263,16 +272,23 @@ function V2Conversation({
           ),
         }));
       setTurns((t) => [...t, { question: current, reply }]);
-      setQuestion('');
+      setQuestion((draft) => draft.trim() === current ? '' : draft);
     } catch (e) {
-      if (!controller.current?.signal.aborted)
-        setError(e instanceof Error ? e.message : '查詢失敗');
+      if (!request.signal.aborted) setError(e instanceof Error ? e.message : '查詢失敗');
     } finally {
-      if (!controller.current?.signal.aborted) setPending(false);
+      if (activeAsk.current === request) {
+        activeAsk.current = null;
+        if (!request.signal.aborted) setOperation(null);
+      }
     }
   }
+  function stopAsking() {
+    activeAsk.current?.abort();
+    activeAsk.current = null;
+    setOperation(null);
+  }
   async function execute(cards: V2Card[]) {
-    setPending(true);
+    setOperation('card');
     setError('');
     try {
       for (const card of cards) {
@@ -287,11 +303,11 @@ function V2Conversation({
       if (!controller.current?.signal.aborted)
         setError(e instanceof Error ? e.message : '確認失敗');
     } finally {
-      if (!controller.current?.signal.aborted) setPending(false);
+      if (!controller.current?.signal.aborted) setOperation(null);
     }
   }
   async function cancel(turn: V2Turn, cardIndex: number) {
-    setPending(true);
+    setOperation('card');
     try {
       const card = turn.reply.cards[cardIndex];
       const affected =
@@ -304,7 +320,7 @@ function V2Conversation({
     } catch {
       setError('撤銷未完成，請重試。');
     } finally {
-      setPending(false);
+      setOperation(null);
     }
   }
   return (
@@ -322,6 +338,7 @@ function V2Conversation({
       pending={pending}
       error={error}
       onAsk={() => void ask()}
+      onStop={inlineDraft && operation === 'ask' ? stopAsking : undefined}
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}
     />

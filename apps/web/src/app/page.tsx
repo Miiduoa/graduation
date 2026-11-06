@@ -240,7 +240,7 @@ export default function HomePage() {
         跳到主要內容
       </a>
       <AppHeader onOpenVoice={() => {
-        const entry = voiceEntry.current;
+        const entry = voiceEntry.current?.querySelector<HTMLElement>('form[aria-label="傳送問題"]') ?? voiceEntry.current;
         const mic = entry?.querySelector<HTMLButtonElement>('button[data-voice-input]:not(:disabled)');
         if (mic) {
           mic.focus();

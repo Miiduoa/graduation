@@ -16,6 +16,7 @@ import {
 } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { SpokenReply, stopSpokenReply } from '@/components/SpokenReply';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalCampusDraft } from '@/components/CampusDraftProvider';
@@ -47,6 +48,12 @@ import styles from './assistant.module.css';
 type Message =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string; response: CampusAssistantEnvelope };
+
+function visibleMessage(message: Message) {
+  return message.role === 'assistant' && !isWebOnlineOrderingEnabled() && hasOrderProposal(message.response)
+    ? ONLINE_ORDERING_OFF_TEXT
+    : message.content;
+}
 function requestError(error: unknown): string {
   if (error instanceof CampusAssistantError && error.code === 'unconfigured')
     return '雲端助理尚未啟用。';
@@ -115,6 +122,7 @@ export function AssistantConversation({
     event.preventDefault();
     const content = draft.trim();
     if (!content || request.current || !functionsReady) return;
+    if (inline) stopSpokenReply();
     if (!isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
       setMessages((previous) => [
         ...previous,
@@ -155,7 +163,7 @@ export function AssistantConversation({
         { role: 'user', content },
         { role: 'assistant', content: response.content, response },
       ]);
-      setDraft('');
+      setDraft((draft) => draft.trim() === content ? '' : draft);
     } catch (failure) {
       if (!controller.signal.aborted && request.current === controller)
         setError(requestError(failure));
@@ -168,15 +176,19 @@ export function AssistantConversation({
     }
   }
 
-  function clearConversation() {
+  function stopAsking() {
     request.current?.abort();
     request.current = null;
+    setPending(false);
+    composer.current?.focus();
+  }
+
+  function clearConversation() {
+    stopAsking();
     sessionId.current = null;
     setMessages([]);
     setDraft('');
     setError('');
-    setPending(false);
-    composer.current?.focus();
   }
 
   return (
@@ -255,15 +267,10 @@ export function AssistantConversation({
             className={message.role === 'user' ? styles.question : styles.answer}
           >
             <p className={styles.author}>{message.role === 'user' ? '你' : '校園助理'}</p>
-            <p className={styles.content}>
-              {message.role === 'assistant' &&
-              !isWebOnlineOrderingEnabled() &&
-              hasOrderProposal(message.response)
-                ? ONLINE_ORDERING_OFF_TEXT
-                : message.content}
-            </p>
+            <p className={styles.content}>{visibleMessage(message)}</p>
             {message.role === 'assistant' && (
               <>
+                {inline && <SpokenReply text={visibleMessage(message)} disabled={pending} />}
                 {index === messages.length - 1 && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
                   <AgentWritePanel
                     key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
@@ -373,13 +380,20 @@ export function AssistantConversation({
                 ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
                 : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
           </p>
-          <button
-            type="submit"
-            className={home.primary}
-            disabled={!functionsReady || pending || !draft.trim()}
-          >
-            {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
-          </button>
+          {inline && pending ? (
+            <button key="stop" type="button" className={home.primary} onClick={stopAsking}>
+              停止回答
+            </button>
+          ) : (
+            <button
+              key="send"
+              type="submit"
+              className={home.primary}
+              disabled={!functionsReady || pending || !draft.trim()}
+            >
+              {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
+            </button>
+          )}
         </div>
       </form>
     </section>

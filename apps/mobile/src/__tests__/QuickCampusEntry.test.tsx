@@ -75,28 +75,27 @@ test('ignores a late result after the user edits the phrase', async () => {
   expect(view.queryByText('舊結果')).toBeNull();
 });
 
-test('answers dictated text in Today and keeps the last class available for a follow-up', async () => {
+test('asks about a saved class in one tap and carries its source into the room follow-up', async () => {
   const ask = jest.mocked(askCampusAssistant);
   const course = { uid: 'alice', schoolId: 'pu', updatedAt: null, classes: [
     { courseId: 'stats', name: '統計學', room: '主顧樓 301', term: '115|1', date: '2026-11-06', startTime: '13:00', endTime: '14:00' },
   ] };
-  ask.mockResolvedValueOnce({ source: 'device', content: '下一堂是統計學。', hasActions: false,
+  ask.mockResolvedValueOnce({ source: 'device', content: '現在是統計學。', hasActions: false,
     savedClassRead: course });
   ask.mockResolvedValueOnce({ source: 'device', content: '在主顧樓 301。', hasActions: false });
   const open = jest.fn();
   const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={open} />);
   const input = view.getByLabelText('說出或輸入想做的事');
-  fireEvent.changeText(input, '下一堂是什麼？');
-  await act(async () => fireEvent(input, 'submitEditing'));
-  expect(view.getByText('下一堂是統計學。')).toBeTruthy();
+  expect(view.queryByLabelText('詢問手機助理，在哪間教室？')).toBeNull();
+  await act(async () => fireEvent.press(view.getByLabelText('詢問手機助理，我現在有課嗎？')));
+  expect(view.getByText('現在是統計學。')).toBeTruthy();
   expect(input.props.value).toBe('');
-  fireEvent.changeText(input, '在哪裡？');
-  await act(async () => fireEvent.press(view.getByLabelText('詢問手機助理')));
+  await act(async () => fireEvent.press(view.getByLabelText('詢問手機助理，在哪間教室？')));
   expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({
     scope: { uid: 'alice', schoolId: 'pu' }, mode: 'device',
-    messages: [{ role: 'user', content: '下一堂是什麼？' },
+    messages: [{ role: 'user', content: '我現在有課嗎？' },
       expect.objectContaining({ role: 'assistant', savedClassRead: course }),
-      { role: 'user', content: '在哪裡？' }],
+      { role: 'user', content: '在哪間教室？' }],
   }));
   expect(view.getByText('在主顧樓 301。')).toBeTruthy();
   expect(open).not.toHaveBeenCalled();
@@ -153,3 +152,59 @@ test.each([
     expect(view.queryByRole('button', { name: /^開啟/ })).toBeNull();
   }
 });
+
+test('reviews earlier questions in order beyond the model context and can collapse them without changing a draft', async () => {
+  const ask = jest.mocked(askCampusAssistant);
+  ask.mockImplementation(async ({ messages }) => ({ source: 'device', hasActions: false,
+    content: messages.at(-1)!.content.replace('問題', '回答') }));
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={jest.fn()} />);
+  const input = view.getByLabelText('說出或輸入想做的事');
+  for (let index = 1; index <= 11; index++) {
+    fireEvent.changeText(input, '問題 ' + index);
+    await act(async () => fireEvent(input, 'submitEditing'));
+  }
+  const toggle = view.getByRole('button', { name: '查看前 10 組問答', expanded: false });
+  expect(view.queryByText('回答 1')).toBeNull();
+  expect(view.getByText('回答 11')).toBeTruthy();
+  expect(ask.mock.lastCall![0].messages).toHaveLength(19);
+  expect(ask.mock.lastCall![0].messages[0].content).toBe('問題 2');
+  fireEvent.changeText(input, '保留草稿');
+  fireEvent.press(toggle);
+  expect(view.getAllByText(/^回答 [0-9]+$/).map(row => row.props.children)).toEqual(
+    Array.from({ length: 11 }, (_, index) => '回答 ' + (index + 1)),
+  );
+  expect(view.getByText('問題 1')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '收合先前問答', expanded: true }));
+  expect(view.queryByText('回答 1')).toBeNull();
+  expect(input.props.value).toBe('保留草稿');
+  expect(ask).toHaveBeenCalledTimes(11);
+});
+
+test('a one-tap question is still editable after the user stops the answer', async () => {
+  const ask = jest.mocked(askCampusAssistant);
+  let finish!: (value: Awaited<ReturnType<typeof askCampusAssistant>>) => void;
+  ask.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={jest.fn()} />);
+  fireEvent.press(view.getByLabelText('詢問手機助理，我現在有課嗎？'));
+  const stop = view.getByLabelText('停止回答');
+  fireEvent.press(stop);
+  const input = view.getByLabelText('說出或輸入想做的事');
+  expect(input.props.value).toBe('我現在有課嗎？');
+  expect(input.props.editable).toBe(true);
+  await act(async () => finish({ source: 'device', hasActions: false, content: '遲來的回答' }));
+  expect(view.queryByText('遲來的回答')).toBeNull();
+});
+
+test.each([['alice', 'pu', true], ['bob', 'pu', false], ['alice', 'other', false]] as const)(
+  'offers the next class after a verified empty current period only for the same scope (%s/%s)',
+  async (uid, schoolId, offerNext) => {
+    jest.mocked(askCampusAssistant).mockResolvedValueOnce({
+      source: 'device', hasActions: false, content: '依手機課表，這個時段沒有排課。',
+      savedClassRead: { uid, schoolId, updatedAt: null, currentAt: '2026-11-06T05:00:00Z', classes: [] },
+    });
+    const view = render(<QuickCampusEntry uid="alice" schoolId="pu" onOpen={jest.fn()} />);
+    await act(async () => fireEvent.press(view.getByLabelText('詢問手機助理，我現在有課嗎？')));
+    expect(Boolean(view.queryByLabelText('詢問手機助理，下一堂課是什麼？'))).toBe(offerNext);
+    expect(view.queryByLabelText('詢問手機助理，在哪間教室？')).toBeNull();
+  },
+);

@@ -34,6 +34,17 @@ type Analysis = {
   result?: CampusSemanticResult;
 };
 
+function classQuestions(reply?: CampusAssistantMessage, uid?: string | null, schoolId?: string | null) {
+  if (!reply) return ['我現在有課嗎？'];
+  const read = reply.savedClassRead;
+  if (!read || read.uid !== uid || read.schoolId !== schoolId) return [];
+  if (!read.classes.length) return read.currentAt ? ['下一堂課是什麼？'] : [];
+  const questions: string[] = [];
+  if (read.focus !== 'room' && read.classes.some(item => item.room.trim())) questions.push('在哪間教室？');
+  if (read.focus !== 'time') questions.push('幾點下課？');
+  return questions;
+}
+
 export function QuickCampusEntry({
   uid,
   schoolId,
@@ -50,6 +61,7 @@ export function QuickCampusEntry({
   const [query, setQuery] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<CampusAssistantMessage[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState<AskFailure | null>(null);
   const pending = useRef<AbortController | null>(null);
@@ -75,6 +87,8 @@ export function QuickCampusEntry({
   const lastQuestion = history.at(-2);
   const lastReply = history.at(-1);
   const replyAction = getMobileAssistantAction(lastReply?.route);
+  const earlierTurns = Math.max(0, history.length / 2 - 1);
+  const suggestedQuestions = classQuestions(lastReply, uid, schoolId);
   const signedIn = Boolean(uid);
   const canAsk = Boolean(uid && schoolId);
   const modelBusy = shown?.status === 'loading';
@@ -108,8 +122,9 @@ export function QuickCampusEntry({
     }
   }
 
-  async function ask() {
-    if (!uid || !schoolId || !phrase || pending.current) return;
+  async function ask(question = phrase) {
+    if (!uid || !schoolId || !question || pending.current) return;
+    if (question !== phrase) setQuery(question);
     Keyboard.dismiss();
     sequence.current += 1;
     setAnalysis(null);
@@ -118,14 +133,14 @@ export function QuickCampusEntry({
     const controller = new AbortController();
     pending.current = controller;
     const current = () => mounted.current && !controller.signal.aborted && pending.current === controller;
-    const next: CampusAssistantMessage[] = [...history.slice(-18), { role: 'user', content: phrase }];
+    const asked: CampusAssistantMessage = { role: 'user', content: question };
     try {
       const reply = await askCampusAssistant({
-        scope: { uid, schoolId }, messages: next, mode: 'device',
+        scope: { uid, schoolId }, messages: [...history.slice(-18), asked], mode: 'device',
         signal: controller.signal, isCurrent: current,
       });
       if (current()) {
-        setHistory([...next, { ...reply, role: 'assistant' }]);
+        setHistory(previous => [...previous, asked, { ...reply, role: 'assistant' }]);
         setQuery('');
       }
     } catch (error) {
@@ -170,6 +185,29 @@ export function QuickCampusEntry({
         </Text>
       </View>
 
+      {earlierTurns > 0 && (
+        <View style={{ gap: 8 }}>
+          <Pressable
+            accessibilityRole="button"
+            aria-expanded={historyOpen}
+            onPress={() => setHistoryOpen(value => !value)}
+            style={{ alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          >
+            <Ionicons name={historyOpen ? 'chevron-up' : 'chevron-down'} size={16} color={colors.accent} />
+            <Text style={{ ...typography.bodySmall, color: colors.accent }}>
+              {historyOpen ? '收合先前問答' : `查看前 ${earlierTurns} 組問答`}
+            </Text>
+          </Pressable>
+          {historyOpen && history.slice(0, -2).map((message, index) => (
+            <View key={index} style={{ gap: 2 }}>
+              <Text style={{ ...typography.caption, color: colors.muted }}>
+                {message.role === 'user' ? `第 ${index / 2 + 1} 問` : '校園助理'}
+              </Text>
+              <Text selectable style={{ ...typography.bodySmall, color: colors.text }}>{message.content}</Text>
+            </View>
+          ))}
+        </View>
+      )}
       {lastQuestion && lastReply && (
         <View style={{ gap: 6, padding: 12, borderRadius: radius.lg, backgroundColor: colors.surface2 }}>
           <Text style={{ ...typography.caption, color: colors.muted }}>{lastQuestion.content}</Text>
@@ -182,6 +220,19 @@ export function QuickCampusEntry({
               <Text style={{ color: colors.accent, ...typography.bodySmall }}>開啟{replyAction.label}</Text>
             </Pressable>
           )}
+        </View>
+      )}
+      {canAsk && !phrase && suggestedQuestions.length > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {suggestedQuestions.map(question => (
+            <Pressable key={question} accessibilityRole="button" accessibilityLabel={'詢問手機助理，' + question}
+              onPress={() => void ask(question)}
+              style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 6, paddingHorizontal: 12,
+                borderRadius: radius.lg, backgroundColor: colors.surface2 }}>
+              <Ionicons name="chatbubble-outline" size={16} color={colors.accent} />
+              <Text style={{ ...typography.bodySmall, color: colors.accent }}>{question}</Text>
+            </Pressable>
+          ))}
         </View>
       )}
       <View

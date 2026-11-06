@@ -190,6 +190,7 @@ test.each(['account', 'school'])('drops assistant replies and in-flight dictatio
   const ask = jest.mocked(askCampusAssistant);
   const late = deferred<Awaited<ReturnType<typeof askCampusAssistant>>>();
   ask.mockResolvedValueOnce({ content: '上一個身分的課表', source: 'device', hasActions: false });
+  ask.mockResolvedValueOnce({ content: '上一個身分的教室', source: 'device', hasActions: false });
   ask.mockReturnValueOnce(late.promise);
   const view = render(<StudentTodayScreen />);
   const input = await view.findByLabelText('說出或輸入想做的事');
@@ -197,6 +198,10 @@ test.each(['account', 'school'])('drops assistant replies and in-flight dictatio
   await act(async () => fireEvent(input, 'submitEditing'));
   expect(view.getByText('上一個身分的課表')).toBeTruthy();
   fireEvent.changeText(input, '在哪裡？');
+  await act(async () => fireEvent(input, 'submitEditing'));
+  fireEvent.press(view.getByRole('button', { name: '查看前 1 組問答' }));
+  expect(view.getByText('上一個身分的課表')).toBeTruthy();
+  fireEvent.changeText(input, '幾點結束？');
   fireEvent.press(view.getByLabelText('詢問手機助理'));
   const request = ask.mock.lastCall![0];
   mockAuth = change === 'account'
@@ -206,6 +211,8 @@ test.each(['account', 'school'])('drops assistant replies and in-flight dictatio
   await view.findByLabelText('說出或輸入想做的事');
   expect(request.signal?.aborted).toBe(true);
   expect(view.queryByText('上一個身分的課表')).toBeNull();
+  expect(view.queryByText('上一個身分的教室')).toBeNull();
+  expect(view.queryByRole('button', { name: '收合先前問答' })).toBeNull();
   await act(async () => late.resolve({ content: '逾期的回答', source: 'device', hasActions: false }));
   expect(view.queryByText('逾期的回答')).toBeNull();
   expect(mockNavigate).not.toHaveBeenCalled();

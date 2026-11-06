@@ -65,6 +65,25 @@ function mockNuniAsk(
   );
 }
 
+const deviceVoice = { name: '裝置中文', lang: 'zh-TW', localService: true };
+const networkVoice = { name: '雲端中文', lang: 'zh-TW', localService: false };
+class TestUtterance {
+  voice: typeof deviceVoice | null = null;
+  onend?: () => void;
+  onerror?: () => void;
+  constructor(public text: string) {}
+}
+function installSpeech() {
+  const synthesis = {
+    getVoices: vi.fn(() => [networkVoice, { ...deviceVoice, lang: 'zh-CN' }, deviceVoice]),
+    speak: vi.fn<(utterance: TestUtterance) => void>(),
+    cancel: vi.fn(),
+  };
+  vi.stubGlobal('SpeechSynthesisUtterance', TestUtterance);
+  vi.stubGlobal('speechSynthesis', synthesis);
+  return synthesis;
+}
+
 function reply(answer: string) {
   return Response.json({ answer, steps: [], cards: [] });
 }
@@ -80,6 +99,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 it('accepts a spoken question on Today, waits for consent and sends follow-ups in the same conversation', async () => {
+  const synthesis = installSpeech();
   let dictate: (text: string) => void = () => {};
   vi.stubGlobal(
     'SpeechRecognition',
@@ -114,9 +134,20 @@ it('accepts a spoken question on Today, waits for consent and sends follow-ups i
     history: [],
     consent: true,
   });
+  expect(synthesis.speak).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
+  expect(synthesis.speak).toHaveBeenCalledOnce();
+  expect(synthesis.speak.mock.calls[0][0]).toMatchObject({
+    text: '下一堂是資料庫。',
+    voice: deviceVoice,
+  });
   fireEvent.change(field, { target: { value: '在哪裡上課？' } });
+  expect(field.value).toBe('在哪裡上課？');
+  fireEvent.click(screen.getByRole('button', { name: '停止朗讀', pressed: true }));
+  expect(synthesis.cancel).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
   await screen.findByText('在主顧樓。');
+  expect(synthesis.speak).toHaveBeenCalledOnce();
   expect(ask.mock.calls[1][0]).toMatchObject({
     conversationId: ask.mock.calls[0][0].conversationId,
     question: '在哪裡上課？',
@@ -157,10 +188,12 @@ it.each(['account', 'school'])(
 );
 
 it('carries a typed service search into the school assistant on Today without sending it until confirmed', async () => {
+  const synthesis = installSpeech();
+  synthesis.getVoices.mockReturnValue([networkVoice]);
   state.context = null;
   state.uid = 'alice';
   vi.mocked(callCampusAssistant).mockResolvedValue({ content: '你有兩份作業。' });
-  render(entry(false));
+  const view = render(entry(false));
   fireEvent.click(await screen.findByRole('button', { name: '找校園服務' }));
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '今天有幾份作業？' } });
   fireEvent.click(screen.getByRole('button', { name: '詢問校園助理' }));
@@ -170,6 +203,21 @@ it('carries a typed service search into the school assistant on Today without se
   expect(callCampusAssistant).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
   await screen.findByText('你有兩份作業。');
+  const play = screen.getByRole('button', { name: '朗讀回覆' });
+  expect(synthesis.speak).not.toHaveBeenCalled();
+  fireEvent.click(play);
+  expect(await screen.findByText(/沒有可用的中文朗讀語音/)).toBeTruthy();
+  expect(synthesis.speak).not.toHaveBeenCalled();
+  synthesis.getVoices.mockReturnValue([networkVoice, deviceVoice]);
+  fireEvent.click(play);
+  expect(synthesis.speak.mock.calls[0][0]).toMatchObject({
+    text: '你有兩份作業。',
+    voice: deviceVoice,
+  });
+  state.uid = 'bob';
+  view.rerender(entry(false));
+  expect(synthesis.cancel).toHaveBeenCalledOnce();
+  expect(screen.queryByText('你有兩份作業。')).toBeNull();
   expect(vi.mocked(callCampusAssistant).mock.calls[0][0]).toMatchObject({
     userId: 'alice',
     schoolId: 'pu',
@@ -239,3 +287,108 @@ it.each([
     }
   },
 );
+
+it('keeps the visible answer and follow-up input usable without a speech engine', async () => {
+  vi.stubGlobal('speechSynthesis', undefined);
+  vi.stubGlobal('SpeechSynthesisUtterance', undefined);
+  mockNuniAsk(() => reply('下一堂是資料庫。'));
+  render(entry());
+  const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '下一堂課' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  await screen.findByText('下一堂是資料庫。');
+  fireEvent.click(screen.getByRole('button', { name: '朗讀回覆' }));
+  expect(screen.getByText(/此瀏覽器不支援朗讀回覆/)).toBeTruthy();
+  fireEvent.change(field, { target: { value: '教室在哪裡？' } });
+  expect(field.value).toBe('教室在哪裡？');
+});
+
+it('stops a spoken reply on a new submission and ignores late speech events on a different turn', async () => {
+  const synthesis = installSpeech();
+  mockNuniAsk((body) =>
+    reply(body.history instanceof Array && body.history.length ? '在主顧樓。' : '下一堂是資料庫。'),
+  );
+  render(entry());
+  const field = await screen.findByRole('textbox', { name: '問題' });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '下一堂課' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  fireEvent.click(await screen.findByRole('button', { name: '朗讀回覆' }));
+  const staleEnd = synthesis.speak.mock.calls[0][0].onend!;
+  fireEvent.change(field, { target: { value: '在哪裡上課？' } });
+  fireEvent.click(screen.getByRole('button', { name: /^送出/ }));
+  expect(synthesis.cancel).toHaveBeenCalledOnce();
+  await screen.findByText('在主顧樓。');
+  fireEvent.click(screen.getAllByRole('button', { name: '朗讀回覆' })[1]);
+  act(() => staleEnd());
+  expect(screen.getByRole('button', { name: '停止朗讀', pressed: true })).toBeTruthy();
+  const current = synthesis.speak.mock.calls[1][0];
+  expect(current.text).toBe('在主顧樓。');
+  act(() => current.onerror?.());
+  expect(screen.getByText(/朗讀暫時無法使用/)).toBeTruthy();
+  fireEvent.click(screen.getAllByRole('button', { name: '朗讀回覆' })[1]);
+  fireEvent(window, new Event('pagehide'));
+  expect(synthesis.cancel).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+});
+
+it('keeps the draft and ignores a late bootstrap after stopping a question and asking again', async () => {
+  let finishOld!: (response: Response) => void;
+  let firstSignal: AbortSignal | null | undefined;
+  const ask = vi.fn((_body: Record<string, unknown>, signal?: AbortSignal | null) => {
+    if (!firstSignal) {
+      firstSignal = signal;
+      return new Promise<Response>((resolve) => { finishOld = resolve; });
+    }
+    return reply('這週要交資料庫報告。');
+  });
+  mockNuniAsk(ask);
+  render(entry());
+  const first = await screen.findByRole('button', { name: '下一堂課在哪裡？' });
+  fireEvent.click(first);
+  const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '問題' });
+  expect(input.value).toBe('下一堂課在哪裡？');
+  expect(document.activeElement).toBe(input);
+  expect(ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  fireEvent.click(await screen.findByRole('button', { name: '停止回答' }));
+  expect(firstSignal?.aborted).toBe(true);
+  expect(input.value).toBe('下一堂課在哪裡？');
+  expect(input.readOnly).toBe(false);
+  fireEvent.change(input, { target: { value: '這週有哪些作業？' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('這週要交資料庫報告。');
+  await act(async () => finishOld(Response.json({ bootstrap: true, conversationId: 'stale', routeToken: 'stale' })));
+  expect(ask).toHaveBeenCalledTimes(2);
+  expect(ask.mock.calls[1][0].history).toEqual([]);
+  const settings = screen.getByText('本次對話的資料使用設定').closest('details')!;
+  expect(settings.open).toBe(false);
+  settings.open = true;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(input, { target: { value: '還有其他作業嗎？' } });
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '送出' }).disabled).toBe(true);
+});
+
+it('stops a school query without clearing previous answers or letting the cancelled result appear', async () => {
+  state.context = null;
+  state.uid = 'alice';
+  let finishOld!: (value: { content: string }) => void;
+  const ask = vi.mocked(callCampusAssistant)
+    .mockResolvedValueOnce({ content: '上一題的回答' })
+    .mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve; }));
+  render(entry(false));
+  const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '你的問題' });
+  fireEvent.change(field, { target: { value: '問第一題' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('上一題的回答');
+  fireEvent.change(field, { target: { value: '問第二題' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  fireEvent.click(await screen.findByRole('button', { name: '停止回答' }));
+  expect(ask.mock.calls[1][1]?.aborted).toBe(true);
+  await act(async () => finishOld({ content: '舊回覆不應顯示' }));
+  expect(screen.queryByText('舊回覆不應顯示')).toBeNull();
+  expect(field.value).toBe('問第二題');
+  expect(screen.getByText('上一題的回答')).toBeTruthy();
+});

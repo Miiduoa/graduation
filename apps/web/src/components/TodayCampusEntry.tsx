@@ -8,6 +8,7 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useAssistantEnabled } from './AssistantEnabledProvider';
 import { useAuth } from './AuthGuard';
 import { LoginLink } from './LoginLink';
+import { CampusIcon } from './CampusIcon';
 import { QuickCampusEntry } from './QuickCampusEntry';
 import styles from './QuickCampusEntry.module.css';
 
@@ -31,24 +32,37 @@ function TodayConversation({ account, schoolId }: { account: Account; schoolId: 
 
   return (
     <section className={styles.entry} aria-label="今天的校園助理">
-      <div className={styles.heading}>
-        <div>
+      <div>
+        <div className={styles.todayHeading}>
           <h2>問校園助理</h2>
-          {canAsk && (
-            <p className={styles.subtitle}>
-              用語音或文字問，助理會在這裡回答。瀏覽器可能會使用語音服務進行聽寫。
-            </p>
-          )}
+          <button
+            type="button"
+            className={styles.serviceToggle}
+            aria-expanded={searchOpen}
+            aria-controls={searchId}
+            onClick={() => setSearchOpen(!searchOpen)}
+          >
+            <CampusIcon name="search" size={16} />找校園服務
+          </button>
         </div>
-        <button
-          type="button"
-          className={styles.serviceToggle}
-          aria-expanded={searchOpen}
-          aria-controls={searchId}
-          onClick={() => setSearchOpen(!searchOpen)}
-        >
-          找校園服務
-        </button>
+        {canAsk && (
+          <p className={styles.subtitle}>可以打字或開啟麥克風聽寫。聽寫時，瀏覽器可能會使用語音服務。</p>
+        )}
+      </div>
+      <div id={searchId} hidden={!searchOpen}>
+        {searchOpen && (
+          <QuickCampusEntry
+            onAsk={
+              canAsk
+                ? (phrase) => {
+                    setText(phrase);
+                    setSearchOpen(false);
+                    conversation.current?.querySelector('textarea')?.focus();
+                  }
+                : null
+            }
+          />
+        )}
       </div>
       <div ref={conversation}>
         <Suspense fallback={<p role="status">正在開啟校園助理…</p>}>
@@ -70,21 +84,6 @@ function TodayConversation({ account, schoolId }: { account: Account; schoolId: 
             />
           )}
         </Suspense>
-      </div>
-      <div id={searchId} hidden={!searchOpen}>
-        {searchOpen && (
-          <QuickCampusEntry
-            onAsk={
-              canAsk
-                ? (phrase) => {
-                    setText(phrase);
-                    setSearchOpen(false);
-                    conversation.current?.querySelector('textarea')?.focus();
-                  }
-                : null
-            }
-          />
-        )}
       </div>
     </section>
   );
