@@ -426,6 +426,15 @@ it('clears a completed search immediately before a route change can remove the d
 });
 
 
+it('uses the existing Today assistant when its header voice shortcut is pressed', () => {
+  navigation.pathname = '/';
+  const openTodayVoice = vi.fn();
+  render(<AppHeader onOpenVoice={openTodayVoice} />);
+  fireEvent.click(screen.getByRole('button', { name: '開啟校園語音 AI' }));
+  expect(openTodayVoice).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
 it('opens a keyboard-dismissible voice AI entry without leaving the current service', () => {
   const view = render(<AppHeader />);
   fireEvent.click(view.getByRole('button', { name: '開啟校園語音 AI' }));

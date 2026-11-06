@@ -33,6 +33,7 @@ it('keeps camera permission gated and blob previews scoped to classroom routes',
         }
         const classroom = pathname === '/classroom' || pathname.startsWith('/classroom/');
         expect(effective.get('Content-Security-Policy')?.includes('object-src blob:')).toBe(classroom);
+        expect(effective.get('Permissions-Policy')?.includes('microphone=(self)')).toBe(pathname === '/');
         if (classroom) {
           expect(effective.get('Permissions-Policy')?.includes('camera=(self)')).toBe(flag === 'true');
         }

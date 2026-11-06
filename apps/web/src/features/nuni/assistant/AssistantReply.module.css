@@ -706,3 +706,38 @@
     opacity: 0.7;
   }
 }
+
+.inlineShell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.inlineShell .log {
+  max-height: min(48dvh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+}
+
+.inlineShell .composerDock {
+  grid-template-columns: minmax(0, 1fr);
+  position: static;
+  padding: 0;
+  background: none;
+  backdrop-filter: none;
+}
+
+.consentSettings summary {
+  width: fit-content;
+  min-height: 44px;
+  align-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.consentSettings summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}

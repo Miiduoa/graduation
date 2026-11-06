@@ -119,6 +119,12 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: '/',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(self)' },
+        ],
+      },
+      {
         source: '/merchant',
         headers: [
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
