@@ -35,7 +35,11 @@ function savedCopy(stored: 'cloud' | 'local', message: string) {
 export default function ShopDockScreen({ navigation }: ServiceScreenProps = {}) {
   const auth = useAuth();
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('pending');
-  const assignments = (auth.profile?.merchantAssignments ?? []).filter((item) => item.status === 'active');
+  const checkingAssignments = auth.loading || auth.profileLoading || auth.user?.uid !== auth.profile?.uid;
+  const assignmentsError = auth.profile?.merchantAssignmentsError || auth.error;
+  const assignments = checkingAssignments || assignmentsError
+    ? []
+    : (auth.profile?.merchantAssignments ?? []).filter((item) => item.status === 'active');
   const shop = assignments[0] ?? null;
   const [hubCafeteriaId, setHubCafeteriaId] = useState<string | null>(null);
   const countShop = assignments.find((item) => item.cafeteriaId === hubCafeteriaId) ?? shop;
@@ -67,11 +71,18 @@ export default function ShopDockScreen({ navigation }: ServiceScreenProps = {}) 
           ))}
         </View>
       )}
-      {assignments.length === 0 ? (
+      {checkingAssignments ? (
+        <Text style={{ padding: 16, color: theme.colors.muted }}>正在確認門市指派…</Text>
+      ) : assignmentsError ? (
+        <View style={{ padding: 16 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.text }}>{assignmentsError}</Text>
+          <Button text="重新載入門市指派" onPress={() => void auth.refreshProfile()} />
+        </View>
+      ) : assignments.length === 0 ? (
         <View style={{ padding: 16 }}>
           <Text style={{ color: theme.colors.text, fontWeight: '700', marginBottom: 8 }}>這個帳號尚未獲指派門市</Text>
           <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            店員請向門市負責人確認工作帳號與所屬門市。若你是進駐申請人，請使用原申請的 Google 帳號。
+            店員請向所屬單位確認已核發的工作帳號，並由校方管理員指派門市。進駐申請人請使用原申請的 Google 帳號。
           </Text>
           {navigation && (
             <Button
