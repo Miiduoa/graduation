@@ -1,7 +1,7 @@
 'use client';
 
 import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_SECONDS } from '@campus/shared/src/storyVideo';
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -11,7 +11,7 @@ import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { verifiedSocialPoisForSchool } from '@/lib/community/pois';
-import { createStoryId, publishStory } from '@/lib/community/firestore';
+import { createStoryId, publishStory, type StoryPublication } from '@/lib/community/firestore';
 import { storyMediaError, uploadStoryMedia } from '@/lib/community/media';
 import styles from './composer.module.css';
 
@@ -95,20 +95,28 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
   );
   const mediaName = media?.duration ? '影片' : '照片';
   const [checkingMedia, setCheckingMedia] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'publishing' | 'published'>('idle');
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'confirming' | 'publishing' | 'published'>('idle');
+  const [result, setResult] = useState<'none' | 'cancelled' | 'unconfirmed' | 'stopped' | 'draft-preserved'>('none');
+  const [progress, setProgress] = useState({ bytesTransferred: 0, totalBytes: 1 });
   const [error, setError] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
+  const textInput = useRef<HTMLTextAreaElement>(null);
+  const submitButton = useRef<HTMLButtonElement>(null);
   const mounted = useRef(false);
   const selection = useRef(0);
-  const publishing = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  const revision = useRef(0);
+  const publication = useRef<{ payload: StoryPublication; revision: number } | null>(null);
   const storyId = useRef('');
-  const uploadedUrl = useRef('');
+  const uploadedMedia = useRef<{ path: string; url?: string } | null>(null);
   const busy = status !== 'idle';
+  const needsConfirmation = result === 'unconfirmed' || result === 'stopped';
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      request.current?.abort();
     };
   }, []);
   useEffect(
@@ -121,8 +129,8 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
   async function selectMedia(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = '';
-    if (!file || publishing.current) return;
-    const request = ++selection.current;
+    if (!file || request.current) return;
+    const selected = ++selection.current;
     const invalid = storyMediaError(file);
     setError(invalid ?? '');
     setCheckingMedia(!invalid);
@@ -138,78 +146,138 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
         image.src = preview;
         await image.decode();
       }
-      if (!mounted.current || selection.current !== request) {
+      if (!mounted.current || selection.current !== selected) {
         URL.revokeObjectURL(preview);
         return;
       }
+      revision.current++;
       storyId.current = '';
-      uploadedUrl.current = '';
+      uploadedMedia.current = null;
       setMedia({ file, preview, duration });
     } catch (cause) {
       URL.revokeObjectURL(preview);
-      if (mounted.current && selection.current === request)
+      if (mounted.current && selection.current === selected)
         setError(
           file.type === STORY_VIDEO_CONTENT_TYPE && cause instanceof Error
             ? cause.message
             : '無法開啟這張照片，請改選其他圖片。',
         );
     } finally {
-      if (mounted.current && selection.current === request) setCheckingMedia(false);
+      if (mounted.current && selection.current === selected) setCheckingMedia(false);
     }
   }
 
   function removeMedia() {
+    if (request.current) return;
     selection.current++;
+    revision.current++;
     storyId.current = '';
-    uploadedUrl.current = '';
+    uploadedMedia.current = null;
     setCheckingMedia(false);
     setMedia(null);
     setError('');
   }
 
+  function stopRequest() {
+    const controller = request.current;
+    if (!controller) return;
+    const submitted = !!publication.current;
+    controller.abort();
+    request.current = null;
+    setStatus('idle');
+    setResult(submitted ? 'stopped' : 'cancelled');
+    setError('');
+    requestAnimationFrame(() => {
+      if (!mounted.current || request.current) return;
+      if (submitted) submitButton.current?.focus();
+      else textInput.current?.focus();
+    });
+  }
+
   async function publish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (publishing.current || checkingMedia || !user?.uid || (!body.trim() && !media)) return;
-    publishing.current = true;
+    if (request.current || busy || checkingMedia || !user?.uid || (!publication.current && !body.trim() && !media)) return;
+    const controller = new AbortController();
+    request.current = controller;
+    const current = () => mounted.current && request.current === controller && !controller.signal.aborted;
+    const retrying = !!publication.current;
     setError('');
+    if (!retrying) setResult('none');
     try {
-      storyId.current ||= createStoryId();
-      if (media && !uploadedUrl.current) {
-        setStatus('uploading');
-        const uploaded = await uploadStoryMedia({
-          schoolId,
-          storyId: storyId.current,
-          uid: user.uid,
-          file: media.file,
-        });
-        if (!mounted.current) return;
-        uploadedUrl.current = uploaded.url;
+      let entry = publication.current;
+      if (!entry) {
+        const submittedRevision = revision.current;
+        storyId.current ||= createStoryId();
+        if (media && !uploadedMedia.current?.url) {
+          setStatus('uploading');
+          setProgress({ bytesTransferred: 0, totalBytes: media.file.size });
+          const uploaded = await uploadStoryMedia({
+            schoolId,
+            storyId: storyId.current,
+            uid: user.uid,
+            file: media.file,
+            signal: controller.signal,
+            uploadedPath: uploadedMedia.current?.path,
+            onProgress: (next) => {
+              if (current()) setProgress(next);
+            },
+            onUploaded: (path) => {
+              if (current()) uploadedMedia.current = { path };
+            },
+          });
+          if (!current()) return;
+          uploadedMedia.current = uploaded;
+        }
+        entry = {
+          revision: submittedRevision,
+          payload: {
+            storyId: storyId.current,
+            schoolId,
+            authorUid: user.uid,
+            kind: media?.duration ? 'video' : media ? 'image' : 'text',
+            text: body.trim(),
+            allowReplies,
+            mediaUrl: media ? uploadedMedia.current?.url ?? null : null,
+            bgColor,
+            poiId: poi?.id ?? null,
+            poiName: poi?.name ?? null,
+            expiresAtMs: Date.now() + TTL_24H,
+          },
+        };
+        publication.current = entry;
       }
-      setStatus('publishing');
-      await publishStory({
-        storyId: storyId.current,
-        schoolId,
-        authorUid: user.uid,
-        kind: media?.duration ? 'video' : media ? 'image' : 'text',
-        text: body.trim(),
-        allowReplies,
-        mediaUrl: media ? uploadedUrl.current : null,
-        bgColor,
-        poiId: poi?.id ?? null,
-        poiName: poi?.name ?? null,
-        expiresAtMs: Date.now() + TTL_24H,
+      setStatus(retrying ? 'confirming' : 'publishing');
+      await publishStory(entry.payload, {
+        signal: controller.signal,
+        confirmFirst: retrying,
       });
-    } catch {
-      if (mounted.current) {
-        publishing.current = false;
+      if (!current()) return;
+      publication.current = null;
+      if (revision.current !== entry.revision) {
+        storyId.current = '';
+        uploadedMedia.current = null;
         setStatus('idle');
-        setError('發布失敗，你的內容還在。請確認連線與校園帳號後再試一次。');
+        setResult('draft-preserved');
+        requestAnimationFrame(() => {
+          if (mounted.current && !request.current) textInput.current?.focus();
+        });
+      } else {
+        setStatus('published');
+        router.replace(returnHref);
       }
-      return;
-    }
-    if (mounted.current) {
-      setStatus('published');
-      router.replace(returnHref);
+    } catch {
+      if (current()) {
+        setStatus('idle');
+        setResult(publication.current ? 'unconfirmed' : 'none');
+        setError(publication.current
+          ? '尚未確認原版本是否發布。請確認連線與校園帳號後再試一次。'
+          : '媒體尚未完成上傳，草稿已保留。請確認連線後重試。');
+        requestAnimationFrame(() => {
+          if (mounted.current && !request.current) submitButton.current?.focus();
+        });
+      }
+    } finally {
+      if (request.current === controller) request.current = null;
     }
   }
 
@@ -224,10 +292,14 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
             </small>
           </div>
           <textarea
+            ref={textInput}
             id="story-text"
             className="input"
             value={body}
-            onChange={(event) => setBody(event.target.value)}
+            onChange={(event) => {
+              revision.current++;
+              setBody(event.target.value);
+            }}
             aria-describedby="story-count"
             maxLength={MAX_TEXT}
             rows={3}
@@ -262,7 +334,10 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
                   aria-label={name}
                   aria-pressed={bgColor === color}
                   title={name}
-                  onClick={() => setBgColor(color)}
+                  onClick={() => {
+                    if (bgColor !== color) revision.current++;
+                    setBgColor(color);
+                  }}
                 >
                   <span style={{ backgroundColor: color }}>{bgColor === color ? '✓' : ''}</span>
                 </button>
@@ -273,7 +348,10 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
             <input
               type="checkbox"
               checked={allowReplies}
-              onChange={(event) => setAllowReplies(event.target.checked)}
+              onChange={(event) => {
+                revision.current++;
+                setAllowReplies(event.target.checked);
+              }}
             />
             允許同校成員私訊回覆
           </label>
@@ -281,7 +359,10 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
             <button
               className={styles.location}
               type="button"
-              onClick={() => setPoi(undefined)}
+              onClick={() => {
+                revision.current++;
+                setPoi(undefined);
+              }}
               aria-label={`移除地點：${poi.name}`}
             >
               {poi.name} <span aria-hidden="true">×</span>
@@ -331,14 +412,38 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
             ? '正在讀取媒體…'
             : status === 'uploading'
               ? `正在上傳${mediaName}…`
-              : status === 'publishing'
-                ? '正在發布限時動態…'
-                : status === 'published'
-                  ? '限時動態已發布'
-                  : ''}
+              : status === 'confirming'
+                ? '正在確認或重試原版本…'
+                : status === 'publishing'
+                  ? '正在發布限時動態…'
+                  : status === 'published'
+                    ? '限時動態已發布'
+                    : result === 'cancelled'
+                      ? '已取消上傳，文字、媒體與設定已保留。'
+                      : result === 'stopped'
+                        ? '已停止等待，可稍後確認原版本是否發布。'
+                        : result === 'unconfirmed'
+                          ? '重新確認會沿用首次送出的內容，目前修改會保留。'
+                          : result === 'draft-preserved'
+                            ? '上一版已發布，修改後的草稿已保留。'
+                            : ''}
         </span>
+        {status === 'uploading' && (
+          <div className={styles.progress}>
+            <progress
+              aria-label={`上傳${mediaName}進度`}
+              value={progress.bytesTransferred}
+              max={progress.totalBytes}
+            />
+            <span aria-hidden="true">{Math.floor(progress.bytesTransferred / progress.totalBytes * 100)}%</span>
+          </div>
+        )}
         <div className={styles.actionRow}>
-          <Link
+          {status === 'uploading' || status === 'publishing' || status === 'confirming' ? (
+            <button className="btn" type="button" onClick={stopRequest}>
+              {status === 'uploading' ? '取消上傳' : '停止等待'}
+            </button>
+          ) : <Link
             href={returnHref}
             className="btn"
             aria-disabled={busy}
@@ -346,14 +451,17 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
               if (busy) event.preventDefault();
             }}
           >
-            取消
-          </Link>
+            {result === 'draft-preserved' ? '查看限動' : '取消'}
+          </Link>}
           <button
+            ref={submitButton}
             className="btn primary"
             type="submit"
-            disabled={busy || checkingMedia || (!body.trim() && !media)}
+            disabled={busy || checkingMedia || (!needsConfirmation && !body.trim() && !media)}
           >
-            {busy ? (status === 'published' ? '已發布' : '發布中…') : '發布限時動態'}
+            {busy ? (status === 'published' ? '已發布' : '發布中…')
+              : needsConfirmation ? '確認／重試原版本'
+                : result === 'draft-preserved' ? '發布修改後的草稿' : '發布限時動態'}
           </button>
         </div>
       </div>

@@ -214,6 +214,21 @@
   color: var(--danger);
 }
 
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress progress {
+  flex: 1;
+  min-width: 0;
+  height: 10px;
+  accent-color: var(--brand);
+}
+
 @media (max-width: 640px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);

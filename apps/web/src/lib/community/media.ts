@@ -8,7 +8,7 @@
  */
 import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_BYTES } from '@campus/shared/src/storyVideo';
 import { getApps } from 'firebase/app';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 export type CampusMediaScope = 'posts' | 'replies';
 
@@ -78,13 +78,49 @@ export async function uploadStoryMedia(input: {
   storyId: string;
   uid: string;
   file: File;
+  signal?: AbortSignal;
+  uploadedPath?: string;
+  onProgress?: (progress: { bytesTransferred: number; totalBytes: number }) => void;
+  onUploaded?: (path: string) => void;
 }): Promise<UploadedCampusMedia> {
+  input.signal?.throwIfAborted();
   const error = storyMediaError(input.file);
   if (error) throw new Error(error);
   const kind = input.file.type === STORY_VIDEO_CONTENT_TYPE ? 'video' : 'image';
-  return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/${kind}`, input.file, {
-    ownerUid: input.uid,
-  });
+  const path = `schools/${input.schoolId}/stories/${input.storyId}/${kind}`;
+  const storageRef = ref(getStorageClient(), path);
+  const contentType = input.file.type;
+  if (input.uploadedPath !== path) {
+    const task = uploadBytesResumable(storageRef, input.file, {
+      contentType,
+      customMetadata: { ownerUid: input.uid },
+    });
+    let listening = true;
+    const unsubscribe = task.on('state_changed', (snapshot) => {
+      if (listening && !input.signal?.aborted) input.onProgress?.({
+        bytesTransferred: snapshot.bytesTransferred,
+        totalBytes: snapshot.totalBytes,
+      });
+    });
+    const cancel = () => task.cancel();
+    input.signal?.addEventListener('abort', cancel, { once: true });
+    if (input.signal?.aborted) cancel();
+    try {
+      await task;
+      input.signal?.throwIfAborted();
+      input.onUploaded?.(path);
+    } finally {
+      listening = false;
+      unsubscribe();
+      input.signal?.removeEventListener('abort', cancel);
+    }
+  } else {
+    input.onProgress?.({ bytesTransferred: input.file.size, totalBytes: input.file.size });
+  }
+  input.signal?.throwIfAborted();
+  const url = await getDownloadURL(storageRef);
+  input.signal?.throwIfAborted();
+  return { url, path, contentType };
 }
 
 export async function uploadCampusMediaBatch(input: {
