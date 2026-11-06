@@ -765,6 +765,70 @@ describe('firestore security rules', () => {
     await assertFails(bob.collectionGroup('orders').where('userId', '==', 'alice').get());
   });
 
+  describe('campus post authorship and votes', () => {
+    const post = (uid) => testEnv.authenticatedContext(uid).firestore().doc('schools/pu/campusPosts/one');
+    const fresh = { schoolId: 'pu', boardId: 'general', title: 'Notes', anonymous: false,
+      authorUid: 'alice', createdAt: new Date(), likedBy: [], likes: 0 };
+    beforeEach(async () => {
+      await seedFirestore(async (admin) => {
+        await admin.doc('schools/pu/boards/general').set({ mods: ['mod'] });
+        for (const uid of ['alice', 'bob', 'mod']) {
+          await admin.doc('schools/pu/members/' + uid).set({ status: 'active', role: 'member' });
+        }
+      });
+    });
+
+    test('creation cannot attribute likes to other students', async () => {
+      await assertFails(post('alice').set({ ...fresh, likes: 1, likedBy: ['bob'] }));
+      await assertSucceeds(post('alice').set(fresh));
+    });
+
+    test('authors and moderators can edit content without changing public identity', async () => {
+      await assertSucceeds(post('alice').set(fresh));
+      for (const uid of ['alice', 'mod']) {
+        await assertSucceeds(post(uid).update({ title: 'Edited by ' + uid }));
+        for (const patch of [{ authorUid: 'bob' }, { schoolId: 'other' }, { anonymous: true }, { aliasSnapshot: 'bob' }]) {
+          await assertFails(post(uid).update(patch));
+        }
+      }
+      const reply = (uid) => post(uid).collection('replies').doc('one');
+      await assertFails(reply('alice').set({ anonymous: 'false', authorUid: 'alice', content: 'Reply' }));
+      await assertFails(reply('alice').set({ anonymous: false, authorUid: 'alice', schoolId: 'other', content: 'Reply' }));
+      await assertSucceeds(reply('alice').set({ anonymous: false, authorUid: 'alice', content: 'Reply' }));
+      for (const uid of ['alice', 'mod']) {
+        await assertSucceeds(reply(uid).update({ content: 'Edited by ' + uid }));
+        for (const patch of [{ authorUid: 'bob' }, { schoolId: 'other' }, { anonymous: true }, { aliasSnapshot: 'bob' }]) {
+          await assertFails(reply(uid).update(patch));
+        }
+      }
+      const anonymous = post('alice').parent.doc('anonymous');
+      const { authorUid, ...unattributed } = fresh;
+      await assertSucceeds(anonymous.set({ ...unattributed, anonymous: true, aliasSnapshot: '匿名同學' }));
+      const moderated = post('mod').parent.doc('anonymous');
+      await assertSucceeds(moderated.update({ title: 'Updated' }));
+      await assertFails(moderated.update({ authorUid: 'bob' }));
+      await assertSucceeds(moderated.delete());
+    });
+
+    test('adding or removing a like cannot swap another voter', async () => {
+      await assertSucceeds(post('alice').set(fresh));
+      await assertSucceeds(post('mod').update({ likes: 1, likedBy: ['mod'] }));
+      await assertFails(post('bob').update({ likes: 2, likedBy: ['alice', 'bob'] }));
+      await assertSucceeds(post('bob').update({ likes: 2, likedBy: ['mod', 'bob'] }));
+      await assertFails(post('bob').update({ likes: 1, likedBy: ['alice'] }));
+      await assertSucceeds(post('bob').update({ likes: 1, likedBy: ['mod'] }));
+    });
+
+    test('post owners and moderators cannot bypass vote checks through content edits', async () => {
+      await assertSucceeds(post('alice').set(fresh));
+      for (const uid of ['alice', 'mod']) {
+        await assertFails(post(uid).update({ title: 'Edited', likes: 20, likedBy: ['bob'] }));
+        await assertFails(post(uid).update({ likedBy: ['bob'] }));
+      }
+      await assertSucceeds(post('alice').update({ likes: 1, likedBy: ['alice'] }));
+    });
+  });
+
   test('deny group post impersonation on create', async () => {
     await seedFirestore(async (db) => {
       await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });
@@ -2246,9 +2310,15 @@ describe('attendance transactions on Firestore', () => {
     currentTime = Date.now();
     notifications = 0;
     handlers = createLiveSessionHandlers({ db, now: () => currentTime, notifyStarted: async () => { notifications++; } });
-    await db.doc(base).set({ name: '交易測試課程' });
-    await db.doc(`${base}/members/teacher`).set({ role: 'instructor', status: 'active' });
-    for (const uid of ['alice', 'bob', 'carol']) await db.doc(`${base}/members/${uid}`).set({ role: 'student', status: 'active', displayName: uid });
+    const batch = db.batch();
+    batch.set(db.doc(base), { name: '交易測試課程', type: 'course', schoolId: 'school-one' });
+    for (const uid of ['teacher', 'alice', 'bob', 'carol']) {
+      batch.set(db.doc(`schools/school-one/members/${uid}`), { status: 'active' });
+      batch.set(db.doc(`${base}/members/${uid}`), {
+        role: uid === 'teacher' ? 'instructor' : 'student', status: 'active', displayName: uid,
+      });
+    }
+    await batch.commit();
   });
   after(async () => { if (app) await deleteApp(app); });
 
@@ -2357,6 +2427,27 @@ describe('attendance transactions on Firestore', () => {
     const retry = await handlers.startLiveSession(startRequest());
     assert.equal(retry.active, false);
     assert.equal(retry.reused, true);
+  });
+
+  test('revoked school membership blocks receipt replay, new check-ins and instructor changes', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    const first = await handlers.joinLiveSession(request(session));
+    const attendance = sessionDoc(session, 'attendanceSessions');
+    const batch = db.batch();
+    for (const uid of ['alice', 'bob', 'teacher']) {
+      batch.update(db.doc(`schools/school-one/members/${uid}`), { status: 'inactive' });
+      batch.set(db.doc(`schools/other-school/members/${uid}`), { status: 'active' });
+    }
+    await batch.commit();
+    await assert.rejects(handlers.joinLiveSession(request(session)), { code: 'permission-denied' });
+    await assert.rejects(handlers.joinLiveSession(request(session, 'bob')), { code: 'permission-denied' });
+    await assert.rejects(handlers.startLiveSession(startRequest()), { code: 'permission-denied' });
+    await assert.rejects(handlers.endLiveSession(request(session, 'teacher')), { code: 'permission-denied' });
+    assert.equal((await sessionDoc(session, 'liveSessions').get()).data().active, true);
+    assert.equal((await attendance.get()).data().attendeeCount, 1);
+    const records = await attendance.collection('attendanceRecords').get();
+    assert.deepEqual(records.docs.map((doc) => doc.id), ['alice']);
+    assert.equal(records.docs[0].data().checkedInAt.toDate().toISOString(), first.checkedInAt);
   });
 
   test('revocation and token expiry are checked before any new attendance write', async () => {

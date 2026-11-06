@@ -153,6 +153,7 @@ service cloud.firestore {
         && post.boardId is string
         && post.createdAt != null
         && post.title is string
+        && post.get('likes', 0) == 0 && post.get('likedBy', []) == []
         && (
           (post.anonymous == true && !('authorUid' in post) && post.aliasSnapshot is string)
           || (
@@ -162,18 +163,11 @@ service cloud.firestore {
         );
     }
 
-    function campusPostLikesNumeric(d) {
-      return (d.keys().hasAll(['likes']) && d.likes is int) ? d.likes : 0;
-    }
-
-    function campusPostLikedByLen(d) {
-      return (d.keys().hasAll(['likedBy']) && d.likedBy is list) ? d.likedBy.size() : 0;
-    }
-
-    function campusPostViewerHasLiked(d) {
-      return d.keys().hasAll(['likedBy'])
-        && d.likedBy is list
-        && request.auth.uid in d.likedBy;
+    function changesOnlyOwnVote(before, after, oldCount, newCount) {
+      let uid = request.auth.uid;
+      return before is list && after is list && oldCount is int && newCount is int && newCount >= 0
+        && ((!(uid in before) && after == before.concat([uid]) && newCount == oldCount + 1)
+          || (uid in before && after == before.removeAll([uid]) && newCount == oldCount - 1));
     }
 
     function campusPostCommentCountNum(d) {
@@ -186,25 +180,8 @@ service cloud.firestore {
     function campusPostLikeReactionOk() {
       let before = resource.data;
       let after = request.resource.data;
-      // affectedKeys covers add/remove/change; changedKeys alone misses field insert/delete.
-      let diff = after.diff(before).affectedKeys();
-      return diff.hasOnly(['likes', 'likedBy', 'updatedAt'])
-        && after.likedBy is list
-        && campusPostLikesNumeric(after) >= 0
-        && (
-          (
-            campusPostViewerHasLiked(after)
-            && !campusPostViewerHasLiked(before)
-            && campusPostLikesNumeric(after) == campusPostLikesNumeric(before) + 1
-            && campusPostLikedByLen(after) == campusPostLikedByLen(before) + 1
-          )
-          || (
-            !campusPostViewerHasLiked(after)
-            && campusPostViewerHasLiked(before)
-            && campusPostLikesNumeric(after) == campusPostLikesNumeric(before) - 1
-            && campusPostLikedByLen(after) == campusPostLikedByLen(before) - 1
-          )
-        );
+      return after.diff(before).affectedKeys().hasOnly(['likes', 'likedBy', 'updatedAt'])
+        && changesOnlyOwnVote(before.get('likedBy', []), after.likedBy, before.get('likes', 0), after.likes);
     }
 
     /**
@@ -790,11 +767,9 @@ service cloud.firestore {
                   && isSchoolBoardModerator(schoolId, resource.data.boardId)
                 )
               )
-              && request.resource.data.boardId == resource.data.boardId
-              && (
-                !(resource.data.anonymous == true)
-                || request.resource.data.authorUid == null
-              )
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'boardId', 'schoolId', 'authorUid', 'anonymous', 'aliasSnapshot', 'likes', 'likedBy'
+              ])
             )
           );
         allow delete: if isSchoolMember(schoolId)
@@ -804,8 +779,15 @@ service cloud.firestore {
           );
 
         match /replies/{replyId} {
+          function canEditReply() {
+            return isSchoolMember(schoolId)
+              && ((resource.data.anonymous != true && resource.data.authorUid == request.auth.uid)
+                || isSchoolBoardModerator(schoolId, get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.boardId));
+          }
+
           allow read: if isSchoolMember(schoolId);
           allow create: if isSchoolMember(schoolId)
+            && request.resource.data.get('schoolId', schoolId) == schoolId
             && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.boardId is string
             && (
               (
@@ -814,15 +796,15 @@ service cloud.firestore {
                 && request.resource.data.aliasSnapshot is string
               )
               || (
-                request.resource.data.anonymous != true
+                request.resource.data.anonymous == false
                 && request.resource.data.authorUid == request.auth.uid
               )
             );
-          allow update, delete: if isSchoolMember(schoolId)
-            && (
-              (resource.data.anonymous != true && resource.data.authorUid == request.auth.uid)
-              || isSchoolBoardModerator(schoolId, get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.boardId)
-            );
+          allow update: if canEditReply()
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'schoolId', 'authorUid', 'anonymous', 'aliasSnapshot'
+            ]);
+          allow delete: if canEditReply();
         }
       }
 
@@ -1113,14 +1095,10 @@ service cloud.firestore {
           }
 
           function changesOwnVote() {
-            let uid = request.auth.uid;
-            let before = resource.data.get('upvotedBy', []);
-            let after = request.resource.data.upvotedBy;
-            let count = resource.data.get('upvotes', 0);
-            return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes', 'upvotedBy'])
-              && after is list && request.resource.data.upvotes is int
-              && ((!(uid in before) && after == before.concat([uid]) && request.resource.data.upvotes == count + 1)
-                || (uid in before && after == before.removeAll([uid]) && request.resource.data.upvotes == count - 1));
+            let before = resource.data;
+            let after = request.resource.data;
+            return after.diff(before).affectedKeys().hasOnly(['upvotes', 'upvotedBy'])
+              && changesOnlyOwnVote(before.get('upvotedBy', []), after.upvotedBy, before.get('upvotes', 0), after.upvotes);
           }
 
           allow read: if isActiveGroupMember(groupId);
