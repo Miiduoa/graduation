@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
 import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/TodayCampusEntry';
+import { StudentCardEntry } from '@/components/StudentCardEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
 import { AccountIdentity } from '@/components/AccountIdentity';
@@ -260,6 +261,7 @@ export default function HomePage() {
       </a>
       <AppHeader onOpenVoice={() => voiceEntry.current?.openVoice()} />
       <main id="today-content" className={styles.main} tabIndex={-1}>
+        <StudentCardEntry />
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
             <h2 id="session-title">

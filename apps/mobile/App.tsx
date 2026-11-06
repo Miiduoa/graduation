@@ -236,6 +236,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           NotificationSettings: 'notification-settings',
           ProfileEdit: 'profile/edit',
           QRCode: 'qrcode',
+          StudentCard: 'student-card',
           GlobalSearch: 'search',
           Achievements: 'achievements',
           CampusGarden: 'campus-garden',

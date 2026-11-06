@@ -41,8 +41,14 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
+  // Keep directory-only destinations explicit as the service catalog expands.
   expect(serviceRoutes.filter(href => !shortcutSet.has(href)).sort()).toEqual([
-    '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms',
+    '/classroom/material-bookmarks',
+    '/leave',
+    '/leave/review',
+    '/orders',
+    '/school-lms',
+    '/student-card',
   ]);
 });
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getStudentCardService } from '@campus/shared/src/studentCard';
 import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
 import { theme } from '../ui/theme';
@@ -199,6 +200,9 @@ export default function LoginLandingScreen() {
                   ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
                   ['Library', '圖書館', `搜尋${school.name}的館藏與官方服務`],
                   ['SchoolInfo', '學校資訊', '查看官方總機、網站與名錄地址'],
+                  ...(getStudentCardService(school.id)
+                    ? [['StudentCard', '數位學生證', `開啟${school.name}的校方學生證服務`] as const]
+                    : []),
                   ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
                   ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
                   ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],

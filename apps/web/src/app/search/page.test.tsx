@@ -70,7 +70,10 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getByRole('link', { name: /^數位學生證/ }).getAttribute('href')).toBe(
+    '/student-card',
+  );
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
   });

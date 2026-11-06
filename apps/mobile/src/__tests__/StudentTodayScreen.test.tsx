@@ -691,3 +691,10 @@ test('distinguishes a class in progress and shows the timetable before non-urgen
   const headings = view.getAllByRole('header').map(node => node.props.children);
   expect(headings.indexOf('今天課表')).toBeLessThan(headings.indexOf('待處理'));
 });
+
+test('the header opens the student card before the timetable finishes loading', () => {
+  mockTimetable.status = 'loading';
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(view.getByLabelText('開啟數位學生證'));
+  expect(rootNavigateNested).toHaveBeenCalledWith('我的', 'StudentCard');
+});
