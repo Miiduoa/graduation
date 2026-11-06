@@ -307,7 +307,7 @@ function getFollowRedirect(hostname, path, cookies, maxRedirects = 3, extra = {}
 /** Extract normalized visible text from an HTML fragment. */
 function stripTags(html) {
   return puVisibleTextParts(parseFragment(html))
-    .join(' ')
+    .join('')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -1049,6 +1049,7 @@ function puVisibleTextParts(node) {
       (name === 'style' && /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i.test(value)),
     )
   ) return [];
+  if (node.nodeName === 'br') return [' '];
   return (node.childNodes || []).flatMap(puVisibleTextParts);
 }
 

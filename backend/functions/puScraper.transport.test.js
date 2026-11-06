@@ -194,6 +194,16 @@ describe('PU course document recognition', () => {
     });
   });
 
+  test('preserves adjacent inline text in course headers and names while separating line breaks', async () => {
+    const inlineHeader = header.replace('選課代號 course code', '<span>選課<b>代號</b></span>');
+    mockRequests(() => ({ html: student + `<table>${inlineHeader}
+      <tr><td>IM02</td><td>資管</td><td><span><b>資訊</b>管理</span><br>實務</td>
+      <td>必修</td><td>3</td><td>另行公告</td><td></td></tr></table>` }));
+    await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
+      success: true, courses: [{ code: 'IM02', name: '資訊管理 實務', nameEn: '' }],
+    });
+  });
+
   test('extracts visible course text with an HTML parser and decodes entities once', async () => {
     mockRequests(() => ({ html: student + `<table>${header}
       <tr><td>IM01</td><td>資管</td><td>資料庫 &amp; <b>&#x6574;&#x5408;</b> &amp;lt;課程&amp;gt;
