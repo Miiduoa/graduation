@@ -1,5 +1,6 @@
 .entry {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding: clamp(20px, 4vw, 32px);
   margin-bottom: 26px;

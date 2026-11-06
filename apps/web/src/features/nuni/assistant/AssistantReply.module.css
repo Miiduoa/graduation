@@ -707,9 +707,9 @@
   }
 }
 
-
 .inlineShell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
 }
@@ -722,6 +722,7 @@
 }
 
 .inlineShell .composerDock {
+  grid-template-columns: minmax(0, 1fr);
   position: static;
   padding: 0;
   background: none;
