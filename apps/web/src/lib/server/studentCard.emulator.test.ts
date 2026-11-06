@@ -16,6 +16,8 @@ describe.skipIf(!local)('student card presentation', { timeout: 25000 }, () => {
     firebase: { sign_in_provider: 'custom' },
     auth_time: Math.floor(Date.now() / 1000),
   };
+  const verificationId = '12345678-1234-4123-8123-123456789abc';
+  const otherVerificationId = '87654321-4321-4321-9321-cba987654321';
   beforeAll(() => {
     app = initializeApp({ projectId: 'demo-campus-cards' }, 'student-cards');
     db = getFirestore(app);
@@ -67,6 +69,93 @@ describe.skipIf(!local)('student card presentation', { timeout: 25000 }, () => {
     await ref.update({ expiresAt: Date.now() - 1 });
     await expect(redeemStudentCard(db, next.token)).rejects.toThrow('CARD_UNAVAILABLE');
   });
+
+  it('returns the original receipt to retries of the same confirmation only', async () => {
+    const card = await issueStudentCard(db, account, 'pu');
+    const [first, retry] = await Promise.all([
+      redeemStudentCard(db, card.token, verificationId),
+      redeemStudentCard(db, card.token, verificationId),
+    ]);
+    expect(retry).toEqual(first);
+    await expect(redeemStudentCard(db, card.token, verificationId)).resolves.toEqual(first);
+    await expect(redeemStudentCard(db, card.token, otherVerificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+    await expect(redeemStudentCard(db, card.token)).rejects.toThrow('CARD_UNAVAILABLE');
+    const stored = await db.doc('_studentCardPresentations/alice').get();
+    expect(stored.get('receipt')).toEqual(first);
+    expect(JSON.stringify(stored.data())).not.toContain(verificationId);
+    expect(JSON.stringify(stored.data())).not.toContain(account.campusCardStudentId);
+    await stored.ref.update({ 'receipt.studentId': account.campusCardStudentId });
+    await expect(redeemStudentCard(db, card.token, verificationId)).resolves.toEqual(first);
+  });
+
+  it('allows only one of two different concurrent confirmation IDs', async () => {
+    const card = await issueStudentCard(db, account, 'pu');
+    const scans = await Promise.allSettled([
+      redeemStudentCard(db, card.token, verificationId),
+      redeemStudentCard(db, card.token, otherVerificationId),
+    ]);
+    expect(scans.filter((scan) => scan.status === 'fulfilled')).toHaveLength(1);
+    const rejected = scans.find((scan) => scan.status === 'rejected');
+    expect(rejected).toMatchObject({ reason: { message: 'CARD_UNAVAILABLE' } });
+  });
+
+  it('does not let an ID claim a receipt already consumed by a legacy client', async () => {
+    const card = await issueStudentCard(db, account, 'pu');
+    await redeemStudentCard(db, card.token);
+    await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+  });
+
+  it('does not return a saved receipt after the presentation expires', async () => {
+    const card = await issueStudentCard(db, account, 'pu');
+    await redeemStudentCard(db, card.token, verificationId);
+    await db.doc('_studentCardPresentations/alice').update({ expiresAt: Date.now() - 1 });
+    await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+  });
+
+  it('rechecks the current account and membership before returning a saved receipt', async () => {
+    const card = await issueStudentCard(db, account, 'pu');
+    await redeemStudentCard(db, card.token, verificationId);
+    const user = db.doc('users/alice');
+    await user.update({ primarySchoolId: 'thu' });
+    await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+    await user.update({ primarySchoolId: 'pu', role: 'teacher' });
+    await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+    await user.update({ role: 'student', accountDeletionInProgress: true });
+    await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+    await user.update({ accountDeletionInProgress: false });
+    await db.doc('schools/pu/members/alice').delete();
+    await expect(redeemStudentCard(db, card.token, verificationId)).rejects.toThrow(
+      'CARD_UNAVAILABLE',
+    );
+  });
+
+  it.each([undefined, verificationId])(
+    'keeps the issuance fence after a code has been consumed (%s)',
+    async (id) => {
+      const startedBefore = Date.now() - 1_000;
+      const card = await issueStudentCard(db, account, 'pu');
+      const receipt = await redeemStudentCard(db, card.token, id);
+      const ref = db.doc('_studentCardPresentations/alice');
+      await ref.update({ issuedAt: 0 });
+      await expect(
+        issueStudentCard(db, account, 'pu', { requestedAt: startedBefore }),
+      ).rejects.toThrow('PRESENTATION_SUPERSEDED');
+      expect((await ref.get()).get('receipt')).toEqual(receipt);
+    },
+  );
+
   it.each(['removed', 'deleting', 'school-changed', 'primary-school-changed', 'role-changed'])(
     'rechecks account and membership before redemption (%s)',
     async (reason) => {

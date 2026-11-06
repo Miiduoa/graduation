@@ -189,7 +189,7 @@ function Presentation({
       animationType="none"
       presentationStyle="fullScreen"
     >
-      <SafeAreaView style={s.presentation} accessibilityViewIsModal>
+      <SafeAreaView style={s.presentation} accessibilityViewIsModal onAccessibilityEscape={onClose}>
         <ScrollView contentContainerStyle={s.sheet}>
           <Text style={s.sheetBrand}>CAMPUS ONE</Text>
           <Text style={s.sheetSchool}>{schoolName}</Text>

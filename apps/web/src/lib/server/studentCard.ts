@@ -5,8 +5,11 @@ import { getPublicSchoolInfo } from '@campus/shared/src/publicSchoolInfo';
 import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import {
   isStudentCardToken,
+  isStudentCardVerification,
+  isStudentCardVerificationId,
   maskStudentId,
   STUDENT_CARD_TTL_MS,
+  type StudentCardVerification,
 } from '@campus/shared/src/studentCard';
 import { boundedJson } from '@/lib/nuni/server';
 import { getFirebaseAdmin } from './firebaseAdmin';
@@ -65,20 +68,31 @@ async function activeMember(db: Firestore, tx: Transaction, uid: string, school:
   );
 }
 
-export async function issueStudentCard(db: Firestore, account: Account, requestedSchool: unknown) {
+export async function issueStudentCard(
+  db: Firestore,
+  account: Account,
+  requestedSchool: unknown,
+  { requestedAt = Date.now(), signal }: { requestedAt?: number; signal?: AbortSignal } = {},
+) {
+  if (signal?.aborted) fail(409, 'PRESENTATION_CANCELLED');
   const { schoolId, studentId } = cardIdentity(account, requestedSchool, Date.now());
   const token = randomBytes(24).toString('base64url');
   const ref = db.collection(collection).doc(account.uid);
   const expiresAt = await db.runTransaction(async (tx) => {
+    if (signal?.aborted) fail(409, 'PRESENTATION_CANCELLED');
     if (!(await activeMember(db, tx, account.uid, schoolId))) fail(403, 'SCHOOL_SIGN_IN_REQUIRED');
     const previous = await tx.get(ref);
     const now = Date.now();
+    if (signal?.aborted) fail(409, 'PRESENTATION_CANCELLED');
     if (previous.exists && now - previous.get('issuedAt') < 2_000) fail(429, 'TRY_LATER');
+    if (previous.exists && requestedAt <= (previous.get('requestedAt') ?? previous.get('issuedAt')))
+      fail(409, 'PRESENTATION_SUPERSEDED');
     const expiry = now + STUDENT_CARD_TTL_MS;
     tx.set(ref, {
       schoolId,
       maskedId: maskStudentId(studentId),
       digest: tokenHash(token),
+      requestedAt,
       issuedAt: now,
       expiresAt: expiry,
     });
@@ -87,7 +101,16 @@ export async function issueStudentCard(db: Firestore, account: Account, requeste
   return { token, studentId, expiresAt };
 }
 
-export async function redeemStudentCard(db: Firestore, token: string) {
+export async function redeemStudentCard(
+  db: Firestore,
+  token: string,
+  verificationId?: string,
+): Promise<StudentCardVerification> {
+  if (
+    !isStudentCardToken(token) ||
+    (verificationId !== undefined && !isStudentCardVerificationId(verificationId))
+  )
+    fail(400, 'INVALID_INPUT');
   const digest = tokenHash(token);
   const matches = await db.collection(collection).where('digest', '==', digest).limit(1).get();
   const ref = matches.docs[0]?.ref;
@@ -103,8 +126,31 @@ export async function redeemStudentCard(db: Firestore, token: string) {
       fail(410, 'CARD_UNAVAILABLE');
     const verifiedAt = Date.now();
     if (expiresAt <= verifiedAt) fail(410, 'CARD_UNAVAILABLE');
-    tx.delete(record.ref);
-    return { schoolName: school.name, maskedId: record.get('maskedId') as string, verifiedAt };
+    const previousReceipt: unknown = record.get('receipt');
+    if (previousReceipt !== undefined) {
+      if (
+        !verificationId ||
+        record.get('verificationDigest') !== tokenHash(verificationId) ||
+        !isStudentCardVerification(previousReceipt, verifiedAt)
+      )
+        fail(410, 'CARD_UNAVAILABLE');
+      return {
+        schoolName: previousReceipt.schoolName,
+        maskedId: previousReceipt.maskedId,
+        verifiedAt: previousReceipt.verifiedAt,
+      };
+    }
+    const receipt = {
+      schoolName: school.name,
+      maskedId: record.get('maskedId') as string,
+      verifiedAt,
+    };
+    // Keep the issuance fence after use so an older request cannot replace this card.
+    tx.update(record.ref, {
+      receipt,
+      verificationDigest: verificationId ? tokenHash(verificationId) : null,
+    });
+    return receipt;
   });
 }
 
@@ -120,6 +166,7 @@ async function requireCardAdmin() {
 }
 
 export async function studentCardRequest(request: Request, action: 'present' | 'verify') {
+  const requestedAt = Date.now();
   try {
     const body = await boundedJson(request, 1024).catch((error) => {
       if (error instanceof NuniError && error.status === 413) throw error;
@@ -128,10 +175,16 @@ export async function studentCardRequest(request: Request, action: 'present' | '
     if (!body || typeof body !== 'object') fail(400, 'INVALID_INPUT');
     if (action === 'verify') {
       const token = 'token' in body ? body.token : null;
-      if (!isStudentCardToken(token)) fail(400, 'INVALID_INPUT');
+      const verificationId = 'verificationId' in body ? body.verificationId : undefined;
+      if (
+        !isStudentCardToken(token) ||
+        (verificationId !== undefined && !isStudentCardVerificationId(verificationId))
+      )
+        fail(400, 'INVALID_INPUT');
       scanLimit.check(request.headers.get('fly-client-ip') || 'unknown');
-      return json(await redeemStudentCard((await requireCardAdmin()).db, token));
+      return json(await redeemStudentCard((await requireCardAdmin()).db, token, verificationId));
     }
+    if (request.signal.aborted) fail(409, 'PRESENTATION_CANCELLED');
     const bearer = /^Bearer (\S+)$/i.exec(request.headers.get('authorization') ?? '');
     if (!bearer) fail(401, 'SIGN_IN_REQUIRED');
     const admin = await requireCardAdmin();
@@ -140,7 +193,10 @@ export async function studentCardRequest(request: Request, action: 'present' | '
       .catch(() => fail(401, 'SIGN_IN_REQUIRED'));
     presentationLimit.check(account.uid);
     return json(
-      await issueStudentCard(admin.db, account, 'schoolId' in body ? body.schoolId : null),
+      await issueStudentCard(admin.db, account, 'schoolId' in body ? body.schoolId : null, {
+        requestedAt,
+        signal: request.signal,
+      }),
     );
   } catch (error) {
     if (error instanceof NuniError) return json({ error: error.code }, error.status);

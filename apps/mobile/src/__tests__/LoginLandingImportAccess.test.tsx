@@ -7,6 +7,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 const mockNavigation = { navigate: jest.fn() };
 let mockAuth: ReturnType<typeof useNuniSession>;
 let mockProviderAvailable = false;
+let mockSchool = { id: 'pu', name: '靜宜大學' };
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
@@ -17,7 +18,7 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockAuth }));
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
+  useSchool: () => ({ school: mockSchool }),
 }));
 jest.mock('../ui/useThemeStyleSheet', () => ({
   useThemeStyleSheet: <T,>(create: () => T) => create(),
@@ -36,6 +37,7 @@ jest.mock('../components/TodayTimetablePanel', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockProviderAvailable = false;
+  mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
     session: null,
     loading: false,
@@ -102,10 +104,22 @@ it.each([
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
-it.each(['Map', 'StudentCard'])('opens public %s without starting an account or school login', async (route) => {
+it.each(['Map', 'StudentCard'])(
+  'opens public %s without starting an account or school login',
+  async (route) => {
+    const view = await landing();
+    await fireEventAsync.press(view.getByTestId(`public-${route}`));
+    expect(safeNavigate).toHaveBeenCalledTimes(1);
+    expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, route);
+    expect(mockAuth.signIn).not.toHaveBeenCalled();
+  },
+);
+
+it('offers student card verification when the selected school has no official card service', async () => {
+  mockSchool = { id: 'ntu', name: '國立臺灣大學' };
   const view = await landing();
-  await fireEventAsync.press(view.getByTestId(`public-${route}`));
-  expect(safeNavigate).toHaveBeenCalledTimes(1);
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, route);
+  expect(view.getByText('出示學生證，或核對對方的校園身分')).toBeTruthy();
+  await fireEventAsync.press(view.getByTestId('public-StudentCard'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'StudentCard');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
