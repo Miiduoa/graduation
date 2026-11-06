@@ -135,3 +135,13 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 **剩餘邊界：** 校園限時動態讀取目前同時查學校成員及 story 文件，部分公告／活動編輯路徑同時查目標與學校管理員文件；Firebase Storage 規則的 Firestore 文件查詢上限限制了直接再加一份 user 文件的方法。此輪不在這些路徑套用會導致合法請求全面拒絕的第三份文件查詢；後續應比照私有群組檔案的 HTTP 授權入口或調整權限資料模型，單獨對停權及撤權做模擬器驗收。真 GCS staging 與既有 token 移除、Supabase 已簽發 URL、minimatch 相容性、正式發布條件仍未解除。
 
 本輪變更只包含 Storage 規則、隔離測試及本紀錄；沒有寫入正式資料、清理真實 token、改動正式金鑰或部署。
+
+## 2026-11-07：校園貼文 Storage 規則在 CI 的相容性修正
+
+精確 head `83b45fdb9571b3252f56863325cba17dfc3b1753` 的主 CI [42292144769](https://github.com/Miiduoa/graduation/actions/runs/42292144769) 失敗於 Firebase Storage 規則：`a shared upload cannot be replaced at schools/pu/campusPosts/one/photo.jpg` 的首筆合法建立回傳 `storage/unauthorized`；251 個 Firestore/Storage 案例通過 250、失敗 1。CodeQL、Supabase、Python、Mobile Agent、Functions、Web、型別檢查均成功，Maestro 當時仍在進行中。本輪先處理這個實際 CI 失敗，沒有把被拒絕的合法操作改成預期失敗。
+
+原因候選為 `isSchoolMemberStorage()` 先對相同 membership 文件呼叫 `firestore.exists()`，接著 `firestore.get()`，與 `isActiveAccount()` 的 canonical user 文件查詢一起增加了 Storage Security Rules 的跨服務文件查詢負擔。獨立的校園貼文停權案例已明確建立 `users/alice` 文件並通過，失敗的共用檔案覆寫回歸則只建立了學校 membership，符合現有無 user 文件的 legacy 身分相容案例。
+
+本次將 membership 判斷簡化為單次 `firestore.get(...).data.status == 'active'`。文件不存在時評估拒絕，不再另做 `exists()`；`isActiveAccount()` 對已存在帳號的 `deleted/disabled/suspended/inactive` 拒絕保持不變。原有合法建立、不可覆寫、停權與撤權回歸均保留，沒有為了讓 CI 變綠而停用案例。這是有待在新精確 head 的 emulator CI 實測的修補，**不能在執行前宣稱通過**。
+
+**重要剩餘風險：** `isActiveAccount()` 仍為兼容 legacy 無 canonical user 文件的身分而允許缺少 `users/{uid}` 文件的 token。若刪除／停權程序只移除 user 文件卻留下 active school membership，可能延遲撤權；需在實際 deletion workflow 驗證清除學校 membership，或以可信的單一權限來源改造這一資料模型。在完成驗證前不得宣稱所有已刪帳號的舊 token 都已撤銷。此輪未修改正式資料或執行正式發布。
