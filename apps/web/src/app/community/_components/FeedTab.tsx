@@ -119,14 +119,15 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const pageStatusId = useId();
   const pageStatusRef = useRef<HTMLParagraphElement>(null);
   const loadMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const revalidateButtonRef = useRef<HTMLButtonElement>(null);
   const focusPageStatusRef = useRef(false);
   useEffect(() => () => { feedReadVersion.current += 1; }, []);
   useLayoutEffect(() => {
     if (!loadingMorePosts && focusPageStatusRef.current) {
       focusPageStatusRef.current = false;
-      pageStatusRef.current?.focus();
+      (feedReadDenied ? revalidateButtonRef.current : pageStatusRef.current)?.focus();
     }
-  }, [loadingMorePosts]);
+  }, [loadingMorePosts, hasMorePosts, feedReadDenied]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
@@ -210,6 +211,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     '暫時無法讀取校園動態，請確認連線後重試。',
   );
 
+  // The focusable aria-disabled control relies on this synchronous request guard.
   const loadMorePosts = async () => {
     if (!schoolId || loading || refreshing || moreInFlight.current || !hasMorePosts || !feedCursorRef.current) return;
     const cursor = feedCursorRef.current;
@@ -217,6 +219,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     moreInFlight.current = true;
     setLoadingMorePosts(true);
     setMorePostsError('');
+    setPageMessage('');
     try {
       const page = await fetchCampusPostPage(schoolId, cursor);
       if (request !== feedReadVersion.current) return;
@@ -242,6 +245,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     } catch (cause) {
       if (request !== feedReadVersion.current) return;
       if (isPermissionDeniedError(cause)) {
+        focusPageStatusRef.current = document.activeElement === loadMoreButtonRef.current;
         feedCursorRef.current = null;
         setPosts([]);
         setHasMorePosts(false);
@@ -777,7 +781,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       {feedReadDenied && (
         <div className={styles.feedError} role="alert">
           校籍或貼文存取權限已變更，原本載入的貼文已清除。
-          <button type="button" onClick={() => void refresh()}>重新驗證</button>
+          <button ref={revalidateButtonRef} type="button" className="btn" onClick={() => void refresh()}>重新驗證</button>
         </div>
       )}
 
@@ -1024,7 +1028,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
               type="button"
               className="btn"
               style={{ minHeight: 44, maxWidth: '100%', whiteSpace: 'normal' }}
-              disabled={loadingMorePosts || refreshing}
+              aria-disabled={loadingMorePosts || refreshing}
               aria-busy={loadingMorePosts}
               aria-describedby={pageStatusId}
               onClick={() => void loadMorePosts()}

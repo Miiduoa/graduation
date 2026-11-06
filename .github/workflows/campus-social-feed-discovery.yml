@@ -51,7 +51,7 @@ jobs:
         id: install
         run: pnpm install --frozen-lockfile
       - name: Feed discovery interaction, model and service tests
-        run: pnpm --filter web exec vitest run src/app/community/_components/FeedTab.following.test.tsx src/app/community/_components/feedView.test.ts src/lib/community/firestore.feedRead.test.ts src/lib/community/feedPages.test.ts
+        run: pnpm --filter web exec vitest run src/app/community/_components/FeedTab.following.test.tsx src/app/community/_components/FeedTab.pagingFocus.test.tsx src/app/community/_components/feedView.test.ts src/lib/community/firestore.feedRead.test.ts src/lib/community/feedPages.test.ts
       - name: Real SDK and repository rules in an isolated emulator
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
