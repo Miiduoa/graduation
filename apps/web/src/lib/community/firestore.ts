@@ -26,6 +26,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   increment,
   limit,
@@ -470,7 +471,12 @@ function storiesCol(db: Firestore) {
   return collection(db, 'campusStories');
 }
 
+export function createStoryId(): string {
+  return doc(storiesCol(getDb())).id;
+}
+
 export async function publishStory(payload: {
+  storyId: string;
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
@@ -482,7 +488,8 @@ export async function publishStory(payload: {
   expiresAtMs: number;
 }): Promise<string> {
   const db = getDb();
-  const ref = await addDoc(storiesCol(db), {
+  const ref = doc(storiesCol(db), payload.storyId);
+  const content = {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
@@ -491,10 +498,27 @@ export async function publishStory(payload: {
     bgColor: payload.bgColor ?? '#0f172a',
     poiId: payload.poiId ?? null,
     poiName: payload.poiName ?? null,
-    createdAt: serverTimestamp(),
-    expiresAt: payload.expiresAtMs,
-    viewCount: 0,
-  });
+  };
+  try {
+    await setDoc(ref, {
+      ...content,
+      createdAt: serverTimestamp(),
+      expiresAt: payload.expiresAtMs,
+      viewCount: 0,
+    });
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+    // A committed create whose acknowledgement was lost is immutable on retry.
+    const current = await getDocFromServer(ref).catch(() => null);
+    const saved = current?.data();
+    if (
+      !saved ||
+      current?.metadata.hasPendingWrites ||
+      Object.entries(content).some(([field, value]) => saved[field] !== value)
+    ) {
+      throw error;
+    }
+  }
   return ref.id;
 }
 
@@ -532,11 +556,6 @@ export async function markStoryViewed(storyId: string, viewerUid: string) {
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, { viewerUid, viewedAt: serverTimestamp() });
-  try {
-    await updateDoc(doc(db, 'campusStories', storyId), { viewCount: increment(1) });
-  } catch {
-    /* ignore */
-  }
 }
 
 export type StoryAuthorGroup = {

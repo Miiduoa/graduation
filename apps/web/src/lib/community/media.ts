@@ -2,14 +2,14 @@
  * 校園社群 — 圖片上傳 (Web)
  *
  * 與 mobile/services/campusMedia.ts 對齊：
- *  - 路徑：campus/{scope}/{schoolId}/{uid}/{ts}_{rand}.{ext}
+ *  - 限動存於 schools/{schoolId}/stories/{storyId}/image。
  *  - 走 Firebase Storage 直寫
  *  - 接受 File 物件（瀏覽器 <input type="file"> 拿到的）；mobile 是 URI string
  */
-import { getApps, initializeApp } from 'firebase/app';
+import { getApps } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-export type CampusMediaScope = 'posts' | 'stories' | 'replies';
+export type CampusMediaScope = 'posts' | 'replies';
 
 export type UploadedCampusMedia = {
   url: string;
@@ -45,11 +45,38 @@ export async function uploadCampusMedia(input: {
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
   const path = `campus/${input.scope}/${input.schoolId}/${input.uid}/${ts}_${rand}.${ext}`;
-  const storage = getStorageClient();
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, input.file, { contentType: input.file.type || 'image/jpeg' });
+  return uploadMediaFile(path, input.file);
+}
+
+async function uploadMediaFile(
+  path: string,
+  file: File,
+  customMetadata?: Record<string, string>,
+): Promise<UploadedCampusMedia> {
+  const storageRef = ref(getStorageClient(), path);
+  const contentType = file.type || 'image/jpeg';
+  await uploadBytes(storageRef, file, { contentType, ...(customMetadata && { customMetadata }) });
   const url = await getDownloadURL(storageRef);
-  return { url, path, contentType: input.file.type || 'image/jpeg' };
+  return { url, path, contentType };
+}
+
+export function storyImageError(file: File): string | null {
+  if (!file.type.startsWith('image/') || !file.size) return '請選擇一張可讀取的圖片。';
+  if (file.size >= 10 * 1024 * 1024) return '照片須小於 10 MB，請換一張較小的照片。';
+  return null;
+}
+
+export async function uploadStoryImage(input: {
+  schoolId: string;
+  storyId: string;
+  uid: string;
+  file: File;
+}): Promise<UploadedCampusMedia> {
+  const error = storyImageError(input.file);
+  if (error) throw new Error(error);
+  return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/image`, input.file, {
+    ownerUid: input.uid,
+  });
 }
 
 export async function uploadCampusMediaBatch(input: {

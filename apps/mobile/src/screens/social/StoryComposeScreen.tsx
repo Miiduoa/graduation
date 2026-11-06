@@ -8,7 +8,7 @@
  *  - 自動帶入 POI（從 route.params.poiId / poiName，由 RealtimeSocialScreen 傳入）
  *  - 預覽卡片即時反映選色與內容
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,21 +28,31 @@ import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
+import { isProvidenceSchoolId } from '../../data/schoolIds';
+import { findSocialPoi } from '../../services/campusSocialPois';
 import { isFirebaseMockMode } from '../../firebase';
-import { publishStory, type StoryKind } from '../../services/stories';
+import { publishStory, reserveStoryId, type StoryKind } from '../../services/stories';
 import { storage } from '../../services/storage';
-import { uploadCampusMedia } from '../../services/campusMedia';
+import { uploadStoryImage, STORY_IMAGE_LIMIT } from '../../services/mediaUpload';
 
 const BG_COLORS = ['#0f172a', '#7c5dfa', '#0ea5e9', '#10b981', '#f97316', '#ef4444'];
 const TTL_24H = 24 * 3600 * 1000;
 const MAX_TEXT = 220;
 
 export function StoryComposeScreen(props: any) {
+  const { user, loading } = useAuth();
+  const { school } = useSchool();
+  if (loading) return <ActivityIndicator />;
+  return <StoryComposer key={JSON.stringify([user?.uid, school?.id])} {...props} />;
+}
+
+function StoryComposer(props: any) {
   const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
-  const initialPoiId = (props?.route?.params?.poiId as string | undefined) ?? null;
-  const initialPoiName = (props?.route?.params?.poiName as string | undefined) ?? null;
+  const initialPoi = isProvidenceSchoolId(school?.id) ? findSocialPoi(props?.route?.params?.poiId) : null;
+  const initialPoiId = initialPoi?.id ?? null;
+  const initialPoiName = initialPoi?.name ?? null;
 
   const [kind, setKind] = useState<StoryKind>('text');
   const [body, setBody] = useState('');
@@ -53,6 +63,14 @@ export function StoryComposeScreen(props: any) {
   const [poiName, setPoiName] = useState<string | null>(initialPoiName);
   const [busy, setBusy] = useState(false);
 
+  const publishing = useRef(false);
+  const active = useRef(true);
+  const draft = useRef<{ id: string; uri: string | null; url: string | null } | null>(null);
+  React.useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
   useEffect(() => {
     if (initialPoiId) setPoiId(initialPoiId);
     if (initialPoiName) setPoiName(initialPoiName);
@@ -61,7 +79,11 @@ export function StoryComposeScreen(props: any) {
   const pickImage = async () => {
     try {
       const file = await storage.pickImage({ quality: 0.85, aspect: [9, 16] });
-      if (!file) return;
+      if (!file || !active.current) return;
+      if (!file.type?.startsWith('image/') || file.size >= STORY_IMAGE_LIMIT) {
+        Alert.alert('無法使用這張照片', '請選擇小於 10 MB 的圖片。');
+        return;
+      }
       setImageUri(file.uri);
       setImageMime(file.type);
       setKind('image');
@@ -96,45 +118,48 @@ export function StoryComposeScreen(props: any) {
       return;
     }
 
+    if (publishing.current) return;
+    publishing.current = true;
     setBusy(true);
     try {
-      let mediaUrl: string | null = null;
-      if (kind === 'image' && imageUri) {
-        const result = await uploadCampusMedia({
-          scope: 'stories',
-          schoolId: sid,
-          uid,
-          uri: imageUri,
-          mime: imageMime ?? undefined,
-        });
-        mediaUrl = result.url;
+      const uri = kind === 'image' ? imageUri : null;
+      if (!draft.current || draft.current.uri !== uri) {
+        draft.current = { id: reserveStoryId(), uri, url: null };
       }
-
-      await publishStory({
+      const entry = draft.current;
+      if (uri && !entry.url) {
+        entry.url = await uploadStoryImage(sid, entry.id, uid, uri, imageMime ?? '');
+      }
+      if (!active.current) return;
+      await publishStory(entry.id, {
         schoolId: sid,
         authorUid: uid,
         kind,
         text: body.trim(),
-        mediaUrl,
+        mediaUrl: entry.url,
         bgColor,
         poiId,
         poiName,
         expiresAtMs: Date.now() + TTL_24H,
       });
 
-      Alert.alert('已發佈', 'Story 將在 24 小時後自動下架。', [
-        { text: '好的', onPress: () => props?.navigation?.goBack?.() },
-      ]);
+      if (!active.current) return;
+      props?.navigation?.goBack?.();
+      Alert.alert('已發布限時動態', '同校成員可在接下來 24 小時內觀看。');
     } catch (e: any) {
-      Alert.alert('發佈失敗', e?.message ?? String(e));
-    } finally {
+      if (!active.current) return;
+      publishing.current = false;
       setBusy(false);
+      const message = e?.code === 'permission-denied' || e?.code === 'storage/unauthorized'
+        ? '目前沒有發布權限，請確認登入帳號與學校。'
+        : e?.code || !e?.message ? '請確認網路連線後再試一次，草稿已保留。' : e.message;
+      Alert.alert('發布失敗', message);
     }
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32 }}>
+      <ScrollView pointerEvents={busy ? 'none' : 'auto'} contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32 }}>
         {/* ─── Preview ─── */}
         <Text style={styles.label}>預覽</Text>
         <View style={[styles.preview, { backgroundColor: kind === 'image' ? '#000' : bgColor }]}>
@@ -147,12 +172,12 @@ export function StoryComposeScreen(props: any) {
                 {body.trim()}
               </Text>
             </View>
-          ) : (
+          ) : kind === 'text' ? (
             <View style={styles.previewPlaceholder}>
               <Ionicons name="bulb-outline" size={18} color="rgba(255,255,255,0.8)" />
               <Text style={styles.previewPlaceholderTxt}>內容會即時顯示在這裡</Text>
             </View>
-          )}
+          ) : null}
           {poiName ? (
             <View style={styles.previewPoi}>
               <Ionicons name="location" size={11} color="#fff" />
@@ -226,10 +251,10 @@ export function StoryComposeScreen(props: any) {
           {busy ? (
             <ActivityIndicator color={theme.colors.onAccent} />
           ) : (
-            <Text style={styles.btnTx}>發佈 Story</Text>
+            <Text style={styles.btnTx}>發布限時動態</Text>
           )}
         </Pressable>
-        <Text style={styles.hintMuted}>Story 24 小時後自動下架。建議：圖文皆可，會出現在「即時」分頁與動態頂端 Story Strip。</Text>
+        <Text style={styles.hintMuted}>發布後，同校成員可在動態列和「即時」觀看 24 小時。</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

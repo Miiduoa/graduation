@@ -94,6 +94,7 @@ jobs:
             src/__tests__/usePushNotifications.test.ts \
             src/__tests__/personalEventReminderTelemetry.test.ts \
             src/__tests__/services/nuniReceiptQuery.test.ts \
+            src/__tests__/services/nuniQuizAssistant.test.ts \
             src/__tests__/StudyAgenda.test.tsx \
             src/__tests__/NuniCourses.test.tsx \
             --runInBand --ci
