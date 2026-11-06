@@ -76,7 +76,7 @@ export default function ShopDockScreen({ navigation }: ServiceScreenProps = {}) 
           {navigation && (
             <Button
               text="前往店家進駐與門市管理"
-              onPress={() => safeNavigate(navigation, 'NuniWorkspace', { tab: 'merchant' })}
+              onPress={() => void safeNavigate(navigation, 'NuniWorkspace', { tab: 'merchant' })}
             />
           )}
         </View>
