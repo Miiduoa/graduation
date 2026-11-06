@@ -20,6 +20,7 @@ beforeEach(() => {
   change = undefined;
   document.documentElement.removeAttribute('style');
   document.documentElement.removeAttribute('data-theme');
+  document.documentElement.removeAttribute('data-reduced-motion');
   vi.stubGlobal('matchMedia', () => ({
     get matches() {
       return systemDark;
@@ -110,13 +111,15 @@ it('keeps rendering when storage access is denied', () => {
     },
   });
   try {
+    expect(() => new Function(appearanceBootstrap)()).not.toThrow();
+    expect(document.documentElement.hasAttribute('data-reduced-motion')).toBe(false);
     expect(() => render(<AppearancePreferences />)).not.toThrow();
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   } finally {
     Object.defineProperty(window, 'localStorage', storage);
   }
 });
-it('bootstrap applies only a valid saved theme before hydration', () => {
+it('bootstrap applies a valid saved theme before hydration', () => {
   setPreferences({ theme: 'dark' });
   new Function(appearanceBootstrap)();
   expect(document.documentElement.dataset.theme).toBe('dark');
@@ -124,4 +127,20 @@ it('bootstrap applies only a valid saved theme before hydration', () => {
   localStorage.setItem(webPreferencesStorageKey, 'not json');
   expect(() => new Function(appearanceBootstrap)()).not.toThrow();
   expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+});
+
+it('restores disabled animations before hydration and keeps the setting after mounting', () => {
+  setPreferences({ animations: false });
+  new Function(appearanceBootstrap)();
+  expect(document.documentElement.dataset.reducedMotion).toBe('true');
+  render(<AppearancePreferences />);
+  expect(document.documentElement.dataset.reducedMotion).toBe('true');
+});
+
+it.each([true, 'false', null])('normalizes the saved animation setting %s before hydration', (animations) => {
+  setPreferences({ animations });
+  new Function(appearanceBootstrap)();
+  expect(document.documentElement.dataset.reducedMotion).toBe('false');
+  render(<AppearancePreferences />);
+  expect(document.documentElement.dataset.reducedMotion).toBe('false');
 });
