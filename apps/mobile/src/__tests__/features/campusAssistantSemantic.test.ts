@@ -144,6 +144,21 @@ test.each(['account', 'school', 'cancel'])('discards model-selected reads after 
   expect(httpsCallable).not.toHaveBeenCalled();
 });
 
+test('does not send private context to fallback inference if the session changes after selection', async () => {
+  mockGenerate.mockImplementationOnce(async () => {
+    // The native engine is shared with other screens. A state change may race
+    // with the account/school switch just before fallback generation.
+    mockState.mockImplementation(() => {
+      mockSchool = 'other';
+      return { status: 'ready', modelId: 'qwen2.5-0.5b' };
+    });
+    return selected([]);
+  });
+  await expect(askCampusAssistant(request())).rejects.toMatchObject({ code: 'session-changed' });
+  expect(mockGenerate).toHaveBeenCalledTimes(1); // Selector only; no private fallback prompt.
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
 test('a foreign snapshot never supplies data to a model-selected read', async () => {
   mockGenerate.mockResolvedValueOnce(selected([{ tool: 'assignments' }]));
   const result = await askCampusAssistant({ ...request(), senseSnapshot: { ...snapshot(), userId: 'B' } });
