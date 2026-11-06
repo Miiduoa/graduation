@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { getDocFromServer, onSnapshot, runTransaction } from 'firebase/firestore';
+import { deriveDmConversationId } from './conversationAccess';
 import {
   watchMessagingSession,
   watchPrivateConversations,
@@ -558,7 +559,15 @@ it.each(['unknown', 'system', 'group_invite'])(
   },
 );
 
-it.each(['.', '..', '../other', 'x'.repeat(129)])(
+it('opens existing DM conversation IDs longer than 128 characters', () => {
+  const conversationId = deriveDmConversationId('pu', 'a'.repeat(64), 'b'.repeat(64));
+  expect(conversationId).toHaveLength(135);
+  expect(
+    notificationDestination({ ...notice, type: 'message', data: { conversationId } }),
+  ).toEqual({ href: `/dms/${encodeURIComponent(conversationId)}`, label: '開啟對話' });
+});
+
+it.each(['.', '..', '../other', ''])(
   'rejects malformed private conversation ID %s',
   (conversationId) => {
     expect(

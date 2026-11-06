@@ -705,8 +705,12 @@ export function notificationDestination(
     return { href: '/grades?tab=feedback', label: '查看課業成績與回饋' };
   }
   if (notification.type === 'message') {
-    const conversationId = safeNoticeId(data.conversationId);
-    return conversationId
+    const conversationId = data.conversationId;
+    return typeof conversationId === 'string' &&
+      conversationId.length > 0 &&
+      !conversationId.includes('/') &&
+      conversationId !== '.' &&
+      conversationId !== '..'
       ? { href: `/dms/${encodeURIComponent(conversationId)}`, label: '開啟對話' }
       : null;
   }
