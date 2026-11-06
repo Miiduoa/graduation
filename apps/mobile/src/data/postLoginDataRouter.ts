@@ -15,6 +15,7 @@ import { puCacheGet, puCacheSet } from './puDataCache';
  * 並回傳 PostLoginContext 給前端使用。
  */
 export async function buildPostLoginContext(params: {
+  origin?: PostLoginContext['origin'];
   uid: string;
   schoolId: string;
   /** 從 Firestore users/{uid} 讀出的資料 */
@@ -57,6 +58,7 @@ export async function buildPostLoginContext(params: {
 
   // 5. 依角色組出視角
   const ctx: PostLoginContext = {
+    ...(params.origin && { origin: params.origin }),
     uid: params.uid,
     schoolId: params.schoolId,
     roles,

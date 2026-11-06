@@ -286,7 +286,7 @@ test('real school login exchanges the hosted token, uses its actual UID and imme
   expect((await getAnyCachedCourses())?.courses[0].credits).toBe(1.5);
   expect((await getAnyCachedGrades())?.grades).toEqual(grades);
   expect(syncPostLoginContextFromCaches).toHaveBeenCalledWith(
-    expect.objectContaining({ uid: serverUid }),
+    expect.objectContaining({ uid: serverUid, assertVerifiedSession: expect.any(Function) }),
   );
   expect(puLogin).not.toHaveBeenCalled();
   expect(puFetchCourses).not.toHaveBeenCalled();

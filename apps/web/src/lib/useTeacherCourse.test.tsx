@@ -90,3 +90,9 @@ it('an old permission callback cannot clear the next course data', async () => {
   act(() => oldInvalidate());
   expect(result.current.state?.status).toBe('ready');
 });
+
+it('starts no reads or membership watch until there is a selected campus', () => {
+  renderHook(() => useTeacherCourse('', 'course-a', 'workspace'));
+  expect(loadTeacherWorkspace).not.toHaveBeenCalled();
+  expect(watchTeacherAccess).not.toHaveBeenCalled();
+});
