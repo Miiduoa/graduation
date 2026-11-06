@@ -1653,6 +1653,28 @@ describe('campus story view receipts', () => {
     await assertFails(alice.doc('alice').delete());
   });
 
+  test('changing schools revokes access to old-school receipts even with an active membership', async () => {
+    const alice = dbFor('alice');
+    const author = views(dbFor('author'));
+    await assertSucceeds(views(alice).doc('alice').set(receipt('alice')));
+    await assertSucceeds(legacyViews(alice).doc('alice').set(receipt('alice')));
+    assert.equal((await assertSucceeds(author.limit(10).get())).size, 1);
+
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'author', 'bob']) {
+        await db.doc(`users/${uid}`).update({ schoolId: 'other' });
+        await db.doc(`schools/other/members/${uid}`).set({ status: 'active' });
+      }
+    });
+    await assertFails(author.orderBy('viewedAt', 'desc').limit(10).get({ source: 'server' }));
+    await assertFails(author.doc('alice').get({ source: 'server' }));
+    await assertFails(views(alice).doc('alice').get({ source: 'server' }));
+    await assertFails(legacyViews(alice).doc('alice').get({ source: 'server' }));
+    const bob = dbFor('bob');
+    await assertFails(views(bob).doc('bob').set(receipt('bob')));
+    await assertFails(legacyViews(bob).doc('bob').set(receipt('bob')));
+  });
+
   test('legacy clients can record and check themselves; nobody can list legacy receipts', async () => {
     const mine = legacyViews(dbFor('alice')).doc('alice');
     assert.equal((await assertSucceeds(mine.get())).exists, false);
