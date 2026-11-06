@@ -43,7 +43,8 @@ export function FoodOrders({
   initialOrder: string;
 }) {
   const [state, setState] = useState('');
-  const [cursor, setCursor] = useState<string | undefined>();
+  const [pageCursors, setPageCursors] = useState<string[]>([]);
+  const cursor = pageCursors.at(-1);
   const [selected, setSelected] = useFoodDraft(
     cache,
     `food:orders:${tenantId}:selected`,
@@ -69,6 +70,12 @@ export function FoodOrders({
     };
   }, [orders.data]);
   const detailOpen = !!selected;
+  const nextCursor = orders.data?.nextCursor;
+
+  function changePage(cursors: string[]) {
+    setPageCursors(cursors);
+    listHeadingRef.current?.focus();
+  }
 
   function openOrder(orderId: string, trigger?: HTMLElement | null) {
     returnFocusRef.current = trigger ?? null;
@@ -133,7 +140,7 @@ export function FoodOrders({
           ]}
           onChange={(event) => {
             setState(event.target.value);
-            setCursor(undefined);
+            setPageCursors([]);
           }}
         />
         {orders.loading && <p role="status">正在查詢訂單…</p>}
@@ -167,13 +174,21 @@ export function FoodOrders({
                 ))}
               </div>
             )}
-            <div className={styles.bar}>
-              {cursor && <Button onClick={() => setCursor(undefined)}>回到第一頁訂單</Button>}
-              {orders.data.nextCursor && (
-                <Button onClick={() => setCursor(orders.data!.nextCursor)}>下一頁訂單</Button>
-              )}
-            </div>
           </>
+        )}
+        {(cursor || nextCursor) && (
+          <nav className={styles.bar} aria-label="訂單分頁">
+            <span>第 {pageCursors.length + 1} 頁</span>
+            {pageCursors.length > 1 && (
+              <Button onClick={() => changePage([])}>回到第一頁訂單</Button>
+            )}
+            {cursor && (
+              <Button onClick={() => changePage(pageCursors.slice(0, -1))}>上一頁訂單</Button>
+            )}
+            {nextCursor && !pageCursors.includes(nextCursor) && (
+              <Button onClick={() => changePage([...pageCursors, nextCursor])}>下一頁訂單</Button>
+            )}
+          </nav>
         )}
       </section>
     </div>
