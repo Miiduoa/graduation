@@ -67,17 +67,19 @@ export function CatalogRouteList({
               </span>
               <span>{catalogDirection(sign.direction)}</span>
             </div>
-            <strong className={css.signNumber}>{sign.name}</strong>
-            <p className={css.signDestination}>
-              {sign.destination ? (
-                <>
-                  <span>往</span>
-                  {sign.destination}
-                </>
-              ) : (
-                '終點未提供'
-              )}
-            </p>
+            <div className={css.signDisplay}>
+              <strong className={css.signNumber}>{sign.name}</strong>
+              <p className={css.signDestination}>
+                {sign.destination ? (
+                  <>
+                    <span>往</span>
+                    {sign.destination}
+                  </>
+                ) : (
+                  '終點未提供'
+                )}
+              </p>
+            </div>
           </div>
           <p className={css.signCaption}>臺中市靜態路線資料 · 上車前請核對車頭顯示。</p>
         </Modal>
