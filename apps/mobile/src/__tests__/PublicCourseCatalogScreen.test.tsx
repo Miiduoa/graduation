@@ -89,7 +89,9 @@ test('NTHU clipboard rejection retains selectable import data and unscheduled co
     expect(view.getByText('上課時間未提供')).toBeTruthy();
     expect(view.getAllByText('複製課表匯入資料')).toHaveLength(1);
     fireEvent.press(view.getByText('複製課表匯入資料'));
-    expect((await view.findByLabelText('可複製的課表資料')).props.value).toContain('11510AES 520300');
+    const fallback = await view.findByLabelText('可複製的課表資料');
+    expect(fallback.props.children).toContain('11510AES 520300');
+    expect(fallback.props.selectable).toBe(true);
   } finally { globalThis.fetch = original; }
 });
 

@@ -55,7 +55,7 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
         <Text style={body}>請選取下方資料複製，再到匯入頁貼上。</Text>
-        <TextInput accessibilityLabel="可複製的課表資料" value={csv} multiline editable={false} selectTextOnFocus style={body} />
+        <Text accessibilityLabel="可複製的課表資料" selectable style={body}>{csv}</Text>
       </>}
       {(copied || manualCopy) && <Button text="前往課表匯入" kind="primary" onPress={() => { safeNavigate(navigation, 'PersonalImport'); }} />}
     </View>}
