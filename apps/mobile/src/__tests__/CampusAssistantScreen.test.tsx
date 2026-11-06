@@ -1,4 +1,5 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AIOverlayHost } from '../components/AIOverlayHost';
 import { CampusAssistantScreen } from '../screens/CampusAssistantScreen';
@@ -6,6 +7,9 @@ import { askCampusAssistant, getOnDeviceAssistantReadiness } from '../features/c
 import { confirmCampusAgentWrite } from '../features/campusAssistantActions';
 import { refreshCampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { scheduleCampusAssignmentReminder, cancelCampusAssignmentReminder, getCampusAssignmentReminderStatus } from '../services/campusAssignmentReminders';
+import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
+import { beginSavedCampusPlansSignOutCleanup, endSavedCampusPlansSignOutCleanup } from '../services/savedCampusPlans';
+jest.mock('expo-crypto', () => ({ randomUUID: () => require('crypto').randomUUID() }));
 const mockClose = jest.fn();
 let mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 jest.mock('../app/useAIOverlay', () => ({
@@ -81,7 +85,7 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
   // clearAllMocks does not clear queued mockResolvedValueOnce implementations.
   // Prevent a pending result from one navigation test reaching another account.
@@ -97,6 +101,7 @@ beforeEach(() => {
   mockUpcomingClass = false;
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
+  await AsyncStorage.clear();
 });
 test('failed questions remain editable and retry does not add duplicated history', async () => {
   request
@@ -1397,4 +1402,131 @@ test.each([false, true])('today’s announcement shortcut uses the indicated sou
   fireEvent.press(view.getByText('清除本次校園摘要'));
   fireEvent.press(view.getByRole('tab', { name: '對話' }));
   expect(view.queryByRole('button', { name: /開啟公告，第 2 則/ })).toBeNull();
+});
+
+function resumablePlan(): CampusEvidencePlan {
+  return {
+    title: '今日優先行動', overview: '依手機課表與已同步作業整理。',
+    checkedAt: '2026-11-06T01:00:00.000Z',
+    steps: [
+      { id: 'assignment-0', title: '資料庫期末報告', detail: '資料庫｜11/6 23:59 截止。',
+        priority: 'urgent', evidence: 'authorized-assignments', route: '/classroom',
+        dueAt: '2026-11-06T15:59:00.000Z', groupName: '資料庫' },
+      { id: 'timetable-review', title: '核對今天課表', detail: '下午兩堂課，請確認教室。',
+        priority: 'normal', evidence: 'saved-timetable', route: '/timetable' },
+    ],
+    limitations: ['校方資料可能更新，請重新核對。'],
+    content: '今日優先行動：資料庫期末報告、核對今天課表。',
+  };
+}
+
+async function askForSavedPlan(view: ReturnType<typeof render>, plan = resumablePlan()) {
+  request.mockResolvedValueOnce({ content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan });
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '儲存這份計畫' })));
+}
+
+test('saves a real plan, resumes after remount, and records personal progress without executing a task', async () => {
+  let view = render(<CampusAssistantScreen />);
+  await askForSavedPlan(view);
+  expect(view.getByText('計畫已儲存')).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
+  view.unmount();
+  request.mockClear();
+  jest.mocked(getCampusAssignmentReminderStatus).mockClear();
+
+  view = render(<CampusAssistantScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
+  fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
+  fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
+  const checkbox = view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' });
+  expect(checkbox.props.accessibilityState.checked).toBe(false);
+  await act(async () => fireEvent.press(checkbox));
+  expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(true);
+  expect(request).not.toHaveBeenCalled();
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+  expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
+  expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
+  expect(getCampusAssignmentReminderStatus).not.toHaveBeenCalled();
+  view.unmount();
+
+  view = render(<CampusAssistantScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
+  openCampusTools(view);
+  fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
+  expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(true);
+});
+
+test('saved-plan read failures cannot be shown as an empty shelf or a successful save', async () => {
+  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('disk unavailable'));
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => undefined);
+  openCampusTools(view);
+  expect(view.getByRole('alert')).toBeTruthy();
+  expect(view.queryByText(/尚未儲存計畫/)).toBeNull();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新讀取已儲存計畫' })));
+  expect(view.queryByRole('alert')).toBeNull();
+  fireEvent.press(view.getByRole('tab', { name: '對話' }));
+  jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('disk full'));
+  await askForSavedPlan(view);
+  expect(view.queryByText('計畫已儲存')).toBeNull();
+  expect(view.getByRole('button', { name: '儲存這份計畫' })).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '儲存這份計畫' })));
+  expect(view.getByText('計畫已儲存')).toBeTruthy();
+});
+
+test('account and campus switches hide saved plans, while returning to the original scope restores them', async () => {
+  const view = render(<CampusAssistantScreen />);
+  await askForSavedPlan(view);
+  mockUid = 'B';
+  view.rerender(<CampusAssistantScreen />);
+  await act(async () => undefined);
+  expect(view.queryByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeNull();
+  expect(view.queryByText('資料庫期末報告')).toBeNull();
+  mockUid = 'A'; mockSchool = 'nthu';
+  view.rerender(<CampusAssistantScreen />);
+  await act(async () => undefined);
+  expect(view.queryByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeNull();
+  mockSchool = 'pu';
+  view.rerender(<CampusAssistantScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
+});
+
+test('replanning keeps the old checklist and unsent draft without trusting saved assistant text', async () => {
+  let view = render(<CampusAssistantScreen />);
+  await askForSavedPlan(view);
+  view.unmount();
+  request.mockClear();
+  view = render(<CampusAssistantScreen />);
+  await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '等一下問公車');
+  fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
+  fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
+  await act(async () => fireEvent.press(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' })));
+  request.mockResolvedValueOnce({ content: '新的規劃，尚未儲存。', source: 'device', hasActions: false });
+  jest.mocked(refreshCampusSenseSnapshot).mockRejectedValueOnce(new Error('offline'));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '依目前資料重新規劃' })));
+  expect(view.getByText('新的規劃，尚未儲存。')).toBeTruthy();
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('等一下問公車');
+  expect(request.mock.calls.at(-1)[0].messages).toEqual([{ role: 'user', content: '今天要先處理什麼？' }]);
+  expect(request.mock.calls.at(-1)[0].senseSnapshot).toBeNull();
+  openCampusTools(view);
+  expect(view.getByRole('checkbox', { name: '我已處理：資料庫期末報告' }).props.accessibilityState.checked).toBe(true);
+});
+
+test('a failed sign-out revokes saved-plan UI and an explicit reload can save again', async () => {
+  const view = render(<CampusAssistantScreen />);
+  await askForSavedPlan(view);
+  await act(async () => {
+    await beginSavedCampusPlansSignOutCleanup();
+    endSavedCampusPlansSignOutCleanup();
+  });
+  expect(view.queryByText('計畫已儲存')).toBeNull();
+  expect(view.queryByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeNull();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '儲存這份計畫' })));
+  expect(view.queryByText('計畫已儲存')).toBeNull();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新載入計畫' })));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '儲存這份計畫' })));
+  expect(view.getByText('計畫已儲存')).toBeTruthy();
 });

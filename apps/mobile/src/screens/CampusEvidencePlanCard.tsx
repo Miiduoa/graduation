@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -36,11 +36,19 @@ export function CampusEvidencePlanCard({
   onOpenRoute,
   reminderContext,
   navigation,
+  historical = false,
+  progress,
 }: {
   plan: CampusEvidencePlan;
   disabled: boolean;
   onOpenRoute?: (route: CampusPlanRoute) => void;
   navigation?: Parameters<typeof safeNavigate>[0];
+  /** Saved copies retain their original dates and never restore a live data grant. */
+  historical?: boolean;
+  progress?: {
+    completedStepIds: string[];
+    onToggleStep: (stepId: string, done: boolean) => void;
+  };
   reminderContext?: {
     userId: string;
     schoolId: string;
@@ -48,7 +56,7 @@ export function CampusEvidencePlanCard({
     isCurrent: () => boolean;
   };
 }) {
-  const assignmentAction = (assignment: CampusAssignmentIdentity) => reminderContext && navigation ? (
+  const assignmentAction = (assignment: CampusAssignmentIdentity) => !historical && reminderContext && navigation ? (
     <CampusAssignmentOpenButton
       assignment={assignment}
       context={reminderContext}
@@ -63,12 +71,14 @@ export function CampusEvidencePlanCard({
           {plan.title}
         </Text>
         <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
-          所有步驟都需要本人核對，不會自動提交、修改校園資料或建立行事曆。
+          {progress ? '勾選只記錄你自己的處理進度。作業是否繳交，請到課程頁核對。'
+            : '開啟對應服務確認內容，再決定要處理的事。'}
         </Text>
       </View>
       {plan.steps.map((step, index) => {
-        const priorityColor = step.priority === 'overdue' || step.priority === 'urgent'
+        const priorityColor = historical ? aiTokens.muted : step.priority === 'overdue' || step.priority === 'urgent'
           ? aiTokens.danger : step.priority === 'soon' ? aiTokens.warning : aiTokens.muted;
+        const done = progress?.completedStepIds.includes(step.id) ?? false;
         return (
           <View key={step.id} style={{
             backgroundColor: aiTokens.panel,
@@ -91,7 +101,7 @@ export function CampusEvidencePlanCard({
                   {step.title}
                 </Text>
                 <Text style={{ color: priorityColor, fontSize: 12, fontWeight: '600' }}>
-                  {PRIORITY[step.priority]}
+                  {historical ? '規劃當時：' : ''}{PRIORITY[step.priority]}
                 </Text>
               </View>
             </View>
@@ -111,7 +121,7 @@ export function CampusEvidencePlanCard({
                 onPress={() => onOpenRoute(step.route)}
               />
             ) : null}
-            {reminderContext ? (
+            {!historical && reminderContext ? (
               <CampusAssignmentReminderAction
                 key={step.id + ':' + step.dueAt}
                 step={step}
@@ -121,6 +131,26 @@ export function CampusEvidencePlanCard({
                 isCurrent={reminderContext.isCurrent}
                 disabled={disabled}
               />
+            ) : null}
+            {progress ? (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityLabel={'我已處理：' + step.title}
+                accessibilityState={{ checked: done, disabled }}
+                disabled={disabled}
+                onPress={() => progress.onToggleStep(step.id, !done)}
+                style={{ minHeight: 44, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+              >
+                <View style={{ width: 22, height: 22, borderWidth: 1, borderRadius: 6,
+                  borderColor: done ? aiTokens.success : aiTokens.muted,
+                  backgroundColor: done ? aiTokens.successSoft : aiTokens.surface,
+                  alignItems: 'center', justifyContent: 'center' }}>
+                  {done ? <Text style={{ color: aiTokens.success, fontWeight: '700' }}>✓</Text> : null}
+                </View>
+                <Text style={{ color: done ? aiTokens.success : aiTokens.textSecondary, fontSize: 14 }}>
+                  {done ? '我已處理' : '標記為我已處理'}
+                </Text>
+              </Pressable>
             ) : null}
           </View>
         );
