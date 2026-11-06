@@ -267,52 +267,46 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
         const rows=window.__feedRequests; const denied=rows.findIndex(r=>r.code==='unavailable');
         return denied>=0 && rows[denied].cursor===rows[denied+1]?.cursor;
       });
-    } catch(error) {report.errors.push(label+': '+error.message);await snapshot(label+'-failure.png').catch(()=>{});}
-  }
-  // Keep a full historical list on-screen instead of filtering down to one result.
-  // This separate 245-item session keeps the stress fixture bounded; repeated
-  // emulator navigation can exhaust long-polling connections unrelated to layout.
-  // Verify that deferred rendering preserves the oldest card and return path.
-  for (const [width,height,theme] of [[320,720,'light']]) {
-    const label=width+'-'+theme+':long-list';
-    try {
-      await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-      await begin('?theme='+theme+'&case=long-list-'+width);
-      for (const count of [120,180,240,245]) {
-        await clickButton('載入更多貼文'); await awaitCount(count);
-      }
-      await check(label+':all 245 cards and unique titles remain in the document',()=>{
-        const cards=[...document.querySelectorAll('article')];
-        return cards.length===245 && new Set(cards.map(card=>card.querySelector('h3')?.textContent)).size===245;
-      });
-      await check(label+':native offscreen rendering is deferred',()=>{
-        const cards=[...document.querySelectorAll('article')];
-        return cards.every(card=>{
-          const style=getComputedStyle(card);
-          return style.contentVisibility==='auto' && style.containIntrinsicBlockSize.includes('320px');
+      // Reuse the same 245 real SDK results to stress the entire on-screen list.
+      // No extra emulator sessions are needed after the offline/retry journey.
+      if (label==='320-light') {
+        await call(()=>{const input=document.querySelector('input[type=search]');input.focus();input.select();});
+        await send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
+        await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
+        await until(()=>call(()=>document.querySelector('input[type=search]')?.value==='' && document.querySelectorAll('article').length===245),'full historical list after clearing search');
+        await check(label+':clearing search restores all 245 unique post cards',()=>{
+          const cards=[...document.querySelectorAll('article')];
+          return document.querySelector('input[type=search]').value==='' && cards.length===245 &&
+            new Set(cards.map(card=>card.querySelector('h3')?.textContent)).size===245;
         });
-      });
-      await call(()=>document.querySelectorAll('article')[244].scrollIntoView({block:'center',behavior:'instant'}));
-      await sleep(180);
-      await check(label+':oldest card paints and its post link accepts focus',()=>{
-        const card=document.querySelectorAll('article')[244];
-        const rect=card.getBoundingClientRect();
-        const link=card.querySelector('a[href^="/community/post/"]');
-        const hit=document.elementFromPoint(Math.max(1,rect.left+20),Math.min(innerHeight-1,rect.top+20));
-        link?.focus({preventScroll:true});
-        return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!hit && (card===hit || card.contains(hit)) && document.activeElement===link;
-      });
-      await snapshot(width+'-'+theme+'-long-tail.png');
-      await call(()=>document.querySelectorAll('article')[0].scrollIntoView({block:'center',behavior:'instant'}));
-      await sleep(180);
-      await check(label+':first card remains readable after scrolling back',()=>{
-        const card=document.querySelector('article');
-        const rect=card.getBoundingClientRect();
-        return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!card.querySelector('h3')?.textContent;
-      });
-      await check(label+':no horizontal overflow while all cards are loaded',()=>document.documentElement.scrollWidth<=innerWidth+1);
-      await snapshot(width+'-'+theme+'-long-return.png');
-    } catch(error) {report.errors.push(label+': '+error.message);await snapshot(width+'-'+theme+'-long-failure.png').catch(()=>{});}
+        await check(label+':offscreen rendering is deferred without removing posts',()=>{
+          const cards=[...document.querySelectorAll('article')];
+          return cards.every(card=>{
+            const style=getComputedStyle(card);
+            return style.contentVisibility==='auto' && style.containIntrinsicBlockSize.includes('320px');
+          });
+        });
+        await call(()=>document.querySelectorAll('article')[244].scrollIntoView({block:'center',behavior:'instant'}));
+        await sleep(180);
+        await check(label+':oldest card paints and its post link accepts focus',()=>{
+          const card=document.querySelectorAll('article')[244],rect=card.getBoundingClientRect();
+          const link=card.querySelector('a[href^="/community/post/"]');
+          const hit=document.elementFromPoint(Math.max(1,rect.left+20),Math.min(innerHeight-1,rect.top+20));
+          link?.focus({preventScroll:true});
+          return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!hit &&
+            (card===hit || card.contains(hit)) && document.activeElement===link;
+        });
+        await snapshot('320-light-long-tail.png');
+        await call(()=>document.querySelectorAll('article')[0].scrollIntoView({block:'center',behavior:'instant'}));
+        await sleep(180);
+        await check(label+':first card remains readable after returning',()=>{
+          const card=document.querySelector('article'),rect=card.getBoundingClientRect();
+          return rect.height>100 && rect.top<innerHeight && rect.bottom>0 && !!card.querySelector('h3')?.textContent;
+        });
+        await check(label+':long list has no horizontal overflow',()=>document.documentElement.scrollWidth<=innerWidth+1);
+        await snapshot('320-light-long-return.png');
+      }
+    } catch(error) {report.errors.push(label+': '+error.message);await snapshot(label+'-failure.png').catch(()=>{});}
   }
   // A real authorized result is held after the SDK completes, not replaced with a fake page.
   try {
