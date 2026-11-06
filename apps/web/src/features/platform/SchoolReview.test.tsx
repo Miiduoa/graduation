@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { SchoolReview } from './SchoolReview';
+import { SchoolReview, SchoolReviewContent } from './SchoolReview';
 
 const mocks = vi.hoisted(() => ({
   session: null as null | {
@@ -34,6 +34,25 @@ const principal = {
   isPlatformOperator: true,
 };
 
+const stamp = '2026-11-06T08:00:00.000Z';
+function applicationRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'app-1',
+    state: 'pending',
+    displayName: '待審學校',
+    proposedTenantId: 'pending-school',
+    proposedEmailDomain: 'pending.edu.tw',
+    contactName: '王老師',
+    contactEmail: 'wang@pending.edu.tw',
+    justification: '請協助接入',
+    tenantId: null,
+    tenantState: null,
+    createdAt: stamp,
+    decidedAt: null,
+    ...overrides,
+  };
+}
+
 function schoolRow(tenantId: string, displayName: string) {
   return {
     kind: 'tenant',
@@ -62,26 +81,37 @@ beforeEach(() => {
   mocks.session = { ...principal };
   mocks.loading = false;
   mocks.pendingLogout = false;
-  fetcher.mockReset().mockImplementation(async (url: string) => {
+  let applicationPending = true;
+  let applicationApproved = false;
+  fetcher.mockReset().mockImplementation(async (url: string, options?: RequestInit) => {
     if (String(url).includes('school-applications?scope=pending')) {
       return ok({
-        applications: [
-          {
-            id: 'app-1',
-            displayName: '待審學校',
-            proposedTenantId: 'pending-school',
-            proposedEmailDomain: 'pending.edu.tw',
-            contactName: '王老師',
-            contactEmail: 'wang@pending.edu.tw',
-            justification: '請協助接入',
-          },
-        ],
+        applications: applicationPending ? [applicationRow()] : [],
       });
+    }
+    if (String(url).endsWith('/school-applications/app-1/decision') && options?.method === 'POST') {
+      const input = JSON.parse(String(options.body));
+      applicationPending = false;
+      applicationApproved = input.decision === 'approve';
+      return ok(
+        applicationRow({
+          state: applicationApproved ? 'approved' : 'rejected',
+          tenantId: applicationApproved ? 'pending-school' : null,
+          tenantState: applicationApproved ? 'provisioned' : null,
+          decidedAt: stamp,
+        }),
+      );
     }
     if (String(url).endsWith('/api/platform-admin/schools')) {
       return ok({
-        schools: [schoolRow('ready-school', '待開放學校')],
+        schools: [
+          schoolRow('ready-school', '待開放學校'),
+          ...(applicationApproved ? [schoolRow('pending-school', '待審學校')] : []),
+        ],
       });
+    }
+    if (String(url).endsWith('/schools/ready-school/open')) {
+      return ok({ tenantId: 'ready-school', tenantState: 'open' });
     }
     if (String(url).includes('/api/platform-admin/people?tenantId=')) {
       return ok({
@@ -212,7 +242,8 @@ it('does not restore old schools when their response arrives after a context swi
     return original(url, options);
   });
   const view = render(<SchoolReview />);
-  await screen.findByText('待審學校');
+  await waitFor(() => expect(schoolReads).toBe(1));
+  expect(screen.queryByText('待審學校')).toBeNull();
   mocks.session = { ...principal, context: 'b'.repeat(43) };
   view.rerender(<SchoolReview />);
   await screen.findByText('待開放學校');
@@ -333,19 +364,25 @@ it('opens a provisioned school only after administrator verification and confirm
   );
 });
 
-it('redirects to account login when the nuni session is gone', async () => {
-  const replace = vi.fn();
-  vi.stubGlobal('location', { ...window.location, replace });
-  fetcher.mockResolvedValue(ok({ error: 'SIGN_IN_REQUIRED' }, 401));
-  render(<SchoolReview />);
-  await waitFor(() =>
-    expect(replace).toHaveBeenCalledWith(
-      `/admin/login?returnUrl=${encodeURIComponent('/admin/school-review')}`,
-    ),
-  );
-  expect(String(fetcher.mock.calls[0][0])).toContain('/api/platform-admin/');
-  expect(fetcher.mock.calls.some(([url]) => String(url).startsWith('/auth/platform/'))).toBe(false);
-});
+it.each(['/admin/school-review', '/admin#school-review/app-1'])(
+  'returns an expired review session through administrator login preserving %s',
+  async (path) => {
+    window.history.replaceState(null, '', path);
+    const replace = vi.fn();
+    vi.stubGlobal('location', { ...window.location, replace });
+    fetcher.mockResolvedValue(ok({ error: 'SIGN_IN_REQUIRED' }, 401));
+    render(<SchoolReview />);
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith(
+        `/admin/login?returnUrl=${encodeURIComponent(path)}${path.includes('#') ? '#' : ''}`,
+      ),
+    );
+    expect(String(fetcher.mock.calls[0][0])).toContain('/api/platform-admin/');
+    expect(fetcher.mock.calls.some(([url]) => String(url).startsWith('/auth/platform/'))).toBe(
+      false,
+    );
+  },
+);
 
 it('clears pending applications when the later school lookup rejects operator authority', async () => {
   const original = fetcher.getMockImplementation()!;
@@ -363,15 +400,17 @@ it('blocks opening a school with no active school administrator', async () => {
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url: string, options?: RequestInit) =>
     String(url).includes('/people?tenantId=')
-      ? Promise.resolve(ok({
-          tenantId: 'ready-school',
-          displayName: '待開放學校',
-          tenantState: 'provisioned',
-          hasRoleAdmin: false,
-          roleAdmins: [],
-          people: [],
-          honesty: '依校方授權名單核對',
-        }))
+      ? Promise.resolve(
+          ok({
+            tenantId: 'ready-school',
+            displayName: '待開放學校',
+            tenantState: 'provisioned',
+            hasRoleAdmin: false,
+            roleAdmins: [],
+            people: [],
+            honesty: '依校方授權名單核對',
+          }),
+        )
       : original(url, options),
   );
   render(<SchoolReview />);
@@ -386,15 +425,17 @@ it('rechecks school admin role at confirmation and rejects a revoked role', asyn
   const original = fetcher.getMockImplementation()!;
   fetcher.mockImplementation((url: string, options?: RequestInit) => {
     if (String(url).includes('/people?tenantId=') && ++reads === 2)
-      return Promise.resolve(ok({
-        tenantId: 'ready-school',
-        displayName: '待開放學校',
-        tenantState: 'provisioned',
-        hasRoleAdmin: false,
-        roleAdmins: [],
-        people: [],
-        honesty: '最新校方授權',
-      }));
+      return Promise.resolve(
+        ok({
+          tenantId: 'ready-school',
+          displayName: '待開放學校',
+          tenantState: 'provisioned',
+          hasRoleAdmin: false,
+          roleAdmins: [],
+          people: [],
+          honesty: '最新校方授權',
+        }),
+      );
     return original(url, options);
   });
   render(<SchoolReview />);
@@ -428,5 +469,313 @@ it('keeps the entered review reason when a decision request fails', async () => 
   });
   fireEvent.click(screen.getByRole('button', { name: '確定拒絕申請' }));
   expect(await screen.findByRole('alert')).toBeTruthy();
-  expect((screen.getByLabelText('審核理由') as HTMLTextAreaElement).value).toBe('申請人無法提供有效的學校代表授權');
+  expect((screen.getByLabelText('審核理由') as HTMLTextAreaElement).value).toBe(
+    '申請人無法提供有效的學校代表授權',
+  );
+});
+
+it('continues a confirmed school approval in the same workbench using the returned school', async () => {
+  const onManagePeople = vi.fn();
+  const onManageSchool = vi.fn();
+  render(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="app-1"
+      onManagePeople={onManagePeople}
+      onManageSchool={onManageSchool}
+    />,
+  );
+  expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+  expect(screen.queryByRole('navigation', { name: '營運作業' })).toBeNull();
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '已確認申請文件與校方授權' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確定核准申請' }));
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '設定待審學校的管理員' })).toHaveProperty(
+      'disabled',
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '設定待審學校的管理員' }));
+  expect(onManagePeople).toHaveBeenCalledWith('pending-school');
+  fireEvent.click(screen.getByRole('button', { name: '查看學校設定' }));
+  expect(onManageSchool).toHaveBeenCalledWith('pending-school');
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/open'))).toHaveLength(0);
+});
+
+it('opens only the selected application and keeps another school out of its decision form', async () => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url: string, options?: RequestInit) =>
+    String(url).includes('school-applications?scope=pending')
+      ? Promise.resolve(
+          ok({
+            applications: [
+              applicationRow(),
+              applicationRow({
+                id: 'app-2',
+                displayName: '另一所學校',
+                proposedTenantId: 'another-school',
+              }),
+            ],
+          }),
+        )
+      : original(url, options),
+  );
+  const onSelect = vi.fn();
+  render(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="app-2"
+      onSelect={onSelect}
+    />,
+  );
+  await screen.findByText('另一所學校');
+  expect(screen.queryByText('待審學校')).toBeNull();
+  expect(screen.queryByText('待開放學校')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '核准申請' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '已核對此學校的申請資料' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確定核准申請' }));
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.some(
+        ([url, options]) =>
+          url === '/api/platform-admin/school-applications/app-2/decision' &&
+          options?.method === 'POST',
+      ),
+    ).toBe(true),
+  );
+  await screen.findByRole('alert');
+  expect(fetcher.mock.calls.some(([url]) => String(url).includes('/app-1/decision'))).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '返回申請清單' }));
+  expect(onSelect).toHaveBeenCalledWith(null);
+});
+
+it('does not substitute another application when a bookmarked application is gone', async () => {
+  const onSelect = vi.fn();
+  render(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="missing-case"
+      onSelect={onSelect}
+    />,
+  );
+  await screen.findByText(/這筆申請已處理或不在目前清單中/);
+  expect(screen.queryByText('待審學校')).toBeNull();
+  expect(screen.queryByRole('button', { name: '核准申請' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '返回申請清單' }));
+  expect(onSelect).toHaveBeenCalledWith(null);
+});
+
+it.each([{}, { applications: null }, { applications: [{ id: 'broken' }] }])(
+  'shows a recoverable load error instead of an empty queue for %j',
+  async (badPayload) => {
+    fetcher.mockImplementationOnce(async () => ok(badPayload));
+    render(<SchoolReviewContent context={principal.context} embedded />);
+    await screen.findByRole('alert');
+    expect(screen.queryByText('目前沒有待審申請。')).toBeNull();
+    expect(screen.queryByText('目前沒有已建檔、尚未開放的學校。')).toBeNull();
+    expect(screen.queryByRole('button', { name: '核准申請' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重新讀取審核資料' }));
+    await screen.findByText('待審學校');
+    expect(screen.queryByRole('alert')).toBeNull();
+  },
+);
+
+it('rejects a successful HTTP response for a different school application without offering its next steps', async () => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url: string, options?: RequestInit) =>
+    options?.method === 'POST'
+      ? Promise.resolve(
+          ok(
+            applicationRow({
+              id: 'different-application',
+              state: 'approved',
+              tenantId: 'wrong-school',
+              tenantState: 'provisioned',
+              decidedAt: stamp,
+            }),
+          ),
+        )
+      : original(url, options),
+  );
+  render(<SchoolReviewContent context={principal.context} embedded onManagePeople={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), { target: { value: '核對申請資料已完成' } });
+  fireEvent.click(screen.getByRole('button', { name: '確定核准申請' }));
+  await screen.findByText(/審核回應與這筆申請不一致/);
+  expect(screen.queryByRole('region', { name: '學校審核結果' })).toBeNull();
+  expect((screen.getByLabelText('審核理由') as HTMLTextAreaElement).value).toBe(
+    '核對申請資料已完成',
+  );
+});
+
+it('reports review drafts and opening confirmations to the shared navigation guard', async () => {
+  const onDraftChange = vi.fn();
+  const view = render(
+    <SchoolReviewContent context={principal.context} embedded onDraftChange={onDraftChange} />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(onDraftChange).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole('button', { name: '檢查開通條件' }));
+  await screen.findByRole('button', { name: '確認開通 待開放學校' });
+  expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(onDraftChange).toHaveBeenLastCalledWith(false);
+  fireEvent.click(screen.getByRole('button', { name: '拒絕' }));
+  expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  view.unmount();
+  expect(onDraftChange).toHaveBeenLastCalledWith(false);
+});
+
+it('suspends embedded review data and discards its unfinished confirmation', async () => {
+  const onDraftChange = vi.fn();
+  const view = render(
+    <SchoolReviewContent context={principal.context} embedded onDraftChange={onDraftChange} />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  view.rerender(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      suspended
+      onDraftChange={onDraftChange}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toBe('正在確認管理權限…');
+  expect(screen.queryByText('待審學校')).toBeNull();
+  expect(screen.queryByLabelText('審核理由')).toBeNull();
+  expect(onDraftChange).toHaveBeenLastCalledWith(false);
+});
+
+it('discards the previous school review draft when the workbench changes the selected application', async () => {
+  const original = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url: string, options?: RequestInit) =>
+    String(url).includes('school-applications?scope=pending')
+      ? Promise.resolve(
+          ok({
+            applications: [
+              applicationRow(),
+              applicationRow({
+                id: 'app-2',
+                displayName: '另一所學校',
+                proposedTenantId: 'another-school',
+              }),
+            ],
+          }),
+        )
+      : original(url, options),
+  );
+  const onDraftChange = vi.fn();
+  const view = render(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="app-1"
+      onDraftChange={onDraftChange}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '這是原本案件尚未送出的核准理由' },
+  });
+  expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  view.rerender(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="app-2"
+      onDraftChange={onDraftChange}
+    />,
+  );
+  await screen.findByText('另一所學校');
+  expect(onDraftChange).toHaveBeenLastCalledWith(false);
+  view.rerender(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="app-1"
+      onDraftChange={onDraftChange}
+    />,
+  );
+  await screen.findByText('待審學校');
+  expect(screen.queryByLabelText('審核理由')).toBeNull();
+  expect(screen.getByRole('button', { name: '核准申請' })).toBeTruthy();
+});
+
+it('ignores a completed school decision after the workbench has selected another case', async () => {
+  const original = fetcher.getMockImplementation()!;
+  const pending = deferredResponse();
+  fetcher.mockImplementation((url: string, options?: RequestInit) => {
+    if (options?.method === 'POST') return pending.promise;
+    if (String(url).includes('school-applications?scope=pending'))
+      return Promise.resolve(
+        ok({
+          applications: [
+            applicationRow(),
+            applicationRow({
+              id: 'app-2',
+              displayName: '另一所學校',
+              proposedTenantId: 'another-school',
+            }),
+          ],
+        }),
+      );
+    return original(url, options);
+  });
+  const view = render(
+    <SchoolReviewContent context={principal.context} embedded selectedId="app-1" />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '核准申請' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '已確認原本學校的完整申請文件' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '確定核准申請' }));
+  view.rerender(<SchoolReviewContent context={principal.context} embedded selectedId="app-2" />);
+  await screen.findByText('另一所學校');
+  const requests = fetcher.mock.calls.length;
+  await act(async () => {
+    pending.resolve(
+      ok(
+        applicationRow({
+          state: 'approved',
+          tenantId: 'pending-school',
+          tenantState: 'provisioned',
+          decidedAt: stamp,
+        }),
+      ),
+    );
+  });
+  expect(fetcher).toHaveBeenCalledTimes(requests);
+  expect(screen.queryByRole('region', { name: '學校審核結果' })).toBeNull();
+  expect(screen.getByText('另一所學校')).toBeTruthy();
+});
+
+it('keeps an unfinished school review reason when manually refreshing the queue', async () => {
+  const onDraftChange = vi.fn();
+  render(
+    <SchoolReviewContent
+      context={principal.context}
+      embedded
+      selectedId="app-1"
+      onDraftChange={onDraftChange}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '拒絕' }));
+  fireEvent.change(screen.getByLabelText('審核理由'), {
+    target: { value: '仍需校方提供完整的申請與授權文件' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '更新申請清單' }));
+  const reason = await screen.findByLabelText('審核理由');
+  expect(reason).toHaveProperty('value', '仍需校方提供完整的申請與授權文件');
+  expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
