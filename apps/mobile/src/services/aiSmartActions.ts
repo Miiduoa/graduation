@@ -30,6 +30,7 @@ import { resolveActivePostLoginContext } from './postLoginContextFromCaches';
 import type { PUCourse, PUGrade } from './puDirectScraper';
 import type { TCActivity, TCAttendance } from './tronClassClient';
 import { computeRealtimeInsights } from './aiRealtimeAnalytics';
+import { getVerifiedSchoolAiScope, isVerifiedSchoolAiScopeCurrent } from './verifiedSchoolAiScope';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -536,8 +537,18 @@ export async function executeSmartAction(
 ): Promise<SmartActionResult> {
   const handler = HANDLERS[action];
   if (!handler) return { success: false, action, title: '未知', data: `不支援：${action}` };
-  try { return await handler(scope); }
-  catch (e: any) { return { success: false, action, title: '失敗', data: `執行失敗：${e?.message ?? '未知'}` }; }
+  const verifiedScope = getVerifiedSchoolAiScope(scope);
+  const unavailable: SmartActionResult = {
+    success: false, action, title: '學校資料尚未就緒', data: '請先連線目前學校帳號後再查詢。',
+  };
+  if (!verifiedScope) return unavailable;
+  try {
+    const result = await handler(scope);
+    return isVerifiedSchoolAiScopeCurrent(verifiedScope) ? result : unavailable;
+  } catch (e: any) {
+    if (!isVerifiedSchoolAiScopeCurrent(verifiedScope)) return unavailable;
+    return { success: false, action, title: '失敗', data: `執行失敗：${e?.message ?? '未知'}` };
+  }
 }
 
 /**
@@ -548,6 +559,7 @@ export async function detectAndExecuteSmartAction(
   message: string,
   scope?: SmartActionScope,
 ): Promise<SmartActionResult | null> {
+  if (!getVerifiedSchoolAiScope(scope)) return null;
   const intents = detectIntents(message);
   if (intents.length === 0 || intents[0].confidence < 0.5) return null;
   return executeSmartAction(intents[0].action, scope);
