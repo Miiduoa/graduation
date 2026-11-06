@@ -223,22 +223,33 @@ it('keeps the readonly course link when enabled', async () => {
   expect(screen.getByRole('link', { name: '本課作業與教材' }).getAttribute('href')).toBe('/school-lms?course=100&campus=pu');
 });
 
-it('clears the public search immediately on campus change without opening a private school session', async () => {
-  const pending = vi.fn(() => new Promise<Response>(() => {}));
+it.each(['ncnu', 'nthu'])('clears the %s public search when switching campuses without opening a private school session', async (schoolId) => {
+  let finish!: (response: Response) => void;
+  const pending = vi.fn<typeof fetch>(() => new Promise<Response>((resolve) => { finish = resolve; }));
   vi.stubGlobal('fetch', pending);
   try {
     context.uid = null;
-    context.schoolId = 'ncnu';
+    context.schoolId = schoolId;
     const view = render(<SchoolCoursesPage />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '切校前的查詢' } });
     fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
-    expect(screen.getByText(/正在查詢開課資料/)).toBeTruthy();
-    context.schoolId = 'nthu';
+    expect(screen.getByText(/正在查詢「切校前的查詢」開課資料/)).toBeTruthy();
+    expect(pending).toHaveBeenCalledWith(`/api/public-course-catalog?schoolId=${schoolId}&q=${encodeURIComponent('切校前的查詢')}`, expect.anything());
+    context.schoolId = schoolId === 'ncnu' ? 'nthu' : 'ncnu';
+    view.rerender(<SchoolCoursesPage />);
+    const nextName = context.schoolId === 'nthu' ? '國立清華大學' : '國立暨南國際大學';
+    expect(screen.getByRole('heading', { name: `${nextName}開課查詢` })).toBeTruthy();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByText(/正在查詢/)).toBeNull();
+    expect(pending.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await act(async () => { finish(Response.json({ schoolId, sourceUrl: 'https://example.invalid/', courses: [], truncated: false })); });
+    expect(screen.queryByText(/這次查詢沒有找到/)).toBeNull();
+    context.schoolId = 'tw-nchu';
     view.rerender(<SchoolCoursesPage />);
     expect(screen.queryByRole('search', { name: '搜尋校方開課資料' })).toBeNull();
-    expect(screen.getByRole('link', { name: '清大 eLearn ↗' })).toBeTruthy();
-    context.schoolId = 'ncnu';
+    context.schoolId = schoolId;
     view.rerender(<SchoolCoursesPage />);
-    expect(screen.queryByText(/正在查詢開課資料/)).toBeNull();
+    expect(screen.queryByText(/正在查詢/)).toBeNull();
     expect(loadTronClassCourses).not.toHaveBeenCalled();
   } finally {
     vi.unstubAllGlobals();

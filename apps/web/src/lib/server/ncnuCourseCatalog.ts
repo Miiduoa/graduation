@@ -8,7 +8,7 @@ const CSV_URL = 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_list
 const SOURCE_URL = resolveOfficialCourseQueryLink('ncnu')!.url;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MATCH_LIMIT = 50;
-const columns: Record<keyof PublicCatalogCourse, string> = {
+const columns: Record<Exclude<keyof PublicCatalogCourse, 'meetings'>, string> = {
   code: '課號', section: '班別', title: '中文課名', department: '開課系所', teacher: '開課教師',
   time: '時間', room: '地點', semester: '學期', credits: '學分數',
 };
@@ -17,7 +17,7 @@ function parseCatalog(csv: string): PublicCatalogCourse[] {
   const records = readImportDelimitedRecords(csv, ',');
   const header = records?.[0]?.cells;
   if (!records || !header || new Set(header).size !== header.length) throw new Error('Invalid course catalog');
-  const keys = Object.keys(columns) as (keyof PublicCatalogCourse)[];
+  const keys = Object.keys(columns) as (keyof typeof columns)[];
   const indices = keys.map(key => header.indexOf(columns[key]));
   if (indices.includes(-1)) throw new Error('Unrecognized course catalog columns');
 

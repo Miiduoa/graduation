@@ -55,6 +55,7 @@ export async function loadAdvisorCatalog(
 ): Promise<CatalogQueryResult> {
   const capability = resolveCourseCatalogCapability(schoolId);
   if (capability?.providerId === 'ncnu-public') throw new AdvisorError('請開啟「暨大開課查詢」搜尋本學期公開課程。');
+  if (capability?.providerId === 'nthu-public') throw new AdvisorError('請開啟「清大開課查詢」搜尋本學期公開課程。');
   if (!capability) {
     throw new AdvisorError('這所學校的課程查詢尚未開放。');
   }

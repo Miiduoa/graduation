@@ -7,8 +7,9 @@ import { readPersonalImportDraft, readPersonalImportPartialDraft, writePersonalI
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
-import { isNcnuPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import { isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
+import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
 import { formatSemester } from '@/lib/academicRecords';
 import { campusServiceHref } from '@/lib/campusNavigation';
 import styles from '@/components/academic/academic.module.css';
@@ -18,15 +19,20 @@ type SearchResult =
   | { status: 'loading' | 'error'; query: string }
   | { status: 'ready'; query: string; courses: PublicCatalogCourse[]; truncated: boolean };
 
-function CatalogCourse({ course, importHref, review }: {
+function CatalogCourse({ course, schoolId, importHref, review }: {
   course: PublicCatalogCourse;
+  schoolId: PublicCourseCatalogResponse['schoolId'];
   importHref: string;
   review: (course: PublicCatalogCourse, csv: string) => string;
 }) {
   const [notice, setNotice] = useState('');
   const [copy, setCopy] = useState<'idle' | 'copied' | 'manual'>('idle');
-  const meetings = ncnuCourseMeetings(course.time, course.semester);
-  const csv = ncnuTimetableImportCsv(course);
+  const meetings = schoolId === 'ncnu' ? ncnuCourseMeetings(course.time, course.semester) : null;
+  const pairedMeetings = schoolId === 'nthu'
+    ? nthuCourseMeetings(course.meetings ?? [], course.semester)?.map((meeting) => ({ time: meeting.label, room: meeting.room }))
+      ?? (course.meetings?.length ? course.meetings : [{ time: course.time, room: course.room }])
+    : null;
+  const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
 
   async function copyCourse() {
     if (!csv) return;
@@ -42,11 +48,21 @@ function CatalogCourse({ course, importHref, review }: {
       <p className={courseStyles.code}>{formatSemester(course.semester)} · 課號 {course.code || '未提供'} · 班別 {course.section || '未提供'}</p>
       <h3>{course.title}</h3>
       <dl>
-        <div><dt>開課單位</dt><dd>{course.department || '未提供'}</dd></div>
+        <div><dt>{schoolId === 'nthu' ? '開課單位代碼' : '開課單位'}</dt><dd>{course.department || '未提供'}</dd></div>
         <div><dt>授課老師</dt><dd>{course.teacher || '未提供'}</dd></div>
         <div><dt>學分</dt><dd>{course.credits || '未提供'}</dd></div>
-        <div><dt>校方節次</dt><dd>{meetings?.map((meeting) => meeting.label).join('；') || course.time || '未提供'}</dd></div>
-        <div><dt>上課地點</dt><dd>{course.room || '未提供'}</dd></div>
+        {pairedMeetings ? (
+          <div><dt>時間與教室</dt><dd>
+            {pairedMeetings.map((meeting, index) => (
+              <div key={index}>{meeting.time || '時間未提供'} · {meeting.room || '教室未提供'}</div>
+            ))}
+          </dd></div>
+        ) : (
+          <>
+            <div><dt>校方節次</dt><dd>{meetings?.map((meeting) => meeting.label).join('；') || course.time || '未提供'}</dd></div>
+            <div><dt>上課地點</dt><dd>{course.room || '未提供'}</dd></div>
+          </>
+        )}
       </dl>
       {csv && (
         <div className={courseStyles.cardActions}>
@@ -80,7 +96,7 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
   function review(course: PublicCatalogCourse, csv: string): string {
     const { scope } = context;
     if (!context.canPrepareSchoolDraft || scope.schoolId !== schoolId) {
-      return '請先確認目前帳號和所選校園為暨南大學，也可以先複製課表資料。';
+      return `請先確認目前帳號和所選校園為${schoolName}，也可以先複製課表資料。`;
     }
     try {
       if (readPersonalImportDraft(scope) || readPersonalImportPartialDraft(scope)) {
@@ -88,7 +104,7 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       }
       const year = course.semester.slice(0, -1);
       const semester = course.semester.slice(-1);
-      const source = { type: 'paste' as const, name: '暨南大學本學期開設課程' };
+      const source = { type: 'paste' as const, name: `${schoolName}本學期開設課程` };
       const { rows, issues } = parsePersonalImport(csv, { kind: 'timetable', schoolId, academicYear: year, semester, source });
       if (!rows.length || issues.some(issue => issue.severity === 'error')) return '課表資料需要手動核對，請先複製再貼到匯入頁。';
       writePersonalImportDraft(scope, { kind: 'timetable', year, semester, text: csv, source, rows, parseIssues: issues, excluded: [], backup: null });
@@ -128,7 +144,7 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       });
       if (!response.ok) throw new Error();
       const data = await response.json();
-      if (!isNcnuPublicCourseCatalog(data)) throw new Error('Invalid catalog');
+      if (!isPublicCourseCatalog(data, schoolId)) throw new Error('Invalid catalog');
       if (!controller.signal.aborted) setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated });
     } catch {
       if (!controller.signal.aborted) setResult({ status: 'error', query: term });
@@ -167,6 +183,7 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
                 <CatalogCourse
                   key={JSON.stringify([course.semester, course.code, course.section])}
                   course={course}
+                  schoolId={schoolId}
                   importHref={importHref}
                   review={review}
                 />
