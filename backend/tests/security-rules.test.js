@@ -1901,6 +1901,40 @@ describe('storage security rules', () => {
     }
   });
 
+  test('a transfer cannot leave writable story drafts in the previous school', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      // School changes can leave the old membership active until cleanup.
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/other/members/alice').set({ status: 'active' });
+    });
+    const alice = testEnv.authenticatedContext('alice').storage();
+    const putPhoto = (file, content) => alice.ref(file).putString(content, 'raw', {
+      contentType: 'image/jpeg',
+      customMetadata: { ownerUid: 'alice' },
+    });
+    const oldDraft = 'schools/pu/stories/unpublished/image';
+    await assertSucceeds(putPhoto(oldDraft, 'draft before transfer'));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').update({ schoolId: 'other' });
+    });
+    // Both rewriting a known draft and allocating a fresh ID must be rejected.
+    await assertFails(putPhoto(oldDraft, 'overwrite after transfer'));
+    await assertFails(putPhoto('schools/pu/stories/new-draft/image', 'old-school draft'));
+    await assertFails(alice.ref(oldDraft).getMetadata());
+
+    const currentDraft = 'schools/other/stories/new-draft/image';
+    await assertSucceeds(putPhoto(currentDraft, 'current-school draft'));
+
+    // Closing an account must not regain upload access via a still-active member record.
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').update({ accountDeletionInProgress: true });
+    });
+    await assertFails(putPhoto(currentDraft, 'closing account overwrite'));
+    await assertFails(putPhoto('schools/other/stories/another-draft/image', 'closing account new'));
+  });
+
   test('DM attachments reject a transferred member with stale old-school access', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ schoolId: 'pu' });
