@@ -57,6 +57,24 @@ describe('mobile school-scoped feed discovery', () => {
     expect(posts[0].id).toBe('one');
   });
 
+  it('uses the server document-ID tie breaker for latest across loaded pages', () => {
+    const tied: CampusPostDoc[] = [
+      { ...posts[0], id: 'post-a', createdAt: new Date('2026-10-25T00:00:00Z') },
+      { ...posts[1], id: 'post-c' },
+      { ...posts[0], id: 'post-b', createdAt: new Date('2026-10-25T00:00:00Z') },
+    ];
+    const options = {
+      filter: 'all' as const, order: 'latest' as const, search: '',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boards: {}, authors: {},
+    };
+    expect(selectMobileFeedPosts(tied, { ...options, order: 'recommended' })
+      .map((item) => item.id)).toEqual(['post-a', 'post-c', 'post-b']);
+    expect(selectMobileFeedPosts(tied, options).map((item) => item.id))
+      .toEqual(['post-c', 'post-b', 'post-a']);
+    expect(tied.map((item) => item.id)).toEqual(['post-a', 'post-c', 'post-b']);
+  });
+
   it('applies subscription and media filters to the existing results', () => {
     expect(pick({ filter: 'subscribed' })).toEqual(['one']);
     expect(pick({ filter: 'following' })).toEqual(['one']);

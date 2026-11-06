@@ -37,6 +37,24 @@ describe('school-scoped feed discovery', () => {
     expect(select({ order: 'latest' })).toEqual(['newer', 'older']);
     expect(posts.map((post) => post.id)).toEqual(['older', 'newer']);
   });
+  it('uses the server document-ID tie breaker when multiple loaded pages share a timestamp', () => {
+    const tied: CampusPostDoc[] = [
+      { ...posts[0], id: 'post-a', createdAt: new Date('2026-10-25T00:00:00Z') },
+      { ...posts[1], id: 'post-c' },
+      { ...posts[0], id: 'post-b', createdAt: new Date('2026-10-25T00:00:00Z') },
+    ];
+    const options = {
+      filter: 'all' as const, order: 'latest' as const, search: '',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boardNames: {}, authorNames: {},
+    };
+    expect(selectCampusFeedPosts(tied, { ...options, order: 'recommended' })
+      .map((post) => post.id)).toEqual(['post-a', 'post-c', 'post-b']);
+    expect(selectCampusFeedPosts(tied, options).map((post) => post.id))
+      .toEqual(['post-c', 'post-b', 'post-a']);
+    expect(tied.map((post) => post.id)).toEqual(['post-a', 'post-c', 'post-b']);
+  });
+
   it('filters subscriptions and media without introducing another data source', () => {
     expect(select({ filter: 'subscribed' })).toEqual(['older']);
     expect(select({ filter: 'following' })).toEqual(['older']);

@@ -7,6 +7,8 @@ on:
       - 'apps/mobile/src/screens/social/HomeFeedScreen.tsx'
       - 'apps/mobile/src/services/feedPages.ts'
       - 'apps/mobile/src/__tests__/feedPages.test.ts'
+      - 'apps/mobile/src/__tests__/feedDiscoveryModel.test.ts'
+      - 'apps/mobile/src/screens/social/feedDiscoveryModel.ts'
       - 'apps/mobile/src/__tests__/SocialBrowsingScreens.test.tsx'
       - '.github/workflows/campus-mobile-feed-cursor.yml'
   pull_request:
