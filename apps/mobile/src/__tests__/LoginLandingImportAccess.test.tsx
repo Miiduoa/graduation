@@ -61,7 +61,8 @@ it('places the import and account actions before the long public-service list', 
   expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(accountIndex).toBeGreaterThan(importIndex);
   expect(servicesIndex).toBeGreaterThan(accountIndex);
-  expect(view.getAllByTestId(/^public-/)).toHaveLength(10);
+  expect(view.getAllByTestId(/^public-/)).toHaveLength(11);
+  expect(view.getByTestId('public-StudentCard').props.accessibilityLabel).toBe('數位學生證');
   expect(safeNavigate).not.toHaveBeenCalled();
 });
 
@@ -101,10 +102,10 @@ it.each([
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
-it('opens public information without starting an account or school login', async () => {
+it.each(['Map', 'StudentCard'])('opens public %s without starting an account or school login', async (route) => {
   const view = await landing();
-  await fireEventAsync.press(view.getByTestId('public-Map'));
+  await fireEventAsync.press(view.getByTestId(`public-${route}`));
   expect(safeNavigate).toHaveBeenCalledTimes(1);
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, route);
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
