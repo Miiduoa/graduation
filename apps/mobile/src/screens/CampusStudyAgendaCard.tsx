@@ -50,6 +50,7 @@ export function CampusStudyAgendaCard({ agenda, disabled, onOpenRoute, renderAss
               accessibilityRole="button"
               accessibilityLabel={day.label + '逐日安排'}
               accessibilityState={{ expanded, disabled }}
+              aria-expanded={expanded}
               disabled={disabled}
               onPress={() => toggle(day.date)}
               style={{ minHeight: 52, padding: 13, backgroundColor: aiTokens.panel, gap: 5 }}
