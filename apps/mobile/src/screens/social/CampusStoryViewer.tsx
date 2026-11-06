@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   AppState,
   Easing,
@@ -174,13 +175,28 @@ function StorySlide({
   const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
   const playbackActive = playing && !inspecting && !replying;
-  const [loadedImage, setLoadedImage] = useState('');
-  const [failedImage, setFailedImage] = useState('');
   const [imageAttempt, setImageAttempt] = useState(0);
+  const imageSession = useMemo(
+    () => ({ key: JSON.stringify([scope, story.kind, story.mediaUrl, imageAttempt]) }),
+    [scope, story.kind, story.mediaUrl, imageAttempt],
+  );
+  const [imageResult, setImageResult] = useState<{
+    session: typeof imageSession;
+    status: 'loaded' | 'failed';
+  } | null>(null);
+  const currentImage = React.useRef<typeof imageSession | null>(null);
+  React.useLayoutEffect(() => {
+    currentImage.current = imageSession;
+    return () => {
+      currentImage.current = null;
+    };
+  }, [imageSession]);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && failedImage === story.id;
-  const ready = !hasImage || (loadedImage === story.id && !imageFailed);
+  const imageLoaded = imageResult?.session === imageSession && imageResult.status === 'loaded';
+  const imageFailed =
+    hasImage && imageResult?.session === imageSession && imageResult.status === 'failed';
+  const ready = !hasImage || imageLoaded;
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
   const fill = useMemo(() => new Animated.Value(0), [story.id]);
@@ -272,7 +288,9 @@ function StorySlide({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={playLabel}
-            style={styles.iconButton}
+            accessibilityState={{ disabled: imageFailed }}
+            disabled={imageFailed}
+            style={[styles.iconButton, imageFailed && styles.disabled]}
             onPress={() => setPlaying((value) => !value)}
           >
             <Ionicons name={playing ? 'pause' : 'play'} color="white" size={20} />
@@ -304,14 +322,20 @@ function StorySlide({
             />
           ) : hasImage && !imageFailed ? (
             <Image
-              key={`${story.id}:${imageAttempt}`}
+              key={imageSession.key}
               source={{ uri: story.mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
-              onLoad={() => setLoadedImage(story.id)}
+              onLoad={() => {
+                if (currentImage.current === imageSession)
+                  setImageResult({ session: imageSession, status: 'loaded' });
+              }}
               onError={() => {
-                setFailedImage(story.id);
+                if (currentImage.current !== imageSession) return;
+                // Ignore queued native callbacks after a failure, retry, or navigation.
+                currentImage.current = null;
+                setImageResult({ session: imageSession, status: 'failed' });
                 setPlaying(false);
               }}
             />
@@ -327,8 +351,6 @@ function StorySlide({
                   style={[styles.step, { alignSelf: 'center', marginTop: 16 }]}
                   onPress={() => {
                     setPlaying(false);
-                    setFailedImage('');
-                    setLoadedImage('');
                     setImageAttempt((attempt) => attempt + 1);
                   }}
                 >
@@ -337,19 +359,36 @@ function StorySlide({
               )}
             </ScrollView>
           )}
-          <Pressable
-            accessible={false}
-            importantForAccessibility="no"
-            disabled={!previousId}
-            style={[styles.tapZone, { left: 0 }]}
-            onPress={() => previousId && selectStory(previousId)}
-          />
-          <Pressable
-            accessible={false}
-            importantForAccessibility="no"
-            style={[styles.tapZone, { right: 0 }]}
-            onPress={() => selectStory(nextId ?? null)}
-          />
+          {!imageFailed && (
+            <>
+              <Pressable
+                accessible={false}
+                importantForAccessibility="no"
+                disabled={!previousId}
+                style={[styles.tapZone, { left: 0 }]}
+                onPress={() => previousId && selectStory(previousId)}
+              />
+              <Pressable
+                accessible={false}
+                importantForAccessibility="no"
+                style={[styles.tapZone, { right: 0 }]}
+                onPress={() => selectStory(nextId ?? null)}
+              />
+            </>
+          )}
+          {hasImage && !imageLoaded && !imageFailed && (
+            <View
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel="照片載入中"
+              accessibilityLiveRegion="polite"
+              pointerEvents="none"
+              style={styles.photoLoading}
+            >
+              <ActivityIndicator color="#fff" />
+              <Text style={styles.stepText}>照片載入中…</Text>
+            </View>
+          )}
         </View>
         {((hasImage || hasVideo) && story.text) || story.poiName ? (
           <ScrollView
@@ -583,6 +622,12 @@ const styles = StyleSheet.create({
   sound: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   clipStatus: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   photo: { width: '100%', height: '100%' },
+  photoLoading: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
   centerText: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   storyText: {
     color: 'white',

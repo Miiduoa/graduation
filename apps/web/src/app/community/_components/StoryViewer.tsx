@@ -22,6 +22,8 @@ export function StoryViewer({
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
+  const playbackButton = useRef<HTMLButtonElement>(null);
+  const photoElement = useRef<HTMLImageElement>(null);
   const videoElement = useRef<HTMLVideoElement>(null);
   const videoBar = useRef<HTMLElement>(null);
   const beforePanel = useRef<{ element: HTMLVideoElement; playing: boolean } | null>(null);
@@ -29,16 +31,25 @@ export function StoryViewer({
   const [auto, setAuto] = useState(false);
   const [panelFor, setPanelFor] = useState<string | null>(null);
   const [hidden, setHidden] = useState(() => document.hidden);
-  const [loadedId, setLoadedId] = useState<string | null>(null);
-  const [failedId, setFailedId] = useState<string | null>(null);
-  const [mediaAttempt, setMediaAttempt] = useState(0);
   const story = viewer.group.stories[viewer.index]!;
   const photo = story.kind === 'image' && !!story.mediaUrl;
   const video = story.kind === 'video';
   const media = photo || video;
-  const failedVideo = video && (!story.mediaUrl || failedId === story.id);
-  const failedPhoto = photo && failedId === story.id;
   const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
+  const mediaScope = JSON.stringify([scope, story.kind, story.mediaUrl]);
+  const [mediaState, setMediaState] = useState<{
+    scope: string;
+    attempt: number;
+    status: 'loading' | 'loaded' | 'failed';
+  }>({ scope: mediaScope, attempt: 0, status: 'loading' });
+  // A newly mounted image must finish loading even when returning to the same story.
+  if (mediaState.scope !== mediaScope) {
+    setMediaState({ scope: mediaScope, attempt: 0, status: 'loading' });
+  }
+  const mediaKey = JSON.stringify([mediaScope, mediaState.attempt]);
+  const photoLoaded = photo && mediaState.status === 'loaded';
+  const failedVideo = video && (!story.mediaUrl || mediaState.status === 'failed');
+  const failedPhoto = photo && mediaState.status === 'failed';
   const canReply =
     story.allowReplies === true &&
     !!viewer.viewerUid &&
@@ -52,7 +63,7 @@ export function StoryViewer({
     !panelOpen &&
     !hidden &&
     !video &&
-    (!photo || loadedId === story.id) &&
+    (!photo || photoLoaded) &&
     !failedPhoto;
   const onNext = useRef(viewer.next);
   useEffect(() => {
@@ -63,9 +74,7 @@ export function StoryViewer({
   function retryMedia() {
     // Keep the same signed URL; appending a cache buster could invalidate its signature.
     setAuto(false);
-    setLoadedId(null);
-    setFailedId(null);
-    setMediaAttempt((attempt) => attempt + 1);
+    setMediaState((current) => ({ ...current, attempt: current.attempt + 1, status: 'loading' }));
   }
 
   useEffect(() => {
@@ -73,6 +82,9 @@ export function StoryViewer({
     if (!element) return;
     return openModalSession(element, closeButton.current);
   }, []);
+  useEffect(() => {
+    if (mediaState.attempt > 0) playbackButton.current?.focus({ preventScroll: true });
+  }, [mediaState.scope, mediaState.attempt]);
   useEffect(() => {
     const element = videoElement.current;
     let live = true;
@@ -111,11 +123,12 @@ export function StoryViewer({
       live = false;
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [auto, panelOpen, failedVideo, story.id]);
+  }, [auto, panelOpen, failedVideo, mediaKey]);
 
   useEffect(() => {
     remaining.current = DWELL_MS;
-  }, [story.id]);
+    gesture.current = null;
+  }, [scope]);
   useEffect(() => {
     if (!running) return;
     const start = performance.now();
@@ -124,7 +137,7 @@ export function StoryViewer({
       window.clearTimeout(timer);
       remaining.current = Math.max(0, remaining.current - (performance.now() - start));
     };
-  }, [story.id, running]);
+  }, [scope, running]);
 
   return (
     <dialog
@@ -158,7 +171,7 @@ export function StoryViewer({
         style={{ backgroundColor: media ? '#121212' : story.bgColor || '#243b35' }}
       >
         <header className={styles.header}>
-          <div className={styles.segments} aria-hidden="true" key={story.id}>
+          <div className={styles.segments} aria-hidden="true" key={scope}>
             {viewer.group.stories.map((s, i) => (
               <span key={s.id} data-past={i < viewer.index}>
                 {i === viewer.index && (
@@ -205,6 +218,10 @@ export function StoryViewer({
         <div
           className={styles.canvas}
           onPointerDown={(e) => {
+            if (e.target instanceof Element && e.target.closest('button')) {
+              gesture.current = null;
+              return;
+            }
             // Leave native play/seek controls alone; swipes across the picture can still change author.
             if (
               e.target instanceof HTMLVideoElement &&
@@ -224,6 +241,7 @@ export function StoryViewer({
           onPointerUp={(e) => {
             const start = gesture.current;
             gesture.current = null;
+            if (e.target instanceof Element && e.target.closest('button')) return;
             if (!start || e.pointerId !== start.pointerId) return;
             const dx = e.clientX - start.x;
             const dy = e.clientY - start.y;
@@ -242,9 +260,9 @@ export function StoryViewer({
             }
           }}
         >
-          {video && story.mediaUrl && failedId !== story.id ? (
+          {video && story.mediaUrl && !failedVideo ? (
             <video
-              key={`${scope}:${mediaAttempt}`}
+              key={mediaKey}
               ref={videoElement}
               className={styles.photo}
               src={story.mediaUrl}
@@ -255,16 +273,19 @@ export function StoryViewer({
               preload="metadata"
               tabIndex={0}
               onTimeUpdate={(event) => {
+                if (event.currentTarget !== videoElement.current) return;
                 const { currentTime, duration } = event.currentTarget;
                 if (videoBar.current && duration > 0 && Number.isFinite(duration)) {
                   videoBar.current.style.transform = `scaleX(${Math.min(1, currentTime / duration)})`;
                 }
               }}
-              onEnded={() => {
+              onEnded={(event) => {
+                if (event.currentTarget !== videoElement.current) return;
                 if (auto && !panelOpen && !document.hidden) viewer.next();
               }}
-              onError={() => {
-                setFailedId(story.id);
+              onError={(event) => {
+                if (event.currentTarget !== videoElement.current) return;
+                setMediaState((current) => ({ ...current, status: 'failed' }));
                 setAuto(false);
               }}
             />
@@ -275,22 +296,31 @@ export function StoryViewer({
                 <button type="button" onClick={retryMedia}>重新載入影片</button>
               )}
             </div>
-          ) : photo && failedId !== story.id ? (
-            <Image
-              unoptimized
-              loading="eager"
-              width={900}
-              height={1600}
-              key={`${scope}:${mediaAttempt}`}
-              className={styles.photo}
-              src={story.mediaUrl!}
-              alt="限時動態照片"
-              onLoad={() => setLoadedId(story.id)}
-              onError={() => {
-                setFailedId(story.id);
-                setAuto(false);
-              }}
-            />
+          ) : photo && !failedPhoto ? (
+            <div className={styles.photoFrame}>
+              <Image
+                unoptimized
+                loading="eager"
+                width={900}
+                height={1600}
+                key={mediaKey}
+                ref={photoElement}
+                className={styles.photo}
+                src={story.mediaUrl!}
+                alt="限時動態照片"
+                onLoad={(event) => {
+                  if (event.currentTarget === photoElement.current) {
+                    setMediaState((current) => ({ ...current, status: 'loaded' }));
+                  }
+                }}
+                onError={(event) => {
+                  if (event.currentTarget !== photoElement.current) return;
+                  setMediaState((current) => ({ ...current, status: 'failed' }));
+                  setAuto(false);
+                }}
+              />
+              {!photoLoaded && <p className={styles.mediaLoading} role="status">照片載入中…</p>}
+            </div>
           ) : photo ? (
             <div role="status" className={styles.mediaError}>
               <p>照片暫時無法顯示</p>
@@ -329,6 +359,7 @@ export function StoryViewer({
               ‹ 上一則
             </button>
             <button
+              ref={playbackButton}
               type="button"
               aria-pressed={auto}
               disabled={failedVideo || failedPhoto}

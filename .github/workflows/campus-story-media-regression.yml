@@ -44,10 +44,10 @@ jobs:
       - name: Install from lockfile
         run: pnpm install --frozen-lockfile
       - name: Web story viewer interaction tests
-        run: pnpm --filter web exec vitest run src/app/community/_components/StoryViewer.test.tsx
+        run: pnpm --filter web exec vitest run src/app/community/_components/StoryViewer.test.tsx src/app/community/_components/StoryReply.test.tsx src/app/community/_components/StoryAudience.test.tsx
       - name: Mobile story viewer interaction tests
-        run: pnpm --filter mobile exec jest src/__tests__/CampusStoryViewer.test.tsx --runInBand --ci
-      - name: Typecheck web and mobile viewer integration
-        run: |
-          pnpm --filter web typecheck
-          pnpm --filter mobile typecheck
+        run: pnpm --filter mobile exec jest src/__tests__/CampusStoryViewer.test.tsx src/__tests__/StoryReply.test.tsx src/__tests__/StoryAudience.test.tsx --runInBand --ci
+      - name: Typecheck web viewer integration
+        run: pnpm --filter web typecheck
+      - name: Typecheck mobile viewer integration
+        run: pnpm --filter mobile typecheck
