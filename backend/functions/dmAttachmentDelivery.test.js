@@ -207,6 +207,18 @@ test('GCS metadata deletion must be verified before an otherwise-authorized read
   expect(file.getSignedUrl).not.toHaveBeenCalled();
 });
 
+test('replaced GCS object during token scrub never receives a stale read capability', async () => {
+  const { call, file } = fixture();
+  file.getMetadata.mockResolvedValueOnce([{
+    generation: '10', metageneration: '3', size: '512', contentType: 'application/pdf',
+    metadata: { firebaseStorageDownloadTokens: 'OLD_SECRET' },
+  }]).mockResolvedValueOnce([{
+    generation: '11', metageneration: '4', size: '512', contentType: 'application/pdf', metadata: {},
+  }]);
+  await expect(call()).rejects.toMatchObject({ code: 'failed-precondition' });
+  expect(file.getSignedUrl).not.toHaveBeenCalled();
+});
+
 test('object with download token but no metageneration cannot receive a signed read', async () => {
   const { call, file } = fixture();
   file.getMetadata.mockResolvedValueOnce([{
