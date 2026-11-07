@@ -1035,7 +1035,12 @@ test.each([
   const { view } = await mount(HomeStack);
   if (role === 'teacher') expect(view.getByText('TeacherTodayScreen')).toBeTruthy();
   else if (role === 'admin') expect(view.getByText('管理公告與活動')).toBeTruthy();
-  else {
+  else if (role === 'vendor') {
+    expect(view.getByText('這個帳號尚未獲指派門市')).toBeTruthy();
+    expect(view.getByText('前往店家進駐與門市管理')).toBeTruthy();
+    expect(view.queryByText('待接單')).toBeNull();
+    expect(view.queryByText(/此身分的工作台尚未開放/)).toBeNull();
+  } else {
     expect(view.getByText(/此身分的工作台尚未開放/)).toBeTruthy();
     expect(view.getByText('查看校方公告')).toBeTruthy();
     expect(view.queryByText('StudentTodayScreen')).toBeNull();
@@ -1106,7 +1111,7 @@ test('Map school information keeps real official housing and career services aft
   expect(view.getByText('前往靜宜住宿服務組')).toBeTruthy();
   expect(view.getByText('前往靜宜職涯發展暨產業促進處')).toBeTruthy();
 });
-test.each([['MerchantHub', '這間店還沒接到訂單系統']])(
+test.each([['MerchantHub', '這個帳號尚未獲指派門市']])(
   'Me %s no longer shows fictitious account data',
   async (route, explanation) => {
     const { view, navigation } = await mount(MeStack);

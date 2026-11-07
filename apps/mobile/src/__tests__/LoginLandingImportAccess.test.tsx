@@ -1,4 +1,5 @@
 import React from 'react';
+import { Linking } from 'react-native';
 import { fireEventAsync, renderAsync } from '@testing-library/react-native';
 import type { useNuniSession } from '../state/nuniSession';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
@@ -107,4 +108,25 @@ it('opens public information without starting an account or school login', async
   expect(safeNavigate).toHaveBeenCalledTimes(1);
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
+
+it('opens a task-specific login without asking for school credentials or granting a role', async () => {
+  const web = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  try {
+    const view = await landing();
+    const work = view.getByRole('button', { name: '店家與教職員入口' });
+    expect(work.props.accessibilityState.expanded).toBe(false);
+    await fireEventAsync.press(work);
+    await fireEventAsync.press(view.getByRole('button', { name: '店家進駐與門市管理' }));
+    expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'merchant' });
+    await fireEventAsync.press(view.getByRole('button', { name: '教師課程' }));
+    expect(safeNavigate).toHaveBeenLastCalledWith(mockNavigation, 'NuniWorkspace', { tab: 'courses' });
+    await fireEventAsync.press(view.getByRole('link', { name: '校方人員登入（網頁）' }));
+    expect(web).toHaveBeenLastCalledWith('https://nuni.tw/auth/account?method=school');
+    await fireEventAsync.press(view.getByRole('link', { name: '平台管理員登入（網頁）' }));
+    expect(web).toHaveBeenLastCalledWith('https://nuni.tw/admin/login');
+    expect(mockAuth.signIn).not.toHaveBeenCalled();
+  } finally {
+    web.mockRestore();
+  }
 });
