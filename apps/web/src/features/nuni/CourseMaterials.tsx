@@ -34,6 +34,7 @@ import {
 } from '@/lib/useMaterialClientState';
 import { MutationForm, useClasses } from './CourseUI';
 import { CourseUnitSelect } from './CourseUnitSelect';
+import { CourseStudyPanel } from './CourseStudyPanel';
 import { selectCourseUnit } from './courseOutline';
 import { useLocationHash } from '@/lib/useLocationHash';
 import { useNuniSession } from './Session';
@@ -117,6 +118,9 @@ function Materials({
   const [readingMore, setReadingMore] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [query, setQuery] = useState('');
+  const [study, setStudy] = useState<{ material?: NuniMaterial; version: number } | null>(null);
+  const studyVersion = useRef(0);
+  const studyTrigger = useRef<HTMLButtonElement | null>(null);
   const now = useClientNow();
   const readIds = useMaterialReadIds(accountId);
   const bookmarks = useMaterialBookmarks(accountId);
@@ -132,6 +136,7 @@ function Materials({
 
   async function load() {
     if (denied.current) return;
+    setStudy(null);
     const run = ++request.current;
     moreRequest.current = null;
     setReadingMore(false);
@@ -307,8 +312,19 @@ function Materials({
       <div className={shared.actions}>
         <a href={classroomCourseHref(workspace.id, context)}>回課程首頁</a>
         <a href={classroomDirectoryHref(context, 'bookmarks')}>此裝置收藏</a>
+        <button type="button" className={`${shared.button} ${shared.secondary}`}
+          disabled={reading || accessDenied || items === null}
+          onClick={(event) => {
+            studyTrigger.current = event.currentTarget;
+            setStudy({ version: ++studyVersion.current });
+          }}>讀講義</button>
       </div>
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
+      {study && !reading && !accessDenied && items !== null && (
+        <CourseStudyPanel key={study.version} courseTitle={workspace.title} material={study.material}
+          scope={{ platformAccountId: accountId, workspaceId: workspace.id }}
+          onClose={() => { setStudy(null); studyTrigger.current?.focus(); }} />
+      )}
       {bookmarks.error && (
         <div role="alert" className={shared.notice}>
           <p>{bookmarks.error}</p>
@@ -388,6 +404,12 @@ function Materials({
                             </div>
                             <h3 id={`material-heading-${item.id}`}>{item.title}</h3>
                             <CourseText text={item.body} />
+                            <button type="button" className={`${shared.button} ${shared.secondary}`}
+                              aria-label={`陪我讀「${item.title}」`} disabled={reading || accessDenied}
+                              onClick={(event) => {
+                                studyTrigger.current = event.currentTarget;
+                                setStudy({ material: item, version: ++studyVersion.current });
+                              }}>陪我讀這份教材</button>
                             <button
                               type="button"
                               className={`${shared.button} ${shared.secondary} ${styles.bookmarkButton}`}
