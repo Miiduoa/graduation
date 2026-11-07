@@ -251,7 +251,7 @@ service firebase.storage {
           && resource.metadata.ownerUid == story.authorUid
           && story.mediaUrl is string && story.mediaUrl.size() > 0
           && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
-            || (story.kind == 'video' && resource.contentType.matches('video/.*')));
+            || (story.kind == 'video' && fileName == 'video' && resource.contentType == 'video/mp4'));
       }
       allow get: if activeStoryMember()
         && (resource.metadata.get('ownerUid', '') == request.auth.uid || isPublishedStory());
@@ -260,7 +260,9 @@ service firebase.storage {
         && request.resource.metadata.ownerUid == request.auth.uid
         && (resource == null || resource.metadata.ownerUid == request.auth.uid)
         && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
-        && (isValidImage() && maxSize(10) || isValidVideo() && maxSize(100));
+        && request.resource.size > 0
+        && ((fileName == 'image' && isValidImage() && maxSize(10))
+          || (fileName == 'video' && request.resource.contentType == 'video/mp4' && maxSize(100)));
     }
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {
