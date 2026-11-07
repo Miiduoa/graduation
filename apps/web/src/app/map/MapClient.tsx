@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
 import { useLocationHash } from '@/lib/useLocationHash';
 import MapCanvas from './MapCanvas';
+import CampusSpatialExplorer from './CampusSpatialExplorer';
 import {
   loadMapFavorites,
   loadMapLocations,
@@ -437,6 +438,12 @@ function MapContent({
         </section>
       )}
       <div className={styles.tools}>
+        <CampusSpatialExplorer
+          school={school}
+          locations={mapLocations}
+          selected={selected}
+          onSelect={selectLocation}
+        />
         {officialMapUrl && (
           <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
             校方校區平面圖
