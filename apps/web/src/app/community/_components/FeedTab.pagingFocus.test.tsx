@@ -117,3 +117,52 @@ it('restores the same retry control after a network failure without replacing th
   expect(mocks.page.mock.calls[2][1]).toBe(cursor);
   expect(document.activeElement).toBe(screen.getByText('已讀到本次查詢的最後一頁。'));
 });
+
+it('jumps to older posts by Taiwan date without scanning recent pages and keeps keyword and sort', async () => {
+  const button = await ready();
+  const search = screen.getByRole('searchbox');
+  fireEvent.change(search, { target: { value: '專題' } });
+  fireEvent.click(screen.getByRole('button', { name: '最新' }));
+  const older = { posts: [{ ...post, id: 'old', title: '去年的專題' }], nextCursor: null, hasMore: false };
+  mocks.page.mockResolvedValueOnce(older);
+  fireEvent.change(screen.getByLabelText('選擇歷史貼文截止日期'), { target: { value: '2024-02-29' } });
+  fireEvent.click(screen.getByRole('button', { name: '從這天往前找' }));
+  await screen.findByText('去年的專題');
+  expect(mocks.page).toHaveBeenCalledTimes(2);
+  expect(mocks.page.mock.calls[1][1]).toBeNull();
+  expect((mocks.page.mock.calls[1][2] as Date).toISOString()).toBe('2024-02-29T15:59:59.999Z');
+  expect(search).toHaveProperty('value', '專題');
+  expect(screen.getByRole('button', { name: '最新' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByText(/2024-02-29 當日以前/)).toBeTruthy();
+  expect(screen.queryByText('原本的貼文')).toBeNull();
+  expect(button.isConnected).toBe(false);
+});
+
+it('keeps original cards and active date when a new historical date is offline, then retries', async () => {
+  await ready();
+  const offline = Object.assign(new Error('offline'), { code: 'unavailable' });
+  mocks.page.mockRejectedValueOnce(offline)
+    .mockResolvedValueOnce({ posts: [{ ...post, id: 'old', title: '歷史貼文' }], nextCursor: null, hasMore: false });
+  const date = screen.getByLabelText('選擇歷史貼文截止日期');
+  fireEvent.change(date, { target: { value: '2022-09-03' } });
+  fireEvent.click(screen.getByRole('button', { name: '從這天往前找' }));
+  await screen.findByRole('alert');
+  expect(screen.getByText('原本的貼文')).toBeTruthy();
+  expect(screen.queryByText(/2022-09-03 當日以前/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '從這天往前找' }));
+  await screen.findByText('歷史貼文');
+  expect((mocks.page.mock.calls[1][2] as Date).getTime()).toBe((mocks.page.mock.calls[2][2] as Date).getTime());
+  fireEvent.click(screen.getByRole('button', { name: '回到最新貼文' }));
+  await screen.findByText('已讀到本次查詢的最後一頁。');
+  expect(mocks.page.mock.calls[3][2]).toBeNull();
+});
+
+it('clears old cards if a historical lookup discovers revoked membership', async () => {
+  await ready();
+  mocks.page.mockRejectedValueOnce(Object.assign(new Error('revoked'), {code:'permission-denied'}));
+  fireEvent.change(screen.getByLabelText('選擇歷史貼文截止日期'), { target: {value:'2023-11-15'} });
+  fireEvent.click(screen.getByRole('button', {name:'從這天往前找'}));
+  await screen.findByRole('button', {name:'重新驗證'});
+  expect(screen.queryByText('原本的貼文')).toBeNull();
+  expect(screen.queryByRole('button', {name:'載入更多貼文'})).toBeNull();
+});

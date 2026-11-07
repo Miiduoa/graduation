@@ -30,7 +30,7 @@ import {
   removeCampusPostBookmark,
 } from '@/lib/community/bookmarks';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
-import { fetchCampusPostPage, type CampusPostCursor } from '@/lib/community/feedPages';
+import { fetchCampusPostPage, taiwanFeedDayEnd, type CampusPostCursor } from '@/lib/community/feedPages';
 import {
   rankFeedPosts,
   toggleCampusPostLike,
@@ -107,6 +107,12 @@ export function FeedTab(props: FeedTabProps) {
 function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const { schoolId, user } = props;
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
+  const [dateDraft, setDateDraft] = useState('');
+  const [activeDate, setActiveDate] = useState('');
+  const activeDateBoundaryRef = useRef<Date | null>(null);
+  const dateNavigationBusyRef = useRef(false);
+  const [dateNavigationBusy, setDateNavigationBusy] = useState(false);
+  const [dateNavigationError, setDateNavigationError] = useState('');
   // The cursor follows server ordering, never the recommendation-ranked cards.
   const feedCursorRef = useRef<CampusPostCursor | null>(null);
   const feedReadVersion = useRef(0);
@@ -190,7 +196,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       return;
     }
     const [page, boardList, subs, storyRows] = await Promise.all([
-      fetchCampusPostPage(schoolId, null),
+      fetchCampusPostPage(schoolId, null, activeDateBoundaryRef.current),
       listBoards(schoolId, 80),
       listSubscribedBoardIds(user.uid, schoolId),
       listActiveStoriesForSchool(schoolId, 80),
@@ -222,7 +228,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     setMorePostsError('');
     setPageMessage('');
     try {
-      const page = await fetchCampusPostPage(schoolId, cursor);
+      const page = await fetchCampusPostPage(schoolId, cursor, activeDateBoundaryRef.current);
       if (request !== feedReadVersion.current) return;
       feedCursorRef.current = page.nextCursor;
       // Append new cards without replacing previous pages or their pending reactions.
@@ -516,6 +522,52 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     [user, schoolId],
   );
 
+  const jumpToDate = async (requestedDay: string) => {
+    const before = requestedDay ? taiwanFeedDayEnd(requestedDay) : null;
+    if ((requestedDay && !before) || !schoolId || loading || refreshing ||
+        dateNavigationBusyRef.current || loadingMorePosts || feedReadDenied) return;
+    const request = ++feedReadVersion.current;
+    dateNavigationBusyRef.current = true;
+    setDateNavigationBusy(true);
+    setDateNavigationError('');
+    // A previous next-page response must not replace the new historical range.
+    moreInFlight.current = false;
+    setLoadingMorePosts(false);
+    try {
+      const page = await fetchCampusPostPage(schoolId, null, before);
+      if (request !== feedReadVersion.current) return;
+      activeDateBoundaryRef.current = before;
+      setActiveDate(requestedDay);
+      feedCursorRef.current = page.nextCursor;
+      setPosts(rankFeedPosts(page.posts.filter(post => post.schoolId === schoolId), page.posts.length));
+      setHasMorePosts(page.hasMore);
+      setMorePostsError('');
+      setFeedReadDenied(false);
+      setPageMessage(page.hasMore
+        ? (requestedDay ? '已從指定日期開始載入，可繼續翻閱更早貼文。' : '已返回最新貼文，可繼續翻閱。')
+        : (requestedDay ? '這個日期以前的貼文已全部載入。' : '已讀到本次查詢的最後一頁。'));
+    } catch (cause) {
+      if (request !== feedReadVersion.current) return;
+      if (isPermissionDeniedError(cause)) {
+        feedCursorRef.current = null;
+        setPosts([]);
+        setStories([]);
+        setBoards([]);
+        setSubscribedIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
+        setHasMorePosts(false);
+        setFeedReadDenied(true);
+        setPageMessage('');
+      } else {
+        setDateNavigationError('無法讀取指定日期，原本貼文與搜尋仍保留，請確認連線後重試。');
+      }
+    } finally {
+      dateNavigationBusyRef.current = false;
+      setDateNavigationBusy(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     setFollowingRevision((prev) => prev + 1);
@@ -761,6 +813,41 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             {savedView ? '貼文最新' : '最新'}
           </button>
         </div>
+        {!savedView && (
+          <div style={{ display: 'flex', alignItems: 'end', flexWrap: 'wrap', gap: 8, width: '100%' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+              依日期找舊貼文
+              <input
+                type="date"
+                aria-label="選擇歷史貼文截止日期"
+                value={dateDraft}
+                onChange={(event) => setDateDraft(event.target.value)}
+                style={{ minHeight: 44, maxWidth: '100%', color: 'var(--text)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn"
+              style={{ minHeight: 44 }}
+              aria-disabled={dateNavigationBusy || loading || refreshing || loadingMorePosts || !taiwanFeedDayEnd(dateDraft) || feedReadDenied}
+              onClick={() => void jumpToDate(dateDraft)}
+            >
+              {dateNavigationBusy ? '正在定位貼文…' : '從這天往前找'}
+            </button>
+            {activeDate && (
+              <button
+                type="button"
+                className="btn"
+                style={{ minHeight: 44 }}
+                aria-disabled={dateNavigationBusy || loading || refreshing || feedReadDenied}
+                onClick={() => { if (!dateNavigationBusy && !loading && !refreshing) void jumpToDate(''); }}
+              >
+                回到最新貼文
+              </button>
+            )}
+          </div>
+        )}
+        {dateNavigationError && <p role="alert" className={styles.feedError}>{dateNavigationError}</p>}
       </div>
       {!selectedFeedLoading && !selectedFeedError && !(savedView && bookmarkUnavailable) && (
         <p className={styles.feedScope} role="status">
@@ -768,7 +855,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
             : followingView
               ? `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則貼文中追蹤的作者`
-              : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
+              : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態${activeDate ? `（${activeDate} 當日以前）` : ''}，文字搜尋與排序僅適用於已載入貼文`}
         </p>
       )}
       {followingError && (
@@ -1064,7 +1151,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       {!savedView && !selectedFeedLoading && !selectedFeedError && (
         <p ref={pageStatusRef} id={pageStatusId} tabIndex={-1} className={styles.feedScope} role="status" aria-live="polite">
           {loadingMorePosts ? '正在讀取下一頁…' : pageMessage || (hasMorePosts
-            ? '每次接續載入 60 則更早貼文；重新整理會回到最新一頁。'
+            ? `每次接續載入 60 則更早貼文；重新整理${activeDate ? '保留目前日期範圍' : '會回到最新一頁'}。`
             : '已讀到本次查詢的最後一頁。')}
         </p>
       )}

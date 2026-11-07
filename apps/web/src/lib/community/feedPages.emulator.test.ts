@@ -208,6 +208,23 @@ describeEmulator('campus feed cursor pagination with repository rules', () => {
     expect((await fetchMobileCampusPostPage('other')).posts.map(row => row.id)).toEqual(['private']);
   });
 
+
+  it('locates historical posts without reading the newer 224 documents and rejects a cross-date cursor', async () => {
+    // Every seven fixture posts share a second. This bound includes 0..20, excluding 21..244.
+    const before = new Date('2023-11-15T06:13:22.999+08:00');
+    const page = await fetchCampusPostPage('pu', null, before);
+    expect(page.posts.map(post => post.id)).toEqual(
+      Array.from({ length: 21 }, (_, index) => 'post-' + String(20 - index).padStart(3, '0')),
+    );
+    expect(page.hasMore).toBe(false);
+    await expect(fetchCampusPostPage('pu', page.nextCursor, new Date('2023-11-15T07:00:00+08:00')))
+      .rejects.toMatchObject({ code: 'invalid-argument' });
+    await environment.withSecurityRulesDisabled(async context => {
+      await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
+    });
+    await expect(fetchCampusPostPage('pu', null, before)).rejects.toMatchObject({ code: 'permission-denied' });
+  });
+
   it('handles an exact 60-item feed with one final empty page', async () => {
     await environment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();

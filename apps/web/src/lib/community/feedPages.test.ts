@@ -9,12 +9,14 @@ vi.mock('firebase/firestore', async (importOriginal) => ({
   query: (source: unknown, ...constraints: unknown[]) => ({ source, constraints }),
   orderBy: (field: string, direction: string) => ({ orderBy: [field, direction] }),
   startAfter: (document: unknown) => ({ startAfter: document }),
+  startAt: (value: unknown) => ({ startAt: value }),
   limit: (count: number) => ({ limit: count }),
   getDocsFromServer: mocks.server,
   getDocs: mocks.cache,
 }));
 
-import { CAMPUS_FEED_PAGE_SIZE, fetchCampusPostPage } from './feedPages';
+import { CAMPUS_FEED_PAGE_SIZE, fetchCampusPostPage, taiwanFeedDayEnd } from './feedPages';
+import { Timestamp } from 'firebase/firestore';
 
 function document(id: string, schoolId = 'pu', fields: Record<string, unknown> = {}) {
   return {
@@ -121,5 +123,49 @@ describe('fixed-size campus feed pages', () => {
     expect(page.posts.every((post) => post.schoolId === 'pu')).toBe(true);
     expect(page.nextCursor?.document.id).toBe('boundary');
     expect(page.hasMore).toBe(true);
+  });
+});
+
+describe('direct historical date lookup', () => {
+  it('validates Taiwan calendar dates, including leap days, independent of local timezone', () => {
+    expect(taiwanFeedDayEnd('2024-02-29')?.toISOString()).toBe('2024-02-29T15:59:59.999Z');
+    expect(taiwanFeedDayEnd('2023-02-29')).toBeNull();
+    expect(taiwanFeedDayEnd('2024-13-01')).toBeNull();
+    expect(taiwanFeedDayEnd('2024/02/29')).toBeNull();
+    expect(taiwanFeedDayEnd('')).toBeNull();
+  });
+
+  it('starts at the requested date on the server and carries the same date through the cursor', async () => {
+    const before = taiwanFeedDayEnd('2023-11-15')!;
+    const first = await fetchCampusPostPage('pu', null, before);
+    expect(mocks.server).toHaveBeenCalledExactlyOnceWith({
+      source: { path: 'schools/pu/campusPosts' },
+      constraints: [
+        { orderBy: ['createdAt', 'desc'] },
+        { orderBy: ['__name__', 'desc'] },
+        { startAt: Timestamp.fromDate(before) },
+        { limit: 60 },
+      ],
+    });
+    expect(first.nextCursor?.beforeMillis).toBe(before.getTime());
+    await fetchCampusPostPage('pu', first.nextCursor, before);
+    expect(mocks.server.mock.calls[1][0].constraints).toEqual([
+      { orderBy: ['createdAt', 'desc'] },
+      { orderBy: ['__name__', 'desc'] },
+      { startAfter: first.nextCursor!.document },
+      { limit: 60 },
+    ]);
+    expect(mocks.cache).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mismatched date cursor and invalid Date before any read', async () => {
+    const before = taiwanFeedDayEnd('2024-02-29')!;
+    const first = await fetchCampusPostPage('pu', null, before);
+    mocks.server.mockClear();
+    await expect(fetchCampusPostPage('pu', first.nextCursor)).rejects.toMatchObject({code:'invalid-argument'});
+    await expect(fetchCampusPostPage('pu', first.nextCursor, taiwanFeedDayEnd('2024-02-28')))
+      .rejects.toMatchObject({code:'invalid-argument'});
+    await expect(fetchCampusPostPage('pu', null, new Date('invalid'))).rejects.toMatchObject({code:'invalid-argument'});
+    expect(mocks.server).not.toHaveBeenCalled();
   });
 });
