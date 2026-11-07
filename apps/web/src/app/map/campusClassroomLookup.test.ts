@@ -125,7 +125,7 @@ it('requires a deliberate choice when two valid POIs describe the coded building
   expect(result.matches).toEqual([hall, desk]);
 });
 
-it.each(['PH', 'PHxyz303', 'PH303旁', 'PH303 / 任垣201', 'SP303', 'AK303', 'R201'])(
+it.each(['PH', 'PHxyz303', 'PHAB303', 'PH303旁', 'PH303 / 任垣201', 'SP303', 'AK303', 'R201'])(
   'leaves incomplete, unverified, or composite PU code %s unresolved', (query) => {
     expect(resolveCampusClassroom({ schoolId: 'pu', query, locations: places }).status).toBe('unmatched');
   },

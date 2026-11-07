@@ -88,7 +88,8 @@ function nameMatchesVerifiedCode(school: string, query: string, suppliedName: un
     (entry) =>
       entry.schoolId === school &&
       query.startsWith(entry.code) &&
-      isRoomSuffix(query.slice(entry.code.length)) &&
+      // The verified building code must be followed by a numeric room token, not arbitrary letters.
+      /^[\s:：-]*\d{1,5}[a-z]?(?:\s*(?:教室|室))?$/u.test(query.slice(entry.code.length)) &&
       entry.buildingNames.some((building) => comparisonText(building) === name),
   );
 }
