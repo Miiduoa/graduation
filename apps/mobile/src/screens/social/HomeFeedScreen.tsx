@@ -897,7 +897,7 @@ function HomeFeedContent() {
                   {!!activeDate && (
                     <Text accessibilityLiveRegion="polite"
                       style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-                      目前範圍：${activeDate}（台灣時間）及更早
+                      目前範圍：{activeDate}（台灣時間）及更早
                     </Text>
                   )}
                   {!!dateJumpError && (
