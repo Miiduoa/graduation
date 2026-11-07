@@ -2072,7 +2072,36 @@ describe('storage security rules', () => {
     );
   });
 
+  test('deleted canonical profiles cannot create public avatar or lost-found uploads with old tokens', async () => {
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+    const storage = testEnv.authenticatedContext('alice').storage();
+    await assertSucceeds(uploadString(storage.ref('avatars/alice.jpg'), 'valid avatar', 'image/jpeg'));
+    await assertSucceeds(uploadString(storage.ref('lostfound/owned/photo.jpg'), 'valid photo', 'image/jpeg'));
+
+    // Auth context remains unchanged after profile removal: the old token is still valid.
+    await seedFirestore(async (db) => db.doc('users/alice').delete());
+    await assertFails(uploadString(storage.ref('avatars/alice.png'), 'orphan avatar', 'image/png'));
+    await assertFails(uploadString(storage.ref('lostfound/orphan/photo.jpg'), 'orphan photo', 'image/jpeg'));
+
+    // Recreating a legitimate canonical profile allows new uploads again.
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+    await assertSucceeds(uploadString(storage.ref('avatars/alice.png'), 'restored avatar', 'image/png'));
+    await assertSucceeds(uploadString(storage.ref('lostfound/restored/photo.jpg'), 'restored photo', 'image/jpeg'));
+
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'suspended' }));
+    await assertFails(uploadString(storage.ref('avatars/alice.gif'), 'suspended avatar', 'image/gif'));
+    await assertFails(uploadString(storage.ref('lostfound/suspended/photo.jpg'), 'suspended photo', 'image/jpeg'));
+
+    // A different active account is not allowed to overwrite Alice's profile image.
+    await seedFirestore(async (db) => db.doc('users/bob').set({ status: 'active' }));
+    await assertFails(uploadString(
+      testEnv.authenticatedContext('bob').storage().ref('avatars/alice.jpg'),
+      'cross-account avatar', 'image/jpeg',
+    ));
+  });
+
   test('allow avatar uploads for the file owner', async () => {
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
     const storage = testEnv.authenticatedContext('alice').storage();
 
     await assertSucceeds(

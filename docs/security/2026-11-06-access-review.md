@@ -225,3 +225,14 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 新增 Firebase Storage emulator 回歸，在同一個舊 token context 驗證管理員正常讀取、非管理員／訪客無法讀取、正常使用者上傳、刪除 canonical profile 後的讀取與新建拒絕、補回 active 後恢復、改為 suspended 後再拒絕。上述為**待精確 head 的 CI 執行驗證**，程式邊界的推論不等同已完成模擬器測試。
 
 風險與相容性：沒有 canonical profile 的舊管理員將無法讀取 bugreports，沒有 profile 的登入使用者也無法新上傳該類附件；發布前應由受控帳號流程補齊真正有效的 profile，而非放寬舊 token。Firebase 下載 URL token 撤銷不受本規則變更取代，仍須隔離 GCS staging 驗收。此次未操作正式資料、金鑰、token、migration 或發布；仍須由既有主線窗口確認精確 head CI、CodeQL、Maestro、指定 App 核可。
+
+
+### 2026-11-07：公開頭像與失物照片的孤兒 token 寫入邊界
+
+核對前一精確提交 `8e8de2035ef383281df53f4d7526434ac05d6a22` 的 GitHub Actions：主 CI、CodeQL、Supabase permission migrations、Python AI Server Security、Mobile Agent Regression、Chroma、Zod、Course access review 及適用 Maestro 均為 completed/success；PR reviews 與 review threads 為空，但仍未看到指定 `nuni-merge-gate` App 5504170 對 head 核發「審查通過」。GitHub compare 回報當時 main `33e65c2b26848b60a9fea9b4272d19b73cb29760`，PR ahead 36、behind 8，尚未做正式主線整合。
+
+前輪已將 health、temp、printjobs、repairs、bugreports 等敏感附件改為強制 canonical profile，但公開頭像 `avatars/{uid}.ext` 及失物照片 `lostfound/{itemId}/{filename}` 的寫入仍使用容許 `users/{uid}` 文件不存在的 legacy `isActiveAccount()`。因而在帳號主文件被直接移除而 Auth ID token 尚未失效時，舊 token 仍可能發佈新的公開頭像／失物照片，繞過帳號撤銷的寫入邊界。
+
+此次僅將兩個公開上傳 namespace 的 **寫入／建立** 改為 `hasCanonicalActiveAccount()`，保持原有檔名約束、Content-Type、大小、建立／不可覆寫條件與公開讀取規則。新增 Firebase Storage emulator 測試用同一 Auth context 驗證：正常 active upload、直接刪除 canonical profile 後兩類新上傳拒絕、受控重建 profile 後恢復、再次 suspended 時拒絕、其他 active user 不得改 Alice 頭像；原有合法頭像測試補齊 active canonical profile fixture。原版在孤兒狀態的兩項拒絕斷言應失敗；本輪需以**新精確 head** 的 Rules CI 和完整工作流結果確認，不預先宣稱成功。
+
+公開讀取仍是既有產品功能；此修補**不會**撤銷已發公開物件網址或過去已公開影像。缺少 canonical profile 的合法 legacy 帳號將無法建立這兩類附件，正式發布前需由受控 onboarding 修復資料。stories 和 events 編輯路徑受跨服務兩文件查詢上限限制，尚未解除；GCS 歷史下載 URL、Supabase 已簽發 URL、隔離 staging bucket 驗證、minimatch 相容性與正式審查仍待完成。本輪只修改原始碼、隔離測試與紀錄，未合併、部署或操作正式資料／金鑰／token。

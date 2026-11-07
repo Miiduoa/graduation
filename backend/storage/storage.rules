@@ -134,7 +134,7 @@ service firebase.storage {
 
     match /avatars/{fileName} {
       allow read: if true;
-      allow write: if isActiveAccount()
+      allow write: if hasCanonicalActiveAccount()
         && fileName.matches('^' + request.auth.uid + '\\.[A-Za-z0-9]+$')
         && isValidImage()
         && maxSize(5);
@@ -155,7 +155,7 @@ service firebase.storage {
 
     match /lostfound/{itemId}/{fileName} {
       allow read: if true;
-      allow create: if resource == null && isActiveAccount() && isValidImage() && maxSize(10);
+      allow create: if resource == null && hasCanonicalActiveAccount() && isValidImage() && maxSize(10);
     }
 
     match /printjobs/{userId}/{jobId}/{fileName} {
