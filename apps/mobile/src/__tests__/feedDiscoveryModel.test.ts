@@ -97,6 +97,14 @@ describe('mobile school-scoped feed discovery', () => {
     expect(pick({ search: ' 攝影看板 ' })).toEqual(['two']);
   });
 
+  it('combines spaced keywords from visible fields without crossing filters', () => {
+    expect(pick({ search: '同學 期末' })).toEqual(['one']);
+    expect(pick({ search: '小明 課程討論 讀書會' })).toEqual(['one']);
+    expect(pick({ search: '攝影看板　神秘同學' })).toEqual(['two']);
+    expect(pick({ search: '期末 攝影看板' })).toEqual([]);
+    expect(pick({ filter: 'subscribed', search: '攝影看板 神秘同學' })).toEqual([]);
+  });
+
   it('does not expose an anonymous author when searching', () => {
     expect(pick({ search: '神秘同學' })).toEqual(['two']);
     expect(pick({ search: '真實姓名' })).toEqual([]);

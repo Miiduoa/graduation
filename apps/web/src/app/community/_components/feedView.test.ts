@@ -67,6 +67,14 @@ describe('school-scoped feed discovery', () => {
     expect(select({ search: '  攝影社  ' })).toEqual(['newer']);
     expect(select({ search: '不存在' })).toEqual([]);
   });
+  it('combines keywords across visible fields without changing the selected scope', () => {
+    expect(select({ search: '讀書 期中考' })).toEqual(['older']);
+    expect(select({ search: '小明 課業討論 考試' })).toEqual(['older']);
+    expect(select({ search: '攝影社　神祕同學' })).toEqual(['newer']);
+    expect(select({ search: '期中考 攝影社' })).toEqual([]);
+    expect(select({ filter: 'subscribed', search: '攝影社 神祕同學' })).toEqual([]);
+  });
+
   it('never lets search reveal an anonymous author identity', () => {
     expect(select({ search: '神祕同學' })).toEqual(['newer']);
     expect(select({ search: '不可公開的真名' })).toEqual([]);
