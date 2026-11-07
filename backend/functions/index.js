@@ -14,6 +14,7 @@ const { readSecretValue } = require('./secretParams');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+const { getStorage } = require('firebase-admin/storage');
 const https = require('https');
 const nodeCrypto = require('crypto');
 const {
@@ -47,6 +48,7 @@ const { canonicalizePuStudentId, createPuTronClassRefresher } = require('./puTro
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
+const { createPrivateGroupFileHandler } = require('./privateGroupFiles');
 const directorySync = require('./directorySync');
 const { getAuth: getAdminAuth } = require('firebase-admin/auth');
 const {
@@ -2780,6 +2782,14 @@ exports.getTimetableShare = onRequest(
   { region: REGION, cors: true },
   createGetTimetableShareHandler({ db }),
 );
+exports.privateGroupFile = onRequest(
+  { region: REGION, cors: getCorsOrigins(), timeoutSeconds: 120 },
+  createPrivateGroupFileHandler({
+    db,
+    bucket: () => getStorage().bucket(),
+    verifyIdToken: (token, checkRevoked) => getAdminAuth().verifyIdToken(token, checkRevoked),
+  }),
+);
 const eventRegistrationHandlers = createEventRegistrationHandlers({ db });
 exports.getEventRegistrations = onCall({ region: REGION }, eventRegistrationHandlers.getEventRegistrations);
 exports.registerCampusEvent = onCall({ region: REGION }, eventRegistrationHandlers.registerCampusEvent);
@@ -5048,56 +5058,11 @@ const liveSessionHandlers = createLiveSessionHandlers({
 exports.startLiveSession = onCall({ region: REGION }, liveSessionHandlers.startLiveSession);
 exports.endLiveSession = onCall({ region: REGION }, liveSessionHandlers.endLiveSession);
 
-exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId, pollId, optionIdx } = request.data;
-  if (!groupId || !sessionId || !pollId || optionIdx === undefined) {
-    throw new HttpsError('invalid-argument', 'Missing required fields');
-  }
-
-  const pollRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('liveSessions')
-    .doc(sessionId)
-    .collection('polls')
-    .doc(pollId);
-
-  await pollRef.update({ [`responses.${uid}`]: optionIdx });
-  return { success: true };
-});
-
 exports.joinLiveSession = onCall({ region: REGION }, liveSessionHandlers.joinLiveSession);
 exports.correctAttendanceRecord = onCall({ region: REGION }, liveSessionHandlers.correctAttendanceRecord);
 
-exports.submitReaction = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId, reaction } = request.data;
-  if (!groupId || !sessionId || !['understood', 'partial', 'confused'].includes(reaction)) {
-    throw new HttpsError('invalid-argument', 'Invalid reaction');
-  }
-
-  const sessionRef = db.collection('groups').doc(groupId).collection('liveSessions').doc(sessionId);
-  const userReactionRef = sessionRef.collection('userReactions').doc(uid);
-
-  const existing = await userReactionRef.get();
-  const updates = { [`reactions.${reaction}`]: FieldValue.increment(1) };
-
-  if (existing.exists && existing.data()?.reaction) {
-    updates[`reactions.${existing.data().reaction}`] = FieldValue.increment(-1);
-  }
-
-  await Promise.all([
-    sessionRef.update(updates),
-    userReactionRef.set({ reaction, updatedAt: FieldValue.serverTimestamp() }),
-  ]);
-
-  return { success: true };
-});
+exports.submitPollResponse = onCall({ region: REGION }, liveSessionHandlers.submitPollResponse);
+exports.submitReaction = onCall({ region: REGION }, liveSessionHandlers.submitReaction);
 
 // =====================================================
 // AI 每日簡報 (generateDailyBrief) - 每日 07:30
