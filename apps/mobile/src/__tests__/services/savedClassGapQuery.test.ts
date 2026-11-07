@@ -222,6 +222,26 @@ describe('saved class gap answer', () => {
     expect(answer({ part: 'afternoon', fromMinute: 930, untilMinute: 1140 })).toContain('下午（12:00–18:00） 15:30–19:00');
   });
 
+  test('does not mistake a corrupt saved gap for evidence that no class gaps exist', () => {
+    const badIntervals = [
+      { startAt: Number.NaN, endAt: instant('14:00') },
+      { startAt: instant('15:00'), endAt: instant('14:00') },
+      { startAt: Number.POSITIVE_INFINITY, endAt: Number.POSITIVE_INFINITY },
+      { startAt: instant('14:00') + 0.5, endAt: instant('15:00') },
+    ];
+    for (const bad of badIntervals) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, classGaps: [bad] },
+      }).content;
+      expect(answer).toContain('資料不足');
+      expect(answer).not.toContain('沒有課間空堂');
+    }
+    // Empty data from an otherwise usable timetable is distinct from a corrupt interval.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [] },
+    }).content).toContain('沒有課間空堂');
+  });
+
   test('distinguishes a known empty result from missing, unreadable or incomplete evidence', () => {
     const answer = (timetable: Partial<OnDeviceSchoolContext['timetable']>, checkedAt = context.checkedAt) =>
       answerSavedClassGapQuery(today, { ...context, checkedAt, timetable: { ...context.timetable, ...timetable } }).content;

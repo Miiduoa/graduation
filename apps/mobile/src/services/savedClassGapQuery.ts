@@ -246,6 +246,11 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (!timetable.classGaps || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
   }
+  // A damaged local snapshot cannot be treated as proof that a student has no free period.
+  if (timetable.classGaps.some(({ startAt, endAt }) =>
+    !Number.isSafeInteger(startAt) || !Number.isSafeInteger(endAt) || startAt >= endAt)) {
+    return reply('這份手機課表的空堂時間資料不足，無法核對。請開啟「我的課表」重新確認上課時間。');
+  }
   const offset = savedClassGapDayOffset(query.day);
   const date = classDate(new Date(now + offset * DAY));
   const midnight = Date.parse(date + 'T00:00:00+08:00');
