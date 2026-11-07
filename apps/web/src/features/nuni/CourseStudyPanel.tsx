@@ -78,6 +78,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [downloadError, setDownloadError] = useState('');
   const downloadUrl = useRef<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const readingFocus = useRef<HTMLDivElement>(null);
+  const focusReadingOnReturn = useRef(false);
   const restoreHeading = useRef<HTMLHeadingElement>(null);
   const progressInput = useRef<HTMLInputElement>(null);
   const read = useRef<AbortController | null>(null);
@@ -109,6 +111,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   function movePassage(target: { sectionNumber: number; partNumber: number } | null) {
     if (!target) return;
+    focusReadingOnReturn.current = true;
     setSectionIndex(target.sectionNumber);
     setPassageIndex(target.partNumber);
   }
@@ -116,6 +119,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   function moveReview(direction: 'previous' | 'next') {
     const target = adjacentStudyReview(reviewPassages, { sectionNumber: sectionIndex, partNumber: passageIndex }, direction);
     if (!target) return;
+    focusReadingOnReturn.current = true;
     setSectionIndex(target.sectionNumber);
     setPassageIndex(target.partNumber);
   }
@@ -134,6 +138,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   function readPracticeSource(card?: StudyPracticeCard) {
     if (!practiceRound || practiceRound.revision !== session.revision) return;
+    focusReadingOnReturn.current = true;
     const target = card ?? practiceRound.cards[practiceRound.index];
     if (target && practiceRound.cards.some((item) => item.id === target.id)) {
       setSectionIndex(target.sectionNumber);
@@ -157,6 +162,15 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     if (restorePreview) restoreHeading.current?.focus();
   }, [restorePreview]);
 
+  // The practice action buttons disappear when returning to a passage. Move
+  // keyboard/screen-reader focus to the newly visible source instead of body.
+  // Ordinary select changes keep focus on their control for keyboard users.
+  useEffect(() => {
+    if (!focusReadingOnReturn.current || reading || practiceRound) return;
+    focusReadingOnReturn.current = false;
+    (readingFocus.current ?? heading.current)?.focus();
+  }, [reading, practiceRound, source, sectionIndex, passageIndex]);
+
   function clearDownload() {
     if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
     downloadUrl.current = null;
@@ -165,6 +179,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   function replaceSource(value: StudySource) {
+    focusReadingOnReturn.current = true;
     setSource(value);
     setSectionIndex(0);
     setPassageIndex(0);
@@ -270,6 +285,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   function restoreProgress() {
     if (!restorePreview) return;
     const { progress, filename, round } = restorePreview;
+    focusReadingOnReturn.current = !round;
     read.current?.abort();
     read.current = null;
     setReading(null);
@@ -311,6 +327,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   function cancelRead() {
+    focusReadingOnReturn.current = true;
     read.current?.abort();
     read.current = null;
     setReading(null);
@@ -415,7 +432,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <div className={styles.actions}>{reviewPassages.map((item) => <button type="button" className={styles.button}
             key={`${item.sectionNumber}:${item.partNumber}`}
             aria-current={sectionIndex === item.sectionNumber && passageIndex === item.partNumber ? 'location' : undefined}
-            onClick={() => { setSectionIndex(item.sectionNumber); setPassageIndex(item.partNumber); }}>{item.label}</button>)}</div>
+            onClick={() => { focusReadingOnReturn.current = true; setSectionIndex(item.sectionNumber); setPassageIndex(item.partNumber); }}>{item.label}</button>)}</div>
           <div className={styles.actions}>
             <button type="button" className={`${styles.button} ${styles.primary}`} disabled={!practiceDeck.cards.length}
               onClick={startPractice}>開始逐題複習</button>
@@ -439,7 +456,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           </label>
         </div>
         <div className={styles.board}>
-          <div className={styles.stepHeading}>
+          <div className={styles.stepHeading} ref={readingFocus} tabIndex={-1} role="group"
+            aria-label={`目前閱讀段落：${passage.label}`}>
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
           <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}

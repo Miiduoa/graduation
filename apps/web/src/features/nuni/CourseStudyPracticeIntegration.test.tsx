@@ -122,6 +122,28 @@ it('uses the selected lesson and reading mode, reports missing questions, and re
   expect(mocks.read).not.toHaveBeenCalled();
 });
 
+it('moves keyboard focus to the source when returning from practice or stepping across PDF pages', async () => {
+  mount();
+  await restore();
+  begin();
+  fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
+  fireEvent.click(screen.getByRole('button', { name: '回白板看這段' }));
+  const onSecondPage = screen.getByRole('group', { name: '目前閱讀段落：第 5 頁 · 第 1 段' });
+  expect(document.activeElement).toBe(onSecondPage);
+  expect(onSecondPage.parentElement?.textContent).toContain(transactionText);
+
+  fireEvent.click(screen.getByRole('button', { name: '上一段' }));
+  expect(document.activeElement).toBe(screen.getByRole('group', { name: '目前閱讀段落：第 2 頁 · 第 1 段' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一個待複習' }));
+  expect(document.activeElement).toBe(screen.getByRole('group', { name: '目前閱讀段落：第 5 頁 · 第 1 段' }));
+
+  const modeSelect = screen.getByLabelText('這次怎麼讀');
+  modeSelect.focus();
+  fireEvent.change(modeSelect, { target: { value: 'exam' } });
+  expect(document.activeElement).toBe(modeSelect);
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('keeps all original attempts, answers, branches and review markers unchanged after a finished round', async () => {
   const downloads = downloadMock();
   const original = savedPractice();
