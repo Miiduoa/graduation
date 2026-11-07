@@ -95,6 +95,16 @@ describe('AI assistant capability profile', () => {
     expect(local?.answer).not.toContain('要幫你提交報修');
   });
 
+  it('offline help does not claim the app files a dorm repair', async () => {
+    const response = await chatWithCampusAssistant(
+      [{ role: 'user', content: '你會什麼' }],
+      { schoolId: 'tw-pu', userId: 'u1', userName: '測試同學' },
+    );
+    expect(response.content).toContain('報修備忘');
+    expect(response.content).toContain('學校網站');
+    expect(response.content).not.toMatch(/確認後提交支援的報修|提交報修|送出報修|工單|叫工人/);
+  });
+
   it('answers parameter requests honestly in offline chat', async () => {
     const response = await chatWithCampusAssistant(
       [{ role: 'user', content: '繼續訓練你，讓你的參數跟 ChatGPT 一樣多' }],

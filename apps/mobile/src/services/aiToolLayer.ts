@@ -501,12 +501,12 @@ export function getCrossRoleEffectsForIntent(params: {
   }
   if (params.intent === 'repair_status' || /報修|維修|壞|漏水|冷氣|網路/.test(msg)) {
     add({
-      action: '宿舍/校園報修',
+      action: '宿舍報修備忘',
       targetRoles: ['staff'],
-      targetWork: '宿舍管理員或總務維修人員依學校管道受理報修、派工、回覆處理狀態',
+      targetWork: '此應用只存個人報修備忘，不會送到學校或通知宿舍管理員；正式通報請依學校管道辦理',
       confirmationRequired: true,
       dataScope: 'cross_role',
-      notes: '需要房號、問題描述、照片/位置等資料才能正式送出。',
+      notes: '需要房號、問題描述、照片/位置等資料才能存成報修備忘；正式通報請依學校管道送出。',
     });
   }
   if (params.intent === 'health_status' || /掛號|看診|諮商|衛保/.test(msg)) {
@@ -965,7 +965,7 @@ export function runAIToolLayer(params: {
         answer:
           (context?.repairRequests?.length ?? 0) > 0
             ? `報修狀態：\n${context!.repairRequests!.slice(0, 5).map((item, i) => `${i + 1}. ${item.title ?? item.type}：${item.status}${item.room ? `，${item.room}` : ''}`).join('\n')}`
-            : '目前沒有查到報修案件。',
+            : '目前沒有查到報修備忘。',
       };
 
     case 'library_status':

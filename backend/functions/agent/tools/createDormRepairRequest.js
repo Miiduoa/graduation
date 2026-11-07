@@ -98,7 +98,7 @@ async function execute(ctx, rawInput) {
 module.exports = {
   name: 'createDormRepairRequest',
   description:
-    '幫使用者把宿舍報修存成個人備忘。需要宿舍棟名、房號、故障類別（category）、描述。這不會送到學校。緊急程度可選 low/normal/high。',
+    '幫使用者把宿舍報修存成個人備忘。需要宿舍棟名、房號、故障類別（category）、描述。這不會送到學校。緊急程度可選 low/normal/high。回傳的 repairId 是內部識別，不是校方單號，請勿向使用者說成單號或已送到學校。',
   inputSchema,
   execute,
   requiresConfirmation: true,

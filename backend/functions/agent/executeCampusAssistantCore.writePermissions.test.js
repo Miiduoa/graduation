@@ -133,7 +133,17 @@ describe('executeCampusAssistantCore write permission gate', () => {
     });
     expect(result.content).toContain('報修備忘');
     expect(result.content).toContain('請依學校規定管道送出');
+    expect(result.content).toMatch(/。確認後只會存在此應用/);
+    expect(result.content).not.toMatch(/[^。…\s]確認後只會存在此應用/);
     expect(JSON.stringify(result.actions || [])).toContain('確認存成報修備忘');
-    expect(JSON.stringify(result)).not.toMatch(/工單|已提交報修|已為你提交/);
+    expect(JSON.stringify(result)).not.toMatch(/工單|已提交報修|已為你提交|報修單 |報修編號/);
   });
+});
+
+test('createDormRepairRequest tool copy is a memo, not a school ticket', () => {
+  const tool = require('./tools/createDormRepairRequest');
+  expect(tool.description).toContain('個人備忘');
+  expect(tool.description).toContain('repairId');
+  expect(tool.description).toMatch(/不是校方單號/);
+  expect(tool.description).not.toMatch(/提交宿舍報修|工單/);
 });
