@@ -165,8 +165,8 @@ test('rapid result taps from the real SDK page navigate once', async () => {
   const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
   const target = view.getAllByLabelText('開啟貼文：二手書 00')[0];
   act(() => {
-    target.props.onPress();
-    target.props.onPress();
+    fireEvent.press(target);
+    fireEvent.press(target);
   });
   expect(onOpenPost).toHaveBeenCalledTimes(1);
   expect(onOpenPost).toHaveBeenCalledWith({ id: 'old-000', schoolId: 'pu' });
