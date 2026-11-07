@@ -44,8 +44,17 @@ export function buildCourseStudyNotes(
             `講解標題：${lesson.response.title}`,
             'AI 講解：', lesson.response.explanation,
             '', '引用原文：', lesson.response.sourceQuote,
-            '', '自我檢查題：', lesson.response.question,
           );
+          if (lesson.response.steps?.length) {
+            lines.push('', '分步講解：');
+            lesson.response.steps.forEach((step, index) => {
+              lines.push('', `第 ${index + 1} 步：${step.title}`,
+                '本步講解：', step.explanation,
+                '本步引用原文：', step.sourceQuote);
+              if (step.formula) lines.push('原文公式：', step.formula);
+            });
+          }
+          lines.push('', '自我檢查題：', lesson.response.question);
           if (lesson.attempt.trim()) lines.push('', '我的試答：', lesson.attempt);
           // Downloading must not bypass the same self-check condition as the panel.
           if (lesson.answerVisible && lesson.attempt.trim())

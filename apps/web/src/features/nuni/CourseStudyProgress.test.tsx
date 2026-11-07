@@ -147,7 +147,8 @@ it('saves an explicit progress download that can restore its source, position, n
     selectFile(progressFile(text, downloads[0].filename));
     await screen.findByRole('region', { name: '閱讀進度預覽' });
     fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
-    expect(await screen.findByText(savedText)).toBeTruthy();
+    await screen.findByRole('heading', { name: explanation.title });
+    expect(document.querySelector('mark')?.parentElement?.textContent).toBe(savedText);
     expect(inputValue('這次怎麼讀')).toBe('practice');
     expect(inputValue(noteLabel)).toBe(memory.note);
     expect(inputValue(questionLabel)).toBe(memory.modes.practice.question);
@@ -156,6 +157,64 @@ it('saves an explicit progress download that can restore its source, position, n
     expect(mocks.run).toHaveBeenCalledTimes(1);
   } finally { view.unmount(); }
   expect(revoke).toHaveBeenCalledWith('blob:study-progress');
+});
+
+it('saves and restores structured steps and quoted formulas without another model call or revealing the answer', async () => {
+  const response: TutorExplanation = {
+    title: '長方形的面積', explanation: '把寬與高相乘，得到面積。', sourceQuote: 'A = w*h',
+    question: '這裡的 w 代表什麼？', answer: '長方形的寬。',
+    steps: [
+      { title: '辨認寬與高', explanation: '先確認 w 與 h 各代表哪一條邊。', sourceQuote: 'w 是寬，h 是高' },
+      { title: '對照面積公式', explanation: '教材以寬乘以高表示面積。', sourceQuote: 'A = w*h', formula: 'A = w*h' },
+    ],
+  };
+  mocks.run.mockResolvedValue(response);
+  const create = vi.fn().mockReturnValue('blob:step-progress');
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = vi.fn(); });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const body = '長方形的面積 A = w*h；w 是寬，h 是高。';
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="數學" material={{ id: 'area', title: '面積', body }} onClose={vi.fn()} />);
+  const start = screen.getByRole('button', { name: '啟用 AI 講解本段' });
+  await waitFor(() => expect(start.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(start);
+  await screen.findByRole('navigation', { name: '講解步驟' });
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  expect(document.querySelector('math')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '其中一條邊的長度。' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+  const raw = await readBlob(create.mock.calls[0][0] as Blob);
+  expect(JSON.parse(raw).version).toBe(2);
+  expect(parseCourseStudyProgress(raw, scope).passages['0:0'].modes.understand.lessons[0].response).toEqual(response);
+  view.unmount();
+  render(<CourseStudyPanel scope={scope} courseTitle="數學" onClose={vi.fn()} />);
+  selectFile(progressFile(raw));
+  await screen.findByRole('region', { name: '閱讀進度預覽' });
+  expect(screen.queryByRole('navigation', { name: '講解步驟' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect(await screen.findByText('第 1 步，共 2 步')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  expect(screen.getByRole('heading', { name: '對照面積公式' })).toBeTruthy();
+  expect(document.querySelector('math')).toBeTruthy();
+  expect(document.querySelector('mark')?.textContent).toBe('A = w*h');
+  expect(document.querySelector('mark')?.parentElement?.textContent).toBe(body);
+  expect(inputValue('先寫下你的想法')).toBe('其中一條邊的長度。');
+  expect(screen.queryByText(response.answer)).toBeNull();
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+
+it('loads a version one progress file without inventing structured teaching steps', async () => {
+  const legacy = JSON.parse(serializeCourseStudyProgress(progress()));
+  legacy.version = 1;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  selectFile(progressFile(JSON.stringify(legacy)));
+  await screen.findByRole('region', { name: '閱讀進度預覽' });
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect(await screen.findByRole('heading', { name: '第三輪講解' })).toBeTruthy();
+  expect(screen.queryByRole('navigation', { name: '講解步驟' })).toBeNull();
+  expect(inputValue(noteLabel)).toBe(progress().passages['1:1'].note);
+  expect(mocks.run).not.toHaveBeenCalled();
 });
 
 it('previews the saved location and lets the user cancel without replacing current learning', async () => {
@@ -205,7 +264,8 @@ it('restores the selected PDF page, mode, notes and lesson branch without automa
   expect(screen.queryByRole('region', { name: '本段 AI 講解' })).toBeNull();
   expect(mocks.run).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
-  expect(await screen.findByText(savedText)).toBeTruthy();
+  await screen.findByRole('heading', { name: '第三輪講解' });
+  expect(document.querySelector('mark')?.parentElement?.textContent).toBe(savedText);
   expect(inputValue('閱讀範圍')).toBe('1');
   expect(inputValue('這次怎麼讀')).toBe('exam');
   expect(screen.getByText('第 2 段，共 2 段')).toBeTruthy();

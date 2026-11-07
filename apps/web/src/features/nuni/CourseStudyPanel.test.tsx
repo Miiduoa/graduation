@@ -422,3 +422,82 @@ it('identifies repeated quotations without changing the original text or silentl
   expect(mark.parentElement?.textContent).toBe(repeated);
   expect(document.querySelectorAll('mark')).toHaveLength(1);
 });
+
+const mathMaterial = { id: 'math-1', title: '平均數', body: '平均數可寫成 m = s/n，其中 s 是總和，n 是筆數。先求總和，再除以筆數；筆數必須大於零。' };
+const steppedExplanation: TutorExplanation = {
+  title: '從總和算出平均數', explanation: '先加總資料，再除以資料筆數。',
+  sourceQuote: '平均數可寫成 m = s/n', question: '這個公式可以用在沒有任何資料的情況嗎？',
+  answer: '不可以，筆數不能是零。',
+  steps: [
+    { title: '辨認總和與筆數', explanation: 's 表示總和，n 表示資料筆數。', sourceQuote: '其中 s 是總和，n 是筆數' },
+    { title: '套用平均數公式', explanation: '用總和 s 除以筆數 n，得到平均數 m。', sourceQuote: 'm = s/n', formula: 'm = s/n' },
+    { title: '檢查分母', explanation: '先確認資料筆數大於零，才能使用這個公式。', sourceQuote: '筆數必須大於零' },
+  ],
+};
+
+it('navigates real teaching steps with their own source highlights and quoted formulas', async () => {
+  mocks.run.mockResolvedValue(steppedExplanation);
+  render(<CourseStudyPanel scope={scope} courseTitle="統計" material={mathMaterial} onClose={vi.fn()} />);
+  await generate();
+  const navigation = screen.getByRole('navigation', { name: '講解步驟' });
+  expect(within(navigation).getAllByRole('button')).toHaveLength(3);
+  expect(within(navigation).getByRole('button', { name: '第 1 步：辨認總和與筆數' }).getAttribute('aria-current')).toBe('step');
+  expect(screen.getByRole('button', { name: '上一步' }).hasAttribute('disabled')).toBe(true);
+  expect(document.querySelector('math')).toBeNull();
+  expect(document.querySelector('mark')?.textContent).toBe(steppedExplanation.steps![0].sourceQuote);
+  expect(document.querySelector('mark')?.parentElement?.textContent).toBe(mathMaterial.body);
+  expect(screen.getByRole('button', { name: '朗讀這一步' })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '筆數不能是零。' } });
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  expect(screen.getByText('第 2 步，共 3 步')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '套用平均數公式' })).toBeTruthy();
+  expect(document.querySelector('math')).toBeTruthy();
+  expect(document.querySelector('mark')?.textContent).toBe('m = s/n');
+  fireEvent.click(screen.getByRole('button', { name: '定位這一步的原文' }));
+  expect(document.activeElement).toBe(document.querySelector('mark'));
+  expect(document.querySelector('mark')?.parentElement?.textContent).toBe(mathMaterial.body);
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  expect(screen.getByRole('button', { name: '下一步' }).hasAttribute('disabled')).toBe(true);
+  expect(document.querySelector('math')).toBeNull();
+  expect(document.querySelector('mark')?.textContent).toBe('筆數必須大於零');
+  fireEvent.click(within(navigation).getByRole('button', { name: '第 1 步：辨認總和與筆數' }));
+  expect(screen.getByText('第 1 步，共 3 步')).toBeTruthy();
+  expect(inputValue('先寫下你的想法')).toBe('筆數不能是零。');
+  expect(screen.queryByText(steppedExplanation.answer)).toBeNull();
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+
+it('preserves the active step through a failed follow-up and resets it when another lesson is selected', async () => {
+  mocks.run.mockResolvedValue(steppedExplanation);
+  render(<CourseStudyPanel scope={scope} courseTitle="統計" material={mathMaterial} onClose={vi.fn()} />);
+  await generate();
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  mocks.run.mockRejectedValueOnce(new Error('暫時無法講解'));
+  fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
+  await screen.findByRole('alert');
+  expect(screen.getByText('第 2 步，共 3 步')).toBeTruthy();
+  expect(document.querySelector('mark')?.textContent).toBe('m = s/n');
+  fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
+  await waitFor(() => expect(inputValue('這一段的講解記錄')).toBe('2'));
+  expect(screen.getByText('第 1 步，共 3 步')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }));
+  fireEvent.change(screen.getByLabelText('這一段的講解記錄'), { target: { value: '1' } });
+  expect(screen.getByText('第 1 步，共 3 步')).toBeTruthy();
+  expect(document.querySelector('mark')?.textContent).toBe(steppedExplanation.steps![0].sourceQuote);
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  expect(screen.queryByRole('navigation', { name: '講解步驟' })).toBeNull();
+  expect(document.querySelector('mark')).toBeNull();
+  expect(screen.getByText(mathMaterial.body)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'understand' } });
+  expect(screen.getByText('第 1 步，共 3 步')).toBeTruthy();
+});
+
+it('shows saved legacy explanations without inventing teaching steps', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  await generate();
+  expect(screen.getByText(explanation.explanation)).toBeTruthy();
+  expect(screen.queryByRole('navigation', { name: '講解步驟' })).toBeNull();
+  expect(screen.getByRole('button', { name: '朗讀這段講解' })).toBeTruthy();
+  expect(document.querySelector('mark')?.textContent).toBe(explanation.sourceQuote);
+});

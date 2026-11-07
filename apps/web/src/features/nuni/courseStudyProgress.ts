@@ -10,7 +10,8 @@ import {
 import { STUDY_SESSION_LIMITS, type StudyLesson, type StudyModeMemory, type StudyPassageMemory } from './courseStudySession';
 
 const FORMAT = 'campus-one-study-progress';
-const VERSION = 1;
+const VERSION = 2;
+type ProgressVersion = 1 | typeof VERSION;
 const MODES: StudyMode[] = ['understand', 'exam', 'practice'];
 
 export const COURSE_STUDY_PROGRESS_LIMITS = {
@@ -96,7 +97,7 @@ function readSource(value: unknown): StudySource {
   };
 }
 
-function readMode(value: unknown, passage: StudyPassage): StudyModeMemory {
+function readMode(value: unknown, passage: StudyPassage, version: ProgressVersion): StudyModeMemory {
   const memory = exactObject(value, ['question', 'lessons', 'selectedLessonId']);
   if (!Array.isArray(memory.lessons) || memory.lessons.length > STUDY_SESSION_LIMITS.lessonsPerMode) invalid();
   let previousId = 0;
@@ -112,8 +113,12 @@ function readMode(value: unknown, passage: StudyPassage): StudyModeMemory {
     let response: TutorExplanation;
     try {
       // A matching quote confirms a relationship to this copy, not its authenticity or teaching quality.
-      exactObject(lesson.response, ['title', 'explanation', 'sourceQuote', 'question', 'answer']);
-      response = parseTutorExplanation(JSON.stringify(lesson.response), passage);
+      const savedResponse = object(lesson.response);
+      const responseFields = ['title', 'explanation', 'sourceQuote', 'question', 'answer'];
+      // Version 1 stays a five-field format even after the tutor learns new fields.
+      if (version === 2 && Object.hasOwn(savedResponse, 'steps')) responseFields.push('steps');
+      exactObject(savedResponse, responseFields);
+      response = parseTutorExplanation(JSON.stringify(savedResponse), passage);
     } catch {
       invalid('進度檔中的講解無法對照該段原文，請重新選擇完整的進度檔。');
     }
@@ -132,7 +137,7 @@ function readMode(value: unknown, passage: StudyPassage): StudyModeMemory {
   return { question: text(memory.question, STUDY_TUTOR_LIMITS.questionCharacters), lessons, selectedLessonId };
 }
 
-function readData(value: unknown, expectedScope?: CourseStudyProgressScope, passageLengths?: unknown): CourseStudyProgressData {
+function readData(value: unknown, version: ProgressVersion, expectedScope?: CourseStudyProgressScope, passageLengths?: unknown): CourseStudyProgressData {
   const data = exactObject(value, ['scope', 'source', 'position', 'passages']);
   const scope = readScope(data.scope);
   if (expectedScope) {
@@ -171,9 +176,9 @@ function readData(value: unknown, expectedScope?: CourseStudyProgressScope, pass
       note: text(memory.note, STUDY_SESSION_LIMITS.noteCharacters),
       needsReview: boolean(memory.needsReview),
       modes: {
-        understand: readMode(modes.understand, passage),
-        exam: readMode(modes.exam, passage),
-        practice: readMode(modes.practice, passage),
+        understand: readMode(modes.understand, passage, version),
+        exam: readMode(modes.exam, passage, version),
+        practice: readMode(modes.practice, passage, version),
       },
     };
   }
@@ -187,7 +192,7 @@ function checkBytes(value: string) {
 
 /** Explicit, unencrypted local backup; no session token or automatic storage is involved. */
 export function serializeCourseStudyProgress(data: CourseStudyProgressData): string {
-  const canonical = readData(data);
+  const canonical = readData(data, VERSION);
   const passageLengths = canonical.source.sections.map((section) => splitStudySection(section).map((part) => part.text.length));
   const serialized = JSON.stringify({ format: FORMAT, version: VERSION, ...canonical, passageLengths });
   checkBytes(serialized);
@@ -207,9 +212,11 @@ export function parseCourseStudyProgress(raw: string, expectedScope: CourseStudy
   }
   const envelope = object(decoded);
   if (envelope.format !== FORMAT) invalid('這不是讀書白板的閱讀進度檔，請選擇正確的檔案。');
-  if (envelope.version !== VERSION) invalid('目前不支援這個閱讀進度檔的版本，請使用相容版本的進度檔。');
+  if (envelope.version !== 1 && envelope.version !== VERSION)
+    invalid('目前不支援這個閱讀進度檔的版本，請使用相容版本的進度檔。');
   exactObject(envelope, ['format', 'version', 'scope', 'source', 'position', 'passages', 'passageLengths']);
-  return readData({ scope: envelope.scope, source: envelope.source, position: envelope.position, passages: envelope.passages }, expected, envelope.passageLengths);
+  return readData({ scope: envelope.scope, source: envelope.source, position: envelope.position, passages: envelope.passages },
+    envelope.version, expected, envelope.passageLengths);
 }
 
 export function courseStudyProgressFilename(sourceTitle: string): string {

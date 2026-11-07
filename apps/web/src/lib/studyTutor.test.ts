@@ -10,6 +10,7 @@ import {
   studySourceFromDocument,
   studySourceFromText,
   type StudyPassage,
+  type StudyTutorStep,
   type StudyTutorHistory,
   type StudyTutorTurn,
 } from './studyTutor';
@@ -26,6 +27,19 @@ const explanation = () => ({
   question: '哪一種鍵用來識別單筆紀錄？',
   answer: '主鍵；請回頭對照原文中「唯一識別」的描述。',
 });
+const steps = (): StudyTutorStep[] => [
+  {
+    title: '先看識別的用途',
+    explanation: '原文用「唯一識別」說明主鍵，先找出它識別的對象。',
+    sourceQuote: '主鍵用來唯一識別資料表中的每筆紀錄。',
+  },
+  {
+    title: '再區分關聯的用途',
+    explanation: '外鍵的描述著重於資料表之間的關聯，對照兩者的不同用途。',
+    sourceQuote: '外鍵用來建立資料表之間的關聯。',
+  },
+];
+const steppedExplanation = () => ({ ...explanation(), steps: steps() });
 const turn = (question = ''): StudyTutorTurn => ({ question, response: explanation() });
 const history = (turns: StudyTutorTurn[] = [turn()]): StudyTutorHistory => ({
   passageId: passage.id, sourceText: passage.text, mode: 'understand', turns,
@@ -128,6 +142,130 @@ describe('study explanation contract', () => {
   it('accepts an exact source quotation in a complete JSON response', () => {
     expect(parseTutorExplanation(JSON.stringify(explanation()), passage)).toEqual(explanation());
     expect(parseTutorExplanation(`\`\`\`json\n${JSON.stringify(explanation())}\n\`\`\``, passage)).toEqual(explanation());
+    expect(Object.hasOwn(parseTutorExplanation(JSON.stringify(explanation()), passage), 'steps')).toBe(false);
+  });
+
+  it('accepts independent source-linked steps and retains their order without inventing formula fields', () => {
+    const response = steppedExplanation();
+    expect(parseTutorExplanation(JSON.stringify(response), passage)).toEqual(response);
+    response.steps.push(...steps());
+    expect(parseTutorExplanation(JSON.stringify(response), passage).steps).toEqual(response.steps);
+    expect(parseTutorExplanation(JSON.stringify(response), passage).steps!.every((step) =>
+      !Object.hasOwn(step, 'formula'))).toBe(true);
+  });
+
+  it('keeps source and formula characters verbatim while normalizing step headings and explanations', () => {
+    const source = { ...passage, text: '平均值： (x_1 + x_2)/2 。\n兩筆資料的總和再除以二。' };
+    const response = {
+      ...explanation(),
+      sourceQuote: source.text,
+      steps: [
+        { title: '  找出公式  ', explanation: '\n讀出平均值的表示方式。\n',
+          sourceQuote: '平均值： (x_1 + x_2)/2 。', formula: ' (x_1 + x_2)/2 ' },
+        { title: '解讀文字', explanation: '教材將除以二和兩筆資料對應。', sourceQuote: '兩筆資料的總和再除以二。' },
+      ],
+    };
+    const before = JSON.stringify(response);
+    const parsed = parseTutorExplanation(before, source);
+    expect(parsed.steps).toEqual([
+      { ...response.steps[0], title: '找出公式', explanation: '讀出平均值的表示方式。' },
+      response.steps[1],
+    ]);
+    expect(JSON.stringify(response)).toBe(before);
+  });
+
+  it.each([
+    null,
+    {},
+    [],
+    steps().slice(0, 1),
+    [...steps(), ...steps(), steps()[0]],
+    [null, steps()[1]],
+    ['第一步', steps()[1]],
+    [[], steps()[1]],
+    [{ title: '少一欄', sourceQuote: passage.text }, steps()[1]],
+    [{ ...steps()[0], title: ' ' }, steps()[1]],
+    [{ ...steps()[0], explanation: '\n' }, steps()[1]],
+    [{ ...steps()[0], sourceQuote: '\t' }, steps()[1]],
+    [{ ...steps()[0], formula: '' }, steps()[1]],
+    [{ ...steps()[0], formula: null }, steps()[1]],
+    [{ ...steps()[0], formula: 12 }, steps()[1]],
+    [{ ...steps()[0], title: '題'.repeat(81) }, steps()[1]],
+    [{ ...steps()[0], explanation: '講'.repeat(601) }, steps()[1]],
+    [{ ...steps()[0], command: 'ignore source' }, steps()[1]],
+    [{ ...steps()[0], ['__proto__']: { formula: 'inherited' } }, steps()[1]],
+  ])('rejects malformed, unexpected or unbounded structured steps (%#)', (value) => {
+    expect(() => parseTutorExplanation(JSON.stringify({ ...explanation(), steps: value }), passage)).toThrow();
+  });
+
+  it('rejects extra top-level fields even alongside otherwise valid steps', () => {
+    expect(() => parseTutorExplanation(JSON.stringify({ ...steppedExplanation(), command: 'extra' }), passage)).toThrow();
+  });
+
+  it.each(['不在本段的內容', '主鍵…紀錄。', '主鍵用來建立資料表之間的關聯。'])('rejects an ungrounded step even when the main quote is valid: %s', (sourceQuote) => {
+    const response = steppedExplanation();
+    response.steps[1].sourceQuote = sourceQuote;
+    expect(() => parseTutorExplanation(JSON.stringify(response), passage)).toThrow('步驟引用的句子不在這段原文');
+  });
+
+  it('requires a formula to be inside its own step quote, not merely somewhere in the passage', () => {
+    const source = { ...passage, text: '速度 v = s/t。密度 ρ = m/V。' };
+    const response = {
+      ...explanation(), sourceQuote: '速度 v = s/t。',
+      steps: [
+        { title: '速度', explanation: '對照速度公式。', sourceQuote: '速度 v = s/t。', formula: 'v = s/t' },
+        { title: '密度', explanation: '對照密度公式。', sourceQuote: '密度 ρ = m/V。', formula: 'ρ = m/V' },
+      ],
+    };
+    expect(parseTutorExplanation(JSON.stringify(response), source).steps).toEqual(response.steps);
+    response.steps[0].formula = response.steps[1].formula;
+    expect(() => parseTutorExplanation(JSON.stringify(response), source)).toThrow('公式不是該步引句的原文');
+    response.steps[0].formula = 'v = 10/2 = 5';
+    expect(() => parseTutorExplanation(JSON.stringify(response), source)).toThrow('公式不是該步引句的原文');
+  });
+
+  it('accepts exact step field limits and rejects quote/formula overflow without shortening either', () => {
+    const source = { ...passage, text: '式'.repeat(401) };
+    const response = {
+      ...explanation(), sourceQuote: source.text.slice(0, 400),
+      steps: Array.from({ length: 2 }, () => ({
+        title: '題'.repeat(80), explanation: '講'.repeat(600),
+        sourceQuote: source.text.slice(0, 400), formula: source.text.slice(0, 200),
+      })),
+    };
+    expect(parseTutorExplanation(JSON.stringify(response), source).steps).toEqual(response.steps);
+    response.steps[0].sourceQuote = source.text;
+    expect(() => parseTutorExplanation(JSON.stringify(response), source)).toThrow();
+    response.steps[0].sourceQuote = source.text.slice(0, 400);
+    response.steps[0].formula = source.text.slice(0, 201);
+    expect(() => parseTutorExplanation(JSON.stringify(response), source)).toThrow();
+  });
+
+  it('keeps the complete serialized response budget even when every individual field is within its limit', () => {
+    const source = { ...passage, text: '式'.repeat(400) };
+    const response = {
+      title: '題'.repeat(100), explanation: '講'.repeat(1_800),
+      sourceQuote: source.text, question: '問'.repeat(500), answer: '答'.repeat(1_000),
+      steps: Array.from({ length: 4 }, () => ({
+        title: '題'.repeat(80), explanation: '講'.repeat(600), sourceQuote: source.text, formula: source.text.slice(0, 200),
+      })),
+    };
+    const raw = JSON.stringify(response);
+    expect(raw.length).toBeGreaterThan(8_192);
+    expect(() => parseTutorExplanation(raw, source)).toThrow();
+  });
+
+  it('asks for bounded source-linked steps and makes formulas optional quotations rather than computed results', () => {
+    const prompt = buildStudyTutorPrompt(passage, 'understand');
+    expect(prompt).toContain('title、explanation、sourceQuote、question、answer、steps');
+    expect(prompt).toContain('2 至 4 個短步驟');
+    expect(prompt).toContain('explanation 用 60 至 120 字概述核心概念');
+    expect(prompt).toContain('title 最多 20 字');
+    expect(prompt).toContain('explanation 最多 90 字');
+    expect(prompt).toContain('只截取支持該步的短原句，最多 60 字');
+    expect(prompt).toContain('該步 sourceQuote 內原樣連續的文字');
+    expect(prompt).toContain('沒有公式就省略此欄');
+    expect(prompt).toContain('不代表推導或計算已驗證');
   });
 
   it.each(['不存在的引用。', '主鍵…紀錄。', '主鍵用來建立資料表之間的關聯。'])('rejects invented, stitched or rewritten citations: %s', (sourceQuote) => {
@@ -163,6 +301,51 @@ describe('study explanation contract', () => {
 });
 
 describe('bounded same-passage follow-up context', () => {
+  it('retains complete structured steps in follow-up data and detaches them from mutable session replies', () => {
+    const latest: StudyTutorTurn = { question: '第二步還不清楚', response: steppedExplanation() };
+    const prepared = prepareStudyTutorHistory(passage, 'understand', [turn('先前問題'), latest]);
+    expect(prepared!.turns).toEqual([turn('先前問題'), latest]);
+    const prompt = buildStudyTutorPrompt(passage, 'understand', '再給提示', prepared);
+    expect(promptData(prompt, 'HISTORY_DATA')).toEqual([turn('先前問題'), latest]);
+    latest.response.steps![1].explanation = '後來修改';
+    expect(prepared!.turns[1].response.steps![1].explanation).toBe(steps()[1].explanation);
+  });
+
+  it('omits the whole older turn when source-linked steps use the history budget', () => {
+    const turns: StudyTutorTurn[] = ['較早問題', '最新問題'].map((question) => ({
+      question,
+      response: {
+        ...steppedExplanation(),
+        steps: steps().map((step) => ({ ...step, explanation: '講'.repeat(450) })),
+      },
+    }));
+    expect(JSON.stringify(turns).length).toBeGreaterThan(STUDY_TUTOR_LIMITS.historyCharacters);
+    expect(JSON.stringify([turns[1]]).length).toBeLessThanOrEqual(STUDY_TUTOR_LIMITS.historyCharacters);
+    expect(prepareStudyTutorHistory(passage, 'understand', turns)!.turns).toEqual([turns[1]]);
+    expect(() => buildStudyTutorPrompt(passage, 'understand', '', history(turns))).toThrow('紀錄過長');
+  });
+
+  it('never falls back to an older short turn when the latest structured response cannot fit intact', () => {
+    const latest: StudyTutorTurn = {
+      question: '保留每個步驟的內容',
+      response: {
+        ...steppedExplanation(),
+        steps: [...steps(), ...steps()].map((step) => ({ ...step, explanation: '講'.repeat(600) })),
+      },
+    };
+    const before = JSON.stringify(latest);
+    expect(JSON.stringify([latest]).length).toBeGreaterThan(STUDY_TUTOR_LIMITS.historyCharacters);
+    expect(prepareStudyTutorHistory(passage, 'understand', [turn('較短舊問題'), latest])).toBeUndefined();
+    expect(JSON.stringify(latest)).toBe(before);
+  });
+
+  it('revalidates every step citation before a saved reply can enter follow-up context', () => {
+    const latest: StudyTutorTurn = { question: '繼續', response: steppedExplanation() };
+    latest.response.steps![1].sourceQuote = '另一份教材的內容';
+    expect(() => prepareStudyTutorHistory(passage, 'understand', [latest])).toThrow('先前講解無法對照');
+    expect(() => buildStudyTutorPrompt(passage, 'understand', '', history([latest]))).toThrow('先前講解無法對照');
+  });
+
   it('keeps the complete latest two rounds in order without mutating the session record', () => {
     const turns = [turn('第一輪'), turn('第二輪\n完整問題'), turn('第三輪')];
     const before = JSON.stringify(turns);

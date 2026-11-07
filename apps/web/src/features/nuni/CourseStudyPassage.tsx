@@ -18,6 +18,7 @@ import {
   type StudyPassageMemory,
 } from './courseStudySession';
 import { StudyReadAloud } from './StudyReadAloud';
+import { CourseStudySteps } from './CourseStudySteps';
 import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
@@ -34,6 +35,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [speaking, setSpeaking] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
+  const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   const current = useRef<AbortController | null>(null);
   const passageHeading = useRef<HTMLHeadingElement>(null);
   const evidenceMark = useRef<HTMLElement>(null);
@@ -45,7 +47,10 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const modeMemory = memory.modes[mode];
   const selected = modeMemory.lessons.find((lesson) => lesson.id === modeMemory.selectedLessonId);
   const result = selected?.response;
-  const evidence = result ? locateStudyEvidence(passage.text, result.sourceQuote) : null;
+  const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
+  const activeStep = result?.steps?.[activeStepIndex];
+  const displayedQuote = activeStep?.sourceQuote ?? result?.sourceQuote;
+  const evidence = displayedQuote ? locateStudyEvidence(passage.text, displayedQuote) : null;
 
   useEffect(() => {
     setAvailability(getStudyTutorAvailability());
@@ -91,6 +96,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         },
       });
       if (current.current !== controller || controller.signal.aborted) return;
+      setStepSelection(null);
       onChange((previous) => appendStudyLesson(previous, mode, { question, response: explanation }, history ? selected?.id ?? null : null));
       const retained = history?.turns.length ?? 0;
       const scope = withHistory && retained < turns.length
@@ -114,8 +120,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
           className={styles.evidenceHighlight}>{evidence.quote}</mark>{evidence.after}</> : passage.text}
       </blockquote>
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
-      {!busy && <StudyReadAloud key={selected?.id ?? 'source'}
-        text={result?.explanation ?? passage.text} label={result ? '朗讀這段講解' : '朗讀原文'}
+      {!busy && <StudyReadAloud key={`${selected?.id ?? 'source'}:${activeStepIndex}`}
+        text={activeStep?.explanation ?? result?.explanation ?? passage.text}
+        label={activeStep ? '朗讀這一步' : result ? '朗讀這段講解' : '朗讀原文'}
         onSpeakingChange={setSpeaking} />}
       <section className={styles.personalNotes} aria-label="本段學習筆記">
         <div className={styles.coachHeading}>
@@ -143,6 +150,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
           <label className={styles.field} htmlFor={lessonId}>這一段的講解記錄
             <select id={lessonId} value={selected?.id ?? ''} disabled={busy} onChange={(event) => {
               const selectedLessonId = Number(event.target.value);
+              setStepSelection(null);
               onChange((previous) => updateStudyMode(previous, mode, (state) => ({ ...state, selectedLessonId })));
               setError('');
               setProgress('');
@@ -179,10 +187,11 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
           <h4>{result.title}</h4>
           {selected.question && <p className={styles.studentQuestion}>我的問題：{selected.question}</p>}
-          <div className={styles.evidencePath} role="group" aria-label="三步對照學習">
+          <div className={`${styles.evidencePath} ${result.steps ? styles.structuredPath : ''}`} role="group" aria-label="三步對照學習">
             <section className={styles.evidenceStep} aria-label="第一步：核對原文">
               <p className={styles.evidenceStepHeading}>01 · 核對教材原文</p>
-              <blockquote className={styles.evidenceQuote}>{result.sourceQuote}</blockquote>
+              {activeStep && <p className={styles.note}>目前對照第 {activeStepIndex + 1} 步：{activeStep.title}</p>}
+              <blockquote className={styles.evidenceQuote}>{displayedQuote}</blockquote>
               <button type="button" className={styles.button} disabled={!evidence}
                 onClick={() => evidenceMark.current?.focus()}>定位原文引句</button>
               {evidence && evidence.occurrences > 1 && <p className={styles.note}>
@@ -193,6 +202,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
             <section className={styles.evidenceStep} aria-label="第二步：理解講解">
               <p className={styles.evidenceStepHeading}>02 · AI 解讀</p>
               <p className={styles.explanationText}>{result.explanation}</p>
+              {result.steps && <CourseStudySteps steps={result.steps} activeIndex={activeStepIndex}
+                onSelect={(index) => setStepSelection({ lessonId: selected.id, index })}
+                onLocate={() => evidenceMark.current?.focus()} evidenceAvailable={!!evidence} />}
               <p className={styles.note}>找到引句只代表原文相符，不代表這段解釋一定正確。</p>
             </section>
             <section className={styles.evidenceStep} aria-label="第三步：自己試答">

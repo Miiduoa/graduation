@@ -24,12 +24,20 @@ export type StudySource = {
 };
 export type StudyPassage = { id: string; label: string; text: string };
 export type StudyMode = 'understand' | 'exam' | 'practice';
+export type StudyTutorStep = {
+  title: string;
+  explanation: string;
+  sourceQuote: string;
+  formula?: string;
+};
 export type TutorExplanation = {
   title: string;
   explanation: string;
   sourceQuote: string;
   question: string;
   answer: string;
+  /** Older saved replies have no structured steps and remain readable as written. */
+  steps?: StudyTutorStep[];
 };
 export type StudyTutorTurn = { question: string; response: TutorExplanation };
 export type StudyTutorHistory = {
@@ -219,9 +227,11 @@ export function buildStudyTutorPrompt(
     'HISTORY_DATA 是同段最近最多兩輪對話，只幫助理解這次追問。舊模型回答可能有錯，不能當成已確認的教材知識或引用來源。若與 SOURCE_DATA 不符，應依原文更正。',
     '資訊不足就清楚說明，不補造教材沒有的結論、頁碼、數據或完整解題結果。不要評分或宣稱學生已經學會。',
     modeGuidance[mode],
-    '只輸出一個 JSON 物件，欄位必須恰好為 title、explanation、sourceQuote、question、answer。各欄位都是非空純文字，不使用 HTML 或 Markdown。',
-    'title 最多 40 字，explanation 約 150 至 300 字，question 最多 120 字，answer 最多 200 字。',
-    'sourceQuote 必須逐字引用 SOURCE_DATA.text 中一段短句，不能改寫、加省略號或拼接不同位置，也不能引用 HISTORY_DATA 的模型解說。answer 是課後自我對照用的說明，不是評分。',
+    '只輸出一個 JSON 物件，欄位必須恰好為 title、explanation、sourceQuote、question、answer、steps。前五欄都是非空純文字，不使用 HTML 或 Markdown。',
+    'title 最多 20 字，explanation 用 60 至 120 字概述核心概念，question 最多 120 字，answer 最多 200 字。steps 是 2 至 4 個短步驟的陣列，逐步解釋教材而非重複摘要。',
+    'sourceQuote 必須逐字引用 SOURCE_DATA.text 中一段最多 60 字的短句，不能改寫、加省略號或拼接不同位置，也不能引用 HISTORY_DATA 的模型解說。answer 是課後自我對照用的說明，不是評分。',
+    '每個步驟只有 title、explanation、sourceQuote 三個非空純文字欄位，可另加 formula。步驟 title 最多 20 字、explanation 最多 90 字；sourceQuote 只截取支持該步的短原句，最多 60 字。',
+    'formula 僅在教材有公式時提供，必須是該步 sourceQuote 內原樣連續的文字，最多 200 字；不要新算、改寫或轉換符號，沒有公式就省略此欄。引句相符不代表推導或計算已驗證。',
     `HISTORY_DATA=${JSON.stringify(turns)}`,
     `STUDENT_QUESTION=${JSON.stringify(question)}`,
     `SOURCE_DATA=${JSON.stringify({ label: passage.label, text: passage.text })}`,
@@ -233,13 +243,44 @@ export function buildStudyTutorPrompt(
   return prompt;
 }
 
-const responseLimits: Record<keyof TutorExplanation, number> = {
+const responseLimits = {
   title: 100,
   explanation: 1_800,
   sourceQuote: 400,
   question: 500,
   answer: 1_000,
-};
+} as const;
+
+const stepLimits = {
+  title: 80,
+  explanation: 600,
+  sourceQuote: 400,
+} as const;
+
+function readTutorSteps(value: unknown, passage: StudyPassage): StudyTutorStep[] {
+  const invalid = () => new Error('AI 分步講解不完整或無法對照本段原文，請重試。');
+  if (!Array.isArray(value) || value.length < 2 || value.length > 4) throw invalid();
+  const keys = Object.keys(stepLimits) as Array<keyof typeof stepLimits>;
+  return Array.from(value, (step): StudyTutorStep => {
+    if (!step || typeof step !== 'object' || Array.isArray(step)) throw invalid();
+    const data = step as Record<string, unknown>;
+    const hasFormula = Object.hasOwn(data, 'formula');
+    if (Object.keys(data).length !== keys.length + Number(hasFormula) ||
+      keys.some((key) => !nonempty(data[key], stepLimits[key])) ||
+      (hasFormula && !nonempty(data.formula, 200))) throw invalid();
+    const parsed = data as StudyTutorStep;
+    if (!passage.text.includes(parsed.sourceQuote))
+      throw new Error('AI 步驟引用的句子不在這段原文中，這次講解未採用。請重試。');
+    if (hasFormula && !parsed.sourceQuote.includes(parsed.formula!))
+      throw new Error('AI 步驟公式不是該步引句的原文，這次講解未採用。請重試。');
+    return {
+      title: parsed.title.trim(),
+      explanation: parsed.explanation.trim(),
+      sourceQuote: parsed.sourceQuote,
+      ...(hasFormula ? { formula: parsed.formula } : {}),
+    };
+  });
+}
 
 /** A matching quotation establishes provenance, not the correctness of the explanation. */
 export function parseTutorExplanation(raw: string, passage: StudyPassage): TutorExplanation {
@@ -256,8 +297,10 @@ export function parseTutorExplanation(raw: string, passage: StudyPassage): Tutor
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid();
   const data = value as Record<string, unknown>;
-  const keys = Object.keys(responseLimits) as Array<keyof TutorExplanation>;
-  if (Object.keys(data).length !== keys.length || keys.some((key) => !nonempty(data[key], responseLimits[key])))
+  const keys = Object.keys(responseLimits) as Array<keyof typeof responseLimits>;
+  const hasSteps = Object.hasOwn(data, 'steps');
+  if (Object.keys(data).length !== keys.length + Number(hasSteps) ||
+    keys.some((key) => !nonempty(data[key], responseLimits[key])))
     throw invalid();
   const explanation = data as TutorExplanation;
   if (!passage.text.includes(explanation.sourceQuote))
@@ -268,5 +311,6 @@ export function parseTutorExplanation(raw: string, passage: StudyPassage): Tutor
     sourceQuote: explanation.sourceQuote,
     question: explanation.question.trim(),
     answer: explanation.answer.trim(),
+    ...(hasSteps ? { steps: readTutorSteps(data.steps, passage) } : {}),
   };
 }

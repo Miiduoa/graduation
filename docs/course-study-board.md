@@ -17,6 +17,8 @@
 - 追問最多帶入同段、同讀法的最近 2 輪；選舊講解時只沿著該次對話接續，不混用另一條追問分支。
 - 引用必須確實出現在該段來源。這項檢查不代表生成的解釋或算式一定正確。
 - 可在本段原文看到 AI 引句的逐字標記，點「定位原文引句」回去核對；三步卡片依序呈現教材引用、AI 解讀與個人試答。若相同引句重複出現會提示目前標記第一處。這是對照流程，不是數學推導或自動正確性驗證。
+- 新講解可包含 2–4 個獨立步驟，以「上一步／下一步」或步驟清單切換。每一步有自己的說明與逐字引句，原文標記跟著目前步驟更新；「定位這一步的原文」將焦點移到該引句，本機朗讀也跟隨這一步。
+- 教材內的基本公式可排版顯示，並保留原始公式文字供核對。公式必須逐字存在於該步引句；這項功能只處理呈現，沒有數值求解或推導正確性判定。
 - 可主動下載本次筆記為純文字檔，包含原頁碼、原文、個人筆記、講解與試答；只有已試答且已展開的參考回答才會匯出。
 - 可儲存完整閱讀進度，關閉後再從本機進度檔還原原頁段、讀法、筆記、講解、試答與問題草稿。載入先顯示預覽，確認後才取代目前內容。
 - 支援瀏覽器語音輸入與可用時的本機中文朗讀；語音輸入不會自動送出。
@@ -34,7 +36,10 @@
 預覽教材名稱、原頁段、讀法及筆記／待複習數量。按「還原這份進度」才會替換目前白板，
 也可以取消，或先儲存正在閱讀的內容。
 
-進度格式固定為 `campus-one-study-progress` 第 1 版，最多 8 MiB。只保存穩定的
+進度格式為 `campus-one-study-progress`，新保存使用第 2 版，最多 8 MiB，仍可載入原先的第 1 版。
+第 1 版維持原本的五欄講解格式；第 2 版接受舊講解或含 `steps` 的新講解。舊檔再次保存會升級為第 2 版，
+不會為舊講解捏造步驟。分步講解與原文公式會完整存入進度檔及文字筆記；步驟導覽本身從第一步開始，
+不把當下步驟索引寫入檔案。只保存穩定的
 `platformAccountId` 與 `workspaceId` 供載入時核對，不保存 session context、登入 token、cookie 或權限判定。
 載入時仍需通過當下課程存取流程；不同帳號／課程、未知版本、損壞格式、超限內容、錯誤段落位置、
 孤立的狀態 key、不合法的追問祖先與無法對照原文的 AI 引用都會拒絕，不清空目前內容。
@@ -75,6 +80,10 @@ PDF 沿用 `readPersonalImportDocumentFile` 的同源讀取器：最多 8 MiB、
 超出預算時只省略完整的舊輪次：兩輪放不下就帶最近一輪，最近一輪仍放不下則依原文重新整理並提示。
 原文與這次問題不會默默截斷。可使用「只依原文重新講解」明確開始另一條講解。
 Prompt 將歷史當作理解追問的資料，不把先前模型回答視為教材事實；新引文仍須來自原文。
+講解可帶有 2–4 個 `steps`，每步包含 `title`、`explanation`、`sourceQuote` 與選填的 `formula`。
+每步的引用必須是目前原文的連續子字串；公式則必須是該步引句的連續子字串。
+不接受額外欄位、空步驟、不符引用或超限內容。舊五欄回覆仍可閱讀與追問，但不補造步驟。
+步驟會完整計入既有歷史預算，超限時省略完整輪次；目前選取的步驟不會縮減模型可見的教材內容。
 現有模型資源 GET 白名單、輸入／輸出 token 限制及 GPU tensor 釋放機制維持原樣。
 
 只有使用者按下「啟用 AI 講解本段」才建立 worker。首次下載沿用現有約 1.9 GB 模型；
@@ -85,12 +94,28 @@ Prompt 將歷史當作理解追問的資料，不把先前模型回答視為教�
 找不到時不改用遠端聲音。語音辨識沿用 `VoiceDictationButton`，可能使用瀏覽器的線上服務，
 因此不能把整個語音流程宣稱為完全離線。朗讀時停用語音輸入，避免把播報聲錄成提問。
 
+## 基本公式呈現
+
+公式使用 [MathML Core](https://www.w3.org/TR/mathml-core/) 的分數、上下標與根號結構，不增加數學排版依賴。
+目前支援數字、小數、單一英文字母／希臘字母、明確四則運算與比較符號、括號、`x^2`、`x_1`、
+`x_{i+1}^2`，以及明確括住範圍的 `sqrt(...)`／`√(...)`。乘除由左至右，腳標先於乘除；
+例如 `a/b+c` 會把 `a/b` 排成分數，再接 `+c`，不把 `c` 放入分母。
+
+必須完整解析整條公式才排版：最多 200 字元、120 個語法 token、12 層巢狀。
+LaTeX、隱含乘法、多字母函數、中文、缺漏括號或其他不支援的語法會保留全部原文，
+不丟字、不猜測缺漏、不做數值求值。排版成功仍可展開「核對原始公式」，查看原始空白與符號。
+資料只經過固定標籤的 React 元件，沒有 HTML 字串插入、程式求值或外部服務。
+畫面提供可聚焦的橫向捲動區，實際字型、觸控與讀屏效果仍需在目標裝置驗收。
+
 ## 維護與驗證
 
 核心檔案：
 
 - `apps/web/src/features/nuni/CourseStudyPanel.tsx`：來源選擇、段落導覽、講解與試答。
 - `apps/web/src/features/nuni/CourseStudyPassage.tsx`：單段講解、追問、筆記、試答與取消。
+- `apps/web/src/features/nuni/CourseStudySteps.tsx`：逐步講解、步驟導覽與個別原文定位。
+- `apps/web/src/features/nuni/StudyFormula.tsx`：基本公式呈現與完整原文回退。
+- `apps/web/src/features/nuni/studyFormula.ts`：受限算式語法、運算優先序與解析上限。
 - `apps/web/src/features/nuni/courseStudySession.ts`：會話記憶、各模式的保留上限及追問分支。
 - `apps/web/src/features/nuni/courseStudyNotes.ts`：按來源順序匯出純文字筆記與安全檔名。
 - `apps/web/src/features/nuni/courseStudyProgress.ts`：進度檔格式、範圍與內容驗證、序列化與還原資料。
@@ -101,7 +126,7 @@ Prompt 將歷史當作理解追問的資料，不把先前模型回答視為教�
 在專案支援的 Node 與 pnpm 版本、已安裝依賴的 checkout 執行：
 
 ```sh
-pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorRuntime.test.ts src/features/nuni/CourseStudyPanel.test.tsx src/features/nuni/StudyReadAloud.test.tsx src/features/nuni/CourseMaterials.test.tsx src/features/nuni/courseStudyNotes.test.ts src/features/nuni/courseStudyProgress.test.ts src/features/nuni/CourseStudyProgress.test.tsx
+pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorRuntime.test.ts src/features/nuni/CourseStudyPanel.test.tsx src/features/nuni/StudyReadAloud.test.tsx src/features/nuni/CourseMaterials.test.tsx src/features/nuni/courseStudyNotes.test.ts src/features/nuni/courseStudyProgress.test.ts src/features/nuni/CourseStudyProgress.test.tsx src/features/nuni/studyEvidence.test.ts src/features/nuni/StudyFormula.test.tsx
 ```
 
 測試另覆蓋引用精確定位、原文完整保留、重複引句提示與三步對照的焦點行為。
@@ -109,6 +134,8 @@ pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorR
 過期回應隔離、頁面／模式切換後還原、追問分支、長歷史縮減、同名來源替換、匯入失敗保留、
 帳號切換與權限撤銷、本機聲音限制、輸入超限、下載失敗恢復及文字筆記不提前匯出隱藏答案。
 進度檔另驗證格式版本、帳號／課程一致、來源完整性、預覽確認、取消與晚回應、關閉重開後還原，以及還原後的追問分支。
+分步功能另覆蓋每步引用與公式歸屬、完整歷史預算、步驟切換與原文焦點、失敗保留與成功講解重設、
+v1 舊檔還原、v2 保存後重開與步驟／公式完整保留，以及還原不自動生成或提前展開參考回答。
 
 發布前仍需在有 WebGPU 的實機完成模型下載及中文教材推論，檢查延遲、記憶體、引用與教學品質；
 以正式授權的課程確認 PDF／掃描頁，並做 iPhone、Android 的觸控與輔助功能驗收。
@@ -127,7 +154,7 @@ pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorR
 | 翻頁後回來繼續 | 筆記、試答、講解記錄、待複習定位 | iPhone／Android 觸控、鍵盤、輔助功能與縮放驗收 |
 | 下次繼續複習 | 主動儲存閱讀進度檔、載入預覽與明確還原；亦可下載純文字筆記 | 實機檔案下載／選取、自動保存、跨裝置同步與衝突處理 |
 | 核對講解與原文 | 原文逐字標記、焦點定位、AI 解讀與自我試答三步卡片 | iPhone／Android 觸控及讀屏驗收、解釋正確性實測 |
-| 看懂圖形與解題過程 | 目前新增的是文字引用對照，而非計算圖形或公式 | 可核對的分步圖解、公式呈現與圖像理解 |
+| 看懂公式與解題步驟 | 2–4 步獨立講解、逐步原文引用、教材公式排版與原字核對 | 實機公式與輔助功能驗收、推導品質、數值運算及圖像理解 |
 | 說到不懂時插話 | 目前分別提供朗讀、語音轉字與明確送出 | 不中斷上下文的語音打斷、實機錄放音驗收 |
 
 每輪先核對最新 main 與 PR 的確切 head、CI／CodeQL、未解討論及指定 App 的「審查通過」。

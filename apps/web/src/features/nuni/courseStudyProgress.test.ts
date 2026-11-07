@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { splitStudySection, studySourceFromDocument, studySourceFromText } from '@/lib/studyTutor';
+import { splitStudySection, studySourceFromDocument, studySourceFromText, type TutorExplanation } from '@/lib/studyTutor';
 import { appendStudyLesson, emptyStudyPassage, studyLessonHistory, type StudyModeMemory } from './courseStudySession';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
@@ -32,6 +32,22 @@ function data(): CourseStudyProgressData {
     position: { sectionIndex: 0, passageIndex: 0, mode: 'understand' },
     passages: { '0:0': memory },
   };
+}
+
+const formulaSourceText = '平均數等於總和除以筆數：μ = Σx / n。\r\n樣本有 n = 3 筆：1、2、3。';
+function dataWithSteps(): CourseStudyProgressData {
+  const saved = data();
+  saved.source = studySourceFromText({ id: 'formula-material', title: '平均數', text: formulaSourceText });
+  saved.passages['0:0'].modes.understand.lessons[0].response = {
+    title: '看懂平均數', explanation: '先確認總和與筆數，再讀教材公式。',
+    sourceQuote: '平均數等於總和除以筆數', question: '公式中的 n 代表什麼？', answer: '樣本筆數。',
+    steps: [
+      { title: '讀公式', explanation: 'μ 代表平均數；Σx 代表所有數值的總和。',
+        sourceQuote: '平均數等於總和除以筆數：μ = Σx / n。', formula: 'μ = Σx / n' },
+      { title: '確認筆數', explanation: '這裡列出三個數值，因此筆數是 3。', sourceQuote: '樣本有 n = 3 筆：1、2、3。' },
+    ],
+  };
+  return saved;
 }
 
 type Envelope = CourseStudyProgressData & { format: string; version: number; passageLengths: number[][] };
@@ -79,6 +95,7 @@ describe('portable study progress', () => {
     expect(restored.source.warnings.some((warning) => warning.includes('第 1 頁'))).toBe(true);
     expect(studyLessonHistory(restored.passages['0:0'].modes.understand, 7).map((turn) => turn.response.title)).toEqual(['講解 3', '講解 7']);
     expect(restored.passages['0:0'].modes.understand.lessons[0].previousLessonId).toBe(1);
+    expect(JSON.parse(serialized).version).toBe(2);
     expect(JSON.parse(serialized).passageLengths).toEqual([[1600, '後續內容。'.length], ['交易具有原子性。'.length]]);
     expect(JSON.stringify(saved)).toBe(before);
   });
@@ -121,7 +138,7 @@ describe('portable study progress', () => {
     expect(() => parseCourseStudyProgress(serializeCourseStudyProgress(data()), expected as CourseStudyProgressScope)).toThrow();
   });
 
-  it.each([0, 2, -1, '1', null])('rejects unsupported versions without inventing a migration (%s)', (version) => {
+  it.each([0, 3, -1, 1.5, '1', '2', null])('rejects unsupported versions without inventing a migration (%s)', (version) => {
     expect(() => parseCourseStudyProgress(changed((value) => Reflect.set(value, 'version', version)), scope)).toThrow(/版本/);
   });
 
@@ -136,6 +153,76 @@ describe('portable study progress', () => {
     expect(() => parseCourseStudyProgress(changed((value) => Reflect.set(value.scope, 'token', 'private-token')), scope)).toThrow();
     expect(() => parseCourseStudyProgress(changed((value) => Reflect.set(value, 'session', { token: 'private-token' })), scope)).toThrow();
     expect(serializeCourseStudyProgress(data())).not.toMatch(/sessionContext|token|revision/);
+  });
+});
+
+describe('study progress format compatibility', () => {
+  it('restores an original five-field v1 file and saves it as v2 without inventing steps or changing hidden answers', () => {
+    const saved = data();
+    saved.passages['0:0'].modes.understand.lessons[0].attempt = '保留還沒展開答案的試答';
+    // Construct the legacy envelope independently of the current writer.
+    const legacy = JSON.stringify({
+      format: 'campus-one-study-progress', version: 1, ...saved, passageLengths: [[sourceText.length]],
+    });
+    const restored = parseCourseStudyProgress(legacy, scope);
+    expect(restored).toEqual(saved);
+    expect(restored.passages['0:0'].modes.understand.lessons[0].response).not.toHaveProperty('steps');
+    expect(restored.passages['0:0'].modes.understand.lessons[0].answerVisible).toBe(false);
+    const upgraded = serializeCourseStudyProgress(restored);
+    expect(JSON.parse(upgraded).version).toBe(2);
+    expect(parseCourseStudyProgress(upgraded, scope)).toEqual(saved);
+  });
+
+  it('round-trips every step, its exact formula and quote in v2 without changing lesson branches or reveal state', () => {
+    const saved = dataWithSteps();
+    const original = saved.passages['0:0'].modes.understand.lessons[0];
+    saved.passages['0:0'] = appendStudyLesson(saved.passages['0:0'], 'understand', {
+      question: '再說明筆數', response: { ...original.response, title: '回到樣本筆數' },
+    }, original.id);
+    const memory = saved.passages['0:0'].modes.understand;
+    memory.lessons[0].attempt = '我的第一個想法';
+    memory.lessons[0].answerVisible = true;
+    memory.lessons[1].attempt = '第二個尚未展開答案的想法';
+    memory.selectedLessonId = 1;
+    const before = JSON.stringify(saved);
+    const serialized = serializeCourseStudyProgress(saved);
+    expect(JSON.parse(serialized).version).toBe(2);
+    const restored = parseCourseStudyProgress(serialized, scope);
+    expect(restored).toEqual(saved);
+    const lessons = restored.passages['0:0'].modes.understand.lessons;
+    expect(lessons[0].response.steps).not.toBe(original.response.steps);
+    expect(lessons[0].response.steps?.[0].formula).toBe('μ = Σx / n');
+    expect(lessons[0].response.steps?.[1]).not.toHaveProperty('formula');
+    expect(lessons.map((lesson) => lesson.answerVisible)).toEqual([true, false]);
+    expect(studyLessonHistory(restored.passages['0:0'].modes.understand, 2).map((turn) => turn.response.steps))
+      .toEqual([original.response.steps, original.response.steps]);
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+
+  it('rejects steps injected into a v1 file even when their quotes and formula are valid', () => {
+    const value = JSON.parse(serializeCourseStudyProgress(dataWithSteps())) as Envelope;
+    value.version = 1;
+    expect(() => parseCourseStudyProgress(JSON.stringify(value), scope)).toThrow(/無法對照該段原文/);
+  });
+
+  it.each([
+    ['too few steps', (value: TutorExplanation) => { value.steps!.pop(); }],
+    ['too many steps', (value: TutorExplanation) => { value.steps = Array.from({ length: 5 }, () => ({ ...value.steps![0] })); }],
+    ['non-array steps', (value: TutorExplanation) => { Reflect.set(value, 'steps', {}); }],
+    ['missing quote', (value: TutorExplanation) => { Reflect.deleteProperty(value.steps![0], 'sourceQuote'); }],
+    ['quote outside this passage', (value: TutorExplanation) => { value.steps![0].sourceQuote = '另一段原文'; }],
+    ['formula only in another step', (value: TutorExplanation) => { value.steps![0].formula = 'n = 3'; }],
+    ['invented formula', (value: TutorExplanation) => { value.steps![0].formula = 'μ = 2'; }],
+    ['non-string formula', (value: TutorExplanation) => { Reflect.set(value.steps![0], 'formula', 3); }],
+    ['unknown step field', (value: TutorExplanation) => { Reflect.set(value.steps![0], 'tool', 'run-code'); }],
+  ] as const)('rejects %s when importing and saving v2', (_label, update) => {
+    const saved = dataWithSteps();
+    update(saved.passages['0:0'].modes.understand.lessons[0].response);
+    const raw = JSON.stringify({
+      format: 'campus-one-study-progress', version: 2, ...saved, passageLengths: [[formulaSourceText.length]],
+    });
+    expect(() => parseCourseStudyProgress(raw, scope)).toThrow(/無法對照該段原文/);
+    expect(() => serializeCourseStudyProgress(saved)).toThrow(/無法對照該段原文/);
   });
 });
 

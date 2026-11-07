@@ -113,7 +113,7 @@
   .actions > .primary { flex: 1 1 160px; }
 }
 
-/* A source-linked learning path; no generated drawing or equation is implied. */
+/* Source-linked reading, explanation and practice; each stage remains readable on narrow screens. */
 .evidenceHighlight { border-radius: 2px; background: color-mix(in srgb, var(--brand) 19%, var(--surface)); color: var(--text); }
 .evidenceHighlight:focus { outline: 3px solid var(--brand); outline-offset: 3px; }
 .evidencePath { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; align-items: start; }
@@ -123,5 +123,16 @@
 .evidenceStep .explanationText { margin: 0; }
 .evidenceStep .exercise { margin: 0; padding: 0; border: none; background: transparent; }
 .evidenceStep .exercise .field { margin-top: 12px; }
+.structuredPath { grid-template-columns: minmax(0, 1fr); }
+.studySteps { min-width: 0; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+.studySteps h5, .studyStepContent h6 { margin: 0 0 12px; font-size: 16px; line-height: 1.6; }
+.studyStepsBody { display: grid; grid-template-columns: minmax(160px, .7fr) minmax(0, 1.5fr); gap: 18px; }
+.studyStepList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.studyStepButton { display: flex; gap: 10px; align-items: flex-start; width: 100%; min-height: 44px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text); background: var(--bg); font: inherit; font-size: 14px; text-align: start; line-height: 1.6; overflow-wrap: anywhere; cursor: pointer; }
+.studyStepButton > span:first-child { flex-shrink: 0; color: var(--muted); font-variant-numeric: tabular-nums; }
+.studyStepButton[aria-current="step"] { border-color: var(--brand); box-shadow: inset 3px 0 0 var(--brand); font-weight: 600; }
+.studyStepContent { min-width: 0; padding: 16px; background: var(--bg); border: 1px solid var(--border); }
+.studyStepActions { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
 @media (max-width: 900px) { .evidencePath { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 520px) { .evidenceStep { padding: 14px; } }
+@media (max-width: 640px) { .studyStepsBody { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .evidenceStep, .studyStepContent { padding: 14px; } }

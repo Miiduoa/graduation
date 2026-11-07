@@ -88,11 +88,49 @@ describe('course study note downloads', () => {
     { attempt: '我自己的答案', visible: false, exported: false },
     { attempt: '我自己的答案', visible: true, exported: true },
   ])('includes a reference answer only after an attempt and explicit reveal (%#)', ({ attempt, visible, exported }) => {
+    for (const includeSteps of [false, true]) {
+      const memory = withLesson();
+      const lesson = memory.modes.understand.lessons[0];
+      Object.assign(lesson, { attempt, answerVisible: visible });
+      if (includeSteps) lesson.response.steps = [
+        { title: '找主鍵', explanation: '辨認教材討論的對象。', sourceQuote: '主鍵' },
+        { title: '確認用途', explanation: '用來分辨每一筆資料。', sourceQuote: '唯一識別資料' },
+      ];
+      const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
+      expect(text.includes('參考解答秘密：不可以。')).toBe(exported);
+      expect(text.includes('參考回答（已展開）：')).toBe(exported);
+    }
+  });
+
+  it('exports all step titles, explanations, quotes and optional formulas in order as plain text', () => {
+    const formulaSource = studySourceFromText({
+      id: 'formula-notes', title: '公式與符號', text: '平均數公式：μ = Σx / n。\r\n比較符號 x < y 表示 x 小於 y。',
+    });
     const memory = withLesson();
-    Object.assign(memory.modes.understand.lessons[0], { attempt, answerVisible: visible });
-    const text = buildCourseStudyNotes('資料庫', source, { '0:0': memory });
-    expect(text.includes('參考解答秘密：不可以。')).toBe(exported);
-    expect(text.includes('參考回答（已展開）：')).toBe(exported);
+    memory.modes.understand.lessons[0].response = {
+      title: '理解教材符號', explanation: '先讀公式，再辨認比較符號。',
+      sourceQuote: '平均數公式：μ = Σx / n。', question: 'n 表示什麼？', answer: '尚未展開的公式參考答案',
+      steps: [
+        { title: '平均數', explanation: '把總和除以筆數。\n保留這行補充說明。',
+          sourceQuote: '平均數公式：μ = Σx / n。', formula: 'μ = Σx / n' },
+        { title: '比較符號', explanation: '小於符號依原文顯示；<img src=x> 仍是文字。',
+          sourceQuote: '比較符號 x < y 表示 x 小於 y。', formula: 'x < y' },
+        { title: '自己解釋', explanation: '請用自己的話解釋符號。', sourceQuote: 'x 小於 y' },
+      ],
+    };
+    const before = JSON.stringify(memory);
+    const text = buildCourseStudyNotes('統計', formulaSource, { '0:0': memory });
+    expect(text).toContain('AI 講解：\n先讀公式，再辨認比較符號。');
+    expect(text).toContain('分步講解：\n\n第 1 步：平均數\n本步講解：\n把總和除以筆數。\n保留這行補充說明。\n本步引用原文：\n平均數公式：μ = Σx / n。\n原文公式：\nμ = Σx / n');
+    expect(text).toContain('第 2 步：比較符號\n本步講解：\n小於符號依原文顯示；<img src=x> 仍是文字。\n本步引用原文：\n比較符號 x < y 表示 x 小於 y。\n原文公式：\nx < y');
+    expect(text).toContain('第 3 步：自己解釋\n本步講解：\n請用自己的話解釋符號。\n本步引用原文：\nx 小於 y\n\n自我檢查題：\nn 表示什麼？');
+    expect(text.indexOf('第 2 步：')).toBeGreaterThan(text.indexOf('第 1 步：'));
+    expect(text.indexOf('第 3 步：')).toBeGreaterThan(text.indexOf('第 2 步：'));
+    expect(text.match(/原文公式：/g)).toHaveLength(2);
+    expect(text).not.toContain('&lt;');
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('尚未展開的公式參考答案');
+    expect(JSON.stringify(memory)).toBe(before);
   });
 
   it('preserves Unicode, multiline notes and source text verbatim as plain text', () => {
