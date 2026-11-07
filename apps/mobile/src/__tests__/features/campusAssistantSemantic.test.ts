@@ -159,6 +159,30 @@ test('does not send private context to fallback inference if the session changes
   expect(httpsCallable).not.toHaveBeenCalled();
 });
 
+test.each(['B', undefined])('direct offline reads never disclose %s-owned cached classes', async (ownerUid) => {
+  mockContext = { ...mockContext, ownerUid };
+  const direct = await askCampusAssistant({
+    ...request(), messages: [{ role: 'user', content: '明天課表' }],
+  });
+  expect(direct).toMatchObject({ source: 'device', tool: 'saved-timetable', hasActions: false });
+  expect(direct.content).toContain('沒有可確認的個人課表副本');
+  expect(direct.content).not.toContain('週二資料庫');
+  expect(mockGenerate).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
+test('a foreign cached timetable cannot enter a study plan, but owned synced assignments remain available', async () => {
+  mockContext = { ...mockContext, ownerUid: 'B' };
+  const result = await askCampusAssistant({
+    ...request(), messages: [{ role: 'user', content: '幫我安排明天的課表與作業' }],
+  });
+  expect(result).toMatchObject({ source: 'device', tool: 'campus-plan', hasActions: false });
+  expect(result.content).toContain('真正的資料庫作業');
+  expect(result.content).not.toContain('週二資料庫');
+  expect(mockGenerate).not.toHaveBeenCalled();
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
 test('a foreign saved timetable cannot appear in a model-selected result', async () => {
   mockContext = { ...mockContext, ownerUid: 'B' };
   mockGenerate.mockResolvedValueOnce(selected([{ tool: 'timetable', day: 'tomorrow' }]));
