@@ -6,7 +6,7 @@ service cloud.firestore {
       return request.auth != null
         && (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
           || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountDeletionInProgress', false) != true
-            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', '') != 'deleted'));
+            && !(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', '') in ['deleted', 'disabled', 'suspended', 'inactive'])));
     }
 
     function isSelf(uid) {
@@ -40,7 +40,7 @@ service cloud.firestore {
     function isCafeteriaOperator(schoolId, cafeteriaId, uid) {
       return cafeteriaId is string
         && exists(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/operators/$(uid))
-        && get(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/operators/$(uid)).data.status != 'inactive';
+        && get(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/operators/$(uid)).data.status == 'active';
     }
 
     function hasRole(schoolId, role) {
@@ -61,7 +61,11 @@ service cloud.firestore {
     }
 
     function requesterIsCafeteriaOperator(schoolId, cafeteriaId) {
-      return isSignedIn() && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
+      // A stale operator record cannot authorize a deleted canonical account.
+      // The user and operator documents are the only two authorization lookups.
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
     }
 
     function isHttpsStorefrontUrl(value) {
@@ -1165,6 +1169,7 @@ service cloud.firestore {
       allow update: if isSelf(uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'role',
+          'status',
           'primaryRole',
           'postLoginRoles',
           'teachingRoles',

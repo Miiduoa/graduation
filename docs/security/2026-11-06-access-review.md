@@ -113,3 +113,93 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 ### Supabase CI 結構差異回歸
 
 提交 a4d4351d 的真實 Supabase CI 發現 SQL 測試使用的 ON CONFLICT(bucket_id,name) 在目前 Storage schema 沒有對應 arbiter。上游 migration 已移除此索引，原生測試 bootstrap 的額外 unique 掩蓋了差異。本輪移除測試專用的多餘 unique，先重現相同的 42P10，再讓兩個 upsert 案例使用兩邊都存在的 PRIMARY KEY(id)。預簽案例維持 sign_upload_url context，真正覆寫案例明確使用正常 upload context，拒絕判定仍要求 42501。四輪 53 SQL、53 HTTP 再次通過，真正 Storage API 的 upsert 案例持續由 CI 執行。
+
+
+## 2026-11-07：真實 PostgreSQL 附件回歸納入主 CI
+
+既有 `Web Tests` job 未設定 `NUNI_TEST_POSTGRES_PORT`，因此 `assignmentFileStore.postgres.test.ts` 的 7 項競態案例與 `assignmentFileService.test.ts` 的 6 項 PostgreSQL 變體未納入正式 Web CI 計數。本輪已調整 `.github/workflows/ci.yml`：在 `test-web` job 加入獨立 PostgreSQL 15 服務，使用僅供 CI 的 `box` 測試帳號與 `postgres` 測試資料庫，並在定向與完整 Web Vitest 執行時明確傳入 `NUNI_TEST_POSTGRES_PORT=5432` 及測試密碼。定向步驟先執行兩個附件套件，避免資料庫不可用時誤將略過當作通過；完整 Web 測試沿用先前的 coverage 步驟。
+
+**驗證狀態：** 修改已提交，但此變更的 GitHub CI 新提交結果尚待確認，不得把上輪在一次性本機 PG15 測得的 13／13 當作本提交的雲端 CI 成功。確認後需核對定向步驟實際執行 PostgreSQL 案例，且主 Web、Functions、CodeQL、Supabase、Python、Mobile 與適用 Maestro 均對應精確 head。若另有測試在 CI 出現競態超時，應先保留失敗證據並修復測試隔離／邏輯，而非停用案例。
+
+本次只修改 CI 測試環境與本文件；沒有執行正式資料庫 migration、下載 token 寫入、發布或 GitHub App 核可。先前列出的 GCS staging 憑證、舊網址撤權驗收、主線審查閘門及相依相容性缺口仍未解除。
+
+
+## 2026-11-07：Storage 停權狀態與校園貼文附件存取
+
+本輪讀取完整的 GitHub 精確 head `358a9fd8`，其 CI、CodeQL、Supabase permission migrations、Python、Mobile Agent Regression 與適用 Maestro 都顯示成功；審查紀錄與未解決 review thread 目前均為空，但指定 App `nuni-merge-gate` 的「審查通過」尚未出現。main `cacea7e6`，分支相較 main ahead 12 / behind 2，新的主線整合仍待獨立驗證。
+
+從 Storage 規則查得另一項授權一致性缺口：原 `isActiveAccount()` 對明確設為 `disabled`、`suspended`、`inactive` 的帳號不拒絕（只擋 `deleted` 與刪除程序）；`schools/{schoolId}/campusPosts` 原先只看學校成員文件，對保留 `active` 的舊校籍資料未檢查帳號狀態。此缺口可使停權身分持舊 ID token 在規則允許的私人附件與校園貼文路徑繼續讀取或上傳。新增的規則將這四種終止狀態視為拒絕；校園貼文用相同帳號檢查，保持未建立 users 文件的既有相容情境。
+
+回歸補強 `backend/tests/security-rules.test.js`：原關閉帳號私人檔案測試增加 disabled、suspended、inactive 三種狀態，覆蓋 temp、health、printjobs、兩類私訊及報修附件的讀寫拒絕；獨立校園貼文附件案例涵蓋正常寫入／讀取、停權後的舊物件讀取與新物件上傳拒絕，以及恢復 active 後正常讀取。原規則對非 deleted 狀態及保留校籍的路徑缺少這些拒絕條件；本輪變更提交後的 Firebase 模擬器／主 CI 以新精確 head 的執行結果為準，未將先前 CI 綠燈當成此修補已驗證。
+
+**剩餘邊界：** 校園限時動態讀取目前同時查學校成員及 story 文件，部分公告／活動編輯路徑同時查目標與學校管理員文件；Firebase Storage 規則的 Firestore 文件查詢上限限制了直接再加一份 user 文件的方法。此輪不在這些路徑套用會導致合法請求全面拒絕的第三份文件查詢；後續應比照私有群組檔案的 HTTP 授權入口或調整權限資料模型，單獨對停權及撤權做模擬器驗收。真 GCS staging 與既有 token 移除、Supabase 已簽發 URL、minimatch 相容性、正式發布條件仍未解除。
+
+本輪變更只包含 Storage 規則、隔離測試及本紀錄；沒有寫入正式資料、清理真實 token、改動正式金鑰或部署。
+
+## 2026-11-07：校園貼文 Storage 規則在 CI 的相容性修正
+
+精確 head `83b45fdb9571b3252f56863325cba17dfc3b1753` 的主 CI [42292144769](https://github.com/Miiduoa/graduation/actions/runs/42292144769) 失敗於 Firebase Storage 規則：`a shared upload cannot be replaced at schools/pu/campusPosts/one/photo.jpg` 的首筆合法建立回傳 `storage/unauthorized`；251 個 Firestore/Storage 案例通過 250、失敗 1。CodeQL、Supabase、Python、Mobile Agent、Functions、Web、型別檢查均成功，Maestro 當時仍在進行中。本輪先處理這個實際 CI 失敗，沒有把被拒絕的合法操作改成預期失敗。
+
+原因候選為 `isSchoolMemberStorage()` 先對相同 membership 文件呼叫 `firestore.exists()`，接著 `firestore.get()`，與 `isActiveAccount()` 的 canonical user 文件查詢一起增加了 Storage Security Rules 的跨服務文件查詢負擔。獨立的校園貼文停權案例已明確建立 `users/alice` 文件並通過，失敗的共用檔案覆寫回歸則只建立了學校 membership，符合現有無 user 文件的 legacy 身分相容案例。
+
+本次將 membership 判斷簡化為單次 `firestore.get(...).data.status == 'active'`。文件不存在時評估拒絕，不再另做 `exists()`；`isActiveAccount()` 對已存在帳號的 `deleted/disabled/suspended/inactive` 拒絕保持不變。原有合法建立、不可覆寫、停權與撤權回歸均保留，沒有為了讓 CI 變綠而停用案例。這是有待在新精確 head 的 emulator CI 實測的修補，**不能在執行前宣稱通過**。
+
+**重要剩餘風險：** `isActiveAccount()` 仍為兼容 legacy 無 canonical user 文件的身分而允許缺少 `users/{uid}` 文件的 token。若刪除／停權程序只移除 user 文件卻留下 active school membership，可能延遲撤權；需在實際 deletion workflow 驗證清除學校 membership，或以可信的單一權限來源改造這一資料模型。在完成驗證前不得宣稱所有已刪帳號的舊 token 都已撤銷。此輪未修改正式資料或執行正式發布。
+
+### 21:14 UTC 再驗與正式收斂
+
+第一次最小化相同 membership 的 `exists + get` 為單次 `get`，但精確 head `8503c10b` 的 [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42294746416) **仍在相同合法建立案例失敗**（250/251），因此先前「僅因重複查詢上限」的原因假設未被驗證，不視為已解決。這一輪繼續追查缺失的前置條件，而不是跳過測試。
+
+對照兩組 storage 回歸發現，正常建立成功的 `schools/pu/campusPosts` 案例有 `users/alice` canonical 文件；共用覆寫案例只有 `schools/pu/members/alice`。為避免帳號已刪除、canonical 文件遺失而校籍 membership 孤留時繼續持舊 token 存取校園附件，這個 namespace 現在**明確要求 canonical user 文件存在**，並保留 `isActiveAccount()` 的停權狀態拒絕以及 `members/{uid}.status == active` 的跨校授權。此策略僅修改校園貼文附件，不擴大至未驗證的其他命名空間。
+
+更新既有「上傳不可被其他人覆寫」測試，使 Alice/Bob 都有真實 `status: active` 的 canonical 文件，維持首筆合法上傳成功、第二人覆寫與刪除失敗；新增無 canonical user 文件而學校 membership 留存時**必須拒絕讀取既有檔案及新上傳**的負向案例；既有檔案由規則停用的 emulator fixture 預先建立。此方式不削弱授權來讓測試通過，但會讓歷史上只有學校 membership、未完成 user profile 建立的帳號暫時無法上傳／讀取該類私有校園附件。發布前須盤點、補齊真實 legacy 帳號的 canonical profile，不能盲目在正式環境打開規則。不同套件仍在各自隔離 emulator 中驗證。
+
+此修正推送後才可由精確 head 的 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 判斷結果；截至本段記錄時**尚未取得新版本完整 CI 成功結果**，沒有合併、正式資料修改或部署。
+
+### 同一檔名的跨案例隔離檢查
+
+再次查核精確 head `3bcdb64b` 的 GitHub [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42295543338)，在明確建立 `users/alice,bob` 且增加孤兒校籍的負面回歸後，252 個模擬器案例仍有 1 個失敗：共用覆寫案例的首筆合法 `schools/pu/campusPosts/one/photo.jpg` 上傳被拒絕。新孤兒校籍拒絕讀取及寫入案例、停權與恢復案例均通過。`one/photo.jpg` 同時被前一個「停權帳號校園貼文附件」案例建立過，雖然共用 beforeEach 有 clearStorage，本輪將共用覆寫案例改用獨立 `replacement-proof/photo.jpg` 路徑，避免不同測試共用同一物件名稱。原來的「合法建立成功、他人不可覆寫、不可編輯 metadata、不可刪除」斷言沒有移除。此為跨測試隔離的待驗證假設；若新 CI 仍失敗，須保留證據進一步查權限前置資料、條件執行或模擬器資料清理，不能直接宣稱已修補。
+
+### 會話附件：canonical user 刪除後的殘留會員授權
+
+本輪在原 PR #517 進一步檢查 `conversations/{conversationId}/messages` 與 `conversations/{conversationId}/media` 的 Storage 規則。`conversationMember()` 原先允許 `users/{uid}` 文件不存在，而若 `conversations/{id}.memberIds` 殘留舊 UID，仍可能憑先前簽發且尚有效的登入 token 讀取既有私訊附件或上傳新檔案。這不同於已公開的 Firebase Storage bearer 下載 URL；下載 URL 撤銷另有遷移流程，不能被本次 SDK 規則變更替代。
+
+將 `conversationMember()` 加入必須存在 canonical `users/{uid}` 文件的檢查，同時保留既有 `isActiveAccount()` 對刪除中、deleted、disabled、suspended、inactive 的拒絕。此路徑最多查詢兩份不同 Firestore 文件（canonical user 與 conversation），沒有超過 Cloud Storage Rules 的兩份文件上限；同一路徑重複查詢會由規則引擎快取。已新增兩種私訊附件路徑的隔離 emulator 回歸，驗證：只有殘留 `memberIds` 時，舊附件讀取及新附件寫入被拒絕；補回合法 active profile 時，合法讀取及上傳可用；再次刪掉 profile 後，同一個登入 context 再次被拒絕。
+
+**變更驗證：** 這一段更新所對應的程式與測試已推到安全分支，尚須以提交後精確 head 的 Firebase Storage emulator 及完整 CI 結果判定，未在此預先宣稱通過。此修補可能使只有殘留 conversation 成員清單、卻缺少 canonical profile 的 legacy 帳號無法存取私訊附件。正式發布前須盤點該類帳號並完成適當身分恢復與資料保留決策，不應恢復無 profile 的廣泛授權。其餘舊下載 URL、stories／events 兩文件查詢上限、GCS staging、正式 App 審查與 deployment 缺口維持開放。
+
+### 校園帳號狀態：Firestore 與 callable 的停權拒絕一致化
+
+進一步檢查發現 Storage 的 `isActiveAccount()` 已拒絕 `disabled`、`suspended`、`inactive` 與 `deleted`，但 Firestore `isSignedIn()` 只拒絕 `deleted`；包裝多數 callable 的 `accountLifecycle.assertAccountAvailable()` 也只拒絕 `deleted`。若 canonical `users/{uid}` 明確停權而校籍 membership 或過去取得的登入 token 仍有效，Firetore client 與部分 callable 原本仍可執行以 `isSignedIn` 為入口的操作。已同步擴充 Firestore 與 callable admission 的拒絕狀態，保留 `accountDeletionInProgress` 與匿名／新帳號既有邊界，也保留 callable 原本 `account-deletion` 機器可讀 reason，避免破壞既有客戶端契約。
+
+將 Firestore 現有帳號關閉測試從 2 個狀態擴充至 5 個，驗證個人資料、群組、學校權限的正常與拒絕路徑；將 callable guard 單元回歸擴充至 5 個狀態，確認 handler 不執行。這些案例屬新變更，須以精確提交的 Firestore emulator、Functions、完整 CI 結果驗收，不預先視為測試通過。Firestore 公開資料 `allow read: if true` 不受此登入狀態判斷影響。仍需獨立查核所有未採用 `isSignedIn` 或 `createAccountGuardedOnCall` 的授權入口，並確保停權流程原子更新 canonical user 與會員資料。
+
+此輪為隔離原始碼修補和新增測試，沒有修改正式資料、發布環境、金鑰、舊 token 或主線閘門。
+
+### 將 canonical 帳號狀態標記改為伺服器管理
+
+追查 Firestore `users/{uid}` 的更新規則，發現既有 affectedKeys 欄位清單保護 role、accountDeletionInProgress 等，但沒有保護 `status`。新提交將 `status` 納入禁止由客戶端修改／移除的權限欄位，不更動既有合法 displayName 和 notificationsEnabled 更新。現有權限欄位測試增加對缺少 status 的插入、已有 active status 的變更與移除三種拒絕斷言。此調整與停權判斷一致，避免客戶端竄改 canonical 帳號狀態。Admin SDK 伺服器對既有帳號的合法停權、恢復與刪除流程不使用 Firestore Security Rules 的 client update，因此不受此 denylist 影響。是否存在舊版客戶端直接操作該狀態欄位，仍待實機／版本相容性查核。
+
+以精確 head 的 Firebase emulator 與 CI 結果驗證；若仍在佇列或執行中，不將它記為已通過。正式環境資料與發布沒有變動。
+
+### 21:50 UTC 精確提交 CI 失敗與隔離 fixture 修正
+
+GitHub 精確 head `c86ad270` 的 [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42299579448) 實際執行 257 個 Firestore／Storage 模擬器案例，256 通過、1 失敗。新增兩個「孤兒 conversation member」測試均通過；唯一失敗是既有 `closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads` 在尾端斷言 Bob 仍可讀私人會話附件。該 fixture 只建立 Alice 的 canonical user 文件，Bob 有 conversation memberIds 卻無 `users/bob` 文件。新規則應拒絕缺少 canonical user 的 Bob，因此測試舊資料配置不再符合「合法 Bob」前提。
+
+本次只在該回歸的 seed 新增 `users/bob = {status:'active'}`，保留 Alice 停權後所有既有路徑的拒絕斷言，以及合法 Bob 的正常讀取斷言。沒有放寬 Storage 規則，也沒有移除任何新增失效案例。完整規則與其他工作在修補提交後重新執行，**尚待精確 head 結果，不視為已驗證成功**。
+
+
+### 2026-11-07 08:45+08：撤銷店家帳號後的殘留 operator 權限（待精確 head CI 驗證）
+
+Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{uid}` 不存在時，單靠餐廳 `operators/{uid}` 殘留記錄通過權限判定；而 operator 狀態只排除 `inactive`，使 `revoked`／`suspended` 亦可被當作有效。已針對餐廳營運員權限單點修補：要求 canonical user 文件存在且帳號不在停權或刪除狀態，同時 operator.status 必須**明確等於** `active`。涉及使用者與 operator 兩份文件，不依賴跨校角色推斷或第三份查詢。涵蓋店家訂單讀取、營業時間更新、菜單建立三個受影響入口。
+
+新增 Firebase Rules emulator 回歸：殘留 operator 但無 canonical profile、active 恢復、disabled／suspended／inactive／deleted、operator revoked、再次刪除 canonical profile 的存取重驗；原有合法店家與即時訂單監聽測試補齊 active canonical profile fixture，拒絕其他店家與停用店員的測試不移除。這一輪尚未取得**新精確 head** 的整體 CI／CodeQL／Supabase／Maestro 成功結果，不應用前次提交代替。
+
+**相容性注意：** 歷史上如果存在只有 operator 記錄、沒有 canonical profile 的合法店家帳號，更新規則後其訂單與菜單操作會拒絕；正式發佈前先盤點並透過受控 onboarding 補齊真正的 active profile，不應為求相容放寬「沒有 profile 仍授權」的條件。未改動正式環境或主線，尚待獨立 GCS、歷史簽發網址及正式審查核可。
+
+
+### 2026-11-07 00:51 UTC：精確 head `b868d8ed` 的 Rules CI 失敗與資料前提修補
+
+[Rules CI / run 42320495648](https://github.com/Miiduoa/graduation/actions/runs/42320495648) 已實際跑完第一輪規則測試：**258 案例、256 通過、2 失敗**。兩個失敗均為原本假設「合法店家 operator」但未建立 canonical `users/{uid}` 的測試 fixture：`school-responsibility-rules.test.cjs` 的外部 merchant 合法更新，以及 `security-rules.test.js` 的「學生和別家店不得改網址」中的 owner 合法更新。此次安全修補前，這兩組可因孤兒 operator 記錄而通過；新規則應拒絕缺失 canonical profile，所以原 fixture 已不滿足成功前提。
+
+本輪只補 `users/merchant` 與 `users/merchant-1`／`users/merchant-2` 的 `status: active` 合法身分 fixture，保留「外部 merchant 不能繼承校方管理權」、非 owner 拒絕修改、可用性與輸入檢查，沒有放寬任何 Firestore 規則；新增的孤兒或停權 operator 侵入測試原本已在同輪通過。修補提交須以新精確 head 的 Rules CI、全套 CI 與必要工作流重新驗證，在完整驗證前仍不能合併或部署。

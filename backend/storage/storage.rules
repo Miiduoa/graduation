@@ -11,7 +11,8 @@ service firebase.storage {
       return isAuthenticated()
         && (!firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
           || (firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accountDeletionInProgress', false) != true
-            && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', '') != 'deleted'));
+            && !(firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', '')
+              in ['deleted', 'disabled', 'suspended', 'inactive'])));
     }
 
     function isOwner(userId) {
@@ -48,8 +49,11 @@ service firebase.storage {
     }
 
     function isSchoolMemberStorage(schoolId) {
-      return isAuthenticated()
-        && firestore.exists(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid))
+      // School membership may remain active after account suspension.
+      // This path uses at most two Firestore lookups (account and school member).
+      return isActiveAccount()
+        // A missing canonical profile must not turn an orphaned membership into access.
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
         && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
@@ -79,7 +83,10 @@ service firebase.storage {
     }
 
     function conversationMember(conversationId) {
+      // Conversation memberIds may survive account deletion; require a live canonical profile.
+      // Storage rules can access only two unique Firestore documents per request.
       return isActiveAccount()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
         && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
     }

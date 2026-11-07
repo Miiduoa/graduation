@@ -253,6 +253,21 @@ jobs:
   test-web:
     name: Web Tests
     runs-on: ubuntu-latest
+    # Test-only PostgreSQL. No production credentials or databases are used.
+    services:
+      attachment-postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: box
+          POSTGRES_PASSWORD: attachment_test_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U box -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -284,9 +299,19 @@ jobs:
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
 
+      - name: Run PostgreSQL attachment race and submission regressions
+        # The two suites otherwise silently skip 13 PostgreSQL-backed cases.
+        env:
+          NUNI_TEST_POSTGRES_PORT: '5432'
+          PGPASSWORD: attachment_test_only
+        run: pnpm --filter web exec vitest run src/lib/nuni/assignmentFileStore.postgres.test.ts src/lib/nuni/assignmentFileService.test.ts --reporter=verbose
+
       - name: Run web tests
         # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
         # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
+        env:
+          NUNI_TEST_POSTGRES_PORT: '5432'
+          PGPASSWORD: attachment_test_only
         run: pnpm --filter web exec vitest run --coverage
 
   test-nuni-assistant:

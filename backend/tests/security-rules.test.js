@@ -49,7 +49,10 @@ after(async () => {
 });
 
 describe('firestore security rules', () => {
-  for (const accountState of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+  for (const accountState of [
+    { accountDeletionInProgress: true },
+    ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+  ]) {
     test(`deny new reads and writes for closing accounts ${JSON.stringify(accountState)}`, async () => {
       await seedFirestore(async (db) => {
         await db.doc('users/alice').set({ ...accountState, displayName: 'Alice' });
@@ -189,8 +192,52 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('orphaned, disabled or revoked cafeteria operators cannot read orders or edit storefronts', async () => {
+    const school = 'schools/tw-demo-uni';
+    const cafe = `${school}/cafeterias/cafe-a`;
+    const operator = `${cafe}/operators/merchant-1`;
+    const order = `${school}/orders/one`;
+    await seedFirestore(async (db) => {
+      await db.doc(cafe).set({ name: 'Cafeteria', openingHours: '11:00-14:00', orderingEnabled: true, pilotStatus: 'live' });
+      await db.doc(operator).set({ status: 'active', role: 'manager' });
+      await db.doc(order).set({ userId: 'student', schoolId: 'tw-demo-uni', cafeteriaId: 'cafe-a', status: 'pending' });
+    });
+    const merchant = testEnv.authenticatedContext('merchant-1').firestore();
+    const orderRef = merchant.doc(order);
+    const cafeRef = merchant.doc(cafe);
+    const menuRef = merchant.doc(`${school}/menus/menu`);
+    const menu = { schoolId: 'tw-demo-uni', cafeteriaId: 'cafe-a', name: 'Meal' };
+    const denyMerchant = async () => {
+      await assertFails(orderRef.get());
+      await assertFails(cafeRef.update({ openingHours: '12:00-20:00' }));
+      await assertFails(menuRef.set(menu));
+    };
+
+    // Previously, a leftover active operator record alone authorized old Firebase ID tokens.
+    await denyMerchant();
+    await seedFirestore(async (db) => db.doc('users/merchant-1').set({ status: 'active' }));
+    await assertSucceeds(orderRef.get());
+    await assertSucceeds(cafeRef.update({ openingHours: '11:00-19:00' }));
+    await assertSucceeds(menuRef.set(menu));
+
+    for (const status of ['disabled', 'suspended', 'inactive', 'deleted']) {
+      await seedFirestore(async (db) => db.doc('users/merchant-1').set({ status }));
+      await denyMerchant();
+    }
+    await seedFirestore(async (db) => {
+      await db.doc('users/merchant-1').set({ status: 'active' });
+      await db.doc(operator).set({ status: 'revoked', role: 'manager' });
+    });
+    await denyMerchant();
+    await seedFirestore(async (db) => db.doc(operator).set({ status: 'active', role: 'manager' }));
+    await assertSucceeds(orderRef.get());
+    await seedFirestore(async (db) => db.doc('users/merchant-1').delete());
+    await denyMerchant();
+  });
+
   test("allow matching cafeteria operator to read orders but require callable writes", async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/merchant-1').set({ status: 'active' });
       await db
         .collection('schools')
         .doc('tw-demo-uni')
@@ -233,6 +280,7 @@ describe('firestore security rules', () => {
 
   test('allow cafeteria operator to write hours and menus but not ordering flags', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/merchant-1').set({ status: 'active' });
       await db
         .collection('schools')
         .doc('tw-demo-uni')
@@ -539,6 +587,9 @@ describe('firestore security rules', () => {
 
   test('學生和別家店改不了別人的外連網址', async () => {
     await seedFirestore(async (db) => {
+      // Both merchants are real active users; the second is still not this store's operator.
+      await db.doc('users/merchant-1').set({ status: 'active' });
+      await db.doc('users/merchant-2').set({ status: 'active' });
       await db
         .collection('schools')
         .doc('tw-demo-uni')
@@ -707,6 +758,9 @@ describe('firestore security rules', () => {
   test('店家即時監聽：只放行查自己這家店的單，別家、不帶店別、停用的店員、學生都查不到', async () => {
     const school = 'schools/tw-demo-uni';
     await seedFirestore(async (db) => {
+      for (const uid of ['staff-a', 'staff-b', 'staff-off']) {
+        await db.doc(`users/${uid}`).set({ status: 'active' });
+      }
       await db.doc(`${school}/cafeterias/cafe-a`).set({ name: 'A' });
       await db.doc(`${school}/cafeterias/cafe-b`).set({ name: 'B' });
       await db.doc(`${school}/cafeterias/cafe-a/operators/staff-a`).set({ status: 'active', role: 'staff' });
@@ -1787,9 +1841,42 @@ describe('storage security rules', () => {
     }
   });
 
-  test('closing and deleted accounts cannot reuse issued tokens for private files or uploads', async () => {
+  for (const objectPath of [
+    'conversations/orphan/messages/one/private.pdf',
+    'conversations/orphan/media/one/private.pdf',
+  ]) {
+    test(`orphaned conversation membership cannot access attachments at ${objectPath}`, async () => {
+      await seedFirestore(async (db) => {
+        // Keep stale memberIds while the canonical user document is absent.
+        await db.doc('conversations/orphan').set({ memberIds: ['alice', 'bob'] });
+      });
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await uploadString(context.storage().ref(objectPath), 'private bytes', 'application/pdf');
+      });
+      const alice = testEnv.authenticatedContext('alice').storage();
+      const existing = alice.ref(objectPath);
+      const fresh = alice.ref(objectPath.replace('private.pdf', 'new.pdf'));
+      await assertFails(getBytes(existing));
+      await assertFails(uploadString(fresh, 'orphan write', 'application/pdf'));
+
+      await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+      await assertSucceeds(getBytes(existing));
+      await assertSucceeds(uploadString(fresh, 'allowed write', 'application/pdf'));
+
+      // Removing only the profile must revoke the same previously issued token.
+      await seedFirestore(async (db) => db.doc('users/alice').delete());
+      await assertFails(existing.getMetadata());
+      await assertFails(uploadString(
+        alice.ref(objectPath.replace('private.pdf', 'after-deletion.pdf')),
+        'stale token', 'application/pdf',
+      ));
+    });
+  }
+
+  test('closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ displayName: 'Alice' });
+      await db.doc('users/bob').set({ displayName: 'Bob', status: 'active' });
       await db.doc('conversations/private').set({ memberIds: ['alice', 'bob'] });
       await db.doc('repairRequests/one').set({ userId: 'alice' });
     });
@@ -1803,7 +1890,10 @@ describe('storage security rules', () => {
       await assertSucceeds(uploadString(storage.ref(file), 'fixture', file.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf'));
     }
     await assertFails(uploadString(storage.ref('health/alice/one/program.exe'), 'fixture', 'application/x-msdownload'));
-    for (const state of [{ accountDeletionInProgress: true }, { status: 'deleted' }]) {
+    for (const state of [
+      { accountDeletionInProgress: true },
+      ...['deleted', 'disabled', 'suspended', 'inactive'].map((status) => ({ status })),
+    ]) {
       await seedFirestore(async (db) => db.doc('users/alice').set(state));
       for (const file of privatePaths) {
         await assertFails(storage.ref(file).getMetadata());
@@ -1816,10 +1906,45 @@ describe('storage security rules', () => {
     await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
   });
 
+  test('school campus media rejects stale school membership after account suspension', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'member' });
+    });
+    const storage = testEnv.authenticatedContext('alice').storage();
+    const photo = storage.ref('schools/pu/campusPosts/one/photo.jpg');
+    await assertSucceeds(uploadString(photo, 'original image', 'image/jpeg'));
+    await assertSucceeds(photo.getMetadata());
+
+    for (const status of ['disabled', 'suspended', 'inactive', 'deleted']) {
+      await seedFirestore(async (db) => db.doc('users/alice').set({ status }));
+      await assertFails(photo.getMetadata());
+      await assertFails(uploadString(
+        storage.ref(`schools/pu/campusPosts/${status}/photo.jpg`),
+        'blocked image', 'image/jpeg',
+      ));
+    }
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+    await assertSucceeds(photo.getMetadata());
+  });
+
+  test('campus media denies an orphaned membership without a canonical user profile', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active', role: 'member' });
+    });
+    const path = 'schools/pu/campusPosts/orphan/photo.jpg';
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await uploadString(context.storage().ref(path), 'existing image', 'image/jpeg');
+    });
+    const file = testEnv.authenticatedContext('alice').storage().ref(path);
+    await assertFails(file.getMetadata());
+    await assertFails(uploadString(file, 'orphaned membership', 'image/jpeg'));
+  });
+
   for (const objectPath of [
     'conversations/chat/messages/one/photo.jpg',
     'conversations/chat/media/one/photo.jpg',
-    'schools/pu/campusPosts/one/photo.jpg',
+    'schools/pu/campusPosts/replacement-proof/photo.jpg',
     'lostfound/one/photo.jpg',
     'bugreports/one/photo.jpg',
   ]) {
@@ -1827,6 +1952,7 @@ describe('storage security rules', () => {
       await seedFirestore(async (db) => {
         await db.doc('conversations/chat').set({ memberIds: ['alice', 'bob'] });
         for (const uid of ['alice', 'bob']) {
+          await db.doc('users/' + uid).set({ status: 'active' });
           await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
           await db.doc('groups/course/members/' + uid).set({ status: 'active' });
         }
@@ -2610,6 +2736,7 @@ describe('P1 authorization: users role authority fields', () => {
       await db.doc('users/bob').set({
         displayName: 'Bob',
         role: 'student',
+        status: 'active',
         primaryRole: 'student',
         postLoginRoles: ['student'],
         teachingRoles: [],
@@ -2638,6 +2765,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ orgRoles: ['schoolAdmin'] }));
     await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(alice.update({ role: 'admin' }));
+    await assertFails(alice.update({ status: 'active' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
     await assertFails(bob.update({ postLoginRoles: ['admin', 'teacher'] }));
@@ -2645,6 +2773,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ orgRoles: ['schoolAdmin'] }));
     await assertFails(bob.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(bob.update({ role: 'teacher' }));
+    await assertFails(bob.update({ status: 'disabled' }));
 
     await assertFails(bob.update({ primaryRole: deleteField() }));
     await assertFails(bob.update({ postLoginRoles: deleteField() }));
@@ -2652,6 +2781,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ orgRoles: deleteField() }));
     await assertFails(bob.update({ lastPostLoginResolvedAt: deleteField() }));
     await assertFails(bob.update({ role: deleteField() }));
+    await assertFails(bob.update({ status: deleteField() }));
     await assertFails(bob.update({ notificationDeliveryDisabled: deleteField() }));
     await assertFails(bob.update({ accountDeletionInProgress: deleteField() }));
     await assertFails(alice.update({ notificationDeliveryDisabled: true }));
