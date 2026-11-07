@@ -407,3 +407,41 @@ it('ignores a late clipboard denial after a learner switches questions', async (
     restoreClipboard();
   }
 });
+
+it('pauses a practice round for source review, resumes drafts, and saves the paused round independently', async () => {
+  const downloads = downloadMock();
+  mount();
+  await restore();
+  begin();
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '我暫停前的回答😀' } });
+  fireEvent.click(screen.getByRole('button', { name: '回白板看這段' }));
+  expect(screen.queryByLabelText(practiceLabel)).toBeNull();
+  expect(screen.getByRole('region', { name: '暫停的逐題複習' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '開始逐題複習' }).hasAttribute('disabled')).toBe(false);
+  expect(value('用自己的話記下這一段')).toBe('原本的主鍵筆記');
+
+  // Reading a different mode must not corrupt the original practice mode in the checkpoint.
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存暫停的練習與閱讀進度' }));
+  const checkpoint = await readBlob(downloads.create.mock.calls[0][0] as Blob);
+  expect(JSON.parse(checkpoint)).toMatchObject({
+    format: 'campus-one-study-practice', version: 1,
+    progress: { position: { mode: 'understand' } },
+    practice: { mode: 'understand' },
+  });
+  expect(checkpoint).toContain('我暫停前的回答😀');
+  expect(downloads.filenames[0]).toMatch(/-逐題練習\\.campus-practice\\.json$/);
+
+  fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
+  expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('我暫停前的回答😀');
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(screen.getByText('逐題複習 · 理解概念')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '結束暫停的練習' }));
+  expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
+  expect(screen.getByRole('button', { name: '開始逐題複習' }).hasAttribute('disabled')).toBe(false);
+  expect(mocks.run).not.toHaveBeenCalled();
+});

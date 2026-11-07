@@ -226,3 +226,25 @@ it.each([
   expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
   expect(mocks.run).not.toHaveBeenCalled();
 });
+
+it('keeps a paused round through a cancelled progress read, then clears it on identical-source replacement', async () => {
+  await startSecondQuestion();
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+
+  const finish = pendingRead('progress');
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  await act(async () => finish());
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
+  expectSecondQuestion();
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+
+  fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: sourceText } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '繼續這輪練習' })).toBeNull();
+  expect(screen.queryByLabelText(attemptLabel)).toBeNull();
+  expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});

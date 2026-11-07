@@ -67,6 +67,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [passageIndex, setPassageIndex] = useState(0);
   const [session, setSession] = useState<StudySessionMemory>({ revision: 0, passages: {} });
   const [practiceRound, setPracticeRound] = useState<StudyPracticeRound | null>(null);
+  const [pausedRound, setPausedRound] = useState<StudyPracticeRound | null>(null);
   const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
   const [paste, setPaste] = useState('');
@@ -132,6 +133,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     const round = startStudyPracticeRound(session.revision, mode, practiceDeck.cards);
     if (!round) return;
     setPracticeRound(round);
+    setPausedRound(null);
     clearDownload();
   }
 
@@ -154,7 +156,16 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       setPassageIndex(target.partNumber);
       setMode(practiceRound.mode);
     }
+    setPausedRound(practiceRound);
     setPracticeRound(null);
+    clearDownload();
+  }
+
+  function resumePractice() {
+    if (!pausedRound || pausedRound.revision !== session.revision) return;
+    setMode(pausedRound.mode);
+    setPracticeRound(pausedRound);
+    setPausedRound(null);
     clearDownload();
   }
 
@@ -202,6 +213,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     revision.current += 1;
     setSession({ revision: revision.current, passages: {} });
     setPracticeRound(null);
+    setPausedRound(null);
     setRestorePreview(null);
     setRestoredFile(null);
     clearDownload();
@@ -270,13 +282,13 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     }
   }
 
-  function savePracticeCheckpoint() {
-    if (!source || !practiceRound || practiceRound.revision !== session.revision) return;
+  function savePracticeCheckpoint(round: StudyPracticeRound | null) {
+    if (!source || !round || round.revision !== session.revision) return;
     let saved: string;
     try {
       saved = serializeStudyPracticeCheckpoint({
-        progress: { scope, source, position: { sectionIndex, passageIndex, mode }, passages: session.passages },
-        round: practiceRound,
+        progress: { scope, source, position: { sectionIndex, passageIndex, mode: round.mode }, passages: session.passages },
+        round,
       });
     } catch (failure) {
       setDownloadStatus('');
@@ -339,6 +351,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     revision.current += 1;
     setSession({ revision: revision.current, passages: progress.passages });
     setPracticeRound(round ? { ...round, revision: revision.current } : null);
+    setPausedRound(null);
     setRestoredFile(filename);
     setRestorePreview(null);
     setPaste('');
@@ -447,6 +460,15 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         <div className={styles.sourceMeta}>
           <strong>{source.title}</strong><span>{practiceRound ? '本輪回答獨立保留，離開前可下載練習紀錄' : '關閉後會清除，想下次繼續可先儲存閱讀進度'}</span>
         </div>
+        {!practiceRound && pausedRound?.revision === session.revision && <section className={styles.reviewList} aria-label="暫停的逐題複習">
+          <h4>這輪練習已暫停</h4>
+          <p className={styles.note}>可以先核對教材，再回到原本的題號、草稿和自評。此狀態只保留在目前分頁；一般閱讀進度檔不包含這輪練習。若開始另一輪練習將取代這輪草稿；關閉、更換教材或重新開始前，請先儲存完整練習備份。</p>
+          <div className={styles.actions}>
+            <button type="button" className={`${styles.button} ${styles.primary}`} onClick={resumePractice}>繼續這輪練習</button>
+            <button type="button" className={styles.button} onClick={() => savePracticeCheckpoint(pausedRound)}>儲存暫停的練習與閱讀進度</button>
+            <button type="button" className={styles.button} onClick={() => { setPausedRound(null); clearDownload(); }}>結束暫停的練習</button>
+          </div>
+        </section>}
         {!practiceRound && <div className={styles.actions}>
           <button type="button" className={styles.button} onClick={saveProgress}>儲存閱讀進度</button>
           <button type="button" className={styles.button} disabled={!hasNotes} onClick={downloadNotes}>下載本次筆記</button>
@@ -495,7 +517,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         </section>}
         {practiceRound ? <CourseStudyPractice round={practiceRound} onAction={changePractice}
           onExit={() => readPracticeSource()} onReadSource={readPracticeSource}
-          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={savePracticeCheckpoint} /> : <>
+          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={() => savePracticeCheckpoint(practiceRound)} /> : <>
         <div className={styles.selectors}>
           <label className={styles.field} htmlFor={sectionId}>閱讀範圍
             <select id={sectionId} value={sectionIndex} onChange={(event) => { setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>
