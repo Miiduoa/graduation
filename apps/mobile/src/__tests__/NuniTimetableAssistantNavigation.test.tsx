@@ -62,7 +62,13 @@ jest.mock('../app/rootNavigation', () => ({
   ...jest.requireActual('../app/rootNavigation'),
   rootNavigateNested: jest.fn(),
 }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool, selectionReady: mockSchoolSelectionReady }) }));
+jest.mock('../state/school', () => ({
+  useSchool: () => ({
+    school: mockSchool,
+    selection: { code: 'PU', schoolId: mockSchool.id },
+    selectionReady: mockSchoolSelectionReady,
+  }),
+}));
 jest.mock('../state/theme', () => ({
   useThemeMode: () => ({ mode: 'light' }),
   useTheme: () => require('../ui/theme').getCurrentTheme(),

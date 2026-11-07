@@ -95,6 +95,10 @@ test.each([
     loadAdvisorCatalog('pu', '1151', '', new AbortController().signal),
   ).rejects.toThrow();
 });
+test('NCNU public catalog does not authorize a myPU advisor query', async () => {
+  await expect(loadAdvisorCatalog('ncnu', '1151', '', new AbortController().signal)).rejects.toThrow('暨大開課查詢');
+  expect(queryCatalog).not.toHaveBeenCalled();
+});
 test('another school never queries PU data', async () => {
   await expect(
     loadAdvisorCatalog('other', '1151', '', new AbortController().signal),

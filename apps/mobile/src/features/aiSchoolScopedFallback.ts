@@ -1,3 +1,4 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
 import {
   getOfficialLibrary,
   isProvidenceSchoolId,
@@ -238,6 +239,9 @@ export function buildSchoolScopedEmergencyFallback(
     .filter(Boolean)
     .slice(0, 5);
 
+  const contact = getSchoolContactAnswer(schoolId, userText, schoolName);
+  if (contact) return { content: contact, suggestions: ['學校總機', '學校地址', '學校官網'] };
+
   const transport = buildSchoolScopedTransportDirections(schoolId, text, schoolName);
   if (transport) return transport;
 
@@ -284,12 +288,6 @@ export function buildSchoolScopedEmergencyFallback(
         answer:
           '靜宜大學停車與 YouBike 位置請以校安／總務公告與現場標示為準。緊急回退不會捏造車位數量或拖吊規則；可改開校園地圖查看動線。',
         suggestions: ['開啟校園地圖', 'YouBike 在哪'],
-      },
-      {
-        pattern: /校園|學校|靜宜|在哪|怎麼走|地圖|位置/,
-        answer:
-          '靜宜大學校園資訊：\n\n📍 地址：台中市沙鹿區台灣大道七段 200 號\n📞 總機：(04) 2632-8001\n\n特定建築動線請改開校園地圖；開放時間與服務規定以校方公告為準。',
-        suggestions: ['開啟校園地圖', '圖書館在哪', '怎麼去台中車站'],
       },
     ];
 
