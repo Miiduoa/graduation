@@ -77,11 +77,19 @@ describe('versioned independent review checkpoint', () => {
 
   it('retains an ordered pending subset and never borrows an unrelated lesson', () => {
     const saved = checkpoint();
+    const fullIds = saved.round.cards.map((card) => card.id);
+    saved.round = updateStudyPracticeRound(saved.round, { type: 'go', index: 0 });
+    saved.round = updateStudyPracticeRound(saved.round, { type: 'decide', outcome: 'understood' });
     saved.round = updateStudyPracticeRound(saved.round, { type: 'skip' });
     saved.round = updateStudyPracticeRound(saved.round, { type: 'restart', scope: 'pending' });
+    expect(saved.round.cards.map((card) => card.id)).toEqual([fullIds[1]]);
     const loaded = parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint(saved), scope);
-    expect(loaded.round.cards.map((card) => card.id)).toEqual(saved.round.cards.map((card) => card.id));
+    expect(loaded.round.cards.map((card) => card.id)).toEqual([fullIds[1]]);
     expect(loaded.round.responses[loaded.round.cards[0].id].attempt).toBe('');
+    const returnedToAll = updateStudyPracticeRound(loaded.round, { type: 'restart', scope: 'all' });
+    expect(returnedToAll.cards.map((card) => card.id)).toEqual(fullIds);
+    expect(returnedToAll.responses[fullIds[0]].attempt).toBe('');
+    expect(returnedToAll.responses[fullIds[1]].answerVisible).toBe(false);
   });
 
   it('rejects a different account or course before replacing any session state', () => {

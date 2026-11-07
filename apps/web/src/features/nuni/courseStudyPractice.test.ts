@@ -278,7 +278,30 @@ describe('finite independent practice rounds', () => {
     })));
     expect(getStudyPracticeSummary(retried)).toMatchObject({ total: 3, understood: 0, answered: 0, pending: 3, unreviewed: 3 });
     expect(JSON.stringify(current)).toBe(before);
-    expect(updateStudyPracticeRound(retried, { type: 'restart', scope: 'all' }).cards).toEqual(retried.cards);
+    expect(updateStudyPracticeRound(retried, { type: 'restart', scope: 'all' }).cards).toEqual(current.cards);
+  });
+
+  it('can recover the original source-ordered questions after multiple pending-only retries', () => {
+    const original = round(3);
+    let current = decide(original, 'understood', '第一題已理解');
+    current = decide(current, 'again', '第二題需要加強');
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    const firstRetry = updateStudyPracticeRound(current, { type: 'restart', scope: 'pending' });
+    expect(firstRetry.cards.map((card) => card.id)).toEqual(original.cards.slice(1).map((card) => card.id));
+
+    current = decide(firstRetry, 'understood', '第二題後來理解了');
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    const secondRetry = updateStudyPracticeRound(current, { type: 'restart', scope: 'pending' });
+    expect(secondRetry.cards.map((card) => card.id)).toEqual([original.cards[2].id]);
+    const restoredFull = updateStudyPracticeRound(secondRetry, { type: 'restart', scope: 'all' });
+    expect(restoredFull.cards.map((card) => card.id)).toEqual(original.cards.map((card) => card.id));
+    expect(restoredFull.allCards).toEqual(original.allCards);
+    expect(Object.values(restoredFull.responses)).toEqual(Array.from({ length: 3 }, () => ({
+      attempt: '', answerVisible: false, hintVisible: false, outcome: null,
+    })));
+    expect(getStudyPracticeSummary(restoredFull)).toMatchObject({ total: 3, pending: 3, understood: 0 });
+    expect(firstRetry.cards).toHaveLength(2);
+    expect(original.cards).toHaveLength(3);
   });
 
   it('keeps a completed round when there is no pending card and can explicitly restart all cards', () => {

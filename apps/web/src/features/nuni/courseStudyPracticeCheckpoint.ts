@@ -92,9 +92,12 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
       outcome,
     };
   }
-  const initial = startStudyPracticeRound(0, mode, cards);
-  if (!initial) invalid();
-  return { ...initial, index, finished: data.finished as boolean, responses };
+  const restored = startStudyPracticeRound(0, mode, cards);
+  const full = startStudyPracticeRound(0, mode, available);
+  if (!restored || !full) invalid();
+  // Old v1 checkpoints only store the active subset. The validated reading
+  // snapshot reconstructs the original full deck without changing the format.
+  return { ...restored, allCards: full.allCards, index, finished: data.finished as boolean, responses };
 }
 
 /** Self-contained backup: an existing v2 reading snapshot plus a separately validated round. */

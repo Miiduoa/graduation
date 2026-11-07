@@ -193,6 +193,23 @@ it('retries only cards not marked understood in source order with fresh drafts a
   expect(within(screen.getByRole('navigation', { name: '本輪題目' })).getAllByRole('button')).toHaveLength(2);
 });
 
+it('can restart the original full deck after a pending-only retry using the visible summary controls', () => {
+  render(<Controller />);
+  decide('understood');
+  decide('again');
+  skip();
+  fireEvent.click(screen.getByRole('button', { name: '重練待加強題（2 題）' }));
+  expect(screen.getByText(cards[1].question)).toBeTruthy();
+  decide('understood');
+  skip();
+  expect(screen.getByRole('status').textContent).toBe('本輪結束，共 2 題');
+  fireEvent.click(screen.getByRole('button', { name: '重練本輪全部' }));
+  expect(screen.getByRole('status').textContent).toBe('第 1 題／共 3 題');
+  expect(screen.getByText(cards[0].question)).toBeTruthy();
+  expect(answerInput().value).toBe('');
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+});
+
 it('can restart the entire current round and disables pending retry when every card is self-marked understood', () => {
   render(<Controller deck={cards.slice(0, 2)} />);
   decide('understood');

@@ -27,6 +27,8 @@ export type StudyPracticeRound = {
   revision: number;
   mode: StudyMode;
   cards: StudyPracticeCard[];
+  /** Original source-ordered question set, even when cards is a retry subset. */
+  allCards: StudyPracticeCard[];
   index: number;
   finished: boolean;
   responses: Record<string, StudyPracticeResponse>;
@@ -124,6 +126,7 @@ export function startStudyPracticeRound(
     revision,
     mode,
     cards: snapshots,
+    allCards: snapshots.map((card) => ({ ...card })),
     index: 0,
     finished: false,
     responses: Object.fromEntries(snapshots.map((card) => [card.id, emptyResponse()])),
@@ -152,9 +155,11 @@ export function updateStudyPracticeRound(
   if (action.type === 'restart') {
     if (action.scope !== 'all' && action.scope !== 'pending') return round;
     const cards = action.scope === 'all'
-      ? round.cards
+      ? round.allCards
       : round.cards.filter((card) => round.responses[card.id]?.outcome !== 'understood');
-    return startStudyPracticeRound(round.revision, round.mode, cards) ?? round;
+    const next = startStudyPracticeRound(round.revision, round.mode, cards);
+    // Retrying a subset must not make the original full set unreachable.
+    return next ? { ...next, allCards: round.allCards.map((card) => ({ ...card })) } : round;
   }
   if (round.finished) return round;
   const card = round.cards[round.index];
