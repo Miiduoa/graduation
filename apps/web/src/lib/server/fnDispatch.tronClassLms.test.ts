@@ -681,6 +681,9 @@ it.each([
   { path: PORTAL, change: { tronClassSessionId: 'c'.repeat(32) }, status: 'FAILED_PRECONDITION' },
   { path: LMS, change: { ownerUid: 'another-owner' }, status: 'FAILED_PRECONDITION' },
   { path: `users/${UID}`, change: { accountDeletionInProgress: true }, status: 'PERMISSION_DENIED' },
+  ...['deleted', 'disabled', 'suspended', 'inactive'].map((accountStatus) => ({
+    path: `users/${UID}`, change: { status: accountStatus }, status: 'PERMISSION_DENIED',
+  })),
   { path: `schools/pu/members/${UID}`, change: { status: 'inactive' }, status: 'PERMISSION_DENIED' },
 ])('rejects access revoked at $path just before the cache transaction', async ({ path, change, status }) => {
   const { request, store } = setup();
@@ -691,6 +694,7 @@ it.each([
   });
 
   const response = await request();
+  expect(response.ok).toBe(false);
   expect((await response.json()).error.status).toBe(status);
   expect(store.docs.has(CACHE)).toBe(false);
 });
@@ -773,6 +777,24 @@ it.each(['cold fetch', 'extras cleanup'])('rejects %s if the portal relinks afte
     for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
   }
 });
+
+it.each(['deleted', 'disabled', 'suspended', 'inactive'])(
+  'rejects account status %s before any LMS source or cache write',
+  async (status) => {
+    const { request, source, store } = setup();
+    store.docs.get(`users/${UID}`)!.status = status;
+
+    const response = await request({ courseId: 10001 });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.status).toBe('PERMISSION_DENIED');
+    expect(source.fetchCourses).not.toHaveBeenCalled();
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+    expect(store.docs.has(CACHE)).toBe(false);
+  },
+);
 
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();
