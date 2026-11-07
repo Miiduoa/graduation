@@ -47,6 +47,40 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+it('opens the study board only on demand and returns focus when it closes', async () => {
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  const open = await screen.findByRole('button', { name: `陪我讀「${material.title}」` });
+  fireEvent.click(open);
+  expect(await screen.findByRole('heading', { name: '讀書白板' })).toBeTruthy();
+  expect(screen.getByText(/附件與外部連結的內容需另外選擇/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  expect(document.activeElement).toBe(open);
+});
+
+it('clears study content when the course session changes', async () => {
+  const view = render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  await screen.findByRole('heading', { name: '讀書白板' });
+  state.context = 'session-b';
+  state.request.mockResolvedValue({ materials: [], nextCursor: null });
+  view.rerender(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  expect(await screen.findByText(/目前還沒有教材/)).toBeTruthy();
+});
+
+it('closes the study board on refresh and prevents reopening after access is revoked', async () => {
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  await screen.findByRole('heading', { name: '讀書白板' });
+  state.request.mockRejectedValue(new NuniError(403, 'FORBIDDEN'));
+  fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
+  expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('button', { name: `陪我讀「${material.title}」` })).toBeNull());
+  expect(screen.getByRole('button', { name: '讀講義' }).hasAttribute('disabled')).toBe(true);
+});
+
 it('renders real reading content and safe links for students without publication controls', async () => {
   render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
   expect(await screen.findByRole('heading', { name: '關聯與主鍵' })).toBeTruthy();

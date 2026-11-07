@@ -1,0 +1,102 @@
+.root {
+  margin: 24px 0;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.heading, .sourceMeta, .stepHeading, .stepNavigation, .coachHeading, .sourceHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.root .heading h3 { margin: 4px 0 0; font-size: 24px; letter-spacing: -.5px; }
+.eyebrow { margin: 0; color: var(--muted); font-size: 13px; }
+.intro { margin: 16px 0; line-height: 1.8; }
+.note { margin: 10px 0; font-size: 13px; line-height: 1.8; color: var(--muted); }
+.button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.button:disabled { opacity: .5; cursor: not-allowed; }
+.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.root :is(button, input, select, textarea, summary, h3, h4):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 4px;
+}
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.field { display: grid; gap: 8px; font-size: 14px; line-height: 1.7; min-width: 0; }
+.field :is(input, select, textarea) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.field textarea { resize: vertical; }
+.import { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: 20px 0; }
+.import summary, .reference summary { cursor: pointer; padding: 14px 0; min-height: 44px; box-sizing: border-box; }
+.importBody { display: grid; gap: 12px; padding: 0 0 20px; }
+.importBody .button { justify-self: start; }
+.sourceMeta { margin: 24px 0 16px; }
+.sourceMeta span, .coachHeading span { font-size: 12px; color: var(--muted); }
+.selectors { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.board {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-top: 4px solid var(--brand);
+  border-radius: 3px;
+  padding: clamp(16px, 3vw, 28px);
+  min-width: 0;
+}
+.stepHeading { font-size: 13px; color: var(--muted); padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.passage { animation: reveal .18s ease-out; }
+.sourceHeading { margin: 24px 0 12px; font-size: 12px; color: var(--muted); }
+.sourceHeading h4 { margin: 0; font-size: 13px; font-weight: 500; }
+.sourceText { margin: 0 0 18px; padding: 0 0 0 18px; border-left: 2px solid var(--border-strong); white-space: pre-wrap; line-height: 2; font-size: 17px; }
+.readAloud { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.readAloud small { color: var(--muted); font-size: 12px; }
+.coach { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }
+.coachHeading h4, .explanation h4 { margin: 0; font-size: 17px; }
+.coach > .field { margin: 18px 0 12px; }
+.status { font-size: 13px; color: var(--muted); line-height: 1.8; }
+.status:empty { display: none; }
+.error { border-left: 3px solid var(--brand); padding: 12px; background: var(--surface-raised); font-size: 14px; line-height: 1.8; }
+.explanation { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.explanationText { white-space: pre-wrap; line-height: 1.9; }
+.reference { font-size: 13px; line-height: 1.8; margin-bottom: 14px; }
+.reference blockquote { margin: 0 0 14px; padding-left: 12px; border-left: 2px solid var(--brand); white-space: pre-wrap; }
+.exercise { margin-top: 28px; padding: 20px; background: var(--bg); border: 1px solid var(--border); }
+.exercise > p { line-height: 1.9; }
+.exercise .button { margin-top: 12px; }
+.referenceAnswer { padding-top: 12px; border-top: 1px solid var(--border); white-space: pre-wrap; }
+.stepNavigation { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 13px; }
+@keyframes reveal { from { opacity: .6; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .passage { animation: none; } }
+@media (max-width: 520px) {
+  .field :is(input, select, textarea) { font-size: 16px; }
+  .selectors { grid-template-columns: 1fr; gap: 12px; }
+  .root { padding: 14px; }
+  .board { padding: 14px; }
+  .sourceText { font-size: 16px; padding-left: 12px; }
+  .exercise { padding: 14px; }
+  .actions > .primary { flex: 1 1 160px; }
+}
