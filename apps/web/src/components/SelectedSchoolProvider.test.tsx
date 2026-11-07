@@ -336,9 +336,9 @@ it('distinguishes a listed campus from an opened school service', () => {
   expect(navigation.search).toBe('?schoolId=school-a&campus=school-a&school=A');
 });
 
-it('uses Providence on a first visit when the directory includes it, without writing a choice', () => {
+it('leaves a first visit unselected even with Providence in the directory', () => {
   render(<View ownerKey={null} schools={[{ id: 'pu', name: '靜宜大學' }, ...schools]} />);
-  expect(screen.getByTestId('selected-school').textContent).toBe('靜宜大學');
+  expect(screen.getByTestId('selected-school').textContent).toBe('不限校園');
   expect(localStorage.getItem(schoolPreferenceKey(null))).toBeNull();
 });
 

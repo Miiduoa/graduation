@@ -15,6 +15,7 @@ import { puCacheGet, puCacheSet } from './puDataCache';
  * 並回傳 PostLoginContext 給前端使用。
  */
 export async function buildPostLoginContext(params: {
+  origin?: PostLoginContext['origin'];
   uid: string;
   schoolId: string;
   /** 從 Firestore users/{uid} 讀出的資料 */
@@ -57,6 +58,7 @@ export async function buildPostLoginContext(params: {
 
   // 5. 依角色組出視角
   const ctx: PostLoginContext = {
+    ...(params.origin && { origin: params.origin }),
     uid: params.uid,
     schoolId: params.schoolId,
     roles,
@@ -97,11 +99,13 @@ export async function buildPostLoginContext(params: {
  * 從 cache 讀取上一次 buildPostLoginContext 的結果。
  * 在各引擎初始化時呼叫，不用每次重跑 router。
  */
-export async function getPostLoginContext(schoolId: string): Promise<PostLoginContext | null> {
+export async function getPostLoginContext(schoolId: string, uid: string): Promise<PostLoginContext | null> {
+  if (!schoolId || !uid) return null;
   const cached = await puCacheGet<PostLoginContext>(`${schoolId}:postLoginContext`, {
     allowStale: true,
   });
-  return cached?.data ?? null;
+  const context = cached?.data;
+  return context?.schoolId === schoolId && context.uid === uid ? context : null;
 }
 
 // ─── 內部函式 ────────────────────────────────────────────────────────────────

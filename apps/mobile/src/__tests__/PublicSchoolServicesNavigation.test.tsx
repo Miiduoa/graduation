@@ -533,3 +533,27 @@ test('PU guest CourseCatalog may query publicly but does not offer schedule muta
   expect(view.queryByText('加入本機課程清單')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
+
+test('a direct library route waits for school selection and resumes the original route', async () => {
+  setBrowsingSchoolId('');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  await view.findByTestId('login-landing');
+  expect(view.queryByTestId('public-Library')).toBeNull();
+  act(() => navigation.navigate('Library' as never));
+  await view.findByText('先選擇要瀏覽的學校');
+  expect(view.queryByTestId('public-library-screen')).toBeNull();
+  expect(navigation.getCurrentRoute()?.name).toBe('Library');
+  act(() => setBrowsingSchoolId('nthu'));
+  await view.findByTestId('public-library-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('Library');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('the platform workspace remains available without choosing any university', async () => {
+  setBrowsingSchoolId('');
+  const { view, navigation } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('platform-workspace-start'));
+  await view.findByTestId('platform-workspace');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+  expect(view.queryByText('先選擇要瀏覽的學校')).toBeNull();
+});

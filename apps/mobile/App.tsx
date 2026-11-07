@@ -50,7 +50,7 @@ import { PreferencesProvider } from './src/state/preferences';
 import { AccessibilityProvider } from './src/state/accessibility';
 import { I18nProvider } from './src/i18n';
 import { analytics } from './src/services/analytics';
-import { initOfflineModeSync, setHybridSourceSchoolContext } from './src/data';
+import { initOfflineModeSync } from './src/data';
 import {
   initNetworkMonitoring,
   syncEssentialData,
@@ -513,8 +513,9 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   useClassReminders();
   useDormLaundryReminder();
   const auth = useAuth();
-  const { school } = useSchool();
-  const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);
+  const { schoolId: selectedSchoolId, selectionReady } = useSchool();
+  const schoolId = selectionReady ? selectedSchoolId : null;
+  const schoolSessionReady = hasReadySchoolSession(auth, schoolId);
   const userId = schoolSessionReady ? auth.user!.uid : null;
   const appState = useRef(AppState.currentState);
 
@@ -529,24 +530,20 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   }, [userId]);
 
   useEffect(() => {
-    setHybridSourceSchoolContext(school?.id ?? null);
-  }, [school?.id]);
-
-  useEffect(() => {
-    if (school?.id && userId) {
-      syncEssentialData(school.id).catch(console.error);
+    if (schoolId && userId) {
+      syncEssentialData(schoolId).catch(console.error);
     }
-  }, [school?.id, userId]);
+  }, [schoolId, userId]);
 
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (
         appState.current.match(/inactive|background/) &&
         nextAppState === 'active' &&
-        school?.id &&
+        schoolId &&
         userId
       ) {
-        syncEssentialData(school.id).catch(console.error);
+        syncEssentialData(schoolId).catch(console.error);
       }
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         import('./src/services/companionEngine')
@@ -561,9 +558,7 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, [school?.id, userId]);
-
-  const schoolId = school?.id ?? null;
+  }, [schoolId, userId]);
 
   return (
     <SearchHistoryProvider userId={userId} schoolId={schoolId}>

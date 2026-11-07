@@ -7,9 +7,9 @@ import type { PersonalImportScope } from '../services/personalImports';
 export function usePersonalImportScope(): PersonalImportScope | null {
   const legacy = useAuth();
   const platform = useNuniSession();
-  const { school, selectionReady } = useSchool();
+  const { schoolId, selectionReady } = useSchool();
   const unresolved = !!(
-    selectionReady === false || legacy.loading ||
+    !selectionReady || legacy.loading ||
     platform.loading ||
     platform.pendingLogout ||
     platform.error
@@ -19,7 +19,6 @@ export function usePersonalImportScope(): PersonalImportScope | null {
     : legacy.user?.uid
       ? `firebase:${legacy.user.uid}`
       : 'guest:device';
-  const schoolId = school?.id || 'pu';
   // Session revalidation must not expose another namespace while the account is unresolved.
-  return useMemo(() => (unresolved ? null : { owner, schoolId }), [unresolved, owner, schoolId]);
+  return useMemo(() => (unresolved || !schoolId ? null : { owner, schoolId }), [unresolved, owner, schoolId]);
 }

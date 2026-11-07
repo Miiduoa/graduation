@@ -51,3 +51,24 @@ test('the existing no-adapter fallback receives the explicit school instead of P
   expect(mockFallbackGetCourse).toHaveBeenCalledWith('shared', 'ntu');
   expect(mockGetAdapter).not.toHaveBeenCalled();
 });
+
+test('an empty selection never derives a tenant from a course ID, cached user ID, or adapter default', async () => {
+  setHybridSourceSchoolContext(null);
+  await expect(hybridSource.getCourse('pu-previous-course')).rejects.toThrow('請先選擇學校');
+  await expect(hybridSource.listGrades('pu-previous-student')).rejects.toThrow('請先選擇學校');
+  await expect(hybridSource.listEnrollments('old-student')).rejects.toThrow('請先選擇學校');
+  await expect(hybridSource.listBusRoutes()).rejects.toThrow('請先選擇學校');
+  await expect(hybridSource.listWashingMachines()).rejects.toThrow('請先選擇學校');
+  expect(mockGetAdapter).not.toHaveBeenCalled();
+  expect(mockFallbackGetCourse).not.toHaveBeenCalled();
+});
+
+test('a selected campus is used consistently when the real adapter is missing', async () => {
+  setHybridSourceSchoolContext('nthu');
+  mockHasAdapter.mockReturnValue(false);
+  mockFallbackGetCourse.mockResolvedValue({ id: 'c', schoolId: 'nthu' });
+  await expect(hybridSource.getCourse('c')).resolves.toMatchObject({ schoolId: 'nthu' });
+  expect(mockFallbackGetCourse).toHaveBeenCalledWith('c', 'nthu');
+  setHybridSourceSchoolContext(null);
+  await expect(hybridSource.getCourse('c')).rejects.toThrow('請先選擇學校');
+});

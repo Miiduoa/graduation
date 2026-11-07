@@ -3,8 +3,24 @@ import { act, render } from '@testing-library/react-native';
 import { AuthProvider, useAuth } from '../state/auth';
 import { signOut } from 'firebase/auth';
 import { clearAllCache } from '../data/cachedSource';
+import { clearAllOfflineData } from '../services/offline';
 import { clearMockAuthSession } from '../services/mockAuth';
+import { clearUserScopedStorage } from '../services/scopedStorage';
+import { clearTCSession } from '../services/tronClassClient';
+import { clearPUSession } from '../services/studentIdAuth';
+import { clearPUCache } from '../services/puDataCache';
+import { puCacheClearAll } from '../data/puDataCache';
 import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
+import type { PostLoginContext } from '../data/postLoginTypes';
+import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+import { executeSmartAction } from '../services/aiSmartActions';
+import { getAnyCachedTCTodos } from '../services/supabaseLmsCache';
+import {
+  bindVerifiedSchoolAiScope,
+  getVerifiedSchoolAiScope,
+  isVerifiedSchoolAiScopeCurrent,
+  revokeVerifiedSchoolAiScope,
+} from '../services/verifiedSchoolAiScope';
 
 const mockFirebaseAuth: { currentUser: { uid: string } | null } = { currentUser: { uid: 'u1' } };
 const mockBeginReminderCleanup = jest.fn(async () => 0);
@@ -18,7 +34,7 @@ jest.mock('firebase/auth', () => ({
   onAuthStateChanged: () => () => undefined,
   signOut: jest.fn(),
 }));
-jest.mock('../data/postLoginDataRouter', () => ({ buildPostLoginContext: jest.fn() }));
+jest.mock('../data/postLoginDataRouter', () => ({ getPostLoginContext: jest.fn(async () => null), buildPostLoginContext: jest.fn() }));
 jest.mock('../services/campusAssignmentReminders', () => ({
   beginCampusAssignmentReminderSignOutCleanup: () => mockBeginReminderCleanup(),
   endCampusAssignmentReminderSignOutCleanup: () => mockEndReminderCleanup(),
@@ -44,8 +60,13 @@ jest.mock('../services/puDataCache', () => ({
   getAnyCachedCourses: jest.fn(),
   getAnyCachedTCCourses: jest.fn(),
 }));
-jest.mock('../services/postLoginContextHolder', () => ({ setInMemoryPostLoginContext: jest.fn() }));
+jest.mock('../services/postLoginContextHolder', () => ({ getInMemoryPostLoginContext: jest.fn(() => null), setInMemoryPostLoginContext: jest.fn() }));
 jest.mock('../services/studentIdAuth', () => ({ clearPUSession: jest.fn() }));
+jest.mock('../services/supabaseLmsCache', () => ({
+  getAnyCachedTCActivities: jest.fn(async () => null),
+  getAnyCachedTCCourses: jest.fn(async () => null),
+  getAnyCachedTCTodos: jest.fn(async () => null),
+}));
 jest.mock('../services/clearOwnedPuCampusSessions', () => ({
   clearOwnedPuCampusSessions: jest.fn().mockResolvedValue(undefined),
 }));
@@ -67,6 +88,8 @@ function deferred() {
 }
 beforeEach(() => {
   jest.clearAllMocks();
+  revokeVerifiedSchoolAiScope();
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(null);
   mockBeginReminderCleanup.mockResolvedValue(0);
   mockFirebaseAuth.currentUser = { uid: 'u1' };
   for (const [module, names] of [
@@ -86,21 +109,39 @@ beforeEach(() => {
   });
 });
 
-test('a deletion logout for a former account performs no cache cleanup or SDK signout', async () => {
+test.each(['u2', null])('a deletion logout for a former account performs no cleanup with current UID %s', async (currentUid) => {
   render(
     <AuthProvider>
       <Probe />
     </AuthProvider>,
   );
   await act(async () => undefined);
-  mockFirebaseAuth.currentUser = { uid: 'u2' };
+  mockFirebaseAuth.currentUser = currentUid ? { uid: currentUid } : null;
+  const revoke = jest.spyOn(require('../services/verifiedSchoolAiScope'), 'revokeVerifiedSchoolAiScope');
+  jest.mocked(setInMemoryPostLoginContext).mockClear();
   await expect(auth.signOut('u1')).rejects.toThrow('account changed');
+  expect(revoke).not.toHaveBeenCalled();
   expect(clearAllCache).not.toHaveBeenCalled();
+  expect(clearAllOfflineData).not.toHaveBeenCalled();
+  expect(clearUserScopedStorage).not.toHaveBeenCalled();
   expect(mockBeginReminderCleanup).not.toHaveBeenCalled();
+  expect(mockEndReminderCleanup).not.toHaveBeenCalled();
   expect(clearMockAuthSession).not.toHaveBeenCalled();
+  expect(clearTCSession).not.toHaveBeenCalled();
+  expect(clearOwnedPuCampusSessions).not.toHaveBeenCalled();
+  expect(clearPUSession).not.toHaveBeenCalled();
+  expect(clearPUCache).not.toHaveBeenCalled();
+  expect(puCacheClearAll).not.toHaveBeenCalled();
+  expect(setInMemoryPostLoginContext).not.toHaveBeenCalled();
   expect(signOut).not.toHaveBeenCalled();
+  revoke.mockRestore();
 });
-test('an account switch while cleanup waits cannot sign out the new account or restart cleanup', async () => {
+test.each([
+  { label: 'explicit UID', initialUid: 'u1', expectedUid: 'u1', nextUid: 'u2' },
+  { label: 'omitted UID', initialUid: 'u1', expectedUid: undefined, nextUid: 'u2' },
+  { label: 'initially signed out', initialUid: null, expectedUid: undefined, nextUid: 'u2' },
+  { label: 'account disappears', initialUid: 'u1', expectedUid: undefined, nextUid: null },
+])('an account change while cleanup waits stops further sign-out with $label', async ({ initialUid, expectedUid, nextUid }) => {
   const pending = deferred();
   jest.mocked(clearAllCache).mockReturnValueOnce(pending.promise);
   render(
@@ -109,15 +150,40 @@ test('an account switch while cleanup waits cannot sign out the new account or r
     </AuthProvider>,
   );
   await act(async () => undefined);
+  mockFirebaseAuth.currentUser = initialUid ? { uid: initialUid } : null;
+  jest.mocked(setInMemoryPostLoginContext).mockClear();
   const quiet = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-  const outcome = auth.signOut('u1').catch((error: Error) => error);
-  mockFirebaseAuth.currentUser = { uid: 'u2' };
+  const signingOut = expectedUid === undefined ? auth.signOut() : auth.signOut(expectedUid);
+  const outcome = signingOut.catch((error: Error) => error);
+  const guards = [
+    jest.mocked(clearAllCache).mock.calls[0][0],
+    jest.mocked(clearAllOfflineData).mock.calls[0][0],
+    jest.mocked(clearUserScopedStorage).mock.calls[0][1],
+  ];
+  for (const guard of guards) {
+    expect(guard).toEqual(expect.any(Function));
+    expect(guard).not.toThrow();
+  }
+  mockFirebaseAuth.currentUser = nextUid ? { uid: nextUid } : null;
+  for (const guard of guards) {
+    expect(guard).toThrow('account changed');
+  }
   pending.resolve();
   expect(await outcome).toEqual(
     expect.objectContaining({ message: expect.stringContaining('account changed') }),
   );
   expect(signOut).not.toHaveBeenCalled();
+  expect(mockFirebaseAuth.currentUser).toEqual(nextUid ? { uid: nextUid } : null);
+  expect(clearUserScopedStorage).toHaveBeenCalledWith(
+    { uid: initialUid, schoolId: null },
+    expect.any(Function),
+  );
   expect(clearMockAuthSession).toHaveBeenCalledTimes(1);
+  expect(clearPUSession).not.toHaveBeenCalled();
+  expect(clearPUCache).not.toHaveBeenCalled();
+  expect(puCacheClearAll).not.toHaveBeenCalled();
+  expect(setInMemoryPostLoginContext).not.toHaveBeenCalled();
+  expect(mockEndReminderCleanup).toHaveBeenCalledTimes(1);
   quiet.mockRestore();
 });
 test('matching-account deletion logout completes actual SDK signout', async () => {
@@ -197,4 +263,49 @@ test('failed Agent reminder cleanup is surfaced yet releases the sign-out fence'
   expect(mockEndReminderCleanup).toHaveBeenCalledTimes(1);
   expect(signOut).toHaveBeenCalledTimes(1);
   warning.mockRestore();
+});
+
+test('sign-out immediately rejects an in-flight raw AI read while cleanup is still pending', async () => {
+  const cleanup = deferred();
+  jest.mocked(clearAllCache).mockReturnValueOnce(cleanup.promise);
+  let finishRead!: (value: Awaited<ReturnType<typeof getAnyCachedTCTodos>>) => void;
+  jest.mocked(getAnyCachedTCTodos).mockImplementationOnce(() => new Promise((resolve) => {
+    finishRead = resolve;
+  }));
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await act(async () => undefined);
+  const requester = mockFirebaseAuth.currentUser;
+  const context: PostLoginContext = {
+    uid: 'u1', schoolId: 'pu', origin: 'verified-school-login',
+    roles: {
+      primaryRole: 'student', subRoles: [], source: 'firestore',
+      flags: { isStudent: true, isTeacher: false, isDeptAdmin: false, isAdmin: false },
+    },
+    latestAnnouncements: [], partialErrors: [], builtAt: new Date().toISOString(),
+  };
+  jest.mocked(getInMemoryPostLoginContext).mockReturnValue(context);
+  bindVerifiedSchoolAiScope(context, () => {
+    if (mockFirebaseAuth.currentUser !== requester) throw new Error('account changed');
+  });
+  const identity = { userId: 'u1', schoolId: 'pu' };
+  const scope = getVerifiedSchoolAiScope(identity)!;
+  const read = executeSmartAction('query_assignments', identity);
+  const signingOut = auth.signOut('u1');
+
+  expect(mockFirebaseAuth.currentUser).toBe(requester);
+  expect(signOut).not.toHaveBeenCalled();
+  expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  finishRead([{
+    id: 8, course_id: 3, title: '登出前的私人作業', type: 'homework', status: 'pending',
+    description: null, start_time: null, end_time: null, score: null, total_score: null,
+    weight: null, score_percentage: null, published: true,
+  }]);
+  const result = await read;
+  expect(result).toMatchObject({ success: false, title: '學校資料尚未就緒' });
+  expect(JSON.stringify(result)).not.toContain('登出前的私人作業');
+  expect(signOut).not.toHaveBeenCalled();
+
+  await act(async () => { cleanup.resolve(); await signingOut; });
+  expect(signOut).toHaveBeenCalledTimes(1);
 });

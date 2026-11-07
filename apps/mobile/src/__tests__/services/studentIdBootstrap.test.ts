@@ -31,6 +31,9 @@ import {
   tcLogin,
 } from '../../services/tronClassClient';
 import { syncPostLoginContextFromCaches } from '../../services/postLoginContextFromCaches';
+import type { PostLoginContext } from '../../data/postLoginTypes';
+import * as postLoginContextHolder from '../../services/postLoginContextHolder';
+import { getVerifiedSchoolAiScope, isVerifiedSchoolAiScopeCurrent } from '../../services/verifiedSchoolAiScope';
 
 const serverUid = 'pu-canonical-owner';
 const mockSchoolUser = { uid: serverUid, getIdToken: jest.fn(async () => 'owner-id-token') };
@@ -286,7 +289,7 @@ test('real school login exchanges the hosted token, uses its actual UID and imme
   expect((await getAnyCachedCourses())?.courses[0].credits).toBe(1.5);
   expect((await getAnyCachedGrades())?.grades).toEqual(grades);
   expect(syncPostLoginContextFromCaches).toHaveBeenCalledWith(
-    expect.objectContaining({ uid: serverUid }),
+    expect.objectContaining({ uid: serverUid, assertVerifiedSession: expect.any(Function) }),
   );
   expect(puLogin).not.toHaveBeenCalled();
   expect(puFetchCourses).not.toHaveBeenCalled();
@@ -575,4 +578,37 @@ test('disabled LMS bootstrap never requests a course platform endpoint', async (
   expect(result.syncSummary?.items.find((item) => item.key === 'learning')?.state).toBe('disabled');
   expect(mockFetch.mock.calls.some(([url]) => /TronClass/.test(String(url)))).toBe(false);
   expect(setTCSavedCredentials).not.toHaveBeenCalled();
+});
+
+test('verified AI scope uses the actual school-login user and session revocation checks', async () => {
+  const context: PostLoginContext = {
+    uid: serverUid, schoolId: 'pu', origin: 'verified-school-login',
+    roles: {
+      primaryRole: 'student', subRoles: [], source: 'firestore',
+      flags: { isStudent: true, isTeacher: false, isDeptAdmin: false, isAdmin: false },
+    },
+    latestAnnouncements: [], partialErrors: [], builtAt: new Date().toISOString(),
+  };
+  const memory = jest.spyOn(postLoginContextHolder, 'getInMemoryPostLoginContext').mockReturnValue(context);
+  jest.mocked(syncPostLoginContextFromCaches).mockResolvedValueOnce(context);
+  try {
+    const identity = { userId: serverUid, schoolId: 'pu' };
+    expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+    await signInWithStudentId(params);
+    const scope = getVerifiedSchoolAiScope(identity);
+    expect(scope?.context).toBe(context);
+
+    memory.mockReturnValue(null);
+    expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+    memory.mockReturnValue(JSON.parse(JSON.stringify(context)));
+    expect(getVerifiedSchoolAiScope(identity)).toBe(scope);
+
+    mockAuth.currentUser = { ...mockSchoolUser };
+    expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
+    mockAuth.currentUser = mockSchoolUser;
+    clearPUSession();
+    expect(isVerifiedSchoolAiScopeCurrent(scope!)).toBe(false);
+  } finally {
+    memory.mockRestore();
+  }
 });
