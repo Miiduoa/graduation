@@ -234,11 +234,20 @@ service firebase.storage {
         return story.schoolId == schoolId
           && resource.metadata.ownerUid == story.authorUid
           && story.mediaUrl is string && story.mediaUrl.size() > 0
+          // Story expiry is stored as epoch milliseconds by the mobile publisher.
+          && story.expiresAt is int && story.expiresAt > request.time.toMillis()
           && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
             || (story.kind == 'video' && resource.contentType.matches('video/.*')));
       }
       allow get: if activeStoryMember()
-        && (resource.metadata.get('ownerUid', '') == request.auth.uid || isPublishedStory());
+        && (
+          // Before publication only the author can preview a draft. Once the
+          // story exists, all readers (including its author) use the published
+          // owner, media-type and expiry checks.
+          (resource.metadata.get('ownerUid', '') == request.auth.uid
+            && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId)))
+          || isPublishedStory()
+        );
       // Draft uploads may be retried until their Firestore story is published.
       allow create, update: if activeStoryMember()
         && request.resource.metadata.ownerUid == request.auth.uid

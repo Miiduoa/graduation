@@ -236,3 +236,14 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 此次僅將兩個公開上傳 namespace 的 **寫入／建立** 改為 `hasCanonicalActiveAccount()`，保持原有檔名約束、Content-Type、大小、建立／不可覆寫條件與公開讀取規則。新增 Firebase Storage emulator 測試用同一 Auth context 驗證：正常 active upload、直接刪除 canonical profile 後兩類新上傳拒絕、受控重建 profile 後恢復、再次 suspended 時拒絕、其他 active user 不得改 Alice 頭像；原有合法頭像測試補齊 active canonical profile fixture。原版在孤兒狀態的兩項拒絕斷言應失敗；本輪需以**新精確 head** 的 Rules CI 和完整工作流結果確認，不預先宣稱成功。
 
 公開讀取仍是既有產品功能；此修補**不會**撤銷已發公開物件網址或過去已公開影像。缺少 canonical profile 的合法 legacy 帳號將無法建立這兩類附件，正式發布前需由受控 onboarding 修復資料。stories 和 events 編輯路徑受跨服務兩文件查詢上限限制，尚未解除；GCS 歷史下載 URL、Supabase 已簽發 URL、隔離 staging bucket 驗證、minimatch 相容性與正式審查仍待完成。本輪只修改原始碼、隔離測試與紀錄，未合併、部署或操作正式資料／金鑰／token。
+
+
+## 2026-11-08：校園限時動態過期媒體與超長效期邊界
+
+原 schools/{schoolId}/stories/{storyId} Storage 規則僅檢查學校成員、作者 metadata 與故事型態；已發布故事的 expiresAt 即使過期，其他同校帳號仍可對舊物件進行受規則管控的讀取。作者的直接讀取分支也不要求 published metadata 有效。另 campusStories Firestore 建立規則只要求 expiresAt 非空，允許客戶端自行寫入任意未來期限，與手機端一日限動的產品期限不符。
+
+此次在既有兩份 Firestore 跨服務文件查詢額度內，區分未發布草稿（僅 owner 可 preview）與已發布故事（包含 owner 在內須由 story 的作者、媒體型態及毫秒期限驗證）。校園限動發布時要求 expiresAt 為 epoch milliseconds 整數，晚於伺服器現在且不超過未來 24 小時加 5 分鐘時鐘容差。原有效草稿與正常發布讀取仍應可用。
+
+新增 Firebase emulator 定向回歸：草稿本人可讀、他人不可讀；七日未來期限與過去期限拒絕建立；正常兩分鐘期限可以發布且兩個帳號可讀；將故事改成過期後，原本同一枚登入身分對作者與同校成員的規則讀取都必須拒絕。這項是程式與可重跑測試的修補，**GitHub 精確 head CI 尚待驗證**，不得借用先前 head 綠燈。
+
+**仍受限的範圍：** Firestore campusStories 的舊資料讀取規則，以及已簽發的 Firebase/GCS bearer download URL，不能由這次 Storage SDK 規則變更立即撤銷；前者的列表查詢目前只以客戶端過濾過期項目，需要另設與查詢相容的服務端策略，後者仍需隔離 GCS staging 進行網址失效驗證。原 stories 的身份撤權仍受 Storage 最多兩份 Firestore 文件查詢限制；已刪帳號舊 token 且 school membership 尚存的全面撤權未在本輪完成。正式環境未修改、未執行 migration／token 清理、未合併部署。

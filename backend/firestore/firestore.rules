@@ -1743,7 +1743,11 @@ service cloud.firestore {
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.schoolId != null
         && isSchoolMember(request.resource.data.schoolId)
-        && request.resource.data.expiresAt != null;
+        // The mobile publisher stores epoch milliseconds. Bound the lifetime
+        // to one day plus five minutes of client clock skew.
+        && request.resource.data.expiresAt is int
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 86_700_000;
       allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
       allow update: if false;
 

@@ -1841,6 +1841,35 @@ describe('storage security rules', () => {
     }
   });
 
+  test('story expiry prevents overlong publication and closes published media reads', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+    });
+    const alice = testEnv.authenticatedContext('alice');
+    const bob = testEnv.authenticatedContext('bob');
+    const media = alice.storage().ref('schools/pu/stories/expiring/photo.jpg');
+    await assertSucceeds(media.putString('draft photo', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'alice' },
+    }));
+    // Draft previews remain available to the author, but not to classmates.
+    await assertSucceeds(media.getMetadata());
+    await assertFails(bob.storage().ref(media.fullPath).getMetadata());
+    const mediaUrl = await assertSucceeds(media.getDownloadURL());
+    const docRef = alice.firestore().doc('campusStories/expiring');
+    const doc = { schoolId: 'pu', authorUid: 'alice', kind: 'image', mediaUrl };
+    await assertFails(docRef.set({ ...doc, expiresAt: Date.now() + 7 * 86_400_000 }));
+    await assertFails(docRef.set({ ...doc, expiresAt: Date.now() - 60_000 }));
+    await assertSucceeds(docRef.set({ ...doc, expiresAt: Date.now() + 120_000 }));
+    await assertSucceeds(media.getMetadata());
+    await assertSucceeds(bob.storage().ref(media.fullPath).getMetadata());
+    // Use the same issued auth contexts, without advancing the clock.
+    await seedFirestore(async (db) =>
+      db.doc('campusStories/expiring').update({ expiresAt: Date.now() - 60_000 }));
+    await assertFails(bob.storage().ref(media.fullPath).getMetadata());
+    await assertFails(media.getMetadata());
+  });
+
   for (const objectPath of [
     'conversations/orphan/messages/one/private.pdf',
     'conversations/orphan/media/one/private.pdf',
