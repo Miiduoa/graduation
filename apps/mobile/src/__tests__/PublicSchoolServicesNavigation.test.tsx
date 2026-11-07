@@ -471,7 +471,7 @@ test('residents can open the current school repair channel without saving and la
   fireEvent.press(view.getByText('水電與漏水'));
   fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
   await view.findByText('編輯');
-  fireEvent.press(view.getByText('查海大修繕處理狀況'));
+  fireEvent.press(view.getByText('到海大教務系統網站查修繕紀錄'));
   expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
   expect(view.queryByText(general.label)).toBeNull();
 

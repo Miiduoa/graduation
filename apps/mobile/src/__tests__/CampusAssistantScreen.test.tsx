@@ -364,7 +364,7 @@ test('a server proposal requires review and a second explicit tap before writing
     source: 'campus',
     hasActions: true,
     proposals: [{
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       toolName: 'createDormRepairRequest',
       input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
       agentRunId: runId,
@@ -379,7 +379,7 @@ test('a server proposal requires review and a second explicit tap before writing
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), 'A棟301冷氣不冷');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
 
-  expect(view.getByText('確認送出報修')).toBeTruthy();
+  expect(view.getByText('確認存成報修備忘')).toBeTruthy();
   expect(view.getByText('需要本人確認 · 尚未執行')).toBeTruthy();
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
   fireEvent.press(view.getByText('檢視任務草稿'));
@@ -395,7 +395,8 @@ test('a server proposal requires review and a second explicit tap before writing
     proposal: { agentRunId: runId, toolName: 'createDormRepairRequest' },
   });
   expect(view.getByText('伺服器已確認執行成功')).toBeTruthy();
-  expect(view.getByText('紀錄編號：repair-123')).toBeTruthy();
+  expect(view.queryByText(/repair-123/)).toBeNull();
+  expect(view.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
   expect(view.queryByText('確認並執行')).toBeNull();
   fireEvent.press(view.getByText('開啟服務頁核對紀錄'));
   expect(navigate).toHaveBeenCalledWith('校園', {

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import {
   ASSISTANT_PERMISSIONS_SETTINGS_HREF,
 } from '@campus/shared/src/assistantPermissions';
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import {
   executeCampusAgentWrite,
   type AgentWriteResult,
@@ -110,7 +111,10 @@ export function AgentWritePanel({ proposal, userId, schoolId, groupId, onComplet
 
   const path = servicePaths[proposal.toolName];
   const verified = result?.success === true;
-  const reference = result?.requestId || result?.repairId || result?.reservationId || result?.orderId;
+  const isRepair = proposal.toolName === 'createDormRepairRequest';
+  const reference = isRepair
+    ? undefined
+    : result?.requestId || result?.repairId || result?.reservationId || result?.orderId;
   const fields = reviewFields(proposal.input);
 
   return (
@@ -142,6 +146,7 @@ export function AgentWritePanel({ proposal, userId, schoolId, groupId, onComplet
             <div className={styles.actionSuccess} role="status">
               <strong>伺服器已確認執行成功</strong>
               {reference && <p>紀錄編號：{reference}</p>}
+              {isRepair && <p>{DORM_REPAIR_COPY.assistantSavedMemo}</p>}
               {path && <Link href={path}>前往服務頁面核對紀錄</Link>}
             </div>
           ) : permissionDenied ? (

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Text, View } from 'react-native';
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import {
   confirmCampusAgentWrite,
@@ -90,7 +91,8 @@ export function CampusAgentActionReview({
     }
   }
 
-  const reference = receipt?.requestId || receipt?.repairId ||
+  const isRepair = proposal.toolName === 'createDormRepairRequest';
+  const reference = isRepair ? undefined : receipt?.requestId || receipt?.repairId ||
     receipt?.reservationId || receipt?.loanId;
   const success = receipt?.success === true;
   return (
@@ -144,7 +146,9 @@ export function CampusAgentActionReview({
                 </Text>
               ) : null}
               <Text style={{ color: aiTokens.muted, lineHeight: 20, fontSize: 12 }}>
-                請到對應服務頁面核對完整紀錄。
+                {isRepair
+                  ? DORM_REPAIR_COPY.assistantSavedMemo
+                  : '請到對應服務頁面核對完整紀錄。'}
               </Text>
             </View>
           ) : permissionDenied ? (

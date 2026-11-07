@@ -9,6 +9,7 @@ import {
 import { getAuthInstance, getFunctionsInstance } from '../firebase';
 import { safeNavigate } from '../utils/safeNavigate';
 import { resolveDeprecatedRouteRedirect } from '../app/deprecatedRouteRedirect';
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
 import {
   ORDER_NOT_SENT_TEXT,
@@ -571,10 +572,10 @@ function RepairSubmittedCard({ payload }: { payload: any }) {
   const nav = useNavigation<any>();
   return (
     <View style={[styles.card, styles.successCard]}>
-      <CardHeader icon="✅" title="平台報修已建立" color="#1B5E20" />
+      <CardHeader icon="✅" title={DORM_REPAIR_COPY.assistantCardTitle} color="#1B5E20" />
       <InfoRow label="地點" value={payload.location || payload.dormitory || '—'} />
       <InfoRow label="類別" value={payload.category || '—'} />
-      <InfoRow label="平台案件編號" value={payload.repairId || payload.requestId || '—'} />
+      <Text style={styles.emptyText}>{DORM_REPAIR_COPY.assistantSavedMemo}</Text>
       <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'Dormitory')}>
         <Text style={styles.actionButtonText}>開啟宿舍服務</Text>
       </TouchableOpacity>

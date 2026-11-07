@@ -874,13 +874,13 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
     const descSnippet = repairInput.description.slice(0, 120);
-    response.content = `已整理好報修草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
+    response.content = `已整理好報修備忘草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
       repairInput.description.length > 120 ? '…' : ''
-    }`;
+    }確認後只會存在此應用，請依學校規定管道送出。`;
     response.suggestions = ['我的報修'];
     response.actions = [
       assistantAction({
-        label: '確認送出報修',
+        label: '確認存成報修備忘',
         action: 'queue_action',
         params: { toolName: 'createDormRepairRequest', input: repairInput, agentRunId: requestId },
         requiresConfirmation: true,

@@ -372,7 +372,7 @@ it('requires a second explicit confirmation before executing a validated action'
     run: { runId, status: 'completed' },
     actions: [{
       action: 'queue_action',
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       requiresConfirmation: true,
       params: {
         toolName: 'createDormRepairRequest',
@@ -397,7 +397,8 @@ it('requires a second explicit confirmation before executing a validated action'
     userId: 'alice', schoolId: 'pu', agentRunId: runId,
     toolName: 'createDormRepairRequest',
   });
-  expect(screen.getByText(/repair-123/)).toBeTruthy();
+  expect(screen.queryByText(/repair-123/)).toBeNull();
+  expect(screen.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
 });
 
 it('never offers execution for an action not bound to its server run', async () => {

@@ -40,7 +40,7 @@ export const DORM_REPAIR_SHORTCUTS: ReadonlyArray<{
 export const DORM_REPAIR_REFERENCE_LIMIT = 80;
 
 /** Phrases that imply this app submits to the school, issues a ticket, or tracks official progress. */
-export const DORM_REPAIR_DISALLOWED_COPY = /單號|已送出給學校|查詢進度/;
+export const DORM_REPAIR_DISALLOWED_COPY = /單號|已送出給學校|查詢進度|工單|已提交報修|查看處理狀況|修繕進度|查進度/;
 
 /** Shared web/app copy: personal memos only; official filing stays on school channels. */
 export const DORM_REPAIR_COPY = {
@@ -54,9 +54,13 @@ export const DORM_REPAIR_COPY = {
   copyReferenceFailed: '無法自動複製。請選取畫面上的校方編號，手動複製。',
   missingRoute: '請向這所學校的住宿服務單位確認報修方式。',
   officialChannelTitle: '校方報修管道',
-  officialTrackingFallback: '前往校方頁面查看處理狀況',
+  officialTrackingFallback: '前往學校網站查看修繕紀錄',
   emptyHint: '遇到設備問題時可以先記下細節，再到校方正式管道辦理。',
   openIssues: '待處理備忘',
+  assistantSavedMemo: '已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。',
+  assistantCanHelp: '可以幫你先存成報修備忘，請依學校管道送出，或聯繫宿舍管理員。',
+  assistantConfirm: '確認存成報修備忘',
+  assistantCardTitle: '已存成報修備忘',
 } as const;
 
 export type DormRepair = {
