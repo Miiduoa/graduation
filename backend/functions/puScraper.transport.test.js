@@ -7,7 +7,7 @@ jest.mock('./generated/shared/puEcampusDataPolicy', () => ({
 
 const { EventEmitter } = require('events');
 const https = require('https');
-const { puLogin, puFetchCourses, puFetchGrades } = require('./puScraper');
+const { puLogin, puFetchCourses, puFetchGrades, puFetchStudentInfo } = require('./puScraper');
 
 const gradePage = `<table>
   <tr><th>學期別</th><th>課程名稱</th><th>修課班級</th><th>修別</th><th>學分數</th><th>成績</th></tr>
@@ -183,6 +183,50 @@ describe('PU course document recognition', () => {
       <table><tr><td>其他查詢</td></tr></table>` }));
     await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
       success: true, courses: [{ code: 'IM01', name: '資料庫', credits: 3 }],
+    });
+  });
+});
+
+describe('PU student number used on the card', () => {
+  const number = '學號(Student No.)：412345678';
+  afterEach(() => jest.restoreAllMocks());
+
+  test('reads the visible field in the authenticated course profile', async () => {
+    mockRequests(() => ({ html: `<!-- 學號(Student No.)：999999999 -->
+      <script>const label = '學號(Student No.)：888888888';</script>
+      <div title="學號(Student No.)：777777777" hidden>學號(Student No.)：666666666</div>
+      <p>學號(Student No.)：<b>412345678</b></p>` }));
+    await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+      success: true, studentInfo: { studentId: '412345678' },
+    });
+  });
+
+  test.each([
+    `<!-- ${number} --><style>/* ${number} */</style><template>${number}</template>`,
+    `<div title="${number}"></div><p aria-hidden="true">${number}</p>`,
+    `<div style="display: none">${number}</div><textarea>${number}</textarea>`,
+  ])('rejects a profile whose only identity markers are hidden', async (html) => {
+    mockRequests(() => ({ html }));
+    await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+      success: false, studentInfo: {},
+    });
+  });
+
+  test.each([number + 'X', number + '00', number + ' ' + number.replace('412345678', '999999999')])(
+    'withholds malformed or ambiguous numbers', async (text) => {
+      mockRequests(() => ({ html: `<p>${text}</p>` }));
+      await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+        success: true, studentInfo: { studentId: null },
+      });
+    },
+  );
+
+  test('cannot obtain a card identity from a redirect to another campus page', async () => {
+    mockRequests((_request, hop) => hop === 0
+      ? { status: 302, headers: { location: '/notices' } }
+      : { html: `<p>${number}</p>` });
+    await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+      success: false, studentInfo: {},
     });
   });
 });

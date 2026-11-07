@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { QuickCampusEntry } from '../components/QuickCampusEntry';
 import type { MobileQuickAction } from '../services/quickCampusActions';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -248,12 +249,23 @@ export default function StudentTodayScreen() {
           />
         }
       >
-        <View>
-          <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
-          <Text accessibilityRole="header" style={s.heading}>
-            今天
-          </Text>
-          {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
+        <View style={s.header}>
+          <View style={s.headerDate}>
+            <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
+            <Text accessibilityRole="header" style={s.heading}>今天</Text>
+            {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
+          </View>
+          {profile?.role === 'student' && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="開啟數位學生證"
+              onPress={() => rootNavigateNested('我的', 'StudentCard')}
+              style={s.studentCard}
+            >
+              <Ionicons name="id-card-outline" size={19} color={theme.colors.text} />
+              <Text style={s.studentCardLabel}>學生證</Text>
+            </Pressable>
+          )}
         </View>
         {firstLoad ? (
           <TodaySkeleton styles={s} />
@@ -654,6 +666,13 @@ const createStyles = () =>
       alignSelf: 'center',
       gap: 28,
     },
+    header: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 },
+    headerDate: { flexGrow: 1, flexShrink: 1 },
+    studentCard: {
+      flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14,
+      borderRadius: 14, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+    },
+    studentCardLabel: { fontSize: 15, fontWeight: '600', color: theme.colors.text },
     date: {
       color: theme.colors.muted,
       fontSize: 13,

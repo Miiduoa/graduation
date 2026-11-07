@@ -67,6 +67,11 @@ test('an isolated release has matching bundle, Google callback, channel and a di
   const info = readFileSync(join(path, files[2]), 'utf8');
   assert.ok(info.includes(production.iosClientId));
   assert.ok(info.includes(production.iosClientId.split('.').reverse().join('.')));
+  assert.ok(info.includes('<key>NFCReaderUsageDescription</key>'));
+  assert.ok(info.includes('<string>F04E554E490101</string>'));
+  const entitlements = readFileSync(join(path, files[4]), 'utf8');
+  assert.ok(entitlements.includes('<key>com.apple.developer.nfc.readersession.formats</key>'));
+  assert.ok(entitlements.includes('<string>TAG</string>'));
   for (const file of files.slice(4)) {
     const contents = readFileSync(join(path, file), 'utf8');
     assert.ok(contents.includes('group.com.nuni.app'));

@@ -7,6 +7,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 const mockNavigation = { navigate: jest.fn() };
 let mockAuth: ReturnType<typeof useNuniSession>;
 let mockProviderAvailable = false;
+let mockSchool = { id: 'pu', name: '靜宜大學' };
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
@@ -17,7 +18,7 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockAuth }));
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
+  useSchool: () => ({ school: mockSchool }),
 }));
 jest.mock('../ui/useThemeStyleSheet', () => ({
   useThemeStyleSheet: <T,>(create: () => T) => create(),
@@ -36,6 +37,7 @@ jest.mock('../components/TodayTimetablePanel', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockProviderAvailable = false;
+  mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
     session: null,
     loading: false,
@@ -61,7 +63,8 @@ it('places the import and account actions before the long public-service list', 
   expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(accountIndex).toBeGreaterThan(importIndex);
   expect(servicesIndex).toBeGreaterThan(accountIndex);
-  expect(view.getAllByTestId(/^public-/)).toHaveLength(10);
+  expect(view.getAllByTestId(/^public-/)).toHaveLength(11);
+  expect(view.getByTestId('public-StudentCard').props.accessibilityLabel).toBe('數位學生證');
   expect(safeNavigate).not.toHaveBeenCalled();
 });
 
@@ -101,10 +104,22 @@ it.each([
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });
 
-it('opens public information without starting an account or school login', async () => {
+it.each(['Map', 'StudentCard'])(
+  'opens public %s without starting an account or school login',
+  async (route) => {
+    const view = await landing();
+    await fireEventAsync.press(view.getByTestId(`public-${route}`));
+    expect(safeNavigate).toHaveBeenCalledTimes(1);
+    expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, route);
+    expect(mockAuth.signIn).not.toHaveBeenCalled();
+  },
+);
+
+it('offers student card verification when the selected school has no official card service', async () => {
+  mockSchool = { id: 'ntu', name: '國立臺灣大學' };
   const view = await landing();
-  await fireEventAsync.press(view.getByTestId('public-Map'));
-  expect(safeNavigate).toHaveBeenCalledTimes(1);
-  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
+  expect(view.getByText('出示學生證，或核對對方的校園身分')).toBeTruthy();
+  await fireEventAsync.press(view.getByTestId('public-StudentCard'));
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'StudentCard');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
 });

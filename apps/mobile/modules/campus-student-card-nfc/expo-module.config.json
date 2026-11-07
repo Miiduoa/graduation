@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["CampusStudentCardNfcModule"]
+  },
+  "android": {
+    "modules": ["app.campus.studentcardnfc.CampusStudentCardNfcModule"]
+  }
+}
