@@ -1,5 +1,5 @@
 import { classMeetingKey, type PersonalImportRecord } from '@campus/shared';
-import { savedClassGaps } from '../../services/nextSavedClasses';
+import { currentSavedClasses, nextSavedClasses, savedClassGaps } from '../../services/nextSavedClasses';
 
 function meeting(id: string, startTime: string, endTime: string, dayOfWeek = 5): PersonalImportRecord {
   return {
@@ -39,6 +39,46 @@ test('a missing timetable or unplaceable meeting cannot establish a free period'
     { ...first, academicYear: '114', endTime: undefined }])).toEqual([{ startAt: at('09:00'), endAt: at('14:00') }]);
 });
 
+test.each([
+  ['missing', undefined], ['zero', 0], ['NaN', Number.NaN], ['negative', -1],
+  ['fractional', 2.5], ['out of range', 8],
+] as const)('a current-term meeting with a %s weekday cannot establish a gap', (_label, dayOfWeek) => {
+  const unplaced = { ...meeting('待確認課程', '11:00', '12:00'), dayOfWeek };
+  expect(gaps([first, unplaced, last])).toBeUndefined();
+  expect(gaps([unplaced])).toBeUndefined();
+});
+
+test.each([
+  { startTime: undefined }, { endTime: undefined }, { startTime: '25:00' },
+  { endTime: '11:60' }, { startTime: '12:00' }, { startTime: '13:00' },
+])('an incomplete or invalid current-term meeting time blocks gap assertions: %j', (change) => {
+  expect(gaps([first, { ...meeting('待確認時間', '11:00', '12:00'), ...change }, last])).toBeUndefined();
+});
+
+test('scope normalization cannot hide a current-term meeting without a weekday', () => {
+  expect(gaps([first, last, {
+    ...meeting('待確認課程', '11:00', '12:00'), academicYear: '2026', semester: '上學期', dayOfWeek: undefined,
+  }])).toBeUndefined();
+});
+
+test('unplaced or malformed records from other terms and scopes do not invalidate known gaps', () => {
+  const unplaced = { ...meeting('待確認課程', '11:00', '12:00'), dayOfWeek: undefined };
+  expect(gaps([
+    first, last, { ...unplaced, academicYear: '114' },
+    { ...first, academicYear: '114', endTime: '25:00' },
+    { ...unplaced, semester: '2' }, { ...unplaced, schoolId: 'nthu' },
+    { ...unplaced, kind: 'grades' }, { ...unplaced, kind: 'events' },
+  ])).toEqual([{ startAt: at('09:00'), endAt: at('14:00') }]);
+});
+
+test('current and next class queries keep their existing handling of unscheduled courses', () => {
+  const rows = [first, last, { ...meeting('未排課課程', '11:00', '12:00'), dayOfWeek: undefined }];
+  const now = new Date(at('08:30'));
+  expect(currentSavedClasses(rows, 'pu', now)?.map((entry) => entry.courseId)).toEqual([first.id]);
+  expect(nextSavedClasses(rows, 'pu', now)?.map((entry) => entry.courseId)).toEqual([last.id]);
+  expect(savedClassGaps(rows, 'pu', now, 'today')).toBeUndefined();
+});
+
 test('tomorrow follows the Taiwan date and respects single-day cancellations', () => {
   const cancelled = meeting('國文', '10:00', '12:00');
   const rows = [first, { ...cancelled, classExceptions: [{
@@ -61,6 +101,28 @@ test('a previous-term class ending after midnight bounds the first gap of the ne
   expect(savedClassGaps(rows, 'pu', now, 'tomorrow')).toEqual([{
     startAt: Date.parse('2027-02-01T01:15:00+08:00'), endAt: Date.parse('2027-02-01T14:00:00+08:00'),
   }]);
+});
+
+test('the day after tomorrow uses the Taiwan date and retains Sunday meetings', () => {
+  const sunday = [meeting('週日上午', '09:00', '10:00', 7), meeting('週日下午', '14:00', '15:00', 7)];
+  expect(savedClassGaps([first, last, ...sunday], 'pu', new Date('2026-11-05T16:30:00Z'), 'day-after-tomorrow')).toEqual([{
+    startAt: Date.parse('2026-11-08T10:00:00+08:00'), endAt: Date.parse('2026-11-08T14:00:00+08:00'),
+  }]);
+});
+
+test('the day after tomorrow preserves overnight changes when the semester changes', () => {
+  const rows: PersonalImportRecord[] = [{ ...first, classExceptions: [{
+    id: 'move', kind: 'move', original: first, originalDate: '2027-01-29',
+    courseKey: classMeetingKey(first), createdAt: first.importedAt,
+    date: '2027-01-31', startTime: '23:00', endDate: '2027-02-01', endTime: '01:15',
+  }] }, { ...last, dayOfWeek: 1, semester: '2' },
+  { ...meeting('前學期未排課', '11:00', '12:00'), dayOfWeek: undefined }];
+  expect(savedClassGaps(rows, 'pu', new Date('2027-01-30T23:30:00+08:00'), 'day-after-tomorrow')).toEqual([{
+    startAt: Date.parse('2027-02-01T01:15:00+08:00'), endAt: Date.parse('2027-02-01T14:00:00+08:00'),
+  }]);
+  expect(savedClassGaps([...rows, {
+    ...meeting('新學期未排課', '11:00', '12:00'), semester: '2', dayOfWeek: undefined,
+  }], 'pu', new Date('2027-01-30T23:30:00+08:00'), 'day-after-tomorrow')).toBeUndefined();
 });
 
 test('a previous weekday cannot invent a free period before the first class or on a single-class day', () => {

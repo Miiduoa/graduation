@@ -154,6 +154,19 @@ describe('class lookups from saved timetables and imports', () => {
     expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([]);
   });
 
+  test.each([false, true])('reads the day after tomorrow and rejects an incomplete active schedule (platform: %p)', async (platform) => {
+    const params = { uid: platform ? '' : 'alice', schoolId: 'pu', gapDay: 'day-after-tomorrow' as const,
+      ...(platform && { platformTimetable: { accountId: 'alice', isCurrent: () => true } }) };
+    const morning = { ...original, dayOfWeek: 6, startTime: '09:00', endTime: '10:00' };
+    const afternoon = { ...morning, id: 'lab', title: '實驗課', startTime: '13:00', endTime: '14:00' };
+    saveImports(morning, afternoon);
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([{
+      startAt: Date.parse('2026-11-07T10:00:00+08:00'), endAt: Date.parse('2026-11-07T13:00:00+08:00'),
+    }]);
+    saveImports(morning, afternoon, { ...original, id: 'unfinished', title: '未填星期的課', dayOfWeek: undefined });
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toBeUndefined();
+  });
+
   test('deduplicates manual and imported copies, retaining every class with the earliest start', async () => {
     jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
     saveImports(original, { ...original, id: 'other', title: '英文', location: '210' });

@@ -9,6 +9,7 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
 import { classCourseworkQuestion, type CourseworkChoice, type CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
+import { ClassGapReplyCard } from './ClassGapReplyCard';
 import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
 import { subscribeNuniAssignmentChanges } from '../services/nuniAssignmentChanges';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
@@ -796,22 +797,11 @@ function AssistantConversation({
         </View>
       ) : message.classGapRead ? (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.classGapRead.day === 'today' ? '今日空堂' : '明日空堂'}>
-            <Text selectable style={{ color: aiTokens.text, lineHeight: 25 }}>{message.content}</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-              {index === messages.length - 1 && <>
-                <AIButton label={message.classGapRead.day === 'today' ? '改查明天' : '改查今天'}
-                  variant="ghost" disabled={busy || syncBusy}
-                  onPress={() => void send({ kind: 'gap', question: message.classGapRead?.day === 'today' ? '那明天呢？' : '那今天呢？' })} />
-                {message.classGapRead.minMinutes < 60 && (
-                  <AIButton label="只看一小時以上" variant="ghost" disabled={busy || syncBusy}
-                    onPress={() => void send({ kind: 'gap', question: '至少一小時呢？' })} />
-                )}
-              </>}
-              {navigation?.navigate && <AIButton label="開啟我的課表" variant="ghost" disabled={busy || syncBusy}
-                onPress={() => current() && safeNavigate(navigation, 'PersonalTimetable')} />}
-            </View>
-          </AICard>
+          <ClassGapReplyCard query={message.classGapRead} content={message.content}
+            latest={index === messages.length - 1} busy={busy || syncBusy}
+            onAsk={(question) => void send({ kind: 'gap', question })}
+            onOpenTimetable={navigation?.navigate
+              ? () => { if (current()) safeNavigate(navigation, 'PersonalTimetable'); } : undefined} />
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>

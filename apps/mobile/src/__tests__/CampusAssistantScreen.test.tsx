@@ -1165,6 +1165,41 @@ test('the gap shortcut and its results stay in the signed-in local timetable sco
   expect(view.queryByRole('button', { name: '查今日空堂' })).toBeNull();
 });
 
+test('gap filter controls keep the latest query and draft when clearing a no-match result', async () => {
+  usePlatformFixture('student-b');
+  const query = { day: 'day-after-tomorrow', minMinutes: 90, fromMinute: 930,
+    owner: 'nuni:student-b', schoolId: 'pu', checkedAt: new Date().toISOString() };
+  const available = { ...query, minMinutes: 0 };
+  const allDay = { ...available, fromMinute: undefined };
+  const result = (classGapRead: typeof query, content: string) => ({
+    source: 'device', tool: 'saved-timetable', classGapRead, content,
+  });
+  request.mockResolvedValueOnce(result(query, '後天沒有符合條件的課間空堂。'))
+    .mockResolvedValueOnce(result(available, '15:30–16:00（30 分鐘）'))
+    .mockResolvedValueOnce(result(allDay, '10:00–12:00（120 分鐘）'));
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '後天下午三點半以後有一個半小時空堂嗎？');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(view.getByText('後天空堂')).toBeTruthy();
+  fireEvent.changeText(field, '稍後再問這堂課的作業');
+
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '不限長度' })));
+  expect(request.mock.calls[1][0].messages.slice(-2)).toMatchObject([
+    { role: 'assistant', classGapRead: query }, { role: 'user', content: '不限長度' },
+  ]);
+  expect(view.queryByRole('button', { name: '不限長度' })).toBeNull();
+  expect(view.getByText('15:30–16:00（30 分鐘）')).toBeTruthy();
+
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查看全天' })));
+  expect(request.mock.calls[2][0].messages.slice(-2)).toMatchObject([
+    { role: 'assistant', classGapRead: available }, { role: 'user', content: '全天' },
+  ]);
+  expect(view.queryByRole('button', { name: '查看全天' })).toBeNull();
+  expect(field.props.value).toBe('稍後再問這堂課的作業');
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
 test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
   setPlatformFixture('student-b');
   const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',

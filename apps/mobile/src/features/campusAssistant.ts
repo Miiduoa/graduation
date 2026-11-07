@@ -9,7 +9,10 @@ import type { LocalCampusReadResult } from '../services/localCampusToolProtocol'
 import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AnnouncementRead, AssignmentRead, OfflineCampusToolResult } from '../services/offlineCampusTools';
-import { answerSavedClassGapQuery, savedClassGapFollowUp, savedClassGapQuery, type SavedClassGapQuery } from '../services/savedClassGapQuery';
+import {
+  answerSavedClassGapQuery, savedClassGapFollowUp, savedClassGapQuery,
+  isSavedClassGapQuestion, isSavedClassGapRefinement, type SavedClassGapQuery,
+} from '../services/savedClassGapQuery';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
@@ -206,21 +209,27 @@ export async function askCampusAssistant(input: {
     }
     const previousGap = lastReply?.classGapRead;
     const gapFollowUp = previousGap && savedClassGapFollowUp(question, previousGap);
-    const gapQuery = gapFollowUp || savedClassGapQuery(question);
+    const refiningGap = !!previousGap && (!!gapFollowUp || isSavedClassGapRefinement(question));
+    // A conflicting refinement cannot become a fresh lookup that drops prior conditions.
+    const gapQuery = refiningGap ? gapFollowUp : savedClassGapQuery(question);
     const gapOwner = owner || (uid && `firebase:${uid}`);
     if (gapQuery && !gapOwner) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
         content: '請先登入帳號並儲存個人課表，再查課間空堂。' };
     }
-    if (previousGap && gapFollowUp && (previousGap.owner !== gapOwner || previousGap.schoolId !== input.scope.schoolId)) {
+    if (previousGap && refiningGap && (previousGap.owner !== gapOwner || previousGap.schoolId !== input.scope.schoolId)) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
         content: '帳號或學校已變更。請重新問「今天有哪些空堂？」來查目前的課表。' };
+    }
+    if (!gapQuery && (refiningGap || isSavedClassGapQuestion(question))) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false, route: '/timetable',
+        content: '這個空堂條件還無法完整辨識，這次沒有套用。可以查今天、明天或後天，並指定「下午三點半以後」、「15:30–17:00」或「至少 45 分鐘」。若條件互相衝突，請重新問完整問題，例如「明天下午有哪些空堂？」。' };
     }
     if (platform && !classQuery && !gapQuery) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
         content: '可以問「幫我安排未來七天的課表與作業」、「我現在有課嗎？」、「下一堂課在哪裡？」或「今天有哪些空堂？」。查到課程後，也可以接著問教室與下課時間。' };
     }
-    const snapshot = await collectOnDeviceSchoolContext({
+    const snapshot = await abortableCampusRead(() => collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
@@ -230,7 +239,7 @@ export async function askCampusAssistant(input: {
       ...(classQuery && classQuery.window !== 'current' && { includeNextClasses: true }),
       ...(classQuery?.followUp && lastClass?.uid === uid && lastClass.owner === owner &&
         lastClass.schoolId === input.scope.schoolId ? { classFollowUp: lastClass.classes } : {}),
-    });
+    }), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
     scopeCheck(input, false);
     assertNotCancelled();
 
