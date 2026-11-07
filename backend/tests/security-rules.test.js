@@ -1906,6 +1906,39 @@ describe('storage security rules', () => {
     await assertSucceeds(testEnv.authenticatedContext('bob').storage().ref('conversations/private/messages/one/file.pdf').getMetadata());
   });
 
+  test('orphaned administrator ID tokens cannot read incident files or create reports', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+    });
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await uploadString(context.storage().ref('bugreports/private/proof.jpg'), 'private incident', 'image/jpeg');
+    });
+    // Reuse the original auth context throughout to model a still-valid old ID token.
+    const admin = testEnv.authenticatedContext('alice', { role: 'admin' }).storage();
+    const reporter = testEnv.authenticatedContext('bob').storage();
+    const incident = admin.ref('bugreports/private/proof.jpg');
+
+    await assertSucceeds(incident.getMetadata());
+    await assertFails(reporter.ref('bugreports/private/proof.jpg').getMetadata());
+    await assertFails(testEnv.unauthenticatedContext().storage().ref('bugreports/private/proof.jpg').getMetadata());
+    await assertSucceeds(uploadString(reporter.ref('bugreports/bob/report.jpg'), 'valid report', 'image/jpeg'));
+    await assertSucceeds(uploadString(admin.ref('bugreports/admin/initial.jpg'), 'initial report', 'image/jpeg'));
+
+    // Previously isAdmin() treated a missing user document as an active account.
+    await seedFirestore(async (db) => db.doc('users/alice').delete());
+    await assertFails(incident.getMetadata());
+    await assertFails(uploadString(admin.ref('bugreports/admin/orphan.jpg'), 'stale token', 'image/jpeg'));
+
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+    await assertSucceeds(incident.getMetadata());
+    await assertSucceeds(uploadString(admin.ref('bugreports/admin/restored.jpg'), 'restored account', 'image/jpeg'));
+
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'suspended' }));
+    await assertFails(incident.getMetadata());
+    await assertFails(uploadString(admin.ref('bugreports/admin/suspended.jpg'), 'suspended token', 'image/jpeg'));
+  });
+
   test('school campus media rejects stale school membership after account suspension', async () => {
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set({ status: 'active' });
