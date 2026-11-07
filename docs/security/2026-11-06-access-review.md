@@ -214,3 +214,14 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 本輪新增 `hasCanonicalActiveAccount()`，對上述四種敏感私有命名空間的讀取與寫入同時要求 canonical user 文件存在且未停權，不改動無關 namespace 與既有最大容量、Content-Type 條件。新增隔離回歸在同一個 Auth context 驗證無 user 文件時舊檔不能讀、不能新寫；補回合法 active profile 後讀寫正常；再次移除 profile 後同一個 token 立即被拒絕。另一使用者即使 canonical profile active 也不能跨帳號讀取。使用真實 Firebase Storage/Firestore 規則模擬器，fixture bytes 和報修資料均為合成。
 
 **狀態：** 上述為新提出的程式與測試，須以此變更提交後精確 head 的 Rules CI／完整 CI／CodeQL／Supabase／Mobile／Maestro 實際結果驗收；此處不預先宣稱通過。對 legacy 尚未建立 canonical user profile 的合法使用者，這四類附件會被拒絕，正式發布前應盤點、受控補齊真正 active profile，不可透過恢復孤兒 token 存取解決。已發 GCS Firebase bearer URL、Supabase signed URL、stories 兩文件查詢上限及真正 GCS staging 仍需獨立驗證。本輪未執行正式部署、金鑰變更、正式 token 清理、migration 或 App 核可。
+
+
+### 2026-11-07：遭刪除管理員舊 token 的 bugreports 讀取與上傳撤權
+
+上一輪 `aa135a0c` 的完整 CI、CodeQL、Supabase permissions、Python security、Mobile Agent Regression 與適用 Maestro 全數成功；該 PR 仍無指定 nuni-merge-gate「審查通過」。本輪另查到 Storage `isAdmin()` 只核對 ID token 的 `role: admin` 與 `isActiveAccount()`。後者為兼容部分 legacy 路徑，在 canonical `users/{uid}` 不存在時仍回傳 true，讓尚有效的舊管理員 ID token 在帳號文件刪除後仍可能讀取 `bugreports/{reportId}/{fileName}` 的私有照片。相同缺口也讓已失去 canonical profile 的普通登入使用者繼續建立新 bugreport 圖片。
+
+這次只對管理員 role helper 與 bugreports 建立權限使用已存在的 `hasCanonicalActiveAccount()`，要求 canonical user 文件存在、未停權或刪除，並維持既有 token role、影像 Content-Type、大小與不可覆寫條件。管理員必須有 active profile 才可讀取私人報告；正常 active 使用者仍可新建報告，不把一般回報權限誤改成只有管理員可以上傳。
+
+新增 Firebase Storage emulator 回歸，在同一個舊 token context 驗證管理員正常讀取、非管理員／訪客無法讀取、正常使用者上傳、刪除 canonical profile 後的讀取與新建拒絕、補回 active 後恢復、改為 suspended 後再拒絕。上述為**待精確 head 的 CI 執行驗證**，程式邊界的推論不等同已完成模擬器測試。
+
+風險與相容性：沒有 canonical profile 的舊管理員將無法讀取 bugreports，沒有 profile 的登入使用者也無法新上傳該類附件；發布前應由受控帳號流程補齊真正有效的 profile，而非放寬舊 token。Firebase 下載 URL token 撤銷不受本規則變更取代，仍須隔離 GCS staging 驗收。此次未操作正式資料、金鑰、token、migration 或發布；仍須由既有主線窗口確認精確 head CI、CodeQL、Maestro、指定 App 核可。
