@@ -1,7 +1,9 @@
 'use strict';
 
 const { getFirestore } = require('firebase-admin/firestore');
+const { HttpsError } = require('firebase-functions/v2/https');
 const { createAuthzHelpers } = require('../authz');
+const { isAuthorizationFailure, isAuthorizationDeniedResult } = require('./authorizationFailure');
 const { isOnlineOrderingEnabled, ONLINE_ORDERING_OFF_MESSAGE } = require('../lib/onlineOrdering');
 const {
   answerWithServerWebSearch,
@@ -75,13 +77,19 @@ function modelTimeoutMs() {
   return Number.isFinite(value) && value > 0 ? value : 45000;
 }
 
-/** 模型太久沒回就當作失敗。 */
-function withModelTimeout(promise) {
+/** Stop planning after the deadline, including work awaiting a late tool result. */
+function withModelTimeout(run) {
+  const controller = new AbortController();
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('model-timeout')), modelTimeoutMs());
+    timer = setTimeout(() => {
+      const error = new Error('model-timeout');
+      controller.abort(error);
+      reject(error);
+    }, modelTimeoutMs());
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  const pending = Promise.resolve().then(() => run(controller.signal));
+  return Promise.race([pending, timeout]).finally(() => clearTimeout(timer));
 }
 
 const INTENTS_SKIP_LLM = new Set([
@@ -143,7 +151,10 @@ async function resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessag
     'getLibraryLoans',
     { uid, schoolId, timeZone, prefetched: {} },
     { onlyOverdue: /逾期|過期/.test(String(lastUserMessage || '')) },
-  ).catch(() => ({ loans: [] }));
+  ).catch((error) => {
+    if (isAuthorizationFailure(error)) throw error;
+    return { loans: [] };
+  });
   const loan = chooseLibraryLoan(result.loans, lastUserMessage);
   if (!loan?.id) return null;
   return { input: { loanId: String(loan.id) }, loan };
@@ -422,36 +433,41 @@ async function executeCampusAssistantCore({
     });
     let modelBacked;
     try {
-      modelBacked = await withModelTimeout(buildModelBackedAssistantResponse({
-      rawMessages,
-      lastUserMessage,
-      schoolId,
-      actorRole,
-      permissionScope,
-      structuredContext,
-      knowledgeChunks: campusChunks,
-      webAnswer: ragWebAnswer,
-      writePermissions,
-      toolCtx: {
-        uid,
+      modelBacked = await withModelTimeout((signal) => buildModelBackedAssistantResponse({
+        lastUserMessage,
         schoolId,
-        groupId: context.groupId,
-        timeZone,
-        prefetched,
-        intent,
-      },
-      uid,
-      sessionId: context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null,
-    }));
+        actorRole,
+        permissionScope,
+        structuredContext,
+        knowledgeChunks: campusChunks,
+        webAnswer: ragWebAnswer,
+        writePermissions,
+        signal,
+        toolCtx: {
+          uid,
+          schoolId,
+          groupId: context.groupId,
+          timeZone,
+          prefetched,
+          intent,
+        },
+        uid,
+        sessionId: context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null,
+      }));
     } catch (error) {
+      if (isAuthorizationFailure(error)) throw error;
       console.warn('[AI] model call failed:', error?.message || error);
       modelBacked = { modelResult: { provider: 'none', errors: [{ message: error?.message || String(error) }] }, response: null };
+    }
+    if (modelBacked.modelResult?.securityEvent) {
+      await recordStep('security_containment', {}, modelBacked.modelResult.securityEvent, 0);
     }
     modelTrace = {
       provider: modelBacked.modelResult?.provider || 'none',
       model: modelBacked.modelResult?.model || null,
       usage: modelBacked.modelResult?.usage || null,
       errors: modelBacked.modelResult?.errors || [],
+      securityEvent: modelBacked.modelResult?.securityEvent || null,
     };
     if (modelBacked.response) {
       response.content = modelBacked.response.content;
@@ -503,6 +519,7 @@ async function executeCampusAssistantCore({
     try {
       leaveRows = await runTool('getLeaveRequestStatus', toolCtx, { limit: 10 });
     } catch (e) {
+      if (isAuthorizationFailure(e)) throw e;
       console.warn('[AI] getLeaveRequestStatus failed:', e?.message || e);
       response.content = '目前無法讀取請假紀錄，請稍後再試或聯絡管理員。';
       response.suggestions = ['查課表', '今日公告', '功能說明'];
@@ -560,12 +577,10 @@ async function executeCampusAssistantCore({
       try {
         const tOne = Date.now();
         const one = await runTool('getDormRepairStatus', toolCtx, { repairId });
-        await recordStep('getDormRepairStatus', { repairId }, one, Date.now() - tOne);
-        if (one?.forbidden) {
-          response.content = '查不到這筆報修，或它不屬於你的帳號；可改問「我的報修」列出清單。';
-          response.suggestions = ['我的報修'];
-          return await finalizeResponse();
+        if (isAuthorizationDeniedResult(one)) {
+          throw new HttpsError('permission-denied', 'Repair request is outside the current account scope');
         }
+        await recordStep('getDormRepairStatus', { repairId }, one, Date.now() - tOne);
         if (!one?.found) {
           response.content = '找不到這筆報修；若剛送出，請稍後到宿舍「我的報修」確認，或改問「我的報修」。';
           response.suggestions = ['我的報修'];
@@ -604,6 +619,7 @@ async function executeCampusAssistantCore({
         response.debug.sourcesUsed = 1;
         return await finalizeResponse();
       } catch (e) {
+        if (isAuthorizationFailure(e)) throw e;
         console.warn('[AI] getDormRepairStatus failed:', e?.message || e);
         response.content = '暫時讀不到這筆報修狀態，請稍後再試或到宿舍頁查看。';
         response.suggestions = ['我的報修'];
@@ -617,6 +633,7 @@ async function executeCampusAssistantCore({
       listRows = await runTool('listMyDormRepairs', toolCtx, { limit: 15 });
       await recordStep('listMyDormRepairs', { limit: 15 }, listRows, Date.now() - tList);
     } catch (e) {
+      if (isAuthorizationFailure(e)) throw e;
       console.warn('[AI] listMyDormRepairs failed:', e?.message || e);
       response.content = '暫時讀不到報修列表，請稍後再試或到宿舍「我的報修」查看。';
       response.suggestions = ['我的報修'];

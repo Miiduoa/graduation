@@ -25,26 +25,30 @@ describe('searchCampusDocs tool', () => {
     expect(mockWebSearch).not.toHaveBeenCalled();
   });
 
-  test('calls answerWithServerWebSearch when no chunks', async () => {
+  test('an empty campus result keeps model-generated private text local', async () => {
     mockFetchChunks.mockResolvedValue([]);
     mockWebSearch.mockResolvedValue({
       content: '公開摘要',
       sources: [{ title: 'Duck', url: 'https://x', snippet: 'y' }],
     });
-    const out = await searchCampusDocs.execute({ schoolId: 's1' }, { query: '診斷書' });
-    expect(out.campusChunks).toEqual([]);
-    expect(out.webFallback?.content).toBe('公開摘要');
-    expect(mockWebSearch).toHaveBeenCalledWith('診斷書', { schoolId: 's1' });
+    const out = await searchCampusDocs.execute(
+      { uid: 'alice', schoolId: 's1' },
+      { query: '館藏校驗 AUDIT_PRIVATE_LIBRARY_CANARY_518' },
+    );
+    expect(out).toEqual({ campusChunks: [], webFallback: null });
+    expect(mockWebSearch).not.toHaveBeenCalled();
   });
 
-  test('forwards selected schoolId for NTU/NCKU/NTPU web fallback', async () => {
+  test.each(['ntu', 'ncku', 'ntpu'])('preserves the server actor and %s campus scope', async (schoolId) => {
     mockFetchChunks.mockResolvedValue([]);
-    mockWebSearch.mockResolvedValue({ content: 'ok', sources: [] });
-    for (const schoolId of ['ntu', 'ncku', 'ntpu']) {
-      mockWebSearch.mockClear();
-      await searchCampusDocs.execute({ schoolId }, { query: '校規' });
-      expect(mockWebSearch).toHaveBeenCalledWith('校規', { schoolId });
-    }
+    await searchCampusDocs.execute(
+      { uid: 'alice', schoolId, groupId: 'current-group' },
+      { query: '校規', uid: 'other-user', schoolId: 'other-school', groupId: 'other-group' },
+    );
+    expect(mockFetchChunks).toHaveBeenCalledWith({
+      uid: 'alice', schoolId, groupId: 'current-group', queryText: '校規',
+    });
+    expect(mockWebSearch).not.toHaveBeenCalled();
   });
 
   test('bounds only the retrieval query while accepting a long conversation question', async () => {
@@ -53,6 +57,6 @@ describe('searchCampusDocs tool', () => {
     const query = `請查公告${'完整背景。'.repeat(700)}`;
     await expect(searchCampusDocs.execute({ schoolId: 'pu' }, { query })).resolves.toEqual({ campusChunks: [], webFallback: null });
     expect(mockFetchChunks).toHaveBeenCalledWith(expect.objectContaining({ queryText: query.slice(0, 500) }));
-    expect(mockWebSearch).toHaveBeenCalledWith(query.slice(0, 500), { schoolId: 'pu' });
+    expect(mockWebSearch).not.toHaveBeenCalled();
   });
 });

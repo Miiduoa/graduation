@@ -97,6 +97,8 @@ export async function askCampusAssistant(input: {
   senseSnapshot?: CampusSenseSnapshot | null;
   /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
   mode?: CampusAssistantMode;
+  /** Stable cloud conversation id; omit only when the caller has not started one. */
+  sessionId?: string;
 }): Promise<{
   content: string;
   hasActions: boolean;
@@ -342,6 +344,7 @@ export async function askCampusAssistant(input: {
   const schoolName = typeof input.schoolName === 'string'
     ? input.schoolName.trim().slice(0, 160)
     : '';
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
   const result = await callable({
     messages,
     context: {
@@ -350,6 +353,7 @@ export async function askCampusAssistant(input: {
       screen: 'campus-assistant',
       locale: 'zh-TW',
       timezone: 'Asia/Taipei',
+      ...(sessionId ? { sessionId } : {}),
     },
   });
   scopeCheck(input, true);
