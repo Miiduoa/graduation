@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -19,7 +19,7 @@ import { isFirebaseConfigured } from '@/lib/firebase';
 import styles from './StudentToday.module.css';
 
 type FeedState =
-  | { status: 'idle' | 'loading' }
+  | { status: 'loading' }
   | { status: 'ready'; items: AccountNotification[] }
   | { status: 'error' };
 
@@ -27,17 +27,40 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
   const { user, loading: authLoading } = useAuth();
   const school = useOptionalSelectedSchool();
   const schoolId = school?.selectedSchool?.id || '';
-  const [feed, setFeed] = useState<FeedState>({ status: 'idle' });
+  if (!unsigned && !authLoading && !user) return null;
+  return (
+    <UnreadFeed
+      key={JSON.stringify([user?.uid, schoolId])}
+      uid={user?.uid}
+      schoolId={schoolId}
+      unsigned={unsigned}
+      authLoading={authLoading}
+    />
+  );
+}
+
+function UnreadFeed({
+  uid,
+  schoolId,
+  unsigned,
+  authLoading,
+}: {
+  uid?: string;
+  schoolId: string;
+  unsigned: boolean;
+  authLoading: boolean;
+}) {
+  const [feed, setFeed] = useState<FeedState>({ status: 'loading' });
   const [retryKey, setRetryKey] = useState(0);
 
-  const canWatch =
-    !unsigned && !authLoading && !!user?.uid && !!schoolId && isFirebaseConfigured();
+  const configured = isFirebaseConfigured();
+  const canWatch = !unsigned && !authLoading && !!uid && !!schoolId && configured;
 
   useEffect(() => {
-    if (!canWatch || !user?.uid || !schoolId) return;
+    if (!canWatch || !uid) return;
     let active = true;
     const stop = watchAccountNotifications(
-      { uid: user.uid, schoolId },
+      { uid, schoolId },
       (next) => {
         if (!active) return;
         setFeed({
@@ -53,42 +76,36 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
       active = false;
       stop();
     };
-  }, [canWatch, user?.uid, schoolId, retryKey]);
+  }, [canWatch, uid, schoolId, retryKey]);
 
-  const displayFeed = useMemo<FeedState>(() => {
-    if (!canWatch) return { status: 'idle' };
-    if (feed.status === 'idle') return { status: 'loading' };
-    return feed;
-  }, [canWatch, feed]);
-
-  const visible = displayFeed.status === 'ready' ? displayFeed.items.slice(0, 3) : [];
-  const extra =
-    displayFeed.status === 'ready' ? Math.max(0, displayFeed.items.length - visible.length) : 0;
+  const visible = feed.status === 'ready' ? feed.items.slice(0, 3) : [];
+  const extra = feed.status === 'ready' ? Math.max(0, feed.items.length - visible.length) : 0;
 
   return (
     <section
-      className={styles.section}
+      className={styles.section + ' ' + styles.notifications}
       aria-labelledby="today-notify-title"
       data-testid="today-notifications"
     >
       <h2 id="today-notify-title" className={styles.sectionTitle}>
         {TODAY_NOTIFY_TITLE}
       </h2>
-      {unsigned || (!authLoading && !user) ? (
+      {unsigned ? (
         <p className={styles.empty}>
           {TODAY_NOTIFY_UNSIGNED} <Link href="/messages">前往通知匣</Link>
         </p>
+      ) : !configured && !authLoading ? (
+        <p className={styles.empty}>目前無法取得校園通知。</p>
       ) : !schoolId ? (
         <p className={styles.empty}>
-          先選擇校園後，就能在這裡看到該校的未讀通知。{' '}
-          <Link href="/messages">前往通知匣</Link>
+          先選擇校園後，就能在這裡看到該校的未讀通知。 <Link href="/messages">前往通知匣</Link>
         </p>
-      ) : displayFeed.status === 'loading' || authLoading ? (
+      ) : feed.status === 'loading' || authLoading ? (
         <div className={styles.skeleton} aria-busy="true">
           <span className={styles.bone} />
           <span className={styles.bone} />
         </div>
-      ) : displayFeed.status === 'error' ? (
+      ) : feed.status === 'error' ? (
         <>
           <p className={styles.empty} role="alert">
             {TODAY_NOTIFY_ERROR}
