@@ -20,13 +20,25 @@ export function AttendanceQrScanner(props: Props) {
 function CameraCapture({ groupId, sessionId, disabled, onToken }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const stopCamera = useRef<(() => void) | null>(null);
-  const [phase, setPhase] = useState<'idle' | 'starting' | 'scanning' | 'detected' | 'paused' | 'error'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'starting' | 'scanning' | 'detected' | 'paused' | 'error' | 'reopen'>('idle');
   const [message, setMessage] = useState('不必手動輸入長碼；對準老師的 QR Code 即可帶入。');
   const running = phase === 'starting' || phase === 'scanning';
   useEffect(() => () => { stopCamera.current?.(); }, []);
 
   function start() {
     if (disabled || !video.current || stopCamera.current) return;
+    const loaded = performance.getEntriesByType?.('navigation')[0];
+    // Login or another client-side entry may have kept its document policy.
+    if (loaded && new URL(loaded.name).pathname !== window.location.pathname) {
+      const policy = (document as Document & {
+        featurePolicy?: { allowsFeature(name: string): boolean };
+      }).featurePolicy;
+      if (policy?.allowsFeature('camera') === false) {
+        setPhase('reopen');
+        setMessage('請重新載入簽到頁以啟用相機，或直接輸入下方簽到碼。');
+        return;
+      }
+    }
     setPhase('starting');
     setMessage('正在開啟相機，請允許此網站使用相機。');
     stopCamera.current = startAttendanceCamera({
@@ -55,6 +67,10 @@ function CameraCapture({ groupId, sessionId, disabled, onToken }: Props) {
         <div><strong>用相機掃碼</strong><p>僅辨識這堂課、這次點名的 QR Code。</p></div>
         {running ? (
           <Button type="button" variant="outline" onClick={cancel}>關閉相機</Button>
+        ) : phase === 'reopen' ? (
+          <Button type="button" variant="outline" disabled={disabled} onClick={() => window.location.reload()}>
+            重新載入簽到頁
+          </Button>
         ) : (
           <Button type="button" variant="outline" disabled={disabled} onClick={start}>開啟相機掃碼</Button>
         )}

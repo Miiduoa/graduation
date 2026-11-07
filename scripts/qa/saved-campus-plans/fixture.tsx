@@ -306,9 +306,15 @@ const quizTask = {
 };
 const quizPlan: CampusEvidencePlan = {
   ...assignmentPlan, title: '作業與測驗一起安排',
+  limitations: [
+    ...assignmentPlan.limitations.slice(0, 2),
+    '本次只納入已連結課程的作業與測驗，其他校務來源仍須自行核對。',
+  ],
   steps: [{ ...quizTask, id: 'quiz-preparation', priority: 'urgent', evidence: 'authorized-quizzes', route: '/classroom',
     detail: '參考期限 11/8 18:00。建議先用 10:10–10:40 複習這份測驗的課程內容；開考時間與作答方式請到課程頁核對。' },
-  ...assignmentPlan.steps],
+  ...assignmentPlan.steps.map((step) => ({ ...step,
+    detail: step.detail.replace('10:10–10:40', '10:40–11:10') })),
+  ],
   agenda: { ...assignmentPlan.agenda!, quizzesAvailable: true,
     days: assignmentPlan.agenda!.days.map((day) => ({ ...day,
       deadlines: [{ ...quizTask, timeLabel: '18:00', overdue: false }, ...day.deadlines] })),

@@ -63,7 +63,7 @@ nuni 規劃對前三項優先作業提出準備建議，使用下列固定範圍
 
 ## 2026-11-07：計畫納入待答測驗
 
-已接續 main `4357441c686a1ce4b4bf493f7b51dcc4c4850ebb`，保留手機課表 `ownerUid` 遮蔽及平台與 Firebase 帳號隔離。nuni 今日／七日計畫現在一起整理作業與線上測驗：同一課表連結、有效學生身分及課程來源核對後，作業使用既有附件 BFF，測驗使用正式平台 API。兩類來源分別記錄完整、部分與不可用；一類失敗不抹掉另一類已確認項目。
+已整合 main `d1555303423d5e57da47048a2695fb22ef11a1b1`，保留手機課表 `ownerUid` 遮蔽及平台與 Firebase 帳號隔離。nuni 今日／七日計畫現在一起整理作業與線上測驗：同一課表連結、有效學生身分及課程來源核對後，作業使用既有附件 BFF，測驗使用正式平台 API。兩類來源分別記錄完整、部分與不可用；一類失敗不抹掉另一類已確認項目。
 
 - 待答測驗限仍開放且沒有本人作答紀錄的項目。作答者、測驗 ID 或工作區不一致時，來源視為無法核對，不能當成已完成。
 - 作業與測驗依期限一起排序，準備時段共用同一份課間可用區間，避免互相重疊。測驗只建議複習課程內容，參考期限不代表開考時間、考場或作答所需時間。
@@ -78,6 +78,8 @@ nuni 規劃對前三項優先作業提出準備建議，使用下列固定範圍
 驗證入口：既有 `nuniCampusPlanner`、`campusStudyAgenda`、`savedCampusPlans`、`campusPlanComparison`、兩種精確 target reader／button，以及真正 session provider／navigator／課程接收頁整合。`Mobile Agent Regression` 已納入新測驗 reader／button。Browser fixture 增加 390px 淺色與 320px 深色混合計畫、鍵盤開啟、失敗重試、來源改變與未定期限的 2 個情境；同樣檢查 44px 控制區、裁切、水平溢出、頁面錯誤與外部請求。
 
 本機使用 Node 24 的隔離服務測試，nuni planner、comparison 與兩種 target reader 共 4 組、238 項通過，不將它等同專案 Node 22／Expo 完整回歸。標準 Expo preset 會載入全域 AI 測試初始化，在本次執行環境遭記憶體終止；沒有修改或略過 GitHub 原生測試 gate。當輪精確 head 的完整 CI、TypeScript、CodeQL、Browser 與 Maestro 結果以 PR Checks 為準，過往提交的成功不能代替本輪驗證。
+
+首個測驗提交 `4be0949c80eadb2e7ebc1a5e678f6549a7dcea39` 的遠端 Mobile Agent Regression 已通過：手機 47 組、1,339 項，以及後端來源 3 組、87 項，並完成原生 typecheck 與 lint。Browser 通過 10 個情境、46 組量測，輸出 48 張截圖；頁面錯誤、外部請求、裁切、水平溢出及過小控制項皆為 0，最小高度 44px。人工檢視全部 8 張新增測驗畫面後，修正合成範例沿用同一準備時段及純作業限制說明的問題；正式 planner 已有混合任務不重疊的整合驗證。此後續範例修正與 main 同步仍須以新 head 的 Checks 驗證，不沿用首個提交的結果。
 
 ## 保存資料的一般邊界
 
