@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import { readPersonalImportDraft, readPersonalImportPartialDraft, writePersonalImportDraft } from '@/lib/personalImportDrafts';
 import { usePersonalImportScope } from '@/lib/usePersonalImports';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
+import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOperations';
 import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
@@ -18,6 +19,9 @@ import courseStyles from './schoolCourses.module.css';
 type SearchResult =
   | { status: 'loading' | 'error'; query: string }
   | { status: 'ready'; query: string; courses: PublicCatalogCourse[]; truncated: boolean; fetchedAt?: string };
+
+const QUERY_LENGTH_NOTICE = '搜尋文字最多 80 個字，請縮短後再查詢。';
+const REPEATED_QUERY_NOTICE = '連結帶入多個查詢條件。請在搜尋欄確認要查的內容，再按「查詢課程」。';
 
 function CatalogCourse({ course, schoolId, importHref, review }: {
   course: PublicCatalogCourse;
@@ -85,9 +89,26 @@ function CatalogCourse({ course, schoolId, importHref, review }: {
   );
 }
 
-export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { schoolId: PublicCourseCatalogResponse['schoolId']; schoolName: string; schoolSearch: string }) {
-  const [query, setQuery] = useState('');
-  const [result, setResult] = useState<SearchResult | null>(null);
+type PublicCourseSearchProps = {
+  schoolId: PublicCourseCatalogResponse['schoolId'];
+  schoolName: string;
+  schoolSearch: string;
+  queryParameters?: readonly string[];
+};
+
+export function PublicCourseSearch(props: PublicCourseSearchProps) {
+  return <PublicCourseSearchForm key={JSON.stringify([props.schoolId, props.queryParameters ?? []])} {...props} />;
+}
+
+function PublicCourseSearchForm({ schoolId, schoolName, schoolSearch, queryParameters = [] }: PublicCourseSearchProps) {
+  const queryFromLink = queryParameters[0];
+  const queryCount = queryParameters.length;
+  const [query, setQuery] = useState(queryFromLink ?? '');
+  const [queryNotice, setQueryNotice] = useState<string | null>(() => queryCount > 1
+    ? REPEATED_QUERY_NOTICE
+    : queryFromLink !== undefined && !isPublicCourseOperationQuery(queryFromLink) ? QUERY_LENGTH_NOTICE : null);
+  const [result, setResult] = useState<SearchResult | null>(() => queryCount === 1 && isPublicCourseOperationQuery(queryFromLink)
+    ? { status: 'loading', query: queryFromLink.trim() } : null);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
@@ -114,20 +135,16 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
     router.push(importHref + '#import-review');
     return '';
   }
-  useEffect(() => () => {
+  const cancelSearch = useCallback(() => {
     if (!pending.current) return;
     pending.current.controller.abort();
     clearTimeout(pending.current.timer);
+    pending.current = null;
   }, []);
   const catalog = resolveOfficialCourseQueryLink(schoolId);
 
-  async function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const term = query.trim();
-    if (pending.current) {
-      pending.current.controller.abort();
-      clearTimeout(pending.current.timer);
-    }
+  const searchCourses = useCallback(async (term: string) => {
+    cancelSearch();
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (pending.current?.controller !== controller || controller.signal.aborted) return;
@@ -135,7 +152,6 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       setResult({ status: 'error', query: term });
     }, 25_000);
     pending.current = { controller, timer };
-    setResult({ status: 'loading', query: term });
     try {
       const params = new URLSearchParams({ schoolId });
       if (term) params.set('q', term);
@@ -145,12 +161,33 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       if (!response.ok) throw new Error();
       const data = await response.json();
       if (!isPublicCourseCatalog(data, schoolId)) throw new Error('Invalid catalog');
-      if (!controller.signal.aborted) setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated, fetchedAt: data.fetchedAt });
+      if (pending.current?.controller === controller && !controller.signal.aborted) {
+        setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated, fetchedAt: data.fetchedAt });
+      }
     } catch {
-      if (!controller.signal.aborted) setResult({ status: 'error', query: term });
+      if (pending.current?.controller === controller && !controller.signal.aborted) setResult({ status: 'error', query: term });
     } finally {
       clearTimeout(timer);
     }
+  }, [schoolId, cancelSearch]);
+
+  useEffect(() => {
+    if (queryCount === 1 && isPublicCourseOperationQuery(queryFromLink)) void searchCourses(queryFromLink.trim());
+    return cancelSearch;
+  }, [queryFromLink, queryCount, searchCourses, cancelSearch]);
+
+  function search(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!isPublicCourseOperationQuery(query)) {
+      cancelSearch();
+      setResult(null);
+      setQueryNotice(QUERY_LENGTH_NOTICE);
+      return;
+    }
+    setQueryNotice(null);
+    const term = query.trim();
+    setResult({ status: 'loading', query: term });
+    void searchCourses(term);
   }
 
   const term = result?.query ? '「' + result.query + '」' : '';
@@ -161,12 +198,19 @@ export function PublicCourseSearch({ schoolId, schoolName, schoolSearch }: { sch
       <form className={courseStyles.toolbar} onSubmit={search} role="search" aria-label="搜尋校方開課資料">
         <label className={styles.field}>
           課名、課號或授課老師
-          <input type="search" value={query} maxLength={80} placeholder="例如：資料庫" onChange={(event) => setQuery(event.target.value)} />
+          <input type="search" value={query} placeholder="例如：資料庫"
+            aria-invalid={queryNotice ? true : undefined}
+            aria-describedby={queryNotice ? 'public-course-query-notice' : undefined}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setQueryNotice(isPublicCourseOperationQuery(event.target.value) ? null : QUERY_LENGTH_NOTICE);
+            }} />
         </label>
         <button type="submit" className="btn primary" disabled={result?.status === 'loading' && result.query === query.trim()}>
           {result?.status === 'error' && result.query === query.trim() ? '重新查詢' : '查詢課程'}
         </button>
       </form>
+      {queryNotice && <p id="public-course-query-notice" role="alert">{queryNotice}</p>}
       {result?.status === 'loading' && <p role="status">正在查詢{term}開課資料…</p>}
       {result?.status === 'error' && (
         <p role="alert">暫時無法取得校方課程資料，請重新查詢{catalog && <>或前往<a href={catalog.url} target="_blank" rel="noopener noreferrer">校方課程目錄</a></>}。</p>

@@ -91,6 +91,44 @@ test('forwards selected school name without treating browsing as authorization',
     },
   });
 });
+test.each(['device', 'campus'] as const)('keeps ordinary history but excludes other-campus public lookups from the %s model', async (mode) => {
+  const ordinary = [
+    { role: 'user' as const, content: '幫我整理閱讀計畫' },
+    { role: 'assistant' as const, content: '你可以先列出閱讀目標。' },
+  ];
+  const question = { role: 'user' as const, content: '請根據剛才的閱讀規劃，說明如何安排休息' };
+  // These turns exceed the old raw 20-message window: filtering must not let
+  // public lookups evict the ordinary conversation the next question refers to.
+  const publicTurns = Array.from({ length: 11 }, (_, index) => [
+    { role: 'user' as const, content: `查${index % 2 ? '清大' : '暨大'}的外校課程${index}` },
+    { role: 'assistant' as const, content: `外校公開課程${index}，不代表個人選課。`, tool: 'public-course-catalog' as const },
+  ]).flat();
+  const history = [...ordinary, ...publicTurns, question];
+  const original = JSON.stringify(history);
+  await askCampusAssistant({ ...input(), mode, messages: history });
+  const expected = [...ordinary, question];
+  if (mode === 'campus') {
+    expect(mockCallable.mock.calls[0][0].messages).toEqual(expected);
+    expect(mockCallable.mock.calls[0][0].context.schoolId).toBe('pu');
+    expect(localLLM.generate).not.toHaveBeenCalled();
+  } else {
+    expect(localLLM.generate).toHaveBeenCalledTimes(1);
+    expect(localLLM.generate.mock.calls[0][0].messages.slice(1)).toEqual(expected);
+    expect(mockCallable).not.toHaveBeenCalled();
+  }
+  expect(JSON.stringify(history)).toBe(original);
+});
+
+test('an invalid history ending in a public reply cannot revive its preceding question as a new request', async () => {
+  await expect(askCampusAssistant({ ...input(), messages: [
+    { role: 'user', content: '先前的一般問題' },
+    { role: 'assistant', content: '先前的一般回答' },
+    { role: 'user', content: '查清大資料庫課程' },
+    { role: 'assistant', content: '清大公開課程', tool: 'public-course-catalog' },
+  ] })).rejects.toThrow('Missing question');
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(localLLM.generate).not.toHaveBeenCalled();
+});
 test.each([
   {},
   { content: 'fallback', run: { status: 'failed' } },

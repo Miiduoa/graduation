@@ -8,7 +8,7 @@ export type PreAuthStackParamList = {
   BusSchedule: undefined;
   公告總覽: undefined;
   公告詳情: { id: string };
-  CourseCatalog: undefined;
+  CourseCatalog: { publicSchoolId?: 'ncnu' | 'nthu'; filter?: { keyword?: string }; autoSearch?: boolean } | undefined;
   Health: undefined;
   Dormitory: undefined;
   Career: undefined;

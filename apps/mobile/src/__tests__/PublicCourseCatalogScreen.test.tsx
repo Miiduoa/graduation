@@ -217,3 +217,69 @@ test.each([
     expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   } finally { globalThis.fetch = original; }
 });
+
+test('the real native Request keeps the strict API query without adding a cache-busting underscore', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const { Request: NativeRequest } = jest.requireActual('whatwg-fetch') as {
+    Request: new (url: string, init?: RequestInit) => Request;
+  };
+  const expectedUrl = 'https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES';
+  // This control exercises the actual polyfill behavior that broke native GETs.
+  expect(new URL(new NativeRequest(expectedUrl, { cache: 'no-store' }).url).searchParams.has('_')).toBe(true);
+  let request: Request | undefined;
+  const fetchSource = jest.fn(async (url: string, options: RequestInit) => {
+    request = new NativeRequest(url, options);
+    return { ...nthuJson(), url: request.url };
+  });
+  try {
+    globalThis.fetch = fetchSource as unknown as typeof fetch;
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
+    expect(request?.url).toBe(expectedUrl);
+    expect(request?.credentials).toBe('omit');
+    expect(fetchSource.mock.calls[0][1]).not.toHaveProperty('cache');
+    expect(new URL(request!.url).searchParams.has('_')).toBe(false);
+  } finally { globalThis.fetch = original; }
+});
+
+test.each([
+  'https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES%20A',
+  'https://nuni.tw/api/public-course-catalog?q=AES+A&schoolId=nthu',
+])('accepts a reported final URL only for the same endpoint, campus and decoded query: %s', async (url) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue({ ...nthuJson(), url });
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES A' } } }} />);
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
+  } finally { globalThis.fetch = original; }
+});
+
+test.each([
+  'https://other.test/api/public-course-catalog?schoolId=nthu&q=AES',
+  'https://nuni.tw.evil.test/api/public-course-catalog?schoolId=nthu&q=AES',
+  'http://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES',
+  'https://nuni.tw/elsewhere?schoolId=nthu&q=AES',
+  'https://nuni.tw/api/public-course-catalog?schoolId=ncnu&q=AES',
+  'https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=other',
+  'https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES&_=123',
+  'https://nuni.tw/api/public-course-catalog?schoolId=nthu&schoolId=nthu&q=AES',
+  'https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES&q=AES',
+  'https://nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES#unverified',
+  'https://account:secret@nuni.tw/api/public-course-catalog?schoolId=nthu&q=AES',
+  '/api/public-course-catalog?schoolId=nthu&q=AES',
+])('a different reported final URL cannot display or import an otherwise valid catalog: %s', async (url) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const body = jest.fn(nthuJson().text);
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue({ ...nthuJson(), url, text: body });
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('暫時無法讀取清大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+    expect(body).not.toHaveBeenCalled();
+    expect(view.queryByText('分析化學專題')).toBeNull();
+    expect(view.queryByText('複製課表匯入資料')).toBeNull();
+    expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  } finally { globalThis.fetch = original; }
+});

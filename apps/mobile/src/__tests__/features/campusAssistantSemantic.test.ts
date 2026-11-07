@@ -102,6 +102,29 @@ test('a follow-up includes bounded conversation context but no private facts in 
   expect(httpsCallable).not.toHaveBeenCalled();
 });
 
+test('a public lookup from another campus never becomes history for selecting a private scoped read', async () => {
+  mockGenerate.mockResolvedValueOnce(selected([{ tool: 'assignments' }]));
+  const question = 'What remains to hand in?';
+  const result = await askCampusAssistant({ ...request(), messages: [
+    { role: 'user', content: '今天有哪些待辦？' },
+    { role: 'assistant', content: '可以繼續核對已同步的待辦。' },
+    { role: 'user', content: '幫我查清大的資料庫課程' },
+    { role: 'assistant', content: '清大公開課程：外校資料庫專題', tool: 'public-course-catalog' },
+    { role: 'user', content: question },
+  ] });
+  expect(result.localReads?.[0]).toMatchObject({ route: '/classroom', status: 'available' });
+  expect(result.content).toContain('真正的資料庫作業');
+  expect(result.content).not.toContain('外校資料庫專題');
+  const prompt = JSON.stringify(mockGenerate.mock.calls[0][0].messages);
+  expect(prompt).toContain('今天有哪些待辦？');
+  expect(prompt).toContain('可以繼續核對已同步的待辦。');
+  expect(prompt).toContain(question);
+  expect(prompt).not.toContain('清大');
+  expect(prompt).not.toContain('外校資料庫專題');
+  expect(mockGenerate).toHaveBeenCalledTimes(1);
+  expect(httpsCallable).not.toHaveBeenCalled();
+});
+
 test.each([
   selected([{ tool: 'assignments', uid: 'someone-else' }]),
   selected([{ tool: 'submitQuizAttempt' }]),

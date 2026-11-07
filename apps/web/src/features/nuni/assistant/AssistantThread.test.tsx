@@ -90,3 +90,16 @@ it('collapses suggestion chips to one scrolling row after a turn', () => {
   expect(row.className).toMatch(/chipsCompact/);
   expect(screen.getByRole('button', { name: '送出' }).hasAttribute('disabled')).toBe(true);
 });
+
+it('enables explicit public reads without model consent but blocks keyboard submission of ordinary questions', () => {
+  const onAsk = vi.fn();
+  const view = render(<AssistantThread {...base} ready={false} question="幫我查清大資料庫課程" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  expect(onAsk).toHaveBeenCalledOnce();
+  view.rerender(<AssistantThread {...base} ready={false} question="我的下一堂課" onAsk={onAsk} />);
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
+  fireEvent.submit(screen.getByRole('form', { name: '傳送問題' }));
+  expect(onAsk).toHaveBeenCalledOnce();
+});

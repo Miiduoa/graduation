@@ -4,22 +4,24 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SchoolCoursesPage from './page';
 import { AcademicConnectionError } from '@/lib/academicClient';
 import { loadTronClassCourses, type SchoolLmsSnapshot, type TronClassCourseStatus } from '@/lib/tronClassCourses';
+import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 
 const context = vi.hoisted(() => ({
   uid: 'one' as string | null,
   schoolId: 'pu',
   loading: false,
   studentId: true,
+  search: '',
 }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: context.uid ? { uid: context.uid } : null, loading: context.loading, error: null }),
 }));
 vi.mock('@/lib/useCampusBrowseContext', () => ({
-  useCampusBrowseContext: () => ({
+  useCampusBrowseContext: vi.fn(() => ({
     status: 'ready', schoolId: context.schoolId,
     schoolName: ({ ncnu: '國立暨南國際大學', pu: '靜宜大學', nthu: '國立清華大學', 'tw-nchu': '國立中興大學' } as Record<string, string>)[context.schoolId] || '未知學校',
     schoolSearch: `?schoolId=${context.schoolId}&campus=${context.schoolId}`,
-  }),
+  })),
 }));
 vi.mock('@/lib/signInOptions', () => ({ useSignInOptions: () => ({ studentId: context.studentId, loading: false }) }));
 vi.mock('@/components/AppHeader', () => ({ AppHeader: () => null }));
@@ -33,7 +35,7 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   }),
 }));
 vi.mock('@/components/SchoolAccountRequired', () => ({ SchoolAccountRequired: () => <p>需要學校帳號</p> }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/school-courses', useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/school-courses', useSearchParams: () => new URLSearchParams(context.search) }));
 vi.mock('@/lib/tronClassCourses', () => ({ loadTronClassCourses: vi.fn() }));
 vi.mock('@/lib/academicClient', () => ({
   AcademicConnectionError: class extends Error {
@@ -51,10 +53,63 @@ function snapshot(status: TronClassCourseStatus = 'ongoing', name = '資料庫�
 
 beforeEach(() => {
   context.uid = 'one'; context.schoolId = 'pu'; context.loading = false; context.studentId = true;
+  context.search = '';
+  vi.mocked(useCampusBrowseContext).mockClear();
   vi.mocked(loadTronClassCourses).mockReset().mockImplementation(async (_uid, status) => snapshot(status));
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+it.each(['ncnu', 'nthu'])('carries the assistant link into the existing %s public search without a private session', async (schoolId) => {
+  context.uid = null;
+  context.schoolId = schoolId;
+  context.search = new URLSearchParams({ schoolId, q: '資料庫' }).toString();
+  const sourceUrl = schoolId === 'nthu'
+    ? 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json'
+    : 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall';
+  const fetcher = vi.fn().mockResolvedValue(Response.json({ schoolId, sourceUrl, courses: [], truncated: false }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<SchoolCoursesPage />);
+  expect(await screen.findByText(/沒有找到「資料庫」課程/)).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('資料庫');
+  expect(useCampusBrowseContext).toHaveBeenCalledWith({ school: undefined, schoolId, campus: undefined });
+  expect(fetcher).toHaveBeenCalledWith(`/api/public-course-catalog?schoolId=${schoolId}&q=${encodeURIComponent('資料庫')}`,
+    expect.objectContaining({ credentials: 'omit' }));
+  expect(loadTronClassCourses).not.toHaveBeenCalled();
+  expect(localStorage.length).toBe(0);
+});
+
+it('distinguishes a missing URL query from an explicitly empty browse request', async () => {
+  context.uid = null;
+  context.schoolId = 'ncnu';
+  const fetcher = vi.fn().mockResolvedValue(Response.json({
+    schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall', courses: [], truncated: false,
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<SchoolCoursesPage />);
+  expect(fetcher).not.toHaveBeenCalled();
+  context.search = 'schoolId=ncnu&q=';
+  view.rerender(<SchoolCoursesPage />);
+  expect(await screen.findByText('這次查詢沒有找到課程。')).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=ncnu', expect.anything());
+});
+
+it.each([
+  'q=第一個&q=第二個',
+  'q=' + '𠮷'.repeat(81),
+])('does not automatically read an invalid query from the URL: %s', (search) => {
+  context.uid = null;
+  context.schoolId = 'nthu';
+  context.search = 'schoolId=nthu&' + search;
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  render(<SchoolCoursesPage />);
+  expect(screen.getByRole('alert').textContent).toMatch(/多個查詢條件|最多 80 個字/);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(loadTronClassCourses).not.toHaveBeenCalled();
 });
 
 it('reads real course records for the selected account and searches locally', async () => {

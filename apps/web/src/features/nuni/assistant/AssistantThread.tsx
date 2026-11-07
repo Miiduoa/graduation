@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
@@ -66,6 +68,8 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const publicCourseIntent = resolvePublicCourseAssistantIntent(question, schoolId);
+  const canAsk = Boolean(question.trim()) && !pending && (Boolean(publicCourseIntent) || (consent && ready));
   function applyChip(phrase: string) {
     onQuestion(phrase);
     field.current?.focus();
@@ -80,7 +84,7 @@ export function AssistantThread({
       </nav>
       {!ready ? (
         <p className={styles.notice} role="status">
-          模型目前無法使用。
+          模型目前無法使用，仍可查詢清大、暨大的公開開課資料。
         </p>
       ) : null}
       <label className={styles.consent}>
@@ -112,7 +116,9 @@ export function AssistantThread({
             </div>
             <div className={`${styles.row} ${styles.rowAssistant}`}>
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
-                <AssistantMarkdown text={turn.reply.answer} />
+                {turn.publicCourse?.read
+                  ? <PublicCourseAssistantResult read={turn.publicCourse.read} />
+                  : turn.publicCourse ? <p>{turn.reply.answer}</p> : <AssistantMarkdown text={turn.reply.answer} />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
@@ -169,7 +175,7 @@ export function AssistantThread({
           aria-label="傳送問題"
           onSubmit={(e) => {
             e.preventDefault();
-            onAsk();
+            if (canAsk) onAsk();
           }}
         >
           <label htmlFor="assistant-question">問題</label>
@@ -182,16 +188,17 @@ export function AssistantThread({
             placeholder="輸入問題"
             onChange={(e) => onQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                onAsk();
+                if (canAsk) onAsk();
               }
             }}
           />
-          <button className={styles.send} disabled={!consent || !ready || pending || !question.trim()}>
+          <button className={styles.send} disabled={!canAsk}>
             送出
           </button>
         </form>
+        {publicCourseIntent && <p className={styles.muted}>直接查詢校方公開資料；到查課頁核對後再匯入課表。</p>}
       </div>
     </section>
   );

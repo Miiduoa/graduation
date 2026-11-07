@@ -1,0 +1,79 @@
+.result {
+  min-width: 0;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 12px);
+  background: var(--surface);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.result h3 {
+  margin: 6px 0;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.eyebrow {
+  margin: 0;
+  color: var(--brand2, var(--muted));
+  font-size: 12px;
+  font-weight: 700;
+}
+.meta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.courses {
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 14px;
+}
+.courses li + li {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.courses strong {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.courses dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.courses dl > div {
+  display: flex;
+  gap: 8px;
+}
+.courses dt {
+  color: var(--muted);
+}
+.courses dd {
+  margin: 0;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 16px;
+}
+.links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.links a:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}

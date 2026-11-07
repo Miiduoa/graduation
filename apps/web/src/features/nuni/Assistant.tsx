@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { answerPublicCourseQuestion } from '@campus/shared/src/publicCourseAssistantClient';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
@@ -15,7 +17,7 @@ type Step = {
   answer?: string;
   simulation: boolean;
 };
-function Conversation({ context, schoolId }: { context: string; schoolId: string }) {
+function Conversation({ context, schoolId, initialDraft }: { context: string; schoolId: string; initialDraft: string }) {
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
@@ -99,7 +101,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
       if (!signal.aborted) setPending(false);
     }
   }
-  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={providerReady} fallback={fallback} />;
+  if (v2) return <V2Conversation context={context} schoolId={schoolId} initialDraft={initialDraft} ready={providerReady} fallback={fallback} />;
   return (
     <section aria-label="公開校園助理">
       <p>此助理目前提供公開資訊，尚未支援代辦寫入。私人課表、作業與借閱快照尚未支援。</p>
@@ -178,17 +180,19 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
 function V2Conversation({
   context,
   schoolId,
+  initialDraft,
   ready,
   fallback,
 }: {
   context: string;
   schoolId: string;
+  initialDraft: string;
   ready: boolean;
   fallback: boolean;
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState(initialDraft);
   const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
@@ -227,11 +231,30 @@ function V2Conversation({
   }
   async function ask() {
     const current = question.trim();
-    if (!current || pending) return;
+    const signal = controller.current?.signal;
+    const publicCourseIntent = resolvePublicCourseAssistantIntent(current, schoolId);
+    if (!current || pending || !signal || signal.aborted || (!publicCourseIntent && (!ready || !consent))) return;
     setPending(true);
     setError('');
     try {
-      const history = turns.slice(-6).flatMap((t) => [
+      if (publicCourseIntent) {
+        const result = await answerPublicCourseQuestion({
+          question: current,
+          schoolId,
+          origin: 'web',
+          signal,
+          isCurrent: () => !signal.aborted,
+        });
+        if (signal.aborted || !result) return;
+        setTurns((t) => [...t, {
+          question: current,
+          reply: { answer: result.content, steps: [], cards: [] },
+          publicCourse: { read: result.read },
+        }]);
+        setQuestion('');
+        return;
+      }
+      const history = turns.filter((t) => !t.publicCourse).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: t.reply.answer },
       ]);
@@ -323,17 +346,21 @@ function AssistantRoute() {
     campus: search.get('campus') ?? undefined,
     school: search.get('school') ?? undefined,
   });
+  const initialDraft = (search.get('q') || '').slice(0, 1000);
   if (auth.loading) return <p role="status">正在確認登入狀態…</p>;
   if (auth.pendingLogout || auth.error)
     return <p role="alert">登入狀態尚未確認，請先完成登入或登出。</p>;
-  if (!auth.session)
-    return <Link href="/login?returnTo=%2Fai-assistant">請先登入以使用校園助理</Link>;
+  if (!auth.session) {
+    const returnTo = '/ai-assistant' + (search.size ? `?${search.toString()}` : '');
+    return <Link href={'/login?returnTo=' + encodeURIComponent(returnTo)}>請先登入以使用校園助理</Link>;
+  }
   if (campus.status !== 'ready' || !campus.schoolId) return <p role="status">請先選擇學校。</p>;
   return (
     <Conversation
-      key={auth.session.context + ':' + campus.schoolId}
+      key={JSON.stringify([auth.session.context, campus.schoolId, initialDraft])}
       context={auth.session.context}
       schoolId={campus.schoolId}
+      initialDraft={initialDraft}
     />
   );
 }

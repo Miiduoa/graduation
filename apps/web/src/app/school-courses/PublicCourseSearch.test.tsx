@@ -53,6 +53,119 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each(['資料庫', '', '𠮷'.repeat(80)])('reads a single linked query without creating a timetable draft: %s', async (query) => {
+  const fetcher = vi.fn().mockResolvedValue(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} queryParameters={[query]} />);
+  await screen.findByText(/這次查詢沒有找到/);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(query);
+  const url = new URL(fetcher.mock.calls[0][0], 'https://campus.local');
+  expect(url.searchParams.get('schoolId')).toBe('ncnu');
+  expect(url.searchParams.get('q') ?? '').toBe(query);
+  expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'omit', cache: 'no-store', redirect: 'error' });
+  view.rerender(<PublicCourseSearch {...props} queryParameters={[query]} />);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(push).not.toHaveBeenCalled();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
+});
+
+it.each([
+  { parameters: ['課'.repeat(81)], notice: /最多 80 個字/ },
+  { parameters: ['𠮷'.repeat(81)], notice: /最多 80 個字/ },
+  { parameters: [' '.repeat(81)], notice: /最多 80 個字/ },
+  { parameters: ['第一個查詢', '第二個查詢'], notice: /多個查詢條件/ },
+  { parameters: ['', ''], notice: /多個查詢條件/ },
+])('keeps invalid linked queries editable and waits for an explicit corrected search: $parameters', async ({ parameters, notice }) => {
+  const fetcher = vi.fn().mockResolvedValue(response([course]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={parameters} />);
+  expect(screen.getByRole('alert').textContent).toMatch(notice);
+  const field = screen.getByRole('searchbox') as HTMLInputElement;
+  expect(field.value).toBe(parameters[0]);
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  expect(fetcher).not.toHaveBeenCalled();
+  submit('005076');
+  expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('validates manually edited queries by Unicode code point without truncating input', async () => {
+  const fetcher = vi.fn().mockResolvedValue(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  const tooLong = '𠮷'.repeat(81);
+  submit(tooLong);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(tooLong);
+  expect(screen.getByRole('alert').textContent).toContain('最多 80 個字');
+  expect(fetcher).not.toHaveBeenCalled();
+  const boundary = '𠮷'.repeat(80);
+  submit(boundary);
+  await screen.findByText(/這次查詢沒有找到/);
+  expect(new URL(fetcher.mock.calls[0][0], 'https://campus.local').searchParams.get('q')).toBe(boundary);
+});
+
+it.each(['fetch', 'body'])('cancels a linked query when the URL query changes and ignores the old %s', async (stage) => {
+  let finish!: () => void;
+  const delayed = new Promise<unknown>((resolve) => {
+    finish = () => resolve(stage === 'fetch' ? response([course]) : {
+      schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall', truncated: false, courses: [course],
+    });
+  });
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockResolvedValueOnce(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} queryParameters={['前一筆']} />);
+  view.rerender(<PublicCourseSearch {...props} queryParameters={['下一筆']} />);
+  expect(await screen.findByText(/沒有找到「下一筆」課程/)).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('下一筆');
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  await act(async () => { finish(); });
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.getByText(/沒有找到「下一筆」課程/)).toBeTruthy();
+});
+
+it.each([
+  { parameters: undefined },
+  { parameters: ['課'.repeat(81)] },
+  { parameters: ['第一個', '第二個'] },
+])('cancels an ongoing lookup when the link has no usable query: $parameters', async ({ parameters }) => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockReturnValue(new Promise<Response>((resolve) => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} queryParameters={['005076']} />);
+  view.rerender(<PublicCourseSearch {...props} queryParameters={parameters} />);
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe(parameters?.[0] ?? '');
+  expect(screen.queryByText(/正在查詢/)).toBeNull();
+  if (parameters) expect(screen.getByRole('alert')).toBeTruthy();
+  await act(async () => { finish(response([course])); });
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.queryByText(/顯示.*開課資料/)).toBeNull();
+});
+
+it('cancels the previous campus lookup before following the same linked query at another school', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }))
+    .mockResolvedValueOnce(response([nthuCourse], { schoolId: 'nthu' }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} queryParameters={['化學']} />);
+  view.rerender(<PublicCourseSearch {...nthuProps} queryParameters={['化學']} />);
+  expect(await screen.findByRole('heading', { name: nthuCourse.title })).toBeTruthy();
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(new URL(fetcher.mock.calls[1][0], 'https://campus.local').searchParams.get('schoolId')).toBe('nthu');
+  await act(async () => { finish(response([course])); });
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.getByRole('heading', { name: nthuCourse.title })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+  expect(screen.getByText(/請先確認目前帳號和所選校園為國立清華大學/)).toBeTruthy();
+  expect(push).not.toHaveBeenCalled();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
 it('searches the public endpoint, distinguishes sections and copies a school-scoped reviewable row', async () => {
   const fetcher = vi.fn().mockResolvedValue(response([course, { ...course, section: 'b', time: '' }]));
   vi.stubGlobal('fetch', fetcher);

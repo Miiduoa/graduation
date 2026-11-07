@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Keyboard, Linking, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
+import { isPublicCourseResponseUrl } from '@campus/shared/src/publicCourseAssistantClient';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
 import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
@@ -15,10 +16,13 @@ type Result =
   | { status: 'ready'; query: string; data: PublicCourseCatalogResponse };
 
 const maxBytes = 512 * 1024;
+const publicCatalogEndpoint = 'https://nuni.tw/api/public-course-catalog';
 
 type Props = {
   schoolId: PublicCourseCatalogResponse['schoolId'];
   initialQuery?: string;
+  autoSearch?: boolean;
+  currentSchoolName?: string;
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 
@@ -69,7 +73,7 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
   </Card>;
 }
 
-export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', navigation }: Props) {
+export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', autoSearch = false, currentSchoolName, navigation }: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [result, setResult] = useState<Result | null>(null);
   const [linkError, setLinkError] = useState(false);
@@ -94,11 +98,16 @@ export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', navigat
     }, 25_000);
     pending.current = { controller, timer };
     try {
-      const response = await fetch('https://nuni.tw/api/public-course-catalog?schoolId=' + schoolId + '&q=' + encodeURIComponent(term), {
-        credentials: 'omit', redirect: 'error', cache: 'no-store', signal: controller.signal,
+      const response = await fetch(publicCatalogEndpoint + '?schoolId=' + schoolId + '&q=' + encodeURIComponent(term), {
+        // The server sends Cache-Control: no-store. Native whatwg-fetch adds an
+        // unsupported `_` query parameter if request.cache is set to no-store.
+        credentials: 'omit', redirect: 'error', signal: controller.signal,
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok || Number(response.headers.get('content-length')) > maxBytes) throw new Error();
+      // Native fetch may already have followed a redirect. Validate the reported
+      // final resource before accepting its body; this is not a transport guard.
+      if (!response.ok || (response.url && !isPublicCourseResponseUrl(response.url, { schoolId, query: term })) ||
+          Number(response.headers.get('content-length')) > maxBytes) throw new Error();
       const text = await response.text();
       if (text.length > maxBytes) throw new Error();
       const data: unknown = JSON.parse(text);
@@ -113,7 +122,7 @@ export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', navigat
   }, [schoolId]);
 
   useEffect(() => {
-    if (initialQuery) void search(initialQuery);
+    if (autoSearch || initialQuery) void search(initialQuery);
     return () => {
       if (pending.current) {
         pending.current.controller.abort();
@@ -121,7 +130,7 @@ export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', navigat
       }
       pending.current = null;
     };
-  }, [initialQuery, search]);
+  }, [autoSearch, initialQuery, search]);
 
   const label = result?.query ? '「' + result.query + '」' : '';
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
@@ -133,9 +142,11 @@ export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', navigat
         keyExtractor={row => [row.semester, row.code, row.section].join('-')}
         contentContainerStyle={{ gap: 12, paddingBottom: 24 }}
         ListHeaderComponent={<View style={{ gap: 10 }}>
+          {currentSchoolName && <Text style={body}>正在瀏覽{fullSchoolName}的公開課程；目前選校仍為{currentSchoolName}。</Text>}
           <Text style={body}>依課名、課號、系所或老師搜尋，留白可瀏覽開課清單。</Text>
           <TextInput
-            accessibilityLabel={'搜尋' + schoolName + '課程'} value={query} onChangeText={setQuery} maxLength={80}
+            accessibilityLabel={'搜尋' + schoolName + '課程'} value={query}
+            onChangeText={value => setQuery(Array.from(value).slice(0, 80).join(''))} maxLength={160}
             placeholder="例如：資料庫" placeholderTextColor={theme.colors.muted} returnKeyType="search"
             onSubmitEditing={() => void search(query)}
             style={{ minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, color: theme.colors.text, paddingHorizontal: 12 }}

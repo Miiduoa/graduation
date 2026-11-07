@@ -226,7 +226,8 @@ export default function SchoolCoursesPage() {
       ) : !isOfficialAcademicSchool(browse.schoolId) ? (
         <>
           {(browse.schoolId === 'ncnu' || browse.schoolId === 'nthu') && getPublicSchoolInfo(browse.schoolId, browse.schoolName) && (
-            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName} schoolSearch={browse.schoolSearch} />
+            <PublicCourseSearch key={browse.schoolId} schoolId={browse.schoolId} schoolName={browse.schoolName}
+              schoolSearch={browse.schoolSearch} queryParameters={params.getAll('q')} />
           )}
           <SchoolLearningLinks schoolId={browse.schoolId} schoolName={browse.schoolName} courseSearch={browse.schoolSearch} />
         </>

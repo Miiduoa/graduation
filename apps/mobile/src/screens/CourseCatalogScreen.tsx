@@ -504,19 +504,37 @@ function UnsupportedCourseCatalogScreen(props: {
 export function CourseCatalogScreen(props: CatalogScreenProps) {
   const { school } = useSchool();
   const auth = useAuth();
+  const requestedPublicSchool = props.route?.params?.publicSchoolId;
+  const publicSchoolId = requestedPublicSchool === 'ncnu' || requestedPublicSchool === 'nthu'
+    ? requestedPublicSchool : null;
   const scopeKey = JSON.stringify({
     schoolId: school.id,
+    publicSchoolId,
     uid: auth.user?.uid ?? auth.profile?.uid ?? null,
     entryFilter: props.route?.params?.filter ?? null,
+    autoSearch: props.route?.params?.autoSearch === true,
   });
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
-  const capability = resolveCourseCatalogCapability(school.id);
+  const capability = resolveCourseCatalogCapability(publicSchoolId ?? school.id);
+
+  // A public handoff may browse another campus, but never changes the selected
+  // school or the account used by the existing personal-import review.
+  if (requestedPublicSchool !== undefined && !publicSchoolId) {
+    return <Screen title="公開開課查詢" subtitle="查課連結無法確認">
+      <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, lineHeight: 22 }}>
+        這個公開查課連結的學校無法確認，請回到助理重新查詢。
+      </Text>
+    </Screen>;
+  }
 
   if (capability?.providerId === 'ncnu-public' || capability?.providerId === 'nthu-public') {
     const keyword = props.route?.params?.filter?.keyword;
     const schoolId = capability.providerId === 'nthu-public' ? 'nthu' : 'ncnu';
-    return <PublicCourseCatalogScreen key={scopeKey} schoolId={schoolId} navigation={props.navigation} initialQuery={typeof keyword === 'string' ? keyword.slice(0, 80) : ''} />;
+    return <PublicCourseCatalogScreen key={scopeKey} schoolId={schoolId} navigation={props.navigation}
+      initialQuery={typeof keyword === 'string' ? Array.from(keyword).slice(0, 80).join('') : ''}
+      autoSearch={props.route?.params?.autoSearch === true}
+      currentSchoolName={publicSchoolId && publicSchoolId !== school.id ? school.name : undefined} />;
   }
 
   if (!capability) {
