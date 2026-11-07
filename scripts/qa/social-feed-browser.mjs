@@ -353,7 +353,16 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       });
       await check('long-list:recommendation may reorder same-timestamp posts',()=>
         document.querySelector('article h3')?.textContent==='校園貼文 243');
-      await clickButton('最新');
+      // Content-visibility can shift hundreds of virtualized cards during a
+      // long scroll. Activate the actual ordering control with the keyboard,
+      // rather than using pointer coordinates captured before layout settles.
+      await call(() => {
+        const button = [...document.querySelectorAll('button')]
+          .find(node => node.textContent.trim() === '最新');
+        if (!button) throw new Error('Latest ordering control is missing');
+        button.focus({ preventScroll: true });
+      });
+      await key('Enter', 'Enter', 13);
       // Confirm the React choice has committed before asserting card order.
       // An immediate CDP read races the click event on busy CI runners.
       await until(()=>call(()=>[...document.querySelectorAll('button')].some(
