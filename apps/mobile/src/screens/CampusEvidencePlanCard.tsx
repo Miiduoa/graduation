@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, Text, View } from 'react-native';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -32,6 +32,12 @@ const EVIDENCE_LABEL = {
   verification: '人工核對建議',
 };
 
+type WebCheckboxKeyboardProps = {
+  onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => void;
+  onKeyUp: (event: React.KeyboardEvent<HTMLElement>) => void;
+  onBlur: () => void;
+};
+
 export function CampusEvidencePlanCard({
   plan,
   disabled,
@@ -62,6 +68,10 @@ export function CampusEvidencePlanCard({
   };
 }) {
   const [showAllLimitations, setShowAllLimitations] = useState(false);
+  const spacePressedStep = useRef<string | null>(null);
+  useEffect(() => {
+    spacePressedStep.current = null;
+  }, [disabled, plan]);
   const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
@@ -92,6 +102,30 @@ export function CampusEvidencePlanCard({
         const priorityColor = historical ? aiTokens.muted : step.priority === 'overdue' || step.priority === 'urgent'
           ? aiTokens.danger : step.priority === 'soon' ? aiTokens.warning : aiTokens.muted;
         const done = progress?.completedStepIds.includes(step.id) ?? false;
+        const toggleStep = () => {
+          spacePressedStep.current = null;
+          if (!disabled) progress?.onToggleStep(step.id, !done);
+        };
+        // RN Web's press responder handles Enter, but excludes Space for checkbox roles.
+        const webKeyboardProps: WebCheckboxKeyboardProps | undefined = Platform.OS === 'web' && progress ? {
+          onKeyDown: (event) => {
+            if ((event.key !== ' ' && event.key !== 'Spacebar') || event.target !== event.currentTarget) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (!disabled && !event.repeat) spacePressedStep.current = step.id;
+          },
+          onKeyUp: (event) => {
+            if ((event.key !== ' ' && event.key !== 'Spacebar') || event.target !== event.currentTarget) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const wasPressed = spacePressedStep.current === step.id;
+            spacePressedStep.current = null;
+            if (wasPressed) toggleStep();
+          },
+          onBlur: () => {
+            if (spacePressedStep.current === step.id) spacePressedStep.current = null;
+          },
+        } : undefined;
         return (
           <View key={step.id} style={{
             backgroundColor: aiTokens.panel,
@@ -152,7 +186,8 @@ export function CampusEvidencePlanCard({
                 accessibilityState={{ checked: done, disabled }}
                 aria-checked={done}
                 disabled={disabled}
-                onPress={() => progress.onToggleStep(step.id, !done)}
+                onPress={toggleStep}
+                {...webKeyboardProps}
                 style={{ minHeight: 44, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}
               >
                 <View style={{ width: 22, height: 22, borderWidth: 1, borderRadius: 6,

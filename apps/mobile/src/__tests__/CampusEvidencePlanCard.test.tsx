@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from 'react-native';
+import { Platform, Text } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 import { CampusEvidencePlanCard } from '../screens/CampusEvidencePlanCard';
 import { CampusAssignmentOpenButton } from '../screens/CampusAssignmentOpenButton';
@@ -38,6 +38,155 @@ function plan(): CampusEvidencePlan {
 const reminderContext = { userId: 'firebase-user', schoolId: 'pu', snapshot: null, isCurrent: () => true };
 
 beforeEach(() => jest.clearAllMocks());
+afterEach(() => jest.restoreAllMocks());
+
+function renderProgressCard(disabled = false) {
+  const input = plan();
+  const onToggle = jest.fn();
+  function ProgressCard({ blocked }: { blocked: boolean }) {
+    const [completedStepIds, setCompletedStepIds] = React.useState<string[]>([]);
+    return <CampusEvidencePlanCard plan={input} historical disabled={blocked} progress={{
+      completedStepIds,
+      onToggleStep: (stepId, done) => {
+        onToggle(stepId, done);
+        setCompletedStepIds((previous) => done ? [...previous, stepId] : previous.filter((id) => id !== stepId));
+      },
+    }} />;
+  }
+  const view = render(<ProgressCard blocked={disabled} />);
+  return { ...view, onToggle, steps: input.steps,
+    setDisabled: (blocked: boolean) => view.rerender(<ProgressCard blocked={blocked} />) };
+}
+
+function keyEvent(key = ' ', repeat = false) {
+  const target = {};
+  return { key, repeat, target, currentTarget: target, preventDefault: jest.fn(), stopPropagation: jest.fn() };
+}
+
+test('web Space toggles only the focused progress checkbox once on release and prevents page scrolling', () => {
+  jest.replaceProperty(Platform, 'OS', 'web');
+  const view = renderProgressCard();
+  const checkbox = () => view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  const down = keyEvent();
+  fireEvent(checkbox(), 'keyDown', down);
+  fireEvent(checkbox(), 'keyDown', keyEvent(' ', true));
+  fireEvent(checkbox(), 'keyDown', keyEvent(' ', true));
+  expect(down.preventDefault).toHaveBeenCalledTimes(1);
+  expect(down.stopPropagation).toHaveBeenCalledTimes(1);
+  expect(view.onToggle).not.toHaveBeenCalled();
+  expect(checkbox().props.accessibilityState.checked).toBe(false);
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(view.onToggle.mock.calls).toEqual([[view.steps[0].id, true]]);
+  expect(checkbox().props.accessibilityState.checked).toBe(true);
+  expect(view.getByRole('checkbox', { name: '我已處理：核對來源' }).props.accessibilityState.checked).toBe(false);
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(view.onToggle).toHaveBeenCalledTimes(1);
+  fireEvent(checkbox(), 'keyDown', keyEvent('Spacebar'));
+  fireEvent(checkbox(), 'keyUp', keyEvent('Spacebar'));
+  expect(view.onToggle.mock.calls).toEqual([[view.steps[0].id, true], [view.steps[0].id, false]]);
+  expect(checkbox().props.accessibilityState.checked).toBe(false);
+});
+
+test('web focus loss cancels a held Space and repeated keys cannot replay it after focus returns', () => {
+  jest.replaceProperty(Platform, 'OS', 'web');
+  const view = renderProgressCard();
+  const checkbox = view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  fireEvent(checkbox, 'keyUp', keyEvent());
+  fireEvent(checkbox, 'keyDown', keyEvent());
+  fireEvent(checkbox, 'blur', { nativeEvent: {} });
+  fireEvent(checkbox, 'keyDown', keyEvent(' ', true));
+  fireEvent(checkbox, 'keyUp', keyEvent());
+  expect(view.onToggle).not.toHaveBeenCalled();
+  expect(checkbox.props.accessibilityState.checked).toBe(false);
+  fireEvent(checkbox, 'keyDown', keyEvent());
+  fireEvent(checkbox, 'keyUp', keyEvent());
+  expect(view.onToggle).toHaveBeenCalledTimes(1);
+});
+
+test('web replacing the plan while Space is held cannot apply the old key release to a reused step id', () => {
+  jest.replaceProperty(Platform, 'OS', 'web');
+  const previous = plan();
+  const next = { ...plan(), title: '另一份已儲存計畫' };
+  const previousToggle = jest.fn();
+  const nextToggle = jest.fn();
+  const view = render(<CampusEvidencePlanCard plan={previous} historical disabled={false}
+    progress={{ completedStepIds: [], onToggleStep: previousToggle }} />);
+  const checkbox = () => view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  fireEvent(checkbox(), 'keyDown', keyEvent());
+  view.rerender(<CampusEvidencePlanCard plan={next} historical disabled={false}
+    progress={{ completedStepIds: [], onToggleStep: nextToggle }} />);
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(previousToggle).not.toHaveBeenCalled();
+  expect(nextToggle).not.toHaveBeenCalled();
+  expect(checkbox().props.accessibilityState.checked).toBe(false);
+  fireEvent(checkbox(), 'keyDown', keyEvent());
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(nextToggle.mock.calls).toEqual([[next.steps[0].id, true]]);
+});
+
+test('web disabled progress rejects activation and cancels a held Space even if reenabled before release', () => {
+  jest.replaceProperty(Platform, 'OS', 'web');
+  const view = renderProgressCard(true);
+  const checkbox = () => view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  expect(checkbox().props.accessibilityState.disabled).toBe(true);
+  fireEvent(checkbox(), 'keyDown', keyEvent());
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  fireEvent.press(checkbox());
+  expect(view.onToggle).not.toHaveBeenCalled();
+  view.setDisabled(false);
+  fireEvent(checkbox(), 'keyDown', keyEvent());
+  view.setDisabled(true);
+  view.setDisabled(false);
+  fireEvent(checkbox(), 'keyDown', keyEvent(' ', true));
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(view.onToggle).not.toHaveBeenCalled();
+  fireEvent(checkbox(), 'keyDown', keyEvent());
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(view.onToggle).toHaveBeenCalledWith(view.steps[0].id, true);
+});
+
+test('web keyboard extension leaves Enter to onPress and does not replay Space after another press', () => {
+  jest.replaceProperty(Platform, 'OS', 'web');
+  const view = renderProgressCard();
+  const checkbox = () => view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  const enter = keyEvent('Enter');
+  fireEvent(checkbox(), 'keyDown', enter);
+  fireEvent(checkbox(), 'keyUp', enter);
+  expect(enter.preventDefault).not.toHaveBeenCalled();
+  expect(enter.stopPropagation).not.toHaveBeenCalled();
+  expect(view.onToggle).not.toHaveBeenCalled();
+  // RN Web's press responder owns Enter and delivers the existing onPress callback.
+  fireEvent.press(checkbox());
+  expect(view.onToggle.mock.calls).toEqual([[view.steps[0].id, true]]);
+  fireEvent(checkbox(), 'keyDown', keyEvent());
+  fireEvent.press(checkbox());
+  fireEvent(checkbox(), 'keyUp', keyEvent());
+  expect(view.onToggle.mock.calls).toEqual([[view.steps[0].id, true], [view.steps[0].id, false]]);
+});
+
+test('web Space bubbling from a descendant cannot toggle an unfocused progress checkbox', () => {
+  jest.replaceProperty(Platform, 'OS', 'web');
+  const view = renderProgressCard();
+  const checkbox = view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  const descendant = { ...keyEvent(), target: {} };
+  fireEvent(checkbox, 'keyDown', descendant);
+  fireEvent(checkbox, 'keyUp', descendant);
+  expect(descendant.preventDefault).not.toHaveBeenCalled();
+  expect(view.onToggle).not.toHaveBeenCalled();
+});
+
+test.each(['ios', 'android'] as const)('%s keeps native progress presses without installing web keyboard handlers', (platform) => {
+  jest.replaceProperty(Platform, 'OS', platform);
+  const view = renderProgressCard();
+  const checkbox = () => view.getByRole('checkbox', { name: '我已處理：資料庫報告' });
+  expect(checkbox().props.onKeyDown).toBeUndefined();
+  expect(checkbox().props.onKeyUp).toBeUndefined();
+  fireEvent.press(checkbox());
+  expect(view.onToggle.mock.calls).toEqual([[view.steps[0].id, true]]);
+  view.setDisabled(true);
+  fireEvent.press(checkbox());
+  expect(view.onToggle).toHaveBeenCalledTimes(1);
+});
 
 test('one live renderer receives the exact source for steps, daily deadlines and expanded outside-window tasks', () => {
   const renderAction = jest.fn((assignment: CampusAssignmentIdentity & { nuniSource?: NuniPlanAssignmentSource }) => (

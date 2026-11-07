@@ -547,7 +547,10 @@ async def receipt_scenario(browser, port, width, mode):
     checkboxes = page.get_by_role('checkbox')
     await expect(checkboxes).to_have_count(2)
     await checkboxes.first.focus()
-    await checkboxes.first.press('Space')
+    # Repeated keydown while Space is held must still produce one checkbox change.
+    await page.keyboard.down('Space')
+    await page.keyboard.down('Space')
+    await page.keyboard.up('Space')
     await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
     await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
     # A historical plan never restores the precise live coursework buttons.

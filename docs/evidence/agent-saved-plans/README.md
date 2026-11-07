@@ -96,6 +96,8 @@ nuni 規劃對前三項優先作業提出準備建議，使用下列固定範圍
 
 本輪以 Node 22.23.4、既有 Expo Jest 設定完成同一輪 **5 組、314 項測試，全數通過且沒有 skipped**，包含 21 項正式導覽整合與 15 項比較卡片測試。修正最後審查發現的課名缺漏後，已重新執行這一組測試。9 個異動手機 TypeScript／TSX 檔的 ESLint、Browser fixture 建置、Python syntax 與 whitespace 檢查通過。本機導覽測試原先被扁平套件目錄中錯誤的 `color-string` 版本阻擋；只將 lockfile 指定且 SHA-512 核對一致的 `1.9.1` 放入 `color@4.2.3` 的巢狀相依位置，沒有修改 package、lockfile、Jest 或任何斷言。完整手機 TypeScript 程序在本機以 exit 137 結束，未列為通過；Chromium 也仍受本機 socket 限制而無法啟動。全量型別、Browser 與完整 CI 以本輪新 head 的遠端 Checks 為準。
 
+首輪 `65e0ccac` 的遠端全量 lint／typecheck 及 [Mobile Agent Regression](https://github.com/Miiduoa/graduation/actions/runs/42383976435) 通過，後者實際執行 47 組、1,390 項手機測試與 3 組、87 項後端來源測試。新增 Browser 情境則抓到進度勾選框不支援 Space 的真實操作缺漏；依 [W3C checkbox 鍵盤模式](https://www.w3.org/WAI/ARIA/apg/patterns/checkbox/) 補上網頁版按下防捲動、放開切換一次，以及長按、失焦、停用與更換計畫時取消舊按鍵。Enter 沿用既有按壓流程，iOS／Android 不安裝網頁鍵盤處理。Browser 保留 Space 驗收並增加重複 keydown，核對只產生一次變更。受影響的三套畫面／導覽測試 49 項通過；最後加入同 step ID 換計畫防護後，再跑計畫卡片 14 項全部通過。這兩次有重疊，沒有加總成新案例數；鍵盤修正版仍以新 head 的遠端結果為準。
+
 前一輪 head `1dbf3e48fbfa39792ebfe375c0de35e851a65559` 的 [完整 CI](https://github.com/Miiduoa/graduation/actions/runs/42377489391)、[Mobile Agent Regression](https://github.com/Miiduoa/graduation/actions/runs/42377489349)、[Assistant Plans Browser](https://github.com/Miiduoa/graduation/actions/runs/42377489357)、CodeQL 與課程存取檢查均通過；[iPhone Maestro](https://github.com/Miiduoa/graduation/actions/runs/42377489339) 也已完成 Release app 的 onboarding／map smoke。這些是測驗整合版的歷史驗證，不代替本輪平台紀錄比較的新 head。
 
 ## 保存資料的一般邊界
