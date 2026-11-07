@@ -79,6 +79,10 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
       </section>
 
       <nav className={styles.quickLinks} aria-label="延伸交流服務">
+        <Link href={`/community/history?schoolId=${encodeURIComponent(schoolId)}`}>
+          <strong>找舊貼文</strong>
+          <span>以標題開頭搜尋歷史</span>
+        </Link>
         <Link href="/dms">
           <strong>私人訊息</strong>
           <span>接續一對一對話</span>

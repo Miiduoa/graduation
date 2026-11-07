@@ -1,0 +1,22 @@
+.panel { color: var(--text); min-width: 0; padding: 20px 0; }
+.form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.field { flex: 1 1 240px; min-width: 0; display: grid; gap: 8px; }
+.field label { font-weight: 650; }
+.field input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; font: inherit; font-size: 16px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.panel button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--card); font: inherit; cursor: pointer; }
+.panel button[aria-disabled='true'] { cursor: progress; }
+.panel :is(button, input, a, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.hint { color: var(--muted); line-height: 1.7; margin: 12px 0; overflow-wrap: anywhere; }
+.notice { line-height: 1.7; overflow-wrap: anywhere; }
+.error { padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.error p { margin: 0 0 8px; }
+.results { list-style: none; padding: 0; margin: 20px 0; display: grid; gap: 12px; }
+.card { padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; min-width: 0; overflow-wrap: anywhere; }
+.card h3 { margin: 0; font-size: 18px; }
+.card a { display: flex; align-items: center; min-height: 44px; color: var(--text); text-underline-offset: 4px; }
+.card p { margin: 8px 0 12px; line-height: 1.7; white-space: pre-wrap; }
+.card small { color: var(--muted); }
+.more { width: 100%; }
+@media (max-width: 400px) { .panel { padding-top: 12px; } .actions { width: 100%; } .actions button { flex: 1; } }
+@media (forced-colors: active) { .panel :is(button, input, a, [tabindex]):focus-visible { outline-color: Highlight; } }
