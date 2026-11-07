@@ -1,0 +1,67 @@
+name: Assistant Plans Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/mobile/src/screens/SavedCampusPlansPanel.tsx'
+      - 'apps/mobile/src/screens/CampusEvidencePlanCard.tsx'
+      - 'apps/mobile/src/screens/CampusPlanComparisonCard.tsx'
+      - 'apps/mobile/src/screens/NuniStudyPlanActions.tsx'
+      - 'apps/mobile/src/screens/NuniPlanAssignmentOpenButton.tsx'
+      - 'apps/mobile/src/screens/AssistantConversationLayout.tsx'
+      - 'apps/mobile/src/screens/CampusAssistantScreen.tsx'
+      - 'apps/mobile/src/services/campusPlanComparison.ts'
+      - 'apps/mobile/src/services/campusStudyAgenda.ts'
+      - 'apps/mobile/src/services/campusClockAvailability.ts'
+      - 'apps/mobile/src/services/nuniPlanAssignmentTarget.ts'
+      - 'apps/mobile/src/services/nuniCampusPlanner.ts'
+      - 'apps/mobile/src/services/offlineCampusPlanner.ts'
+      - 'apps/mobile/src/screens/CampusStudyAgendaCard.tsx'
+      - 'apps/mobile/src/ui/aiFirst.tsx'
+      - 'apps/mobile/src/ui/theme.ts'
+      - 'scripts/qa/saved-campus-plans/**'
+      - '.github/workflows/assistant-plans-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assistant-plans-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  saved-plan-interactions:
+    name: Saved plan layout and interactions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install browser test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Render actual plan components
+        run: node scripts/qa/saved-campus-plans/build.mjs
+      - name: Check narrow screens, keyboard, progress and deletion
+        run: python scripts/qa/saved-campus-plans/check.py
+      - name: Upload screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: assistant-plans-browser
+          path: artifacts/saved-campus-plans
+          retention-days: 7
