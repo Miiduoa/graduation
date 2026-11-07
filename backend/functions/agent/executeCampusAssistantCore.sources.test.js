@@ -455,14 +455,19 @@ describe('authorization failures inside the real core stop the callable', () => 
     },
   );
 
-  test('a repair owned by another account yields a contained run without the private record', async () => {
+  test('a repair owned by another account looks the same as a missing repair', async () => {
     mockDocuments.set(`schools/pu/repairRequests/${repairId}`, {
       userId: 'another-student', description: 'private-denial-detail', room: 'private-denial-detail',
     });
 
+    const missing = await ask(`查我的報修狀態，單號：missing-${repairId}`);
     const result = await ask(`查我的報修狀態，單號：${repairId}`);
 
-    expectContained(result);
+    expect(result.run.status).toBe('completed');
+    expect(result.content).toBe(missing.content);
+    expect(result.content).toContain('找不到這筆報修');
+    expect(result.evaluation.reason).not.toBe('stopped unauthorized tool request');
+    expect(JSON.stringify(result)).not.toContain('private-denial-detail');
     expect(mockModel).not.toHaveBeenCalled();
   });
 
