@@ -87,5 +87,8 @@ jobs:
           path: |
             artifacts/mobile-title-history/
             artifacts/mobile-title-integration/
+          # The test copies a fixed source allowlist, including its .github workflow.
+          # Only these generated evidence directories are uploaded, never the workspace.
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: error
