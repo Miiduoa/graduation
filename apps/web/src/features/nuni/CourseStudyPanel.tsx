@@ -77,6 +77,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const downloadUrl = useRef<string | null>(null);
+  const copyRequest = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const readingFocus = useRef<HTMLDivElement>(null);
   const focusReadingOnReturn = useRef(false);
@@ -172,6 +173,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }, [reading, practiceRound, source, sectionIndex, passageIndex]);
 
   function clearDownload() {
+    copyRequest.current += 1;
     if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
     downloadUrl.current = null;
     setDownloadStatus('');
@@ -193,6 +195,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   function downloadFile(contents: () => Blob, filename: string, label: string) {
+    copyRequest.current += 1;
     setDownloadStatus('');
     setDownloadError('');
     let url: string | null = null;
@@ -225,6 +228,28 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     if (!source || !practiceRound) return;
     downloadFile(() => new Blob(['\uFEFF', buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound)],
       { type: 'text/plain;charset=utf-8' }), courseStudyPracticeFilename(source.title), '本輪練習紀錄');
+  }
+
+  async function copyPracticeNotes() {
+    if (!source || !practiceRound || practiceRound.revision !== session.revision) return;
+    const request = ++copyRequest.current;
+    setDownloadStatus('');
+    setDownloadError('');
+    if (!navigator.clipboard?.writeText) {
+      setDownloadError('這個瀏覽器無法直接複製，請使用「下載本輪練習」保存紀錄。');
+      return;
+    }
+    try {
+      // Only a deliberate click copies the same answer-gated text as TXT export.
+      await navigator.clipboard.writeText(buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound));
+      if (copyRequest.current === request) {
+        setDownloadStatus('已複製本輪練習紀錄到剪貼簿；內容含個人作答，請留意貼上位置。');
+      }
+    } catch {
+      if (copyRequest.current === request) {
+        setDownloadError('無法存取剪貼簿，請改用「下載本輪練習」；目前的試答仍保留。');
+      }
+    }
   }
 
   function savePracticeCheckpoint() {
@@ -442,7 +467,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         </section>}
         {practiceRound ? <CourseStudyPractice round={practiceRound} onAction={changePractice}
           onExit={() => readPracticeSource()} onReadSource={readPracticeSource}
-          onDownload={downloadPractice} onSave={savePracticeCheckpoint} /> : <>
+          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={savePracticeCheckpoint} /> : <>
         <div className={styles.selectors}>
           <label className={styles.field} htmlFor={sectionId}>閱讀範圍
             <select id={sectionId} value={sectionIndex} onChange={(event) => { setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>

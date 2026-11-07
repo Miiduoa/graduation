@@ -263,3 +263,75 @@ it('rejects a corrupt practice checkpoint without replacing the existing lecture
   expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('目前安全保留的試答');
   expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
 });
+
+function mockPracticeClipboard(writeText?: (text: string) => Promise<void>): () => void {
+  const previous = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', {
+    configurable: true,
+    value: writeText ? { writeText } : undefined,
+  });
+  return () => {
+    if (previous) Object.defineProperty(window.navigator, 'clipboard', previous);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  };
+}
+
+it('copies only explicit practice text without exposing unrevealed reference answers', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const restoreClipboard = mockPracticeClipboard(writeText);
+  try {
+    mount();
+    await restore();
+    begin();
+    expect(writeText).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '我的獨立回答：主鍵不可重複。' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const hidden = writeText.mock.calls[0][0] as string;
+    expect(hidden).toContain('我的獨立回答：主鍵不可重複。');
+    expect(hidden).not.toContain(first.answer);
+    expect(hidden).not.toContain(second.answer);
+    expect(hidden).not.toContain('原本的主鍵試答');
+    await screen.findByText(/已複製本輪練習紀錄到剪貼簿/);
+    fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+    expect(writeText.mock.calls[1][0] as string).toContain(first.answer);
+    expect(writeText.mock.calls[1][0] as string).not.toContain(second.answer);
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    restoreClipboard();
+  }
+});
+
+it('preserves the active answer when clipboard access is denied', async () => {
+  const denied = vi.fn().mockRejectedValue(new Error('permission denied'));
+  const restoreClipboard = mockPracticeClipboard(denied);
+  try {
+    mount();
+    await restore();
+    begin();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '保留本輪的文字草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('無法存取剪貼簿'));
+    expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('保留本輪的文字草稿');
+    expect(screen.getByRole('button', { name: '下載本輪練習' })).toBeTruthy();
+  } finally {
+    restoreClipboard();
+  }
+});
+
+it('reports a fallback without changing the practice round when clipboard is unsupported', async () => {
+  const restoreClipboard = mockPracticeClipboard();
+  try {
+    mount();
+    await restore();
+    begin();
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    expect(screen.getByRole('alert').textContent).toContain('瀏覽器無法直接複製');
+    expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下載本輪練習' })).toBeTruthy();
+  } finally {
+    restoreClipboard();
+  }
+});
