@@ -32,9 +32,26 @@ it('keeps the requested task through the native OAuth form', async () => {
 });
 it('recognizes an authenticated account and avoids school-login redirect loops', () => {
   mocks.session = { platformAccountId: 'a' };
-  render(<NuniSignIn returnUrl="/grades" />);
+  render(<NuniSignIn returnUrl="/grades?tab=semester" />);
   expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/classroom');
   expect(mocks.request).not.toHaveBeenCalled();
+});
+it.each([
+  '/timetable?schoolId=pu#today',
+  '/calendar?campus=ntu#week',
+  '/import?campus=nthu',
+  '/dormitory?schoolId=ntu',
+  '/food?tenant=pu&order=order-1',
+  '/grades',
+  '/classroom/material-bookmarks',
+])('keeps the Google task %s for both a new and an existing account', async (destination) => {
+  const view = render(<NuniSignIn returnUrl={destination} />);
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  const action = new URL(button.closest('form')!.action);
+  expect(action.searchParams.get('returnUrl')).toBe(destination);
+  mocks.session = { platformAccountId: 'a' };
+  view.rerender(<NuniSignIn returnUrl={destination} />);
+  expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(destination);
 });
 it('returns a new Google session to course feedback with its campus and section intact', async () => {
   const destination = '/grades?schoolId=tw-pu&tab=feedback#recent';

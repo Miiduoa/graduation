@@ -446,6 +446,13 @@ describe('Nuni Google authorization code flow', () => {
   it.each([
     '/social?campus=tw-pu',
     '/merchant',
+    '/timetable?schoolId=ntu#today',
+    '/calendar?campus=nthu#week',
+    '/import?schoolId=pu',
+    '/dormitory?schoolId=ntu',
+    '/food?tenant=pu&order=order-1',
+    '/grades',
+    '/classroom/material-bookmarks?campus=pu',
     '/map?school=pu&focus=library#route',
     '/bus?school=pu',
     '/announcements/news-123?schoolId=tw-pu',
@@ -507,7 +514,7 @@ describe('Nuni Google authorization code flow', () => {
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
-  it.each(['https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades'])(
+  it.each(['https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades?tab=semester'])(
     'does not carry an external or school-only destination into the login transaction: %s',
     async (target) => {
       fetcher.mockResolvedValue(response(tx()));

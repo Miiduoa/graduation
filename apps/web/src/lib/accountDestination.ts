@@ -1,22 +1,29 @@
 import { sanitizeInternalPath } from './navigation';
 import { isPublicCampusPath } from './publicCampusServices';
 
-/** Platform login cannot establish a separate school identity. */
+/** Return to an existing platform or personal tool without granting school identity. */
 export function platformDestination(value?: string | null): string {
   const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '/classroom');
   const destination = new URL(safe, 'https://campus.local');
   const path = destination.pathname;
   if (
     isPublicCampusPath(path) ||
-    (path === '/grades' && destination.searchParams.get('tab') === 'feedback') ||
+    // GradesPage defaults to platform course feedback; only the semester tab reads school records.
+    (path === '/grades' && destination.searchParams.get('tab') !== 'semester') ||
     [
       '/',
       '/profile',
       '/settings',
       '/social',
+      '/timetable',
+      '/calendar',
+      '/import',
+      '/dormitory',
+      '/food',
       '/classroom',
       '/classroom/account',
       '/classroom/grades',
+      '/classroom/material-bookmarks',
       '/admin',
       '/admin/ops',
       '/admin/school-review',

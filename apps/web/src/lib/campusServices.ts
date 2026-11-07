@@ -183,6 +183,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板',
+    href: '/social',
+    access: 'platform',
+    keywords: 'Google 公開 跨校 貼文 社群 看板 social community',
+    category: 'connect',
+  },
+  {
     name: '校園交流',
     text: '閱讀與分享校園話題',
     href: '/community',
