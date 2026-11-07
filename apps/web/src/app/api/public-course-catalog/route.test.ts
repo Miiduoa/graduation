@@ -26,6 +26,10 @@ describe('NCNU public guest catalog', () => {
       GET(request('schoolId=ncnu&q=００５０７６')), GET(request('schoolId=ncnu&q=諮人系+夏榕文')),
     ]);
     const first = await a.json();
+    expect(first.operation).toEqual({
+      id: 'ncnu.courses.search', version: 1, responseSchemaVersion: 1, access: 'anonymous-public',
+    });
+    expect(first.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(first.courses.map((row: { section: string }) => row.section)).toEqual(['a', 'b']);
     expect(first.truncated).toBe(false);
     const second = await b.json();
@@ -58,7 +62,9 @@ describe('NCNU public guest catalog', () => {
     const { GET } = await import('./route');
     for (const params of ['q=x', 'schoolId=pu', 'schoolId=all', 'schoolId=constructor', 'schoolId=ncnu&schoolId=pu',
       'schoolId=nthu&schoolId=ncnu', 'schoolId=nthu&q=x&q=y', 'schoolId=nthu&q=' + 'a'.repeat(81),
-      'schoolId=ncnu&q=x&q=y', 'schoolId=ncnu&q=' + 'a'.repeat(81)]) {
+      'schoolId=ncnu&q=x&q=y', 'schoolId=ncnu&q=' + 'a'.repeat(81),
+      'schoolId=nthu&url=https://example.test', 'schoolId=ncnu&headers=Cookie',
+      'schoolId=nthu&operationId=ncnu.courses.search', 'schoolId=ncnu&__proto__=x']) {
       expect((await GET(request(params))).status).toBe(400);
     }
     expect(fetchSource).not.toHaveBeenCalled();
@@ -79,6 +85,37 @@ describe('NCNU public guest catalog', () => {
     vi.setSystemTime(16_000 + 15 * 60_000);
     expect((await GET(request('schoolId=ncnu'))).status).toBe(200);
     expect(fetchSource).toHaveBeenCalledTimes(3);
+  });
+
+  it('counts supplementary characters using the published JSON Schema limit', async () => {
+    const fetchSource = vi.fn().mockResolvedValue(csv());
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET } = await import('./route');
+    expect((await GET(request('schoolId=ncnu&q=' + encodeURIComponent('𠮷'.repeat(81))))).status).toBe(400);
+    expect(fetchSource).not.toHaveBeenCalled();
+    expect((await GET(request('schoolId=ncnu&q=' + encodeURIComponent('𠮷'.repeat(80))))).status).toBe(200);
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes a discovered operation through its published endpoint and parameter mapping', async () => {
+    const fetchSource = vi.fn().mockResolvedValue(csv());
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET: discover } = await import('./operations/route');
+    const { GET } = await import('./route');
+    const directory = await (await discover()).json();
+    expect(fetchSource).not.toHaveBeenCalled();
+    const operation = directory.operations.find((item: { id: string }) => item.id === 'ncnu.courses.search');
+    const url = new URL(operation.endpoint.path, 'https://example.test');
+    for (const [key, value] of Object.entries(operation.endpoint.fixedQuery)) url.searchParams.set(key, String(value));
+    url.searchParams.set(operation.endpoint.inputQuery.query, '005076');
+    const result = await GET(new Request(url));
+    expect(result.status).toBe(200);
+    const body = await result.json();
+    expect(body.operation.id).toBe(operation.id);
+    expect(body.operation.version).toBe(operation.version);
+    expect(body.sourceUrl).toBe(operation.sourceUrl);
+    expect(body.courses.map((course: { section: string }) => course.section)).toEqual(['a', 'b']);
+    expect(fetchSource).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -121,6 +158,7 @@ describe('school-scoped public course catalog dispatch', () => {
       const body = await result.json();
       expect(body.schoolId).toBe(schoolId);
       expect(body.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(body.operation).toEqual({ id: schoolId + '.courses.search', version: 1, responseSchemaVersion: 1, access: 'anonymous-public' });
       expect(body.courses[0].title).toBe(schoolId === 'nthu' ? '環境化學' : '普通心理學');
     }
     expect(fetchSource).toHaveBeenCalledTimes(2);

@@ -102,7 +102,7 @@ test('the CSV handoff rejects mismatched course identities and preserves zero cr
 });
 
 test('catalog responses require the expected campus and valid bounded room/time pairs', () => {
-  const response = { schoolId: 'nthu', sourceUrl: 'https://example.test/catalog.json', courses: [chemistry], truncated: false };
+  const response = { schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json', courses: [chemistry], truncated: false };
   assert.equal(isPublicCourseCatalog(response, 'nthu'), true);
   assert.equal(isPublicCourseCatalog(response, 'ncnu'), false);
   assert.equal(isNcnuPublicCourseCatalog(response), false);
@@ -112,7 +112,7 @@ test('catalog responses require the expected campus and valid bounded room/time 
   }
   assert.equal(isPublicCourseCatalog({ ...response, courses: Array(51).fill(chemistry) }, 'nthu'), false);
   assert.equal(isPublicCourseCatalog({ ...response, courses: [{ ...chemistry, code: '' }] }, 'nthu'), false);
-  const ncnu = { ...response, schoolId: 'ncnu', courses: [{ ...chemistry, meetings: undefined }] };
+  const ncnu = { ...response, schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall', courses: [{ ...chemistry, meetings: undefined }] };
   assert.equal(isNcnuPublicCourseCatalog(ncnu), true);
   assert.equal(isPublicCourseCatalog(ncnu, 'ncnu'), true);
 });

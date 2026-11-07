@@ -1,11 +1,10 @@
 import { readImportDelimitedRecords } from '@campus/shared/src/imports/aiDelimitedText';
-import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { boundedBytes } from '../nuni/server';
 
 // The public guest list links to a complete current-semester CSV export, without a session.
-const CSV_URL = 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?export=csv';
-const SOURCE_URL = resolveOfficialCourseQueryLink('ncnu')!.url;
+const operation = resolvePublicCourseOperation('ncnu')!;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MATCH_LIMIT = 50;
 const columns: Record<Exclude<keyof PublicCatalogCourse, 'meetings'>, string> = {
@@ -31,7 +30,7 @@ function parseCatalog(csv: string): PublicCatalogCourse[] {
 }
 
 async function loadCourses() {
-  const response = await fetch(CSV_URL, {
+  const response = await fetch(operation.upstreamUrl, {
     headers: { Accept: 'text/csv' },
     redirect: 'error',
     credentials: 'omit',
@@ -72,5 +71,5 @@ export async function searchNcnuCourseCatalog(query: string): Promise<PublicCour
     const text = normalize([row.code, row.title, row.department, row.teacher, row.room].join(' '));
     return terms.every(term => text.includes(term));
   });
-  return { schoolId: 'ncnu', sourceUrl: SOURCE_URL, fetchedAt, courses: matches.slice(0, MATCH_LIMIT), truncated: matches.length > MATCH_LIMIT };
+  return { schoolId: 'ncnu', sourceUrl: operation.sourceUrl, fetchedAt, courses: matches.slice(0, MATCH_LIMIT), truncated: matches.length > MATCH_LIMIT };
 }

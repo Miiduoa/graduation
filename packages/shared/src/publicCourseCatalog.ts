@@ -1,3 +1,8 @@
+import {
+  resolvePublicCourseOperation,
+  type PublicCourseOperationReceipt,
+} from './publicCourseOperations';
+
 export type PublicCatalogMeeting = { time: string; room: string };
 
 /** Fields from a public course listing. Codes retain leading zeroes and internal spaces. */
@@ -20,6 +25,8 @@ export type PublicCourseCatalogResponse = {
   sourceUrl: string;
   /** UTC time when the server successfully fetched the official feed; not the school's publication time. */
   fetchedAt?: string;
+  /** Added by the reviewed operation dispatcher. Older servers may omit this receipt. */
+  operation?: PublicCourseOperationReceipt;
   courses: PublicCatalogCourse[];
   truncated: boolean;
 };
@@ -38,15 +45,59 @@ export function isPublicCourseCatalog(
 ): value is PublicCourseCatalogResponse {
   if (!value || typeof value !== 'object') return false;
   if (expectedSchoolId !== 'ncnu' && expectedSchoolId !== 'nthu') return false;
+  const operation = resolvePublicCourseOperation(expectedSchoolId);
+  if (!operation) return false;
   const data = value as Partial<PublicCourseCatalogResponse>;
-  return data.schoolId === expectedSchoolId && typeof data.sourceUrl === 'string' && typeof data.truncated === 'boolean' &&
-    (data.fetchedAt === undefined || (typeof data.fetchedAt === 'string' && formatPublicCatalogFetchedAt(data.fetchedAt) !== null)) &&
-    Array.isArray(data.courses) && data.courses.length <= 50 && data.courses.every(row =>
-      row && ['code', 'section', 'title', 'department', 'teacher', 'time', 'room', 'semester', 'credits']
-        .every(field => typeof row[field as keyof PublicCatalogCourse] === 'string') &&
-      row.code.trim() && row.title.trim() && row.semester.trim() &&
-      (row.meetings === undefined || (Array.isArray(row.meetings) && row.meetings.length <= 32 &&
-        row.meetings.every(meeting => meeting && typeof meeting.time === 'string' && typeof meeting.room === 'string'))));
+  if (data.operation !== undefined) {
+    const receipt = data.operation;
+    if (
+      !receipt ||
+      typeof receipt !== 'object' ||
+      Array.isArray(receipt) ||
+      Object.keys(receipt).length !== 4 ||
+      receipt.id !== operation.id ||
+      receipt.version !== operation.version ||
+      receipt.responseSchemaVersion !== operation.responseSchemaVersion ||
+      receipt.access !== operation.access ||
+      typeof data.fetchedAt !== 'string'
+    )
+      return false;
+  }
+  return (
+    data.schoolId === expectedSchoolId &&
+    data.sourceUrl === operation.sourceUrl &&
+    typeof data.truncated === 'boolean' &&
+    (data.fetchedAt === undefined ||
+      (typeof data.fetchedAt === 'string' &&
+        formatPublicCatalogFetchedAt(data.fetchedAt) !== null)) &&
+    Array.isArray(data.courses) &&
+    data.courses.length <= 50 &&
+    data.courses.every(
+      (row) =>
+        row &&
+        [
+          'code',
+          'section',
+          'title',
+          'department',
+          'teacher',
+          'time',
+          'room',
+          'semester',
+          'credits',
+        ].every((field) => typeof row[field as keyof PublicCatalogCourse] === 'string') &&
+        row.code.trim() &&
+        row.title.trim() &&
+        row.semester.trim() &&
+        (row.meetings === undefined ||
+          (Array.isArray(row.meetings) &&
+            row.meetings.length <= 32 &&
+            row.meetings.every(
+              (meeting) =>
+                meeting && typeof meeting.time === 'string' && typeof meeting.room === 'string',
+            ))),
+    )
+  );
 }
 
 export function isNcnuPublicCourseCatalog(value: unknown): value is PublicCourseCatalogResponse {

@@ -38,8 +38,11 @@ const nthuCourse: PublicCatalogCourse = {
   meetings: [{ time: 'M3M4', room: 'BMES醫環618' }, { time: 'F3F4', room: 'BMES醫環501' }],
 };
 const nthuProps = { schoolId: 'nthu' as const, schoolName: '國立清華大學', schoolSearch: '?campus=nthu' };
-function response(courses: PublicCatalogCourse[], extra = {}) {
-  return Response.json({ schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/', fetchedAt: '2026-11-06T08:00:00.000Z', truncated: false, courses, ...extra });
+function response(courses: PublicCatalogCourse[], extra: Record<string, unknown> = {}) {
+  const sourceUrl = extra.schoolId === 'nthu'
+    ? 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json'
+    : 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall';
+  return Response.json({ schoolId: 'ncnu', sourceUrl, fetchedAt: '2026-11-06T08:00:00.000Z', truncated: false, courses, ...extra });
 }
 function submit(query: string) {
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
@@ -106,7 +109,7 @@ it.each(['fetch', 'body'])('times out a stalled %s, retries the same query and i
   let finish!: () => void;
   const delayed = new Promise<unknown>((resolve) => {
     finish = () => resolve(stage === 'fetch' ? response([course]) : {
-      schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/', truncated: false, courses: [course],
+      schoolId: 'ncnu', sourceUrl: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall', truncated: false, courses: [course],
     });
   });
   const fetcher = vi.fn()
@@ -285,4 +288,18 @@ it.each(['ncnu', 'nthu'] as const)('rejects a valid reply from the other public 
   const alert = await screen.findByRole('alert');
   expect(within(alert).getByRole('link', { name: '校方課程目錄' }).getAttribute('href')).toContain(`.${schoolId}.edu.tw/`);
   expect(screen.queryByRole('listitem')).toBeNull();
+});
+
+it.each([
+  { sourceUrl: 'https://example.test/unverified-courses' },
+  { operation: { id: 'nthu.courses.search', version: 1, responseSchemaVersion: 1, access: 'anonymous-public' } },
+  { operation: { id: 'ncnu.courses.search', version: 2, responseSchemaVersion: 1, access: 'anonymous-public' } },
+])('does not offer timetable import for an unverified source or operation receipt: %j', async (extra) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([course], extra)));
+  render(<PublicCourseSearch {...props} />);
+  submit('005076');
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.queryByRole('button', { name: '帶入課表核對' })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
 });

@@ -41,10 +41,10 @@ const nthuCourse = {
   time: 'M3M4\nR5R6', room: '教室甲\n教室乙', semester: '1151', credits: '3',
   meetings: [{ time: 'M3M4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' }],
 };
-function nthuJson(courses: unknown[] = [nthuCourse]) {
+function nthuJson(courses: unknown[] = [nthuCourse], extra: Record<string, unknown> = {}) {
   return { ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
     schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json', fetchedAt: '2026-11-06T08:00:00.000Z',
-    truncated: false, courses,
+    truncated: false, courses, ...extra,
   }) };
 }
 test('NTHU preserves classroom pairs and provides reviewed CSV import without writing private records', async () => {
@@ -198,5 +198,22 @@ test('NCNU late response is cancelled on school switch and a different-campus pa
     view.rerender(<CourseCatalogScreen route={{ params: { filter: { keyword: '資料庫' } } }} />);
     expect(await view.findByText('暫時無法讀取暨大課程，請重試或查看官方課程目錄。')).toBeTruthy();
     expect(view.queryByText('資料庫管理系統')).toBeNull();
+  } finally { globalThis.fetch = original; }
+});
+
+test.each([
+  { sourceUrl: 'https://example.test/unverified-courses' },
+  { operation: { id: 'ncnu.courses.search', version: 1, responseSchemaVersion: 1, access: 'anonymous-public' } },
+  { operation: { id: 'nthu.courses.search', version: 2, responseSchemaVersion: 1, access: 'anonymous-public' } },
+])('a source or operation mismatch cannot become a mobile import: %j', async (extra) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson([nthuCourse], extra));
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('暫時無法讀取清大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+    expect(view.queryByText('分析化學專題')).toBeNull();
+    expect(view.queryByText('複製課表匯入資料')).toBeNull();
+    expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   } finally { globalThis.fetch = original; }
 });

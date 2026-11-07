@@ -1,10 +1,11 @@
 import { nthuCourseIdentity } from '@campus/shared/src/nthuCourseSchedule';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { boundedBytes } from '../nuni/server';
 
 // NTHU publishes this daily JSON explicitly for analysis and system integration.
 // https://curricul.site.nthu.edu.tw/p/404-1208-111356.php?Lang=zh-tw
-const JSON_URL = 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json';
+const operation = resolvePublicCourseOperation('nthu')!;
 const MAX_BYTES = 6 * 1024 * 1024;
 const MATCH_LIMIT = 50;
 type CatalogEntry = { course: PublicCatalogCourse; searchText: string };
@@ -55,7 +56,7 @@ function parseCatalog(json: string): CatalogEntry[] {
 }
 
 async function loadCourses(): Promise<{ rows: CatalogEntry[]; fetchedAt: string }> {
-  const response = await fetch(JSON_URL, {
+  const response = await fetch(operation.upstreamUrl, {
     headers: { Accept: 'application/json, text/plain' },
     redirect: 'error',
     credentials: 'omit',
@@ -88,7 +89,7 @@ export async function searchNthuCourseCatalog(query: string): Promise<PublicCour
   const { rows, fetchedAt } = await currentSnapshot.rows;
   const matches = rows.filter(row => terms.every(term => row.searchText.includes(term)));
   return {
-    schoolId: 'nthu', sourceUrl: JSON_URL, fetchedAt,
+    schoolId: 'nthu', sourceUrl: operation.sourceUrl, fetchedAt,
     courses: matches.slice(0, MATCH_LIMIT).map(row => row.course),
     truncated: matches.length > MATCH_LIMIT,
   };
