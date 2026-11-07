@@ -27,7 +27,8 @@ service firebase.storage {
     }
 
     function isAdmin() {
-      return isActiveAccount() && request.auth.token.role == 'admin';
+      // A role claim can outlive the canonical account document after deletion.
+      return hasCanonicalActiveAccount() && request.auth.token.role == 'admin';
     }
 
     function isValidImage() {
@@ -200,7 +201,7 @@ service firebase.storage {
 
     match /bugreports/{reportId}/{fileName} {
       allow read: if isAdmin();
-      allow create: if resource == null && isActiveAccount() && isValidImage() && maxSize(10);
+      allow create: if resource == null && hasCanonicalActiveAccount() && isValidImage() && maxSize(10);
     }
 
     match /repairs/{requestId}/{fileName} {
