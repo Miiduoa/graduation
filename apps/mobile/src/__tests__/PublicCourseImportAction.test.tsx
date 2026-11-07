@@ -166,9 +166,13 @@ test('storage failure is not success, and retry works without losing the preview
   expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(2);
 });
 
-test('a changed existing record is not overwritten by the public catalog', async () => {
+test.each([
+  { field: 'location', value: '本人修正的教室' },
+  { field: 'title', value: '本人修正的課名' },
+  { field: 'linkedCourseId', value: 'cw_personal' },
+])('changed $field metadata is not overwritten by the public catalog', async ({ field, value }) => {
   const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
-  await ledger.appendPersonalImports(scope, preview.rows.map((row) => ({ ...row, teacher: '本人修正的教師' })));
+  await ledger.appendPersonalImports(scope, preview.rows.map((row) => ({ ...row, [field]: value })));
   const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
   jest.clearAllMocks();
   const view = renderAction();
@@ -176,6 +180,20 @@ test('a changed existing record is not overwritten by the public catalog', async
   await view.findByText(/未能確認加入結果/);
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
+});
+
+test('courses with different teachers retain separate identities and preserve existing records', async () => {
+  const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
+  await ledger.appendPersonalImports(scope, preview.rows.map((row) => ({ ...row, teacher: '另一位老師' })));
+  const before = await ledger.loadPersonalImports(scope);
+  const view = renderAction();
+  review(view); confirm(view);
+  await view.findByText('已加入 2 個上課時段。');
+  const saved = await ledger.loadPersonalImports(scope);
+  expect(saved.records).toHaveLength(4);
+  expect(saved.records.slice(0, before.records.length)).toEqual(before.records);
+  expect(saved.records.filter((row) => row.teacher === '另一位老師')).toHaveLength(2);
+  expect(saved.records.filter((row) => row.teacher === nthu.teacher)).toHaveLength(2);
 });
 
 test.each(['account', 'school', 'unresolved', 'away-and-back'])('a delayed read cannot save after scope changes: %s', async (change) => {
