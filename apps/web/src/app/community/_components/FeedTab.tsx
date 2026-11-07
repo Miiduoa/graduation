@@ -740,7 +740,8 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="貼文、標籤、看板或作者"
+            placeholder="貼文、標籤或作者（可空白組合）"
+            title="以空白分隔關鍵字，全部符合才顯示；僅搜尋已載入貼文"
             autoComplete="off"
           />
         </label>

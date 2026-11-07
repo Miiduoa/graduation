@@ -1,4 +1,5 @@
 import type { CampusPostDoc } from '@/lib/community/firestore';
+import { campusFeedSearchTerms, matchesCampusFeedSearchTerms } from '@campus/shared/src/communityFeedSearch';
 
 export type FeedFilter = 'all' | 'following' | 'subscribed' | 'media';
 export type FeedOrder = 'recommended' | 'latest';
@@ -33,7 +34,7 @@ export function selectCampusFeedPosts(
   posts: CampusPostDoc[],
   options: FeedViewOptions,
 ): CampusPostDoc[] {
-  const query = options.search.trim().toLocaleLowerCase();
+  const terms = campusFeedSearchTerms(options.search);
   const filtered = posts.filter((post) => {
     if (options.filter === 'subscribed' && !options.subscribedIds.has(post.boardId)) return false;
     if (
@@ -42,19 +43,18 @@ export function selectCampusFeedPosts(
     ) return false;
     if (options.filter === 'media' && !((Array.isArray(post.mediaUrls) ? post.mediaUrls : [])).some((url) => typeof url === 'string' && url.length > 0))
       return false;
-    if (!query) return true;
+    if (terms.length === 0) return true;
 
     const author = post.anonymous
       ? post.aliasSnapshot ?? '匿名貼文'
       : post.authorUid ? options.authorNames[post.authorUid] ?? '' : '';
-    const searchable = [
+    return matchesCampusFeedSearchTerms(terms, [
       post.title,
       post.content,
       ...(Array.isArray(post.tags) ? post.tags : []),
       options.boardNames[post.boardId] ?? '',
       author,
-    ].join(' ').toLocaleLowerCase();
-    return searchable.includes(query);
+    ]);
   });
   // Match the server cursor's createdAt desc, documentId desc ordering even
   // when recommendation ranking rearranged posts sharing a timestamp.

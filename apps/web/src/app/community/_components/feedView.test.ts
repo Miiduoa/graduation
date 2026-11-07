@@ -69,6 +69,12 @@ describe('school-scoped feed discovery', () => {
   });
   it('combines keywords across visible fields without changing the selected scope', () => {
     expect(select({ search: '讀書 期中考' })).toEqual(['older']);
+    const fullwidth = [{ ...posts[0], title: 'API 2026 校園專題' }];
+    expect(selectCampusFeedPosts(fullwidth, {
+      filter: 'all', order: 'recommended', search: 'ａｐｉ ２０２６',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boardNames: {}, authorNames: {},
+    }).map((post) => post.id)).toEqual(['older']);
     expect(select({ search: '小明 課業討論 考試' })).toEqual(['older']);
     expect(select({ search: '攝影社　神祕同學' })).toEqual(['newer']);
     expect(select({ search: '期中考 攝影社' })).toEqual([]);

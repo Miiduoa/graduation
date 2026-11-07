@@ -745,7 +745,8 @@ function HomeFeedContent() {
                   accessibilityLabel="搜尋本校貼文"
                   value={search}
                   onChangeText={setSearch}
-                  placeholder="搜尋貼文、看板、標籤或作者"
+                  placeholder="搜尋貼文、標籤或作者（可多詞）"
+                  accessibilityHint="以空白分隔多個關鍵字，需全部符合；僅搜尋已載入貼文"
                   placeholderTextColor={theme.colors.textSecondary}
                   returnKeyType="search"
                   autoCorrect={false}
