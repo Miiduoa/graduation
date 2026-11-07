@@ -55,8 +55,8 @@ export const ASSISTANT_WRITE_PERMISSION_DEFINITIONS: readonly AssistantWritePerm
   },
   {
     key: 'createDormRepairRequest',
-    label: '送出宿舍報修',
-    description: '整理報修草稿，確認後送出宿舍維修申請。',
+    label: '存成宿舍報修備忘',
+    description: '整理報修草稿，確認後只會存成個人備忘，不會送到學校。請依學校規定管道送出。',
   },
   {
     key: 'reserveWashingMachine',

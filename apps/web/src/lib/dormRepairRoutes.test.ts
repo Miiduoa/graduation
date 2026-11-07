@@ -63,9 +63,11 @@ it('does not phrase official repair channels as in-app tickets or school submiss
         for (const text of [route.label, route.detail, route.trackingLabel ?? '']) {
           expect(text).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
         }
+        if (route.trackingLabel) expect(route.trackingLabel).toMatch(/網站/);
       }
     }
   }
+  expect(resolveDormRepairRoute('nsysu', 'water')?.trackingLabel).toBe('到中山宿舍網站查修繕紀錄');
   expect(resolveDormRepairRoute('unknown-campus', 'other')).toBeNull();
 });
 

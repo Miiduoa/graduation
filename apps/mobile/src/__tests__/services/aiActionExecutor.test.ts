@@ -78,14 +78,15 @@ describe('aiActionExecutor', () => {
   it('executes repair, lost-found, reminder, health booking, and seat reservation through DataSource', async () => {
     const ds = buildDataSource();
 
-    await expect(
-      executeAgentToolAction({
-        ...baseContext,
-        dataSource: ds,
-        tool: tool('report_repair'),
-        params: { category: 'ac', room: 'A101', description: '冷氣壞了', urgency: 'high' },
-      }),
-    ).resolves.toMatchObject({ kind: 'executed', recordId: 'repair-1' });
+    const repair = await executeAgentToolAction({
+      ...baseContext,
+      dataSource: ds,
+      tool: tool('report_repair'),
+      params: { category: 'ac', room: 'A101', description: '冷氣壞了', urgency: 'high' },
+    });
+    expect(repair).toMatchObject({ kind: 'executed', recordId: 'repair-1' });
+    expect(repair.message).toContain('報修備忘');
+    expect(repair.message).not.toMatch(/工單|已提交報修|單號/);
 
     await expect(
       executeAgentToolAction({
