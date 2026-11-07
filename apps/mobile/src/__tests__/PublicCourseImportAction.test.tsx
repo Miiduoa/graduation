@@ -277,3 +277,58 @@ test('an intervening timetable update invalidates an acknowledged overlap before
   confirm(view);
   await view.findByText('仍要加入（保留兩門課）');
 });
+
+test('undo removes only this newly imported batch and preserves pre-existing classes', async () => {
+  const existing = preparePublicCourseTimetableImport('nthu', {
+    ...nthu, code: '11510AES 520400', title: '原有課程',
+    meetings: [{ time: 'T1T2', room: '原教室' }],
+  })!;
+  await ledger.appendPersonalImports(scope, existing.rows);
+  const before = (await ledger.loadPersonalImports(scope)).records[0];
+  const view = renderAction();
+  review(view); confirm(view);
+  await view.findByText('已加入 2 個上課時段。');
+  fireEvent.press(view.getByText('撤回這次加入'));
+  await view.findByText('已撤回這次加入的 2 個上課時段，其他課程不受影響。');
+  const saved = await ledger.loadPersonalImports(scope);
+  expect(saved.records).toEqual([before]);
+  expect(view.queryByText('撤回這次加入')).toBeNull();
+});
+
+test('a later import blocks stale undo instead of deleting another batch', async () => {
+  const view = renderAction();
+  review(view); confirm(view);
+  await view.findByText('已加入 2 個上課時段。');
+  const later = preparePublicCourseTimetableImport('nthu', {
+    ...nthu, code: '11510AES 520500', title: '稍後加入的課程',
+    meetings: [{ time: 'T1T2', room: '另一教室' }],
+  })!;
+  await ledger.appendPersonalImports(scope, later.rows);
+  const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
+  fireEvent.press(view.getByText('撤回這次加入'));
+  await view.findByText(/無法安全撤回/);
+  expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
+  expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(3);
+});
+
+test('duplicate-only confirmation offers no undo, because it did not create a batch', async () => {
+  const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
+  await ledger.appendPersonalImports(scope, preview.rows);
+  const view = renderAction();
+  review(view); confirm(view);
+  await view.findByText('這些時段已在個人課表，沒有重複新增。');
+  expect(view.queryByText('撤回這次加入')).toBeNull();
+  expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(2);
+});
+
+test('partial duplicate undo preserves the original meeting and removes only the new meeting', async () => {
+  const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
+  await ledger.appendPersonalImports(scope, [preview.rows[0]]);
+  const existing = (await ledger.loadPersonalImports(scope)).records[0];
+  const view = renderAction();
+  review(view); confirm(view);
+  await view.findByText('已加入 1 個上課時段。另有 1 個重複時段未新增。');
+  fireEvent.press(view.getByText('撤回這次加入'));
+  await view.findByText('已撤回這次加入的 1 個上課時段，其他課程不受影響。');
+  expect((await ledger.loadPersonalImports(scope)).records).toEqual([existing]);
+});

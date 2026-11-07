@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
-import { appendPersonalImports, snapshotPersonalImports, type PersonalImportScope } from '../services/personalImports';
+import { appendPersonalImports, snapshotPersonalImports, undoLastPersonalImport, type PersonalImportScope } from '../services/personalImports';
 import { findCatalogTimetableOverlaps, preparePublicCourseTimetableImport, type CatalogTimetableOverlap, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { Button } from '../ui/components';
@@ -17,7 +17,8 @@ type Props = {
 type Outcome =
   | { status: 'review' | 'saving' | 'error' }
   | { status: 'conflict'; overlaps: CatalogTimetableOverlap[]; recordsJson: string }
-  | { status: 'saved'; added: number; duplicates: number };
+  | { status: 'saved'; added: number; duplicates: number; batchId?: string }
+  | { status: 'undone'; removed: number };
 
 type ReviewProps = {
   preview: PublicCourseTimetablePreview;
@@ -34,10 +35,13 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
   const focused = useRef(false);
   const generation = useRef(0);
   const pending = useRef(false);
+  const [undoing, setUndoing] = useState(false);
+  const [undoError, setUndoError] = useState(false);
   useFocusEffect(useCallback(() => {
     focused.current = true;
     generation.current += 1;
     pending.current = false;
+    setUndoing(false);
     setOutcome((previous) => previous.status === 'saving' ? { status: 'error' } : previous);
     return () => {
       focused.current = false;
@@ -48,7 +52,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
   const active = (run: number) => focused.current && generation.current === run && liveScopeKey.current === scopeKey;
   async function confirm() {
     const run = generation.current;
-    if (pending.current || outcome.status === 'saved' || !active(run)) return;
+    if (pending.current || undoing || outcome.status === 'saved' || outcome.status === 'undone' || !active(run)) return;
     pending.current = true;
     const acknowledged = outcome.status === 'conflict' ? outcome : null;
     setOutcome({ status: 'saving' });
@@ -71,11 +75,33 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       const result = await appendPersonalImports(scope, preview.rows, () => active(run), {
         protectCatalogTimetableSlots: true, expectedRecordsJson: recordsJson,
       });
-      if (active(run)) setOutcome({ status: 'saved', added: result.added, duplicates: result.duplicates });
+      if (active(run)) setOutcome({
+        status: 'saved', added: result.added, duplicates: result.duplicates,
+        batchId: result.added > 0 ? result.ledger.batches[result.ledger.batches.length - 1]?.id : undefined,
+      });
     } catch {
       if (active(run)) setOutcome({ status: 'error' });
     } finally {
       if (active(run)) pending.current = false;
+    }
+  }
+  async function undo() {
+    const run = generation.current;
+    if (pending.current || undoing || outcome.status !== 'saved' || !outcome.batchId || !active(run)) return;
+    pending.current = true;
+    setUndoError(false);
+    setUndoing(true);
+    try {
+      // Undo only our exact last batch. Never erase another import or a later edit.
+      const result = await undoLastPersonalImport(scope, outcome.batchId, () => active(run));
+      if (active(run)) setOutcome({ status: 'undone', removed: result.removed });
+    } catch {
+      if (active(run)) setUndoError(true);
+    } finally {
+      if (active(run)) {
+        pending.current = false;
+        setUndoing(false);
+      }
     }
   }
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
@@ -93,6 +119,19 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         {outcome.added ? `已加入 ${outcome.added} 個上課時段。` : '這些時段已在個人課表，沒有重複新增。'}
         {outcome.added > 0 && outcome.duplicates > 0 ? `另有 ${outcome.duplicates} 個重複時段未新增。` : ''}
       </Text>
+      <Button text="查看個人課表" kind="primary" onPress={() => {
+        if (active(generation.current) && !undoing) safeNavigate(navigation, 'PersonalTimetable', {
+          term: preview.term, reminderScope: JSON.stringify(scope),
+        });
+      }} />
+      {outcome.added > 0 && outcome.batchId && <Button
+        text={undoing ? '正在撤回…' : '撤回這次加入'} kind="ghost" disabled={undoing}
+        onPress={() => void undo()} />}
+      {undoError && <Text accessibilityRole="alert" style={body}>
+        無法安全撤回：課表可能已更新，或剛才的撤回已完成。請先查看個人課表，不會刪除其他批次。
+      </Text>}
+    </> : outcome.status === 'undone' ? <>
+      <Text accessibilityLiveRegion="polite" style={body}>已撤回這次加入的 {outcome.removed} 個上課時段，其他課程不受影響。</Text>
       <Button text="查看個人課表" kind="primary" onPress={() => {
         if (active(generation.current)) safeNavigate(navigation, 'PersonalTimetable', {
           term: preview.term, reminderScope: JSON.stringify(scope),
@@ -112,7 +151,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         outcome.status === 'conflict' ? '仍要加入（保留兩門課）' : '確認加入個人課表'} kind="primary"
         disabled={outcome.status === 'saving'} onPress={() => void confirm()} />
     </>}
-    <Button text="收起核對" kind="ghost" disabled={outcome.status === 'saving'} onPress={onClose} />
+    <Button text="收起核對" kind="ghost" disabled={outcome.status === 'saving' || undoing} onPress={onClose} />
   </View>;
 }
 
