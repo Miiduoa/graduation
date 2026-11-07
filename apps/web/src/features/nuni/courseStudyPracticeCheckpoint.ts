@@ -92,7 +92,7 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
       outcome,
     };
   }
-  const restored = startStudyPracticeRound(0, mode, cards);
+  // A finished round is reached only by deciding or skipping its last card.\n  // A forged `finished` flag must not hide an unreviewed final question behind a summary.\n  if (data.finished && responses[cards[index].id].outcome === null) {\n    invalid('練習摘要缺少最後一題的自評或略過紀錄，無法還原。');\n  }\n  const restored = startStudyPracticeRound(0, mode, cards);
   const full = startStudyPracticeRound(0, mode, available);
   if (!restored || !full) invalid();
   // Old v1 checkpoints only store the active subset. The validated reading

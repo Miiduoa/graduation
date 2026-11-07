@@ -122,6 +122,27 @@ describe('versioned independent review checkpoint', () => {
     }
   });
 
+  it('rejects a forged finished summary but restores actual last-question completion and revisits', () => {
+    const unfinished = checkpoint();
+    const raw = serializeStudyPracticeCheckpoint(unfinished);
+    expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
+      item.practice.finished = true;
+    }), scope)).toThrow(/最後一題/);
+
+    const completed = checkpoint();
+    completed.round = updateStudyPracticeRound(completed.round, { type: 'skip' });
+    expect(completed.round.finished).toBe(true);
+    const resumed = parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint(completed), scope);
+    expect(resumed.round.finished).toBe(true);
+    expect(resumed.round.responses[resumed.round.cards[1].id].outcome).toBe('skipped');
+
+    const revisited = updateStudyPracticeRound(completed.round, { type: 'go', index: 1 });
+    expect(revisited.finished).toBe(false);
+    expect(() => parseStudyPracticeCheckpoint(serializeStudyPracticeCheckpoint({
+      progress: completed.progress, round: revisited,
+    }), scope)).not.toThrow();
+  });
+
   it('rejects a corrupted underlying lesson or source instead of trusting cached answer text', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
     expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => {
