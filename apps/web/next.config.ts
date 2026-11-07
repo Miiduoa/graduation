@@ -118,12 +118,14 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      {
-        source: '/merchant',
-        headers: [
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
-        ],
-      },
+      ...['/merchant', '/course/:courseId/attendance', '/teacher/course/:courseId/attendance'].map(
+        (source) => ({
+          source,
+          headers: [
+            { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+          ],
+        }),
+      ),
       // classroom camera 是建置時讀進映像的；開 ASSIGNMENT_FILE_SUBMIT_ENABLED 必須重建 Web 映像。
       ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
         ? [

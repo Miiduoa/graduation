@@ -407,7 +407,8 @@ function OrderDraftCard({ payload }: { payload: any }) {
 
 function NavigateCard({ payload }: { payload: any }) {
   const nav = useNavigation<any>();
-  const screenLabel = String(payload.screen || '')
+  const redirect = resolveDeprecatedRouteRedirect(payload.screen);
+  const screenLabel = redirect?.screen === 'Dormitory' ? '宿舍服務' : String(payload.screen || '')
     .replace('Screen', '')
     .replace(/([A-Z])/g, ' $1')
     .trim();
@@ -415,9 +416,8 @@ function NavigateCard({ payload }: { payload: any }) {
     <TouchableOpacity
       style={styles.navigateCard}
       onPress={() => {
-        const redirect = resolveDeprecatedRouteRedirect(payload.screen);
         if (redirect) {
-          safeNavigate(nav, redirect.screen, payload.params || {});
+          safeNavigate(nav, redirect.screen, redirect.screen === 'Dormitory' ? undefined : payload.params || {});
           return;
         }
         nav.navigate(payload.screen, payload.params || {});
@@ -571,12 +571,12 @@ function RepairSubmittedCard({ payload }: { payload: any }) {
   const nav = useNavigation<any>();
   return (
     <View style={[styles.card, styles.successCard]}>
-      <CardHeader icon="✅" title="宿舍報修已提交" color="#1B5E20" />
+      <CardHeader icon="✅" title="平台報修已建立" color="#1B5E20" />
       <InfoRow label="地點" value={payload.location || payload.dormitory || '—'} />
       <InfoRow label="類別" value={payload.category || '—'} />
-      <InfoRow label="編號" value={payload.repairId || payload.requestId || '—'} />
-      <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'TodayHome')}>
-        <Text style={styles.actionButtonText}>查看報修紀錄</Text>
+      <InfoRow label="平台案件編號" value={payload.repairId || payload.requestId || '—'} />
+      <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'Dormitory')}>
+        <Text style={styles.actionButtonText}>開啟宿舍服務</Text>
       </TouchableOpacity>
     </View>
   );

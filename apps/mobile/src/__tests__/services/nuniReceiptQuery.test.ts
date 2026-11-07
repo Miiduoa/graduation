@@ -1,5 +1,5 @@
 import type { NuniStudyAgenda, NuniStudyTask } from '@campus/shared/src/nuniStudyAgenda';
-import { isNuniReceiptQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts } from '../../services/nuniReceiptQuery';
+import { isNuniReceiptQuestion, isNuniReceiptReferenceQuestion, isNuniReceiptStatusFollowUp, queryNuniReceipts } from '../../services/nuniReceiptQuery';
 
 const task = (id: string, courseId: string, submittedAt: string | null = null,
   state: NuniStudyTask['state'] = 'open'): NuniStudyTask => ({
@@ -134,4 +134,30 @@ test('future-seven-day receipt status never includes an earlier deadline or an u
   expect(result.kind).toBe('results');
   if (result.kind !== 'results') return;
   expect(result.rows.map((row) => row.item.id)).toEqual(['within-week']);
+});
+
+
+test('a singular reference needs an explicit selected source, checked against current student courses', () => {
+  expect(isNuniReceiptReferenceQuestion('這份作業交了嗎？')).toBe(true);
+  expect(isNuniReceiptReferenceQuestion('那個報告已交了嗎？')).toBe(true);
+  expect(isNuniReceiptReferenceQuestion('那已交的呢？')).toBe(false);
+  expect(queryNuniReceipts(agenda, '這份作業交了嗎？')).toMatchObject({
+    kind: 'clarify', message: expect.stringContaining('課程或作業名稱'),
+  });
+  const read = (courseId: string, id: string) =>
+    queryNuniReceipts(agenda, '這份作業交了嗎？', '這份作業交了嗎？',
+      undefined, { courseId, id });
+  expect(read('management', 'submitted')).toMatchObject({
+    kind: 'results', rows: [{ item: { courseId: 'management', id: 'submitted' }, receiptStatus: 'submitted' }],
+  });
+  expect(read('design', 'pending')).toMatchObject({
+    kind: 'results', rows: [{ item: { courseId: 'design', id: 'pending' }, receiptStatus: 'pending' }],
+  });
+  expect(read('design', 'closed')).toMatchObject({
+    kind: 'results', rows: [{ item: { courseId: 'design', id: 'closed' }, receiptStatus: 'closed' }],
+  });
+  for (const [courseId, id] of [['teacher', 'teacher-only'], ['archived', 'archived'],
+    ['design', 'quiz'], ['design', 'nonexistent'], ['wrong-course', 'submitted']]) {
+    expect(read(courseId, id)).toMatchObject({ kind: 'results', rows: [] });
+  }
 });

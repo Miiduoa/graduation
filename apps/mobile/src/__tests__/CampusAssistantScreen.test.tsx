@@ -98,6 +98,41 @@ beforeEach(() => {
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 });
+test('campus follow-up questions reuse one sessionId', async () => {
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '第一題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '追問細節');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const first = request.mock.calls[0][0].sessionId;
+  const second = request.mock.calls[1][0].sessionId;
+  expect(typeof first).toBe('string');
+  expect(first.length).toBeGreaterThan(8);
+  expect(second).toBe(first);
+  expect(request.mock.calls[0][0].mode).toBe('campus');
+});
+
+test.each(['account', 'school'])('changing %s starts a new campus sessionId', async (change) => {
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '第一題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const first = request.mock.calls[0][0].sessionId;
+  if (change === 'school') mockSchool = 'other';
+  else mockUid = 'B';
+  view.rerender(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '新範圍的問題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const next = request.mock.calls[1][0].sessionId;
+  expect(typeof next).toBe('string');
+  expect(next.length).toBeGreaterThan(8);
+  expect(next).not.toBe(first);
+});
+
 test('failed questions remain editable and retry does not add duplicated history', async () => {
   request
     .mockRejectedValueOnce(new Error('unavailable'))
@@ -110,6 +145,8 @@ test('failed questions remain editable and retry does not add duplicated history
   expect(view.getByText(/問題已保留/)).toBeTruthy();
   await act(async () => fireEvent.press(view.getByText('重試查詢')));
   expect(request.mock.calls[1][0].messages).toEqual([{ role: 'user', content: '查公告' }]);
+  expect(request.mock.calls[1][0].sessionId).toBe(request.mock.calls[0][0].sessionId);
+  expect(typeof request.mock.calls[0][0].sessionId).toBe('string');
   expect(view.getByText('已找到公告')).toBeTruthy();
   expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
 });
@@ -946,7 +983,8 @@ test('tapping a result retains the unsent draft and opens only the selected sour
   fireEvent.changeText(field, '期中報告何時交？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   fireEvent.changeText(field, '還在輸入的問題');
-  await act(async () => fireEvent.press(view.getByText('第 2 筆')));
+  expect(view.getByRole('button', { name: '選擇第 1 筆，資料庫設計，期中報告' })).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '選擇第 2 筆，資料庫管理，期中報告' })));
   const turns = request.mock.calls[1][0].messages;
   expect(turns[1].assignmentRead).toEqual(assignmentRead);
   expect(turns[2]).toEqual({ role: 'user', content: '第 2 筆' });
@@ -985,7 +1023,7 @@ test('moves between assignment pages without sending the draft and keeps the bac
   expect(view.queryByText('下一頁作業')).toBeNull();
   await act(async () => fireEvent.press(view.getByText('上一頁作業')));
   expect(request.mock.calls[2][0].messages.at(-1).content).toBe('上一頁');
-  expect(view.getByText('本頁第 2 筆')).toBeTruthy();
+  expect(view.getByRole('button', { name: '選擇本頁第 2 筆，資料庫，練習 2' })).toBeTruthy();
   expect(field.props.value).toBe('待會再問的問題');
   expect(scheduleCampusAssignmentReminder).not.toHaveBeenCalled();
 });

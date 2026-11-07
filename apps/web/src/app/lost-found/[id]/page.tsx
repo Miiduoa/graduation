@@ -12,6 +12,8 @@ import {
   validateLostFoundForm,
   type LostFoundFormErrors,
 } from '@/components/lost-found/LostFoundForm';
+import { LostFoundGallery } from '@/components/lost-found/LostFoundPhotos';
+import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
 import styles from '@/components/lost-found/LostFound.module.css';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
@@ -26,14 +28,10 @@ import {
   LostFoundError,
   LostFoundWriteUnconfirmedError,
   canManageLostFoundItem,
-  categoryLabel,
-  formatLostFoundCalendarDate,
   getLostFoundItem,
   isOpenLostFoundStatus,
   resolveLostFoundItem,
-  statusLabel,
   toTaipeiCalendarDateInput,
-  typeLabel,
   updateLostFoundItem,
   type LostFoundItem,
   type LostFoundWriteFields,
@@ -436,211 +434,206 @@ function LostFoundDetailPageContent({
             </p>
           </section>
         ) : (
-          <article className={styles.panel}>
-            <div className={styles.itemMeta}>
-              <span className={styles.badge}>{typeLabel(item.type)}</span>
-              <span className={styles.badge}>{categoryLabel(item.category)}</span>
-              <span className={styles.badge}>{statusLabel(item.status)}</span>
-              {!item.canonical ? <span className={styles.badge}>舊版紀錄</span> : null}
-            </div>
-            <h2>{item.title}</h2>
-            <p className={styles.muted}>
-              {item.location}
-              {item.date ? ` · ${formatLostFoundCalendarDate(item.date)}` : ''}
-            </p>
-            <p>{item.description}</p>
-            {item.contactInfo ? (
-              <p>
-                聯絡方式：{item.contactInfo}
-                <span className={styles.muted}>（{CONTACT_VISIBILITY_NOTE}）</span>
-              </p>
-            ) : (
-              <p className={styles.muted}>未提供聯絡方式</p>
-            )}
-            {item.imageUrl ? <p className={styles.muted}>此則含既有圖片連結。</p> : null}
-
-            {legacyReadOnly ? (
-              <p className={styles.notice} role="status">
-                這則為尚未完整遷移的舊版紀錄，目前僅供檢視，無法在此編輯或結案。
-              </p>
-            ) : null}
-
-            {storageBlocked ? (
-              <div className={styles.resolveBox}>
-                <p className={styles.error} role="alert">
-                  {storageMessage}
+          <article className={styles.stack} aria-label="物品詳情">
+            <LostFoundItemTag item={item}>
+              {item.photos?.length ? (
+                <LostFoundGallery key={item.id} photos={item.photos} title={item.title} />
+              ) : null}
+              <p>{item.description}</p>
+              {item.contactInfo ? (
+                <p>
+                  聯絡方式：{item.contactInfo}
+                  <span className={styles.muted}>（{CONTACT_VISIBILITY_NOTE}）</span>
                 </p>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    try {
-                      const storedPending = loadLostFoundPending(editScope());
-                      const draft = loadLostFoundDraft(editScope());
-                      setPending(storedPending);
-                      if (storedPending?.fields) {
-                        setFields(lostFoundFormFields(storedPending.fields));
-                        setBaseUpdatedAt(storedPending.expectedUpdatedAt ?? null);
-                      } else if (draft) {
-                        setFields(lostFoundFormFields(draft));
-                        setBaseUpdatedAt(draft.expectedUpdatedAt ?? null);
-                      }
-                      setStorageBlocked(false);
-                      setStorageMessage('');
-                    } catch (reason) {
-                      setStorageMessage(
-                        reason instanceof LostFoundStorageError
-                          ? reason.message
-                          : '仍無法讀取本機草稿。',
-                      );
-                    }
-                  }}
-                >
-                  重新確認本機儲存
-                </Button>
-              </div>
-            ) : null}
+              ) : (
+                <p className={styles.muted}>未提供聯絡方式</p>
+              )}
+            </LostFoundItemTag>
 
-            {canManage && editing && fields ? (
-              <div className={styles.resolveBox}>
-                <h2>編輯刊登</h2>
-                {revisionStale ? (
-                  <div className={styles.notice} role="status">
-                    <p>
-                      伺服器上的內容已更新，你目前編輯的是較早版本的草稿。本機內容會保留；若直接儲存而伺服器已不同，會提示衝突。也可放棄草稿、改載入最新內容。
+            <div className={styles.panel}>
+              {legacyReadOnly ? (
+                <p className={styles.notice} role="status">
+                  這則為尚未完整遷移的舊版紀錄，目前僅供檢視，無法在此編輯或結案。
+                </p>
+              ) : null}
+
+              {storageBlocked ? (
+                <div className={styles.resolveBox}>
+                  <p className={styles.error} role="alert">
+                    {storageMessage}
+                  </p>
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const storedPending = loadLostFoundPending(editScope());
+                        const draft = loadLostFoundDraft(editScope());
+                        setPending(storedPending);
+                        if (storedPending?.fields) {
+                          setFields(lostFoundFormFields(storedPending.fields));
+                          setBaseUpdatedAt(storedPending.expectedUpdatedAt ?? null);
+                        } else if (draft) {
+                          setFields(lostFoundFormFields(draft));
+                          setBaseUpdatedAt(draft.expectedUpdatedAt ?? null);
+                        }
+                        setStorageBlocked(false);
+                        setStorageMessage('');
+                      } catch (reason) {
+                        setStorageMessage(
+                          reason instanceof LostFoundStorageError
+                            ? reason.message
+                            : '仍無法讀取本機草稿。',
+                        );
+                      }
+                    }}
+                  >
+                    重新確認本機儲存
+                  </Button>
+                </div>
+              ) : null}
+
+              {canManage && editing && fields ? (
+                <div className={styles.resolveBox}>
+                  <h2>編輯刊登</h2>
+                  {revisionStale ? (
+                    <div className={styles.notice} role="status">
+                      <p>
+                        伺服器上的內容已更新，你目前編輯的是較早版本的草稿。本機內容會保留；若直接儲存而伺服器已不同，會提示衝突。也可放棄草稿、改載入最新內容。
+                      </p>
+                      <div className={styles.actions}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={adoptServerRevision}
+                        >
+                          改用最新內容
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                  <LostFoundForm
+                    value={fields}
+                    errors={formErrors}
+                    busy={busy}
+                    disabled={storageBlocked && !pending}
+                    submitLabel={pending?.action === 'edit' ? '重試同一則更新' : '儲存更新'}
+                    statusMessage={statusMessage}
+                    onChange={onFieldsChange}
+                    onSubmit={() => void onSaveEdit()}
+                    onCancel={() => {
+                      if (pending) {
+                        setFormErrors({
+                          form: '尚有未確認的操作，請先重試，勿直接放棄後另開。',
+                        });
+                        return;
+                      }
+                      setEditing(false);
+                      setFields(toFormFields(item));
+                      setBaseUpdatedAt(item.updatedAt ?? null);
+                      setFormErrors({});
+                      setStatusMessage('');
+                      try {
+                        clearLostFoundDraft(editScope());
+                      } catch {
+                        // keep in-memory fields
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
+
+              {canManage && !editing ? (
+                <div className={styles.resolveBox}>
+                  {statusMessage ? (
+                    <p className={styles.success} role="status">
+                      {statusMessage}
                     </p>
-                    <div className={styles.actions}>
+                  ) : null}
+                  {formErrors.form ? (
+                    <p className={styles.error} role="alert">
+                      {formErrors.form}
+                    </p>
+                  ) : null}
+                  <div className={styles.actions}>
+                    {isOpenLostFoundStatus(item.status) ? (
                       <Button
                         type="button"
                         variant="outline"
                         disabled={busy}
-                        onClick={adoptServerRevision}
+                        onClick={() => {
+                          setEditing(true);
+                          setFields(fields ?? toFormFields(item));
+                          setBaseUpdatedAt(baseUpdatedAt ?? item.updatedAt ?? null);
+                          setConfirmResolve(false);
+                        }}
                       >
-                        改用最新內容
+                        編輯
                       </Button>
-                    </div>
-                  </div>
-                ) : null}
-                <LostFoundForm
-                  value={fields}
-                  errors={formErrors}
-                  busy={busy}
-                  disabled={storageBlocked && !pending}
-                  submitLabel={pending?.action === 'edit' ? '重試同一則更新' : '儲存更新'}
-                  statusMessage={statusMessage}
-                  onChange={onFieldsChange}
-                  onSubmit={() => void onSaveEdit()}
-                  onCancel={() => {
-                    if (pending) {
-                      setFormErrors({
-                        form: '尚有未確認的操作，請先重試，勿直接放棄後另開。',
-                      });
-                      return;
-                    }
-                    setEditing(false);
-                    setFields(toFormFields(item));
-                    setBaseUpdatedAt(item.updatedAt ?? null);
-                    setFormErrors({});
-                    setStatusMessage('');
-                    try {
-                      clearLostFoundDraft(editScope());
-                    } catch {
-                      // keep in-memory fields
-                    }
-                  }}
-                />
-              </div>
-            ) : null}
-
-            {canManage && !editing ? (
-              <div className={styles.resolveBox}>
-                {statusMessage ? (
-                  <p className={styles.success} role="status">
-                    {statusMessage}
-                  </p>
-                ) : null}
-                {formErrors.form ? (
-                  <p className={styles.error} role="alert">
-                    {formErrors.form}
-                  </p>
-                ) : null}
-                <div className={styles.actions}>
-                  {isOpenLostFoundStatus(item.status) ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => {
-                        setEditing(true);
-                        setFields(fields ?? toFormFields(item));
-                        setBaseUpdatedAt(baseUpdatedAt ?? item.updatedAt ?? null);
-                        setConfirmResolve(false);
-                      }}
-                    >
-                      編輯
-                    </Button>
-                  ) : null}
-                  {isOpenLostFoundStatus(item.status) ? (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      disabled={busy}
-                      onClick={() => setConfirmResolve(true)}
-                    >
-                      標示已結案
-                    </Button>
-                  ) : null}
-                  {pending?.action === 'resolve' ? (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      loading={busy}
-                      onClick={() => void onConfirmResolve()}
-                    >
-                      重試結案確認
-                    </Button>
-                  ) : null}
-                </div>
-                {confirmResolve ? (
-                  <div className={styles.notice}>
-                    <p>
-                      確認將「{item.title}
-                      」標示為已結案？結案後一般使用者仍可查看紀錄，但不可再編輯。
-                    </p>
-                    <div className={styles.actions}>
+                    ) : null}
+                    {isOpenLostFoundStatus(item.status) ? (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => setConfirmResolve(true)}
+                      >
+                        標示已結案
+                      </Button>
+                    ) : null}
+                    {pending?.action === 'resolve' ? (
                       <Button
                         type="button"
                         variant="primary"
                         loading={busy}
                         onClick={() => void onConfirmResolve()}
                       >
-                        確認結案
+                        重試結案確認
                       </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        disabled={busy}
-                        onClick={() => setConfirmResolve(false)}
-                      >
-                        取消
-                      </Button>
-                    </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-            ) : null}
+                  {confirmResolve ? (
+                    <div className={styles.notice}>
+                      <p>
+                        確認將「{item.title}
+                        」標示為已結案？結案後一般使用者仍可查看紀錄，但不可再編輯。
+                      </p>
+                      <div className={styles.actions}>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          loading={busy}
+                          onClick={() => void onConfirmResolve()}
+                        >
+                          確認結案
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => setConfirmResolve(false)}
+                        >
+                          取消
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
-            <p className={styles.actions}>
-              <Link className="btn" href={listHref}>
-                返回列表
-              </Link>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setReloadToken((value) => value + 1)}
-              >
-                重新讀取
-              </Button>
-            </p>
+              <p className={styles.actions}>
+                <Link className="btn" href={listHref}>
+                  返回列表
+                </Link>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setReloadToken((value) => value + 1)}
+                >
+                  重新讀取
+                </Button>
+              </p>
+            </div>
           </article>
         )}
       </div>

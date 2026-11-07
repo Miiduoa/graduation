@@ -33,7 +33,7 @@ async function execute(ctx, rawInput) {
   }
   const d = doc.data() || {};
   if (String(d.userId || '') !== String(uid)) {
-    return { found: false, repairId: input.repairId, forbidden: true };
+    return { found: false, repairId: input.repairId };
   }
 
   return {

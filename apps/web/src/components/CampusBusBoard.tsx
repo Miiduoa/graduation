@@ -10,6 +10,7 @@ import {
 } from '@/lib/transit';
 import { CampusApproachTrack } from './CampusApproachTrack';
 import { CampusArrivalRow } from './CampusArrivalRow';
+import { CampusIcon } from './CampusIcon';
 import { SchoolSelector } from './SchoolSelector';
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import css from './transit.module.css';
@@ -142,14 +143,13 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
     setRevision((value) => value + 1);
   }
   return (
-    <section className={css.board} aria-labelledby="campus-bus-title" aria-busy={busy} data-testid="campus-next">
+    <section className={`${css.board} ${css.physicalBoard}`} aria-labelledby="campus-bus-title" aria-busy={busy} data-testid="campus-next">
       <header className={css.boardHead}>
+        <span className={css.boardEmblem} aria-hidden="true"><CampusIcon name="bus" size={32} /></span>
         <div className={css.boardHeadCopy}>
           {selection ? <SchoolSelector compact variant="name" /> : <p className={css.boardSchool}>{schoolName}</p>}
           <h1 id="campus-bus-title" className={css.boardTitle}>公車</h1>
-          {offline ? <p className={css.boardStamp} role="status">目前離線，恢復網路後會重新查詢。</p> : null}
-          {!offline && stamp ? <p className={css.boardStamp}>{stamp}</p> : null}
-          {allEnded ? <p className={css.boardEndedHint}>這個方向今天的班次都結束了</p> : null}
+          <p className={css.boardLabel} aria-hidden="true">BUS STOP</p>
         </div>
         <button
           type="button"
@@ -161,6 +161,9 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
           <RefreshIcon />
         </button>
       </header>
+      {offline ? <p className={css.boardStamp} role="status">目前離線，恢復網路後會重新查詢。</p> : null}
+      {!offline && stamp ? <p className={css.boardStamp}>{stamp}</p> : null}
+      {allEnded ? <p className={css.boardEndedHint}>這個方向今天的班次都結束了</p> : null}
       <div className={css.segmentWrap} data-campus-segments="true" data-sticky-cover="true">
         <div className={css.segmentBar} role="tablist" aria-label="站牌方向">
           {CAMPUS_SEGMENTS.map((item) => (
@@ -182,7 +185,13 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         </div>
       </div>
       <p className={css.waitLine}>{waitLine}</p>
-      {approach && !missing && !showSkeleton ? <CampusApproachTrack model={approach} /> : null}
+      {approach && !missing && !showSkeleton ? (
+        <CampusApproachTrack
+          key={approachRow ? campusRowKey(approachRow) : undefined}
+          model={approach}
+          animateUpdates={!offline && !liveUnavailable}
+        />
+      ) : null}
       {missing ? (
         <div className={css.boardError} role="status">
           <p>暫時讀不到資料，請稍後再試</p>
@@ -197,6 +206,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               <CampusArrivalRow
                 row={row}
                 now={clock}
+                animateUpdates={!offline && !liveUnavailable}
                 active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
                 onSelect={() => setFocusedKey(campusRowKey(row))}
               />
@@ -211,6 +221,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               <CampusArrivalRow
                 row={row}
                 now={clock}
+                animateUpdates={!offline && !liveUnavailable}
                 active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
                 onSelect={() => setFocusedKey(campusRowKey(row))}
               />

@@ -105,6 +105,8 @@ export async function askCampusAssistant(input: {
   senseSnapshot?: CampusSenseSnapshot | null;
   /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
   mode?: CampusAssistantMode;
+  /** Stable cloud conversation id; omit only when the caller has not started one. */
+  sessionId?: string;
 }): Promise<{
   content: string;
   hasActions: boolean;
@@ -212,7 +214,7 @@ export async function askCampusAssistant(input: {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
         content: '可以問「我現在有課嗎？」、「下一堂課在哪裡？」或「今天有哪些空堂？」。查到課程後，也可以接著問教室與下課時間。' };
     }
-    const snapshot = await abortableCampusRead(() => collectOnDeviceSchoolContext({
+    const collected = await abortableCampusRead(() => collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
@@ -225,6 +227,12 @@ export async function askCampusAssistant(input: {
     }), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
     scopeCheck(input, false);
     assertNotCancelled();
+    // A cached context can outlive an account switch or be restored without
+    // owner metadata. Direct timetable and planning tools must fail closed,
+    // not just the native prompt and model-selected semantic reads.
+    const snapshot = !platform && (!uid || collected.ownerUid !== uid)
+      ? { ...collected, timetable: { source: 'not-available' as const, updatedAt: null, courses: [] } }
+      : collected;
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
@@ -331,6 +339,11 @@ export async function askCampusAssistant(input: {
       throw new OnDeviceAssistantError('model-busy');
     }
 
+    // Native inference can consume private context before an eventual response is discarded.
+    // Recheck after the selector and shared engine state, immediately before sending it.
+    scopeCheck(input, false);
+    assertNotCancelled();
+
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
     // Reserve enough context for the instruction, trusted data and generated answer.
@@ -346,6 +359,7 @@ export async function askCampusAssistant(input: {
         { role: 'system', content: formatOnDeviceSchoolPrompt(
           { ...snapshot, checkedAt: new Date().toISOString() },
           useCampusReads ? validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }) : null,
+          uid,
         ) },
         ...compactHistory,
       ],
@@ -372,6 +386,7 @@ export async function askCampusAssistant(input: {
   const schoolName = typeof input.schoolName === 'string'
     ? input.schoolName.trim().slice(0, 160)
     : '';
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
   const result = await callable({
     messages,
     context: {
@@ -380,6 +395,7 @@ export async function askCampusAssistant(input: {
       screen: 'campus-assistant',
       locale: 'zh-TW',
       timezone: 'Asia/Taipei',
+      ...(sessionId ? { sessionId } : {}),
     },
   });
   scopeCheck(input, true);

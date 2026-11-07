@@ -59,4 +59,27 @@ describe('proposeOrder assistant write permission', () => {
     expect(result.draft?.cafeteriaId).toBe('cafe');
     expect(result.draft?.items?.[0]?.menuItemId).toBe('rice');
   });
+
+  test.each(['permission-denied', 'unauthenticated', 7, 16])('propagates a cafeteria authorization error %p', async (code) => {
+    mockDocuments.set('users/alice/settings/assistantPermissions', { createOrder: true });
+    const error = Object.assign(new Error('private-document-id'), { code });
+    mockDocuments.set('schools/pu/cafeterias/cafe', error);
+
+    await expect(proposeOrder.execute(
+      { uid: 'alice', schoolId: 'pu' },
+      { cafeteriaId: 'cafe', items: [{ menuItemId: 'rice', quantity: 1 }] },
+    )).rejects.toBe(error);
+  });
+
+  test('a temporary cafeteria failure still returns the existing failure result', async () => {
+    mockDocuments.set('users/alice/settings/assistantPermissions', { createOrder: true });
+    mockDocuments.set('schools/pu/cafeterias/cafe', Object.assign(new Error('temporarily unavailable'), { code: 'unavailable' }));
+
+    const result = await proposeOrder.execute(
+      { uid: 'alice', schoolId: 'pu' },
+      { cafeteriaId: 'cafe', items: [{ menuItemId: 'rice', quantity: 1 }] },
+    );
+    expect(result).toMatchObject({ success: false, errorCode: 'propose_failed' });
+    expect(result.draft).toBeUndefined();
+  });
 });
