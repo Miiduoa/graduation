@@ -104,7 +104,8 @@ Prompt 將歷史當作理解追問的資料，不把先前模型回答視為教�
 pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorRuntime.test.ts src/features/nuni/CourseStudyPanel.test.tsx src/features/nuni/StudyReadAloud.test.tsx src/features/nuni/CourseMaterials.test.tsx src/features/nuni/courseStudyNotes.test.ts src/features/nuni/courseStudyProgress.test.ts src/features/nuni/CourseStudyProgress.test.tsx
 ```
 
-測試另覆蓋引用精確定位、原文完整保留、重複引句提示與三步對照的焦點行為。\n測試涵蓋完整分段、缺頁、錯引、HTML 文字處理、不自動啟動模型、worker 實際終止、
+測試另覆蓋引用精確定位、原文完整保留、重複引句提示與三步對照的焦點行為。
+測試涵蓋完整分段、缺頁、錯引、HTML 文字處理、不自動啟動模型、worker 實際終止、
 過期回應隔離、頁面／模式切換後還原、追問分支、長歷史縮減、同名來源替換、匯入失敗保留、
 帳號切換與權限撤銷、本機聲音限制、輸入超限、下載失敗恢復及文字筆記不提前匯出隱藏答案。
 進度檔另驗證格式版本、帳號／課程一致、來源完整性、預覽確認、取消與晚回應、關閉重開後還原，以及還原後的追問分支。
