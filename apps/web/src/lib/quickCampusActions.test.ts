@@ -60,7 +60,7 @@ it.each([
   '進入 Tron Class',
 ])('opens the school course service for an explicit platform name: %s', (utterance) => {
   expect(getQuickCampusActions(utterance)).toEqual([
-    expect.objectContaining({ href: '/school-courses', name: '玩課雲課程', access: 'school' }),
+    expect.objectContaining({ href: '/school-courses', name: '校方課程', access: 'public' }),
   ]);
 });
 

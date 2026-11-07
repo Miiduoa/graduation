@@ -26,14 +26,14 @@ HOUSING_TEXT = "Campus housing: dormitory maintenance and repair requests."
 BUS_TEXT = "Campus transit: shuttle bus arrivals and stations."
 DOCS = [
     {
-        "source": "smoke:housing",
+        "source": "firestore:announcements",
         "text": HOUSING_TEXT,
-        "metadata": {"campus": "pu", "category": "housing"},
+        "metadata": {"schoolId": "pu", "visibility": "public", "category": "housing"},
     },
     {
-        "source": "smoke:bus",
+        "source": "firestore:events",
         "text": BUS_TEXT,
-        "metadata": {"campus": "nchu", "category": "transit"},
+        "metadata": {"schoolId": "nchu", "visibility": "public", "category": "transit"},
     },
 ]
 
@@ -50,20 +50,25 @@ def assert_saved_records(expected_count: int) -> None:
     collection = indexer.get_or_create_collection(COLLECTION)
     assert collection.count() == expected_count, f"wrong row count: {collection.count()}"
     housing = collection.get(
-        where={"source": "smoke:housing"}, include=["documents", "metadatas"]
+        where={"source": "firestore:announcements"}, include=["documents", "metadatas"]
     )
     assert housing["documents"] == [HOUSING_TEXT], housing
-    assert housing["metadatas"][0]["campus"] == "pu", housing
+    assert housing["metadatas"][0]["schoolId"] == "pu", housing
     if expected_count == 2:
         bus = collection.get(
-            where={"source": "smoke:bus"}, include=["documents", "metadatas"]
+            where={"source": "firestore:events"}, include=["documents", "metadatas"]
         )
         assert bus["documents"] == [BUS_TEXT], bus
         matches = retriever.retrieve(
-            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed
+            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed, school_id="pu"
         )
-        assert len(matches) == 1 and matches[0].source == "smoke:housing", matches
+        assert len(matches) == 1 and matches[0].source == "firestore:announcements", matches
         assert matches[0].score > 0.99, matches
+        other = retriever.retrieve(
+            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed, school_id="nchu"
+        )
+        assert [row.text for row in other] == [BUS_TEXT], other
+        assert not retriever.retrieve("housing", collection_name=COLLECTION, embedding_fn=embed)
 
 
 def assert_legacy_rollback() -> None:
@@ -110,7 +115,7 @@ def main() -> None:
             [DOCS[0]], collection_name=COLLECTION, embedding_fn=embed
         )
         assert_saved_records(2)  # upsert does not duplicate the known ID
-        indexer.delete_by_source("smoke:bus", collection_name=COLLECTION)
+        indexer.delete_by_source("firestore:events", collection_name=COLLECTION)
         assert_saved_records(1)
     elif args.stage == "restart":
         assert store.exists(), "migration store is missing"

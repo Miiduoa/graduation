@@ -35,7 +35,7 @@ it.each(['WOW Class', 'TronClass', 'LMS', '玩課雲'])(
   (query) => {
     const courseService = searchCampusServices(query).find((service) => service.href === '/school-courses');
     expect(courseService?.name).toBe(ACADEMIC_LMS_SECTIONS[0].label);
-    expect(courseService?.access).toBe('school');
+    expect(courseService?.access).toBe('public');
     expect(courseService?.category).toBe('study');
   },
 );
@@ -43,7 +43,7 @@ it.each(['WOW Class', 'TronClass', 'LMS', '玩課雲'])(
 it('lists the read-only homework surface as a searchable secondary', () => {
   const service = searchCampusServices('玩課雲作業', 'all', true).find((item) => item.href === '/school-lms');
   expect(service?.name).toBe(ACADEMIC_LMS_SECTIONS[1].label);
-  expect(service?.access).toBe('school');
+  expect(service?.access).toBe('public');
 });
 
 it.each(['總機', '職涯', '實習'])('finds school info through %s without a retired career entry', (query) => {
@@ -132,8 +132,8 @@ it('keeps academic vocabulary aligned across directory primaries', () => {
   expect(byHref.get('/grades?tab=semester')).toBe(ACADEMIC_SECTIONS[2].label);
   expect(byHref.get('/credit-planner')).toBe(ACADEMIC_SECTIONS[3].label);
   expect(byHref.get('/calendar')).toBe(ACADEMIC_SECTIONS[4].label);
-  expect(byHref.get('/school-courses')).toBe('玩課雲課程');
-  expect(byHref.get('/school-lms')).toBe('玩課雲作業');
+  expect(byHref.get('/school-courses')).toBe('校方課程');
+  expect(byHref.get('/school-lms')).toBe('校方作業與教材');
   expect(byHref.get('/grades?tab=feedback')).toBe('成績回饋');
 });
 

@@ -1268,3 +1268,22 @@ test('a date follow-up re-reads announcements from the current authorized snapsh
     jest.useRealTimers();
   }
 });
+
+test('offline school contacts use only the selected directory without model, timetable or network access', async () => {
+  const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
+  for (const [schoolId, name, phone] of [
+    ['nthu', '國立清華大學', '(03)5715131'],
+    ['ncku', '國立成功大學', '(06)2757575'],
+  ]) {
+    const answer = await askCampusAssistant({
+      ...input(), mode: 'device', scope: { uid: '', schoolId }, schoolName: name,
+      messages: [{ role: 'user', content: '請問學校總機電話是多少？' }],
+    });
+    expect(answer).toMatchObject({ source: 'device', tool: 'school-directory', hasActions: false });
+    expect(answer.content).toContain(phone);
+    expect(answer.content).toContain('教育部');
+  }
+  expect(collectOnDeviceSchoolContext).not.toHaveBeenCalled();
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});

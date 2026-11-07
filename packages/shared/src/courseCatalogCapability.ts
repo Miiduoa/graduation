@@ -5,7 +5,7 @@ import { resolveSchoolPublicServices } from './schoolPublicServices';
 /**
  * In-app integrated course catalog providers.
  * Unknown schools have no provider — do not invent semesters, buildings, or filters.
- * Public official course URLs come from schoolPublicServices (verified separately);
+ * Public course links are verified separately;
  * those links are not evidence of private academic / in-app catalog capability.
  */
 export type CourseCatalogProviderId = 'pu-mypu';
@@ -55,6 +55,19 @@ export function hasIntegratedCourseCatalog(schoolId?: string | null): boolean {
   return resolveCourseCatalogCapability(schoolId) != null;
 }
 
+// Course-only destinations verified through https://nust.edu.tw/resource.php
+// and the universities' course offices on 2026-11-06.
+const additionalPublicCourses = new Map<string, { label: string; url: string }>([
+  ['ncnu', { label: '暨南大學本學期開設課程', url: 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall' }],
+  ['ncue', { label: '彰師大開課課程查詢', url: 'https://webap0.ncue.edu.tw/DEANV2/Other/OB010' }],
+  ['ncut', { label: '勤益科大本學期開課查詢', url: 'https://nmsd.ncut.edu.tw/wbcmss/Query/CourseView' }],
+  ['ncyu', { label: '嘉義大學全校課程查詢', url: 'https://web085003.adm.ncyu.edu.tw/pub_course.aspx' }],
+  ['ndhu', { label: '東華大學全校課程查詢', url: 'https://sys.ndhu.edu.tw/aa/class/course/' }],
+  ['nfu', { label: '虎尾科大學生專區（教務查詢整合平台入口）', url: 'https://nfu.edu.tw/zh_tw/pages/students' }],
+  ['nuk', { label: '高雄大學課程資料查詢', url: 'https://course.nuk.edu.tw/QueryCourse/QueryCourse.asp' }],
+  ['nuu', { label: '聯合大學課程檢索操作說明', url: 'https://curr.nuu.edu.tw/p/404-1076-11586.php' }],
+]);
+
 export function resolveOfficialCourseQueryLink(
   schoolId?: string | null,
 ): { label: string; url: string; sourceLabel?: string } | null {
@@ -70,6 +83,8 @@ export function resolveOfficialCourseQueryLink(
   }
   const publicId = toPublicSchoolId(schoolId);
   if (!publicId) return null;
+  const courseLink = additionalPublicCourses.get(publicId);
+  if (courseLink) return courseLink;
   const fromCapability = lookupIntegratedCatalog(publicId);
   if (fromCapability) {
     return { label: fromCapability.label, url: fromCapability.officialQueryUrl };

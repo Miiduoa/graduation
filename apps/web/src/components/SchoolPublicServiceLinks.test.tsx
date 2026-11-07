@@ -94,11 +94,21 @@ it('holds back links while catalog loading or on catalog error', () => {
   expect(screen.queryByRole('link')).toBeNull();
 });
 
-it('keeps unknown schools without substituting another campus link', () => {
+it('offers the selected school website when a dedicated career link is unavailable', () => {
   browsing.id = 'nthu';
   browsing.name = '國立清華大學';
   render(<SchoolPublicServiceLinks service="career" />);
-  expect(screen.getByRole('status').textContent).toMatch(/尚未提供/);
+  const link = screen.getByRole('link', { name: '前往國立清華大學官網' });
+  expect(new URL(link.getAttribute('href')!).hostname).toBe('www.nthu.edu.tw');
+});
+
+it('uses the course-specific entry and suppresses a mismatched school identity', () => {
+  browsing.id = 'ndhu';
+  browsing.name = '國立東華大學';
+  const view = render(<SchoolPublicServiceLinks service="courses" />);
+  expect(screen.getByRole('link').getAttribute('href')).toBe('https://sys.ndhu.edu.tw/aa/class/course/');
+  browsing.name = '靜宜大學';
+  view.rerender(<SchoolPublicServiceLinks service="courses" />);
   expect(screen.queryByRole('link')).toBeNull();
 });
 

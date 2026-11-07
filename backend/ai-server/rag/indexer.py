@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from typing import Sequence
 
@@ -36,11 +37,6 @@ def get_or_create_collection(name: str = "campus") -> chromadb.Collection:
     )
 
 
-def _doc_id(source: str, idx: int, text: str = "") -> str:
-    h = hashlib.md5(f"{source}:{idx}:{text[:80]}".encode()).hexdigest()[:12]
-    return f"{source}_{idx}_{h}"
-
-
 def index_documents(
     documents: Sequence[dict],
     collection_name: str = "campus",
@@ -64,10 +60,11 @@ def index_documents(
         chunks = _splitter.split_text(text)
 
         for i, chunk in enumerate(chunks):
-            doc_id = _doc_id(source, i, chunk)
+            identity = [source, extra_meta.get("schoolId"), extra_meta.get("firestore_id"), i, chunk]
+            doc_id = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
             all_chunks.append(chunk)
             all_ids.append(doc_id)
-            all_metas.append({"source": source, "chunk_index": i, **extra_meta})
+            all_metas.append({**extra_meta, "source": source, "chunk_index": i})
 
     if not all_chunks:
         return 0
