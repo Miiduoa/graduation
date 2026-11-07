@@ -105,7 +105,7 @@ describe('versioned independent review checkpoint', () => {
       (item: any) => { item.practice.cardIds.reverse(); },
       (item: any) => { item.practice.cardIds = [item.practice.cardIds[0], item.practice.cardIds[0]]; },
       (item: any) => { item.practice.cardIds[0] = '0:0:exam:1'; },
-      (item: any) => { item.practice.responses[item.practice.cardIds[1]].answerVisible = true; },
+      (item: any) => { item.practice.responses[item.practice.cardIds[1]].attempt = ''; item.practice.responses[item.practice.cardIds[1]].answerVisible = true; },
       (item: any) => { item.practice.responses[item.practice.cardIds[0]].attempt = ''; },
       (item: any) => { item.practice.index = 99; },
       (item: any) => { item.practice.extra = 'injected'; },
