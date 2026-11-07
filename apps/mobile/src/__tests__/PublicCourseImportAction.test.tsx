@@ -214,3 +214,64 @@ test('leaving and returning invalidates pending work, rejects double taps and pe
   await view.findByText('已加入 2 個上課時段。');
   expect(append).toHaveBeenCalledTimes(2);
 });
+
+
+test('warns about same-term overlapping imported classes before writing, requiring a second confirmation', async () => {
+  const existing = preparePublicCourseTimetableImport('nthu', {
+    ...nthu, code: '11510AES 520400', title: '既有課程', teacher: '另一位教授',
+    meetings: [{ time: 'M3M4', room: '原教室' }],
+  })!;
+  await ledger.appendPersonalImports(scope, existing.rows);
+  jest.clearAllMocks();
+  const view = renderAction();
+  review(view);
+  confirm(view);
+  await view.findByText('仍要加入（保留兩門課）');
+  expect(view.getByText(/本裝置已匯入課表發現 1 個重疊時段/)).toBeTruthy();
+  expect(view.getByText(/分析化學專題 與 既有課程/)).toBeTruthy();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('仍要加入（保留兩門課）'));
+  await view.findByText('已加入 2 個上課時段。');
+  expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(3);
+});
+
+test('overlap check respects school, term, distinct weekdays, adjacent periods and exact duplicates', () => {
+  const current = preparePublicCourseTimetableImport('nthu', nthu)!;
+  const existing = current.rows.map((row) => ({
+    ...row, batchId: 'existing', importedAt: new Date('2026-11-06').toISOString(),
+  }));
+  const find = require('../services/publicCourseTimetableImport').findCatalogTimetableOverlaps as
+    (rows: typeof current.rows, records: typeof existing) => unknown[];
+  expect(find(current.rows, existing)).toHaveLength(0);
+  expect(find(current.rows, existing.map((row) => ({ ...row, academicYear: '114' })))).toHaveLength(0);
+  expect(find(current.rows, existing.map((row) => ({ ...row, schoolId: 'ncnu' })))).toHaveLength(0);
+  expect(find(current.rows, existing.map((row) => ({ ...row, dayOfWeek: 2 })))).toHaveLength(0);
+  expect(find(current.rows, existing.map((row) => ({
+    ...row, courseCode: 'ANOTHER', startTime: '12:00', endTime: '13:00',
+  })))).toHaveLength(0);
+  expect(find(current.rows, existing.map((row) => ({
+    ...row, courseCode: 'ANOTHER', startTime: '10:30', endTime: '11:30',
+  })))).toHaveLength(1);
+});
+
+test('an intervening timetable update invalidates an acknowledged overlap before commit', async () => {
+  const existing = preparePublicCourseTimetableImport('nthu', {
+    ...nthu, code: '11510AES 520400', title: '衝突課程', meetings: [{ time: 'M3M4', room: '原教室' }],
+  })!;
+  await ledger.appendPersonalImports(scope, existing.rows);
+  const view = renderAction();
+  review(view);
+  confirm(view);
+  await view.findByText('仍要加入（保留兩門課）');
+  const another = preparePublicCourseTimetableImport('nthu', {
+    ...nthu, code: '11510AES 520500', title: '另一門新課', meetings: [{ time: 'T1T2', room: '新教室' }],
+  })!;
+  await ledger.appendPersonalImports(scope, another.rows);
+  const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
+  fireEvent.press(view.getByText('仍要加入（保留兩門課）'));
+  await view.findByText(/未能確認加入結果/);
+  expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
+  expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(2);
+  confirm(view);
+  await view.findByText('仍要加入（保留兩門課）');
+});

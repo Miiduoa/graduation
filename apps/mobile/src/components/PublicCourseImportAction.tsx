@@ -2,8 +2,8 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
-import { appendPersonalImports, type PersonalImportScope } from '../services/personalImports';
-import { preparePublicCourseTimetableImport, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
+import { appendPersonalImports, snapshotPersonalImports, type PersonalImportScope } from '../services/personalImports';
+import { findCatalogTimetableOverlaps, preparePublicCourseTimetableImport, type CatalogTimetableOverlap, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -16,6 +16,7 @@ type Props = {
 };
 type Outcome =
   | { status: 'review' | 'saving' | 'error' }
+  | { status: 'conflict'; overlaps: CatalogTimetableOverlap[]; recordsJson: string }
   | { status: 'saved'; added: number; duplicates: number };
 
 type ReviewProps = {
@@ -49,11 +50,27 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
     const run = generation.current;
     if (pending.current || outcome.status === 'saved' || !active(run)) return;
     pending.current = true;
+    const acknowledged = outcome.status === 'conflict' ? outcome : null;
     setOutcome({ status: 'saving' });
     try {
-      // The ledger serializes writes, rejects metadata conflicts and deduplicates
-      // retries. It does not touch either of the existing import draft stores.
-      const result = await appendPersonalImports(scope, preview.rows, () => active(run), { protectCatalogTimetableSlots: true });
+      // A first confirmation reads this owner's own ledger after pending writes.
+      // If a different class overlaps, a second explicit acknowledgement is required.
+      let recordsJson = acknowledged?.recordsJson;
+      if (recordsJson === undefined) {
+        const current = await snapshotPersonalImports(scope, () => active(run));
+        if (!active(run)) return;
+        recordsJson = JSON.stringify(current.records);
+        const overlaps = findCatalogTimetableOverlaps(preview.rows, current.records);
+        if (overlaps.length) {
+          setOutcome({ status: 'conflict', overlaps, recordsJson });
+          return;
+        }
+      }
+      // The ledger serializes writes and checks that the reviewed records did
+      // not change before committing. Other import drafts are untouched.
+      const result = await appendPersonalImports(scope, preview.rows, () => active(run), {
+        protectCatalogTimetableSlots: true, expectedRecordsJson: recordsJson,
+      });
       if (active(run)) setOutcome({ status: 'saved', added: result.added, duplicates: result.duplicates });
     } catch {
       if (active(run)) setOutcome({ status: 'error' });
@@ -69,7 +86,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       {row.title} · 星期{row.dayOfWeek ? '一二三四五六日'[row.dayOfWeek - 1] : '待確認'} {row.startTime}–{row.endTime}
       {row.location ? ` · ${row.location}` : ' · 教室未提供'}
     </Text>)}
-    <Text style={body}>僅加入這個帳號在此裝置的個人課表，不代表校方選課成功。請核對修課資格與衝堂；原有匯入草稿不會變更。</Text>
+    <Text style={body}>僅加入這個帳號在此裝置的個人課表，不代表校方選課成功。衝堂檢查只涵蓋本裝置已匯入的同校同學期時段，不含手動課表、校方正式紀錄或其他裝置；原有草稿不會變更。</Text>
     {preview.issues.map((issue, index) => <Text key={index} style={body}>{issue.message}</Text>)}
     {outcome.status === 'saved' ? <>
       <Text accessibilityLiveRegion="polite" style={body}>
@@ -82,10 +99,17 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         });
       }} />
     </> : <>
+      {outcome.status === 'conflict' && <>
+        <Text accessibilityRole="alert" style={body}>本裝置已匯入課表發現 {outcome.overlaps.length} 個重疊時段。請先核對；兩門課都保留可能衝堂，並不代表校方正式選課。</Text>
+        {outcome.overlaps.map((overlap, index) => <Text key={index} style={body}>
+          星期{'一二三四五六日'[overlap.dayOfWeek - 1]} · {overlap.incomingTitle} 與 {overlap.existingTitle}（原有 {overlap.startTime}–{overlap.endTime}）
+        </Text>)}
+      </>}
       {outcome.status === 'error' ? <Text accessibilityRole="alert" style={body}>
-        未能確認加入結果。請重試；相同時段不會重複新增。若仍失敗，請從個人匯入頁核對現有資料。
+        未能確認加入結果（資料可能已變動）。請重新核對後重試；相同時段不會重複新增。若仍失敗，請從個人匯入頁核對現有資料。
       </Text> : null}
-      <Button text={outcome.status === 'saving' ? '正在加入…' : '確認加入個人課表'} kind="primary"
+      <Button text={outcome.status === 'saving' ? '正在加入…' :
+        outcome.status === 'conflict' ? '仍要加入（保留兩門課）' : '確認加入個人課表'} kind="primary"
         disabled={outcome.status === 'saving'} onPress={() => void confirm()} />
     </>}
     <Button text="收起核對" kind="ghost" disabled={outcome.status === 'saving'} onPress={onClose} />

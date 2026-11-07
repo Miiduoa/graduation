@@ -164,11 +164,14 @@ export function appendPersonalImports(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
-  options: { restoreBackup?: boolean; protectCatalogTimetableSlots?: boolean } = {},
+  options: { restoreBackup?: boolean; protectCatalogTimetableSlots?: boolean; expectedRecordsJson?: string } = {},
 ) {
   return mutate(scope, active, (current) => {
     if (rows.some((row) => row.schoolId !== scope.schoolId))
       throw new Error('資料的學校與目前選擇不同。');
+    // A conflict acknowledgement is valid only for the exact records reviewed.
+    if (options.expectedRecordsJson !== undefined && JSON.stringify(current.records) !== options.expectedRecordsJson)
+      throw new Error('個人課表已更新，請重新核對衝堂後再加入。');
     if (options.protectCatalogTimetableSlots) {
       // Run alongside normal duplicate checks under the same owner/school lock.
       // Instructor changes must not create another copy of the same class slot.
