@@ -10,6 +10,7 @@ let mockUid: string | null = 'student-a';
 let mockSchool = 'pu';
 let mockRootReady = false;
 let mockPublicReady = false;
+let mockOverlayPrompt = '幫我查清大的資料庫課程';
 const mockRootDispatch = jest.fn();
 const mockPublicDispatch = jest.fn();
 const mockClose = jest.fn();
@@ -32,7 +33,7 @@ jest.mock('../app/publicNavigation', () => ({
   subscribePublicNavigationReady: () => () => {},
 }));
 jest.mock('../app/useAIOverlay', () => ({
-  useAIOverlay: () => ({ visible: true, mode: 'chat', initialPrompt: '幫我查清大的資料庫課程' }),
+  useAIOverlay: () => ({ visible: true, mode: 'chat', initialPrompt: mockOverlayPrompt }),
   aiOverlay: { close: () => mockClose() },
 }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUid ? { uid: mockUid } : null }) }));
@@ -82,6 +83,18 @@ function response(courses = [course]) {
     operation: { id: operation.id, version: 1, responseSchemaVersion: 1, access: 'anonymous-public' },
   }) };
 }
+const filteredQuestion = '幫我查清大的星期一 3 學分資料庫課程';
+const filters = { weekday: 1, credits: 3 };
+function filteredResponse(empty = false) {
+  const operation = resolvePublicCourseOperation('nthu', 2)!;
+  return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({
+    schoolId: 'nthu', sourceUrl: operation.sourceUrl, truncated: false, filters, unresolvedCount: 2,
+    courses: empty ? [] : [{ ...course, time: 'M3M4\nR5R6', room: '資電館 101\n資電館 202',
+      meetings: [{ time: 'M3M4', room: '資電館 101' }, { time: 'R5R6', room: '資電館 202' }] }],
+    fetchedAt: '2026-11-07T06:00:00.000Z',
+    operation: { id: operation.id, version: 2, responseSchemaVersion: 2, access: operation.access },
+  }) };
+}
 const navigation = () => ({ navigate: jest.fn(), getState: () => ({ routeNames: ['CourseCatalog'] }) });
 async function ask(view: ReturnType<typeof render>, question = '幫我查清大的資料庫課程') {
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), question);
@@ -95,6 +108,7 @@ function deferred<T>() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockUid = 'student-a'; mockSchool = 'pu'; mockRootReady = false; mockPublicReady = false;
+  mockOverlayPrompt = '幫我查清大的資料庫課程';
   fetchSource.mockReset().mockResolvedValue(response());
   globalThis.fetch = fetchSource;
   jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
@@ -218,4 +232,71 @@ test('an overlay without a ready navigation container does not present a false i
   expect(view.queryByText('開啟完整查課結果')).toBeNull();
   expect(view.getByText('查看校方課程目錄')).toBeTruthy();
   expect(mockClose).not.toHaveBeenCalled();
+});
+
+test('a natural-language filtered answer shows its conditions and all weekdays, then hands off the original read instead of the new draft', async () => {
+  fetchSource.mockResolvedValue(filteredResponse());
+  const nav = navigation();
+  const view = render(<CampusAssistantScreen navigation={nav} />);
+  await ask(view, filteredQuestion);
+  await view.findByText('資料庫系統');
+  expect(Object.fromEntries(new URL(fetchSource.mock.calls[0][0]).searchParams)).toEqual({
+    schoolId: 'nthu', q: '資料庫', weekday: '1', credits: '3',
+  });
+  expect(view.getByText('查詢條件：星期一有課 · 3 學分')).toBeTruthy();
+  expect(view.getByText('上課日：星期一、星期四')).toBeTruthy();
+  expect(view.getByText('星期條件表示當天有課，同一門課也可能在其他天上課。')).toBeTruthy();
+  expect(view.getByText('另有 2 筆課程的篩選資料不足，未列入符合結果。')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我想改問週五的課');
+  fireEvent.press(view.getByText('開啟完整查課結果'));
+  expect(nav.navigate).toHaveBeenCalledWith('CourseCatalog', {
+    publicSchoolId: 'nthu', filter: { keyword: '資料庫', weekday: 1, credits: 3 }, autoSearch: true,
+  });
+  expect(view.getByLabelText('詢問校園助理').props.value).toBe('我想改問週五的課');
+  expect(mockSchool).toBe('pu');
+  expect(localLLM.generate).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
+test.each(['empty', 'unavailable'])('the filtered %s answer keeps conditions on the follow-up CTA', async (status) => {
+  fetchSource.mockResolvedValue(status === 'empty' ? filteredResponse(true)
+    : { ok: false, status: 502, headers: { get: () => null } });
+  const nav = navigation();
+  const view = render(<CampusAssistantScreen navigation={nav} />);
+  await ask(view, filteredQuestion);
+  await view.findByText('查詢條件：星期一有課 · 3 學分');
+  const label = status === 'empty' ? '開啟完整查課結果' : '到查課頁重試';
+  fireEvent.press(view.getByText(label));
+  expect(nav.navigate).toHaveBeenCalledWith('CourseCatalog', {
+    publicSchoolId: 'nthu', filter: { keyword: '資料庫', weekday: 1, credits: 3 }, autoSearch: true,
+  });
+  expect(view.queryByText('資料庫系統')).toBeNull();
+  if (status === 'empty') expect(view.getByText('另有 2 筆課程的篩選資料不足，未列入符合結果。')).toBeTruthy();
+  else expect(view.queryByText(/這次沒有符合/)).toBeNull();
+});
+
+test.each(['school', 'public'])('the %s overlay preserves all filters through the actual navigation bridge', async (owner) => {
+  mockRootReady = owner === 'school'; mockPublicReady = owner === 'public';
+  if (owner === 'public') mockUid = null;
+  mockOverlayPrompt = filteredQuestion;
+  fetchSource.mockResolvedValue(filteredResponse());
+  const view = render(<AIOverlayHost />);
+  expect(fetchSource).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  await view.findByText('資料庫系統');
+  fireEvent.press(view.getByText('開啟完整查課結果'));
+  const params = { publicSchoolId: 'nthu', filter: { keyword: '資料庫', weekday: 1, credits: 3 }, autoSearch: true };
+  if (owner === 'school') {
+    expect(mockRootDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'NAVIGATE', payload: { name: '學習', params: { screen: 'CourseCatalog', params } },
+    }));
+    expect(mockPublicDispatch).not.toHaveBeenCalled();
+  } else {
+    expect(mockPublicDispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'NAVIGATE', payload: { name: 'CourseCatalog', params },
+    }));
+    expect(mockRootDispatch).not.toHaveBeenCalled();
+  }
+  expect(mockClose).toHaveBeenCalledTimes(1);
+  expect(mockSchool).toBe('pu');
 });

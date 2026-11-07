@@ -2,6 +2,12 @@ import {
   resolvePublicCourseOperation,
   type PublicCourseOperationReceipt,
 } from './publicCourseOperations';
+import {
+  evaluatePublicCourseFilters,
+  hasPublicCourseFilters,
+  parsePublicCourseFilters,
+  type PublicCourseFilters,
+} from './publicCourseFilters';
 
 export type PublicCatalogMeeting = { time: string; room: string };
 
@@ -27,6 +33,10 @@ export type PublicCourseCatalogResponse = {
   fetchedAt?: string;
   /** Added by the reviewed operation dispatcher. Older servers may omit this receipt. */
   operation?: PublicCourseOperationReceipt;
+  /** Present only on a v2 filtered response, so older servers cannot silently drop conditions. */
+  filters?: PublicCourseFilters;
+  /** Keyword matches with no known mismatch but insufficient data for an active filter. */
+  unresolvedCount?: number;
   courses: PublicCatalogCourse[];
   truncated: boolean;
 };
@@ -42,12 +52,32 @@ export function formatPublicCatalogFetchedAt(iso: string): string | null {
 export function isPublicCourseCatalog(
   value: unknown,
   expectedSchoolId: PublicCourseCatalogResponse['schoolId'],
+  expectedFilters?: PublicCourseFilters,
 ): value is PublicCourseCatalogResponse {
   if (!value || typeof value !== 'object') return false;
   if (expectedSchoolId !== 'ncnu' && expectedSchoolId !== 'nthu') return false;
-  const operation = resolvePublicCourseOperation(expectedSchoolId);
+  const filters = parsePublicCourseFilters(expectedFilters ?? {});
+  if (!filters) return false;
+  const filtered = hasPublicCourseFilters(filters);
+  const operation = resolvePublicCourseOperation(expectedSchoolId, filtered ? 2 : 1);
   if (!operation) return false;
   const data = value as Partial<PublicCourseCatalogResponse>;
+  if (filtered) {
+    const applied = parsePublicCourseFilters(data.filters);
+    if (
+      !data.operation ||
+      !applied ||
+      applied.weekday !== filters.weekday ||
+      applied.credits !== filters.credits ||
+      typeof data.unresolvedCount !== 'number' ||
+      !Number.isSafeInteger(data.unresolvedCount) ||
+      data.unresolvedCount < 0 ||
+      data.unresolvedCount > 20_000
+    )
+      return false;
+  } else if (data.filters !== undefined || data.unresolvedCount !== undefined) {
+    return false;
+  }
   if (data.operation !== undefined) {
     const receipt = data.operation;
     if (
@@ -63,7 +93,7 @@ export function isPublicCourseCatalog(
     )
       return false;
   }
-  return (
+  const valid =
     data.schoolId === expectedSchoolId &&
     data.sourceUrl === operation.sourceUrl &&
     typeof data.truncated === 'boolean' &&
@@ -96,6 +126,12 @@ export function isPublicCourseCatalog(
               (meeting) =>
                 meeting && typeof meeting.time === 'string' && typeof meeting.room === 'string',
             ))),
+    );
+  if (!valid) return false;
+  return (
+    !filtered ||
+    data.courses!.every(
+      (course) => evaluatePublicCourseFilters(course, expectedSchoolId, filters) === 'match',
     )
   );
 }

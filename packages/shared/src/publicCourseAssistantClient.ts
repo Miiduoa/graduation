@@ -7,6 +7,7 @@ import {
   type PublicCourseAssistantRead,
   type PublicCourseAssistantSearch,
 } from './publicCourseAssistant';
+import { parsePublicCourseFilterParams, parsePublicCourseFilters } from './publicCourseFilters';
 
 export type {
   PublicCourseAssistantAnswer,
@@ -37,21 +38,28 @@ function cancelled(): Error {
 /** Native fetch may follow redirects; reject a different final resource when its URL is available. */
 export function isPublicCourseResponseUrl(
   value: string,
-  search: Pick<PublicCourseAssistantSearch, 'schoolId' | 'query'>,
+  search: Pick<PublicCourseAssistantSearch, 'schoolId' | 'query' | 'filters'>,
 ): boolean {
   try {
     const url = new URL(value);
+    const expected = parsePublicCourseFilters(search.filters ?? {});
+    const actual = parsePublicCourseFilterParams(url.searchParams);
+    if (!expected || !actual) return false;
+    const parameterCount =
+      2 + Number(expected.weekday !== undefined) + Number(expected.credits !== undefined);
     return (
       url.origin === 'https://nuni.tw' &&
       url.pathname === '/api/public-course-catalog' &&
       !url.username &&
       !url.password &&
       !url.hash &&
-      [...url.searchParams].length === 2 &&
+      [...url.searchParams].length === parameterCount &&
       url.searchParams.getAll('schoolId').length === 1 &&
       url.searchParams.get('schoolId') === search.schoolId &&
       url.searchParams.getAll('q').length === 1 &&
-      url.searchParams.get('q') === search.query
+      url.searchParams.get('q') === search.query &&
+      actual.weekday === expected.weekday &&
+      actual.credits === expected.credits
     );
   } catch {
     return false;
@@ -97,6 +105,10 @@ export async function answerPublicCourseQuestion(input: {
   const fetcher = input.fetcher ?? globalThis.fetch;
   try {
     const params = new URLSearchParams({ schoolId: intent.schoolId, q: intent.query });
+    if (source.filters?.weekday !== undefined)
+      params.set('weekday', String(source.filters.weekday));
+    if (source.filters?.credits !== undefined)
+      params.set('credits', String(source.filters.credits));
     const url =
       (input.origin === 'mobile' ? 'https://nuni.tw' : '') + '/api/public-course-catalog?' + params;
     const request = (async () => {

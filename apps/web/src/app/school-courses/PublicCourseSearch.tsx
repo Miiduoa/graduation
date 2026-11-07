@@ -9,6 +9,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
 import { isPublicCourseOperationQuery } from '@campus/shared/src/publicCourseOperations';
 import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import {
+  hasPublicCourseFilters, parsePublicCourseFilterParams, publicCourseFilterLabel, type PublicCourseFilters,
+} from '@campus/shared/src/publicCourseFilters';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
 import { formatSemester } from '@/lib/academicRecords';
@@ -16,12 +19,39 @@ import { campusServiceHref } from '@/lib/campusNavigation';
 import styles from '@/components/academic/academic.module.css';
 import courseStyles from './schoolCourses.module.css';
 
-type SearchResult =
-  | { status: 'loading' | 'error'; query: string }
-  | { status: 'ready'; query: string; courses: PublicCatalogCourse[]; truncated: boolean; fetchedAt?: string };
+type CourseSearch = { query: string; filters?: PublicCourseFilters };
+type SearchResult = CourseSearch & (
+  | { status: 'loading' | 'error' }
+  | { status: 'ready'; courses: PublicCatalogCourse[]; truncated: boolean; fetchedAt?: string; unresolvedCount?: number }
+);
 
 const QUERY_LENGTH_NOTICE = '搜尋文字最多 80 個字，請縮短後再查詢。';
 const REPEATED_QUERY_NOTICE = '連結帶入多個查詢條件。請在搜尋欄確認要查的內容，再按「查詢課程」。';
+const INVALID_LINK_FILTER_NOTICE = '連結帶入的篩選條件無效或重複，請重新設定星期、學分或清除篩選後再查詢。';
+const FILTER_NOTICE = '星期請選擇星期一至星期日；學分請填 0～40，最多兩位小數，留白表示不限。';
+const WEEKDAYS = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+
+function filterParameters(weekdays: readonly string[], credits: readonly string[]): URLSearchParams {
+  const params = new URLSearchParams();
+  weekdays.forEach((value) => params.append('weekday', value));
+  credits.forEach((value) => params.append('credits', value));
+  return params;
+}
+
+function formFilters(weekday: string, credits: string): PublicCourseFilters | null {
+  return parsePublicCourseFilterParams(filterParameters(
+    weekday.trim() ? [weekday.trim()] : [],
+    credits.trim() ? [credits.trim()] : [],
+  ));
+}
+
+function courseSearch(query: string, filters: PublicCourseFilters): CourseSearch {
+  return { query: query.trim(), ...(hasPublicCourseFilters(filters) ? { filters } : {}) };
+}
+
+function sameSearch(left: CourseSearch, right: CourseSearch): boolean {
+  return left.query === right.query && left.filters?.weekday === right.filters?.weekday && left.filters?.credits === right.filters?.credits;
+}
 
 function CatalogCourse({ course, schoolId, importHref, review }: {
   course: PublicCatalogCourse;
@@ -94,21 +124,39 @@ type PublicCourseSearchProps = {
   schoolName: string;
   schoolSearch: string;
   queryParameters?: readonly string[];
+  weekdayParameters?: readonly string[];
+  creditsParameters?: readonly string[];
 };
 
 export function PublicCourseSearch(props: PublicCourseSearchProps) {
-  return <PublicCourseSearchForm key={JSON.stringify([props.schoolId, props.queryParameters ?? []])} {...props} />;
+  return <PublicCourseSearchForm key={JSON.stringify([
+    props.schoolId, props.queryParameters ?? [], props.weekdayParameters ?? [], props.creditsParameters ?? [],
+  ])} {...props} />;
 }
 
-function PublicCourseSearchForm({ schoolId, schoolName, schoolSearch, queryParameters = [] }: PublicCourseSearchProps) {
-  const queryFromLink = queryParameters[0];
-  const queryCount = queryParameters.length;
-  const [query, setQuery] = useState(queryFromLink ?? '');
-  const [queryNotice, setQueryNotice] = useState<string | null>(() => queryCount > 1
+function PublicCourseSearchForm({
+  schoolId, schoolName, schoolSearch, queryParameters = [], weekdayParameters = [], creditsParameters = [],
+}: PublicCourseSearchProps) {
+  const [linked] = useState(() => {
+    const query = queryParameters[0] ?? '';
+    const filters = parsePublicCourseFilterParams(filterParameters(weekdayParameters, creditsParameters));
+    const hasSearch = queryParameters.length > 0 || weekdayParameters.length > 0 || creditsParameters.length > 0;
+    return {
+      query, weekday: weekdayParameters[0] ?? '', credits: creditsParameters[0] ?? '',
+      invalidWeekday: parsePublicCourseFilterParams(filterParameters(weekdayParameters, [])) === null,
+      invalidCredits: parsePublicCourseFilterParams(filterParameters([], creditsParameters)) === null,
+      search: hasSearch && queryParameters.length <= 1 && isPublicCourseOperationQuery(query) && filters
+        ? courseSearch(query, filters) : null,
+    };
+  });
+  const [query, setQuery] = useState(linked.query);
+  const [weekday, setWeekday] = useState(linked.weekday);
+  const [credits, setCredits] = useState(linked.credits);
+  const [invalidLinkedFields, setInvalidLinkedFields] = useState({ weekday: linked.invalidWeekday, credits: linked.invalidCredits });
+  const [queryNotice, setQueryNotice] = useState<string | null>(() => queryParameters.length > 1
     ? REPEATED_QUERY_NOTICE
-    : queryFromLink !== undefined && !isPublicCourseOperationQuery(queryFromLink) ? QUERY_LENGTH_NOTICE : null);
-  const [result, setResult] = useState<SearchResult | null>(() => queryCount === 1 && isPublicCourseOperationQuery(queryFromLink)
-    ? { status: 'loading', query: queryFromLink.trim() } : null);
+    : !isPublicCourseOperationQuery(linked.query) ? QUERY_LENGTH_NOTICE : null);
+  const [result, setResult] = useState<SearchResult | null>(() => linked.search ? { status: 'loading', ...linked.search } : null);
   const pending = useRef<{ controller: AbortController; timer: ReturnType<typeof setTimeout> } | null>(null);
   const router = useRouter();
   const context = usePersonalImportScope();
@@ -143,38 +191,54 @@ function PublicCourseSearchForm({ schoolId, schoolName, schoolSearch, queryParam
   }, []);
   const catalog = resolveOfficialCourseQueryLink(schoolId);
 
-  const searchCourses = useCallback(async (term: string) => {
+  const searchCourses = useCallback(async (search: CourseSearch) => {
     cancelSearch();
     const controller = new AbortController();
     const timer = setTimeout(() => {
       if (pending.current?.controller !== controller || controller.signal.aborted) return;
       controller.abort();
-      setResult({ status: 'error', query: term });
+      setResult({ status: 'error', ...search });
     }, 25_000);
     pending.current = { controller, timer };
     try {
       const params = new URLSearchParams({ schoolId });
-      if (term) params.set('q', term);
+      if (search.query) params.set('q', search.query);
+      if (search.filters?.weekday !== undefined) params.set('weekday', String(search.filters.weekday));
+      if (search.filters?.credits !== undefined) params.set('credits', String(search.filters.credits));
       const response = await fetch('/api/public-course-catalog?' + params, {
         signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error',
       });
       if (!response.ok) throw new Error();
       const data = await response.json();
-      if (!isPublicCourseCatalog(data, schoolId)) throw new Error('Invalid catalog');
+      if (!isPublicCourseCatalog(data, schoolId, search.filters)) throw new Error('Invalid catalog');
       if (pending.current?.controller === controller && !controller.signal.aborted) {
-        setResult({ status: 'ready', query: term, courses: data.courses, truncated: data.truncated, fetchedAt: data.fetchedAt });
+        setResult({
+          status: 'ready', ...search, courses: data.courses, truncated: data.truncated,
+          fetchedAt: data.fetchedAt, unresolvedCount: data.unresolvedCount,
+        });
       }
     } catch {
-      if (pending.current?.controller === controller && !controller.signal.aborted) setResult({ status: 'error', query: term });
+      if (pending.current?.controller === controller && !controller.signal.aborted) setResult({ status: 'error', ...search });
     } finally {
       clearTimeout(timer);
     }
   }, [schoolId, cancelSearch]);
 
   useEffect(() => {
-    if (queryCount === 1 && isPublicCourseOperationQuery(queryFromLink)) void searchCourses(queryFromLink.trim());
+    if (linked.search) void searchCourses(linked.search);
     return cancelSearch;
-  }, [queryFromLink, queryCount, searchCourses, cancelSearch]);
+  }, [linked, searchCourses, cancelSearch]);
+
+  const filters = formFilters(weekday, credits);
+  const invalidWeekday = invalidLinkedFields.weekday || formFilters(weekday, '') === null;
+  const invalidCredits = invalidLinkedFields.credits || formFilters('', credits) === null;
+  const filterNotice = invalidLinkedFields.weekday || invalidLinkedFields.credits
+    ? INVALID_LINK_FILTER_NOTICE : filters === null ? FILTER_NOTICE : null;
+
+  function editSearch() {
+    cancelSearch();
+    setResult(null);
+  }
 
   function search(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -184,33 +248,95 @@ function PublicCourseSearchForm({ schoolId, schoolName, schoolSearch, queryParam
       setQueryNotice(QUERY_LENGTH_NOTICE);
       return;
     }
+    if (filterNotice || !filters) {
+      cancelSearch();
+      setResult(null);
+      return;
+    }
     setQueryNotice(null);
-    const term = query.trim();
-    setResult({ status: 'loading', query: term });
-    void searchCourses(term);
+    const submitted = courseSearch(query, filters);
+    setResult({ status: 'loading', ...submitted });
+    void searchCourses(submitted);
+  }
+
+  function clearFilters() {
+    editSearch();
+    setWeekday('');
+    setCredits('');
+    setInvalidLinkedFields({ weekday: false, credits: false });
+    if (!isPublicCourseOperationQuery(query)) {
+      setQueryNotice(QUERY_LENGTH_NOTICE);
+      return;
+    }
+    setQueryNotice(null);
+    const submitted = courseSearch(query, {});
+    setResult({ status: 'loading', ...submitted });
+    void searchCourses(submitted);
   }
 
   const term = result?.query ? '「' + result.query + '」' : '';
+  const currentSearch = !filterNotice && filters ? courseSearch(query, filters) : null;
+  const isCurrentSearch = Boolean(result && currentSearch && sameSearch(result, currentSearch));
+  const appliedFilters = publicCourseFilterLabel(result?.filters);
   return (
     <section aria-labelledby="public-course-title">
       <h2 id="public-course-title">{schoolName}開課查詢</h2>
-      <p>查找校方公布的課程。可輸入關鍵字，或留白瀏覽開課清單。</p>
-      <form className={courseStyles.toolbar} onSubmit={search} role="search" aria-label="搜尋校方開課資料">
-        <label className={styles.field}>
+      <p>查找校方公布的課程。可輸入關鍵字、指定上課星期或學分；留白表示不限。</p>
+      <form className={`${courseStyles.toolbar} ${courseStyles.publicSearch}`} onSubmit={search} role="search" aria-label="搜尋校方開課資料">
+        <label className={`${styles.field} ${courseStyles.queryField}`}>
           課名、課號或授課老師
           <input type="search" value={query} placeholder="例如：資料庫"
             aria-invalid={queryNotice ? true : undefined}
             aria-describedby={queryNotice ? 'public-course-query-notice' : undefined}
             onChange={(event) => {
+              editSearch();
               setQuery(event.target.value);
               setQueryNotice(isPublicCourseOperationQuery(event.target.value) ? null : QUERY_LENGTH_NOTICE);
             }} />
         </label>
-        <button type="submit" className="btn primary" disabled={result?.status === 'loading' && result.query === query.trim()}>
-          {result?.status === 'error' && result.query === query.trim() ? '重新查詢' : '查詢課程'}
-        </button>
+        <label className={styles.field}>
+          上課星期
+          <select value={weekday} aria-invalid={invalidWeekday || undefined}
+            aria-describedby={`public-course-weekday-help${invalidWeekday ? ' public-course-filter-notice' : ''}`}
+            onChange={(event) => {
+              editSearch();
+              setWeekday(event.target.value);
+              setInvalidLinkedFields((previous) => ({ ...previous, weekday: false }));
+            }}>
+            <option value="">不限</option>
+            {weekday && !/^[1-7]$/.test(weekday) && <option value={weekday}>連結值：{weekday}（請重選）</option>}
+            {WEEKDAYS.map((label, index) => <option key={label} value={index + 1}>{label}</option>)}
+          </select>
+        </label>
+        <label className={`${styles.field} ${courseStyles.creditsField}`}>
+          學分（完全符合）
+          <input type="text" inputMode="decimal" value={credits} placeholder="不限"
+            aria-invalid={invalidCredits || undefined}
+            aria-describedby={`public-course-credits-help${invalidCredits ? ' public-course-filter-notice' : ''}`}
+            onChange={(event) => {
+              editSearch();
+              setCredits(event.target.value);
+              setInvalidLinkedFields((previous) => ({ ...previous, credits: false }));
+            }} />
+        </label>
+        <div className={courseStyles.searchActions}>
+          <button type="submit" className="btn primary" disabled={result?.status === 'loading' && isCurrentSearch}>
+            {result?.status === 'error' && isCurrentSearch ? '重新查詢' : '查詢課程'}
+          </button>
+          <button type="button" className="btn" onClick={clearFilters}
+            disabled={!weekday && !credits && !invalidLinkedFields.weekday && !invalidLinkedFields.credits}>清除篩選</button>
+        </div>
+        <div className={courseStyles.filterHelp}>
+          <p id="public-course-weekday-help">星期篩選表示當天有課，課程也可能在其他天上課。</p>
+          <p id="public-course-credits-help">學分可填 0～40，最多兩位小數；清除篩選會保留關鍵字重新查詢。</p>
+        </div>
       </form>
       {queryNotice && <p id="public-course-query-notice" role="alert">{queryNotice}</p>}
+      {filterNotice && <p id="public-course-filter-notice" role="alert">{filterNotice}</p>}
+      {result && <p className={courseStyles.appliedFilters}>
+        {result.status === 'ready' ? '已套用條件' : '本次查詢條件'}：{result.query ? `關鍵字「${result.query}」` : '關鍵字不限'}
+        {appliedFilters ? ` · ${appliedFilters}` : ' · 星期與學分不限'}
+      </p>}
       {result?.status === 'loading' && <p role="status">正在查詢{term}開課資料…</p>}
       {result?.status === 'error' && (
         <p role="alert">暫時無法取得校方課程資料，請重新查詢{catalog && <>或前往<a href={catalog.url} target="_blank" rel="noopener noreferrer">校方課程目錄</a></>}。</p>
@@ -221,6 +347,9 @@ function PublicCourseSearchForm({ schoolId, schoolName, schoolSearch, queryParam
             {result.courses.length ? `顯示${term}${result.courses.length} 筆開課資料。` : `這次查詢沒有找到${term}課程。`}
             {result.truncated ? '符合條件的課程超過顯示上限，可改用課號或老師姓名縮小範圍。' : null}
           </p>
+          {!!result.unresolvedCount && <p className={courseStyles.filterHelp}>
+            另有 {result.unresolvedCount} 筆資料無法確認是否符合上述篩選條件，未列入結果。
+          </p>}
           {result.fetchedAt && <p>校方資料擷取：{formatPublicCatalogFetchedAt(result.fetchedAt)}（台灣時間；非校方更新時間）</p>}
           {result.courses.length > 0 && (
             <ul className={courseStyles.courses}>

@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
+import type { PublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
 import { queryCatalog } from '../services/courseCatalogClient';
 import * as ledger from '../services/personalImports';
@@ -39,9 +40,18 @@ function response(schoolId: 'ncnu' | 'nthu' = 'nthu') {
     courses: [schoolId === 'nthu' ? nthuCourse : ncnuCourse], truncated: false,
   }) };
 }
-const route = (publicSchoolId: unknown, keyword = 'AES') => ({ params: {
-  publicSchoolId, filter: { keyword }, autoSearch: true,
+const route = (publicSchoolId: unknown, keyword = 'AES', filters: PublicCourseFilters = {}) => ({ params: {
+  publicSchoolId, filter: { keyword, ...filters }, autoSearch: true,
 } });
+function filteredResponse(schoolId: 'ncnu' | 'nthu', filters: PublicCourseFilters, empty = false) {
+  const operation = resolvePublicCourseOperation(schoolId, 2)!;
+  return { ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+    schoolId, sourceUrl: operation.sourceUrl, fetchedAt: '2026-11-07T08:00:00.000Z',
+    operation: { id: operation.id, version: 2, responseSchemaVersion: 2, access: operation.access },
+    filters, unresolvedCount: 0, truncated: false,
+    courses: empty ? [] : [schoolId === 'nthu' ? nthuCourse : ncnuCourse],
+  }) };
+}
 beforeEach(() => {
   jest.clearAllMocks(); mockSchool = 'pu';
   fetchSource.mockReset().mockResolvedValue(response());
@@ -102,5 +112,91 @@ test('replacing the public handoff aborts its old request and ignores an eventua
   await act(async () => finish(response()));
   expect(view.queryByText('分析化學專題')).toBeNull();
   expect(view.getByLabelText('搜尋暨大課程').props.value).toBe('資料庫');
+  expect(mockSchool).toBe('pu');
+});
+
+test.each([['nthu', 1], ['ncnu', 4]] as const)('a filtered %s handoff preserves the empty keyword and independent selected-school scope', async (schoolId, weekday) => {
+  const filters = { weekday, credits: 3 };
+  fetchSource.mockResolvedValue(filteredResponse(schoolId, filters));
+  const append = jest.spyOn(ledger, 'appendPersonalImports');
+  const view = render(<CourseCatalogScreen route={route(schoolId, '', filters)} />);
+  await view.findByText(schoolId === 'nthu' ? nthuCourse.title : ncnuCourse.title);
+  expect(Object.fromEntries(new URL(fetchSource.mock.calls[0][0]).searchParams)).toEqual({
+    schoolId, q: '', weekday: String(weekday), credits: '3',
+  });
+  expect(view.getByLabelText('課程學分').props.value).toBe('3');
+  expect(view.getByRole('button', { name: weekday === 1 ? '星期一' : '星期四' }).props.accessibilityState.selected).toBe(true);
+  expect(view.getByText(/目前選校仍為靜宜大學/)).toBeTruthy();
+  fireEvent.press(view.getByText('核對並加入課表'));
+  expect(view.getByText(/請先確認目前帳號與所選學校/)).toBeTruthy();
+  expect(append).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(queryCatalog).not.toHaveBeenCalled();
+  expect(mockSchool).toBe('pu');
+});
+
+test('an existing semester handoff stays editable and requires an explicit latest-catalog search', async () => {
+  mockSchool = 'nthu';
+  fetchSource.mockResolvedValue(filteredResponse('nthu', { weekday: 1, credits: 3 }));
+  const view = render(<CourseCatalogScreen route={{ params: {
+    filter: { keyword: 'AES', semester: '1142' }, autoSearch: true,
+  } }} />);
+  expect(view.getByText('連結指定114學年度第2學期，目前僅能查校方最新公開開課，無法按指定學期篩選。')).toBeTruthy();
+  expect(view.getByLabelText('搜尋清大課程').props.value).toBe('AES');
+  expect(fetchSource).not.toHaveBeenCalled();
+  fireEvent.changeText(view.getByLabelText('搜尋清大課程'), '化學');
+  fireEvent.press(view.getByRole('button', { name: '星期一' }));
+  fireEvent.changeText(view.getByLabelText('課程學分'), '3');
+  fireEvent(view.getByLabelText('搜尋清大課程'), 'submitEditing');
+  expect(view.getByLabelText('搜尋清大課程').props.value).toBe('化學');
+  expect(fetchSource).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '查詢最新公開課程' }));
+  await view.findByText(nthuCourse.title);
+  expect(Object.fromEntries(new URL(fetchSource.mock.calls[0][0]).searchParams)).toEqual({
+    schoolId: 'nthu', q: '化學', weekday: '1', credits: '3',
+  });
+  expect(view.getByText('115 學年度第 1 學期')).toBeTruthy();
+  expect(queryCatalog).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(mockSchool).toBe('nthu');
+});
+
+test.each([
+  { weekday: 0 }, { weekday: 8 }, { weekday: '1' }, { weekday: [1] },
+  { credits: -1 }, { credits: 40.01 }, { credits: 3.001 }, { credits: '3' },
+  { credits: null }, { semester: '1153' }, { semester: 1151 }, { semester: '' }, { keyword: '課'.repeat(81) },
+])('invalid public entry conditions cannot be dropped or interpreted as PU defaults: %j', (filter) => {
+  const view = render(<CourseCatalogScreen route={{ params: { publicSchoolId: 'nthu', filter, autoSearch: true } }} />);
+  expect(view.getByText('這個公開查課連結的星期、學分或搜尋條件無法確認，請回到助理重新查詢。')).toBeTruthy();
+  expect(fetchSource).not.toHaveBeenCalled();
+  expect(queryCatalog).not.toHaveBeenCalled();
+});
+
+test('an accessor in public entry filters is rejected without evaluating it', () => {
+  const getter = jest.fn(() => 1);
+  const filter = Object.defineProperty({ keyword: 'AES' }, 'weekday', { enumerable: true, get: getter });
+  const view = render(<CourseCatalogScreen route={{ params: { publicSchoolId: 'nthu', filter, autoSearch: true } }} />);
+  expect(view.getByText(/星期、學分或搜尋條件無法確認/)).toBeTruthy();
+  expect(getter).not.toHaveBeenCalled();
+  expect(fetchSource).not.toHaveBeenCalled();
+});
+
+test.each(['fetch', 'body'])('changing only route filters cancels the old %s while keeping the new empty result', async (stage) => {
+  let finish!: (value: never) => void;
+  const delayed = new Promise<never>(resolve => { finish = resolve; });
+  const oldBody = jest.fn(() => delayed);
+  if (stage === 'fetch') fetchSource.mockReturnValueOnce(delayed);
+  else fetchSource.mockResolvedValueOnce({ ...filteredResponse('nthu', { weekday: 1, credits: 3 }), text: oldBody });
+  fetchSource.mockResolvedValueOnce(filteredResponse('nthu', { weekday: 4, credits: 3 }, true));
+  const view = render(<CourseCatalogScreen route={route('nthu', 'AES', { weekday: 1, credits: 3 })} />);
+  await waitFor(() => expect(stage === 'fetch' ? fetchSource : oldBody).toHaveBeenCalledTimes(1));
+  view.rerender(<CourseCatalogScreen route={route('nthu', 'AES', { weekday: 4, credits: 3 })} />);
+  await view.findByText('找不到「AES」的開課資料。');
+  expect(fetchSource.mock.calls[0][1].signal.aborted).toBe(true);
+  const previous = filteredResponse('nthu', { weekday: 1, credits: 3 });
+  await act(async () => finish((stage === 'fetch' ? previous : await previous.text()) as never));
+  expect(view.queryByText(nthuCourse.title)).toBeNull();
+  expect(view.getByText('本次查詢條件：星期四有課 · 3 學分')).toBeTruthy();
+  expect(view.getByRole('button', { name: '星期四' }).props.accessibilityState.selected).toBe(true);
   expect(mockSchool).toBe('pu');
 });

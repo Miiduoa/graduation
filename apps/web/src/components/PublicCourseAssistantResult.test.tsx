@@ -49,3 +49,35 @@ it('keeps unavailable results distinct from an empty validated catalog', () => {
   expect(screen.queryByText(/暫時無法取得/)).toBeNull();
   expect(screen.queryByText(/校方資料擷取/)).toBeNull();
 });
+
+it('shows the applied filters, all meeting weekdays and unresolved exclusions with the complete handoff', () => {
+  const filtered: PublicCourseAssistantRead = {
+    ...ready, filters: { weekday: 1, credits: 3 }, unresolvedCount: 2,
+    href: source.href + '&weekday=1&credits=3',
+    courses: [{
+      ...ready.courses[0], time: 'M3M4\nF3F4',
+      meetings: [{ time: 'M3M4', room: '資電館101' }, { time: 'F3F4', room: '資電館102' }],
+    }],
+  };
+  render(<PublicCourseAssistantResult read={filtered} />);
+  expect(screen.getByText('已套用條件：星期一有課 · 3 學分')).toBeTruthy();
+  expect(screen.getByText('星期一、星期五')).toBeTruthy();
+  expect(screen.getByText('當天有課，也可能在其他天上課。')).toBeTruthy();
+  expect(screen.getByText(/另有 2 筆資料無法確認是否符合上述篩選條件/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')).toBe(filtered.href);
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('keeps requested filters on an unavailable reply without claiming they were applied', () => {
+  const filteredSource = { ...source, query: '', filters: { credits: 0 }, href: source.href + '&credits=0' };
+  const view = render(<PublicCourseAssistantResult read={{ ...filteredSource, status: 'unavailable' }} />);
+  expect(screen.getByText('關鍵字不限')).toBeTruthy();
+  expect(screen.getByText('查詢條件：0 學分')).toBeTruthy();
+  expect(screen.queryByText(/已套用條件|未列入結果|沒有符合的開課資料/)).toBeNull();
+  expect(screen.getByRole('link', { name: '查看課程與課表核對' }).getAttribute('href')).toBe(filteredSource.href);
+  view.rerender(<PublicCourseAssistantResult read={{ ...filteredSource, status: 'ready', courses: [], matchCount: 0, truncated: false, unresolvedCount: 4 }} />);
+  expect(screen.getByText('已套用條件：0 學分')).toBeTruthy();
+  expect(screen.getByText(/沒有符合的開課資料，可調整關鍵字、星期或學分/)).toBeTruthy();
+  expect(screen.getByText(/另有 4 筆資料無法確認/)).toBeTruthy();
+  expect(screen.queryByText(/暫時無法取得/)).toBeNull();
+});

@@ -81,6 +81,37 @@ it.each(['ncnu', 'nthu'])('carries the assistant link into the existing %s publi
   expect(localStorage.length).toBe(0);
 });
 
+it('carries the assistant keyword and every filter into public search without reading private courses', async () => {
+  context.uid = null;
+  context.schoolId = 'nthu';
+  context.search = new URLSearchParams({ schoolId: 'nthu', campus: 'nthu', q: '資料庫', weekday: '3', credits: '3' }).toString();
+  const fetcher = vi.fn().mockResolvedValue(Response.json({
+    schoolId: 'nthu', sourceUrl: 'https://www.ccxp.nthu.edu.tw/ccxp/INQUIRE/JH/OPENDATA/open_course_data.json',
+    fetchedAt: '2026-11-07T08:00:00.000Z', courses: [], truncated: false,
+    filters: { weekday: 3, credits: 3 }, unresolvedCount: 1,
+    operation: { id: 'nthu.courses.search', version: 2, responseSchemaVersion: 2, access: 'anonymous-public' },
+  }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<SchoolCoursesPage />);
+  await screen.findByText(/沒有找到「資料庫」課程/);
+  expect(screen.getByText('已套用條件：關鍵字「資料庫」 · 星期三有課 · 3 學分')).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=nthu&q=' + encodeURIComponent('資料庫') + '&weekday=3&credits=3', expect.anything());
+  expect(loadTronClassCourses).not.toHaveBeenCalled();
+  expect(localStorage.length).toBe(0);
+});
+
+it('preserves duplicate filters from the URL so the public form can reject them', () => {
+  context.uid = null;
+  context.schoolId = 'nthu';
+  context.search = 'schoolId=nthu&q=CS&weekday=1&weekday=3&credits=3';
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  render(<SchoolCoursesPage />);
+  expect(screen.getByRole('alert').textContent).toContain('篩選條件無效或重複');
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(loadTronClassCourses).not.toHaveBeenCalled();
+});
+
 it('distinguishes a missing URL query from an explicitly empty browse request', async () => {
   context.uid = null;
   context.schoolId = 'ncnu';

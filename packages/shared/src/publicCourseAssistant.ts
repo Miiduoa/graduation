@@ -9,11 +9,20 @@ import {
   type PublicCourseOperationSchoolId,
 } from './publicCourseOperations';
 import { mockSchools } from './schools';
+import { extractPublicCourseAssistantFilters } from './publicCourseAssistantFilters';
+import {
+  hasPublicCourseFilters,
+  parsePublicCourseFilters,
+  publicCourseFilterLabel,
+  publicCourseWeekdays,
+  type PublicCourseFilters,
+} from './publicCourseFilters';
 
 export type PublicCourseAssistantSearch = {
   kind: 'search';
   schoolId: PublicCourseOperationSchoolId;
   query: string;
+  filters?: PublicCourseFilters;
 };
 export type PublicCourseAssistantIntent =
   | PublicCourseAssistantSearch
@@ -26,6 +35,7 @@ type ReadSource = {
   schoolId: PublicCourseOperationSchoolId;
   schoolName: string;
   query: string;
+  filters?: PublicCourseFilters;
   href: string;
   sourceUrl: string;
 };
@@ -37,6 +47,7 @@ export type PublicCourseAssistantRead = ReadSource &
         matchCount: number;
         truncated: boolean;
         courses: PublicCatalogCourse[];
+        unresolvedCount?: number;
       }
     | { status: 'unavailable' }
   );
@@ -136,7 +147,9 @@ export function resolvePublicCourseAssistantIntent(
       text = suffix[1].trim();
     }
   }
-  const hasCourseWord = /課程|開課|課號|課名|查課|的課|課[?？!！。]*$|courses?\b/i.test(question);
+  const hasCourseWord = /課程|開課|課號|課名|查課|學分|的課|課[?？!！。]*$|courses?\b/i.test(
+    question,
+  );
   // A school name alone does not turn a library, dining or other service question into a course lookup.
   if (
     !hasCourseWord &&
@@ -150,7 +163,12 @@ export function resolvePublicCourseAssistantIntent(
   const outsideQuotes = text
     .replace(/[「『“"][^「」『』“”"]*[」』”"]/g, '')
     .replace(/^的\s*/, '')
-    .replace(/^(?:有沒有|有哪些|有什麼|是否有)\s*/, '');
+    .replace(/^(?:有沒有|有哪些|有什麼|是否有)\s*/, '')
+    // A filter prefix before 大學英文 is not the name of another university.
+    .replace(
+      /^(?:(?:星期|禮拜|週|周)\s*[一二三四五六日天1-7](?:\s*(?:有課|上課))?\s*|(?:\d+(?:\.\d+)?|[零〇一二兩三四五六七八九十百點]+)\s*(?:個)?學分\s*|的\s*|在\s*|[、,\s])+/,
+      '',
+    );
   const mentionsAnotherSchool = schools.some((school) =>
     school.aliases.some((alias) =>
       /^[A-Z]+$/.test(alias)
@@ -220,17 +238,20 @@ export function resolvePublicCourseAssistantIntent(
   text = text.replace(/(?:嗎|呢)$/, '').trim();
   text = text.replace(/(?:的)?(?:公開開課|開課|課程|課|\s+courses?)$/, '').trim();
   if (/^(?:所有|全部|有哪些|有什麼|開設|清單|目錄)$/.test(text)) text = '';
+  const extracted = extractPublicCourseAssistantFilters(text);
+  if ('error' in extracted) return clarify(extracted.error);
+  text = extracted.text;
   const quoted = text.match(/^[「『“"]([^「」『』“”"]*)[」』”"]$/);
   if (quoted) text = quoted[1].trim();
   else if (/[「」『』“”"]/.test(text)) return clarify(queryHelp);
   if (
     !quoted &&
-    /下學期|上學期|明年|去年|\d{2,4}\s*學年度|\d{2,4}\s*[-/]\s*[123]|(?:星期|禮拜|週)[一二三四五六日天1-7]|(?:[0-9一二三四五六七八九十]+)\s*學分|必修|選修|不衝堂|不撞課|空堂|幾點|上午|下午|晚上/.test(
+    /下學期|上學期|明年|去年|\d{2,4}\s*學年度|\d{2,4}\s*[-/]\s*[123]|星期|禮拜|週|周|學分|必修|選修|不衝堂|不撞課|空堂|幾點|上午|下午|晚上|早上|中午|傍晚/.test(
       text,
     )
   ) {
     return clarify(
-      '目前可依課名、課號、系所或老師搜尋校方現有開課資料；尚不能用這句話篩選指定學期、時段或學分。' +
+      '目前可依課名、課號、系所或老師搜尋，並指定一個上課日與精確學分；尚不能篩選指定學期、鐘點、必選修或不衝堂。' +
         queryHelp,
     );
   }
@@ -245,12 +266,18 @@ export function resolvePublicCourseAssistantIntent(
     return clarify(
       '目前可直接查詢清大與暨大的公開開課資料。請在問題中指定學校，例如「查清大的資料庫課程」。',
     );
-  return { kind: 'search', schoolId, query: text };
+  return {
+    kind: 'search',
+    schoolId,
+    query: text,
+    ...(hasPublicCourseFilters(extracted.filters) ? { filters: extracted.filters } : {}),
+  };
 }
 
 export function publicCourseAssistantSource(search: PublicCourseAssistantSearch): ReadSource {
   const operation = resolvePublicCourseOperation(search.schoolId);
-  if (!operation || !isPublicCourseOperationQuery(search.query))
+  const filters = parsePublicCourseFilters(search.filters ?? {});
+  if (!operation || !isPublicCourseOperationQuery(search.query) || !filters)
     throw new Error('Invalid public course search');
   const schoolName = schools.find((school) => school.id === search.schoolId)!.name;
   const params = new URLSearchParams({
@@ -258,10 +285,13 @@ export function publicCourseAssistantSource(search: PublicCourseAssistantSearch)
     campus: search.schoolId,
     q: search.query,
   });
+  if (filters.weekday !== undefined) params.set('weekday', String(filters.weekday));
+  if (filters.credits !== undefined) params.set('credits', String(filters.credits));
   return {
     schoolId: search.schoolId,
     schoolName,
     query: search.query,
+    ...(hasPublicCourseFilters(filters) ? { filters } : {}),
     href: '/school-courses?' + params,
     sourceUrl: operation.sourceUrl,
   };
@@ -271,7 +301,7 @@ export function publicCourseAssistantRead(
   search: PublicCourseAssistantSearch,
   data: unknown,
 ): PublicCourseAssistantRead {
-  if (!isPublicCourseCatalog(data, search.schoolId))
+  if (!isPublicCourseCatalog(data, search.schoolId, search.filters))
     throw new Error('Invalid public course result');
   return {
     ...publicCourseAssistantSource(search),
@@ -279,6 +309,7 @@ export function publicCourseAssistantRead(
     ...(data.fetchedAt ? { fetchedAt: data.fetchedAt } : {}),
     matchCount: data.courses.length,
     truncated: data.truncated,
+    ...(data.unresolvedCount === undefined ? {} : { unresolvedCount: data.unresolvedCount }),
     courses: data.courses.slice(0, 5).map((course) => ({
       code: course.code,
       section: course.section,
@@ -307,12 +338,23 @@ export function formatPublicCourseAssistantRead(read: PublicCourseAssistantRead)
     read.schoolName + '公開開課查詢',
     count + (read.matchCount > read.courses.length ? `，先列出 ${read.courses.length} 筆。` : '。'),
   ];
+  if (hasPublicCourseFilters(read.filters))
+    lines.push('篩選條件：' + publicCourseFilterLabel(read.filters));
+  if (read.filters?.weekday !== undefined)
+    lines.push('有指定星期的上課時段即可符合，課程也可能在其他天上課。');
   if (!read.matchCount) lines.push('這次沒有符合的課程，可改用課號或老師姓名查詢。');
   for (const course of read.courses) {
     lines.push(
       `${course.title}｜課號 ${course.code}｜學期 ${course.semester}${course.teacher ? '｜' + course.teacher : ''}`,
     );
+    if (read.filters?.weekday !== undefined) {
+      const days = publicCourseWeekdays(course, read.schoolId);
+      if (days)
+        lines.push('上課日：' + days.map((day) => '星期' + '一二三四五六日'[day - 1]).join('、'));
+    }
   }
+  if (read.unresolvedCount)
+    lines.push(`另有 ${read.unresolvedCount} 筆符合關鍵字的課程資料不足，未列入這次篩選。`);
   if (read.fetchedAt)
     lines.push(
       `校方資料擷取：${formatPublicCatalogFetchedAt(read.fetchedAt)}（台灣時間；非校方更新時間）。`,

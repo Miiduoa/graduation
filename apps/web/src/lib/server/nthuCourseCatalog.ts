@@ -1,5 +1,11 @@
 import { nthuCourseIdentity } from '@campus/shared/src/nthuCourseSchedule';
 import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
+import {
+  evaluatePublicCourseFilters,
+  hasPublicCourseFilters,
+  parsePublicCourseFilters,
+  type PublicCourseFilters,
+} from '@campus/shared/src/publicCourseFilters';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { boundedBytes } from '../nuni/server';
 
@@ -77,7 +83,10 @@ async function loadCourses(): Promise<{ rows: CatalogEntry[]; fetchedAt: string 
 // and a failed refresh remains rejected for 15 seconds before retrying upstream.
 let snapshot: { rows: Promise<{ rows: CatalogEntry[]; fetchedAt: string }>; expires: number } | undefined;
 
-export async function searchNthuCourseCatalog(query: string): Promise<PublicCourseCatalogResponse> {
+export async function searchNthuCourseCatalog(query: string, requestedFilters?: PublicCourseFilters): Promise<PublicCourseCatalogResponse> {
+  const filters = parsePublicCourseFilters(requestedFilters === undefined ? {} : requestedFilters);
+  if (!filters) throw new Error('Invalid course filters');
+  const filtered = hasPublicCourseFilters(filters);
   if (!snapshot || Date.now() >= snapshot.expires) {
     const next = { rows: loadCourses(), expires: Date.now() + 15 * 60_000 };
     snapshot = next;
@@ -87,10 +96,17 @@ export async function searchNthuCourseCatalog(query: string): Promise<PublicCour
   const currentSnapshot = snapshot;
   if (!currentSnapshot) throw new Error('Public catalog snapshot unavailable');
   const { rows, fetchedAt } = await currentSnapshot.rows;
-  const matches = rows.filter(row => terms.every(term => row.searchText.includes(term)));
+  let unresolvedCount = 0;
+  const matches = rows.filter(row => {
+    if (!terms.every(term => row.searchText.includes(term))) return false;
+    const match = evaluatePublicCourseFilters(row.course, 'nthu', filters);
+    if (match === 'unresolved') unresolvedCount += 1;
+    return match === 'match';
+  });
   return {
     schoolId: 'nthu', sourceUrl: operation.sourceUrl, fetchedAt,
     courses: matches.slice(0, MATCH_LIMIT).map(row => row.course),
     truncated: matches.length > MATCH_LIMIT,
+    ...(filtered ? { filters, unresolvedCount } : {}),
   };
 }

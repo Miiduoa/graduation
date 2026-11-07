@@ -721,7 +721,7 @@ function AssistantConversation({
                   const read = message.publicCourseRead;
                   if (!current() || lock.current || syncLock.current || !read) return;
                   safeNavigate(navigation, 'CourseCatalog', {
-                    publicSchoolId: read.schoolId, filter: { keyword: read.query }, autoSearch: true,
+                    publicSchoolId: read.schoolId, filter: { keyword: read.query, ...read.filters }, autoSearch: true,
                   });
                 } : undefined} />
             ) : platformTimetable && message.courseworkRead ? (

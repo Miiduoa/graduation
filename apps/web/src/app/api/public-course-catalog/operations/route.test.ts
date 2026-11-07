@@ -58,4 +58,48 @@ describe('public course operation discovery', () => {
       'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?export=csv',
     );
   });
+
+  it('requires an explicit v2 discovery request and describes at least one executable filter', async () => {
+    const fetchSource = vi.fn(() => { throw new Error('Discovery must not fetch'); });
+    vi.stubGlobal('fetch', fetchSource);
+    const legacy = await (await GET(new Request('https://example.test/api/public-course-catalog/operations?version=1'))).json();
+    expect(legacy).toEqual(await (await GET()).json());
+    const response = await GET(new Request('https://example.test/api/public-course-catalog/operations?version=2'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    const directory = await response.json();
+    expect(directory.schemaVersion).toBe(1);
+    expect(directory.operations).toHaveLength(2);
+    for (const operation of directory.operations) {
+      expect(operation).toMatchObject({
+        version: 2, responseSchemaVersion: 2, access: 'anonymous-public',
+        inputSchema: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            query: { type: 'string', maxLength: 80 },
+            weekday: { type: 'integer', minimum: 1, maximum: 7 },
+            credits: { type: 'number', minimum: 0, maximum: 40, multipleOf: 0.01 },
+          },
+          anyOf: [{ required: ['weekday'] }, { required: ['credits'] }],
+        },
+        endpoint: {
+          method: 'GET', path: '/api/public-course-catalog', fixedQuery: { schoolId: operation.schoolId },
+          inputQuery: { query: 'q', weekday: 'weekday', credits: 'credits' },
+        },
+      });
+    }
+    expect(fetchSource).not.toHaveBeenCalled();
+  });
+
+  it.each(['version=', 'version=0', 'version=3', 'version=02', 'version=1&version=2', 'version=2&schoolId=ncnu', 'headers=Cookie'])(
+    'rejects invalid discovery parameters %s without a source read', async (query) => {
+      const fetchSource = vi.fn();
+      vi.stubGlobal('fetch', fetchSource);
+      const response = await GET(new Request('https://example.test/api/public-course-catalog/operations?' + query));
+      expect(response.status).toBe(400);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(await response.json()).not.toHaveProperty('operations');
+      expect(fetchSource).not.toHaveBeenCalled();
+    },
+  );
 });

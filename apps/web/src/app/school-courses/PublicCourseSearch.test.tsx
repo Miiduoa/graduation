@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PublicCourseSearch } from './PublicCourseSearch';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import type { PublicCourseFilters } from '@campus/shared/src/publicCourseFilters';
 import { parsePersonalImport } from '@campus/shared/src/imports/parser';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 
@@ -44,6 +45,14 @@ function response(courses: PublicCatalogCourse[], extra: Record<string, unknown>
     : 'https://ccweb6.ncnu.edu.tw/student/current_semester_opened_listlist.php?cmd=resetall';
   return Response.json({ schoolId: 'ncnu', sourceUrl, fetchedAt: '2026-11-06T08:00:00.000Z', truncated: false, courses, ...extra });
 }
+function filteredResponse(courses: PublicCatalogCourse[], filters: PublicCourseFilters, extra: Record<string, unknown> = {}) {
+  const schoolId = extra.schoolId === 'nthu' ? 'nthu' : 'ncnu';
+  return response(courses, {
+    filters, unresolvedCount: 0,
+    operation: { id: `${schoolId}.courses.search`, version: 2, responseSchemaVersion: 2, access: 'anonymous-public' },
+    ...extra,
+  });
+}
 function submit(query: string) {
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
   fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
@@ -51,6 +60,143 @@ function submit(query: string) {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it('carries linked weekday and credits into a verified search and imports every meeting of a matching course', async () => {
+  const multiDay = { ...course, time: '3cd4i' };
+  const fetcher = vi.fn().mockResolvedValue(filteredResponse([multiDay], { weekday: 3, credits: 3 }, { unresolvedCount: 2 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['3']} creditsParameters={['3']} />);
+  expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=ncnu&q=005076&weekday=3&credits=3', expect.objectContaining({ credentials: 'omit' }));
+  expect((screen.getByRole('combobox', { name: '上課星期' }) as HTMLSelectElement).value).toBe('3');
+  expect((screen.getByLabelText('學分（完全符合）') as HTMLInputElement).value).toBe('3');
+  expect(screen.getByText('已套用條件：關鍵字「005076」 · 星期三有課 · 3 學分')).toBeTruthy();
+  expect(screen.getByText(/也可能在其他天上課/)).toBeTruthy();
+  expect(screen.getByText(/另有 2 筆資料無法確認/)).toBeTruthy();
+  expect(screen.getByText(/星期三 c、d 節.*星期四 i 節/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '帶入課表核對' }));
+  expect(readPersonalImportDraft(importContext.scope)?.rows.map(row => row.dayOfWeek)).toEqual([3, 4]);
+  expect(readPersonalImports(importContext.scope)).toEqual([]);
+});
+
+it('allows filter-only links and distinguishes zero credits from an unlimited search', async () => {
+  const fetcher = vi.fn().mockResolvedValue(filteredResponse([{ ...course, credits: '0' }], { credits: 0 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} creditsParameters={['0']} />);
+  expect(await screen.findByRole('heading', { name: course.title })).toBeTruthy();
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=ncnu&credits=0', expect.anything());
+  expect(screen.getByText('已套用條件：關鍵字不限 · 0 學分')).toBeTruthy();
+});
+
+it.each([
+  { weekdayParameters: ['3', '4'], creditsParameters: ['3'] },
+  { weekdayParameters: [''], creditsParameters: [] },
+  { weekdayParameters: ['8'], creditsParameters: [] },
+  { weekdayParameters: ['3'], creditsParameters: ['3', '2'] },
+  { weekdayParameters: [], creditsParameters: [''] },
+  { weekdayParameters: [], creditsParameters: ['3.001'] },
+])('does not silently drop invalid linked filters: %j', async (parameters) => {
+  const fetcher = vi.fn().mockResolvedValue(response([]));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['資料庫']} {...parameters} />);
+  expect(screen.getByRole('alert').textContent).toContain('篩選條件無效或重複');
+  expect(fetcher).not.toHaveBeenCalled();
+  submit('老師姓名');
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  await screen.findByText(/沒有找到「老師姓名」課程/);
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=ncnu&q=' + encodeURIComponent('老師姓名'), expect.anything());
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByText('已套用條件：關鍵字「老師姓名」 · 星期與學分不限')).toBeTruthy();
+});
+
+it('validates edited credits without converting invalid text to an unlimited query', async () => {
+  const fetcher = vi.fn().mockResolvedValue(filteredResponse([], { weekday: 7, credits: 2.5 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} />);
+  fireEvent.change(screen.getByRole('combobox', { name: '上課星期' }), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('學分（完全符合）'), { target: { value: '3abc' } });
+  submit('資料庫');
+  expect(screen.getByRole('alert').textContent).toContain('學分請填 0～40');
+  expect((screen.getByLabelText('學分（完全符合）') as HTMLInputElement).value).toBe('3abc');
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('學分（完全符合）'), { target: { value: '2.50' } });
+  fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
+  await screen.findByText(/沒有找到「資料庫」課程/);
+  expect(fetcher).toHaveBeenCalledWith('/api/public-course-catalog?schoolId=ncnu&q=' + encodeURIComponent('資料庫') + '&weekday=7&credits=2.5', expect.anything());
+  expect(screen.getByText('已套用條件：關鍵字「資料庫」 · 星期日有課 · 2.5 學分')).toBeTruthy();
+});
+
+it.each(['fetch', 'body'])('cancels a same-keyword lookup when a filter is edited and ignores its late %s', async (stage) => {
+  let finish!: () => void;
+  const original = filteredResponse([course], { weekday: 5, credits: 3 });
+  const originalBody = await original.clone().json();
+  const delayed = new Promise<unknown>((resolve) => {
+    finish = () => resolve(stage === 'fetch' ? original : originalBody);
+  });
+  const fetcher = vi.fn()
+    .mockReturnValueOnce(stage === 'fetch' ? delayed : Promise.resolve({ ok: true, json: () => delayed }))
+    .mockResolvedValueOnce(filteredResponse([], { weekday: 3, credits: 3 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['3']} />);
+  fireEvent.change(screen.getByRole('combobox', { name: '上課星期' }), { target: { value: '3' } });
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(screen.queryByText(/正在查詢/)).toBeNull();
+  expect(screen.queryByText(/已套用條件|本次查詢條件/)).toBeNull();
+  fireEvent.submit(screen.getByRole('search', { name: '搜尋校方開課資料' }));
+  await screen.findByText(/沒有找到「005076」課程/);
+  expect(fetcher.mock.calls[1][0]).toBe('/api/public-course-catalog?schoolId=ncnu&q=005076&weekday=3&credits=3');
+  expect(screen.getByText('已套用條件：關鍵字「005076」 · 星期三有課 · 3 學分')).toBeTruthy();
+  await act(async () => { finish(); });
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.queryByText(/星期五有課/)).toBeNull();
+});
+
+it('uses the full URL filter scope and cancels an old request when only the linked credits change', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }))
+    .mockResolvedValueOnce(filteredResponse([], { weekday: 5, credits: 2 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['3']} />);
+  view.rerender(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['2']} />);
+  await screen.findByText(/沒有找到「005076」課程/);
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect((screen.getByLabelText('學分（完全符合）') as HTMLInputElement).value).toBe('2');
+  expect(screen.getByText('已套用條件：關鍵字「005076」 · 星期五有課 · 2 學分')).toBeTruthy();
+  await act(async () => { finish(filteredResponse([course], { weekday: 5, credits: 3 })); });
+  expect(screen.queryByText(course.title)).toBeNull();
+});
+
+it('clears both filters while retaining keyword and campus and aborts the filtered request', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }))
+    .mockResolvedValueOnce(response([], { schoolId: 'nthu' }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<PublicCourseSearch {...nthuProps} queryParameters={['環境化學']} weekdayParameters={['1']} creditsParameters={['3']} />);
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  await screen.findByText(/沒有找到「環境化學」課程/);
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  expect(fetcher.mock.calls[1][0]).toBe('/api/public-course-catalog?schoolId=nthu&q=' + encodeURIComponent('環境化學'));
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('環境化學');
+  expect((screen.getByRole('combobox', { name: '上課星期' }) as HTMLSelectElement).value).toBe('');
+  expect((screen.getByLabelText('學分（完全符合）') as HTMLInputElement).value).toBe('');
+  await act(async () => { finish(filteredResponse([nthuCourse], { weekday: 1, credits: 3 }, { schoolId: 'nthu' })); });
+  expect(screen.queryByRole('heading', { name: nthuCourse.title })).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
+});
+
+it.each(['missing-receipt', 'different-filters', 'nonmatching-course'])('rejects a filtered response with %s instead of presenting broader results', async (reason) => {
+  const data = reason === 'missing-receipt' ? response([course])
+    : reason === 'different-filters' ? filteredResponse([], { weekday: 3, credits: 3 })
+      : filteredResponse([{ ...course, credits: '2' }], { weekday: 5, credits: 3 });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(data));
+  render(<PublicCourseSearch {...props} queryParameters={['005076']} weekdayParameters={['5']} creditsParameters={['3']} />);
+  expect(await screen.findByRole('alert')).toBeTruthy();
+  expect(screen.queryByText(course.title)).toBeNull();
+  expect(screen.getByText('本次查詢條件：關鍵字「005076」 · 星期五有課 · 3 學分')).toBeTruthy();
+  expect(screen.queryByText(/已套用條件/)).toBeNull();
+  expect(readPersonalImportDraft(importContext.scope)).toBeNull();
 });
 
 it.each(['資料庫', '', '𠮷'.repeat(80)])('reads a single linked query without creating a timetable draft: %s', async (query) => {

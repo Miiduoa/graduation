@@ -7,6 +7,11 @@ import {
   isPublicCourseCatalog,
   type PublicCourseCatalogResponse,
 } from '@campus/shared/src/publicCourseCatalog';
+import {
+  hasPublicCourseFilters,
+  parsePublicCourseFilters,
+  type PublicCourseFilters,
+} from '@campus/shared/src/publicCourseFilters';
 import { searchNcnuCourseCatalog } from './ncnuCourseCatalog';
 import { searchNthuCourseCatalog } from './nthuCourseCatalog';
 
@@ -26,48 +31,69 @@ export type PublicCourseOperationResult = PublicCourseCatalogResponse & {
   operation: PublicCourseOperationReceipt;
 };
 
-function readQuery(input: unknown): string {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+function readInput(input: unknown, version: number): { query: string; filters: PublicCourseFilters } {
+  try {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new PublicCourseOperationError('input');
+    }
+    const prototype = Object.getPrototypeOf(input);
+    if (
+      (prototype !== Object.prototype && prototype !== null) ||
+      Reflect.ownKeys(input).some((key) => key !== 'query' &&
+        (version !== 2 || (key !== 'weekday' && key !== 'credits')))
+    ) {
+      throw new PublicCourseOperationError('input');
+    }
+    const query = Object.getOwnPropertyDescriptor(input, 'query');
+    // Descriptors avoid executing accessors supplied by an internal caller.
+    if (query && (!('value' in query) || !isPublicCourseOperationQuery(query.value))) {
+      throw new PublicCourseOperationError('input');
+    }
+    const filterInput: PublicCourseFilters = {};
+    for (const key of ['weekday', 'credits'] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key);
+      if (!descriptor) continue;
+      if (!('value' in descriptor)) throw new PublicCourseOperationError('input');
+      filterInput[key] = descriptor.value;
+    }
+    const filters = parsePublicCourseFilters(filterInput);
+    if (!filters || (version === 2 && !hasPublicCourseFilters(filters))) {
+      throw new PublicCourseOperationError('input');
+    }
+    return { query: query?.value ?? '', filters };
+  } catch {
     throw new PublicCourseOperationError('input');
   }
-  const prototype = Object.getPrototypeOf(input);
-  if (
-    (prototype !== Object.prototype && prototype !== null) ||
-    Reflect.ownKeys(input).some((key) => key !== 'query')
-  ) {
-    throw new PublicCourseOperationError('input');
-  }
-  const query = Object.getOwnPropertyDescriptor(input, 'query');
-  if (!query) return '';
-  // Descriptors avoid executing accessors supplied by an internal caller.
-  if (!('value' in query) || !isPublicCourseOperationQuery(query.value)) {
-    throw new PublicCourseOperationError('input');
-  }
-  return query.value;
 }
 
 /** Dispatch a reviewed read, never a caller-supplied URL, header or script. */
 export async function executePublicCourseOperation(
   operationId: string,
   input: unknown,
+  version = 1,
 ): Promise<PublicCourseOperationResult> {
-  const operation = getPublicCourseOperation(operationId);
+  const operation = getPublicCourseOperation(operationId, version);
   if (!operation) throw new PublicCourseOperationError('input');
-  const query = readQuery(input);
+  const { query, filters } = readInput(input, operation.version);
 
   try {
-    const result =
-      operation.schoolId === 'ncnu'
-        ? await searchNcnuCourseCatalog(query)
-        : await searchNthuCourseCatalog(query);
+    const search = operation.schoolId === 'ncnu' ? searchNcnuCourseCatalog : searchNthuCourseCatalog;
+    const result = operation.version === 2 ? await search(query, filters) : await search(query);
+    const base = operation.version === 2 ? {
+      schoolId: result.schoolId,
+      sourceUrl: result.sourceUrl,
+      fetchedAt: result.fetchedAt,
+      courses: result.courses,
+      truncated: result.truncated,
+    } : result;
     if (
-      !isPublicCourseCatalog(result, operation.schoolId) ||
+      !isPublicCourseCatalog(base, operation.schoolId) ||
       typeof result.fetchedAt !== 'string'
     ) {
       throw new PublicCourseOperationError('upstream');
     }
     // Copy the public contract instead of sharing raw provider responses.
-    return {
+    const projected: PublicCourseOperationResult = {
       schoolId: operation.schoolId,
       sourceUrl: operation.sourceUrl,
       fetchedAt: result.fetchedAt,
@@ -93,11 +119,21 @@ export async function executePublicCourseOperation(
       })),
       operation: {
         id: operation.id,
-        version: operation.version,
-        responseSchemaVersion: operation.responseSchemaVersion,
         access: operation.access,
+        ...(operation.version === 2
+          ? { version: 2 as const, responseSchemaVersion: 2 as const }
+          : { version: 1 as const, responseSchemaVersion: 1 as const }),
       },
+      ...(operation.version === 2
+        ? { filters: result.filters, unresolvedCount: result.unresolvedCount }
+        : {}),
     };
+    // Verify the provider's filter receipt and every returned course before
+    // copying canonical metadata. Never label an unfiltered result as filtered.
+    if (!isPublicCourseCatalog(projected, operation.schoolId, filters)) {
+      throw new PublicCourseOperationError('upstream');
+    }
+    return operation.version === 2 ? { ...projected, filters: { ...filters } } : projected;
   } catch {
     // Upstream errors may contain request details; callers only need the category.
     throw new PublicCourseOperationError('upstream');

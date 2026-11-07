@@ -78,6 +78,71 @@ describe('NTHU official public JSON catalog', () => {
     expect((await searchNthuCourseCatalog('資料庫')).courses).toEqual([]);
   });
 
+  it('filters the complete feed before truncating while retaining all padded identities and meetings', async () => {
+    const rows = Array.from({ length: 70 }, (_, index) => ({
+      ...chemistry,
+      科號: '11520AES ' + String(index).padStart(6, '0'),
+      ...(index < 60 ? {} : { 學分數: '1.50', 教室與上課時間: '教室甲\tR3R4\n教室乙\tU1\n' }),
+    }));
+    const fetchSource = vi.fn().mockResolvedValue(response(rows));
+    vi.stubGlobal('fetch', fetchSource);
+    const { searchNthuCourseCatalog } = await import('./nthuCourseCatalog');
+    const unfiltered = await searchNthuCourseCatalog('');
+    expect(unfiltered.courses).toHaveLength(50);
+    expect(unfiltered).not.toHaveProperty('filters');
+    expect(unfiltered).not.toHaveProperty('unresolvedCount');
+    const filtered = await searchNthuCourseCatalog('chemistry', { weekday: 4, credits: 1.5 });
+    expect(filtered).toMatchObject({ filters: { weekday: 4, credits: 1.5 }, truncated: false, unresolvedCount: 0 });
+    expect(filtered.courses.map(course => course.code)).toEqual(
+      Array.from({ length: 10 }, (_, index) => '11520AES ' + String(index + 60).padStart(6, '0')),
+    );
+    expect(filtered.courses[0]).toMatchObject({
+      semester: '1152', time: 'R3R4\nU1', credits: '1.50',
+      meetings: [{ room: '教室甲', time: 'R3R4' }, { room: '教室乙', time: 'U1' }],
+    });
+    expect((await searchNthuCourseCatalog('', { weekday: 7 })).courses).toEqual(filtered.courses);
+    const capped = await searchNthuCourseCatalog('', { weekday: 1 });
+    expect(capped.courses).toHaveLength(50);
+    expect(capped).toMatchObject({ truncated: true, unresolvedCount: 0, filters: { weekday: 1 } });
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts only unresolved keyword matches and keeps unknown credits distinct from zero', async () => {
+    const rows = [
+      { ...chemistry, 科號: '11520AES 000001', 教室與上課時間: '教室\tR3R4\n', 學分數: '3.0' },
+      { ...chemistry, 科號: '11520AES 000002', 教室與上課時間: '', 學分數: '3' },
+      { ...chemistry, 科號: '11520AES 000003', 教室與上課時間: '教室\t未定\n', 學分數: '2' },
+      { ...chemistry, 科號: '11520AES 000004', 教室與上課時間: '教室\tM3M4\n', 學分數: '' },
+      { ...chemistry, 科號: '11520AES 000005', 教室與上課時間: '教室\tR3R4\n', 學分數: '' },
+      { ...chemistry, 科號: '11520AES 000006', 教室與上課時間: '甲\tR3R4\n乙\t\n', 學分數: '3' },
+      { ...chemistry, 科號: '11520AES 000007', 教室與上課時間: '', 學分數: '0' },
+      { ...database, 科號: '11520CS  000008', 教室與上課時間: '', 學分數: '待確認' },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(rows)));
+    const { searchNthuCourseCatalog } = await import('./nthuCourseCatalog');
+    const filtered = await searchNthuCourseCatalog('chemistry', { weekday: 4, credits: 3 });
+    expect(filtered).toMatchObject({ filters: { weekday: 4, credits: 3 }, unresolvedCount: 3, truncated: false });
+    expect(filtered.courses.map(course => course.code)).toEqual(['11520AES 000001']);
+    const zero = await searchNthuCourseCatalog('', { credits: 0 });
+    expect(zero.courses.map(course => course.code)).toEqual(['11520AES 000007']);
+    expect(zero.unresolvedCount).toBe(3);
+    const unfiltered = await searchNthuCourseCatalog('');
+    expect(unfiltered.courses).toHaveLength(8);
+    expect(unfiltered.courses[5].meetings).toEqual([{ room: '甲', time: 'R3R4' }, { room: '乙', time: '' }]);
+    expect(unfiltered.courses[7].credits).toBe('待確認');
+    expect(unfiltered).not.toHaveProperty('unresolvedCount');
+  });
+
+  it.each([{ weekday: 0 }, { weekday: 1.5 }, { credits: -1 }, { credits: 40.01 }, { credits: 1.234 }])(
+    'rejects invalid direct adapter filters %j before loading the source', async (filters) => {
+      const fetchSource = vi.fn();
+      vi.stubGlobal('fetch', fetchSource);
+      const { searchNthuCourseCatalog } = await import('./nthuCourseCatalog');
+      await expect(searchNthuCourseCatalog('', filters)).rejects.toThrow('Invalid course filters');
+      expect(fetchSource).not.toHaveBeenCalled();
+    },
+  );
+
   it('coalesces simultaneous searches into one in-flight download', async () => {
     let finish!: (value: Response) => void;
     const fetchSource = vi.fn().mockReturnValue(new Promise<Response>(resolve => { finish = resolve; }));

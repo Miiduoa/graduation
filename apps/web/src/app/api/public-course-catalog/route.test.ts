@@ -56,6 +56,86 @@ describe('NCNU public guest catalog', () => {
     expect(last.truncated).toBe(false);
   });
 
+  it('applies weekday and decimal credits across the whole snapshot before the 50-course cap', async () => {
+    const many = Array.from({ length: 70 }, (_, index) => {
+      const row = lines[0].replace('000001', String(index).padStart(6, '0'));
+      return index < 60 ? row : row.replace('3bcd', '5bcd').replace('3.0', '1.50');
+    });
+    const fetchSource = vi.fn().mockResolvedValue(csv([header, ...many].join('\r\n')));
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET } = await import('./route');
+    const legacy = await (await GET(request('schoolId=ncnu&q=普通'))).json();
+    expect(legacy.operation).toEqual({
+      id: 'ncnu.courses.search', version: 1, responseSchemaVersion: 1, access: 'anonymous-public',
+    });
+    expect(legacy).not.toHaveProperty('filters');
+    expect(legacy).not.toHaveProperty('unresolvedCount');
+    expect(legacy.courses).toHaveLength(50);
+
+    const response = await GET(request('schoolId=ncnu&q=普通&weekday=5&credits=1.50'));
+    expect(response.status).toBe(200);
+    const filtered = await response.json();
+    expect(filtered).toMatchObject({
+      filters: { weekday: 5, credits: 1.5 }, unresolvedCount: 0, truncated: false,
+      operation: { id: 'ncnu.courses.search', version: 2, responseSchemaVersion: 2, access: 'anonymous-public' },
+    });
+    expect(filtered.courses.map((course: { code: string }) => course.code)).toEqual(
+      Array.from({ length: 10 }, (_, index) => String(index + 60).padStart(6, '0')),
+    );
+    expect(filtered.courses.every((course: { credits: string }) => course.credits === '1.50')).toBe(true);
+    const capped = await (await GET(request('schoolId=ncnu&weekday=3'))).json();
+    expect(capped.courses).toHaveLength(50);
+    expect(capped).toMatchObject({ truncated: true, unresolvedCount: 0, filters: { weekday: 3 } });
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps unknown source values separate from matches and known exclusions, including unverified terms', async () => {
+    const makeRow = (code: string, time: string, credits: string, title = '普通心理學') => lines[0]
+      .replace('000001', code).replace('1151', '1152').replace('3bcd', time).replace('3.0', credits)
+      .replace('普通心理學', title);
+    const rows = [
+      makeRow('000010', '5bcd', '3.0'),
+      makeRow('000011', '', '3'),
+      makeRow('000012', '未定', '2'),
+      makeRow('000013', '3bcd', ''),
+      makeRow('000014', '5bcd', ''),
+      makeRow('000015', '', '待確認'),
+      makeRow('000016', '5bcd', '0'),
+      makeRow('000017', '', '', '無關課名'),
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(csv([header, ...rows].join('\r\n'))));
+    const { GET } = await import('./route');
+    const response = await GET(request('schoolId=ncnu&q=普通&weekday=5&credits=3'));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ filters: { weekday: 5, credits: 3 }, unresolvedCount: 3, truncated: false });
+    expect(body.courses).toEqual([expect.objectContaining({ code: '000010', semester: '1152', time: '5bcd', credits: '3.0' })]);
+    const zero = await (await GET(request('schoolId=ncnu&credits=0'))).json();
+    expect(zero.courses.map((course: { code: string }) => course.code)).toEqual(['000016']);
+    expect(zero.unresolvedCount).toBe(4);
+    const legacy = await (await GET(request('schoolId=ncnu&q=普通'))).json();
+    expect(legacy.courses).toHaveLength(7);
+    expect(legacy.courses.find((course: { code: string }) => course.code === '000015').credits).toBe('待確認');
+    expect(legacy).not.toHaveProperty('unresolvedCount');
+  });
+
+  it.each([
+    'weekday=', 'weekday=0', 'weekday=8', 'weekday=1.5', 'weekday=01', 'weekday=一',
+    'weekday=1&weekday=1', 'credits=', 'credits=-1', 'credits=40.01', 'credits=Infinity',
+    'credits=NaN', 'credits=1.234', 'credits=3學分', 'credits=1e0', 'credits=03',
+    'credits=3&credits=3', 'weekday=3&credits=3&version=2', 'weekday=3&extra=1',
+  ])('rejects malformed or repeated filter parameters %s before fetching any source', async (filters) => {
+    const fetchSource = vi.fn();
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET } = await import('./route');
+    for (const schoolId of ['ncnu', 'nthu']) {
+      const response = await GET(request('schoolId=' + schoolId + '&' + filters));
+      expect(response.status).toBe(400);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+    }
+    expect(fetchSource).not.toHaveBeenCalled();
+  });
+
   it('rejects ambiguous campuses and oversized searches before accessing the source', async () => {
     const fetchSource = vi.fn();
     vi.stubGlobal('fetch', fetchSource);
@@ -115,6 +195,31 @@ describe('NCNU public guest catalog', () => {
     expect(body.operation.version).toBe(operation.version);
     expect(body.sourceUrl).toBe(operation.sourceUrl);
     expect(body.courses.map((course: { section: string }) => course.section)).toEqual(['a', 'b']);
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes a v2 operation exactly through its discovered optional filter mapping', async () => {
+    const fetchSource = vi.fn().mockResolvedValue(csv());
+    vi.stubGlobal('fetch', fetchSource);
+    const { GET: discover } = await import('./operations/route');
+    const { GET } = await import('./route');
+    const directory = await (await discover(new Request('https://example.test/api/public-course-catalog/operations?version=2'))).json();
+    const operation = directory.operations.find((item: { id: string }) => item.id === 'ncnu.courses.search');
+    expect(fetchSource).not.toHaveBeenCalled();
+    expect(operation.inputSchema.anyOf).toEqual([{ required: ['weekday'] }, { required: ['credits'] }]);
+    for (const filters of [{ weekday: 5 }, { credits: 3 }, { weekday: 5, credits: 3 }]) {
+      const url = new URL(operation.endpoint.path, 'https://example.test');
+      for (const [key, value] of Object.entries(operation.endpoint.fixedQuery)) url.searchParams.set(key, String(value));
+      url.searchParams.set(operation.endpoint.inputQuery.query, '005076');
+      for (const [key, value] of Object.entries(filters)) url.searchParams.set(operation.endpoint.inputQuery[key], String(value));
+      const response = await GET(new Request(url));
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.operation).toEqual({ id: operation.id, version: operation.version, responseSchemaVersion: operation.responseSchemaVersion, access: operation.access });
+      expect(body.filters).toEqual(filters);
+      expect(body.unresolvedCount).toBe(0);
+      expect(body.courses.map((course: { section: string }) => course.section)).toEqual(['a', 'b']);
+    }
     expect(fetchSource).toHaveBeenCalledTimes(1);
   });
 

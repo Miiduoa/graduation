@@ -40,6 +40,16 @@ function catalog(schoolId: PublicCourseCatalogResponse['schoolId']): PublicCours
   };
 }
 
+function filteredCatalog(schoolId: PublicCourseCatalogResponse['schoolId']): PublicCourseCatalogResponse {
+  const base = catalog(schoolId);
+  return {
+    ...base,
+    courses: base.courses.map(course => ({ ...course, ...(schoolId === 'ncnu' ? { time: '3abc' } : {}) })),
+    filters: { weekday: 3, credits: 3 },
+    unresolvedCount: 2,
+  };
+}
+
 beforeEach(() => {
   ncnu.mockReset().mockResolvedValue(catalog('ncnu'));
   nthu.mockReset().mockResolvedValue(catalog('nthu'));
@@ -89,6 +99,45 @@ describe('reviewed public course operations', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('keeps default v1 operations stable and separately resolves immutable v2 filter contracts', () => {
+    const filtered = listPublicCourseOperations(2);
+    expect(filtered).toHaveLength(2);
+    expect(Object.isFrozen(filtered)).toBe(true);
+    for (const operation of filtered) {
+      expect(getPublicCourseOperation(operation.id, 2)).toBe(operation);
+      expect(resolvePublicCourseOperation(operation.schoolId, 2)).toBe(operation);
+      expect(getPublicCourseOperation(operation.id)?.version).toBe(1);
+      expect(resolvePublicCourseOperation(operation.schoolId)?.version).toBe(1);
+      expect(operation).toMatchObject({
+        version: 2, responseSchemaVersion: 2,
+        inputSchema: {
+          properties: {
+            query: { type: 'string', maxLength: 80 },
+            weekday: { type: 'integer', minimum: 1, maximum: 7 },
+            credits: { type: 'number', minimum: 0, maximum: 40, multipleOf: 0.01 },
+          },
+          additionalProperties: false,
+          anyOf: [{ required: ['weekday'] }, { required: ['credits'] }],
+        },
+      });
+      expect(Reflect.set(operation.inputSchema.properties.weekday!, 'maximum', 8)).toBe(false);
+      expect(Reflect.set(operation.inputSchema.anyOf![0].required, '0', 'query')).toBe(false);
+    }
+    expect(ncnu).not.toHaveBeenCalled();
+    expect(nthu).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 3, -1, NaN, Infinity])('rejects unreviewed version %s without a provider read', async (version) => {
+    expect(listPublicCourseOperations(version)).toEqual([]);
+    expect(getPublicCourseOperation('ncnu.courses.search', version)).toBeNull();
+    expect(resolvePublicCourseOperation('ncnu', version)).toBeNull();
+    await expect(executePublicCourseOperation('ncnu.courses.search', { weekday: 3 }, version)).rejects.toMatchObject({ kind: 'input' });
+    expect(ncnu).not.toHaveBeenCalled();
+    expect(nthu).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each(['', 'pu', 'constructor', '__proto__', 'toString', 'https://example.test/'])(
     'does not resolve unreviewed school %s',
     (schoolId) => {
@@ -129,6 +178,8 @@ describe('reviewed public course operations', () => {
     ['prototype property', JSON.parse('{"__proto__":{"query":"private"}}')],
     ['inherited values', Object.create({ query: 'private' })],
     ['symbol property', { [Symbol('url')]: 'https://example.test/' }],
+    ['v2 weekday on the legacy operation', { weekday: 3 }],
+    ['v2 credits on the legacy operation', { query: '資料庫', credits: 3 }],
   ])('rejects %s without starting a provider read', async (_name, input) => {
     await expect(executePublicCourseOperation('ncnu.courses.search', input)).rejects.toMatchObject({
       kind: 'input',
@@ -146,6 +197,85 @@ describe('reviewed public course operations', () => {
     });
     expect(getter).not.toHaveBeenCalled();
     expect(ncnu).not.toHaveBeenCalled();
+    expect(nthu).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing filters', {}], ['query only', { query: '資料庫' }],
+    ['undefined weekday', { weekday: undefined }], ['text weekday', { weekday: '3' }],
+    ['out of range weekday', { weekday: 8 }], ['fractional weekday', { weekday: 1.5 }],
+    ['text credits', { credits: '3' }], ['negative credits', { credits: -1 }],
+    ['too many credits', { credits: 40.01 }], ['overprecise credits', { credits: 1.234 }],
+    ['nonfinite credits', { credits: Infinity }], ['invalid number', { credits: NaN }],
+    ['missing query data', { query: undefined, credits: 3 }],
+    ['school override', { weekday: 3, schoolId: 'nthu' }],
+    ['URL', { credits: 3, url: 'https://example.test/' }],
+    ['nested filters', { filters: { credits: 3 } }],
+    ['inherited filter', Object.create({ weekday: 3 })],
+    ['symbol option', { weekday: 3, [Symbol('secret')]: true }],
+  ])('rejects v2 %s before reading any source', async (_name, input) => {
+    await expect(executePublicCourseOperation('ncnu.courses.search', input, 2)).rejects.toMatchObject({ kind: 'input' });
+    expect(ncnu).not.toHaveBeenCalled();
+    expect(nthu).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['weekday', 'credits'])('does not execute a v2 %s accessor', async (key) => {
+    const getter = vi.fn(() => 3);
+    const input = Object.defineProperty({ query: '資料庫' }, key, { get: getter, enumerable: true });
+    await expect(executePublicCourseOperation('ncnu.courses.search', input, 2)).rejects.toMatchObject({ kind: 'input' });
+    expect(getter).not.toHaveBeenCalled();
+    expect(ncnu).not.toHaveBeenCalled();
+    expect(nthu).not.toHaveBeenCalled();
+  });
+
+  it.each(['ncnu', 'nthu'] as const)('executes the %s v2 filters and preserves metadata without sharing provider objects', async (schoolId) => {
+    const source = { ...filteredCatalog(schoolId), privateToken: 'private-value' };
+    (schoolId === 'ncnu' ? ncnu : nthu).mockResolvedValue(source);
+    const input = Object.assign(Object.create(null), { query: '資料庫', weekday: 3, credits: 3 });
+    const result = await executePublicCourseOperation(schoolId + '.courses.search', input, 2);
+    expect(schoolId === 'ncnu' ? ncnu : nthu).toHaveBeenCalledWith('資料庫', { weekday: 3, credits: 3 });
+    expect(schoolId === 'ncnu' ? nthu : ncnu).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      schoolId, fetchedAt, filters: { weekday: 3, credits: 3 }, unresolvedCount: 2,
+      operation: { id: schoolId + '.courses.search', version: 2, responseSchemaVersion: 2, access: 'anonymous-public' },
+    });
+    expect(Object.keys(result.operation).sort()).toEqual(['access', 'id', 'responseSchemaVersion', 'version']);
+    expect(result.filters).not.toBe(source.filters);
+    expect(result.courses).not.toBe(source.courses);
+    expect(result.courses[0].code).toBe(schoolId === 'ncnu' ? '005076' : '11510CS  772000');
+    expect(JSON.stringify(result)).not.toContain('private-value');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 0.5, 1.25, 40])('allows an exact %s-credit filter without a weekday', async (credits) => {
+    const source = filteredCatalog('ncnu');
+    ncnu.mockResolvedValue({ ...source, courses: [{ ...source.courses[0], credits: credits.toFixed(2) }], filters: { credits }, unresolvedCount: 0 });
+    const result = await executePublicCourseOperation('ncnu.courses.search', { credits }, 2);
+    expect(ncnu).toHaveBeenCalledWith('', { credits });
+    expect(result.filters).toEqual({ credits });
+    expect(result.courses[0].credits).toBe(credits.toFixed(2));
+  });
+
+  it.each([
+    ['dropped filters', () => ({ ...filteredCatalog('ncnu'), filters: undefined })],
+    ['empty filters', () => ({ ...filteredCatalog('ncnu'), filters: {} })],
+    ['different filters', () => ({ ...filteredCatalog('ncnu'), filters: { weekday: 4, credits: 3 } })],
+    ['expanded filters', () => ({ ...filteredCatalog('ncnu'), filters: { weekday: 3, credits: 3, privateToken: 'secret' } })],
+    ['missing unresolved count', () => ({ ...filteredCatalog('ncnu'), unresolvedCount: undefined })],
+    ['negative unresolved count', () => ({ ...filteredCatalog('ncnu'), unresolvedCount: -1 })],
+    ['fractional unresolved count', () => ({ ...filteredCatalog('ncnu'), unresolvedCount: 0.5 })],
+    ['unbounded unresolved count', () => ({ ...filteredCatalog('ncnu'), unresolvedCount: 20_001 })],
+    ['wrong weekday', () => ({ ...filteredCatalog('ncnu'), courses: [{ ...catalog('ncnu').courses[0], time: '4abc' }] })],
+    ['unresolved weekday', () => ({ ...filteredCatalog('ncnu'), courses: [{ ...catalog('ncnu').courses[0], time: '' }] })],
+    ['wrong credits', () => ({ ...filteredCatalog('ncnu'), courses: [{ ...filteredCatalog('ncnu').courses[0], credits: '2' }] })],
+    ['other school', () => filteredCatalog('nthu')],
+    ['foreign source', () => ({ ...filteredCatalog('ncnu'), sourceUrl: 'https://example.test/' })],
+    ['missing fetch time', () => ({ ...filteredCatalog('ncnu'), fetchedAt: undefined })],
+  ])('rejects v2 provider %s instead of relabeling it as a filtered success', async (_label, source) => {
+    ncnu.mockResolvedValue(source() as PublicCourseCatalogResponse);
+    await expect(executePublicCourseOperation('ncnu.courses.search', { weekday: 3, credits: 3 }, 2)).rejects.toMatchObject({ kind: 'upstream' });
+    expect(ncnu).toHaveBeenCalledTimes(1);
     expect(nthu).not.toHaveBeenCalled();
   });
 

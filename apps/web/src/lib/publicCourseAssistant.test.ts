@@ -79,7 +79,6 @@ describe('public course requests', () => {
     '查資料庫清大課程',
     '清大週二下午的資料庫課程',
     '查清大下學期的資料庫課程',
-    '幫我找清大三學分資料庫課程',
     '查清大資料庫課程然後直接加入課表',
   ])('does not silently change or drop a requested constraint: %s', (question) => {
     // Personal timetable mutations stay on the normal assistant path.
@@ -123,6 +122,66 @@ describe('public course requests', () => {
       query,
     });
     expect(resolve('查清大「' + query + '𠮷」課程')?.kind).toBe('clarify');
+  });
+
+  it.each([
+    ['幫我查清大的星期一 3 學分資料庫課程', 'nthu', '資料庫', { weekday: 1, credits: 3 }],
+    ['查清大星期三3學分的資料庫課程', 'nthu', '資料庫', { weekday: 3, credits: 3 }],
+    ['清大週三有沒有三學分資料庫課程', 'nthu', '資料庫', { weekday: 3, credits: 3 }],
+    ['查清大星期三上課的3學分課程', 'nthu', '', { weekday: 3, credits: 3 }],
+    ['查暨大資料庫課程 週日 2.5學分', 'ncnu', '資料庫', { weekday: 7, credits: 2.5 }],
+    ['幫我找清大三學分資料庫課程', 'nthu', '資料庫', { credits: 3 }],
+    ['查清大星期四大學英文課程', 'nthu', '大學英文', { weekday: 4 }],
+    ['查清大星期三「大學英文」課程', 'nthu', '大學英文', { weekday: 3 }],
+    ['查清大星期天 0 學分的課程', 'nthu', '', { weekday: 7, credits: 0 }],
+    ['查暨大兩點五學分管理學課程', 'ncnu', '管理學', { credits: 2.5 }],
+    ['查暨大十五學分的課程', 'ncnu', '', { credits: 15 }],
+    ['查清大３學分的資料庫課程', 'nthu', '資料庫', { credits: 3 }],
+    ['查清大3學分非線性課程', 'nthu', '非線性', { credits: 3 }],
+    ['查清大星期三無機化學課程', 'nthu', '無機化學', { weekday: 3 }],
+    ['查星期五的資料庫課程', 'ncnu', '資料庫', { weekday: 5 }],
+  ])('keeps the complete supported conditions for %s', (question, schoolId, query, filters) => {
+    expect(resolve(question, 'ncnu')).toEqual({ kind: 'search', schoolId, query, filters });
+  });
+
+  it.each([
+    '查清大星期一和星期三的課程',
+    '查清大週三或四資料庫課程',
+    '查清大星期三四資料庫課程',
+    '查清大只有星期三上課的課程',
+    '查清大非星期三的課程',
+    '查清大星期三不上課的課程',
+    '查清大星期三沒課的課程',
+    '查清大星期三無課的課程',
+    '查清大非三學分的課程',
+    '查清大三學分以外的課程',
+    '查清大3學分左右的課程',
+    '查清大星期三以前的課程',
+    '查清大下週三的課程',
+    '查清大下星期三的課程',
+    '查清大這禮拜三的課程',
+    '查清大11月18日星期三的課程',
+    '查清大星期三下午3學分資料庫課程',
+    '查清大至少3學分的課程',
+    '查清大3到4學分的課程',
+    '查清大3或4學分的課程',
+    '查清大41學分課程',
+    '查清大-3學分課程',
+    '查清大2.555學分課程',
+    '查清大1e1學分課程',
+    '查清大0x3學分課程',
+    '查清大星期八課程',
+    '查清大星期三台大資料庫課程',
+  ])('does not silently reinterpret unsupported conditions: %s', (question) => {
+    expect(resolve(question, 'nthu')?.kind).toBe('clarify');
+  });
+
+  it('keeps weekday and credit words inside quoted course titles literal', () => {
+    expect(resolve('查清大「星期三的三學分」課程')).toEqual({
+      kind: 'search',
+      schoolId: 'nthu',
+      query: '星期三的三學分',
+    });
   });
 });
 

@@ -28,6 +28,54 @@ afterEach(() => {
 
 describe('public course transport', () => {
   it.each(['web', 'mobile'] as const)(
+    'sends the complete filtered request from %s without any private context',
+    async (origin) => {
+      const filters = { weekday: 3, credits: 0 };
+      const response = {
+        ...data(),
+        filters,
+        unresolvedCount: 2,
+        operation: { ...data().operation, version: 2, responseSchemaVersion: 2 },
+      };
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply(response));
+      const result = await answer({
+        ...options,
+        origin,
+        question: '查清大星期三0學分的課程',
+        fetcher,
+      });
+      expect(result?.read).toMatchObject({
+        status: 'ready',
+        filters,
+        unresolvedCount: 2,
+        matchCount: 0,
+      });
+      const [url, init] = fetcher.mock.calls[0];
+      expect(Object.fromEntries(new URL(String(url), 'https://nuni.tw').searchParams)).toEqual({
+        schoolId: 'nthu',
+        q: '',
+        weekday: '3',
+        credits: '0',
+      });
+      expect(init?.credentials).toBe('omit');
+      expect(init?.body).toBeUndefined();
+      expect(init?.headers).toEqual({ Accept: 'application/json' });
+      expect(JSON.stringify(init)).not.toContain('pu');
+    },
+  );
+
+  it('does not fall back to an unfiltered search when an old server cannot apply the conditions', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply(data()));
+    const result = await answer({ ...options, question: '查清大星期三3學分課程', fetcher });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result?.read).toMatchObject({
+      status: 'unavailable',
+      filters: { weekday: 3, credits: 3 },
+    });
+    expect(result?.content).not.toContain('0 筆');
+  });
+
+  it.each(['web', 'mobile'] as const)(
     'makes only the reviewed anonymous request from %s',
     async (origin) => {
       const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply(data()));

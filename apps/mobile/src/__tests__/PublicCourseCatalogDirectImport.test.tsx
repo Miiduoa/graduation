@@ -3,6 +3,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import type { PublicCatalogCourse } from '@campus/shared/src/publicCourseCatalog';
+import { resolvePublicCourseOperation } from '@campus/shared/src/publicCourseOperations';
 import { PublicCourseCatalogScreen } from '../screens/PublicCourseCatalogScreen';
 import { loadPersonalImports } from '../services/personalImports';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -54,6 +55,32 @@ test.each(['nthu', 'ncnu'] as const)('the actual %s card exposes review controls
   const saved = await loadPersonalImports(mockScope);
   expect(saved.records).toHaveLength(schoolId === 'nthu' ? 2 : 1);
   expect(saved.records.every((row) => row.schoolId === schoolId && row.courseCode === course.code)).toBe(true);
+  expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  expect(safeNavigate).not.toHaveBeenCalled();
+});
+
+test('a Monday filter still reviews and imports both Monday and Thursday meetings from the verified course', async () => {
+  mockScope = { owner: 'guest:device', schoolId: 'nthu' };
+  const operation = resolvePublicCourseOperation('nthu', 2)!;
+  const filters = { weekday: 1, credits: 3 };
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true, headers: { get: () => null }, text: async () => JSON.stringify({
+      schoolId: 'nthu', sourceUrl: operation.sourceUrl, fetchedAt: '2026-11-07T08:00:00.000Z',
+      operation: { id: operation.id, version: 2, responseSchemaVersion: 2, access: operation.access },
+      filters, unresolvedCount: 0, truncated: false, courses: [nthu],
+    }),
+  });
+  const view = render(<PublicCourseCatalogScreen schoolId="nthu" initialQuery={nthu.code} initialFilters={filters} />);
+  fireEvent.press(await view.findByRole('button', { name: '核對並加入課表' }));
+  expect(view.getByText(/分析化學專題 · 星期一 10:10–12:00/)).toBeTruthy();
+  expect(view.getByText(/分析化學專題 · 星期四 13:20–15:10/)).toBeTruthy();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '確認加入個人課表' }));
+  await view.findByRole('button', { name: '查看個人課表' });
+  const saved = await loadPersonalImports(mockScope);
+  expect(saved.records.map(row => row.dayOfWeek).sort()).toEqual([1, 4]);
+  expect(saved.records.map(row => row.location).sort()).toEqual(['教室乙', '教室甲']);
+  expect(saved.records.every(row => row.courseCode === nthu.code)).toBe(true);
   expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   expect(safeNavigate).not.toHaveBeenCalled();
 });

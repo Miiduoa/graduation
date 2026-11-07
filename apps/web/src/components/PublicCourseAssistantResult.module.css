@@ -25,6 +25,14 @@
   font-size: 12px;
   line-height: 1.7;
 }
+.filters {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 12px);
+  font-size: 13px;
+  line-height: 1.7;
+}
 .courses {
   margin: 16px 0;
   padding: 0;
