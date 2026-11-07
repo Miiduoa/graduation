@@ -7,6 +7,7 @@ import { safeNavigate } from '../utils/safeNavigate';
 const mockNavigation = { navigate: jest.fn() };
 let mockAuth: ReturnType<typeof useNuniSession>;
 let mockProviderAvailable = false;
+let mockSchool = { id: 'pu', name: '靜宜大學' };
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
@@ -17,7 +18,7 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../state/nuniSession', () => ({ useNuniSession: () => mockAuth }));
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'pu', name: '靜宜大學' } }),
+  useSchool: () => ({ school: mockSchool }),
 }));
 jest.mock('../ui/useThemeStyleSheet', () => ({
   useThemeStyleSheet: <T,>(create: () => T) => create(),
@@ -36,6 +37,7 @@ jest.mock('../components/TodayTimetablePanel', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   mockProviderAvailable = false;
+  mockSchool = { id: 'pu', name: '靜宜大學' };
   mockAuth = {
     session: null,
     loading: false,
@@ -45,6 +47,9 @@ beforeEach(() => {
     signIn: jest.fn(),
     logout: jest.fn(),
     request: jest.fn(),
+    upload: jest.fn(),
+    bffRequest: jest.fn(),
+    isSessionCurrent: jest.fn(),
   };
 });
 
@@ -52,15 +57,15 @@ function landing() {
   return renderAsync(<LoginLandingScreen />);
 }
 
-it('places the import and account actions before the long public-service list', async () => {
+it('prioritizes the Google account entry before school import and public services', async () => {
   const view = await landing();
   const tree = JSON.stringify(view.toJSON());
   const importIndex = tree.indexOf('"testID":"school-import-start"');
   const accountIndex = tree.indexOf('"testID":"login-start"');
   const servicesIndex = tree.indexOf('"testID":"public-Map"');
-  expect(importIndex).toBeGreaterThanOrEqual(0);
-  expect(accountIndex).toBeGreaterThan(importIndex);
-  expect(servicesIndex).toBeGreaterThan(accountIndex);
+  expect(accountIndex).toBeGreaterThanOrEqual(0);
+  expect(importIndex).toBeGreaterThan(accountIndex);
+  expect(servicesIndex).toBeGreaterThan(importIndex);
   expect(view.getAllByTestId(/^public-/)).toHaveLength(10);
   expect(safeNavigate).not.toHaveBeenCalled();
 });
@@ -107,4 +112,28 @@ it('opens public information without starting an account or school login', async
   expect(safeNavigate).toHaveBeenCalledTimes(1);
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'Map');
   expect(mockAuth.signIn).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('opens the platform without selecting or verifying a school (Google session: %s)', async (signedIn) => {
+  mockSchool = { id: '', name: '選擇學校' };
+  if (signedIn) {
+    mockAuth.session = {
+      platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
+      isPlatformOperator: false,
+      context: 'google-platform-context',
+      expiresAt: Date.now() + 60_000,
+    };
+  }
+  const sessionBeforeNavigation = mockAuth.session;
+  const view = await landing();
+  expect(view.getByText(signedIn ? '回到我的 nuni' : '登入或建立帳號')).toBeTruthy();
+  expect(view.getByText('和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。')).toBeTruthy();
+  await fireEventAsync.press(view.getByTestId('login-start'));
+  expect(safeNavigate).toHaveBeenCalledTimes(1);
+  expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'NuniWorkspace');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+  expect(mockAuth.request).not.toHaveBeenCalled();
+  expect(mockAuth.bffRequest).not.toHaveBeenCalled();
+  expect(mockAuth.session).toBe(sessionBeforeNavigation);
+  expect(view.queryByTestId('school-login-start')).toBeNull();
 });
