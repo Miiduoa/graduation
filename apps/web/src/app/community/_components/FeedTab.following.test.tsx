@@ -663,3 +663,22 @@ it('returns to the loaded-post search from a long list without another server re
   expect(document.activeElement).toBe(screen.getByRole('searchbox'));
   expect(mocks.fetchPosts).toHaveBeenCalledTimes(2);
 });
+
+it('names image-only post links for keyboard and screen-reader navigation', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce([
+    { ...bob, title: '校園活動照片', mediaUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=='] },
+    { ...anonymous, title: '匿名的社團相簿', mediaUrls: [
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+    ] },
+  ]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('校園活動照片');
+  const single = postCard('校園活動照片').getByRole('link', { name: '查看貼文圖片：校園活動照片' });
+  const multiple = postCard('匿名的社團相簿').getByRole('link', { name: '查看貼文圖片：匿名的社團相簿' });
+  expect(single.getAttribute('href')).toBe('/community/post/p-bob?schoolId=pu');
+  expect(multiple.getAttribute('href')).toBe('/community/post/p-anon?schoolId=pu');
+  expect(single.querySelector('img')?.getAttribute('alt')).toBe('');
+  expect(multiple.querySelectorAll('img')).toHaveLength(2);
+  expect(multiple.getAttribute('aria-label')).not.toContain('bob');
+});
