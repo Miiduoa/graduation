@@ -7,12 +7,27 @@ import {
 } from '@campus/shared/src/notificationListFilter';
 
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
 import { findSchoolById } from '@campus/shared/src/schools';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { getAuth } from '@/lib/firebase';
+import {
+  DEFAULT_NOTIFICATION_FILTERS,
+  NOTIFICATION_CATEGORIES,
+  filterNotifications,
+  readNotificationListFilters,
+  type NotificationListFilters,
+} from '@/lib/notificationListState';
 import {
   watchMessagingSession,
   watchPrivateConversations,
@@ -684,7 +699,44 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
   );
   const { state, retry } = useFeed(`${session.uid}:${session.schoolId}`, subscribe);
   const isCurrent = useCurrent(session);
-  const [onlyUnread, setOnlyUnread] = useState(false);
+  const filterKey = `campus-one:notification-filters:${encodeURIComponent(session.uid)}:${encodeURIComponent(session.schoolId)}`;
+  const [filterState, setFilterState] = useState({
+    scope: '',
+    filters: DEFAULT_NOTIFICATION_FILTERS,
+  });
+  const savedFilters = useSyncExternalStore(
+    useCallback((onChange: () => void) => {
+      window.addEventListener('storage', onChange);
+      return () => window.removeEventListener('storage', onChange);
+    }, []),
+    useCallback(() => {
+      try {
+        return sessionStorage.getItem(filterKey) ?? '';
+      } catch {
+        return '';
+      }
+    }, [filterKey]),
+    () => '',
+  );
+  let filters = DEFAULT_NOTIFICATION_FILTERS;
+  if (filterState.scope === filterKey) {
+    filters = filterState.filters;
+  } else {
+    try {
+      filters = readNotificationListFilters(JSON.parse(savedFilters || 'null'));
+    } catch {
+      // Ignore malformed saved filters.
+    }
+  }
+  const setFilters = (value: NotificationListFilters) => {
+    setFilterState({ scope: filterKey, filters: value });
+    try {
+      sessionStorage.setItem(filterKey, JSON.stringify(value));
+    } catch {
+      // Keep the current controls usable without browser storage.
+    }
+  };
+  const searchRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState('');
   const lock = useRef(false);
@@ -702,19 +754,57 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
       if (isCurrent()) setPending(null);
     }
   };
-  const rows = notificationListFilter(
-    state.data?.notifications ?? [],
-    onlyUnread ? 'unread' : 'all',
-  );
+  const rows = filterNotifications(state.data?.notifications ?? [], filters);
+  const hasSearchFilters = !!filters.q.trim() || filters.category !== 'all';
   const unreadCount = notificationListFilter(state.data?.notifications ?? [], 'unread').length;
   return (
     <div className={styles.stack}>
+      <div className={styles.inboxToolbar}>
+        <label className={styles.field}>
+          搜尋通知
+          <input
+            ref={searchRef}
+            type="search"
+            value={filters.q}
+            maxLength={200}
+            placeholder="搜尋標題、內容或通知類型"
+            onChange={(event) => setFilters({ ...filters, q: event.target.value })}
+          />
+        </label>
+        <label className={styles.field}>
+          通知類型
+          <select
+            value={filters.category}
+            onChange={(event) =>
+              setFilters(readNotificationListFilters({ ...filters, category: event.target.value }))
+            }
+          >
+            {NOTIFICATION_CATEGORIES.map((category) => (
+              <option key={category.value} value={category.value}>
+                {category.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {filters.q && (
+          <button
+            className={styles.button}
+            type="button"
+            onClick={() => {
+              setFilters({ ...filters, q: '' });
+              searchRef.current?.focus();
+            }}
+          >
+            清除搜尋
+          </button>
+        )}
+      </div>
       <div className={styles.toolbar}>
         <label className={styles.checkbox}>
           <input
             type="checkbox"
-            checked={onlyUnread}
-            onChange={(event) => setOnlyUnread(event.target.checked)}
+            checked={filters.onlyUnread}
+            onChange={(event) => setFilters({ ...filters, onlyUnread: event.target.checked })}
           />
           只看未讀
         </label>
@@ -723,8 +813,7 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
         </button>
       </div>
       <p className={styles.muted}>
-        只含已載入的近期通知（每個來源最多 50
-        則），不代表完整通知紀錄。開啟通知中的連結，可以前往處理。
+        搜尋與篩選涵蓋已載入的近期通知，每個來源最多 50 則。開啟連結後，請在對應服務確認處理結果。
       </p>
       <StateNotice status={state.status} retry={retry} />
       {error && (
@@ -735,7 +824,9 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
       {state.status === 'ready' && (
         <>
           <p role="status" className={styles.muted}>
-            {unreadCount} 則未讀（只含已載入）
+            顯示 {rows.length} / {state.data?.notifications.length ?? 0} 則通知
+            {' · '}
+            <span>{unreadCount} 則未讀（只含已載入）</span>
           </p>
           {!!state.data?.unscopedCount && (
             <p className={styles.muted}>部分通知尚未標示學校，未列入本頁。</p>
@@ -769,6 +860,9 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
                           {target.label}
                         </Link>
                       )}
+                      {!target && (
+                        <p className={styles.muted}>這則通知目前沒有可開啟的服務連結。</p>
+                      )}
                       {!notification.read && (
                         <button
                           className={styles.button}
@@ -786,19 +880,30 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
             </div>
           ) : (
             <section className={styles.notice}>
-              <h2>{onlyUnread ? '目前沒有未讀通知' : '目前沒有本校通知'}</h2>
+              <h2>
+                {hasSearchFilters
+                  ? '找不到符合的通知'
+                  : filters.onlyUnread
+                    ? '目前沒有未讀通知'
+                    : '目前沒有本校通知'}
+              </h2>
               <p>
-                {onlyUnread
-                  ? '你可以切回全部通知，查看之前收到的消息。'
-                  : '收到課程、活動或服務的新消息時，會顯示在這裡。'}
+                {hasSearchFilters
+                  ? '試著調整關鍵字或通知類型，也可以清除篩選查看已載入的通知。'
+                  : filters.onlyUnread
+                    ? '你可以切回全部通知，查看之前收到的消息。'
+                    : '收到課程、活動或服務的新消息時，會顯示在這裡。'}
               </p>
-              {onlyUnread && (
+              {(hasSearchFilters || filters.onlyUnread) && (
                 <button
                   className={styles.button}
                   type="button"
-                  onClick={() => setOnlyUnread(false)}
+                  onClick={() => {
+                    setFilters(DEFAULT_NOTIFICATION_FILTERS);
+                    searchRef.current?.focus();
+                  }}
                 >
-                  查看全部通知
+                  {hasSearchFilters ? '清除篩選' : '查看全部通知'}
                 </button>
               )}
             </section>

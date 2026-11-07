@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { getDocFromServer, onSnapshot, runTransaction } from 'firebase/firestore';
+import { deriveDmConversationId } from './conversationAccess';
 import {
   watchMessagingSession,
   watchPrivateConversations,
@@ -364,10 +365,10 @@ it('notification destinations only use supported local tasks and never arbitrary
   });
   expect(
     notificationDestination({ ...notice, type: 'leave', data: { url: '/fake-approve' } }),
-  ).toEqual({ href: '/messages', label: '開啟通知中心' });
+  ).toBeNull();
   expect(
     notificationDestination({ ...notice, type: 'message', data: { conversationId: '../other' } }),
-  ).toEqual({ href: '/messages', label: '開啟通知中心' });
+  ).toBeNull();
   expect(
     notificationDestination({
       ...notice,
@@ -401,7 +402,7 @@ it('notification destinations only use supported local tasks and never arbitrary
       type: 'assignment',
       data: { courseId: '../other', assignmentId: 'hw-1' },
     }),
-  ).toEqual({ href: '/messages', label: '開啟通知中心' });
+  ).toBeNull();
   expect(
     notificationDestination({
       ...notice,
@@ -438,7 +439,7 @@ it('notification destinations only use supported local tasks and never arbitrary
       type: 'announcement',
       data: { announcementId: 'ann-9', schoolId: 'pu' },
     }),
-  ).toEqual({ href: '/announcements/ann-9', label: '查看公告' });
+  ).toEqual({ href: '/announcements/ann-9?campus=pu&schoolId=pu', label: '查看公告' });
   expect(
     notificationDestination({
       ...notice,
@@ -487,6 +488,93 @@ it('toggles a permitted message reaction with the authenticated school session',
     },
   );
 });
+
+it.each(['school-club-events', 'school-events', 'legacy-events'])(
+  'opens an event with its verified %s source and notification campus',
+  (source) => {
+    expect(
+      notificationDestination({
+        ...notice,
+        type: 'event',
+        data: { eventId: 'event-1', source, schoolId: 'pu' },
+      }),
+    ).toEqual({
+      href: `/events/event-1?campus=pu&schoolId=pu&source=${source}`,
+      label: '查看活動詳情',
+    });
+  },
+);
+
+it.each([undefined, 'unrecognized', 'https://example.com'])(
+  'uses the campus event list when its source is %s',
+  (source) => {
+    expect(
+      notificationDestination({
+        ...notice,
+        type: 'event',
+        data: { eventId: 'event-1', source, schoolId: 'ncnu' },
+      }),
+    ).toEqual({ href: '/events?campus=ncnu&schoolId=ncnu', label: '查看活動列表' });
+  },
+);
+
+it('invalid event IDs do not select a different document or arbitrary destination', () => {
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'event',
+      data: {
+        eventId: '../other',
+        source: 'school-events',
+        schoolId: 'pu',
+        url: 'https://example.com',
+      },
+    }),
+  ).toEqual({ href: '/events?campus=pu&schoolId=pu', label: '查看活動列表' });
+});
+
+it.each(['friend_request', 'friend_invite', 'friend_accepted'])(
+  'opens existing account-scoped friendships for %s without taking action',
+  (type) => {
+    expect(
+      notificationDestination({ ...notice, type, data: { schoolId: 'ncnu', url: '/fake-accept' } }),
+    ).toEqual({ href: '/friends?campus=ncnu&schoolId=ncnu', label: '開啟好友與邀請' });
+  },
+);
+
+it('opens the notification campus library service without substituting a raw payload URL', () => {
+  expect(
+    notificationDestination({
+      ...notice,
+      type: 'library_due',
+      data: { schoolId: 'pu', url: '/fake-renew' },
+    }),
+  ).toEqual({ href: '/library?campus=pu&schoolId=pu', label: '查看本校借閱服務' });
+});
+
+it.each(['unknown', 'system', 'group_invite'])(
+  'does not offer a circular task action for unsupported %s notifications',
+  (type) => {
+    expect(notificationDestination({ ...notice, type, data: { url: '/fake-action' } })).toBeNull();
+  },
+);
+
+it('opens existing DM conversation IDs longer than 128 characters', () => {
+  const conversationId = deriveDmConversationId('pu', 'a'.repeat(64), 'b'.repeat(64));
+  expect(conversationId).toHaveLength(135);
+  expect(
+    notificationDestination({ ...notice, type: 'message', data: { conversationId } }),
+  ).toEqual({ href: `/dms/${encodeURIComponent(conversationId)}`, label: '開啟對話' });
+});
+
+it.each(['.', '..', '../other', ''])(
+  'rejects malformed private conversation ID %s',
+  (conversationId) => {
+    expect(
+      notificationDestination({ ...notice, type: 'message', data: { conversationId } }),
+    ).toBeNull();
+  },
+);
 
 it('refuses reactions on messages outside the current school and on recalled messages', async () => {
   const original = tx.get.getMockImplementation()!;
