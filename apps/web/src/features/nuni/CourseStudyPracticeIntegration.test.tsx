@@ -197,6 +197,27 @@ it('downloads only this round with its own answer gate and keeps the round throu
   expect(downloads.revoke).toHaveBeenCalledWith('blob:practice-revealed');
 });
 
+it('persists a draft when using next question instead of skipping before the JSON checkpoint', async () => {
+  const downloads = downloadMock();
+  mount();
+  await restore();
+  begin();
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '主鍵的初步想法，尚未自評' } });
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
+  expect(screen.getByText(second.question)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '下一題' }).hasAttribute('disabled')).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));
+  const raw = await readBlob(downloads.create.mock.calls[0][0] as Blob);
+  const saved = JSON.parse(raw) as { practice: {
+    finished: boolean; index: number; responses: Record<string, { attempt: string; outcome: string | null }>;
+  } };
+  expect(saved.practice.finished).toBe(false);
+  expect(saved.practice.index).toBe(1);
+  expect(Object.values(saved.practice.responses).map((response) => response.outcome)).toEqual([null, null]);
+  expect(Object.values(saved.practice.responses)[0].attempt).toBe('主鍵的初步想法，尚未自評');
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('aborts a running follow-up when starting practice and ignores its late answer', async () => {
   mocks.available = true;
   let finish!: (response: TutorExplanation) => void;

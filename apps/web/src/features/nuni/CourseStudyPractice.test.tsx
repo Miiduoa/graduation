@@ -125,6 +125,43 @@ it('isolates drafts and hint visibility between questions and allows bounded pre
   expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
 });
 
+it('lets students move forward without accidentally skipping an unanswered question', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  expect(screen.getByRole('button', { name: '下一題' }).hasAttribute('disabled')).toBe(false);
+  writeAnswer('第一題先留著，不表示已答完');
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 1 });
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+  expect(answerInput().value).toBe('');
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+  writeAnswer('第二題也先留草稿');
+  fireEvent.click(screen.getByRole('button', { name: '上一題' }));
+  expect(answerInput().value).toBe('第一題先留著，不表示已答完');
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
+  expect(answerInput().value).toBe('第二題也先留草稿');
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
+  expect(screen.getByRole('heading', { name: '第 3 題' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '下一題' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByText(/只有按「略過這題」才會標記略過/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '本輪練習摘要' })).toBeNull();
+});
+
+it('keeps a revealed answer and self-assessment when navigating without modifying them', () => {
+  render(<Controller />);
+  decide('understood');
+  fireEvent.click(screen.getByRole('button', { name: '上一題' }));
+  expect(screen.getByRole('region', { name: '本題參考回答' }).textContent).toContain(cards[0].answer);
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，自評理解' })).toBeTruthy();
+  expect(answerInput().value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '上一題' }));
+  expect(screen.getByRole('region', { name: '本題參考回答' }).textContent).toContain(cards[0].answer);
+  expect(screen.getByRole('group', { name: '本題自評' })).toBeTruthy();
+});
+
 it('only reveals the source on request and marks the exact first quotation', () => {
   const sourceText = `前文，${cards[0].sourceQuote}。後文又說${cards[0].sourceQuote}。`;
   render(<Controller deck={[{ ...cards[0], sourceText }]} />);

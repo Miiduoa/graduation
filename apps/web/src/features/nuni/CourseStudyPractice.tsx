@@ -132,10 +132,13 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
         <nav className={styles.navigation} aria-label="練習題目導覽">
           <button type="button" className={styles.button} disabled={round.index === 0}
             onClick={() => onAction({ type: 'go', index: round.index - 1 })}>上一題</button>
+          <button type="button" className={styles.button} disabled={round.index >= round.cards.length - 1}
+            onClick={() => onAction({ type: 'go', index: round.index + 1 })}>下一題</button>
           <button type="button" className={styles.button} onClick={() => onReadSource(card)}>回白板看這段</button>
           <button type="button" className={styles.button} onClick={() => onAction({ type: 'skip' })}>略過這題</button>
         </nav>
-      </section> : <p className={styles.note}>請回到閱讀，選擇有講解記錄的待複習段落再開始。</p>}
+        <p className={styles.note}>上一題／下一題只移動閱讀位置，保留每題草稿與自評；只有按「略過這題」才會標記略過。</p>
+      </section> : <p className={styles.note}>請回到閱讀，選擇有講解記錄的待複習段落再開始。</p>
 
       <nav className={styles.overview} aria-label="本輪題目">
         <h5>本輪題目</h5>
