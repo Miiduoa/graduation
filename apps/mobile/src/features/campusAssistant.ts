@@ -19,7 +19,8 @@ import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 import type { AssistantServiceSelection } from '../services/assistantServiceNavigation';
 import { parseAssistantCalendarIntent } from '../services/assistantCalendarIntent';
-import { assistantCalendarOwner, createAssistantCalendarTask, recheckAssistantCalendarTask, sameAssistantCalendarEvent,
+import { assistantCalendarOwner, createAssistantCalendarTask, findPersistedAssistantCalendarTask,
+  recheckAssistantCalendarTask, sameAssistantCalendarEvent,
   type AssistantCalendarTask } from '../services/assistantCalendarExecution';
 
 export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
@@ -109,6 +110,8 @@ export async function askCampusAssistant(input: {
   senseSnapshot?: CampusSenseSnapshot | null;
   /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
   mode?: CampusAssistantMode;
+  /** Stable cloud conversation id; omit only when the caller has not started one. */
+  sessionId?: string;
 }): Promise<{
   content: string;
   hasActions: boolean;
@@ -166,14 +169,27 @@ export async function askCampusAssistant(input: {
       message.calendarTask && message.calendarTask.proposal.owner === owner &&
       message.calendarTask.proposal.schoolId === input.scope.schoolId && !['cancelled', 'blocked'].includes(message.calendarTask.state) &&
       sameAssistantCalendarEvent(message.calendarTask.proposal.event, calendarIntent.event))?.calendarTask;
+    let restored: AssistantCalendarTask | null = null;
+    if (!previous) {
+      try {
+        restored = await abortableCampusRead(() => findPersistedAssistantCalendarTask(calendarIntent.event,
+          { ...context, isCurrent: () => input.isCurrent() && !input.signal?.aborted }), input.signal);
+      } catch {
+        scopeCheck(input, false);
+        assertNotCancelled();
+        return { content: '目前無法讀取先前的行程操作紀錄，暫時無法建立新的行程草稿。請重新載入行程紀錄，或先到個人行事曆查看。',
+          source: 'device', tool: 'calendar-action', hasActions: false,
+          serviceSelection: { kind: 'open', serviceIds: ['calendar'] } };
+      }
+    }
     const calendarTask = previous?.state === 'verified'
       ? await abortableCampusRead(() => recheckAssistantCalendarTask(previous.proposal,
         { ...context, isCurrent: () => input.isCurrent() && !input.signal?.aborted }, previous), input.signal)
         .catch((error: unknown) => { assertNotCancelled(); throw error; })
-      : previous ?? createAssistantCalendarTask(calendarIntent.event, context);
+      : previous ?? restored ?? createAssistantCalendarTask(calendarIntent.event, context);
     scopeCheck(input, false);
     assertNotCancelled();
-    return { content: previous ? '這是先前同一筆行程的處理紀錄。' : '請核對行程名稱與時間，再確認加入個人行事曆。',
+    return { content: previous || restored ? '這是先前同一筆行程的處理紀錄。' : '請核對行程名稱與時間，再確認加入個人行事曆。',
       source: 'device', tool: 'calendar-action', hasActions: false, calendarTask };
   }
   const serviceIntent = resolveAssistantServiceIntent(question);
@@ -443,6 +459,7 @@ export async function askCampusAssistant(input: {
   const schoolName = typeof input.schoolName === 'string'
     ? input.schoolName.trim().slice(0, 160)
     : '';
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
   const result = await callable({
     messages,
     context: {
@@ -451,6 +468,7 @@ export async function askCampusAssistant(input: {
       screen: 'campus-assistant',
       locale: 'zh-TW',
       timezone: 'Asia/Taipei',
+      ...(sessionId ? { sessionId } : {}),
     },
   });
   scopeCheck(input, true);

@@ -3,9 +3,13 @@ import type { PersonalImportRecord } from '@campus/shared/src/imports/types';
 import { parseAssistantCalendarIntent } from '../services/assistantCalendarIntent';
 import {
   assistantCalendarOwner, createAssistantCalendarTask, confirmAssistantCalendarTask, recheckAssistantCalendarTask,
+  restoreAssistantCalendarTasks, findPersistedAssistantCalendarTask,
   type AssistantCalendarContext,
 } from '../services/assistantCalendarExecution';
 import { deletePersonalImport, loadPersonalImports, mutatePersonalImportLedger, personalImportStorageKey } from '../services/personalImports';
+import {
+  assistantCalendarJournalStorageKey, readAssistantCalendarJournal, reserveAssistantCalendarAttempt,
+} from '../services/assistantCalendarJournal';
 
 let mockUid = 'A';
 let mockFake = false;
@@ -19,6 +23,9 @@ const event = { title: '英文讀書', date: '2099-01-02', allDay: false, startT
 const context = (): AssistantCalendarContext => ({ uid: 'A', schoolId: 'pu', isCurrent: () => true });
 const scope = { owner: 'firebase:A', schoolId: 'pu' };
 const key = personalImportStorageKey(scope);
+const journalKey = assistantCalendarJournalStorageKey(scope);
+const ledgerWrites = (target = key) => jest.mocked(AsyncStorage.setItem).mock.calls.filter(([storageKey]) => storageKey === target);
+const ledgerReads = () => jest.mocked(AsyncStorage.getItem).mock.calls.filter(([storageKey]) => storageKey === key);
 const existing = (overrides: Partial<PersonalImportRecord> = {}): PersonalImportRecord => ({
   ...event, id: 'existing-row', batchId: 'existing-batch', kind: 'events', schoolId: 'pu',
   academicYear: '', semester: '', importedAt: '2026-11-06T12:00:00.000Z',
@@ -99,8 +106,8 @@ test('confirm writes exactly the reviewed row, reads it back, and preserves unre
   expect(result.receipt).toMatchObject({ status: 'verified', storage: 'device', replay: false,
     mutationId: task.proposal.mutationId, record: { ...event, id: task.proposal.mutationId,
       batchId: task.proposal.mutationId, source: { type: 'paste', name: '助理行程', line: 1, rawText: '' } } });
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
-  expect(AsyncStorage.getItem).toHaveBeenCalledTimes(2); // locked read, then independent readback
+  expect(ledgerWrites()).toHaveLength(1);
+  expect(ledgerReads()).toHaveLength(2); // locked read, then independent readback
   const stored = await loadPersonalImports(scope);
   expect(stored.records).toEqual([JSON.parse(JSON.stringify(grade)), result.receipt.record]);
   expect(stored.batches.at(-1)).toEqual({ id: task.proposal.mutationId, createdAt: task.proposal.createdAt, count: 1 });
@@ -110,9 +117,9 @@ test('parallel confirmations and later rechecks share one ID and never append tw
   const task = createAssistantCalendarTask(event, context());
   const results = await Promise.all([confirmAssistantCalendarTask(task.proposal, context()), confirmAssistantCalendarTask(task.proposal, context())]);
   expect(results.map((result) => result.state)).toEqual(['verified', 'verified']);
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
   expect((await recheckAssistantCalendarTask(task.proposal, context())).state).toBe('verified');
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
   expect((await loadPersonalImports(scope)).records).toHaveLength(1);
 });
 
@@ -120,8 +127,9 @@ test('platform storage is isolated from both Firebase and other platform account
   const platform = { ...context(), uid: '', platformTimetable: { accountId: 'platform-a', isCurrent: () => true } };
   const task = createAssistantCalendarTask(event, platform);
   expect((await confirmAssistantCalendarTask(task.proposal, platform)).state).toBe('verified');
-  const writtenKeys = jest.mocked(AsyncStorage.setItem).mock.calls.map(([storageKey]) => storageKey);
-  expect(writtenKeys).toEqual([personalImportStorageKey({ owner: 'nuni:platform-a', schoolId: 'pu' })]);
+  const platformScope = { owner: 'nuni:platform-a', schoolId: 'pu' };
+  const writtenKeys = new Set(jest.mocked(AsyncStorage.setItem).mock.calls.map(([storageKey]) => storageKey));
+  expect(writtenKeys).toEqual(new Set([personalImportStorageKey(platformScope), assistantCalendarJournalStorageKey(platformScope)]));
   for (const other of [scope, { owner: 'nuni:platform-b', schoolId: 'pu' }, { owner: 'nuni:platform-a', schoolId: 'nthu' }]) {
     expect((await loadPersonalImports(other)).records).toEqual([]);
   }
@@ -129,21 +137,22 @@ test('platform storage is isolated from both Firebase and other platform account
 
 test('a native bridge that saves then rejects still produces a verified readback receipt', async () => {
   const task = createAssistantCalendarTask(event, context());
-  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(async (storageKey, value) => {
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
     await originalSet(storageKey, value);
-    throw new Error('native response lost');
+    if (storageKey === key) throw new Error('native response lost');
   });
   expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('verified');
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
 });
 
 test('a rejected write without a row remains unknown; every later confirm or check only reads', async () => {
   const task = createAssistantCalendarTask(event, context());
-  jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('device storage full'));
+  jest.mocked(AsyncStorage.setItem).mockImplementation((storageKey, value) =>
+    storageKey === key ? Promise.reject(new Error('device storage full')) : originalSet(storageKey, value));
   expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('unknown');
   expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('unknown');
   expect((await recheckAssistantCalendarTask(task.proposal, context())).state).toBe('unknown');
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
 });
 
 test('an acknowledged row whose saved content differs cannot be overwritten or claimed complete', async () => {
@@ -153,7 +162,7 @@ test('an acknowledged row whose saved content differs cannot be overwritten or c
   await seed([{ ...ledger.records[0], title: '已自行修改的名稱' }]);
   const result = await recheckAssistantCalendarTask(task.proposal, context());
   expect(result).toMatchObject({ state: 'unknown', message: expect.stringContaining('內容與確認草稿不同') });
-  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(ledgerWrites()).toHaveLength(0);
 });
 
 test('unavailable rechecks preserve an existing receipt, but cannot resurrect completion after a verified absence', async () => {
@@ -170,7 +179,7 @@ test('unavailable rechecks preserve an existing receipt, but cannot resurrect co
   jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('temporarily unavailable'));
   const stillAbsent = await recheckAssistantCalendarTask(task.proposal, context(), absent);
   expect(stillAbsent).toMatchObject({ state: 'unknown', reason: 'unavailable', lastVerified: verified.receipt });
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(2); // original create and explicit user deletion
+  expect(ledgerWrites()).toHaveLength(2); // original create and explicit user deletion
 });
 
 test('a deleted row with retained operation batch metadata is never recreated', async () => {
@@ -210,7 +219,7 @@ test.each([
   await seed([existing(overrides)]);
   const task = createAssistantCalendarTask(event, context());
   expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('verified');
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
 });
 
 test('a semantic duplicate with another ID is blocked instead of being duplicated', async () => {
@@ -226,13 +235,14 @@ test.each(['before', 'after'] as const)('scope change %s native write discards t
   const task = createAssistantCalendarTask(event, access);
   const pending = deferred<string | null>();
   if (when === 'before') jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => pending.promise);
-  else jest.mocked(AsyncStorage.setItem).mockImplementationOnce(async (storageKey, value) => {
-    await originalSet(storageKey, value); active = false; mockUid = 'B';
+  else jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
+    await originalSet(storageKey, value);
+    if (storageKey === key) { active = false; mockUid = 'B'; }
   });
   const run = confirmAssistantCalendarTask(task.proposal, access);
   if (when === 'before') { await flush(); active = false; mockUid = 'B'; pending.resolve(null); }
   await expect(run).rejects.toMatchObject({ code: 'session-changed' });
-  expect(jest.mocked(AsyncStorage.setItem).mock.calls.map(([storageKey]) => storageKey)).toEqual(when === 'before' ? [] : [key]);
+  expect(ledgerWrites().map(([storageKey]) => storageKey)).toEqual(when === 'before' ? [] : [key]);
 });
 
 test('a timeout while queued prevents a future write and permanently limits that ID to checking', async () => {
@@ -249,4 +259,224 @@ test('a timeout while queued prevents a future write and permanently limits that
   gate.resolve(); await earlier; await flush();
   expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('unknown');
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test('the durable attempt and its independent readback precede the only ledger write', async () => {
+  const task = createAssistantCalendarTask(event, context());
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
+    if (storageKey === key) {
+      const journal = JSON.parse((await originalGet(journalKey))!);
+      expect(journal.entries).toMatchObject([{ proposal: task.proposal }]);
+      const firstSet = jest.mocked(AsyncStorage.setItem).mock.calls.findIndex(([item]) => item === journalKey);
+      const writeOrder = jest.mocked(AsyncStorage.setItem).mock.invocationCallOrder[firstSet];
+      expect(jest.mocked(AsyncStorage.getItem).mock.calls.some(([item], index) =>
+        item === journalKey && jest.mocked(AsyncStorage.getItem).mock.invocationCallOrder[index] > writeOrder)).toBe(true);
+    }
+    return originalSet(storageKey, value);
+  });
+  expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('verified');
+  expect(ledgerWrites()).toHaveLength(1);
+});
+
+test.each(['read', 'corrupt', 'quota', 'readback'] as const)(
+  'journal %s failure prevents any ledger mutation and consumes this confirmation',
+  async (failure) => {
+    const task = createAssistantCalendarTask(event, context());
+    let wroteJournal = false;
+    if (failure === 'corrupt') await originalSet(journalKey, '{broken');
+    jest.mocked(AsyncStorage.getItem).mockImplementation((storageKey) => {
+      if (storageKey === journalKey && failure === 'read') return Promise.reject(new Error('private native payload'));
+      if (storageKey === journalKey && failure === 'readback' && wroteJournal) return Promise.resolve(null);
+      return originalGet(storageKey);
+    });
+    jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
+      if (storageKey === journalKey && failure === 'quota') throw new Error('private quota payload');
+      await originalSet(storageKey, value);
+      if (storageKey === journalKey) wroteJournal = true;
+    });
+    const result = await confirmAssistantCalendarTask(task.proposal, context());
+    expect(result).toMatchObject({ state: 'blocked', message: expect.not.stringContaining('private') });
+    expect(ledgerWrites()).toHaveLength(0);
+    jest.mocked(AsyncStorage.getItem).mockImplementation(originalGet);
+    jest.mocked(AsyncStorage.setItem).mockImplementation(originalSet);
+    expect((await confirmAssistantCalendarTask(task.proposal, context())).state).toBe('unknown');
+    expect(ledgerWrites()).toHaveLength(0);
+  },
+);
+
+test('a deserialized review proposal cannot acquire write authority, even without a journal entry', async () => {
+  const task = createAssistantCalendarTask(event, context());
+  const clone = JSON.parse(JSON.stringify(task.proposal));
+  expect((await confirmAssistantCalendarTask(clone, context())).state).toBe('unknown');
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toEqual([]);
+});
+
+test('a saved attempt before a crash restores the same absent operation and never re-creates it', async () => {
+  const task = createAssistantCalendarTask(event, context());
+  await reserveAssistantCalendarAttempt(task.proposal, () => true);
+  jest.clearAllMocks();
+  const restored = await restoreAssistantCalendarTasks(context());
+  expect(restored).toMatchObject([{ state: 'unknown', reason: 'absent', proposal: task.proposal }]);
+  expect((await confirmAssistantCalendarTask(restored[0].proposal, context())).state).toBe('unknown');
+  const next = createAssistantCalendarTask(event, context());
+  const repeated = await confirmAssistantCalendarTask(next.proposal, context());
+  expect(repeated).toMatchObject({ state: 'unknown', reason: 'absent', proposal: task.proposal });
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(1);
+});
+
+test('two fresh proposals still use one ID after an ambiguous first ledger write', async () => {
+  const first = createAssistantCalendarTask(event, context());
+  const second = createAssistantCalendarTask(event, context());
+  jest.mocked(AsyncStorage.setItem).mockImplementation((storageKey, value) =>
+    storageKey === key ? Promise.reject(new Error('response unknown')) : originalSet(storageKey, value));
+  const results = await Promise.all([
+    confirmAssistantCalendarTask(first.proposal, context()),
+    confirmAssistantCalendarTask(second.proposal, context()),
+  ]);
+  expect(results).toMatchObject([
+    { state: 'unknown', proposal: first.proposal },
+    { state: 'unknown', proposal: first.proposal },
+  ]);
+  expect(ledgerWrites()).toHaveLength(1);
+});
+
+test.each(['delete', 'edit'] as const)('restoring a verified event after %s preserves history without rebuilding', async (change) => {
+  const task = createAssistantCalendarTask(event, context());
+  const verified = await confirmAssistantCalendarTask(task.proposal, context());
+  if (verified.state !== 'verified') throw new Error('missing receipt');
+  const ledger = await loadPersonalImports(scope);
+  if (change === 'delete') {
+    await deletePersonalImport(scope, ledger.records[0]);
+    expect((await loadPersonalImports(scope)).batches).toEqual([]);
+  } else await seed([{ ...ledger.records[0], location: '使用者已修改的地點' }]);
+  jest.clearAllMocks();
+  const restored = await restoreAssistantCalendarTasks(context());
+  expect(restored).toMatchObject([{ state: 'unknown', reason: change === 'delete' ? 'absent' : 'changed',
+    proposal: task.proposal, lastVerified: verified.receipt }]);
+  const repeated = await findPersistedAssistantCalendarTask(event, context());
+  expect(repeated).toMatchObject({ state: 'unknown', proposal: task.proposal, lastVerified: verified.receipt });
+  const fresh = createAssistantCalendarTask(event, context());
+  expect(await confirmAssistantCalendarTask(fresh.proposal, context())).toMatchObject({ state: 'unknown', proposal: task.proposal });
+  expect(ledgerWrites()).toHaveLength(0);
+});
+
+test.each([
+  { title: 'study english' }, { title: 'Study   English' },
+  { endDate: event.date }, { location: '新地點' },
+])('a normalized re-ask keeps the original unknown proposal exactly: %#', async (change) => {
+  const originalEvent = { ...event, title: 'Study English' };
+  const task = createAssistantCalendarTask(originalEvent, context());
+  await reserveAssistantCalendarAttempt(task.proposal, () => true);
+  const found = await findPersistedAssistantCalendarTask({ ...originalEvent, ...change }, context());
+  expect(found).toMatchObject({ state: 'unknown', proposal: task.proposal });
+  expect(ledgerWrites()).toHaveLength(0);
+});
+
+test('a failed negative journal update followed by unavailable storage cannot revive old completion on restart', async () => {
+  const task = createAssistantCalendarTask(event, context());
+  const verified = await confirmAssistantCalendarTask(task.proposal, context());
+  if (verified.state !== 'verified') throw new Error('missing receipt');
+  await deletePersonalImport(scope, (await loadPersonalImports(scope)).records[0]);
+  jest.mocked(AsyncStorage.setItem).mockImplementation((storageKey, value) =>
+    storageKey === journalKey ? Promise.reject(new Error('journal unavailable')) : originalSet(storageKey, value));
+  expect(await recheckAssistantCalendarTask(task.proposal, context(), verified))
+    .toMatchObject({ state: 'unknown', reason: 'absent', lastVerified: verified.receipt });
+  expect((await readAssistantCalendarJournal(scope, () => true))[0].observation?.state).toBe('verified');
+  jest.mocked(AsyncStorage.setItem).mockImplementation(originalSet);
+  jest.mocked(AsyncStorage.getItem).mockImplementation((storageKey) =>
+    storageKey === key ? Promise.reject(new Error('ledger unavailable')) : originalGet(storageKey));
+  expect(await restoreAssistantCalendarTasks(context()))
+    .toMatchObject([{ state: 'unknown', reason: 'unavailable', lastVerified: verified.receipt }]);
+});
+
+test('empty restore has no ledger work, while a nonempty restore shares one snapshot and one journal update', async () => {
+  expect(await restoreAssistantCalendarTasks(context())).toEqual([]);
+  expect(ledgerReads()).toHaveLength(0);
+  for (let index = 0; index < 4; index++) {
+    const task = createAssistantCalendarTask({ ...event, title: '讀書 ' + index }, context());
+    await reserveAssistantCalendarAttempt(task.proposal, () => true);
+  }
+  jest.clearAllMocks();
+  const restored = await restoreAssistantCalendarTasks(context());
+  expect(restored).toHaveLength(4);
+  expect(restored.every((task) => task.state === 'unknown')).toBe(true);
+  expect(ledgerReads()).toHaveLength(1);
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(jest.mocked(AsyncStorage.setItem).mock.calls.filter(([storageKey]) => storageKey === journalKey)).toHaveLength(1);
+});
+
+test('the journal can retain an attempt whose reviewed start expires while its durable write is pending', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date('2099-01-02T10:59:59.000Z'));
+  const task = createAssistantCalendarTask(event, context()); // 19:00 Taiwan, one second ahead.
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
+    await originalSet(storageKey, value);
+    if (storageKey === journalKey) jest.setSystemTime(new Date('2099-01-02T11:00:00.001Z'));
+  });
+  expect(await confirmAssistantCalendarTask(task.proposal, context()))
+    .toMatchObject({ state: 'blocked', message: expect.stringContaining('開始時間已經過了') });
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(1);
+  expect((await restoreAssistantCalendarTasks(context()))[0].proposal.mutationId).toBe(task.proposal.mutationId);
+  expect(ledgerWrites()).toHaveLength(0);
+});
+
+test('a known exact receipt survives a journal observation that never responds before the overall deadline', async () => {
+  jest.useFakeTimers();
+  const gate = deferred<void>();
+  let journalWrites = 0;
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (storageKey, value) => {
+    await originalSet(storageKey, value);
+    if (storageKey === journalKey && ++journalWrites === 2) await gate.promise;
+  });
+  const task = createAssistantCalendarTask(event, context());
+  const run = confirmAssistantCalendarTask(task.proposal, context());
+  await flush();
+  await jest.advanceTimersByTimeAsync(20_001);
+  const result = await run;
+  expect(result).toMatchObject({ state: 'verified', receipt: { mutationId: task.proposal.mutationId },
+    warning: expect.stringContaining('本次核對結果尚未更新') });
+  expect(ledgerWrites()).toHaveLength(1);
+  gate.resolve();
+  await flush();
+});
+
+test('restore has one overall deadline across journal and ledger reads, preserving historical receipts only', async () => {
+  const task = createAssistantCalendarTask(event, context());
+  const verified = await confirmAssistantCalendarTask(task.proposal, context());
+  if (verified.state !== 'verified') throw new Error('missing receipt');
+  const rawJournal = await originalGet(journalKey);
+  const rawLedger = await originalGet(key);
+  jest.useFakeTimers();
+  const journalGate = deferred<string | null>();
+  const ledgerGate = deferred<string | null>();
+  jest.mocked(AsyncStorage.getItem).mockImplementation((storageKey) =>
+    storageKey === journalKey ? journalGate.promise : storageKey === key ? ledgerGate.promise : originalGet(storageKey));
+  jest.clearAllMocks();
+  const run = restoreAssistantCalendarTasks(context());
+  await jest.advanceTimersByTimeAsync(15_000);
+  journalGate.resolve(rawJournal);
+  await flush();
+  await jest.advanceTimersByTimeAsync(5_001);
+  expect(await run).toMatchObject([{ state: 'unknown', reason: 'unavailable', lastVerified: verified.receipt }]);
+  expect(ledgerWrites()).toHaveLength(0);
+  ledgerGate.resolve(rawLedger);
+  await flush();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test('a stuck journal restore throws a safe timeout instead of allowing an empty-history new draft', async () => {
+  jest.useFakeTimers();
+  const gate = deferred<string | null>();
+  jest.mocked(AsyncStorage.getItem).mockImplementationOnce(() => gate.promise);
+  const run = findPersistedAssistantCalendarTask(event, context());
+  const rejection = expect(run).rejects.toMatchObject({ code: 'journal-timeout' });
+  await jest.advanceTimersByTimeAsync(20_001);
+  await rejection;
+  gate.resolve(null);
+  await flush();
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(ledgerReads()).toHaveLength(0);
 });

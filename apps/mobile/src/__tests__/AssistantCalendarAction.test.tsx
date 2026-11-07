@@ -4,6 +4,7 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AssistantCalendarAction } from '../screens/AssistantCalendarAction';
 import { createAssistantCalendarTask, type AssistantCalendarContext, type AssistantCalendarTask } from '../services/assistantCalendarExecution';
+import { personalImportStorageKey } from '../services/personalImports';
 import type { ServiceScreenProps } from '../screens/UnavailableFeatureScreen';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -13,6 +14,8 @@ jest.mock('../firebase', () => ({
 const originalGet = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
 const originalSet = jest.mocked(AsyncStorage.setItem).getMockImplementation()!;
 const context: AssistantCalendarContext = { uid: 'A', schoolId: 'pu', isCurrent: () => true };
+const ledgerKey = personalImportStorageKey({ owner: 'firebase:A', schoolId: 'pu' });
+const ledgerWrites = () => jest.mocked(AsyncStorage.setItem).mock.calls.filter(([key]) => key === ledgerKey);
 const event = { title: '英文讀書', date: '2099-01-02', allDay: false, startTime: '19:00', endTime: '20:00' };
 const navigation = () => ({ navigate: jest.fn(), getState: () => ({ routeNames: ['PersonalCalendar'] }) });
 function Harness({ initial, access = context, nav, changed = () => undefined }: {
@@ -41,7 +44,7 @@ test('review requires an explicit click, duplicate taps create once, and the ver
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   const confirm = view.getByRole('button', { name: '確認加入個人行事曆' });
   await act(async () => { fireEvent.press(confirm); fireEvent.press(confirm); });
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
   expect(changed.mock.calls.map(([next]) => next.state)).toEqual(['saving', 'verified']);
   expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
   expect(view.getByText(/沒有排程手機通知/)).toBeTruthy();
@@ -61,7 +64,8 @@ test('cancelling an unconfirmed draft never writes or offers a misleading succes
 test('an unknown result offers only same-ID checking and can verify a late native commit', async () => {
   const task = createAssistantCalendarTask(event, context);
   let lateKey = ''; let lateValue = '';
-  jest.mocked(AsyncStorage.setItem).mockImplementationOnce(async (key, value) => {
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    if (key !== ledgerKey) return originalSet(key, value);
     lateKey = key; lateValue = value; throw new Error('lost native response');
   });
   const view = render(<Harness initial={task} nav={navigation()} />);
@@ -72,7 +76,7 @@ test('an unknown result offers only same-ID checking and can verify a late nativ
   await originalSet(lateKey, lateValue);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
   expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
 });
 
 test('a device receipt never opens an unavailable native route or a website that lacks the local record', async () => {
@@ -103,12 +107,13 @@ test('rechecking a completed card keeps its original proof and timestamp when re
   const view = render(<Harness initial={createAssistantCalendarTask(event, context)} nav={navigation()} changed={changed} />);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '確認加入個人行事曆' })));
   const before = changed.mock.calls.at(-1)![0];
-  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('temporary storage read failure'));
+  jest.mocked(AsyncStorage.getItem).mockImplementation((key) => key === ledgerKey
+    ? Promise.reject(new Error('temporary storage read failure')) : originalGet(key));
   await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對行程' })));
   expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
   expect(view.getByRole('alert')).toHaveTextContent(/仍保留先前已核對的回執與時間/);
   const after = changed.mock.calls.at(-1)![0];
   expect(after.state).toBe('verified');
   expect(after.receipt).toEqual(before.receipt);
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
 });

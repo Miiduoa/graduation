@@ -15,7 +15,9 @@ import type { PlatformTimetableAccess } from '../services/assistantTimetableSour
 import { AssistantClassNowHint } from './AssistantClassNowHint';
 import { AssistantServiceReply } from './AssistantServiceReply';
 import { AssistantCalendarAction } from './AssistantCalendarAction';
+import { AssistantCalendarRecovery } from './AssistantCalendarRecovery';
 import type { AssistantCalendarTask } from '../services/assistantCalendarExecution';
+import { useAssistantCalendarRecovery } from '../state/useAssistantCalendarRecovery';
 import { useAssistantSessionExpiry } from '../state/useAssistantSessionExpiry';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
@@ -171,8 +173,6 @@ function AssistantConversation({
       proposals?: CampusAgentWriteProposal[];
     }>
   >([]);
-  const calendarBusy = messages.some(({ calendarTask }) => calendarTask?.state === 'saving' || calendarTask?.state === 'checking' ||
-    (calendarTask?.state === 'verified' && calendarTask.checking));
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
   const [mode, setMode] = useState<CampusAssistantMode>('device');
   const [deviceStatus, setDeviceStatus] = useState<OnDeviceAssistantReadiness | null>(null);
@@ -193,6 +193,7 @@ function AssistantConversation({
   const mounted = useRef(true);
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
+  const campusSessionId = useRef<string | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const canAsk = mode === 'device' || Boolean(uid);
   const timetableOwner = platformTimetable ? `nuni:${platformTimetable.accountId}` : `firebase:${uid}`;
@@ -236,6 +237,19 @@ function AssistantConversation({
     });
   }, [platformContext, platformTimetable]);
   const current = () => mounted.current && isScopeCurrent() && (!platformTimetable || platformTimetable.isCurrent());
+  const calendarContext = { uid, schoolId, platformTimetable, isCurrent: current };
+  const calendarRecovery = useAssistantCalendarRecovery(calendarContext);
+  const taskIsBusy = (task?: AssistantCalendarTask) => task?.state === 'saving' || task?.state === 'checking' ||
+    (task?.state === 'verified' && task.checking);
+  const calendarBusy = calendarRecovery.loading || messages.some(({ calendarTask }) => taskIsBusy(calendarTask)) ||
+    calendarRecovery.tasks.some(taskIsBusy);
+  const changeCalendarTask = (task: AssistantCalendarTask, originalId = task.proposal.mutationId) => {
+    if (!current() || task.proposal.owner !== timetableOwner || task.proposal.schoolId !== schoolId) return;
+    calendarRecovery.updateTask(task, originalId);
+    setMessages((previous) => previous.map((entry) => entry.calendarTask &&
+      [originalId, task.proposal.mutationId].includes(entry.calendarTask.proposal.mutationId)
+      ? { ...entry, calendarTask: task } : entry));
+  };
   useEffect(() => {
     if (platformTimetable) return;
     let active = true;
@@ -412,6 +426,11 @@ function AssistantConversation({
     changesDuringRead.current = duringRead;
     const asked: CampusAssistantMessage = { role: 'user', content: question };
     const next = [...messages, asked];
+    if (mode === 'campus') {
+      campusSessionId.current ??= typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `campus-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+    }
     try {
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
@@ -422,6 +441,9 @@ function AssistantConversation({
         isCurrent: current,
         mode,
         ...(mode === 'device' ? { signal: controller.signal } : {}),
+        ...(mode === 'campus' && campusSessionId.current
+          ? { sessionId: campusSessionId.current }
+          : {}),
       });
       const anchor = reply.savedClassRead ?? reply.courseworkRead?.anchor;
       if (platformTimetable && anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
@@ -441,6 +463,7 @@ function AssistantConversation({
         return;
       }
       if (current()) {
+        if (reply.calendarTask) calendarRecovery.updateTask(reply.calendarTask);
         const read = reply.courseworkRead;
         const changed = read?.result.kind === 'assignments' && duringRead?.get(read.result.workspace.id);
         setMessages((previous) => [
@@ -664,7 +687,14 @@ function AssistantConversation({
           <AIButton label="改問手機助理" onPress={() => changeMode('device')} />
         </AICard>
       )}
-      {(uid || platformTimetable) && messages.length === 0 && !busy && !draft.trim() ? (
+      <AssistantCalendarRecovery
+        tasks={calendarRecovery.tasks.filter((task) => !messages.some((message) =>
+          message.calendarTask?.proposal.mutationId === task.proposal.mutationId))}
+        loading={calendarRecovery.loading} error={calendarRecovery.error}
+        context={calendarContext} navigation={navigation} disabled={busy || syncBusy || calendarBusy}
+        onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
+        onChange={changeCalendarTask} />
+      {(uid || platformTimetable) && messages.length === 0 && !busy && !calendarBusy && !draft.trim() ? (
         <AICard title="安排個人行程">
           <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 23 }}>
             輸入明確日期、時間與名稱，例如「幫我明天 19:00 到 20:00 安排英文讀書」。先核對草稿，再確認加入個人行事曆。
@@ -672,7 +702,7 @@ function AssistantConversation({
           <AIButton label="填寫行程範例" variant="ghost" onPress={() => editDraft('幫我明天 19:00 到 20:00 安排英文讀書')} />
         </AICard>
       ) : null}
-      {panel === 'chat' && (uid || platformTimetable) && mode === 'device' && messages.length === 0 && !busy && !error && !draft.trim() ? (
+      {panel === 'chat' && (uid || platformTimetable) && mode === 'device' && messages.length === 0 && !busy && !calendarBusy && !error && !draft.trim() ? (
         <AICard title={platformTimetable ? '我的上課安排' : '我的課業安排'}>
           <AssistantClassNowHint uid={uid} schoolId={schoolId} platformTimetable={platformTimetable}>
             {(upcoming) => (
@@ -812,13 +842,9 @@ function AssistantConversation({
             ) : null}
             {message.calendarTask ? (
               <AssistantCalendarAction task={message.calendarTask}
-                context={{ uid, schoolId, platformTimetable, isCurrent: current }}
+                context={calendarContext}
                 navigation={navigation} disabled={busy || syncBusy || calendarBusy}
-                onChange={(task: AssistantCalendarTask) => {
-                  if (!current() || task.proposal.owner !== timetableOwner || task.proposal.schoolId !== schoolId) return;
-                  setMessages((previous) => previous.map((entry) => entry.calendarTask?.proposal.mutationId === task.proposal.mutationId
-                    ? { ...entry, calendarTask: task } : entry));
-                }} />
+                onChange={(next) => changeCalendarTask(next, message.calendarTask!.proposal.mutationId)} />
             ) : null}
             {platformTimetable && index === messages.length - 1 && !!message.savedClassRead?.classes.length ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>

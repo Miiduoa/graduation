@@ -98,6 +98,41 @@ beforeEach(() => {
   mockPlatform = null;
   mockOverlay = { visible: true, mode: 'chat', initialPrompt: '查校方公告' };
 });
+test('campus follow-up questions reuse one sessionId', async () => {
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '第一題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '追問細節');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const first = request.mock.calls[0][0].sessionId;
+  const second = request.mock.calls[1][0].sessionId;
+  expect(typeof first).toBe('string');
+  expect(first.length).toBeGreaterThan(8);
+  expect(second).toBe(first);
+  expect(request.mock.calls[0][0].mode).toBe('campus');
+});
+
+test.each(['account', 'school'])('changing %s starts a new campus sessionId', async (change) => {
+  request.mockResolvedValue({ content: '已記下', hasActions: false });
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '第一題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const first = request.mock.calls[0][0].sessionId;
+  if (change === 'school') mockSchool = 'other';
+  else mockUid = 'B';
+  view.rerender(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '新範圍的問題');
+  await act(async () => fireEvent.press(view.getByText('送出問題')));
+  const next = request.mock.calls[1][0].sessionId;
+  expect(typeof next).toBe('string');
+  expect(next.length).toBeGreaterThan(8);
+  expect(next).not.toBe(first);
+});
+
 test('failed questions remain editable and retry does not add duplicated history', async () => {
   request
     .mockRejectedValueOnce(new Error('unavailable'))
@@ -110,6 +145,8 @@ test('failed questions remain editable and retry does not add duplicated history
   expect(view.getByText(/問題已保留/)).toBeTruthy();
   await act(async () => fireEvent.press(view.getByText('重試查詢')));
   expect(request.mock.calls[1][0].messages).toEqual([{ role: 'user', content: '查公告' }]);
+  expect(request.mock.calls[1][0].sessionId).toBe(request.mock.calls[0][0].sessionId);
+  expect(typeof request.mock.calls[0][0].sessionId).toBe('string');
   expect(view.getByText('已找到公告')).toBeTruthy();
   expect(view.getByLabelText('詢問校園助理').props.value).toBe('');
 });
@@ -1108,6 +1145,10 @@ function usePlatformFixture(accountId: string, context = 'context-a') {
   };
 }
 
+async function waitForCalendarRecovery(view: ReturnType<typeof render>) {
+  await waitFor(() => expect(view.queryByText('正在找回並核對先前的行程操作…')).toBeNull());
+}
+
 test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
   usePlatformFixture('student-b');
   const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',
@@ -1117,6 +1158,7 @@ test('platform lookup, room follow-up and exact class link use the same nuni own
     .mockResolvedValueOnce({ content: item.room, source: 'device', tool: 'saved-timetable', savedClassRead: { ...read, focus: 'room' } });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalTimetable', 'PersonalImport'] }) }} />);
+  await waitForCalendarRecovery(view);
   expect(view.getByText('課表助理')).toBeTruthy();
   expect(view.queryByRole('tab')).toBeNull();
   expect(view.queryByText('整理今日重點')).toBeNull();
@@ -1167,12 +1209,14 @@ test('a platform session replacement discards pending results even for the same 
   const response = deferred<object>();
   request.mockReturnValue(response.promise);
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   fireEvent.press(view.getByText('現在有課嗎？'));
   const claim = request.mock.calls[0][0].platformTimetable;
   usePlatformFixture('student-b', 'context-new');
   expect(claim.isCurrent()).toBe(false);
   view.rerender(<CampusAssistantScreen route={platformRoute} />);
   await act(async () => response.resolve({ content: '舊學生的課表', source: 'device' }));
+  await waitForCalendarRecovery(view);
   expect(view.queryByText('舊學生的課表')).toBeNull();
   expect(view.getByText('現在有課嗎？')).toBeTruthy();
 });
@@ -1183,6 +1227,7 @@ test('a missing nuni timetable opens the public import screen; unrelated questio
     .mockResolvedValueOnce({ content: '可查現在或下一堂課。', source: 'device', tool: 'saved-timetable' });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalImport'] }) }} />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByText('現在有課嗎？')));
   fireEvent.press(view.getByRole('button', { name: '匯入課表' }));
   expect(navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
@@ -1217,6 +1262,7 @@ test('the nuni course action opens a specific assignment and keeps a typed draft
     } });
   const screen = render(<CampusAssistantScreen route={platformRoute}
     navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace', 'PersonalImport', 'PersonalTimetable'] }) }} />);
+  await waitForCalendarRecovery(screen);
   await act(async () => fireEvent.press(screen.getByText('查下一堂課')));
   const input = screen.getByLabelText('詢問校園助理');
   fireEvent.changeText(input, '保留我的草稿');
@@ -1248,6 +1294,7 @@ test('course choices show reviewed class details, verify the selected ID, and ma
     ],
   }));
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await act(async () => fireEvent.press(view.getByRole('button', { name: /資料結構.*115學年度.*乙班.*林老師/ })));
@@ -1283,6 +1330,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
         .mockResolvedValueOnce(card({ step: 'review', message: '請核對作業和提醒時間。' }))
         .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
       const screen = render(<CampusAssistantScreen route={platformRoute} />);
+      await waitForCalendarRecovery(screen);
       fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
       await act(async () => fireEvent.press(screen.getByText('送出問題')));
       await act(async () => fireEvent.press(screen.getByRole('button', { name: '提醒我交這份' })));
@@ -1315,6 +1363,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
       .mockResolvedValueOnce(reply());
     const screen = render(<CampusAssistantScreen route={platformRoute}
       navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace'] }) }} />);
+    await waitForCalendarRecovery(screen);
     const input = screen.getByLabelText('詢問校園助理');
     fireEvent.changeText(input, '這堂課有什麼作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
@@ -1339,6 +1388,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
     request.mockResolvedValueOnce(reply())
       .mockResolvedValueOnce(reply({ view: { kind: 'priority', ids: ['first'], message: '最早逾期、仍在收件的作業。' } }));
     const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    await waitForCalendarRecovery(screen);
     fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
     await act(async () => fireEvent.press(screen.getByRole('button', { name: '哪個最急？' })));
@@ -1355,6 +1405,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
       view: { kind: 'receipt', ids: ['first'], message: '舊的收據回答' } }))
       .mockResolvedValueOnce(reply());
     const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    await waitForCalendarRecovery(screen);
     fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
     expect(screen.getByText('作業已更新，這是上次查詢的紀錄。')).toBeTruthy();

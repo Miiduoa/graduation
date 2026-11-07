@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { askCampusAssistant, type CampusAssistantMessage } from '../../features/campusAssistant';
 import { CampusAssistantScreen } from '../../screens/CampusAssistantScreen';
@@ -47,6 +47,10 @@ const input = (content = request) => ({ scope: { uid: 'A', schoolId: 'pu' }, mes
   isCurrent: () => true, mode: 'device' as const });
 const platform = (content = request) => ({ ...input(content), scope: { uid: '', schoolId: 'pu' },
   platformTimetable: { accountId: 'platform-a', isCurrent: () => true } });
+const ledgerReads = () => jest.mocked(AsyncStorage.getItem).mock.calls
+  .filter(([key]) => key.startsWith('campus.personal-imports.v1:'));
+const ledgerWrites = () => jest.mocked(AsyncStorage.setItem).mock.calls
+  .filter(([key]) => key.startsWith('campus.personal-imports.v1:'));
 
 beforeEach(async () => {
   jest.mocked(AsyncStorage.getItem).mockReset().mockImplementation(originalGet);
@@ -67,7 +71,7 @@ test.each(['device', 'campus', 'platform'] as const)('%s explicit appointment re
   expect(reply).toMatchObject({ source: 'device', tool: 'calendar-action', hasActions: false,
     calendarTask: { state: 'review', proposal: { owner: mode === 'platform' ? 'nuni:platform-a' : 'firebase:A',
       schoolId: 'pu', event: { title: '英文讀書', startTime: '19:00', endTime: '20:00', allDay: false } } } });
-  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  expect(ledgerReads()).toHaveLength(0);
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   expect(mockCallable).not.toHaveBeenCalled();
   expect(mockCollect).not.toHaveBeenCalled();
@@ -92,7 +96,7 @@ test('a repeated request reuses the original unknown operation instead of mintin
     calendarTask: { proposal: calendarTask.proposal, state: 'unknown', reason: 'unavailable', message: '待核對' } }, ...question(request)];
   const again = await askCampusAssistant({ ...platform(), messages: history });
   expect(again.calendarTask).toEqual(history[1].calendarTask);
-  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  expect(ledgerReads()).toHaveLength(0);
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });
 
@@ -142,7 +146,7 @@ test.each(['deleted', 'edited'] as const)('asking again after the actual calenda
   ] });
   expect(again.calendarTask).toMatchObject({ state: 'unknown', reason: change === 'deleted' ? 'absent' : 'changed',
     proposal: { mutationId: verified.proposal.mutationId }, lastVerified: verified.receipt });
-  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(ledgerWrites()).toHaveLength(0);
   expect(mockCallable).not.toHaveBeenCalled();
 });
 
@@ -150,13 +154,17 @@ test('asking again when storage cannot be read retains the previous successful r
   const first = await askCampusAssistant(input());
   const verified = await confirmAssistantCalendarTask(first.calendarTask!.proposal, { ...input().scope, isCurrent: () => true });
   if (verified.state !== 'verified') throw new Error('missing receipt');
-  jest.mocked(AsyncStorage.getItem).mockRejectedValueOnce(new Error('unavailable'));
+  const ledgerKey = personalImportStorageKey({ owner: 'firebase:A', schoolId: 'pu' });
+  jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => {
+    if (key === ledgerKey) throw new Error('unavailable');
+    return originalGet(key);
+  });
   const again = await askCampusAssistant({ ...input(), messages: [
     ...question(request), { role: 'assistant', ...first, calendarTask: verified }, ...question(request),
   ] });
   expect(again.calendarTask).toMatchObject({ state: 'verified', receipt: verified.receipt,
     warning: expect.stringContaining('目前內容尚未重新確認') });
-  expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  expect(ledgerWrites()).toHaveLength(1);
 });
 
 function setupPlatform() {
@@ -164,6 +172,7 @@ function setupPlatform() {
     isSessionCurrent: (id, context) => id === 'platform-a' && context === 'ctx-a', request: jest.fn(), bffRequest: jest.fn() };
 }
 async function send(view: ReturnType<typeof render>, text: string) {
+  if (mockSelectionReady) await waitFor(() => expect(view.getByLabelText('詢問校園助理').props.editable).not.toBe(false));
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), text);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
 }
@@ -180,7 +189,7 @@ test.each(['campus', 'dual-login-platform'] as const)('real %s conversation comp
   const owner = audience === 'campus' ? 'firebase:A' : 'nuni:platform-a';
   const ledger = await loadPersonalImports({ owner, schoolId: 'pu' });
   expect(ledger.records).toHaveLength(1);
-  expect(jest.mocked(AsyncStorage.setItem).mock.calls.map(([key]) => key)).toEqual([personalImportStorageKey({ owner, schoolId: 'pu' })]);
+  expect(ledgerWrites().map(([key]) => key)).toEqual([personalImportStorageKey({ owner, schoolId: 'pu' })]);
   await send(view, '打開校園地圖');
   expect(view.getByText('已在這台手機保存並核對行程。')).toBeTruthy();
   fireEvent.press(view.getByRole('button', { name: '查看已建立的行程' }));
@@ -216,7 +225,7 @@ test('reasking after deletion updates the older conversation card instead of lea
   expect(view.queryByRole('button', { name: '查看已建立的行程' })).toBeNull();
   expect(view.getAllByText(/目前沒有讀到這筆行程/)).toHaveLength(2);
   expect(view.getAllByText(/歷史回執不代表目前仍有相同內容/)).toHaveLength(2);
-  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(ledgerWrites()).toHaveLength(0);
 });
 
 test('an unresolved school selection cannot create a proposal against its temporary school value', async () => {
