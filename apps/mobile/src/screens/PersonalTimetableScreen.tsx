@@ -116,10 +116,11 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
   }, [timetable, importedRecords, schoolId]);
   const allTerms = personalTimetableTerms(records, schoolId);
   const importTerms = allTerms.map((term) => term.key);
-  const activeTerm = importTerms.includes(importTerm) ? importTerm : importTerms[0];
+  const selectedTerm = allTerms.find((term) => term.key === importTerm) ?? allTerms[0];
+  const activeTerm = selectedTerm?.key;
   const manualTerm = timetable ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : '';
   const selectedView = importTerm === 'legacy' || activeTerm === manualTerm
-    ? 'legacy' : activeTerm?.replace('|', '／');
+    ? 'legacy' : selectedTerm && `${selectedTerm.academicYear}／${selectedTerm.semester}`;
   const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
   const viewTerm = selectedView === 'legacy' ? manualTerm : activeTerm;
   const matchesTerm = initialTerm === undefined || viewTerm === initialTerm;
