@@ -10,9 +10,9 @@ test('rewrites the old /shops entry to the current school login path', () => {
   expect(rewriteLegacyShopsPath('cafeteria')).toBe('cafeteria');
 });
 
-test('rewrites retired staff, department and dormitory paths to today', () => {
+test('rewrites retired staff and department paths while preserving the restored dormitory route', () => {
   expect(rewriteLegacyShopsPath('staff')).toBe('home');
   expect(rewriteLegacyShopsPath('/department')).toBe('/home');
-  expect(rewriteLegacyShopsPath('dormitory?id=1')).toBe('home?id=1');
+  expect(rewriteLegacyShopsPath('dormitory?id=1')).toBe('dormitory?id=1');
   expect(rewriteLegacyShopsPath('library')).toBe('library');
 });
