@@ -455,7 +455,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
         {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
         {practiceRound && manualCopyText !== null && <section className={styles.manualCopy} aria-label="手動複製本輪紀錄">
-          <label className={styles.field} htmlFor={manualCopyId}>手動複製本輪紀錄
+          <label className={styles.field} htmlFor={manualCopyId}>可選取的本輪紀錄文字
             <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
               onFocus={(event) => event.currentTarget.select()}
               onClick={(event) => event.currentTarget.select()} />

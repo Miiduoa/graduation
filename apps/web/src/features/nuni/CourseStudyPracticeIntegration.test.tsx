@@ -346,8 +346,9 @@ it('offers a selectable local fallback on unsupported mobile clipboard and clear
     expect(screen.queryByRole('region', { name: '手動複製本輪紀錄' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
     const fallback = screen.getByRole('region', { name: '手動複製本輪紀錄' });
-    const manual = screen.getByLabelText('手動複製本輪紀錄') as HTMLTextAreaElement;
+    const manual = screen.getByRole('textbox', { name: '可選取的本輪紀錄文字' }) as HTMLTextAreaElement;
     expect(fallback.contains(manual)).toBe(true);
+    expect(screen.getAllByRole('region', { name: '手動複製本輪紀錄' })).toHaveLength(1);
     expect(manual.readOnly).toBe(true);
     expect(manual.value).toContain('當輪主鍵試答（不可丟失）');
     expect(manual.value).not.toContain(first.answer);
@@ -374,7 +375,7 @@ it('shows only the revealed answer in manual selection after clipboard permissio
     fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
     fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
     await screen.findByRole('region', { name: '手動複製本輪紀錄' });
-    const manual = screen.getByLabelText('手動複製本輪紀錄') as HTMLTextAreaElement;
+    const manual = screen.getByRole('textbox', { name: '可選取的本輪紀錄文字' }) as HTMLTextAreaElement;
     expect(manual.value).toContain(first.answer);
     expect(manual.value).not.toContain(second.answer);
     fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
