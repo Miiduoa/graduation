@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,7 +9,7 @@ const output = path.join(root, 'artifacts/campus-spatial');
 await mkdir(output, { recursive: true });
 const result = await build({
   absWorkingDir: root,
-  entryPoints: { fixture: path.join(directory, 'fixture.tsx') },
+  entryPoints: { fixture: path.join(directory, 'fixture.tsx'), map: path.join(directory, 'map-fixture.tsx') },
   outdir: output,
   bundle: true,
   splitting: true,
@@ -24,10 +24,25 @@ const result = await build({
   define: { 'process.env.NODE_ENV': '"production"', 'process.env': '{}' },
   plugins: [{ name: 'public-map-only', setup(builder) {
     builder.onResolve({ filter: /^@\/lib\/firebase$/ }, () => ({ path: 'no-backend', namespace: 'fixture' }));
-    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({
-      contents: 'export const isFirebaseConfigured=()=>false; export function getAuth(){throw new Error("Fixture has no account")}; export function getDb(){throw new Error("Fixture must not access Firestore")}',
+    builder.onResolve({ filter: /^@\/components\/AuthGuard$/ }, () => ({ path: 'guest-auth', namespace: 'fixture' }));
+    builder.onResolve({ filter: /^next\/link$/ }, () => ({ path: 'plain-link', namespace: 'fixture' }));
+    builder.onResolve({ filter: /^firebase\/firestore$/ }, () => ({ path: path.join(directory, 'firestore-fixture.ts') }));
+    builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: name }) => ({
+      contents: name === 'guest-auth'
+        ? 'export const useAuth=()=>({user:null,loading:false,error:null});'
+        : name === 'plain-link'
+        ? 'import {createElement} from "react"; export default function Link({children,prefetch,replace,scroll,...props}){return createElement("a",props,children)}'
+        : 'export const isFirebaseConfigured=()=>true; export const getAuth=()=>({currentUser:null}); export const getDb=()=>null;',
       loader: 'js',
+      resolveDir: root,
     }));
+    builder.onLoad({ filter: /[\\/]MapCanvas\.tsx$/ }, async ({ path: filename }) => {
+      const source = await readFile(filename, 'utf8');
+      const url = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+      if (source.split(url).length !== 2) throw new Error('Map fixture tile boundary changed; review the adapter');
+      // Only the tile URL changes. Leaflet, markers, selection and viewport remain production code.
+      return { contents: source.replace(url, '/offline-tile.svg'), loader: 'tsx', resolveDir: path.dirname(filename) };
+    });
   } }],
 });
 await writeFile(path.join(output, 'bundle-meta.json'), JSON.stringify(result.metafile, null, 2));
@@ -35,6 +50,11 @@ await writeFile(path.join(output, 'scene.html'), `<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>校園空間導覽元件驗證</title><link rel="stylesheet" href="fixture.css"></head>
 <body><div id="root"></div><script type="module" src="fixture.js"></script></body></html>`);
+await writeFile(path.join(output, 'map.html'), `<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>課表教室地圖驗證</title><link rel="stylesheet" href="map.css"></head>
+<body><div id="root"></div><script type="module" src="map.js"></script></body></html>`);
+await writeFile(path.join(output, 'offline-tile.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><path fill="#f0f2ee" d="M0 0h256v256H0z"/><path stroke="#d8ddd7" fill="none" d="M0 0H256V256H0Z M128 0V256 M0 128H256"/></svg>');
 await writeFile(path.join(output, 'index.html'), `<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>校園空間導覽｜瀏覽器驗證</title><style>

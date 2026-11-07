@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BufferGeometry, Camera, InstancedMesh, Material, Matrix4, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
-import { createCampusSpatialScene, type CampusSpatialScene } from './campusSpatialScene';
+import { createCampusSpatialScene, type CampusSpatialScene, type CampusSpatialView } from './campusSpatialScene';
+import {
+  DEFAULT_SPATIAL_BEARING,
+  MAX_SPATIAL_ZOOM,
+  MIN_SPATIAL_ZOOM,
+  SPATIAL_ROTATION_STEP,
+  SPATIAL_ZOOM_FACTOR,
+  normalizeSpatialCamera,
+  spatialNorthRotationDegrees,
+  type CampusSpatialCamera,
+} from './campusSpatialCamera';
 import type { MapLocation } from './mapService';
 
 const webgl = vi.hoisted(() => ({
@@ -88,7 +98,7 @@ function drawFrame(elapsed = 16) {
   for (const callback of pending) callback(time);
 }
 
-function setup(source = model) {
+function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) => void) {
   const container = document.createElement('div');
   container.tabIndex = -1;
   const bounds = { width: 800, height: 480 };
@@ -99,9 +109,58 @@ function setup(source = model) {
   document.body.append(container);
   const onSelect = vi.fn();
   const onError = vi.fn();
-  const scene = createCampusSpatialScene(container, source, { onSelect, onError });
+  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange });
   scenes.push(scene);
   return { scene, container, bounds, onSelect, onError, renderer: webgl.renderers.at(-1)! };
+}
+
+function setupControlled(source = model) {
+  let current: CampusSpatialView = {
+    selectedId: null, overhead: false, motion: true, dark: false, ...normalizeSpatialCamera(),
+  };
+  const onCameraChange = vi.fn((camera: CampusSpatialCamera) => {
+    current = { ...current, ...camera };
+    result.scene.setView(current);
+  });
+  const result = setup(source, onCameraChange);
+  result.container.tabIndex = 0;
+  const captured = new Set<number>();
+  const setPointerCapture = vi.fn((id: number) => captured.add(id));
+  const releasePointerCapture = vi.fn((id: number) => captured.delete(id));
+  Object.assign(result.container, {
+    setPointerCapture,
+    releasePointerCapture,
+    hasPointerCapture: (id: number) => captured.has(id),
+  });
+  result.scene.setView(current);
+  return {
+    ...result, onCameraChange, captured, setPointerCapture, releasePointerCapture,
+    setView(next: Partial<CampusSpatialView>) {
+      current = { ...current, ...next };
+      result.scene.setView(current);
+    },
+  };
+}
+
+function pointer(target: EventTarget, type: string, init: Partial<PointerEvent> = {}) {
+  // jsdom does not implement browser pointer capture. Event dispatch is real; capture is a boundary stub.
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, {
+    pointerId: 1, pointerType: 'touch', isPrimary: true, button: 0, buttons: 1,
+    clientX: 100, clientY: 100, ...init,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function keyboard(target: EventTarget, key: string, init: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function lastCamera(renderer: (typeof webgl.renderers)[number]) {
+  return renderer.render.mock.calls.at(-1)![1] as Camera;
 }
 
 function focusOnGround(camera: Camera) {
@@ -192,17 +251,26 @@ describe('optional spatial canvas lifecycle', () => {
     expect(frames.size).toBe(0);
   });
 
-  it.each([{ width: 480, height: 800 }, { width: 500, height: 500 }])(
-    'fits every corner of an oblique overview in a $width × $height viewport', (size) => {
+  it.each(
+    [{ width: 480, height: 800 }, { width: 500, height: 500 }].flatMap((size) =>
+      [0, DEFAULT_SPATIAL_BEARING, 90, 135, 225, 315].flatMap((bearing) =>
+        [false, true].map((overhead) => ({ ...size, bearing, overhead }))),
+    ),
+  )(
+    'fits every overview corner at bearing $bearing, overhead=$overhead in $width × $height', (size) => {
       const square = buildCampusSpatialModel([
         { ...locations[0], id: 'nw', lat: 24.004, lng: 119.9956 },
         { ...locations[0], id: 'ne', lat: 24.004, lng: 120.0044 },
         { ...locations[0], id: 'sw', lat: 23.996, lng: 119.9956 },
         { ...locations[0], id: 'se', lat: 23.996, lng: 120.0044 },
       ]);
-      const { renderer, bounds } = setup(square);
+      const { scene, renderer, bounds } = setup(square);
       Object.assign(bounds, size);
       window.dispatchEvent(new Event('resize'));
+      scene.setView({
+        selectedId: null, overhead: size.overhead, bearing: size.bearing,
+        motion: false, dark: false, zoom: 1,
+      });
       drawFrame();
       const [renderedScene, camera] = renderer.render.mock.calls.at(-1)! as [Scene, Camera];
       const caps = renderedScene.children.find((child): child is InstancedMesh =>
@@ -220,6 +288,60 @@ describe('optional spatial canvas lifecycle', () => {
       }
     },
   );
+
+  it.each([false, true])('projects compass north consistently with the actual overhead=%s camera', (overhead) => {
+    const { scene, renderer, bounds } = setup();
+    for (const bearing of [0, 45, 90, 135, 210, 270, 315]) {
+      scene.setView({ selectedId: null, overhead, motion: false, dark: false, bearing, zoom: 1 });
+      drawFrame();
+      const camera = lastCamera(renderer);
+      const target = focusOnGround(camera);
+      const center = target.clone().project(camera);
+      const north = target.clone().add(new Vector3(0, 0, -10)).project(camera);
+      const screenX = (north.x - center.x) * bounds.width;
+      const screenUp = (north.y - center.y) * bounds.height;
+      const rotation = normalizeSpatialCamera({ bearing: Math.atan2(screenX, screenUp) * 180 / Math.PI }).bearing;
+      const expected = spatialNorthRotationDegrees(bearing, overhead);
+      const shortestDifference = (rotation - expected + 540) % 360 - 180;
+      expect(shortestDifference).toBeCloseTo(0, 7);
+      if (bearing === 0) {
+        expect(north.y).toBeGreaterThan(center.y);
+        expect(north.x).toBeCloseTo(center.x, 10);
+      }
+    }
+    expect(frames.size).toBe(0);
+  });
+
+  it('applies rotation and bounded zoom immediately even when flight animation is enabled', () => {
+    const { renderer, setView } = setupControlled();
+    drawFrame();
+    const originalDistance = lastCamera(renderer).position.length();
+    setView({ zoom: 2 });
+    drawFrame();
+    expect(lastCamera(renderer).position.length()).toBeCloseTo(originalDistance / 2, 8);
+    expect(frames.size).toBe(0);
+    setView({ bearing: 90 });
+    drawFrame();
+    const camera = lastCamera(renderer);
+    expect(camera.position.x).toBeGreaterThan(0);
+    expect(camera.position.z).toBeCloseTo(0, 8);
+    expect(focusOnGround(camera).length()).toBeCloseTo(0, 8);
+    expect(frames.size).toBe(0);
+    setView({ zoom: 100 });
+    drawFrame();
+    const maximumZoomDistance = camera.position.length();
+    setView({ zoom: MAX_SPATIAL_ZOOM });
+    expect(frames.size).toBe(0);
+    expect(camera.position.length()).toBe(maximumZoomDistance);
+    setView({ selectedId: 'hall', zoom: 1 });
+    drawFrame(100);
+    expect(frames.size).toBe(1);
+    setView({ bearing: 0 });
+    drawFrame();
+    expect(frames.size).toBe(0);
+    expect(focusOnGround(camera).x).toBeCloseTo(model.points[1].x, 8);
+    expect(focusOnGround(camera).z).toBeCloseTo(model.points[1].z, 8);
+  });
 
   it('treats names as text and lets native buttons select their real source id', () => {
     const namedPlace = { ...locations[0], name: '<img src=x onerror=alert(1)>' };
@@ -301,6 +423,68 @@ describe('optional spatial canvas lifecycle', () => {
     expect(document.activeElement).toBe(selector);
   });
 
+  it('returns focused labels to the host when a scene is rebuilt from changed source data', () => {
+    const { scene, container, onSelect, onError } = setup();
+    container.tabIndex = 0;
+    drawFrame();
+    const label = [...container.querySelectorAll('button')].find((button) => !button.hidden)!;
+    label.focus();
+    expect(document.activeElement).toBe(label);
+    scene.dispose();
+    expect(label.isConnected).toBe(false);
+    expect(document.activeElement).toBe(container);
+    const replacement = createCampusSpatialScene(container, buildCampusSpatialModel([locations[1]]), {
+      onSelect, onError,
+    });
+    scenes.push(replacement);
+    drawFrame();
+    expect(document.activeElement).toBe(container);
+    expect(container.querySelector('button')?.hidden).toBe(false);
+    expect(frames.size).toBe(0);
+  });
+
+  it('preserves a keyboard continuation point when context loss removes the focused label', () => {
+    const { container, renderer, onError } = setup();
+    container.tabIndex = 0;
+    drawFrame();
+    const label = [...container.querySelectorAll('button')].find((button) => !button.hidden)!;
+    label.focus();
+    renderer.domElement.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    expect(label.isConnected).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(container);
+    expect(frames.size).toBe(0);
+  });
+
+  it.each(['select', 'button'])('leaves focus on an external %s when disposing a scene', (tag) => {
+    const { scene, container } = setup();
+    drawFrame();
+    const external = document.createElement(tag);
+    document.body.append(external);
+    external.focus();
+    const focusHost = vi.spyOn(container, 'focus');
+    scene.dispose();
+    expect(document.activeElement).toBe(external);
+    expect(focusHost).not.toHaveBeenCalled();
+  });
+
+  it('does not restore focus to a host that React has already unmounted', () => {
+    const { scene, container } = setup();
+    drawFrame();
+    const label = [...container.querySelectorAll('button')].find((button) => !button.hidden)!;
+    label.focus();
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    container.remove();
+    opener.focus();
+    const focusHost = vi.spyOn(container, 'focus');
+    scene.dispose();
+    expect(container.isConnected).toBe(false);
+    expect(focusHost).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(opener);
+    expect(frames.size).toBe(0);
+  });
+
   it('cleans up GPU resources, event handlers and the canvas exactly once', () => {
     const geometryDispose = vi.spyOn(BufferGeometry.prototype, 'dispose');
     const materialDispose = vi.spyOn(Material.prototype, 'dispose');
@@ -350,6 +534,216 @@ describe('optional spatial canvas lifecycle', () => {
     expect(second.onError).toHaveBeenCalledTimes(1);
     expect(second.renderer.dispose).toHaveBeenCalledTimes(1);
     expect(second.container.childElementCount).toBe(0);
+    expect(frames.size).toBe(0);
+  });
+});
+
+describe('controlled spatial camera input', () => {
+  it('emits camera intent without moving until the owner supplies the controlled view', () => {
+    const onCameraChange = vi.fn();
+    const { container, scene, renderer } = setup(model, onCameraChange);
+    container.tabIndex = 0;
+    container.focus();
+    drawFrame();
+    const previous = lastCamera(renderer).position.clone();
+    expect(keyboard(container, 'ArrowRight').defaultPrevented).toBe(true);
+    const requested = onCameraChange.mock.calls[0][0] as CampusSpatialCamera;
+    expect(requested.bearing).toBeCloseTo(DEFAULT_SPATIAL_BEARING + SPATIAL_ROTATION_STEP, 8);
+    expect(requested.zoom).toBe(1);
+    expect(lastCamera(renderer).position.equals(previous)).toBe(true);
+    expect(frames.size).toBe(0);
+    scene.setView({ selectedId: null, overhead: false, motion: true, dark: false, ...requested });
+    drawFrame();
+    expect(lastCamera(renderer).position.equals(previous)).toBe(false);
+    expect(frames.size).toBe(0);
+  });
+
+  it('supports host keyboard rotation, bounded zoom and a north-up reset', () => {
+    const { container, onCameraChange } = setupControlled();
+    drawFrame();
+    container.focus();
+    keyboard(container, 'ArrowLeft');
+    expect(onCameraChange).toHaveBeenLastCalledWith({
+      bearing: normalizeSpatialCamera({ bearing: DEFAULT_SPATIAL_BEARING - SPATIAL_ROTATION_STEP }).bearing,
+      zoom: 1,
+    });
+    keyboard(container, '+');
+    expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(SPATIAL_ZOOM_FACTOR);
+    for (let index = 0; index < 20; index += 1) keyboard(container, '+');
+    expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(MAX_SPATIAL_ZOOM);
+    const maximumCalls = onCameraChange.mock.calls.length;
+    keyboard(container, '+');
+    expect(onCameraChange).toHaveBeenCalledTimes(maximumCalls);
+    for (let index = 0; index < 20; index += 1) keyboard(container, '-');
+    expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(MIN_SPATIAL_ZOOM);
+    keyboard(container, 'Home');
+    expect(onCameraChange).toHaveBeenLastCalledWith({ bearing: 0, zoom: 1 });
+    drawFrame();
+    expect(frames.size).toBe(0);
+    expect(document.activeElement).toBe(container);
+  });
+
+  it('leaves label buttons, selectors, ranges and browser shortcuts in control of their own keys', () => {
+    const { container, onCameraChange, onSelect } = setupControlled();
+    drawFrame();
+    const button = [...container.querySelectorAll('button')].find((label) => !label.hidden)!;
+    button.focus();
+    for (const key of ['ArrowLeft', '+', 'Home']) expect(keyboard(button, key).defaultPrevented).toBe(false);
+    button.click();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    const select = document.createElement('select');
+    const range = document.createElement('input');
+    range.type = 'range';
+    document.body.append(select, range);
+    for (const input of [select, range]) {
+      input.focus();
+      expect(keyboard(input, 'ArrowRight').defaultPrevented).toBe(false);
+      expect(keyboard(container, 'Home').defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(input);
+    }
+    container.focus();
+    for (const init of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+      expect(keyboard(container, '+', init).defaultPrevented).toBe(false);
+    }
+    for (const key of ['ArrowUp', 'ArrowDown', 'Escape', 'Tab']) {
+      expect(keyboard(container, key).defaultPrevented).toBe(false);
+    }
+    expect(onCameraChange).not.toHaveBeenCalled();
+  });
+
+  it('rotates only after horizontal intent and preserves the final mouse-up position', () => {
+    const { container, onCameraChange, setPointerCapture, releasePointerCapture, captured, renderer } = setupControlled();
+    drawFrame();
+    const original = lastCamera(renderer).position.clone();
+    expect(pointer(container, 'pointerdown', { pointerType: 'mouse' }).defaultPrevented).toBe(false);
+    expect(pointer(container, 'pointermove', { clientX: 105, pointerType: 'mouse' }).defaultPrevented).toBe(false);
+    expect(onCameraChange).not.toHaveBeenCalled();
+    expect(pointer(container, 'pointermove', {
+      clientX: 300, clientY: 105, pointerType: 'mouse',
+    }).defaultPrevented).toBe(true);
+    expect(setPointerCapture).toHaveBeenCalledWith(1);
+    expect(captured.has(1)).toBe(true);
+    expect(onCameraChange.mock.calls.at(-1)![0].bearing).toBeCloseTo(DEFAULT_SPATIAL_BEARING + 45, 8);
+    pointer(container, 'pointerup', { clientX: 500, clientY: 105, pointerType: 'mouse', buttons: 0 });
+    expect(onCameraChange.mock.calls.at(-1)![0].bearing).toBeCloseTo(DEFAULT_SPATIAL_BEARING + 90, 8);
+    expect(onCameraChange.mock.calls.at(-1)![0].zoom).toBe(1);
+    expect(releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(captured.size).toBe(0);
+    drawFrame();
+    expect(lastCamera(renderer).position.equals(original)).toBe(false);
+    expect(frames.size).toBe(0);
+    pointer(container, 'pointermove', { clientX: 700 });
+    expect(onCameraChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows vertical scrolling, browser pinch zoom and wheel input without camera changes', () => {
+    const { container, onCameraChange, setPointerCapture } = setupControlled();
+    drawFrame();
+    expect(container.style.touchAction).toBe('pan-y pinch-zoom');
+    pointer(container, 'pointerdown');
+    expect(pointer(container, 'pointermove', { clientX: 104, clientY: 120 }).defaultPrevented).toBe(false);
+    expect(pointer(container, 'pointermove', { clientX: 400, clientY: 120 }).defaultPrevented).toBe(false);
+    pointer(container, 'pointerup');
+    pointer(container, 'pointerdown');
+    expect(pointer(container, 'pointerdown', { pointerId: 2, isPrimary: false }).defaultPrevented).toBe(false);
+    pointer(container, 'pointermove', { clientX: 500 });
+    const wheel = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
+    container.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(onCameraChange).not.toHaveBeenCalled();
+    expect(frames.size).toBe(0);
+  });
+
+  it('keeps label taps native and suppresses the synthetic click following a drag', () => {
+    const { container, onSelect, onCameraChange } = setupControlled();
+    drawFrame();
+    const button = [...container.querySelectorAll('button')].find((label) => !label.hidden)!;
+    pointer(button, 'pointerdown');
+    pointer(button, 'pointermove', { clientX: 300 });
+    pointer(button, 'pointerup', { clientX: 300 });
+    button.click();
+    expect(onCameraChange).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 300 });
+    pointer(container, 'pointerup', { clientX: 300 });
+    const dragClick = new MouseEvent('click', { detail: 1, bubbles: true, cancelable: true });
+    button.dispatchEvent(dragClick);
+    expect(dragClick.defaultPrevented).toBe(true);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    pointer(button, 'pointerdown');
+    pointer(button, 'pointerup');
+    button.dispatchEvent(new MouseEvent('click', { detail: 1, bubbles: true }));
+    expect(onSelect).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['pointercancel', 'lostpointercapture', 'blur', 'second-touch', 'resize', 'selection']) (
+    'ends pointer tracking after %s', (reason) => {
+      const { container, bounds, onCameraChange, setView, captured } = setupControlled();
+      drawFrame();
+      pointer(container, 'pointerdown');
+      pointer(container, 'pointermove', { clientX: 300 });
+      expect(captured.has(1)).toBe(true);
+      switch (reason) {
+        case 'blur': window.dispatchEvent(new Event('blur')); break;
+        case 'second-touch': pointer(container, 'pointerdown', { pointerId: 2, isPrimary: false }); break;
+        case 'resize': bounds.width = 400; window.dispatchEvent(new Event('resize')); break;
+        case 'selection': setView({ selectedId: 'hall' }); break;
+        default: pointer(container, reason);
+      }
+      expect(captured.size).toBe(0);
+      onCameraChange.mockClear();
+      pointer(container, 'pointermove', { clientX: 700 });
+      pointer(container, 'pointerup', { clientX: 700 });
+      expect(onCameraChange).not.toHaveBeenCalled();
+      drawFrame(500);
+      expect(frames.size).toBe(0);
+    },
+  );
+
+  it('stops tracking on pointer leave when pointer capture is unavailable', () => {
+    const { container, onCameraChange } = setupControlled();
+    container.setPointerCapture = () => { throw new Error('capture unavailable'); };
+    drawFrame();
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 300 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+    pointer(container, 'pointerleave');
+    pointer(container, 'pointermove', { clientX: 700 });
+    expect(onCameraChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases capture while inactive and removes all input behavior on disposal', () => {
+    const { container, scene, onCameraChange, captured } = setupControlled();
+    container.focus();
+    drawFrame();
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 300 });
+    scene.setActive(false);
+    expect(captured.size).toBe(0);
+    expect(frames.size).toBe(0);
+    onCameraChange.mockClear();
+    expect(keyboard(container, 'Home').defaultPrevented).toBe(false);
+    pointer(container, 'pointermove', { clientX: 700 });
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 500 });
+    expect(onCameraChange).not.toHaveBeenCalled();
+    scene.setActive(true);
+    drawFrame();
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 300 });
+    expect(captured.size).toBe(1);
+    scene.dispose();
+    expect(captured.size).toBe(0);
+    expect(frames.size).toBe(0);
+    expect(container.style.touchAction || '').toBe('');
+    onCameraChange.mockClear();
+    pointer(container, 'pointerdown');
+    pointer(container, 'pointermove', { clientX: 500 });
+    keyboard(container, 'Home');
+    window.dispatchEvent(new Event('blur'));
+    expect(onCameraChange).not.toHaveBeenCalled();
     expect(frames.size).toBe(0);
   });
 });

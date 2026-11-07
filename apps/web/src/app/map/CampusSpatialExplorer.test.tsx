@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
 import type { MapLocation } from './mapService';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
+import { DEFAULT_SPATIAL_BEARING, MAX_SPATIAL_ZOOM, MIN_SPATIAL_ZOOM } from './campusSpatialCamera';
 
 const scene = vi.hoisted(() => ({
   create: vi.fn(),
@@ -73,7 +74,9 @@ it('opens graphics only on request, uses the current places, and leaves selectio
   expect(scene.create.mock.calls[0][1].points.map((point: { id: string }) => point.id)).toEqual(['library', 'dorm']);
   expect(screen.queryByText('主顧樓')).toBeNull();
   expect(within(dialog).getByText(/不代表建築外觀或室內動線/)).toBeTruthy();
-  expect(scene.setView).toHaveBeenLastCalledWith({ selectedId: null, overhead: false, motion: true, dark: false });
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(scene.setView).toHaveBeenLastCalledWith({ selectedId: null, overhead: false, motion: true, dark: false, bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   fireEvent.click(within(dialog).getByRole('button', { name: '關閉視窗' }));
   expect(onSelect).not.toHaveBeenCalled();
   expect(scene.dispose).toHaveBeenCalledTimes(1);
@@ -104,11 +107,49 @@ it('connects scene markers, the progress control, directions and the original ma
   expect(scene.dispose).toHaveBeenCalledTimes(1);
 });
 
+it('controls camera without changing the place or recreating its context and resets framing after selection', async () => {
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).tabIndex).toBe(0);
+  fireEvent.click(within(dialog).getByRole('button', { name: '向右旋轉' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'library', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1.25 }));
+  expect(within(dialog).getByText('縮放 125%')).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '下一個地點' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: 'dorm', bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '放大空間圖' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '看全部地點' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null, bearing: DEFAULT_SPATIAL_BEARING + 30, zoom: 1 }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '回到北向' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 0, zoom: 1 }));
+  expect(within(dialog).getByText('畫面北向').parentElement?.querySelector('g')?.getAttribute('transform')).toBe('rotate(0 20 20)');
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
+it('reflects gesture camera changes in accessible bounded controls without reloading graphics', async () => {
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={vi.fn()} />);
+  const dialog = await open();
+  const changed = scene.create.mock.calls[0][2].onCameraChange;
+  act(() => changed({ bearing: 420, zoom: 9 }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 60, zoom: MAX_SPATIAL_ZOOM }));
+  expect(within(dialog).getByRole('button', { name: '放大空間圖' }).getAttribute('aria-disabled')).toBe('true');
+  expect(within(dialog).getByText('縮放 250%')).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '向左旋轉' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 30, zoom: MAX_SPATIAL_ZOOM }));
+  act(() => changed({ bearing: -60, zoom: 0 }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ bearing: 300, zoom: MIN_SPATIAL_ZOOM }));
+  expect(within(dialog).getByRole('button', { name: '縮小空間圖' }).getAttribute('aria-disabled')).toBe('true');
+  expect(within(dialog).getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+});
+
 it('keeps real place information and navigation available after WebGL failure and permits a retry', async () => {
   scene.create.mockImplementationOnce(() => { throw new Error('WebGL unavailable'); });
   render(<CampusSpatialExplorer school="other-school" locations={places} selected={null} onSelect={vi.fn()} />);
   const dialog = await open();
   expect(await within(dialog).findByText(/這次無法顯示立體畫面/)).toBeTruthy();
+  expect(within(dialog).getByRole('group', { name: '校園地點空間圖' }).tabIndex).toBe(-1);
+  expect(within(dialog).queryByRole('group', { name: '調整空間視角' })).toBeNull();
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
   expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -204,7 +245,8 @@ it('destroys old-school graphics and exposes only the replacement school after r
   expect(screen.queryByRole('dialog')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '空間導覽' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
-  expect(screen.getByRole('heading', { name: '另一校圖書館' })).toBeTruthy();
+  expect(screen.getByRole('option', { name: '另一校圖書館' })).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toContain('請選擇地點');
   expect(screen.queryByRole('heading', { name: '本校圖書館' })).toBeNull();
   expect(scene.create.mock.calls[1][1].points.map((point: { id: string }) => point.id)).toEqual(['new-library']);
 });
@@ -218,4 +260,35 @@ it('closes an emptied tour and does not reopen it when location data returns', a
   view.rerender(<CampusSpatialExplorer {...props} locations={places} />);
   expect(screen.getByRole('button', { name: '空間導覽' })).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('withdraws inherited navigation when a source makes the original automatic match ambiguous', async () => {
+  const props = { school: 'other-school', onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
+  const dialog = await open();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  // The old ID can still exist; the parent has withdrawn its automatic choice.
+  view.rerender(<CampusSpatialExplorer {...props} locations={places} selected={null} />);
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  view.rerender(<CampusSpatialExplorer {...props} locations={[...places]} selected={null} />);
+  expect(within(dialog).getByRole('heading', { name: '本校宿舍' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('requires a fresh choice when the selected location disappears instead of using the first replacement', async () => {
+  const props = { school: 'other-school', onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} locations={places} selected={places[0]} />);
+  const dialog = await open();
+  fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'dorm' } });
+  const replacement = { ...places[1], id: 'replacement-dorm' };
+  view.rerender(<CampusSpatialExplorer {...props} locations={[replacement]} selected={null} />);
+  expect(within(dialog).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  expect(within(dialog).queryByRole('heading', { name: '本校宿舍' })).toBeNull();
+  expect((within(dialog).getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(within(dialog).getByRole('button', { name: '看全部地點' }).getAttribute('aria-pressed')).toBe('true');
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
 });

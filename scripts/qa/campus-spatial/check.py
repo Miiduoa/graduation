@@ -15,7 +15,7 @@ import time
 import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 from playwright.async_api import async_playwright, expect
 
@@ -33,11 +33,44 @@ LIBRARY = {
     "lng": 120.581377,
     "source": "https://www.openstreetmap.org/way/255784049",
 }
+ZHUGU = {"id": "pu-zhugu", "name": "主顧樓", "lat": 24.226939, "lng": 120.583587}
 
 PROBE = """(() => {
-  const probe = { clears: 0, draws: 0, focusBoundaries: [] };
+  const probe = { clears: 0, draws: 0, contexts: 0,
+    rafRequested: 0, rafExecuted: 0, rafPending: 0, focusBoundaries: [] };
   window.__campusSpatialProbe = probe;
+  const pending = new Set();
+  const requestFrame = window.requestAnimationFrame;
+  const cancelFrame = window.cancelAnimationFrame;
+  window.requestAnimationFrame = function (callback) {
+    const id = Reflect.apply(requestFrame, window, [timestamp => {
+      pending.delete(id);
+      probe.rafPending = pending.size;
+      probe.rafExecuted += 1;
+      Reflect.apply(callback, window, [timestamp]);
+    }]);
+    pending.add(id);
+    probe.rafPending = pending.size;
+    probe.rafRequested += 1;
+    return id;
+  };
+  window.cancelAnimationFrame = function (id) {
+    pending.delete(id);
+    probe.rafPending = pending.size;
+    return Reflect.apply(cancelFrame, window, [id]);
+  };
   if (typeof WebGL2RenderingContext === 'undefined') return;
+  const contexts = new WeakSet();
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (...args) {
+    const context = Reflect.apply(getContext, this, args);
+    if (this.dataset.spatialCanvas && context instanceof WebGL2RenderingContext &&
+        !contexts.has(context)) {
+      contexts.add(context);
+      probe.contexts += 1;
+    }
+    return context;
+  };
   for (const name of ['clear', 'drawArrays', 'drawElements',
                       'drawArraysInstanced', 'drawElementsInstanced']) {
     const original = WebGL2RenderingContext.prototype[name];
@@ -85,6 +118,10 @@ def selector_for(page):
     return dialog_for(page).get_by_role("combobox", name="想去哪裡", exact=True)
 
 
+def scene_host(page):
+    return dialog_for(page).get_by_role("group", name="校園地點空間圖", exact=True)
+
+
 async def clears(page):
     return await page.evaluate("window.__campusSpatialProbe.clears")
 
@@ -124,6 +161,7 @@ async def ready(page):
     )
     await expect(page.locator("[data-spatial-marker]:visible").first).to_be_visible()
     await page.wait_for_function("window.__campusSpatialProbe.draws > 0")
+    await expect(scene_host(page)).to_have_attribute("tabindex", "0")
 
 
 async def open_explorer(page):
@@ -175,10 +213,7 @@ async def assert_layout(page):
     return {"viewport": measurements["viewport"], "targets": len(measurements["controls"])}
 
 
-async def assert_navigation(page):
-    dialog = dialog_for(page)
-    await expect(dialog.get_by_role("heading", name=LIBRARY["name"], exact=True)).to_be_visible()
-    link = dialog.get_by_role("link", name="開啟步行導航", exact=True)
+async def assert_walking_link(link, destination_place):
     href = await link.get_attribute("href")
     parsed = urlparse(href)
     query = parse_qs(parsed.query)
@@ -189,14 +224,349 @@ async def assert_navigation(page):
     assert "origin" not in query, "Fixture must not invent the user's current location"
     destination = [float(value) for value in query["destination"][0].split(",")]
     assert len(destination) == 2, href
-    assert abs(destination[0] - LIBRARY["lat"]) < 1e-9, href
-    assert abs(destination[1] - LIBRARY["lng"]) < 1e-9, href
+    assert abs(destination[0] - destination_place["lat"]) < 1e-9, href
+    assert abs(destination[1] - destination_place["lng"]) < 1e-9, href
     await expect(link).to_have_attribute("target", "_blank")
     assert {"noopener", "noreferrer"} <= set((await link.get_attribute("rel")).split())
+    return href
+
+
+async def assert_navigation(page):
+    dialog = dialog_for(page)
+    await expect(dialog.get_by_role("heading", name=LIBRARY["name"], exact=True)).to_be_visible()
+    href = await assert_walking_link(dialog.get_by_role("link", name="開啟步行導航", exact=True), LIBRARY)
     await expect(dialog.get_by_role("link", name="查看地點資料來源 ↗", exact=True)).to_have_attribute(
         "href", LIBRARY["source"]
     )
     return href
+
+
+async def camera_readout(page):
+    """Read the visible compass and zoom, without exposing renderer internals."""
+    dialog = dialog_for(page)
+    await expect(dialog.get_by_text("畫面北向", exact=True)).to_be_visible()
+    transform = await dialog.get_by_role("group", name="調整空間視角", exact=True).locator("svg g").get_attribute("transform")
+    match = re.fullmatch(r"rotate\(([-+\d.eE]+) 20 20\)", transform or "")
+    assert match, f"Compass does not expose a rendered rotation: {transform}"
+    zoom_text = await dialog.get_by_text(re.compile(r"^縮放 \d+%$")).inner_text()
+    return {"northDegrees": float(match[1]), "zoomPercent": int(re.search(r"\d+", zoom_text)[0])}
+
+
+async def assert_same_scene(page, canvas, context, selected):
+    await expect(page.locator(CANVAS)).to_have_count(1)
+    await expect(selector_for(page)).to_have_value(selected)
+    state = await page.locator(CANVAS).evaluate("""(current, previous) => ({
+      sameCanvas: current === previous.canvas,
+      sameContext: current.getContext('webgl2') === previous.context,
+      lost: current.getContext('webgl2').isContextLost(),
+      contexts: window.__campusSpatialProbe.contexts,
+    })""", {"canvas": canvas, "context": context})
+    assert state == {"sameCanvas": True, "sameContext": True, "lost": False, "contexts": 1}, state
+
+
+async def assert_idle_renderer(page):
+    # Both GPU work and scheduled callbacks must stop. Counting draws alone could
+    # miss an empty requestAnimationFrame loop. These wrappers call the originals.
+    await page.wait_for_timeout(650)
+    before = await page.evaluate("""() => {
+      const { clears, draws, rafRequested, rafExecuted, rafPending } = window.__campusSpatialProbe;
+      return { clears, draws, rafRequested, rafExecuted, rafPending };
+    }""")
+    await page.wait_for_timeout(250)
+    after = await page.evaluate("""() => {
+      const { clears, draws, rafRequested, rafExecuted, rafPending } = window.__campusSpatialProbe;
+      return { clears, draws, rafRequested, rafExecuted, rafPending };
+    }""")
+    assert after == before and after["rafPending"] == 0, {"before": before, "after": after}
+    return after
+
+
+async def wait_for_repaint(page, before):
+    await page.wait_for_function("before => window.__campusSpatialProbe.clears > before", arg=before)
+
+
+async def canvas_fingerprint(page):
+    return hashlib.sha256(await page.locator(CANVAS).screenshot()).hexdigest()
+
+
+async def camera_controls(page, _requests, _resources):
+    await open_explorer(page)
+    dialog = dialog_for(page)
+    host = scene_host(page)
+    selected = await selector_for(page).input_value()
+    canvas = await page.locator(CANVAS).element_handle()
+    context = await canvas.evaluate_handle("canvas => canvas.getContext('webgl2')")
+    await assert_idle_renderer(page)
+    initial = await camera_readout(page)
+    assert initial["zoomPercent"] == 100 and 0 < initial["northDegrees"] < 90, initial
+    baseline = await canvas_fingerprint(page)
+    states = {"initial": initial}
+
+    async def click_camera(name):
+        before = await clears(page)
+        await dialog.get_by_role("button", name=name, exact=True).click()
+        await wait_for_repaint(page, before)
+        await assert_same_scene(page, canvas, context, selected)
+        return await camera_readout(page)
+
+    states["right"] = await click_camera("向右旋轉")
+    assert abs(states["right"]["northDegrees"] - initial["northDegrees"]) > 1
+    assert await canvas_fingerprint(page) != baseline, "Rotation changed the UI but not the WebGL view"
+    states["left"] = await click_camera("向左旋轉")
+    assert abs(states["left"]["northDegrees"] - initial["northDegrees"]) < 1e-7
+    states["zoomIn"] = await click_camera("放大空間圖")
+    assert states["zoomIn"]["zoomPercent"] == 125
+    assert await canvas_fingerprint(page) != baseline, "Zoom changed the UI but not the WebGL view"
+    assert (await click_camera("縮小空間圖"))["zoomPercent"] == 100
+
+    await host.focus()
+    await expect(host).to_be_focused()
+    # A keyboard event activates the visible-focus treatment on the scene.
+    await page.keyboard.press("Home")
+    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    await page.wait_for_timeout(100)
+    assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
+    focus = await host.evaluate("""el => ({
+      visible: el.matches(':focus-visible'),
+      outline: getComputedStyle(el).outlineStyle,
+      width: parseFloat(getComputedStyle(el).outlineWidth),
+    })""")
+    assert focus["visible"] and focus["outline"] != "none" and focus["width"] >= 2, focus
+    for key, expected_zoom in [("ArrowLeft", 100), ("ArrowRight", 100),
+                               ("Shift+Equal", 125), ("Minus", 100)]:
+        before = await clears(page)
+        await page.keyboard.press(key)
+        await wait_for_repaint(page, before)
+        state = await camera_readout(page)
+        assert state["zoomPercent"] == expected_zoom, {"key": key, **state}
+        if key == "ArrowLeft":
+            assert abs(state["northDegrees"]) > 1
+        if key == "ArrowRight":
+            assert abs(state["northDegrees"]) < 1e-7
+        await expect(host).to_be_focused()
+        await assert_same_scene(page, canvas, context, selected)
+        states[key] = state
+
+    # Check the actual displayed bounds and disabled controls, including a key
+    # that attempts to exceed each bound while the scene itself is focused.
+    for name, bound, key in [("放大空間圖", 250, "Shift+Equal"), ("縮小空間圖", 65, "Minus")]:
+        button = dialog.get_by_role("button", name=name, exact=True)
+        for _ in range(12):
+            if await button.get_attribute("aria-disabled") == "true":
+                break
+            await button.click()
+        await expect(button).to_have_attribute("aria-disabled", "true")
+        await expect(button).to_be_disabled()
+        await expect(dialog.get_by_text(f"縮放 {bound}%", exact=True)).to_be_visible()
+        await expect(button).to_be_focused()
+        await page.keyboard.press("Enter")
+        assert (await camera_readout(page))["zoomPercent"] == bound
+        await expect(button).to_be_focused()
+        states[f"limit{bound}"] = {"zoomPercent": bound, "focusRetainedAfterEnter": True}
+        await host.focus()
+        await page.keyboard.press(key)
+        assert (await camera_readout(page))["zoomPercent"] == bound
+        await assert_same_scene(page, canvas, context, selected)
+
+    # Home resets both a rotated view and a non-default zoom.
+    await page.keyboard.press("ArrowLeft")
+    await page.keyboard.press("Home")
+    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    assert abs((await camera_readout(page))["northDegrees"]) < 1e-7
+    rotated = await click_camera("向右旋轉")
+    await click_camera("放大空間圖")
+    await selector_for(page).select_option(LIBRARY["id"])
+    selected = LIBRARY["id"]
+    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    assert abs((await camera_readout(page))["northDegrees"] - rotated["northDegrees"]) < 1e-7
+    await assert_same_scene(page, canvas, context, selected)
+    await assert_idle_renderer(page)
+    await click_camera("放大空間圖")
+    await dialog.get_by_role("button", name="看全部地點", exact=True).click()
+    await expect(dialog.get_by_text("縮放 100%", exact=True)).to_be_visible()
+    assert abs((await camera_readout(page))["northDegrees"] - rotated["northDegrees"]) < 1e-7
+    await assert_same_scene(page, canvas, context, selected)
+    await assert_idle_renderer(page)
+    await click_camera("放大空間圖")
+    states["northReset"] = await click_camera("回到北向")
+    assert states["northReset"] == {"northDegrees": 0, "zoomPercent": 100}
+    idle = await assert_idle_renderer(page)
+    await page.screenshot(path=str(OUT / "camera-controls.png"))
+    await context.dispose()
+    await canvas.dispose()
+    return {"readouts": states, "sameCanvasAndContext": True, "zoomBounds": [65, 250],
+            "selectionAndOverviewResetZoom": True, "keyboardFocus": focus, "idle": idle}
+
+
+async def touch_camera(page, _requests, _resources):
+    await page.emulate_media(reduced_motion="reduce")
+    await open_explorer(page)
+    host = scene_host(page)
+    await host.scroll_into_view_if_needed()
+    await assert_idle_renderer(page)
+    selected = await selector_for(page).input_value()
+    canvas = await page.locator(CANVAS).element_handle()
+    context = await canvas.evaluate_handle("canvas => canvas.getContext('webgl2')")
+    await host.evaluate("""host => {
+      window.__campusSpatialProbe.touchInputs = [];
+      host.addEventListener('pointerdown', event => {
+        window.__campusSpatialProbe.touchInputs.push({ trusted: event.isTrusted, type: event.pointerType });
+      });
+    }""")
+    touch_action = await host.evaluate("el => getComputedStyle(el).touchAction")
+    assert "pan-y" in touch_action and "pinch-zoom" in touch_action, touch_action
+    scroller = await host.evaluate_handle("""host => {
+      for (let el = host.parentElement; el; el = el.parentElement) {
+        if (/(auto|scroll)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight + 1) {
+          return el;
+        }
+      }
+      throw new Error('The mobile dialog has no scrollable content');
+    }""")
+    session = await page.context.new_cdp_session(page)
+
+    async def swipe(horizontal):
+        point = await host.evaluate("""host => {
+          const rect = host.getBoundingClientRect();
+          for (const fy of [0.72, 0.58, 0.44]) for (const fx of [0.2, 0.3, 0.4]) {
+            const x = rect.left + rect.width * fx;
+            const y = rect.top + rect.height * fy;
+            const hit = document.elementFromPoint(x, y);
+            if (hit && host.contains(hit) && !hit.closest('button, a, input, select, textarea')) {
+              return { x, y, dx: rect.width * 0.35, dy: -Math.min(rect.height * 0.4, y - rect.top - 12) };
+            }
+          }
+          throw new Error('No unobstructed scene surface for a genuine touch gesture');
+        }""")
+        assert point["dx"] > 50 and -point["dy"] > 60, point
+        await session.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [
+            {"x": point["x"], "y": point["y"], "id": 1, "radiusX": 2, "radiusY": 2}
+        ]})
+        try:
+            for step in range(1, 9):
+                await session.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [
+                    {"x": point["x"] + (point["dx"] * step / 8 if horizontal else 0),
+                     "y": point["y"] + (0 if horizontal else point["dy"] * step / 8),
+                     "id": 1, "radiusX": 2, "radiusY": 2}
+                ]})
+                await page.wait_for_timeout(24)
+        finally:
+            await session.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+
+    initial = await camera_readout(page)
+    initial_scroll = await scroller.evaluate("el => el.scrollTop")
+    before = await clears(page)
+    await swipe(horizontal=True)
+    await wait_for_repaint(page, before)
+    horizontal = await camera_readout(page)
+    assert abs(horizontal["northDegrees"] - initial["northDegrees"]) > 1, horizontal
+    assert horizontal["zoomPercent"] == initial["zoomPercent"]
+    assert abs(await scroller.evaluate("el => el.scrollTop") - initial_scroll) <= 3
+    await assert_same_scene(page, canvas, context, selected)
+    await assert_idle_renderer(page)
+    await page.screenshot(path=str(OUT / "camera-touch.png"))
+
+    await swipe(horizontal=False)
+    await page.wait_for_function(
+        "args => args.el.scrollTop > args.before + 30", arg={"el": scroller, "before": initial_scroll}
+    )
+    vertical_scroll = await scroller.evaluate("el => el.scrollTop")
+    assert vertical_scroll > initial_scroll + 30, {"before": initial_scroll, "after": vertical_scroll}
+    assert await camera_readout(page) == horizontal, "Vertical scrolling also changed the camera"
+    await assert_same_scene(page, canvas, context, selected)
+    inputs = await page.evaluate("window.__campusSpatialProbe.touchInputs")
+    assert len(inputs) == 2 and all(item == {"trusted": True, "type": "touch"} for item in inputs), inputs
+    idle = await assert_idle_renderer(page)
+    await session.detach()
+    await scroller.dispose()
+    await context.dispose()
+    await canvas.dispose()
+    return {"touchAction": touch_action, "nativeTouchInputs": inputs,
+            "horizontalRotation": {"before": initial, "after": horizontal},
+            "verticalScroll": {"before": initial_scroll, "after": vertical_scroll}, "idle": idle}
+
+
+async def open_map_fixture(page, school, query):
+    await page.goto(urljoin(page.url, "map.html") + "?" + urlencode({"schoolId": school, "query": query}),
+                    wait_until="networkidle")
+    result = page.get_by_role("region", name="教室定位結果", exact=True)
+    await expect(result.get_by_role("heading", name=query, exact=True)).to_be_visible()
+    await expect(page.locator(".leaflet-container")).to_be_visible()
+    assert not await page.evaluate("document.documentElement.scrollWidth > innerWidth + 1"), (
+        "Map fixture overflows its viewport"
+    )
+    return result
+
+
+async def classroom_unique(page, requests, resources):
+    result = await open_map_fixture(page, "pu", "主顧303")
+    await expect(result).to_contain_text("可對應「主顧樓」的位置。抵達後請依課表與現場標示確認教室。")
+    details = page.get_by_role("region", name="地點詳情", exact=True)
+    await expect(details.get_by_role("heading", name=ZHUGU["name"], exact=True)).to_be_visible()
+    href = await assert_walking_link(details.get_by_role("link", name="從目前位置導航", exact=True), ZHUGU)
+    await expect(page.locator(".leaflet-tile-loaded").first).to_be_visible()
+    eager = resources.intersection(urlparse(url).path for url in requests)
+    assert not eager, f"MapClient loaded 3D before opening: {sorted(eager)}"
+    await page.screenshot(path=str(OUT / "map-classroom-unique.png"), full_page=True)
+    await open_explorer(page)
+    await expect(selector_for(page)).to_have_value(ZHUGU["id"])
+    await expect(selector_for(page).locator("option")).to_have_count(1)
+    await expect(dialog_for(page).get_by_role("heading", name=ZHUGU["name"], exact=True)).to_be_visible()
+    await assert_walking_link(dialog_for(page).get_by_role("link", name="開啟步行導航", exact=True), ZHUGU)
+    graphics = await assert_webgl(page)
+    await dialog_for(page).get_by_role("button", name="在平面地圖查看", exact=True).click()
+    await expect(dialog_for(page)).to_have_count(0)
+    await expect(details.get_by_role("heading", name=ZHUGU["name"], exact=True)).to_be_visible()
+
+    # The user explicitly clears the classroom filter before choosing another POI.
+    await page.get_by_role("button", name="看整個校園", exact=True).click()
+    await open_explorer(page)
+    assert await selector_for(page).locator("option").count() > 2
+    await selector_for(page).select_option(LIBRARY["id"])
+    await assert_navigation(page)
+    await dialog_for(page).get_by_role("button", name="在平面地圖查看", exact=True).click()
+    await expect(details.get_by_role("heading", name=LIBRARY["name"], exact=True)).to_be_visible()
+    await assert_walking_link(details.get_by_role("link", name="從目前位置導航", exact=True), LIBRARY)
+    return {"query": "主顧303", "resolvedBuilding": ZHUGU, "navigationHref": href,
+            "webgl": graphics, "selectionReturnedToMap": LIBRARY["id"]}
+
+
+async def classroom_ambiguous(page, _requests, _resources):
+    result = await open_map_fixture(page, "qa-campus", "測試教學101")
+    await expect(result).to_contain_text("有多個相符地點，請核對位置後選擇。")
+    await expect(result.get_by_role("button", name="選擇候選 1：測試教學大樓", exact=True)).to_be_visible()
+    second = result.get_by_role("button", name="選擇候選 2：測試教學大樓", exact=True)
+    await expect(second).to_be_visible()
+    await expect(page.get_by_role("region", name="地點詳情", exact=True)).to_have_count(0)
+    await expect(page.get_by_role("link", name="從目前位置導航", exact=True)).to_have_count(0)
+    await open_explorer(page)
+    await expect(selector_for(page)).to_have_value("")
+    await expect(dialog_for(page).get_by_role("link", name="開啟步行導航", exact=True)).to_have_count(0)
+    await expect(dialog_for(page).get_by_role("button", name="在平面地圖查看", exact=True)).to_have_count(0)
+    await page.keyboard.press("Escape")
+    await expect(dialog_for(page)).to_have_count(0)
+    await expect(page.get_by_role("region", name="地點詳情", exact=True)).to_have_count(0)
+    await second.click()
+    details = page.get_by_role("region", name="地點詳情", exact=True)
+    await expect(details.get_by_role("heading", name="測試教學大樓", exact=True)).to_be_visible()
+    await expect(details).to_contain_text("測試候選：西側")
+    href = await assert_walking_link(details.get_by_role("link", name="從目前位置導航", exact=True),
+                                     {"lat": 24.225, "lng": 120.582})
+    return {"query": "測試教學101", "candidateCount": 2, "noAutomaticSelection": True,
+            "explicitCandidate": 2, "navigationHref": href, "data": "clearly labelled synthetic candidates"}
+
+
+async def classroom_unknown(page, _requests, _resources):
+    result = await open_map_fixture(page, "pu", "PH303")
+    await expect(result).to_contain_text("目前地點資料無法確認這間教室的位置。")
+    await expect(page.get_by_role("region", name="地點詳情", exact=True)).to_have_count(0)
+    await expect(page.get_by_role("link", name="從目前位置導航", exact=True)).to_have_count(0)
+    await expect(page.get_by_role("button", name="空間導覽", exact=True)).to_have_count(0)
+    official = result.get_by_role("link", name="核對校方地圖", exact=True)
+    href = "https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw"
+    await expect(official).to_have_attribute("href", href)
+    await page.screenshot(path=str(OUT / "map-classroom-unknown.png"), full_page=True)
+    return {"query": "PH303", "noInventedDestination": True, "officialMapHref": href}
 
 
 async def desktop(page, requests, resources):
@@ -217,18 +587,23 @@ async def desktop(page, requests, resources):
     assert not await page.get_by_role("button", name="背景操作測試", include_hidden=True).evaluate(
         "el => { el.focus(); return document.activeElement === el; }"
     ), "The background accepted focus while the modal was open"
+    await ready(page)
+    await expect(selector_for(page)).to_have_value("")
+    await expect(dialog.get_by_role("link", name="開啟步行導航", exact=True)).to_have_count(0)
+    loaded = resources.intersection(urlparse(url).path for url in requests)
+    assert loaded, "Opening the explorer did not request its real lazy scene chunk"
+    graphics = await assert_webgl(page)
+    layout = await assert_layout(page)
+    await page.screenshot(path=str(OUT / "desktop-overview.png"))
+    await selector_for(page).select_option(LIBRARY["id"])
+    await assert_layout(page)
     last = dialog.get_by_role("link", name="查看地點資料來源 ↗", exact=True)
     await last.focus()
     await expect(last).to_be_focused()
     await assert_native_tab_boundary(page, "Tab", close)
     await assert_native_tab_boundary(page, "Shift+Tab", last)
 
-    await ready(page)
-    loaded = resources.intersection(urlparse(url).path for url in requests)
-    assert loaded, "Opening the explorer did not request its real lazy scene chunk"
-    graphics = await assert_webgl(page)
-    layout = await assert_layout(page)
-    await page.screenshot(path=str(OUT / "desktop-overview.png"))
+    await page.wait_for_timeout(650)
     marker = page.locator("[data-spatial-marker]:visible").first
     marker_id = await marker.get_attribute("data-spatial-marker")
     marker_name = await marker.inner_text()
@@ -298,6 +673,7 @@ async def mobile(page, _requests, _resources):
     await page.screenshot(path=str(OUT / f"mobile-{page.viewport_size['width']}.png"))
     await selector_for(page).select_option(LIBRARY["id"])
     await assert_navigation(page)
+    await assert_layout(page)
     action = dialog_for(page).get_by_role("button", name="在平面地圖查看", exact=True)
     await action.scroll_into_view_if_needed()
     await expect(action).to_be_in_viewport()
@@ -321,6 +697,7 @@ async def dark_large_text(page, _requests, _resources):
     assert len(channels) == 3 and max(channels) < 80, background
     await selector_for(page).select_option(LIBRARY["id"])
     await assert_navigation(page)
+    await assert_layout(page)
     await selector_for(page).scroll_into_view_if_needed()
     await page.screenshot(path=str(OUT / "dark-large-text.png"))
     await dialog_for(page).get_by_role("button", name="在平面地圖查看", exact=True).click()
@@ -412,6 +789,7 @@ async def run_case(browser, base, name, viewport, test, resources):
     context = await browser.new_context(
         viewport=viewport, device_scale_factor=1, color_scheme="light",
         reduced_motion="no-preference", service_workers="block",
+        has_touch=name == "camera-touch", is_mobile=name == "camera-touch",
     )
     await context.add_init_script(PROBE)
     requests, blocked, errors, console = [], [], [], []
@@ -462,6 +840,10 @@ async def run_case(browser, base, name, viewport, test, resources):
             focus = await page.evaluate("window.__campusSpatialProbe?.focusBoundaries ?? []")
             if focus:
                 result["focusBoundaries"] = focus
+            result["rendererCounters"] = await page.evaluate("""() => {
+              const { clears, draws, contexts, rafRequested, rafExecuted, rafPending } = window.__campusSpatialProbe;
+              return { clears, draws, contexts, rafRequested, rafExecuted, rafPending };
+            }""")
         except Exception as evidence_error:
             result["focusEvidenceError"] = str(evidence_error)
         await context.tracing.stop(
@@ -476,19 +858,22 @@ async def main():
     OUT.mkdir(parents=True, exist_ok=True)
     report = {
         "status": "failed",
-        "scope": "Production spatial explorer components with checked-in public POIs",
+        "scope": "Production spatial explorer and MapClient components with public POIs and labelled ambiguous fixtures",
         "limitations": [
             "Chromium with software WebGL; physical iPhone/Android GPU performance is not measured.",
+            "Touch gestures use Chromium's native input emulation; physical touchscreen and Safari behavior are not verified.",
             "Offscreen pause is tested; operating-system background-tab visibility is not verified.",
             "200% root font size is tested, not browser page zoom.",
             "Navigation URLs are checked without visiting Google Maps or any external destination.",
             "The component fixture does not verify the authenticated Next.js map route or live POI freshness.",
+            "MapClient uses local placeholder map tiles and mocked read-only data; this is not a full Today-to-Next.js routing test.",
         ],
         "checks": [],
     }
     server = None
     try:
         assert (OUT / "scene.html").is_file(), "Build the fixture before running browser checks"
+        assert (OUT / "map.html").is_file(), "Build the MapClient fixture before running browser checks"
         resources = lazy_resources()
         server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(QuietHandler, directory=str(OUT)))
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -501,11 +886,16 @@ async def main():
                 report["browserVersion"] = browser.version
                 cases = [
                     ("desktop", {"width": 1440, "height": 1000}, desktop),
+                    ("camera-controls", {"width": 1440, "height": 1000}, camera_controls),
+                    ("camera-touch", {"width": 390, "height": 844}, touch_camera),
                     ("mobile-320", {"width": 320, "height": 568}, mobile),
                     ("mobile-390", {"width": 390, "height": 844}, mobile),
                     ("dark-large-text", {"width": 390, "height": 844}, dark_large_text),
                     ("motion-visibility", {"width": 1440, "height": 1000}, motion_and_visibility),
                     ("context-loss", {"width": 1440, "height": 1000}, context_loss),
+                    ("map-classroom-unique", {"width": 390, "height": 844}, classroom_unique),
+                    ("map-classroom-ambiguous", {"width": 390, "height": 844}, classroom_ambiguous),
+                    ("map-classroom-unknown", {"width": 320, "height": 568}, classroom_unknown),
                 ]
                 for name, viewport, test in cases:
                     report["checks"].append(await run_case(browser, base, name, viewport, test, resources))

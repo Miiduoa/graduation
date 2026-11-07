@@ -12,6 +12,8 @@ on:
       - 'packages/shared/src/providenceCampus*'
       - 'packages/shared/src/campusGeo*'
       - 'packages/shared/src/campusMapRecords*'
+      - 'packages/shared/src/campusClassroomLookup*'
+      - 'packages/shared/src/campusMapLookup*'
       - 'scripts/qa/campus-spatial/**'
       - 'apps/web/tsconfig.json'
       - 'apps/web/package.json'

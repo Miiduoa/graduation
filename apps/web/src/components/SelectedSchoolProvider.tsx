@@ -249,6 +249,9 @@ export function SelectedSchoolProvider({
     if (pathname === '/map' && selectedSchool?.id !== id) {
       next.delete('route');
       next.delete('focus');
+      next.delete('query');
+      next.delete('q');
+      next.delete('room');
     }
     if (id) {
       next.set('schoolId', id);

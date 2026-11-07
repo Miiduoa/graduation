@@ -21,12 +21,21 @@ import {
   type Material,
 } from 'three';
 import type { CampusSpatialModel, CampusSpatialPoint } from './campusSpatialModel';
+import {
+  normalizeSpatialCamera,
+  spatialCameraDirection,
+  SPATIAL_ROTATION_STEP,
+  SPATIAL_ZOOM_FACTOR,
+  type CampusSpatialCamera,
+} from './campusSpatialCamera';
 
 export type CampusSpatialView = {
   selectedId: string | null;
   overhead: boolean;
   motion: boolean;
   dark: boolean;
+  bearing?: number;
+  zoom?: number;
 };
 
 export type CampusSpatialScene = {
@@ -35,11 +44,25 @@ export type CampusSpatialScene = {
   dispose: () => void;
 };
 
-type Options = { onSelect: (id: string) => void; onError: () => void };
+type Options = {
+  onSelect: (id: string) => void;
+  onError: () => void;
+  onCameraChange?: (camera: CampusSpatialCamera) => void;
+};
 type Pose = { position: Vector3; target: Vector3 };
 type Transition = { from: Pose; to: Pose; start: number };
 type Label = { point: CampusSpatialPoint; button: HTMLButtonElement };
 type Rectangle = { left: number; top: number; width: number; height: number };
+type Drag = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  width: number;
+  bearing: number;
+  zoom: number;
+  claimed: boolean;
+  captured: boolean;
+};
 
 const TRANSITION_MS = 420;
 const MAX_BUFFER_PIXELS = 1_200_000;
@@ -102,19 +125,22 @@ export function createCampusSpatialScene(
   let transition: Transition | null = null;
   let width = 0;
   let height = 0;
-  let view: CampusSpatialView = { selectedId: null, overhead: false, motion: false, dark: false };
+  let view: CampusSpatialView & CampusSpatialCamera = {
+    selectedId: null, overhead: false, motion: false, dark: false, ...normalizeSpatialCamera(),
+  };
+  let requestedCamera: CampusSpatialCamera = normalizeSpatialCamera(view);
+  let drag: Drag | null = null;
+  let suppressDragClick = false;
   let caps: InstancedMesh | null = null;
   let ring: Mesh | null = null;
   let groundMaterial: MeshStandardMaterial | null = null;
   let stemMaterial: MeshStandardMaterial | null = null;
   let gridMaterial: LineBasicMaterial | null = null;
   let ringMaterial: MeshStandardMaterial | null = null;
-  let northLabel: HTMLSpanElement | null = null;
   const pinRadius = Math.max(3, Math.min(9, model.radius * 0.018));
   const pinHeight = pinRadius * 3.3;
   const groundWidth = Math.max(180, model.extent.width + pinRadius * 12);
   const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12);
-  const northPosition = new Vector3(-groundWidth / 2 + pinRadius * 3, 1, -groundDepth / 2 + pinRadius * 3);
 
   function ownGeometry<T extends BufferGeometry>(geometry: T): T {
     geometries.push(geometry);
@@ -128,10 +154,103 @@ export function createCampusSpatialScene(
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
   }
+  function cancelDrag() {
+    const current = drag;
+    drag = null;
+    if (current?.captured && container.hasPointerCapture?.(current.pointerId)) {
+      try { container.releasePointerCapture(current.pointerId); } catch {
+        // Capture may already have been released by the browser after cancellation.
+      }
+    }
+  }
+  function emitCamera(next: CampusSpatialCamera) {
+    if (disposed || !active || !options.onCameraChange) return;
+    const normalized = normalizeSpatialCamera(next);
+    if (normalized.bearing === requestedCamera.bearing && normalized.zoom === requestedCamera.zoom) return;
+    requestedCamera = normalized;
+    options.onCameraChange(normalized);
+  }
+  function onKeyDown(event: KeyboardEvent) {
+    if (disposed || !active || !options.onCameraChange || event.target !== container ||
+      container.ownerDocument.activeElement !== container || event.altKey || event.ctrlKey || event.metaKey) return;
+    let next: CampusSpatialCamera;
+    switch (event.key) {
+      case 'ArrowLeft': next = { ...requestedCamera, bearing: requestedCamera.bearing - SPATIAL_ROTATION_STEP }; break;
+      case 'ArrowRight': next = { ...requestedCamera, bearing: requestedCamera.bearing + SPATIAL_ROTATION_STEP }; break;
+      case '+':
+      case '=': next = { ...requestedCamera, zoom: requestedCamera.zoom * SPATIAL_ZOOM_FACTOR }; break;
+      case '-':
+      case '_': next = { ...requestedCamera, zoom: requestedCamera.zoom / SPATIAL_ZOOM_FACTOR }; break;
+      case 'Home': next = { bearing: 0, zoom: 1 }; break;
+      default: return;
+    }
+    event.preventDefault();
+    cancelDrag();
+    emitCamera(next);
+  }
+  function onPointerDown(event: PointerEvent) {
+    suppressDragClick = false;
+    if (disposed || !active || !options.onCameraChange) return;
+    if (event.isPrimary === false || (drag && drag.pointerId !== event.pointerId)) {
+      cancelDrag();
+      return;
+    }
+    if (event.button !== 0 || !width) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('button, a, input, select, textarea, [contenteditable]')) return;
+    drag = {
+      pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, width,
+      bearing: requestedCamera.bearing, zoom: requestedCamera.zoom, claimed: false, captured: false,
+    };
+  }
+  function onPointerMove(event: PointerEvent) {
+    if (disposed || !active || !drag || drag.pointerId !== event.pointerId) return;
+    if (event.type === 'pointermove' && event.pointerType === 'mouse' && event.buttons === 0) {
+      cancelDrag();
+      return;
+    }
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.claimed) {
+      if (Math.abs(dy) >= 8 && Math.abs(dy) >= Math.abs(dx)) { cancelDrag(); return; }
+      if (Math.abs(dx) < 8 || Math.abs(dx) <= Math.abs(dy) * 1.2) return;
+      drag.claimed = true;
+      suppressDragClick = true;
+      finishTransition();
+      try {
+        container.setPointerCapture(event.pointerId);
+        drag.captured = true;
+      } catch {
+        // Without capture, pointerleave cancels the drag instead of tracking outside the scene.
+      }
+    }
+    event.preventDefault();
+    emitCamera({ bearing: drag.bearing + dx / drag.width * 180, zoom: drag.zoom });
+  }
+  function onPointerUp(event: PointerEvent) {
+    if (drag?.pointerId !== event.pointerId) return;
+    // The final position can differ from the most recently delivered pointermove.
+    if (drag.claimed) onPointerMove(event);
+    cancelDrag();
+  }
+  function onPointerCancel(event: PointerEvent) {
+    if (drag?.pointerId === event.pointerId) cancelDrag();
+  }
+  function onPointerLeave() {
+    if (drag && !drag.captured) cancelDrag();
+  }
+  function suppressClick(event: MouseEvent) {
+    if (suppressDragClick && event.detail > 0) {
+      suppressDragClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
   function dispose() {
     if (disposed) return;
     disposed = true;
     cancelFrame();
+    cancelDrag();
     transition = null;
     resizeObserver?.disconnect();
     for (const remove of listeners) remove();
@@ -141,6 +260,11 @@ export function createCampusSpatialScene(
     scene.clear();
     renderer?.dispose();
     renderer?.forceContextLoss();
+    // A rebuild or context loss must not remove the keyboard's current position.
+    // A detached host belongs to an unmounted dialog and must not reclaim focus.
+    if (container.isConnected && root.contains(container.ownerDocument.activeElement)) {
+      container.focus({ preventScroll: true });
+    }
     root.remove();
   }
   function fail() {
@@ -157,9 +281,8 @@ export function createCampusSpatialScene(
     const target = new Vector3(point?.x ?? 0, 0, point?.z ?? 0);
     const aspect = width > 0 && height > 0 ? width / height : 1;
     const focusSpan = Math.max(180, Math.min(450, model.radius * 0.85));
-    const direction = view.overhead
-      ? new Vector3(0, 1, 0.001).normalize()
-      : new Vector3(0.5, 0.94, 1).normalize();
+    const offset = spatialCameraDirection(view.bearing, view.overhead);
+    const direction = new Vector3(offset.x, offset.y, offset.z);
     const right = new Vector3().crossVectors(new Vector3(0, 1, 0), direction).normalize();
     const up = new Vector3().crossVectors(direction, right);
     const halfWidth = (point ? focusSpan : groundWidth) / 2;
@@ -179,7 +302,7 @@ export function createCampusSpatialScene(
         }
       }
     }
-    return { target, position: direction.multiplyScalar(distance).add(target) };
+    return { target, position: direction.multiplyScalar(distance / view.zoom).add(target) };
   }
   function applyPose(pose: Pose) {
     camera.position.copy(pose.position);
@@ -221,7 +344,10 @@ export function createCampusSpatialScene(
     }
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    if (changed) moveCamera(false);
+    if (changed) {
+      cancelDrag();
+      moveCamera(false);
+    }
     requestFrame();
   }
   function updateAppearance() {
@@ -250,7 +376,6 @@ export function createCampusSpatialScene(
       button.style.borderColor = chosen ? palette.accent : palette.border;
       button.style.fontWeight = chosen ? '650' : '500';
     }
-    if (northLabel) northLabel.style.color = palette.text;
   }
   function projectLabels() {
     const selected = view.selectedId ? pointsById.get(view.selectedId) : undefined;
@@ -310,12 +435,6 @@ export function createCampusSpatialScene(
       occupied.push(rectangle);
       button.style.transform = `translate(${left}px, ${top}px)`;
     }
-    if (northLabel) {
-      const screen = northPosition.clone().project(camera);
-      northLabel.hidden = screen.z < -1 || screen.z > 1 ||
-        Math.abs(screen.x) > 0.9 || Math.abs(screen.y) > 0.9;
-      northLabel.style.transform = `translate(${(screen.x + 1) * width / 2}px, ${(1 - screen.y) * height / 2}px)`;
-    }
   }
   function draw(time: number) {
     frame = null;
@@ -341,15 +460,20 @@ export function createCampusSpatialScene(
     if (disposed) return;
     const normalized = {
       ...next,
+      ...normalizeSpatialCamera(next),
       selectedId: next.selectedId && pointsById.has(next.selectedId) ? next.selectedId : null,
     };
-    const cameraChanged = view.selectedId !== normalized.selectedId || view.overhead !== normalized.overhead;
+    const targetChanged = view.selectedId !== normalized.selectedId || view.overhead !== normalized.overhead;
+    const controlsChanged = view.bearing !== normalized.bearing || view.zoom !== normalized.zoom;
+    const cameraChanged = targetChanged || controlsChanged;
     const appearanceChanged = view.dark !== normalized.dark || view.selectedId !== normalized.selectedId;
     const motionChanged = view.motion !== normalized.motion;
+    requestedCamera = normalizeSpatialCamera(normalized);
     if (!cameraChanged && !appearanceChanged && !motionChanged) return;
+    if (targetChanged) cancelDrag();
     view = normalized;
     if (!view.motion) finishTransition();
-    if (cameraChanged) moveCamera(view.motion);
+    if (cameraChanged) moveCamera(targetChanged && view.motion);
     if (appearanceChanged) updateAppearance();
     requestFrame();
   }
@@ -358,6 +482,7 @@ export function createCampusSpatialScene(
     active = next;
     if (!active) {
       cancelFrame();
+      cancelDrag();
       finishTransition();
     } else {
       resize();
@@ -447,14 +572,6 @@ export function createCampusSpatialScene(
     ring.visible = false;
     scene.add(ring);
 
-    northLabel = document.createElement('span');
-    northLabel.textContent = '北 N';
-    northLabel.setAttribute('aria-hidden', 'true');
-    Object.assign(northLabel.style, {
-      position: 'absolute', left: '0', top: '0', font: '600 0.75rem system-ui, sans-serif',
-      whiteSpace: 'nowrap',
-    });
-    labelLayer.append(northLabel);
     container.append(root);
     updateAppearance();
     resize();
@@ -464,6 +581,31 @@ export function createCampusSpatialScene(
     }
     window.addEventListener('resize', resize);
     listeners.push(() => window.removeEventListener('resize', resize));
+    if (options.onCameraChange) {
+      const previousTouchAction = container.style.touchAction;
+      container.style.touchAction = 'pan-y pinch-zoom';
+      container.addEventListener('keydown', onKeyDown);
+      container.addEventListener('pointerdown', onPointerDown);
+      container.addEventListener('pointermove', onPointerMove);
+      container.addEventListener('pointerup', onPointerUp);
+      container.addEventListener('pointercancel', onPointerCancel);
+      container.addEventListener('lostpointercapture', onPointerCancel);
+      container.addEventListener('pointerleave', onPointerLeave);
+      container.addEventListener('click', suppressClick, true);
+      window.addEventListener('blur', cancelDrag);
+      listeners.push(() => {
+        container.style.touchAction = previousTouchAction;
+        container.removeEventListener('keydown', onKeyDown);
+        container.removeEventListener('pointerdown', onPointerDown);
+        container.removeEventListener('pointermove', onPointerMove);
+        container.removeEventListener('pointerup', onPointerUp);
+        container.removeEventListener('pointercancel', onPointerCancel);
+        container.removeEventListener('lostpointercapture', onPointerCancel);
+        container.removeEventListener('pointerleave', onPointerLeave);
+        container.removeEventListener('click', suppressClick, true);
+        window.removeEventListener('blur', cancelDrag);
+      });
+    }
   } catch {
     fail();
   }
