@@ -1,3 +1,4 @@
+import { useDormLaundryReminder } from './src/hooks/useDormLaundryReminder';
 import { useClassReminders } from './src/hooks/useClassReminders';
 import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
@@ -510,6 +511,7 @@ function TokenErrorHandler() {
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   useNextClassWidget();
   useClassReminders();
+  useDormLaundryReminder();
   const auth = useAuth();
   const { school } = useSchool();
   const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);

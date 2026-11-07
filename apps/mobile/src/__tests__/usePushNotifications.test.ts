@@ -284,3 +284,21 @@ test('clears only an exact OS response match even if a newer personal tap has no
   expect(notices.clearLastNotificationResponseAsync).not.toHaveBeenCalled();
   view.unmount();
 });
+
+test('a laundry alarm resumes the current screen and clears only its own tap on restore or resume', async () => {
+  const alarm = (digit: string) => ({ notification: { request: {
+    identifier: 'campus.dorm.laundry.v1.' + digit.repeat(64), content: { data: {} },
+  } } }) as NativeResponse;
+  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValue(alarm('a'));
+  const view = renderHook(() => usePushNotifications({ current: null }, 'alice', 'student', 'pu'));
+  await waitFor(() => expect(notices.clearLastNotificationResponseAsync).toHaveBeenCalledTimes(1));
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(mockRootNavigateNested).not.toHaveBeenCalled();
+  expect(mockApply).not.toHaveBeenCalled();
+
+  jest.mocked(notices.getLastNotificationResponseAsync).mockResolvedValue(personal as NativeResponse);
+  await act(async () => listeners[0]!(alarm('b')));
+  expect(notices.clearLastNotificationResponseAsync).toHaveBeenCalledTimes(1);
+  expect(mockResolve).not.toHaveBeenCalled();
+  view.unmount();
+});
