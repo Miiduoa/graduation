@@ -59,6 +59,7 @@ it('sends submit, withdraw and review through same-origin /api/fn', async () => 
       },
     }),
     cache: 'no-store',
+    signal: expect.any(AbortSignal),
   });
 
   fetchMock.mockResolvedValueOnce({
@@ -96,4 +97,14 @@ it('maps 尚未啟用 to the existing unconfigured error instead of a network fa
       courseIds: ['c1'],
     }),
   ).rejects.toBeInstanceOf(FunctionsUnconfiguredError);
+});
+
+it('does not send a write with the old token after an account switch', async () => {
+  let finish!: (token: string) => void;
+  auth.currentUser = { uid: 'stu', getIdToken: () => new Promise((resolve) => { finish = resolve; }) };
+  const withdrawal = withdrawLeaveRequest('stu', 'leave-2026-good-id');
+  auth.currentUser = { uid: 'other', getIdToken: async () => 'other-token' };
+  finish('first-account-token');
+  await expect(withdrawal).rejects.toMatchObject({ code: 'functions/unauthenticated' });
+  expect(fetchMock).not.toHaveBeenCalled();
 });

@@ -1069,3 +1069,30 @@ it('validates the location before opening the ordering menu', async () => {
   const paths = mocks.request.mock.calls.map(([path]) => String(path));
   expect(paths.findIndex((p) => p.endsWith('/locations'))).toBeLessThan(paths.findIndex((p) => p.endsWith('/menu')));
 });
+
+it('can return one page after an older order page fails and resets pagination on a new filter', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  mocks.request.mockImplementation(async (path, context, input, _signal, query) => {
+    if (!path.endsWith('/orders')) return respond(path, context, input);
+    if (query.cursor === 'third') throw new Error('offline');
+    const second = query.cursor === 'second';
+    return {
+      orders: [{ ...orderSummary(orderFixture()), locationName: second ? '第二頁店家' : '第一頁店家' }],
+      nextCursor: second ? 'third' : 'second',
+    };
+  });
+  render(<FoodWorkspace initialTenant="campus-one" />);
+  await screen.findByText('第一頁店家');
+  fireEvent.click(button('下一頁訂單'));
+  await screen.findByText('第二頁店家');
+  fireEvent.click(button('下一頁訂單'));
+  await screen.findByRole('alert');
+  expect(screen.queryByText('第二頁店家')).toBeNull();
+  fireEvent.click(button('上一頁訂單'));
+  await screen.findByText('第二頁店家');
+  expect(screen.getByText('第 2 頁')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('訂單狀態'), { target: { value: 'ready' } });
+  await screen.findByText('第一頁店家');
+  expect(screen.queryByRole('button', { name: '上一頁訂單' })).toBeNull();
+  expect(mocks.request.mock.calls.at(-1)?.[4]).toMatchObject({ state: 'ready' });
+});

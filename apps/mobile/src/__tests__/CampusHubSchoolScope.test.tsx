@@ -19,7 +19,6 @@ jest.mock('../services/schoolDirectory', () => ({
 jest.mock('../state/theme', () => ({ useTheme: () => require('../ui/theme').theme }));
 jest.mock('../components/HeaderAvatarButton', () => ({ HeaderAvatarButton: () => null }));
 jest.mock('../components/OpenOrderCard', () => ({ OpenOrderCard: () => null }));
-jest.mock('../app/rootNavigation', () => ({ rootNavigateNested: jest.fn() }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: jest.fn() }));
 jest.mock('../ui/AppActionIcon', () => ({ AppActionIcon: () => null }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -177,4 +176,28 @@ test('when the ordinary service list matches, it does not duplicate the same des
   fireEvent.changeText(view.getByPlaceholderText('搜尋地點或服務'), '宿舍');
   expect(view.getAllByText('宿舍')).toHaveLength(1);
   expect(view.queryByLabelText('依需求前往宿舍')).toBeNull();
+});
+
+test.each([
+  ['找人', '找人', 'FriendSearch'],
+  ['共同空堂', '找人', 'FriendSearch'],
+  ['我的訂單', '我的訂單', 'StudentOrders'],
+  ['取餐　訂單', '我的訂單', 'StudentOrders'],
+])('搜尋「%s」可直接開啟目錄上的服務', (query, title, route) => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  expect(view.getByText(title)).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), query);
+  fireEvent.press(view.getByText(title));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, route, undefined, expect.any(Object));
+});
+
+test('站內點餐的訂單和 App 校園餐廳的訂單有各自的入口', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.changeText(view.getByLabelText('搜尋校園服務'), '訂單紀錄');
+  fireEvent.press(view.getByText('站內點餐'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'NuniWorkspace', { tab: 'food' }, expect.any(Object));
+  fireEvent.press(view.getByText('我的訂單'));
+  expect(safeNavigate).toHaveBeenLastCalledWith(navigation, 'StudentOrders', undefined, expect.any(Object));
 });
