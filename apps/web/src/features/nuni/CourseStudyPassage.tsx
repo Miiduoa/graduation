@@ -54,7 +54,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
 
   useEffect(() => {
     setAvailability(getStudyTutorAvailability());
-    passageHeading.current?.focus();
+    // Preserve focus on the mode/page select when a keyed passage remounts.
+    // Explicit passage navigation and practice return focus the source in the parent.
+    if (document.activeElement === document.body) passageHeading.current?.focus();
     return () => { current.current?.abort(); current.current = null; };
   }, []);
 

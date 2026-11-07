@@ -227,7 +227,8 @@ it('previews the saved location and lets the user cancel without replacing curre
   expect(region.textContent).toContain('第 5 頁');
   expect(region.textContent).toContain('第 2 段');
   expect(region.textContent).toContain('考前複習');
-  expect(document.activeElement).toBe(within(region).getByRole('heading'));
+  // File.text() and the preview focus effect settle in separate microtasks.
+  await waitFor(() => expect(document.activeElement).toBe(within(region).getByRole('heading')));
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.read).not.toHaveBeenCalled();
   fireEvent.click(within(region).getByRole('button', { name: '取消還原' }));
