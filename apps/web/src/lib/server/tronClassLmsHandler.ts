@@ -521,12 +521,14 @@ export function createTronClassLmsHandler({
         }
       };
 
+      const cacheReadTime = now();
+      const cachedSnapshot = publicSnapshot(cacheData?.snapshot, uid, cacheReadTime);
       if (cached.exists && sessionVersion && cacheData?.sessionVersion === sessionVersion &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
-        cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
-        const pruned = readCachedExtras(cacheData.extras, now());
+        cacheStillFresh(cacheData.expiresAt, cacheReadTime) && cachedSnapshot) {
+        const pruned = readCachedExtras(cacheData.extras, cacheReadTime);
         extras = refresh ? {} : pruned.extras;
-        cachedHomework = refresh ? null : homeworkOnlySnapshot(publicSnapshot(cacheData.snapshot, uid, now())!);
+        cachedHomework = refresh ? null : homeworkOnlySnapshot(cachedSnapshot);
         shouldPruneExtras = !refresh && pruned.pruned;
       }
 

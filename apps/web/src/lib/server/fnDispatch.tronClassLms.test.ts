@@ -350,6 +350,44 @@ it.each([
     .toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
 });
 
+it('uses one validated snapshot when its nested TTL expires during cache handling', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const expiresAt = Date.now() + 1_000;
+  const nestedExpiresAt = new Date(expiresAt).toISOString();
+  const snapshot = store.docs.get(CACHE)!.snapshot as { cache: { expiresAt: string } };
+  snapshot.cache.expiresAt = nestedExpiresAt;
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(expiresAt - 1);
+  const parseDate = Date.parse;
+  const parse = vi.spyOn(Date, 'parse').mockImplementation((value) => {
+    const timestamp = parseDate(value);
+    // Cross the deadline after validating the nested TTL, before using the snapshot.
+    if (value === nestedExpiresAt) clock.mockReturnValue(expiresAt);
+    return timestamp;
+  });
+  try {
+    const cachedResponse = await request();
+    expect(cachedResponse.status).toBe(200);
+    const cachedBody = await cachedResponse.json();
+    expect(cachedBody.result.cache.hit).toBe(true);
+    expect(cachedBody.result.homework).toHaveLength(2);
+    expect(Date.now()).toBe(expiresAt);
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+
+    const refreshedResponse = await request();
+    expect(refreshedResponse.status).toBe(200);
+    expect((await refreshedResponse.json()).result.cache.hit).toBe(false);
+    expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  } finally {
+    parse.mockRestore();
+    clock.mockRestore();
+  }
+});
+
 it.each([
   { cookies: { session: 'new-cookie' }, userId: 10 },
   { cookies: { session: 'lms-secret' }, userId: 11 },
