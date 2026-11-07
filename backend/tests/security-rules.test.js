@@ -192,8 +192,52 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('orphaned, disabled or revoked cafeteria operators cannot read orders or edit storefronts', async () => {
+    const school = 'schools/tw-demo-uni';
+    const cafe = `${school}/cafeterias/cafe-a`;
+    const operator = `${cafe}/operators/merchant-1`;
+    const order = `${school}/orders/one`;
+    await seedFirestore(async (db) => {
+      await db.doc(cafe).set({ name: 'Cafeteria', openingHours: '11:00-14:00', orderingEnabled: true, pilotStatus: 'live' });
+      await db.doc(operator).set({ status: 'active', role: 'manager' });
+      await db.doc(order).set({ userId: 'student', schoolId: 'tw-demo-uni', cafeteriaId: 'cafe-a', status: 'pending' });
+    });
+    const merchant = testEnv.authenticatedContext('merchant-1').firestore();
+    const orderRef = merchant.doc(order);
+    const cafeRef = merchant.doc(cafe);
+    const menuRef = merchant.doc(`${school}/menus/menu`);
+    const menu = { schoolId: 'tw-demo-uni', cafeteriaId: 'cafe-a', name: 'Meal' };
+    const denyMerchant = async () => {
+      await assertFails(orderRef.get());
+      await assertFails(cafeRef.update({ openingHours: '12:00-20:00' }));
+      await assertFails(menuRef.set(menu));
+    };
+
+    // Previously, a leftover active operator record alone authorized old Firebase ID tokens.
+    await denyMerchant();
+    await seedFirestore(async (db) => db.doc('users/merchant-1').set({ status: 'active' }));
+    await assertSucceeds(orderRef.get());
+    await assertSucceeds(cafeRef.update({ openingHours: '11:00-19:00' }));
+    await assertSucceeds(menuRef.set(menu));
+
+    for (const status of ['disabled', 'suspended', 'inactive', 'deleted']) {
+      await seedFirestore(async (db) => db.doc('users/merchant-1').set({ status }));
+      await denyMerchant();
+    }
+    await seedFirestore(async (db) => {
+      await db.doc('users/merchant-1').set({ status: 'active' });
+      await db.doc(operator).set({ status: 'revoked', role: 'manager' });
+    });
+    await denyMerchant();
+    await seedFirestore(async (db) => db.doc(operator).set({ status: 'active', role: 'manager' }));
+    await assertSucceeds(orderRef.get());
+    await seedFirestore(async (db) => db.doc('users/merchant-1').delete());
+    await denyMerchant();
+  });
+
   test("allow matching cafeteria operator to read orders but require callable writes", async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/merchant-1').set({ status: 'active' });
       await db
         .collection('schools')
         .doc('tw-demo-uni')
@@ -236,6 +280,7 @@ describe('firestore security rules', () => {
 
   test('allow cafeteria operator to write hours and menus but not ordering flags', async () => {
     await seedFirestore(async (db) => {
+      await db.doc('users/merchant-1').set({ status: 'active' });
       await db
         .collection('schools')
         .doc('tw-demo-uni')
@@ -710,6 +755,9 @@ describe('firestore security rules', () => {
   test('店家即時監聽：只放行查自己這家店的單，別家、不帶店別、停用的店員、學生都查不到', async () => {
     const school = 'schools/tw-demo-uni';
     await seedFirestore(async (db) => {
+      for (const uid of ['staff-a', 'staff-b', 'staff-off']) {
+        await db.doc(`users/${uid}`).set({ status: 'active' });
+      }
       await db.doc(`${school}/cafeterias/cafe-a`).set({ name: 'A' });
       await db.doc(`${school}/cafeterias/cafe-b`).set({ name: 'B' });
       await db.doc(`${school}/cafeterias/cafe-a/operators/staff-a`).set({ status: 'active', role: 'staff' });

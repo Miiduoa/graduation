@@ -187,3 +187,12 @@ glob、minimatch 同時出現在工作區 pnpm 與 Functions 獨立 npm 圖，�
 GitHub 精確 head `c86ad270` 的 [Rules CI](https://github.com/Miiduoa/graduation/actions/runs/42299579448) 實際執行 257 個 Firestore／Storage 模擬器案例，256 通過、1 失敗。新增兩個「孤兒 conversation member」測試均通過；唯一失敗是既有 `closed, disabled and suspended accounts cannot reuse issued tokens for private files or uploads` 在尾端斷言 Bob 仍可讀私人會話附件。該 fixture 只建立 Alice 的 canonical user 文件，Bob 有 conversation memberIds 卻無 `users/bob` 文件。新規則應拒絕缺少 canonical user 的 Bob，因此測試舊資料配置不再符合「合法 Bob」前提。
 
 本次只在該回歸的 seed 新增 `users/bob = {status:'active'}`，保留 Alice 停權後所有既有路徑的拒絕斷言，以及合法 Bob 的正常讀取斷言。沒有放寬 Storage 規則，也沒有移除任何新增失效案例。完整規則與其他工作在修補提交後重新執行，**尚待精確 head 結果，不視為已驗證成功**。
+
+
+### 2026-11-07 08:45+08：撤銷店家帳號後的殘留 operator 權限（待精確 head CI 驗證）
+
+Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{uid}` 不存在時，單靠餐廳 `operators/{uid}` 殘留記錄通過權限判定；而 operator 狀態只排除 `inactive`，使 `revoked`／`suspended` 亦可被當作有效。已針對餐廳營運員權限單點修補：要求 canonical user 文件存在且帳號不在停權或刪除狀態，同時 operator.status 必須**明確等於** `active`。涉及使用者與 operator 兩份文件，不依賴跨校角色推斷或第三份查詢。涵蓋店家訂單讀取、營業時間更新、菜單建立三個受影響入口。
+
+新增 Firebase Rules emulator 回歸：殘留 operator 但無 canonical profile、active 恢復、disabled／suspended／inactive／deleted、operator revoked、再次刪除 canonical profile 的存取重驗；原有合法店家與即時訂單監聽測試補齊 active canonical profile fixture，拒絕其他店家與停用店員的測試不移除。這一輪尚未取得**新精確 head** 的整體 CI／CodeQL／Supabase／Maestro 成功結果，不應用前次提交代替。
+
+**相容性注意：** 歷史上如果存在只有 operator 記錄、沒有 canonical profile 的合法店家帳號，更新規則後其訂單與菜單操作會拒絕；正式發佈前先盤點並透過受控 onboarding 補齊真正的 active profile，不應為求相容放寬「沒有 profile 仍授權」的條件。未改動正式環境或主線，尚待獨立 GCS、歷史簽發網址及正式審查核可。
