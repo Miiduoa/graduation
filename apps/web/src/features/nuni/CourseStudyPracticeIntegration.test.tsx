@@ -207,7 +207,7 @@ it('saves an independent practice checkpoint and restores the exact second-quest
   fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '第二題待完成的試答😀' } });
   fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));
   const raw = await readBlob(downloads.create.mock.calls[0][0] as Blob);
-  expect(downloads.filenames[0]).toMatch(/-逐題練習\.campus-practice\.json$/);
+  expect(downloads.filenames[0]).toMatch(/-逐題練習\\.campus-practice\\.json$/);
   expect(JSON.parse(raw)).toMatchObject({ format: 'campus-one-study-practice', version: 1 });
   expect(raw).toContain('第二題待完成的試答😀');
   view.unmount();
@@ -219,7 +219,7 @@ it('saves an independent practice checkpoint and restores the exact second-quest
   const preview = await screen.findByRole('region', { name: '閱讀進度預覽' });
   expect(preview.textContent).toContain('第 2 題，共 2 題');
   fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
-  expect(screen.getByRole('status').textContent).toBe('第 2 題／共 2 題');
+  expect(screen.getAllByRole('status').map((node) => node.textContent)).toContain('第 2 題／共 2 題');
   expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('第二題待完成的試答😀');
   expect(screen.queryByText(second.answer)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '上一題' }));

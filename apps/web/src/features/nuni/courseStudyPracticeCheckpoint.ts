@@ -55,6 +55,7 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
   const data = exact(value, ['mode', 'index', 'finished', 'cardIds', 'responses']);
   if (typeof data.mode !== 'string' || !MODES.includes(data.mode as StudyMode)) invalid();
   const mode = data.mode as StudyMode;
+  if (mode !== progress.position.mode) invalid('練習模式與儲存的閱讀位置不一致，無法還原。');
   const available = buildStudyPracticeDeck(
     progress.source.sections.map(splitStudySection), progress.passages, mode,
   ).cards;

@@ -94,6 +94,7 @@ describe('versioned independent review checkpoint', () => {
     const raw = serializeStudyPracticeCheckpoint(checkpoint());
     expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => { item.version = 999; }), scope)).toThrow();
     expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => { item.unexpected = true; }), scope)).toThrow();
+    expect(() => parseStudyPracticeCheckpoint(tamper(raw, (item) => { item.practice.mode = 'exam'; }), scope)).toThrow(/練習模式/);
     expect(() => parseStudyPracticeCheckpoint('{bad', scope)).toThrow();
     expect(() => parseStudyPracticeCheckpoint('x'.repeat(8 * 1024 * 1024 + 1), scope)).toThrow(/8 MiB/);
   });
