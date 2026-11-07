@@ -24,6 +24,8 @@
 
 ## 本機單元與整合回歸
 
+瀏覽器 fixture 以 esbuild 分割模組，Leaflet 使用同一個已安裝版本提供的官方 ESM 入口。這讓動態匯入保留 `map`、`control`、`tileLayer` 等真正的命名 API；沒有以假的地圖函式替代。專案的 Next.js 正式載入方式不變。
+
 專案使用 Node 22.23.4、pnpm 10.28.2。先依根目錄說明安裝相依套件。
 
 ```sh

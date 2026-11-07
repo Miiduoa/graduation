@@ -1,10 +1,12 @@
 import { build } from 'esbuild';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(directory, '../../..');
+const webRequire = createRequire(path.join(root, 'apps/web/package.json'));
 const output = path.join(root, 'artifacts/campus-spatial');
 await mkdir(output, { recursive: true });
 const result = await build({
@@ -23,6 +25,9 @@ const result = await build({
   loader: { '.png': 'file' },
   define: { 'process.env.NODE_ENV': '"production"', 'process.env': '{}' },
   plugins: [{ name: 'public-map-only', setup(builder) {
+    // esbuild gives the package's CommonJS main a default-only dynamic namespace.
+    // Use the same installed Leaflet release's official ESM entry for real named APIs.
+    builder.onResolve({ filter: /^leaflet$/ }, () => ({ path: webRequire.resolve('leaflet/dist/leaflet-src.esm.js') }));
     builder.onResolve({ filter: /^@\/lib\/firebase$/ }, () => ({ path: 'no-backend', namespace: 'fixture' }));
     builder.onResolve({ filter: /^@\/components\/AuthGuard$/ }, () => ({ path: 'guest-auth', namespace: 'fixture' }));
     builder.onResolve({ filter: /^next\/link$/ }, () => ({ path: 'plain-link', namespace: 'fixture' }));
