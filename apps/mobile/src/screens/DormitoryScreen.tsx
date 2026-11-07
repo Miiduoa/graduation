@@ -19,6 +19,7 @@ import {
   DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
+  DORM_REPAIR_COPY,
   DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
@@ -449,13 +450,13 @@ function DormitoryBody({
 
   function renderRepairHandoff(category: DormRepairCategory, location: string, followUp = false) {
     const route = resolveDormRepairRoute(schoolId, category, location);
-    if (!route) return <Body muted>請向目前校園的宿舍服務台確認報修方式。</Body>;
+    if (!route) return <Body muted>{DORM_REPAIR_COPY.missingRoute}</Body>;
     const trackingUrl = followUp ? route.trackingUrl : undefined;
     return (
-      <View style={{ gap: 8, marginTop: 12 }}>
+      <View style={{ gap: 8, marginTop: 12 }} accessibilityLabel={DORM_REPAIR_COPY.officialChannelTitle}>
         <Body muted>{route.detail}</Body>
         {route.url !== trackingUrl && <AIButton label={route.label} onPress={() => void openPublicLink(route.url)} />}
-        {trackingUrl && <AIButton variant="ghost" label={route.trackingLabel ?? '查詢校方報修進度'}
+        {trackingUrl && <AIButton variant="ghost" label={route.trackingLabel ?? DORM_REPAIR_COPY.officialTrackingFallback}
           onPress={() => void openPublicLink(trackingUrl)} />}
       </View>
     );
@@ -485,7 +486,7 @@ function DormitoryBody({
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 16 }}>
             {([
               { id: 'parcels' as const, count: String(pendingParcels.length), label: '待領包裹' },
-              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: '待追蹤問題' },
+              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: DORM_REPAIR_COPY.openIssues },
               { id: 'dates' as const, count: String(milestones.filter((entry) => !entry.completed).length), label: '待辦日期' },
               { id: 'checklist' as const, count: progress.completed + '/' + progress.total, label: '準備進度' },
             ]).map((item) => (
@@ -620,7 +621,7 @@ function DormitoryBody({
         {!loading && !failure && view === 'repairs' && (
           <>
             <AICard title="設備問題">
-              <Body muted>請透過校方管道報修。這裡可整理問題、記下案號，並自行標記處理進度。</Body>
+              <Body muted>{DORM_REPAIR_COPY.intro}</Body>
               {!editor && !data.repairs.length && renderRepairHandoff('other', data.building)}
               <View style={{ marginTop: 14 }}><AIButton label="＋ 記錄問題" onPress={() => editRepair()} /></View>
               {!editor && <View style={{ marginTop: 16, gap: 10 }}>
@@ -700,11 +701,11 @@ function DormitoryBody({
                   </View>
                   <Field label="位置" value={repair.location} maxLength={100} placeholder="例如：浴室洗手台" onChangeText={(text) => setRepair({ ...repair, location: text })} />
                   <Field label="詳細狀況" value={repair.description} maxLength={1200} multiline placeholder="詳細描述問題，方便向服務台通報" onChangeText={(text) => setRepair({ ...repair, description: text })} />
-                  <Field label="校方案號（選填）" value={repair.reference} maxLength={DORM_REPAIR_REFERENCE_LIMIT}
-                    placeholder="收到校方回覆後可補填" onChangeText={(reference) => setRepair({ ...repair, reference })} />
+                  <Field label={DORM_REPAIR_COPY.referenceLabel} value={repair.reference} maxLength={DORM_REPAIR_REFERENCE_LIMIT}
+                    placeholder={DORM_REPAIR_COPY.referencePlaceholder} onChangeText={(reference) => setRepair({ ...repair, reference })} />
                   {renderRepairHandoff(repair.category, repair.location, !!repair.reference.trim())}
                   <View style={{ ...flexRow, marginTop: 16 }}>
-                    <AIButton label="儲存紀錄" disabled={conflict} onPress={() => void saveRepair()} />
+                    <AIButton label={DORM_REPAIR_COPY.saveMemo} disabled={conflict} onPress={() => void saveRepair()} />
                     <AIButton label="取消" variant="ghost" onPress={() => { setEditor(false); setEditingId(null); setPendingId(null); }} />
                   </View>
                 </View>
@@ -724,7 +725,7 @@ function DormitoryBody({
                 <Body muted>{DORM_REPAIR_STATUSES[item.status]}</Body>
                 {!!item.location && <Body>位置：{item.location}</Body>}
                 {!!item.description && <Body>{item.description}</Body>}
-                {!!item.reference && <Text selectable style={{ color: aiTokens.text, lineHeight: 23 }}>校方案號：{item.reference}</Text>}
+                {!!item.reference && <Text selectable style={{ color: aiTokens.text, lineHeight: 23 }}>{DORM_REPAIR_COPY.referenceDisplay}：{item.reference}</Text>}
                 {(!editor || item.id !== editingId) && renderRepairHandoff(item.category, item.location, item.status !== 'draft' || !!item.reference)}
                 <View style={{ ...flexRow, marginTop: 12 }}>
                   <AIButton variant="ghost" label="編輯" onPress={() => editRepair(item)} />

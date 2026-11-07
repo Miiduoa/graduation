@@ -84,6 +84,8 @@ it('does not rewrite non-food services when ordering is off', () => {
 it('lists the local dormitory workspace without implying an official application', () => {
   const dorm = CAMPUS_SERVICES.find((service) => service.href === '/dormitory');
   expect(dorm?.access).toBe('device');
+  expect(dorm?.text).toContain('宿舍備忘');
+  expect(dorm?.text).not.toMatch(/單號|已送出給學校|查詢進度/);
   expect(searchCampusServices('報修').some((service) => service.href === '/dormitory')).toBe(true);
 });
 
