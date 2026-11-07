@@ -8,8 +8,8 @@ const inputSchema = z.object({
 });
 
 /**
- * RAG 入口；校內無命中時 lazy-require answerWithServerWebSearch 作公開網路補充。
- * @returns {{ campusChunks: Array, webFallback: null | { content: string, sources: Array, confidence?: string } }}
+ * RAG 入口，維持校內檢索範圍。公開網路檢索由伺服器依使用者問題處理。
+ * @returns {{ campusChunks: Array, webFallback: null }}
  */
 async function execute(ctx, rawInput) {
   const input = inputSchema.parse(rawInput ?? {});
@@ -22,30 +22,13 @@ async function execute(ctx, rawInput) {
     queryText: query,
   });
 
-  if (campusChunks.length > 0) {
-    return { campusChunks, webFallback: null };
-  }
-
-  const { answerWithServerWebSearch } = require('../../assistantAgent');
-  const webAnswer = await answerWithServerWebSearch(query, { schoolId: ctx.schoolId }).catch(() => null);
-  if (!webAnswer || !webAnswer.content) {
-    return { campusChunks: [], webFallback: null };
-  }
-
-  return {
-    campusChunks: [],
-    webFallback: {
-      content: webAnswer.content,
-      sources: webAnswer.sources || [],
-      confidence: webAnswer.confidence,
-    },
-  };
+  return { campusChunks, webFallback: null };
 }
 
 module.exports = {
   name: 'searchCampusDocs',
   description:
-    '搜尋校園知識庫（公告、規章、FAQ）。若校內無結果，會自動查詢公開網路資料。遇到校規、請假規定、選課限制等問題優先呼叫此工具。',
+    '搜尋校園知識庫（公告、規章、FAQ）。遇到校規、請假規定、選課限制等問題優先呼叫此工具。查無資料時回傳空結果。',
   inputSchema,
   execute,
 };
