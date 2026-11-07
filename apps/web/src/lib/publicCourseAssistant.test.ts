@@ -139,6 +139,7 @@ describe('public course requests', () => {
     ['查清大３學分的資料庫課程', 'nthu', '資料庫', { credits: 3 }],
     ['查清大3學分非線性課程', 'nthu', '非線性', { credits: 3 }],
     ['查清大星期三無機化學課程', 'nthu', '無機化學', { weekday: 3 }],
+    ['查清大星期三「不排課程」課程', 'nthu', '不排課程', { weekday: 3 }],
     ['查星期五的資料庫課程', 'ncnu', '資料庫', { weekday: 5 }],
   ])('keeps the complete supported conditions for %s', (question, schoolId, query, filters) => {
     expect(resolve(question, 'ncnu')).toEqual({ kind: 'search', schoolId, query, filters });
@@ -151,6 +152,12 @@ describe('public course requests', () => {
     '查清大只有星期三上課的課程',
     '查清大非星期三的課程',
     '查清大星期三不上課的課程',
+    '查清大星期三不排課的資料庫課程',
+    '查清大星期三沒排課的資料庫課程',
+    '查清大星期三不能上課的資料庫課程',
+    '查清大星期三不想上課的資料庫課程',
+    '查清大星期三不安排課程的資料庫課程',
+    '查清大星期三無法上課的資料庫課程',
     '查清大星期三沒課的課程',
     '查清大星期三沒課',
     '查清大星期三不上課',

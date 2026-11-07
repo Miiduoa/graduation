@@ -17,7 +17,8 @@ export type {
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const TIMEOUT_MS = 25_000;
 
-function exceedsByteLimit(text: string): boolean {
+/** Shared UTF-8 guard for the assistant and native catalog screens. */
+export function exceedsPublicCourseResponseByteLimit(text: string): boolean {
   if (text.length > MAX_RESPONSE_BYTES) return true;
   let bytes = 0;
   // Native callers do not need a TextEncoder or Buffer polyfill.
@@ -133,7 +134,7 @@ export async function answerPublicCourseQuestion(input: {
         throw new Error('Public course source unavailable');
       const body = await response.text();
       if (!current() || controller.signal.aborted) throw cancelled();
-      if (exceedsByteLimit(body)) throw new Error('Public course response too large');
+      if (exceedsPublicCourseResponseByteLimit(body)) throw new Error('Public course response too large');
       return publicCourseAssistantRead(intent, JSON.parse(body) as unknown);
     })();
     const read = await Promise.race([request, cancellation, timeout]);

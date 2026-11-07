@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Keyboard, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
-import { isPublicCourseResponseUrl } from '@campus/shared/src/publicCourseAssistantClient';
+import { exceedsPublicCourseResponseByteLimit, isPublicCourseResponseUrl } from '@campus/shared/src/publicCourseAssistantClient';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
 import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
@@ -142,7 +142,7 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
           Number(response.headers.get('content-length')) > maxBytes) throw new Error();
       const text = await response.text();
       if (!current()) return;
-      if (text.length > maxBytes) throw new Error();
+      if (exceedsPublicCourseResponseByteLimit(text)) throw new Error();
       const data: unknown = JSON.parse(text);
       if (!isPublicCourseCatalog(data, schoolId, filters)) throw new Error();
       if (current()) setResult({ status: 'ready', query: term, filters, data });

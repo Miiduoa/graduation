@@ -59,6 +59,10 @@ export function extractPublicCourseAssistantFilters(
     /以外|之外|除了|排除|避開|不要|不是|不在|不含|只有|僅|限定|(?:^|[^有])沒有|(?:沒|無)(?:課|上課|開課)|不(?:上課|開課)|非\s*(?:星期|禮拜|週|周|(?:\d+(?:\.\d+)?|[零〇一二兩三四五六七八九十百點]+)\s*(?:個)?學分)/.test(
       rest,
     );
+  // A negative weekday requirement must never become a positive "that day has class" filter.
+  // Keep quoted course titles literal; they were replaced by the marker above.
+  const hasNegativeTimetableConstraint =
+    /不(?:想要|想|能|會|用|方便|可以|可|要|應該|應|必須)?\s*(?:安排|排定|排|上|修|選|開)(?:任何)?(?:課程|課)|(?:沒|沒有|無)\s*(?:排|修|選|上|開)(?:課程|課)|(?:無法|不能)\s*(?:排|上|修|選)(?:課程|課)/.test(rest);
   const hasCalendarDate =
     /之前|之後|以前|以後|[上下本這](?:個)?(?:星期|禮拜|週|周)|今天|明天|後天|\d{1,2}\s*月\s*\d{1,2}(?:日|號)?/.test(
       rest,
@@ -68,6 +72,7 @@ export function extractPublicCourseAssistantFilters(
     credits.length > 1 ||
     hasComparison ||
     hasExclusion ||
+    hasNegativeTimetableConstraint ||
     hasCalendarDate ||
     /[0-9零〇一二兩三四五六七八九十]\s*(?:到|至|或|和|與|及|、|-)\s*[0-9零〇一二兩三四五六七八九十]/.test(
       rest,

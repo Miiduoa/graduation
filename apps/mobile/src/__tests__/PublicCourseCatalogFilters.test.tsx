@@ -182,6 +182,17 @@ test.each(['v1', 'missing-filters', 'different-filters', 'wrong-course', 'differ
   if (kind === 'different-url') expect(body).not.toHaveBeenCalled();
 });
 
+test('a CJK-heavy response exceeding 512 KiB in UTF-8 fails closed even when JS text.length is smaller', async () => {
+  const oversized = JSON.stringify({ ...catalog(), upstreamExtra: '課'.repeat(175000) });
+  expect(oversized.length).toBeLessThan(512 * 1024);
+  fetchSource.mockResolvedValue({ ok: true, headers: { get: () => null }, text: async () => oversized });
+  const view = render(<PublicCourseCatalogScreen schoolId="nthu" initialQuery="AES" />);
+  expect(await view.findByText('暫時無法讀取清大課程，請重試或查看官方課程目錄。')).toBeTruthy();
+  expect(view.queryByText('分析化學專題')).toBeNull();
+  expect(view.queryByText('核對並加入課表')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
 test('the real native Request keeps filters and never adds an unsupported cache-busting query', async () => {
   const { Request: NativeRequest } = jest.requireActual('whatwg-fetch') as {
     Request: new (url: string, init?: RequestInit) => Request;
