@@ -11,6 +11,7 @@ export type PreAuthStackParamList = {
   CourseCatalog: undefined;
   Health: undefined;
   Dormitory: undefined;
+  PlatformLostFound: { id?: string; schoolId?: string } | undefined;
   Career: undefined;
   SSOLogin: undefined;
   NuniTimetableAssistant: undefined;

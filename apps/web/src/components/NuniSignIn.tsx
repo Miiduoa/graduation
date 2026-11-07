@@ -15,6 +15,8 @@ function signInPurpose(path: string): string {
   if (path === '/classroom/grades' || path === '/grades')
     return '登入後查看各門課目前的成績、等待公布與老師回饋。';
   if (path === '/social') return '登入後回到公開交流，閱讀貼文、參與討論與分享近況。';
+  if (path === '/lost-found' || path.startsWith('/lost-found/platform'))
+    return '登入後查看、刊登與管理失物招領，不需要先綁定學校帳號。';
   if (['/food', '/shops', '/shops/'].includes(path))
     return '登入後回到餐飲服務，查看自己的訂單與取餐進度。';
   if (path === '/map') return '登入後回到地圖，在此裝置收藏常用地點。';

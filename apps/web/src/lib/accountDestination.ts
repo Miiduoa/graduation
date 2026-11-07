@@ -1,6 +1,8 @@
 import { sanitizeInternalPath } from './navigation';
 import { isPublicCampusPath } from './publicCampusServices';
 
+const PLATFORM_LOST_FOUND_ITEM = /^\/lost-found\/platform\/plf_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /** Return to an existing platform or personal tool without granting school identity. */
 export function platformDestination(value?: string | null): string {
   const safe = sanitizeInternalPath(value && value.length <= 1200 ? value : null, '/classroom');
@@ -8,6 +10,9 @@ export function platformDestination(value?: string | null): string {
   const path = destination.pathname;
   if (
     isPublicCampusPath(path) ||
+    (path === '/lost-found' && !destination.searchParams.getAll('source').includes('school')) ||
+    path === '/lost-found/platform' || path === '/lost-found/platform/post' ||
+    PLATFORM_LOST_FOUND_ITEM.test(path) ||
     // GradesPage defaults to platform course feedback; only the semester tab reads school records.
     (path === '/grades' && destination.searchParams.get('tab') !== 'semester') ||
     [

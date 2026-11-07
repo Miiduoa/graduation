@@ -104,6 +104,19 @@ export default function LoginLandingScreen() {
           </Pressable>
         </View>
         <SchoolBrowsingControl />
+        <View style={s.panel}>
+          <Text accessibilityRole="header" style={s.title}>失物招領</Text>
+          <Text style={s.body}>用 Google 帳號刊登遺失或拾獲資訊，查看聯絡方式，並管理自己的刊登。</Text>
+          <Pressable
+            testID="platform-lost-found-start"
+            accessibilityRole="button"
+            accessibilityLabel="開啟平台失物招領"
+            style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+            onPress={() => safeNavigate(navigation, 'PlatformLostFound')}
+          >
+            <Text style={s.schoolButtonText}>開啟失物招領 →</Text>
+          </Pressable>
+        </View>
         <View style={s.schoolPanel}>
           <Text accessibilityRole="header" style={s.title}>
             {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}

@@ -32,16 +32,32 @@ tags:
       id: login-start
     direction: DOWN
     centerElement: false
-- tapOn:
-    id: login-start
 # Assert the visible terminal state rather than a non-interactive page container.
 # A remote session failure is not a successful login; recovery must remain usable.
-- extendedWaitUntil:
-    visible:
-      text: '登入或建立帳號|目前無法確認登入狀態|登出尚未完成'
-    timeout: 20000
-- assertNotVisible:
-    id: login-landing
+# The first iOS tap can report a hierarchy change while still on the landing page.
+# Retry this transition only while its source is visible; never tap the next page.
+- retry:
+    maxRetries: 2
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: login-landing
+          commands:
+            - assertVisible:
+                id: login-start
+                enabled: true
+            - waitForAnimationToEnd
+            - tapOn:
+                id: login-start
+                enabled: true
+                retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            text: '登入或建立帳號|目前無法確認登入狀態|登出尚未完成'
+          timeout: 20000
+      - assertNotVisible:
+          id: login-landing
 - assertNotVisible: '登出 Google 帳號'
 - runFlow:
     when:

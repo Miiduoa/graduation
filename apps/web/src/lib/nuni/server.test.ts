@@ -454,6 +454,10 @@ describe('Nuni Google authorization code flow', () => {
     '/food?school=PU&schoolId=pu&campus=nthu',
     '/shops/?campus=all',
     '/shops?schoolId=pu&campus=nthu',
+    '/lost-found?schoolId=pu',
+    '/lost-found/platform?schoolId=nthu&mine=1',
+    '/lost-found/platform/post?schoolId=pu',
+    '/lost-found/platform/plf_11111111-1111-4111-8111-111111111111?schoolId=pu#contact',
     '/grades',
     '/classroom/material-bookmarks?campus=pu',
     '/map?school=pu&focus=library#route',
@@ -517,7 +521,11 @@ describe('Nuni Google authorization code flow', () => {
       expect(fetcher).not.toHaveBeenCalled();
     },
   );
-  it.each(['https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades?tab=semester'])(
+  it.each([
+    'https://attacker.example', '//attacker.example', '/auth/platform/start', '/grades?tab=semester',
+    '/lost-found?source=school&schoolId=pu', '/lost-found/post', '/lost-found/legacy-item',
+    '/lost-found/platform/legacy-item', '/lost-found/platform/post/extra',
+  ])(
     'does not carry an external or school-only destination into the login transaction: %s',
     async (target) => {
       fetcher.mockResolvedValue(response(tx()));

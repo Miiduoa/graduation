@@ -100,6 +100,13 @@ test('frequent services open their actual routes without duplicate map entries',
   );
 });
 
+test('lost-found uses the Google platform entry while its screen retains the explicit legacy source', () => {
+  const navigation = { navigate: jest.fn() };
+  const view = render(<CampusHubScreen navigation={navigation} />);
+  fireEvent.press(view.getByText('失物招領'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'PlatformLostFound', undefined, expect.any(Object));
+});
+
 test('the compact school control opens the picker directly from campus services', async () => {
   const view = render(<CampusHubScreen />);
   fireEvent.press(view.getByRole('button', { name: '目前瀏覽靜宜大學，選擇其他學校' }));

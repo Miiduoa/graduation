@@ -249,10 +249,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '失物招領',
-    text: '查看本校遺失與拾獲刊登',
+    text: '用 Google 帳號查看、刊登與管理失物',
     href: '/lost-found',
-    access: 'school',
-    keywords: '失物 招領 遺失 拾獲 lost found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 Google lost found',
     category: 'campus',
   },
   {

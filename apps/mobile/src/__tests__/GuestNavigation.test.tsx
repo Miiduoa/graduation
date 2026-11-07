@@ -95,6 +95,12 @@ jest.mock('../screens/NuniWorkspaceScreen', () => ({
     return <Text testID="platform-workspace">nuni 帳號</Text>;
   },
 }));
+jest.mock('../screens/PlatformLostFoundScreen', () => ({
+  PlatformLostFoundScreen: () => {
+    const { Text } = require('react-native');
+    return <Text testID="platform-lost-found-screen">平台失物招領</Text>;
+  },
+}));
 jest.mock('../screens/SSOLoginScreen', () => ({
   SSOLoginScreen: () => {
     const { Text } = require('react-native');
@@ -166,6 +172,41 @@ test('the primary signed-out entry opens the independent platform workspace', as
   fireEvent.press(await view.findByTestId('login-start'));
   await view.findByTestId('platform-workspace');
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+});
+
+test.each([null, { platformAccountId: 'google-only' }])('platform lost-found has a reachable entry before school authentication (%j)', async (session) => {
+  mockPlatformSession = session;
+  mockSchoolAuth.loading = true;
+  mockSchoolAuth.profileLoading = true;
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <SchoolSessionBoundary publicContent={<NavigationContainer ref={navigation}><PreAuthStack /></NavigationContainer>}>
+      <Text>Private school navigation</Text>
+    </SchoolSessionBoundary>,
+  );
+  fireEvent.press(await view.findByTestId('platform-lost-found-start'));
+  await view.findByTestId('platform-lost-found-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('PlatformLostFound');
+  expect(view.queryByTestId('school-login-form')).toBeNull();
+});
+
+test.each(['cold', 'warm'])('a %s platform lost-found detail link opens without registering legacy Firebase routes', async (start) => {
+  const id = 'plf_11111111-1111-4111-8111-111111111111';
+  const url = `campus://platform-lost-found/${id}?schoolId=pu`;
+  mockPlatformSession = { platformAccountId: 'google-only' };
+  if (start === 'cold') mockInitialUrl = url;
+  const navigation = createNavigationContainerRef();
+  const view = render(<NavigationContainer ref={navigation} linking={preAuthLinking}><PreAuthStack /></NavigationContainer>);
+  if (start === 'warm') {
+    await view.findByTestId('login-landing');
+    await waitFor(() => expect(mockLinkListener).toBeDefined());
+    act(() => mockLinkListener?.({ url }));
+  }
+  await view.findByTestId('platform-lost-found-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('PlatformLostFound');
+  expect(navigation.getCurrentRoute()?.params).toEqual({ id, schoolId: 'pu' });
+  expect(navigation.getRootState().routeNames).not.toContain('LostFound');
+  expect(view.queryByTestId('school-login-form')).toBeNull();
 });
 
 test('a guest can open the real import route without a school or platform account', async () => {

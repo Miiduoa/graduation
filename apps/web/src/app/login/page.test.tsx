@@ -251,6 +251,10 @@ it.each([
   '/dormitory?schoolId=ntu',
   '/food?tenant=pu&order=order-1',
   '/shops?schoolId=pu&campus=nthu',
+  '/lost-found?schoolId=pu',
+  '/lost-found/platform?schoolId=nthu&mine=1',
+  '/lost-found/platform/post?schoolId=pu',
+  '/lost-found/platform/plf_11111111-1111-4111-8111-111111111111?schoolId=pu#contact',
   '/grades',
   '/classroom/material-bookmarks?campus=pu',
 ])('starts the platform task %s with Google while school login is unavailable', (destination) => {
@@ -505,9 +509,14 @@ it('keeps a school task school-only when student ID is not available', () => {
   expect(replace).not.toHaveBeenCalled();
 });
 
-it('treats lost-found as a school destination under Google-only sign-in options', () => {
+it.each([
+  '/lost-found?source=school&schoolId=pu',
+  '/lost-found?source=platform&source=school&schoolId=pu',
+  '/lost-found/post?schoolId=pu',
+  '/lost-found/legacy-item?schoolId=pu',
+])('keeps the retained school lost-found destination %s out of Google sign-in', (destination) => {
   state.user = null;
-  state.params = new URLSearchParams('returnUrl=%2Flost-found%3FschoolId%3Dpu');
+  state.params = new URLSearchParams({ returnUrl: destination });
   render(<LoginPage />);
   expect(screen.queryByTestId('platform-sign-in')).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('連線學校帳號');

@@ -13,7 +13,7 @@
 1. `/social` 把使用者導向僅認 Firebase 校園身分的 `/community`，但既有 `SocialWorkspace` 與 `/api/social` 已支援 Nuni Google 平台帳號。
 2. OAuth 的安全返回清單漏掉已支援平台帳號或本機個人資料的路徑。登入頁又用這張清單判斷是否需要學校帳號，導致 Google 按鈕被隱藏，或成功登入後回到無關的課程頁。
 
-這次恢復既有功能入口，不建立 Google→Firebase 身分橋接，不建立學校 member，不修改資料庫或 Firestore 權限。
+前兩輪恢復既有功能入口並加入裝置收藏。本輪新增獨立的平台失物招領 API 與 PostgreSQL migration；不建立 Google→Firebase 身分橋接，不建立學校 member，也不放寬既有 Firestore 權限。新 API 必須另外完成候選版本發布，不能因網頁程式已接通就視為正式可用。
 
 ## 網頁服務邊界
 
@@ -25,6 +25,8 @@
 | 資料匯入 | `/import` | 不需學校密碼；平台雲端同步依部署能力與使用者啟用狀態提供 |
 | 個人住宿備忘 | `/dormitory` | 本機紀錄依帳號／校園隔離；不是校方正式申請或報修受理 |
 | 公開交流 | `/social` | Google 平台 session；只讀取後端允許的公開貼文，發表資格由後端決定 |
+| 平台失物招領 | `/lost-found/platform` | Google 平台 session；校區只是瀏覽分組，刊登者由伺服器決定。需部署新增的候選 API／migration 才能在正式站使用 |
+| 學校帳號舊刊登 | `/lost-found?source=school` 與既有明細／刊登頁 | 保留 Firebase 資料及原有 owner，不與平台刊登自動合併 |
 | 平台課班 | `/classroom` 與既有課程頁 | Google 平台帳號，再檢查課班成員／邀請資格 |
 | 課程回饋 | `/grades` 預設、`/classroom/grades` | 平台課班公布的回饋；不是校方學期成績 |
 | 教材收藏 | `/classroom/material-bookmarks` | 只查看本人可存取的課班教材 |
@@ -62,26 +64,47 @@ Web `/shops` 只保留既有 `school`、`schoolId`、`campus` 瀏覽資訊後轉
 
 ## 後續需要真正遷移的服務
 
-失物招領、好友、私人訊息、部分舊校園收藏目前仍依賴另一套帳號。它們不應永久被學號綁住，但需要以平台 principal、物件擁有者與原可見範圍逐項接通。
+好友、私人訊息、部分舊校園收藏目前仍依賴另一套帳號。它們不應永久被學號綁住，但需要以平台 principal、物件擁有者與原可見範圍逐項接通。平台失物招領的實作與發布條件如下。
 
 不能直接把任意 Google 帳號塞進舊學校登入流程：`writeSchoolLoginProfile` 會建立學校成員；舊角色預設與 Firebase／Nuni 的獨立登出生命週期也需要處理。這些問題不應以放寬 UI guard 或資料庫規則掩蓋。
 
-### 失物招領的下一步
+## 平台失物招領
 
-現有失物 Firestore 規則主要檢查「已登入」與本人 `userId`，並不是每次都要求學校會員；實際限制來自兩端使用 Firebase SDK／UID，而 Google 是另一套平台 session。目前沒有可直接接通的 Nuni 失物 CRUD。下一輪遷移應完成一個含列表、本人刊登／編輯／結案／下架的完整 API，並同時處理：
+現有失物 Firestore 規則主要檢查「已登入」與本人 `userId`，實際入口限制來自兩端使用 Firebase SDK／UID，而 Google 是另一套平台 session。本輪在既有 Nuni 平台資料庫新增獨立的刊登資料，不將同信箱的兩種帳號視為同一個 owner。
 
-- 伺服器透過 live platform session 決定 owner，不接受 body 自填帳號；不授予學籍或發出 Firebase 登入 token。
-- 新舊資料與聯絡資訊可見範圍；不得依 email 或 displayName 自動認領歷史紀錄。
-- 穩定刊登編號、冪等重試、版本衝突與帳號／校園切換時的草稿及結果隔離。
-- 平台帳號關閉時的下架與聯絡方式清理。現有 Nuni 帳號關閉只處理平台資料庫／session，不會自動清理新增的 Firestore store。
-- 手機公開導航入口、發文額度、真實資料庫回歸與正式伺服器所需的 Admin 設定。
+### 操作與資料
 
-本輪未建立這個新資料集，也未把失物招領或私人訊息標記成已支援 Google。
+- 支援伺服器端校區／文字／類型／狀態／本人篩選、真正分頁、查看詳情、刊登、編輯、結案、下架，以及匯出本人在目前校區的刊登。
+- 列表摘要不傳聯絡方式。登入後查看尚未結案的詳情可讀取聯絡方式，表單明確告知不限本校；結案會清除聯絡方式，並停止編輯。下架會抹除所有可編輯內容，只保留防止重送復活所需的最小 tombstone。
+- 伺服器從有效平台 session 取得 owner，並在資料庫交易內重新檢查帳號、憑證與 session。請求不能指定帳號、校籍或角色。每次異動檢查本人及版本。
+- 建立使用固定 `plf_UUID`，每次意圖使用固定 mutation ID。相同重試不建立另一則刊登；同 ID 不同內容、過期版本及後續已變更的回執都不會被當成成功。
+- mutation journal 僅保存雜湊、物件 ID 與回執版本，不複製刊登或聯絡資料。資料庫對單一帳號的操作頻率、有效刊登及歷史總量設上限。
+- PostgreSQL FK／帳號關閉 trigger 會在同一交易刪除該帳號的刊登、聯絡方式、tombstone 與重試紀錄。暫停帳號會隱藏刊登，恢復時仍可取回原有資料。
+
+### 網頁與手機
+
+網頁的 Google-only 使用者由 `/lost-found` 進入平台清單；已有 Firebase 使用者預設保留原列表，也可明確選擇 Google 刊登。`source=platform` 可指定新來源，任何 `source=school` 都保留舊來源。新頁面使用 `/lost-found/platform`、`/post` 與精確的 `plf_UUID` 明細路徑；OAuth 不因此開放任意舊明細路徑。
+
+網頁將登入／回執、列表、明細與表單拆成獨立元件，沿用既有實物吊牌視覺。手機新增 `PlatformLostFound`，在 Google-only 的入口及已連線學校的導覽都可抵達；`campus://platform-lost-found/:id?` 保留明確校區，不把舊失物連結改查新資料。
+
+兩端都以平台帳號、session context 與校區隔離畫面；手機另外隔離 focus generation。舊讀取不得覆寫已確認的編輯、結案或下架。即使清除本機待確認紀錄失敗，也先套用已驗證的回執，立即隱藏已刪除的聯絡方式。
+
+網頁在送出前，以獨立的 sessionStorage namespace 保存精確待確認意圖；尚未送出的表單內容只保留在目前畫面。手機另有獨立的帳號／校區草稿與待確認儲存。換帳號不顯示前一人的內容，舊回應不清除另一個 scope 的紀錄；損壞紀錄需明確確認後清理。匯出只在所有分頁驗證完畢、帳號仍相同時提供完整檔案／分享內容。
+
+### 發布條件
+
+新增來源位於 `deploy/nuni-api/lost-found/`，以已固定的 composed API 為基礎，明確選擇候選版本才會加入。`282_platform_lost_found.sql`、對應執行帳號權限與 `CAMPUS_PLATFORM_LOST_FOUND_ENABLED` 需要依候選 runbook 一起驗收；正式 API 的既有 manifest、旗標及資料庫不會因本輪開發自動變更。相容回退保留同一 migration manifest 與資料清理機制。
+
+後端未安裝或暫時無法連線時，兩端顯示服務無法使用，不以空列表或假成功掩蓋。舊 API 可能將未知失物路徑回成 401；此時只以同一個已擷取的 session 重新確認帳號，確認仍有效才顯示服務未開放，不重送原本的刊登／修改請求，也不將失效帳號當成已登入。新候選及相容回退的確切失物 POST 路徑在功能關閉時直接回 404，其他路徑仍保留既有授權。
+
+完整來源重建、API／資料庫驗證及發布進度以候選 README 和本輪 PR 為準；仍不能宣稱正式 Google 帳號端到端驗收已完成。
 
 ## 驗證與發布
 
 回歸涵蓋 Google-only 公開交流、未登入不發出公開社群請求、校內讀取未掛載、回跳原任務、校園範圍保留、個人資料帳號隔離、OAuth 同源／state／端點限制與真正校務頁面仍要求學校身分。
 
-測試使用模擬 session／API；不代表正式 Google OAuth、真實帳號、實機畫面或生產發布已驗收。完整結果與精確提交請見本輪 PR。
+介面與登入回歸使用模擬 session／API；新增失物招領另有真正的 Fastify HTTP 路由與 SQL 交易測試。本輪已在隔離 PostgreSQL 16.15 通過 81 項共用契約／SQL／路由案例，包含多連線的關閉帳號及登出競爭；完整候選 API 套用全部 migration 後，另有 6 項實際 HTTP 測試通過。相同的隔離資料庫測試也加入獨立 CI。嵌入式模式仍會略過兩項多連線案例，不能取代 PostgreSQL 驗證。
+
+完整 API bundle 與新增模組對實際 runtime 型別的嚴格檢查通過；全 API 型別檢查遭執行環境中止，仍待完成。測試使用本機簽署的身分 token 與本機 JWKS，不代表正式 Google OAuth、真實帳號、實機畫面或生產發布已驗收。精確來源與後端驗證紀錄見 `deploy/nuni-api/lost-found/verification.json`，前端結果與精確提交請見本輪 PR。
 
 main 必須經 PR 與指定 GitHub App 的「審查通過」檢查。既有 #511、#519 也修改登入／首次選校流程；整合時需保留兩套身分與明確校園範圍，並在合併後重跑對應回歸。
