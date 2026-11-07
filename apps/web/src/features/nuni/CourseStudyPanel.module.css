@@ -75,7 +75,13 @@
 .readAloud { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .readAloud small { color: var(--muted); font-size: 12px; }
 .coach { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }
-.coachHeading h4, .explanation h4 { margin: 0; font-size: 17px; }
+.coachHeading h4, .explanation h4, .reviewList h4 { margin: 0; font-size: 17px; }
+.personalNotes { margin-top: 24px; padding: 18px; border: 1px solid var(--border); background: var(--bg); }
+.personalNotes > .field { margin-top: 12px; }
+.reviewList { margin: 20px 0; padding: 18px; border: 1px solid var(--border); background: var(--surface); }
+.reviewList [aria-current="location"], .personalNotes [aria-pressed="true"] { border-color: var(--brand); font-weight: 600; }
+.lessonHistory { margin: 20px 0; }
+.studentQuestion { padding: 12px; background: var(--surface-raised); white-space: pre-wrap; line-height: 1.8; }
 .coach > .field { margin: 18px 0 12px; }
 .status { font-size: 13px; color: var(--muted); line-height: 1.8; }
 .status:empty { display: none; }
@@ -97,6 +103,6 @@
   .root { padding: 14px; }
   .board { padding: 14px; }
   .sourceText { font-size: 16px; padding-left: 12px; }
-  .exercise { padding: 14px; }
+  .exercise, .personalNotes, .reviewList { padding: 14px; }
   .actions > .primary { flex: 1 1 160px; }
 }

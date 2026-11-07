@@ -63,17 +63,26 @@ it('clears study content when the course session changes', async () => {
   const view = render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
   fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
   await screen.findByRole('heading', { name: '讀書白板' });
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), { target: { value: '帳號 A 的私人學習筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
   state.context = 'session-b';
   state.request.mockResolvedValue({ materials: [], nextCursor: null });
   view.rerender(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
   expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
   expect(await screen.findByText(/目前還沒有教材/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '讀講義' }));
+  fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: '帳號 B 的教材' } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();
+  expect(screen.getByRole('button', { name: '下載本次筆記' }).hasAttribute('disabled')).toBe(true);
 });
 
 it('closes the study board on refresh and prevents reopening after access is revoked', async () => {
   render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
   fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
   await screen.findByRole('heading', { name: '讀書白板' });
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), { target: { value: '權限撤銷前的筆記' } });
   state.request.mockRejectedValue(new NuniError(403, 'FORBIDDEN'));
   fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
   expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();

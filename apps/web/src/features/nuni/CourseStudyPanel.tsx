@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { PERSONAL_IMPORT_DOCUMENT_LIMITS } from '@campus/shared/src/imports/documents';
-import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { readPersonalImportDocumentFile } from '@/lib/personalImportDocuments';
 import {
   splitStudySection,
@@ -10,12 +9,11 @@ import {
   studySourceFromText,
   STUDY_TUTOR_LIMITS,
   type StudyMode,
-  type StudyPassage,
   type StudySource,
-  type TutorExplanation,
 } from '@/lib/studyTutor';
-import { getStudyTutorAvailability, runStudyTutor } from '@/lib/studyTutorRuntime';
-import { StudyReadAloud } from './StudyReadAloud';
+import { CourseStudyPassage } from './CourseStudyPassage';
+import { emptyStudyPassage, type StudySessionMemory } from './courseStudySession';
+import { buildCourseStudyNotes, courseStudyNotesFilename } from './courseStudyNotes';
 import styles from './CourseStudyPanel.module.css';
 
 type Material = { id: string; title: string; body: string };
@@ -30,129 +28,20 @@ function initialMaterial(material?: Material): { source: StudySource | null; err
   }
 }
 
-function PassageStudy({ passage, mode }: { passage: StudyPassage; mode: StudyMode }) {
-  const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
-  const [result, setResult] = useState<TutorExplanation | null>(null);
-  const [question, setQuestion] = useState('');
-  const [attempt, setAttempt] = useState('');
-  const [answerVisible, setAnswerVisible] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const [progress, setProgress] = useState('');
-  const [error, setError] = useState('');
-  const current = useRef<AbortController | null>(null);
-  const passageHeading = useRef<HTMLHeadingElement>(null);
-  const questionId = useId();
-  const attemptId = useId();
-  const downloadId = useId();
-
-  useEffect(() => {
-    setAvailability(getStudyTutorAvailability());
-    passageHeading.current?.focus();
-    return () => { current.current?.abort(); current.current = null; };
-  }, []);
-
-  function stop() {
-    current.current?.abort();
-    current.current = null;
-    setBusy(false);
-    setProgress('已停止，原文仍保留。');
-  }
-
-  async function explain() {
-    if (current.current || !availability?.available || !passage.text.trim()) return;
-    const controller = new AbortController();
-    current.current = controller;
-    setBusy(true);
-    setError('');
-    setResult(null);
-    setAttempt('');
-    setAnswerVisible(false);
-    setProgress('正在準備這一段的講解…');
-    try {
-      const explanation = await runStudyTutor({ passage, mode, question: question.trim() || undefined,
-        signal: controller.signal,
-        onProgress: (message) => {
-          if (current.current === controller && !controller.signal.aborted) setProgress(message);
-        },
-      });
-      if (current.current !== controller || controller.signal.aborted) return;
-      setResult(explanation);
-      setProgress('講解已整理，可對照原文與試答。');
-    } catch (failure) {
-      if (current.current !== controller || controller.signal.aborted) return;
-      setError(failure instanceof Error ? failure.message : '講解未能完成，請再試一次。');
-      setProgress('');
-    } finally {
-      if (current.current === controller) { current.current = null; setBusy(false); }
-    }
-  }
-
-  return (
-    <div className={styles.passage}>
-      <div className={styles.sourceHeading}><h4 ref={passageHeading} tabIndex={-1}>原文</h4><span>{passage.label}</span></div>
-      <blockquote className={styles.sourceText}>{passage.text}</blockquote>
-      {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
-      {!busy && <StudyReadAloud key={result ? 'explanation' : 'source'}
-        text={result?.explanation ?? passage.text} label={result ? '朗讀這段講解' : '朗讀原文'}
-        onSpeakingChange={setSpeaking} />}
-      <div className={styles.coach}>
-        <div className={styles.coachHeading}><h4>把這一段弄懂</h4><span>選用 AI 講解</span></div>
-        <p id={downloadId} className={styles.note}>
-          首次啟用會下載模型（{availability?.downloadLabel ?? '約 1.9 GB，建議使用 Wi-Fi'}）。
-          講解在裝置上產生，只使用目前這一段；內容可能有誤，請對照教材。
-        </p>
-        {availability && !availability.available && <p className={styles.note} role="status">{availability.reason}</p>}
-        <label className={styles.field} htmlFor={questionId}>卡在哪裡？也可以直接開始講解
-          <textarea id={questionId} rows={2} value={question} maxLength={STUDY_TUTOR_LIMITS.questionCharacters}
-            disabled={busy} onChange={(event) => setQuestion(event.target.value)}
-            placeholder="例如：用生活中的例子解釋這個概念" />
-        </label>
-        <div className={styles.actions}>
-          <VoiceDictationButton disabled={busy || speaking} onTranscript={(text) =>
-            setQuestion((previous) => `${previous}${previous ? ' ' : ''}${text}`.slice(0, STUDY_TUTOR_LIMITS.questionCharacters))} />
-          <button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy || !availability?.available || !passage.text.trim()}
-            aria-describedby={downloadId} onClick={() => void explain()}>
-            {busy ? '準備講解中…' : result ? '依問題重新講解' : '啟用 AI 講解本段'}
-          </button>
-          {busy && <button type="button" className={styles.button} onClick={stop}>停止講解</button>}
-        </div>
-        <p className={styles.note}>語音輸入由瀏覽器提供，可能使用線上辨識服務；轉成文字後，由你決定是否送出。</p>
-        {speaking && <p className={styles.note}>停止朗讀後，就能用語音提問。</p>}
-        <p className={styles.status} role="status" aria-live="polite">{progress}</p>
-        {error && <p className={styles.error} role="alert">{error}</p>}
-        {result && <section className={styles.explanation} aria-label="本段 AI 講解">
-          <h4>{result.title}</h4>
-          <p className={styles.explanationText}>{result.explanation}</p>
-          <details className={styles.reference}><summary>對照這段講解引用的原文</summary><blockquote>{result.sourceQuote}</blockquote></details>
-          <div className={styles.exercise}>
-            <h4>換你試試</h4>
-            <p>{result.question}</p>
-            <label className={styles.field} htmlFor={attemptId}>先寫下你的想法
-              <textarea id={attemptId} rows={3} maxLength={2000} value={attempt}
-                onChange={(event) => { setAttempt(event.target.value); setAnswerVisible(false); }} />
-            </label>
-            <button type="button" className={styles.button} disabled={!attempt.trim()} onClick={() => setAnswerVisible((value) => !value)}
-              aria-expanded={answerVisible}>{answerVisible ? '收起參考回答' : '對照參考回答'}</button>
-            {answerVisible && <p className={styles.referenceAnswer}>{result.answer}</p>}
-            <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
-          </div>
-        </section>}
-      </div>
-    </div>
-  );
-}
-
 export function CourseStudyPanel({ courseTitle, material, onClose }: Props) {
   const [initial] = useState(() => initialMaterial(material));
   const [source, setSource] = useState<StudySource | null>(initial.source);
   const [sectionIndex, setSectionIndex] = useState(0);
   const [passageIndex, setPassageIndex] = useState(0);
-  const [revision, setRevision] = useState(0);
+  const [session, setSession] = useState<StudySessionMemory>({ revision: 0, passages: {} });
+  const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
   const [paste, setPaste] = useState('');
   const [reading, setReading] = useState(false);
   const [error, setError] = useState(initial.error);
+  const [downloadStatus, setDownloadStatus] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const downloadUrl = useRef<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useRef<AbortController | null>(null);
   const inputId = useId();
@@ -160,21 +49,65 @@ export function CourseStudyPanel({ courseTitle, material, onClose }: Props) {
   const sectionId = useId();
   const modeId = useId();
   const headingId = useId();
+  const sectionPassages = useMemo(() => source?.sections.map(splitStudySection) ?? [], [source]);
   const section = source?.sections[sectionIndex];
-  const passages = section ? splitStudySection(section) : [];
+  const passages = sectionPassages[sectionIndex] ?? [];
   const passage = passages[passageIndex];
+  const passageKey = `${sectionIndex}:${passageIndex}`;
+  const memory = session.passages[passageKey] ?? emptyStudyPassage();
+  const hasNotes = Object.values(session.passages).some((item) =>
+    item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
+  const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
+    parts.flatMap((part, partNumber) =>
+      session.passages[`${sectionNumber}:${partNumber}`]?.needsReview
+        ? [{ label: part.label, sectionNumber, partNumber }] : []));
 
   useEffect(() => {
     heading.current?.focus();
-    return () => { read.current?.abort(); read.current = null; };
+    return () => {
+      read.current?.abort();
+      read.current = null;
+      if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+      downloadUrl.current = null;
+    };
   }, []);
 
   function replaceSource(value: StudySource) {
     setSource(value);
     setSectionIndex(0);
     setPassageIndex(0);
-    setRevision((previous) => previous + 1);
+    revision.current += 1;
+    setSession({ revision: revision.current, passages: {} });
+    if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+    downloadUrl.current = null;
+    setDownloadStatus('');
+    setDownloadError('');
     setError('');
+  }
+
+  function downloadNotes() {
+    if (!source || !hasNotes) return;
+    setDownloadStatus('');
+    setDownloadError('');
+    let url: string | null = null;
+    const link = document.createElement('a');
+    try {
+      const text = buildCourseStudyNotes(courseTitle, source, session.passages);
+      url = URL.createObjectURL(new Blob(['\uFEFF', text], { type: 'text/plain;charset=utf-8' }));
+      link.href = url;
+      link.download = courseStudyNotesFilename(source.title);
+      link.hidden = true;
+      document.body.append(link);
+      link.click();
+      if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+      downloadUrl.current = url;
+      setDownloadStatus('已交給瀏覽器下載本次筆記；若沒有出現檔案，請確認瀏覽器的下載設定。');
+    } catch {
+      if (url) URL.revokeObjectURL(url);
+      setDownloadError('目前無法下載，筆記仍保留在白板中，可重試或先複製需要的文字。');
+    } finally {
+      link.remove();
+    }
   }
 
   async function chooseFile(file: File) {
@@ -243,12 +176,26 @@ export function CourseStudyPanel({ courseTitle, material, onClose }: Props) {
       {error && <p className={styles.error} role="alert">{error}</p>}
       {!reading && source && passage && <>
         <div className={styles.sourceMeta}>
-          <strong>{source.title}</strong><span>離開白板即清除本次內容</span>
+          <strong>{source.title}</strong><span>僅保留本次閱讀；換教材、關閉或離開白板即清除</span>
         </div>
+        <div className={styles.actions}>
+          <button type="button" className={styles.button} disabled={!hasNotes} onClick={downloadNotes}>下載本次筆記</button>
+          <p className={styles.note}>想下次接著看，可下載文字檔；包含你的筆記、講解與試答。</p>
+        </div>
+        {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
+        {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
         {source.warnings.length > 0 && <details className={styles.reference}>
           <summary>來源注意事項（{source.warnings.length}）</summary>
           {source.warnings.map((warning, index) => <p key={index} className={styles.note}>{warning}</p>)}
         </details>}
+        {reviewPassages.length > 0 && <section className={styles.reviewList} aria-label="待複習段落">
+          <h4>待複習 · {reviewPassages.length} 段</h4>
+          <p className={styles.note}>這是你標記的重點，點選即可回到原段落。</p>
+          <div className={styles.actions}>{reviewPassages.map((item) => <button type="button" className={styles.button}
+            key={`${item.sectionNumber}:${item.partNumber}`}
+            aria-current={sectionIndex === item.sectionNumber && passageIndex === item.partNumber ? 'location' : undefined}
+            onClick={() => { setSectionIndex(item.sectionNumber); setPassageIndex(item.partNumber); }}>{item.label}</button>)}</div>
+        </section>}
         <div className={styles.selectors}>
           <label className={styles.field} htmlFor={sectionId}>閱讀範圍
             <select id={sectionId} value={sectionIndex} onChange={(event) => { setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>
@@ -265,7 +212,11 @@ export function CourseStudyPanel({ courseTitle, material, onClose }: Props) {
           <div className={styles.stepHeading}>
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
-          <PassageStudy key={`${revision}:${passage.id}:${mode}`} passage={passage} mode={mode} />
+          <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}
+            onChange={(update) => setSession((previous) => previous.revision !== session.revision ? previous : {
+              ...previous,
+              passages: { ...previous.passages, [passageKey]: update(previous.passages[passageKey] ?? emptyStudyPassage()) },
+            })} />
           <nav className={styles.stepNavigation} aria-label="白板段落導覽">
             <button type="button" className={styles.button} disabled={passageIndex === 0}
               onClick={() => setPassageIndex((previous) => previous - 1)}>上一段</button>

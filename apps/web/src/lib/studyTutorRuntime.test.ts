@@ -6,7 +6,7 @@ import {
   STUDY_TUTOR_GENERATION_TIMEOUT_MS,
   STUDY_TUTOR_TIMEOUT_MS,
 } from './studyTutorRuntime';
-import type { StudyPassage, TutorExplanation } from './studyTutor';
+import type { StudyPassage, StudyTutorHistory, TutorExplanation } from './studyTutor';
 
 const availability = vi.hoisted(() => vi.fn());
 vi.mock('./personalImportAiLocal', () => ({ getPersonalImportAiAvailability: availability }));
@@ -39,6 +39,10 @@ const lesson = (): TutorExplanation => ({
   title: '主鍵', explanation: '主鍵用來區分每一筆紀錄。',
   sourceQuote: '主鍵用來唯一識別一筆紀錄。',
   question: '主鍵用來識別什麼？', answer: '每一筆紀錄。',
+});
+const history = (): StudyTutorHistory => ({
+  passageId: passage().id, sourceText: passage().text, mode: 'understand',
+  turns: [{ question: '上一輪的問題', response: lesson() }],
 });
 const lastWorker = () => FakeWorker.instances.at(-1)!;
 
@@ -97,6 +101,38 @@ describe('explicit local study generation', () => {
     expect(FakeWorker.instances).toHaveLength(0);
   });
 
+  it('dispatches a snapshot of same-passage history with the full new question', async () => {
+    const previous = history();
+    const expected = JSON.parse(JSON.stringify(previous.turns)) as StudyTutorHistory['turns'];
+    const question = '剛才你提到的「區分」是什麼意思？\n請用這段原文回答。';
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', question, history: previous, signal: new AbortController().signal,
+    });
+    previous.turns[0].question = '送出之後才改的問題';
+    previous.turns[0].response.explanation = '送出之後才改的回覆';
+    previous.sourceText = '另一份教材';
+    const prompt = lastWorker().request!.prompt;
+    const historyLine = prompt.split('\n').find((line) => line.startsWith('HISTORY_DATA='))!;
+    const questionLine = prompt.split('\n').find((line) => line.startsWith('STUDENT_QUESTION='))!;
+    expect(JSON.parse(historyLine.slice('HISTORY_DATA='.length))).toEqual(expected);
+    expect(JSON.parse(questionLine.slice('STUDENT_QUESTION='.length))).toBe(question);
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(pending).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    () => ({ ...history(), passageId: 'page-2:part-1' }),
+    () => ({ ...history(), mode: 'exam' as const }),
+    () => ({ ...history(), turns: [{ question: '', response: { ...lesson(), sourceQuote: '另一頁原文' } }] }),
+    () => ({ ...history(), turns: Array.from({ length: 3 }, () => ({ question: '', response: lesson() })) }),
+  ])('rejects invalid follow-up context before allocating or downloading a worker (%#)', async (invalidHistory) => {
+    await expect(runStudyTutor({
+      passage: passage(), mode: 'understand', history: invalidHistory(), signal: new AbortController().signal,
+    })).rejects.toThrow();
+    expect(FakeWorker.instances).toHaveLength(0);
+  });
+
   it('rejects an ungrounded lesson and validates against the request snapshot', async () => {
     const source = passage();
     const pending = runStudyTutor({ passage: source, mode: 'understand', signal: new AbortController().signal });
@@ -129,13 +165,15 @@ describe('study cancellation and failure isolation', () => {
     expect(FakeWorker.instances).toHaveLength(0);
 
     const firstController = new AbortController();
-    const first = runStudyTutor({ passage: passage(), mode: 'understand', signal: firstController.signal });
+    const first = runStudyTutor({ passage: passage(), mode: 'understand', history: history(), signal: firstController.signal });
     const firstWorker = lastWorker();
     const stale = firstWorker.onmessage!;
     firstController.abort();
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
     const next = runStudyTutor({ passage: passage(), mode: 'exam', signal: new AbortController().signal });
     const nextWorker = lastWorker();
+    expect(nextWorker.request!.prompt).toContain('HISTORY_DATA=[]');
+    expect(nextWorker.request!.prompt).not.toContain('上一輪的問題');
     stale({ data: { id: firstWorker.request!.id, type: 'result', raw: JSON.stringify(lesson()) } } as MessageEvent);
     expect(firstWorker.terminate).toHaveBeenCalledOnce();
     expect(nextWorker.terminate).not.toHaveBeenCalled();
@@ -159,6 +197,20 @@ describe('study cancellation and failure isolation', () => {
     worker.emit({ type: 'error', code: 'memory', message: 'private student ID and source contents' });
     await expect(pending).rejects.toThrow('記憶體不足');
     expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the worker token limit authoritative and offers a clear retry without history', async () => {
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', history: history(), signal: new AbortController().signal,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'error', code: 'input_limit', message: 'private tokenizer diagnostics' });
+    await expect(pending).rejects.toThrow('不帶追問紀錄重新講解');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    const retry = runStudyTutor({ passage: passage(), mode: 'understand', signal: new AbortController().signal });
+    expect(lastWorker().request!.prompt).toContain('HISTORY_DATA=[]');
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
   });
 
   it('cleans up a synchronous dispatch failure and allows a subsequent session', async () => {

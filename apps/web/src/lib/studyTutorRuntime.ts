@@ -7,6 +7,7 @@ import {
   parseTutorExplanation,
   type StudyMode,
   type StudyPassage,
+  type StudyTutorHistory,
   type TutorExplanation,
 } from './studyTutor';
 
@@ -29,6 +30,7 @@ export type StudyTutorRequest = {
   passage: StudyPassage;
   mode: StudyMode;
   question?: string;
+  history?: StudyTutorHistory;
   signal: AbortSignal;
   onProgress?: (message: string) => void;
 };
@@ -43,7 +45,7 @@ function aborted() {
 function workerError(code: unknown): Error {
   const messages: Record<string, string> = {
     unsupported: '這台裝置無法執行講解模型，仍可使用白板閱讀原文。',
-    input_limit: '這段文字或追問超過模型能處理的範圍，請縮短提問或改選較短的段落。',
+    input_limit: '原文與追問超過模型能處理的範圍，請縮短提問，或不帶追問紀錄重新講解。',
     output_limit: '這次講解沒有完整產生，請重試或縮小問題範圍。',
     memory: '裝置記憶體不足，講解已停止。請關閉其他分頁後重試，或先閱讀原文。',
     download: '講解模型尚未下載完成，請確認網路後重試。教材內容仍在本機。',
@@ -68,13 +70,14 @@ export async function runStudyTutor({
   passage,
   mode,
   question,
+  history,
   signal,
   onProgress,
 }: StudyTutorRequest): Promise<TutorExplanation> {
   if (signal.aborted) throw aborted();
   // Snapshot the source before awaiting the worker so a later selection cannot change validation.
   const source = { ...passage };
-  const prompt = buildStudyTutorPrompt(source, mode, question);
+  const prompt = buildStudyTutorPrompt(source, mode, question, history);
   if (running) throw new Error('另一段講解正在進行，請先停止或等完成後再試。');
   const availability = getStudyTutorAvailability();
   if (!availability.available) throw new Error(availability.reason);
