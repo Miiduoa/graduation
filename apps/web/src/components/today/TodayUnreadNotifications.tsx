@@ -30,7 +30,7 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
   if (!unsigned && !authLoading && !user) return null;
   return (
     <UnreadFeed
-      key={JSON.stringify([user?.uid, schoolId])}
+      key={JSON.stringify([user?.uid, schoolId, unsigned, authLoading])}
       uid={user?.uid}
       schoolId={schoolId}
       unsigned={unsigned}
@@ -57,7 +57,7 @@ function UnreadFeed({
   const canWatch = !unsigned && !authLoading && !!uid && !!schoolId && configured;
 
   useEffect(() => {
-    if (!canWatch || !uid) return;
+    if (!canWatch || !uid || !schoolId) return;
     let active = true;
     const stop = watchAccountNotifications(
       { uid, schoolId },
@@ -133,16 +133,18 @@ function UnreadFeed({
           {visible.map((item) => {
             const destination = notificationDestination(item);
             const href = destination?.href || '/messages';
+            // Reload the document so attendance receives its camera permissions policy.
+            const DestinationLink = item.type === 'live_session' ? 'a' : Link;
             return (
               <li key={`${item.source}:${item.id}`}>
-                <Link href={href} className={styles.row}>
+                <DestinationLink href={href} className={styles.row}>
                   <span className={styles.rowBody}>
                     <span className={styles.rowTitle}>{item.title}</span>
                     <span className={styles.rowMeta}>
                       {item.body || destination?.label || '查看通知'}
                     </span>
                   </span>
-                </Link>
+                </DestinationLink>
               </li>
             );
           })}
