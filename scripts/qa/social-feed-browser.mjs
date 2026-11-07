@@ -317,6 +317,21 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       }
       await check('long-list:old post is found through real SDK pagination',()=>
         document.querySelector('article h3')?.textContent==='上學期的專題集合' && document.querySelectorAll('article').length===1);
+      // A title and a body can satisfy different keywords, without another page read.
+      await search('討論 上學期');
+      await until(()=>call(()=>document.querySelectorAll('article').length===1 &&
+        document.querySelector('article h3')?.textContent==='上學期的專題集合'),'combined search across fields');
+      await check('long-list:two keywords find an older post across title and body',()=>
+        document.querySelector('input[type=search]').value==='討論 上學期' &&
+        document.querySelectorAll('article').length===1);
+      await snapshot('320-multi-keyword-found.png');
+      await search('上學期 不存在');
+      await until(()=>call(()=>document.querySelectorAll('article').length===0),'all keywords required');
+      await check('long-list:unmatched second keyword does not show a false result',()=>
+        document.querySelector('input[type=search]').value==='上學期 不存在' &&
+        document.querySelectorAll('article').length===0);
+      await search('上學期的專題集合');
+      await until(()=>call(()=>document.querySelectorAll('article').length===1),'restore single-term search');
       await call(()=>{const input=document.querySelector('input[type=search]');input.focus();input.select();});
       await send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
       await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8,nativeVirtualKeyCode:8});
