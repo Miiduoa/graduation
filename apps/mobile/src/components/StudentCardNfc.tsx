@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   AppState,
   Linking,
@@ -13,7 +14,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { STUDENT_CARD_TTL_MS } from '@campus/shared/src/studentCard';
+import { randomUUID } from 'expo-crypto';
+import { isStudentCardToken, STUDENT_CARD_TTL_MS } from '@campus/shared/src/studentCard';
 import { StudentCardUnavailable, verifyStudentCardCode } from '../services/studentCard';
 import {
   getStudentCardNfcCapabilities,
@@ -28,7 +30,8 @@ type Receipt = Awaited<ReturnType<typeof verifyStudentCardCode>>;
 type ReaderState =
   | { kind: 'reading' | 'ready' | 'checking' }
   | { kind: 'success'; receipt: Receipt }
-  | { kind: 'error'; message: string; retry: 'read' | 'verify' };
+  | { kind: 'error'; message: string; retry: 'read' | 'verify' | 'close' };
+type Credential = { token: string; expiresAt: number; verificationId?: string };
 
 export function StudentCardNfc({ onPresent }: { onPresent?: () => void }) {
   const s = useThemeStyleSheet(createStyles);
@@ -155,33 +158,98 @@ export function StudentCardNfc({ onPresent }: { onPresent?: () => void }) {
           請到手機設定開啟 NFC。
         </Text>
       )}
-      {showReader && <NfcReader onClose={close} />}
+      {showReader && <StudentCardReader onClose={close} />}
     </View>
   );
 }
 
-function NfcReader({ onClose }: { onClose: () => void }) {
+export function StudentCardReader({
+  onClose,
+  initialToken,
+  initialExpiresAt,
+}: {
+  onClose: () => void;
+  initialToken?: string;
+  initialExpiresAt?: number;
+}) {
   const s = useThemeStyleSheet(createStyles);
-  const [state, setState] = useState<ReaderState>({ kind: 'reading' });
+  const [fromQr] = useState(initialToken !== undefined);
+  const [state, setState] = useState<ReaderState>({ kind: fromQr ? 'ready' : 'reading' });
   const [shown, setShown] = useState(false);
-  const token = useRef('');
+  const credential = useRef<Credential | null>(null);
+  const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef<AbortController | null>(null);
+  const active = useRef(true);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const clearCredential = useCallback(() => {
+    if (expiryTimer.current !== null) clearTimeout(expiryTimer.current);
+    expiryTimer.current = null;
+    credential.current = null;
+  }, []);
+
+  const close = useCallback(() => {
+    if (!active.current) return;
+    active.current = false;
+    pending.current?.abort();
+    pending.current = null;
+    clearCredential();
+    onCloseRef.current();
+  }, [clearCredential]);
+
+  const expire = useCallback(
+    (current: Credential) => {
+      if (!active.current || credential.current !== current) return;
+      pending.current?.abort();
+      pending.current = null;
+      clearCredential();
+      setState({
+        kind: 'error',
+        retry: fromQr ? 'close' : 'read',
+        message: fromQr
+          ? '這張憑證已到期，請對方重新出示，再掃描新的 QR Code。'
+          : '這張憑證已到期，請對方重新出示後再感應。',
+      });
+    },
+    [clearCredential, fromQr],
+  );
+
+  const receive = useCallback(
+    (value: string, limit?: number) => {
+      if (!active.current) return;
+      clearCredential();
+      const now = Date.now();
+      const current = {
+        token: value,
+        expiresAt: Math.min(now + STUDENT_CARD_TTL_MS, limit ?? Infinity),
+      };
+      credential.current = current;
+      if (!Number.isFinite(current.expiresAt) || current.expiresAt <= now) {
+        expire(current);
+        return;
+      }
+      expiryTimer.current = setTimeout(() => expire(current), current.expiresAt - now);
+      setState({ kind: 'ready' });
+    },
+    [clearCredential, expire],
+  );
 
   const read = useCallback(async () => {
+    if (fromQr || !active.current) return;
     pending.current?.abort();
-    token.current = '';
+    clearCredential();
     const request = new AbortController();
     pending.current = request;
     setState({ kind: 'reading' });
     try {
       const value = await readStudentCardNfc(request.signal);
-      if (request.signal.aborted) return;
-      token.current = value;
-      setState({ kind: 'ready' });
+      if (!active.current || pending.current !== request || request.signal.aborted) return;
+      receive(value);
     } catch (error) {
-      if (request.signal.aborted) return;
+      if (!active.current || pending.current !== request || request.signal.aborted) return;
       if (error instanceof StudentCardNfcError && error.code === 'CANCELLED') {
-        onClose();
+        close();
       } else {
         setState({
           kind: 'error',
@@ -193,54 +261,106 @@ function NfcReader({ onClose }: { onClose: () => void }) {
     } finally {
       if (pending.current === request) pending.current = null;
     }
-  }, [onClose]);
+  }, [clearCredential, close, fromQr, receive]);
 
   useEffect(() => {
-    if (!shown) return;
+    active.current = true;
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'background') close();
+    });
+    return () => {
+      active.current = false;
+      subscription.remove();
+      pending.current?.abort();
+      pending.current = null;
+      clearCredential();
+    };
+  }, [clearCredential, close]);
+
+  useEffect(() => {
+    // The link owner may discard its copy after expiry while the receipt remains visible.
+    if (initialToken === undefined || !active.current) return;
+    pending.current?.abort();
+    pending.current = null;
+    clearCredential();
+    if (isStudentCardToken(initialToken)) {
+      receive(initialToken, initialExpiresAt);
+    } else {
+      setState({
+        kind: 'error',
+        retry: 'close',
+        message: '這張憑證無法使用，請重新掃描對方的 QR Code。',
+      });
+    }
+  }, [clearCredential, initialExpiresAt, initialToken, receive]);
+
+  useEffect(() => {
+    if (!shown || fromQr) return;
     const frame = requestAnimationFrame(() => {
       void read();
     });
-    return () => {
-      cancelAnimationFrame(frame);
-      pending.current?.abort();
-      token.current = '';
-    };
-  }, [read, shown]);
+    return () => cancelAnimationFrame(frame);
+  }, [fromQr, read, shown]);
 
+  const receipt = state.kind === 'success' ? state.receipt : null;
   useEffect(() => {
-    if (state.kind !== 'ready' && state.kind !== 'success' && state.kind !== 'error') return;
-    const timer = setTimeout(onClose, STUDENT_CARD_TTL_MS);
+    if (!receipt) return;
+    const endsAt = Math.min(receipt.verifiedAt, Date.now()) + STUDENT_CARD_TTL_MS;
+    const timer = setTimeout(close, Math.max(0, endsAt - Date.now()));
     return () => clearTimeout(timer);
-  }, [state.kind, onClose]);
+  }, [receipt, close]);
 
   async function verify() {
-    if (!token.current || pending.current) return;
+    const current = credential.current;
+    if (!active.current || !current || pending.current) return;
+    if (Date.now() >= current.expiresAt) {
+      expire(current);
+      return;
+    }
     const request = new AbortController();
     pending.current = request;
     setState({ kind: 'checking' });
     const timeout = setTimeout(() => {
+      if (!active.current || pending.current !== request) return;
       request.abort();
-      setState({ kind: 'error', retry: 'verify', message: '連線逾時，請再試一次。' });
+      pending.current = null;
+      if (Date.now() >= current.expiresAt) expire(current);
+      else setState({ kind: 'error', retry: 'verify', message: '連線逾時，請再試一次。' });
     }, 15_000);
     const clearDeadline = () => clearTimeout(timeout);
     request.signal.addEventListener('abort', clearDeadline, { once: true });
     try {
-      const receipt = await verifyStudentCardCode(token.current, request.signal);
-      if (request.signal.aborted) return;
-      token.current = '';
+      if (!current.verificationId) current.verificationId = randomUUID();
+      const receipt = await verifyStudentCardCode(
+        current.token,
+        request.signal,
+        current.verificationId,
+      );
+      if (!active.current || pending.current !== request || request.signal.aborted) return;
+      if (Date.now() >= current.expiresAt) {
+        expire(current);
+        return;
+      }
+      clearCredential();
       setState({ kind: 'success', receipt });
     } catch (error) {
-      if (!request.signal.aborted) {
-        token.current = '';
-        setState({
-          kind: 'error',
-          retry: 'read',
-          message:
-            error instanceof StudentCardUnavailable
-              ? error.message
-              : '暫時無法連線核對，請重新感應後再試。',
-        });
+      if (!active.current || pending.current !== request || request.signal.aborted) return;
+      if (Date.now() >= current.expiresAt) {
+        expire(current);
+        return;
       }
+      const retryable = error instanceof StudentCardUnavailable && error.retryable;
+      if (!retryable) clearCredential();
+      setState({
+        kind: 'error',
+        retry: retryable ? 'verify' : fromQr ? 'close' : 'read',
+        message:
+          error instanceof StudentCardUnavailable
+            ? error.message
+            : fromQr
+              ? '核對未完成，請重新掃描對方的 QR Code。'
+              : '核對未完成，請對方重新出示後再感應。',
+      });
     } finally {
       clearTimeout(timeout);
       request.signal.removeEventListener('abort', clearDeadline);
@@ -251,7 +371,7 @@ function NfcReader({ onClose }: { onClose: () => void }) {
   const success = state.kind === 'success';
   const reading = state.kind === 'reading';
   const checking = state.kind === 'checking';
-  let title = '已讀取感應憑證';
+  let title = fromQr ? '已讀取驗證碼' : '已讀取感應憑證';
   let description = '請確認要核對對方的校園學號。每張憑證限用一次。';
   if (reading) {
     title = '讓兩支手機靠近';
@@ -266,23 +386,46 @@ function NfcReader({ onClose }: { onClose: () => void }) {
     title = '學號已核對';
     description = '請與對方卡面上的學校及學號末四碼比對。';
   } else if (state.kind === 'error') {
-    title = state.retry === 'verify' ? '核對尚未完成' : '再靠近一次';
+    title = state.retry === 'verify' ? '核對尚未完成' : fromQr ? '請重新掃碼' : '再靠近一次';
     description = state.message;
   }
+
+  useEffect(() => {
+    if (!shown || Platform.OS !== 'ios' || (state.kind !== 'success' && state.kind !== 'error'))
+      return;
+    let cancelled = false;
+    let announced = false;
+    const announce = () => {
+      if (cancelled || announced || !active.current || AppState.currentState !== 'active') return;
+      announced = true;
+      AccessibilityInfo.announceForAccessibility(`${title}。${description}`);
+    };
+    const frame = requestAnimationFrame(announce);
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') announce();
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      subscription.remove();
+    };
+  }, [description, shown, state, title]);
 
   return (
     <Modal
       visible
-      onRequestClose={onClose}
-      onShow={() => setShown(true)}
+      onRequestClose={close}
+      onShow={() => {
+        if (active.current) setShown(true);
+      }}
       testID="student-card-nfc-reader"
       animationType="fade"
       presentationStyle="fullScreen"
     >
-      <SafeAreaView style={s.reader} accessibilityViewIsModal>
+      <SafeAreaView style={s.reader} accessibilityViewIsModal onAccessibilityEscape={close}>
         <ScrollView contentContainerStyle={s.readerContent}>
           <Text style={s.eyebrow}>CAMPUS ONE</Text>
-          <Text style={s.readerLabel}>NFC 感應核對</Text>
+          <Text style={s.readerLabel}>{fromQr ? '學生證核對' : 'NFC 感應核對'}</Text>
           <View style={s.signalOuter} accessible={false}>
             <View style={[s.signalInner, success && s.signalSuccess]}>
               <Ionicons
@@ -311,7 +454,7 @@ function NfcReader({ onClose }: { onClose: () => void }) {
               <View style={s.divider} />
               <Text style={s.receiptLabel}>學號末碼</Text>
               <Text style={s.maskedId}>{state.receipt.maskedId}</Text>
-              <Text style={s.receiptNote}>憑證已使用 · 60 秒後收起</Text>
+              <Text style={s.receiptNote}>憑證已使用 · 核對結果將自動收起</Text>
             </View>
           )}
           {state.kind === 'ready' && (
@@ -323,7 +466,7 @@ function NfcReader({ onClose }: { onClose: () => void }) {
               <Text style={s.primaryText}>核對這張卡</Text>
             </Pressable>
           )}
-          {state.kind === 'error' && (
+          {state.kind === 'error' && state.retry !== 'close' && (
             <Pressable
               accessibilityRole="button"
               onPress={() => void (state.retry === 'verify' ? verify() : read())}
@@ -338,10 +481,16 @@ function NfcReader({ onClose }: { onClose: () => void }) {
         </ScrollView>
         <Pressable
           accessibilityRole="button"
-          onPress={onClose}
+          onPress={close}
           style={({ pressed }) => [s.dismiss, pressed && s.pressed]}
         >
-          <Text style={s.dismissText}>{success ? '完成核對' : '取消核對'}</Text>
+          <Text style={s.dismissText}>
+            {success
+              ? '完成核對'
+              : state.kind === 'error' && state.retry === 'close'
+                ? '關閉'
+                : '取消核對'}
+          </Text>
         </Pressable>
       </SafeAreaView>
     </Modal>

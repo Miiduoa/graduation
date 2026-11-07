@@ -62,3 +62,34 @@ export const STUDENT_CARD_TTL_MS = 60_000;
 export function isStudentCardToken(value: unknown): value is string {
   return typeof value === 'string' && value.length === 32 && /^[A-Za-z0-9_-]{32}$/.test(value);
 }
+
+export function isStudentCardVerificationId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === 36 &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)
+  );
+}
+
+export type StudentCardVerification = { schoolName: string; maskedId: string; verifiedAt: number };
+
+export function isStudentCardVerification(
+  value: unknown,
+  now = Date.now(),
+): value is StudentCardVerification {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const { schoolName, maskedId, verifiedAt } = value as Record<string, unknown>;
+  return (
+    typeof schoolName === 'string' &&
+    !!schoolName.trim() &&
+    schoolName.length <= 160 &&
+    typeof maskedId === 'string' &&
+    maskedId.length === 9 &&
+    /^•••• [A-Za-z0-9._-]{4}$/.test(maskedId) &&
+    typeof verifiedAt === 'number' &&
+    Number.isSafeInteger(verifiedAt) &&
+    verifiedAt > 0 &&
+    verifiedAt <= now + 5_000 &&
+    verifiedAt >= now - STUDENT_CARD_TTL_MS
+  );
+}

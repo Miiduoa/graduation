@@ -256,3 +256,25 @@ test('a native stop cancels a delayed activation and can restart using the same 
   expect(v.getByText('感應出示已開啟')).toBeTruthy();
   expect(requestStudentCardCode).toHaveBeenCalledTimes(1);
 });
+
+test('accessibility escape stops presentation and removes the full student number', async () => {
+  jest.mocked(getStudentCardNfcCapabilities).mockResolvedValue({
+    moduleAvailable: true,
+    canRead: true,
+    canPresent: true,
+    enabled: true,
+  });
+  jest.mocked(requestStudentCardCode).mockResolvedValue({
+    token: 'n'.repeat(32),
+    studentId: 'S0003141',
+    expiresAt: Date.now() + 55_000,
+  });
+  const v = render(<StudentCardScreen />);
+  await act(async () => {});
+  await act(async () => fireEvent.press(v.getByText('感應出示')));
+  await act(async () => fireEvent(v.getByTestId('student-card-presentation'), 'show'));
+  const signal = jest.mocked(beginStudentCardNfcPresentation).mock.calls[0][1]!;
+  fireEvent(v.getByText('S0003141'), 'accessibilityEscape');
+  expect(signal.aborted).toBe(true);
+  expect(v.queryByText('S0003141')).toBeNull();
+});

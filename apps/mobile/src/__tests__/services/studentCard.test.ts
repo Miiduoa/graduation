@@ -8,6 +8,7 @@ import {
 const user = { getIdToken: jest.fn() } as unknown as User;
 const previousFetch = global.fetch;
 const now = 1_793_923_200_000;
+const verificationId = '12345678-1234-4123-8123-123456789abc';
 
 function response(value: unknown, status = 200): Response {
   return {
@@ -105,15 +106,25 @@ describe('student card presentation', () => {
   });
 
   test.each([
-    [401, '登入已失效'],
-    [403, '校方證件'],
-    [429, '過於頻繁'],
-    [503, '稍後再試'],
-  ] as const)('handles HTTP %s with a safe message', async (status, message) => {
+    [400, '稍後再試', false],
+    [401, '登入已失效', false],
+    [403, '校方證件', false],
+    [409, '稍後再試', false],
+    [429, '過於頻繁', true],
+    [500, '稍後再試', true],
+    [503, '稍後再試', true],
+  ] as const)('classifies HTTP %s with a safe message', async (status, message, retryable) => {
     jest.mocked(fetch).mockResolvedValue(response({ error: 'private-token' }, status));
-    await expect(requestStudentCardCode(user, 'pu', new AbortController().signal)).rejects.toThrow(
-      message,
-    );
+    await expect(
+      requestStudentCardCode(user, 'pu', new AbortController().signal),
+    ).rejects.toMatchObject({ message: expect.stringContaining(message), retryable });
+  });
+
+  test('marks a presentation network failure as retryable', async () => {
+    jest.mocked(fetch).mockRejectedValue(new TypeError('private network detail'));
+    await expect(
+      requestStudentCardCode(user, 'pu', new AbortController().signal),
+    ).rejects.toMatchObject({ message: '暫時無法取得驗證碼，請稍後再試。', retryable: true });
   });
 });
 
@@ -135,6 +146,38 @@ describe('student card verification', () => {
       headers: { 'Content-Type': 'application/json' },
     });
     expect(user.getIdToken).not.toHaveBeenCalled();
+  });
+
+  test('sends the same verification ID when retrying an uncertain response', async () => {
+    jest
+      .mocked(fetch)
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(response(receipt));
+    await expect(
+      verifyStudentCardCode(token, new AbortController().signal, verificationId),
+    ).rejects.toMatchObject({ retryable: true });
+    jest.setSystemTime(now + 2_000);
+    await expect(
+      verifyStudentCardCode(token, new AbortController().signal, verificationId),
+    ).resolves.toEqual(receipt);
+    expect(jest.mocked(fetch).mock.calls.map(([, init]) => init?.body)).toEqual([
+      JSON.stringify({ token, verificationId }),
+      JSON.stringify({ token, verificationId }),
+    ]);
+  });
+
+  test.each([
+    '',
+    'a'.repeat(36),
+    verificationId.toUpperCase(),
+    verificationId + '\n',
+    verificationId.replace('4123', '5123'),
+    verificationId.replace('8123', '7123'),
+  ])('rejects an invalid verification ID before requesting %s', async (id) => {
+    await expect(
+      verifyStudentCardCode(token, new AbortController().signal, id),
+    ).rejects.toMatchObject({ retryable: false });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   test.each([
@@ -166,9 +209,10 @@ describe('student card verification', () => {
     { verifiedAt: now - 60_001 },
   ])('rejects malformed verification fields %p', async (patch) => {
     jest.mocked(fetch).mockResolvedValue(response({ ...receipt, ...patch }));
-    await expect(verifyStudentCardCode(token, new AbortController().signal)).rejects.toThrow(
-      '資料無法確認',
-    );
+    await expect(verifyStudentCardCode(token, new AbortController().signal)).rejects.toMatchObject({
+      message: expect.stringContaining('資料無法確認'),
+      retryable: false,
+    });
   });
 
   test.each([null, [], 'receipt'])('rejects a non-object verification response', async (value) => {
@@ -186,28 +230,51 @@ describe('student card verification', () => {
   });
 
   test.each([
-    [400, '重新出示'],
-    [410, '重新出示'],
-    [429, '過於頻繁'],
-    [503, '稍後再試'],
-  ] as const)('handles HTTP %s without exposing the server body', async (status, message) => {
-    jest.mocked(fetch).mockResolvedValue(response({ error: 'private-token' }, status));
-    await expect(verifyStudentCardCode(token, new AbortController().signal)).rejects.toThrow(
-      message,
-    );
-  });
+    [400, '重新出示', false],
+    [401, '稍後再試', false],
+    [403, '稍後再試', false],
+    [410, '重新出示', false],
+    [429, '過於頻繁', true],
+    [500, '稍後再試', true],
+    [503, '稍後再試', true],
+  ] as const)(
+    'classifies HTTP %s without exposing the server body',
+    async (status, message, retryable) => {
+      jest.mocked(fetch).mockResolvedValue(response({ error: 'private-token' }, status));
+      await expect(
+        verifyStudentCardCode(token, new AbortController().signal),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining(message),
+        retryable,
+      });
+    },
+  );
 
   test('sanitizes network errors', async () => {
     jest.mocked(fetch).mockRejectedValue(new Error('private-token and native details'));
     await expect(verifyStudentCardCode(token, new AbortController().signal)).rejects.toMatchObject({
       message: '暫時無法連線核對，請稍後再試。',
+      retryable: true,
+    });
+  });
+
+  test('does not retry a transport cancellation', async () => {
+    const error = new Error('Aborted');
+    error.name = 'AbortError';
+    jest.mocked(fetch).mockRejectedValue(error);
+    await expect(verifyStudentCardCode(token, new AbortController().signal)).rejects.toMatchObject({
+      message: '已取消核對。',
+      retryable: false,
     });
   });
 
   test('does not start verification with an aborted signal', async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(verifyStudentCardCode(token, controller.signal)).rejects.toThrow('已取消');
+    await expect(verifyStudentCardCode(token, controller.signal)).rejects.toMatchObject({
+      message: '已取消核對。',
+      retryable: false,
+    });
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -216,7 +283,7 @@ describe('student card verification', () => {
     jest.mocked(fetch).mockReturnValue(network.promise);
     const controller = new AbortController();
     const pending = verifyStudentCardCode(token, controller.signal);
-    const cancelled = expect(pending).rejects.toThrow('已取消');
+    const cancelled = expect(pending).rejects.toMatchObject({ retryable: false });
     controller.abort();
     await cancelled;
     network.resolve(response(receipt));
@@ -232,7 +299,7 @@ describe('student card verification', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(readBody).toHaveBeenCalled();
-    const cancelled = expect(pending).rejects.toThrow('已取消');
+    const cancelled = expect(pending).rejects.toMatchObject({ retryable: false });
     controller.abort();
     await cancelled;
     body.resolve(JSON.stringify(receipt));

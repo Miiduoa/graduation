@@ -1,36 +1,43 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { isStudentCardToken, STUDENT_CARD_TTL_MS } from '@campus/shared/src/studentCard';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  isStudentCardToken,
+  isStudentCardVerification,
+  STUDENT_CARD_TTL_MS,
+  type StudentCardVerification,
+} from '@campus/shared/src/studentCard';
 import styles from './check.module.css';
 
-type Check =
-  | 'initial'
-  | 'ready'
-  | 'checking'
-  | 'unavailable'
-  | 'retry'
-  | { schoolName: string; maskedId: string };
+type Check = 'initial' | 'ready' | 'checking' | 'unavailable' | 'retry' | StudentCardVerification;
 
 export function StudentCardCheck() {
   const token = useRef('');
+  const verificationId = useRef('');
   const pending = useRef<AbortController | null>(null);
   const [check, setCheck] = useState<Check>('initial');
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+
+  const clear = useCallback(() => {
+    token.current = '';
+    verificationId.current = '';
+    pending.current?.abort();
+    pending.current = null;
+    setExpiresAt(null);
+    setCheck('unavailable');
+  }, []);
 
   useEffect(() => {
-    function readCode() {
+    function readCode(event?: Event) {
       const value = window.location.hash.slice(1);
-      if (value) {
-        window.history.replaceState(window.history.state, '', window.location.pathname);
-        pending.current?.abort();
-        token.current = isStudentCardToken(value) ? value : '';
-      }
-      setCheck(token.current ? 'ready' : 'unavailable');
-    }
-    function clear() {
-      token.current = '';
-      pending.current?.abort();
-      setCheck('unavailable');
+      if (!value && !event && token.current) return;
+      clear();
+      if (!value) return;
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      if (!isStudentCardToken(value)) return;
+      token.current = value;
+      setExpiresAt(Date.now() + STUDENT_CARD_TTL_MS);
+      setCheck('ready');
     }
     function onVisibility() {
       if (document.hidden) clear();
@@ -41,30 +48,37 @@ export function StudentCardCheck() {
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       pending.current?.abort();
+      pending.current = null;
       window.removeEventListener('hashchange', readCode);
       window.removeEventListener('pagehide', clear);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, []);
+  }, [clear]);
 
   useEffect(() => {
-    if (typeof check === 'string') return;
-    const timer = window.setTimeout(() => setCheck('unavailable'), STUDENT_CARD_TTL_MS);
+    if (expiresAt === null) return;
+    const timer = window.setTimeout(clear, Math.max(0, expiresAt - Date.now()));
     return () => window.clearTimeout(timer);
-  }, [check]);
+  }, [clear, expiresAt]);
 
   async function verify() {
-    if (!token.current || pending.current) return;
+    if (!token.current || pending.current || expiresAt === null) return;
+    if (Date.now() >= expiresAt) {
+      clear();
+      return;
+    }
     const request = new AbortController();
     pending.current = request;
     setCheck('checking');
     const timeout = window.setTimeout(() => {
       if (!request.signal.aborted && pending.current === request) {
         request.abort();
+        pending.current = null;
         setCheck('retry');
       }
     }, 15_000);
     try {
+      if (!verificationId.current) verificationId.current = crypto.randomUUID();
       const response = await fetch('/api/student-card/verify', {
         method: 'POST',
         redirect: 'error',
@@ -72,21 +86,31 @@ export function StudentCardCheck() {
         cache: 'no-store',
         signal: request.signal,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token.current }),
+        body: JSON.stringify({ token: token.current, verificationId: verificationId.current }),
       });
+      if (request.signal.aborted) return;
       if (!response.ok) {
-        if (!request.signal.aborted)
-          setCheck(response.status === 429 || response.status >= 500 ? 'retry' : 'unavailable');
+        if (response.status === 429 || response.status >= 500) setCheck('retry');
+        else clear();
         return;
       }
-      const { schoolName, maskedId } = await response.json();
+      const body = await response.text();
       if (request.signal.aborted) return;
+      let receipt: unknown;
+      try {
+        receipt = body.length <= 2_048 ? JSON.parse(body) : null;
+      } catch {
+        clear();
+        return;
+      }
+      if (!isStudentCardVerification(receipt)) {
+        clear();
+        return;
+      }
       token.current = '';
-      setCheck(
-        typeof schoolName === 'string' && typeof maskedId === 'string'
-          ? { schoolName, maskedId }
-          : 'unavailable',
-      );
+      verificationId.current = '';
+      setExpiresAt(Math.min(receipt.verifiedAt, Date.now()) + STUDENT_CARD_TTL_MS);
+      setCheck(receipt);
     } catch {
       if (!request.signal.aborted) setCheck('retry');
     } finally {
@@ -98,7 +122,11 @@ export function StudentCardCheck() {
   const valid = typeof check !== 'string';
   return (
     <main className={styles.page}>
-      <section className={styles.panel} aria-labelledby="card-check-title">
+      <section
+        className={styles.panel}
+        aria-labelledby="card-check-title"
+        aria-busy={check === 'checking'}
+      >
         <div className={styles.mast}>
           <strong>nuni</strong>
           <span>學生證核對</span>
@@ -115,6 +143,17 @@ export function StudentCardCheck() {
                 <dd>{check.schoolName}</dd>
                 <dt>學號</dt>
                 <dd>{check.maskedId}</dd>
+                <dt>核對時間</dt>
+                <dd>
+                  <time dateTime={new Date(check.verifiedAt).toISOString()}>
+                    {new Date(check.verifiedAt).toLocaleTimeString('zh-TW', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                      hour12: false,
+                    })}
+                  </time>
+                </dd>
               </dl>
               <p>這組驗證碼已使用。</p>
             </>
