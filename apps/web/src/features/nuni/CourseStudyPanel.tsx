@@ -25,6 +25,12 @@ import {
   type StudyPracticeCard,
   type StudyPracticeRound,
 } from './courseStudyPractice';
+import {
+  courseStudyPracticeCheckpointFilename,
+  isStudyPracticeCheckpoint,
+  parseStudyPracticeCheckpoint,
+  serializeStudyPracticeCheckpoint,
+} from './courseStudyPracticeCheckpoint';
 import { buildCourseStudyNotes, courseStudyNotesFilename } from './courseStudyNotes';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
@@ -38,7 +44,7 @@ import styles from './CourseStudyPanel.module.css';
 
 type Material = { id: string; title: string; body: string };
 type Props = { courseTitle: string; scope: CourseStudyProgressScope; material?: Material; onClose: () => void };
-type RestorePreview = { filename: string; progress: CourseStudyProgressData };
+type RestorePreview = { filename: string; progress: CourseStudyProgressData; round: StudyPracticeRound | null };
 
 function initialMaterial(material?: Material): { source: StudySource | null; error: string } {
   if (!material?.body.trim()) return { source: null, error: '' };
@@ -196,6 +202,23 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       { type: 'text/plain;charset=utf-8' }), courseStudyPracticeFilename(source.title), '本輪練習紀錄');
   }
 
+  function savePracticeCheckpoint() {
+    if (!source || !practiceRound || practiceRound.revision !== session.revision) return;
+    let saved: string;
+    try {
+      saved = serializeStudyPracticeCheckpoint({
+        progress: { scope, source, position: { sectionIndex, passageIndex, mode }, passages: session.passages },
+        round: practiceRound,
+      });
+    } catch (failure) {
+      setDownloadStatus('');
+      setDownloadError(failure instanceof Error ? failure.message : '練習進度無法整理，本輪作答仍保留。');
+      return;
+    }
+    downloadFile(() => new Blob([saved], { type: 'application/json;charset=utf-8' }),
+      courseStudyPracticeCheckpointFilename(source.title), '練習與閱讀進度');
+  }
+
   function saveProgress() {
     if (!source) return;
     let text: string;
@@ -222,8 +245,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         throw new Error('請選擇有內容且不超過 8 MiB 的閱讀進度檔。');
       const text = await file.text();
       if (read.current !== controller || controller.signal.aborted) return;
-      const progress = parseCourseStudyProgress(text, scope);
-      setRestorePreview({ filename: file.name, progress });
+      const { progress, round } = isStudyPracticeCheckpoint(text)
+        ? parseStudyPracticeCheckpoint(text, scope)
+        : { progress: parseCourseStudyProgress(text, scope), round: null };
+      setRestorePreview({ filename: file.name, progress, round });
     } catch (failure) {
       if (read.current !== controller || controller.signal.aborted) return;
       setError(failure instanceof Error ? failure.message : '閱讀進度無法載入，目前內容仍保留。');
@@ -234,7 +259,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   function restoreProgress() {
     if (!restorePreview) return;
-    const { progress, filename } = restorePreview;
+    const { progress, filename, round } = restorePreview;
     read.current?.abort();
     read.current = null;
     setReading(null);
@@ -244,7 +269,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setMode(progress.position.mode);
     revision.current += 1;
     setSession({ revision: revision.current, passages: progress.passages });
-    setPracticeRound(null);
+    setPracticeRound(round ? { ...round, revision: revision.current } : null);
     setRestoredFile(filename);
     setRestorePreview(null);
     setPaste('');
@@ -294,26 +319,27 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         <summary>接著上次的進度</summary>
         <div className={styles.importBody}>
           <label className={styles.field} htmlFor={progressInputId}>載入閱讀進度檔
-            <input ref={progressInput} id={progressInputId} type="file" accept=".campus-study.json,.json,application/json" disabled={!!reading}
+            <input ref={progressInput} id={progressInputId} type="file" accept=".campus-study.json,.campus-practice.json,.json,application/json" disabled={!!reading}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
                 if (file) void chooseProgress(file);
               }} />
           </label>
-          <p className={styles.note}>載入時核對帳號與課程，再預覽並確認還原。進度檔未加密，含教材、筆記、講解與練習參考回答，請自行保管。</p>
+          <p className={styles.note}>可載入閱讀進度或逐題練習進度 JSON，先核對帳號與課程，再預覽確認。檔案未加密，含教材、筆記、講解與完整參考回答，請自行保管。</p>
         </div>
       </details>
       {restorePreview && <section className={styles.restorePreview} aria-label="閱讀進度預覽">
-        <h4 ref={restoreHeading} tabIndex={-1}>接著讀「{restorePreview.progress.source.title}」</h4>
+        <h4 ref={restoreHeading} tabIndex={-1}>{restorePreview.round ? '接著練習' : '接著讀'}「{restorePreview.progress.source.title}」</h4>
         <p className={styles.note}>{restorePreview.filename}</p>
         <dl className={styles.progressFacts}>
           <div><dt>閱讀位置</dt><dd>{restorePreview.progress.source.sections[restorePreview.progress.position.sectionIndex].label} · 第 {restorePreview.progress.position.passageIndex + 1} 段</dd></div>
           <div><dt>閱讀方式</dt><dd>{{ understand: '理解概念', exam: '考前複習', practice: '練習思路' }[restorePreview.progress.position.mode]}</dd></div>
           <div><dt>個人筆記</dt><dd>{Object.values(restorePreview.progress.passages).filter((item) => item.note.trim()).length} 段</dd></div>
           <div><dt>待複習</dt><dd>{Object.values(restorePreview.progress.passages).filter((item) => item.needsReview).length} 段</dd></div>
+          {restorePreview.round && <div><dt>逐題練習</dt><dd>{restorePreview.round.finished ? '已完成' : '第 ' + (restorePreview.round.index + 1) + ' 題'}，共 {restorePreview.round.cards.length} 題</dd></div>}
         </dl>
-        <p className={styles.note}>還原會取代目前白板內容；需要保留時，可先{practiceRound ? '下載本輪練習紀錄' : '儲存目前的閱讀進度'}。檔案中的教材副本可能與最新課程不同。</p>
+        <p className={styles.note}>還原會取代目前白板內容；需要保留時，可先{practiceRound ? '儲存本輪練習與閱讀進度' : '儲存目前的閱讀進度'}。檔案中的教材副本可能與最新課程不同。</p>
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`} onClick={restoreProgress}>還原這份進度</button>
           <button type="button" className={styles.button} onClick={() => { setRestorePreview(null); progressInput.current?.focus(); }}>取消還原</button>
@@ -388,7 +414,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           {practiceDeck.missingCount > 0 && <p className={styles.note}>另有 {practiceDeck.missingCount} 段在目前讀法還沒有自我檢查題，可回到段落啟用講解後再練習。</p>}
         </section>}
         {practiceRound ? <CourseStudyPractice round={practiceRound} onAction={changePractice}
-          onExit={() => readPracticeSource()} onReadSource={readPracticeSource} onDownload={downloadPractice} /> : <>
+          onExit={() => readPracticeSource()} onReadSource={readPracticeSource}
+          onDownload={downloadPractice} onSave={savePracticeCheckpoint} /> : <>
         <div className={styles.selectors}>
           <label className={styles.field} htmlFor={sectionId}>閱讀範圍
             <select id={sectionId} value={sectionIndex} onChange={(event) => { setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>

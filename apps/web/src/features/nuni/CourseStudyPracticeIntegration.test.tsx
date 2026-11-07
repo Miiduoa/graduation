@@ -195,3 +195,49 @@ it('aborts a running follow-up when starting practice and ignores its late answe
   expect((screen.getByLabelText('這一段的講解記錄') as HTMLSelectElement).options).toHaveLength(2);
   expect(value('先寫下你的想法')).toBe('原本的主鍵試答');
 });
+
+it('saves an independent practice checkpoint and restores the exact second-question draft after reopening', async () => {
+  const downloads = downloadMock();
+  const view = mount();
+  await restore();
+  begin();
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '我記得主鍵不能重複。' } });
+  fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+  fireEvent.click(screen.getByRole('button', { name: '還要加強' }));
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '第二題待完成的試答😀' } });
+  fireEvent.click(screen.getByRole('button', { name: '儲存練習與閱讀進度' }));
+  const raw = await readBlob(downloads.create.mock.calls[0][0] as Blob);
+  expect(downloads.filenames[0]).toMatch(/-逐題練習\.campus-practice\.json$/);
+  expect(JSON.parse(raw)).toMatchObject({ format: 'campus-one-study-practice', version: 1 });
+  expect(raw).toContain('第二題待完成的試答😀');
+  view.unmount();
+
+  mount();
+  const file = new File([raw], '上次練習.campus-practice.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: async () => raw });
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  const preview = await screen.findByRole('region', { name: '閱讀進度預覽' });
+  expect(preview.textContent).toContain('第 2 題，共 2 題');
+  fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+  expect(screen.getByRole('status').textContent).toBe('第 2 題／共 2 題');
+  expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('第二題待完成的試答😀');
+  expect(screen.queryByText(second.answer)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '上一題' }));
+  expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('我記得主鍵不能重複。');
+  expect(screen.getByText(first.answer)).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('rejects a corrupt practice checkpoint without replacing the existing lecture or round', async () => {
+  mount();
+  await restore();
+  begin();
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '目前安全保留的試答' } });
+  const fake = JSON.stringify({ format: 'campus-one-study-practice', version: 1, progress: {}, practice: {} });
+  const file = new File([fake], 'bad.campus-practice.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: async () => fake });
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  await screen.findByRole('alert');
+  expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('目前安全保留的試答');
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+});

@@ -19,6 +19,7 @@ type Props = {
   onExit: () => void;
   onReadSource: (card: StudyPracticeCard) => void;
   onDownload: () => void;
+  onSave?: () => void;
 };
 
 const modeLabels: Record<StudyMode, string> = {
@@ -32,7 +33,7 @@ function outcomeLabel(outcome: StudyPracticeResponse['outcome'] | undefined): st
   return '未完成';
 }
 
-export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onDownload }: Props) {
+export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onDownload, onSave }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const attemptId = useId();
@@ -55,11 +56,14 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
       <div className={styles.toolbar}>
         <p className={styles.eyebrow}>逐題複習 · {modeLabels[round.mode]}</p>
         <div className={styles.actions}>
+          {onSave && <button type="button" className={styles.button} onClick={onSave}>儲存練習與閱讀進度</button>}
           <button type="button" className={styles.button} onClick={onDownload}>下載本輪練習</button>
           <button type="button" className={styles.button} onClick={onExit}>回到閱讀</button>
         </div>
       </div>
-      <p className={styles.note}>本輪回答獨立於原本試答，離開前可下載紀錄；閱讀進度檔不含本輪練習。</p>
+      <p className={styles.note}>{onSave
+        ? '本輪回答獨立於原本試答，可將練習與閱讀一起儲存供下次還原，也可下載純文字紀錄。進度檔未加密。'
+        : '本輪回答獨立於原本試答，離開前可下載紀錄；閱讀進度檔不含本輪練習。'}</p>
       <p className={styles.position} role="status" aria-live="polite" aria-atomic="true">
         {round.finished ? `本輪結束，共 ${summary.total} 題` : card ? `第 ${round.index + 1} 題／共 ${summary.total} 題` : '目前沒有可練習的題目'}
       </p>
