@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type PersonalCourse } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
@@ -9,6 +10,7 @@ import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { useDemoRole } from '@/lib/demoRole';
+import { leaveRequestHref } from '@/lib/leaveRequestLink';
 import { ensureTimetableIndex, loadPersonalTimetable } from '@/lib/timetable/store';
 import {
   LEAVE_COPY,
@@ -21,11 +23,11 @@ import {
 import {
   LEAVE_KINDS, LEAVE_PERIODS, LEAVE_REVIEWS, LEAVE_STATUSES,
   countLeaveReviews, formatLeaveRange, leaveCourseOptions, leaveKindLabel,
-  leaveRequestError, listMyLeaveRequests, shiftLeaveDay, submitLeaveRequest,
+  getMyLeaveRequest, leaveRequestError, listMyLeaveRequests, shiftLeaveDay, submitLeaveRequest,
   suggestedLeaveCourses, taipeiToday, validLeaveDates, withdrawLeaveRequest,
   type LeaveKind, type LeavePeriod, type LeaveRequest,
 } from '@/lib/leaveRequests';
-import { LeaveStatusPanel } from './LeaveStatusPanel';
+import { LeaveFailurePanel, LeaveStatusPanel } from './LeaveStatusPanel';
 import styles from './leave.module.css';
 
 const PROVIDENCE_GUIDE = 'https://osasa.pu.edu.tw/p/412-1063-5627.php?Lang=zh-tw';
@@ -55,10 +57,90 @@ function createdLabel(value: unknown) {
   }).format(date);
 }
 
+function LeaveRequestDetails({ record }: { record: LeaveRequest }) {
+  return (
+    <div className={styles.details}>
+      <p className={styles.requestId}>站內單號 {record.id}</p>
+      {record.detail && <p className={styles.description}>你的說明：{record.detail}</p>}
+      <ul>
+        {record.courses.map((course) => <li key={course.courseId}>
+          <div><strong>{course.courseName}</strong><span>{LEAVE_REVIEWS[course.reviewStatus] || '待核閱'}</span></div>
+          {course.reviewerNote && <p>師長回覆：{course.reviewerNote}</p>}
+        </li>)}
+      </ul>
+      <p>站內結果不等於學校正式核假。正式出缺勤仍請向學校確認。</p>
+    </div>
+  );
+}
+
+function LeaveRequestLookup({ uid, schoolId, schoolName, requestId, loginHref, busy, onWithdraw }: {
+  uid: string; schoolId: string; schoolName: string; requestId: string; loginHref: string;
+  busy: boolean; onWithdraw: (id: string) => void;
+}) {
+  const [view, setView] = useState<LeavePageView<LeaveRequest | null>>({ status: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getMyLeaveRequest(uid, schoolId, requestId).then(
+      (record) => { if (active) setView(leavePageSuccess(record, record === null)); },
+      (error: unknown) => { if (active) setView(leavePageFailureFromError(error)); },
+    );
+    return () => { active = false; };
+  }, [uid, schoolId, requestId, attempt]);
+
+  useEffect(() => {
+    if (view.status === 'loading') return;
+    panelRef.current?.focus();
+    panelRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [view.status]);
+
+  function retry() {
+    setView({ status: 'loading' });
+    setAttempt((current) => current + 1);
+  }
+
+  const record = view.status === 'ready' ? view.data : null;
+  return (
+    <section ref={panelRef} tabIndex={-1} className={`${styles.panel} ${styles.lookup}`} aria-labelledby="leave-linked-title">
+      <div className={styles.sectionHead}>
+        <div><p className={styles.kicker}>REQUEST LOOKUP</p><h2 id="leave-linked-title">這筆請假紀錄</h2></div>
+        {(view.status === 'ready' || view.status === 'empty' || view.status === 'forbidden') && (
+          <button type="button" className={styles.refresh} disabled={busy} onClick={retry}>重新查詢</button>
+        )}
+      </div>
+      <p>{schoolName} · 本人站內單號回查</p>
+      {!record && <p className={styles.requestId}>站內單號 {requestId}</p>}
+      {view.status === 'loading' ? <p role="status">正在查詢這筆請假紀錄…</p>
+        : view.status === 'empty' ? <p role="status">找不到可查看的本人站內請假紀錄，請確認單號、校園與登入帳號。</p>
+          : view.status === 'forbidden' ? <p role="alert">目前無法讀取這筆站內請假紀錄，請確認單號、校園與登入帳號。</p>
+            : view.status !== 'ready' ? <LeaveFailurePanel kind="submit" failure={view} loginHref={loginHref} onRetry={retry} />
+              : null}
+      {record && (
+        <>
+          <span className={record.status === 'withdrawn' ? styles.mutedBadge : styles.statusBadge}>{LEAVE_STATUSES[record.status] || '處理中'}</span>
+          <h3>{leaveKindLabel(record.kind)} · {record.startDate}{record.endDate !== record.startDate ? ` ～ ${record.endDate}` : ''}</h3>
+          <p>{LEAVE_PERIODS.find((item) => item.id === record.period)?.label || '全天'} · {record.courses.length} 門課</p>
+          <LeaveRequestDetails record={record} />
+          {record.status === 'pending' && record.courses.every((course) => course.reviewStatus === 'pending') && (
+            <div className={styles.requestActions}>
+              <button type="button" disabled={busy} onClick={() => onWithdraw(record.id)}>撤回這筆紀錄</button>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 export function LeavePageClient({ leaveApiEnabled }: { leaveApiEnabled: boolean }) {
   const { user, loading: authLoading } = useAuth();
   const school = useSelectedSchool();
   const [demoRole] = useDemoRole();
+  const params = useSearchParams();
+  const query = params.toString();
+  const returnUrl = query ? `/leave?${query}` : '/leave';
   if (authLoading) {
     return <SiteShell title="請假"><p role="status">正在確認學校帳號…</p></SiteShell>;
   }
@@ -68,7 +150,7 @@ export function LeavePageClient({ leaveApiEnabled }: { leaveApiEnabled: boolean 
   if (!user) {
     return (
       <SiteShell title="請假" schoolName={school.selectedSchool?.name}>
-        <SchoolAccountRequired returnUrl="/leave" alternative="可先使用學校正式請假管道辦理。" />
+        <SchoolAccountRequired returnUrl={returnUrl} alternative="可先使用學校正式請假管道辦理。" />
         {school.selectedSchoolId === 'pu' && (
           <p><a href={PROVIDENCE_GUIDE} target="_blank" rel="noopener noreferrer">靜宜大學學生請假說明 ↗</a></p>
         )}
@@ -82,12 +164,16 @@ export function LeavePageClient({ leaveApiEnabled }: { leaveApiEnabled: boolean 
       schoolId={school.selectedSchoolId}
       schoolName={school.selectedSchool?.name || '目前學校'}
       leaveApiEnabled={leaveApiEnabled}
+      linkedRequestId={params.get('requestId')}
+      linkedSchoolId={params.get('schoolId')}
+      returnUrl={returnUrl}
     />
   );
 }
 
-function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
+function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled, linkedRequestId, linkedSchoolId, returnUrl }: {
   uid: string; schoolId: string; schoolName: string; leaveApiEnabled: boolean;
+  linkedRequestId: string | null; linkedSchoolId: string | null; returnUrl: string;
 }) {
   const today = useMemo(() => taipeiToday(), []);
   const [startDate, setStartDate] = useState(today);
@@ -97,7 +183,9 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   const [detail, setDetail] = useState('');
   const [selection, setSelection] = useState<string[] | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [lookupVersion, setLookupVersion] = useState(0);
   const [view, setView] = useState<LeavePageView<LeaveData>>(() =>
     initialLeavePageView(leaveApiEnabled),
   );
@@ -106,8 +194,22 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   const idRef = useRef(newId());
   const busyRef = useRef(false);
   const activeRef = useRef(true);
+  const loadGeneration = useRef(0);
+  const noticeRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (notice) noticeRef.current?.focus();
+  }, [notice]);
+
+  const revealSubmission = useCallback((id: string) => {
+    idRef.current = newId();
+    setFilter('all');
+    setExpanded(id);
+    setSearch('');
+    setNotice(`已建立 nuni 請假紀錄，站內單號 ${id}。請另外完成校方正式請假程序。`);
+  }, []);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     if (!leaveApiEnabled) {
       setView({ status: 'unavailable' });
       return;
@@ -120,15 +222,21 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
         loadPersonalTimetable(uid, schoolId),
         listMyLeaveRequests(uid, schoolId),
       ]));
-      if (!activeRef.current) return;
+      if (!activeRef.current || generation !== loadGeneration.current) return;
+      // A timed-out submission may already have reached the server.
+      if (myRecords.some((record) => record.id === idRef.current)) {
+        revealSubmission(idRef.current);
+      }
       setView(leavePageSuccess({
         timetable: leaveCourseOptions(myTimetable.courses),
         records: myRecords,
       }, myRecords.length === 0));
     } catch (error) {
-      if (activeRef.current) setView(leavePageFailureFromError(error));
+      if (activeRef.current && generation === loadGeneration.current) {
+        setView(leavePageFailureFromError(error));
+      }
     }
-  }, [uid, schoolId, leaveApiEnabled]);
+  }, [uid, schoolId, leaveApiEnabled, revealSubmission]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -154,7 +262,12 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   const datesOk = validLeaveDates(startDate, endDate);
   const openCount = records.filter((item) => item.status === 'pending' || item.status === 'partial').length;
   const completedCount = records.filter((item) => item.status === 'completed').length;
+  const query = search.trim().normalize('NFKC').toLowerCase();
+  const searchHref = leaveRequestHref(search.trim(), schoolId);
   const visible = records.filter((item) => {
+    if (query && ![item.id, ...item.courses.map((course) => course.courseName)].some(
+      (value) => value.normalize('NFKC').toLowerCase().includes(query),
+    )) return false;
     if (filter === 'open') return item.status === 'pending' || item.status === 'partial';
     if (filter === 'completed') return item.status === 'completed';
     if (filter === 'withdrawn') return item.status === 'withdrawn';
@@ -181,7 +294,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
       setNotice('一次最多選擇 20 門課，請分開申請。');
       return;
     }
-    const duplicate = records.some((record) =>
+    const duplicate = records.find((record) =>
       record.status !== 'withdrawn' &&
       record.startDate === startDate &&
       record.endDate === endDate &&
@@ -189,23 +302,28 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
       record.courses.some((course) => selectedIds.includes(course.courseId)),
     );
     if (duplicate) {
-      setNotice('這段日期有同一門課的申請紀錄。請先查看下方紀錄，避免重複送出。');
+      setFilter('all');
+      setSearch('');
+      setExpanded(duplicate.id);
+      setNotice(`這段日期已有同一門課的申請，站內單號 ${duplicate.id}。請查看這筆紀錄。`);
       return;
     }
     busyRef.current = true;
+    loadGeneration.current++;
     setBusy(true);
     setNotice('');
     try {
       // Mirrors the existing appeal flow: the server checks a school-scoped timetable.
-      await ensureTimetableIndex(uid, schoolId, loaded.timetable);
-      await submitLeaveRequest(uid, {
+      await withLeaveLoadTimeout(ensureTimetableIndex(uid, schoolId, loaded.timetable));
+      if (!activeRef.current) return;
+      const result = await submitLeaveRequest(uid, {
         schoolId, requestId: idRef.current, startDate, endDate, kind, period,
         detail: detail.trim(), courseIds: selectedIds,
       });
-      idRef.current = newId();
+      if (!activeRef.current) return;
+      revealSubmission(result.id);
       setDetail('');
       setSelection(null);
-      setNotice('已建立 nuni 請假紀錄。請記得另外完成校方正式請假程序。');
       await load();
     } catch (error) {
       if (activeRef.current) setNotice(leaveRequestError(error));
@@ -219,12 +337,16 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   async function withdraw(id: string) {
     if (busyRef.current || !window.confirm('確定撤回這份尚未核閱的請假紀錄？')) return;
     busyRef.current = true;
+    loadGeneration.current++;
     setBusy(true);
     setNotice('');
     try {
       await withdrawLeaveRequest(uid, id);
       if (!activeRef.current) return;
-      setNotice('這份站內請假紀錄已撤回。若曾在學校系統申請，仍須另外處理。');
+      if (id === linkedRequestId) setLookupVersion((current) => current + 1);
+      setFilter((current) => current === 'all' ? 'all' : 'withdrawn');
+      setExpanded(id);
+      setNotice(`站內單號 ${id} 已撤回。若曾在學校系統申請，仍須另外處理。`);
       await load();
     } catch (error) {
       if (activeRef.current) setNotice(leaveRequestError(error));
@@ -237,6 +359,8 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
   }
 
   const showWorkspace = view.status === 'empty' || view.status === 'ready';
+  const linkedHref = leaveRequestHref(linkedRequestId, linkedSchoolId);
+  const loginHref = '/login?returnUrl=' + encodeURIComponent(returnUrl);
 
   return (
     <SiteShell title="請假" schoolName={schoolName} subtitle="選日期、帶入課表、查看老師回覆。">
@@ -256,13 +380,36 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
           </div>
         </section>
 
+        {leaveApiEnabled && linkedRequestId !== null && (
+          !linkedHref ? (
+            <p role="alert" className={styles.notice}>請假連結中的單號或校園格式不正確，請重新從通知開啟。</p>
+          ) : linkedSchoolId !== null && linkedSchoolId !== schoolId ? (
+            <p role="alert" className={styles.notice}>
+              這筆請假紀錄屬於連結指定的校園。<Link href={linkedHref}>切換至通知校園查詢</Link>
+            </p>
+          ) : (
+            <LeaveRequestLookup
+              key={linkedRequestId + ':' + lookupVersion}
+              uid={uid}
+              schoolId={schoolId}
+              schoolName={schoolName}
+              requestId={linkedRequestId}
+              loginHref={loginHref}
+              busy={busy}
+              onWithdraw={(id) => void withdraw(id)}
+            />
+          )
+        )}
+
         <LeaveStatusPanel
           kind="submit"
           view={view}
-          loginHref={'/login?returnUrl=' + encodeURIComponent('/leave')}
+          loginHref={loginHref}
           onRetry={() => void load()}
         />
-        {notice && showWorkspace && <p role="status" aria-live="polite" className={styles.notice}>{notice}</p>}
+        {notice && (
+          <p ref={noticeRef} tabIndex={-1} role="status" className={styles.notice}>{notice}</p>
+        )}
 
         {showWorkspace && (
           <>
@@ -275,11 +422,11 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
             <div className={styles.layout}>
               <section className={styles.panel} aria-labelledby="leave-new-title">
                 <div className={styles.sectionHead}>
-                  <div><p className={styles.kicker}>NEW REQUEST</p><h2 id="leave-new-title">新增請假</h2></div>
+                  <div><p className={styles.kicker}>NEW REQUEST</p><h2 id="leave-new-title" tabIndex={-1}>新增請假</h2></div>
                   <span className={styles.step}>01 — 03</span>
                 </div>
                 <div className={styles.form}>
-                  <fieldset className={styles.fieldset}>
+                  <fieldset className={styles.fieldset} disabled={busy}>
                     <legend>1. 請哪一天？</legend>
                     <div className={styles.quickDates}>
                       <button type="button" aria-pressed={startDate === today && endDate === today} onClick={() => setQuickDate(today)}>今天</button>
@@ -308,7 +455,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                     </div>
                   </fieldset>
 
-                  <fieldset className={styles.fieldset}>
+                  <fieldset className={styles.fieldset} disabled={busy}>
                     <legend>2. 會缺哪幾門課？</legend>
                     <p className={styles.help}>根據所選日期，預先勾選課表裡星期相符的課程；可以自行增減。</p>
                     {available.length === 0
@@ -330,7 +477,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                         </>}
                   </fieldset>
 
-                  <fieldset className={styles.fieldset}>
+                  <fieldset className={styles.fieldset} disabled={busy}>
                     <legend>3. 假別與補充說明</legend>
                     <div className={styles.kindGrid} role="group" aria-label="請假類型">
                       {LEAVE_KINDS.map((item) => (
@@ -352,8 +499,17 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
               <section className={styles.history} aria-labelledby="leave-history-title">
                 <div className={styles.sectionHead}>
                   <div><p className={styles.kicker}>YOUR REQUESTS</p><h2 id="leave-history-title">我的請假紀錄</h2></div>
-                  <button type="button" className={styles.refresh} disabled={busy} onClick={() => void load()}>更新</button>
+                  <div className={styles.historyActions}>
+                    <a className={styles.textLink} href="#leave-new-title">新增請假</a>
+                    <button type="button" className={styles.refresh} disabled={busy} onClick={() => { setLookupVersion((current) => current + 1); void load(); }}>更新</button>
+                  </div>
                 </div>
+                {records.length > 0 && (
+                  <label className={styles.field}>搜尋最近 100 筆紀錄
+                    <input type="search" placeholder="輸入站內單號或課程名稱" value={search} onChange={(event) => setSearch(event.target.value)} />
+                  </label>
+                )}
+                {searchHref && <p className={styles.help}><Link className={styles.textLink} href={searchHref}>依完整單號查詢紀錄，包含較早的申請</Link></p>}
                 <div className={styles.filters} role="group" aria-label="篩選請假紀錄">
                   {([
                     ['all', '全部'], ['open', '處理中'],
@@ -363,7 +519,12 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                   ))}
                 </div>
                 {visible.length === 0
-                  ? <div className={styles.empty}><strong>{view.status === 'empty' || filter === 'all' ? LEAVE_COPY.emptySubmit : '這個狀態沒有紀錄'}</strong><p>{LEAVE_COPY.emptySubmitHint}</p></div>
+                  ? <div className={styles.empty}>
+                      <strong>{!records.length ? LEAVE_COPY.emptySubmit : '沒有符合條件的紀錄'}</strong>
+                      {!records.length ? <p>{LEAVE_COPY.emptySubmitHint}</p> : (
+                        <button type="button" className={styles.refresh} onClick={() => { setSearch(''); setFilter('all'); }}>顯示全部紀錄</button>
+                      )}
+                    </div>
                   : <ul className={styles.requests}>
                       {visible.map((record) => {
                         const counts = countLeaveReviews(record.courses || []);
@@ -382,18 +543,7 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled }: {
                             <button type="button" aria-expanded={isExpanded} onClick={() => setExpanded(isExpanded ? null : record.id)}>{isExpanded ? '收合明細' : '查看明細'}</button>
                             {record.status === 'pending' && <button type="button" disabled={busy} onClick={() => void withdraw(record.id)}>撤回</button>}
                           </div>
-                          {isExpanded && (
-                            <div className={styles.details}>
-                              {record.detail && <p className={styles.description}>你的說明：{record.detail}</p>}
-                              <ul>
-                                {record.courses.map((course) => <li key={course.courseId}>
-                                  <div><strong>{course.courseName}</strong><span>{LEAVE_REVIEWS[course.reviewStatus] || '待核閱'}</span></div>
-                                  {course.reviewerNote && <p>師長回覆：{course.reviewerNote}</p>}
-                                </li>)}
-                              </ul>
-                              <p>站內結果不等於學校正式核假。正式出缺勤仍請向學校確認。</p>
-                            </div>
-                          )}
+                          {isExpanded && <LeaveRequestDetails record={record} />}
                         </li>;
                       })}
                     </ul>}

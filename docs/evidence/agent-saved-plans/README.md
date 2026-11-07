@@ -116,6 +116,10 @@ Browser fixture 增加 390px 淺色與 320px 深色各一個 `receipt-date-query
 
 定稿以 Node 22.23.4、專案原有 Expo Jest 設定完成 `nuniReceiptQuery`、`StudyAgenda`、`nuniQuizAssistant` 與 `assignmentQueryFilter` **4 組、125 項回歸測試，全數通過且沒有 skipped**。其中真正畫面驗證三種繳交日期問法都會進入澄清流程，不能只靠服務測試通過而讓入口仍查錯日期欄位。6 個異動手機 TypeScript／TSX 檔 ESLint 無警告或錯誤；Browser fixture 建置、Python 語法與 whitespace 檢查通過。本機 Chromium 的既有 socket 限制未改動；新 head 的完整型別、全量測試及真瀏覽器結果以 PR Checks 為準。
 
+發布後主線先後納入既有的校園服務接續操作（`162d3aa6`／#510）及助理越權／逾時中止與對話隔離（`ff8a5b9c`／#518）。`02353340` 的遠端 CI 已通過與 `162d3aa6` 的合併版本，但不能代表之後的 `ff8a5b9c`。本分支因此正常合併最新主線，保留 `replanInFlight` 與 `campusSessionId` 兩個各自負責的狀態：保存計畫失效仍中止重新規劃，校園模式的同一對話／重試仍沿用 session ID，換帳號／學校則重新建立對話。主線的服務接續與後端保護完整保留，沒有歸入本輪自行新增的功能。
+
+解決唯一的 ref 宣告衝突後，以同一套 Node 22／Expo 設定重跑上述 4 組，加上正式助理畫面、助理分派及原生作業／測驗導覽，**7 組、344 項全部通過，沒有 skipped**。四個整合檔 ESLint 為 0 errors，保留助理畫面原有兩項 effect dependency warnings。更新後仍以 PR 最新 head 的遠端 CI 為準，不沿用前次合併版本的結果。
+
 ## 保存資料的一般邊界
 
 - 保存時間、原規劃日期及原整理時間各自顯示。歷史優先順序標為「規劃當時」，不用保存時間冒充資料更新時間。

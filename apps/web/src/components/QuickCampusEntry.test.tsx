@@ -59,7 +59,7 @@ it('keeps manually typed questions private until the user asks for AI interpreta
 });
 
 it('never exposes a previous AI answer after a transcript change or logout', async () => {
-  let resolve!: (result: any) => void;
+  let resolve!: (result: Awaited<ReturnType<typeof interpretCampusRequest>>) => void;
   vi.mocked(interpretCampusRequest).mockReturnValue(new Promise(done => { resolve = done; }));
   const view = render(<QuickCampusEntry />);
   fireEvent.click(screen.getByText('模擬語音輸入'));
@@ -94,4 +94,18 @@ it.each([false, true])('filters readonly destinations from voice results with en
   expect(
     screen.getByRole('link', { name: (_, el) => (el.getAttribute('href') || '').startsWith('/classroom') }).getAttribute('href'),
   ).toContain('/classroom');
+});
+
+it('offers semester grades and their preview when the model returns the shared grades destination', async () => {
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood', source: 'model', summary: '查詢學期成績',
+    destinations: ['/grades'], clarifyingQuestion: null,
+    previews: [{ destination: '/grades', status: 'available', source: 'campus-platform',
+      message: '已匯入兩筆成績', items: [{ title: '資料庫', detail: '91 分' }] }],
+  });
+  render(<QuickCampusEntry />);
+  fireEvent.click(screen.getByText('模擬語音輸入'));
+  const grades = await screen.findByRole('link', { name: /已匯入兩筆成績/ });
+  expect(grades.getAttribute('href')).toBe('/grades?tab=semester');
+  expect(grades.textContent).toContain('資料庫 · 91 分');
 });

@@ -92,6 +92,31 @@ test('forwards selected school name without treating browsing as authorization',
     },
   });
 });
+test('forwards a conversation sessionId on the callable context', async () => {
+  await askCampusAssistant({ ...input(), sessionId: '  stable-session  ' });
+  expect(mockCallable).toHaveBeenCalledWith({
+    messages: [{ role: 'user', content: '查公告' }],
+    context: {
+      schoolId: 'pu',
+      screen: 'campus-assistant',
+      locale: 'zh-TW',
+      timezone: 'Asia/Taipei',
+      sessionId: 'stable-session',
+    },
+  });
+});
+test.each(['', '   '])('does not invent or send an empty sessionId %p', async (sessionId) => {
+  await askCampusAssistant({ ...input(), sessionId });
+  expect(mockCallable).toHaveBeenCalledWith({
+    messages: [{ role: 'user', content: '查公告' }],
+    context: {
+      schoolId: 'pu',
+      screen: 'campus-assistant',
+      locale: 'zh-TW',
+      timezone: 'Asia/Taipei',
+    },
+  });
+});
 test.each([
   {},
   { content: 'fallback', run: { status: 'failed' } },
