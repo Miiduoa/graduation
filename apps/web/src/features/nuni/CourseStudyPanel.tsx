@@ -76,7 +76,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [error, setError] = useState(initial.error);
   const [downloadStatus, setDownloadStatus] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const [manualCopyText, setManualCopyText] = useState<string | null>(null);
   const downloadUrl = useRef<string | null>(null);
+  const manualCopyInput = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const readingFocus = useRef<HTMLDivElement>(null);
@@ -87,6 +89,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const inputId = useId();
   const progressInputId = useId();
   const pasteId = useId();
+  const manualCopyId = useId();
   const sectionId = useId();
   const modeId = useId();
   const headingId = useId();
@@ -133,6 +136,11 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   function changePractice(action: StudyPracticeAction) {
+    // A copied snapshot must not linger after an answer, hint or question changes.
+    copyRequest.current += 1;
+    setManualCopyText(null);
+    setDownloadStatus('');
+    setDownloadError('');
     setPracticeRound((previous) => !previous || previous.revision !== session.revision
       ? previous : updateStudyPracticeRound(previous, action));
   }
@@ -147,6 +155,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       setMode(practiceRound.mode);
     }
     setPracticeRound(null);
+    clearDownload();
   }
 
   useEffect(() => {
@@ -163,6 +172,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     if (restorePreview) restoreHeading.current?.focus();
   }, [restorePreview]);
 
+  useEffect(() => {
+    if (manualCopyText !== null) manualCopyInput.current?.focus();
+  }, [manualCopyText]);
+
   // The practice action buttons disappear when returning to a passage. Move
   // keyboard/screen-reader focus to the newly visible source instead of body.
   // Ordinary select changes keep focus on their control for keyboard users.
@@ -174,6 +187,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   function clearDownload() {
     copyRequest.current += 1;
+    setManualCopyText(null);
     if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
     downloadUrl.current = null;
     setDownloadStatus('');
@@ -233,21 +247,25 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   async function copyPracticeNotes() {
     if (!source || !practiceRound || practiceRound.revision !== session.revision) return;
     const request = ++copyRequest.current;
+    // Snapshot exactly the current user-visible disclosures at the click.
+    const text = buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound);
     setDownloadStatus('');
     setDownloadError('');
+    setManualCopyText(null);
     if (!navigator.clipboard?.writeText) {
-      setDownloadError('這個瀏覽器無法直接複製，請使用「下載本輪練習」保存紀錄。');
+      setManualCopyText(text);
+      setDownloadError('這個瀏覽器無法直接複製，請在下方選取文字手動複製，或下載 TXT／JSON。');
       return;
     }
     try {
-      // Only a deliberate click copies the same answer-gated text as TXT export.
-      await navigator.clipboard.writeText(buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound));
+      await navigator.clipboard.writeText(text);
       if (copyRequest.current === request) {
         setDownloadStatus('已複製本輪練習紀錄到剪貼簿；內容含個人作答，請留意貼上位置。');
       }
     } catch {
       if (copyRequest.current === request) {
-        setDownloadError('無法存取剪貼簿，請改用「下載本輪練習」；目前的試答仍保留。');
+        setManualCopyText(text);
+        setDownloadError('無法存取剪貼簿，已提供手動選取的文字；本輪試答仍保留，也可下載 TXT／JSON。');
       }
     }
   }
@@ -436,6 +454,16 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         {!practiceRound && <p className={styles.note}>進度檔可還原閱讀位置、筆記、講解、試答與問題草稿，也含練習參考回答；文字筆記方便直接閱讀。檔案未加密，請自行保管。</p>}
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
         {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
+        {practiceRound && manualCopyText !== null && <section className={styles.manualCopy} aria-label="手動複製本輪紀錄">
+          <label className={styles.field} htmlFor={manualCopyId}>手動複製本輪紀錄
+            <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
+              onFocus={(event) => event.currentTarget.select()}
+              onClick={(event) => event.currentTarget.select()} />
+          </label>
+          <p className={styles.note}>可長按選取文字，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
+            內容可能含教材與個人試答，請注意貼上位置。</p>
+          <button type="button" className={styles.button} onClick={() => setManualCopyText(null)}>收起手動複製文字</button>
+        </section>}
         {source.warnings.length > 0 && <details className={styles.reference}>
           <summary>來源注意事項（{source.warnings.length}）</summary>
           {source.warnings.map((warning, index) => <p key={index} className={styles.note}>{warning}</p>)}

@@ -137,3 +137,8 @@
 @media (max-width: 900px) { .evidencePath { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .studyStepsBody { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 520px) { .evidenceStep, .studyStepContent { padding: 14px; } }
+
+/* Read-only manual selection when a mobile WebView denies clipboard access. */
+.manualCopy { margin: 16px 0; padding: 16px; border: 1px solid var(--border-strong); background: var(--surface); }
+.manualCopy textarea { min-height: 144px; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .manualCopy { padding: 14px; } }

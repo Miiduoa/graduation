@@ -335,3 +335,74 @@ it('reports a fallback without changing the practice round when clipboard is uns
     restoreClipboard();
   }
 });
+
+it('offers a selectable local fallback on unsupported mobile clipboard and clears it after editing', async () => {
+  const restoreClipboard = mockPracticeClipboard();
+  try {
+    mount();
+    await restore();
+    begin();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '當輪主鍵試答（不可丟失）' } });
+    expect(screen.queryByRole('region', { name: '手動複製本輪紀錄' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    const fallback = screen.getByRole('region', { name: '手動複製本輪紀錄' });
+    const manual = screen.getByLabelText('手動複製本輪紀錄') as HTMLTextAreaElement;
+    expect(fallback.contains(manual)).toBe(true);
+    expect(manual.readOnly).toBe(true);
+    expect(manual.value).toContain('當輪主鍵試答（不可丟失）');
+    expect(manual.value).not.toContain(first.answer);
+    expect(manual.value).not.toContain(second.answer);
+    expect(manual.value).not.toContain('原本的主鍵試答');
+    expect(document.activeElement).toBe(manual);
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '修改後的主鍵試答' } });
+    expect(screen.queryByRole('region', { name: '手動複製本輪紀錄' })).toBeNull();
+    expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('修改後的主鍵試答');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    restoreClipboard();
+  }
+});
+
+it('shows only the revealed answer in manual selection after clipboard permission denial', async () => {
+  const restoreClipboard = mockPracticeClipboard(vi.fn().mockRejectedValue(new Error('denied')));
+  try {
+    mount();
+    await restore();
+    begin();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '我對主鍵的說明' } });
+    fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    await screen.findByRole('region', { name: '手動複製本輪紀錄' });
+    const manual = screen.getByLabelText('手動複製本輪紀錄') as HTMLTextAreaElement;
+    expect(manual.value).toContain(first.answer);
+    expect(manual.value).not.toContain(second.answer);
+    fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
+    expect(screen.queryByRole('region', { name: '手動複製本輪紀錄' })).toBeNull();
+    expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('');
+  } finally {
+    restoreClipboard();
+  }
+});
+
+it('ignores a late clipboard denial after a learner switches questions', async () => {
+  let deny!: (reason: Error) => void;
+  const writeText = vi.fn(() => new Promise<void>((_resolve, reject) => { deny = reject; }));
+  const restoreClipboard = mockPracticeClipboard(writeText);
+  try {
+    mount();
+    await restore();
+    begin();
+    fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '已離開的第一題試答' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製本輪紀錄' }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
+    await act(async () => deny(new Error('permission denied')));
+    expect(screen.queryByRole('region', { name: '手動複製本輪紀錄' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText(second.question)).toBeTruthy();
+    expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('');
+  } finally {
+    restoreClipboard();
+  }
+});
