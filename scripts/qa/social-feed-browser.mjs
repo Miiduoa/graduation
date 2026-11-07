@@ -65,6 +65,7 @@ try {
         title: i === 4 ? '上學期的專題集合' : `校園貼文 ${i}`,
         content: '合成驗收資料：保留搜尋條件，接續找回較舊的校園討論。',
         createdAt: new Date(1700000000000 + Math.floor(i / 7) * 1000), likes: i === 243 ? 1 : 0, likedBy: [],
+        mediaUrls: i === 244 ? ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=="] : [],
       });
     }
     batch.set(db.doc('schools/other/campusPosts/other-only'), {
@@ -311,6 +312,15 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
     try {
       await send('Emulation.setDeviceMetricsOverride',{width:320,height:720,deviceScaleFactor:1,mobile:false});
       await begin('?theme=light&case=long-list');
+      await check('long-list:image-only link is named and keyboard focusable', () => {
+        const imageLink = [...document.querySelectorAll('article a')]
+          .find(link => link.querySelector('img') && link.getAttribute('href')?.includes('/post/post-244?'));
+        if (!imageLink) return false;
+        imageLink.focus();
+        return document.activeElement === imageLink &&
+          imageLink.getAttribute('aria-label') === '查看貼文圖片：校園貼文 244' &&
+          imageLink.querySelector('img')?.getAttribute('alt') === '';
+      });
       await search('上學期的專題集合');
       for (const count of [120,180,240,245]) {
         await focusMore();await key('Enter','Enter',13);await awaitCount(count);

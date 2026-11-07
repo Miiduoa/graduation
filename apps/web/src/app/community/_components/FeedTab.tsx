@@ -947,7 +947,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   </p>
                 </Link>
 
-                {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} schoolId={schoolId} />}
+                {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} postTitle={item.title} schoolId={schoolId} />}
 
                 {(item.tags ?? []).length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
@@ -1091,11 +1091,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   );
 }
 
-function MediaGrid({ uris, postId, schoolId }: { uris: string[]; postId: string; schoolId: string }) {
+function MediaGrid({ uris, postId, postTitle, schoolId }: { uris: string[]; postId: string; postTitle: string; schoolId: string }) {
+  const accessibleName = postTitle.trim() ? `查看貼文圖片：${postTitle.trim()}` : '查看貼文圖片';
   if (uris.length === 1) {
     return (
       <Link
         href={`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`}
+        aria-label={accessibleName}
         style={{
           display: 'block',
           marginTop: 10,
@@ -1121,6 +1123,7 @@ function MediaGrid({ uris, postId, schoolId }: { uris: string[]; postId: string;
   return (
     <Link
       href={`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`}
+        aria-label={accessibleName}
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(2, 1fr)',
