@@ -15,6 +15,7 @@ import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
 
 import { HomeFeedScreen } from './social/HomeFeedScreen';
+import { TitleHistoryLauncher } from './social/TitleHistorySearch';
 import { BoardsScreen } from './social/BoardsScreen';
 import { RealtimeSocialScreen } from './social/RealtimeSocialScreen';
 import { StudyBuddyPanel } from './community/StudyBuddyPanel';
@@ -126,6 +127,9 @@ export function CommunityScreen(props: Record<string, unknown>) {
       {/* ─── Content ─── */}
       <CampusSocialNavProvider navigation={stackNav}>
         <View style={{ flex: 1 }}>
+          {activeTab === 'feed' && (
+            <TitleHistoryLauncher onOpenPost={({ id }) => stackNav?.navigate?.('PostDetail', { postId: id })} />
+          )}
           {activeTab === 'feed' && <HomeFeedScreen />}
           {activeTab === 'boards' && <BoardsScreen />}
           {activeTab === 'realtime' && (
