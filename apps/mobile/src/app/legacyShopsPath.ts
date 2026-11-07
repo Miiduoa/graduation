@@ -2,5 +2,5 @@
 export function rewriteLegacyShopsPath(path: string): string {
   return path
     .replace(/(^|\/)shops(?=\/|\?|$)/, '$1sso-login')
-    .replace(/(^|\/)(?:staff|department|dormitory)(?=\/|\?|$)/, '$1home');
+    .replace(/(^|\/)(?:staff|department)(?=\/|\?|$)/, '$1home');
 }

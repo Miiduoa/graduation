@@ -86,6 +86,11 @@ export const CAMPUS_GROUP_LIMIT = 4;
 export const CAMPUS_GROUP_ORDER = [
   '校門口・往沙鹿', '校門口・往市區', '英才路側', '專用道', '校門口・往校內', '校內',
 ] as const;
+// Older favorites stored a campus group label over the name of a single representative stop.
+const legacyCatalogGroupNames = new Set<string>([...CAMPUS_GROUP_ORDER, '校門口']);
+export function isLegacyCatalogGroup(stop: TransitStop): boolean {
+  return isStaticTransitStop(stop) && legacyCatalogGroupNames.has(stop.name);
+}
 export const CAMPUS_SEGMENTS = [
   { key: '往沙鹿', group: '校門口・往沙鹿', wait: '校門口站牌・臺灣大道側' },
   { key: '往市區', group: '校門口・往市區', wait: '校門口站牌・臺灣大道側' },
@@ -911,7 +916,7 @@ export function campusHomeSummary(rows: CampusNextRow[], now: number): string {
 export function stopMapUrl(stop: TransitStop): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lon}&travelmode=walking`;
 }
-function readTransitRoutes(value: unknown): TransitRoute[] | null {
+function readTransitRoutes(value: unknown, fromCatalog = false): TransitRoute[] | null {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > 200) return null;
   const routes: TransitRoute[] = [];
@@ -922,7 +927,7 @@ function readTransitRoutes(value: unknown): TransitRoute[] | null {
     routes.push({
       name: route.name,
       direction: route.direction,
-      destination: publicPlaceName(route.destination) || route.destination,
+      destination: fromCatalog ? route.destination : publicPlaceName(route.destination) || route.destination,
     });
   }
   return routes;
@@ -940,7 +945,7 @@ function readStop(value: unknown): TransitStop | null {
     typeof value.catalogDate !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value.catalogDate) ||
     !Number.isFinite(Date.parse(value.catalogDate)) || Date.parse(value.catalogDate) > Date.now() + 5 * 60_000 ||
     new Date(value.catalogDate).toISOString().replace('.000Z', 'Z') !== value.catalogDate.replace('.000Z', 'Z')) return null;
-  const routes = readTransitRoutes(value.routes);
+  const routes = readTransitRoutes(value.routes, true);
   if (!routes) return null;
   return { ...stop, source: 'taichung-open-data', catalogDate: value.catalogDate, routes };
 }
