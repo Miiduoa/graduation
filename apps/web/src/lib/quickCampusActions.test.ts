@@ -41,13 +41,14 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
-  // The leave workflow added these two routes to main after the original voice
-  // feature was developed. They are not part of the voice allowlist until the
-  // related authenticated interaction and review permissions are integrated.
+  // These directory entries have not been added to the shared Web/native voice
+  // navigation contract. Publishing a Web service does not create a native route
+  // or authorize an authenticated action through speech.
   expect(serviceRoutes.filter(href => !shortcutSet.has(href))).toEqual([
     '/leave',
     '/leave/review',
     '/school-lms',
+    '/social',
   ]);
 });
 

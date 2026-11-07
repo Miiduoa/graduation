@@ -7,6 +7,7 @@ import {
   flattenCampusServices,
   presentCampusService,
   searchCampusServices,
+  serviceAccessLabel,
   visibleCampusServices,
 } from './campusServices';
 
@@ -29,6 +30,17 @@ it('lists lost-found as a school-account service, not a platform Google task', (
   expect(lostFound?.access).toBe('school');
   expect(lostFound?.access).not.toBe('platform');
 });
+
+it.each(['Google', '公開 貼文', '跨校'])(
+  'finds public exchange through %s without requiring school sign-in availability',
+  (query) => {
+    const service = searchCampusServices(query, 'connect').find((entry) => entry.href === '/social');
+    expect(service?.access).toBe('platform');
+    expect(serviceAccessLabel(service!.access, { loading: false, studentId: false })).toBe('Google 帳號');
+    expect(directoryCampusServices().some((entry) => entry.href === '/social')).toBe(true);
+    expect(CAMPUS_SERVICES.find((entry) => entry.href === '/community')?.access).toBe('school');
+  },
+);
 
 it.each(['WOW Class', 'TronClass', 'LMS', '玩課雲'])(
   'finds the school course secondary through %s under 課程與作業',

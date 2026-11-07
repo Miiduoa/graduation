@@ -32,9 +32,41 @@ it('keeps the requested task through the native OAuth form', async () => {
 });
 it('recognizes an authenticated account and avoids school-login redirect loops', () => {
   mocks.session = { platformAccountId: 'a' };
-  render(<NuniSignIn returnUrl="/grades" />);
+  render(<NuniSignIn returnUrl="/grades?tab=semester" />);
   expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/classroom');
   expect(mocks.request).not.toHaveBeenCalled();
+});
+it.each([
+  '/timetable?schoolId=pu#today',
+  '/calendar?campus=ntu#week',
+  '/import?campus=nthu',
+  '/dormitory?schoolId=ntu',
+  '/food?tenant=pu&order=order-1',
+  '/shops?campus=nthu',
+  '/map?schoolId=pu&focus=library#directions',
+  '/grades',
+  '/classroom/material-bookmarks',
+])('keeps the Google task %s for both a new and an existing account', async (destination) => {
+  const view = render(<NuniSignIn returnUrl={destination} />);
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  const action = new URL(button.closest('form')!.action);
+  expect(action.searchParams.get('returnUrl')).toBe(destination);
+  mocks.session = { platformAccountId: 'a' };
+  view.rerender(<NuniSignIn returnUrl={destination} />);
+  expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(destination);
+});
+it('keeps the campus when Next normalizes the existing-account shops link', () => {
+  mocks.session = { platformAccountId: 'a' };
+  render(<NuniSignIn returnUrl="/shops/?campus=all" />);
+  expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/shops?campus=all');
+});
+it('explains that Google map favorites stay on this device', async () => {
+  render(<NuniSignIn returnUrl="/map?schoolId=pu&focus=library#directions" />);
+  expect(screen.getByText('登入後回到地圖，在此裝置收藏常用地點。')).toBeTruthy();
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  expect(new URL(button.closest('form')!.action).searchParams.get('returnUrl')).toBe(
+    '/map?schoolId=pu&focus=library#directions',
+  );
 });
 it('returns a new Google session to course feedback with its campus and section intact', async () => {
   const destination = '/grades?schoolId=tw-pu&tab=feedback#recent';

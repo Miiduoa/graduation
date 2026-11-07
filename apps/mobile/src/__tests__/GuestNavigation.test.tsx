@@ -186,7 +186,7 @@ test('a guest can open the real import route without a school or platform accoun
 test.each([
   ['campus://campus-one', 'NuniWorkspace', 'platform-workspace'],
   ['campus://sso-login', 'SSOLogin', 'school-login-form'],
-  ['campus://shops', 'SSOLogin', 'school-login-form'],
+  ['campus://shops', 'NuniWorkspace', 'platform-workspace'],
 ])('a cold %s opens before any school authentication', async (url, route, target) => {
   mockInitialUrl = url;
   const navigation = createNavigationContainerRef();
@@ -197,12 +197,49 @@ test.each([
   );
   await view.findByTestId(target);
   expect(navigation.getCurrentRoute()?.name).toBe(route);
+  if (url === 'campus://shops') {
+    expect(navigation.getCurrentRoute()?.params).toEqual({ tab: 'food' });
+    expect(view.queryByTestId('school-login-form')).toBeNull();
+  }
   expect(navigation.canGoBack()).toBe(true);
   act(() => navigation.goBack());
   await view.findByTestId('login-landing');
   fireEvent.press(view.getByTestId('school-login-start'));
   await view.findByTestId('school-login-form');
 });
+
+test.each(['cold', 'warm'])('a %s legacy food link opens for a Google-only account without changing school identity', async (start) => {
+  mockPlatformSession = { platformAccountId: 'google-only' };
+  mockBrowsingSchoolId = 'nthu';
+  const url = 'campus://shops?schoolId=pu&campus=pu&tab=merchant&role=admin' +
+    '&assistantAccountId=other&platformAccountId=other&context=secret&token=secret';
+  if (start === 'cold') mockInitialUrl = url;
+  const navigation = createNavigationContainerRef();
+  const view = render(
+    <NavigationContainer ref={navigation} linking={preAuthLinking}>
+      <PreAuthStack />
+    </NavigationContainer>,
+  );
+  if (start === 'warm') {
+    await view.findByTestId('login-landing');
+    await waitFor(() => expect(mockLinkListener).toBeDefined());
+    act(() => mockLinkListener?.({ url }));
+  }
+  await view.findByTestId('platform-workspace');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+  expect(navigation.getCurrentRoute()?.params).toEqual({ tab: 'food', schoolId: 'pu', campus: 'pu' });
+  expect(view.queryByTestId('school-login-form')).toBeNull();
+  expect(mockBrowsingSchoolId).toBe('nthu');
+  expect(mockSchoolAuth).toMatchObject({ user: null, profile: null });
+  expect(mockPlatformSession).toEqual({ platformAccountId: 'google-only' });
+});
+
+test.each(['shops/vendor-one', '/shops/vendor/vendor-one', 'shops/detail/order-one?schoolId=pu'])(
+  'an unsupported legacy detail %s does not resolve to a food success route',
+  (path) => {
+    expect(preAuthLinking.getStateFromPath?.(path, preAuthLinking.config)).toBeUndefined();
+  },
+);
 
 test('a warm platform link works in the school-signed-out stack and cleans up its subscription', async () => {
   const navigation = createNavigationContainerRef();
