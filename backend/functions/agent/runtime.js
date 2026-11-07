@@ -15,13 +15,40 @@ const { evaluateAnswer } = require('./evaluateAnswer');
 const { executeCampusAssistantCore } = require('./executeCampusAssistantCore');
 const { runTool } = require('./tools/registry');
 const { getIntentWritePlan } = require('./intentWritePlan');
+const { isAuthorizationFailure, isAuthorizationDeniedResult } = require('./authorizationFailure');
 const {
-  sanitizeAssistantMessagesForRuntime,
+  redactSensitiveText,
   isPromptInjectionAttempt,
   isThirdPartyPiiStoreAttempt,
   isSelfHarmRiskMessage,
   isWellbeingTopic,
 } = require('./safety');
+
+// Handle questions about a suspicious message locally; quoted or reported text
+// never grants authority to run a tool. Check separate instructions on their own.
+const quotedPassage = /「[^」]+」|『[^』]+』|“[^”]+”|«[^»]+»|"[^"]+"|(?<!\w)'[^']+'(?!\w)/u;
+const reportedSpeech = /(?:叫我|要我|要求我|讓我|让我)|\b(?:asked|asks|told|tells) me to\b/iu;
+const cyberRisk = /(?:釣魚|钓鱼|詐騙|诈骗|防詐|防诈|危險|危险|檢舉|通報|phishing|scam|dangerous|unsafe)|\b(?:report|flag)\b/iu;
+const asksForAdvice = /(?:為何|为何|為什麼|为什么|怎麼|怎么|如何|哪|嗎|吗|是否|是不是|[?？])|\b(?:why|how|whether|should|is this|is that)\b/iu;
+const obeyInstruction = /(?:照做|照著做|照着做|照辦|照办)|\b(?:do (?:it|that)|follow (?:it|those instructions)|carry it out)\b/iu;
+
+function classifyPromptRisk(text) {
+  const quote = text.length <= 2000 ? text.match(quotedPassage)?.[0] : null;
+  const quotedAttack = quote && isPromptInjectionAttempt(quote.slice(1, -1));
+  if (!quotedAttack && !isPromptInjectionAttempt(text)) return null;
+  if (text.length > 2000) return 'blocked';
+
+  const outside = quotedAttack ? text.replace(quote, ' ') : text;
+  if (!cyberRisk.test(outside) || !asksForAdvice.test(outside)) return 'blocked';
+  const clauses = outside.split(/[。！？.!?；;，,\n]|(?:然後|然后|接著|接着|並且|并且|另外|也請|也请|\b(?:and then|also|instead)\b)/iu);
+  if (!quotedAttack && !clauses.some((clause) => reportedSpeech.test(clause))) return 'blocked';
+  for (const clause of clauses) {
+    if (obeyInstruction.test(clause)) return 'blocked';
+    if (!quotedAttack && reportedSpeech.test(clause)) continue;
+    if (isPromptInjectionAttempt(clause)) return 'blocked';
+  }
+  return 'safety_question';
+}
 
 function buildSafetyEnvelope({
   runId,
@@ -126,8 +153,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     windowMs: 5 * 60 * 1000,
   });
 
-  const incomingMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
-  const rawMessages = sanitizeAssistantMessagesForRuntime(incomingMessages);
+  const rawLastUserMessage = normalizeAssistantText(getLastUserMessage(request.data?.messages));
   const context =
     request.data?.context && typeof request.data.context === 'object' ? { ...request.data.context } : {};
   let sessionId = context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null;
@@ -136,9 +162,21 @@ async function runCampusAssistantWithAgentRuntime(request) {
     context.sessionId = sessionId;
   }
   const timeZone = context.timezone || 'Asia/Taipei';
-  const lastUserMessage = normalizeAssistantText(getLastUserMessage(rawMessages));
-  const rawLastUserMessage = normalizeAssistantText(getLastUserMessage(incomingMessages));
-  if (isPromptInjectionAttempt(rawLastUserMessage)) {
+  if (isSelfHarmRiskMessage(rawLastUserMessage)) {
+    return buildWellbeingEnvelope(runId, rawLastUserMessage);
+  }
+  const promptRisk = classifyPromptRisk(rawLastUserMessage);
+  if (promptRisk === 'safety_question') {
+    return buildSafetyEnvelope({
+      runId,
+      status: 'completed',
+      intentName: 'security_guidance',
+      intentSource: 'reported_request_guard',
+      content: '這類訊息可能想取得登入憑證，或讓助理跳過權限檢查。請用學校官網公布的聯絡方式查證。若已提供密碼或權杖，請從官方網站變更密碼或撤銷權杖，再向校方通報。',
+      evaluationReason: 'answered a reported suspicious request with local safety guidance',
+    });
+  }
+  if (promptRisk === 'blocked') {
     return buildSafetyEnvelope({
       runId,
       intentName: 'security_block',
@@ -160,9 +198,10 @@ async function runCampusAssistantWithAgentRuntime(request) {
       evaluationReason: 'blocked third-party PII storage attempt',
     });
   }
-  if (isSelfHarmRiskMessage(rawLastUserMessage) || isWellbeingTopic(rawLastUserMessage)) {
+  if (isWellbeingTopic(rawLastUserMessage)) {
     return buildWellbeingEnvelope(runId, rawLastUserMessage);
   }
+  const lastUserMessage = redactSensitiveText(rawLastUserMessage);
   let intentMeta = classifyIntent(lastUserMessage);
   if (intentMeta.name === 'submit_repair_request' && isDormRepairStatusQueryMessage(lastUserMessage)) {
     intentMeta = {
@@ -235,6 +274,59 @@ async function runCampusAssistantWithAgentRuntime(request) {
       .catch((e) => console.warn('[agentRuns] init failed:', e?.message || e));
   }
 
+  function withholdStepData() {
+    for (const step of steps) {
+      if (step.tool === 'security_containment') continue;
+      step.input = {};
+      step.output = { status: 'withheld' };
+    }
+  }
+
+  async function stopUnauthorizedRun(source) {
+    // A revoked scope must not leave earlier fetched records in user-readable logs.
+    withholdStepData();
+    await recordStep(source, {}, { success: false, errorCode: 'authorization_denied' }, 0);
+    await recordStep('security_containment', {}, {
+      action: 'stop_tool_run',
+      reason: 'authorization_denied',
+    }, 0);
+    const envelope = {
+      ...buildSafetyEnvelope({
+        runId,
+        intentName: 'security_block',
+        intentSource: 'authorization_guard',
+        content: '這次操作超出你的授權範圍，已停止。請確認帳號或助理權限後再試。',
+        evaluationReason: 'stopped unauthorized tool request',
+      }),
+      cards: [],
+    };
+    if (uid && schoolId) {
+      await db
+        .collection('users')
+        .doc(uid)
+        .collection('agentRuns')
+        .doc(runId)
+        .set({
+          runId,
+          userId: uid,
+          schoolId,
+          status: 'blocked',
+          intent: intentMeta.name,
+          steps,
+          toolCalls: steps,
+          actionProposals: [],
+          finalAnswer: envelope.content,
+          evaluationScore: envelope.evaluation.score,
+          evaluationReason: envelope.evaluation.reason,
+          actionQueueId: null,
+          errorCode: 'authorization_denied',
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true })
+        .catch(() => null);
+    }
+    return envelope;
+  }
+
   let prefetched = { scope: { uid, schoolId } };
   if (uid && schoolId) {
     const toolCtx = { uid, schoolId, groupId: context.groupId, timeZone, prefetched: {} };
@@ -265,29 +357,32 @@ async function runCampusAssistantWithAgentRuntime(request) {
       },
     ];
 
-    // A failed reader must not hide the data returned by the other sources.
+    // Ordinary source failures keep partial data. Authorization failures stop
+    // before another reader, write, or model can use a revoked scope.
     const readStarted = Date.now();
-    const settled = await Promise.allSettled(reads.map((item) => item.load()));
-    for (let index = 0; index < reads.length; index += 1) {
-      const item = reads[index];
-      const result = settled[index];
-      if (result.status === 'fulfilled') {
-        prefetched[item.key] = result.value;
-        const output = Array.isArray(result.value)
-          ? { count: result.value.length }
+    for (const item of reads) {
+      try {
+        const value = await item.load();
+        if (isAuthorizationDeniedResult(value)) return stopUnauthorizedRun(item.tool);
+        prefetched[item.key] = value;
+        const output = Array.isArray(value)
+          ? { count: value.length }
           : item.key === 'dailyBrief'
-            ? { hasBrief: Boolean(result.value?.summary) }
-            : { status: result.value?.status || 'available' };
+            ? { hasBrief: Boolean(value?.summary) }
+            : { status: value?.status || 'available' };
         await recordStep(item.tool, item.input, output, Date.now() - readStarted);
-      } else {
+      } catch (error) {
+        if (isAuthorizationFailure(error)) return stopUnauthorizedRun(item.tool);
         await recordStep(item.tool, item.input, { status: 'unavailable' }, Date.now() - readStarted);
       }
     }
     try {
       const prioritySummary = await runTool('getPrioritySummary', { ...toolCtx, prefetched }, {});
+      if (isAuthorizationDeniedResult(prioritySummary)) return stopUnauthorizedRun('getPrioritySummary');
       prefetched.prioritySummary = prioritySummary;
       await recordStep('getPrioritySummary', {}, prioritySummary, Date.now() - readStarted);
-    } catch {
+    } catch (error) {
+      if (isAuthorizationFailure(error)) return stopUnauthorizedRun('getPrioritySummary');
       await recordStep('getPrioritySummary', {}, { status: 'unavailable' }, Date.now() - readStarted);
     }
 
@@ -324,6 +419,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
               prefetched,
             };
             const writeResult = await runTool(writePlan.toolName, writeCtx, toolInput);
+            if (isAuthorizationDeniedResult(writeResult)) return stopUnauthorizedRun(writePlan.toolName);
             prefetched = {
               ...prefetched,
               autoWriteResults: {
@@ -336,6 +432,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
             await recordStep(writePlan.toolName, toolInput, writeResult, Date.now() - tw0);
           }
         } catch (e) {
+          if (isAuthorizationFailure(e)) return stopUnauthorizedRun(writePlan.toolName);
           await recordStep(
             'intent_write_error',
             { intent: intentMeta.name, tool: writePlan.toolName },
@@ -351,7 +448,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     ...request,
     data: {
       ...request.data,
-      messages: rawMessages,
+      messages: [{ role: 'user', content: lastUserMessage }],
       context,
     },
   };
@@ -367,6 +464,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
       routingIntent: intentMeta.name,
     });
   } catch (err) {
+    if (isAuthorizationFailure(err)) return stopUnauthorizedRun('executeCampusAssistantCore');
     if (uid && schoolId) {
       await db
         .collection('users')
@@ -393,15 +491,19 @@ async function runCampusAssistantWithAgentRuntime(request) {
   const response = { ...responseRest };
   delete response.modelTrace;
 
-  const evaluation = await evaluateAnswer({
-    userQuestion: lastUserMessage,
-    answerText: response.content,
-    intentConfidence: intentMeta.confidence,
-  });
+  const runStatus = modelTrace?.securityEvent ? 'blocked' : 'completed';
+  if (runStatus === 'blocked') withholdStepData();
+  const evaluation = runStatus === 'blocked'
+    ? { score: 1, needsUserReview: false, reason: 'stopped unauthorized tool request' }
+    : await evaluateAnswer({
+      userQuestion: lastUserMessage,
+      answerText: response.content,
+      intentConfidence: intentMeta.confidence,
+    });
 
   let actionQueueId = null;
   let clarifyingQuestion = null;
-  if (intentMeta.confidence < 0.62 && lastUserMessage) {
+  if (runStatus === 'completed' && intentMeta.confidence < 0.62 && lastUserMessage) {
     clarifyingQuestion = '你想查的是公告、作業截止，還是今天的課程與課表呢？也可以換個說法再問一次。';
   }
 
@@ -436,7 +538,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     error: response.error,
     usage: response.usage,
     debug: response.debug,
-    run: { runId, status: 'completed' },
+    run: { runId, status: runStatus },
     intent: {
       name: intentMeta.name,
       confidence: intentMeta.confidence,
@@ -486,7 +588,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
           runId,
           userId: uid,
           schoolId,
-          status: 'completed',
+          status: runStatus,
           intent,
           steps,
           toolCalls: steps,

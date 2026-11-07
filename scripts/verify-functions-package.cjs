@@ -56,9 +56,6 @@ async function main() {
           for (const name of [
             'postLogin/finalizePostLogin',
             'companion/aggregateCompanionSignals',
-            'agent/tools/computeGradebook',
-            'agent/tools/draftQuizFromBank',
-            'agent/tools/upsertQuestionBank',
             'agent/tools/computeCompanionState',
             'agent/tools/verifyAttendanceClaim',
             'agent/tools/submitQuizAttempt',
