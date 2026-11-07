@@ -119,11 +119,22 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: '/merchant',
+        source: '/',
+        headers: [
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=(self)' },
+        ],
+      },
+      ...[
+        '/merchant',
+        '/merchant/workspace',
+        '/course/:courseId/attendance',
+        '/teacher/course/:courseId/attendance',
+      ].map((source) => ({
+        source,
         headers: [
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
         ],
-      },
+      })),
       // classroom camera 是建置時讀進映像的；開 ASSIGNMENT_FILE_SUBMIT_ENABLED 必須重建 Web 映像。
       ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
         ? [
@@ -147,6 +158,13 @@ const nextConfig: NextConfig = {
             },
           ]
         : []),
+      {
+        source: '/auth/account/callback',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
       {
         source: '/sso-callback',
         headers: [

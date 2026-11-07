@@ -4,7 +4,8 @@ Use only a disposable directory and deterministic embeddings. Run "seed" with
 the old Chroma version, then "verify" and "restart" with the candidate version
 in separate Python processes. Run "rollback" against a restored pre-upgrade
 snapshot using the isolated old runtime, never downgrade the migrated store
-in place. No external embedding service or account is used.
+in place. The workflow pins the pre-hardening application for seed and rollback.
+No external embedding service or account is used.
 """
 
 from __future__ import annotations
@@ -24,16 +25,31 @@ from rag import indexer, retriever
 COLLECTION = "upgrade_test"
 HOUSING_TEXT = "Campus housing: dormitory maintenance and repair requests."
 BUS_TEXT = "Campus transit: shuttle bus arrivals and stations."
-DOCS = [
+# Exact records written by the pinned 1bca9d77 application, including its old IDs.
+LEGACY_DOCS = [
     {
+        "id": "smoke:housing_0_68b202bcd3c8",
         "source": "smoke:housing",
         "text": HOUSING_TEXT,
         "metadata": {"campus": "pu", "category": "housing"},
     },
     {
+        "id": "smoke:bus_0_0a3093d654da",
         "source": "smoke:bus",
         "text": BUS_TEXT,
         "metadata": {"campus": "nchu", "category": "transit"},
+    },
+]
+DOCS = [
+    {
+        "source": "firestore:announcements",
+        "text": HOUSING_TEXT,
+        "metadata": {"schoolId": "pu", "visibility": "public", "category": "housing"},
+    },
+    {
+        "source": "firestore:events",
+        "text": BUS_TEXT,
+        "metadata": {"schoolId": "nchu", "visibility": "public", "category": "transit"},
     },
 ]
 
@@ -46,24 +62,52 @@ def embed(texts: list[str]) -> list[list[float]]:
     ]
 
 
-def assert_saved_records(expected_count: int) -> None:
+def assert_preserved_legacy_records() -> None:
     collection = indexer.get_or_create_collection(COLLECTION)
-    assert collection.count() == expected_count, f"wrong row count: {collection.count()}"
+    for document in LEGACY_DOCS:
+        row = collection.get(
+            where={"source": document["source"]},
+            include=["documents", "metadatas", "embeddings"],
+        )
+        assert row["ids"] == [document["id"]], row
+        assert row["documents"] == [document["text"]], row
+        assert row["metadatas"] == [{
+            "source": document["source"], "chunk_index": 0, **document["metadata"],
+        }], row
+        actual = list(row["embeddings"][0])
+        expected = embed([document["text"]])[0]
+        assert len(actual) == len(expected), actual
+        assert all(abs(float(a) - b) < 1e-6 for a, b in zip(actual, expected)), actual
+        for school in (None, "pu", "nchu"):
+            assert not retriever.retrieve(
+                "housing", collection_name=COLLECTION, embedding_fn=embed,
+                school_id=school, where={"source": document["source"]},
+            ), "Legacy records without trusted public school metadata must stay out of retrieval"
+
+
+def assert_saved_records(expected_count: int, *, legacy_count: int = 0) -> None:
+    collection = indexer.get_or_create_collection(COLLECTION)
+    assert collection.count() == expected_count + legacy_count, f"wrong row count: {collection.count()}"
     housing = collection.get(
-        where={"source": "smoke:housing"}, include=["documents", "metadatas"]
+        where={"source": "firestore:announcements"}, include=["documents", "metadatas"]
     )
     assert housing["documents"] == [HOUSING_TEXT], housing
-    assert housing["metadatas"][0]["campus"] == "pu", housing
+    assert housing["metadatas"][0]["schoolId"] == "pu", housing
     if expected_count == 2:
         bus = collection.get(
-            where={"source": "smoke:bus"}, include=["documents", "metadatas"]
+            where={"source": "firestore:events"}, include=["documents", "metadatas"]
         )
         assert bus["documents"] == [BUS_TEXT], bus
         matches = retriever.retrieve(
-            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed
+            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed, school_id="pu"
         )
-        assert len(matches) == 1 and matches[0].source == "smoke:housing", matches
+        assert len(matches) == 1 and matches[0].source == "firestore:announcements", matches
         assert matches[0].score > 0.99, matches
+        other = retriever.retrieve(
+            "housing", top_k=1, collection_name=COLLECTION, embedding_fn=embed, school_id="nchu"
+        )
+        assert [row.text for row in other] == [BUS_TEXT], other
+        assert not retriever.retrieve("housing", collection_name=COLLECTION, embedding_fn=embed)
 
 
 def assert_legacy_rollback() -> None:
@@ -105,20 +149,31 @@ def main() -> None:
         assert_saved_records(2)
     elif args.stage == "verify":
         assert store.exists(), "migration store is missing"
-        assert_saved_records(2)
+        assert indexer.get_or_create_collection(COLLECTION).count() == len(LEGACY_DOCS)
+        assert_preserved_legacy_records()
+        # The current school-scoped SHA256 IDs intentionally differ from legacy IDs.
+        # Exercise writes in the migrated collection while preserving the old rows.
+        count = indexer.index_documents(
+            DOCS, collection_name=COLLECTION, embedding_fn=embed
+        )
+        assert count == 2, count
+        assert_saved_records(2, legacy_count=len(LEGACY_DOCS))
         indexer.index_documents(
             [DOCS[0]], collection_name=COLLECTION, embedding_fn=embed
         )
-        assert_saved_records(2)  # upsert does not duplicate the known ID
-        indexer.delete_by_source("smoke:bus", collection_name=COLLECTION)
-        assert_saved_records(1)
+        assert_saved_records(2, legacy_count=len(LEGACY_DOCS))  # current IDs upsert without duplicates
+        indexer.delete_by_source("firestore:events", collection_name=COLLECTION)
+        assert_saved_records(1, legacy_count=len(LEGACY_DOCS))
+        assert_preserved_legacy_records()
     elif args.stage == "restart":
         assert store.exists(), "migration store is missing"
-        assert_saved_records(1)
+        assert_preserved_legacy_records()
+        assert_saved_records(1, legacy_count=len(LEGACY_DOCS))
         indexer.index_documents(
             [DOCS[1]], collection_name=COLLECTION, embedding_fn=embed
         )
-        assert_saved_records(2)
+        assert_saved_records(2, legacy_count=len(LEGACY_DOCS))
+        assert_preserved_legacy_records()
     else:
         assert store.exists(), "restored legacy snapshot is missing"
         assert_legacy_rollback()

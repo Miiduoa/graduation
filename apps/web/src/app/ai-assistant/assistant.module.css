@@ -183,6 +183,29 @@
 .cards {
   margin-top: 12px;
 }
+.inline .toolbar {
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.inline .messages {
+  gap: 12px;
+}
+.inline .question,
+.inline .answer {
+  padding: 12px;
+}
+.inline .question {
+  margin-left: 16px;
+}
+.inline .composer {
+  margin-top: 12px;
+}
+.inline .messages:empty + .composer {
+  margin-top: 0;
+}
+.inline .composer textarea {
+  min-height: 64px;
+}
 @media (max-width: 600px) {
   .empty,
   .question,

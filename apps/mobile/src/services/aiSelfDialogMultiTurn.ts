@@ -178,10 +178,10 @@ export const MULTI_TURN_SELF_DIALOG_SCENARIOS: MultiTurnScenario[] = [
   },
   {
     id: 'mt-already-checked-in',
-    description: '已簽到只查不簽',
+    description: '已簽到查詢在離線未驗證帳號下提示校務驗證',
     userTurns: ['我已經簽到了'],
     expectAnyTools: ['query_attendance'],
-    expectContextIncludes: ['以下是我自主查詢'],
+    expectLastAssistantIncludes: ['學校資料尚未驗證', '請確認校園與登入帳號'],
   },
   {
     id: 'mt-notify-peer',

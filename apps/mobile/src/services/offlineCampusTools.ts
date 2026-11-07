@@ -1,3 +1,4 @@
+import { getMobileAssistantAction } from './quickCampusActions';
 import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
@@ -383,35 +384,20 @@ function userWriteRequest(question: string): OfflineCampusToolResult | null {
   };
 }
 
-const SAFE_OFFLINE_DESTINATIONS: Record<string, string> = {
-  '/map': '校園地圖',
-  '/bus': '公車',
-  '/classroom': '課程與作業',
-  '/timetable': '我的課表',
-  '/library': '圖書館',
-  '/grades': '成績',
-  '/cafeteria': '校園餐廳',
-  '/dormitory': '宿舍服務',
-  '/events': '校園活動',
-  '/announcements': '校園公告',
-  '/dms': '私訊',
-};
-
 function openReadOnlyService(question: string): OfflineCampusToolResult | null {
   // A generic query is not an instruction to navigate. Only direct
   // navigation requests may be handled without running a local model.
   if (!/(?:開啟|打開|前往|帶我去|我要找|我想找|幫我找|幫我開|怎麼走|怎麼去|導航|在哪裡|服務入口)/.test(outsideAssignmentNames(question))) {
     return null;
   }
-  const routes = suggestCampusDestinations(question).filter((route) =>
-    Object.prototype.hasOwnProperty.call(SAFE_OFFLINE_DESTINATIONS, route));
+  const actions = suggestCampusDestinations(question).map(getMobileAssistantAction).filter(Boolean);
   // Ambiguous destinations go to the assistant instead of guessing.
-  if (routes.length !== 1) return null;
-  const route = routes[0];
+  if (actions.length !== 1) return null;
+  const [action] = actions;
   return {
     tool: 'open-service',
-    route,
-    content: `可以開啟「${SAFE_OFFLINE_DESTINATIONS[route]}」查看資料或使用功能。這只是提供入口，沒有替你送出任何申請或執行操作。`,
+    route: action.destination,
+    content: `可以開啟「${action.label}」查看資料或使用功能。這只是提供入口，沒有替你送出任何申請或執行操作。`,
   };
 }
 
@@ -487,6 +473,12 @@ export function runOfflineCampusTool(
   // A planning request needs a synthesized answer, not a raw timetable dump.
   if (/(規劃|安排|制定|拆成|讀書計畫|學習計畫)/.test(text) &&
       /(課表|空堂|學習|讀書|複習|報告)/.test(text)) return null;
+  // The weekly period list cannot verify a time limit or a date-specific opening.
+  if (/空堂|空檔|空閒時段/.test(text) &&
+      /分鐘|小時|鐘頭|[早晚]上|[上中下]午|午休|凌晨|[點時][:半前後]|[0-9一二三四五六七八九十]點|\d[:：]\d|[昨前後]天|下[週周]|[年月號]|今天.{0,3}明天/.test(text)) {
+    return { tool: 'saved-timetable', route: '/timetable',
+      content: '這個條件需要核對實際上課時間。可以問「今天下午有半小時的空堂嗎？」或開啟「我的課表」查看指定時段。' };
+  }
   const wantsTimetable = /課表|有課|沒課|上課|哪幾堂|哪些課|幾堂課|空堂|空檔|課程時間/.test(text);
   if (!wantsTimetable) return null;
 

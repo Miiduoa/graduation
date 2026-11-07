@@ -116,10 +116,11 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
   }, [timetable, importedRecords, schoolId]);
   const allTerms = personalTimetableTerms(records, schoolId);
   const importTerms = allTerms.map((term) => term.key);
-  const activeTerm = importTerms.includes(importTerm) ? importTerm : importTerms[0];
+  const selectedTerm = allTerms.find((term) => term.key === importTerm) ?? allTerms[0];
+  const activeTerm = selectedTerm?.key;
   const manualTerm = timetable ? `${timetable.meta.year || '未填'}|${timetable.meta.semester || '未填'}` : '';
   const selectedView = importTerm === 'legacy' || activeTerm === manualTerm
-    ? 'legacy' : activeTerm?.replace('|', '／');
+    ? 'legacy' : selectedTerm && `${selectedTerm.academicYear}／${selectedTerm.semester}`;
   const displayCourses = useMemo(() => selectPersonalTimetableCourses(timetable, importedRecords, schoolId, selectedView), [timetable, importedRecords, schoolId, selectedView]);
   const viewTerm = selectedView === 'legacy' ? manualTerm : activeTerm;
   const matchesTerm = initialTerm === undefined || viewTerm === initialTerm;
@@ -385,7 +386,7 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
         {!profile ? <Text style={{ color: theme.colors.muted }}>這所學校尚未提供節次時間表。可在匯入紀錄填寫實際時間；不套用其他學校的節次。</Text> : null}
         {listedImports.map((row) => <Pressable key={row.id} onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} style={{ gap: 6, paddingVertical: 12 }}>
           <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{row.title}</Text>
-          <Text style={{ color: theme.colors.muted }}>週{['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '未填'} · {row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : '時間未確認'} · {row.location || '教室未填'} · 個人匯入</Text>
+          <Text style={{ color: theme.colors.muted }}>週{['', '一', '二', '三', '四', '五', '六', '日'][row.dayOfWeek || 0] || '未填'} · {row.startTime && row.endTime ? `${row.startTime}–${row.endTime}` : row.periodLabel?.trim() ? `校方節次 ${row.periodLabel}` : '時間未確認'} · {row.location || '教室未填'} · 個人匯入</Text>
         </Pressable>)}
         {view === 'day' ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

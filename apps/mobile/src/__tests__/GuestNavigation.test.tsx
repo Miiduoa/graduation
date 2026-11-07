@@ -5,12 +5,16 @@ import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
 import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { dormStorageKey } from '@campus/shared/src/dormitory';
 import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
 let mockBrowsingSchoolId = 'pu';
+let mockPlatformSession: { platformAccountId: string } | null = null;
+let mockSelectionReady = true;
 let mockSchoolAuth: {
   user: { uid: string } | null;
   profile: { uid: string; schoolId: string } | null;
@@ -28,7 +32,13 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
 // Navigation tests render the signed-out stack without mounting the app shell.
 // Supply the same selected-campus context that production SchoolProvider supplies.
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: mockBrowsingSchoolId, name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' } }),
+  useSchool: () => ({
+    school: { id: mockBrowsingSchoolId, name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' },
+    schoolId: mockBrowsingSchoolId || null,
+    selection: { schoolId: mockBrowsingSchoolId || null },
+    selectionReady: mockSelectionReady,
+    setSelection: jest.fn(),
+  }),
 }));
 let mockInitialUrl: string | null = null;
 let mockLinkListener: ((event: { url: string }) => void) | undefined;
@@ -42,7 +52,9 @@ jest.mock('expo-linking', () => ({
   },
 }));
 beforeEach(() => {
+  mockSelectionReady = true;
   mockBrowsingSchoolId = 'pu';
+  mockPlatformSession = null;
   mockSchoolAuth = {
     user: null,
     profile: null,
@@ -65,7 +77,8 @@ jest.mock('../state/theme', () => ({
   useTheme: () => require('../ui/theme').getCurrentTheme(),
 }));
 jest.mock('../state/nuniSession', () => ({
-  useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
+  useNuniSession: () => ({ session: mockPlatformSession, loading: false, error: '', pendingLogout: false }),
+  useOptionalNuniSession: () => ({ session: mockPlatformSession, loading: false, error: '', pendingLogout: false }),
 }));
 jest.mock('../state/schedule', () => ({
   useSchedule: () => ({
@@ -124,6 +137,10 @@ jest.mock('../screens/LibraryCatalogScreen', () => {
 jest.mock('../screens/SchoolInfoScreen', () => {
   const { Text } = require('react-native');
   return { __esModule: true, default: () => <Text testID="public-school-info-screen">學校資訊</Text> };
+});
+jest.mock('../screens/StudentCardScreen', () => {
+  const { Text } = require('react-native');
+  return { __esModule: true, default: () => <Text testID="public-student-card-screen">數位學生證</Text> };
 });
 jest.mock('../screens/CampusContentScreens', () => {
   const { Text } = require('react-native');
@@ -215,10 +232,32 @@ test('a warm platform link works in the school-signed-out stack and cleans up it
   expect(mockRemoveLinkListener).toHaveBeenCalledTimes(1);
 });
 
+test('a dormitory link opens the selected campus workspace for a signed-in platform student', async () => {
+  mockBrowsingSchoolId = 'nthu';
+  mockPlatformSession = { platformAccountId: 'resident' };
+  mockInitialUrl = 'campus://dormitory?schoolId=pu&repairId=external';
+  const key = dormStorageKey('platform:resident', 'nthu');
+  await AsyncStorage.setItem(key, JSON.stringify({ building: '清大宿舍備忘' }));
+  try {
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <NavigationContainer ref={navigation} linking={preAuthLinking}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    expect((await view.findAllByText('清大宿舍備忘')).length).toBeGreaterThan(0);
+    expect(navigation.getCurrentRoute()?.name).toBe('Dormitory');
+    expect(view.queryByText('external')).toBeNull();
+  } finally {
+    await AsyncStorage.removeItem(key);
+  }
+});
+
 test.each([
   ['Map', 'public-map-screen'],
   ['Library', 'public-library-screen'],
   ['SchoolInfo', 'public-school-info-screen'],
+  ['StudentCard', 'public-student-card-screen'],
   ['BusSchedule', 'public-bus-screen'],
   ['公告總覽', 'public-announcements-screen'],
 ])('signed-out users can open %s without either account', async (route, target) => {
@@ -241,6 +280,7 @@ test.each([
   ['campus://library', 'public-library-screen'],
   ['campus://library/catalog', 'public-library-catalog'],
   ['campus://school-info', 'public-school-info-screen'],
+  ['campus://student-card', 'public-student-card-screen'],
   ['campus://bus', 'public-bus-screen'],
   ['campus://announcements', 'public-announcements-screen'],
   ['campus://announcement/public-1', 'public-announcement-screen'],
@@ -410,4 +450,22 @@ test('the public library remains reachable after browsing away from the logged-i
   expect(view.queryByTestId('private-school')).toBeNull();
   fireEvent.press(await view.findByTestId('public-Library'));
   expect(await view.findByTestId('public-library-screen')).toBeTruthy();
+});
+
+
+test('a restored account cannot mount private navigation before school choice is resolved', () => {
+  mockSchoolAuth = { user: { uid: 'u1' }, profile: { uid: 'u1', schoolId: 'pu' }, loading: false, profileLoading: false };
+  const content = () => (
+    <SchoolSessionBoundary publicContent={<Text>公開入口</Text>}><Text>私人課務</Text></SchoolSessionBoundary>
+  );
+  mockSelectionReady = false;
+  const view = render(content());
+  expect(view.queryByText('私人課務')).toBeNull();
+  mockSelectionReady = true;
+  mockBrowsingSchoolId = '';
+  view.rerender(content());
+  expect(view.getByText('公開入口')).toBeTruthy();
+  mockBrowsingSchoolId = 'pu';
+  view.rerender(content());
+  expect(view.getByText('私人課務')).toBeTruthy();
 });

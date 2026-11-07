@@ -39,9 +39,12 @@ import {
   doc,
   collection,
   addDoc,
+  arrayRemove,
+  arrayUnion,
   updateDoc,
   serverTimestamp,
   increment,
+  runTransaction,
 } from 'firebase/firestore';
 
 type AnonQuestion = {
@@ -472,18 +475,26 @@ export function ClassroomScreen(props: any) {
   // 問題 Upvote
   const handleUpvote = useCallback(
     async (question: AnonQuestion) => {
-      if (!groupId || !sessionId || !auth.user) return;
+      if (!groupId || !sessionId || !auth.user || !session?.active) return;
       const uid = auth.user.uid;
-      const alreadyVoted = question.upvotedBy?.includes(uid);
+      const addVote = !question.upvotedBy?.includes(uid);
       const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId, 'questions', question.id);
-      await updateDoc(ref, {
-        upvotes: increment(alreadyVoted ? -1 : 1),
-        upvotedBy: alreadyVoted
-          ? (question.upvotedBy ?? []).filter((id: string) => id !== uid)
-          : [...(question.upvotedBy ?? []), uid],
-      });
+      try {
+        await runTransaction(db, async (transaction) => {
+          const snapshot = await transaction.get(ref);
+          if (!snapshot.exists()) return;
+          const hasVoted = snapshot.data().upvotedBy?.includes(uid) ?? false;
+          if (hasVoted === addVote) return;
+          transaction.update(ref, {
+            upvotes: increment(addVote ? 1 : -1),
+            upvotedBy: addVote ? arrayUnion(uid) : arrayRemove(uid),
+          });
+        });
+      } catch {
+        Alert.alert('未能更新投票', '請稍後再試');
+      }
     },
-    [groupId, sessionId, auth.user],
+    [groupId, sessionId, auth.user, session?.active],
   );
 
   // 標記問題已回答
@@ -1398,8 +1409,13 @@ export function ClassroomScreen(props: any) {
                       </View>
                       <View style={{ alignItems: 'center', gap: 6 }}>
                         <Pressable
+                          disabled={!session.active}
+                          accessibilityRole="button"
+                          accessibilityLabel={voted ? '收回這個問題的票' : '為這個問題投票'}
+                          accessibilityState={{ disabled: !session.active, selected: voted === true }}
                           onPress={() => handleUpvote(q)}
                           style={{
+                            opacity: session.active ? 1 : 0.55,
                             alignItems: 'center',
                             padding: 8,
                             borderRadius: theme.radius.md,

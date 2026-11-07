@@ -12,11 +12,13 @@
   },
   "include": [
     "src/postLoginRoles.ts",
+    "src/schoolContactAnswer.ts",
     "src/puEcampusDataPolicy.ts",
     "src/assistantPermissions.ts",
     "src/lms/**/*.ts",
     "src/companion/**/*.ts",
     "src/timetable/schoolPeriods.ts",
+    "src/timetable/publicShare.ts",
     "src/imports/today.ts",
     "src/timetable/classExceptions.ts"
   ]

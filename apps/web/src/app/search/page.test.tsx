@@ -52,7 +52,7 @@ it('keeps every service discoverable without inventing a school selection', () =
   expect(screen.getByRole('link', { name: /^成績回饋/ }).getAttribute('href')).toBe(
     '/grades?tab=feedback',
   );
-  expect(screen.getByRole('link', { name: /^玩課雲課程/ }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: /^校方課程/ }).getAttribute('href')).toBe(
     '/school-courses',
   );
   expect(screen.getByRole('link', { name: /^餐廳/ }).getAttribute('href')).toBe('/cafeteria');
@@ -70,7 +70,10 @@ it('combines category filters with keyword search and restores all services afte
   render(<SearchPage />);
   fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
   expect(screen.queryByRole('link', { name: /^課表/ })).toBeNull();
-  expect(screen.getAllByRole('link')).toHaveLength(10);
+  expect(screen.getAllByRole('link')).toHaveLength(11);
+  expect(screen.getByRole('link', { name: /^數位學生證/ }).getAttribute('href')).toBe(
+    '/student-card',
+  );
   fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
     target: { value: '借書' },
   });
@@ -280,13 +283,52 @@ it('recognizes a complex signed-in campus request using AI instead of only keywo
 
 it('hides readonly homework by default and restores it when enabled', () => {
   const view = render(<SearchPage />);
-  expect(screen.queryByRole('link', { name: /^玩課雲作業/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /^校方作業與教材/ })).toBeNull();
   view.rerender(
     <SchoolLmsReadonlyProvider enabled={true}>
       <SearchPage />
     </SchoolLmsReadonlyProvider>,
   );
-  expect(screen.getByRole('link', { name: /^玩課雲作業/ }).getAttribute('href')).toContain(
+  expect(screen.getByRole('link', { name: /^校方作業與教材/ }).getAttribute('href')).toContain(
     '/school-lms',
   );
+});
+
+it('opens the selected campus semester grades and keeps feedback previews on their own tab', async () => {
+  userState.uid = 'alice';
+  window.history.replaceState({}, '', '/search?schoolId=nthu');
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood', source: 'model', summary: '查看成績與回饋',
+    destinations: ['/grades', '/grades?tab=feedback'], clarifyingQuestion: null,
+    previews: [
+      { destination: '/grades', status: 'available', source: 'campus-platform', message: '學期資料已匯入', items: [] },
+      { destination: '/grades?tab=feedback', status: 'empty', source: 'campus-platform', message: '尚無回饋紀錄', items: [] },
+    ],
+  });
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '這學期表現怎樣' } });
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  const semester = await screen.findByRole('link', { name: /學期資料已匯入/ });
+  expect(semester.getAttribute('href')).toBe('/grades?tab=semester&schoolId=nthu');
+  expect(screen.getByRole('link', { name: /尚無回饋紀錄/ }).getAttribute('href')).toBe('/grades?tab=feedback&schoolId=nthu');
+});
+
+it('opens device bookmarks in the selected campus classroom and describes the account requirement', () => {
+  window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('書籤'));
+  render(<SearchPage />);
+  const bookmarks = screen.getByRole('link', { name: /教材收藏.*這台裝置.*Google 帳號/ });
+  expect(bookmarks.getAttribute('href')).toBe('/classroom/material-bookmarks?campus=nthu');
+});
+
+it.each([false, true])('shows App restaurant orders only when ordering is enabled (%s)', (enabled) => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', String(enabled));
+  try {
+    window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('訂單'));
+    render(<SearchPage />);
+    const orders = screen.queryByRole('link', { name: /App 餐廳訂單/ });
+    expect(orders?.getAttribute('href')).toBe(enabled ? '/orders?campus=nthu' : undefined);
+    expect(screen.getByRole('link', { name: /^點餐與取餐/ }).getAttribute('href')).toBe('/food?campus=nthu');
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

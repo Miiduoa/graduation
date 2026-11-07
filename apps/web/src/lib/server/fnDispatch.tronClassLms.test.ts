@@ -311,18 +311,101 @@ it('does not serve another linked TronClass session\'s cached courses after reco
   expect(store.docs.get(CACHE)?.sessionId).toBe(nextId);
 });
 
-it('invalidates legacy cache entries without a verified session binding', async () => {
+it.each(['sessionId', 'sessionVersion'])('refetches a legacy cache missing %s', async (field) => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
-  const cached = store.docs.get(CACHE);
-  expect(cached?.sessionId).toBe(LMS_ID);
-  delete cached!.sessionId;
+  const cached = store.docs.get(CACHE)!;
+  delete cached[field];
   vi.mocked(source.fetchHomeworkPage).mockClear();
 
   const body = await (await request()).json();
   expect(body.result.cache.hit).toBe(false);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+  expect(store.docs.get(CACHE)?.[field]).toBeDefined();
+});
+
+it.each([
+  { scenario: 'missing nested cache', corrupted: undefined },
+  { scenario: 'non-object nested cache', corrupted: 'broken' },
+  { scenario: 'missing nested expiry', corrupted: { hit: false } },
+  { scenario: 'unparseable nested expiry', corrupted: { hit: false, expiresAt: 'invalid' } },
+  { scenario: 'expired nested cache', corrupted: { hit: false, expiresAt: '2000-01-01T00:00:00.000Z' } },
+  { scenario: 'invalid cache hit flag', corrupted: { hit: 'false', expiresAt: '2099-01-01T00:00:00.000Z' } },
+])('refetches instead of failing when $scenario is stored', async ({ corrupted }) => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const existing = store.docs.get(CACHE)!;
+  (existing.snapshot as Record<string, unknown>).cache = corrupted;
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const response = await request();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(body.result.homework).toHaveLength(2);
+  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  expect((store.docs.get(CACHE)!.snapshot as { cache: { expiresAt: string } }).cache.expiresAt)
+    .toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
+});
+
+it('uses one validated snapshot when its nested TTL expires during cache handling', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const expiresAt = Date.now() + 1_000;
+  const nestedExpiresAt = new Date(expiresAt).toISOString();
+  const snapshot = store.docs.get(CACHE)!.snapshot as { cache: { expiresAt: string } };
+  snapshot.cache.expiresAt = nestedExpiresAt;
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(expiresAt - 1);
+  const parseDate = Date.parse;
+  const parse = vi.spyOn(Date, 'parse').mockImplementation((value) => {
+    const timestamp = parseDate(value);
+    // Cross the deadline after validating the nested TTL, before using the snapshot.
+    if (value === nestedExpiresAt) clock.mockReturnValue(expiresAt);
+    return timestamp;
+  });
+  try {
+    const cachedResponse = await request();
+    expect(cachedResponse.status).toBe(200);
+    const cachedBody = await cachedResponse.json();
+    expect(cachedBody.result.cache.hit).toBe(true);
+    expect(cachedBody.result.homework).toHaveLength(2);
+    expect(Date.now()).toBe(expiresAt);
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+
+    const refreshedResponse = await request();
+    expect(refreshedResponse.status).toBe(200);
+    expect((await refreshedResponse.json()).result.cache.hit).toBe(false);
+    expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
+  } finally {
+    parse.mockRestore();
+    clock.mockRestore();
+  }
+});
+
+it.each([
+  { cookies: { session: 'new-cookie' }, userId: 10 },
+  { cookies: { session: 'lms-secret' }, userId: 11 },
+])('discards homework and course extras after an in-place LMS rotation to %j', async (session) => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const oldVersion = store.docs.get(CACHE)?.sessionVersion;
+  await store.db.doc(LMS).set(session, { merge: true });
+  vi.mocked(source.fetchCourses).mockClear().mockResolvedValue([{ id: 10002, name: '新課程' }]);
+
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(false);
+  expect(source.fetchCourses).toHaveBeenCalledWith(session.cookies, { userId: session.userId, status: 'ongoing' });
+  expect(body.result.courses).toEqual([{ id: 10002, name: '新課程' }]);
+  expect(body.result.contentsLoadedFor).toEqual([]);
+  expect(body.result.materials).toEqual([]);
+  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+  expect(store.docs.get(CACHE)?.sessionVersion).not.toEqual(oldVersion);
 });
 
 it('does not expose an otherwise fresh cache when its LMS session changes owner', async () => {
@@ -357,6 +440,27 @@ it('rejects an in-flight course read when its linked session changes before comp
   expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
   expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
   expect(store.docs.get(CACHE)?.extras).toEqual({});
+});
+
+it('rejects an in-flight read when a newer portal takes precedence over the still-valid original', async () => {
+  const { request, source, store } = setup();
+  const originalPortal = structuredClone(store.docs.get(PORTAL));
+  const newId = 'c'.repeat(32);
+  const laterExpiry = new Date(Date.now() + 120_000);
+  vi.mocked(source.fetchCourses).mockImplementationOnce(async () => {
+    await store.db.doc(`_puTronClassSessions/${newId}`).set({
+      ownerUid: UID, userId: 11, cookies: { session: 'new-cookie' }, expiresAt: laterExpiry,
+    });
+    await store.db.doc('_puSessions/new-login').set({
+      ownerUid: UID, tronClassSessionId: newId, expiresAt: laterExpiry,
+    });
+    return [LMS_FIXTURE_COURSE];
+  });
+
+  const response = await request();
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(store.docs.get(PORTAL)).toEqual(originalPortal);
 });
 
 it.each([
@@ -420,7 +524,7 @@ it.each([
     cached.extras = { '10001': { invalid: true } };
   }
   const cacheBefore = structuredClone(cached);
-  const writeCache = vi.fn();
+  const cacheTransaction = vi.spyOn(store.db, 'runTransaction');
   const originalDoc = store.db.doc.bind(store.db);
   let changed = false;
   vi.spyOn(store.db, 'doc').mockImplementation((path) => {
@@ -428,7 +532,6 @@ it.each([
     if (path !== CACHE) return ref;
     return {
       ...ref,
-      set: writeCache,
       get: async () => {
         const snapshot = await ref.get();
         changed = true;
@@ -451,10 +554,247 @@ it.each([
   const body = await response.json();
   expect(body.error.status).toBe('FAILED_PRECONDITION');
   expect(body.result).toBeUndefined();
-  expect(writeCache).not.toHaveBeenCalled();
+  expect(cacheTransaction).not.toHaveBeenCalled();
   expect(store.docs.get(CACHE)).toEqual(cacheBefore);
   for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
 });
+
+it.each([
+  'expired cached snapshot',
+  'cache bound to an older session',
+])('does not delete %s after a reconnect during the cache read', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const existing = store.docs.get(CACHE)!;
+  if (scenario === 'expired cached snapshot') {
+    existing.expiresAt = new Date(0);
+  } else {
+    existing.sessionId = 'a'.repeat(32);
+  }
+  const cacheBefore = structuredClone(existing);
+  const originalDoc = store.db.doc.bind(store.db);
+  const deleteCache = vi.fn();
+  let relinked = false;
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      delete: deleteCache,
+      get: async () => {
+        const snapshot = await ref.get();
+        // The old request must not remove this cache after the user relinks.
+        Object.assign(store.docs.get(PORTAL)!, { tronClassSessionId: 'c'.repeat(32) });
+        relinked = true;
+        return snapshot;
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(relinked).toBe(true);
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(deleteCache).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it.each([
+  'rotated cookies',
+  'changed TronClass user ID',
+])('rejects a cache hit after %s in the same session document', async (scenario) => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cacheBefore = structuredClone(store.docs.get(CACHE));
+  const originalDoc = store.db.doc.bind(store.db);
+  const cacheTransaction = vi.spyOn(store.db, 'runTransaction');
+  const cacheDelete = vi.fn();
+  vi.spyOn(store.db, 'doc').mockImplementation((path) => {
+    const ref = originalDoc(path);
+    if (path !== CACHE) return ref;
+    return {
+      ...ref,
+      delete: cacheDelete,
+      get: async () => {
+        const snapshot = await ref.get();
+        if (scenario === 'rotated cookies') {
+          Object.assign(store.docs.get(LMS)!, { cookies: { session: 'rotated-lms-session' } });
+        } else {
+          Object.assign(store.docs.get(LMS)!, { userId: 11 });
+        }
+        return snapshot;
+      },
+    };
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('FAILED_PRECONDITION');
+  expect(cacheTransaction).not.toHaveBeenCalled();
+  expect(cacheDelete).not.toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it.each([
+  'rotated cookies',
+  'changed TronClass user ID',
+])('rejects a cold fetch when %s during the school read', async (scenario) => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchCourses).mockImplementationOnce(async () => {
+    if (scenario === 'rotated cookies') {
+      Object.assign(store.docs.get(LMS)!, { cookies: { session: 'rotated-lms-session' } });
+    } else {
+      Object.assign(store.docs.get(LMS)!, { userId: 11 });
+    }
+    return [LMS_FIXTURE_COURSE];
+  });
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
+it('preserves a stale cache when its safe replacement cannot be fetched', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  cached.expiresAt = new Date(0);
+  const cacheBefore = structuredClone(cached);
+  vi.mocked(source.fetchCourses).mockRejectedValueOnce(new Error('upstream unavailable'));
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe('UNAVAILABLE');
+  // No unconditional delete: another request may have replaced this document
+  // after we observed the stale snapshot. It is never returned to the caller.
+  expect(store.docs.get(CACHE)).toEqual(cacheBefore);
+});
+
+it.each([
+  { path: PORTAL, change: { tronClassSessionId: 'c'.repeat(32) }, status: 'FAILED_PRECONDITION' },
+  { path: LMS, change: { ownerUid: 'another-owner' }, status: 'FAILED_PRECONDITION' },
+  { path: `users/${UID}`, change: { accountDeletionInProgress: true }, status: 'PERMISSION_DENIED' },
+  ...['deleted', 'disabled', 'suspended', 'inactive'].map((accountStatus) => ({
+    path: `users/${UID}`, change: { status: accountStatus }, status: 'PERMISSION_DENIED',
+  })),
+  { path: `schools/pu/members/${UID}`, change: { status: 'inactive' }, status: 'PERMISSION_DENIED' },
+])('rejects access revoked at $path just before the cache transaction', async ({ path, change, status }) => {
+  const { request, store } = setup();
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    await store.db.doc(path).set(change, { merge: true });
+    return runTransaction(callback);
+  });
+
+  const response = await request();
+  expect(response.ok).toBe(false);
+  expect((await response.json()).error.status).toBe(status);
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
+it('returns fresh homework after a cache commit fails and retries on the next read', async () => {
+  const { request, source, store } = setup();
+  store.failNextCommit();
+  const first = await (await request()).json();
+  expect(first.result.cache.hit).toBe(false);
+  expect(first.result.homework).toHaveLength(2);
+  expect(store.docs.has(CACHE)).toBe(false);
+
+  const retry = await (await request()).json();
+  expect(retry.result.cache.hit).toBe(false);
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+  expect(store.docs.get(CACHE)?.sessionId).toBe(LMS_ID);
+});
+
+it('preserves course contents cached by a faster request for the same session', async () => {
+  const { request, source, store } = setup();
+  let release!: () => void;
+  vi.mocked(source.fetchCourses).mockImplementationOnce(() => new Promise((resolve) => {
+    release = () => resolve([LMS_FIXTURE_COURSE]);
+  }));
+  const pending = request();
+  await vi.waitFor(() => expect(source.fetchCourses).toHaveBeenCalledTimes(1));
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const winner = structuredClone(store.docs.get(CACHE));
+  release();
+
+  expect((await pending).status).toBe(200);
+  expect(store.docs.get(CACHE)).toEqual(winner);
+  vi.mocked(source.fetchActivities).mockClear();
+  const body = await (await request({ courseId: 10001 })).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(body.result.materials).toHaveLength(1);
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+});
+
+it('does not prune course contents refreshed after the initial cache read', async () => {
+  const { request, source, store } = setup();
+  expect((await request({ courseId: 10001 })).status).toBe(200);
+  const fresh = structuredClone(store.docs.get(CACHE)!);
+  const extras = store.docs.get(CACHE)!.extras as Record<string, { expiresAt: string }>;
+  extras['10001'].expiresAt = new Date(0).toISOString();
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  const transaction = vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    await store.db.doc(CACHE).set(fresh);
+    return runTransaction(callback);
+  });
+  for (const method of Object.values(source)) vi.mocked(method).mockClear();
+
+  expect((await request()).status).toBe(200);
+  expect(transaction).toHaveBeenCalled();
+  expect(store.docs.get(CACHE)).toEqual(fresh);
+  for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+});
+
+it.each(['cold fetch', 'extras cleanup'])('rejects %s if the portal relinks after commit', async (scenario) => {
+  const { request, source, store } = setup();
+  if (scenario === 'extras cleanup') {
+    expect((await request({ courseId: 10001 })).status).toBe(200);
+    const extras = store.docs.get(CACHE)!.extras as Record<string, { expiresAt: string }>;
+    extras['10001'].expiresAt = new Date(0).toISOString();
+    for (const method of Object.values(source)) vi.mocked(method).mockClear();
+  }
+  const runTransaction = store.db.runTransaction.bind(store.db);
+  vi.spyOn(store.db, 'runTransaction').mockImplementationOnce(async (callback) => {
+    const result = await runTransaction(callback);
+    await store.db.doc(PORTAL).set({ tronClassSessionId: 'c'.repeat(32) }, { merge: true });
+    return result;
+  });
+
+  const response = await request();
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(store.docs.get(CACHE)?.extras).toEqual({});
+  if (scenario === 'extras cleanup') {
+    for (const method of Object.values(source)) expect(method).not.toHaveBeenCalled();
+  }
+});
+
+it.each(['deleted', 'disabled', 'suspended', 'inactive'])(
+  'rejects account status %s before any LMS source or cache write',
+  async (status) => {
+    const { request, source, store } = setup();
+    store.docs.get(`users/${UID}`)!.status = status;
+
+    const response = await request({ courseId: 10001 });
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.status).toBe('PERMISSION_DENIED');
+    expect(source.fetchCourses).not.toHaveBeenCalled();
+    expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+    expect(source.fetchActivities).not.toHaveBeenCalled();
+    expect(source.fetchCourseAnnouncements).not.toHaveBeenCalled();
+    expect(source.fetchSiteAnnouncements).not.toHaveBeenCalled();
+    expect(store.docs.has(CACHE)).toBe(false);
+  },
+);
 
 it('makes no LMS calls when the read-only feature flag is disabled', async () => {
   const { request, source, store } = setup();

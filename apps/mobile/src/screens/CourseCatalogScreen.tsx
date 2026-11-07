@@ -38,6 +38,7 @@ import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchedule } from '../state/schedule';
 import { useSchool } from '../state/school';
+import { PublicCourseCatalogScreen } from './PublicCourseCatalogScreen';
 import { safeNavigate } from '../utils/safeNavigate';
 
 import {
@@ -511,6 +512,12 @@ export function CourseCatalogScreen(props: CatalogScreenProps) {
   const activeScope = useRef(scopeKey);
   activeScope.current = scopeKey;
   const capability = resolveCourseCatalogCapability(school.id);
+
+  if (capability?.providerId === 'ncnu-public' || capability?.providerId === 'nthu-public') {
+    const keyword = props.route?.params?.filter?.keyword;
+    const schoolId = capability.providerId === 'nthu-public' ? 'nthu' : 'ncnu';
+    return <PublicCourseCatalogScreen key={scopeKey} schoolId={schoolId} navigation={props.navigation} initialQuery={typeof keyword === 'string' ? keyword.slice(0, 80) : ''} />;
+  }
 
   if (!capability) {
     return (

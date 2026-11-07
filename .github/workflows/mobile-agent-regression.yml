@@ -63,7 +63,12 @@ jobs:
         run: |
           pnpm --filter mobile exec jest \
             src/__tests__/services/offlineCampusPlanner.test.ts \
+            src/__tests__/services/nuniCampusPlanner.test.ts \
+            src/__tests__/services/nuniPlanAssignmentTarget.test.ts \
+            src/__tests__/services/campusPlanComparison.test.ts \
+            src/__tests__/services/savedCampusPlans.test.ts \
             src/__tests__/services/campusStudyAgenda.test.ts \
+            src/__tests__/services/campusClockAvailability.test.ts \
             src/__tests__/services/campusAssignmentReminders.test.ts \
             src/__tests__/services/campusAssignmentTarget.test.ts \
             src/__tests__/services/campusAssignmentPreview.test.ts \
@@ -78,12 +83,20 @@ jobs:
             src/__tests__/services/nuniAssignmentReminders.test.ts \
             src/__tests__/services/nuniClassCoursework.test.ts \
             src/__tests__/services/onDeviceSchoolContext.test.ts \
+            src/__tests__/services/nextSavedClasses.test.ts \
+            src/__tests__/services/savedClassGapQuery.test.ts \
             src/__tests__/NativeLoginLifecycle.test.tsx \
             src/__tests__/nuniSession.test.ts \
+            src/__tests__/NuniSessionProvider.test.tsx \
             src/__tests__/NuniTimetableAssistantNavigation.test.tsx \
             src/__tests__/AssistantClassNowHint.test.tsx \
             src/__tests__/SavedClassReplyCard.test.tsx \
+            src/__tests__/ClassGapReplyCard.test.tsx \
             src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/CampusEvidencePlanCard.test.tsx \
+            src/__tests__/NuniPlanAssignmentOpenButton.test.tsx \
+            src/__tests__/SavedCampusPlansPanel.test.tsx \
+            src/__tests__/CampusPlanComparisonCard.test.tsx \
             src/__tests__/CampusAssignmentWorkbench.test.tsx \
             src/__tests__/CampusAssignmentCoverage.test.tsx \
             src/__tests__/CampusAssignmentHandoff.test.tsx \

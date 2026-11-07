@@ -1,3 +1,4 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
@@ -8,21 +9,30 @@ import type { LocalCampusReadResult } from '../services/localCampusToolProtocol'
 import { abortableCampusRead } from '../services/abortableCampusRead';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import type { AnnouncementRead, AssignmentRead, OfflineCampusToolResult } from '../services/offlineCampusTools';
+import {
+  answerSavedClassGapQuery, savedClassGapFollowUp, savedClassGapQuery,
+  isSavedClassGapQuestion, isSavedClassGapRefinement, type SavedClassGapQuery,
+} from '../services/savedClassGapQuery';
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
+import { taipeiDayNumber } from '../services/campusStudyAgenda';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
+import { isNuniCampusPlanningQuestion } from '../services/nuniCampusPlanner';
+
+type ClassGapRead = SavedClassGapQuery & { owner: string; schoolId: string; checkedAt: string };
 
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory';
   route?: string;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
+  classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
 };
 export type CampusAssistantScope = { uid: string; schoolId: string };
@@ -101,11 +111,12 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
+  tool?: CampusAssistantMessage['tool'];
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
+  classGapRead?: ClassGapRead;
   courseworkRead?: CourseworkRead;
   announcementRead?: AnnouncementRead;
   route?: string;
@@ -135,6 +146,10 @@ export async function askCampusAssistant(input: {
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
     const question = messages[messages.length - 1].content;
+    const contact = getSchoolContactAnswer(input.scope.schoolId, question, input.schoolName);
+    if (contact && !input.courseworkChoice) {
+      return { content: contact, source: 'device', hasActions: false, tool: 'school-directory' };
+    }
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;
@@ -142,6 +157,17 @@ export async function askCampusAssistant(input: {
     const platform = input.platformTimetable;
     const owner = platform && `nuni:${platform.accountId}`;
     let choice = input.courseworkChoice;
+    if (platform && !choice && isNuniCampusPlanningQuestion(question)) {
+      const { buildNuniCampusPlan } = require('../services/nuniCampusPlanner') as typeof import('../services/nuniCampusPlanner');
+      const plan = await abortableCampusRead(() => buildNuniCampusPlan({
+        question, schoolId: input.scope.schoolId, platformTimetable: platform,
+        ...input.courseworkRequests, isCurrent: input.isCurrent, signal: input.signal,
+      }), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      if (!plan) throw new OnDeviceAssistantError('session-changed');
+      return { content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan };
+    }
     if (platform && (choice ? 'reminder' in choice : lastReply?.courseworkRead?.view?.kind === 'reminder' || isCourseworkReminderQuestion(question))) {
       const selected = choice && 'reminder' in choice ? choice : undefined;
       const reminder = await abortableCampusRead(() => answerCourseworkReminder(lastReply?.courseworkRead,
@@ -181,25 +207,58 @@ export async function askCampusAssistant(input: {
       assertNotCancelled();
       return { ...work, source: 'device', hasActions: false };
     }
-    if (platform && !classQuery) {
+    const previousGap = lastReply?.classGapRead;
+    const gapFollowUp = previousGap && savedClassGapFollowUp(question, previousGap);
+    const refiningGap = !!previousGap && (!!gapFollowUp || isSavedClassGapRefinement(question));
+    // A conflicting refinement cannot become a fresh lookup that drops prior conditions.
+    const gapQuery = refiningGap ? gapFollowUp : savedClassGapQuery(question);
+    const gapOwner = owner || (uid && `firebase:${uid}`);
+    if (gapQuery && !gapOwner) {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
-        content: '可以問「我現在有課嗎？」或「下一堂課在哪裡？」。查到課程後，也可以接著問教室與下課時間。' };
+        content: '請先登入帳號並儲存個人課表，再查課間空堂。' };
     }
-    const snapshot = await collectOnDeviceSchoolContext({
+    if (previousGap && refiningGap && (previousGap.owner !== gapOwner || previousGap.schoolId !== input.scope.schoolId)) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false,
+        content: '帳號或學校已變更。請重新問「今天有哪些空堂？」來查目前的課表。' };
+    }
+    if (!gapQuery && (refiningGap || isSavedClassGapQuestion(question))) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false, route: '/timetable',
+        content: '這個空堂條件還無法完整辨識，這次沒有套用。可以查今天、明天或後天，並指定「下午三點半以後」、「15:30–17:00」或「至少 45 分鐘」。若條件互相衝突，請重新問完整問題，例如「明天下午有哪些空堂？」。' };
+    }
+    if (platform && !classQuery && !gapQuery) {
+      return { source: 'device', tool: 'saved-timetable', hasActions: false,
+        content: '可以問「幫我安排未來七天的課表與作業」、「我現在有課嗎？」、「下一堂課在哪裡？」或「今天有哪些空堂？」。查到課程後，也可以接著問教室與下課時間。' };
+    }
+    const snapshot = await abortableCampusRead(() => collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
       ...(platform && { platformTimetable: platform }),
+      ...(gapQuery && { gapDay: gapQuery.day }),
       ...(classQuery?.window === 'current' && { includeCurrentClasses: true }),
       ...(classQuery && classQuery.window !== 'current' && { includeNextClasses: true }),
       ...(classQuery?.followUp && lastClass?.uid === uid && lastClass.owner === owner &&
         lastClass.schoolId === input.scope.schoolId ? { classFollowUp: lastClass.classes } : {}),
-    });
+    }), input.signal).catch((error: unknown) => { assertNotCancelled(); throw error; });
     scopeCheck(input, false);
     assertNotCancelled();
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
+    if (gapQuery) {
+      if (gapFollowUp && previousGap && taipeiDayNumber(Date.parse(previousGap.checkedAt)) !== taipeiDayNumber(Date.parse(snapshot.checkedAt))) {
+        return { source: 'device', tool: 'saved-timetable', hasActions: false,
+          content: '現在已經換日，請重新問「今天有哪些空堂？」或「明天有哪些空堂？」。' };
+      }
+      const answer = answerSavedClassGapQuery(gapQuery, snapshot);
+      return {
+        ...answer, source: 'device', hasActions: false,
+        ...(platform && snapshot.timetable.source === 'not-available' && { route: '/timetable/import' }),
+        ...(snapshot.timetable.classGaps && { classGapRead: {
+          ...gapQuery, owner: gapOwner, schoolId: input.scope.schoolId, checkedAt: snapshot.checkedAt,
+        } }),
+      };
+    }
     if (classQuery) {
       const answer = answerSavedClassQuery(classQuery, snapshot, uid, lastClass, owner);
       return { ...answer, source: 'device', hasActions: false };
@@ -288,6 +347,11 @@ export async function askCampusAssistant(input: {
     if (afterSelection.status !== 'ready' || afterSelection.modelId !== readiness.modelId) {
       throw new OnDeviceAssistantError('model-busy');
     }
+
+    // Native inference can consume private context before an eventual response is discarded.
+    // Recheck after the selector and shared engine state, immediately before sending it.
+    scopeCheck(input, false);
+    assertNotCancelled();
 
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.

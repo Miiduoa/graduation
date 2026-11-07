@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from rag.indexer import get_or_create_collection
 from config import RAG_TOP_K
+from rag.public_documents import retrieval_filter
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,10 @@ def retrieve(
     collection_name: str = "campus",
     where: dict | None = None,
     embedding_fn=None,
+    *,
+    school_id: str | None = None,
 ) -> list[RetrievedChunk]:
-    """Return the *top_k* most relevant chunks for *query*."""
+    """Rank app help and public material from only the selected campus."""
     collection = get_or_create_collection(collection_name)
 
     if collection.count() == 0:
@@ -37,8 +40,8 @@ def retrieve(
         "n_results": min(top_k, collection.count()),
         "include": ["documents", "metadatas", "distances"],
     }
-    if where:
-        query_kwargs["where"] = where
+    scope = retrieval_filter(school_id)
+    query_kwargs["where"] = {"$and": [scope, where]} if where else scope
     if embedding_fn:
         query_kwargs.pop("query_texts")
         query_kwargs["query_embeddings"] = embedding_fn([query])

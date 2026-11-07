@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, renderAsync, waitFor } from '@testing-library/react-native';
 import { Alert, type AlertButton } from 'react-native';
 import type { NavigationAction } from '@react-navigation/native';
 import { shareAsync } from 'expo-sharing';
@@ -60,7 +60,7 @@ function button(title: string, label: string): NonNullable<AlertButton['onPress'
 }
 async function ready(native = false) {
   const navigation = { goBack: jest.fn(), ...(native ? { dispatch: jest.fn() } : {}) };
-  const view = render(<CreditPlanningScreen navigation={navigation} />);
+  const view = await renderAsync(<CreditPlanningScreen navigation={navigation} />);
   await waitFor(() => expect(view.getByLabelText('已確認可採計學分').props.value).toBe('20'));
   return { view, navigation };
 }
@@ -200,7 +200,7 @@ test('a prior account confirmation cannot navigate after switching A -> B -> A',
   const discard = button('尚有未儲存的內容', '捨棄並離開');
   for (const uid of ['student-b', 'student-a']) {
     mockUid = uid;
-    view.rerender(<CreditPlanningScreen navigation={navigation} />);
+    await view.rerenderAsync(<CreditPlanningScreen navigation={navigation} />);
     await waitFor(() => expect(view.getByLabelText('已確認可採計學分').props.value).toBe('20'));
   }
   act(() => discard());

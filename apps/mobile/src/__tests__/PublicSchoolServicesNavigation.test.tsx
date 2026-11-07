@@ -3,6 +3,8 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Linking } from 'react-native';
+import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
+import { dormStorageKey, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { getDefaultCatalogFilter } from '../data/courseCatalogConstants';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
@@ -18,6 +20,7 @@ const SCHOOL_NAMES: Record<string, string> = {
   ntpu: '國立臺北大學',
   ntu: '國立臺灣大學',
   nthu: '國立清華大學',
+  nycu: '國立陽明交通大學',
 };
 
 let mockBrowsingSchoolId = 'ncku';
@@ -361,7 +364,7 @@ test('landing exposes school-scoped public service entries for guests', async ()
   expect(view.getByTestId('public-Dormitory')).toBeTruthy();
   expect(view.getByTestId('public-Career')).toBeTruthy();
   expect(view.getByText(/查看國立成功大學課綱或校方課程查詢入口/)).toBeTruthy();
-  expect(view.getByText(/前往國立成功大學住宿相關校方入口/)).toBeTruthy();
+  expect(view.getByText(/國立成功大學.*報修管道/)).toBeTruthy();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
@@ -430,6 +433,82 @@ test('guest Dormitory provides an editable personal workspace without claiming s
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
+test('residents can open the current school repair channel without saving and later record a case number', async () => {
+  setBrowsingSchoolId('ntou');
+  const key = dormStorageKey('guest', 'ntou');
+  await AsyncStorage.removeItem(key);
+  const network = resolveDormRepairRoute('ntou', 'network');
+  const general = resolveDormRepairRoute('ntou', 'other');
+  if (!network || !general) throw new Error('Missing NTOU repair routes');
+  const { view } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-Dormitory'));
+  fireEvent.press(await view.findByText('設備問題'));
+  fireEvent.press(await view.findByText(general.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
+  expect(await AsyncStorage.getItem(key)).toBeNull();
+
+  fireEvent.press(view.getByText('已自行確認處理完成'));
+  fireEvent.press(view.getByText('宿舍網路無法連線'));
+  fireEvent.press(view.getByText(network.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
+  expect(await AsyncStorage.getItem(key)).toBeNull();
+  fireEvent.press(view.getByText('儲存紀錄'));
+  fireEvent.press(await view.findByText('編輯'));
+  fireEvent.changeText(view.getByLabelText('校方案號（選填）'), '  CASE-168  ');
+  fireEvent.press(view.getByText('儲存紀錄'));
+  expect(await view.findByText('校方案號：CASE-168')).toBeTruthy();
+  fireEvent.press(view.getByText(network.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
+  const stored = normalizeDormWorkspace(JSON.parse((await AsyncStorage.getItem(key))!));
+  expect(stored.repairs).toHaveLength(1);
+  expect(stored.repairs[0]).toMatchObject({ reference: 'CASE-168', category: 'network', status: 'draft' });
+
+  fireEvent.press(view.getByText('編輯'));
+  fireEvent.press(view.getByText('水電與漏水'));
+  fireEvent.press(view.getByText('儲存紀錄'));
+  await view.findByText('編輯');
+  fireEvent.press(view.getByText('查海大修繕處理狀況'));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
+  expect(view.queryByText(general.label)).toBeNull();
+
+  act(() => setBrowsingSchoolId('ncku'));
+  fireEvent.press(await view.findByText('設備問題'));
+  await view.findByText('＋ 記錄問題');
+  expect(view.queryByText('校方案號：CASE-168')).toBeNull();
+  expect(view.queryByText(network.label)).toBeNull();
+  await AsyncStorage.removeItem(key);
+});
+
+test('changing residence does not reroute an existing repair to the new hall', async () => {
+  setBrowsingSchoolId('pu');
+  const key = dormStorageKey('guest', 'pu');
+  const location = '希嘉學苑 302';
+  const previousHall = resolveDormRepairRoute('pu', 'water', location);
+  const currentHall = resolveDormRepairRoute('pu', 'water', '思高學苑');
+  if (!previousHall || !currentHall) throw new Error('Missing PU repair routes');
+  expect(previousHall.detail).toContain('11245');
+  expect(currentHall.detail).toContain('11254');
+  await AsyncStorage.setItem(key, JSON.stringify({
+    building: '思高學苑', repairs: [{ id: 'leak', title: '洗手台漏水', category: 'water', location }],
+  }));
+  const { view } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-Dormitory'));
+  fireEvent.press(await view.findByText('設備問題'));
+  fireEvent.press(await view.findByText(previousHall.label));
+  expect(view.getByText(previousHall.detail)).toBeTruthy();
+  expect(Linking.openURL).toHaveBeenLastCalledWith(previousHall.url);
+  fireEvent.press(view.getByText('編輯'));
+  fireEvent.changeText(view.getByLabelText('位置'), '思高學苑 103');
+  expect(view.getByText(currentHall.detail)).toBeTruthy();
+  fireEvent.press(view.getByText(currentHall.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(currentHall.url);
+  fireEvent.press(view.getByText('取消'));
+  expect(view.queryByText(currentHall.detail)).toBeNull();
+  fireEvent.press(view.getByText(previousHall.label));
+  expect(Linking.openURL).toHaveBeenLastCalledWith(previousHall.url);
+  await AsyncStorage.removeItem(key);
+});
+
 test('PU guest Dormitory guide displays verified reference details without claiming live bed availability', async () => {
   setBrowsingSchoolId('pu');
   const { view, navigation, onUnhandledAction } = renderPublicStack();
@@ -464,7 +543,7 @@ test('Career wrapper keeps route.name for resolver and only offers registered pu
 });
 
 test('a school without configured sources shows honest unsupported states without inventing links', async () => {
-  setBrowsingSchoolId('nthu');
+  setBrowsingSchoolId('nycu');
   const { view, navigation, onUnhandledAction } = renderPublicStack();
   fireEvent.press(await view.findByTestId('public-Health'));
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Health'));
@@ -484,6 +563,24 @@ test('a school without configured sources shows honest unsupported states withou
   await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('Dormitory'));
   expect(view.queryByText(/前往.*住宿/)).toBeNull();
   expect(await view.findByText(/這所學校目前沒有已核實的住宿專屬網站/)).toBeTruthy();
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('NTHU guests can enter the public course search with the selected-school official catalog', async () => {
+  setBrowsingSchoolId('nthu');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('public-CourseCatalog'));
+  await waitFor(() => expect(navigation.getCurrentRoute()?.name).toBe('CourseCatalog'));
+  expect(view.getByText('清大開課查詢')).toBeTruthy();
+  expect(view.getByLabelText('搜尋清大課程')).toBeTruthy();
+  expect(queryCatalog).not.toHaveBeenCalled();
+  expect(view.queryByTestId('school-login-form')).toBeNull();
+  await act(async () => {
+    fireEvent.press(view.getByText('開啟清大官方課程目錄'));
+  });
+  expect(Linking.openURL).toHaveBeenCalledWith(
+    'https://curricul.site.nthu.edu.tw/p/406-1208-290365,r7880.php?Lang=zh-tw',
+  );
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
@@ -532,4 +629,28 @@ test('PU guest CourseCatalog may query publicly but does not offer schedule muta
   expect(view.getByText(/訪客/)).toBeTruthy();
   expect(view.queryByText('加入本機課程清單')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('a direct library route waits for school selection and resumes the original route', async () => {
+  setBrowsingSchoolId('');
+  const { view, navigation, onUnhandledAction } = renderPublicStack();
+  await view.findByTestId('login-landing');
+  expect(view.queryByTestId('public-Library')).toBeNull();
+  act(() => navigation.navigate('Library' as never));
+  await view.findByText('先選擇要瀏覽的學校');
+  expect(view.queryByTestId('public-library-screen')).toBeNull();
+  expect(navigation.getCurrentRoute()?.name).toBe('Library');
+  act(() => setBrowsingSchoolId('nthu'));
+  await view.findByTestId('public-library-screen');
+  expect(navigation.getCurrentRoute()?.name).toBe('Library');
+  expect(onUnhandledAction).not.toHaveBeenCalled();
+});
+
+test('the platform workspace remains available without choosing any university', async () => {
+  setBrowsingSchoolId('');
+  const { view, navigation } = renderPublicStack();
+  fireEvent.press(await view.findByTestId('platform-workspace-start'));
+  await view.findByTestId('platform-workspace');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
+  expect(view.queryByText('先選擇要瀏覽的學校')).toBeNull();
 });

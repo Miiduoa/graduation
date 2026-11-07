@@ -6,7 +6,7 @@ service cloud.firestore {
       return request.auth != null
         && (!exists(/databases/$(database)/documents/users/$(request.auth.uid))
           || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountDeletionInProgress', false) != true
-            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', '') != 'deleted'));
+            && !(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('status', '') in ['deleted', 'disabled', 'suspended', 'inactive'])));
     }
 
     function isSelf(uid) {
@@ -40,7 +40,7 @@ service cloud.firestore {
     function isCafeteriaOperator(schoolId, cafeteriaId, uid) {
       return cafeteriaId is string
         && exists(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/operators/$(uid))
-        && get(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/operators/$(uid)).data.status != 'inactive';
+        && get(/databases/$(database)/documents/schools/$(schoolId)/cafeterias/$(cafeteriaId)/operators/$(uid)).data.status == 'active';
     }
 
     function hasRole(schoolId, role) {
@@ -61,7 +61,11 @@ service cloud.firestore {
     }
 
     function requesterIsCafeteriaOperator(schoolId, cafeteriaId) {
-      return isSignedIn() && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
+      // A stale operator record cannot authorize a deleted canonical account.
+      // The user and operator documents are the only two authorization lookups.
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isCafeteriaOperator(schoolId, cafeteriaId, request.auth.uid);
     }
 
     function isHttpsStorefrontUrl(value) {
@@ -153,6 +157,7 @@ service cloud.firestore {
         && post.boardId is string
         && post.createdAt != null
         && post.title is string
+        && post.get('likes', 0) == 0 && post.get('likedBy', []) == []
         && (
           (post.anonymous == true && !('authorUid' in post) && post.aliasSnapshot is string)
           || (
@@ -162,18 +167,11 @@ service cloud.firestore {
         );
     }
 
-    function campusPostLikesNumeric(d) {
-      return (d.keys().hasAll(['likes']) && d.likes is int) ? d.likes : 0;
-    }
-
-    function campusPostLikedByLen(d) {
-      return (d.keys().hasAll(['likedBy']) && d.likedBy is list) ? d.likedBy.size() : 0;
-    }
-
-    function campusPostViewerHasLiked(d) {
-      return d.keys().hasAll(['likedBy'])
-        && d.likedBy is list
-        && request.auth.uid in d.likedBy;
+    function changesOnlyOwnVote(before, after, oldCount, newCount) {
+      let uid = request.auth.uid;
+      return before is list && after is list && oldCount is int && newCount is int && newCount >= 0
+        && ((!(uid in before) && after == before.concat([uid]) && newCount == oldCount + 1)
+          || (uid in before && after == before.removeAll([uid]) && newCount == oldCount - 1));
     }
 
     function campusPostCommentCountNum(d) {
@@ -186,25 +184,8 @@ service cloud.firestore {
     function campusPostLikeReactionOk() {
       let before = resource.data;
       let after = request.resource.data;
-      // affectedKeys covers add/remove/change; changedKeys alone misses field insert/delete.
-      let diff = after.diff(before).affectedKeys();
-      return diff.hasOnly(['likes', 'likedBy', 'updatedAt'])
-        && after.likedBy is list
-        && campusPostLikesNumeric(after) >= 0
-        && (
-          (
-            campusPostViewerHasLiked(after)
-            && !campusPostViewerHasLiked(before)
-            && campusPostLikesNumeric(after) == campusPostLikesNumeric(before) + 1
-            && campusPostLikedByLen(after) == campusPostLikedByLen(before) + 1
-          )
-          || (
-            !campusPostViewerHasLiked(after)
-            && campusPostViewerHasLiked(before)
-            && campusPostLikesNumeric(after) == campusPostLikesNumeric(before) - 1
-            && campusPostLikedByLen(after) == campusPostLikedByLen(before) - 1
-          )
-        );
+      return after.diff(before).affectedKeys().hasOnly(['likes', 'likedBy', 'updatedAt'])
+        && changesOnlyOwnVote(before.get('likedBy', []), after.likedBy, before.get('likes', 0), after.likes);
     }
 
     /**
@@ -790,11 +771,9 @@ service cloud.firestore {
                   && isSchoolBoardModerator(schoolId, resource.data.boardId)
                 )
               )
-              && request.resource.data.boardId == resource.data.boardId
-              && (
-                !(resource.data.anonymous == true)
-                || request.resource.data.authorUid == null
-              )
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'boardId', 'schoolId', 'authorUid', 'anonymous', 'aliasSnapshot', 'likes', 'likedBy'
+              ])
             )
           );
         allow delete: if isSchoolMember(schoolId)
@@ -804,8 +783,15 @@ service cloud.firestore {
           );
 
         match /replies/{replyId} {
+          function canEditReply() {
+            return isSchoolMember(schoolId)
+              && ((resource.data.anonymous != true && resource.data.authorUid == request.auth.uid)
+                || isSchoolBoardModerator(schoolId, get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.boardId));
+          }
+
           allow read: if isSchoolMember(schoolId);
           allow create: if isSchoolMember(schoolId)
+            && request.resource.data.get('schoolId', schoolId) == schoolId
             && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.boardId is string
             && (
               (
@@ -814,15 +800,15 @@ service cloud.firestore {
                 && request.resource.data.aliasSnapshot is string
               )
               || (
-                request.resource.data.anonymous != true
+                request.resource.data.anonymous == false
                 && request.resource.data.authorUid == request.auth.uid
               )
             );
-          allow update, delete: if isSchoolMember(schoolId)
-            && (
-              (resource.data.anonymous != true && resource.data.authorUid == request.auth.uid)
-              || isSchoolBoardModerator(schoolId, get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.boardId)
-            );
+          allow update: if canEditReply()
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'schoolId', 'authorUid', 'anonymous', 'aliasSnapshot'
+            ]);
+          allow delete: if canEditReply();
         }
       }
 
@@ -909,15 +895,24 @@ service cloud.firestore {
       }
 
       match /posts/{postId} {
+        function activeAuthor() {
+          return isActiveGroupMember(groupId) && resource.data.authorId == request.auth.uid;
+        }
+
+        function ownsOrdinaryPost() {
+          return activeAuthor() && resource.data.get('kind', 'post') != 'announcement';
+        }
+
         allow read: if isActiveGroupMember(groupId);
         // 助理回覆的狀態（assistantReply）只由伺服器寫
         allow create: if isActiveGroupMember(groupId)
           && request.resource.data.authorId == request.auth.uid
           && !('assistantReply' in request.resource.data)
           && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
-        allow update: if (canManageGroup(groupId) || (isSignedIn() && resource.data.authorId == request.auth.uid))
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assistantReply']);
-        allow delete: if canManageGroup(groupId) || (isSignedIn() && resource.data.authorId == request.auth.uid);
+        allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'assistantReply'])
+          && (canManageGroup(groupId)
+            || (ownsOrdinaryPost() && request.resource.data.get('kind', 'post') != 'announcement'));
+        allow delete: if canManageGroup(groupId) || ownsOrdinaryPost();
 
         match /comments/{commentId} {
           allow read: if isActiveGroupMember(groupId);
@@ -934,15 +929,9 @@ service cloud.firestore {
             && request.resource.data.get('isAI', false) != true
             && request.resource.data.get('generatedBy', null) == resource.data.get('generatedBy', null)
             && request.resource.data.get('authorName', '') != '助理回覆'
-            && (
-              canManageGroup(groupId)
-              || (isSignedIn() && resource.data.authorId == request.auth.uid
-                && request.resource.data.authorId == resource.data.authorId)
-            );
-          allow delete: if commentId != 'assistant' && (
-            canManageGroup(groupId)
-            || (isSignedIn() && resource.data.authorId == request.auth.uid)
-          );
+            && request.resource.data.authorId == resource.data.authorId
+            && (canManageGroup(groupId) || activeAuthor());
+          allow delete: if commentId != 'assistant' && (canManageGroup(groupId) || activeAuthor());
         }
       }
 
@@ -1100,16 +1089,33 @@ service cloud.firestore {
         allow write: if false;
 
         match /questions/{questionId} {
+          function currentSession() {
+            return get(/databases/$(database)/documents/groups/$(groupId)/liveSessions/$(sessionId)).data;
+          }
+
+          function sessionAcceptsQuestions() {
+            let session = currentSession();
+            return session.schemaVersion == 2 && session.active == true;
+          }
+
+          function changesOwnVote() {
+            let before = resource.data;
+            let after = request.resource.data;
+            return after.diff(before).affectedKeys().hasOnly(['upvotes', 'upvotedBy'])
+              && changesOnlyOwnVote(before.get('upvotedBy', []), after.upvotedBy, before.get('upvotes', 0), after.upvotes);
+          }
+
           allow read: if isActiveGroupMember(groupId);
           allow create: if isActiveGroupMember(groupId)
-            && request.resource.data.authorId == request.auth.uid;
-          allow update: if canManageGroup(groupId)
-            || (
-              isActiveGroupMember(groupId)
-              && request.resource.data.text == resource.data.text
-              && request.resource.data.createdAt == resource.data.createdAt
-              && request.resource.data.answered == resource.data.answered
-            );
+            && request.resource.data.authorId == request.auth.uid
+            && sessionAcceptsQuestions()
+            && request.resource.data.get('upvotes', 0) == 0
+            && request.resource.data.get('upvotedBy', []) == []
+            && request.resource.data.get('answered', false) == false;
+          allow update: if (isActiveGroupMember(groupId) && sessionAcceptsQuestions() && changesOwnVote())
+            || (canManageGroup(groupId) && currentSession().schemaVersion == 2
+              && request.resource.data.answered is bool
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answered']));
           allow delete: if canManageGroup(groupId);
         }
 
@@ -1163,6 +1169,7 @@ service cloud.firestore {
       allow update: if isSelf(uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'role',
+          'status',
           'primaryRole',
           'postLoginRoles',
           'teachingRoles',
@@ -1589,7 +1596,9 @@ service cloud.firestore {
     }
 
     match /timetableShares/{token} {
-      allow get: if resource.data.revoked != true
+      // Older snapshots may contain private fields and are projected by the server.
+      allow get: if resource.data.get('publicSchemaVersion', 0) == 1
+        && resource.data.revoked == false
         && resource.data.expiresAt is timestamp
         && resource.data.expiresAt > request.time;
       allow list, write: if false;

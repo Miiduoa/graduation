@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   selectedSchoolId: 'pu' as string | null,
   schoolRole: null as string | null,
-  schoolRoleCalls: [] as Array<[string | null | undefined, string]>,
+  schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
   session: null as null | { context: string; platformAccountId: string },
   sessionLoading: false,
   sessionError: '',
@@ -43,7 +43,11 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/components/AppHeader', () => ({ AppHeader: () => <header>nuni</header> }));
+vi.mock('@/components/AppHeader', () => ({
+  AppHeader: ({ onOpenVoice }: { onOpenVoice: () => void }) => (
+    <header><button type="button" onClick={onOpenVoice}>頁首語音</button></header>
+  ),
+}));
 vi.mock('@/components/SiteFooter', () => ({ SiteFooter: () => null }));
 vi.mock('@/lib/usePersonalTodayRecords', () => ({
   usePersonalTodayRecords: () => state.timetable,
@@ -80,7 +84,7 @@ vi.mock('@/lib/useSchoolRole', async (original) => {
   const actual = await original<typeof import('@/lib/useSchoolRole')>();
   return {
     ...actual,
-    useSchoolRole: (uid: string | null | undefined, schoolId: string) => {
+    useSchoolRole: (uid: string | null | undefined, schoolId: string | null | undefined) => {
       state.schoolRoleCalls.push([uid, schoolId]);
       return state.schoolRole;
     },
@@ -434,7 +438,8 @@ it('looks up the school role from the selected school instead of always using pu
   expect(screen.queryByRole('link', { name: /課務申訴審核/ })).toBeNull();
   state.selectedSchoolId = null;
   view.rerender(<HomePage />);
-  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'pu')).toBe(true);
+  expect(state.schoolRoleCalls.at(-1)).toEqual(['alice', null]);
+  expect(state.schoolRoleCalls.some((call) => call[1] === 'pu')).toBe(false);
 });
 
 it('shows the LMS-unconnected sentence instead of pretending there is no homework', async () => {
@@ -932,3 +937,52 @@ it.each([
     expect(state.refresh).not.toHaveBeenCalled();
   },
 );
+
+it('starts Today dictation from the header and keeps an active recording running', async () => {
+  state.uid = null;
+  const start = vi.fn();
+  vi.stubGlobal('SpeechRecognition', class { start = start; abort = vi.fn(); });
+  try {
+    render(<HomePage />);
+    const panel = screen.getByText('打字或語音詢問').closest('details')!;
+    expect(panel.open).toBe(false);
+    const shortcut = screen.getByRole('button', { name: '頁首語音' });
+    fireEvent.click(shortcut);
+    expect(panel.open).toBe(true);
+    const mic = await screen.findByRole('button', { name: '停止語音輸入' });
+    expect(start).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(mic);
+    fireEvent.click(shortcut);
+    expect(start).toHaveBeenCalledOnce();
+    expect(mic.getAttribute('aria-pressed')).toBe('true');
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('focuses the Today input from the header when the browser lacks speech recognition', async () => {
+  state.uid = null;
+  render(<HomePage />);
+  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  const input = await screen.findByRole('searchbox');
+  expect(document.activeElement).toBe(input);
+});
+
+it('keeps the active question on screen while a late course load resolves the teacher view', async () => {
+  let finish!: (result: HomeData) => void;
+  vi.mocked(loadHomeData).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  render(<HomePage />);
+  fireEvent.click(screen.getByRole('button', { name: '頁首語音' }));
+  const question = await screen.findByRole('searchbox');
+  fireEvent.change(question, { target: { value: '我今天要去哪間教室？' } });
+  await act(async () => finish(data('資料庫', {
+    courses: [{ id: 'teach', name: '資料庫', role: 'owner-teacher', unreadCount: 0 }],
+    tasks: [],
+  })));
+  expect(screen.getByRole('searchbox')).toBe(question);
+  expect((question as HTMLInputElement).value).toBe('我今天要去哪間教室？');
+  const summary = screen.getByText('打字或語音詢問').closest('summary')!;
+  fireEvent.click(summary);
+  await screen.findByTestId('teacher-today');
+  expect(screen.getByText('打字或語音詢問').closest('details')!.open).toBe(false);
+});

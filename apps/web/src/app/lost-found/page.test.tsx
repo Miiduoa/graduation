@@ -65,6 +65,7 @@ it('offers posting, visible filter scope, and load-failure retry', async () => {
         id: 'item-1',
         type: 'lost',
         title: '黑色雨傘',
+        photos: [{ src: 'https://photos.example/umbrella.jpg', host: 'photos.example', campusHosted: false }],
         description: '圖書館',
         category: 'other',
         location: '圖書館',
@@ -89,6 +90,8 @@ it('offers posting, visible filter scope, and load-failure retry', async () => {
   expect((await screen.findByRole('alert')).textContent).toContain('暫時無法讀取失物招領');
   fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
   expect(await screen.findByRole('link', { name: '黑色雨傘' })).toBeTruthy();
+  expect(screen.getByText('照片 1 張')).toBeTruthy();
+  expect(document.querySelector('img[src*="photos.example"]')).toBeNull();
   expect(screen.getByRole('link', { name: '刊登物品' }).getAttribute('href')).toContain(
     '/lost-found/post',
   );

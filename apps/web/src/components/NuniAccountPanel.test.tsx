@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { NuniError } from '@campus/shared/src/nuni';
@@ -469,6 +469,37 @@ it('keeps explicit recovery retryable after a rejected refresh without claiming 
   await act(async () => retry.resolve());
   await screen.findByRole('form', { name: '申請學校資格' });
   expect(reads()).toHaveLength(2);
+});
+
+it('starts a new recovery when the failure retry first becomes visible', async () => {
+  mocks.request.mockImplementation(async (path: string) => {
+    if (path === 'memberships') throw new NuniError(401, 'UNAUTHENTICATED');
+    return nuniPayload(path);
+  });
+  mocks.account.refresh.mockRejectedValueOnce(new Error('synthetic failed refresh'));
+  const retry = deferred();
+  const view = render(<NuniAccountPanel />);
+  let retryCalls = 0;
+  const observer = new MutationObserver(() => {
+    if (!view.container.textContent?.includes('目前無法重新確認帳號，請稍後再試。')) return;
+    observer.disconnect();
+    mocks.account.refresh.mockReturnValueOnce(retry.promise);
+    mocks.request.mockImplementation(async (path: string) => nuniPayload(path));
+    fireEvent.click(screen.getByRole('button', { name: '重新確認帳號' }));
+    retryCalls = mocks.account.refresh.mock.calls.length;
+  });
+  // Exercise the visible button before a later passive effect can release its lock.
+  observer.observe(view.container, { childList: true, subtree: true, characterData: true });
+  try {
+    fireEvent.click(await screen.findByRole('button', { name: '重新確認帳號' }));
+    await waitFor(() => expect(retryCalls).toBeGreaterThan(0));
+    expect(retryCalls).toBe(2);
+    await act(async () => retry.resolve());
+    await screen.findByRole('form', { name: '申請學校資格' });
+    expect(reads()).toHaveLength(2);
+  } finally {
+    observer.disconnect();
+  }
 });
 
 it('does not let a late recovery settle a new operation after an account leaves and returns', async () => {

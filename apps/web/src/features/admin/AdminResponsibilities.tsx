@@ -6,40 +6,40 @@ import styles from './Admin.module.css';
 
 const responsibilities = [
   {
-    data: '正式學籍、成績與校務設定',
-    owner: '校方負責單位與經指派的承辦人',
-    student: '查看本人資料、提出更正申請',
-    platform: '跨校掌握開通、授權與異常；正式資料依校方串接範圍提供',
+    data: '學校接入與服務開通',
+    owner: '校方申請窗口與平台管理員',
+    student: '依學校開通狀態使用服務',
+    platform: '審核接入申請、編輯學校資料與服務設定、確認開通或暫停',
   },
   {
-    data: '課程教材、作業與評量',
-    owner: '該課程的負責老師與受指派的共同授課者',
-    student: '繳交本人作業、查看自己的作答與回饋',
-    platform: '追溯課程授權與治理紀錄，協助處理權限爭議',
+    data: '校方管理員與職員授權',
+    owner: '該校管理員與授權承辦人',
+    student: '使用本人獲准的功能',
+    platform: '查核各校授權名單、指派校方管理員或職員；已開通學校須先啟用限時代操作',
   },
   {
-    data: '請假、證件、報修、包裹、列印與健康案件',
-    owner: '校方指派的各業務承辦人',
-    student: '送件、補件與查看本人案件',
-    platform: '跨校掌握服務狀態、負責人、異常與處理紀錄',
+    data: '店家接入與公開目錄',
+    owner: '店家申請人與校方店家管理人員',
+    student: '查看已公開店家，依服務狀態點餐',
+    platform: '審核合作意向與店家進件、查看目錄及公開狀態',
   },
   {
-    data: '校園公告、活動與公開內容',
-    owner: '校方授權的內容編輯者',
-    student: '閱讀、報名、參與及提出檢舉',
-    platform: '跨校檢舉處理與內容治理',
+    data: '課班與學校的掛靠關係',
+    owner: '建立課班的教師與申請學校',
+    student: '使用已加入的課班',
+    platform: '核對課班、目標學校與理由後，核准或拒絕掛靠申請',
   },
   {
-    data: '店家、訂單與取餐',
-    owner: '校方店家管理人員與該店授權操作者',
-    student: '處理自己的訂單與取餐',
-    platform: '跨校查看店家接入、營運方式、公開狀態與異常',
+    data: '公開交流看板與內容檢舉',
+    owner: '公開看板管理者與內容作者',
+    student: '閱讀、發文、提出檢舉',
+    platform: '建立公開看板，核對被檢舉內容後隱藏貼文或駁回檢舉',
   },
   {
-    data: '私人筆記、個人行程與個人匯入資料',
-    owner: '資料本人；送交校方的內容依案件授權處理',
-    student: '編輯、匯出或刪除自己的個人資料',
-    platform: '掌握服務與治理紀錄；個案內容存取須有授權與稽核',
+    data: '平台營運操作紀錄',
+    owner: '執行操作的管理員',
+    student: '依各項服務查看自己的處理結果',
+    platform: '查核本次載入紀錄中的操作者、學校、處理理由與變更內容',
   },
 ];
 
@@ -55,8 +55,8 @@ export function AdminResponsibilities({
       </summary>
       <div className={styles.disclosureBody}>
         <p className={styles.notice}>
-          平台管理員負責跨校治理；校方管理員指派本校人員；承辦人只處理被授權的業務；
-          老師依課程授權管理教學。內容編輯權限只涵蓋內容工作，授課或承辦資格需另行指派。
+          這個工作台處理跨校接入、授權、店家申請與公開內容。每項操作先確認對象與學校，
+          再依目前有效的授權送出，結果可到操作紀錄查核。
         </p>
         <div
           className={styles.tableWrap}
@@ -69,8 +69,8 @@ export function AdminResponsibilities({
               <tr>
                 <th scope="col">資料與工作</th>
                 <th scope="col">日常負責人</th>
-                <th scope="col">學生本人</th>
-                <th scope="col">平台全覽</th>
+                <th scope="col">使用者</th>
+                <th scope="col">本工作台提供</th>
               </tr>
             </thead>
             <tbody>
@@ -86,8 +86,9 @@ export function AdminResponsibilities({
           </table>
         </div>
         <p className={styles.muted}>
-          個人匯入的課表與成績保留原始來源，由本人確認；正式學籍、正式成績及校務核准結果由校方發布。
-          校務功能依學校正式開通與授權狀態提供。平台帳號與校方帳號目前分別驗證。
+          校園公告由該校授權的管理員或內容編輯者，以校園帳號進入公告工作區發布。
+          正式學籍、成績、個人案件與私人資料依各校及資料本人的授權處理，這個工作台不提供內容存取。
+          課班掛靠只建立課班與學校的關係，正式選課與學籍仍由校方管理。
         </p>
         <div className={styles.actions}>
           <Button onClick={() => onNavigate('people')}>查各校負責人與授權</Button>

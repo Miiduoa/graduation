@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { queryTransit, readSavedStops, type TransitStop } from './transit';
+import { isLegacyCatalogGroup, queryTransit, readSavedStops, type TransitStop } from './transit';
 
 const stop: TransitStop = {
   id: 'TCOD_sample_outbound', name: '靜宜大學', city: 'Taichung', lat: 24.22, lon: 120.58, distance: 80,
   source: 'taichung-open-data', catalogDate: '2026-10-18T04:00:00.000Z',
-  routes: [{ name: '300', direction: '去', destination: '臺中車站' }],
+  routes: [{ name: '310區2', direction: '去', destination: '臺中車站(A月台)' }],
 };
 beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-18T08:00:00.000Z')); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -17,12 +17,26 @@ it('keeps catalog metadata through API parsing and favorites while discarding UR
   })));
   const result = await queryTransit({ action: 'campus', schoolId: 'pu' }, new AbortController().signal);
   expect(result.status === 'ready' && result.kind === 'stops' ? result.stops : []).toEqual([
-    { ...stop, routes: [{ name: '300', direction: '去', destination: '台中車站' }] },
+    stop,
   ]);
   if (result.status !== 'ready' || result.kind !== 'stops') throw new Error('expected stops');
   expect(readSavedStops(JSON.stringify(result.stops))).toEqual([
-    { ...stop, distance: null, routes: [{ name: '300', direction: '去', destination: '台中車站' }] },
+    { ...stop, distance: null },
   ]);
+});
+
+it('distinguishes old campus-group favorites from physical catalog and TDX stops', () => {
+  for (const name of ['校門口・往沙鹿', '校門口・往市區', '英才路側', '專用道', '校門口・往校內', '校內', '校門口']) {
+    const [favorite] = readSavedStops(JSON.stringify([{ ...stop, name }]));
+    expect(isLegacyCatalogGroup(favorite)).toBe(true);
+    expect(isLegacyCatalogGroup({ ...favorite, source: undefined })).toBe(false);
+  }
+  expect(isLegacyCatalogGroup({ ...stop, name: '靜宜大學(專用道)' })).toBe(false);
+});
+
+it('reads older favorites with shortened destinations without inventing their original platforms', () => {
+  const old = { ...stop, distance: null, routes: [{ name: '300', direction: '去', destination: '台中車站' }] };
+  expect(readSavedStops(JSON.stringify([old]))).toEqual([old]);
 });
 
 it.each([

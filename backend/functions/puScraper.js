@@ -17,6 +17,7 @@
  */
 
 const https = require('https');
+const { parseFragment } = require('parse5');
 const { parsePuGradeDocument, parseGradeSemesterCodes } = require('./lib/puGradeDocument');
 const { buildDerivedCreditSummary } = require('./lib/puCreditSummary');
 const { parsePuCourseTime } = require('./lib/puCourseTime');
@@ -303,15 +304,10 @@ function getFollowRedirect(hostname, path, cookies, maxRedirects = 3, extra = {}
 // HTML helpers
 // ---------------------------------------------------------------------------
 
-/** Strip HTML tags from a string */
+/** Extract normalized visible text from an HTML fragment. */
 function stripTags(html) {
-  return html
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
+  return puVisibleTextParts(parseFragment(html))
+    .join('')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -372,9 +368,7 @@ function isPuEmptyCourseMessage(text) {
 
 function hasPuEmptyCourseMessage(html) {
   // 只接受頁面上的明確無課文字，不把腳本中的空狀態文案當作校務結果。
-  const visible = html.replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|template)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
-  return visible.split(/<[^>]+>/).some(text => isPuEmptyCourseMessage(stripTags(text)));
+  return puVisibleTextParts(parseFragment(html)).some(isPuEmptyCourseMessage);
 }
 
 function looksLikePuLoginPage(html) {
@@ -1041,6 +1035,30 @@ async function puFetchCreditSummary(cookies) {
   }
 }
 
+const PROFILE_NON_TEXT = new Set([
+  '#comment', 'script', 'style', 'template', 'noscript', 'input', 'textarea', 'select', 'button',
+]);
+
+function puVisibleTextParts(node) {
+  if (PROFILE_NON_TEXT.has(node.nodeName)) return [];
+  if (node.nodeName === '#text') return [node.value];
+  if (
+    node.attrs?.some(({ name, value }) =>
+      name === 'hidden' ||
+      (name === 'aria-hidden' && value.toLowerCase() === 'true') ||
+      (name === 'style' && /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i.test(value)),
+    )
+  ) return [];
+  if (node.nodeName === 'br') return [' '];
+  return (node.childNodes || []).flatMap(puVisibleTextParts);
+}
+
+function studentNumberFromProfile(text) {
+  const fields = [...text.matchAll(/學號\(Student No\.\)\s*[：:]\s*(\S*)/g)];
+  if (fields.length !== 1 || !/^\d{7,10}$/.test(fields[0][1])) return null;
+  return fields[0][1];
+}
+
 /**
  * Fetch student profile info from the course query page.
  * (The course page contains: class, student ID, name)
@@ -1056,12 +1074,18 @@ async function puFetchStudentInfo(cookies) {
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 
     const html = res.data;
-    if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
+    const source = new URL(res.url);
+    const profileText = puVisibleTextParts(parseFragment(html)).join(' ');
+    if (
+      source.origin !== `https://${ALCAT_HOST}` ||
+      source.pathname !== COURSE_RESULT_PATH ||
+      looksLikePuLoginPage(html) ||
+      !hasPuStudentContext(profileText)
+    ) {
       return { success: false, studentInfo: {}, error: 'E校園 session 已失效，請重新登入' };
     }
 
     const classMatch = html.match(/班級\(Class\)[：:]\s*([^\s<]+)/);
-    const idMatch = html.match(/學號\(Student No\.\)[：:]\s*(\d+)/);
     const nameMatch = html.match(/姓名\(Student Name\)[：:]\s*([^\s<]+)/);
     const semMatch = html.match(/(\d+)學年度\s*第(\d)學期/);
 
@@ -1071,7 +1095,7 @@ async function puFetchStudentInfo(cookies) {
     return {
       success: true,
       studentInfo: {
-        studentId: idMatch ? idMatch[1] : null,
+        studentId: studentNumberFromProfile(profileText),
         name: nameMatch ? nameMatch[1] : null,
         class: className,
         department,

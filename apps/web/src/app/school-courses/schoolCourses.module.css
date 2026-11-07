@@ -57,7 +57,8 @@
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.courses h2 {
+.courses h2,
+.courses h3 {
   font-size: 19px;
   font-weight: 600;
   margin: 0 0 20px;

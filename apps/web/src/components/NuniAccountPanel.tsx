@@ -12,7 +12,6 @@ type MembershipRecovery = {
   resolve: () => void;
   reject: (failure: unknown) => void;
   targetVersion: number;
-  failure?: unknown;
 };
 
 /** Account-level information only. Teaching roles belong to individual courses. */
@@ -84,10 +83,7 @@ function ConfirmedAccountPanel({
   useEffect(() => {
     const operation = recoveryOperation.current;
     if (!operation) return;
-    if (recovery === 'error') {
-      recoveryOperation.current = null;
-      operation.reject(operation.failure);
-    } else if (!loading && recovery === 'idle' && readerVersion === operation.targetVersion) {
+    if (!loading && recovery === 'idle' && readerVersion === operation.targetVersion) {
       recoveryOperation.current = null;
       // Complete after the previous reader's cleanup, so it cannot start another read.
       operation.resolve();
@@ -126,9 +122,10 @@ function ConfirmedAccountPanel({
         if (mounted.current && recoveryOperation.current === operation) setRecovery('settled');
       } catch (failure) {
         if (mounted.current && recoveryOperation.current === operation) {
-          recoveryOperation.current.failure = failure;
+          recoveryOperation.current = null;
           setReaderSuppressed(true);
           setRecovery('error');
+          operation.reject(failure);
         }
       }
     })();

@@ -11,7 +11,11 @@ import {
 } from '../../../../../backend/functions/lib/puSessionStore.js';
 
 type RecordData = Record<string, unknown>;
-export type SchoolDataSnapshot = { exists: boolean; data: () => RecordData | undefined };
+export type SchoolDataSnapshot = {
+  exists: boolean;
+  data: () => RecordData | undefined;
+  updateTime?: { seconds: number; nanoseconds: number };
+};
 type Snapshot = SchoolDataSnapshot;
 export type AcademicDocRef = {
   path?: string;
@@ -29,7 +33,8 @@ type SessionQuery = {
 };
 
 export type AcademicTransaction = {
-  get: (ref: AcademicDocRef) => Promise<Snapshot>;
+  get(ref: AcademicDocRef): Promise<Snapshot>;
+  get(query: SessionQuery): ReturnType<SessionQuery['get']>;
   set: (ref: AcademicDocRef, data: RecordData, options?: { merge?: boolean }) => void;
 };
 
@@ -90,14 +95,20 @@ function publicResult(kind: keyof AcademicFetchers, result: RecordData): RecordD
   return publicCampusDataResult(kind, result) as RecordData;
 }
 
-export async function requireAcademicAccount(db: AcademicFirestore, uid: string): Promise<void> {
+export async function requireAcademicAccount(
+  db: AcademicFirestore,
+  uid: string,
+  tx?: AcademicTransaction,
+): Promise<void> {
+  const get = (ref: AcademicDocRef) => tx ? tx.get(ref) : ref.get();
   const [profile, membership] = await Promise.all([
-    db.doc(`users/${uid}`).get(),
-    db.doc(`schools/pu/members/${uid}`).get(),
+    get(db.doc(`users/${uid}`)),
+    get(db.doc(`schools/pu/members/${uid}`)),
   ]);
   const account = profile.data();
   if (!profile.exists || account?.schoolId !== 'pu' ||
-    account.accountDeletionInProgress === true || account.status === 'deleted' ||
+    account.accountDeletionInProgress === true ||
+    ['deleted', 'disabled', 'suspended', 'inactive'].includes(String(account.status)) ||
     !membership.exists || membership.data()?.status !== 'active') {
     throw new HttpsError('permission-denied', '目前無法確認你的在校身分。');
   }

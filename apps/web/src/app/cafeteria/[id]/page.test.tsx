@@ -468,6 +468,43 @@ it('combines menu category and case-insensitive search, then clears both filters
   expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
 });
 
+it('keeps menu controls stable and turns the page only for a changed category', async () => {
+  state.menus = [
+    { ...toastMenu, category: '輕食' },
+    { ...toastMenu, id: 'coffee', name: '冷萃咖啡', category: '飲品', price: 85 },
+  ];
+  await mountStorefront();
+
+  const menu = screen.getByRole('region', { name: '菜單' });
+  expect(within(menu).getByText(showcaseShop.name)).toBeTruthy();
+  const search = within(menu).getByRole('searchbox', { name: '搜尋這間店的餐點' });
+  const drinks = within(menu).getByRole('button', { name: '飲品' });
+  const initialPage = screen.getByTestId('storefront-menu-page');
+
+  search.focus();
+  fireEvent.change(search, { target: { value: '咖啡' } });
+  expect(screen.getByTestId('storefront-menu-page')).toBe(initialPage);
+  expect(document.activeElement).toBe(search);
+
+  drinks.focus();
+  fireEvent.click(drinks);
+  const drinksPage = screen.getByTestId('storefront-menu-page');
+  expect(drinksPage).not.toBe(initialPage);
+  expect(within(menu).getByRole('searchbox')).toBe(search);
+  expect(within(menu).getByRole('button', { name: '飲品' })).toBe(drinks);
+  expect(document.activeElement).toBe(drinks);
+
+  fireEvent.click(drinks);
+  expect(screen.getByTestId('storefront-menu-page')).toBe(drinksPage);
+  expect(document.activeElement).toBe(drinks);
+
+  search.focus();
+  fireEvent.change(search, { target: { value: '不存在的餐點' } });
+  expect(screen.getByTestId('storefront-menu-page')).toBe(drinksPage);
+  expect(within(menu).getByRole('heading', { name: '沒有符合的餐點' })).toBeTruthy();
+  expect(document.activeElement).toBe(search);
+});
+
 it('offers an actual retry without confusing catalog failure with a missing shop', async () => {
   vi.mocked(fetchCafeteriaDetail).mockRejectedValueOnce(new Error('unavailable'));
   await mountStorefront();

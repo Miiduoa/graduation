@@ -249,6 +249,7 @@ function createDeleteUserAccountHandler({
     // Financial history remains intact, including account-side mirrors. All
     // other private collections include orphaned/nested descendants in cleanup.
     await checkFinancialRecords(db, userRef, uid);
+    await db.collection('_studentCardPresentations').doc(uid).delete();
     await clearPrivateSubtree(db, userRef);
 
     // Replacement is intentional: unknown profile fields must not survive a

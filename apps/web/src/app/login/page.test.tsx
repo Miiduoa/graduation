@@ -721,7 +721,7 @@ it.each(['unmount', 'change task'])(
     else {
       state.params = new URLSearchParams('returnUrl=%2Fmerchant');
       view.rerender(<LoginPage />);
-      expect((screen.getByLabelText('密碼') as HTMLInputElement).value).toBe('');
+      expect(screen.queryByLabelText('密碼')).toBeNull();
     }
     expect(signal.aborted).toBe(true);
     await act(async () => finish({ uid: 'one' }));
@@ -824,3 +824,27 @@ it('does not treat another Firebase user as a verified school session', () => {
   expect(screen.getByLabelText('學號')).toBeTruthy();
   expect(replace).not.toHaveBeenCalled();
 });
+
+it('offers task-specific entries before asking a visitor for credentials', () => {
+  state.params = new URLSearchParams();
+  state.user = null;
+  render(<LoginPage />);
+  expect(screen.getByRole('link', { name: '第一次申請店家進駐' }).getAttribute('href')).toBe('/merchant/apply');
+  expect(screen.getByRole('link', { name: '查看申請或進入門市' }).getAttribute('href')).toBe('/merchant/workspace');
+  expect(screen.getByRole('link', { name: '學生與教師進入課程' }).getAttribute('href')).toBe('/classroom');
+  expect(screen.getByRole('link', { name: '校方人員登入' }).getAttribute('href')).toBe('/auth/account?method=school');
+  expect(screen.getByRole('link', { name: '平台管理員登入' }).getAttribute('href')).toBe('/admin/login');
+});
+
+it.each(['/merchant', '/merchant/apply', '/merchant/workspace'])(
+  'keeps the merchant task %s on platform sign-in even if student login is available',
+  (returnUrl) => {
+    state.params = new URLSearchParams({ returnUrl });
+    state.studentId = true;
+    render(<LoginPage />);
+    expect(screen.getByTestId('platform-sign-in').getAttribute('data-return-url')).toBe(returnUrl);
+    expect(screen.queryByLabelText('學號')).toBeNull();
+    expect(screen.queryByLabelText('密碼')).toBeNull();
+    expect(replace).not.toHaveBeenCalled();
+  },
+);

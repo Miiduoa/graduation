@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { use } from 'react';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { useTeacherCourse } from '@/lib/useTeacherCourse';
 import styles from '../../../../home.module.css';
 import local from '../teacherCourse.module.css';
@@ -15,9 +16,9 @@ export default function TeacherGradebookPage(props: {
 }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { ready, schoolId, schoolSearch: q } = useBrowsingSchoolPageContext(searchParams);
   const { state, refresh, authLoading, signedIn } = useTeacherCourse(
-    schoolId,
+    ready ? schoolId : '',
     courseId,
     'gradebook',
   );
@@ -39,7 +40,9 @@ export default function TeacherGradebookPage(props: {
           回課程工作台
         </Link>
       </nav>
-      {authLoading ? (
+      {!ready ? (
+        <SchoolScopePlaceholder />
+      ) : authLoading ? (
         <p role="status">確認登入狀態…</p>
       ) : !signedIn ? (
         <SchoolAccountRequired

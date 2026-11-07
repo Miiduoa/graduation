@@ -7,7 +7,7 @@ jest.mock('./generated/shared/puEcampusDataPolicy', () => ({
 
 const { EventEmitter } = require('events');
 const https = require('https');
-const { puLogin, puFetchCourses, puFetchGrades } = require('./puScraper');
+const { puLogin, puFetchCourses, puFetchGrades, puFetchStudentInfo } = require('./puScraper');
 
 const gradePage = `<table>
   <tr><th>學期別</th><th>課程名稱</th><th>修課班級</th><th>修別</th><th>學分數</th><th>成績</th></tr>
@@ -159,6 +159,12 @@ describe('PU course document recognition', () => {
     ['truncated course row', `<table>${header}<tr><td>IM01</td><td>資管</td><td>資料庫</td></tr></table>`],
     ['unrecognizable credits', `<table>${header}<tr><td>IM01</td><td>資管</td><td>資料庫</td><td>必修</td><td>unknown</td><td>二 3</td><td></td></tr></table>`],
     ['empty message only in script', '<script>const emptyText = "本學期尚未選課";</script><p>課程查詢版面已更新</p>'],
+    ['empty message in an unclosed script', '<script>本學期尚未選課'],
+    ['empty message in an unclosed style', '<style>本學期尚未選課'],
+    ['empty message in an unclosed template', '<template>本學期尚未選課'],
+    ['empty message in an unclosed comment', '<!-- <p>本學期尚未選課</p>'],
+    ['empty message in a hidden element', '<section hidden><p>本學期尚未選課</p></section>'],
+    ['empty message in an aria-hidden element', '<section aria-hidden="true"><p>本學期尚未選課</p></section>'],
   ])('fails closed for %s instead of inventing an empty timetable', async (_label, document) => {
     mockRequests(() => ({ html: student + document }));
     const result = await puFetchCourses({ SID: 'fixture-session' });
@@ -170,6 +176,8 @@ describe('PU course document recognition', () => {
     ['recognized table with zero rows', `<table>${header}</table>`],
     ['explicit empty row', `<table>${header}<tr><td colspan="7">本學期無選課資料</td></tr></table>`],
     ['explicit empty page', '<p>本學期尚未選課</p>'],
+    ['multiline empty message inside a visible container', '<section><h1>課程查詢</h1><p>本學期\n 尚未選課</p></section>'],
+    ['entity-encoded empty message', '<p>本學期&#x5C1A;未選課</p>'],
   ])('preserves a legitimate %s', async (_label, document) => {
     mockRequests(() => ({ html: student + document }));
     await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
@@ -183,6 +191,71 @@ describe('PU course document recognition', () => {
       <table><tr><td>其他查詢</td></tr></table>` }));
     await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
       success: true, courses: [{ code: 'IM01', name: '資料庫', credits: 3 }],
+    });
+  });
+
+  test('preserves adjacent inline text in course headers and names while separating line breaks', async () => {
+    const inlineHeader = header.replace('選課代號 course code', '<span>選課<b>代號</b></span>');
+    mockRequests(() => ({ html: student + `<table>${inlineHeader}
+      <tr><td>IM02</td><td>資管</td><td><span><b>資訊</b>管理</span><br>實務</td>
+      <td>必修</td><td>3</td><td>另行公告</td><td></td></tr></table>` }));
+    await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
+      success: true, courses: [{ code: 'IM02', name: '資訊管理 實務', nameEn: '' }],
+    });
+  });
+
+  test('extracts visible course text with an HTML parser and decodes entities once', async () => {
+    mockRequests(() => ({ html: student + `<table>${header}
+      <tr><td>IM01</td><td>資管</td><td>資料庫 &amp; <b>&#x6574;&#x5408;</b> &amp;lt;課程&amp;gt;
+        <!-- 註解課名 --><script>隱藏腳本</script><style>隱藏樣式</style>
+        <template>隱藏範本</template><span hidden>隱藏課名</span>
+      </td><td>必修</td><td>3</td><td>另行公告</td><td></td></tr></table>` }));
+    await expect(puFetchCourses({ SID: 'fixture-session' })).resolves.toMatchObject({
+      success: true, courses: [{ code: 'IM01', name: '資料庫 & 整合 &lt;課程&gt;', nameEn: '' }],
+    });
+  });
+});
+
+describe('PU student number used on the card', () => {
+  const number = '學號(Student No.)：412345678';
+  afterEach(() => jest.restoreAllMocks());
+
+  test('reads the visible field in the authenticated course profile', async () => {
+    mockRequests(() => ({ html: `<!-- 學號(Student No.)：999999999 -->
+      <script>const label = '學號(Student No.)：888888888';</script>
+      <div title="學號(Student No.)：777777777" hidden>學號(Student No.)：666666666</div>
+      <p>學號(Student No.)：<b>412345678</b></p>` }));
+    await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+      success: true, studentInfo: { studentId: '412345678' },
+    });
+  });
+
+  test.each([
+    `<!-- ${number} --><style>/* ${number} */</style><template>${number}</template>`,
+    `<div title="${number}"></div><p aria-hidden="true">${number}</p>`,
+    `<div style="display: none">${number}</div><textarea>${number}</textarea>`,
+  ])('rejects a profile whose only identity markers are hidden', async (html) => {
+    mockRequests(() => ({ html }));
+    await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+      success: false, studentInfo: {},
+    });
+  });
+
+  test.each([number + 'X', number + '00', number + ' ' + number.replace('412345678', '999999999')])(
+    'withholds malformed or ambiguous numbers', async (text) => {
+      mockRequests(() => ({ html: `<p>${text}</p>` }));
+      await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+        success: true, studentInfo: { studentId: null },
+      });
+    },
+  );
+
+  test('cannot obtain a card identity from a redirect to another campus page', async () => {
+    mockRequests((_request, hop) => hop === 0
+      ? { status: 302, headers: { location: '/notices' } }
+      : { html: `<p>${number}</p>` });
+    await expect(puFetchStudentInfo({ SID: 'session' })).resolves.toMatchObject({
+      success: false, studentInfo: {},
     });
   });
 });

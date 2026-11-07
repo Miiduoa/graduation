@@ -2,8 +2,8 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 
 const mockNavigate = jest.fn();
-let mockEmit: (orders: unknown[]) => void = () => undefined;
-const mockWatch = jest.fn((_scope: unknown, onChange: (orders: unknown[]) => void) => {
+let mockEmit: (orders: unknown[], fromCache?: boolean) => void = () => undefined;
+const mockWatch = jest.fn((_scope: unknown, onChange: (orders: unknown[], fromCache?: boolean) => void) => {
   mockEmit = onChange;
   return () => undefined;
 });
@@ -13,7 +13,7 @@ jest.mock('../state/theme', () => ({
   useTheme: () => ({ colors: { border: '#ccc', surface: '#fff', text: '#000', muted: '#666' }, radius: { md: 12 } }),
 }));
 jest.mock('../utils/safeNavigate', () => ({ safeNavigate: (_nav: unknown, route: string) => mockNavigate(route) }));
-jest.mock('../features/dining', () => ({ watchMyOrders: (...args: [unknown, (orders: unknown[]) => void]) => mockWatch(...args) }));
+jest.mock('../features/dining', () => ({ watchMyOrders: (...args: [unknown, (orders: unknown[], fromCache?: boolean) => void]) => mockWatch(...args) }));
 
 import { OpenOrderCard, latestOpenOrder } from '../components/OpenOrderCard';
 
@@ -46,4 +46,13 @@ test('沒有還沒取餐的單（已取餐、已取消）：整張不出現', ()
   ]));
   expect(view.queryByText(/取餐號碼|號碼還沒拿到/)).toBeNull();
   expect(latestOpenOrder([])).toBeNull();
+});
+
+test('未核實的快取不會顯示為目前的取餐號碼', () => {
+  const view = render(<OpenOrderCard />);
+  const orders = [{ ...base, id: 'co_ready123456', status: 'ready', queueNumber: 7 }];
+  act(() => mockEmit(orders, true));
+  expect(view.queryByText('取餐號碼 7')).toBeNull();
+  act(() => mockEmit(orders, false));
+  expect(view.getByText('取餐號碼 7')).toBeTruthy();
 });

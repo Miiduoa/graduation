@@ -136,7 +136,34 @@ test('the term selected on Today remains selected in the complete timetable', as
   expect(view.queryByText('成大課程')).toBeNull();
 });
 
-test('unknown school clock times remain readable without borrowing another school period table', async () => {
+test.each(['1|密集', '1|密集|夜間'])(
+  'preserves literal separators in the selected semester %s',
+  async (semester) => {
+    mockRoute = { params: { term: `115|${semester}` } };
+    jest.mocked(loadPersonalImports).mockResolvedValue({
+      version: 1,
+      records: [record(), record({ id: 'special-term', semester, title: '特殊學期課程' })],
+      batches: [],
+    });
+    const view = render(<PersonalTimetableScreen />);
+    await view.findByText('特殊學期課程');
+    expect(view.queryByText('成大課程')).toBeNull();
+
+    fireEvent.press(view.getByText('115／1'));
+    await view.findByText('成大課程');
+    expect(view.queryByText('特殊學期課程')).toBeNull();
+
+    fireEvent.press(view.getByText(`115／${semester}`));
+    await view.findByText('特殊學期課程');
+    expect(view.queryByText('成大課程')).toBeNull();
+  },
+);
+
+test.each([
+  { startTime: '09:00', endTime: '10:00', periodLabel: 'ab', expected: '09:00–10:00' },
+  { startTime: undefined, endTime: undefined, periodLabel: 'cd', expected: '校方節次 cd' },
+  { startTime: undefined, endTime: undefined, periodLabel: '', expected: '時間未確認' },
+])('unknown school imports preserve their schedule $expected', async ({ expected, ...schedule }) => {
   mockSchool = { id: 'unknown', name: '其他學校' };
   mockScope = { owner: 'guest:device', schoolId: 'unknown' };
   jest
@@ -150,8 +177,7 @@ test('unknown school clock times remain readable without borrowing another schoo
           dayOfWeek: 6,
           startPeriod: undefined,
           endPeriod: undefined,
-          startTime: '09:00',
-          endTime: '10:00',
+          ...schedule,
         }),
       ],
       batches: [],
@@ -159,7 +185,7 @@ test('unknown school clock times remain readable without borrowing another schoo
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週末課程');
   expect(view.queryByText('開啟課前提醒')).toBeNull();
-  expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
+  expect(view.getByText(new RegExp(`週六 · ${expected}`))).toBeTruthy();
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
 });

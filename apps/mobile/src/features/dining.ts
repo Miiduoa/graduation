@@ -400,15 +400,15 @@ function myOrderOf(id: string, row: Record<string, unknown>): MyOrder {
 }
 /**
  * 「我的訂單」：讀學生自己的訂單副本（users/{uid}/schools/{schoolId}/orders），由新到舊，即時更新。
- * 號碼、狀態都以伺服器上的訂單為準，App 關掉重開一樣讀得到；不讀手機本機存的訂單。
+ * 首次讀取或離線時可能先收到快取。即使訂單內容相同，也要告知畫面伺服器已回應。
  */
 export function watchMyOrders(
   scope: DiningScope,
-  onChange: (orders: MyOrder[]) => void,
+  onChange: (orders: MyOrder[], fromCache: boolean) => void,
   onError: (error: unknown) => void,
 ): () => void {
   if (!scope.userId || !scope.schoolId || isFirebaseMockMode()) {
-    onChange([]);
+    onChange([], false);
     return () => undefined;
   }
   try {
@@ -418,7 +418,8 @@ export function watchMyOrders(
         firestore.orderBy('createdAt', 'desc'),
         firestore.limit(30),
       ),
-      (snapshot) => onChange(snapshot.docs.map((row) => myOrderOf(row.id, row.data()))),
+      { includeMetadataChanges: true },
+      (snapshot) => onChange(snapshot.docs.map((row) => myOrderOf(row.id, row.data())), snapshot.metadata.fromCache),
       onError,
     );
   } catch (error) {
@@ -426,6 +427,33 @@ export function watchMyOrders(
     return () => undefined;
   }
 }
+
+export function watchMyOrder(
+  scope: DiningScope,
+  orderId: string,
+  onChange: (order: MyOrder | null, fromCache: boolean) => void,
+  onError: (error: unknown) => void,
+): () => void {
+  if (!scope.userId || !scope.schoolId || isFirebaseMockMode()) {
+    onChange(null, false);
+    return () => undefined;
+  }
+  try {
+    return firestore.onSnapshot(
+      doc(getDb(), 'users', scope.userId, 'schools', scope.schoolId, 'orders', orderId),
+      { includeMetadataChanges: true },
+      (snapshot) => onChange(
+        snapshot.exists() ? myOrderOf(snapshot.id, snapshot.data()) : null,
+        snapshot.metadata.fromCache,
+      ),
+      onError,
+    );
+  } catch (error) {
+    onError(error);
+    return () => undefined;
+  }
+}
+
 export async function submitDiningIntent(
   intent: DiningIntent,
   isCurrent: () => boolean,

@@ -38,6 +38,12 @@ export type NuniSessionDependencies = {
     mark(): Promise<void>;
     clear(): Promise<void>;
   };
+  savedPlansCleanup: {
+    /** Must invalidate existing save leases synchronously, before returning its promise. */
+    begin(): Promise<void>;
+    /** Release the cleanup barrier after both local cleanup and logout have settled. */
+    end(): void;
+  };
   request: NuniTransport;
   credential(clientId: string, nonce: string): Promise<string>;
   clearCredential(): Promise<void>;
@@ -69,6 +75,8 @@ export class NuniSessionController {
   private storageRead = false;
   private signingIn = false;
   private loggingOut = false;
+  private logoutPending = false;
+  private savedPlansCleanupFailed = false;
   private disposed = false;
   private readonly now: () => number;
   constructor(private readonly deps: NuniSessionDependencies) {
@@ -168,6 +176,7 @@ export class NuniSessionController {
     }
   }
   private async markPendingLogout() {
+    this.logoutPending = true;
     // This independent, non-secret marker survives a Keychain/Keystore write failure.
     // Neither failure may prevent an attempt to revoke the server session.
     try {
@@ -198,7 +207,7 @@ export class NuniSessionController {
         session: null,
         loading: true,
         error: '',
-        pendingLogout: !!this.record?.pendingLogout,
+        pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
       });
     }
     const finish = (next: NativeNuniState) => {
@@ -215,19 +224,22 @@ export class NuniSessionController {
       const fenced = await this.deps.logoutFence.read();
       if (!this.current(run)) return;
       if (fenced && this.record) this.record = { ...this.record, pendingLogout: true };
-      if (fenced && !this.record) await this.deps.logoutFence.clear();
-      if (!this.current(run)) return;
-      if (!this.record) {
-        finish({ session: null, loading: false, error: '', pendingLogout: false });
-        return;
-      }
-      if (this.record.pendingLogout) {
+      if (fenced || this.record?.pendingLogout) this.logoutPending = true;
+      // A fence without a credential can still mean local plans were not removed.
+      // Only an explicit, successful cleanup retry may release this intent.
+      if (this.logoutPending) {
         finish({
           session: null,
           loading: false,
-          error: '登出尚未完成，請重試以結束這次登入。',
+          error: this.savedPlansCleanupFailed
+            ? '手機內的已儲存計畫尚未清除，請重試登出。'
+            : '登出尚未完成，請重試以結束這次登入。',
           pendingLogout: true,
         });
+        return;
+      }
+      if (!this.record) {
+        finish({ session: null, loading: false, error: '', pendingLogout: false });
         return;
       }
       if (this.record.expiresAt <= this.now()) {
@@ -277,7 +289,7 @@ export class NuniSessionController {
           session: null,
           loading: false,
           error: '無法確認登入狀態，請重新連線後再試。',
-          pendingLogout: !!this.record?.pendingLogout,
+          pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
         });
     }
   };
@@ -337,8 +349,19 @@ export class NuniSessionController {
         try {
           await this.revoke(issued.sessionHandle, false);
           if (!this.record || this.record.sessionHandle === issued.sessionHandle) {
-            await this.forget();
-            await this.deps.logoutFence.clear();
+            if (this.logoutPending) {
+              // Preserve the secure-storage fallback if another logout cleanup failed.
+              this.record = { ...issued, pendingLogout: true };
+              await this.markPendingLogout();
+              // Logout may finish while this fallback write is still in flight.
+              if (!this.logoutPending) {
+                await this.forget();
+                await this.deps.logoutFence.clear();
+              }
+            } else {
+              await this.forget();
+              await this.deps.logoutFence.clear();
+            }
           }
         } catch {
           this.record = { ...issued, pendingLogout: true };
@@ -346,16 +369,18 @@ export class NuniSessionController {
         }
       }
       const cancelled = (error as { code?: unknown } | null)?.code === 'CANCELLED';
-      if (!this.disposed && (this.current(run) || this.record?.pendingLogout))
+      if (!this.disposed && (this.current(run) || this.logoutPending || this.record?.pendingLogout))
         this.update({
           session: null,
           loading: false,
-          error: this.record?.pendingLogout
-            ? '登出尚未完成，請重試以結束這次登入。'
-            : cancelled
-              ? ''
-              : '登入沒有完成，請重新連線後再試。',
-          pendingLogout: !!this.record?.pendingLogout,
+          error: this.savedPlansCleanupFailed
+            ? '手機內的已儲存計畫尚未清除，請重試登出。'
+            : this.logoutPending || this.record?.pendingLogout
+              ? '登出尚未完成，請重試以結束這次登入。'
+              : cancelled
+                ? ''
+                : '登入沒有完成，請重新連線後再試。',
+          pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
         });
       if (cancelled) return 'cancelled';
       throw error;
@@ -367,34 +392,67 @@ export class NuniSessionController {
     if (this.loggingOut || this.disposed) return;
     this.loggingOut = true;
     const run = this.invalidate();
-    this.update({ session: null, loading: true, error: '', pendingLogout: !!this.record });
+    this.logoutPending = true;
+    // begin() fences saved-plan leases before the first await (including startup reads).
+    const plansCleaned = (async () => {
+      try {
+        await this.deps.savedPlansCleanup.begin();
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    this.update({ session: null, loading: true, error: '', pendingLogout: true });
+    let sessionCleanupFailed = false;
+    let credentialCleanupFailed = false;
     try {
-      if (!this.storageRead) {
-        const value = await this.deps.storage.read();
-        if (!this.current(run)) return;
-        this.record = value ? storedSession(value) : null;
-        this.storageRead = true;
+      // Persist the intent even when there is no credential left to revoke.
+      await this.markPendingLogout();
+      try {
+        if (!this.storageRead) {
+          const value = await this.deps.storage.read();
+          if (!this.current(run)) return;
+          this.record = value ? storedSession(value) : null;
+          this.storageRead = true;
+          if (this.record) await this.markPendingLogout();
+        }
+        if (this.record) await this.revoke(this.record.sessionHandle);
+      } catch {
+        sessionCleanupFailed = true;
       }
-      if (this.record) {
-        await this.markPendingLogout();
-        await this.revoke(this.record!.sessionHandle);
-        await this.forget();
+      this.savedPlansCleanupFailed = !(await plansCleaned);
+      if (!sessionCleanupFailed && !this.savedPlansCleanupFailed) {
+        try {
+          // Retain the pending secure record until local cleanup also succeeds. It
+          // remains a durable fallback when writing the independent fence failed.
+          if (this.record) await this.forget();
+          await this.deps.logoutFence.clear();
+          this.logoutPending = false;
+        } catch {
+          sessionCleanupFailed = true;
+        }
       }
-      await this.deps.logoutFence.clear();
-      await this.deps.clearCredential();
-      if (this.current(run))
-        this.update({ session: null, loading: false, error: '', pendingLogout: false });
-    } catch {
+      try {
+        await this.deps.clearCredential();
+      } catch {
+        credentialCleanupFailed = true;
+      }
       if (this.current(run))
         this.update({
           session: null,
           loading: false,
-          error: this.record
-            ? '登出尚未完成，請重試以結束這次登入。'
-            : '已登出；裝置上的 Google 帳號選擇狀態尚未清除。',
-          pendingLogout: !!this.record,
+          error: this.savedPlansCleanupFailed
+            ? '手機內的已儲存計畫尚未清除，請重試登出。'
+            : sessionCleanupFailed
+              ? '登出尚未完成，請重試以結束這次登入。'
+              : credentialCleanupFailed
+                ? '已登出；裝置上的 Google 帳號選擇狀態尚未清除。'
+                : '',
+          pendingLogout: this.logoutPending,
         });
     } finally {
+      await plansCleaned;
+      this.deps.savedPlansCleanup.end();
       this.loggingOut = false;
     }
   };

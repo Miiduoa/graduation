@@ -371,12 +371,13 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
       {course && (
         <>
           <div className={styles.heading}>
-            <Link
+            {/* A document navigation applies the attendance page's camera policy. */}
+            <a
               href={`/course/${encodeURIComponent(courseId)}/attendance`}
               className={styles.secondary}
             >
               {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
-            </Link>
+            </a>
             <button type="button" className={styles.secondary} onClick={refresh} disabled={refreshing}>
               重新整理
             </button>

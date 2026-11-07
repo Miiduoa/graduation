@@ -10,6 +10,8 @@ import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
   searchCampusServices,
+  writeCampusServiceFilters,
+  countCampusSearchResults,
   secondaryCampusServices,
   type CampusService,
   type ServiceCategory,
@@ -123,6 +125,8 @@ export function CampusServiceMenu() {
   const filtering = browsing ? category !== 'all' : true;
   const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);
+  const directoryParams = new URLSearchParams(context);
+  writeCampusServiceFilters(directoryParams, query, category);
   function closeMenu() {
     if (!menu.current?.open) return;
     menu.current.open = false;
@@ -266,7 +270,7 @@ export function CampusServiceMenu() {
           {filtering && (
             <div className={styles.resultSummary}>
               <p role="status" aria-live="polite">
-                找到 {matches.length} 項服務
+                找到 {countCampusSearchResults(matches, browsing, schoolLmsEnabled)} 項服務
               </p>
               <button type="button" onClick={resetSearch}>
                 清除篩選
@@ -280,7 +284,7 @@ export function CampusServiceMenu() {
           id={`${id}-results`}
         >
           <Link
-            href={href('/search')}
+            href={campusServiceHref('/search', directoryParams.toString())}
             className={styles.menuOverview}
             aria-current={pathname === '/search' ? 'page' : undefined}
             onClick={closeMenu}

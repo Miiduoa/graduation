@@ -2114,9 +2114,14 @@ export async function autonomousQuery(
   }
 
   // ── Step 3: 格式化結果 ──
+  // Show the known, user-safe verification precondition instead of returning an
+  // empty answer. Never surface other failed reads: those may contain private
+  // upstream errors from a previous account or campus.
   const contextParts = readResults
-    .filter(r => r.result.success && r.result.summary)
-    .map(r => `【${r.reason}】\n${r.result.summary}`);
+    .filter(r => r.result.summary && (r.result.success || r.result.error === 'school_scope_unverified'))
+    .map(r => r.result.success
+      ? `【${r.reason}】\n${r.result.summary}`
+      : `【${r.reason}需要驗證身分】\n${r.result.summary}`);
 
   // 加入已執行操作的結果
   for (const ea of executedActions) {
