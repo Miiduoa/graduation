@@ -13,6 +13,7 @@ import {
 } from '@/lib/studyTutor';
 import { CourseStudyPassage } from './CourseStudyPassage';
 import { emptyStudyPassage, type StudySessionMemory } from './courseStudySession';
+import { adjacentStudyReview } from './courseStudyReview';
 import { buildCourseStudyNotes, courseStudyNotesFilename } from './courseStudyNotes';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
@@ -79,6 +80,15 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     parts.flatMap((part, partNumber) =>
       session.passages[`${sectionNumber}:${partNumber}`]?.needsReview
         ? [{ label: part.label, sectionNumber, partNumber }] : []));
+  const currentReviewIndex = reviewPassages.findIndex((item) =>
+    item.sectionNumber === sectionIndex && item.partNumber === passageIndex);
+
+  function moveReview(direction: 'previous' | 'next') {
+    const target = adjacentStudyReview(reviewPassages, { sectionNumber: sectionIndex, partNumber: passageIndex }, direction);
+    if (!target) return;
+    setSectionIndex(target.sectionNumber);
+    setPassageIndex(target.partNumber);
+  }
 
   useEffect(() => {
     heading.current?.focus();
@@ -309,7 +319,18 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         </details>}
         {reviewPassages.length > 0 && <section className={styles.reviewList} aria-label="待複習段落">
           <h4>待複習 · {reviewPassages.length} 段</h4>
-          <p className={styles.note}>這是你標記的重點，點選即可回到原段落。</p>
+          <p className={styles.note}>依教材頁碼與段落順序循環複習；不會自動取消標記、評分或改動你的筆記。</p>
+          <div className={styles.actions}>
+            <button type="button" className={styles.button}
+              disabled={reviewPassages.length === 1 && currentReviewIndex === 0}
+              onClick={() => moveReview('previous')}>上一個待複習</button>
+            <span role="status" aria-live="polite" className={styles.note}>
+              {currentReviewIndex >= 0 ? `目前第 ${currentReviewIndex + 1} / ${reviewPassages.length} 段` : '目前不在待複習段落'}
+            </span>
+            <button type="button" className={styles.button}
+              disabled={reviewPassages.length === 1 && currentReviewIndex === 0}
+              onClick={() => moveReview('next')}>下一個待複習</button>
+          </div>
           <div className={styles.actions}>{reviewPassages.map((item) => <button type="button" className={styles.button}
             key={`${item.sectionNumber}:${item.partNumber}`}
             aria-current={sectionIndex === item.sectionNumber && passageIndex === item.partNumber ? 'location' : undefined}

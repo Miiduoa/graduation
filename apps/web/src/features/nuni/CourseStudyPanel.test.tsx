@@ -501,3 +501,56 @@ it('shows saved legacy explanations without inventing teaching steps', async () 
   expect(screen.getByRole('button', { name: '朗讀這段講解' })).toBeTruthy();
   expect(document.querySelector('mark')?.textContent).toBe(explanation.sourceQuote);
 });
+
+it('reviews marked passages in source order with wraparound, without erasing notes or triggering AI', () => {
+  const body = `${'甲'.repeat(1600)}${'乙'.repeat(1600)}${'丙'.repeat(100)}`;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={{ ...material, body }} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '第一段的筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一段' }));
+  fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '第二段的筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  expect(screen.getByText('目前第 2 / 2 段')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一段' }));
+  expect(screen.getByText('目前不在待複習段落')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一個待複習' }));
+  expect(screen.getByText('目前第 1 / 2 段')).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('第一段的筆記');
+  fireEvent.click(screen.getByRole('button', { name: '上一個待複習' }));
+  expect(screen.getByText('目前第 2 / 2 段')).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('第二段的筆記');
+  fireEvent.click(screen.getByRole('button', { name: '已加入待複習' }));
+  expect(screen.getByText('目前不在待複習段落')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '上一個待複習' }));
+  expect(inputValue(noteLabel)).toBe('第一段的筆記');
+  expect(screen.getByText('目前第 1 / 1 段')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '下一個待複習' }).hasAttribute('disabled')).toBe(true);
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+
+it('moves directly between marked PDF pages while retaining page identity and current reading mode', async () => {
+  mocks.read.mockResolvedValue({
+    format: 'pdf', name: '跨頁複習.pdf', warnings: [], sections: [
+      { id: 'page-2', label: '第 2 頁', rows: [{ line: 1, cells: ['主鍵唯一識別資料。'] }], needsOcr: false, warnings: [] },
+      { id: 'page-7', label: '第 7 頁', rows: [{ line: 1, cells: ['外鍵建立表格關聯。'] }], needsOcr: false, warnings: [] },
+    ],
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('選擇講義'), {
+    target: { files: [new File(['pdf'], '跨頁複習.pdf', { type: 'application/pdf' })] },
+  });
+  await screen.findByText('主鍵唯一識別資料。');
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  fireEvent.change(screen.getByLabelText('閱讀範圍'), { target: { value: '1' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一個待複習' }));
+  expect(inputValue('閱讀範圍')).toBe('0');
+  expect(inputValue('這次怎麼讀')).toBe('exam');
+  expect(screen.getByText('主鍵唯一識別資料。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '上一個待複習' }));
+  expect(inputValue('閱讀範圍')).toBe('1');
+  expect(screen.getByText('外鍵建立表格關聯。')).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
