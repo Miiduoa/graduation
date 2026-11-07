@@ -18,16 +18,20 @@ import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 import type { AssistantServiceSelection } from '../services/assistantServiceNavigation';
+import { parseAssistantCalendarIntent } from '../services/assistantCalendarIntent';
+import { assistantCalendarOwner, createAssistantCalendarTask, recheckAssistantCalendarTask, sameAssistantCalendarEvent,
+  type AssistantCalendarTask } from '../services/assistantCalendarExecution';
 
 export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
 
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action';
   route?: string;
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
+  calendarTask?: AssistantCalendarTask;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
@@ -109,9 +113,10 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent' | 'saved-academics';
+  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent' | 'saved-academics' | 'calendar-action';
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
+  calendarTask?: AssistantCalendarTask;
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
@@ -131,10 +136,10 @@ export async function askCampusAssistant(input: {
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
     .slice(-20)
-    // A local academic result is displayed in this conversation, but does not
-    // grant permission to send the imported grades to a later model request.
-    .filter((message, index, history) => message.tool !== 'saved-academics' &&
-      !(message.role === 'user' && history[index + 1]?.tool === 'saved-academics'))
+    // Local records and calendar tasks stay in the conversation without being
+    // forwarded, together with their preceding question, to a later model.
+    .filter((message, index, history) => !['saved-academics', 'calendar-action'].includes(message.tool ?? '') &&
+      !(message.role === 'user' && ['saved-academics', 'calendar-action'].includes(history[index + 1]?.tool ?? '')))
     .map((message) => ({
       role: message.role,
       content: message.content.trim().slice(0, 1600),
@@ -145,6 +150,32 @@ export async function askCampusAssistant(input: {
   }
 
   const question = messages[messages.length - 1].content;
+  const calendarIntent = parseAssistantCalendarIntent(question);
+  if (calendarIntent) {
+    if (calendarIntent.kind === 'invalid') return { content: calendarIntent.message,
+      source: 'device', tool: 'calendar-action', hasActions: false };
+    const context = { ...input.scope, platformTimetable: input.platformTimetable, isCurrent: input.isCurrent };
+    const owner = assistantCalendarOwner(context);
+    if (!owner) return { content: '請先登入自己的帳號，再建立個人行事曆草稿。',
+      source: 'device', tool: 'calendar-action', hasActions: false,
+      serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    // Rephrasing the same appointment must not mint a fresh operation while a
+    // previous attempt is unknown or already completed. Cancellation only
+    // applies to a draft whose explicit confirmation has not happened yet.
+    const previous = [...input.messages].reverse().find((message) => message.role === 'assistant' &&
+      message.calendarTask && message.calendarTask.proposal.owner === owner &&
+      message.calendarTask.proposal.schoolId === input.scope.schoolId && !['cancelled', 'blocked'].includes(message.calendarTask.state) &&
+      sameAssistantCalendarEvent(message.calendarTask.proposal.event, calendarIntent.event))?.calendarTask;
+    const calendarTask = previous?.state === 'verified'
+      ? await abortableCampusRead(() => recheckAssistantCalendarTask(previous.proposal,
+        { ...context, isCurrent: () => input.isCurrent() && !input.signal?.aborted }, previous), input.signal)
+        .catch((error: unknown) => { assertNotCancelled(); throw error; })
+      : previous ?? createAssistantCalendarTask(calendarIntent.event, context);
+    scopeCheck(input, false);
+    assertNotCancelled();
+    return { content: previous ? '這是先前同一筆行程的處理紀錄。' : '請核對行程名稱與時間，再確認加入個人行事曆。',
+      source: 'device', tool: 'calendar-action', hasActions: false, calendarTask };
+  }
   const serviceIntent = resolveAssistantServiceIntent(question);
   if (serviceIntent) {
     return {

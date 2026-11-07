@@ -6,7 +6,7 @@ import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
-import type { V2Turn } from './types';
+import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 export function AssistantThread({
   schoolId,
@@ -23,6 +23,7 @@ export function AssistantThread({
   onAsk,
   onConfirm,
   onCancel,
+  onReconcile,
 }: {
   schoolId: string;
   ready: boolean;
@@ -32,12 +33,13 @@ export function AssistantThread({
   question: string;
   onQuestion: (value: string) => void;
   turns: V2Turn[];
-  states: Record<string, string>;
+  states: V2ActionStates;
   pending: boolean;
   error: string;
   onAsk: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
+  onReconcile?: (card: V2Card) => void;
 }) {
   const shell = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -137,6 +139,7 @@ export function AssistantThread({
               pending={pending}
               onConfirm={onConfirm}
               onCancel={(index) => onCancel(turn, index)}
+              onReconcile={onReconcile}
             />
           </article>
         ))}

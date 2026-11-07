@@ -5,6 +5,8 @@ export type V2Card = {
   mutationId: string;
   schoolId: string;
   destination: string;
+  /** Kept with recovery cards; never derived from model-generated arguments. */
+  conversationId?: string;
 };
 
 export type V2Step = { name: string; status: string; summary: string };
@@ -18,6 +20,22 @@ export type V2Reply = {
 };
 
 export type V2Turn = { question: string; reply: V2Reply };
+
+export type V2ActionState =
+  | { status: 'executing' | 'checking' }
+  | { status: 'unknown' | 'blocked' | 'conflict'; message: string }
+  | { status: 'absent'; retryable: boolean; message: string }
+  | { status: 'cancelled' | 'superseded' }
+  | { status: 'handoff'; href: string; message: string }
+  | {
+      status: 'verified';
+      receipt: import('@campus/shared/src/assistantExecution').AssistantCalendarReceipt;
+      local: 'ready' | 'unavailable';
+      localMessage?: string;
+      verificationWarning?: string;
+    };
+
+export type V2ActionStates = Record<string, V2ActionState>;
 
 export type DueItem = {
   title: string;

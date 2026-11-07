@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { AssistantCardStack } from './AssistantCards';
 import type { V2Card } from './types';
+import { createAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 
 const eventCard = (id: string, title: string): V2Card => ({
   tool: 'propose_personal_event',
@@ -16,6 +17,17 @@ const eventCard = (id: string, title: string): V2Card => ({
     endTime: '21:00',
     allDay: false,
   },
+});
+
+const verifiedState = (card: V2Card) => ({
+  status: 'verified' as const, local: 'ready' as const,
+  receipt: createAssistantCalendarReceipt({
+    schoolId: card.schoolId, mutationId: card.mutationId, event: card.args, storage: 'synced',
+    revision: 1, verifiedAt: '2026-11-04T11:00:00.000Z',
+    record: { ...card.args, id: card.mutationId, batchId: card.mutationId, kind: 'events',
+      schoolId: card.schoolId, academicYear: '', semester: '', importedAt: '2026-11-04T10:59:00.000Z',
+      source: { type: 'paste', line: 1, rawText: '', name: '助理確認' } },
+  }),
 });
 
 const foodCard: V2Card = {
@@ -81,16 +93,18 @@ it('shows food store, item, price and a button to the order page', () => {
 });
 
 it('keeps confirmed calendar copy and page link after write-in', () => {
+  const card = eventCard('calendar-event-1', '精確作業安排');
   render(
     <AssistantCardStack
-      cards={[eventCard('m1', '精確作業安排')]}
-      states={{ m1: '已加入個人行事曆' }}
+      cards={[card]}
+      states={{ [card.mutationId]: verifiedState(card) }}
       pending={false}
       onConfirm={vi.fn()}
       onCancel={vi.fn()}
     />,
   );
-  expect(screen.getByText('已加入個人行事曆')).toBeTruthy();
+  expect(screen.getByText('已核對並加入個人行事曆')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '開啟這筆行程' }).getAttribute('href')).toBe('/calendar?schoolId=pu&eventId=calendar-event-1');
   expect(screen.queryByText('確認')).toBeNull();
 });
 
@@ -118,18 +132,18 @@ it('only links food and confirmed pages through in-app hrefs', () => {
   rerender(
     <AssistantCardStack
       cards={[eventCard('m1', '精確作業安排')]}
-      states={{ m1: 'https://evil.test/done' }}
+      states={{ m1: { status: 'handoff', href: 'https://evil.test/done', message: '外部連結未核對' } }}
       pending={false}
       onConfirm={vi.fn()}
       onCancel={vi.fn()}
     />,
   );
   expect(screen.queryByRole('link', { name: '開啟確認的頁面' })).toBeNull();
-  expect(screen.getByText('https://evil.test/done')).toBeTruthy();
+  expect(screen.getByText('外部連結未核對')).toBeTruthy();
   rerender(
     <AssistantCardStack
       cards={[eventCard('m1', '精確作業安排')]}
-      states={{ m1: '/calendar?id=evt-1' }}
+      states={{ m1: { status: 'handoff', href: '/calendar?id=evt-1', message: '入口已備妥' } }}
       pending={false}
       onConfirm={vi.fn()}
       onCancel={vi.fn()}
@@ -153,4 +167,27 @@ it('keeps pending batch confirm disabled without hiding the label', () => {
   const batch = screen.getByRole('button', { name: '依序全部確認' }) as HTMLButtonElement;
   expect(batch.disabled).toBe(true);
   expect(batch.textContent).toBe('依序全部確認');
+});
+
+it('offers read-only recovery for uncertain results and blocks the dependent batch', () => {
+  const onReconcile = vi.fn();
+  const cards = [eventCard('calendar-event-1', '英文'), eventCard('calendar-event-2', '程式'), eventCard('calendar-event-3', '資料庫')];
+  render(<AssistantCardStack cards={cards}
+    states={{ [cards[0].mutationId]: { status: 'unknown', message: '尚未核對執行結果' } }}
+    pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} onReconcile={onReconcile} />);
+  fireEvent.click(screen.getByRole('button', { name: '重新核對結果' }));
+  expect(onReconcile).toHaveBeenCalledWith(cards[0]);
+  expect(screen.getAllByRole('button', { name: '確認' })).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: '確認' }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  expect((screen.getByRole('button', { name: '依序全部確認' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByLabelText('行程執行進度').textContent).toContain('待核對 1 項');
+});
+
+it('keeps service handoff distinct from verified calendar completion', () => {
+  render(<AssistantCardStack cards={[foodCard]}
+    states={{ [foodCard.mutationId]: { status: 'handoff', href: '/food?tenant=fixture-realm', message: '請到點餐頁完成確認與付款。' } }}
+    pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByText('請到點餐頁完成確認與付款。')).toBeTruthy();
+  expect(screen.queryByText('已送出訂單')).toBeNull();
+  expect(screen.queryByLabelText('行程執行回執')).toBeNull();
 });

@@ -20,10 +20,16 @@ export type PersonalImportPendingMutation = {
   expectedRevision: number;
   records: PersonalImportRecord[];
 };
+/** A single server-read event, not a claim that the whole ledger was downloaded. */
+export type PersonalImportAcknowledgement = {
+  record: PersonalImportRecord & { kind: 'events' };
+  revision: number;
+};
 export type PersonalImportSyncState = {
   enabled: boolean;
   base: PersonalImportSnapshot | null;
   pending?: PersonalImportPendingMutation;
+  acknowledged?: PersonalImportAcknowledgement[];
 };
 export type PersonalImportSyncConflict = {
   key: string;
@@ -116,7 +122,42 @@ export function parsePersonalImportSyncState(
       records: validatePersonalImportSyncRecords(candidate.records, schoolId),
     };
   }
-  return { enabled: value.enabled, base, ...(pending ? { pending } : {}) };
+  let acknowledged: PersonalImportAcknowledgement[] | undefined;
+  if (value.acknowledged !== undefined) {
+    if (!Array.isArray(value.acknowledged) || value.acknowledged.length > 2000)
+      throw new Error('單筆核對紀錄無法讀取，原有資料仍保留。');
+    const revisions: number[] = [];
+    const rawRecords = value.acknowledged.map((raw) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        throw new Error('單筆核對紀錄無法讀取，原有資料仍保留。');
+      const item = raw as Record<string, unknown>;
+      if (
+        Object.keys(item).some((key) => !['record', 'revision'].includes(key)) ||
+        !Number.isSafeInteger(item.revision) ||
+        (item.revision as number) < 1
+      )
+        throw new Error('單筆核對紀錄無法讀取，原有資料仍保留。');
+      revisions.push(item.revision as number);
+      return item.record;
+    });
+    acknowledged = validatePersonalImportSyncRecords(rawRecords, schoolId).map((record, index) => {
+      if (record.kind !== 'events')
+        throw new Error('單筆核對紀錄只能保存個人行程，原有資料仍保留。');
+      const revision = revisions[index];
+      if (
+        base?.revision === revision &&
+        !personalImportRecordsEqual(base.records.filter((row) => row.id === record.id), [record])
+      )
+        throw new Error('同版本的單筆核對與同步紀錄不一致，請重新確認帳號資料。');
+      return { record: { ...record, kind: 'events' }, revision };
+    });
+  }
+  return {
+    enabled: value.enabled,
+    base,
+    ...(pending ? { pending } : {}),
+    ...(acknowledged ? { acknowledged } : {}),
+  };
 }
 
 function canonical(value: unknown): string {

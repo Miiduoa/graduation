@@ -10,7 +10,7 @@ vi.mock('./LegacyAssistant', () => ({
   default: ({ children }: { children?: ReactNode }) => <div>Legacy entry{children}</div>,
 }));
 vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({ ...identity, session: identity.platform ? { context: 'session-a', platformAccountId: 'alice' } : null }),
+  useNuniSession: () => ({ ...identity, session: identity.platform ? { context: 'a'.repeat(43), platformAccountId: 'alice' } : null }),
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
 vi.mock('@/lib/useCampusBrowseContext', () => ({

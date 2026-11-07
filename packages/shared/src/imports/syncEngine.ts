@@ -6,6 +6,7 @@ import {
   parsePersonalImportSyncState,
   personalImportRecordsEqual,
   validatePersonalImportSyncRecords,
+  type PersonalImportAcknowledgement,
   type PersonalImportSnapshot,
   type PersonalImportSyncChoices,
   type PersonalImportSyncConflict,
@@ -21,6 +22,7 @@ export type PersonalImportSyncReview = {
   baseRevision: number;
   localRecords: PersonalImportRecord[];
   pendingMutationId?: string;
+  acknowledged?: PersonalImportAcknowledgement[];
 };
 export type PersonalImportSyncResolution = PersonalImportSyncReview & {
   choices: PersonalImportSyncChoices;
@@ -36,6 +38,55 @@ export type PersonalImportSyncTransport = (
   input: Record<string, unknown>,
 ) => Promise<unknown>;
 export type PersonalImportSyncCheckpoint = (state: PersonalImportLocalState) => Promise<void>;
+
+function sameAcknowledgements(
+  left: readonly PersonalImportAcknowledgement[] | undefined,
+  right: readonly PersonalImportAcknowledgement[] | undefined,
+): boolean {
+  if (left !== undefined && !Array.isArray(left)) return false;
+  const first = left || [];
+  const second = right || [];
+  if (first.length !== second.length) return false;
+  return first.every((item) => {
+    const other = second.find((candidate) => candidate.record.id === item?.record?.id);
+    return !!other && item.revision === other.revision &&
+      personalImportRecordsEqual([item.record], [other.record]);
+  });
+}
+
+/** A stale/full snapshot cannot contradict a row already read at that exact revision. */
+function assertAcknowledgedSnapshot(sync: PersonalImportSyncState, snapshot: PersonalImportSnapshot) {
+  for (const item of sync.acknowledged || []) {
+    if (snapshot.revision < item.revision)
+      throw new Error('帳號同步版本比已核對的行程舊，資料仍保留，請稍後再試。');
+    if (
+      snapshot.revision === item.revision &&
+      !personalImportRecordsEqual(snapshot.records.filter((row) => row.id === item.record.id), [item.record])
+    )
+      throw new Error('同版本的行程核對結果不一致，資料仍保留，請重新確認帳號資料。');
+  }
+}
+
+function uncoveredAcknowledgements(sync: PersonalImportSyncState, base: PersonalImportSnapshot) {
+  const remaining = (sync.acknowledged || []).filter((item) => {
+    if (
+      base.revision === item.revision &&
+      !personalImportRecordsEqual(base.records.filter((row) => row.id === item.record.id), [item.record])
+    )
+      throw new Error('同版本的行程核對結果不一致，資料仍保留，請重新確認帳號資料。');
+    return item.revision > base.revision;
+  });
+  return remaining.length ? { acknowledged: remaining } : {};
+}
+
+/** Only this merge input overlays single-row evidence; the stored full base stays honest. */
+function mergeBase(sync: PersonalImportSyncState) {
+  const rows = new Map((sync.base?.records || []).map((row) => [row.id, row]));
+  for (const item of sync.acknowledged || []) {
+    if (!sync.base || item.revision > sync.base.revision) rows.set(item.record.id, item.record);
+  }
+  return [...rows.values()];
+}
 
 /** Hold the local mutation lock throughout. Checkpoint atomically before any remote write. */
 export async function performPersonalImportSync(
@@ -81,13 +132,14 @@ export async function performPersonalImportSync(
       requireActive();
       if (remote.revision <= pending.expectedRevision)
         throw new Error('同步回應未確認上次寫入，原有資料仍保留。');
+      assertAcknowledgedSnapshot(sync, remote);
       base = {
         schoolId,
         revision: pending.expectedRevision + 1,
         records: pending.records,
         updatedAt: remote.updatedAt,
       };
-      sync = { enabled: true, base };
+      sync = { enabled: true, base, ...uncoveredAcknowledgements(sync, base) };
       working = { records: local, sync };
       await persist(working);
       if (resolution?.pendingMutationId)
@@ -100,12 +152,14 @@ export async function performPersonalImportSync(
       remote = await read();
       if (base && remote.revision < base.revision)
         throw new Error('帳號同步版本比這台裝置已確認的版本舊，資料仍保留，請稍後再試。');
+      assertAcknowledgedSnapshot(sync, remote);
       const key = `pending:${pending.mutationId}`;
       const review: PersonalImportSyncReview = {
         remoteRevision: remote.revision,
         baseRevision: base?.revision ?? 0,
         localRecords: local,
         pendingMutationId: pending.mutationId,
+        ...(sync.acknowledged ? { acknowledged: sync.acknowledged } : {}),
       };
       if (!resolution)
         return {
@@ -127,6 +181,7 @@ export async function performPersonalImportSync(
         resolution.remoteRevision !== remote.revision ||
         resolution.baseRevision !== (base?.revision ?? 0) ||
         !personalImportRecordsEqual(resolution.localRecords, local) ||
+        !sameAcknowledgements(resolution.acknowledged, sync.acknowledged) ||
         !['local', 'remote'].includes(resolution.choices[key])
       ) {
         throw new Error('核對期間資料又有變更，請重新同步後選擇要保留的內容。');
@@ -144,17 +199,19 @@ export async function performPersonalImportSync(
   }
   if (base && remote.revision < base.revision)
     throw new Error('帳號同步版本比這台裝置已確認的版本舊，資料仍保留，請稍後再試。');
+  assertAcknowledgedSnapshot(sync, remote);
   if (
     resolution &&
     (resolution.pendingMutationId ||
       resolution.remoteRevision !== remote.revision ||
       resolution.baseRevision !== (base?.revision ?? 0) ||
-      !personalImportRecordsEqual(resolution.localRecords, local))
+      !personalImportRecordsEqual(resolution.localRecords, local) ||
+      !sameAcknowledgements(resolution.acknowledged, sync.acknowledged))
   ) {
     throw new Error('核對期間資料又有變更，請重新同步後選擇要保留的內容。');
   }
   const merged = mergePersonalImportRecords(
-    base?.records || [],
+    mergeBase(sync),
     local,
     remote.records,
     resolution?.choices,
@@ -168,6 +225,7 @@ export async function performPersonalImportSync(
         remoteRevision: remote.revision,
         baseRevision: base?.revision ?? 0,
         localRecords: local,
+        ...(sync.acknowledged ? { acknowledged: sync.acknowledged } : {}),
       },
     };
   const records = validatePersonalImportSyncRecords(merged.records, schoolId);
@@ -181,7 +239,7 @@ export async function performPersonalImportSync(
     };
     // Install the merged local view as well: otherwise remote-only rows included in
     // this request would look like local deletions when recovering after a crash.
-    await persist({ records, sync: { enabled: true, base, pending: mutation } });
+    await persist({ records, sync: { ...sync, enabled: true, base, pending: mutation } });
     snapshot = parsePersonalImportSnapshot(
       await transport('personal-imports/write', { schoolId, ...mutation }),
       schoolId,
