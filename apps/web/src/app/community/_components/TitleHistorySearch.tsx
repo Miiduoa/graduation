@@ -41,6 +41,9 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
     const destination = focusAfter.current === 'summary' ? summary.current : errorRegion.current;
     focusAfter.current = null;
     destination?.focus({ preventScroll: true });
+    // The disappearing footer can be many screens below the summary. Keep the
+    // keyboard destination visible without inheriting a long smooth-scroll animation.
+    destination?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
   });
 
   function edit(value: string) {

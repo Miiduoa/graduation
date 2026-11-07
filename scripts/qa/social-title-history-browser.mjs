@@ -247,6 +247,10 @@ window.__fixtureToken=location.search;
       return new Set(links.map((link) => link.href)).size === 45 && links.some((link) => link.textContent === '二手書📚');
     });
     await check(`${label}: final page preserves keyboard focus`, () => document.activeElement?.getAttribute('role') === 'status');
+    await check(`${label}: focused summary is visible without scrolling through the list`, () => {
+      const bounds = document.activeElement.getBoundingClientRect();
+      return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+    });
     const ax = await send('Accessibility.getFullAXTree');
     assert.ok(ax.nodes.some((node) => node.role?.value === 'searchbox' && node.name?.value === '標題開頭'));
     report.checks.push({ label: `${label}: searchbox has an accessible name`, pass: true });
