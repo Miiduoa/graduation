@@ -82,6 +82,16 @@ test('searches the literal title and opens only the scoped post identifier', asy
   expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' });
 });
 
+test('opening the same historical result twice rapidly navigates only once', async () => {
+  const view = panel(); enter(view);
+  await view.findByText('二手書 one');
+  const target = view.getByLabelText('開啟貼文：二手書 one');
+  fireEvent.press(target);
+  fireEvent.press(target);
+  expect(view.open).toHaveBeenCalledTimes(1);
+  expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' });
+});
+
 test('uses the same cursor on a failed next-page retry and deduplicates returned IDs', async () => {
   const first = result([row('one')], true);
   search.mockResolvedValueOnce(first).mockRejectedValueOnce({ code: 'unavailable' })
