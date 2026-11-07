@@ -322,6 +322,7 @@ function Materials({
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
       {study && !reading && !accessDenied && items !== null && (
         <CourseStudyPanel key={study.version} courseTitle={workspace.title} material={study.material}
+          scope={{ platformAccountId: accountId, workspaceId: workspace.id }}
           onClose={() => { setStudy(null); studyTrigger.current?.focus(); }} />
       )}
       {bookmarks.error && (

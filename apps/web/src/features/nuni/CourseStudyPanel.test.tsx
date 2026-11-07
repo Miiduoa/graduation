@@ -10,6 +10,7 @@ vi.mock('@/lib/studyTutorRuntime', () => ({
 }));
 vi.mock('@/lib/personalImportDocuments', () => ({ readPersonalImportDocumentFile: mocks.read }));
 
+const scope = { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', workspaceId: 'cw_11111111-1111-4111-8111-111111111111' };
 const material = { id: 'material-1', title: '關聯式資料庫', body: '主鍵用來唯一識別一筆資料，不能重複或為空值。' };
 const explanation: TutorExplanation = {
   title: '辨認一筆資料', explanation: '把主鍵想成每位學生的學號，同一份名冊裡不能重複。',
@@ -19,7 +20,7 @@ const explanation: TutorExplanation = {
 beforeEach(() => { mocks.read.mockReset(); mocks.run.mockReset(); mocks.available = true; mocks.run.mockResolvedValue(explanation); });
 
 it('shows the authorized material without downloading or generating until requested', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   expect(screen.getByText(material.body)).toBeTruthy();
   expect(screen.getByText(/附件與外部連結的內容需另外選擇/)).toBeTruthy();
   expect(mocks.run).not.toHaveBeenCalled();
@@ -41,7 +42,7 @@ it('shows the authorized material without downloading or generating until reques
 
 it('keeps reading available when the browser cannot run a model', () => {
   mocks.available = false;
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   expect(screen.getByText(material.body)).toBeTruthy();
   expect(screen.getByRole('button', { name: '啟用 AI 講解本段' }).hasAttribute('disabled')).toBe(true);
   expect(mocks.run).not.toHaveBeenCalled();
@@ -53,7 +54,7 @@ it('keeps reading available when the browser cannot run a model', () => {
 it('aborts a previous passage and ignores a late model response after navigation', async () => {
   let finish!: (value: TutorExplanation) => void;
   mocks.run.mockImplementation(() => new Promise<TutorExplanation>((resolve) => { finish = resolve; }));
-  render(<CourseStudyPanel courseTitle="資料庫" material={{ ...material, body: `${'甲'.repeat(1600)}乙` }} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={{ ...material, body: `${'甲'.repeat(1600)}乙` }} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   const signal = mocks.run.mock.calls[0][0].signal as AbortSignal;
   fireEvent.click(screen.getByRole('button', { name: '下一段' }));
@@ -65,7 +66,7 @@ it('aborts a previous passage and ignores a late model response after navigation
 
 it('requests cancellation on stop, mode change, and unmount', () => {
   mocks.run.mockImplementation(() => new Promise(() => {}));
-  const view = render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   const start = () => fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   start();
   const first = mocks.run.mock.calls[0][0].signal as AbortSignal;
@@ -87,7 +88,7 @@ it('preserves PDF page labels and reports unreadable pages instead of inventing 
     { id: 'page-1', label: '第 1 頁', rows: [], needsOcr: true, warnings: [] },
     { id: 'page-2', label: '第 2 頁', rows: [{ line: 1, cells: ['交易要符合 ACID。'] }], needsOcr: false, warnings: [] },
   ] });
-  render(<CourseStudyPanel courseTitle="資料庫" onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [new File(['pdf'], '複習.pdf', { type: 'application/pdf' })] } });
   expect(await screen.findByText('交易要符合 ACID。')).toBeTruthy();
   expect(screen.getByRole('option', { name: '第 2 頁' })).toBeTruthy();
@@ -100,7 +101,7 @@ it('preserves PDF page labels and reports unreadable pages instead of inventing 
 it('ignores a cancelled file read and does not leak its content into a later selection', async () => {
   let finish!: (value: unknown) => void;
   mocks.read.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-  render(<CourseStudyPanel courseTitle="資料庫" onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [new File(['pdf'], '舊講義.pdf')] } });
   const signal = mocks.read.mock.calls[0][1] as AbortSignal;
   fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
@@ -115,7 +116,7 @@ it('ignores a cancelled file read and does not leak its content into a later sel
 });
 
 it('renders source and generated text without executing HTML or treating URLs as file contents', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={{ ...material, body: '<img src=x onerror=alert(1)> https://example.test/private.pdf' }} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={{ ...material, body: '<img src=x onerror=alert(1)> https://example.test/private.pdf' }} onClose={vi.fn()} />);
   expect(document.querySelector('img')).toBeNull();
   expect(mocks.read).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
@@ -123,7 +124,7 @@ it('renders source and generated text without executing HTML or treating URLs as
 });
 
 it('keeps an oversized paste intact and asks for a smaller section instead of silently truncating it', () => {
-  render(<CourseStudyPanel courseTitle="資料庫" onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const text = '字'.repeat(60001);
   fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: text } });
   expect((screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement).value).toBe(text);
@@ -142,7 +143,7 @@ async function generate() {
 }
 
 it('retains notes, the question draft, lesson, attempt and answer when returning to a marked passage', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={{ ...material, body: `${material.body.padEnd(1600, '甲')}乙` }} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={{ ...material, body: `${material.body.padEnd(1600, '甲')}乙` }} onClose={vi.fn()} />);
   await generate();
   fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '主鍵就像學號。\n同一份名冊不可重複。' } });
   fireEvent.change(screen.getByLabelText(questionLabel), { target: { value: '換一間學校也不能重複嗎？' } });
@@ -165,7 +166,7 @@ it('retains notes, the question draft, lesson, attempt and answer when returning
 });
 
 it('keeps each reading mode independent while sharing the personal passage note', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '這段要再確認。' } });
   fireEvent.change(screen.getByLabelText(questionLabel), { target: { value: '理解模式的未送出問題' } });
@@ -186,7 +187,7 @@ it('keeps each reading mode independent while sharing the personal passage note'
 it('continues from the selected successful lesson and keeps older attempts separately', async () => {
   const next = { ...explanation, title: '換一個角度', question: '什麼是唯一？', answer: '在指定資料表裡沒有重複。' };
   mocks.run.mockResolvedValueOnce(explanation).mockResolvedValueOnce(next);
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '保留第一題的回答' } });
   fireEvent.click(screen.getByRole('button', { name: '對照參考回答' }));
@@ -206,7 +207,7 @@ it('continues from the selected successful lesson and keeps older attempts separ
 });
 
 it('preserves a successful lesson and all drafts through a failed or cancelled follow-up', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.change(screen.getByLabelText(questionLabel), { target: { value: '可以再說一次嗎？' } });
   fireEvent.change(screen.getByLabelText('先寫下你的想法'), { target: { value: '我的原始試答' } });
@@ -233,7 +234,7 @@ it('preserves a successful lesson and all drafts through a failed or cancelled f
 it('follows the selected conversation branch without importing an unrelated later explanation', async () => {
   const answers = [1, 2, 3, 4].map((id) => ({ ...explanation, title: `講解 ${id}` }));
   answers.forEach((answer) => mocks.run.mockResolvedValueOnce(answer));
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
   await screen.findByRole('heading', { name: '講解 2' });
@@ -247,7 +248,7 @@ it('follows the selected conversation branch without importing an unrelated late
 });
 
 it('starts from the original source without history on request and does not lose earlier lessons', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.click(screen.getByRole('button', { name: '只依原文重新講解' }));
   await waitFor(() => expect(inputValue('這一段的講解記錄')).toBe('2'));
@@ -263,7 +264,7 @@ it('clears all study memory when another PDF has the same filename and page IDs'
     { id: 'page-2', label: '第 2 頁', rows: [{ line: 1, cells: [text] }], needsOcr: false, warnings: [] },
   ] });
   mocks.read.mockResolvedValueOnce(document(material.body)).mockResolvedValueOnce(document('新的一份檔案，主題是交易。'));
-  render(<CourseStudyPanel courseTitle="資料庫" onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   const upload = () => fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [new File(['pdf'], '筆記.pdf')] } });
   upload();
   await screen.findByText(material.body);
@@ -281,7 +282,7 @@ it('clears all study memory when another PDF has the same filename and page IDs'
 });
 
 it('keeps the existing notes if replacing the source fails or is cancelled', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '不要因為匯入失敗消失' } });
   mocks.read.mockRejectedValueOnce(new Error('檔案無法讀取'));
@@ -297,12 +298,12 @@ it('keeps the existing notes if replacing the source fails or is cancelled', asy
 });
 
 it('does not restore study memory after the panel has been closed and reopened', async () => {
-  const view = render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '只在這次開啟保留' } });
   fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
   view.unmount();
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   expect(inputValue(noteLabel)).toBe('');
   expect(screen.queryByRole('region', { name: '本段 AI 講解' })).toBeNull();
   expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();
@@ -310,7 +311,7 @@ it('does not restore study memory after the panel has been closed and reopened',
 
 it('bounds retained lessons to the six most recent successful results', async () => {
   for (let number = 1; number <= 7; number++) mocks.run.mockResolvedValueOnce({ ...explanation, title: `講解 ${number}` });
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   for (let number = 2; number <= 7; number++) {
     fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
@@ -322,7 +323,7 @@ it('bounds retained lessons to the six most recent successful results', async ()
 });
 
 it('ignores a cancelled follow-up even when its original passage has been reopened', async () => {
-  render(<CourseStudyPanel courseTitle="資料庫" material={{ ...material, body: `${material.body.padEnd(1600, '甲')}乙` }} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={{ ...material, body: `${material.body.padEnd(1600, '甲')}乙` }} onClose={vi.fn()} />);
   await generate();
   let finish!: (value: TutorExplanation) => void;
   mocks.run.mockImplementationOnce(() => new Promise<TutorExplanation>((resolve) => { finish = resolve; }));
@@ -339,7 +340,7 @@ it('ignores a cancelled follow-up even when its original passage has been reopen
 
 it('explains when a long prior answer cannot fit in follow-up context and keeps it readable', async () => {
   mocks.run.mockResolvedValueOnce({ ...explanation, explanation: '長'.repeat(1800), answer: '答'.repeat(1000) });
-  render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
   fireEvent.click(screen.getByRole('button', { name: '接著追問' }));
   await waitFor(() => expect(inputValue('這一段的講解記錄')).toBe('2'));
@@ -358,7 +359,7 @@ it('downloads only after an explicit click, recovers from download failure, and 
   const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
     downloads.push({ href: this.href, filename: this.download });
   });
-  const view = render(<CourseStudyPanel courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   try {
     const download = screen.getByRole('button', { name: '下載本次筆記' });
     expect(download.hasAttribute('disabled')).toBe(true);

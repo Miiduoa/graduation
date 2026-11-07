@@ -82,6 +82,12 @@
 .reviewList [aria-current="location"], .personalNotes [aria-pressed="true"] { border-color: var(--brand); font-weight: 600; }
 .lessonHistory { margin: 20px 0; }
 .studentQuestion { padding: 12px; background: var(--surface-raised); white-space: pre-wrap; line-height: 1.8; }
+.restorePreview { margin: 20px 0; padding: 20px; border: 1px solid var(--brand); background: var(--surface); }
+.restorePreview h4 { margin: 0; font-size: 17px; }
+.progressFacts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin: 18px 0; }
+.progressFacts div { min-width: 0; }
+.progressFacts dt { color: var(--muted); font-size: 12px; }
+.progressFacts dd { margin: 5px 0 0; font-size: 14px; line-height: 1.7; }
 .coach > .field { margin: 18px 0 12px; }
 .status { font-size: 13px; color: var(--muted); line-height: 1.8; }
 .status:empty { display: none; }
@@ -103,6 +109,6 @@
   .root { padding: 14px; }
   .board { padding: 14px; }
   .sourceText { font-size: 16px; padding-left: 12px; }
-  .exercise, .personalNotes, .reviewList { padding: 14px; }
+  .exercise, .personalNotes, .reviewList, .restorePreview { padding: 14px; }
   .actions > .primary { flex: 1 1 160px; }
 }

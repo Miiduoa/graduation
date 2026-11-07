@@ -17,13 +17,36 @@
 - 追問最多帶入同段、同讀法的最近 2 輪；選舊講解時只沿著該次對話接續，不混用另一條追問分支。
 - 引用必須確實出現在該段來源。這項檢查不代表生成的解釋或算式一定正確。
 - 可主動下載本次筆記為純文字檔，包含原頁碼、原文、個人筆記、講解與試答；只有已試答且已展開的參考回答才會匯出。
+- 可儲存完整閱讀進度，關閉後再從本機進度檔還原原頁段、讀法、筆記、講解、試答與問題草稿。載入先顯示預覽，確認後才取代目前內容。
 - 支援瀏覽器語音輸入與可用時的本機中文朗讀；語音輸入不會自動送出。
 - 沒有 WebGPU 或本機中文聲音時，原文閱讀仍可使用。
 
 沒有正式評分、成績寫入、作業送出或教師進度變更。白板內容只保留在目前頁面的記憶體，
 不寫入 localStorage、資料庫或學習計畫。關閉／離開白板、換教材或帳號界線變更會清除本次會話；
-已下載的文字檔由使用者保管。每段筆記與每次試答各最多 2,000 字元。需要再生成時沿用裝置模型快取。
-跨次開啟的進度還原、雲端同步與自動錯題判定尚未實作。
+使用者可明確下載文字筆記或閱讀進度檔，由自己保管。每段筆記與每次試答各最多 2,000 字元。
+需要再生成時沿用裝置模型快取。自動保存、雲端同步與自動錯題判定尚未實作。
+
+## 保存與還原閱讀進度
+
+「儲存閱讀進度」會下載 `.campus-study.json`，即使還沒有筆記也能保存目前閱讀位置。
+之後在同帳號、同課程的白板展開「接著上次的進度」，選擇檔案；程式先驗證內容，
+預覽教材名稱、原頁段、讀法及筆記／待複習數量。按「還原這份進度」才會替換目前白板，
+也可以取消，或先儲存正在閱讀的內容。
+
+進度格式固定為 `campus-one-study-progress` 第 1 版，最多 8 MiB。只保存穩定的
+`platformAccountId` 與 `workspaceId` 供載入時核對，不保存 session context、登入 token、cookie 或權限判定。
+載入時仍需通過當下課程存取流程；不同帳號／課程、未知版本、損壞格式、超限內容、錯誤段落位置、
+孤立的狀態 key、不合法的追問祖先與無法對照原文的 AI 引用都會拒絕，不清空目前內容。
+檔案也保存各頁的分段長度，還原時逐段比對；日後若切段方式改變，會明確拒絕不相容的對應，避免把筆記移到錯誤段落。
+成功還原建立新的本機 revision，不沿用檔案中的執行狀態，也不自動啟動模型或朗讀。
+
+檔案保留教材副本，因此會明確提示對照課程最新內容，不把還原內容描述為剛從 LMS 取得。
+進度檔未加密，包含個人筆記、問題草稿、完整講解及練習參考回答；帳號／課程核對是防止誤載，
+不是檔案加密或來源認證。還原會維持答案原本的展開狀態，JSON 本身不作為保密題庫。
+純文字筆記仍只匯出已試答且已展開的參考回答。
+
+載入進度與讀取新教材共用取消控制：停止、關閉、換帳號、換課程及權限撤銷後，
+晚到的檔案讀取結果不能建立預覽或替換目前內容。預覽期間更換教材會移除舊預覽。
 
 ## 來源界線
 
@@ -69,6 +92,7 @@ Prompt 將歷史當作理解追問的資料，不把先前模型回答視為教�
 - `apps/web/src/features/nuni/CourseStudyPassage.tsx`：單段講解、追問、筆記、試答與取消。
 - `apps/web/src/features/nuni/courseStudySession.ts`：會話記憶、各模式的保留上限及追問分支。
 - `apps/web/src/features/nuni/courseStudyNotes.ts`：按來源順序匯出純文字筆記與安全檔名。
+- `apps/web/src/features/nuni/courseStudyProgress.ts`：進度檔格式、範圍與內容驗證、序列化與還原資料。
 - `apps/web/src/features/nuni/StudyReadAloud.tsx`：本機語音與播放生命週期。
 - `apps/web/src/lib/studyTutor.ts`：來源轉換、完整分段、提示與輸出驗證。
 - `apps/web/src/lib/studyTutorRuntime.ts`：worker 協議、取消、錯誤及逾時。
@@ -76,12 +100,13 @@ Prompt 將歷史當作理解追問的資料，不把先前模型回答視為教�
 在專案支援的 Node 與 pnpm 版本、已安裝依賴的 checkout 執行：
 
 ```sh
-pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorRuntime.test.ts src/features/nuni/CourseStudyPanel.test.tsx src/features/nuni/StudyReadAloud.test.tsx src/features/nuni/CourseMaterials.test.tsx src/features/nuni/courseStudyNotes.test.ts
+pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorRuntime.test.ts src/features/nuni/CourseStudyPanel.test.tsx src/features/nuni/StudyReadAloud.test.tsx src/features/nuni/CourseMaterials.test.tsx src/features/nuni/courseStudyNotes.test.ts src/features/nuni/courseStudyProgress.test.ts src/features/nuni/CourseStudyProgress.test.tsx
 ```
 
 測試涵蓋完整分段、缺頁、錯引、HTML 文字處理、不自動啟動模型、worker 實際終止、
 過期回應隔離、頁面／模式切換後還原、追問分支、長歷史縮減、同名來源替換、匯入失敗保留、
-帳號切換與權限撤銷、本機聲音限制、輸入超限、下載失敗恢復及隱藏答案不外流。
+帳號切換與權限撤銷、本機聲音限制、輸入超限、下載失敗恢復及文字筆記不提前匯出隱藏答案。
+進度檔另驗證格式版本、帳號／課程一致、來源完整性、預覽確認、取消與晚回應、關閉重開後還原，以及還原後的追問分支。
 
 發布前仍需在有 WebGPU 的實機完成模型下載及中文教材推論，檢查延遲、記憶體、引用與教學品質；
 以正式授權的課程確認 PDF／掃描頁，並做 iPhone、Android 的觸控與輔助功能驗收。
@@ -98,11 +123,11 @@ pnpm --filter web exec vitest run src/lib/studyTutor.test.ts src/lib/studyTutorR
 | 從課程開始讀講義 | 已授權教材帶入；PDF 原頁碼與缺頁警示 | 真實課程、掃描頁與手機檔案選取驗收 |
 | 看懂一段後連續追問 | 同段近期上下文、原文引用、失敗可恢復 | 實機教學品質、首次／後續講解延遲與記憶體 |
 | 翻頁後回來繼續 | 筆記、試答、講解記錄、待複習定位 | iPhone／Android 觸控、鍵盤、輔助功能與縮放驗收 |
-| 下次繼續複習 | 使用者主動下載純文字筆記 | 明確保存／還原、跨裝置同步與衝突處理 |
+| 下次繼續複習 | 主動儲存閱讀進度檔、載入預覽與明確還原；亦可下載純文字筆記 | 實機檔案下載／選取、自動保存、跨裝置同步與衝突處理 |
 | 看懂圖形與解題過程 | 目前僅文字講解，公式與圖像要求對照原檔 | 可核對的分步圖解、公式呈現與引用定位 |
 | 說到不懂時插話 | 目前分別提供朗讀、語音轉字與明確送出 | 不中斷上下文的語音打斷、實機錄放音驗收 |
 
 每輪先核對最新 main 與 PR 的確切 head、CI／CodeQL、未解討論及指定 App 的「審查通過」。
 持續在同主題分支完成可驗證改動；合併與正式部署仍遵守原有規則。
-優先補實際失敗，再實作明確保存／還原及可核對圖解。正式帳號或實機驗收暫時無法取得時，
+優先補實際失敗，再實作可核對圖解及更順手的持續複習流程。正式帳號或實機驗收暫時無法取得時，
 繼續可獨立完成的開發並保留待驗證項目，不把單元測試當成競品實測。

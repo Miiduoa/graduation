@@ -6,6 +6,9 @@ import { NuniError, type NuniMaterial, type NuniWorkspace } from '@campus/shared
 import { COURSE_WORK_LANDING_ATTR, COURSE_WORK_MISSING_MATERIAL } from '@/lib/courseWorkLanding';
 import { MATERIAL_READ_KEY_PREFIX, markMaterialRead } from '@/lib/courseMaterials';
 import { CourseMaterials } from './CourseMaterials';
+import { studySourceFromText } from '@/lib/studyTutor';
+import { serializeCourseStudyProgress } from './courseStudyProgress';
+import { emptyStudyPassage } from './courseStudySession';
 
 const state = vi.hoisted(() => ({ context: 'session-a', request: vi.fn(), refresh: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -88,6 +91,41 @@ it('closes the study board on refresh and prevents reopening after access is rev
   expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
   await waitFor(() => expect(screen.queryByRole('button', { name: `陪我讀「${material.title}」` })).toBeNull());
   expect(screen.getByRole('button', { name: '讀講義' }).hasAttribute('disabled')).toBe(true);
+});
+
+it.each(['context', 'access'] as const)('discards a late progress-file read after the %s boundary changes', async (boundary) => {
+  const view = render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  await screen.findByRole('heading', { name: '讀書白板' });
+  const saved = serializeCourseStudyProgress({
+    scope: { platformAccountId: 'pa_11111111-1111-4111-8111-111111111111', workspaceId: workspace.id },
+    source: studySourceFromText({ id: 'old-session', title: '上一個登入階段的教材', text: '舊的教材原文。' }),
+    position: { sectionIndex: 0, passageIndex: 0, mode: 'understand' },
+    passages: { '0:0': { ...emptyStudyPassage(), note: '不應流入新登入階段的私人筆記' } },
+  });
+  let finish!: (value: string) => void;
+  const file = new File([saved], 'saved.campus-study.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: () => new Promise<string>((resolve) => { finish = resolve; }) });
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  if (boundary === 'context') {
+    state.context = 'session-b';
+    view.rerender(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+    expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+    await screen.findByRole('heading', { name: '讀書白板' });
+  } else {
+    state.request.mockRejectedValue(new NuniError(403, 'FORBIDDEN'));
+    fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '讀講義' }).hasAttribute('disabled')).toBe(true));
+  }
+  await act(async () => finish(saved));
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+  expect(screen.queryByText('不應流入新登入階段的私人筆記')).toBeNull();
+  if (boundary === 'context') {
+    expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  } else {
+    expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  }
 });
 
 it('renders real reading content and safe links for students without publication controls', async () => {
