@@ -181,6 +181,9 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
+      - name: Test platform public Agent admission contracts
+        run: node scripts/test-platform-public-agent.mjs
+
   test-mobile:
     name: Mobile Tests
     runs-on: ubuntu-latest
