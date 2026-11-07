@@ -6,7 +6,10 @@ import { CampusPlanComparisonCard } from '../../../apps/mobile/src/screens/Campu
 import { CampusEvidencePlanCard } from '../../../apps/mobile/src/screens/CampusEvidencePlanCard';
 import { NuniStudyPlanActions } from '../../../apps/mobile/src/screens/NuniStudyPlanActions';
 import { NuniPlanAssignmentOpenButton, type NuniPlanAssignmentOpenContext } from '../../../apps/mobile/src/screens/NuniPlanAssignmentOpenButton';
+import { StudyAssignmentAssistant } from '../../../apps/mobile/src/screens/nuni/StudyAssignmentAssistant';
+import { ThemeProvider } from '../../../apps/mobile/src/state/theme';
 import { applyTheme, theme } from '../../../apps/mobile/src/ui/theme';
+import type { NuniStudyAgenda, NuniStudyTask } from '../../../packages/shared/src/nuniStudyAgenda';
 import type { SavedCampusPlan } from '../../../apps/mobile/src/services/savedCampusPlans';
 import { compareCampusPlans, type CampusPlanComparison, type CampusPlanComparisonBasis } from '../../../apps/mobile/src/services/campusPlanComparison';
 import { copyCampusEvidencePlan } from '../../../apps/mobile/src/services/savedCampusPlanValidation';
@@ -472,8 +475,66 @@ function ReceiptComparisonApp() {
   </View>;
 }
 
+// The production assistant owns query parsing, date/status follow-ups and row
+// selection. Only its loaded course snapshot and navigation callback are fixed.
+const receiptQueryCourses: NuniStudyAgenda['workspaces'] = [
+  { id: 'receipt-database', title: '資料庫', state: 'active', memberRole: 'student' },
+  { id: 'receipt-programming', title: '程式設計', state: 'active', memberRole: 'student' },
+  { id: 'receipt-unavailable', title: '資訊管理實務', state: 'active', memberRole: 'student' },
+];
+function receiptQueryTask(
+  id: string, courseId: string, title: string, dueAt: string | null, submittedAt: string | null = null,
+): NuniStudyTask {
+  return {
+    id, courseId, title, dueAt, submittedAt,
+    courseTitle: receiptQueryCourses.find((course) => course.id === courseId)!.title,
+    kind: 'assignment', state: 'open', feedback: null, reviewedAt: null,
+  };
+}
+const receiptQueryAgenda: NuniStudyAgenda = {
+  workspaces: receiptQueryCourses, studiedCourseCount: receiptQueryCourses.length,
+  failedCourseIds: ['receipt-unavailable'], limitedCourseIds: ['receipt-database'],
+  tasks: [
+    receiptQueryTask('database-tomorrow-pending', 'receipt-database', '明日資料整理報告', '2026-11-08T10:00:00+08:00'),
+    receiptQueryTask('database-tomorrow-received', 'receipt-database', '資料庫概念摘要', '2026-11-08T18:00:00+08:00',
+      '2026-11-07T09:15:00+08:00'),
+    receiptQueryTask('database-next-week-pending', 'receipt-database', '下週索引練習', '2026-11-10T09:00:00+08:00'),
+    receiptQueryTask('database-next-week-received', 'receipt-database', '期末報告', '2026-11-10T18:00:00+08:00',
+      '2026-11-06T17:30:00+08:00'),
+    // A same-title receipt from another course must never replace the chosen course.
+    receiptQueryTask('programming-next-week-received', 'receipt-programming', '期末報告', '2026-11-10T18:00:00+08:00',
+      '2026-11-07T09:20:00+08:00'),
+    receiptQueryTask('database-undated-pending', 'receipt-database', '期限待確認報告', null),
+    receiptQueryTask('database-undated-received', 'receipt-database', '期限待確認摘要', null,
+      '2026-11-07T08:00:00+08:00'),
+  ],
+};
+
+function ReceiptDateQueryApp() {
+  return <ThemeProvider>
+    <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 14 }}>
+      <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
+        依期限核對繳交紀錄
+      </Text>
+      <View testID="receipt-date-query-preview">
+        <StudyAssignmentAssistant data={receiptQueryAgenda} open={(courseId, activityId) => {
+          window.qaEvents.push({ kind: 'receipt-date-open', courseId, activityId });
+        }} />
+      </View>
+      <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
+        測試畫面：使用正式課業助理及日期查詢，課程與繳交紀錄為合成範例，開啟結果只記錄目標，未連接平台或載入原課程頁。
+      </Text>
+    </View>
+  </ThemeProvider>;
+}
+
 const scenario = new URLSearchParams(location.search).get('scenario');
-createRoot(document.getElementById('root')!).render(scenario === 'receipt' ? <ReceiptComparisonApp />
+if (scenario === 'receipt-date-query') {
+  // The real ThemeProvider reads this same preference through AsyncStorage Web.
+  localStorage.setItem('campus.themeMode.v2', mode);
+}
+createRoot(document.getElementById('root')!).render(scenario === 'receipt-date-query' ? <ReceiptDateQueryApp />
+  : scenario === 'receipt' ? <ReceiptComparisonApp />
   : scenario === 'assignment' || scenario === 'quiz' ? <AssignmentPlanningApp quiz={scenario === 'quiz'} />
   : scenario === 'platform' || scenario === 'clock'
     ? <PlatformPlanningApp clock={scenario === 'clock'} /> : <App />);
