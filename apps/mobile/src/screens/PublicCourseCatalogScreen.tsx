@@ -8,6 +8,7 @@ import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalog
 import { Button, Card, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
+import { PublicCourseImportAction } from '../components/PublicCourseImportAction';
 
 type Result =
   | { status: 'loading' | 'error'; query: string }
@@ -42,7 +43,11 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
       setManualCopy(true);
     }
   }
-  return <Card title={course.title} subtitle={`課號 ${course.code} · 班別 ${course.section || '未提供'}`}>
+  // Keep the title separate: grouping the whole Card as an accessible header
+  // prevents VoiceOver from reaching its nested review and copy controls.
+  return <Card>
+    <Text accessibilityRole="header" style={{ ...theme.typography.h3, color: theme.colors.text }}>{course.title}</Text>
+    <Text style={body}>{`課號 ${course.code} · 班別 ${course.section || '未提供'}`}</Text>
     <Text style={body}>{[course.department, course.teacher, course.credits && course.credits + ' 學分'].filter(Boolean).join(' · ')}</Text>
     {meetings ? meetings.map((meeting, index) => <Text key={index} style={body}>
       {meeting.label}{meeting.room ? ' · ' + meeting.room : ''}
@@ -52,6 +57,7 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
     {!meetings && rawMeetings.length === 0 && <Text style={body}>上課時間未提供</Text>}
     <Text style={body}>{course.semester.replace(/^(\d{3})([12])$/, '$1 學年度第 $2 學期').replace(/^(\d{3})3$/, '$1 學年度暑期')}</Text>
     {csv && <View style={{ gap: 8, marginTop: 8 }}>
+      <PublicCourseImportAction course={course} schoolId={schoolId} navigation={navigation} />
       <Button text="複製課表匯入資料" kind="ghost" onPress={() => void copy()} />
       {copied && <Text accessibilityLiveRegion="polite" style={body}>已複製，請到匯入頁貼上並核對上課時間。</Text>}
       {manualCopy && <>
