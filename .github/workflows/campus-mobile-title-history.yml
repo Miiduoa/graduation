@@ -8,6 +8,8 @@ on:
       - 'apps/mobile/src/screens/social/TitleHistorySearch.tsx'
       - 'apps/mobile/src/services/titleSearch.ts'
       - 'apps/mobile/src/__tests__/TitleHistorySearch.test.tsx'
+      - 'apps/mobile/integration/title-history/**'
+      - 'apps/mobile/jest.title-history-integration.config.cjs'
       - 'packages/shared/src/communityTitleSearch.ts'
       - 'backend/firestore/firestore.rules'
       - 'scripts/qa/mobile-title-history-emulator.mjs'
@@ -19,6 +21,8 @@ on:
       - 'apps/mobile/src/screens/social/TitleHistorySearch.tsx'
       - 'apps/mobile/src/services/titleSearch.ts'
       - 'apps/mobile/src/__tests__/TitleHistorySearch.test.tsx'
+      - 'apps/mobile/integration/title-history/**'
+      - 'apps/mobile/jest.title-history-integration.config.cjs'
       - 'packages/shared/src/communityTitleSearch.ts'
       - 'backend/firestore/firestore.rules'
       - 'scripts/qa/mobile-title-history-emulator.mjs'
@@ -55,7 +59,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Native history interactions and existing feed regression
         run: |
-          mkdir -p artifacts/mobile-title-history
+          mkdir -p artifacts/mobile-title-history artifacts/mobile-title-integration
           pnpm --filter mobile exec jest src/__tests__/TitleHistorySearch.test.tsx src/__tests__/SocialBrowsingScreens.test.tsx src/__tests__/feedPages.test.ts src/__tests__/feedDiscoveryModel.test.ts --runInBand --json --outputFile=../../artifacts/mobile-title-history/jest.json
       - name: Native service against real SDK and repository rules
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
@@ -63,6 +67,12 @@ jobs:
           GCLOUD_PROJECT: demo-campus-native-title
           SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: pnpm exec firebase emulators:exec --project demo-campus-native-title --only firestore "node scripts/qa/mobile-title-history-emulator.mjs"
+      - name: Native component through real SDK and repository rules
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          GCLOUD_PROJECT: demo-campus-native-title-ui
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: pnpm exec firebase emulators:exec --project demo-campus-native-title-ui --only firestore "pnpm --filter mobile exec jest --config jest.title-history-integration.config.cjs --runInBand --json --outputFile=../../artifacts/mobile-title-integration/jest.json"
       - name: Mobile typecheck
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: pnpm --filter mobile typecheck
@@ -74,6 +84,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-title-history-${{ github.run_id }}
-          path: artifacts/mobile-title-history/
+          path: |
+            artifacts/mobile-title-history/
+            artifacts/mobile-title-integration/
           retention-days: 14
           if-no-files-found: error
