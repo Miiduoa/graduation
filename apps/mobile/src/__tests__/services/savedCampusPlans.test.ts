@@ -15,6 +15,7 @@ import {
 import type { CampusEvidencePlan } from '../../services/offlineCampusPlanner';
 import { buildOfflineCampusPlan } from '../../services/offlineCampusPlanner';
 import { buildCampusStudyAgenda, formatCampusStudyAgenda, resolveStudyWindow } from '../../services/campusStudyAgenda';
+import { compareCampusPlans } from '../../services/campusPlanComparison';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -306,6 +307,125 @@ function mixedTaskSample(): CampusEvidencePlan {
   return plan;
 }
 
+function receiptSample(): CampusEvidencePlan {
+  const plan = mixedTaskSample();
+  plan.comparisonBasis!.assignments.items[0].activity = {
+    state: 'open', receipt: { submittedAt: '2026-11-06T08:30:00+08:00' },
+  };
+  plan.comparisonBasis!.quizzes!.items[0].activity = { state: 'closed', receipt: null };
+  plan.comparisonBasis!.quizzes!.items[1].activity = { state: 'open', receipt: { submittedAt: null } };
+  return plan;
+}
+
+test('receipt metadata survives serialization independently of personal checklist progress', async () => {
+  const plan = receiptSample();
+  const saved = await saveCampusPlan(scope, { question, plan }, session());
+  await setCampusPlanStepDone(scope, saved[0].id, 'quiz-0', true, session());
+  const restored = (await readSavedCampusPlans(scope, session()))[0];
+  expect(restored.plan).toEqual(receiptSample());
+  expect(restored.completedStepIds).toEqual(['quiz-0']);
+  expect(restored.plan.comparisonBasis!.quizzes!.items[0].activity!.receipt).toBeNull();
+  restored.plan.comparisonBasis!.assignments.items[0].activity!.receipt!.submittedAt = null;
+  expect((await readSavedCampusPlans(scope, session()))[0].plan).toEqual(receiptSample());
+});
+
+test('legacy saved activity stays unknown rather than becoming an explicit missing receipt', async () => {
+  await saveCampusPlan(scope, { question, plan: mixedTaskSample() }, session());
+  const restored = (await readSavedCampusPlans(scope, session()))[0].plan;
+  for (const source of [restored.comparisonBasis!.assignments, restored.comparisonBasis!.quizzes!]) {
+    expect(source.items.every((item) => !Object.prototype.hasOwnProperty.call(item, 'activity'))).toBe(true);
+  }
+  const current = receiptSample();
+  const result = compareCampusPlans(restored, current);
+  // Same source timestamps do not become newer evidence merely by restoring an old plan.
+  expect(result.changes.some((change) => change.kind === 'receipt')).toBe(false);
+});
+
+test('saved and restored receipts discard raw answers, attachments, accounts and navigation authority', async () => {
+  const addPrivateFields = (plan: CampusEvidencePlan) => {
+    for (const source of [plan.comparisonBasis!.assignments, plan.comparisonBasis!.quizzes!]) {
+      for (const item of source.items) {
+        Object.assign(item.activity!, { accountId: 'private-owner', answers: ['private-answer'], canSubmit: true,
+          nuniSource: { accountId: 'private-owner' }, nuniQuizSource: { quizId: 'private-quiz' } });
+        if (item.activity!.receipt) Object.assign(item.activity!.receipt, {
+          submitter: { accountId: 'private-owner' }, attachments: ['private-attachment'],
+          answers: ['private-answer'], execute: 'submit', submissionId: 'private-submission',
+        });
+      }
+    }
+  };
+  const plan = receiptSample();
+  addPrivateFields(plan);
+  const saved = await saveCampusPlan(scope, { question, plan }, session());
+  expect(saved[0].plan).toEqual(receiptSample());
+  const key = savedCampusPlansStorageKey(scope);
+  expect(persisted.get(key)).not.toMatch(/private-|accountId|answers|attachments|canSubmit|nuniSource|nuniQuizSource|execute|submissionId/);
+  const stored = JSON.parse(persisted.get(key)!);
+  addPrivateFields(stored.plans[0].plan);
+  persisted.set(key, JSON.stringify(stored));
+  expect((await readSavedCampusPlans(scope, session()))[0].plan).toEqual(receiptSample());
+});
+
+test('a restored explicit absence can be compared with a later platform receipt for both task kinds', async () => {
+  const original = mixedTaskSample();
+  for (const source of [original.comparisonBasis!.assignments, original.comparisonBasis!.quizzes!]) {
+    source.items[0].activity = { state: 'open', receipt: null };
+  }
+  await saveCampusPlan(scope, { question, plan: original }, session());
+  const restored = (await readSavedCampusPlans(scope, session()))[0].plan;
+  const current = JSON.parse(JSON.stringify(restored)) as CampusEvidencePlan;
+  current.checkedAt = '2026-11-06T02:00:00Z';
+  for (const source of [current.comparisonBasis!.assignments, current.comparisonBasis!.quizzes!]) {
+    source.checkedAt = current.checkedAt;
+    source.items[0].activity!.receipt = { submittedAt: '2026-11-06T01:30:00Z' };
+  }
+  const changes = compareCampusPlans(restored, current).changes;
+  expect(changes).toHaveLength(2);
+  expect(changes.map((change) => change.category).sort()).toEqual(['assignment', 'quiz']);
+  expect(changes.every((change) => change.kind === 'receipt' && change.after!.includes('09:30'))).toBe(true);
+});
+
+test.each<[string, unknown]>([
+  ['null activity', null],
+  ['array activity', []],
+  ['unknown state', { state: 'completed', receipt: null }],
+  ['missing state', { receipt: null }],
+  ['missing receipt', { state: 'open' }],
+  ['boolean receipt', { state: 'open', receipt: true }],
+  ['array receipt', { state: 'open', receipt: [] }],
+  ['missing receipt time', { state: 'open', receipt: {} }],
+  ['numeric receipt time', { state: 'open', receipt: { submittedAt: 1793925000000 } }],
+  ['date-only receipt time', { state: 'open', receipt: { submittedAt: '2026-11-06' } }],
+  ['offset-free receipt time', { state: 'open', receipt: { submittedAt: '2026-11-06T08:30:00' } }],
+  ['invalid calendar time', { state: 'open', receipt: { submittedAt: '2026-02-30T08:30:00+08:00' } }],
+  ['invalid timezone', { state: 'open', receipt: { submittedAt: '2026-11-06T08:30:00+14:30' } }],
+])('invalid receipt metadata cannot overwrite saved personal progress: %s', async (_label, activity) => {
+  const saved = await saveCampusPlan(scope, { question, plan: receiptSample() }, session());
+  await setCampusPlanStepDone(scope, saved[0].id, 'quiz-0', true, session());
+  const key = savedCampusPlansStorageKey(scope);
+  const previous = persisted.get(key);
+  for (const kind of ['assignments', 'quizzes'] as const) {
+    const invalid = receiptSample();
+    invalid.comparisonBasis![kind]!.items[0].activity = activity as never;
+    await expect(saveCampusPlan(scope, { question, plan: invalid }, session())).rejects.toMatchObject({ code: 'invalid-plan' });
+  }
+  expect(persisted.get(key)).toBe(previous);
+  expect((await readSavedCampusPlans(scope, session()))[0].completedStepIds).toEqual(['quiz-0']);
+});
+
+test.each(['assignments', 'quizzes'] as const)('corrupt stored %s receipts are rejected without rewriting the original', async (kind) => {
+  await saveCampusPlan(scope, { question, plan: receiptSample() }, session());
+  const key = savedCampusPlansStorageKey(scope);
+  const stored = JSON.parse(persisted.get(key)!);
+  stored.plans[0].plan.comparisonBasis[kind].items[0].activity = { state: 'open', receipt: {} };
+  const raw = JSON.stringify(stored);
+  persisted.set(key, raw);
+  write.mockClear();
+  await expect(readSavedCampusPlans(scope, session())).rejects.toMatchObject({ code: 'corrupt-storage' });
+  expect(persisted.get(key)).toBe(raw);
+  expect(write).not.toHaveBeenCalled();
+});
+
 test('mixed quiz and assignment plans retain types, progress and independent source evidence after restart', async () => {
   const plan = mixedTaskSample();
   const saved = await saveCampusPlan(scope, { question, plan }, session());
@@ -377,7 +497,8 @@ test('the 400-row comparison allowance is shared by assignment and quiz evidence
   const plan = mixedTaskSample();
   for (const source of [plan.comparisonBasis!.assignments, plan.comparisonBasis!.quizzes!]) {
     source.items = Array.from({ length: 200 }, (_, index) => ({ ...source.items[0],
-      identity: ['database', 'activity-' + index] as [string, string] }));
+      identity: ['database', 'activity-' + index] as [string, string],
+      activity: { state: 'closed' as const, receipt: { submittedAt: '2026-11-06T00:30:00Z' } } }));
     source.total = 200;
   }
   await saveCampusPlan(scope, { question, plan }, session());

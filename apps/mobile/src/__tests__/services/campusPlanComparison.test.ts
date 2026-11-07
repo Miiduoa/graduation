@@ -74,6 +74,173 @@ function laterWithQuizzes(before: CampusEvidencePlan): CampusEvidencePlan {
   return after;
 }
 
+describe('platform activity receipts', () => {
+  function source(value: CampusEvidencePlan, kind: 'assignment' | 'quiz') {
+    return kind === 'quiz' ? value.comparisonBasis!.quizzes! : value.comparisonBasis!.assignments;
+  }
+
+  test.each(['assignment', 'quiz'] as const)('a confirmed own %s receipt changes the plan even when its deadline does not', (kind) => {
+    const before = quizPlan();
+    source(before, kind).items[0].activity = { state: 'open', receipt: null };
+    const after = laterWithQuizzes(before);
+    source(after, kind).items[0].activity = { state: 'closed', receipt: { submittedAt: '2026-11-06T01:30:15.500Z' } };
+    const result = compareCampusPlans(before, after);
+    const record = kind === 'quiz' ? '作答紀錄' : '繳交紀錄';
+    expect(result.changes.filter((change) => change.category === kind)).toEqual([
+      expect.objectContaining({ kind: 'receipt', before: expect.stringContaining('未回傳本人' + record),
+        after: expect.stringContaining('本人' + record + '：2026/11/6 09:30:15.500') }),
+    ]);
+    expect(kind === 'quiz' ? result.unchangedQuizzes : result.unchangedAssignments).toBe(0);
+    expect(kind === 'quiz' ? result.unchangedAssignments : result.unchangedQuizzes).toBe(1);
+  });
+
+  test('receipt, title and deadline updates retain both evidence rows for the same identity', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    Object.assign(after.comparisonBasis!.assignments.items[0], {
+      title: '修訂期末報告', dueAt: '2026-11-07T15:59:00Z',
+      activity: { state: 'open', receipt: { submittedAt: '2026-11-06T01:30:00Z' } },
+    });
+    const result = compareCampusPlans(before, after);
+    expect(result.changes).toHaveLength(2);
+    expect(result.changes.map((change) => change.kind).sort()).toEqual(['changed', 'receipt']);
+    expect(new Set(result.changes.map((change) => change.id)).size).toBe(2);
+    expect(result.unchangedAssignments).toBe(0);
+  });
+
+  test('colliding assignment and quiz tuples keep their own receipts and timestamps', () => {
+    const before = quizPlan();
+    for (const kind of ['assignment', 'quiz'] as const) source(before, kind).items[0].activity = { state: 'open', receipt: null };
+    const after = laterWithQuizzes(before);
+    source(after, 'assignment').items[0].activity!.receipt = { submittedAt: '2026-11-06T01:30:00Z' };
+    source(after, 'quiz').items[0].activity!.receipt = { submittedAt: '2026-11-06T01:31:00Z' };
+    const result = compareCampusPlans(before, after);
+    expect(result.changes).toHaveLength(2);
+    expect(new Set(result.changes.map((change) => change.id)).size).toBe(2);
+    expect(result.changes.find((change) => change.category === 'assignment'))
+      .toMatchObject({ kind: 'receipt', after: expect.stringContaining('繳交紀錄：2026/11/6 09:30') });
+    expect(result.changes.find((change) => change.category === 'quiz'))
+      .toMatchObject({ kind: 'receipt', after: expect.stringContaining('作答紀錄：2026/11/6 09:31') });
+  });
+
+  test('a legacy plan confirms the current receipt without claiming it was completed between plans', () => {
+    const before = plan();
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity = { state: 'open', receipt: { submittedAt: '2026-11-06T01:30:00Z' } };
+    expect(assignmentChanges(before, after)).toEqual([expect.objectContaining({ kind: 'receipt',
+      before: expect.stringContaining('未保存'), detail: expect.stringContaining('無法判定是否在兩次規劃之間完成') })]);
+  });
+
+  test('an untimed own receipt confirms a record but keeps completion time unknown', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity!.receipt = { submittedAt: null };
+    expect(assignmentChanges(before, after)).toEqual([expect.objectContaining({ kind: 'receipt',
+      after: expect.stringContaining('本人繳交紀錄：時間未確認'),
+      detail: expect.stringContaining('無法判定何時完成') })]);
+  });
+
+  test('a changed receipt timestamp is shown without inferring a resubmission', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: { submittedAt: '2026-11-06T00:30:00Z' } } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity!.receipt = { submittedAt: '2026-11-06T01:30:00Z' };
+    expect(assignmentChanges(before, after)).toEqual([expect.objectContaining({ kind: 'receipt',
+      before: expect.stringContaining('08:30'), after: expect.stringContaining('09:30'),
+      detail: expect.stringContaining('無法僅憑時間變更判定是否重新送出') })]);
+  });
+
+  test('equivalent receipt offsets remain unchanged while distinct subsecond times are visible', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: { submittedAt: '2026-11-06T00:30:00Z' } } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity!.receipt = { submittedAt: '2026-11-06T08:30:00+08:00' };
+    expect(compareCampusPlans(before, after)).toMatchObject({ changes: [], unchangedAssignments: 1 });
+    after.comparisonBasis!.assignments.items[0].activity!.receipt!.submittedAt = '2026-11-06T08:30:00.001+08:00';
+    expect(assignmentChanges(before, after)[0]).toMatchObject({ kind: 'receipt', after: expect.stringContaining('08:30:00.001') });
+  });
+
+  test.each([
+    ['same synchronization', '2026-11-06T01:00:00Z', '2026-11-06T01:00:00Z'],
+    ['unknown previous synchronization', null, '2026-11-06T02:00:00Z'],
+    ['unknown current synchronization', '2026-11-06T01:00:00Z', null],
+  ])('%s cannot announce a new receipt or a confirmed state transition', (_label, previous, current) => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    before.comparisonBasis!.assignments.checkedAt = previous;
+    after.comparisonBasis!.assignments.checkedAt = current;
+    after.comparisonBasis!.assignments.items[0].activity = { state: 'closed', receipt: { submittedAt: '2026-11-06T00:30:00Z' } };
+    const result = compareCampusPlans(before, after);
+    expect(result.changes).toEqual([expect.objectContaining({ kind: 'unverifiable', detail: expect.stringContaining('無法判定') })]);
+    expect(result.unchangedAssignments).toBe(0);
+  });
+
+  test('a receipt later than its source timestamp remains unverified', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity!.receipt = { submittedAt: '2026-11-06T02:00:00.001Z' };
+    expect(assignmentChanges(before, after)).toEqual([expect.objectContaining({ kind: 'unverifiable',
+      detail: expect.stringContaining('時間晚於本次來源同步時間') })]);
+  });
+
+  test('a newly returned receipt preceding the old synchronization is not called newly completed', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity!.receipt = { submittedAt: '2026-11-06T01:00:00Z' };
+    expect(assignmentChanges(before, after)[0]).toMatchObject({ kind: 'receipt',
+      detail: expect.stringContaining('不能視為這次新完成') });
+  });
+
+  test.each(['open', 'closed'] as const)('changing a task from %s without a receipt never means completion', (state) => {
+    const before = plan([assignment({ activity: { state, receipt: null } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items[0].activity!.state = state === 'open' ? 'closed' : 'open';
+    const result = compareCampusPlans(before, after);
+    expect(result.changes).toEqual([expect.objectContaining({ kind: 'changed',
+      detail: expect.stringContaining(state === 'open' ? '關閉不代表本人已完成' : '已重新開放') })]);
+    expect(result.unchangedAssignments).toBe(0);
+  });
+
+  test.each([false, true])('a missing current receipt remains unverified, including missing activity metadata (%s)', (absent) => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: { submittedAt: '2026-11-06T00:30:00Z' } } })]);
+    const after = later(before);
+    if (absent) delete after.comparisonBasis!.assignments.items[0].activity;
+    else after.comparisonBasis!.assignments.items[0].activity!.receipt = null;
+    expect(assignmentChanges(before, after)).toEqual([expect.objectContaining({ kind: 'unverifiable',
+      detail: expect.stringContaining('不能據此推定已撤回或未完成') })]);
+  });
+
+  test('a missing receipt in the same snapshot cannot establish that the task reopened', () => {
+    const before = plan([assignment({ activity: { state: 'closed', receipt: { submittedAt: '2026-11-06T00:30:00Z' } } })]);
+    const after = clone(before);
+    after.comparisonBasis!.assignments.items[0].activity = { state: 'open', receipt: null };
+    const change = assignmentChanges(before, after)[0];
+    expect(change).toMatchObject({ kind: 'unverifiable', detail: expect.stringContaining('平台狀態變化仍待核對') });
+    expect(change.detail).not.toContain('已重新開放');
+  });
+
+  test('same-name tasks attach a receipt only to the exact course and activity tuple', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } }),
+      assignment({ identity: ['course-b', 'report-a'], groupName: '程式設計', activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items.reverse();
+    after.comparisonBasis!.assignments.items[0].activity!.receipt = { submittedAt: '2026-11-06T01:30:00Z' };
+    const result = compareCampusPlans(before, after);
+    expect(result.changes).toEqual([expect.objectContaining({ kind: 'receipt', id: 'assignment:activity:["course-b","report-a"]',
+      before: expect.stringContaining('程式設計｜期末報告'), after: expect.stringContaining('程式設計｜期末報告') })]);
+    expect(result.unchangedAssignments).toBe(1);
+  });
+
+  test('duplicate identities suppress receipt matching even when one copy has a receipt', () => {
+    const before = plan([assignment({ activity: { state: 'open', receipt: null } })]);
+    const after = later(before);
+    after.comparisonBasis!.assignments.items.push(assignment({ activity: { state: 'closed', receipt: { submittedAt: '2026-11-06T01:30:00Z' } } }));
+    after.comparisonBasis!.assignments.total = 2;
+    const result = compareCampusPlans(before, after);
+    expect(result.changes.some((change) => change.kind === 'receipt')).toBe(false);
+    expect(result.changes).toContainEqual(expect.objectContaining({ id: 'source:assignment-identities', kind: 'unverifiable' }));
+    expect(result.unchangedAssignments).toBe(0);
+  });
+});
+
 test('assignment and quiz source identities never collide and use separate deadline language', () => {
   const before = quizPlan();
   const after = laterWithQuizzes(before);

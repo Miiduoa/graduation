@@ -12,6 +12,7 @@ type Props = {
 
 const PREVIEW_COUNT = 5;
 const CHANGE_LABEL = {
+  receipt: '平台紀錄',
   added: '本次新增',
   missing: '本次未列出',
   changed: '內容調整',

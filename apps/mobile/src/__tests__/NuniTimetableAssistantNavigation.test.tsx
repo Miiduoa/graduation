@@ -16,6 +16,9 @@ import type { NuniAssignment, NuniQuiz } from '@campus/shared/src/nuni';
 import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
 import * as nuniPlanAssignmentTarget from '../services/nuniPlanAssignmentTarget';
 import type { StoredTimetable } from '../services/personalTimetable';
+import { savedCampusPlansStorageKey, type SavedCampusPlan } from '../services/savedCampusPlans';
+import { CampusEvidencePlanCard } from '../screens/CampusEvidencePlanCard';
+import { CampusPlanComparisonCard } from '../screens/CampusPlanComparisonCard';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 let mockSchoolSelectionReady = true;
@@ -384,6 +387,145 @@ test('the real quiz receiver reports removal after verification and leaves an id
   expect(quizReads).toBeGreaterThanOrEqual(2);
   expect(unhandled).not.toHaveBeenCalled();
 });
+
+test.each(['assignment', 'quiz'] as const)(
+  'a saved mixed plan compares the exact %s submission after returning and leaves namesakes and personal progress separate',
+  async (kind) => {
+    jest.spyOn(assignmentFileSubmit, 'assignmentFileSubmitEnabledNative').mockReturnValue(true);
+    const fixture = await linkedPlanningQuizFixture();
+    const { course, assignment, quiz, assignmentPath, quizPath } = fixture;
+    const assignmentNamesake: NuniAssignment = { ...fixture.decoy, state: 'open', closedAt: null,
+      dueAt: '2026-11-07T08:00:00Z' };
+    const quizNamesake: NuniQuiz = { ...fixture.decoyQuiz, state: 'open', closedAt: null,
+      dueAt: '2026-11-07T07:00:00Z' };
+    const submittedAt = '2026-11-05T01:46:30Z';
+    const assignmentBody = '作業提交的私密內容，不能進入助理或保存計畫。';
+    const quizAnswer = '測驗作答的私密內容，不能進入助理或保存計畫。';
+    const assignmentSubmit = `${assignmentPath}/${assignment.id}/submit-files`;
+    const quizSubmit = `${quizPath}/${quiz.id}/submit`;
+    let currentAssignment = assignment;
+    let currentQuiz = quiz;
+    const direct = mockRequest.getMockImplementation()!;
+    mockRequest.mockImplementation(async (path, session, input, ...rest) => {
+      if (path === quizPath) return { quizzes: [quizNamesake, currentQuiz] };
+      if (path === quizSubmit) {
+        expect(input).toEqual({ answer: quizAnswer, idempotencyKey: expect.any(String) });
+        currentQuiz = { ...quiz, responseCount: 1, myResponse: {
+          quizId: quiz.id, platformAccountId: account, displayName: '測試學生',
+          answer: quizAnswer, state: 'submitted', submittedAt, teacherFeedback: null, reviewedAt: null,
+        } };
+        return currentQuiz;
+      }
+      return direct(path, session, input, ...rest);
+    });
+    mockAssignmentBff.mockImplementation(async (path, _session, input) => {
+      if (path === assignmentPath) return { assignments: [assignmentNamesake, currentAssignment] };
+      if (path === assignmentSubmit) {
+        expect(input).toEqual({ body: assignmentBody, fileIds: [], idempotencyKey: expect.any(String) });
+        currentAssignment = { ...assignment, submissionCount: 1, mySubmission: {
+          assignmentId: assignment.id, platformAccountId: account, displayName: '測試學生',
+          body: assignmentBody, state: 'submitted', submittedAt, teacherFeedback: null, reviewedAt: null,
+        } };
+        return currentAssignment;
+      }
+      throw Error('unexpected assignment request ' + path);
+    });
+    const { screen, navigation, unhandled } = await openPlatformWeekPlan();
+    const label = kind === 'quiz' ? '測驗' : '作業';
+    const target = kind === 'quiz' ? quiz : assignment;
+    const namesake = kind === 'quiz' ? quizNamesake : assignmentNamesake;
+    const privateContent = kind === 'quiz' ? quizAnswer : assignmentBody;
+    const submitPath = kind === 'quiz' ? quizSubmit : assignmentSubmit;
+    const writes = () => [...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls]
+      .filter(([path]) => path === assignmentSubmit || path === quizSubmit);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '儲存這份計畫' })).toBeEnabled());
+    await fireEventAsync.press(screen.getByRole('button', { name: '儲存這份計畫' }));
+    await screen.findByText('計畫已儲存');
+    await fireEventAsync.press(screen.getByRole('tab', { name: '已儲存計畫' }));
+    await fireEventAsync.press(await screen.findByRole('button', { name: /^查看接下來七天的學習行動/ }));
+    const storageKey = savedCampusPlansStorageKey({ owner: `nuni:${account}`, schoolId: 'pu' });
+    const saved = JSON.parse((await AsyncStorage.getItem(storageKey))!).plans[0] as SavedCampusPlan;
+    const targetIndex = saved.plan.steps.findIndex((step) => step.id.endsWith('-' + target.id));
+    const markedIndex = saved.plan.steps.findIndex((step) => step.kind && step.kind !== kind);
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+    expect(markedIndex).toBeGreaterThanOrEqual(0);
+    const markedId = saved.plan.steps[markedIndex].id;
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(saved.plan.steps.length);
+    await fireEventAsync.press(checkboxes[markedIndex]);
+    await waitFor(() => expect(screen.getAllByRole('checkbox')[markedIndex].props.accessibilityState.checked).toBe(true));
+    expect(screen.getAllByRole('checkbox')[targetIndex].props.accessibilityState.checked).toBe(false);
+    const storedBefore = (await AsyncStorage.getItem(storageKey))!;
+    const original = JSON.parse(storedBefore).plans[0] as SavedCampusPlan;
+    expect(original.completedStepIds).toEqual([markedId]);
+    expect(original.plan.comparisonBasis?.assignments.items.find((item) => item.identity?.[1] === assignment.id)?.activity)
+      .toEqual({ state: 'open', receipt: null });
+    expect(original.plan.comparisonBasis?.quizzes?.items.find((item) => item.identity?.[1] === quiz.id)?.activity)
+      .toEqual({ state: 'open', receipt: null });
+    expect(storedBefore).not.toMatch(/nuniSource|nuniQuizSource/);
+    // Opening a historical card never restores its live precise-target buttons.
+    expect(screen.queryByRole('button', { name: '查看這份作業' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查看這份測驗' })).toBeNull();
+    expect(writes()).toEqual([]);
+
+    await fireEventAsync.press(screen.getByRole('tab', { name: '對話' }));
+    await fireEventAsync.press(screen.getAllByRole('button', { name: `查看這份${label}` })[0]);
+    await screen.findByLabelText(`${kind === 'quiz' ? '測驗作答區' : '作業繳交區'}：${target.title}`);
+    expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: {
+      workspaceId: course.id, assignmentId: target.id, assistantAccountId: account,
+    } });
+    expect(writes()).toEqual([]);
+    jest.setSystemTime(new Date(submittedAt));
+    const targetCard = within(screen.getByTestId(`${kind}-${target.id}`));
+    await fireEventAsync.changeText(targetCard.getByLabelText(`${label}內容：${target.title}`), privateContent);
+    await fireEventAsync.press(targetCard.getByRole('button', { name: `繳交${label}` }));
+    await screen.findByText('已收到伺服器繳交紀錄。');
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][0]).toBe(submitPath);
+    await act(async () => navigation.goBack());
+    await screen.findByRole('tab', { name: '已儲存計畫' });
+    expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+    expect(screen.queryByText(privateContent)).toBeNull();
+
+    await fireEventAsync.press(screen.getByRole('tab', { name: '已儲存計畫' }));
+    expect(await AsyncStorage.getItem(storageKey)).toBe(storedBefore);
+    const beforeAssignmentReads = mockAssignmentBff.mock.calls.filter(([path]) => path === assignmentPath).length;
+    const beforeQuizReads = mockRequest.mock.calls.filter(([path]) => path === quizPath).length;
+    jest.setSystemTime(new Date('2026-11-05T01:47:00Z'));
+    await fireEventAsync.press(screen.getByRole('button', { name: '依目前資料重新規劃' }));
+    await screen.findByText('平台紀錄');
+    expect(mockAssignmentBff.mock.calls.filter(([path]) => path === assignmentPath).length).toBeGreaterThan(beforeAssignmentReads);
+    expect(mockRequest.mock.calls.filter(([path]) => path === quizPath).length).toBeGreaterThan(beforeQuizReads);
+    const comparison = within(screen.UNSAFE_getByType(CampusPlanComparisonCard));
+    expect(comparison.getByText('原計畫')).toBeTruthy();
+    expect(comparison.getByText('本次計畫')).toBeTruthy();
+    expect(comparison.getByText(/2026\/11\/0?5 09:46:30/)).toBeTruthy();
+    expect(comparison.getByText(/處理進度不會自動帶入/)).toBeTruthy();
+    expect(comparison.queryByRole('checkbox')).toBeNull();
+    expect(await AsyncStorage.getItem(storageKey)).toBe(storedBefore);
+    expect(screen.queryByText(assignmentBody)).toBeNull();
+    expect(screen.queryByText(quizAnswer)).toBeNull();
+
+    // The new plan still offers the other exact ID, even though all four titles match.
+    const latestPlan = screen.UNSAFE_getAllByType(CampusEvidencePlanCard)
+      .filter((card) => !card.props.historical).at(-1)!;
+    expect(within(latestPlan).queryByRole('checkbox')).toBeNull();
+    await fireEventAsync.press(within(latestPlan).getAllByRole('button', { name: `查看這份${label}` })[0]);
+    await screen.findByLabelText(`${kind === 'quiz' ? '測驗作答區' : '作業繳交區'}：${namesake.title}`);
+    expect(navigation.getCurrentRoute()?.params).toMatchObject({ workspaceId: course.id, assignmentId: namesake.id });
+    expect(within(screen.getByTestId(`${kind}-${namesake.id}`)).getByText(kind === 'quiz' ? '待作答' : '待繳交')).toBeTruthy();
+    expect(writes()).toHaveLength(1);
+    await act(async () => navigation.goBack());
+    await fireEventAsync.press(await screen.findByRole('button', { name: '查看原計畫' }));
+    expect(screen.getAllByRole('checkbox')[markedIndex].props.accessibilityState.checked).toBe(true);
+    expect(screen.getAllByRole('checkbox')[targetIndex].props.accessibilityState.checked).toBe(false);
+    expect(screen.queryByRole('button', { name: '查看這份作業' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查看這份測驗' })).toBeNull();
+    expect(await AsyncStorage.getItem(storageKey)).toBe(storedBefore);
+    expect(unhandled).not.toHaveBeenCalled();
+  },
+);
 
 test('a platform plan freshly checks its exact assignment and the real receiver focuses the updated record', async () => {
   const { course, other, assignment, decoy, assignmentPath } = await linkedPlanningFixture();

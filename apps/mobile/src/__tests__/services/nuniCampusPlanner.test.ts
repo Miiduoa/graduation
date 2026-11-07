@@ -106,7 +106,8 @@ test('builds seven Taiwan dates from imported records without a legacy timetable
   expect(result.agenda?.days.slice(1).every((day) => day.scheduledClasses?.length === 0)).toBe(true);
   expect(result.comparisonBasis?.assignments).toEqual({
     status: 'complete', checkedAt, total: 1,
-    items: [{ identity: [workspace().id, assignment().id], title: '作業 1', groupName: '資料庫', dueAt: assignment().dueAt }],
+    items: [{ identity: [workspace().id, assignment().id], title: '作業 1', groupName: '資料庫', dueAt: assignment().dueAt,
+      activity: { state: 'open', receipt: null } }],
   });
   expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
   expect(result.content).toContain('10:10');
@@ -170,6 +171,10 @@ test('keeps full source identity for closed/submitted and outside-window items w
   expect(result.agenda?.days.flatMap((day) => day.deadlines).map((item) => item.title)).toEqual(['作業 1']);
   expect(result.agenda?.outsideWindow.map((item) => item.title).sort()).toEqual(['作業 4', '作業 5', '作業 6']);
   expect(result.comparisonBasis?.assignments.items).toHaveLength(6);
+  expect(result.comparisonBasis?.assignments.items.find((item) => item.identity?.[1] === done.id)?.activity)
+    .toEqual({ state: 'open', receipt: { submittedAt: checkedAt } });
+  expect(result.comparisonBasis?.assignments.items.find((item) => item.identity?.[1] === closed.id)?.activity)
+    .toEqual({ state: 'closed', receipt: null });
   expect(JSON.stringify(result)).not.toMatch(/不可出現在|mySubmission|instructions|group-assignment|platformAccountId/);
   expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
@@ -224,12 +229,13 @@ test('an unreviewed explicit binding is disclosed and never marked complete', as
   expect(result.limitations.join(' ')).toContain('尚未經課程目錄核對');
 });
 
-test.each(['memberships', 'assignments', 'foreign-receipt', 'wrong-workspace'])('rejects ambiguous or foreign %s evidence', async (kind) => {
+test.each(['memberships', 'assignments', 'foreign-receipt', 'wrong-receipt-id', 'wrong-workspace'])('rejects ambiguous or foreign %s evidence', async (kind) => {
   if (kind === 'memberships') input.request.mockResolvedValue({ workspaces: [workspace(), workspace()] });
   if (kind === 'assignments') input.bffRequest.mockResolvedValue({ assignments: [assignment(), assignment()] });
   if (kind === 'wrong-workspace') input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { workspaceId: workspace(2).id })] });
-  if (kind === 'foreign-receipt') input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { mySubmission: {
-    assignmentId: assignment().id, platformAccountId: 'pa_' + uuid(2), displayName: '別人', body: 'private',
+  if (kind === 'foreign-receipt' || kind === 'wrong-receipt-id') input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { mySubmission: {
+    assignmentId: kind === 'wrong-receipt-id' ? assignment(2).id : assignment().id,
+    platformAccountId: kind === 'foreign-receipt' ? 'pa_' + uuid(2) : accountId, displayName: '學生', body: 'private',
     state: 'submitted', submittedAt: checkedAt, teacherFeedback: null, reviewedAt: null,
   } })] });
   const result = await plan();
@@ -614,9 +620,71 @@ test('a quiz-only plan keeps reference deadlines and unknown dates but excludes 
   expect(result.agenda?.outsideWindow.every((item) => item.kind === 'quiz' && item.nuniQuizSource?.quizId)).toBe(true);
   expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'complete', total: 0, items: [] });
   expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'complete', total: 6 });
+  expect(result.comparisonBasis?.quizzes?.items.find((item) => item.identity?.[1] === answered.id)?.activity)
+    .toEqual({ state: 'open', receipt: { submittedAt: checkedAt } });
+  expect(result.comparisonBasis?.quizzes?.items.find((item) => item.identity?.[1] === quiz(3).id)?.activity)
+    .toEqual({ state: 'closed', receipt: null });
   expect(result.content).not.toContain('不可出現在');
   expect(result.content).toContain('參考期限');
   expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
+});
+
+test('saved same-name tasks report verified receipts after replanning without rewriting the original checklist', async () => {
+  const taskTitle = '期中練習';
+  input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { title: taskTitle })] });
+  quizRequest.mockResolvedValue({ quizzes: [quiz(1, { title: taskTitle })] });
+  const original = await plan();
+  const taskSteps = original.steps.filter((step) => step.kind);
+  expect(taskSteps).toHaveLength(2);
+  const scope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
+  const session = createSavedCampusPlanSession(() => true);
+  const saved = await saveCampusPlan(scope, { question, plan: original }, session);
+  await setCampusPlanStepDone(scope, saved[0].id, taskSteps[0].id, true, session);
+  const restored = await readSavedCampusPlans(scope, session);
+  const originalStorage = [...persisted.entries()];
+  const assignmentTime = '2026-11-06T01:01:00.000Z';
+  const quizTime = '2026-11-06T01:01:30.000Z';
+  input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { title: taskTitle,
+    mySubmission: { assignmentId: assignment().id, platformAccountId: accountId,
+      displayName: '學生', body: '不可保存的繳交全文', state: 'submitted', submittedAt: assignmentTime,
+      teacherFeedback: null, reviewedAt: null } })] });
+  quizRequest.mockResolvedValue({ quizzes: [quiz(1, { title: taskTitle,
+    myResponse: { quizId: quiz().id, platformAccountId: accountId,
+      displayName: '學生', answer: '不可保存的學生答案', state: 'submitted', submittedAt: quizTime,
+      teacherFeedback: null, reviewedAt: null } })] });
+  const updated = await plan({ now: now + 120_000 });
+  expect(updated.steps.filter((step) => step.kind)).toHaveLength(0);
+  expect(updated.agenda?.days.flatMap((day) => day.deadlines)).toHaveLength(0);
+  const comparison = compareCampusPlans(restored[0].plan, updated);
+  expect(comparison.changes.filter((change) => change.kind === 'receipt').map((change) => change.category).sort())
+    .toEqual(['assignment', 'quiz']);
+  expect(comparison.unchangedAssignments).toBe(0);
+  expect(comparison.unchangedQuizzes).toBe(0);
+  const copy = copyCampusEvidencePlan(updated);
+  expect(copy.comparisonBasis?.assignments.items[0].activity)
+    .toEqual({ state: 'open', receipt: { submittedAt: assignmentTime } });
+  expect(copy.comparisonBasis?.quizzes?.items[0].activity)
+    .toEqual({ state: 'open', receipt: { submittedAt: quizTime } });
+  expect(JSON.stringify(copy)).not.toMatch(/不可保存|mySubmission|myResponse|teacherFeedback|nuniSource|nuniQuizSource/);
+  expect([...persisted.entries()]).toEqual(originalStorage);
+  expect(await readSavedCampusPlans(scope, session)).toEqual(restored);
+  expect(restored[0].completedStepIds).toEqual([taskSteps[0].id]);
+});
+
+test.each(['assignment', 'quiz'] as const)('a %s receipt with an unconfirmed time remains distinct from no receipt', async (kind) => {
+  const submittedAt = '2026-11-06T09:00:00';
+  const common = { platformAccountId: accountId, displayName: '學生', state: 'submitted' as const,
+    submittedAt, teacherFeedback: null, reviewedAt: null };
+  input.bffRequest.mockResolvedValue({ assignments: kind === 'assignment'
+    ? [assignment(1, { mySubmission: { ...common, assignmentId: assignment().id, body: '私人繳交內容' } })] : [] });
+  quizRequest.mockResolvedValue({ quizzes: kind === 'quiz'
+    ? [quiz(1, { myResponse: { ...common, quizId: quiz().id, answer: '私人作答內容' } })] : [] });
+  const result = await plan();
+  const basis = kind === 'assignment' ? result.comparisonBasis?.assignments : result.comparisonBasis?.quizzes;
+  expect(basis?.items[0].activity).toEqual({ state: 'open', receipt: { submittedAt: null } });
+  expect(result.steps.filter((step) => step.kind)).toHaveLength(0);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
+  expect(JSON.stringify(result)).not.toMatch(/私人繳交內容|私人作答內容/);
 });
 
 test.each(['assignment', 'quiz'] as const)('a failed %s source leaves the other kind available and complete', async (failedKind) => {

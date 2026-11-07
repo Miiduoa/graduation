@@ -533,6 +533,83 @@ async def quiz_scenario(browser, port, width, mode):
             'fixtureScope': 'Production mixed plan and quiz button with synthetic data, controlled reader and navigation; no account authorization, real quiz submission or native-device verification.'}
 
 
+async def receipt_scenario(browser, port, width, mode):
+    label = f'receipt-{width}-{mode}'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    errors, external = [], []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('request', lambda request: external.append(request.url)
+            if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=receipt', wait_until='networkidle')
+    saved = page.get_by_role('button', name=re.compile(r'^查看回到計畫核對作業與測驗'))
+    await saved.focus()
+    await saved.press('Enter')
+    checkboxes = page.get_by_role('checkbox')
+    await expect(checkboxes).to_have_count(2)
+    await checkboxes.first.focus()
+    await checkboxes.first.press('Space')
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    # A historical plan never restores the precise live coursework buttons.
+    await expect(page.get_by_role('button', name='查看這份測驗', exact=True)).to_have_count(0)
+    await expect(page.get_by_role('button', name='查看這份作業', exact=True)).to_have_count(0)
+    checks = [await geometry(page)]
+    await page.screenshot(path=str(ROOT / f'{label}-original.png'), full_page=True)
+
+    replan = page.get_by_role('button', name='依目前資料重新規劃', exact=True)
+    await replan.focus()
+    await replan.press('Enter')
+    preview = page.get_by_test_id('receipt-comparison-preview')
+    await expect(preview.get_by_text('平台紀錄', exact=True)).to_have_count(2)
+    await expect(preview.get_by_text(re.compile(r'08:30')).first).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'08:31')).first).to_be_visible()
+    await expect(preview.get_by_role('checkbox')).to_have_count(0)
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-received.png'), full_page=True)
+    await preview.get_by_role('button', name='查看原計畫', exact=True).click()
+    await expect(preview).to_have_count(0)
+    await expect(page.get_by_text('已處理 1 / 2', exact=True)).to_be_visible()
+
+    await page.evaluate("window.qaReceiptRead = 'closed'")
+    await replan.focus()
+    await replan.press('Enter')
+    await expect(preview.get_by_text('平台紀錄', exact=True)).to_have_count(0)
+    await expect(preview.get_by_text(re.compile(r'關閉')).first).to_be_visible()
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-closed.png'), full_page=True)
+    await preview.get_by_role('button', name='查看原計畫', exact=True).click()
+
+    await page.evaluate("window.qaReceiptRead = 'unavailable'")
+    await replan.click()
+    await expect(preview.get_by_text('平台紀錄', exact=True)).to_have_count(0)
+    await expect(preview.get_by_text('來源不可用', exact=True)).to_have_count(2)
+    await expect(checkboxes.first).to_have_attribute('aria-checked', 'true')
+    await expect(checkboxes.last).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-unavailable.png'), full_page=True)
+    events = await page.evaluate('window.qaEvents')
+    assert [event['kind'] for event in events] == [
+        'receipt-toggle', 'receipt-replan', 'receipt-original',
+        'receipt-replan', 'receipt-original', 'receipt-replan',
+    ], events
+    assert events[0] == {'kind': 'receipt-toggle', 'stepId': 'quiz-preparation', 'done': True}, events
+    replans = [event for event in events if event['kind'] == 'receipt-replan']
+    assert [event['read'] for event in replans] == ['received', 'closed', 'unavailable'], events
+    assert all(event['completed'] == ['quiz-preparation'] for event in replans), events
+    assert sorted(replans[0]['receiptKinds']) == ['assignment', 'quiz'], events
+    assert replans[1]['receiptKinds'] == [] and replans[2]['receiptKinds'] == [], events
+    assert not errors and not external, [errors, external]
+    for result in checks:
+        assert result['documentWidth'] <= width and not result['clipped'] and not result['smallControls'], result
+    await page.close()
+    return {'scenario': label, 'events': events, 'geometry': checks, 'pageErrors': errors, 'externalRequests': external,
+            'fixtureScope': 'Real saved-plan projection, comparison and presentation with controlled source snapshots; no account authorization, live submission, persistent storage or native-device verification.'}
+
+
 async def main():
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -550,6 +627,7 @@ async def main():
                 results.append(await clock_scenario(browser, port, width, mode))
                 results.append(await assignment_scenario(browser, port, width, mode))
                 results.append(await quiz_scenario(browser, port, width, mode))
+                results.append(await receipt_scenario(browser, port, width, mode))
             await browser.close()
     finally:
         server.shutdown()

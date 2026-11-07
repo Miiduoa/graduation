@@ -33,6 +33,7 @@ type CourseworkTask = {
   groupName: string;
   dueAt: string | null;
   pending: boolean;
+  activity: NonNullable<CampusPlanComparisonBasis['assignments']['items'][number]['activity']>;
   nuniSource?: NuniPlanAssignmentSource;
   nuniQuizSource?: NuniPlanQuizSource;
 };
@@ -79,6 +80,11 @@ function cancelled(error: unknown): boolean {
 function confirmedTime(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   try { return savedPlanTimestamp(value); } catch { return null; }
+}
+function activitySnapshot(state: 'open' | 'closed', receipt: { submittedAt: string } | null): CourseworkTask['activity'] {
+  // The course parser has already checked the activity and current receipt owner.
+  // Preserve an unknown receipt time separately from the absence of a receipt.
+  return { state, receipt: receipt ? { submittedAt: confirmedTime(receipt.submittedAt) } : null };
 }
 function label(value: string, max: number): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
@@ -220,12 +226,14 @@ async function readCoursework(input: PlanInput, records: PersonalImportRecord[],
               kind, workspaceId: workspace.id, id: item.id,
               title: label(item.title, 240), groupName: label(workspace.title, 160),
               dueAt: confirmedTime(item.dueAt), pending: item.state === 'open' && item.mySubmission === null,
+              activity: activitySnapshot(item.state, item.mySubmission),
               ...(oneScope ? { nuniSource: { ...target, assignmentId: item.id } } : {}),
             }))
             : (await classes.quizzes(workspace.id)).map((item) => ({
               kind, workspaceId: workspace.id, id: item.id,
               title: label(item.title, 240), groupName: label(workspace.title, 160),
               dueAt: confirmedTime(item.dueAt), pending: item.state === 'open' && item.myResponse === null,
+              activity: activitySnapshot(item.state, item.myResponse),
               ...(oneScope ? { nuniQuizSource: { ...target, quizId: item.id } } : {}),
             }));
           assertReading();
@@ -277,7 +285,7 @@ async function readCoursework(input: PlanInput, records: PersonalImportRecord[],
       basis: {
         status: incomplete ? 'partial' : 'complete', checkedAt, total: incomplete ? null : items.length,
         items: items.map((item) => ({ identity: [item.workspaceId, item.id], title: item.title,
-          groupName: item.groupName, dueAt: item.dueAt })),
+          groupName: item.groupName, dueAt: item.dueAt, activity: item.activity })),
       },
       pending: items.filter((item) => item.pending), limitations: notes,
     };

@@ -186,6 +186,17 @@ function agenda(value: unknown): CampusStudyAgenda {
     ignoredCourses: number(item.ignoredCourses, 0, 80), outsideWindow };
 }
 
+function activity(value: unknown): NonNullable<CampusPlanComparisonBasis['assignments']['items'][number]['activity']> {
+  const item = row(value);
+  const state = choice(item.state, ['open', 'closed'] as const);
+  if (item.receipt === null) return { state, receipt: null };
+  const receipt = row(item.receipt);
+  return {
+    state,
+    receipt: { submittedAt: receipt.submittedAt === null ? null : savedPlanTimestamp(receipt.submittedAt) },
+  };
+}
+
 function taskBasis(value: unknown, kind: typeof TASK_KINDS[number]): CampusPlanComparisonBasis['assignments'] {
   const source = row(value);
   const status = choice(source.status, ['complete', 'partial', 'unavailable'] as const);
@@ -202,7 +213,8 @@ function taskBasis(value: unknown, kind: typeof TASK_KINDS[number]): CampusPlanC
     }
     const task = assignment(item);
     if (task.kind !== undefined && task.kind !== kind) return invalid();
-    return { identity, title: task.title, groupName: task.groupName, dueAt: task.dueAt };
+    return { identity, title: task.title, groupName: task.groupName, dueAt: task.dueAt,
+      ...(item.activity !== undefined ? { activity: activity(item.activity) } : {}) };
   });
   if (status === 'unavailable') {
     if (checkedAt !== null || total !== null || items.length) return invalid();

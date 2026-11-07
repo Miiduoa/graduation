@@ -12,6 +12,11 @@ export interface CampusPlanComparisonBasis {
       title: string;
       groupName: string;
       dueAt: string | null;
+      /** Only the platform parser may confirm a receipt belonging to the current user. */
+      activity?: {
+        state: 'open' | 'closed';
+        receipt: { submittedAt: string | null } | null;
+      };
     }>;
   };
   /** Kept separate so a failed or older quiz read cannot change assignment conclusions. */
@@ -22,7 +27,7 @@ export interface CampusPlanComparisonBasis {
 export interface CampusPlanChange {
   id: string;
   category: 'assignment' | 'quiz' | 'timetable' | 'scope' | 'source';
-  kind: 'added' | 'missing' | 'changed' | 'unverifiable' | 'window';
+  kind: 'added' | 'missing' | 'changed' | 'receipt' | 'unverifiable' | 'window';
   title: string;
   before?: string;
   after?: string;
@@ -72,6 +77,71 @@ function taskText(item: Task, kind: TaskKind): string {
   return (item.groupName ? item.groupName + '｜' : '') + item.title + '\n' +
     (timestamp(item.dueAt) === null ? deadline + '未確認' :
       (kind === 'quiz' ? '參考期限 ' : '截止 ') + dateTime(item.dueAt));
+}
+
+function activityText(item: Task, kind: TaskKind): string {
+  const activity = item.activity;
+  const record = kind === 'quiz' ? '作答紀錄' : '繳交紀錄';
+  const context = (item.groupName ? item.groupName + '｜' : '') + item.title + '\n';
+  if (!activity) return context + '未保存平台狀態與本人' + record;
+  return context + '平台狀態：' + (activity.state === 'closed' ? '關閉' : '開放') + '\n' +
+    (activity.receipt ? '本人' + record + '：' + dateTime(activity.receipt.submittedAt)
+      : '未回傳本人' + record);
+}
+
+function activityChange(
+  prior: Task, next: Task, key: string, kind: TaskKind,
+  earlier: number | null, later: number | null,
+): CampusPlanChange | null {
+  const before = prior.activity;
+  const after = next.activity;
+  const previousTime = before?.receipt ? timestamp(before.receipt.submittedAt) : null;
+  const currentTime = after?.receipt ? timestamp(after.receipt.submittedAt) : null;
+  if (before?.state === after?.state && Boolean(before?.receipt) === Boolean(after?.receipt) &&
+      previousTime === currentTime) return null;
+
+  const name = kind === 'quiz' ? '測驗' : '作業';
+  const record = kind === 'quiz' ? '作答紀錄' : '繳交紀錄';
+  const fresh = earlier !== null && later !== null && later > earlier;
+  const receiptChanged = Boolean(before?.receipt) !== Boolean(after?.receipt) || previousTime !== currentTime;
+  const stateDetail = before && after && before.state !== after.state
+    ? after.state === 'closed' ? name + '已關閉；關閉不代表本人已完成。'
+      : name + '已重新開放；請到課程頁確認是否仍需處理。' : '';
+  let changeKind: CampusPlanChange['kind'] = 'unverifiable';
+  let detail: string;
+  if (!after) {
+    detail = '本次未取得平台狀態與本人' + record + '，無法核對原計畫的紀錄；不能據此推定已撤回或未完成。';
+  } else if (before?.receipt && !after.receipt) {
+    detail = '本次未回傳本人' + record + '；不能據此推定已撤回或未完成。' +
+      (fresh ? stateDetail : '兩次來源未確認為先後更新的同步資料，平台狀態變化仍待核對。');
+  } else if (!fresh) {
+    detail = '兩次來源未確認為先後更新的同步資料，無法判定本人' + record + '或平台狀態何時改變；請重新整理後核對。';
+  } else if (after.receipt && currentTime !== null && later !== null && currentTime > later) {
+    detail = '本人' + record + '的時間晚於本次來源同步時間，資料時間不一致；無法確認本次完成，請到課程頁核對。';
+  } else if (after.receipt && (!before || receiptChanged)) {
+    changeKind = 'receipt';
+    detail = !before
+      ? '原計畫未保存平台狀態與本人' + record + '；本次平台確認有本人紀錄，無法判定是否在兩次規劃之間完成。'
+      : before.receipt
+        ? '平台回傳的本人' + record + '時間有更新；無法僅憑時間變更判定是否重新送出。'
+        : '本次平台回傳本人' + record + '，可到課程頁核對提交內容。';
+    if (currentTime === null) detail += '紀錄時間未確認，無法判定何時完成。';
+    else if (earlier !== null && currentTime <= earlier && !before?.receipt) {
+      detail += '紀錄時間早於或等於原來源同步時間，不能視為這次新完成。';
+    }
+    detail += stateDetail;
+  } else if (!before) {
+    detail = '原計畫未保存平台狀態與本人' + record + '；本次未回傳本人紀錄，無法判定期間內的狀態變化。' +
+      (after.state === 'closed' ? name + '關閉不代表本人已完成。' : '');
+  } else {
+    changeKind = 'changed';
+    detail = stateDetail;
+  }
+  return {
+    id: kind + ':activity:' + key, category: kind, kind: changeKind,
+    title: next.title, before: activityText(prior, kind), after: activityText(next, kind),
+    detail, route: '/classroom',
+  };
 }
 
 function taskIndex(items: Task[]) {
@@ -183,9 +253,16 @@ function compareTasks(
     const nameChanged = prior.title !== next.title || prior.groupName !== next.groupName;
     const oldDue = timestamp(prior.dueAt);
     const newDue = timestamp(next.dueAt);
+    const activity = activityChange(prior, next, key, kind, earlier, later);
+    if (activity) {
+      priorities.set(activity.id, 2);
+      result.changes.push(activity);
+    }
     if (!nameChanged && oldDue === newDue) {
-      if (kind === 'quiz') result.unchangedQuizzes = (result.unchangedQuizzes ?? 0) + 1;
-      else result.unchangedAssignments += 1;
+      if (!activity) {
+        if (kind === 'quiz') result.unchangedQuizzes = (result.unchangedQuizzes ?? 0) + 1;
+        else result.unchangedAssignments += 1;
+      }
       continue;
     }
     const deadlineLabel = kind === 'quiz' ? '測驗參考期限' : '截止時間';

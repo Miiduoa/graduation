@@ -1,7 +1,8 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import { CampusPlanComparisonCard } from '../screens/CampusPlanComparisonCard';
-import type { CampusPlanComparison } from '../services/campusPlanComparison';
+import { compareCampusPlans, type CampusPlanComparison } from '../services/campusPlanComparison';
+import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
@@ -41,6 +42,101 @@ function manyChanges(): CampusPlanComparison {
     })),
   });
 }
+
+type ActivitySnapshot = {
+  state: 'open' | 'closed';
+  receipt: { submittedAt: string | null } | null;
+};
+
+function quizPlan(activity: ActivitySnapshot | undefined, checkedAt: string): CampusEvidencePlan {
+  return {
+    title: '測驗學習計畫', overview: '依本次課程來源整理。', checkedAt, content: '測驗學習計畫',
+    steps: [{ id: 'quiz-review', kind: 'quiz', title: '同名小考', detail: '資料庫的線上測驗。',
+      priority: 'normal', evidence: 'authorized-quizzes', route: '/classroom' }],
+    limitations: [],
+    comparisonBasis: {
+      assignments: { status: 'complete', checkedAt, total: 0, items: [] },
+      quizzes: { status: 'complete', checkedAt, total: 1, items: [{
+        identity: ['course-a', 'quiz-a'], title: '同名小考', groupName: '資料庫', dueAt: '2026-11-07T03:00:00Z',
+        ...(activity !== undefined ? { activity } : {}),
+      }] },
+      timetableUpdatedAt: null,
+    },
+  };
+}
+
+test.each(['2026-11-06T16:03:04Z', null])(
+  'a verified receipt renders both source records and its confirmed or unknown time without changing personal progress: %s',
+  (submittedAt) => {
+    const before = quizPlan({ state: 'open', receipt: null }, '2026-11-06T15:58:00Z');
+    const after = quizPlan({ state: 'open', receipt: { submittedAt } }, '2026-11-06T16:05:00Z');
+    const original = JSON.stringify({ before, after });
+    const result = compareCampusPlans(before, after);
+    const update = result.changes.find((change) => change.category === 'quiz')!;
+    expect(update.kind).toBe('receipt');
+    expect(update.before).toMatch(/作答紀錄/);
+    expect(update.after).toMatch(/作答紀錄/);
+    expect(update.after).toMatch(submittedAt ? /2026\/11\/7 00:03:04/ : /時間未確認/);
+    const onOpenOriginal = jest.fn();
+    const view = render(<CampusPlanComparisonCard comparison={result} disabled={false} onOpenOriginal={onOpenOriginal} />);
+    expect(view.getByText('平台紀錄')).toBeTruthy();
+    expect(view.getByText('原計畫')).toBeTruthy();
+    expect(view.getByText('本次計畫')).toBeTruthy();
+    expect(view.getByText(update.before!)).toBeTruthy();
+    expect(view.getByText(update.after!)).toBeTruthy();
+    expect(view.getByText(/處理進度不會自動帶入/)).toBeTruthy();
+    expect(view.queryByText(/1 項測驗摘要與原計畫相同/)).toBeNull();
+    expect(view.queryByRole('checkbox')).toBeNull();
+    expect(view.queryByRole('button', { name: /標記|完成|儲存/ })).toBeNull();
+    expect(onOpenOriginal).not.toHaveBeenCalled();
+    fireEvent.press(view.getByRole('button', { name: '查看原計畫' }));
+    expect(onOpenOriginal).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify({ before, after })).toBe(original);
+  },
+);
+
+test('a legacy plan shows missing historical receipt evidence beside the current record without inventing a new submission', () => {
+  const result = compareCampusPlans(
+    quizPlan(undefined, '2026-11-06T15:58:00Z'),
+    quizPlan({ state: 'open', receipt: { submittedAt: '2026-11-06T16:03:04Z' } }, '2026-11-06T16:05:00Z'),
+  );
+  const update = result.changes.find((change) => change.category === 'quiz')!;
+  expect(update.kind).toBe('receipt');
+  expect(update.before).toMatch(/未保存|未記錄|未保留|未知/);
+  expect(update.after).toContain('2026/11/7 00:03:04');
+  expect(update.detail).toMatch(/無法判定|不能判定/);
+  const view = render(<CampusPlanComparisonCard comparison={result} disabled={false} />);
+  expect(view.getByText('平台紀錄')).toBeTruthy();
+  expect(view.getByText(update.before!)).toBeTruthy();
+  expect(view.getByText(update.after!)).toBeTruthy();
+  expect(view.getByText(update.detail)).toBeTruthy();
+  expect(view.queryByText('本次新增')).toBeNull();
+  expect(view.queryByRole('checkbox')).toBeNull();
+});
+
+test.each(['closed', 'missing-receipt', 'unavailable'] as const)(
+  '%s evidence does not render a positive receipt badge or a completion control',
+  (state) => {
+    const before = quizPlan({ state: 'open', receipt: state === 'missing-receipt'
+      ? { submittedAt: '2026-11-06T15:57:00Z' } : null }, '2026-11-06T15:58:00Z');
+    const after = quizPlan({ state: state === 'closed' ? 'closed' : 'open', receipt: null }, '2026-11-06T16:05:00Z');
+    if (state === 'unavailable') {
+      after.comparisonBasis!.quizzes = { status: 'unavailable', checkedAt: null, total: null, items: [] };
+    }
+    const result = compareCampusPlans(before, after);
+    expect(result.changes.some((change) => change.kind === 'receipt')).toBe(false);
+    expect(result.changes.length).toBeGreaterThan(0);
+    const view = render(<CampusPlanComparisonCard comparison={result} disabled={false} />);
+    expect(view.queryByText('平台紀錄')).toBeNull();
+    expect(view.queryByText(/1 項測驗摘要與原計畫相同/)).toBeNull();
+    expect(view.queryByRole('checkbox')).toBeNull();
+    expect(view.queryByRole('button', { name: /標記|完成|儲存/ })).toBeNull();
+    for (const change of result.changes) {
+      expect(view.getByText(change.detail)).toBeTruthy();
+    }
+    expect(result.changes.map((change) => change.detail).join(' ')).toMatch(/不能|無法|不代表|不等於/);
+  },
+);
 
 test('shows Taiwan timestamps, complete change details and the exact comparison scope', () => {
   const input = comparison();
