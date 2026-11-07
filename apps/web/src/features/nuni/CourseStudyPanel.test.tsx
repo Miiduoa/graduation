@@ -394,3 +394,31 @@ it('downloads only after an explicit click, recovers from download failure, and 
     vi.unstubAllGlobals();
   }
 });
+
+it('shows a source-linked three-step explanation and focuses its exact quotation', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  expect(screen.getByRole('group', { name: '三步對照學習' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '第一步：核對原文' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '第二步：理解講解' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '第三步：自己試答' })).toBeTruthy();
+  const mark = screen.getByText(explanation.sourceQuote, { selector: 'mark' });
+  expect(mark.parentElement?.textContent).toBe(material.body);
+  fireEvent.click(screen.getByRole('button', { name: '定位原文引句' }));
+  expect(document.activeElement).toBe(mark);
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+
+it('identifies repeated quotations without changing the original text or silently picking another', async () => {
+  const repeated = `${material.body} 再讀一次：${explanation.sourceQuote}。`;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={{ ...material, body: repeated }} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  expect(screen.getByText(/相同引句在本段出現 2 處/)).toBeTruthy();
+  const mark = screen.getByText(explanation.sourceQuote, { selector: 'mark' });
+  expect(mark.parentElement?.textContent).toBe(repeated);
+  expect(document.querySelectorAll('mark')).toHaveLength(1);
+});

@@ -112,3 +112,16 @@
   .exercise, .personalNotes, .reviewList, .restorePreview { padding: 14px; }
   .actions > .primary { flex: 1 1 160px; }
 }
+
+/* A source-linked learning path; no generated drawing or equation is implied. */
+.evidenceHighlight { border-radius: 2px; background: color-mix(in srgb, var(--brand) 19%, var(--surface)); color: var(--text); }
+.evidenceHighlight:focus { outline: 3px solid var(--brand); outline-offset: 3px; }
+.evidencePath { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; align-items: start; }
+.evidenceStep { min-width: 0; border: 1px solid var(--border-strong); padding: 16px; background: var(--surface); }
+.evidenceStepHeading { font-size: 13px; font-weight: 700; color: var(--muted); margin: 0 0 14px; }
+.evidenceQuote { margin: 0 0 12px; padding-left: 12px; border-left: 2px solid var(--brand); white-space: pre-wrap; line-height: 1.8; overflow-wrap: anywhere; }
+.evidenceStep .explanationText { margin: 0; }
+.evidenceStep .exercise { margin: 0; padding: 0; border: none; background: transparent; }
+.evidenceStep .exercise .field { margin-top: 12px; }
+@media (max-width: 900px) { .evidencePath { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .evidenceStep { padding: 14px; } }

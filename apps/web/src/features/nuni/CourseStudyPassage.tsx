@@ -18,6 +18,7 @@ import {
   type StudyPassageMemory,
 } from './courseStudySession';
 import { StudyReadAloud } from './StudyReadAloud';
+import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
 
 type Props = {
@@ -35,6 +36,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [error, setError] = useState('');
   const current = useRef<AbortController | null>(null);
   const passageHeading = useRef<HTMLHeadingElement>(null);
+  const evidenceMark = useRef<HTMLElement>(null);
   const questionId = useId();
   const attemptId = useId();
   const noteId = useId();
@@ -43,6 +45,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const modeMemory = memory.modes[mode];
   const selected = modeMemory.lessons.find((lesson) => lesson.id === modeMemory.selectedLessonId);
   const result = selected?.response;
+  const evidence = result ? locateStudyEvidence(passage.text, result.sourceQuote) : null;
 
   useEffect(() => {
     setAvailability(getStudyTutorAvailability());
@@ -106,7 +109,10 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   return (
     <div className={styles.passage}>
       <div className={styles.sourceHeading}><h4 ref={passageHeading} tabIndex={-1}>原文</h4><span>{passage.label}</span></div>
-      <blockquote className={styles.sourceText}>{passage.text}</blockquote>
+      <blockquote className={styles.sourceText}>
+        {evidence ? <>{evidence.before}<mark ref={evidenceMark} tabIndex={-1}
+          className={styles.evidenceHighlight}>{evidence.quote}</mark>{evidence.after}</> : passage.text}
+      </blockquote>
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
       {!busy && <StudyReadAloud key={selected?.id ?? 'source'}
         text={result?.explanation ?? passage.text} label={result ? '朗讀這段講解' : '朗讀原文'}
@@ -173,20 +179,38 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
           <h4>{result.title}</h4>
           {selected.question && <p className={styles.studentQuestion}>我的問題：{selected.question}</p>}
-          <p className={styles.explanationText}>{result.explanation}</p>
-          <details className={styles.reference}><summary>對照這段講解引用的原文</summary><blockquote>{result.sourceQuote}</blockquote></details>
-          <div className={styles.exercise}>
-            <h4>換你試試</h4>
-            <p>{result.question}</p>
-            <label className={styles.field} htmlFor={attemptId}>先寫下你的想法
-              <textarea id={attemptId} rows={3} maxLength={STUDY_SESSION_LIMITS.attemptCharacters} value={selected.attempt}
-                onChange={(event) => { const attempt = event.target.value; changeLesson((previous) => ({ ...previous, attempt, answerVisible: false })); }} />
-            </label>
-            <button type="button" className={styles.button} disabled={!selected.attempt.trim()}
-              onClick={() => changeLesson((previous) => ({ ...previous, answerVisible: !previous.answerVisible }))}
-              aria-expanded={selected.answerVisible}>{selected.answerVisible ? '收起參考回答' : '對照參考回答'}</button>
-            {selected.answerVisible && <p className={styles.referenceAnswer}>{result.answer}</p>}
-            <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
+          <div className={styles.evidencePath} role="group" aria-label="三步對照學習">
+            <section className={styles.evidenceStep} aria-label="第一步：核對原文">
+              <p className={styles.evidenceStepHeading}>01 · 核對教材原文</p>
+              <blockquote className={styles.evidenceQuote}>{result.sourceQuote}</blockquote>
+              <button type="button" className={styles.button} disabled={!evidence}
+                onClick={() => evidenceMark.current?.focus()}>定位原文引句</button>
+              {evidence && evidence.occurrences > 1 && <p className={styles.note}>
+                相同引句在本段出現 {evidence.occurrences} 處，目前標示第一處。
+              </p>}
+              {!evidence && <p className={styles.error}>目前無法在原文定位這句引用，請重新講解。</p>}
+            </section>
+            <section className={styles.evidenceStep} aria-label="第二步：理解講解">
+              <p className={styles.evidenceStepHeading}>02 · AI 解讀</p>
+              <p className={styles.explanationText}>{result.explanation}</p>
+              <p className={styles.note}>找到引句只代表原文相符，不代表這段解釋一定正確。</p>
+            </section>
+            <section className={styles.evidenceStep} aria-label="第三步：自己試答">
+              <p className={styles.evidenceStepHeading}>03 · 自己試答</p>
+              <div className={styles.exercise}>
+                <h4>換你試試</h4>
+                <p>{result.question}</p>
+                <label className={styles.field} htmlFor={attemptId}>先寫下你的想法
+                  <textarea id={attemptId} rows={3} maxLength={STUDY_SESSION_LIMITS.attemptCharacters} value={selected.attempt}
+                    onChange={(event) => { const attempt = event.target.value; changeLesson((previous) => ({ ...previous, attempt, answerVisible: false })); }} />
+                </label>
+                <button type="button" className={styles.button} disabled={!selected.attempt.trim()}
+                  onClick={() => changeLesson((previous) => ({ ...previous, answerVisible: !previous.answerVisible }))}
+                  aria-expanded={selected.answerVisible}>{selected.answerVisible ? '收起參考回答' : '對照參考回答'}</button>
+                {selected.answerVisible && <p className={styles.referenceAnswer}>{result.answer}</p>}
+                <p className={styles.note}>這是自我檢查，不會自動評分，也不會影響課程成績或作業繳交狀態。</p>
+              </div>
+            </section>
           </div>
         </section>}
       </div>
