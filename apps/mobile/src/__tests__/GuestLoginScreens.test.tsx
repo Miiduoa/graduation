@@ -567,6 +567,8 @@ test('public landing exposes school-scoped CourseCatalog Health Dormitory Career
   mockSchool = { id: 'ncku', name: '國立成功大學', shortName: '成大' };
   view.rerender(<LoginLandingScreen />);
   expect(view.getByText(/國立成功大學.*報修管道/)).toBeTruthy();
+  expect(view.getByText(/設備問題只存成個人備忘/)).toBeTruthy();
+  expect(view.queryByText(/單號|已送出給學校|查詢進度/)).toBeNull();
   expect(signInWithStudentId).not.toHaveBeenCalled();
 });
 
