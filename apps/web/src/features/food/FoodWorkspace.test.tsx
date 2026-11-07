@@ -954,7 +954,11 @@ it('expands paper line items by default for in-progress orders and keeps finishe
   const activePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
   const activeDetails = activePaper.querySelector('details');
   expect(activeDetails?.open).toBe(true);
-  expect(within(activePaper).getByText('數量 1')).toBeTruthy();
+  expect(
+    within(activePaper).getByText(
+      (_, node) => node?.tagName === 'SPAN' && node.textContent === '數量 1',
+    ),
+  ).toBeTruthy();
   expect(within(activePaper).getByRole('heading', { name: '蔬菜便當' })).toBeTruthy();
 
   order = {
@@ -975,7 +979,7 @@ it('expands paper line items by default for in-progress orders and keeps finishe
   const donePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
   expect(donePaper.querySelector('details')?.open).toBe(false);
   expect(within(donePaper).getByText('品項明細 · 1 項')).toBeTruthy();
-  expect(within(donePaper).getByText('NT$120').closest('details')).toBeNull();
+  expect(within(donePaper).getByText('NT$120', { selector: 'dd' }).closest('details')).toBeNull();
 });
 
 it('assistant location link opens a read-only menu while online ordering is off', async () => {

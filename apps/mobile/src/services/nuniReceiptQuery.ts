@@ -21,6 +21,7 @@ export type NuniReceiptRow = {
 };
 
 export type NuniReceiptDeadlineScope = { window: AssignmentDeadlineWindow; checkedAt: number };
+export type NuniReceiptSource = { courseId: string; id: string };
 
 type ReceiptAnswer =
   | { kind: 'clarify'; message: string }
@@ -40,6 +41,12 @@ export function isNuniReceiptStatusFollowUp(question: string): boolean {
   return /^(?:那(?:麼)?|改查|改看)?(?:我(?:的)?)?(?:已經|已|還沒|尚未|未)(?:繳交|繳|交)(?:的)?(?:作業)?(?:有哪些|哪些|呢)?$/u.test(text);
 }
 
+/** An explicit row selection can resolve a singular reference, never an unselected guess. */
+export function isNuniReceiptReferenceQuestion(question: string): boolean {
+  const text = question.normalize('NFKC').replace(/\s+/g, '').replace(/[?!。！？，,、]+$/u, '');
+  return /^(?:這份|這個|那份|那個)(?:作業|報告|習題)?(?:已經|已|還沒|尚未|未)?(?:繳交|交|繳)(?:了嗎|了沒|了沒有|過嗎)?$/u.test(text);
+}
+
 /**
  * Read only the currently loaded student workspaces and their submission receipts.
  * Missing cached receipts are not proof of a missing submission at the server.
@@ -47,13 +54,19 @@ export function isNuniReceiptStatusFollowUp(question: string): boolean {
 export function queryNuniReceipts(
   data: NuniStudyAgenda, question: string, scopeQuestion = question,
   deadlineScope?: NuniReceiptDeadlineScope,
+  selectedSource?: NuniReceiptSource,
 ): ReceiptAnswer {
   const courses = new Map(data.workspaces
     .filter((course) => course.state === 'active' && course.memberRole === 'student')
     .map((course) => [course.id, course.title]));
   const tasks = data.tasks.filter((task) => task.kind === 'assignment' && courses.has(task.courseId));
   const named = tasks.map((task) => ({ ...task, groupName: courses.get(task.courseId)! }));
-  const filtered = filterAssignmentQuery(scopeQuestion, named);
+  // A source comes only from a row deliberately selected in the current UI.
+  // Revalidate it against this loaded, authorized student-course snapshot.
+  const filtered = selectedSource
+    ? { scope: null, items: named.filter((task) =>
+        task.courseId === selectedSource.courseId && task.id === selectedSource.id) }
+    : filterAssignmentQuery(scopeQuestion, named);
   const normalized = question.normalize('NFKC').toLowerCase();
   const scopeText = scopeQuestion.normalize('NFKC').toLowerCase();
   const hasKnownName = named.some((task) => [task.title, task.groupName]
@@ -63,10 +76,10 @@ export function queryNuniReceipts(
     // a follow-up. Its date is already enforced by deadlineScope, not a name.
     (Boolean(deadlineScope) && !filtered.scope &&
       /^(?:今天|今日|明天|明日|後天|上週|本週|這週|下週|未來[七7]天)(?:的)?(?:有哪些|哪些|作業|功課|待交)/.test(scopeText));
-  if (/這份|那份|這個|那個/.test(normalized) && !hasKnownName) {
+  if (!selectedSource && /這份|那份|這個|那個/.test(normalized) && !hasKnownName) {
     return { kind: 'clarify', message: '請提供課程或作業名稱，再核對這份作業的繳交紀錄。' };
   }
-  if (!filtered.scope && !hasKnownName && !broad) {
+  if (!selectedSource && !filtered.scope && !hasKnownName && !broad) {
     return { kind: 'clarify', message: '請提供課程或作業名稱，避免把其他作業誤認成你要查的那份。' };
   }
   const list = /有哪些|哪些|列出|幾份|幾筆/.test(normalized) || isNuniReceiptStatusFollowUp(question);
