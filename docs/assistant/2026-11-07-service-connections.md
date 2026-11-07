@@ -164,15 +164,16 @@ V2 的既有訂單入口改用實際 FoodWorkspace 的 `/food?schoolId=…&tenan
 | 手機 scoped TypeScript | **4 個 runtime 修改檔，0 diagnostics** | 檢查實際相依型別及這 4 個檔案的診斷；不是完整手機專案 typecheck。 |
 | 手機 changed-file ESLint | **0 errors** | 8 個修改／新增檔；`CampusAssistantScreen` 有 2 個既有 hook dependency warnings。 |
 | Web V2 回歸 | **16 suites，187 / 187 通過** | root 回報的最後一輪結果；不重複累加先前重跑次數。 |
+| 獨立 V2 preview／模型失敗復原 | **2 / 2 通過** | `scripts/nuni-assistant/v2.test.mjs`；保留原有四輪復原及預算斷言，沒有放寬測試。 |
 | Web UI／入口回歸 | **8 suites，118 / 118 通過** | root 回報的最後一輪結果。 |
 | 既有步行導航／來源卡片回歸 | **1 suite，15 / 15 通過** | 使用實際後端 card builder，驗證學校範圍、座標及固定步行網址契約。 |
 | Web scoped TypeScript | **25 個修改檔，0 diagnostics** | 分為 server 6、UI 8、client 11 個檔案，包含修改的測試；使用實際相依型別、Next 樣式宣告及各組必要 ambient types。不是完整 Web typecheck。 |
 | 共用套件 TypeScript／ESLint | **完整 shared typecheck 通過；4 個修改檔 lint 0 errors** | 使用鎖定的 Node 22 與本專案相依套件。 |
 | Web changed-file ESLint | **25 個檔案，0 errors** | 保留 QuickCampusEntry 既有測試的 1 個 any warning。 |
-| 完整 Web 型別 | **待 CI** | 本機先於 640 MB heap 發生 OOM，改為 1,024 MB 的單程序後遭資源終止（exit 137），未取得完整通過結果。 |
+| 完整 Web／Mobile 型別與 lint | **首版 CI 通過** | `b8e62ab` 的 GitHub Lint & Type Check 已成功；最新提交仍須以對應 Checks 為準。本機完整 Web typecheck 曾因資源限制中止。 |
 | 瀏覽器視覺驗收 | **未完成** | 本次兩次瀏覽器連線嘗試逾時，沒有取得可用的視覺驗收證據。 |
-| 手機真實 PreAuth 導航新增案例 | **待 CI** | 已增加 2 個案例；本機載入大型 suite 時因資源限制結束（exit 137），未取得這 2 個案例的執行結果。 |
-| 完整手機回歸、完整手機 typecheck、真機視覺驗收 | **待 CI／人工驗收** | focused tests 不能替代這些結果。 |
+| 手機真實 PreAuth 導航新增案例 | **首版 Mobile Agent CI 通過** | 既有導航 suite 及新增 2 個案例已在 `b8e62ab` 的 Mobile Agent Checks 成功；本機載入大型 suite 時 exit 137，沒有把該次中止列為通過。 |
+| 完整手機回歸、真機視覺驗收 | **待 CI／人工驗收** | focused tests 不能替代這些結果。 |
 
 手機新增的兩個真實導航案例分別驗證「服務目錄 → 個人行事曆 → 課程工作區」及「本機成績回答 → 成績匯入檢視頁」。既有 [`mobile-agent-regression.yml`](../../.github/workflows/mobile-agent-regression.yml) 已包含此真實導航 suite，本次另加入以下三個 focused suites；未調降 CI 的權限或失敗條件：
 
@@ -182,7 +183,9 @@ V2 的既有訂單入口改用實際 FoodWorkspace 的 `/food?schoolId=…&tenan
 
 共用回歸位置：[`assistantServices.test.cjs`](../../packages/shared/tests/assistantServices.test.cjs) 與 [`importedAcademicSummary.test.cjs`](../../packages/shared/tests/importedAcademicSummary.test.cjs)。
 
-上述不重複計數的回歸共 **523 項通過**；不包括待 CI 的兩個真實導航新增案例。兩個共用測試檔也已加入一般 CI 的 Web 測試工作，防止後續服務目錄與跨端來源契約退化。
+上述本機不重複計數的回歸共 **525 項通過**；不包括遠端 CI 的其他測試。兩個共用測試檔也已加入一般 CI 的 Web 測試工作，防止後續服務目錄與跨端來源契約退化。
+
+首版 CI 的獨立模型復原案例發現：把新增領域說明放進所有問題的系統提示，會壓縮原本的重試預算。因此改為只有選到相關服務／學業工具時才加入該領域說明，維持原本的呼叫次數及成本限制。原案例的四輪復原斷言與 V2 的 187 項回歸均重新通過。
 
 ## 6. 跨端人工 QA 清單
 
