@@ -1,9 +1,9 @@
 import React from 'react';
 import { Modal } from 'react-native';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { TitleHistoryLauncher, TitleHistorySearch } from '../screens/social/TitleHistorySearch';
 import { CommunityScreen } from '../screens/CommunityScreen';
-import { searchCampusPostTitles, type TitleSearchPage, type TitleSearchPost, type TitleSearchCursor } from '../services/titleSearch';
+import { confirmCampusPostTitleOpen, searchCampusPostTitles, type TitleSearchPage, type TitleSearchPost, type TitleSearchCursor } from '../services/titleSearch';
 
 let mockUser: { uid: string } | null = { uid: 'alice' };
 let mockSchool = 'pu';
@@ -27,8 +27,10 @@ jest.mock('../screens/community/StudyBuddyPanel', () => ({ StudyBuddyPanel: () =
 jest.mock('../services/titleSearch', () => ({
   parseTitlePrefix: jest.requireActual('@campus/shared/src/communityTitleSearch').parseTitlePrefix,
   searchCampusPostTitles: jest.fn(),
+  confirmCampusPostTitleOpen: jest.fn(),
 }));
 const search = jest.mocked(searchCampusPostTitles);
+const confirmOpen = jest.mocked(confirmCampusPostTitleOpen);
 const row = (id: string, title = `二手書 ${id}`): TitleSearchPost => ({ id, title, schoolId: 'pu', excerpt: '舊學期的課本', anonymous: true });
 const result = (posts = [row('one')], hasMore = false): TitleSearchPage => ({
   posts, hasMore, nextCursor: posts.length ? {
@@ -53,6 +55,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'alice' }; mockSchool = 'pu'; mockLoading = false; mockDemo = false; mockFirebaseMock = false;
   search.mockReset().mockResolvedValue(result());
+  confirmOpen.mockReset().mockResolvedValue(true);
 });
 
 test.each(['signed-out', 'loading', 'demo', 'mock', 'no-school'])('does not expose the launcher for %s', (condition) => {
@@ -79,7 +82,8 @@ test('searches the literal title and opens only the scoped post identifier', asy
   expect(view.getByText('匿名貼文')).toBeTruthy();
   expect(view.getByText(/英文區分大小寫；不搜尋內文/)).toBeTruthy();
   fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
-  expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' });
+  await waitFor(() => expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' }));
+  expect(confirmOpen).toHaveBeenCalledWith('pu', 'one');
 });
 
 test('opening the same historical result twice rapidly navigates only once', async () => {
@@ -88,8 +92,9 @@ test('opening the same historical result twice rapidly navigates only once', asy
   const target = view.getByLabelText('開啟貼文：二手書 one');
   fireEvent.press(target);
   fireEvent.press(target);
-  expect(view.open).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(view.open).toHaveBeenCalledTimes(1));
   expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' });
+  expect(confirmOpen).toHaveBeenCalledTimes(1);
 });
 
 test('closing a result panel prevents its still-mounted card from opening a post', async () => {
@@ -203,7 +208,7 @@ test('the actual community entry opens history and routes a result without repla
   const timeline = view.getByText('原動態保留');
   fireEvent.press(view.getByLabelText('找舊貼文')); enter(view); await view.findByText('二手書 one');
   fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
-  expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'one' });
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'one' }));
   expect(view.getByText('原動態保留')).toBe(timeline);
   expect(view.queryByLabelText('記得的標題開頭')).toBeNull();
 });
@@ -211,4 +216,49 @@ test('the actual community entry opens history and routes a result without repla
 test('a confirmed empty page has an explicit empty state', async () => {
   search.mockResolvedValueOnce(result([])); const view = panel(); enter(view);
   expect(await view.findByText('沒有符合這個標題開頭的貼文。')).toBeTruthy();
+});
+
+
+test('a deleted historical result stays in search and is removed after server confirmation', async () => {
+  confirmOpen.mockResolvedValueOnce(false);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await view.findByText(/這篇貼文已刪除或不再提供/);
+  expect(view.open).not.toHaveBeenCalled();
+  expect(view.queryByText('二手書 one')).toBeNull();
+  expect(view.getByLabelText('記得的標題開頭')).toBeTruthy();
+});
+
+test('an offline confirmation retains the search and can open on the next tap', async () => {
+  confirmOpen.mockRejectedValueOnce({ code: 'unavailable' }).mockResolvedValueOnce(true);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await view.findByText(/暫時無法向伺服器確認/);
+  expect(view.open).not.toHaveBeenCalled();
+  expect(view.getByText('二手書 one')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await waitFor(() => expect(view.open).toHaveBeenCalledTimes(1));
+  expect(confirmOpen).toHaveBeenCalledTimes(2);
+});
+
+test('permission withdrawal during opening clears results and restarts search at page one', async () => {
+  confirmOpen.mockRejectedValueOnce({ code: 'permission-denied' });
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await view.findByText(/搜尋結果已清除/);
+  expect(view.open).not.toHaveBeenCalled();
+  expect(view.queryByText('二手書 one')).toBeNull();
+  fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+  await view.findByText('二手書 one');
+  expect(search).toHaveBeenLastCalledWith('pu', '二手書', null);
+});
+
+test('changing the query invalidates a late confirmation without navigating', async () => {
+  const pending = deferred<boolean>(); confirmOpen.mockReturnValueOnce(pending.promise);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  fireEvent.changeText(view.getByLabelText('記得的標題開頭'), '租屋');
+  await act(async () => pending.resolve(true));
+  expect(view.open).not.toHaveBeenCalled();
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('租屋');
 });

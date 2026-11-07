@@ -11,7 +11,7 @@ import { isDemoUid } from '../../services/demoSession';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import {
-  parseTitlePrefix, searchCampusPostTitles,
+  confirmCampusPostTitleOpen, parseTitlePrefix, searchCampusPostTitles,
   type TitleSearchCursor, type TitleSearchPost,
 } from '../../services/titleSearch';
 
@@ -72,6 +72,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
   const [text, setText] = useState('');
   const [posts, setPosts] = useState<TitleSearchPost[]>([]);
   const [busy, setBusy] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -89,6 +90,8 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
   const change = (value: string) => {
     version.current += 1;
     inFlight.current = false;
+    openingPost.current = false;
+    setOpening(false);
     cursor.current = null;
     retry.current = null;
     setText(value); setPosts([]); setHasMore(false); setBusy(false); setError(''); setNotice('');
@@ -100,7 +103,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
     onClose();
   };
   const request = async (boundary: TitleSearchCursor | null, append: boolean) => {
-    if (inFlight.current || !live.current) return;
+    if (inFlight.current || openingPost.current || !live.current) return;
     let prefix: string;
     try { prefix = parseTitlePrefix(text); } catch {
       setError('請輸入 1 至 80 字的標題開頭。');
@@ -147,6 +150,43 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
       }
     }
   };
+  const openResult = async (item: TitleSearchPost) => {
+    if (!live.current || openingPost.current || item.schoolId !== schoolId) return;
+    const attempt = ++version.current;
+    openingPost.current = true;
+    inFlight.current = false;
+    setOpening(true);
+    setError('');
+    let navigated = false;
+    try {
+      const stillReadable = await confirmCampusPostTitleOpen(schoolId, item.id);
+      if (!live.current || attempt !== version.current) return;
+      if (!stillReadable) {
+        setPosts((current) => current.filter((row) => row.id !== item.id));
+        setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
+        return;
+      }
+      navigated = true;
+      onOpenPost({ id: item.id, schoolId });
+    } catch (cause) {
+      if (!live.current || attempt !== version.current) return;
+      if (denied(cause)) {
+        cursor.current = null;
+        retry.current = { cursor: null, append: false };
+        setPosts([]);
+        setHasMore(false);
+        setNotice('');
+        setError('校籍或存取權限已變更，搜尋結果已清除。確認校籍後可重試搜尋。');
+      } else {
+        setError('暫時無法向伺服器確認這篇貼文，已保留搜尋結果。確認連線後可再點一次。');
+      }
+    } finally {
+      if (live.current && attempt === version.current) {
+        if (!navigated) openingPost.current = false;
+        setOpening(false);
+      }
+    }
+  };
   return (
     <KeyboardAvoidingView style={styles.panel} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[styles.panel, { paddingTop: insets.top, paddingBottom: insets.bottom }]} accessibilityViewIsModal>
@@ -175,6 +215,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
             </Pressable>
           </View>
           {busy && <ActivityIndicator accessibilityLabel="正在讀取歷史標題" color={theme.colors.accent} />}
+          {opening && <ActivityIndicator accessibilityLabel="正在確認貼文仍可閱讀" color={theme.colors.accent} />}
           {!!error && <Text accessibilityRole="alert" style={styles.message}>{error}</Text>}
           {!!error && retry.current && !busy && (
             <Pressable accessibilityRole="button" accessibilityLabel="重試歷史搜尋" style={styles.button}
@@ -190,19 +231,14 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
           contentContainerStyle={styles.results} initialNumToRender={10}
           renderItem={({ item }) => (
             <Pressable accessibilityRole="button" accessibilityLabel={`開啟貼文：${item.title}`}
-              style={styles.card} onPress={() => {
-                if (!live.current || openingPost.current || item.schoolId !== schoolId) return;
-                openingPost.current = true;
-                version.current += 1;
-                inFlight.current = false;
-                onOpenPost({ id: item.id, schoolId });
-              }}>
+              accessibilityState={{ busy: opening, disabled: opening }}
+              style={styles.card} onPress={() => { void openResult(item); }}>
               <Text style={styles.postTitle}>{item.title}</Text>
               <Text style={styles.muted}>{item.anonymous ? '匿名貼文' : '校園貼文'}</Text>
               {!!item.excerpt && <Text numberOfLines={3} style={styles.excerpt}>{item.excerpt}</Text>}
             </Pressable>
           )}
-          ListEmptyComponent={!busy && notice && !error ? <Text style={styles.message}>沒有符合這個標題開頭的貼文。</Text> : null}
+          ListEmptyComponent={!busy && notice && !notice.startsWith('這篇貼文') && !error ? <Text style={styles.message}>沒有符合這個標題開頭的貼文。</Text> : null}
           ListFooterComponent={hasMore && !error ? (
             <Pressable accessibilityRole="button" accessibilityLabel="載入更多歷史貼文"
               accessibilityState={{ disabled: busy, busy }} disabled={busy} style={styles.button}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { FlatList, Modal } from 'react-native';
-import { act, cleanup, fireEvent, render } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { initializeTestEnvironment } from '@firebase/rules-unit-testing';
 import * as sdk from 'firebase/firestore';
 import * as service from '../../src/services/titleSearch';
@@ -156,7 +156,7 @@ test('student searches 45 historical matches, pages without duplicates and opens
   expect(new Set(rows(view).map((post) => post.id)).size).toBe(45);
   expect(view.queryByLabelText('載入更多歷史貼文')).toBeNull();
   fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 00')[0]);
-  expect(onOpenPost).toHaveBeenCalledWith({ id: 'old-000', schoolId: 'pu' });
+  await waitFor(() => expect(onOpenPost).toHaveBeenCalledWith({ id: 'old-000', schoolId: 'pu' }));
   expect(view.queryByLabelText('記得的標題開頭')).toBeNull();
   record({ cumulativeResults: sizes, uniqueIds: 45, nonmatchingNewerFixtures: 1000 });
 });
@@ -168,7 +168,7 @@ test('rapid result taps from the real SDK page navigate once', async () => {
     fireEvent.press(target);
     fireEvent.press(target);
   });
-  expect(onOpenPost).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(onOpenPost).toHaveBeenCalledTimes(1));
   expect(onOpenPost).toHaveBeenCalledWith({ id: 'old-000', schoolId: 'pu' });
   record({ serverConfirmedResults: 20, navigationCalls: 1 });
 });
@@ -221,7 +221,7 @@ test('cross-school access is refused while that school member retains the normal
   view.rerender(<TitleHistoryLauncher onOpenPost={onOpenPost} />);
   fireEvent.press(view.getByLabelText('找舊貼文')); submit(view); await count(view, 1);
   fireEvent.press(view.getByLabelText('開啟貼文：二手書 他校'));
-  expect(onOpenPost).toHaveBeenCalledWith({ id: 'private', schoolId: 'other' });
+  await waitFor(() => expect(onOpenPost).toHaveBeenCalledWith({ id: 'private', schoolId: 'other' }));
   record({ crossSchoolDenied: true, ownSchoolResults: 1 });
 });
 
