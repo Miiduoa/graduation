@@ -35,7 +35,7 @@ LIBRARY = {
 }
 
 PROBE = """(() => {
-  const probe = { clears: 0, draws: 0 };
+  const probe = { clears: 0, draws: 0, focusBoundaries: [] };
   window.__campusSpatialProbe = probe;
   if (typeof WebGL2RenderingContext === 'undefined') return;
   for (const name of ['clear', 'drawArrays', 'drawElements',
@@ -87,6 +87,35 @@ def selector_for(page):
 
 async def clears(page):
     return await page.evaluate("window.__campusSpatialProbe.clears")
+
+
+async def assert_native_tab_boundary(page, key, expected):
+    # Native dialog traversal may visit browser chrome at a document boundary.
+    # https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation
+    # Accept that transition only when the document lost focus and BODY is its
+    # active element. A second key must return to the exact dialog boundary.
+    for step in (1, 2):
+        await page.keyboard.press(key)
+        state = await expected.evaluate("""expected => {
+          const active = document.activeElement;
+          const dialog = expected.closest('dialog');
+          return {
+            documentFocused: document.hasFocus(),
+            activeTag: active?.tagName ?? null,
+            activeName: active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 80),
+            insideDialog: Boolean(dialog?.contains(active)),
+            expectedActive: active === expected,
+            nativeModal: Boolean(dialog?.matches(':modal')),
+          };
+        }""")
+        state.update({"key": key, "step": step})
+        await page.evaluate("state => window.__campusSpatialProbe.focusBoundaries.push(state)", state)
+        assert state["nativeModal"], f"Dialog stopped being modal during {key}: {state}"
+        if state["documentFocused"] and state["expectedActive"] and state["insideDialog"]:
+            return
+        assert step == 1 and not state["documentFocused"] and state["activeTag"] == "BODY", (
+            f"{key} did not reach the expected dialog control or an unfocused browser boundary: {state}"
+        )
 
 
 async def ready(page):
@@ -190,16 +219,16 @@ async def desktop(page, requests, resources):
     ), "The background accepted focus while the modal was open"
     last = dialog.get_by_role("link", name="查看地點資料來源 ↗", exact=True)
     await last.focus()
-    await page.keyboard.press("Tab")
-    await expect(close).to_be_focused()
-    await page.keyboard.press("Shift+Tab")
     await expect(last).to_be_focused()
+    await assert_native_tab_boundary(page, "Tab", close)
+    await assert_native_tab_boundary(page, "Shift+Tab", last)
 
     await ready(page)
     loaded = resources.intersection(urlparse(url).path for url in requests)
     assert loaded, "Opening the explorer did not request its real lazy scene chunk"
     graphics = await assert_webgl(page)
     layout = await assert_layout(page)
+    await page.screenshot(path=str(OUT / "desktop-overview.png"))
     marker = page.locator("[data-spatial-marker]:visible").first
     marker_id = await marker.get_attribute("data-spatial-marker")
     marker_name = await marker.inner_text()
@@ -429,6 +458,12 @@ async def run_case(browser, base, name, viewport, test, resources):
     finally:
         result.update({"seconds": round(time.monotonic() - started, 2),
                        "pageErrors": errors, "blockedRequests": blocked, "console": console})
+        try:
+            focus = await page.evaluate("window.__campusSpatialProbe?.focusBoundaries ?? []")
+            if focus:
+                result["focusBoundaries"] = focus
+        except Exception as evidence_error:
+            result["focusEvidenceError"] = str(evidence_error)
         await context.tracing.stop(
             path=str(OUT / f"trace-{name}.zip") if result["status"] == "failed" else None
         )
