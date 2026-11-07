@@ -281,3 +281,39 @@ test('an offline first search is an error rather than an empty success and recov
   expect(search.mock.calls[1][2]).toBeNull();
   record({ restoredResults: 20 });
 });
+
+
+test('a post deleted after search must not navigate from a stale result', async () => {
+  const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
+  const document = 'schools/pu/campusPosts/old-000';
+  let saved;
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const doc = context.firestore().doc(document);
+    saved = (await doc.get()).data();
+    await doc.delete();
+  });
+  try {
+    fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 00')[0]);
+    await view.findByText(/這篇貼文已刪除或不再提供/, {}, { timeout: 10000 });
+    expect(onOpenPost).not.toHaveBeenCalled();
+    expect(view.getByLabelText('記得的標題開頭')).toBeTruthy();
+    expect(rows(view).some((post) => post.id === 'old-000')).toBe(false);
+    record({ stalePost: 'old-000', navigationCalls: 0 });
+  } finally {
+    await environment.withSecurityRulesDisabled((context) => context.firestore().doc(document).set(saved));
+  }
+});
+
+test('membership revoked after search prevents opening old cached results', async () => {
+  const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
+  await membership('inactive');
+  try {
+    fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 00')[0]);
+    await view.findByText(/搜尋結果已清除/, {}, { timeout: 10000 });
+    expect(onOpenPost).not.toHaveBeenCalled();
+    expect(rows(view)).toEqual([]);
+    record({ afterSearchMembershipRevoked: true, navigationCalls: 0 });
+  } finally {
+    await membership('active');
+  }
+});
