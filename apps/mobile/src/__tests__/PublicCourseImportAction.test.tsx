@@ -166,7 +166,7 @@ test('storage failure is not success, and retry works without losing the preview
   expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(2);
 });
 
-test('a changed existing record is not overwritten by the public catalog', async () => {
+test('a changed instructor cannot create a second catalog class slot', async () => {
   const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
   await ledger.appendPersonalImports(scope, preview.rows.map((row) => ({ ...row, teacher: '本人修正的教師' })));
   const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));

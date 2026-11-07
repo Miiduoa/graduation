@@ -53,7 +53,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
     try {
       // The ledger serializes writes, rejects metadata conflicts and deduplicates
       // retries. It does not touch either of the existing import draft stores.
-      const result = await appendPersonalImports(scope, preview.rows, () => active(run));
+      const result = await appendPersonalImports(scope, preview.rows, () => active(run), { protectCatalogTimetableSlots: true });
       if (active(run)) setOutcome({ status: 'saved', added: result.added, duplicates: result.duplicates });
     } catch {
       if (active(run)) setOutcome({ status: 'error' });
