@@ -3,7 +3,7 @@ import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import type { CampusPlanComparisonBasis } from './campusPlanComparison';
-import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
+import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from './nuniPlanAssignmentTarget';
 import {
   buildCampusStudyAgenda,
   formatCampusStudyAgenda,
@@ -16,20 +16,23 @@ import {
 /** A plan is read-only; local reminder creation has its own explicit confirmation. */
 export type CampusPlanRoute = '/classroom' | '/timetable' | '/announcements';
 export type CampusPlanPriority = 'overdue' | 'urgent' | 'soon' | 'normal' | 'verify';
-export type CampusPlanEvidence = 'authorized-assignments' | 'saved-timetable' | 'authorized-announcements' | 'verification';
+export type CampusPlanEvidence = 'authorized-assignments' | 'authorized-quizzes' | 'saved-timetable' | 'authorized-announcements' | 'verification';
 
 export interface CampusPlanStep {
+  /** Absent on older plans, whose course tasks are assignments. */
+  kind?: 'assignment' | 'quiz';
   id: string;
   title: string;
   detail: string;
   priority: CampusPlanPriority;
   evidence: CampusPlanEvidence;
   route: CampusPlanRoute;
-  /** Only server-authorized assignment steps may carry a verified deadline. */
+  /** Only server-authorized assignment or quiz steps may carry a source deadline. */
   dueAt?: string;
   groupName?: string;
   /** Live lookup hint only. Saved copies discard it and never restore permission to open a target. */
   nuniSource?: NuniPlanAssignmentSource;
+  nuniQuizSource?: NuniPlanQuizSource;
 }
 
 export interface CampusEvidencePlan {

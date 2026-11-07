@@ -36,7 +36,7 @@ import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusPlanComparisonCard } from './CampusPlanComparisonCard';
 import { NuniStudyPlanActions } from './NuniStudyPlanActions';
 import { NuniPlanAssignmentOpenButton } from './NuniPlanAssignmentOpenButton';
-import { readNuniPlanAssignmentTarget } from '../services/nuniPlanAssignmentTarget';
+import { readNuniPlanAssignmentTarget, readNuniPlanQuizTarget } from '../services/nuniPlanAssignmentTarget';
 import { SavedCampusPlansPanel } from './SavedCampusPlansPanel';
 import { useSavedCampusPlans } from '../state/useSavedCampusPlans';
 import { createSavedCampusPlanSession, subscribeSavedCampusPlanInvalidation } from '../services/savedCampusPlans';
@@ -895,17 +895,18 @@ function AssistantConversation({
                   snapshot: currentSense,
                   isCurrent: current,
                 }}
-                renderAssignmentAction={platformTimetable && courseworkRequests ? (assignment) => assignment.nuniSource ? (
+                renderAssignmentAction={platformTimetable && courseworkRequests ? (assignment) => (
                   <NuniPlanAssignmentOpenButton
                     assignment={assignment}
                     context={{
                       accountId: platformTimetable.accountId, schoolId,
                       isCurrent: current, ...courseworkRequests, readTarget: readNuniPlanAssignmentTarget,
+                      readQuizTarget: readNuniPlanQuizTarget,
                     }}
                     navigation={navigation}
                     disabled={busy || syncBusy}
                   />
-                ) : null : undefined}
+                ) : undefined}
                 onOpenRoute={openPlanRoute}
                 />
                 {canSavePlans && messages[index - 1]?.role === 'user' ? (

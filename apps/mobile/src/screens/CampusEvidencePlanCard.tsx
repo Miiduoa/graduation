@@ -4,7 +4,7 @@ import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
-import type { NuniPlanAssignmentSource } from '../services/nuniPlanAssignmentTarget';
+import type { NuniPlanActivityIdentity } from '../services/nuniPlanAssignmentTarget';
 import type { safeNavigate } from '../utils/safeNavigate';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
 import { CampusStudyAgendaCard } from './CampusStudyAgendaCard';
@@ -26,6 +26,7 @@ const ROUTE_LABEL: Record<CampusPlanRoute, string> = {
 
 const EVIDENCE_LABEL = {
   'authorized-assignments': '已授權作業摘要',
+  'authorized-quizzes': '已授權測驗摘要',
   'saved-timetable': '手機儲存課表',
   'authorized-announcements': '已授權公告摘要',
   verification: '人工核對建議',
@@ -48,7 +49,7 @@ export function CampusEvidencePlanCard({
   /** Saved copies retain their original dates and never restore a live data grant. */
   historical?: boolean;
   /** Live actions come from the current session, never from a saved plan's evidence. */
-  renderAssignmentAction?: (assignment: CampusAssignmentIdentity & { nuniSource?: NuniPlanAssignmentSource }) => React.ReactNode;
+  renderAssignmentAction?: (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => React.ReactNode;
   progress?: {
     completedStepIds: string[];
     onToggleStep: (stepId: string, done: boolean) => void;
@@ -61,9 +62,10 @@ export function CampusEvidencePlanCard({
   };
 }) {
   const [showAllLimitations, setShowAllLimitations] = useState(false);
-  const assignmentAction = (assignment: CampusAssignmentIdentity & { nuniSource?: NuniPlanAssignmentSource }) => {
+  const assignmentAction = (assignment: CampusAssignmentIdentity & NuniPlanActivityIdentity) => {
     if (historical) return null;
     if (renderAssignmentAction) return renderAssignmentAction(assignment);
+    if (assignment.kind === 'quiz') return null;
     return reminderContext && navigation ? (
       <CampusAssignmentOpenButton
         assignment={assignment}
@@ -80,7 +82,9 @@ export function CampusEvidencePlanCard({
           {plan.title}
         </Text>
         <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
-          {progress ? '勾選只記錄你自己的處理進度。作業是否繳交，請到課程頁核對。'
+          {progress ? plan.agenda?.quizzesAvailable !== undefined
+            ? '勾選只記錄你自己的處理進度。作業繳交與測驗作答紀錄，請到課程頁核對。'
+            : '勾選只記錄你自己的處理進度。作業是否繳交，請到課程頁核對。'
             : '開啟對應服務確認內容，再決定要處理的事。'}
         </Text>
       </View>
@@ -110,7 +114,7 @@ export function CampusEvidencePlanCard({
                   {step.title}
                 </Text>
                 <Text style={{ color: priorityColor, fontSize: 12, fontWeight: '600' }}>
-                  {historical ? '規劃當時：' : ''}{PRIORITY[step.priority]}
+                  {historical ? '規劃當時：' : ''}{PRIORITY[step.priority]}{step.kind === 'quiz' ? ' · 測驗參考期限' : ''}
                 </Text>
               </View>
             </View>
@@ -120,7 +124,7 @@ export function CampusEvidencePlanCard({
             <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
               依據：{EVIDENCE_LABEL[step.evidence]}
             </Text>
-            {step.evidence === 'authorized-assignments' ? assignmentAction(step) : null}
+            {step.evidence === 'authorized-assignments' || step.evidence === 'authorized-quizzes' ? assignmentAction(step) : null}
             {onOpenRoute ? (
               <AIButton
                 label={'開啟' + ROUTE_LABEL[step.route] + '核對'}
@@ -130,7 +134,7 @@ export function CampusEvidencePlanCard({
                 onPress={() => onOpenRoute(step.route)}
               />
             ) : null}
-            {!historical && reminderContext ? (
+            {!historical && reminderContext && step.kind !== 'quiz' ? (
               <CampusAssignmentReminderAction
                 key={step.id + ':' + step.dueAt}
                 step={step}

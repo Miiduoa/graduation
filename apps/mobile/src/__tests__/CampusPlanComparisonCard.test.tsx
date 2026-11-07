@@ -5,6 +5,15 @@ import type { CampusPlanComparison } from '../services/campusPlanComparison';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
+test('an unchanged quiz-only comparison is recognized without counting it as an assignment', () => {
+  const view = render(<CampusPlanComparisonCard comparison={comparison({
+    comparableDates: 0, unchangedAssignments: 0, unchangedQuizzes: 2, changes: [],
+  })} disabled={false} />);
+  expect(view.getByText('2 項測驗摘要與原計畫相同。')).toBeTruthy();
+  expect(view.getByText('這次沒有列出可確認的調整；僅涵蓋下方比對範圍。')).toBeTruthy();
+  expect(view.queryByText(/項作業摘要與原計畫相同/)).toBeNull();
+});
+
 const LONG_TITLE = '資料庫系統期末專題：跨校資料交換、課程整合與權限隔離的完整驗證報告';
 
 function comparison(overrides: Partial<CampusPlanComparison> = {}): CampusPlanComparison {

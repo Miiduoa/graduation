@@ -57,6 +57,133 @@ function clockPlan(): CampusEvidencePlan {
   return result;
 }
 
+function quizPlan(): CampusEvidencePlan {
+  const result = plan();
+  result.agenda!.quizzesAvailable = true;
+  result.comparisonBasis!.quizzes = {
+    status: 'complete', checkedAt: result.checkedAt, total: 1,
+    // A colliding tuple deliberately verifies that activity types remain distinct.
+    items: [assignment({ title: '資料庫小考' })],
+  };
+  return result;
+}
+
+function laterWithQuizzes(before: CampusEvidencePlan): CampusEvidencePlan {
+  const after = later(before);
+  after.comparisonBasis!.quizzes!.checkedAt = after.checkedAt;
+  return after;
+}
+
+test('assignment and quiz source identities never collide and use separate deadline language', () => {
+  const before = quizPlan();
+  const after = laterWithQuizzes(before);
+  after.comparisonBasis!.assignments.items[0].dueAt = '2026-11-07T15:59:00Z';
+  after.comparisonBasis!.quizzes!.items[0].dueAt = '2026-11-06T12:00:00Z';
+  const result = compareCampusPlans(before, after);
+  const changes = result.changes.filter((change) => change.category === 'assignment' || change.category === 'quiz');
+  expect(changes).toHaveLength(2);
+  expect(new Set(changes.map((change) => change.id)).size).toBe(2);
+  expect(changes[0]).toMatchObject({ category: 'quiz', kind: 'changed',
+    before: expect.stringContaining('參考期限 2026/11/6 23:59'),
+    after: expect.stringContaining('參考期限 2026/11/6 20:00'),
+    detail: '測驗參考期限有變動。請開啟測驗頁核對。' });
+  expect(changes[1]).toMatchObject({ category: 'assignment', kind: 'changed',
+    detail: '截止時間有變動。請開啟作業頁核對。' });
+  expect(result.unchangedAssignments).toBe(0);
+  expect(result.unchangedQuizzes).toBe(0);
+});
+
+test('upgrading a plan without quiz history does not call observed quizzes newly published', () => {
+  const before = plan();
+  const after = laterWithQuizzes(quizPlan());
+  const result = compareCampusPlans(before, after);
+  expect(result.changes.filter((change) => change.category === 'quiz')).toEqual([]);
+  expect(result.changes).toContainEqual(expect.objectContaining({ id: 'source:quiz-history', kind: 'unverifiable',
+    detail: expect.stringContaining('原計畫未保存測驗來源，這次開始納入') }));
+  expect(result.unchangedAssignments).toBe(1);
+  expect(compareCampusPlans(before, later(before)).changes).toEqual([]);
+  expect(compareCampusPlans(before, later(before)).unchangedQuizzes).toBeUndefined();
+});
+
+test('a failed quiz read cannot turn quizzes into removed or completed work and does not block assignment comparisons', () => {
+  const before = quizPlan();
+  const after = laterWithQuizzes(before);
+  after.comparisonBasis!.assignments.items[0].title = '作業名稱更新';
+  after.comparisonBasis!.quizzes = { status: 'unavailable', checkedAt: null, total: null, items: [] };
+  after.agenda!.quizzesAvailable = false;
+  const result = compareCampusPlans(before, after);
+  expect(result.changes.filter((change) => change.category === 'quiz')).toEqual([]);
+  expect(result.changes).toContainEqual(expect.objectContaining({ id: 'source:quiz-coverage', kind: 'unverifiable',
+    detail: '這次無法讀取測驗，未出現的項目不能視為已完成。' }));
+  expect(result.changes).toContainEqual(expect.objectContaining({ category: 'assignment', kind: 'changed', title: '作業名稱更新' }));
+});
+
+test.each(['assignment', 'quiz'] as const)('an older %s snapshot only stops that source from being compared', (older) => {
+  const before = quizPlan();
+  const after = laterWithQuizzes(before);
+  const previousSource = older === 'quiz' ? after.comparisonBasis!.quizzes! : after.comparisonBasis!.assignments;
+  previousSource.checkedAt = '2026-11-06T00:00:00Z';
+  after.comparisonBasis!.assignments.items[0].title = '新作業名稱';
+  after.comparisonBasis!.quizzes!.items[0].title = '新測驗名稱';
+  const result = compareCampusPlans(before, after);
+  expect(result.changes.filter((change) => change.category === older)).toEqual([]);
+  expect(result.changes).toContainEqual(expect.objectContaining({ id: 'source:' + older + '-time', kind: 'unverifiable' }));
+  expect(result.changes).toContainEqual(expect.objectContaining({ category: older === 'quiz' ? 'assignment' : 'quiz', kind: 'changed' }));
+});
+
+test('partial quiz coverage never borrows complete assignment coverage to infer missing or added quizzes', () => {
+  const before = quizPlan();
+  before.comparisonBasis!.quizzes!.status = 'partial';
+  before.comparisonBasis!.quizzes!.total = null;
+  const after = laterWithQuizzes(before);
+  after.comparisonBasis!.quizzes!.items = [assignment({ identity: ['course-a', 'other-quiz'], title: '另一份測驗' })];
+  const changes = compareCampusPlans(before, after).changes.filter((change) => change.category === 'quiz');
+  expect(changes).toHaveLength(2);
+  expect(changes.every((change) => change.kind === 'unverifiable')).toBe(true);
+  expect(changes.every((change) => change.detail.includes('測驗'))).toBe(true);
+});
+
+test('a quiz absent from a complete current summary remains unproven as completed', () => {
+  const before = quizPlan();
+  const after = laterWithQuizzes(before);
+  after.comparisonBasis!.quizzes!.items = [];
+  after.comparisonBasis!.quizzes!.total = 0;
+  expect(compareCampusPlans(before, after).changes).toContainEqual(expect.objectContaining({
+    category: 'quiz', kind: 'missing', detail: '本次摘要未列出這項測驗；這不能證明已作答或完成，請到課程頁核對。',
+  }));
+});
+
+test('missing and duplicate quiz identifiers do not affect matching assignment identities', () => {
+  const before = quizPlan();
+  const after = laterWithQuizzes(before);
+  after.comparisonBasis!.quizzes!.items.push(assignment(), assignment({ identity: null }));
+  after.comparisonBasis!.quizzes!.total = 3;
+  const result = compareCampusPlans(before, after);
+  expect(result.unchangedAssignments).toBe(1);
+  expect(result.unchangedQuizzes).toBe(0);
+  expect(result.changes.filter((change) => change.category === 'assignment' || change.category === 'quiz')).toEqual([]);
+  expect(result.changes).toContainEqual(expect.objectContaining({ id: 'source:quiz-identities', kind: 'unverifiable' }));
+});
+
+test('quiz freshness warnings and unchanged counts are tracked independently', () => {
+  const before = quizPlan();
+  const after = later(before);
+  const result = compareCampusPlans(before, after);
+  expect(result).toMatchObject({ unchangedAssignments: 1, unchangedQuizzes: 1, changes: [] });
+  expect(result.limitations).toContain('本次沿用同一次測驗同步資料，尚未取得較新的校方摘要。');
+  expect(result.limitations).not.toContain('本次沿用同一次作業同步資料，尚未取得較新的校方摘要。');
+});
+
+test('a missing quiz reference deadline is not a cancelled deadline', () => {
+  const before = quizPlan();
+  const after = laterWithQuizzes(before);
+  after.comparisonBasis!.quizzes!.items[0].dueAt = null;
+  expect(compareCampusPlans(before, after).changes).toContainEqual(expect.objectContaining({
+    category: 'quiz', kind: 'unverifiable', after: expect.stringContaining('參考期限未確認'),
+    detail: '本次測驗參考期限未確認，不能視為取消期限。請開啟測驗頁核對。',
+  }));
+});
+
 test('compares every source row, including tasks omitted from the summary steps', () => {
   const before = plan(Array.from({ length: 7 }, (_, index) => assignment({
     identity: ['course-a', 'report-' + index], title: '報告 ' + index,

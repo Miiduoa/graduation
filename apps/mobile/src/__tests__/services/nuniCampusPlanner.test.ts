@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { classMeetingKey, type ClassException, type PersonalImportRecord } from '@campus/shared';
 import { CourseAccessError } from '@campus/shared/src/courseAccess';
-import { NuniError, type NuniAssignment, type NuniWorkspace } from '@campus/shared/src/nuni';
+import { NuniError, type NuniAssignment, type NuniQuiz, type NuniWorkspace } from '@campus/shared/src/nuni';
 import { readAssistantTimetable } from '../../services/assistantTimetableSource';
 import { buildNuniCampusPlan, isNuniCampusPlanningQuestion } from '../../services/nuniCampusPlanner';
 import { copyCampusEvidencePlan } from '../../services/savedCampusPlanValidation';
@@ -39,6 +39,12 @@ const assignment = (n = 1, fields: Partial<NuniAssignment> = {}): NuniAssignment
   instructions: '不可出現在計畫的作業全文', state: 'open', unitId: null, unitTitle: null,
   mySubmission: null, submissionCount: 0, ...fields,
 });
+const quiz = (n = 1, fields: Partial<NuniQuiz> = {}): NuniQuiz => ({
+  id: 'cwq_' + uuid(n), workspaceId: workspace().id, title: '測驗 ' + n,
+  createdAt: '2026-11-04T05:00:00Z', closedAt: null, dueAt: '2026-11-06T23:59:00+08:00',
+  prompt: '不可出現在計畫的測驗題目', state: 'open', unitId: null, unitTitle: null,
+  myResponse: null, responseCount: 0, ...fields,
+});
 const reviewed = (id: string, fields: Record<string, unknown> = {}) => ({
   workspaceId: id, status: 'reviewed', membershipActive: true, memberRole: 'student',
   course: { id: 'ccd_' + uuid(1), version: 1, workspaceId: id, verification: 'administrator-reviewed',
@@ -54,14 +60,25 @@ const input = {
   bffRequest: jest.fn<Promise<unknown>, [string]>(),
 };
 const persisted = new Map<string, string>();
+const quizRequest = jest.fn<Promise<unknown>, [string]>();
+
+function mockPlatformRead(reader: (path: string, body?: Record<string, unknown>) => Promise<unknown>) {
+  input.request.mockImplementation((path, body) => path.endsWith('/quizzes') ? quizRequest(path) : reader(path, body));
+}
+
+function mockCourseworkRead(reader: (path: string) => Promise<unknown>) {
+  input.bffRequest.mockImplementation(reader);
+  quizRequest.mockImplementation(reader);
+}
 
 beforeEach(() => {
   jest.resetAllMocks();
   persisted.clear();
   input.isCurrent.mockReturnValue(true);
   input.platformTimetable.isCurrent.mockReturnValue(true);
+  quizRequest.mockResolvedValue({ quizzes: [] });
   read.mockResolvedValue(source(record()));
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
     ? { workspaces: [workspace()] } : reviewed(String(body?.workspaceId)));
   input.bffRequest.mockResolvedValue({ assignments: [assignment()] });
   jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) => persisted.get(key) ?? null);
@@ -75,7 +92,7 @@ async function plan(overrides: Partial<typeof input> = {}): Promise<CampusEviden
 }
 
 function withoutLiveSources(value: CampusEvidencePlan): CampusEvidencePlan {
-  return JSON.parse(JSON.stringify(value, (key, item) => key === 'nuniSource' ? undefined : item));
+  return JSON.parse(JSON.stringify(value, (key, item) => key === 'nuniSource' || key === 'nuniQuizSource' ? undefined : item));
 }
 
 test('builds seven Taiwan dates from imported records without a legacy timetable and saves a true planner roundtrip', async () => {
@@ -97,6 +114,7 @@ test('builds seven Taiwan dates from imported records without a legacy timetable
   expect(read).toHaveBeenCalledWith('', 'pu', input.platformTimetable);
   expect(input.request.mock.calls).toEqual([
     ['class-workspaces'], ['course-access/workspace-course', { workspaceId: workspace().id, schoolId: 'pu' }],
+    [`class-workspaces/${workspace().id}/quizzes`],
   ]);
   expect(input.bffRequest.mock.calls).toEqual([[`class-workspaces/${workspace().id}/assignments`]]);
   const scope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
@@ -179,7 +197,7 @@ test.each([
 
 test.each([{ schoolId: 'ncku' }, { academicYear: '114' }, { semester: '2' }, { workspaceId: workspace(2).id }])(
   'rejects contradictory reviewed course metadata before any assignment read: %j', async (patch) => {
-    input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+    mockPlatformRead(async (path, body) => path === 'class-workspaces'
       ? { workspaces: [workspace()] } : reviewed(String(body?.workspaceId), patch));
     const result = await plan();
     expect(input.bffRequest).not.toHaveBeenCalled();
@@ -199,7 +217,7 @@ test('does not include a differently scoped saved timetable or an earlier-term b
 });
 
 test('an unreviewed explicit binding is disclosed and never marked complete', async () => {
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces' ? { workspaces: [workspace()] }
+  mockPlatformRead(async (path, body) => path === 'class-workspaces' ? { workspaces: [workspace()] }
     : { workspaceId: body?.workspaceId, status: 'unreviewed', course: null, memberRole: 'student', membershipActive: true });
   const result = await plan();
   expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'partial', total: null, items: [{ title: '作業 1' }] });
@@ -221,7 +239,7 @@ test.each(['memberships', 'assignments', 'foreign-receipt', 'wrong-workspace'])(
 
 test('a failed source keeps successful student work partial and unlinked same-name workspaces stay unread', async () => {
   read.mockResolvedValue(source(record(), record(2), record(3, { linkedCourseId: undefined })));
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
     ? { workspaces: [workspace(), workspace(2), workspace(3)] } : reviewed(String(body?.workspaceId)));
   input.bffRequest.mockImplementation(async (path) => {
     if (path.includes(workspace(2).id)) throw new NuniError(403, 'FORBIDDEN');
@@ -236,7 +254,7 @@ test('a failed source keeps successful student work partial and unlinked same-na
 
 test('retains at most 400 source assignments, labels 100-row pages partial and compares full identities beyond top steps', async () => {
   read.mockResolvedValue(source(...Array.from({ length: 5 }, (_, n) => record(n + 1))));
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
     ? { workspaces: Array.from({ length: 5 }, (_, n) => workspace(n + 1)) } : reviewed(String(body?.workspaceId)));
   input.bffRequest.mockImplementation(async (path) => ({ assignments: Array.from({ length: 100 }, (_, n) => assignment(n + 1, {
     workspaceId: path.split('/')[1], title: `練習 ${n + 1}`, dueAt: n === 99 ? '2026-12-01T23:59:00+08:00' : assignment().dueAt,
@@ -259,7 +277,7 @@ test('retains at most 400 source assignments, labels 100-row pages partial and c
 
 test('a late-listed workspace urgent pending task survives the 400-row cap ahead of closed and submitted work', async () => {
   read.mockResolvedValue(source(...Array.from({ length: 5 }, (_, n) => record(n + 1))));
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
     ? { workspaces: Array.from({ length: 5 }, (_, n) => workspace(n + 1)) } : reviewed(String(body?.workspaceId)));
   input.bffRequest.mockImplementation(async (path) => {
     const workspaceId = path.split('/')[1];
@@ -280,7 +298,7 @@ test('caps queried workspaces and limits parallel course requests', async () => 
   read.mockResolvedValue(source(...Array.from({ length: 14 }, (_, n) => record(n + 1))));
   let active = 0;
   let maximum = 0;
-  input.request.mockImplementation(async (path, body) => {
+  mockPlatformRead(async (path, body) => {
     if (path === 'class-workspaces') return { workspaces: Array.from({ length: 14 }, (_, n) => workspace(n + 1)) };
     active++;
     maximum = Math.max(maximum, active);
@@ -291,6 +309,7 @@ test('caps queried workspaces and limits parallel course requests', async () => 
   input.bffRequest.mockResolvedValue({ assignments: [] });
   const result = await plan();
   expect(input.bffRequest).toHaveBeenCalledTimes(12);
+  expect(quizRequest).toHaveBeenCalledTimes(12);
   expect(maximum).toBeLessThanOrEqual(3);
   expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'partial', total: null, items: [] });
   expect(result.limitations.join(' ')).toContain('最多查詢 12 門');
@@ -301,7 +320,7 @@ test.each(['local', 'memberships', 'directory', 'assignments'])('discards a scop
   if (stage === 'memberships') input.request.mockImplementationOnce(async () => {
     input.platformTimetable.isCurrent.mockReturnValue(false); return { workspaces: [workspace()] };
   });
-  if (stage === 'directory') input.request.mockImplementation(async (path, body) => {
+  if (stage === 'directory') mockPlatformRead(async (path, body) => {
     if (path === 'class-workspaces') return { workspaces: [workspace()] };
     input.isCurrent.mockReturnValue(false); return reviewed(String(body?.workspaceId));
   });
@@ -323,7 +342,7 @@ test.each([new NuniError(401, 'UNAUTHENTICATED'), new CourseAccessError('SESSION
 test('one revoked parallel membership read stops the other workers before assignment requests', async () => {
   read.mockResolvedValue(source(record(), record(2), record(3)));
   const release: Array<() => void> = [];
-  input.request.mockImplementation(async (path, body) => {
+  mockPlatformRead(async (path, body) => {
     if (path === 'class-workspaces') return { workspaces: [workspace(), workspace(2), workspace(3)] };
     if (body?.workspaceId === workspace().id) throw new NuniError(401, 'UNAUTHENTICATED');
     return new Promise((resolve) => { release.push(() => resolve(reviewed(String(body?.workspaceId)))); });
@@ -482,7 +501,7 @@ test('replanning uses the new class occurrence while leaving the saved preparati
 test('partial assignment coverage only proposes time for observed tasks and keeps the missing source visible', async () => {
   read.mockResolvedValue(source(...clockRecords(),
     record(3, { title: '另一門課', dayOfWeek: 6, linkedCourseId: workspace(2).id })));
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces'
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
     ? { workspaces: [workspace(), workspace(2)] } : reviewed(String(body?.workspaceId)));
   input.bffRequest.mockImplementation(async (path) => {
     if (path.includes(workspace(2).id)) throw new NuniError(403, 'FORBIDDEN');
@@ -520,7 +539,7 @@ test('same-name tasks keep distinct live source IDs in priority, day and outside
 test('an unreviewed workspace linked to multiple terms has no precise live target hint', async () => {
   read.mockResolvedValue(source(record(1, { semester: '1' }),
     record(2, { semester: '2', linkedCourseId: workspace().id })));
-  input.request.mockImplementation(async (path, body) => path === 'class-workspaces' ? { workspaces: [workspace()] }
+  mockPlatformRead(async (path, body) => path === 'class-workspaces' ? { workspaces: [workspace()] }
     : { workspaceId: body?.workspaceId, status: 'unreviewed', course: null, membershipActive: true, memberRole: 'student' });
   input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { dueAt: '2027-02-02T23:59:00+08:00' })] });
   const result = await plan({ now: Date.parse('2027-01-31T09:00:00+08:00') });
@@ -530,9 +549,272 @@ test('an unreviewed workspace linked to multiple terms has no precise live targe
   expect(JSON.stringify(result.agenda)).not.toContain('nuniSource');
 });
 
-test.each(['幫我安排未來七天的課表與作業', '本週學習計畫', '明天作業優先順序', '下週讀書計畫'])('recognizes a read-only study plan: %s', (text) => {
+test('mixes same-name assignments and quizzes in deadline order, gives distinct study slots and saves only historical evidence', async () => {
+  read.mockResolvedValue(source(...clockRecords()));
+  mockCourseworkRead(async (path) => path.endsWith('/quizzes')
+    ? { quizzes: [quiz(1, { title: '期中練習', dueAt: '2026-11-06T10:40:00+08:00' })] }
+    : { assignments: [assignment(1, { title: '期中練習', dueAt: '2026-11-06T11:10:00+08:00' })] });
+  const result = await plan({ question: '幫我安排今天的作業與測驗複習' });
+  const tasks = result.steps.filter((step) => step.kind);
+  expect(tasks.map((step) => [step.kind, step.evidence, step.title])).toEqual([
+    ['quiz', 'authorized-quizzes', '期中練習'], ['assignment', 'authorized-assignments', '期中練習'],
+  ]);
+  expect(new Set(tasks.map((step) => step.id)).size).toBe(2);
+  expect(tasks[0].id).toContain('nuni-quiz-');
+  expect(tasks[1].id).toContain('nuni-assignment-');
+  expect(tasks[0]).toMatchObject({ nuniQuizSource: { accountId, schoolId: 'pu', academicYear: '115', semester: '1',
+    workspaceId: workspace().id, quizId: quiz().id } });
+  expect(tasks[0]).not.toHaveProperty('nuniSource');
+  expect(tasks[1].nuniSource?.assignmentId).toBe(assignment().id);
+  expect(tasks[1]).not.toHaveProperty('nuniQuizSource');
+  expect(tasks[0].detail).toMatch(/參考期限 11\/6\s+10:40/);
+  expect(tasks[0].detail).toContain('10:10–10:40（30 分鐘）複習這份測驗的課程內容');
+  expect(tasks[0].detail).not.toMatch(/開考|代答|提交|補交|截止/);
+  expect(tasks[1].detail).toContain('10:40–11:10（30 分鐘）準備這份作業');
+  expect(result.agenda).toMatchObject({ assignmentsAvailable: true, quizzesAvailable: true });
+  expect(result.agenda?.days[0].deadlines.map((item) => [item.kind, item.title])).toEqual([
+    ['quiz', '期中練習'], ['assignment', '期中練習'],
+  ]);
+  expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'complete', total: 1,
+    items: [{ identity: [workspace().id, assignment().id] }] });
+  expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'complete', total: 1,
+    items: [{ identity: [workspace().id, quiz().id] }] });
+  expect(result.content).toContain('參考期限');
+  expect(JSON.stringify(result)).not.toContain('不可出現在');
+  expect(input.request.mock.calls.some(([path]) => path.endsWith('/quizzes'))).toBe(true);
+  expect(input.request.mock.calls.some(([path]) => path.endsWith('/assignments'))).toBe(false);
+  expect(input.bffRequest.mock.calls.some(([path]) => path.endsWith('/quizzes'))).toBe(false);
+  const scope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
+  const session = createSavedCampusPlanSession(() => true);
+  const saved = await saveCampusPlan(scope, { question, plan: result }, session);
+  await setCampusPlanStepDone(scope, saved[0].id, tasks[0].id, true, session);
+  const restored = await readSavedCampusPlans(scope, createSavedCampusPlanSession(() => true));
+  expect(restored[0].plan).toEqual(withoutLiveSources(result));
+  expect(restored[0].completedStepIds).toEqual([tasks[0].id]);
+  expect(JSON.stringify(restored)).not.toMatch(/nuniSource|nuniQuizSource/);
+});
+
+test('a quiz-only plan keeps reference deadlines and unknown dates but excludes closed or already answered quizzes from pending work', async () => {
+  const answered = quiz(2, { myResponse: { quizId: quiz(2).id, platformAccountId: accountId,
+    displayName: '學生', answer: '不可出現在計畫的學生答案', state: 'submitted', submittedAt: checkedAt,
+    teacherFeedback: null, reviewedAt: null } });
+  mockCourseworkRead(async (path) => path.endsWith('/quizzes') ? { quizzes: [
+    answered, quiz(3, { state: 'closed', closedAt: checkedAt }),
+    quiz(4, { dueAt: '2026-12-01T23:59:00+08:00' }),
+    quiz(5, { dueAt: '2026-11-05T23:59:00+08:00' }), quiz(6, { dueAt: null }), quiz(),
+  ] } : { assignments: [] });
+  const result = await plan();
+  expect(result.steps.filter((step) => step.kind).map((step) => [step.title, step.priority])).toEqual([
+    ['測驗 5', 'overdue'], ['測驗 1', 'urgent'], ['測驗 6', 'verify'],
+  ]);
+  expect(result.steps[0].detail).toContain('參考期限已過，請先核對是否仍可作答');
+  expect(result.steps[2].detail).toContain('未提供可核對的參考期限');
+  expect(result.agenda?.days.flatMap((day) => day.deadlines).map((item) => item.title)).toEqual(['測驗 1']);
+  expect(result.agenda?.outsideWindow.map((item) => item.title).sort()).toEqual(['測驗 4', '測驗 5', '測驗 6']);
+  expect(result.agenda?.outsideWindow.every((item) => item.kind === 'quiz' && item.nuniQuizSource?.quizId)).toBe(true);
+  expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'complete', total: 0, items: [] });
+  expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'complete', total: 6 });
+  expect(result.content).not.toContain('不可出現在');
+  expect(result.content).toContain('參考期限');
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
+});
+
+test.each(['assignment', 'quiz'] as const)('a failed %s source leaves the other kind available and complete', async (failedKind) => {
+  mockCourseworkRead(async (path) => {
+    const isQuiz = path.endsWith('/quizzes');
+    if (isQuiz === (failedKind === 'quiz')) throw new NuniError(503, 'UNAVAILABLE');
+    return isQuiz ? { quizzes: [quiz()] } : { assignments: [assignment()] };
+  });
+  const result = await plan();
+  expect(result.comparisonBasis?.assignments.status).toBe(failedKind === 'assignment' ? 'unavailable' : 'complete');
+  expect(result.comparisonBasis?.quizzes?.status).toBe(failedKind === 'quiz' ? 'unavailable' : 'complete');
+  expect(result.agenda).toMatchObject({ assignmentsAvailable: failedKind !== 'assignment', quizzesAvailable: failedKind !== 'quiz' });
+  const availableKind = failedKind === 'assignment' ? 'quiz' : 'assignment';
+  expect(result.agenda?.days[0].deadlines.map((item) => item.kind)).toEqual([availableKind]);
+  expect(result.steps.filter((step) => step.kind).map((step) => step.kind)).toEqual([availableKind]);
+  expect(result.limitations.join(' ')).toContain(`nuni ${failedKind === 'quiz' ? '測驗' : '作業'}來源`);
+  expect(result.overview).toContain('部分資料尚未確認');
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
+});
+
+test('a missing assignment BFF leaves platform quiz reads available through their existing transport', async () => {
+  quizRequest.mockResolvedValue({ quizzes: [quiz()] });
+  const result = await plan({ bffRequest: undefined });
+  expect(result.comparisonBasis?.assignments.status).toBe('unavailable');
+  expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'complete', total: 1 });
+  expect(result.agenda).toMatchObject({ assignmentsAvailable: false, quizzesAvailable: true });
+  expect(result.steps.find((step) => step.kind)).toMatchObject({ kind: 'quiz', title: '測驗 1' });
+  expect(input.bffRequest).not.toHaveBeenCalled();
+  expect(input.request.mock.calls.some(([path]) => path.endsWith('/assignments'))).toBe(false);
+  expect(quizRequest).toHaveBeenCalledWith(`class-workspaces/${workspace().id}/quizzes`);
+});
+
+test.each(['foreign-answer', 'wrong-workspace', 'wrong-answer-id', 'duplicate'])(
+  'rejects %s quiz evidence without discarding a verified assignment', async (kind) => {
+    let quizzes = [quiz()];
+    if (kind === 'duplicate') quizzes = [quiz(), quiz()];
+    if (kind === 'wrong-workspace') quizzes = [quiz(1, { workspaceId: workspace(2).id })];
+    if (kind === 'foreign-answer' || kind === 'wrong-answer-id') quizzes = [quiz(1, { myResponse: {
+      quizId: kind === 'wrong-answer-id' ? quiz(2).id : quiz().id,
+      platformAccountId: kind === 'foreign-answer' ? 'pa_' + uuid(2) : accountId,
+      displayName: '不可出現在計畫的名字', answer: '不可出現在計畫的答案', state: 'submitted',
+      submittedAt: checkedAt, teacherFeedback: null, reviewedAt: null,
+    } })];
+    mockCourseworkRead(async (path) => path.endsWith('/quizzes') ? { quizzes } : { assignments: [assignment()] });
+    const result = await plan();
+    expect(result.comparisonBasis?.quizzes).toEqual({ status: 'unavailable', checkedAt: null, total: null, items: [] });
+    expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'complete', total: 1 });
+    expect(result.agenda?.quizzesAvailable).toBe(false);
+    expect(result.steps.filter((step) => step.kind).map((step) => step.kind)).toEqual(['assignment']);
+    expect(JSON.stringify(result)).not.toContain('不可出現在');
+  },
+);
+
+test('partial quiz coverage is tracked independently from complete assignments and never reads unlinked same-name courses', async () => {
+  read.mockResolvedValue(source(record(), record(2)));
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
+    ? { workspaces: [workspace(), workspace(2), workspace(3)] } : reviewed(String(body?.workspaceId)));
+  mockCourseworkRead(async (path) => {
+    const workspaceId = path.split('/')[1];
+    if (path.endsWith('/quizzes')) {
+      if (workspaceId === workspace(2).id) throw new NuniError(403, 'FORBIDDEN');
+      return { quizzes: [quiz()] };
+    }
+    return { assignments: [assignment(1, { workspaceId })] };
+  });
+  const result = await plan();
+  expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'complete', total: 2 });
+  expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'partial', total: null, items: [{ title: '測驗 1' }] });
+  expect(input.bffRequest.mock.calls.flat().join(' ')).not.toContain(workspace(3).id);
+  expect(result.limitations.join(' ')).toContain('測驗來源無法核對');
+  expect(result.limitations.join(' ')).not.toContain('作業來源無法核對');
+});
+
+test('caps mixed coursework at 400 total source and agenda items, preserves urgent late-workspace quizzes and marks each truncated kind partial', async () => {
+  read.mockResolvedValue(source(...Array.from({ length: 5 }, (_, n) => record(n + 1))));
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
+    ? { workspaces: Array.from({ length: 5 }, (_, n) => workspace(n + 1)) } : reviewed(String(body?.workspaceId)));
+  mockCourseworkRead(async (path) => {
+    const workspaceId = path.split('/')[1];
+    return path.endsWith('/quizzes')
+      ? { quizzes: Array.from({ length: 50 }, (_, n) => quiz(n + 1, { workspaceId,
+        ...(workspaceId === workspace(5).id && n === 49 ? { title: '最急測驗', dueAt: '2026-11-06T09:30:00+08:00' } : {}),
+      })) }
+      : { assignments: Array.from({ length: 60 }, (_, n) => assignment(n + 1, { workspaceId })) };
+  });
+  const result = await plan();
+  const basis = result.comparisonBasis!;
+  expect(basis.assignments.items.length + basis.quizzes!.items.length).toBe(400);
+  expect(basis.assignments).toMatchObject({ status: 'partial', total: null });
+  expect(basis.quizzes).toMatchObject({ status: 'partial', total: null });
+  expect(result.agenda!.days.flatMap((day) => day.deadlines).length + result.agenda!.outsideWindow.length).toBe(400);
+  expect(result.steps[0]).toMatchObject({ title: '最急測驗', kind: 'quiz', priority: 'urgent' });
+  expect(result.steps.findIndex((step) => step.id === 'nuni-timetable-conflicts')).toBeGreaterThan(0);
+  expect(result.limitations.join(' ')).toContain('前 400 筆作業與測驗');
+  expect(result.limitations.join(' ')).not.toContain('100 筆上限');
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
+});
+
+test('the global cap marks only the omitted kind incomplete when every quiz still fits', async () => {
+  read.mockResolvedValue(source(...Array.from({ length: 5 }, (_, n) => record(n + 1))));
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
+    ? { workspaces: Array.from({ length: 5 }, (_, n) => workspace(n + 1)) } : reviewed(String(body?.workspaceId)));
+  mockCourseworkRead(async (path) => {
+    const workspaceId = path.split('/')[1];
+    return path.endsWith('/quizzes')
+      ? { quizzes: workspaceId === workspace(5).id ? [quiz(1, { workspaceId, dueAt: '2026-11-06T09:30:00+08:00' })] : [] }
+      : { assignments: Array.from({ length: 90 }, (_, n) => assignment(n + 1, { workspaceId })) };
+  });
+  const result = await plan();
+  expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'partial', total: null });
+  expect(result.comparisonBasis?.assignments.items).toHaveLength(399);
+  expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'complete', total: 1 });
+  expect(result.comparisonBasis?.quizzes?.items).toHaveLength(1);
+  expect(result.limitations.join(' ')).toContain('作業資料超出本次保留範圍');
+  expect(result.limitations.join(' ')).not.toContain('測驗資料超出本次保留範圍');
+});
+
+test('a full 100-quiz source page stays partial while the empty assignment source is complete', async () => {
+  mockCourseworkRead(async (path) => path.endsWith('/quizzes')
+    ? { quizzes: Array.from({ length: 100 }, (_, n) => quiz(n + 1)) } : { assignments: [] });
+  const result = await plan();
+  expect(result.comparisonBasis?.quizzes).toMatchObject({ status: 'partial', total: null });
+  expect(result.comparisonBasis?.quizzes?.items).toHaveLength(100);
+  expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'complete', total: 0 });
+  expect(result.limitations.join(' ')).toContain('測驗已達來源 100 筆上限');
+});
+
+test.each(['cancel', 'school', 'account'] as const)('discards both source kinds after %s changes during a quiz response', async (change) => {
+  const controller = new AbortController();
+  mockCourseworkRead(async (path) => {
+    if (!path.endsWith('/quizzes')) return { assignments: [assignment()] };
+    if (change === 'cancel') controller.abort();
+    if (change === 'school') input.isCurrent.mockReturnValue(false);
+    if (change === 'account') input.platformTimetable.isCurrent.mockReturnValue(false);
+    return { quizzes: [quiz()] };
+  });
+  expect(await buildNuniCampusPlan({ ...input, signal: controller.signal })).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
+});
+
+test.each([new NuniError(401, 'UNAUTHENTICATED'), new CourseAccessError('SESSION_EXPIRED', 401)])(
+  'a rejected quiz session revokes an already-read assignment result: %j', async (error) => {
+    mockCourseworkRead(async (path) => {
+      if (path.endsWith('/quizzes')) throw error;
+      return { assignments: [assignment()] };
+    });
+    expect(await buildNuniCampusPlan(input)).toBeNull();
+    expect(input.platformTimetable.isCurrent()).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('a revoked quiz session fences delayed assignment workers before they can request more quizzes', async () => {
+  read.mockResolvedValue(source(record(), record(2), record(3)));
+  mockPlatformRead(async (path, body) => path === 'class-workspaces'
+    ? { workspaces: [workspace(), workspace(2), workspace(3)] } : reviewed(String(body?.workspaceId)));
+  const release: Array<() => void> = [];
+  mockCourseworkRead(async (path) => {
+    const workspaceId = path.split('/')[1];
+    if (path.endsWith('/quizzes')) throw new NuniError(401, 'UNAUTHENTICATED');
+    if (workspaceId === workspace().id) return { assignments: [assignment()] };
+    return new Promise((resolve) => release.push(() => resolve({ assignments: [assignment(1, { workspaceId })] })));
+  });
+  expect(await buildNuniCampusPlan(input)).toBeNull();
+  expect(release).toHaveLength(2);
+  release.forEach((resolve) => resolve());
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(quizRequest.mock.calls).toEqual([[`class-workspaces/${workspace().id}/quizzes`]]);
+});
+
+test.each(['rebind', 'remove', 'school'] as const)('rechecks the original timetable binding after quizzes load and rejects %s', async (change) => {
+  const changed = change === 'rebind' ? source(record(1, { linkedCourseId: workspace(2).id }))
+    : change === 'remove' ? source() : { ...source(record(1, { schoolId: 'ncku' })), schoolId: 'ncku' };
+  read.mockResolvedValueOnce(source(record())).mockResolvedValueOnce(changed);
+  mockCourseworkRead(async (path) => path.endsWith('/quizzes') ? { quizzes: [quiz()] } : { assignments: [] });
+  expect(await buildNuniCampusPlan(input)).toBeNull();
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(quizRequest).toHaveBeenCalledWith(`class-workspaces/${workspace().id}/quizzes`);
+});
+
+test('a quiz in an unreviewed binding spanning two terms has no exact live navigation hint', async () => {
+  read.mockResolvedValue(source(record(1, { semester: '1' }), record(2, { semester: '2', linkedCourseId: workspace().id })));
+  mockPlatformRead(async (path, body) => path === 'class-workspaces' ? { workspaces: [workspace()] }
+    : { workspaceId: body?.workspaceId, status: 'unreviewed', course: null, membershipActive: true, memberRole: 'student' });
+  mockCourseworkRead(async (path) => path.endsWith('/quizzes')
+    ? { quizzes: [quiz(1, { dueAt: '2027-02-02T23:59:00+08:00' })] } : { assignments: [] });
+  const result = await plan({ now: Date.parse('2027-01-31T09:00:00+08:00') });
+  expect(result.comparisonBasis?.quizzes?.status).toBe('partial');
+  expect(result.steps.find((step) => step.kind === 'quiz')).not.toHaveProperty('nuniQuizSource');
+  expect(result.agenda?.days.flatMap((day) => day.deadlines)).toHaveLength(1);
+  expect(JSON.stringify(result.agenda)).not.toContain('nuniQuizSource');
+});
+
+test.each(['幫我安排未來七天的課表與作業', '本週學習計畫', '明天作業優先順序', '下週讀書計畫',
+  '幫我安排測驗複習', '今天小考優先順序', '規劃待作答測驗'])('recognizes a read-only study plan: %s', (text) => {
   expect(isNuniCampusPlanningQuestion(text)).toBe(true);
 });
-test.each(['幫我安排今天作業並直接提交', '下一堂課在哪裡', '幫我發訊息給老師', '有什麼作業'])('does not reinterpret a mutation or a course lookup as a plan: %s', (text) => {
+test.each(['幫我安排今天作業並直接提交', '幫我安排測驗並直接交卷', '規劃今天並幫我作答',
+  '下一堂課在哪裡', '幫我發訊息給老師', '有什麼作業'])('does not reinterpret a mutation or a course lookup as a plan: %s', (text) => {
   expect(isNuniCampusPlanningQuestion(text)).toBe(false);
 });

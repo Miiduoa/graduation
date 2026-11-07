@@ -36,7 +36,8 @@ export function CampusPlanComparisonCard({ comparison, disabled, onOpenOriginal 
   const expanded = view.comparison === comparison && view.expanded;
 
   const visibleChanges = expanded ? comparison.changes : comparison.changes.slice(0, PREVIEW_COUNT);
-  const hasComparableContent = comparison.comparableDates > 0 || comparison.unchangedAssignments > 0;
+  const hasComparableContent = comparison.comparableDates > 0 || comparison.unchangedAssignments > 0 ||
+    (comparison.unchangedQuizzes ?? 0) > 0;
   const summary = comparison.changes.length
     ? '有 ' + comparison.changes.length + ' 項變動或需要核對的內容。'
     : hasComparableContent
@@ -74,6 +75,11 @@ export function CampusPlanComparisonCard({ comparison, disabled, onOpenOriginal 
         {comparison.unchangedAssignments > 0 ? (
           <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
             {comparison.unchangedAssignments} 項作業摘要與原計畫相同。
+          </Text>
+        ) : null}
+        {(comparison.unchangedQuizzes ?? 0) > 0 ? (
+          <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
+            {comparison.unchangedQuizzes} 項測驗摘要與原計畫相同。
           </Text>
         ) : null}
       </View>

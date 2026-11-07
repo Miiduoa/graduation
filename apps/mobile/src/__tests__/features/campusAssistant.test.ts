@@ -31,7 +31,8 @@ jest.mock('../../services/localLLMInference', () => ({
   getDefaultLocalLlmModelId: () => 'qwen2.5-0.5b',
 }));
 jest.mock('../../services/onDeviceSchoolContext', () => ({
-  collectOnDeviceSchoolContext: jest.fn(async ({ schoolId }: { schoolId: string }) => ({
+  collectOnDeviceSchoolContext: jest.fn(async ({ schoolId, uid }: { schoolId: string; uid: string }) => ({
+    ownerUid: uid,
     checkedAt: new Date().toISOString(),
     schoolId, schoolName: '靜宜大學',
     timetable: { source: 'not-available', updatedAt: null, courses: [] },
@@ -221,6 +222,7 @@ test('an offline campus data question resolves without an LLM or Firebase callab
 test('offline timetable read works without downloading a GGUF and never invokes a cloud model', async () => {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
+    ownerUid: 'A',
     checkedAt: '2026-10-26T01:00:00Z',
     schoolId: 'pu',
     schoolName: '靜宜大學',
@@ -357,7 +359,7 @@ test('verified multi-step study plan runs on the phone without GGUF or cloud cal
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   const checkedAt = new Date().toISOString();
   jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
-    checkedAt,
+    ownerUid: 'A', checkedAt,
     schoolId: 'pu', schoolName: '靜宜大學',
     timetable: {
       source: 'saved-device-copy',
@@ -406,7 +408,7 @@ test('offline plan never uses an expired snapshot belonging to another account',
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   const checkedAt = new Date().toISOString();
   jest.mocked(collectOnDeviceSchoolContext).mockResolvedValueOnce({
-    checkedAt, schoolId: 'pu', schoolName: '靜宜大學',
+    ownerUid: 'A', checkedAt, schoolId: 'pu', schoolName: '靜宜大學',
     timetable: {
       source: 'saved-device-copy', updatedAt: checkedAt,
       courses: [{ name: '本人的資料庫課程', day: 1, start: 1, end: 2 }],
@@ -578,7 +580,7 @@ const classOccurrence = {
 function withUpcoming(classes: typeof classOccurrence[] | undefined, checkedAt = '2026-11-05T01:55:00Z') {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   collectOnDeviceSchoolContext.mockResolvedValueOnce({
-    schoolId: 'pu', checkedAt,
+    ownerUid: 'A', schoolId: 'pu', checkedAt,
     timetable: { source: 'saved-device-copy', updatedAt: checkedAt, courses: [], nextClasses: classes },
   });
 }
@@ -654,7 +656,7 @@ test('a room follow-up from another scope never asks the local store to resolve 
 function withCurrent(classes: typeof classOccurrence[] | undefined) {
   const { collectOnDeviceSchoolContext } = require('../../services/onDeviceSchoolContext');
   collectOnDeviceSchoolContext.mockResolvedValueOnce({
-    schoolId: 'pu', checkedAt: '2026-11-05T03:30:00Z',
+    ownerUid: 'A', schoolId: 'pu', checkedAt: '2026-11-05T03:30:00Z',
     timetable: { source: 'saved-device-copy', updatedAt: null, courses: [], currentClasses: classes },
   });
 }

@@ -14,6 +14,16 @@ export type NuniPlanAssignmentSource = {
   assignmentId: string;
 };
 
+export type NuniPlanQuizSource = Omit<NuniPlanAssignmentSource, 'assignmentId'> & {
+  quizId: string;
+};
+
+export type NuniPlanActivityIdentity = {
+  kind?: 'assignment' | 'quiz';
+  nuniSource?: NuniPlanAssignmentSource;
+  nuniQuizSource?: NuniPlanQuizSource;
+};
+
 export type NuniPlanAssignmentTargetInput = {
   source: NuniPlanAssignmentSource;
   accountId: string;
@@ -24,20 +34,27 @@ export type NuniPlanAssignmentTargetInput = {
   signal?: AbortSignal;
 };
 
+export type NuniPlanQuizTargetInput = Omit<NuniPlanAssignmentTargetInput, 'source'> & {
+  source: NuniPlanQuizSource;
+};
+
 export type NuniPlanAssignmentTargetResult =
   | { kind: 'ready'; params: {
     tab: 'courses'; workspaceId: string; assignmentId: string; assistantAccountId: string;
   } }
   | { kind: 'changed' | 'unavailable' | 'session-changed' | 'cancelled' };
 
-const MAX_ASSIGNMENTS = 100;
+const MAX_ACTIVITIES = 100;
+type ActivityKind = 'assignment' | 'quiz';
+type ActivitySource = Omit<NuniPlanAssignmentSource, 'assignmentId'> & { activityId: string };
+type ActivityLookup = Omit<NuniPlanAssignmentTargetInput, 'source'> & { source: ActivitySource };
 
-function assertCurrent(input: NuniPlanAssignmentTargetInput): void {
+function assertCurrent(input: Pick<NuniPlanAssignmentTargetInput, 'signal' | 'isCurrent'>): void {
   if (input.signal?.aborted) throw new NuniError(0, 'REQUEST_CANCELLED');
   if (!input.isCurrent()) throw new NuniError(409, 'SESSION_CHANGED');
 }
 
-function parseSource(value: NuniPlanAssignmentSource): NuniPlanAssignmentSource {
+function parseSource(value: NuniPlanAssignmentSource | NuniPlanQuizSource, kind: ActivityKind): ActivitySource {
   const raw = nuniRecord(value);
   const scope = courseScope(raw);
   // The planner supplies canonical values; do not repair a malformed reference into a new target.
@@ -46,11 +63,12 @@ function parseSource(value: NuniPlanAssignmentSource): NuniPlanAssignmentSource 
     throw new NuniError(422, 'INVALID_INPUT');
   }
   return { ...scope, accountId: nuniId(raw.accountId, 'pa'),
-    workspaceId: nuniId(raw.workspaceId, 'cw'), assignmentId: nuniId(raw.assignmentId, 'cwa') };
+    workspaceId: nuniId(raw.workspaceId, 'cw'),
+    activityId: kind === 'quiz' ? nuniId(raw.quizId, 'cwq') : nuniId(raw.assignmentId, 'cwa') };
 }
 
 /** Multiple meetings may share a workspace, but every binding must agree on the selected term. */
-async function readBinding(input: NuniPlanAssignmentTargetInput): Promise<string | null> {
+async function readBinding(input: ActivityLookup): Promise<string | null> {
   assertCurrent(input);
   const local = await readAssistantTimetable('', input.schoolId, {
     accountId: input.accountId, isCurrent: input.isCurrent,
@@ -74,13 +92,16 @@ async function readBinding(input: NuniPlanAssignmentTargetInput): Promise<string
 }
 
 /** Recheck the current account, saved binding and authorized source immediately before navigation. */
-export async function readNuniPlanAssignmentTarget(input: NuniPlanAssignmentTargetInput): Promise<NuniPlanAssignmentTargetResult> {
+async function readNuniPlanActivityTarget(
+  input: NuniPlanAssignmentTargetInput | NuniPlanQuizTargetInput,
+  kind: ActivityKind,
+): Promise<NuniPlanAssignmentTargetResult> {
   try {
     assertCurrent(input);
-    let source: NuniPlanAssignmentSource;
+    let source: ActivitySource;
     let schoolId: string;
     try {
-      source = parseSource(input.source);
+      source = parseSource(input.source, kind);
       nuniId(input.accountId, 'pa');
       const current = courseScope({ ...source, schoolId: input.schoolId });
       schoolId = toPublicSchoolId(current.schoolId) || current.schoolId;
@@ -94,13 +115,15 @@ export async function readNuniPlanAssignmentTarget(input: NuniPlanAssignmentTarg
 
     const classes = createNuniClasses(async (path) => {
       assertCurrent(lookup);
-      const assignmentsPath = `class-workspaces/${source.workspaceId}/assignments`;
-      const value = path === assignmentsPath ? await lookup.bffRequest(path) : await lookup.request(path);
+      const collection = kind === 'quiz' ? 'quizzes' : 'assignments';
+      const activityPath = `class-workspaces/${source.workspaceId}/${collection}`;
+      const value = kind === 'assignment' && path === activityPath
+        ? await lookup.bffRequest(path) : await lookup.request(path);
       assertCurrent(lookup);
-      if (path === assignmentsPath) {
-        const rows = nuniRecord(value).assignments;
+      if (path === activityPath) {
+        const rows = nuniRecord(value)[collection];
         // This BFF has no continuation cursor. Reject over-limit data instead of silently slicing it.
-        if (!Array.isArray(rows) || rows.length > MAX_ASSIGNMENTS) throw new NuniError(502, 'INVALID_RESPONSE');
+        if (!Array.isArray(rows) || rows.length > MAX_ACTIVITIES) throw new NuniError(502, 'INVALID_RESPONSE');
       }
       return value;
     }, lookup.accountId);
@@ -120,20 +143,22 @@ export async function readNuniPlanAssignmentTarget(input: NuniPlanAssignmentTarg
       return { kind: 'changed' };
     }
 
-    // Reuse receipt/workspace/account validation, including file submissions, from the real BFF parser.
-    const assignments = await classes.assignments(source.workspaceId);
+    // Both real parsers verify the workspace, activity and receipt owner's account.
+    const activities = kind === 'quiz' ? await classes.quizzes(source.workspaceId)
+      : await classes.assignments(source.workspaceId);
     assertCurrent(lookup);
-    if (new Set(assignments.map((item) => item.id)).size !== assignments.length) return { kind: 'unavailable' };
+    if (new Set(activities.map((item) => item.id)).size !== activities.length) return { kind: 'unavailable' };
     if (await readBinding(lookup) !== before) return { kind: 'changed' };
     assertCurrent(lookup);
-    if (!assignments.some((item) => item.id === source.assignmentId)) {
+    if (!activities.some((item) => item.id === source.activityId)) {
       // An omitted row at the source limit is unknown, never evidence of completion or removal.
-      return { kind: assignments.length === MAX_ASSIGNMENTS ? 'unavailable' : 'changed' };
+      return { kind: activities.length === MAX_ACTIVITIES ? 'unavailable' : 'changed' };
     }
     // Renamed, rescheduled, closed or submitted work can still be opened by its exact ID for review.
     // No private content or receipt is carried across the navigation boundary; the destination rereads it.
     return { kind: 'ready', params: { tab: 'courses', workspaceId: source.workspaceId,
-      assignmentId: source.assignmentId, assistantAccountId: lookup.accountId } };
+      // The existing course route accepts both cwa_ assignments and cwq_ quizzes in this field.
+      assignmentId: source.activityId, assistantAccountId: lookup.accountId } };
   } catch (error) {
     if (input.signal?.aborted || (error instanceof NuniError && error.code === 'REQUEST_CANCELLED') ||
         (error instanceof Error && error.name === 'AbortError')) return { kind: 'cancelled' };
@@ -143,4 +168,12 @@ export async function readNuniPlanAssignmentTarget(input: NuniPlanAssignmentTarg
         (error instanceof CourseAccessError && (error.statusCode === 403 || error.statusCode === 404))) return { kind: 'changed' };
     return { kind: 'unavailable' };
   }
+}
+
+export function readNuniPlanAssignmentTarget(input: NuniPlanAssignmentTargetInput): Promise<NuniPlanAssignmentTargetResult> {
+  return readNuniPlanActivityTarget(input, 'assignment');
+}
+
+export function readNuniPlanQuizTarget(input: NuniPlanQuizTargetInput): Promise<NuniPlanAssignmentTargetResult> {
+  return readNuniPlanActivityTarget(input, 'quiz');
 }

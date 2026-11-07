@@ -65,18 +65,25 @@ export function savedPlanTimestamp(value: unknown): string {
 
 const ROUTES: Record<CampusPlanEvidence, CampusPlanRoute> = {
   'authorized-assignments': '/classroom',
+  'authorized-quizzes': '/classroom',
   'saved-timetable': '/timetable',
   'authorized-announcements': '/announcements',
   verification: '/classroom',
 };
 const PRIORITIES: CampusPlanPriority[] = ['overdue', 'urgent', 'soon', 'normal', 'verify'];
+const TASK_KINDS = ['assignment', 'quiz'] as const;
 
 function step(value: unknown): CampusPlanStep {
   const item = row(value);
   const evidence = choice(item.evidence, Object.keys(ROUTES) as CampusPlanEvidence[]);
   const route = choice(item.route, ['/classroom', '/timetable', '/announcements'] as const);
-  if (route !== ROUTES[evidence] || (item.dueAt !== undefined && evidence !== 'authorized-assignments')) return invalid();
-  // Deliberately omit runtime nuniSource. A saved plan is display evidence, not an action context.
+  const kind = item.kind !== undefined ? choice(item.kind, TASK_KINDS) : undefined;
+  if (route !== ROUTES[evidence] ||
+      (item.dueAt !== undefined && evidence !== 'authorized-assignments' && evidence !== 'authorized-quizzes') ||
+      (evidence === 'authorized-quizzes' && kind !== 'quiz') ||
+      (kind === 'quiz' && evidence !== 'authorized-quizzes') ||
+      (kind === 'assignment' && evidence !== 'authorized-assignments')) return invalid();
+  // Neither live source hint is saved. Display evidence never restores permission to open a target.
   return {
     id: text(item.id, 100),
     title: text(item.title, 240),
@@ -84,6 +91,7 @@ function step(value: unknown): CampusPlanStep {
     priority: choice(item.priority, PRIORITIES),
     evidence,
     route,
+    ...(kind !== undefined ? { kind } : {}),
     ...(item.dueAt !== undefined ? { dueAt: savedPlanTimestamp(item.dueAt) } : {}),
     ...(item.groupName !== undefined ? { groupName: text(item.groupName, 160, true) } : {}),
   };
@@ -106,11 +114,13 @@ function course(value: unknown): AgendaCourse {
 }
 function assignment(value: unknown, undated = false): AgendaAssignment {
   const item = row(value);
+  const kind = item.kind !== undefined ? choice(item.kind, TASK_KINDS) : undefined;
   if (undated && item.dueAt !== null && (typeof item.dueAt !== 'string' || item.dueAt.length > 40)) return invalid();
   // Both dated and outside-window rows discard any live target hint on save and restore.
   return {
     title: text(item.title, 240),
     groupName: text(item.groupName, 160, true),
+    ...(kind !== undefined ? { kind } : {}),
     // Unconfirmed date text stays unconfirmed when a historical plan is restored.
     dueAt: undated || item.dueAt === null ? null : savedPlanTimestamp(item.dueAt),
   };
@@ -165,21 +175,23 @@ function agenda(value: unknown): CampusStudyAgenda {
   if (outsideWindow.length + days.reduce((sum, entry) => sum + entry.deadlines.length, 0) > 400) return invalid();
   const timetableAvailable = bool(item.timetableAvailable);
   const assignmentsAvailable = bool(item.assignmentsAvailable);
+  const quizzesAvailable = item.quizzesAvailable !== undefined ? bool(item.quizzesAvailable) : undefined;
   const clockFormat = days[0].scheduledClasses !== undefined;
   if (days.some((entry) => (entry.scheduledClasses !== undefined) !== clockFormat)) return invalid();
+  const tasks = [...outsideWindow, ...days.flatMap((entry) => entry.deadlines)];
   if ((!timetableAvailable && (clockFormat || days.some((entry) => entry.courses.length || entry.gaps.length || entry.conflicts.length))) ||
-      (!assignmentsAvailable && (outsideWindow.length || days.some((entry) => entry.deadlines.length)))) return invalid();
+      tasks.some((entry) => entry.kind === 'quiz' ? quizzesAvailable !== true : !assignmentsAvailable)) return invalid();
   return { days, timetableAvailable, assignmentsAvailable,
+    ...(quizzesAvailable !== undefined ? { quizzesAvailable } : {}),
     ignoredCourses: number(item.ignoredCourses, 0, 80), outsideWindow };
 }
 
-function comparisonBasis(value: unknown): CampusPlanComparisonBasis {
-  const basis = row(value);
-  const assignments = row(basis.assignments);
-  const status = choice(assignments.status, ['complete', 'partial', 'unavailable'] as const);
-  const checkedAt = assignments.checkedAt === null ? null : savedPlanTimestamp(assignments.checkedAt);
-  const total = assignments.total === null ? null : number(assignments.total, 0, Number.MAX_SAFE_INTEGER);
-  const items = list(assignments.items, 400, (value) => {
+function taskBasis(value: unknown, kind: typeof TASK_KINDS[number]): CampusPlanComparisonBasis['assignments'] {
+  const source = row(value);
+  const status = choice(source.status, ['complete', 'partial', 'unavailable'] as const);
+  const checkedAt = source.checkedAt === null ? null : savedPlanTimestamp(source.checkedAt);
+  const total = source.total === null ? null : number(source.total, 0, Number.MAX_SAFE_INTEGER);
+  const items = list(source.items, 400, (value) => {
     const item = row(value);
     let identity: [string, string] | null = null;
     if (item.identity !== null) {
@@ -188,14 +200,26 @@ function comparisonBasis(value: unknown): CampusPlanComparisonBasis {
       if (parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return invalid();
       identity = [parts[0], parts[1]];
     }
-    return { identity, ...assignment(item) };
+    const task = assignment(item);
+    if (task.kind !== undefined && task.kind !== kind) return invalid();
+    return { identity, title: task.title, groupName: task.groupName, dueAt: task.dueAt };
   });
   if (status === 'unavailable') {
     if (checkedAt !== null || total !== null || items.length) return invalid();
   } else if (!checkedAt || (total !== null && total < items.length) ||
       (status === 'complete' && total !== items.length)) return invalid();
+  return { status, checkedAt, total, items };
+}
+
+function comparisonBasis(value: unknown): CampusPlanComparisonBasis {
+  const basis = row(value);
+  const assignments = taskBasis(basis.assignments, 'assignment');
+  const quizzes = basis.quizzes !== undefined ? taskBasis(basis.quizzes, 'quiz') : undefined;
+  // Keep the existing total evidence allowance when both activity sources are present.
+  if (assignments.items.length + (quizzes?.items.length ?? 0) > 400) return invalid();
   return {
-    assignments: { status, checkedAt, total, items },
+    assignments,
+    ...(quizzes !== undefined ? { quizzes } : {}),
     timetableUpdatedAt: basis.timetableUpdatedAt === null ? null : savedPlanTimestamp(basis.timetableUpdatedAt),
   };
 }
@@ -209,7 +233,11 @@ export function copyCampusEvidencePlan(value: unknown): CampusEvidencePlan {
   const savedAgenda = item.agenda !== undefined ? agenda(item.agenda) : undefined;
   const basis = item.comparisonBasis !== undefined ? comparisonBasis(item.comparisonBasis) : undefined;
   if (basis && ((savedAgenda && savedAgenda.assignmentsAvailable !== (basis.assignments.status !== 'unavailable')) ||
-      (basis.assignments.checkedAt && Date.parse(basis.assignments.checkedAt) > Date.parse(checkedAt) + 30_000) ||
+      (savedAgenda && (savedAgenda.quizzesAvailable !== undefined || basis.quizzes !== undefined) &&
+        (savedAgenda.quizzesAvailable === undefined || basis.quizzes === undefined ||
+          savedAgenda.quizzesAvailable !== (basis.quizzes.status !== 'unavailable'))) ||
+      [basis.assignments, basis.quizzes].some((source) => source?.checkedAt &&
+        Date.parse(source.checkedAt) > Date.parse(checkedAt) + 30_000) ||
       (savedAgenda && !savedAgenda.timetableAvailable && basis.timetableUpdatedAt !== null))) return invalid();
   return {
     title: text(item.title, 240),

@@ -12,7 +12,7 @@ import { PreAuthStack } from '../screens/PreAuthStack';
 import { MeStack } from '../screens/MeStack';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { personalImportStorageKey } from '../services/personalImports';
-import type { NuniAssignment } from '@campus/shared/src/nuni';
+import type { NuniAssignment, NuniQuiz } from '@campus/shared/src/nuni';
 import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
 import * as nuniPlanAssignmentTarget from '../services/nuniPlanAssignmentTarget';
 import type { StoredTimetable } from '../services/personalTimetable';
@@ -308,6 +308,82 @@ async function openPlatformWeekPlan() {
   const actions = await screen.findAllByRole('button', { name: '查看這份作業' });
   return { screen, navigation, unhandled, openAssignment: actions[0] };
 }
+
+async function linkedPlanningQuizFixture() {
+  const fixture = await linkedPlanningFixture();
+  const quiz: NuniQuiz = {
+    id: 'cwq_55555555-5555-4555-8555-555555555555', workspaceId: fixture.course.id,
+    title: fixture.assignment.title, prompt: '原本的測驗題目，只在課程頁顯示。',
+    state: 'open', closedAt: null, createdAt: '2026-11-03T08:00:00Z', dueAt: '2026-11-06T07:00:00Z',
+    unitId: null, unitTitle: null, responseCount: 0, myResponse: null,
+  };
+  const decoyQuiz: NuniQuiz = { ...quiz, id: 'cwq_66666666-6666-4666-8666-666666666666',
+    prompt: '另一份同名測驗，不能代替指定測驗。', state: 'closed', closedAt: '2026-11-04T08:00:00Z' };
+  const quizPath = `class-workspaces/${fixture.course.id}/quizzes`;
+  const direct = mockRequest.getMockImplementation()!;
+  mockRequest.mockImplementation(async (path, ...args) => path === quizPath ? { quizzes: [decoyQuiz, quiz] } : direct(path, ...args));
+  return { ...fixture, quiz, decoyQuiz, quizPath };
+}
+
+test('a mixed plan opens the exact quiz through its real platform reader and receiver without choosing a namesake assignment', async () => {
+  const { course, other, assignment, quiz, decoyQuiz, quizPath, assignmentPath } = await linkedPlanningQuizFixture();
+  const { screen, navigation, unhandled } = await openPlatformWeekPlan();
+  expect(mockAssignmentBff.mock.calls.map(([path]) => path)).toEqual([assignmentPath]);
+  expect(screen.queryByText(quiz.prompt)).toBeNull();
+  const updated: NuniQuiz = { ...quiz, title: '小考報告：最新測驗', dueAt: '2026-11-06T06:00:00Z',
+    prompt: '最新測驗要求：請解釋正規化與索引的差異。' };
+  const direct = mockRequest.getMockImplementation()!;
+  let resolveFresh!: (value: unknown) => void;
+  let quizReads = 0;
+  mockRequest.mockImplementation(async (path, ...args) => {
+    if (path !== quizPath) return direct(path, ...args);
+    quizReads++;
+    if (quizReads === 1) return new Promise((resolve) => { resolveFresh = resolve; });
+    return { quizzes: [decoyQuiz, updated] };
+  });
+  await fireEventAsync.press((await screen.findAllByRole('button', { name: '查看這份測驗' }))[0]);
+  await waitFor(() => expect(resolveFresh).toBeDefined());
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+  expect(screen.queryByLabelText('測驗作答區：' + updated.title)).toBeNull();
+  await act(async () => resolveFresh({ quizzes: [decoyQuiz, updated] }));
+  await screen.findByLabelText('測驗作答區：' + updated.title);
+  const selected = within(screen.getByTestId(`quiz-${quiz.id}`));
+  expect(selected.getByText(updated.prompt)).toBeTruthy();
+  expect(screen.queryByLabelText('作業繳交區：' + assignment.title)).toBeNull();
+  expect(within(screen.getByTestId(`quiz-${decoyQuiz.id}`)).queryByLabelText('測驗作答區：' + decoyQuiz.title)).toBeNull();
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: {
+    tab: 'courses', workspaceId: course.id, assignmentId: quiz.id, assistantAccountId: account,
+  } });
+  expect(quizReads).toBeGreaterThanOrEqual(2);
+  expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(other.id))).toBe(false);
+  expect(mockRequest.mock.calls.filter(([path]) => path === quizPath).every(([, , body]) => body === undefined)).toBe(true);
+  expect(mockAssignmentBff.mock.calls.every(([path, , body]) => path === assignmentPath && body === undefined)).toBe(true);
+  expect(unhandled).not.toHaveBeenCalled();
+  await act(async () => navigation.goBack());
+  await screen.findByText('接下來七天的學習行動');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+});
+
+test('the real quiz receiver reports removal after verification and leaves an identically named quiz unfocused', async () => {
+  const { course, quiz, decoyQuiz, quizPath } = await linkedPlanningQuizFixture();
+  const { screen, navigation, unhandled } = await openPlatformWeekPlan();
+  const direct = mockRequest.getMockImplementation()!;
+  let quizReads = 0;
+  mockRequest.mockImplementation(async (path, ...args) => {
+    if (path !== quizPath) return direct(path, ...args);
+    return { quizzes: ++quizReads === 1 ? [decoyQuiz, quiz] : [decoyQuiz] };
+  });
+  await fireEventAsync.press((await screen.findAllByRole('button', { name: '查看這份測驗' }))[0]);
+  await screen.findByText('找不到這份測驗。可能已被老師刪除，或你沒有查看權限。請從測驗列表選擇其他測驗。');
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: {
+    workspaceId: course.id, assignmentId: quiz.id, assistantAccountId: account,
+  } });
+  expect(screen.getByTestId(`quiz-${decoyQuiz.id}`)).toBeTruthy();
+  expect(screen.queryByTestId(`quiz-${quiz.id}`)).toBeNull();
+  expect(screen.queryByLabelText('測驗作答區：' + quiz.title)).toBeNull();
+  expect(quizReads).toBeGreaterThanOrEqual(2);
+  expect(unhandled).not.toHaveBeenCalled();
+});
 
 test('a platform plan freshly checks its exact assignment and the real receiver focuses the updated record', async () => {
   const { course, other, assignment, decoy, assignmentPath } = await linkedPlanningFixture();

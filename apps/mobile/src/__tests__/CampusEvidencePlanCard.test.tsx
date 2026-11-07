@@ -7,7 +7,7 @@ import { CampusAssignmentReminderAction } from '../screens/CampusAssignmentRemin
 import { buildCampusStudyAgenda, resolveStudyWindow } from '../services/campusStudyAgenda';
 import type { CampusEvidencePlan } from '../services/offlineCampusPlanner';
 import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
-import type { NuniPlanAssignmentSource } from '../services/nuniPlanAssignmentTarget';
+import type { NuniPlanAssignmentSource, NuniPlanActivityIdentity } from '../services/nuniPlanAssignmentTarget';
 
 jest.mock('../screens/CampusAssignmentOpenButton', () => ({ CampusAssignmentOpenButton: jest.fn(() => null) }));
 jest.mock('../screens/CampusAssignmentReminderAction', () => ({ CampusAssignmentReminderAction: jest.fn(() => null) }));
@@ -95,4 +95,34 @@ test('without the platform renderer the existing live Firebase action still rece
     assignment: expect.objectContaining({ title: '資料庫報告' }), context: reminderContext, navigation, disabled: false,
   }), undefined);
   expect(CampusAssignmentReminderAction).toHaveBeenCalled();
+});
+
+test('quiz steps, daily deadlines and undated work preserve their kind and live target without enabling assignment reminders', () => {
+  const nuniQuizSource = { accountId: source.accountId, schoolId: source.schoolId,
+    academicYear: source.academicYear, semester: source.semester, workspaceId: source.workspaceId, quizId: 'quiz-one' };
+  const task = { kind: 'quiz' as const, title: '資料庫測驗', groupName: '資料庫',
+    dueAt: '2026-11-08T18:00:00+08:00', nuniQuizSource };
+  const quizPlan: CampusEvidencePlan = { ...plan(), steps: [{ ...task, id: 'quiz-one',
+    detail: '參考期限 18:00，先核對課程。', priority: 'urgent', evidence: 'authorized-quizzes', route: '/classroom' }],
+  agenda: buildCampusStudyAgenda({ now, window: resolveStudyWindow('今天', now)!, courses: [], assignments: null,
+    quizzes: [task, { ...task, title: '未定日期測驗', dueAt: null }] }) };
+  const renderAction = jest.fn((item: CampusAssignmentIdentity & NuniPlanActivityIdentity) => <Text>{'測驗入口：' + item.title}</Text>);
+  const view = render(<CampusEvidencePlanCard plan={quizPlan} disabled={false} renderAssignmentAction={renderAction}
+    reminderContext={reminderContext} navigation={{ navigate: jest.fn() }} />);
+  expect(view.getAllByText('測驗入口：資料庫測驗')).toHaveLength(2);
+  expect(view.getByText('依據：已授權測驗摘要')).toBeTruthy();
+  expect(view.getByText('24 小時內 · 測驗參考期限')).toBeTruthy();
+  expect(view.getByText('作業來源不可用，不能判定是否已全部完成。')).toBeTruthy();
+  fireEvent.press(view.getByRole('button', { name: '查看其他 1 項課業' }));
+  expect(view.getByText('測驗入口：未定日期測驗')).toBeTruthy();
+  expect(renderAction.mock.calls.every(([item]) => item.kind === 'quiz' && item.nuniQuizSource === nuniQuizSource)).toBe(true);
+  expect(CampusAssignmentOpenButton).not.toHaveBeenCalled();
+  expect(CampusAssignmentReminderAction).not.toHaveBeenCalled();
+  renderAction.mockClear();
+  view.rerender(<CampusEvidencePlanCard plan={quizPlan} historical disabled={false}
+    renderAssignmentAction={renderAction} reminderContext={reminderContext} navigation={{ navigate: jest.fn() }} />);
+  expect(renderAction).not.toHaveBeenCalled();
+  expect(view.queryByText('測驗入口：資料庫測驗')).toBeNull();
+  expect(CampusAssignmentOpenButton).not.toHaveBeenCalled();
+  expect(CampusAssignmentReminderAction).not.toHaveBeenCalled();
 });

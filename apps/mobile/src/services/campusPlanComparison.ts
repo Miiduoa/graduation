@@ -14,12 +14,14 @@ export interface CampusPlanComparisonBasis {
       dueAt: string | null;
     }>;
   };
+  /** Kept separate so a failed or older quiz read cannot change assignment conclusions. */
+  quizzes?: CampusPlanComparisonBasis['assignments'];
   timetableUpdatedAt: string | null;
 }
 
 export interface CampusPlanChange {
   id: string;
-  category: 'assignment' | 'timetable' | 'scope' | 'source';
+  category: 'assignment' | 'quiz' | 'timetable' | 'scope' | 'source';
   kind: 'added' | 'missing' | 'changed' | 'unverifiable' | 'window';
   title: string;
   before?: string;
@@ -33,12 +35,15 @@ export interface CampusPlanComparison {
   currentCheckedAt: string;
   changes: CampusPlanChange[];
   unchangedAssignments: number;
+  /** Absent when neither plan inspected a quiz source. */
+  unchangedQuizzes?: number;
   comparableDates: number;
   limitations: string[];
 }
 
-type AssignmentBasis = CampusPlanComparisonBasis['assignments'];
-type Assignment = AssignmentBasis['items'][number];
+type TaskBasis = CampusPlanComparisonBasis['assignments'];
+type Task = TaskBasis['items'][number];
+type TaskKind = 'assignment' | 'quiz';
 
 const timestampFormat = new Intl.DateTimeFormat('zh-TW', {
   timeZone: 'Asia/Taipei', year: 'numeric', month: 'numeric', day: 'numeric',
@@ -62,13 +67,15 @@ function dateTime(value: string | null): string {
     seconds + (fraction ? '.' + String(fraction).padStart(3, '0') : '');
 }
 
-function assignmentText(item: Assignment): string {
+function taskText(item: Task, kind: TaskKind): string {
+  const deadline = kind === 'quiz' ? '參考期限' : '截止時間';
   return (item.groupName ? item.groupName + '｜' : '') + item.title + '\n' +
-    (timestamp(item.dueAt) === null ? '截止時間未確認' : '截止 ' + dateTime(item.dueAt));
+    (timestamp(item.dueAt) === null ? deadline + '未確認' :
+      (kind === 'quiz' ? '參考期限 ' : '截止 ') + dateTime(item.dueAt));
 }
 
-function assignmentIndex(items: Assignment[]) {
-  const rows = new Map<string, Assignment>();
+function taskIndex(items: Task[]) {
+  const rows = new Map<string, Task>();
   const duplicates = new Set<string>();
   let unidentified = 0;
   for (const item of items) {
@@ -84,37 +91,42 @@ function assignmentIndex(items: Assignment[]) {
   return { rows, duplicates, unidentified };
 }
 
-function completeIdentities(basis: AssignmentBasis, index: ReturnType<typeof assignmentIndex>): boolean {
+function completeIdentities(basis: TaskBasis, index: ReturnType<typeof taskIndex>): boolean {
   return basis.status === 'complete' && basis.total === basis.items.length &&
     index.unidentified === 0 && index.duplicates.size === 0;
 }
 
-function compareAssignments(
-  before: AssignmentBasis | undefined,
-  after: AssignmentBasis | undefined,
+function compareTasks(
+  before: TaskBasis | undefined,
+  after: TaskBasis | undefined,
   result: CampusPlanComparison,
   priorities: Map<string, number>,
+  kind: TaskKind,
 ): void {
+  const name = kind === 'quiz' ? '測驗' : '作業';
   if (!before || !after) {
     result.changes.push({
-      id: 'source:assignment-history', category: 'source', kind: 'unverifiable',
-      title: '作業來源無法完整比對',
-      detail: !before ? '原計畫未保存作業的來源識別，無法確認哪些是同一份作業。'
-        : '本次沒有作業比對資料，請重新整理或開啟課程頁核對。',
+      id: 'source:' + kind + '-history', category: 'source', kind: 'unverifiable',
+      title: name + '來源無法完整比對',
+      detail: !before ? kind === 'quiz'
+        ? '原計畫未保存測驗來源，這次開始納入；無法判定哪些測驗是新發布或曾經完成。' +
+          (after?.status === 'unavailable' ? '這次測驗來源也不可用，請稍後重新整理。' : '')
+        : '原計畫未保存作業的來源識別，無法確認哪些是同一份作業。'
+        : '本次沒有' + name + '比對資料，請重新整理或開啟課程頁核對。',
       route: '/classroom',
     });
-    result.limitations.push('未以同名、摘要順序或個人勾選推定作業的新增、延期或完成。');
+    result.limitations.push('未以同名、摘要順序或個人勾選推定' + name + '的新增、延期或完成。');
     return;
   }
 
   const status = { complete: '完整摘要', partial: '部分摘要', unavailable: '來源不可用' };
   if (before.status !== 'complete' || after.status !== 'complete') {
     result.changes.push({
-      id: 'source:assignment-coverage', category: 'source', kind: 'unverifiable',
-      title: '作業資料仍有待核對', before: status[before.status], after: status[after.status],
-      detail: after.status === 'unavailable' ? '這次無法讀取作業，未出現的項目不能視為已完成。'
-        : before.status === 'unavailable' ? '原計畫沒有可用作業來源，無法確認本次列出的項目是否新增。'
-          : '部分摘要可能漏列項目，只比對兩次都有來源識別的內容。',
+      id: 'source:' + kind + '-coverage', category: 'source', kind: 'unverifiable',
+      title: name + '資料仍有待核對', before: status[before.status], after: status[after.status],
+      detail: after.status === 'unavailable' ? '這次無法讀取' + name + '，未出現的項目不能視為已完成。'
+        : before.status === 'unavailable' ? '原計畫沒有可用' + name + '來源，無法確認本次列出的項目是否新增。'
+          : '部分' + (kind === 'quiz' ? '測驗' : '') + '摘要可能漏列項目，只比對兩次都有來源識別的內容。',
       route: '/classroom',
     });
   }
@@ -124,32 +136,32 @@ function compareAssignments(
   const later = timestamp(after.checkedAt);
   if (earlier !== null && later !== null && later < earlier) {
     result.changes.push({
-      id: 'source:assignment-time', category: 'source', kind: 'unverifiable',
-      title: '本次作業資料較舊', before: dateTime(before.checkedAt), after: dateTime(after.checkedAt),
-      detail: '本次摘要早於原計畫的來源，請更新資料後再核對變動。', route: '/classroom',
+      id: 'source:' + kind + '-time', category: 'source', kind: 'unverifiable',
+      title: '本次' + name + '資料較舊', before: dateTime(before.checkedAt), after: dateTime(after.checkedAt),
+      detail: '本次' + (kind === 'quiz' ? '測驗' : '') + '摘要早於原計畫的來源，請更新資料後再核對變動。', route: '/classroom',
     });
     return;
   }
   if (earlier !== null && earlier === later) {
-    result.limitations.push('本次沿用同一次作業同步資料，尚未取得較新的校方摘要。');
+    result.limitations.push('本次沿用同一次' + name + '同步資料，尚未取得較新的校方摘要。');
   } else if (earlier === null || later === null) {
-    result.limitations.push('部分作業來源缺少同步時間，無法確認資料是否更新。');
+    result.limitations.push('部分' + name + '來源缺少同步時間，無法確認資料是否更新。');
   }
 
-  const previous = assignmentIndex(before.items);
-  const current = assignmentIndex(after.items);
+  const previous = taskIndex(before.items);
+  const current = taskIndex(after.items);
   const ambiguous = new Set([...previous.duplicates, ...current.duplicates]);
   if (ambiguous.size || previous.unidentified || current.unidentified) {
     result.changes.push({
-      id: 'source:assignment-identities', category: 'source', kind: 'unverifiable',
-      title: '部分作業無法一一對照',
-      detail: '有項目缺少來源識別或識別重複，已略過不確定的對應；不按同名或排列順序配對。',
+      id: 'source:' + kind + '-identities', category: 'source', kind: 'unverifiable',
+      title: '部分' + name + '無法一一對照',
+      detail: '有' + (kind === 'quiz' ? '測驗' : '') + '項目缺少來源識別或識別重複，已略過不確定的對應；不按同名或排列順序配對。',
       route: '/classroom',
     });
   }
   for (const [label, basis] of [['原計畫', before], ['本次', after]] as const) {
     if (basis.status === 'complete' && basis.total !== basis.items.length) {
-      result.limitations.push(label + '的作業總數與已讀內容不一致，未據此判定新增或未列出項目。');
+      result.limitations.push(label + '的' + name + '總數與已讀內容不一致，未據此判定新增或未列出項目。');
     }
   }
 
@@ -160,10 +172,10 @@ function compareAssignments(
     if (!prior) {
       const added = completeIdentities(before, previous);
       result.changes.push({
-        id: 'assignment:current:' + key, category: 'assignment', kind: added ? 'added' : 'unverifiable',
-        title: next.title, after: assignmentText(next),
-        detail: added ? '本次摘要多出這項待辦，請開啟作業頁確認內容。'
-          : '本次查到這項待辦；原資料不完整，無法判定是否新增。',
+        id: kind + ':current:' + key, category: kind, kind: added ? 'added' : 'unverifiable',
+        title: next.title, after: taskText(next, kind),
+        detail: added ? '本次摘要多出這項' + (kind === 'quiz' ? '測驗' : '待辦') + '，請開啟' + name + '頁確認內容。'
+          : '本次查到這項' + (kind === 'quiz' ? '測驗' : '待辦') + '；原資料不完整，無法判定是否新增。',
         route: '/classroom',
       });
       continue;
@@ -172,20 +184,22 @@ function compareAssignments(
     const oldDue = timestamp(prior.dueAt);
     const newDue = timestamp(next.dueAt);
     if (!nameChanged && oldDue === newDue) {
-      result.unchangedAssignments += 1;
+      if (kind === 'quiz') result.unchangedQuizzes = (result.unchangedQuizzes ?? 0) + 1;
+      else result.unchangedAssignments += 1;
       continue;
     }
+    const deadlineLabel = kind === 'quiz' ? '測驗參考期限' : '截止時間';
     const deadline = oldDue === newDue ? ''
-      : newDue === null ? '本次截止時間未確認，不能視為取消期限。'
-        : oldDue === null ? '本次取得了可核對的截止時間。' : '截止時間有變動。';
-    const id = 'assignment:changed:' + key;
+      : newDue === null ? '本次' + deadlineLabel + '未確認，不能視為取消期限。'
+        : oldDue === null ? '本次取得了可核對的' + deadlineLabel + '。' : deadlineLabel + '有變動。';
+    const id = kind + ':changed:' + key;
     priorities.set(id, oldDue !== newDue && newDue !== null
       ? oldDue !== null && newDue < oldDue ? 0 : 1 : 2);
     result.changes.push({
-      id, category: 'assignment',
+      id, category: kind,
       kind: !nameChanged && newDue === null ? 'unverifiable' : 'changed',
-      title: next.title, before: assignmentText(prior), after: assignmentText(next),
-      detail: (nameChanged ? '作業或課程名稱有更新。' : '') + deadline + '請開啟作業頁核對。',
+      title: next.title, before: taskText(prior, kind), after: taskText(next, kind),
+      detail: (nameChanged ? name + '或課程名稱有更新。' : '') + deadline + '請開啟' + name + '頁核對。',
       route: '/classroom',
     });
   }
@@ -194,10 +208,12 @@ function compareAssignments(
     const prior = previous.rows.get(key)!;
     const missing = completeIdentities(after, current);
     result.changes.push({
-      id: 'assignment:previous:' + key, category: 'assignment', kind: missing ? 'missing' : 'unverifiable',
-      title: prior.title, before: assignmentText(prior),
-      detail: missing ? '本次摘要未列出；這不能證明已繳交，請到課程頁核對。'
-        : '本次資料不足以核對這項待辦，未判定為移除或完成。',
+      id: kind + ':previous:' + key, category: kind, kind: missing ? 'missing' : 'unverifiable',
+      title: prior.title, before: taskText(prior, kind),
+      detail: missing ? kind === 'quiz'
+        ? '本次摘要未列出這項測驗；這不能證明已作答或完成，請到課程頁核對。'
+        : '本次摘要未列出；這不能證明已繳交，請到課程頁核對。'
+        : '本次資料不足以核對這項' + (kind === 'quiz' ? '測驗' : '待辦') + '，未判定為移除或完成。',
       route: '/classroom',
     });
   }
@@ -305,13 +321,16 @@ function compareTimetable(before: CampusEvidencePlan, after: CampusEvidencePlan,
 
 /** Compare displayed evidence only; never copy progress, refresh a source or execute an action. */
 export function compareCampusPlans(before: CampusEvidencePlan, after: CampusEvidencePlan): CampusPlanComparison {
+  const hasQuizzes = before.comparisonBasis?.quizzes !== undefined || after.comparisonBasis?.quizzes !== undefined;
   const result: CampusPlanComparison = {
     previousCheckedAt: before.checkedAt,
     currentCheckedAt: after.checkedAt,
     changes: [], unchangedAssignments: 0, comparableDates: 0, limitations: [],
+    ...(hasQuizzes ? { unchangedQuizzes: 0 } : {}),
   };
   const priorities = new Map<string, number>();
-  compareAssignments(before.comparisonBasis?.assignments, after.comparisonBasis?.assignments, result, priorities);
+  compareTasks(before.comparisonBasis?.assignments, after.comparisonBasis?.assignments, result, priorities, 'assignment');
+  if (hasQuizzes) compareTasks(before.comparisonBasis?.quizzes, after.comparisonBasis?.quizzes, result, priorities, 'quiz');
   compareTimetable(before, after, result);
   // Put verified deadline changes first, then retain source warnings before long lists of new rows.
   const rank = (change: CampusPlanChange) => priorities.get(change.id) ??

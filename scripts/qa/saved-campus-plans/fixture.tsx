@@ -10,7 +10,7 @@ import { applyTheme, theme } from '../../../apps/mobile/src/ui/theme';
 import type { SavedCampusPlan } from '../../../apps/mobile/src/services/savedCampusPlans';
 import type { CampusPlanComparison } from '../../../apps/mobile/src/services/campusPlanComparison';
 import type { CampusEvidencePlan } from '../../../apps/mobile/src/services/offlineCampusPlanner';
-import type { NuniPlanAssignmentSource } from '../../../apps/mobile/src/services/nuniPlanAssignmentTarget';
+import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from '../../../apps/mobile/src/services/nuniPlanAssignmentTarget';
 
 const mode = new URLSearchParams(location.search).get('theme') === 'dark' ? 'dark' : 'light';
 applyTheme(mode);
@@ -107,6 +107,7 @@ declare global {
   interface Window {
     qaEvents: unknown[];
     qaSettleAssignmentRead?: (kind: 'ready' | 'unavailable' | 'changed') => void;
+    qaSettleQuizRead?: (kind: 'ready' | 'unavailable' | 'changed') => void;
   }
 }
 window.qaEvents = [];
@@ -294,6 +295,28 @@ const assignmentPlan: CampusEvidencePlan = {
   },
 };
 
+const quizSource: NuniPlanQuizSource = {
+  accountId: assignmentSource.accountId, schoolId: assignmentSource.schoolId,
+  academicYear: assignmentSource.academicYear, semester: assignmentSource.semester,
+  workspaceId: assignmentSource.workspaceId, quizId: 'cwq_11111111-1111-4111-8111-111111111111',
+};
+const quizTask = {
+  kind: 'quiz' as const, title: '資料庫系統線上測驗：跨校課程整合、資料正規化與權限隔離',
+  groupName: '資料庫系統', dueAt: '2026-11-08T10:00:00.000Z', nuniQuizSource: quizSource,
+};
+const quizPlan: CampusEvidencePlan = {
+  ...assignmentPlan, title: '作業與測驗一起安排',
+  steps: [{ ...quizTask, id: 'quiz-preparation', priority: 'urgent', evidence: 'authorized-quizzes', route: '/classroom',
+    detail: '參考期限 11/8 18:00。建議先用 10:10–10:40 複習這份測驗的課程內容；開考時間與作答方式請到課程頁核對。' },
+  ...assignmentPlan.steps],
+  agenda: { ...assignmentPlan.agenda!, quizzesAvailable: true,
+    days: assignmentPlan.agenda!.days.map((day) => ({ ...day,
+      deadlines: [{ ...quizTask, timeLabel: '18:00', overdue: false }, ...day.deadlines] })),
+    outsideWindow: [{ ...quizTask, title: '尚未確認期限的測驗', dueAt: null, reason: 'undated',
+      nuniQuizSource: { ...quizSource, quizId: 'cwq_22222222-2222-4222-8222-222222222222' } }],
+  },
+};
+
 // The production button and card are real. Only their injected reader and
 // navigation are controlled here; the navigation integration suite covers the
 // real planner, source checks, account guard and destination separately.
@@ -313,6 +336,18 @@ const assignmentContext: NuniPlanAssignmentOpenContext = {
       };
     });
   },
+  readQuizTarget: async (input) => {
+    window.qaEvents.push({ kind: 'quiz-read', source: input.source });
+    return new Promise((resolve) => {
+      window.qaSettleQuizRead = (kind) => {
+        delete window.qaSettleQuizRead;
+        resolve(kind === 'ready' ? { kind, params: {
+          tab: 'courses', workspaceId: input.source.workspaceId,
+          assignmentId: input.source.quizId, assistantAccountId: input.accountId,
+        } } : { kind });
+      };
+    });
+  },
 };
 const assignmentNavigation = {
   getState: () => ({ routeNames: ['NuniWorkspace'] }),
@@ -321,12 +356,12 @@ const assignmentNavigation = {
   },
 };
 
-function AssignmentPlanningApp() {
+function AssignmentPlanningApp({ quiz = false }: { quiz?: boolean }) {
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   return <View style={{ minHeight: '100vh' as never, backgroundColor: theme.colors.bg, padding: 20, gap: 12 }}>
     <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>課業助理</Text>
-    <View testID="assignment-plan-preview">
-      <CampusEvidencePlanCard plan={assignmentPlan} disabled={false}
+    <View testID={quiz ? 'quiz-plan-preview' : 'assignment-plan-preview'}>
+      <CampusEvidencePlanCard plan={quiz ? quizPlan : assignmentPlan} disabled={false}
         progress={{ completedStepIds, onToggleStep: (stepId, done) => {
           window.qaEvents.push({ kind: 'toggle', stepId, done });
           setCompletedStepIds(done ? [stepId] : []);
@@ -338,12 +373,12 @@ function AssignmentPlanningApp() {
         )} />
     </View>
     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 20 }}>
-      測試畫面：使用正式卡片與作業按鈕；來源、核對回覆與導覽皆為合成控制。本情境只驗證顯示與互動，未連接平台，也未載入作業接收頁。
+      測試畫面：使用正式卡片與課業按鈕；來源、核對回覆與導覽皆為合成控制。本情境只驗證顯示與互動，未連接平台，也未載入課程接收頁。
     </Text>
   </View>;
 }
 
 const scenario = new URLSearchParams(location.search).get('scenario');
-createRoot(document.getElementById('root')!).render(scenario === 'assignment' ? <AssignmentPlanningApp />
+createRoot(document.getElementById('root')!).render(scenario === 'assignment' || scenario === 'quiz' ? <AssignmentPlanningApp quiz={scenario === 'quiz'} />
   : scenario === 'platform' || scenario === 'clock'
     ? <PlatformPlanningApp clock={scenario === 'clock'} /> : <App />);

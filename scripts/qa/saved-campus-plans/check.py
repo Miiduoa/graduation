@@ -479,6 +479,60 @@ async def assignment_scenario(browser, port, width, mode):
             'fixtureScope': 'Real CampusEvidencePlanCard and NuniPlanAssignmentOpenButton with synthetic live-source metadata, controlled reader outcomes and navigation callbacks; no planner, fresh authorization, account transition, destination, network, storage or native-device verification.'}
 
 
+async def quiz_scenario(browser, port, width, mode):
+    label = f'quiz-{width}-{mode}'
+    page = await browser.new_page(viewport={'width': width, 'height': 844}, device_scale_factor=1)
+    errors, external = [], []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('request', lambda request: external.append(request.url)
+            if not request.url.startswith(f'http://127.0.0.1:{port}/') else None)
+    await page.goto(f'http://127.0.0.1:{port}/saved-plans-preview.html?theme={mode}&scenario=quiz', wait_until='networkidle')
+    preview = page.get_by_test_id('quiz-plan-preview')
+    actions = preview.get_by_role('button', name='查看這份測驗', exact=True)
+    await expect(actions).to_have_count(2)
+    await expect(preview.get_by_text('依據：已授權測驗摘要', exact=True)).to_be_visible()
+    await expect(preview.get_by_text(re.compile(r'^測驗參考期限 18:00'))).to_be_visible()
+    await expect(preview.get_by_role('button', name='查看這份作業', exact=True)).to_have_count(2)
+    checks = [await geometry(page)]
+    await page.screenshot(path=str(ROOT / f'{label}-mixed-plan.png'), full_page=True)
+    await actions.first.focus()
+    await actions.first.press('Enter')
+    await expect(preview.get_by_role('button', name='正在核對測驗…', exact=True)).to_be_disabled()
+    await page.evaluate("window.qaSettleQuizRead('unavailable')")
+    await expect(preview.get_by_role('alert')).to_have_text('暫時無法核對這份測驗，請稍後重試，或從課程與作業入口確認。')
+    retry = preview.get_by_role('button', name='重新核對這份測驗', exact=True)
+    await expect(retry).to_be_enabled()
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-retry.png'), full_page=True)
+    await retry.focus()
+    await retry.press('Enter')
+    await page.evaluate("window.qaSettleQuizRead('ready')")
+    await expect(preview.get_by_role('alert')).to_have_count(0)
+    await preview.get_by_role('button', name='查看其他 1 項課業', exact=True).click()
+    await expect(preview.get_by_text('測驗 · 參考期限未確認', exact=True)).to_be_visible()
+    await expect(actions).to_have_count(3)
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-undated.png'), full_page=True)
+    await actions.last.click()
+    await page.evaluate("window.qaSettleQuizRead('changed')")
+    await expect(preview.get_by_role('alert')).to_have_text('測驗來源或課程連結已變更，請重新核對，或從課程與作業入口確認。')
+    for checkbox in await preview.get_by_role('checkbox').all():
+        await expect(checkbox).to_have_attribute('aria-checked', 'false')
+    checks.append(await geometry(page))
+    await page.screenshot(path=str(ROOT / f'{label}-changed.png'), full_page=True)
+    events = await page.evaluate('window.qaEvents')
+    assert [event['kind'] for event in events] == ['quiz-read', 'quiz-read', 'assignment-navigation', 'quiz-read'], events
+    assert events[0]['source'] == events[1]['source'], events
+    assert events[2]['params']['assignmentId'] == events[0]['source']['quizId'], events
+    assert events[3]['source']['quizId'] != events[0]['source']['quizId'], events
+    assert not errors and not external, [errors, external]
+    for result in checks:
+        assert result['documentWidth'] <= width and not result['clipped'] and not result['smallControls'], result
+    await page.close()
+    return {'scenario': label, 'events': events, 'geometry': checks, 'pageErrors': errors, 'externalRequests': external,
+            'fixtureScope': 'Production mixed plan and quiz button with synthetic data, controlled reader and navigation; no account authorization, real quiz submission or native-device verification.'}
+
+
 async def main():
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
@@ -495,6 +549,7 @@ async def main():
                 results.append(await platform_scenario(browser, port, width, mode))
                 results.append(await clock_scenario(browser, port, width, mode))
                 results.append(await assignment_scenario(browser, port, width, mode))
+                results.append(await quiz_scenario(browser, port, width, mode))
             await browser.close()
     finally:
         server.shutdown()

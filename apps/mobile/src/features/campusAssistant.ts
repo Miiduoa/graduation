@@ -197,7 +197,7 @@ export async function askCampusAssistant(input: {
       return { source: 'device', tool: 'saved-timetable', hasActions: false,
         content: '可以問「幫我安排未來七天的課表與作業」、「我現在有課嗎？」或「下一堂課在哪裡？」。查到課程後，也可以接著問教室與下課時間。' };
     }
-    const snapshot = await collectOnDeviceSchoolContext({
+    const collected = await collectOnDeviceSchoolContext({
       uid,
       schoolId: input.scope.schoolId,
       schoolName: input.schoolName,
@@ -209,6 +209,12 @@ export async function askCampusAssistant(input: {
     });
     scopeCheck(input, false);
     assertNotCancelled();
+    // A cached context can outlive an account switch or be restored without
+    // owner metadata. Direct timetable and planning tools must fail closed,
+    // not just the native prompt and model-selected semantic reads.
+    const snapshot = !platform && (!uid || collected.ownerUid !== uid)
+      ? { ...collected, timetable: { source: 'not-available' as const, updatedAt: null, courses: [] } }
+      : collected;
 
     // Safe read-only tools run even without a GGUF download or a native runtime.
     // They do not query a backend, perform mutations, or invent missing school data.
@@ -301,6 +307,11 @@ export async function askCampusAssistant(input: {
       throw new OnDeviceAssistantError('model-busy');
     }
 
+    // Native inference can consume private context before an eventual response is discarded.
+    // Recheck after the selector and shared engine state, immediately before sending it.
+    scopeCheck(input, false);
+    assertNotCancelled();
+
     // Each request gets explicitly scoped history; never reuse a global chat history
     // that could contain data from a previous account or campus.
     // Reserve enough context for the instruction, trusted data and generated answer.
@@ -316,6 +327,7 @@ export async function askCampusAssistant(input: {
         { role: 'system', content: formatOnDeviceSchoolPrompt(
           { ...snapshot, checkedAt: new Date().toISOString() },
           useCampusReads ? validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }) : null,
+          uid,
         ) },
         ...compactHistory,
       ],

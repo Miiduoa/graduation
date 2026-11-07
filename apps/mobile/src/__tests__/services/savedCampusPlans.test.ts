@@ -284,6 +284,140 @@ function comparableSample(): CampusEvidencePlan {
   return plan;
 }
 
+function mixedTaskSample(): CampusEvidencePlan {
+  const plan = comparableSample();
+  plan.steps[0].kind = 'assignment';
+  plan.steps.push({ id: 'quiz-0', kind: 'quiz', title: '單元小考', detail: '參考期限需到測驗頁核對。',
+    evidence: 'authorized-quizzes', priority: 'urgent', route: '/classroom',
+    dueAt: '2026-11-06T21:00:00+08:00', groupName: '資料庫系統' });
+  plan.agenda!.quizzesAvailable = true;
+  plan.agenda!.days[0].deadlines[0].kind = 'assignment';
+  plan.agenda!.days[0].deadlines.push({ kind: 'quiz', title: '單元小考', groupName: '資料庫系統',
+    dueAt: '2026-11-06T21:00:00+08:00', timeLabel: '21:00', overdue: false });
+  plan.agenda!.outsideWindow.push({ kind: 'quiz', title: '下週小考', groupName: '資訊管理',
+    dueAt: '2026-11-09T21:00:00+08:00', reason: 'after-window' });
+  plan.comparisonBasis!.quizzes = {
+    status: 'complete', checkedAt: '2026-11-06T00:58:00Z', total: 2,
+    items: [
+      { identity: ['database', 'quiz'], title: '單元小考', groupName: '資料庫系統', dueAt: '2026-11-06T21:00:00+08:00' },
+      { identity: ['mis', 'quiz'], title: '下週小考', groupName: '資訊管理', dueAt: '2026-11-09T21:00:00+08:00' },
+    ],
+  };
+  return plan;
+}
+
+test('mixed quiz and assignment plans retain types, progress and independent source evidence after restart', async () => {
+  const plan = mixedTaskSample();
+  const saved = await saveCampusPlan(scope, { question, plan }, session());
+  await setCampusPlanStepDone(scope, saved[0].id, 'quiz-0', true, session());
+  const restored = await readSavedCampusPlans(scope, session());
+  expect(restored[0].plan).toEqual(plan);
+  expect(restored[0].completedStepIds).toEqual(['quiz-0']);
+  expect(restored[0].plan.agenda!.outsideWindow[1].kind).toBe('quiz');
+  expect(restored[0].plan.comparisonBasis!.quizzes!.checkedAt).toBe('2026-11-06T00:58:00Z');
+  restored[0].plan.comparisonBasis!.quizzes!.items[0].identity![0] = 'another-course';
+  expect((await readSavedCampusPlans(scope, session()))[0].plan.comparisonBasis!.quizzes!.items[0].identity)
+    .toEqual(['database', 'quiz']);
+});
+
+test('saving and restoring quiz evidence strips both live navigation hints at every task position', async () => {
+  const live = mixedTaskSample();
+  const nuniSource = { accountId: 'student-a', schoolId: 'pu', academicYear: '115', semester: '1',
+    workspaceId: 'workspace-private', assignmentId: 'assignment-private' };
+  const nuniQuizSource = { accountId: 'student-a', schoolId: 'pu', academicYear: '115', semester: '1',
+    workspaceId: 'workspace-private', quizId: 'quiz-private' };
+  const addHints = (plan: CampusEvidencePlan) => {
+    const rows = [...plan.steps, ...plan.agenda!.days.flatMap((day) => day.deadlines),
+      ...plan.agenda!.outsideWindow, ...plan.comparisonBasis!.assignments.items, ...plan.comparisonBasis!.quizzes!.items];
+    for (const row of rows) Object.assign(row, { nuniSource, nuniQuizSource, canSubmit: true });
+  };
+  addHints(live);
+  const saved = await saveCampusPlan(scope, { question, plan: live }, session());
+  expect(saved[0].plan).toEqual(mixedTaskSample());
+  expect(live.steps[2].nuniQuizSource).toEqual(nuniQuizSource);
+  const key = savedCampusPlansStorageKey(scope);
+  expect(persisted.get(key)).not.toMatch(/nuniSource|nuniQuizSource|canSubmit|workspace-private|quiz-private/);
+  const tampered = JSON.parse(persisted.get(key)!);
+  addHints(tampered.plans[0].plan);
+  persisted.set(key, JSON.stringify(tampered));
+  expect((await readSavedCampusPlans(scope, session()))[0].plan).toEqual(mixedTaskSample());
+});
+
+test('a stored unknown quiz kind is reported as corrupt without rewriting the original data', async () => {
+  await saveCampusPlan(scope, { question, plan: mixedTaskSample() }, session());
+  const key = savedCampusPlansStorageKey(scope);
+  const store = JSON.parse(persisted.get(key)!);
+  store.plans[0].plan.agenda.days[0].deadlines[1].kind = 'exam';
+  const raw = JSON.stringify(store);
+  persisted.set(key, raw);
+  write.mockClear();
+  await expect(readSavedCampusPlans(scope, session())).rejects.toMatchObject({ code: 'corrupt-storage' });
+  expect(persisted.get(key)).toBe(raw);
+  expect(write).not.toHaveBeenCalled();
+});
+
+test.each(['assignment', 'quiz'] as const)('the other task source remains saveable when %s lookup is unavailable', async (unavailable) => {
+  const plan = mixedTaskSample();
+  plan.steps = plan.steps.filter((step) => step.kind !== unavailable);
+  for (const day of plan.agenda!.days) day.deadlines = day.deadlines.filter((task) => (task.kind ?? 'assignment') !== unavailable);
+  plan.agenda!.outsideWindow = plan.agenda!.outsideWindow.filter((task) => (task.kind ?? 'assignment') !== unavailable);
+  const emptySource = { status: 'unavailable' as const, checkedAt: null, total: null, items: [] };
+  if (unavailable === 'assignment') {
+    plan.agenda!.assignmentsAvailable = false;
+    plan.comparisonBasis!.assignments = emptySource;
+  } else {
+    plan.agenda!.quizzesAvailable = false;
+    plan.comparisonBasis!.quizzes = emptySource;
+  }
+  await saveCampusPlan(scope, { question, plan }, session());
+  expect((await readSavedCampusPlans(scope, session()))[0].plan).toEqual(plan);
+});
+
+test('the 400-row comparison allowance is shared by assignment and quiz evidence', async () => {
+  const plan = mixedTaskSample();
+  for (const source of [plan.comparisonBasis!.assignments, plan.comparisonBasis!.quizzes!]) {
+    source.items = Array.from({ length: 200 }, (_, index) => ({ ...source.items[0],
+      identity: ['database', 'activity-' + index] as [string, string] }));
+    source.total = 200;
+  }
+  await saveCampusPlan(scope, { question, plan }, session());
+  const key = savedCampusPlansStorageKey(scope);
+  const saved = persisted.get(key);
+  const restored = (await readSavedCampusPlans(scope, session()))[0].plan;
+  expect(restored.comparisonBasis!.assignments.items).toHaveLength(200);
+  expect(restored.comparisonBasis!.quizzes!.items).toHaveLength(200);
+  plan.comparisonBasis!.quizzes!.items.push({ ...plan.comparisonBasis!.quizzes!.items[0], identity: ['database', 'activity-201'] });
+  plan.comparisonBasis!.quizzes!.total = 201;
+  await expect(saveCampusPlan(scope, { question, plan }, session())).rejects.toMatchObject({ code: 'invalid-plan' });
+  expect(persisted.get(key)).toBe(saved);
+});
+
+test.each<[string, (plan: CampusEvidencePlan) => void]>([
+  ['unknown step type', (plan) => { plan.steps[2].kind = 'exam' as never; }],
+  ['quiz evidence without quiz type', (plan) => { delete plan.steps[2].kind; }],
+  ['quiz type on assignment evidence', (plan) => { plan.steps[0].kind = 'quiz'; }],
+  ['quiz evidence changed to assignment', (plan) => { plan.steps[2].evidence = 'authorized-assignments'; }],
+  ['unknown daily task type', (plan) => { plan.agenda!.days[0].deadlines[1].kind = 'event' as never; }],
+  ['unknown outside-window task type', (plan) => { plan.agenda!.outsideWindow[1].kind = 'exam' as never; }],
+  ['unknown comparison task type', (plan) => { Object.assign(plan.comparisonBasis!.quizzes!.items[0], { kind: 'event' }); }],
+  ['quiz rows with unavailable source', (plan) => { plan.agenda!.quizzesAvailable = false; }],
+  ['quiz rows without a source flag', (plan) => { delete plan.agenda!.quizzesAvailable; }],
+  ['missing quiz basis with a declared source', (plan) => { delete plan.comparisonBasis!.quizzes; }],
+  ['unavailable quiz basis with rows', (plan) => { plan.comparisonBasis!.quizzes!.status = 'unavailable'; }],
+  ['quiz source newer than this plan', (plan) => { plan.comparisonBasis!.quizzes!.checkedAt = '2026-11-07T00:00:00Z'; }],
+  ['quiz source count mismatch', (plan) => { plan.comparisonBasis!.quizzes!.total = 1; }],
+])('invalid quiz evidence cannot replace existing progress: %s', async (_label, change) => {
+  const saved = await saveCampusPlan(scope, { question, plan: sample() }, session());
+  await setCampusPlanStepDone(scope, saved[0].id, 'assignment-0', true, session());
+  const key = savedCampusPlansStorageKey(scope);
+  const previous = persisted.get(key);
+  const changed = mixedTaskSample();
+  change(changed);
+  await expect(saveCampusPlan(scope, { question, plan: changed }, session())).rejects.toMatchObject({ code: 'invalid-plan' });
+  expect(persisted.get(key)).toBe(previous);
+  expect((await readSavedCampusPlans(scope, session()))[0].completedStepIds).toEqual(['assignment-0']);
+});
+
 test('comparison evidence survives restart while unknown authority fields are discarded', async () => {
   const plan = comparableSample();
   Object.assign(plan.comparisonBasis!, { authToken: 'secret', execute: true });
