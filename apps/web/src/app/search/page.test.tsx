@@ -290,3 +290,42 @@ it('hides readonly homework by default and restores it when enabled', () => {
     '/school-lms',
   );
 });
+
+it('opens the selected campus semester grades and keeps feedback previews on their own tab', async () => {
+  userState.uid = 'alice';
+  window.history.replaceState({}, '', '/search?schoolId=nthu');
+  vi.mocked(interpretCampusRequest).mockResolvedValue({
+    status: 'understood', source: 'model', summary: '查看成績與回饋',
+    destinations: ['/grades', '/grades?tab=feedback'], clarifyingQuestion: null,
+    previews: [
+      { destination: '/grades', status: 'available', source: 'campus-platform', message: '學期資料已匯入', items: [] },
+      { destination: '/grades?tab=feedback', status: 'empty', source: 'campus-platform', message: '尚無回饋紀錄', items: [] },
+    ],
+  });
+  render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '這學期表現怎樣' } });
+  fireEvent.click(screen.getByRole('button', { name: '用 AI 理解需求' }));
+  const semester = await screen.findByRole('link', { name: /學期資料已匯入/ });
+  expect(semester.getAttribute('href')).toBe('/grades?tab=semester&schoolId=nthu');
+  expect(screen.getByRole('link', { name: /尚無回饋紀錄/ }).getAttribute('href')).toBe('/grades?tab=feedback&schoolId=nthu');
+});
+
+it('opens device bookmarks in the selected campus classroom and describes the account requirement', () => {
+  window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('書籤'));
+  render(<SearchPage />);
+  const bookmarks = screen.getByRole('link', { name: /教材收藏.*這台裝置.*Google 帳號/ });
+  expect(bookmarks.getAttribute('href')).toBe('/classroom/material-bookmarks?campus=nthu');
+});
+
+it.each([false, true])('shows App restaurant orders only when ordering is enabled (%s)', (enabled) => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', String(enabled));
+  try {
+    window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('訂單'));
+    render(<SearchPage />);
+    const orders = screen.queryByRole('link', { name: /App 餐廳訂單/ });
+    expect(orders?.getAttribute('href')).toBe(enabled ? '/orders?campus=nthu' : undefined);
+    expect(screen.getByRole('link', { name: /^點餐與取餐/ }).getAttribute('href')).toBe('/food?campus=nthu');
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

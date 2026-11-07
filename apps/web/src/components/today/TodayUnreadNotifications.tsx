@@ -27,17 +27,34 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
   const { user, loading: authLoading } = useAuth();
   const school = useOptionalSelectedSchool();
   const schoolId = school?.selectedSchool?.id || '';
+  return (
+    <UnreadNotificationFeed
+      key={JSON.stringify([user?.uid, schoolId, unsigned, authLoading])}
+      uid={user?.uid}
+      schoolId={schoolId}
+      authLoading={authLoading}
+      unsigned={unsigned}
+    />
+  );
+}
+
+function UnreadNotificationFeed({ uid, schoolId, authLoading, unsigned }: {
+  uid: string | undefined;
+  schoolId: string;
+  authLoading: boolean;
+  unsigned: boolean;
+}) {
   const [feed, setFeed] = useState<FeedState>({ status: 'idle' });
   const [retryKey, setRetryKey] = useState(0);
 
   const canWatch =
-    !unsigned && !authLoading && !!user?.uid && !!schoolId && isFirebaseConfigured();
+    !unsigned && !authLoading && !!uid && !!schoolId && isFirebaseConfigured();
 
   useEffect(() => {
-    if (!canWatch || !user?.uid || !schoolId) return;
+    if (!canWatch || !uid || !schoolId) return;
     let active = true;
     const stop = watchAccountNotifications(
-      { uid: user.uid, schoolId },
+      { uid, schoolId },
       (next) => {
         if (!active) return;
         setFeed({
@@ -53,7 +70,7 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
       active = false;
       stop();
     };
-  }, [canWatch, user?.uid, schoolId, retryKey]);
+  }, [canWatch, uid, schoolId, retryKey]);
 
   const displayFeed = useMemo<FeedState>(() => {
     if (!canWatch) return { status: 'idle' };
@@ -74,7 +91,7 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
       <h2 id="today-notify-title" className={styles.sectionTitle}>
         {TODAY_NOTIFY_TITLE}
       </h2>
-      {unsigned || (!authLoading && !user) ? (
+      {unsigned || (!authLoading && !uid) ? (
         <p className={styles.empty}>
           {TODAY_NOTIFY_UNSIGNED} <Link href="/messages">前往通知匣</Link>
         </p>
@@ -116,16 +133,18 @@ export function TodayUnreadNotifications({ unsigned }: { unsigned: boolean }) {
           {visible.map((item) => {
             const destination = notificationDestination(item);
             const href = destination?.href || '/messages';
+            // Reload the document so attendance receives its camera permissions policy.
+            const DestinationLink = item.type === 'live_session' ? 'a' : Link;
             return (
               <li key={`${item.source}:${item.id}`}>
-                <Link href={href} className={styles.row}>
+                <DestinationLink href={href} className={styles.row}>
                   <span className={styles.rowBody}>
                     <span className={styles.rowTitle}>{item.title}</span>
                     <span className={styles.rowMeta}>
                       {item.body || destination?.label || '查看通知'}
                     </span>
                   </span>
-                </Link>
+                </DestinationLink>
               </li>
             );
           })}
