@@ -29,6 +29,8 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../ui/navigationTheme', () => ({
+  // Preserve layout hooks used by the real Button and its loading overlay.
+  ...jest.requireActual('../ui/navigationTheme'),
   useTabBarContentBottomPadding: () => 0, TAB_BAR_CONTENT_BOTTOM_PADDING: 0,
 }));
 

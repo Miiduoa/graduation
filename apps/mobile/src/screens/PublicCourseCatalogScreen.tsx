@@ -43,7 +43,11 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
       setManualCopy(true);
     }
   }
-  return <Card title={course.title} subtitle={`課號 ${course.code} · 班別 ${course.section || '未提供'}`}>
+  // Keep the title separate: grouping the whole Card as an accessible header
+  // prevents VoiceOver from reaching its nested review and copy controls.
+  return <Card>
+    <Text accessibilityRole="header" style={{ ...theme.typography.h3, color: theme.colors.text }}>{course.title}</Text>
+    <Text style={body}>{`課號 ${course.code} · 班別 ${course.section || '未提供'}`}</Text>
     <Text style={body}>{[course.department, course.teacher, course.credits && course.credits + ' 學分'].filter(Boolean).join(' · ')}</Text>
     {meetings ? meetings.map((meeting, index) => <Text key={index} style={body}>
       {meeting.label}{meeting.room ? ' · ' + meeting.room : ''}
