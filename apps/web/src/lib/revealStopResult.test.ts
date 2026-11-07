@@ -3,6 +3,7 @@ import { revealStopResult } from './revealStopResult';
 
 afterEach(() => {
   document.body.replaceChildren();
+  document.documentElement.removeAttribute('data-reduced-motion');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -40,6 +41,7 @@ it('scrolls by the visual offset so CSS order cannot hide the heading', () => {
 });
 
 it('uses instant scrolling when the user prefers reduced motion', () => {
+  document.documentElement.dataset.reducedMotion = 'false';
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: query.includes('prefers-reduced-motion'),
     media: query,
@@ -50,6 +52,20 @@ it('uses instant scrolling when the user prefers reduced motion', () => {
   const { node } = paneAt(400);
   revealStopResult(node);
   expect(scrollTo).toHaveBeenCalledWith({ top: 376, left: 0, behavior: 'auto' });
+});
+
+it('honors changes to the site animation preference when the system allows motion', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }));
+  const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  const { node } = paneAt(400);
+
+  document.documentElement.dataset.reducedMotion = 'true';
+  revealStopResult(node);
+  expect(scrollTo).toHaveBeenLastCalledWith({ top: 376, left: 0, behavior: 'auto' });
+
+  document.documentElement.dataset.reducedMotion = 'false';
+  revealStopResult(node);
+  expect(scrollTo).toHaveBeenLastCalledWith({ top: 376, left: 0, behavior: 'smooth' });
 });
 
 it('does not move the page when the result is already at the top', () => {
