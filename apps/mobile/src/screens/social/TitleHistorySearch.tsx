@@ -33,6 +33,8 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
   const styles = useThemeStyleSheet(createStyles);
   const [open, setOpen] = useState(false);
   const live = useRef(true);
+  const modalActive = useRef(false);
+  const dismiss = () => { modalActive.current = false; setOpen(false); };
   useLayoutEffect(() => {
     live.current = true;
     return () => { live.current = false; };
@@ -41,15 +43,15 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
     <View style={styles.entry}>
       <Pressable accessibilityRole="button" accessibilityLabel="找舊貼文"
         accessibilityHint="依標題開頭搜尋尚未載入的本校文章"
-        onPress={() => setOpen(true)} style={styles.entryButton}>
+        onPress={() => { modalActive.current = true; setOpen(true); }} style={styles.entryButton}>
         <Text style={styles.actionText}>找舊貼文</Text>
         <Text style={styles.muted}>依標題開頭，不限目前載入範圍</Text>
       </Pressable>
       {open && (
-        <Modal visible presentationStyle="fullScreen" animationType="none" onRequestClose={() => setOpen(false)}>
-          <TitleHistorySearch schoolId={schoolId} onClose={() => setOpen(false)} onOpenPost={(post) => {
-            if (!live.current || post.schoolId !== schoolId) return;
-            setOpen(false);
+        <Modal visible presentationStyle="fullScreen" animationType="none" onRequestClose={dismiss}>
+          <TitleHistorySearch schoolId={schoolId} onClose={dismiss} onOpenPost={(post) => {
+            if (!live.current || !modalActive.current || post.schoolId !== schoolId) return;
+            dismiss();
             onOpenPost(post);
           }} />
         </Modal>
@@ -76,6 +78,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
   const cursor = useRef<TitleSearchCursor | null>(null);
   const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean } | null>(null);
   const inFlight = useRef(false);
+  const openingPost = useRef(false);
   const version = useRef(0);
   const live = useRef(true);
   useLayoutEffect(() => {
@@ -91,6 +94,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
     setText(value); setPosts([]); setHasMore(false); setBusy(false); setError(''); setNotice('');
   };
   const close = () => {
+    openingPost.current = true;
     version.current += 1;
     inFlight.current = false;
     onClose();
@@ -187,8 +191,10 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
           renderItem={({ item }) => (
             <Pressable accessibilityRole="button" accessibilityLabel={`開啟貼文：${item.title}`}
               style={styles.card} onPress={() => {
-                if (!live.current || item.schoolId !== schoolId) return;
+                if (!live.current || openingPost.current || item.schoolId !== schoolId) return;
+                openingPost.current = true;
                 version.current += 1;
+                inFlight.current = false;
                 onOpenPost({ id: item.id, schoolId });
               }}>
               <Text style={styles.postTitle}>{item.title}</Text>

@@ -92,6 +92,16 @@ test('opening the same historical result twice rapidly navigates only once', asy
   expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' });
 });
 
+test('closing a result panel prevents its still-mounted card from opening a post', async () => {
+  const view = panel(); enter(view);
+  await view.findByText('二手書 one');
+  const target = view.getByLabelText('開啟貼文：二手書 one');
+  fireEvent.press(view.getByLabelText('關閉歷史搜尋'));
+  fireEvent.press(target);
+  expect(view.close).toHaveBeenCalledTimes(1);
+  expect(view.open).not.toHaveBeenCalled();
+});
+
 test('uses the same cursor on a failed next-page retry and deduplicates returned IDs', async () => {
   const first = result([row('one')], true);
   search.mockResolvedValueOnce(first).mockRejectedValueOnce({ code: 'unavailable' })

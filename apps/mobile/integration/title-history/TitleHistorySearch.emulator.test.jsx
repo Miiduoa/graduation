@@ -161,6 +161,18 @@ test('student searches 45 historical matches, pages without duplicates and opens
   record({ cumulativeResults: sizes, uniqueIds: 45, nonmatchingNewerFixtures: 1000 });
 });
 
+test('rapid result taps from the real SDK page navigate once', async () => {
+  const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
+  const target = view.getAllByLabelText('開啟貼文：二手書 00')[0];
+  act(() => {
+    target.props.onPress();
+    target.props.onPress();
+  });
+  expect(onOpenPost).toHaveBeenCalledTimes(1);
+  expect(onOpenPost).toHaveBeenCalledWith({ id: 'old-000', schoolId: 'pu' });
+  record({ serverConfirmedResults: 20, navigationCalls: 1 });
+});
+
 test('offline next page keeps existing results and retries the exact server cursor', async () => {
   const { view } = launch(); submit(view); await count(view, 20);
   const first = await search.mock.results[0].value;
