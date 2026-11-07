@@ -1,4 +1,5 @@
 import type { CampusPostDoc } from '../../services/feed';
+import { campusFeedSearchTerms, matchesCampusFeedSearchTerms } from '@campus/shared/src/communityFeedSearch';
 
 export type MobileFeedFilter = 'all' | 'following' | 'subscribed' | 'media';
 export type MobileFeedOrder = 'recommended' | 'latest';
@@ -29,7 +30,7 @@ function timestamp(value: unknown): number {
 }
 
 export function selectMobileFeedPosts(posts: CampusPostDoc[], options: Options): CampusPostDoc[] {
-  const query = options.search.trim().toLocaleLowerCase();
+  const terms = campusFeedSearchTerms(options.search);
   const matched = posts.filter((post) => {
     if (options.filter === 'subscribed' && !options.subscribedIds.has(post.boardId))
       return false;
@@ -41,22 +42,26 @@ export function selectMobileFeedPosts(posts: CampusPostDoc[], options: Options):
       options.filter === 'media' &&
       !((Array.isArray(post.mediaUrls) ? post.mediaUrls : [])).some((url) => typeof url === 'string' && url.length > 0)
     ) return false;
-    if (!query) return true;
+    if (terms.length === 0) return true;
     // 匿名貼文只用公開暱稱；不得用真實姓名或 authorUid 被搜到。
     const author = post.anonymous
       ? post.aliasSnapshot ?? '匿名貼文'
       : post.authorUid ? options.authors[post.authorUid] ?? '' : '';
-    return [
+    return matchesCampusFeedSearchTerms(terms, [
       post.title,
       post.content,
       ...(Array.isArray(post.tags) ? post.tags : []),
       options.boards[post.boardId] ?? '',
       author,
-    ].join(' ').toLocaleLowerCase().includes(query);
+    ]);
   });
   // 推薦次序沿用載入時的排列，搜尋／篩選只做過濾、不重排。
+  // The cursor sorts equal-timestamp documents by ID descending; reproduce
+  // that order instead of inheriting their recommendation ranking.
   return options.order === 'latest'
-    ? [...matched].sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
+    ? [...matched].sort((a, b) =>
+      timestamp(b.createdAt) - timestamp(a.createdAt) ||
+      (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
     : matched;
 }
 

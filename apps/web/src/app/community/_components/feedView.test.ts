@@ -37,6 +37,24 @@ describe('school-scoped feed discovery', () => {
     expect(select({ order: 'latest' })).toEqual(['newer', 'older']);
     expect(posts.map((post) => post.id)).toEqual(['older', 'newer']);
   });
+  it('uses the server document-ID tie breaker when multiple loaded pages share a timestamp', () => {
+    const tied: CampusPostDoc[] = [
+      { ...posts[0], id: 'post-a', createdAt: new Date('2026-10-25T00:00:00Z') },
+      { ...posts[1], id: 'post-c' },
+      { ...posts[0], id: 'post-b', createdAt: new Date('2026-10-25T00:00:00Z') },
+    ];
+    const options = {
+      filter: 'all' as const, order: 'latest' as const, search: '',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boardNames: {}, authorNames: {},
+    };
+    expect(selectCampusFeedPosts(tied, { ...options, order: 'recommended' })
+      .map((post) => post.id)).toEqual(['post-a', 'post-c', 'post-b']);
+    expect(selectCampusFeedPosts(tied, options).map((post) => post.id))
+      .toEqual(['post-c', 'post-b', 'post-a']);
+    expect(tied.map((post) => post.id)).toEqual(['post-a', 'post-c', 'post-b']);
+  });
+
   it('filters subscriptions and media without introducing another data source', () => {
     expect(select({ filter: 'subscribed' })).toEqual(['older']);
     expect(select({ filter: 'following' })).toEqual(['older']);
@@ -49,6 +67,20 @@ describe('school-scoped feed discovery', () => {
     expect(select({ search: '  攝影社  ' })).toEqual(['newer']);
     expect(select({ search: '不存在' })).toEqual([]);
   });
+  it('combines keywords across visible fields without changing the selected scope', () => {
+    expect(select({ search: '讀書 期中考' })).toEqual(['older']);
+    const fullwidth = [{ ...posts[0], title: 'API 2026 校園專題' }];
+    expect(selectCampusFeedPosts(fullwidth, {
+      filter: 'all', order: 'recommended', search: 'ａｐｉ ２０２６',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boardNames: {}, authorNames: {},
+    }).map((post) => post.id)).toEqual(['older']);
+    expect(select({ search: '小明 課業討論 考試' })).toEqual(['older']);
+    expect(select({ search: '攝影社　神祕同學' })).toEqual(['newer']);
+    expect(select({ search: '期中考 攝影社' })).toEqual([]);
+    expect(select({ filter: 'subscribed', search: '攝影社 神祕同學' })).toEqual([]);
+  });
+
   it('never lets search reveal an anonymous author identity', () => {
     expect(select({ search: '神祕同學' })).toEqual(['newer']);
     expect(select({ search: '不可公開的真名' })).toEqual([]);

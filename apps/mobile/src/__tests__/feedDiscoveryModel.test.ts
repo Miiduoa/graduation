@@ -57,6 +57,24 @@ describe('mobile school-scoped feed discovery', () => {
     expect(posts[0].id).toBe('one');
   });
 
+  it('uses the server document-ID tie breaker for latest across loaded pages', () => {
+    const tied: CampusPostDoc[] = [
+      { ...posts[0], id: 'post-a', createdAt: new Date('2026-10-25T00:00:00Z') },
+      { ...posts[1], id: 'post-c' },
+      { ...posts[0], id: 'post-b', createdAt: new Date('2026-10-25T00:00:00Z') },
+    ];
+    const options = {
+      filter: 'all' as const, order: 'latest' as const, search: '',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boards: {}, authors: {},
+    };
+    expect(selectMobileFeedPosts(tied, { ...options, order: 'recommended' })
+      .map((item) => item.id)).toEqual(['post-a', 'post-c', 'post-b']);
+    expect(selectMobileFeedPosts(tied, options).map((item) => item.id))
+      .toEqual(['post-c', 'post-b', 'post-a']);
+    expect(tied.map((item) => item.id)).toEqual(['post-a', 'post-c', 'post-b']);
+  });
+
   it('applies subscription and media filters to the existing results', () => {
     expect(pick({ filter: 'subscribed' })).toEqual(['one']);
     expect(pick({ filter: 'following' })).toEqual(['one']);
@@ -77,6 +95,20 @@ describe('mobile school-scoped feed discovery', () => {
       expect(pick({ search })).toEqual(['one']);
     }
     expect(pick({ search: ' 攝影看板 ' })).toEqual(['two']);
+  });
+
+  it('combines spaced keywords from visible fields without crossing filters', () => {
+    expect(pick({ search: '同學 期末' })).toEqual(['one']);
+    const fullwidth = [{ ...posts[0], title: 'API 2026 校園專題' }];
+    expect(selectMobileFeedPosts(fullwidth, {
+      filter: 'all', order: 'recommended', search: 'ａｐｉ ２０２６',
+      subscribedIds: new Set<string>(), followingIds: new Set<string>(),
+      boards: {}, authors: {},
+    }).map((post) => post.id)).toEqual(['one']);
+    expect(pick({ search: '小明 課程討論 讀書會' })).toEqual(['one']);
+    expect(pick({ search: '攝影看板　神秘同學' })).toEqual(['two']);
+    expect(pick({ search: '期末 攝影看板' })).toEqual([]);
+    expect(pick({ filter: 'subscribed', search: '攝影看板 神秘同學' })).toEqual([]);
   });
 
   it('does not expose an anonymous author when searching', () => {

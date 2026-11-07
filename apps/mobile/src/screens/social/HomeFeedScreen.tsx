@@ -28,11 +28,12 @@ import { shouldBlockForNoLogin, isDemoUid } from '../../services/demoSession';
 import { useSchool } from '../../state/school';
 import { getDb, isFirebaseMockMode } from '../../firebase';
 import {
-  fetchRecentCampusPosts,
   rankFeedPosts,
   toggleCampusPostLike,
   type CampusPostDoc,
 } from '../../services/feed';
+import { fetchCampusPostPage, type CampusPostCursor } from '../../services/feedPages';
+import { taiwanFeedDayEnd } from '../../services/feedDates';
 import { listBoards, listSubscribedBoardIds, type CampusBoard } from '../../services/boards';
 import { listFollowingIds, followUser, unfollowUser } from '../../services/follows';
 import {
@@ -46,7 +47,6 @@ import { CampusStoryViewer, useCampusStories } from './CampusStoryViewer';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 import {
   describeMobileFeedSearchRecovery,
-  mobileFeedHasMorePages,
   mobileFeedSearchScopeLabel,
   MOBILE_FEED_PAGE_SIZE,
   selectMobileFeedPosts,
@@ -147,9 +147,20 @@ function HomeFeedContent() {
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(uid, school?.id, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(uid, school?.id, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
-  const [pageLimit, setPageLimit] = useState(MOBILE_FEED_PAGE_SIZE);
+  const [dateInput, setDateInput] = useState('');
+  const [activeDate, setActiveDate] = useState('');
+  const activeDateBoundary = useRef<Date | null>(null);
+  const dateJumpInFlight = useRef(false);
+  const [dateJumpBusy, setDateJumpBusy] = useState(false);
+  const [dateJumpError, setDateJumpError] = useState('');
+  const searchInputRef = useRef<TextInput>(null);
+  const feedListRef = useRef<FlatList<CampusPostDoc>>(null);
+  const feedCursor = useRef<CampusPostCursor | null>(null);
+  const nextPageInFlight = useRef(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState('');
+  const [pageNotice, setPageNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -185,8 +196,16 @@ function HomeFeedContent() {
   const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
   const loadVersion = useRef(0);
 
-  const load = useCallback(async (limit: number = MOBILE_FEED_PAGE_SIZE) => {
+  const load = useCallback(async () => {
     const version = ++loadVersion.current;
+    feedCursor.current = null;
+    nextPageInFlight.current = false;
+    dateJumpInFlight.current = false;
+    setDateJumpBusy(false);
+    setLoadingMore(false);
+    setPageError('');
+    setDateJumpError('');
+    setPageNotice('');
     setLoadError('');
     try {
       if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
@@ -195,28 +214,30 @@ function HomeFeedContent() {
         setSubscribedBoardIds(new Set());
         setStories([]);
         setHasMore(false);
-        setPageLimit(MOBILE_FEED_PAGE_SIZE);
         return;
       }
-      const [rows, boardList, subs, storyRows] = await Promise.all([
-        fetchRecentCampusPosts(school.id, undefined, limit),
+      const [page, boardList, subs, storyRows] = await Promise.all([
+        activeDateBoundary.current
+          ? fetchCampusPostPage(school.id, null, activeDateBoundary.current)
+          : fetchCampusPostPage(school.id),
         listBoards(school.id, 80),
         listSubscribedBoardIds(auth.user.uid, school.id, { throwOnError: true }),
         listActiveStoriesForSchool(school.id, 80, { throwOnError: true }),
       ]);
-      if (loadVersion.current !== version) return;
+      if (!active.current || loadVersion.current !== version) return;
+      feedCursor.current = page.nextCursor;
       setAccessDenied(false);
-      setPageLimit(limit);
-      setHasMore(mobileFeedHasMorePages(rows.length, MOBILE_FEED_PAGE_SIZE) && rows.length >= limit);
-      setPosts(rankFeedPosts(rows, Math.max(80, limit)));
+      setHasMore(page.hasMore);
+      setPosts(rankFeedPosts(page.posts.filter((row) => row.schoolId === school.id), page.posts.length));
       setBoards(boardList);
       setSubscribedBoardIds(new Set(subs));
       setStories(storyRows);
     } catch (cause) {
-      if (loadVersion.current !== version) return;
+      if (!active.current || loadVersion.current !== version) return;
       setStories([]);
       if (isAccessDenied(cause)) {
         setAccessDenied(true);
+        feedCursor.current = null;
         setPosts([]);
         setBoards([]);
         setSubscribedBoardIds(new Set());
@@ -226,7 +247,7 @@ function HomeFeedContent() {
       }
       setLoadError('暫時無法更新校園動態。請確認網路與登入狀態，再試一次。');
     } finally {
-      if (loadVersion.current === version) {
+      if (active.current && loadVersion.current === version) {
         setLoading(false);
         setRefreshing(false);
         setLoadingMore(false);
@@ -238,14 +259,122 @@ function HomeFeedContent() {
     setRefreshing(true);
     setBookmarkRevision((prev) => prev + 1);
     setFollowingRevision((prev) => prev + 1);
-    await load(MOBILE_FEED_PAGE_SIZE);
+    await load();
   }, [load]);
 
   const onLoadMoreForSearch = useCallback(async () => {
-    if (loadingMore || refreshing || loading || isOffline) return;
+    const schoolId = school?.id;
+    const cursor = feedCursor.current;
+    if (!schoolId || !auth.user?.uid || !cursor || !hasMore ||
+        nextPageInFlight.current || dateJumpInFlight.current || refreshing || loading || isOffline || accessDenied) return;
+    const version = ++loadVersion.current;
+    nextPageInFlight.current = true;
     setLoadingMore(true);
-    await load(pageLimit + MOBILE_FEED_PAGE_SIZE);
-  }, [isOffline, load, loading, loadingMore, pageLimit, refreshing]);
+    setPageError('');
+    setPageNotice('');
+    try {
+      const page = activeDateBoundary.current
+        ? await fetchCampusPostPage(schoolId, cursor, activeDateBoundary.current)
+        : await fetchCampusPostPage(schoolId, cursor);
+      if (!active.current || loadVersion.current !== version) return;
+      feedCursor.current = page.nextCursor;
+      setPosts((previous) => {
+        const ids = new Set(previous.map((row) => row.id));
+        const additions = page.posts.filter((row) => {
+          if (row.schoolId !== schoolId || ids.has(row.id)) return false;
+          ids.add(row.id);
+          return true;
+        });
+        return [...previous, ...rankFeedPosts(additions, additions.length)];
+      });
+      setHasMore(page.hasMore);
+      setPageNotice(page.hasMore
+        ? '已載入下一頁，可繼續找更早貼文。'
+        : '已讀到本次查詢的最後一頁。');
+    } catch (cause) {
+      if (!active.current || loadVersion.current !== version) return;
+      if (isAccessDenied(cause)) {
+        // A denied continuation revokes the whole school feed, not only post cards.
+        // The story strip and author names were fetched under the same old access.
+        feedCursor.current = null;
+        setPosts([]);
+        setStories([]);
+        setBoards([]);
+        setSubscribedBoardIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
+        setHasMore(false);
+        setAccessDenied(true);
+        setPageNotice('');
+        setLoadError('校籍或貼文存取權限已變更，請重新驗證後載入。');
+      } else {
+        // Keep cards, search and the exact cursor so retry requests the same page.
+        setPageError('載入更多貼文失敗，已保留搜尋與原有貼文，請恢復連線後重試。');
+      }
+    } finally {
+      if (active.current && loadVersion.current === version) {
+        nextPageInFlight.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }, [school?.id, auth.user?.uid, hasMore, refreshing, loading, isOffline, accessDenied]);
+
+  const jumpToDate = useCallback(async (requestedDay: string | null) => {
+    const before = requestedDay === null ? null : taiwanFeedDayEnd(requestedDay);
+    if (requestedDay !== null && !before) {
+      setDateJumpError('請輸入有效的台灣日期，例如 2022-09-03。');
+      return;
+    }
+    const schoolId = school?.id;
+    if (!schoolId || !auth.user?.uid || loading || refreshing || accessDenied ||
+        dateJumpInFlight.current) return;
+    // Invalidate an older continuation; only commit the new date and cursor
+    // after a confirmed server page succeeds.
+    const version = ++loadVersion.current;
+    dateJumpInFlight.current = true;
+    nextPageInFlight.current = false;
+    setLoadingMore(false);
+    setDateJumpBusy(true);
+    setDateJumpError('');
+    setPageError('');
+    setPageNotice('');
+    try {
+      const page = await fetchCampusPostPage(schoolId, null, before);
+      if (!active.current || loadVersion.current !== version) return;
+      activeDateBoundary.current = before;
+      feedCursor.current = page.nextCursor;
+      setActiveDate(requestedDay ?? '');
+      if (requestedDay === null) setDateInput('');
+      setPosts(rankFeedPosts(page.posts.filter((row) => row.schoolId === schoolId), page.posts.length));
+      setHasMore(page.hasMore);
+      setPageNotice(requestedDay
+        ? `已定位到 ${requestedDay}（台灣時間）及更早的貼文。`
+        : '已返回最新貼文。');
+      feedListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    } catch (cause) {
+      if (!active.current || loadVersion.current !== version) return;
+      if (isAccessDenied(cause)) {
+        feedCursor.current = null;
+        setPosts([]);
+        setStories([]);
+        setBoards([]);
+        setSubscribedBoardIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
+        setHasMore(false);
+        setAccessDenied(true);
+        setLoadError('校籍或貼文存取權限已變更，請重新驗證後載入。');
+      } else {
+        // On an offline/error result preserve the old cards, range and cursor.
+        setDateJumpError('日期定位失敗，已保留原有貼文。請確認連線後重試。');
+      }
+    } finally {
+      if (active.current && loadVersion.current === version) {
+        dateJumpInFlight.current = false;
+        setDateJumpBusy(false);
+      }
+    }
+  }, [school?.id, auth.user?.uid, loading, refreshing, accessDenied]);
 
   React.useEffect(() => {
     const uid = auth.user?.uid;
@@ -462,6 +591,12 @@ function HomeFeedContent() {
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A denied feed must not rehydrate author names from saved or stale cards.
+      if (accessDenied) {
+        setNameByUid({});
+        setAvatarByUid({});
+        return;
+      }
       // 把貼文作者 + Story 作者一起 hydrate（少一次 batch）
       const uids = new Set<string>();
       [...posts, ...savedPosts].forEach((p) => {
@@ -487,7 +622,7 @@ function HomeFeedContent() {
     return () => {
       cancelled = true;
     };
-  }, [posts, savedPosts, stories, school?.id]);
+  }, [posts, savedPosts, stories, school?.id, accessDenied]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -525,6 +660,12 @@ function HomeFeedContent() {
     }),
     [filter, hasMore, isOffline, savedView, search, sourcePosts.length, visiblePosts.length],
   );
+
+  const returnToSearch = () => {
+    // Keep every loaded page and the current search; only move the viewport.
+    feedListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    searchInputRef.current?.focus();
+  };
 
   const selectFilter = (next: FilterKey) => {
     if (next === 'saved' && !savedView) setBookmarksLoading(true);
@@ -573,9 +714,9 @@ function HomeFeedContent() {
   useFocusEffect(useCallback(() => {
     if (returningFromComposer.current) {
       returningFromComposer.current = false;
-      void load(pageLimit);
+      void load();
     }
-  }, [load, pageLimit]));
+  }, [load]));
 
   const goStoryCompose = () => {
     returningFromComposer.current = true;
@@ -636,6 +777,7 @@ function HomeFeedContent() {
         </View>
       ) : (
         <FlatList
+          ref={feedListRef}
           style={{ flex: 1 }}
           data={discoveryUnavailable ? [] : visiblePosts}
           keyExtractor={(p) => p.id}
@@ -669,11 +811,13 @@ function HomeFeedContent() {
               }}>
                 <Ionicons name="search" size={18} color={theme.colors.textSecondary} />
                 <TextInput
+                  ref={searchInputRef}
                   style={{ flex: 1, minWidth: 0, color: theme.colors.text, paddingVertical: 10 }}
                   accessibilityLabel="搜尋本校貼文"
                   value={search}
                   onChangeText={setSearch}
-                  placeholder="搜尋貼文、看板、標籤或作者"
+                  placeholder="搜尋貼文、標籤或作者（可多詞）"
+                  accessibilityHint="以空白分隔多個關鍵字，需全部符合；僅搜尋已載入貼文"
                   placeholderTextColor={theme.colors.textSecondary}
                   returnKeyType="search"
                   autoCorrect={false}
@@ -689,6 +833,80 @@ function HomeFeedContent() {
                   </Pressable>
                 )}
               </View>
+              {!savedView && !discoveryUnavailable && (
+                <View style={{
+                  gap: 8, padding: 12, backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border, borderWidth: StyleSheet.hairlineWidth,
+                  borderRadius: theme.radius.md,
+                }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>依日期找舊貼文</Text>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+                    直接讀取這一天以前的本校文章，不必先載入所有新貼文；關鍵字仍只比對已載入範圍。
+                  </Text>
+                  <TextInput
+                    accessibilityLabel="要找的貼文日期"
+                    accessibilityHint="請輸入西元年、月、日，格式 YYYY-MM-DD，依台灣時間計算"
+                    value={dateInput}
+                    onChangeText={setDateInput}
+                    placeholder="YYYY-MM-DD，例如 2022-09-03"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    maxLength={10}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    returnKeyType="search"
+                    onSubmitEditing={() => void jumpToDate(dateInput.trim())}
+                    style={{
+                      minHeight: 44, paddingHorizontal: 12, color: theme.colors.text,
+                      borderRadius: theme.radius.md, borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.colors.border,
+                    }}
+                  />
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="從這天往前找"
+                      accessibilityState={{ disabled: dateJumpBusy }}
+                      disabled={dateJumpBusy}
+                      onPress={() => void jumpToDate(dateInput.trim())}
+                      style={{
+                        flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center',
+                        borderRadius: theme.radius.md, backgroundColor: theme.colors.accent,
+                      }}
+                    >
+                      <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 }}>
+                        {dateJumpBusy ? '正在定位…' : '從這天往前找'}
+                      </Text>
+                    </Pressable>
+                    {!!activeDate && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="回到最新貼文"
+                        accessibilityState={{ disabled: dateJumpBusy }}
+                        disabled={dateJumpBusy}
+                        onPress={() => void jumpToDate(null)}
+                        style={{
+                          flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center',
+                          borderRadius: theme.radius.md, borderWidth: StyleSheet.hairlineWidth,
+                          borderColor: theme.colors.border,
+                        }}
+                      >
+                        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>回到最新貼文</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                  {!!activeDate && (
+                    <Text accessibilityLiveRegion="polite"
+                      style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                      目前範圍：{activeDate}（台灣時間）及更早
+                    </Text>
+                  )}
+                  {!!dateJumpError && (
+                    <Text accessibilityRole="alert" style={{ color: theme.colors.danger, fontSize: 12 }}>
+                      {dateJumpError}
+                    </Text>
+                  )}
+                </View>
+              )}
               {isOffline && !!search.trim() && !discoveryUnavailable && (
                 <Text
                   accessibilityRole="text"
@@ -769,6 +987,11 @@ function HomeFeedContent() {
                     title={searchRecovery.title}
                     subtitle={searchRecovery.subtitle}
                   />
+                  {!!pageError && (
+                    <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+                      {pageError}
+                    </Text>
+                  )}
                   {loadingMore ? (
                     <View style={{ alignItems: 'center', paddingVertical: 8 }}>
                       <ActivityIndicator color={theme.colors.accent} />
@@ -780,7 +1003,7 @@ function HomeFeedContent() {
                         key={action.id}
                         accessibilityRole="button"
                         accessibilityLabel={action.label}
-                        disabled={action.id === 'load-more' && (loadingMore || isOffline)}
+                        accessibilityState={{ disabled: action.id === 'load-more' && (loadingMore || isOffline) }}
                         onPress={() => runSearchRecovery(action.id)}
                         style={{
                           minHeight: 44,
@@ -813,7 +1036,7 @@ function HomeFeedContent() {
                   filter === 'following' ? '追蹤的作者尚未發文'
                     : filter === 'saved' ? '還沒有收藏貼文'
                     : filter === 'subscribed' ? '尚無已訂閱看板的新貼文'
-                    : '尚無校園貼文'}
+                    : activeDate ? '這個日期以前沒有貼文' : '尚無校園貼文'}
                 subtitle={
                   filter === 'following'
                     ? '先到「全部」動態追蹤感興趣的作者；目前只篩選已載入貼文。'
@@ -821,10 +1044,60 @@ function HomeFeedContent() {
                       ? '到校園動態收藏有用的內容，之後可跨裝置找回。'
                   : filter === 'subscribed'
                     ? '到「看板」訂閱你想追的版面，或點右下角發第一篇。'
-                    : '點右下角的鉛筆，發出你的第一篇貼文。'
+                    : activeDate ? '可以更換日期，或按「回到最新貼文」查看新文章。' : '點右下角的鉛筆，發出你的第一篇貼文。'
                 }
               />
             )
+          }
+          ListFooterComponent={
+            !savedView && !discoveryUnavailable && visiblePosts.length > 0 &&
+              (hasMore || loadingMore || pageError || pageNotice || posts.length >= 120) ? (
+              <View style={{ paddingHorizontal: 14, paddingVertical: 16, gap: 10 }}>
+                {!!pageError && (
+                  <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
+                    {pageError}
+                  </Text>
+                )}
+                {!!pageNotice && (
+                  <Text accessibilityLiveRegion="polite" style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                    {pageNotice}
+                  </Text>
+                )}
+                {hasMore && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={pageError ? '重試載入此頁' : '載入更多貼文'}
+                    accessibilityState={{ disabled: loadingMore || dateJumpBusy || isOffline }}
+                    onPress={() => void onLoadMoreForSearch()}
+                    style={{
+                      minHeight: 44, alignItems: 'center', justifyContent: 'center',
+                      borderRadius: theme.radius.md, backgroundColor: theme.colors.accent,
+                      opacity: loadingMore || dateJumpBusy || isOffline ? 0.6 : 1,
+                    }}
+                  >
+                    <Text style={{ fontWeight: '700', color: theme.colors.onAccent }}>
+                      {loadingMore ? '正在載入…' : pageError ? '重試載入此頁' : '載入更多貼文'}
+                    </Text>
+                  </Pressable>
+                )}
+                {loadingMore && <ActivityIndicator color={theme.colors.accent} />}
+                {posts.length >= 120 && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="返回搜尋與篩選"
+                    accessibilityHint="返回動態列表開頭並聚焦搜尋欄位"
+                    onPress={returnToSearch}
+                    style={{
+                      minHeight: 44, alignItems: 'center', justifyContent: 'center',
+                      borderRadius: theme.radius.md, borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>返回搜尋與篩選</Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : null
           }
           renderItem={({ item }) => {
             const uid = auth.user?.uid;

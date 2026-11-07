@@ -9,7 +9,7 @@
  *  - 貼文卡片：作者頭像、看板 chip、圖片 grid、點讚、留言、跳 /community/post/[id]
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { StoryViewer } from './StoryViewer';
 import { useStoryShelf } from './useStoryShelf';
@@ -30,8 +30,8 @@ import {
   removeCampusPostBookmark,
 } from '@/lib/community/bookmarks';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { fetchCampusPostPage, taiwanFeedDayEnd, type CampusPostCursor } from '@/lib/community/feedPages';
 import {
-  fetchRecentCampusPosts,
   rankFeedPosts,
   toggleCampusPostLike,
   listBoards,
@@ -107,12 +107,40 @@ export function FeedTab(props: FeedTabProps) {
 function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const { schoolId, user } = props;
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
+  const [dateDraft, setDateDraft] = useState('');
+  const [activeDate, setActiveDate] = useState('');
+  const activeDateBoundaryRef = useRef<Date | null>(null);
+  const dateNavigationBusyRef = useRef(false);
+  const [dateNavigationBusy, setDateNavigationBusy] = useState(false);
+  const [dateNavigationError, setDateNavigationError] = useState('');
+  // The cursor follows server ordering, never the recommendation-ranked cards.
+  const feedCursorRef = useRef<CampusPostCursor | null>(null);
+  const feedReadVersion = useRef(0);
+  const moreInFlight = useRef(false);
+  const [hasMorePosts, setHasMorePosts] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [morePostsError, setMorePostsError] = useState('');
+  const [feedReadDenied, setFeedReadDenied] = useState(false);
+  const [pageMessage, setPageMessage] = useState('');
+  const pageStatusId = useId();
+  const pageStatusRef = useRef<HTMLParagraphElement>(null);
+  const loadMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const revalidateButtonRef = useRef<HTMLButtonElement>(null);
+  const focusPageStatusRef = useRef(false);
+  useEffect(() => () => { feedReadVersion.current += 1; }, []);
+  useLayoutEffect(() => {
+    if (!loadingMorePosts && focusPageStatusRef.current) {
+      focusPageStatusRef.current = false;
+      (feedReadDenied ? revalidateButtonRef.current : pageStatusRef.current)?.focus();
+    }
+  }, [loadingMorePosts, hasMorePosts, feedReadDenied]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [refreshing, setRefreshing] = useState(false);
@@ -153,20 +181,33 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const followedIds = validFollowing ? followingIds : EMPTY_FOLLOWING_IDS;
 
   const load = useCallback(async () => {
+    const request = ++feedReadVersion.current;
+    // Refresh starts a new traversal and invalidates an older page request.
+    feedCursorRef.current = null;
+    focusPageStatusRef.current = false;
+    moreInFlight.current = false;
+    setLoadingMorePosts(false);
     if (!schoolId || !user) {
       setPosts([]);
       setBoards([]);
       setStories([]);
       setSubscribedIds(new Set());
+      setHasMorePosts(false);
       return;
     }
-    const [rows, boardList, subs, storyRows] = await Promise.all([
-      fetchRecentCampusPosts(schoolId, undefined, 60),
+    const [page, boardList, subs, storyRows] = await Promise.all([
+      fetchCampusPostPage(schoolId, null, activeDateBoundaryRef.current),
       listBoards(schoolId, 80),
       listSubscribedBoardIds(user.uid, schoolId),
       listActiveStoriesForSchool(schoolId, 80),
     ]);
-    setPosts(rankFeedPosts(rows, 80));
+    if (request !== feedReadVersion.current) return;
+    feedCursorRef.current = page.nextCursor;
+    setPosts(rankFeedPosts(page.posts.filter((post) => post.schoolId === schoolId), page.posts.length));
+    setHasMorePosts(page.hasMore);
+    setFeedReadDenied(false);
+    setMorePostsError('');
+    setPageMessage('');
     setBoards(boardList);
     setSubscribedIds(new Set(subs));
     setStories(groupStoriesByAuthor(storyRows, user.uid));
@@ -176,11 +217,76 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     load,
     '暫時無法讀取校園動態，請確認連線後重試。',
   );
-  const shelf = useStoryShelf(loading || error ? [] : stories, schoolId, user.uid);
+
+  // The focusable aria-disabled control relies on this synchronous request guard.
+  const loadMorePosts = async () => {
+    if (!schoolId || loading || refreshing || moreInFlight.current || !hasMorePosts || !feedCursorRef.current) return;
+    const cursor = feedCursorRef.current;
+    const request = ++feedReadVersion.current;
+    moreInFlight.current = true;
+    setLoadingMorePosts(true);
+    setMorePostsError('');
+    setPageMessage('');
+    try {
+      const page = await fetchCampusPostPage(schoolId, cursor, activeDateBoundaryRef.current);
+      if (request !== feedReadVersion.current) return;
+      feedCursorRef.current = page.nextCursor;
+      // Append new cards without replacing previous pages or their pending reactions.
+      // A repeated ID can occur if an existing document's ordering field changes.
+      setPosts((previous) => {
+        const ids = new Set(previous.map((post) => post.id));
+        const additions = page.posts.filter((post) => {
+          if (post.schoolId !== schoolId || ids.has(post.id)) return false;
+          ids.add(post.id);
+          return true;
+        });
+        return [...previous, ...rankFeedPosts(additions, additions.length)];
+      });
+      setHasMorePosts(page.hasMore);
+      setPageMessage(page.hasMore
+        ? '已載入下一頁，可繼續載入更早貼文。'
+        : '已讀到本次查詢的最後一頁。');
+      // If the focused button disappears on the last page, leave keyboard users
+      // at the result status. Never steal focus from a search they resumed typing.
+      focusPageStatusRef.current = !page.hasMore && document.activeElement === loadMoreButtonRef.current;
+    } catch (cause) {
+      if (request !== feedReadVersion.current) return;
+      if (isPermissionDeniedError(cause)) {
+        focusPageStatusRef.current = document.activeElement === loadMoreButtonRef.current;
+        feedCursorRef.current = null;
+        setPosts([]);
+        // The same revoked membership protected stories and board metadata.
+        setStories([]);
+        setBoards([]);
+        setSubscribedIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
+        setHasMorePosts(false);
+        setPageMessage('');
+        setFeedReadDenied(true);
+      } else {
+        // Keep the previous cursor, cards and search so a retry requests the same page.
+        setMorePostsError('載入更多貼文失敗，已保留原本的貼文與搜尋，請重試。');
+      }
+    } finally {
+      if (request === feedReadVersion.current) {
+        moreInFlight.current = false;
+        setLoadingMorePosts(false);
+      }
+    }
+  };
+  const shelf = useStoryShelf(loading || error || feedReadDenied ? [] : stories, schoolId, user.uid);
 
   // hydrate display names for post authors + story authors
   useEffect(() => {
+    let live = true;
     (async () => {
+      // A late directory response must not restore identities after access revocation.
+      if (feedReadDenied) {
+        setNameByUid({});
+        setAvatarByUid({});
+        return;
+      }
       const uids = new Set<string>();
       [...posts, ...savedPosts].forEach((p) => {
         if (!p.anonymous && p.authorUid) uids.add(p.authorUid);
@@ -192,6 +298,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         return;
       }
       const profiles = await fetchSchoolDirectoryProfiles(schoolId, [...uids]);
+      if (!live) return;
       const n: Record<string, string> = {};
       const a: Record<string, string> = {};
       profiles.forEach((p) => {
@@ -201,7 +308,8 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
       setNameByUid(n);
       setAvatarByUid(a);
     })().catch(() => {});
-  }, [posts, savedPosts, stories, schoolId]);
+    return () => { live = false; };
+  }, [posts, savedPosts, stories, schoolId, feedReadDenied]);
 
   const boardNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -414,6 +522,52 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
     [user, schoolId],
   );
 
+  const jumpToDate = async (requestedDay: string) => {
+    const before = requestedDay ? taiwanFeedDayEnd(requestedDay) : null;
+    if ((requestedDay && !before) || !schoolId || loading || refreshing ||
+        dateNavigationBusyRef.current || loadingMorePosts || feedReadDenied) return;
+    const request = ++feedReadVersion.current;
+    dateNavigationBusyRef.current = true;
+    setDateNavigationBusy(true);
+    setDateNavigationError('');
+    // A previous next-page response must not replace the new historical range.
+    moreInFlight.current = false;
+    setLoadingMorePosts(false);
+    try {
+      const page = await fetchCampusPostPage(schoolId, null, before);
+      if (request !== feedReadVersion.current) return;
+      activeDateBoundaryRef.current = before;
+      setActiveDate(requestedDay);
+      feedCursorRef.current = page.nextCursor;
+      setPosts(rankFeedPosts(page.posts.filter(post => post.schoolId === schoolId), page.posts.length));
+      setHasMorePosts(page.hasMore);
+      setMorePostsError('');
+      setFeedReadDenied(false);
+      setPageMessage(page.hasMore
+        ? (requestedDay ? '已從指定日期開始載入，可繼續翻閱更早貼文。' : '已返回最新貼文，可繼續翻閱。')
+        : (requestedDay ? '這個日期以前的貼文已全部載入。' : '已讀到本次查詢的最後一頁。'));
+    } catch (cause) {
+      if (request !== feedReadVersion.current) return;
+      if (isPermissionDeniedError(cause)) {
+        feedCursorRef.current = null;
+        setPosts([]);
+        setStories([]);
+        setBoards([]);
+        setSubscribedIds(new Set());
+        setNameByUid({});
+        setAvatarByUid({});
+        setHasMorePosts(false);
+        setFeedReadDenied(true);
+        setPageMessage('');
+      } else {
+        setDateNavigationError('無法讀取指定日期，原本貼文與搜尋仍保留，請確認連線後重試。');
+      }
+    } finally {
+      dateNavigationBusyRef.current = false;
+      setDateNavigationBusy(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     setFollowingRevision((prev) => prev + 1);
@@ -453,7 +607,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const selectedFeedLoading = loading ||
     (savedView && (bookmarksLoading || (!validBookmarks && !bookmarksError))) ||
     (followingView && (followingLoading || (!validFollowing && !followingError)));
-  const selectedFeedError = (savedView && bookmarksError) || (followingView && followingError);
+  const selectedFeedError = (savedView && bookmarksError) || (followingView && followingError) || (feedReadDenied ? '貼文權限已失效' : '');
 
   return (
     <div className={styles.feedColumn}>
@@ -634,10 +788,12 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         <label className={styles.feedSearch}>
           搜尋此校動態
           <input
+            ref={searchInputRef}
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="貼文、標籤、看板或作者"
+            placeholder="貼文、標籤或作者（可空白組合）"
+            title="以空白分隔關鍵字，全部符合才顯示；僅搜尋已載入貼文"
             autoComplete="off"
           />
         </label>
@@ -657,6 +813,41 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             {savedView ? '貼文最新' : '最新'}
           </button>
         </div>
+        {!savedView && (
+          <div style={{ display: 'flex', alignItems: 'end', flexWrap: 'wrap', gap: 8, width: '100%' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+              依日期找舊貼文
+              <input
+                type="date"
+                aria-label="選擇歷史貼文截止日期"
+                value={dateDraft}
+                onChange={(event) => setDateDraft(event.target.value)}
+                style={{ minHeight: 44, maxWidth: '100%', color: 'var(--text)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn"
+              style={{ minHeight: 44 }}
+              aria-disabled={dateNavigationBusy || loading || refreshing || loadingMorePosts || !taiwanFeedDayEnd(dateDraft) || feedReadDenied}
+              onClick={() => void jumpToDate(dateDraft)}
+            >
+              {dateNavigationBusy ? '正在定位貼文…' : '從這天往前找'}
+            </button>
+            {activeDate && (
+              <button
+                type="button"
+                className="btn"
+                style={{ minHeight: 44 }}
+                aria-disabled={dateNavigationBusy || loading || refreshing || feedReadDenied}
+                onClick={() => { if (!dateNavigationBusy && !loading && !refreshing) void jumpToDate(''); }}
+              >
+                回到最新貼文
+              </button>
+            )}
+          </div>
+        )}
+        {dateNavigationError && <p role="alert" className={styles.feedError}>{dateNavigationError}</p>}
       </div>
       {!selectedFeedLoading && !selectedFeedError && !(savedView && bookmarkUnavailable) && (
         <p className={styles.feedScope} role="status">
@@ -664,7 +855,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             ? `顯示 ${visible.length} 則 · 本校最近最多 40 筆私人收藏，跨裝置同步`
             : followingView
               ? `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則貼文中追蹤的作者`
-              : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態，搜尋與排序僅適用於這些貼文`}
+              : `顯示 ${visible.length} 則 · 目前載入 ${posts.length} 則本校動態${activeDate ? `（${activeDate} 當日以前）` : ''}，文字搜尋與排序僅適用於已載入貼文`}
         </p>
       )}
       {followingError && (
@@ -689,6 +880,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           <button type="button" onClick={() => setBookmarkRevision((prev) => prev + 1)}>
             重新載入
           </button>
+        </div>
+      )}
+
+      {feedReadDenied && (
+        <div className={styles.feedError} role="alert">
+          校籍或貼文存取權限已變更，原本載入的貼文已清除。
+          <button ref={revalidateButtonRef} type="button" className="btn" onClick={() => void refresh()}>重新驗證</button>
         </div>
       )}
 
@@ -836,7 +1034,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   </p>
                 </Link>
 
-                {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} schoolId={schoolId} />}
+                {media.length > 0 && <MediaGrid uris={media.slice(0, 4)} postId={item.id} postTitle={item.title} schoolId={schoolId} />}
 
                 {(item.tags ?? []).length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
@@ -926,15 +1124,67 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
           })}
         </div>
       )}
+      {!savedView && !selectedFeedLoading && !selectedFeedError &&
+        (hasMorePosts || loadingMorePosts || !!morePostsError) && (
+        <div className={styles.feedEmptyActions}>
+          {hasMorePosts && (
+            <button
+              ref={loadMoreButtonRef}
+              type="button"
+              className="btn"
+              style={{ minHeight: 44, maxWidth: '100%', whiteSpace: 'normal' }}
+              aria-disabled={loadingMorePosts || refreshing}
+              aria-busy={loadingMorePosts}
+              aria-describedby={pageStatusId}
+              onClick={() => void loadMorePosts()}
+            >
+              {loadingMorePosts
+                ? '正在載入更多貼文…'
+                : search.trim() && visible.length === 0
+                  ? '再載入更多後繼續找'
+                  : '載入更多貼文'}
+            </button>
+          )}
+          {morePostsError && <p className={styles.feedError} role="alert">{morePostsError}</p>}
+        </div>
+      )}
+      {!savedView && !selectedFeedLoading && !selectedFeedError && (
+        <p ref={pageStatusRef} id={pageStatusId} tabIndex={-1} className={styles.feedScope} role="status" aria-live="polite">
+          {loadingMorePosts ? '正在讀取下一頁…' : pageMessage || (hasMorePosts
+            ? `每次接續載入 60 則更早貼文；重新整理${activeDate ? '保留目前日期範圍' : '會回到最新一頁'}。`
+            : '已讀到本次查詢的最後一頁。')}
+        </p>
+      )}
+      {!savedView && !selectedFeedLoading && !selectedFeedError &&
+        posts.length >= 120 && visible.length > 0 && (
+          <div className={styles.feedEmptyActions}>
+            <button
+              type="button"
+              className="btn"
+              style={{ minHeight: 44, maxWidth: '100%' }}
+              onClick={() => {
+                const field = searchInputRef.current;
+                if (!field) return;
+                // Avoid a long smooth scroll across hundreds of deferred cards.
+                field.focus({ preventScroll: true });
+                field.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+              }}
+            >
+              返回搜尋與篩選
+            </button>
+          </div>
+        )}
     </div>
   );
 }
 
-function MediaGrid({ uris, postId, schoolId }: { uris: string[]; postId: string; schoolId: string }) {
+function MediaGrid({ uris, postId, postTitle, schoolId }: { uris: string[]; postId: string; postTitle: string; schoolId: string }) {
+  const accessibleName = postTitle.trim() ? `查看貼文圖片：${postTitle.trim()}` : '查看貼文圖片';
   if (uris.length === 1) {
     return (
       <Link
         href={`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`}
+        aria-label={accessibleName}
         style={{
           display: 'block',
           marginTop: 10,
@@ -960,6 +1210,7 @@ function MediaGrid({ uris, postId, schoolId }: { uris: string[]; postId: string;
   return (
     <Link
       href={`/community/post/${postId}?schoolId=${encodeURIComponent(schoolId)}`}
+        aria-label={accessibleName}
       style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(2, 1fr)',

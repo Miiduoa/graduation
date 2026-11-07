@@ -25,6 +25,19 @@ vi.mock('next/link', () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string; className?: string }) =>
     <a href={href} {...props}>{children}</a>,
 }));
+vi.mock('@/lib/community/feedPages', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/community/feedPages')>()),
+  // Only the service boundary is controlled here. SDK cursor ordering and rules
+  // are exercised independently in feedPages.emulator.test.ts.
+  fetchCampusPostPage: async (schoolId: string, cursor: unknown) => {
+    const posts = await mocks.fetchPosts(schoolId, cursor, 60);
+    return {
+      posts,
+      nextCursor: posts.length ? { schoolId, document: { id: posts.at(-1).id } } : null,
+      hasMore: posts.length === 60,
+    };
+  },
+}));
 vi.mock('@/lib/community/firestore', () => ({
   fetchRecentCampusPosts: mocks.fetchPosts,
   rankFeedPosts: (rows: unknown[]) => rows,
@@ -439,4 +452,234 @@ it('hides a previously loaded story while retrying a rejected server read', asyn
   expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
   await act(async () => pending.resolve([]));
   expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
+});
+
+function pageRows(start = 0) {
+  return Array.from({ length: 60 }, (_, index) => ({
+    ...bob, id: `recent-${start + index}`, title: `近期貼文 ${start + index}`,
+  }));
+}
+
+it('finds an older campus post after loading another page without clearing the search', async () => {
+  const recent = pageRows();
+  const older = { ...bob, id: 'older-post', title: '上學期的專題集合' };
+  mocks.fetchPosts.mockResolvedValueOnce(recent).mockResolvedValueOnce([older]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '上學期的專題集合' } });
+  expect(screen.getByText('找不到符合的貼文')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByText('上學期的專題集合');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('上學期的專題集合');
+  expect(mocks.fetchPosts).toHaveBeenLastCalledWith('pu', { schoolId: 'pu', document: { id: 'recent-59' } }, 60);
+  expect(screen.queryByText('近期貼文 0')).toBeNull();
+});
+
+it('keeps the existing post and search after a failed page request and retries in place', async () => {
+  mocks.fetchPosts
+    .mockResolvedValueOnce(pageRows())
+    .mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }))
+    .mockResolvedValueOnce([{ ...bob, id: 'older', title: '找回舊貼文' }]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '找回舊貼文' } });
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByRole('alert');
+  expect(screen.getByText(/載入更多貼文失敗，已保留/)).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('找回舊貼文');
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByText('找回舊貼文');
+  expect(mocks.fetchPosts).toHaveBeenCalledTimes(3);
+  expect(mocks.fetchPosts.mock.calls[1][1]).toBe(mocks.fetchPosts.mock.calls[2][1]);
+});
+
+it('hides previously loaded posts when load-more detects revoked school access', async () => {
+  mocks.fetchPosts
+    .mockResolvedValueOnce(pageRows())
+    .mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.click(screen.getByRole('button', { name: '載入更多貼文' }));
+  await screen.findByText('校籍或貼文存取權限已變更，原本載入的貼文已清除。');
+  expect(screen.queryByText('近期貼文 0')).toBeNull();
+  expect(screen.queryByText('載入更多貼文')).toBeNull();
+  expect(screen.getByRole('button', { name: '重新驗證' })).toBeTruthy();
+});
+
+it('removes the story rail on a denied page and reloads it only after revalidation', async () => {
+  const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', expiresAt: Date.now() + 60_000,
+    kind: 'text', text: '舊校限時動態' };
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows())
+    .mockRejectedValueOnce(Object.assign(new Error('revoked'), { code: 'permission-denied' }))
+    .mockResolvedValueOnce(pageRows());
+  mocks.fetchStories.mockResolvedValue([story]);
+  mocks.groupStories.mockImplementation((rows) =>
+    rows.length ? [{ authorUid: 'bob', latestAt: Date.now(), stories: rows }] : []);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByRole('button', { name: /Bob的限時動態/ });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多貼文' }));
+  await screen.findByText('校籍或貼文存取權限已變更，原本載入的貼文已清除。');
+  expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新驗證' }));
+  await screen.findByRole('button', { name: /Bob的限時動態/ });
+});
+
+it('finds the 241st post while keeping the selected search, filter and order', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows(0)).mockResolvedValueOnce(pageRows(60))
+    .mockResolvedValueOnce(pageRows(120)).mockResolvedValueOnce(pageRows(180))
+    .mockResolvedValueOnce([{ ...bob, id: 'target-241', title: '第241篇的專題連結' }]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('近期貼文 0');
+  fireEvent.click(screen.getByRole('button', { name: '追蹤' }));
+  fireEvent.click(screen.getByRole('button', { name: '最新' }));
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '第241篇' } });
+  for (const count of [120, 180, 240]) {
+    fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+    await screen.findByText(new RegExp(`目前載入 ${count} 則`));
+  }
+  fireEvent.click(screen.getByRole('button', { name: '再載入更多後繼續找' }));
+  await screen.findByText('第241篇的專題連結');
+  expect(screen.getByRole('searchbox')).toHaveProperty('value', '第241篇');
+  expect(screen.getByRole('button', { name: '追蹤' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: '最新' }).getAttribute('aria-pressed')).toBe('true');
+  expect(mocks.fetchPosts.mock.calls.map((call) => call[2])).toEqual([60, 60, 60, 60, 60]);
+  expect(mocks.fetchPosts.mock.calls.slice(1).map((call) => call[1].document.id))
+    .toEqual(['recent-59', 'recent-119', 'recent-179', 'recent-239']);
+  expect(screen.queryByText(/已達單次瀏覽上限/)).toBeNull();
+});
+
+it('does not replace an existing card or its pending reaction when another page repeats its ID', async () => {
+  const like = deferred<void>();
+  mocks.fetchPosts.mockResolvedValueOnce([{ ...bob, likedBy: [], likes: 0 }, ...pageRows().slice(1)])
+    .mockResolvedValueOnce([{ ...bob, likedBy: [], likes: 0 }, { ...carol, id: 'older' }]);
+  mocks.toggleLike.mockReturnValueOnce(like.promise);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const title = await screen.findByText('小明的貼文');
+  const card = title.closest('article');
+  fireEvent.click(postCard('小明的貼文').getByRole('button', { name: '按讚' }));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多貼文' }));
+  await screen.findByText('小華的貼文');
+  expect(screen.getAllByText('小明的貼文')).toHaveLength(1);
+  expect(screen.getByText('小明的貼文').closest('article')).toBe(card);
+  expect(postCard('小明的貼文').getByRole('button', { name: '取消按讚' }).getAttribute('aria-pressed')).toBe('true');
+  await act(async () => like.resolve());
+});
+
+it('starts only one page request for repeated activation while the page is pending', async () => {
+  const pending = deferred<typeof bob[]>();
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockReturnValueOnce(pending.promise);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '載入更多貼文' });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(mocks.fetchPosts).toHaveBeenCalledTimes(2);
+  expect(button.getAttribute('aria-busy')).toBe('true');
+  await act(async () => pending.resolve([carol]));
+  expect(screen.getByText('小華的貼文')).toBeTruthy();
+});
+
+it('refreshes from the first page and ignores a late continuation result', async () => {
+  const oldPage = deferred<typeof bob[]>();
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockReturnValueOnce(oldPage.promise)
+    .mockResolvedValueOnce([{ ...bob, id: 'new-head', title: '最新頁' }]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多貼文' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+  await screen.findByText('最新頁');
+  expect(mocks.fetchPosts.mock.calls[2][1]).toBeNull();
+  await act(async () => oldPage.resolve([carol]));
+  expect(screen.queryByText('小華的貼文')).toBeNull();
+  expect(screen.getByText('最新頁')).toBeTruthy();
+});
+
+it.each(['account', 'school'] as const)('ignores a late denied page after changing %s', async (scope) => {
+  const pending = deferred<typeof bob[]>();
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockReturnValueOnce(pending.promise);
+  const view = render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多貼文' }));
+  const schoolId = scope === 'school' ? 'other' : 'pu';
+  if (scope === 'account') mocks.auth.user = { uid: 'dana' };
+  mocks.fetchPosts.mockResolvedValue([{ ...bob, schoolId, title: '目前身分的貼文' }]);
+  view.rerender(<FeedTab schoolId={schoolId} schoolSearch={`?schoolId=${schoolId}`} />);
+  await screen.findByText('目前身分的貼文');
+  expect(mocks.fetchPosts.mock.calls[2][1]).toBeNull();
+  await act(async () => pending.reject(Object.assign(new Error('revoked'), { code: 'permission-denied' })));
+  expect(screen.getByText('目前身分的貼文')).toBeTruthy();
+  expect(screen.queryByText('近期貼文 0')).toBeNull();
+  expect(screen.queryByRole('button', { name: '重新驗證' })).toBeNull();
+});
+
+it('moves keyboard focus to the result status when the last-page button disappears', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockResolvedValueOnce([carol]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '載入更多貼文' });
+  button.focus();
+  const statusId = button.getAttribute('aria-describedby');
+  fireEvent.click(button);
+  const status = await screen.findByText('已讀到本次查詢的最後一頁。');
+  expect(status.id).toBe(statusId);
+  expect(document.activeElement).toBe(status);
+  expect(screen.queryByRole('button', { name: '載入更多貼文' })).toBeNull();
+});
+
+it('does not steal search focus when the student resumes typing before a page arrives', async () => {
+  const pending = deferred<typeof bob[]>();
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockReturnValueOnce(pending.promise);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const button = await screen.findByRole('button', { name: '載入更多貼文' });
+  button.focus();
+  fireEvent.click(button);
+  const search = screen.getByRole('searchbox');
+  search.focus();
+  fireEvent.change(search, { target: { value: '小華' } });
+  await act(async () => pending.resolve([carol]));
+  expect(document.activeElement).toBe(search);
+  expect(search).toHaveProperty('value', '小華');
+  expect(screen.getByText('小華的貼文')).toBeTruthy();
+});
+
+it('keeps the existing cards on a final empty page and hides malformed other-school rows', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockResolvedValueOnce([
+    { ...bob, id: 'foreign', schoolId: 'other', title: '不可顯示的他校貼文' },
+  ]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多貼文' }));
+  await screen.findByText('已讀到本次查詢的最後一頁。');
+  expect(screen.getByText('近期貼文 0')).toBeTruthy();
+  expect(screen.queryByText('不可顯示的他校貼文')).toBeNull();
+  expect(screen.getAllByRole('article')).toHaveLength(60);
+});
+
+
+it('returns to the loaded-post search from a long list without another server read', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockResolvedValueOnce(pageRows(60));
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const loadMore = await screen.findByRole('button', { name: '載入更多貼文' });
+  expect(screen.queryByRole('button', { name: '返回搜尋與篩選' })).toBeNull();
+  fireEvent.click(loadMore);
+  const shortcut = await screen.findByRole('button', { name: '返回搜尋與篩選' });
+  expect(shortcut.getBoundingClientRect().height >= 0).toBe(true);
+  shortcut.focus();
+  fireEvent.click(shortcut);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  expect(mocks.fetchPosts).toHaveBeenCalledTimes(2);
+});
+
+it('names image-only post links for keyboard and screen-reader navigation', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce([
+    { ...bob, title: '校園活動照片', mediaUrls: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=='] },
+    { ...anonymous, title: '匿名的社團相簿', mediaUrls: [
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==',
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==#second',
+    ] },
+  ]);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  await screen.findByText('校園活動照片');
+  const single = postCard('校園活動照片').getByRole('link', { name: '查看貼文圖片：校園活動照片' });
+  const multiple = postCard('匿名的社團相簿').getByRole('link', { name: '查看貼文圖片：匿名的社團相簿' });
+  expect(single.getAttribute('href')).toBe('/community/post/p-bob?schoolId=pu');
+  expect(multiple.getAttribute('href')).toBe('/community/post/p-anon?schoolId=pu');
+  expect(single.querySelector('img')?.getAttribute('alt')).toBe('');
+  expect(multiple.querySelectorAll('img')).toHaveLength(2);
+  expect(multiple.getAttribute('aria-label')).not.toContain('bob');
 });
