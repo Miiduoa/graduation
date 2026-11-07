@@ -6,6 +6,7 @@ import {
   DORM_PARCEL_LIMIT,
   DORM_REPAIR_COPY,
   DORM_REPAIR_DISALLOWED_COPY,
+  dormRepairAssistantStatusLabel,
   dormChecklistProgress,
   dormInspectionProgress,
   dormStorageKey,
@@ -76,12 +77,39 @@ it('keeps shared repair copy as a personal memo without ticket or school-progres
   expect(DORM_REPAIR_COPY.intro).toContain('請依學校規定管道送出');
   expect(DORM_REPAIR_COPY.officialTrackingFallback).toContain('網站');
   expect(DORM_REPAIR_COPY.assistantSavedMemo).toContain('報修備忘');
+  expect(DORM_REPAIR_COPY.assistantListTitle).toBe('報修備忘');
+  expect(DORM_REPAIR_COPY.assistantListEmpty).toContain('報修備忘');
+  expect(DORM_REPAIR_COPY.assistantWriteSuccess).toBe('報修備忘已存好');
+  expect(DORM_REPAIR_COPY.assistantWriteStayNote).toContain('只會存成報修備忘');
+  expect(DORM_REPAIR_COPY.assistantWriteStayNote).not.toContain('送出後即使離開此頁');
+  expect(DORM_REPAIR_COPY.assistantWriteUncertain).not.toContain('避免重複送出');
+  expect(DORM_REPAIR_COPY.defaultMemoDescription).toBe('自行記下的報修備忘');
+  expect(DORM_REPAIR_COPY.estimatedDuration).toContain('備忘');
+  expect(DORM_REPAIR_COPY.descriptionHint).toContain('向學校通報');
+  expect(DORM_REPAIR_COPY.pushMemoTitle).toBe('報修備忘已存好');
+  expect(DORM_REPAIR_COPY.pushMemoBody).toContain('請依學校規定管道通報');
   expect('工單').toMatch(DORM_REPAIR_DISALLOWED_COPY);
   expect('已提交報修').toMatch(DORM_REPAIR_DISALLOWED_COPY);
   expect('已為你提交報修工單').toMatch(DORM_REPAIR_DISALLOWED_COPY);
   expect('查看處理狀況').toMatch(DORM_REPAIR_DISALLOWED_COPY);
   expect('修繕進度').toMatch(DORM_REPAIR_DISALLOWED_COPY);
   expect('查進度').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('報修已受理').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('您的報修已派員處理').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('即時提交，1-3 天處理').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+});
+
+it('assistant repair status labels do not imply school processing', () => {
+  expect(dormRepairAssistantStatusLabel('pending')).toBe('已存備忘');
+  expect(dormRepairAssistantStatusLabel('assigned')).toBe('已存備忘');
+  expect(dormRepairAssistantStatusLabel('in_progress')).toBe('已存備忘');
+  expect(dormRepairAssistantStatusLabel('completed')).toBe('已自行註記完成');
+  expect(dormRepairAssistantStatusLabel('resolved')).toBe('已自行註記完成');
+  expect(dormRepairAssistantStatusLabel('cancelled')).toBe('已取消備忘');
+  for (const label of ['pending', 'in_progress', 'completed', 'cancelled'].map(dormRepairAssistantStatusLabel)) {
+    expect(label).not.toMatch(/待處理|處理中|已完成/);
+    expect(label).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  }
 });
 
 

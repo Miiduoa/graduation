@@ -3701,8 +3701,10 @@ exports.updateRepairStatus = onCall(
       await sendPushToUser(
         repairData.userId,
         {
-          title: status === 'assigned' ? '🔧 報修已受理' : '✅ 報修已完成',
-          body: status === 'assigned' ? '您的報修已派員處理' : '您的報修已完成，請確認',
+          title: status === 'assigned' ? '報修備忘已存好' : '報修備忘已更新',
+          body: status === 'assigned'
+            ? '此應用沒有送到學校。請依學校規定管道通報。'
+            : '此應用沒有送到學校。實際是否修好請向校方確認。',
         },
         {
           type: 'repair',

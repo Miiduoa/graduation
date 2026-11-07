@@ -394,7 +394,9 @@ test('a server proposal requires review and a second explicit tap before writing
     userId: 'A', schoolId: 'pu',
     proposal: { agentRunId: runId, toolName: 'createDormRepairRequest' },
   });
-  expect(view.getByText('伺服器已確認執行成功')).toBeTruthy();
+  expect(view.getAllByText('報修備忘已存好').length).toBeGreaterThan(0);
+  expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(view.queryByText('已送出確認，請核對結果')).toBeNull();
   expect(view.queryByText(/repair-123/)).toBeNull();
   expect(view.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
   expect(view.queryByText('確認並執行')).toBeNull();
