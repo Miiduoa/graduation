@@ -8,6 +8,10 @@ import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import type { V2Card, V2Turn } from './assistant/types';
+import { answerAssistantLocally } from '@/lib/assistantLocalActions';
+import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { ASSISTANT_SERVICES } from '@campus/shared/src/assistantServices';
+import { AssistantLocalEntry } from '@/components/AssistantLocalEntry';
 type Step = {
   intent: AssistantIntent;
   confirmation: string;
@@ -15,11 +19,12 @@ type Step = {
   answer?: string;
   simulation: boolean;
 };
-function Conversation({ context, schoolId }: { context: string; schoolId: string }) {
+function Conversation({ context, schoolId, accountId, cloudEnabled }: { context: string; schoolId: string; accountId: string; cloudEnabled: boolean }) {
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
   const [fallback, setFallback] = useState(false);
+  const [capabilityUnavailable, setCapabilityUnavailable] = useState(!cloudEnabled);
   const [step, setStep] = useState<Step | null>(null);
   const [source, setSource] = useState('');
   const [href, setHref] = useState('');
@@ -50,6 +55,7 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
     return response.json();
   }
   useEffect(() => {
+    if (!cloudEnabled) return;
     controller.current = new AbortController();
     const activeController = controller.current;
     let active = true;
@@ -60,10 +66,14 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
           setReady(value.enabled === true);
           setProviderReady(value.ready === true);
           setFallback(value.fallback === true);
+          setCapabilityUnavailable(value.enabled !== true);
         }
       })
       .catch((e) => {
-        if (active) setError(e.message);
+        if (active) {
+          setError(e.message);
+          setCapabilityUnavailable(true);
+        }
       });
     return () => {
       active = false;
@@ -99,11 +109,16 @@ function Conversation({ context, schoolId }: { context: string; schoolId: string
       if (!signal.aborted) setPending(false);
     }
   }
-  if (v2) return <V2Conversation context={context} schoolId={schoolId} ready={providerReady} fallback={fallback} />;
+  if (v2 || capabilityUnavailable) return <>
+    {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
+    <V2Conversation context={context} schoolId={schoolId} accountId={accountId} ready={providerReady} fallback={fallback} />
+  </>;
   return (
     <section aria-label="公開校園助理">
       <p>此助理目前提供公開資訊，尚未支援代辦寫入。私人課表、作業與借閱快照尚未支援。</p>
+      <AssistantLocalEntry owner={accountId ? 'platform:' + accountId : ''} schoolId={schoolId} />
       {!ready && <p role="status">{error || '正在確認助理是否啟用…'}</p>}
+      {!ready && <AssistantServiceLinks serviceIds={ASSISTANT_SERVICES.map((service) => service.id)} schoolId={schoolId} audience="platform" />}
       {ready && (
         <>
           <nav aria-label="公開服務入口">
@@ -180,11 +195,13 @@ function V2Conversation({
   schoolId,
   ready,
   fallback,
+  accountId,
 }: {
   context: string;
   schoolId: string;
   ready: boolean;
   fallback: boolean;
+  accountId: string;
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
@@ -228,10 +245,20 @@ function V2Conversation({
   async function ask() {
     const current = question.trim();
     if (!current || pending) return;
+    const local = answerAssistantLocally(current, { owner: accountId ? 'platform:' + accountId : '', schoolId });
+    if (local) {
+      setTurns((previous) => [...previous, { question: current,
+        reply: { answer: local.content, steps: [], cards: [], local } }]);
+      setQuestion('');
+      setError('');
+      return;
+    }
+    if (!consent || !ready) return;
     setPending(true);
     setError('');
     try {
-      const history = turns.slice(-6).flatMap((t) => [
+      const history = turns.filter((turn) => !turn.reply.local &&
+        !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: t.reply.answer },
       ]);
@@ -315,7 +342,7 @@ function V2Conversation({
     />
   );
 }
-function AssistantRoute() {
+function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {
   const auth = useNuniSession();
   const search = useSearchParams();
   const campus = useCampusBrowseContext({
@@ -331,18 +358,20 @@ function AssistantRoute() {
   if (campus.status !== 'ready' || !campus.schoolId) return <p role="status">請先選擇學校。</p>;
   return (
     <Conversation
-      key={auth.session.context + ':' + campus.schoolId}
+      key={auth.session.context + ':' + auth.session.platformAccountId + ':' + campus.schoolId + ':' + cloudEnabled}
       context={auth.session.context}
+      accountId={auth.session.platformAccountId}
+      cloudEnabled={cloudEnabled}
       schoolId={campus.schoolId}
     />
   );
 }
-export function Assistant({ children }: { children?: ReactNode }) {
+export function Assistant({ children, cloudEnabled = true }: { children?: ReactNode; cloudEnabled?: boolean }) {
   return (
     <SiteShell title="助理" subtitle="查詢課表、作業、餐點與校園服務。">
       {children}
       <Suspense fallback={<p>載入中…</p>}>
-        <AssistantRoute />
+        <AssistantRoute cloudEnabled={cloudEnabled} />
       </Suspense>
     </SiteShell>
   );

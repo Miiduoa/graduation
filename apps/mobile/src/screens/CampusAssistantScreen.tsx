@@ -13,6 +13,7 @@ import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
 import { subscribeNuniAssignmentChanges } from '../services/nuniAssignmentChanges';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
 import { AssistantClassNowHint } from './AssistantClassNowHint';
+import { AssistantServiceReply } from './AssistantServiceReply';
 import { useAssistantSessionExpiry } from '../state/useAssistantSessionExpiry';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
@@ -132,6 +133,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
 type SyncQuestion = typeof TODAY_BRIEF | typeof WEEK_BRIEF | typeof TODAY_ANNOUNCEMENTS;
 type AssistantShortcut =
   | { kind: 'brief'; question: SyncQuestion }
+  | { kind: 'services'; question: string }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
   | { kind: 'selection'; question: string; checkedAt: string };
@@ -359,6 +361,8 @@ function AssistantConversation({
             source: reply.source,
             tool: reply.tool,
             route: reply.route,
+            serviceSelection: reply.serviceSelection,
+            academicRead: reply.academicRead,
             plan: reply.plan,
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
@@ -415,6 +419,10 @@ function AssistantConversation({
         if (current()) setError('無法核對這筆課表，請再查一次。');
         return;
       }
+      if (reply.academicRead && (reply.academicRead.owner !== timetableOwner || reply.academicRead.schoolId !== schoolId)) {
+        if (current()) setError('無法核對這筆成績的帳號與學校，請再查一次。');
+        return;
+      }
       if (controller.signal.aborted && current()) {
         setError(platformTimetable ? '已取消查詢。' : '已停止本機回答。');
         return;
@@ -431,6 +439,8 @@ function AssistantConversation({
             source: reply.source,
             tool: reply.tool,
             route: reply.route,
+            serviceSelection: reply.serviceSelection,
+            academicRead: reply.academicRead,
             plan: reply.plan,
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
@@ -666,6 +676,7 @@ function AssistantConversation({
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <AIButton label="查看完整課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalTimetable')} />
             <AIButton label="匯入課表" variant="ghost" onPress={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} />
+            <AIButton label="查看所有功能" variant="ghost" onPress={() => void send({ kind: 'services', question: '你能做什麼？' })} />
           </View>
         </AICard>
       ) : null}
@@ -678,6 +689,8 @@ function AssistantConversation({
           </Text>
           {!draft.trim() && (
             <View style={{ gap: 6, marginTop: 10 }}>
+              <AIButton label="查看所有功能" variant="ghost" size="sm"
+                style={{ alignSelf: 'stretch' }} onPress={() => void send({ kind: 'services', question: '你能做什麼？' })} />
               {(mode === 'device'
                 ? ['請依手機儲存的課表整理學習安排', ...(currentSense ? ['我還有哪些作業待交？'] : []),
                   '幫我把期末報告拆成可以完成的步驟']
@@ -699,7 +712,9 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
+          <AICard title={message.tool === 'saved-academics' ? '成績與學分紀錄'
+            : message.serviceSelection ? '功能入口'
+            : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
             : message.announcementRead ? '校園公告'
             : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
             {platformTimetable && message.courseworkRead ? (
@@ -766,6 +781,11 @@ function AssistantConversation({
                 {message.plan ? message.plan.overview : message.content}
               </Text>
             )}
+            {message.serviceSelection ? (
+              <AssistantServiceReply selection={message.serviceSelection}
+                audience={platformTimetable ? 'platform' : uid ? 'campus' : 'guest'}
+                navigation={navigation} disabled={busy || syncBusy} isCurrent={current} />
+            ) : null}
             {platformTimetable && index === messages.length - 1 && !!message.savedClassRead?.classes.length ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                 <AIButton label="查這堂課的作業" variant="ghost" disabled={busy}
@@ -817,7 +837,11 @@ function AssistantConversation({
                     : undefined}
                 />
               ))}
-            {!platformTimetable && message.source === 'device' && !message.savedClassRead && (
+            {message.tool === 'saved-academics' && message.academicRead ? (
+              <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 21, marginTop: 10 }}>
+                來源是這台手機的個人匯入紀錄，沒有重新查詢校方成績。
+              </Text>
+            ) : !platformTimetable && message.source === 'device' && !message.savedClassRead && !message.serviceSelection && (
               <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
                 {message.tool === 'local-agent'
                   ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
@@ -830,7 +854,7 @@ function AssistantConversation({
                     : '手機模型生成 · 未進行校園網路查詢，重要資訊請到正式服務確認'}
               </Text>
             )}
-            {platformTimetable && message.route === '/timetable/import' ? (
+            {message.serviceSelection ? null : platformTimetable && message.route === '/timetable/import' ? (
               <AIButton label="匯入課表" disabled={busy} onPress={() => current() && safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })} />
             ) : (!message.savedClassRead || !message.savedClassRead.classes.length) && !message.plan && !message.localReads?.length && message.route && (!platformTimetable || message.route === '/timetable') && VERIFIED_SERVICE_ROUTES[message.route] ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>

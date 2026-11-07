@@ -1,4 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
+import { ASSISTANT_SERVICES, resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
+import { parseImportedAcademicIntent, summarizeImportedAcademics,
+  formatImportedAcademicSummary } from '@campus/shared/src/importedAcademicSummary';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -14,12 +17,17 @@ import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
+import type { AssistantServiceSelection } from '../services/assistantServiceNavigation';
+
+export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
 
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics';
   route?: string;
+  serviceSelection?: AssistantServiceSelection;
+  academicRead?: ImportedAcademicRead;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
@@ -101,7 +109,9 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
+  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent' | 'saved-academics';
+  serviceSelection?: AssistantServiceSelection;
+  academicRead?: ImportedAcademicRead;
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
@@ -121,6 +131,10 @@ export async function askCampusAssistant(input: {
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
     .slice(-20)
+    // A local academic result is displayed in this conversation, but does not
+    // grant permission to send the imported grades to a later model request.
+    .filter((message, index, history) => message.tool !== 'saved-academics' &&
+      !(message.role === 'user' && history[index + 1]?.tool === 'saved-academics'))
     .map((message) => ({
       role: message.role,
       content: message.content.trim().slice(0, 1600),
@@ -130,11 +144,67 @@ export async function askCampusAssistant(input: {
     throw new Error('Missing question');
   }
 
+  const question = messages[messages.length - 1].content;
+  const serviceIntent = resolveAssistantServiceIntent(question);
+  if (serviceIntent) {
+    return {
+      source: 'device', tool: 'open-service', hasActions: false,
+      content: serviceIntent.kind === 'catalog'
+        ? '選擇想使用的功能。查課表與已儲存成績也可以直接提問；送出申請、下單及發訊息仍在原服務確認。'
+        : `可以從下方開啟${serviceIntent.service.label}，再接續處理。`,
+      serviceSelection: serviceIntent.kind === 'catalog'
+        ? { kind: 'catalog', serviceIds: ASSISTANT_SERVICES.map((service) => service.id) }
+        : { kind: 'open', serviceIds: [serviceIntent.service.id] },
+    };
+  }
+  // An explicit campus/live grade request retains the existing school reader.
+  // Only an explicit saved/imported request can use the local source in that mode.
+  const academicIntent = mode === 'device' || /匯入|儲存|保存/.test(question)
+    ? parseImportedAcademicIntent(question) : null;
+  if (academicIntent) {
+    const platform = input.platformTimetable;
+    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const owner = platform ? `nuni:${platform.accountId}` : uid ? `firebase:${uid}` : '';
+    if (!owner) {
+      return { content: '請先登入自己的帳號，再查詢這台手機保存的成績與學分紀錄。',
+        hasActions: false, source: 'device', tool: 'saved-academics',
+        serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    }
+    const { snapshotPersonalImports } = require('../services/personalImports') as typeof import('../services/personalImports');
+    const assertAcademicCurrent = () => {
+      scopeCheck(input, false);
+      if (input.signal?.aborted) throw new OnDeviceAssistantError('cancelled');
+    };
+    const active = () => {
+      try { assertAcademicCurrent(); return true; } catch { return false; }
+    };
+    let ledger: Awaited<ReturnType<typeof snapshotPersonalImports>> | null = null;
+    try {
+      ledger = await abortableCampusRead(() => snapshotPersonalImports({ owner, schoolId: input.scope.schoolId }, active), input.signal);
+    } catch {
+      // Unreadable data is not an empty transcript. Account changes and aborts
+      // must still discard the entire reply rather than expose the old scope.
+      assertAcademicCurrent();
+    }
+    assertAcademicCurrent();
+    const checkedAt = new Date().toISOString();
+    const summary = summarizeImportedAcademics({
+      records: ledger?.records,
+      schoolId: input.scope.schoolId,
+      availability: ledger ? 'available' : 'unavailable',
+      fetchedAt: checkedAt,
+      academicYear: academicIntent.academicYear,
+      semester: academicIntent.semester,
+    });
+    return { content: formatImportedAcademicSummary(summary), hasActions: false,
+      source: 'device', tool: 'saved-academics', academicRead: { owner, schoolId: input.scope.schoolId, checkedAt },
+      serviceSelection: { kind: 'open', serviceIds: ['import'], importKind: 'grades' } };
+  }
+
   if (mode === 'device') {
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
-    const question = messages[messages.length - 1].content;
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;

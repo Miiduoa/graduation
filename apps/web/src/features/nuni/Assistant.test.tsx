@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { Assistant } from './Assistant';
+import { personalImportsStorageKey } from '@/lib/personalImports';
 const state = vi.hoisted(() => ({
   context: 'session-a',
   school: 'pu',
@@ -13,7 +14,7 @@ vi.mock('./Session', () => ({
     loading: false,
     error: '',
     pendingLogout: state.pending,
-    session: state.authenticated ? { context: state.context } : null,
+    session: state.authenticated ? { context: state.context, platformAccountId: 'alice' } : null,
   }),
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
@@ -25,6 +26,7 @@ vi.mock('@/components/SiteShell', () => ({
 }));
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
+  localStorage.clear();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -35,6 +37,75 @@ afterEach(() => {
 });
 const json = (value: object) =>
   new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+
+it('v2 opens a scoped service while the provider is unavailable and without model consent', async () => {
+  const fetch = vi.fn(async () => json({ enabled: true, ready: false, version: 2 }));
+  vi.stubGlobal('fetch', fetch);
+  state.school = 'nthu';
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '開啟助理權限' } });
+  expect((screen.getByText('送出') as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByText('送出'));
+  expect((await screen.findByRole('link', { name: /開啟助理權限/ })).getAttribute('href'))
+    .toBe('/settings?section=assistant&schoolId=nthu');
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+});
+
+it('v2 keeps local grades out of subsequent cloud history and clears them on scope change', async () => {
+  localStorage.setItem(personalImportsStorageKey({ owner: 'platform:alice', schoolId: 'pu' }), JSON.stringify({
+    version: 1, records: [{ id: 'grade-a', kind: 'grades', title: '個人成績專用課名',
+      schoolId: 'pu', academicYear: '115', semester: '1', grade: '87', credits: 3,
+      batchId: 'import-a', importedAt: '2026-11-07T10:00:00.000Z',
+      source: { type: 'paste', line: 1, rawText: '不可帶入模型的原始文字' } }],
+  }));
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json({ answer: '一般查詢回覆', steps: [], cards: [] });
+  }));
+  const view = render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.change(question, { target: { value: '查看我的匯入成績' } });
+  fireEvent.click(screen.getByText('送出'));
+  expect(await screen.findByText(/個人成績專用課名/)).toBeTruthy();
+  expect(bodies).toHaveLength(0);
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('一般查詢回覆');
+  expect(bodies[0].history).toEqual([]);
+  expect(JSON.stringify(bodies)).not.toContain('個人成績專用課名');
+  state.school = 'nthu';
+  view.rerender(<Assistant />);
+  await screen.findByLabelText('問題');
+  expect(screen.queryByText(/個人成績專用課名/)).toBeNull();
+});
+
+it('excludes provider-selected academic reads with nonnumeric grades from subsequent history', async () => {
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    bodies.push(JSON.parse(String(init?.body)));
+    return json(bodies.length === 1
+      ? { answer: '私人課名甲：免修；私人課名乙：缺考',
+        steps: [{ name: 'get_imported_academics', status: 'ok', summary: '已核對個人紀錄' }], cards: [] }
+      : { answer: '一般餐點資訊', steps: [], cards: [] });
+  }));
+  render(<Assistant />);
+  const question = await screen.findByLabelText('問題');
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(question, { target: { value: '比較本學期匯入的成績和其他紀錄' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText(/私人課名甲/);
+  fireEvent.change(question, { target: { value: '附近餐廳有哪些' } });
+  fireEvent.click(screen.getByText('送出'));
+  await screen.findByText('一般餐點資訊');
+  expect(bodies[1].history).toEqual([]);
+  expect(JSON.stringify(bodies[1])).not.toContain('私人課名');
+});
 it('disabled shows existing unavailable message without Firebase requests', async () => {
   const fetch = vi.fn(async (..._args: [string]) => {
     void _args;

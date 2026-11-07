@@ -1,4 +1,5 @@
 import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
+import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
 import { CAMPUS_SERVICES, visibleCampusServices } from './campusServices';
 
 export type QuickCampusAction = Pick<
@@ -8,6 +9,16 @@ export type QuickCampusAction = Pick<
 
 /** Show shortcuts for known services only; no submission, payment or update is executed. */
 export function getQuickCampusActions(input: string, schoolLmsEnabled = false): QuickCampusAction[] {
+  const intent = resolveAssistantServiceIntent(input);
+  if (intent?.kind === 'open') {
+    const existing = CAMPUS_SERVICES.find((item) => item.href === intent.service.href);
+    return [{
+      name: existing?.name ?? intent.service.label,
+      text: intent.service.summary,
+      href: intent.service.href,
+      access: existing?.access ?? 'account',
+    }];
+  }
   return suggestCampusDestinations(input).flatMap((href) => {
     // The shared intent keeps the mobile grade destination; Web uses an explicit semester tab.
     const webHref = href === '/grades' ? '/grades?tab=semester' : href;

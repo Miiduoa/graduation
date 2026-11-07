@@ -14,6 +14,7 @@ export type V2Reply = {
   steps: V2Step[];
   cards: V2Card[];
   simulation?: boolean;
+  local?: import('@/lib/assistantLocalActions').LocalAssistantResult;
 };
 
 export type V2Turn = { question: string; reply: V2Reply };

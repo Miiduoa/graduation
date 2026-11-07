@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
 import type { V2Turn } from './types';
@@ -72,7 +74,7 @@ export function AssistantThread({
   }
   return (
     <section ref={shell} className={styles.shell} aria-label="情境助理 v2">
-      <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
+      <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。開啟服務與本機成績查詢可直接使用。</p>
       <nav className={styles.services} aria-label="校園服務入口">
         <Link href={'/map' + schoolQuery}>校園地圖</Link>
         <Link href={'/bus' + schoolQuery}>公車資訊</Link>
@@ -85,7 +87,7 @@ export function AssistantThread({
       ) : null}
       <label className={styles.consent}>
         <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
-        同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+        同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
         Groq
         {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
       </label>
@@ -113,6 +115,7 @@ export function AssistantThread({
             <div className={`${styles.row} ${styles.rowAssistant}`}>
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
                 <AssistantMarkdown text={turn.reply.answer} />
+                {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
@@ -188,7 +191,7 @@ export function AssistantThread({
               }
             }}
           />
-          <button className={styles.send} disabled={!consent || !ready || pending || !question.trim()}>
+          <button className={styles.send} disabled={pending || !question.trim() || (!canAnswerAssistantLocally(question) && (!consent || !ready))}>
             送出
           </button>
         </form>

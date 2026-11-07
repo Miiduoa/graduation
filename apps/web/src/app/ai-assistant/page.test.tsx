@@ -2,13 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CampusDraftProvider, scopeStorageKey } from '@/components/CampusDraftProvider';
-import AssistantPage from './page';
+import { personalImportsStorageKey } from '@/lib/personalImports';
+import AssistantPage from './LegacyAssistant';
 import { callCampusAssistant, executeCampusAgentWrite, getCampusAssistantSnapshot, type CampusAssistantEnvelope } from '@/lib/campusAssistantClient';
 
 const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   query: '',
   functionsConfigured: true,
+  platformId: '' as string,
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('@/components/AuthGuard', () => ({
@@ -18,7 +20,10 @@ vi.mock('@/lib/signInOptions', () => ({
   useSignInOptions: () => ({ google: false, studentId: false, loading: false, retry: vi.fn() }),
 }));
 vi.mock('@/features/nuni/Session', () => ({
-  useOptionalNuniSession: () => null,
+  useOptionalNuniSession: () => state.platformId ? {
+    session: { platformAccountId: state.platformId, context: 'platform-session' },
+    loading: false, error: '', pendingLogout: false,
+  } : null,
 }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({
@@ -61,6 +66,8 @@ beforeEach(() => {
   state.uid = 'alice';
   state.query = '';
   state.functionsConfigured = true;
+  state.platformId = '';
+  localStorage.clear();
   vi.mocked(getCampusAssistantSnapshot).mockImplementation(async (_userId, schoolId) => ({
     schoolId,
     checkedAt: '2026-10-26T12:00:00.000Z',
@@ -83,6 +90,25 @@ function withCampusDraft(node: ReactNode) {
     </CampusDraftProvider>
   );
 }
+
+it('keeps live school grades available for dual sessions and reads explicit imports from their established owner', async () => {
+  state.platformId = 'platform-alice';
+  const imported = {
+    id: 'grade-1', kind: 'grades', title: '平台匯入專用科目', schoolId: 'pu',
+    academicYear: '115', semester: '1', credits: 3, grade: 'P', batchId: 'batch',
+    importedAt: '2026-11-07T10:00:00.000Z', source: { type: 'paste', line: 1, rawText: '不外送原文' },
+  };
+  localStorage.setItem(personalImportsStorageKey({ owner: 'platform:platform-alice', schoolId: 'pu' }),
+    JSON.stringify({ version: 1, records: [imported] }));
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '校方即時成績結果' } as CampusAssistantEnvelope);
+  render(<AssistantPage />);
+  ask('查看我的成績');
+  await screen.findByText('校方即時成績結果');
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+  ask('查看我的匯入成績');
+  await screen.findByText(/平台匯入專用科目/);
+  expect(callCampusAssistant).toHaveBeenCalledTimes(1);
+});
 
 it('uses the function name in the header instead of a school name before the school account is connected', () => {
   state.uid = null;
@@ -322,7 +348,7 @@ it('shows that the cloud assistant is not enabled instead of a retryable failure
   render(<AssistantPage />);
   expect(screen.getByRole('heading', { name: '雲端助理尚未啟用' })).toBeTruthy();
   expect(screen.getByText(/正式站尚未接上雲端函式服務/)).toBeTruthy();
-  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
   expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText('這次未能取得回覆。你的問題已保留，請稍後重試。')).toBeNull();
   expect(screen.queryByRole('button', { name: '重試' })).toBeNull();
@@ -336,6 +362,28 @@ it('keeps the composer enabled when Cloud Functions are configured', () => {
   expect(screen.getByRole('heading', { name: '今天需要什麼幫忙？' })).toBeTruthy();
   expect((screen.getByLabelText('你的問題') as HTMLTextAreaElement).disabled).toBe(false);
   expect(screen.queryByText('雲端助理尚未啟用')).toBeNull();
+});
+
+it('provides service handoffs even when cloud functions are unavailable', async () => {
+  state.functionsConfigured = false;
+  state.query = 'schoolId=nthu';
+  render(<AssistantPage />);
+  ask('開啟宿舍服務');
+  expect((await screen.findByRole('link', { name: /開啟宿舍服務/ })).getAttribute('href'))
+    .toBe('/dormitory?schoolId=nthu');
+  expect(callCampusAssistant).not.toHaveBeenCalled();
+});
+
+it('does not send local service questions into later cloud conversation history', async () => {
+  vi.mocked(callCampusAssistant).mockResolvedValue({ content: '接續一般查詢' });
+  render(<AssistantPage />);
+  ask('開啟私人訊息');
+  await screen.findByRole('link', { name: /開啟私人訊息/ });
+  ask('我這週的作業有哪些');
+  await screen.findByText('接續一般查詢');
+  expect(vi.mocked(callCampusAssistant).mock.calls[0][0].messages).toEqual([
+    { role: 'user', content: '我這週的作業有哪些' },
+  ]);
 });
 
 it('does not send campus-specific requests before a campus is selected', () => {

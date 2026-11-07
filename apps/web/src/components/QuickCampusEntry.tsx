@@ -13,6 +13,9 @@ import { CampusIcon } from './CampusIcon';
 import { getQuickCampusActions, QUICK_CAMPUS_EXAMPLES } from '@/lib/quickCampusActions';
 import { visibleCampusServices } from '@/lib/campusServices';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import { ASSISTANT_SERVICES, resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
+import { AssistantServiceLinks } from './AssistantServiceLinks';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
 import styles from './QuickCampusEntry.module.css';
 
 type Analysis = {
@@ -26,6 +29,8 @@ export function QuickCampusEntry() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const { user } = useAuth();
+  const platform = useOptionalNuniSession();
+  const platformAudience = !!(platform?.session && !platform.loading && !platform.error && !platform.pendingLogout);
   const selected = selection?.selectedSchool;
   const uid = user?.uid || '';
   const selectedSchoolId = selected?.id || '';
@@ -43,6 +48,7 @@ export function QuickCampusEntry() {
   }, []);
 
   const phrase = query.trim();
+  const serviceIntent = resolveAssistantServiceIntent(phrase);
   const active = analysis?.phrase === phrase && analysis.scope === scope ? analysis : null;
   const aiResult = active?.state === 'ready' ? active.result : null;
   const semanticActions = aiResult?.status === 'understood'
@@ -52,7 +58,7 @@ export function QuickCampusEntry() {
       })
     : null;
   const actions = semanticActions || getQuickCampusActions(phrase, schoolLmsEnabled);
-  const route = (href: string) => campusServiceHref(href, campusSearch);
+  const route = (href: string) => campusServiceHref(platformAudience && href === '/orders' ? '/food' : href, campusSearch);
   const searchHref = route('/search' + (phrase ? '?q=' + encodeURIComponent(phrase.slice(0, 100)) : ''));
   const assistantHref = route('/ai-assistant?q=' + encodeURIComponent(phrase.slice(0, 4000)));
 
@@ -65,6 +71,7 @@ export function QuickCampusEntry() {
   async function analyze(input: string) {
     const text = input.trim().slice(0, 160);
     if (!text || !uid) return;
+    if (resolveAssistantServiceIntent(text)) return;
     const request = ++sequence.current;
     const requestScope = scope;
     setAnalysis({ phrase: text, scope: requestScope, state: 'loading' });
@@ -84,7 +91,7 @@ export function QuickCampusEntry() {
     const transcript = text.slice(0, 160);
     updateQuery(transcript);
     // Starting a speech capture is an explicit interaction; only the transcript is sent to AI.
-    if (uid) void analyze(transcript);
+    if (uid && !resolveAssistantServiceIntent(transcript)) void analyze(transcript);
   }
 
   return (
@@ -115,7 +122,7 @@ export function QuickCampusEntry() {
         />
         <VoiceDictationButton onTranscript={onVoiceTranscript} />
       </div>
-      {phrase && uid ? (
+      {phrase && uid && !serviceIntent ? (
         <div className={styles.aiRow}>
           <button
             type="button"
@@ -138,6 +145,14 @@ export function QuickCampusEntry() {
         </div>
       ) : (
         <div className={styles.results} aria-live="polite">
+          {serviceIntent?.kind === 'catalog' && selectedSchoolId && (
+            <AssistantServiceLinks
+              serviceIds={ASSISTANT_SERVICES.map((service) => service.id)}
+              schoolId={selectedSchoolId}
+              audience={platformAudience ? 'platform' : 'school'}
+            />
+          )}
+          {serviceIntent?.kind === 'catalog' && !selectedSchoolId && <p>先選擇學校，即可查看對應的服務入口。</p>}
           {active?.state === 'loading' && (
             <p role="status" className={styles.hint}>AI 正在理解你想完成的事情，不會直接執行操作。</p>
           )}
@@ -153,10 +168,10 @@ export function QuickCampusEntry() {
               AI 暫時無法使用。以下是基本關鍵字捷徑，並非 AI 理解結果。
             </p>
           )}
-          {!uid && (
+          {!uid && !serviceIntent && (
             <p className={styles.hint}>目前為基本捷徑。登入學校帳號後，可使用 AI 理解較複雜的需求。</p>
           )}
-          {actions.length ? (
+          {serviceIntent?.kind === 'catalog' ? null : actions.length ? (
             <>
               <p className={styles.resultHeading}>
                 {semanticActions ? 'AI 建議先開啟' : '基本快速入口'}
