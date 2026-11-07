@@ -203,3 +203,14 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 [Rules CI / run 42320495648](https://github.com/Miiduoa/graduation/actions/runs/42320495648) 已實際跑完第一輪規則測試：**258 案例、256 通過、2 失敗**。兩個失敗均為原本假設「合法店家 operator」但未建立 canonical `users/{uid}` 的測試 fixture：`school-responsibility-rules.test.cjs` 的外部 merchant 合法更新，以及 `security-rules.test.js` 的「學生和別家店不得改網址」中的 owner 合法更新。此次安全修補前，這兩組可因孤兒 operator 記錄而通過；新規則應拒絕缺失 canonical profile，所以原 fixture 已不滿足成功前提。
 
 本輪只補 `users/merchant` 與 `users/merchant-1`／`users/merchant-2` 的 `status: active` 合法身分 fixture，保留「外部 merchant 不能繼承校方管理權」、非 owner 拒絕修改、可用性與輸入檢查，沒有放寬任何 Firestore 規則；新增的孤兒或停權 operator 侵入測試原本已在同輪通過。修補提交須以新精確 head 的 Rules CI、全套 CI 與必要工作流重新驗證，在完整驗證前仍不能合併或部署。
+
+
+## 2026-11-07：敏感私人檔案的 canonical 帳號撤權
+
+精確 head `9e9f97d7` 的主 CI、Firestore Rules、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、Zod、Chroma 與適用 Maestro 均已完成 success；PR #517 的 reviews／未解決 thread 均為空，但尚無指定 nuni-merge-gate 的「審查通過」。主線已更新到 `36317460d47e1c977e2f78b6e0701e79b3f45077`，原安全分支與 main 仍 diverged，推送前未嘗試合併 main。
+
+檢查 Storage `isActiveAccount()` 發現：當 canonical `users/{uid}` 文件不存在時，函式為保留部分 legacy 流程會回傳 true。若刪除帳號時先移除 canonical 文件、但 Firebase Auth 舊 ID token 尚有效，使用者仍可依 owner UID 或殘留報修單指標存取 `health`、`printjobs`、`temp`、`repairs` 私有檔案。既有狀態檢查只防範保留文件且標記 disabled／deleted 等情況；無法處理被直接刪掉的文件。
+
+本輪新增 `hasCanonicalActiveAccount()`，對上述四種敏感私有命名空間的讀取與寫入同時要求 canonical user 文件存在且未停權，不改動無關 namespace 與既有最大容量、Content-Type 條件。新增隔離回歸在同一個 Auth context 驗證無 user 文件時舊檔不能讀、不能新寫；補回合法 active profile 後讀寫正常；再次移除 profile 後同一個 token 立即被拒絕。另一使用者即使 canonical profile active 也不能跨帳號讀取。使用真實 Firebase Storage/Firestore 規則模擬器，fixture bytes 和報修資料均為合成。
+
+**狀態：** 上述為新提出的程式與測試，須以此變更提交後精確 head 的 Rules CI／完整 CI／CodeQL／Supabase／Mobile／Maestro 實際結果驗收；此處不預先宣稱通過。對 legacy 尚未建立 canonical user profile 的合法使用者，這四類附件會被拒絕，正式發布前應盤點、受控補齊真正 active profile，不可透過恢復孤兒 token 存取解決。已發 GCS Firebase bearer URL、Supabase signed URL、stories 兩文件查詢上限及真正 GCS staging 仍需獨立驗證。本輪未執行正式部署、金鑰變更、正式 token 清理、migration 或 App 核可。

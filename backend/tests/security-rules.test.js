@@ -1966,6 +1966,43 @@ describe('storage security rules', () => {
     });
   }
 
+
+  test('deleted canonical accounts cannot reuse old tokens for sensitive private files', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('repairRequests/canonical-revocation').set({ userId: 'alice' });
+    });
+    const paths = [
+      ['health/alice/record/private.pdf', 'health/alice/record/new.pdf', 'application/pdf'],
+      ['printjobs/alice/job/private.pdf', 'printjobs/alice/job/new.pdf', 'application/pdf'],
+      ['temp/alice/private.pdf', 'temp/alice/new.pdf', 'application/pdf'],
+      ['repairs/canonical-revocation/private.jpg', 'repairs/canonical-revocation/new.jpg', 'image/jpeg'],
+    ];
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      for (const [objectPath, , contentType] of paths) {
+        await uploadString(context.storage().ref(objectPath), 'existing private bytes', contentType);
+      }
+    });
+    // Keep the same authentication context across deletion and restoration.
+    const alice = testEnv.authenticatedContext('alice', { role: 'admin' }).storage();
+    const bob = testEnv.authenticatedContext('bob').storage();
+    for (const [objectPath, newPath, contentType] of paths) {
+      await assertFails(alice.ref(objectPath).getMetadata());
+      await assertFails(uploadString(alice.ref(newPath), 'stale token write', contentType));
+      await assertFails(bob.ref(objectPath).getMetadata());
+    }
+    await seedFirestore(async (db) => db.doc('users/alice').set({ status: 'active' }));
+    for (const [objectPath, newPath, contentType] of paths) {
+      await assertSucceeds(alice.ref(objectPath).getMetadata());
+      await assertSucceeds(uploadString(alice.ref(newPath), 'authorized write', contentType));
+    }
+    await seedFirestore(async (db) => db.doc('users/alice').delete());
+    for (const [objectPath, newPath, contentType] of paths) {
+      await assertFails(alice.ref(objectPath).getMetadata());
+      await assertFails(uploadString(alice.ref(newPath), 'replayed token write', contentType));
+    }
+  });
+
   test('deny print uploads for another user', async () => {
     const storage = testEnv.authenticatedContext('alice').storage();
 
