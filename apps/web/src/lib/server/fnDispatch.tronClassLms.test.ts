@@ -138,6 +138,40 @@ it('keeps the page up when one course feature returns 500', async () => {
   expect(body.result.announcements).toEqual([]);
 });
 
+it.each(['homework', 'activities', 'announcements'] as const)(
+  'requires reconnect instead of caching partial course data after a 401 from %s',
+  async (feed) => {
+    const { request, source, store } = setup();
+    if (feed === 'homework') {
+      vi.mocked(source.fetchHomeworkPage).mockResolvedValue({ ok: false, status: 401 });
+    } else if (feed === 'activities') {
+      vi.mocked(source.fetchActivities).mockResolvedValue({ ok: false, status: 401 });
+    } else {
+      vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 401 });
+    }
+
+    const response = await request({ courseId: 10001 });
+    const body = await response.json();
+    expect(body.error.status).toBe('FAILED_PRECONDITION');
+    expect(body.result).toBeUndefined();
+    expect(store.docs.has(CACHE)).toBe(false);
+    expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+  },
+);
+
+it('requires reconnect when the upcoming course source rejects the session with HTTP 401', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchCourses)
+    .mockResolvedValueOnce([LMS_FIXTURE_COURSE])
+    .mockRejectedValueOnce(Object.assign(new Error('HTTP 401'), { status: 401 }));
+  const response = await request();
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(store.docs.has(CACHE)).toBe(false);
+});
+
 it('uses activity announcements on 404 without marking the course as empty success', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 404 });
