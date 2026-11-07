@@ -204,15 +204,17 @@ test('leaving and returning invalidates pending work, rejects double taps and pe
   const button = view.getByText('確認加入個人課表');
   fireEvent.press(button); fireEvent.press(button);
   await waitFor(() => expect(read).toHaveBeenCalled());
-  expect(append).toHaveBeenCalledTimes(1);
+  // The first read is now a conflict preflight: no write is attempted yet.
+  expect(append).not.toHaveBeenCalled();
   act(() => { mockFocus.leave(); });
   act(() => { mockFocus.enter(); });
   await act(async () => { finish(null); });
+  expect(append).not.toHaveBeenCalled();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   expect(view.queryByText('已加入 2 個上課時段。')).toBeNull();
   confirm(view);
   await view.findByText('已加入 2 個上課時段。');
-  expect(append).toHaveBeenCalledTimes(2);
+  expect(append).toHaveBeenCalledTimes(1);
 });
 
 
