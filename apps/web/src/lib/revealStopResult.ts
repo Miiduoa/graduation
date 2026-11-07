@@ -2,7 +2,8 @@ const VIEW_MARGIN_PX = 24;
 const STICKY_GAP_PX = 8;
 
 function prefersReducedMotion(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return document.documentElement.dataset.reducedMotion === 'true' ||
+    (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
 function scrollBehavior(): ScrollBehavior {

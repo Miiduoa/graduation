@@ -11,6 +11,7 @@ import { isSchoolNavigationReady, rootNavigateNested, subscribeSchoolNavigationR
 import { applyNotificationDestination } from '../utils/applyNotificationDestination';
 import { resolveNotificationDestination } from '../utils/notificationDestination';
 import { personalReminderCategory } from '../services/personalReminderPayload';
+import { isDormLaundryReminderIdentifier } from '../services/dormLaundryReminder';
 import type { UserRole } from '../data/types';
 
 type NavigationLike = {
@@ -101,7 +102,10 @@ export function usePushNotifications(
       const generation = liveTapCount;
       if (key !== lastHandledKey) {
         try {
-          navigateFromNotificationData(response.notification?.request?.content?.data, roleRef.current, schoolRef.current, uid);
+          // A local timer has no cross-account destination. Resume the current screen.
+          if (!isDormLaundryReminderIdentifier(response.notification?.request?.identifier)) {
+            navigateFromNotificationData(response.notification?.request?.content?.data, roleRef.current, schoolRef.current, uid);
+          }
           lastHandledKey = key;
         } catch (error) {
           console.warn('[Notifications] Failed to handle notification response:', error);
