@@ -2,12 +2,14 @@ import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { readAssistantTimetable, type PlatformTimetableAccess } from './assistantTimetableSource';
 import { currentSavedClasses, nextSavedClasses, type SavedClassOccurrence } from './nextSavedClasses';
 import { loadOfflinePersonalTimetable } from './personalTimetable';
-import type { CampusSenseSnapshot } from './campusSenseSnapshot';
+import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
 
 export type { SavedClassOccurrence } from './nextSavedClasses';
 
 export type OnDeviceSchoolContext = {
   checkedAt: string;
+  /** Local account that owns this evidence; never used as a school identity. */
+  ownerUid?: string;
   schoolId: string;
   schoolName: string;
   timetable: {
@@ -37,6 +39,7 @@ export async function collectOnDeviceSchoolContext(
 ): Promise<OnDeviceSchoolContext> {
   const base: OnDeviceSchoolContext = {
     checkedAt: new Date().toISOString(),
+    ownerUid: params.platformTimetable ? '' : params.uid,
     schoolId: params.schoolId,
     schoolName: (params.schoolName || '').trim().slice(0, 90),
     timetable: { source: 'not-available', updatedAt: null, courses: [] },
@@ -81,7 +84,8 @@ export async function collectOnDeviceSchoolContext(
 
 export function formatOnDeviceSchoolPrompt(
   snapshot: OnDeviceSchoolContext,
-  senseSnapshot?: CampusSenseSnapshot | null,
+  senseSnapshot: CampusSenseSnapshot | null | undefined,
+  expectedOwnerUid: string,
 ): string {
   const now = new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei',
@@ -94,9 +98,12 @@ export function formatOnDeviceSchoolPrompt(
   }).format(new Date(snapshot.checkedAt));
   // The rule-based timetable tool uses every saved course. Keep only a short
   // excerpt in the LLM prompt so a small local model cannot overflow context.
-  const sampleCourses = snapshot.timetable.courses.slice(0, 8);
-  const omitted = snapshot.timetable.courses.length - sampleCourses.length;
-  const note = snapshot.timetable.source === 'saved-device-copy'
+  // The prompt is a separate privacy boundary: a caller cannot pass a cached
+  // timetable or campus snapshot for someone other than the active account.
+  const owned = !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
+  const sampleCourses = owned ? snapshot.timetable.courses.slice(0, 8) : [];
+  const omitted = owned ? snapshot.timetable.courses.length - sampleCourses.length : 0;
+  const note = owned && snapshot.timetable.source === 'saved-device-copy'
     ? [
         `裝置上有一份個人儲存課表；保存時間：${snapshot.timetable.updatedAt || '不詳'}。`,
         `課程時段 start/end 是節次索引，不能冒充鐘點或官方當天課程：${JSON.stringify(sampleCourses)}`,
@@ -105,7 +112,11 @@ export function formatOnDeviceSchoolPrompt(
           : '',
       ].filter(Boolean).join(' ')
     : '目前沒有可確認的本機個人課表，因此無法回答正式課程安排。';
-  const verifiedSense = senseSnapshot?.schoolId === snapshot.schoolId ? senseSnapshot : null;
+  // A matching campus alone is not permission to disclose another student's data.
+  // Recheck ownership and freshness at prompt construction, after async model loading.
+  const verifiedSense = owned
+    ? validCampusSenseSnapshot(senseSnapshot, { uid: expectedOwnerUid, schoolId: snapshot.schoolId })
+    : null;
   // Source text is untrusted content. It is evidence for the answer, not a new instruction.
   const sense = verifiedSense
     ? [
