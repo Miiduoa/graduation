@@ -183,3 +183,43 @@ it('clears damaged create metadata only for the confirmed same document id', () 
   expect(localStorage.getItem(lostFoundPendingStorageKey(damagedScope))).toBeNull();
   expect(loadLostFoundDraft(siblingScope)?.title).toBe('完好草稿');
 });
+
+it.each([undefined, ''])('preserves contactInfo %p in stored retry fields', (contactInfo) => {
+  const retryFields = { ...draft, contactInfo, reporterId: 'outside-the-form' };
+  saveLostFoundPending(scope, {
+    version: 1,
+    action: 'create',
+    documentId: scope.itemKey,
+    fields: retryFields,
+  });
+
+  const raw = localStorage.getItem(lostFoundPendingStorageKey(scope));
+  const storedFields = JSON.parse(raw!).fields;
+  expect(storedFields).not.toHaveProperty('reporterId');
+  if (contactInfo === undefined) expect(storedFields).not.toHaveProperty('contactInfo');
+  else expect(storedFields.contactInfo).toBe('');
+});
+
+it('can retry a readable pending write when its draft is corrupt', () => {
+  saveLostFoundPending(scope, {
+    version: 1,
+    action: 'create',
+    documentId: scope.itemKey,
+    fields: draft,
+  });
+  localStorage.setItem(lostFoundDraftStorageKey(scope), '{broken');
+  const [session] = listRecoverableCreateSessions(scope.uid, scope.schoolId);
+  expect(session.pending?.documentId).toBe(scope.itemKey);
+  expect(session.draft).toBeNull();
+  expect(session.fields.title).toBe(draft.title);
+  expect(session.corrupt).toBeUndefined();
+});
+
+it('blocks a readable draft when its pending write is corrupt', () => {
+  saveLostFoundDraft(scope, draft);
+  localStorage.setItem(lostFoundPendingStorageKey(scope), '{broken');
+  const [session] = listRecoverableCreateSessions(scope.uid, scope.schoolId);
+  expect(session.corrupt).toBe(true);
+  expect(session.draft).toBeNull();
+  expect(loadLostFoundDraft(scope)?.title).toBe(draft.title);
+});
