@@ -104,11 +104,11 @@ export const getStorage = () => {throw new Error('Storage is outside the feed-re
   await writeFile(path.join(fixture, 'pages.ts'), `
 import {fetchCampusPostPage as readPage} from '../src/lib/community/feedPages';
 export * from '../src/lib/community/feedPages';
-export async function fetchCampusPostPage(schoolId,cursor) {
-  const item={schoolId,cursor:cursor?.document?.id??null,started:performance.now()};
+export async function fetchCampusPostPage(schoolId,cursor,before=null) {
+  const item={schoolId,cursor:cursor?.document?.id??null,before:before?.toISOString()??null,started:performance.now()};
   window.__feedRequests.push(item);
   try {
-    const page=await readPage(schoolId,cursor);
+    const page=await readPage(schoolId,cursor,before);
     item.ids=page.posts.map(p=>p.id); item.elapsedMs=performance.now()-item.started;
     // Optional delivery gate preserves real SDK results for a deterministic focus/scope race.
     if(cursor && window.__holdFeedPage) await new Promise(resolve=>{window.__releaseFeedPage=resolve;});
@@ -421,6 +421,61 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       });
       await check('long-list:no horizontal overflow with all cards',()=>document.documentElement.scrollWidth<=innerWidth+1);
       await snapshot('320-long-return.png');
+      // Exercise a direct date jump after the ordinary 245-post long-list proof.
+      // This historical document was not present during the earlier pagination assertions.
+      await environment.withSecurityRulesDisabled(async context => {
+        await context.firestore().doc('schools/pu/campusPosts/archive-2022').set({
+          schoolId: 'pu', boardId: 'public', anonymous: false, authorUid: 'bob',
+          title: '2022 年的迎新活動', content: '當年的學生會活動紀錄',
+          createdAt: new Date('2022-09-01T10:00:00+08:00'),
+        });
+      });
+      await call(() => {
+        const input = document.querySelector('input[type=date]');
+        if (!input) throw new Error('Historical date input missing');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '2022-09-03');
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        input.dispatchEvent(new Event('change', {bubbles:true}));
+      });
+      await until(() => call(() => {
+        const button=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='從這天往前找');
+        return document.querySelector('input[type=date]')?.value==='2022-09-03' &&
+          button?.getAttribute('aria-disabled')==='false';
+      }), 'date input React update');
+      const priorRequests = await call(() => window.__feedRequests.length);
+      await call(() => window.__feed.offline());
+      await clickButton('從這天往前找');
+      await until(() => call(() => document.body.textContent.includes('無法讀取指定日期，原本貼文與搜尋仍保留')), 'date-jump offline error');
+      await check('date-jump:offline preserves 245 loaded posts and leaves a retryable date', () =>
+        document.querySelectorAll('article').length===245 &&
+        document.querySelector('input[type=date]').value==='2022-09-03' &&
+        !![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='從這天往前找' && b.getAttribute('aria-disabled')==='false'));
+      await call(() => window.__feed.online());
+      await clickButton('從這天往前找');
+      await until(() => call(() => document.querySelectorAll('article').length===1 &&
+        document.querySelector('article h3')?.textContent==='2022 年的迎新活動'), 'direct historical date read');
+      await check('date-jump:SDK returns the one historical post without traversing newer pages', expected => {
+        const requests=window.__feedRequests.slice(expected);
+        return requests.length===2 && requests.every(r=>r.cursor===null && r.before==='2022-09-03T15:59:59.999Z') &&
+          requests[0].code==='unavailable' && requests[1].ids?.length===1 &&
+          requests[1].ids[0]==='archive-2022';
+      }, priorRequests);
+      await check('date-jump:no horizontal overflow and the old post link stays keyboard focusable', () => {
+        const link=document.querySelector('article a[href*="archive-2022"]');
+        link?.focus({preventScroll:true});
+        return document.documentElement.scrollWidth<=innerWidth+1 &&
+          link && document.activeElement===link;
+      });
+      await snapshot('320-direct-date-old-post.png');
+      await clickButton('回到最新貼文');
+      await awaitCount(60);
+      await check('date-jump:reset reads the newest 60 without keeping old results', () => {
+        const requests=window.__feedRequests;
+        return requests.at(-1)?.cursor===null && requests.at(-1)?.before===null &&
+          document.querySelectorAll('article').length===60 &&
+          !document.body.textContent.includes('2022 年的迎新活動');
+      });
+
     } catch(error) {report.errors.push('long-list: '+error.message);await snapshot('long-list-failure.png').catch(()=>{});}
   }
   await writeFile(path.join(output,'chrome.log'),chromeLog);

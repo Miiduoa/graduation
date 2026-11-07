@@ -25,7 +25,8 @@ vi.mock('next/link', () => ({
   default: ({ children, href, ...props }: { children: React.ReactNode; href: string; className?: string }) =>
     <a href={href} {...props}>{children}</a>,
 }));
-vi.mock('@/lib/community/feedPages', () => ({
+vi.mock('@/lib/community/feedPages', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/community/feedPages')>()),
   // Only the service boundary is controlled here. SDK cursor ordering and rules
   // are exercised independently in feedPages.emulator.test.ts.
   fetchCampusPostPage: async (schoolId: string, cursor: unknown) => {

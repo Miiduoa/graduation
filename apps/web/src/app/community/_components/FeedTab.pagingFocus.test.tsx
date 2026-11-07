@@ -8,7 +8,8 @@ import { FeedTab } from './FeedTab';
 const mocks = vi.hoisted(() => ({ page: vi.fn(), auth: { user: { uid: 'alice' }, loading: false } }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('next/link', () => ({ default: ({ children, ...props }: { children: ReactNode; href: string }) => <a {...props}>{children}</a> }));
-vi.mock('@/lib/community/feedPages', () => ({ fetchCampusPostPage: mocks.page }));
+vi.mock('@/lib/community/feedPages', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/community/feedPages')>()), fetchCampusPostPage: mocks.page }));
 vi.mock('@/lib/community/firestore', () => ({
   rankFeedPosts: (rows: unknown[]) => rows,
   listBoards: async () => [],
