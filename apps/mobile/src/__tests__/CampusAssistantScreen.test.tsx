@@ -1169,7 +1169,7 @@ test('the gap shortcut and its results stay in the signed-in local timetable sco
 });
 
 test('gap filter controls keep the latest query and draft when clearing a no-match result', async () => {
-  usePlatformFixture('student-b');
+  setPlatformFixture('student-b');
   const query = { day: 'day-after-tomorrow', minMinutes: 90, fromMinute: 930,
     owner: 'nuni:student-b', schoolId: 'pu', checkedAt: new Date().toISOString() };
   const available = { ...query, minMinutes: 0 };

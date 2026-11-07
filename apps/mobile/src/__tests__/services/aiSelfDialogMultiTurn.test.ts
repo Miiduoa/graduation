@@ -58,7 +58,8 @@ describe('AI 多輪對話離線驗收', () => {
       }),
     ]);
     expect(last.results[0]?.result.data).toBeUndefined();
-    expect(last.contextText).toBe('');
+    expect(last.contextText).toContain('目前所選校園的學校資料尚未驗證');
+    expect(last.contextText).not.toContain('已簽到成功');
     expect(last.executedActions).toEqual([]);
     expect(last.failedActions).toEqual([]);
     expect(last.pendingWriteActions).toEqual([]);
