@@ -383,6 +383,7 @@ function FoodMenu({
   const preparingQuote = useRef(false);
   const [stage, setStage] = useState<MenuStage>('menu');
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [customizeDraft, setCustomizeDraft] = useState<CartLine | null>(null);
   const [error, setError] = useState('');
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
@@ -404,6 +405,7 @@ function FoodMenu({
         setQuote(null);
         setStage('menu');
         setFocusId(null);
+        setCustomizeDraft(null);
         setLineErrors({});
         onOrder((receipt as NuniFoodOrderCommandResult).orderId);
       }
@@ -447,13 +449,18 @@ function FoodMenu({
     return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 0);
   }, 0);
   const focusItem = focusId ? catalog.find((item) => item.id === focusId) : undefined;
-  const focusLine = focusId ? (cart[focusId] ?? emptyLine()) : emptyLine();
+  const focusLine = customizeDraft ?? (focusId ? (cart[focusId] ?? emptyLine()) : emptyLine());
   const update = (id: string, patch: Partial<CartLine>) => {
     if (locked || !acceptingOrders) return;
     setCart((previous) => ({
       ...previous,
       [id]: { ...emptyLine(), ...previous[id], ...patch },
     }));
+  };
+  const updateCustomize = (patch: Partial<CartLine>) => {
+    if (!focusId || locked || !acceptingOrders) return;
+    if (customizeDraft) setCustomizeDraft({ ...customizeDraft, ...patch });
+    else update(focusId, patch);
   };
   const openCustomize = (item: NuniFoodMenuItem) => {
     if (
@@ -469,6 +476,10 @@ function FoodMenu({
       delete next[item.id];
       return next;
     });
+    const current = cart[item.id];
+    setCustomizeDraft(
+      current && current.inBasket !== false && Number(current.quantity) > 0 ? current : null,
+    );
     setCart((previous) => {
       const current = previous[item.id];
       if (current && current.quantity !== '' && Number(current.quantity) > 0) return previous;
@@ -482,7 +493,7 @@ function FoodMenu({
   };
   const saveCustomize = () => {
     if (!focusItem || locked || !acceptingOrders) return;
-    const line = cart[focusItem.id] ?? emptyLine();
+    const line = focusLine;
     const issue = validateLine(focusItem, line);
     if (issue) {
       setError('');
@@ -495,8 +506,9 @@ function FoodMenu({
       return next;
     });
     setError('');
-    update(focusItem.id, { inBasket: true });
+    update(focusItem.id, { ...line, inBasket: true });
     setFocusId(null);
+    setCustomizeDraft(null);
     setStage('menu');
   };
   const removeLine = (id: string) => {
@@ -514,6 +526,7 @@ function FoodMenu({
     });
     if (focusId === id) {
       setFocusId(null);
+      setCustomizeDraft(null);
       setStage('menu');
     }
   };
@@ -629,7 +642,7 @@ function FoodMenu({
           label={`${focusItem.name}數量`}
           value={focusLine.quantity === '0' ? '1' : focusLine.quantity}
           disabled={disabled}
-          onChange={(quantity) => update(focusItem.id, { quantity })}
+          onChange={(quantity) => updateCustomize({ quantity })}
         />
         {focusItem.optionGroups.map((group) => (
           <View key={group.id} style={{ gap: 8 }}>
@@ -647,7 +660,7 @@ function FoodMenu({
                       .length >= group.maximumSelections)
                 }
                 onPress={() =>
-                  update(focusItem.id, {
+                  updateCustomize({
                     selectedOptionIds: toggleOption(focusLine, group, option.id),
                   })
                 }
@@ -660,7 +673,7 @@ function FoodMenu({
           label={`${focusItem.name}備註`}
           value={focusLine.note}
           disabled={disabled}
-          onChange={(note) => update(focusItem.id, { note })}
+          onChange={(note) => updateCustomize({ note })}
         />
         <FoodButton variant="primary" disabled={disabled} onPress={saveCustomize}>
           放入購物籃
@@ -669,15 +682,22 @@ function FoodMenu({
           disabled={locked}
           onPress={() => {
             if (
-              focusLine.quantity === '0' ||
-              focusLine.quantity === '' ||
-              Number(focusLine.quantity) === 0
+              !customizeDraft &&
+              (focusLine.quantity === '0' ||
+                focusLine.quantity === '' ||
+                Number(focusLine.quantity) === 0)
             )
               removeLine(focusItem.id);
             else {
               setFocusId(null);
               setStage('menu');
             }
+            setCustomizeDraft(null);
+            setLineErrors((previous) => {
+              const next = { ...previous };
+              delete next[focusItem.id];
+              return next;
+            });
             setError('');
           }}
         >
