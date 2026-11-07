@@ -182,7 +182,7 @@ export async function performPersonalImportSync(
         resolution.baseRevision !== (base?.revision ?? 0) ||
         !personalImportRecordsEqual(resolution.localRecords, local) ||
         !sameAcknowledgements(resolution.acknowledged, sync.acknowledged) ||
-        !['local', 'remote'].includes(resolution.choices[key])
+        (resolution.choices[key] !== 'local' && resolution.choices[key] !== 'remote')
       ) {
         throw new Error('核對期間資料又有變更，請重新同步後選擇要保留的內容。');
       }

@@ -117,4 +117,8 @@ Shared 完整 TypeScript 通過。Web 變更檔分為 server 6、UI 4、client 1
 
 本機採單 worker 並限制 heap，沒有將資源限制下未完成的全量檢查列為成功。手機以 `NODE_ENV=test` 執行，與 Jest 正常 CLI 初始化一致；既有聊天測試原樣保留，未加入動畫 stub 或減弱斷言。
 
+遠端 CI 的 `test-personal-import-sync.mjs` 額外啟用 `noUncheckedIndexedAccess` 與 `exactOptionalPropertyTypes`，捕捉到單筆 acknowledgement 解析器的陣列索引可能為空，以及可空 base 的型別收窄問題。已加上缺失 revision 的明確拒絕與 base 存在檢查，沒有降低編譯設定。本機重跑同一支腳本的嚴格編譯通過；因未提供測試資料庫，該次 PostgreSQL 測試為 skipped，實際資料庫驗證以修正提交的遠端 Security Gates 為準。
+
+同一組嚴格旗標亦用於 `assistantExecution.ts` 與 `syncEngine.ts` 及其相依模組；補齊屬性描述、日期匹配與衝突選擇索引的空值檢查後，編譯通過。這些檢查維持原本缺失證據即拒絕的行為。
+
 本輪未進行桌面／手機瀏覽器截圖與 iOS／Android 真機視覺驗收。遠端完整 typecheck、lint、Web／Mobile build、全量測試與必要審查，須以這次推送的精確 commit 狀態另行確認，不沿用上一個提交的綠燈。

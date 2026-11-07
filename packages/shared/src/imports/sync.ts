@@ -144,8 +144,11 @@ export function parsePersonalImportSyncState(
       if (record.kind !== 'events')
         throw new Error('單筆核對紀錄只能保存個人行程，原有資料仍保留。');
       const revision = revisions[index];
+      if (revision === undefined)
+        throw new Error('單筆核對紀錄缺少同步版本，原有資料仍保留。');
       if (
-        base?.revision === revision &&
+        base &&
+        base.revision === revision &&
         !personalImportRecordsEqual(base.records.filter((row) => row.id === record.id), [record])
       )
         throw new Error('同版本的單筆核對與同步紀錄不一致，請重新確認帳號資料。');

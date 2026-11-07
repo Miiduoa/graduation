@@ -86,7 +86,7 @@ function object(raw: unknown, allowed: readonly string[]): Record<string, unknow
   for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== 'string' || !allowed.includes(key)) return invalid();
     const descriptor = descriptors[key];
-    if (!descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return invalid();
+    if (!descriptor || !descriptor.enumerable || !('value' in descriptor) || descriptor.value === undefined) return invalid();
     value[key] = descriptor.value;
   }
   return value;
@@ -111,7 +111,7 @@ function mutation(raw: unknown): string {
 function instant(raw: unknown): string {
   if (typeof raw !== 'string') return invalid();
   const match = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d{1,3})?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/.exec(raw);
-  if (!match || !isPersonalImportDate(match[1]) || !Number.isFinite(Date.parse(raw))) return invalid();
+  if (!match || !match[1] || !isPersonalImportDate(match[1]) || !Number.isFinite(Date.parse(raw))) return invalid();
   return raw;
 }
 
