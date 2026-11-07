@@ -134,6 +134,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [refreshing, setRefreshing] = useState(false);
@@ -735,6 +736,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
         <label className={styles.feedSearch}>
           搜尋此校動態
           <input
+            ref={searchInputRef}
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -1065,6 +1067,19 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
             : '已讀到本次查詢的最後一頁。')}
         </p>
       )}
+      {!savedView && !selectedFeedLoading && !selectedFeedError &&
+        posts.length >= 120 && visible.length > 0 && (
+          <div className={styles.feedEmptyActions}>
+            <button
+              type="button"
+              className="btn"
+              style={{ minHeight: 44, maxWidth: '100%' }}
+              onClick={() => searchInputRef.current?.focus()}
+            >
+              返回搜尋與篩選
+            </button>
+          </div>
+        )}
     </div>
   );
 }

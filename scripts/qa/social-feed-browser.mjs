@@ -354,6 +354,19 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
           (card===hit || card.contains(hit)) && document.activeElement===link;
       });
       await snapshot('320-long-tail.png');
+      await check('long-list:search return is a 44px keyboard control',()=>{
+        const button=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='返回搜尋與篩選');
+        return !!button && button.getBoundingClientRect().height>=43.5;
+      });
+      await clickButton('返回搜尋與篩選');
+      await sleep(200);
+      await check('long-list:one click returns focus and viewport to search without resetting pages',()=>{
+        const input=document.querySelector('input[type=search]');
+        const rect=input?.getBoundingClientRect();
+        return document.activeElement===input && rect && rect.top>=0 && rect.bottom<=innerHeight &&
+          input.value==='' && document.querySelectorAll('article').length===245;
+      });
+      await snapshot('320-long-search-return.png');
       await call(()=>document.querySelectorAll('article')[0].scrollIntoView({block:'center',behavior:'instant'}));
       await sleep(180);
       await check('long-list:first card is readable after scrolling back',()=>{
@@ -376,4 +389,4 @@ finally {
 }
 const failures=report.checks.filter(row=>!row.pass);
 console.log('FEED_BROWSER_SUMMARY',JSON.stringify({sourceHead:report.sourceHead,checks:report.checks.length,failures,errors:report.errors,screenshots:report.screenshots,flows:report.flows.map(({requests,...flow})=>({...flow,pageSizes:requests.filter(r=>r.ids).map(r=>r.ids.length)}))}));
-if(report.errors.length || failures.length || report.checks.length<(longListMode ? 6 : authMode ? 4 : 28))process.exitCode=1;
+if(report.errors.length || failures.length || report.checks.length<(longListMode ? 8 : authMode ? 4 : 28))process.exitCode=1;

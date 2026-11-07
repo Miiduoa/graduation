@@ -146,6 +146,8 @@ function HomeFeedContent() {
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(uid, school?.id, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(uid, school?.id, 'order'), FEED_ORDERS);
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<TextInput>(null);
+  const feedListRef = useRef<FlatList<CampusPostDoc>>(null);
   const feedCursor = useRef<CampusPostCursor | null>(null);
   const nextPageInFlight = useRef(false);
   const [hasMore, setHasMore] = useState(false);
@@ -588,6 +590,12 @@ function HomeFeedContent() {
     [filter, hasMore, isOffline, savedView, search, sourcePosts.length, visiblePosts.length],
   );
 
+  const returnToSearch = () => {
+    // Keep every loaded page and the current search; only move the viewport.
+    feedListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    searchInputRef.current?.focus();
+  };
+
   const selectFilter = (next: FilterKey) => {
     if (next === 'saved' && !savedView) setBookmarksLoading(true);
     setFilter(next);
@@ -698,6 +706,7 @@ function HomeFeedContent() {
         </View>
       ) : (
         <FlatList
+          ref={feedListRef}
           style={{ flex: 1 }}
           data={discoveryUnavailable ? [] : visiblePosts}
           keyExtractor={(p) => p.id}
@@ -731,6 +740,7 @@ function HomeFeedContent() {
               }}>
                 <Ionicons name="search" size={18} color={theme.colors.textSecondary} />
                 <TextInput
+                  ref={searchInputRef}
                   style={{ flex: 1, minWidth: 0, color: theme.colors.text, paddingVertical: 10 }}
                   accessibilityLabel="搜尋本校貼文"
                   value={search}
@@ -894,7 +904,8 @@ function HomeFeedContent() {
             )
           }
           ListFooterComponent={
-            !savedView && !discoveryUnavailable && (hasMore || loadingMore || pageError || pageNotice) && visiblePosts.length > 0 ? (
+            !savedView && !discoveryUnavailable && visiblePosts.length > 0 &&
+              (hasMore || loadingMore || pageError || pageNotice || posts.length >= 120) ? (
               <View style={{ paddingHorizontal: 14, paddingVertical: 16, gap: 10 }}>
                 {!!pageError && (
                   <Text accessibilityRole="alert" style={{ color: theme.colors.danger }}>
@@ -924,6 +935,21 @@ function HomeFeedContent() {
                   </Pressable>
                 )}
                 {loadingMore && <ActivityIndicator color={theme.colors.accent} />}
+                {posts.length >= 120 && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="返回搜尋與篩選"
+                    accessibilityHint="返回動態列表開頭並聚焦搜尋欄位"
+                    onPress={returnToSearch}
+                    style={{
+                      minHeight: 44, alignItems: 'center', justifyContent: 'center',
+                      borderRadius: theme.radius.md, borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>返回搜尋與篩選</Text>
+                  </Pressable>
+                )}
               </View>
             ) : null
           }

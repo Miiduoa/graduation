@@ -648,3 +648,18 @@ it('keeps the existing cards on a final empty page and hides malformed other-sch
   expect(screen.queryByText('不可顯示的他校貼文')).toBeNull();
   expect(screen.getAllByRole('article')).toHaveLength(60);
 });
+
+
+it('returns to the loaded-post search from a long list without another server read', async () => {
+  mocks.fetchPosts.mockResolvedValueOnce(pageRows()).mockResolvedValueOnce(pageRows(60));
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  const loadMore = await screen.findByRole('button', { name: '載入更多貼文' });
+  expect(screen.queryByRole('button', { name: '返回搜尋與篩選' })).toBeNull();
+  fireEvent.click(loadMore);
+  const shortcut = await screen.findByRole('button', { name: '返回搜尋與篩選' });
+  expect(shortcut.getBoundingClientRect().height >= 0).toBe(true);
+  shortcut.focus();
+  fireEvent.click(shortcut);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+  expect(mocks.fetchPosts).toHaveBeenCalledTimes(2);
+});

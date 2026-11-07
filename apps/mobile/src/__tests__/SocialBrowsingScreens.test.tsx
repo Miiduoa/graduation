@@ -857,3 +857,25 @@ test('mobile continuation refuses duplicate taps and ignores an old school respo
   expect(view.queryByText('舊校延遲結果')).toBeNull();
   expect(view.getByText('他校新頁')).toBeTruthy();
 });
+
+
+test('mobile long list offers a search return without changing pagination or query', async () => {
+  const rows = (start: number) => Array.from({ length: 60 }, (_, i) => ({
+    ...post, id: `shortcut-${start + i}`, title: `校園貼文 ${start + i}`,
+  }));
+  const first = rows(0);
+  const second = rows(60);
+  const sdk = jest.mocked(fetchCampusPostPage);
+  sdk.mockResolvedValueOnce({
+    posts: first, hasMore: true,
+    nextCursor: { schoolId: 'pu', document: { id: 'shortcut-59' } },
+  } as any).mockResolvedValueOnce({ posts: second, hasMore: false, nextCursor: null } as any);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText('已載入 60 則 · 顯示 60 則');
+  expect(view.queryByLabelText('返回搜尋與篩選')).toBeNull();
+  await act(async () => fireEvent.press(view.getByLabelText('載入更多貼文')));
+  expect(view.getByLabelText('返回搜尋與篩選')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByLabelText('返回搜尋與篩選')));
+  expect(sdk).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('');
+});
