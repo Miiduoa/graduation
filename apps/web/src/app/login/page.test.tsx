@@ -250,6 +250,7 @@ it.each([
   '/import?schoolId=pu',
   '/dormitory?schoolId=ntu',
   '/food?tenant=pu&order=order-1',
+  '/shops?schoolId=pu&campus=nthu',
   '/grades',
   '/classroom/material-bookmarks?campus=pu',
 ])('starts the platform task %s with Google while school login is unavailable', (destination) => {

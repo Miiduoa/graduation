@@ -15,7 +15,9 @@ function signInPurpose(path: string): string {
   if (path === '/classroom/grades' || path === '/grades')
     return '登入後查看各門課目前的成績、等待公布與老師回饋。';
   if (path === '/social') return '登入後回到公開交流，閱讀貼文、參與討論與分享近況。';
-  if (path === '/food') return '登入後回到餐飲服務，查看自己的訂單與取餐進度。';
+  if (['/food', '/shops', '/shops/'].includes(path))
+    return '登入後回到餐飲服務，查看自己的訂單與取餐進度。';
+  if (path === '/map') return '登入後回到地圖，在此裝置收藏常用地點。';
   if (['/timetable', '/calendar', '/import'].includes(path))
     return '登入後回到你的課表、行程或資料匯入，不需要先綁定學校帳號。';
   if (path === '/dormitory') return '登入後整理自己的住宿備忘、設備問題與入住退宿清單。';

@@ -18,6 +18,9 @@ it.each([
   '/import?schoolId=pu',
   '/dormitory?schoolId=ntu',
   '/food?tenant=pu&order=order-1',
+  '/shops',
+  '/shops/?campus=all',
+  '/shops?school=PU&schoolId=pu&campus=nthu',
   '/map?school=pu&focus=library#route',
   '/bus?schoolId=tw-pu',
   '/announcements?school=pu',
@@ -60,6 +63,12 @@ it.each([
   '/import/private',
   '/dormitory/private',
   '/food/private',
+  '/shops/private',
+  '/shops/private?campus=nthu',
+  '/shops//private',
+  '/shops%2fprivate',
+  '/shops/%2e%2e/teacher',
+  '/shops-old',
   '/classroom/material-bookmarks/private',
   '/school-courses',
   '/school-courses?school=pu&schoolId=pu&campus=pu',
@@ -76,6 +85,8 @@ it.each([
   '/api/nuni/logout',
   '/social/../login',
   '/profile?' + 'a'.repeat(1300),
+  '/shops?campus=' + 'a'.repeat(1300),
+  '/shops/?campus=' + 'a'.repeat(1300),
 ])('rejects a foreign destination or wrong account flow: %s', (path) => {
   expect(platformDestination(path)).toBe('/classroom');
 });

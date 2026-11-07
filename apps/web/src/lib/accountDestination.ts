@@ -20,6 +20,8 @@ export function platformDestination(value?: string | null): string {
       '/import',
       '/dormitory',
       '/food',
+      '/shops',
+      '/shops/',
       '/classroom',
       '/classroom/account',
       '/classroom/grades',
