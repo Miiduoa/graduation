@@ -31,7 +31,9 @@ test('平台報修卡只開啟宿舍服務，不把平台案件編號帶入個�
       ]}
     />,
   );
-  expect(view.getByText('平台案件編號：')).toBeTruthy();
+  expect(view.getByText('已存成報修備忘')).toBeTruthy();
+  expect(view.queryByText('平台案件編號：')).toBeNull();
+  expect(view.queryByText('R1')).toBeNull();
   fireEvent.press(view.getByText('開啟宿舍服務'));
   expect(mockSafeNavigate).toHaveBeenCalledWith('Dormitory', undefined);
   expect(mockNavigate).not.toHaveBeenCalledWith('DormitoryScreen');

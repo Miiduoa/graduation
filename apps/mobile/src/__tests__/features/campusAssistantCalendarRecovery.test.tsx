@@ -9,6 +9,7 @@ import {
   reserveAssistantCalendarAttempt, saveAssistantCalendarJournalObservation,
 } from '../../services/assistantCalendarJournal';
 import type { AssistantCalendarProposal } from '../../services/assistantCalendarExecution';
+import { assistantCalendarBatchStorageKey } from '../../services/assistantCalendarBatchStore';
 import { personalImportStorageKey } from '../../services/personalImports';
 
 let mockUid: string | null = 'A';
@@ -149,7 +150,8 @@ test.each(['campus', 'dual-login-platform'] as const)('a fresh %s screen restore
   expect(view.queryByRole('button', { name: '先不要' })).toBeNull();
   fireEvent.press(view.getByRole('button', { name: '查看已建立的行程' }));
   expect(nav.navigate).toHaveBeenCalledWith('PersonalCalendar', { eventId: value.mutationId });
-  const allowed = new Set([assistantCalendarJournalStorageKey(scopeFor(value)), personalImportStorageKey(scopeFor(value))]);
+  const allowed = new Set([assistantCalendarJournalStorageKey(scopeFor(value)), personalImportStorageKey(scopeFor(value)),
+    assistantCalendarBatchStorageKey(scopeFor(value))]);
   expect(jest.mocked(AsyncStorage.getItem).mock.calls.length).toBeGreaterThan(0);
   expect(jest.mocked(AsyncStorage.getItem).mock.calls.every(([key]) => allowed.has(key))).toBe(true);
   expect(ledgerWrites()).toHaveLength(0);

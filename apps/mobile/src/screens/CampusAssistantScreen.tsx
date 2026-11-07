@@ -16,8 +16,11 @@ import { AssistantClassNowHint } from './AssistantClassNowHint';
 import { AssistantServiceReply } from './AssistantServiceReply';
 import { AssistantCalendarAction } from './AssistantCalendarAction';
 import { AssistantCalendarRecovery } from './AssistantCalendarRecovery';
-import type { AssistantCalendarTask } from '../services/assistantCalendarExecution';
-import { useAssistantCalendarRecovery } from '../state/useAssistantCalendarRecovery';
+import { AssistantCalendarBatchAction } from './AssistantCalendarBatchAction';
+import { AssistantCalendarBatchRecovery } from './AssistantCalendarBatchRecovery';
+import { sameAssistantCalendarEvent, type AssistantCalendarTask } from '../services/assistantCalendarExecution';
+import { updateAssistantCalendarBatchTask, type AssistantCalendarBatchView } from '../services/assistantCalendarBatchExecution';
+import { calendarTaskFromBatch, mergeCalendarBatchEvidence, useAssistantCalendarRecovery } from '../state/useAssistantCalendarRecovery';
 import { useAssistantSessionExpiry } from '../state/useAssistantSessionExpiry';
 import { useOptionalNuniSession } from '../state/nuniSession';
 import { useAuth } from '../state/auth';
@@ -238,18 +241,55 @@ function AssistantConversation({
   }, [platformContext, platformTimetable]);
   const current = () => mounted.current && isScopeCurrent() && (!platformTimetable || platformTimetable.isCurrent());
   const calendarContext = { uid, schoolId, platformTimetable, isCurrent: current };
-  const calendarRecovery = useAssistantCalendarRecovery(calendarContext);
+  const calendarRecovery = useAssistantCalendarRecovery(calendarContext, (restored) => {
+    if (!current()) return;
+    setMessages((previous) => previous.map((message) => {
+      let calendarTask = message.calendarTask;
+      let calendarBatch = message.calendarBatch;
+      if (calendarTask) {
+        calendarTask = restored.tasks.find((task) => task.proposal.mutationId === calendarTask!.proposal.mutationId) ?? calendarTask;
+        for (const batch of restored.batches) calendarTask = calendarTaskFromBatch(calendarTask, batch);
+        if (restored.error && calendarTask.state === 'verified') calendarTask = { ...calendarTask, checking: false,
+          warning: '這次重新載入未能核對行程，目前顯示先前回執與核對時間。' };
+      }
+      if (calendarBatch) {
+        calendarBatch = restored.batches.find((batch) => batch.plan.id === calendarBatch!.plan.id) ??
+          restored.tasks.reduce((batch, task) => updateAssistantCalendarBatchTask(batch, task), calendarBatch);
+        if (restored.error || restored.batchError) calendarBatch = { ...calendarBatch, state: 'paused', checking: false,
+          stop: { reason: 'unavailable', message: '重新載入時未能完整核對這份安排。請重新核對整份行程後再接續。' } };
+      }
+      return calendarTask === message.calendarTask && calendarBatch === message.calendarBatch
+        ? message : { ...message, calendarTask, calendarBatch };
+    }));
+  });
   const taskIsBusy = (task?: AssistantCalendarTask) => task?.state === 'saving' || task?.state === 'checking' ||
     (task?.state === 'verified' && task.checking);
+  const batchIsBusy = (batch?: AssistantCalendarBatchView) => batch?.state === 'running' || batch?.checking;
   const calendarBusy = calendarRecovery.loading || messages.some(({ calendarTask }) => taskIsBusy(calendarTask)) ||
-    calendarRecovery.tasks.some(taskIsBusy);
+    calendarRecovery.tasks.some(taskIsBusy) || messages.some(({ calendarBatch }) => batchIsBusy(calendarBatch)) ||
+    calendarRecovery.batches.some(batchIsBusy);
   const changeCalendarTask = (task: AssistantCalendarTask, originalId = task.proposal.mutationId) => {
     if (!current() || task.proposal.owner !== timetableOwner || task.proposal.schoolId !== schoolId) return;
     calendarRecovery.updateTask(task, originalId);
-    setMessages((previous) => previous.map((entry) => entry.calendarTask &&
-      [originalId, task.proposal.mutationId].includes(entry.calendarTask.proposal.mutationId)
-      ? { ...entry, calendarTask: task } : entry));
+    setMessages((previous) => previous.map((entry) => ({ ...entry,
+      ...(entry.calendarTask && [originalId, task.proposal.mutationId].includes(entry.calendarTask.proposal.mutationId)
+        ? { calendarTask: task } : {}),
+      ...(entry.calendarBatch ? { calendarBatch: updateAssistantCalendarBatchTask(entry.calendarBatch, task) } : {}),
+    })));
   };
+  const changeCalendarBatch = (batch: AssistantCalendarBatchView, originalId = batch.plan.id) => {
+    if (!current() || batch.plan.owner !== timetableOwner || batch.plan.schoolId !== schoolId) return;
+    calendarRecovery.updateBatch(batch, originalId);
+    setMessages((previous) => previous.map((entry) => ({ ...entry,
+      ...(entry.calendarTask ? { calendarTask: calendarTaskFromBatch(entry.calendarTask, batch) } : {}),
+      ...(entry.calendarBatch ? { calendarBatch: entry.calendarBatch.plan.id === originalId
+        ? batch : mergeCalendarBatchEvidence(entry.calendarBatch, batch) } : {}),
+    })));
+  };
+  const batchOperationIds = new Set([...calendarRecovery.batches, ...messages.flatMap((message) =>
+    message.calendarBatch ? [message.calendarBatch] : [])].flatMap((batch) => batch.steps.flatMap((step) =>
+    step.state === 'recorded' && sameAssistantCalendarEvent(step.event, step.task.proposal.event)
+      ? [step.task.proposal.mutationId] : [])));
   useEffect(() => {
     if (platformTimetable) return;
     let active = true;
@@ -273,8 +313,8 @@ function AssistantConversation({
     setPanel('chat');
     // Keep local task receipts and unknown operations when changing answer
     // modes. They are excluded from model history by askCampusAssistant.
-    setMessages((previous) => previous.filter((message, index) => message.calendarTask ||
-      (message.role === 'user' && previous[index + 1]?.calendarTask)));
+    setMessages((previous) => previous.filter((message, index) => message.calendarTask || message.calendarBatch ||
+      (message.role === 'user' && (previous[index + 1]?.calendarTask || previous[index + 1]?.calendarBatch))));
     setError('');
     setActiveShortcut(null);
   };
@@ -386,6 +426,7 @@ function AssistantConversation({
             serviceSelection: reply.serviceSelection,
             academicRead: reply.academicRead,
             calendarTask: reply.calendarTask,
+            calendarBatch: reply.calendarBatch,
             plan: reply.plan,
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
@@ -458,17 +499,33 @@ function AssistantConversation({
         if (current()) setError('無法核對這份行程的帳號與學校，請再提供一次。');
         return;
       }
+      if (reply.calendarBatch && (reply.calendarBatch.plan.owner !== timetableOwner || reply.calendarBatch.plan.schoolId !== schoolId)) {
+        if (current()) setError('無法核對這份多筆行程的帳號與學校，請再提供一次。');
+        return;
+      }
       if (controller.signal.aborted && current()) {
         setError(platformTimetable ? '已取消查詢。' : '已停止本機回答。');
         return;
       }
       if (current()) {
         if (reply.calendarTask) calendarRecovery.updateTask(reply.calendarTask);
+        if (reply.calendarBatch) calendarRecovery.updateBatch(reply.calendarBatch);
         const read = reply.courseworkRead;
         const changed = read?.result.kind === 'assignments' && duringRead?.get(read.result.workspace.id);
         setMessages((previous) => [
-          ...previous.map((message) => reply.calendarTask && message.calendarTask?.proposal.mutationId === reply.calendarTask.proposal.mutationId
-            ? { ...message, calendarTask: reply.calendarTask } : message), asked,
+          ...previous.map((message) => {
+            let nextMessage = message;
+            if (reply.calendarTask) nextMessage = { ...nextMessage,
+              ...(message.calendarTask?.proposal.mutationId === reply.calendarTask.proposal.mutationId
+                ? { calendarTask: reply.calendarTask } : {}),
+              ...(message.calendarBatch ? { calendarBatch: updateAssistantCalendarBatchTask(message.calendarBatch, reply.calendarTask) } : {}),
+            };
+            if (reply.calendarBatch) nextMessage = { ...nextMessage,
+              ...(message.calendarTask ? { calendarTask: calendarTaskFromBatch(message.calendarTask, reply.calendarBatch) } : {}),
+              ...(nextMessage.calendarBatch ? { calendarBatch: mergeCalendarBatchEvidence(nextMessage.calendarBatch, reply.calendarBatch) } : {}),
+            };
+            return nextMessage;
+          }), asked,
           {
             role: 'assistant',
             content: reply.content,
@@ -479,6 +536,7 @@ function AssistantConversation({
             serviceSelection: reply.serviceSelection,
             academicRead: reply.academicRead,
             calendarTask: reply.calendarTask,
+            calendarBatch: reply.calendarBatch,
             plan: reply.plan,
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
@@ -688,18 +746,25 @@ function AssistantConversation({
         </AICard>
       )}
       <AssistantCalendarRecovery
-        tasks={calendarRecovery.tasks.filter((task) => !messages.some((message) =>
-          message.calendarTask?.proposal.mutationId === task.proposal.mutationId))}
+        tasks={calendarRecovery.tasks.filter((task) => !batchOperationIds.has(task.proposal.mutationId) &&
+          !messages.some((message) => message.calendarTask?.proposal.mutationId === task.proposal.mutationId))}
         loading={calendarRecovery.loading} error={calendarRecovery.error}
         context={calendarContext} navigation={navigation} disabled={busy || syncBusy || calendarBusy}
         onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
         onChange={changeCalendarTask} />
+      <AssistantCalendarBatchRecovery
+        batches={calendarRecovery.batches.filter((batch) => !messages.some((message) => message.calendarBatch?.plan.id === batch.plan.id))}
+        error={calendarRecovery.batchError} context={calendarContext} navigation={navigation}
+        disabled={busy || syncBusy || calendarBusy}
+        onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
+        onChange={changeCalendarBatch} />
       {(uid || platformTimetable) && messages.length === 0 && !busy && !calendarBusy && !draft.trim() ? (
         <AICard title="安排個人行程">
           <Text style={{ color: aiTokens.textSecondary, fontSize: 15, lineHeight: 23 }}>
             輸入明確日期、時間與名稱，例如「幫我明天 19:00 到 20:00 安排英文讀書」。先核對草稿，再確認加入個人行事曆。
           </Text>
           <AIButton label="填寫行程範例" variant="ghost" onPress={() => editDraft('幫我明天 19:00 到 20:00 安排英文讀書')} />
+          <AIButton label="填寫多筆行程範例" variant="ghost" onPress={() => editDraft('幫我安排以下行程：\n明天 19:00 到 20:00 英文讀書\n後天 18:00 到 19:00 資料庫複習')} />
         </AICard>
       ) : null}
       {panel === 'chat' && (uid || platformTimetable) && mode === 'device' && messages.length === 0 && !busy && !calendarBusy && !error && !draft.trim() ? (
@@ -765,7 +830,7 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.tool === 'calendar-action' ? '個人行程'
+          <AICard title={message.calendarBatch ? '多筆個人行程' : message.tool === 'calendar-action' ? '個人行程'
             : message.tool === 'saved-academics' ? '成績與學分紀錄'
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
@@ -845,6 +910,11 @@ function AssistantConversation({
                 context={calendarContext}
                 navigation={navigation} disabled={busy || syncBusy || calendarBusy}
                 onChange={(next) => changeCalendarTask(next, message.calendarTask!.proposal.mutationId)} />
+            ) : null}
+            {message.calendarBatch ? (
+              <AssistantCalendarBatchAction batch={message.calendarBatch} context={calendarContext}
+                navigation={navigation} disabled={busy || syncBusy || calendarBusy}
+                onChange={(next) => changeCalendarBatch(next, message.calendarBatch!.plan.id)} />
             ) : null}
             {platformTimetable && index === messages.length - 1 && !!message.savedClassRead?.classes.length ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>

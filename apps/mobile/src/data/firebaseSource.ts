@@ -2963,7 +2963,7 @@ export const firebaseSource: DataSource = {
   async createRepairRequest(data) {
     const resolvedSchoolId = await resolveUserSchoolId(data.userId, data.schoolId);
     if (!resolvedSchoolId) {
-      throw new Error('缺少 schoolId，無法建立報修單');
+      throw new Error('缺少 schoolId，無法存成報修備忘');
     }
 
     const submitRepairRequest = httpsCallable<
@@ -2994,12 +2994,12 @@ export const firebaseSource: DataSource = {
       throw new Error(
         payload.errorCode === 'verify_failed'
           ? '報修寫入後驗證失敗，請稍後到宿舍頁再試。'
-          : '建立報修單失敗，請改用宿舍頁面處理。',
+          : '無法存成報修備忘，請改用宿舍頁面處理。',
       );
     }
     const requestId = payload?.repairId ?? payload?.requestId;
     if (!requestId) {
-      throw new Error('建立報修單失敗');
+      throw new Error('無法存成報修備忘');
     }
 
     const row = await fetchDocumentAtPath<RepairRequest>(

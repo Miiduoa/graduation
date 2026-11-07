@@ -19,6 +19,8 @@ import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
 import type { AssistantServiceSelection } from '../services/assistantServiceNavigation';
 import { parseAssistantCalendarIntent } from '../services/assistantCalendarIntent';
+import { parseAssistantCalendarBatchIntent } from '../services/assistantCalendarBatchIntent';
+import { prepareAssistantCalendarBatch, type AssistantCalendarBatchView } from '../services/assistantCalendarBatchExecution';
 import { assistantCalendarOwner, createAssistantCalendarTask, findPersistedAssistantCalendarTask,
   recheckAssistantCalendarTask, sameAssistantCalendarEvent,
   type AssistantCalendarTask } from '../services/assistantCalendarExecution';
@@ -33,6 +35,7 @@ export type CampusAssistantMessage = {
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
   calendarTask?: AssistantCalendarTask;
+  calendarBatch?: AssistantCalendarBatchView;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
@@ -120,6 +123,7 @@ export async function askCampusAssistant(input: {
   serviceSelection?: AssistantServiceSelection;
   academicRead?: ImportedAcademicRead;
   calendarTask?: AssistantCalendarTask;
+  calendarBatch?: AssistantCalendarBatchView;
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
@@ -153,6 +157,30 @@ export async function askCampusAssistant(input: {
   }
 
   const question = messages[messages.length - 1].content;
+  const batchIntent = parseAssistantCalendarBatchIntent(question);
+  if (batchIntent) {
+    if (batchIntent.kind === 'invalid') return { content: batchIntent.message,
+      source: 'device', tool: 'calendar-action', hasActions: false };
+    const context = { ...input.scope, platformTimetable: input.platformTimetable,
+      isCurrent: () => input.isCurrent() && !input.signal?.aborted };
+    if (!assistantCalendarOwner(context)) return { content: '請先登入自己的帳號，再建立多筆個人行程草稿。',
+      source: 'device', tool: 'calendar-action', hasActions: false,
+      serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    try {
+      const calendarBatch = await abortableCampusRead(
+        () => prepareAssistantCalendarBatch(batchIntent.events, context), input.signal);
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { content: '請逐筆核對下方安排。確認後會依序加入個人行事曆，每筆保存後都會讀回核對。',
+        source: 'device', tool: 'calendar-action', hasActions: false, calendarBatch };
+    } catch {
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { content: '目前無法完整讀取或保存這份多筆行程草稿，尚未開始新的行程操作。請重新載入行程紀錄後再試。',
+        source: 'device', tool: 'calendar-action', hasActions: false,
+        serviceSelection: { kind: 'open', serviceIds: ['calendar'] } };
+    }
+  }
   const calendarIntent = parseAssistantCalendarIntent(question);
   if (calendarIntent) {
     if (calendarIntent.kind === 'invalid') return { content: calendarIntent.message,

@@ -39,6 +39,7 @@ jest.mock('../../services/cloudFunctions', () => ({
   getAIServerBaseUrl: jest.fn(() => 'https://ai.test'),
 }));
 
+import { DORM_REPAIR_COPY, DORM_REPAIR_DISALLOWED_COPY } from '@campus/shared/src/dormitory';
 import {
   executeToolStandard,
   listToolSpecs,
@@ -260,5 +261,22 @@ describe('aiToolRegistry — Stage 4：草稿 vs 真送出', () => {
   it('missing_info 的 badge 是 pending_input', async () => {
     const r = await executeToolStandard('order_food', { vendorId: 'v1' }, baseCtx);
     expect(getResultBadge(r).badge).toBe('pending_input');
+  });
+
+  it('報修成功只說存成備忘，不宣稱已提交或產生單號', async () => {
+    const spec = listToolSpecs().find((item) => item.name === 'create_repair_request');
+    expect(spec?.description).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+    expect(spec?.fields.find((field) => field.name === 'room')?.promptIfMissing)
+      .not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+    const r = await executeToolStandard(
+      'create_repair_request',
+      { type: 'ac', room: 'A101', description: '冷氣不冷' },
+      baseCtx,
+    );
+    expect(r.success).toBe(true);
+    expect(r.summary).toContain(DORM_REPAIR_COPY.assistantSavedMemo);
+    expect(r.summary).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+    expect(r.summary).not.toContain('repair-1');
+    expect(formatStandardToolMessage(r)).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
   });
 });

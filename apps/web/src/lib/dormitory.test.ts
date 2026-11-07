@@ -74,6 +74,14 @@ it('keeps shared repair copy as a personal memo without ticket or school-progres
   }
   expect(DORM_REPAIR_COPY.saveMemo).toBe('存成我的報修備忘');
   expect(DORM_REPAIR_COPY.intro).toContain('請依學校規定管道送出');
+  expect(DORM_REPAIR_COPY.officialTrackingFallback).toContain('網站');
+  expect(DORM_REPAIR_COPY.assistantSavedMemo).toContain('報修備忘');
+  expect('工單').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('已提交報修').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('已為你提交報修工單').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('查看處理狀況').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('修繕進度').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('查進度').toMatch(DORM_REPAIR_DISALLOWED_COPY);
 });
 
 
