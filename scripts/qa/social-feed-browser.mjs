@@ -360,6 +360,13 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       });
       await clickButton('返回搜尋與篩選');
       await sleep(200);
+      const returnDetails = await call(()=>{
+        const input=document.querySelector('input[type=search]');
+        const rect=input?.getBoundingClientRect();
+        return {focused:document.activeElement===input,top:rect?.top,bottom:rect?.bottom,innerHeight,scrollY,
+          visibleCards:document.querySelectorAll('article').length,query:input?.value};
+      });
+      console.info('FEED_SEARCH_RETURN_DIAGNOSTIC',JSON.stringify(returnDetails));
       await check('long-list:one click returns focus and viewport to search without resetting pages',()=>{
         const input=document.querySelector('input[type=search]');
         const rect=input?.getBoundingClientRect();

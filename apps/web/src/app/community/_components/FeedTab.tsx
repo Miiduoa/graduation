@@ -1074,7 +1074,13 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
               type="button"
               className="btn"
               style={{ minHeight: 44, maxWidth: '100%' }}
-              onClick={() => searchInputRef.current?.focus()}
+              onClick={() => {
+                const field = searchInputRef.current;
+                if (!field) return;
+                // Avoid a long smooth scroll across hundreds of deferred cards.
+                field.focus({ preventScroll: true });
+                field.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+              }}
             >
               返回搜尋與篩選
             </button>
