@@ -106,26 +106,6 @@
   list-style: none;
 }
 
-.itemMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  align-items: center;
-  margin: 0 0 8px;
-}
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 0.8125rem;
-  color: var(--muted);
-}
-
 .scopeNote {
   font-size: 0.875rem;
   color: var(--muted);
@@ -145,4 +125,96 @@
   .toolbar {
     align-items: stretch;
   }
+}
+
+.thumbnail {
+  float: inline-end;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: clamp(76px, 13vw, 112px);
+  aspect-ratio: 4 / 3;
+  margin-inline-start: 14px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photoCount,
+.overPhoto {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.photoCount { color: var(--muted); }
+
+.overPhoto {
+  position: absolute;
+  inset: auto 6px 6px auto;
+  border-radius: 5px;
+  padding: 3px 7px;
+  color: white;
+  background: rgb(0 0 0 / 75%);
+}
+
+.gallery {
+  max-width: 40rem;
+  margin-block: 16px;
+}
+
+.zoomPhoto,
+.photoNotice {
+  display: grid;
+  place-content: center;
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.zoomPhoto {
+  display: block;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.zoomPhoto:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--brand));
+  outline-offset: 3px;
+}
+
+.itemPhoto {
+  display: block;
+  width: 100%;
+  height: min(55vh, 22rem);
+  object-fit: contain;
+}
+
+:global(dialog) .itemPhoto { height: min(72vh, 60rem); }
+
+.photoNotice {
+  min-height: 9rem;
+  padding: 16px;
+  text-align: center;
+  justify-items: center;
+  gap: 10px;
+}
+.photoNotice p { margin: 0; }
+
+.photoControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-top: 6px;
 }

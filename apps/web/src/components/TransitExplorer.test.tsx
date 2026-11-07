@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransitExplorer } from './TransitExplorer';
 import { queryTransit, type TransitResult, type TransitStop } from '@/lib/transit';
@@ -146,7 +146,7 @@ it('draws the next live bus on a stop line and does not invent a bus for timetab
   expect(track.getAttribute('data-status')).toBe('soon');
   expect(track.getAttribute('aria-label')).toMatch(/162 號公車，往 沙鹿火車站，還有 \d+ 站，約 3 分/);
   expect(screen.getByText('快到')).toBeTruthy();
-  expect(screen.getByText('你在這裡')).toBeTruthy();
+  expect(screen.getByText('候車站')).toBeTruthy();
   expect(screen.getByText('英才路')).toBeTruthy();
   expect(screen.getByTestId('campus-approach-bus')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '301 往 嘉陽高中 12 分' }));
@@ -460,8 +460,8 @@ it('retains different route and static-source details beside the city', async ()
   fireEvent.change(screen.getByLabelText('站名或學校名稱'), { target: { value: '靜宜大學' } });
   fireEvent.click(screen.getByRole('button', { name: '尋找站牌' }));
   expect(await screen.findByRole('button', { name: compactName('01 靜宜大學(英才路) 臺中市 162 路線') })).toBeTruthy();
-  expect(screen.getByRole('button', { name: compactName('02 靜宜大學(校門) 臺中市 301 路線 · 返程 · 靜態站牌資料') })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '收藏 靜宜大學(校門) 301 路線 · 返程 · 靜態站牌資料 第 2 站牌' }));
+  expect(screen.getByRole('button', { name: compactName('02 靜宜大學(校門) 臺中市 301 路線 · 返程 · 往 靜宜大學靜園餐廳 · 靜態站牌資料') })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '收藏 靜宜大學(校門) 301 路線 · 返程 · 往 靜宜大學靜園餐廳 · 靜態站牌資料 第 2 站牌' }));
   expect(JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]')).toEqual([staticStop]);
 });
 
@@ -736,14 +736,20 @@ it('groups campus stops with student names and never shows stop codes', async ()
   expect(screen.queryByText(/站牌代碼/)).toBeNull();
 });
 
-it('keeps long route badges on one line and fits the stop-mode bar on a 350px board', () => {
+it('fits route details and direction controls when the physical board narrows', () => {
   const css = readFileSync(path.join(process.cwd(), 'src/components/transit.module.css'), 'utf8');
+  const sharedBoard = css.match(/(?:^|\n)\.board \{[^}]*\}/)?.[0] ?? '';
+  expect(sharedBoard).not.toMatch(/(?:border|box-shadow|container):/);
+  expect(css).toMatch(/\.physicalBoard \{[^}]*container: campus-board \/ inline-size;/);
   expect(css).toMatch(/\.routeBadge \{[\s\S]*?white-space: nowrap;/);
-  expect(css).toMatch(/grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
+  expect(css).toMatch(/\.physicalArrival \.arrivalRow \{[^}]*grid-template-columns: minmax\(3.5rem, max-content\) minmax\(0, 1fr\) auto;/);
+  expect(css).toMatch(/\.arrivalRow \{[^}]*grid-template-columns: 56px minmax\(0, 1fr\) auto;/);
   expect(css).toMatch(/\.campusFirst > \.modeBar button \{[\s\S]*?flex: 1 1 0;/);
   expect(css).toMatch(/\.rowCopy strong \{[^}]*white-space: nowrap;/);
   expect(css).toMatch(/\.rowCopy strong \{[^}]*text-overflow: ellipsis;/);
-  expect(css).not.toMatch(/\.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/@container campus-board \(max-width: 30rem\) \{[\s\S]*?\.physicalArrival \.routeBadge \{[^}]*max-width: 100%;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/@container campus-board \(max-width: 30rem\) \{[\s\S]*?\.physicalArrival \.rowCopy strong \{[^}]*overflow-wrap: anywhere;/);
+  expect(css).toMatch(/@container campus-board \(max-width: 20rem\) \{[\s\S]*?\.arrivalRow \{ grid-template-columns: minmax\(0, 1fr\);/);
   expect(css).toMatch(/\.arrivals \{[^}]*scroll-margin-top: 24px;/);
   expect(css).toMatch(/\.arrivals \{[^}]*overflow-anchor: none;/);
   expect(css).toMatch(/\.arrivalBlock \{[^}]*scroll-margin-top: 24px;/);
@@ -754,7 +760,7 @@ it('keeps long route badges on one line and fits the stop-mode bar on a 350px bo
   expect(transferBadge).not.toMatch(/text-overflow: ellipsis;/);
   expect(css).toMatch(/@media \(max-width: 390px\) \{[\s\S]*?\.transferRow \.routeBadge \{[\s\S]*?font-size: 11px;/);
   expect(css).toMatch(/\.approach \{[^}]*position: sticky;/);
-  expect(css).toMatch(/\.approach \{[^}]*top: 44px;/);
+  expect(css).toMatch(/\.approach \{[^}]*top: max\(58px, calc\(1.3125rem \+ 26px\)\);/);
 });
 
 it('lets a Providence student type or tap a destination and see the next direct bus on the first screen', async () => {
@@ -893,7 +899,7 @@ describe('static catalog stops', () => {
 const catalogStop: TransitStop = {
   id: 'TCOD_pu_outbound', name: '靜宜大學', city: 'Taichung', lat: 24.226, lon: 120.576, distance: 120,
   source: 'taichung-open-data', catalogDate: '2026-10-18T04:00:00.000Z',
-  routes: [{ name: '300', direction: '去', destination: '臺中車站' }],
+  routes: [{ name: '300', direction: '去', destination: '臺中車站(A月台)' }],
 };
 const catalogResult = (): TransitResult => ({ ...stopResult(), status: 'ready', kind: 'stops', stops: [catalogStop], limited: false, fetchedAt: new Date().toISOString() });
 
@@ -903,10 +909,10 @@ it('shows catalog directions and source instead of polling or presenting the sna
     ? { status: 'unavailable', reason: 'not-configured' }
     : catalogResult());
   await act(async () => { renderListing(); });
-  fireEvent.click(groupButton('校門口・往市區'));
+  fireEvent.click(groupButton('300 路線'));
   expect(screen.getByText('班次時間請至官方網站確認')).toBeTruthy();
   expect(screen.queryByText(/到站時間為預估值/)).toBeNull();
-  expect(screen.getByText('去程 · 往 台中車站')).toBeTruthy();
+  expect(screen.getByText('去程 · 往 臺中車站(A月台)')).toBeTruthy();
   expect(screen.getByText(/資料快照：2026\/10\/18/)).toBeTruthy();
   expect(screen.getByRole('link', { name: '臺中市政府公車路線站牌資料 ↗' }).getAttribute('href')).toBe('https://data.gov.tw/dataset/81555');
   expect(screen.getByRole('link', { name: '前往臺中公車查即時到站 ↗' }).getAttribute('href')).toBe('https://citybus.taichung.gov.tw/');
@@ -927,22 +933,71 @@ it('preserves static provider metadata across browser favorites and does not tur
     ? { status: 'unavailable', reason: 'not-configured' }
     : catalogResult());
   const view = renderListing();
-  fireEvent.click(await screen.findByRole('button', { name: /收藏 校門口・往市區/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /收藏 靜宜大學 300/ }));
   const saved = JSON.parse(localStorage.getItem('campus-one:transit-stops:v1') || '[]');
   expect(saved[0]).toMatchObject({
     source: 'taichung-open-data', catalogDate: catalogStop.catalogDate, distance: null,
-    routes: [{ name: '300', direction: '去', destination: '台中車站' }],
+    routes: [{ name: '300', direction: '去', destination: '臺中車站(A月台)' }],
   });
   view.unmount();
   vi.clearAllMocks();
   render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
   fireEvent.click(screen.getByRole('button', { name: '常用站牌 1' }));
-  fireEvent.click(groupButton('校門口・往市區'));
+  fireEvent.click(groupButton('300 路線'));
   expect(screen.getByText('班次時間請至官方網站確認')).toBeTruthy();
-  expect(screen.getByText('去程 · 往 台中車站')).toBeTruthy();
+  expect(screen.getByText('去程 · 往 臺中車站(A月台)')).toBeTruthy();
   expect(queryTransit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: /取消收藏 校門口・往市區/ }));
+  fireEvent.click(screen.getByRole('button', { name: /取消收藏 靜宜大學 300/ }));
   expect(screen.getByText(/在站牌旁按「收藏」/)).toBeTruthy();
+});
+
+it('keeps opposite platforms separate when checking a bus display and walking to the stop', async ({ onTestFinished }) => {
+  // jsdom lacks the native dialog methods exercised by the browser scenario.
+  for (const method of ['showModal', 'close'] as const) {
+    if (typeof HTMLDialogElement.prototype[method] === 'function') continue;
+    Object.defineProperty(HTMLDialogElement.prototype, method, {
+      configurable: true,
+      value(this: HTMLDialogElement) { this.open = method === 'showModal'; },
+    });
+    onTestFinished(() => { Reflect.deleteProperty(HTMLDialogElement.prototype, method); });
+  }
+  const otherSide: TransitStop = {
+    ...catalogStop, id: 'TCOD_pu_return', lon: 120.579,
+    routes: [{ name: '300', direction: '返', destination: '靜宜大學(專用道)' }],
+  };
+  vi.mocked(queryTransit).mockResolvedValue({
+    status: 'ready', kind: 'stops', stops: [catalogStop, otherSide], limited: false, fetchedAt: catalogStop.catalogDate!,
+  });
+  renderListing();
+  const stopsPane = within(screen.getByTestId('stop-groups'));
+  fireEvent.click(await stopsPane.findByRole('button', { name: groupName('往 臺中車站(A月台)') }));
+  expect(screen.getByRole('link', { name: /開啟步行導航/ }).getAttribute('href')).toContain('24.226,120.576');
+  fireEvent.click(stopsPane.getByRole('button', { name: groupName('往 靜宜大學(專用道)') }));
+  expect(screen.getByRole('link', { name: /開啟步行導航/ }).getAttribute('href')).toContain('24.226,120.579');
+  expect(screen.queryByRole('button', { name: /放大.*A月台/ })).toBeNull();
+  const enlarge = screen.getByRole('button', { name: '放大 300 路線牌，返程，往 靜宜大學(專用道)' });
+  enlarge.focus();
+  fireEvent.click(enlarge);
+  const sign = within(await screen.findByRole('dialog', { name: '候車路線牌' }));
+  expect(sign.getByText('300')).toBeTruthy();
+  expect(sign.getByText('返程')).toBeTruthy();
+  expect(sign.getByText('靜宜大學(專用道)')).toBeTruthy();
+  fireEvent.click(sign.getByRole('button', { name: '關閉視窗' }));
+  expect(document.activeElement).toBe(enlarge);
+});
+
+it('lets an old grouped favorite be replaced by the physical stop with the same ID', async () => {
+  localStorage.setItem('campus-one:transit-stops:v1', JSON.stringify([{ ...catalogStop, name: '校門口・往市區' }]));
+  vi.mocked(queryTransit).mockResolvedValue(catalogResult());
+  render(<TransitExplorer schoolId="nthu" schoolName="國立清華大學" />);
+  fireEvent.click(await screen.findByRole('button', { name: '常用站牌 1' }));
+  fireEvent.click(groupButton('校門口・往市區'));
+  expect(screen.queryByRole('link', { name: /步行導航/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /放大.*路線牌/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新查找靜宜大學站牌' }));
+  expect(queryTransit).toHaveBeenCalledWith({ action: 'search', city: 'Taichung', text: '靜宜大學' }, expect.any(AbortSignal));
+  fireEvent.click(await screen.findByRole('button', { name: /^收藏 靜宜大學/ }));
+  expect(JSON.parse(localStorage.getItem('campus-one:transit-stops:v1')!)).toEqual([{ ...catalogStop, distance: null }]);
 });
 
 it('aborts in-flight arrivals when switching to a static stop and resumes only when a TDX stop is selected', async () => {
@@ -955,16 +1010,16 @@ it('aborts in-flight arrivals when switching to a static stop and resumes only w
     return new Promise((resolve) => { finish = resolve; });
   });
   renderListing();
-  fireEvent.click(await findGroupButton('校門口・往沙鹿'));
+  fireEvent.click(await findGroupButton('162 路線'));
   await waitFor(() => expect(queryTransit).toHaveBeenCalledWith({ action: 'arrivals', city: 'Taichung', stopId: 'TXG001' }, expect.any(AbortSignal)));
-  fireEvent.click(groupButton('校門口・往市區'));
+  fireEvent.click(groupButton('300 路線'));
   expect(arrivalSignal.aborted).toBe(true);
   expect(screen.getByText('班次時間請至官方網站確認')).toBeTruthy();
   await act(async () => finish({ status: 'ready', kind: 'arrivals', fetchedAt: new Date().toISOString(), arrivals: [{ id: 'old', route: '舊路線', direction: 0, destination: '', status: 0, seconds: 600, updatedAt: new Date().toISOString() }] }));
   expect(screen.queryByText('舊路線')).toBeNull();
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(1);
   vi.mocked(queryTransit).mockResolvedValue(emptyArrivals());
-  fireEvent.click(groupButton('校門口・往沙鹿'));
+  fireEvent.click(groupButton('162 路線'));
   await screen.findByText(/目前沒有班次預估/);
   expect(vi.mocked(queryTransit).mock.calls.filter(([query]) => query.action === 'arrivals')).toHaveLength(2);
 });

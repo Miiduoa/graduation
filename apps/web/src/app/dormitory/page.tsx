@@ -7,6 +7,7 @@ import {
   DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
+  DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
@@ -28,6 +29,7 @@ import {
   type DormWorkspace,
 } from '@campus/shared/src/dormitory';
 import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
+import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
 import { useAuth } from '@/components/AuthGuard';
 import { SiteShell } from '@/components/SiteShell';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
@@ -46,10 +48,11 @@ type RepairDraft = {
   title: string;
   location: string;
   description: string;
+  reference: string;
 };
 
 type ParcelDraft = { title: string; pickupPoint: string; dueDate: string };
-const EMPTY_REPAIR: RepairDraft = { category: 'other', title: '', location: '', description: '' };
+const EMPTY_REPAIR: RepairDraft = { category: 'other', title: '', location: '', description: '', reference: '' };
 const EMPTY_PARCEL: ParcelDraft = { title: '', pickupPoint: '', dueDate: '' };
 const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'overview', label: '總覽' },
@@ -60,6 +63,32 @@ const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'checklist', label: '入住與退宿' },
   { id: 'laundry', label: '洗衣計時' },
 ];
+
+function RepairHandoff({ schoolId, category, location, followUp = false }: {
+  schoolId: string;
+  category: DormRepairCategory;
+  location: string;
+  followUp?: boolean;
+}) {
+  const route = resolveDormRepairRoute(schoolId, category, location);
+  if (!route) return <p className={styles.muted}>請向這所學校的住宿服務單位確認報修方式。</p>;
+  const trackingUrl = followUp ? route.trackingUrl : undefined;
+  return (
+    <div className={styles.handoff} role="group" aria-label="校方報修管道">
+      <strong>校方報修管道</strong>
+      <p>{route.detail}</p>
+      <div className={styles.actions}>
+        {trackingUrl !== route.url && (
+          <a className={styles.external} href={route.url} target={route.url.startsWith('tel:') ? undefined : '_blank'}
+            rel="noopener noreferrer">{route.label}</a>
+        )}
+        {trackingUrl && <a className={styles.external} href={trackingUrl} target="_blank" rel="noopener noreferrer">
+          {route.trackingLabel ?? '查詢校方報修進度'}
+        </a>}
+      </div>
+    </div>
+  );
+}
 
 function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   scope: string;
@@ -179,14 +208,14 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
   function beginRepair(repair?: DormRepair, shortcut?: { category: DormRepairCategory; title: string }) {
     setEditingId(repair?.id ?? null);
     setPendingId(null);
-    const currentRoom = storage.status === 'ready' ? storage.data.room : '';
+    const residence = storage.status === 'ready' ? storage.data : null;
     setRepairDraft(repair
-      ? { title: repair.title, category: repair.category, location: repair.location, description: repair.description }
+      ? { title: repair.title, category: repair.category, location: repair.location, description: repair.description, reference: repair.reference ?? '' }
       : {
         ...EMPTY_REPAIR,
         category: shortcut?.category ?? 'other',
         title: shortcut?.title ?? '',
-        location: currentRoom ? '寢室 ' + currentRoom : '',
+        location: [residence?.building, residence?.room && '寢室 ' + residence.room].filter(Boolean).join(' ').slice(0, 100),
       });
     setEditorOpen(true);
     setDeleteId(null);
@@ -194,13 +223,19 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
     setView('repairs');
   }
 
-  async function copyRepair(repair: DormRepair) {
+  async function copyRepair(repair: DormRepair, part: 'description' | 'reference') {
+    const value = part === 'reference' ? repair.reference : formatDormRepairForCopy(repair);
+    if (!value) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(formatDormRepairForCopy(repair));
-      setNotice('已複製問題說明，請依該校正式管道通報。');
+      await navigator.clipboard.writeText(value);
+      setSaveError('');
+      setNotice(part === 'reference' ? '已複製校方單號。' : '已複製問題說明，請依該校正式管道通報。');
     } catch {
-      setSaveError('無法自動複製。請選取問題文字，手動複製後交給住宿服務單位。');
+      setNotice('');
+      setSaveError(part === 'reference'
+        ? '無法自動複製。請選取畫面上的校方單號，手動複製。'
+        : '無法自動複製。請選取問題文字，手動複製後交給住宿服務單位。');
     }
   }
 
@@ -223,11 +258,13 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
       category: repairDraft.category,
       location: repairDraft.location.trim(),
       description: repairDraft.description.trim(),
+      reference: repairDraft.reference.trim(),
       status: current?.status ?? 'draft',
       createdAt: current?.createdAt ?? Date.now(),
       updatedAt: Date.now(),
     };
     if (save({ ...data, repairs: [next, ...data.repairs.filter((item) => item.id !== id)] })) {
+      if (repairFilter !== 'all' && repairFilter !== next.status) setRepairFilter(next.status);
       setEditorOpen(false);
       setRepairDraft({ ...EMPTY_REPAIR });
       setEditingId(null);
@@ -490,6 +527,7 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
               <button type="button" className={styles.primary} onClick={() => beginRepair()}>＋ 記錄問題</button>
             </div>
             <p className={styles.muted}>儲存只是個人備忘，不會送出報修。已向校方通報的狀態由你自行註記，不是校方系統回覆。</p>
+            {!editorOpen && data.repairs.length === 0 && <RepairHandoff schoolId={schoolId} category="other" location={data.building} />}
             {!editorOpen && <div className={styles.shortcutBar} aria-label="常見設備問題">
               <span>快速記錄</span>
               {DORM_REPAIR_SHORTCUTS.map((shortcut) => <button type="button" key={shortcut.title}
@@ -523,8 +561,11 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                   <label>問題名稱 *<input required minLength={2} maxLength={90} value={repairDraft.title} onChange={(e) => setRepairDraft({ ...repairDraft, title: e.target.value })} placeholder="例如：浴室水龍頭持續滴水" /></label>
                   <label>類別<select value={repairDraft.category} onChange={(e) => setRepairDraft({ ...repairDraft, category: e.target.value as DormRepairCategory })}>{Object.entries(DORM_REPAIR_CATEGORIES).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
                   <label>位置<input maxLength={100} value={repairDraft.location} onChange={(e) => setRepairDraft({ ...repairDraft, location: e.target.value })} placeholder="例如：浴室洗手台" /></label>
+                  <label>校方報修單號（選填）<input maxLength={DORM_REPAIR_REFERENCE_LIMIT} value={repairDraft.reference}
+                    onChange={(e) => setRepairDraft({ ...repairDraft, reference: e.target.value })} placeholder="收到校方單號後再填寫" /></label>
                   <label className={styles.wide}>詳細狀況<textarea rows={4} maxLength={1200} value={repairDraft.description} onChange={(e) => setRepairDraft({ ...repairDraft, description: e.target.value })} placeholder="故障情況、開始時間、需要注意的事項" /></label>
                 </div>
+                <RepairHandoff schoolId={schoolId} category={repairDraft.category} location={repairDraft.location} followUp={!!repairDraft.reference.trim()} />
                 <div className={styles.actions}><button type="submit" className={styles.primary}>儲存紀錄</button><button type="button" className={styles.secondary} onClick={() => { setEditorOpen(false); setEditingId(null); setPendingId(null); }}>取消</button></div>
               </form>
             )}
@@ -541,10 +582,15 @@ function DormitoryWorkspace({ scope, schoolId, schoolName, guest }: {
                     <div className={styles.repairHead}><div><span className={styles.category}>{DORM_REPAIR_CATEGORIES[item.category]}</span><h4>{item.title}</h4></div><span className={styles.status}>{DORM_REPAIR_STATUSES[item.status]}</span></div>
                     {item.location && <p>位置：{item.location}</p>}
                     {item.description && <p className={styles.description}>{item.description}</p>}
+                    {item.reference && <p className={styles.description}>自行登記的校方單號　<strong>{item.reference}</strong></p>}
+                    {(!editorOpen || editingId !== item.id) && (
+                      <RepairHandoff schoolId={schoolId} category={item.category} location={item.location} followUp={item.status !== 'draft' || !!item.reference} />
+                    )}
                     <p className={styles.source}>最後更新：{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString('zh-TW') : '未記錄'}</p>
                     <div className={styles.actions}>
                       <button type="button" onClick={() => beginRepair(item)}>編輯</button>
-                      <button type="button" onClick={() => void copyRepair(item)}>複製通報文字</button>
+                      <button type="button" onClick={() => void copyRepair(item, 'description')}>複製通報文字</button>
+                      {item.reference && <button type="button" onClick={() => void copyRepair(item, 'reference')}>複製單號</button>}
                       {item.status === 'draft' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'reported', updatedAt: Date.now() } : r) })}>我已自行通報</button>}
                       {item.status !== 'resolved' && <button type="button" onClick={() => save({ ...data, repairs: data.repairs.map((r) => r.id === item.id ? { ...r, status: 'resolved', updatedAt: Date.now() } : r) })}>我已確認修復</button>}
                       {deleteId === item.id ? (

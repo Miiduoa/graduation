@@ -1,17 +1,5 @@
 #!/bin/bash
-# ╔══════════════════════════════════════════════════════════════════╗
-# ║  Demo Server 啟動腳本 — 給 AI 自動截圖用                       ║
-# ║                                                                  ║
-# ║  跑法：                                                          ║
-# ║    cd ~/Desktop/畢業專題                                          ║
-# ║    bash start-demo-for-screenshots.sh                            ║
-# ║                                                                  ║
-# ║  跑完會起 2 個 dev server：                                      ║
-# ║    1. http://localhost:3000   (Web demo · Next.js)               ║
-# ║    2. http://localhost:8081   (Mobile · Expo web mode)           ║
-# ║                                                                  ║
-# ║  起好之後依序切 8 角色 + 5 cockpit 截圖，存進 demo-media/。      ║
-# ╚══════════════════════════════════════════════════════════════════╝
+# 啟動截圖用的 Next.js（3000）與 Expo Web（8081）服務。
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
