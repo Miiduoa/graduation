@@ -48,17 +48,13 @@ import {
   type LostFoundDraftScope,
   type LostFoundPendingIntent,
 } from '@/lib/lostFoundDrafts';
+import { lostFoundFormFields } from '@campus/shared/src/lostFoundFields';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 
 function toFormFields(item: LostFoundItem): LostFoundWriteFields {
   return {
-    type: item.type,
-    title: item.title,
-    description: item.description,
-    category: item.category,
-    location: item.location,
+    ...lostFoundFormFields(item),
     date: toTaipeiCalendarDateInput(item.date),
-    contactInfo: item.contactInfo ?? '',
   };
 }
 
@@ -177,31 +173,13 @@ function LostFoundDetailPageContent({
             const draft = loadLostFoundDraft(scope);
             setPending(storedPending);
             if (storedPending?.fields) {
-              setFields({
-                type: storedPending.fields.type,
-                title: storedPending.fields.title,
-                description: storedPending.fields.description,
-                category: storedPending.fields.category,
-                location: storedPending.fields.location,
-                date: storedPending.fields.date,
-                contactInfo: storedPending.fields.contactInfo ?? '',
-              });
+              setFields(lostFoundFormFields(storedPending.fields));
               setBaseUpdatedAt(storedPending.expectedUpdatedAt ?? null);
               setEditing(true);
               setStatusMessage('偵測到尚未確認的編輯，請先重試同一則內容。');
             } else if (draft) {
-              setFields({
-                type: draft.type,
-                title: draft.title,
-                description: draft.description,
-                category: draft.category,
-                location: draft.location,
-                date: draft.date,
-                contactInfo: draft.contactInfo ?? '',
-              });
-              setBaseUpdatedAt(
-                draft.expectedUpdatedAt !== undefined ? (draft.expectedUpdatedAt ?? null) : null,
-              );
+              setFields(lostFoundFormFields(draft));
+              setBaseUpdatedAt(draft.expectedUpdatedAt ?? null);
               setEditing(true);
               setStatusMessage('已還原先前未完成的編輯草稿。');
             } else {
@@ -253,15 +231,7 @@ function LostFoundDetailPageContent({
       setFormErrors({
         form: '尚有未確認的編輯結果。請先重試同一則內容，勿覆蓋成不同內容。',
       });
-      setFields({
-        type: pending.fields.type,
-        title: pending.fields.title,
-        description: pending.fields.description,
-        category: pending.fields.category,
-        location: pending.fields.location,
-        date: pending.fields.date,
-        contactInfo: pending.fields.contactInfo ?? '',
-      });
+      setFields(lostFoundFormFields(pending.fields));
       return;
     }
     setFields(next);
@@ -500,31 +470,11 @@ function LostFoundDetailPageContent({
                         const draft = loadLostFoundDraft(editScope());
                         setPending(storedPending);
                         if (storedPending?.fields) {
-                          setFields({
-                            type: storedPending.fields.type,
-                            title: storedPending.fields.title,
-                            description: storedPending.fields.description,
-                            category: storedPending.fields.category,
-                            location: storedPending.fields.location,
-                            date: storedPending.fields.date,
-                            contactInfo: storedPending.fields.contactInfo ?? '',
-                          });
+                          setFields(lostFoundFormFields(storedPending.fields));
                           setBaseUpdatedAt(storedPending.expectedUpdatedAt ?? null);
                         } else if (draft) {
-                          setFields({
-                            type: draft.type,
-                            title: draft.title,
-                            description: draft.description,
-                            category: draft.category,
-                            location: draft.location,
-                            date: draft.date,
-                            contactInfo: draft.contactInfo ?? '',
-                          });
-                          setBaseUpdatedAt(
-                            draft.expectedUpdatedAt !== undefined
-                              ? (draft.expectedUpdatedAt ?? null)
-                              : null,
-                          );
+                          setFields(lostFoundFormFields(draft));
+                          setBaseUpdatedAt(draft.expectedUpdatedAt ?? null);
                         }
                         setStorageBlocked(false);
                         setStorageMessage('');

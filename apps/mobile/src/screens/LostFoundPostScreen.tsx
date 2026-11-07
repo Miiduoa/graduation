@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { lostFoundFormFields } from '@campus/shared/src/lostFoundFields';
 import {
   ScrollView,
   Text,
@@ -230,14 +231,11 @@ function Editor({
             const storedPending = await loadLostFoundPending(scope);
             const draft = await loadLostFoundDraft(scope);
             if (storedPending?.fields) {
-              nextFields = {
-                ...storedPending.fields,
-                contactInfo: storedPending.fields.contactInfo ?? '',
-              };
+              nextFields = storedPending.fields;
               nextPending = storedPending;
               message = '偵測到尚未確認的刊登，請先重試同一則，避免重複發布。';
             } else if (draft) {
-              nextFields = { ...draft, contactInfo: draft.contactInfo ?? '' };
+              nextFields = draft;
               message = '已還原先前未完成的草稿。';
             } else {
               id = null;
@@ -353,13 +351,8 @@ function Editor({
           setStatusMessage('已還原先前未完成的草稿。');
         } else if (item) {
           applyFields({
-            type: item.type,
-            title: item.title,
-            description: item.description,
-            category: item.category,
-            location: item.location,
+            ...lostFoundFormFields(item),
             date: lostFoundDateFieldValue(item.date),
-            contactInfo: item.contactInfo ?? '',
           });
           setStatusMessage('');
         }
@@ -413,10 +406,7 @@ function Editor({
     const next = { ...fieldsRef.current, ...patch };
     if (currentPending?.fields && !fieldsEqual(currentPending.fields, next)) {
       Alert.alert('尚有未確認的結果', '請先重試同一則內容，或確認列表後再修改。');
-      applyFields({
-        ...currentPending.fields,
-        contactInfo: currentPending.fields.contactInfo ?? '',
-      });
+      applyFields(currentPending.fields);
       return;
     }
     applyFields(next);
@@ -478,24 +468,21 @@ function Editor({
     locked.current = true;
     setSubmitting(true);
     try {
-      // Drain keystroke queue so pending/draft writes see a consistent latest payload.
+      // Finish pending keystroke saves before freezing the submitted fields.
       await drainLostFoundDraftSaves(draftScope(documentId));
-      if (!isCurrent()) return;
-
-      // Gate before durable pending write so a mid-await switch cannot orphan foreign state.
       if (!isCurrent()) return;
       await saveLostFoundPending(draftScope(documentId), intent);
       if (!isCurrent()) return;
       setPending(intent);
 
+      const formFields = lostFoundFormFields(fields);
       await enqueueLostFoundDraftSave(
         draftScope(documentId),
         {
           version: 1,
           documentId,
           expectedRevision: mode === 'edit' ? intent.expectedRevision : undefined,
-          ...fields,
-          contactInfo: fields.contactInfo ?? '',
+          ...formFields,
         },
         () => isCurrent(),
       );
@@ -511,38 +498,16 @@ function Editor({
         expectedRevision: intent.expectedRevision,
         assertCurrentScope,
       };
+      const submission = {
+        ...formFields,
+        category: formFields.category as LostFoundCategory,
+        reporterId: uid,
+        schoolId,
+      };
       const result =
         mode === 'edit' && item
-          ? await source.updateLostFoundItem(
-              item.id,
-              {
-                type: fields.type,
-                title: fields.title,
-                description: fields.description,
-                category: fields.category as LostFoundCategory,
-                location: fields.location,
-                date: fields.date,
-                contactInfo: fields.contactInfo ?? '',
-                reporterId: uid,
-                schoolId,
-              },
-              schoolId,
-              writeOptions,
-            )
-          : await source.createLostFoundItem(
-              {
-                type: fields.type,
-                title: fields.title,
-                description: fields.description,
-                category: fields.category as LostFoundCategory,
-                location: fields.location,
-                date: fields.date,
-                contactInfo: fields.contactInfo ?? '',
-                reporterId: uid,
-                schoolId,
-              },
-              writeOptions,
-            );
+          ? await source.updateLostFoundItem(item.id, submission, schoolId, writeOptions)
+          : await source.createLostFoundItem(submission, writeOptions);
 
       if (!isCurrent()) return;
       const view = asLostFoundViewItem(result);

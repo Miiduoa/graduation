@@ -1,6 +1,6 @@
 import type { PersonalImportRecord } from '../imports/types';
 
-import { periodProfileForSchool, periodTimes } from './schoolPeriods';
+import { periodProfileForSchool, periodSlots } from './schoolPeriods';
 import type { ClassException } from '../imports/types';
 export type { ClassException } from '../imports/types';
 
@@ -39,28 +39,31 @@ export function classMeetingKey(row: PersonalImportRecord): string {
   return JSON.stringify(parts);
 }
 
-const sameText = (left?: string, right?: string) =>
-  (left ?? '').trim().normalize('NFKC') === (right ?? '').trim().normalize('NFKC');
-
 export function classMeetingTimes(row: PersonalImportRecord) {
+  if (row.startTime || row.endTime) return [row.startTime, row.endTime] as const;
   const profile = periodProfileForSchool(row.schoolId);
-  const times = profile ? periodTimes(profile) : [];
-  const explicit = !!(row.startTime || row.endTime);
+  const slots = profile ? periodSlots(profile) : [];
   return [
-    explicit ? row.startTime : times[(row.startPeriod ?? 0) - 1]?.[0],
-    explicit ? row.endTime : times[(row.endPeriod ?? 0) - 1]?.[1],
+    slots[(row.startPeriod ?? 0) - 1]?.start,
+    slots[(row.endPeriod ?? 0) - 1]?.end,
   ] as const;
 }
 
-/** Same equivalence for exception attachment and manual/import display deduplication. */
+const displayText = (value?: string) => (value ?? '').trim().normalize('NFKC');
+
+/** Match a hand-entered class with the same displayed meeting in an import. */
+export function displayedClassMeetingKey(row: PersonalImportRecord): string | null {
+  const [start, end] = classMeetingTimes(row);
+  if (!start || !end) return null;
+  return JSON.stringify([
+    row.schoolId, row.academicYear, row.semester, row.dayOfWeek, start, end,
+    displayText(row.title), displayText(row.teacher), displayText(row.location),
+  ]);
+}
+
 export function sameClassMeeting(left: PersonalImportRecord, right: PersonalImportRecord): boolean {
-  const [start, end] = classMeetingTimes(left);
-  const [otherStart, otherEnd] = classMeetingTimes(right);
-  return !!start && !!end && start === otherStart && end === otherEnd &&
-    left.schoolId === right.schoolId && left.academicYear === right.academicYear &&
-    left.semester === right.semester && left.dayOfWeek === right.dayOfWeek &&
-    sameText(left.title, right.title) && sameText(left.teacher, right.teacher) &&
-    sameText(left.location, right.location);
+  const key = displayedClassMeetingKey(left);
+  return key !== null && key === displayedClassMeetingKey(right);
 }
 
 export function matchesClassException(row: PersonalImportRecord, original: PersonalImportRecord): boolean {
