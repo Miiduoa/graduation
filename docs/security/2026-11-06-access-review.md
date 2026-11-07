@@ -247,3 +247,14 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 新增 Firebase emulator 定向回歸：草稿本人可讀、他人不可讀；七日未來期限與過去期限拒絕建立；正常兩分鐘期限可以發布且兩個帳號可讀；將故事改成過期後，原本同一枚登入身分對作者與同校成員的規則讀取都必須拒絕。這項是程式與可重跑測試的修補，**GitHub 精確 head CI 尚待驗證**，不得借用先前 head 綠燈。
 
 **仍受限的範圍：** Firestore campusStories 的舊資料讀取規則，以及已簽發的 Firebase/GCS bearer download URL，不能由這次 Storage SDK 規則變更立即撤銷；前者的列表查詢目前只以客戶端過濾過期項目，需要另設與查詢相容的服務端策略，後者仍需隔離 GCS staging 進行網址失效驗證。原 stories 的身份撤權仍受 Storage 最多兩份 Firestore 文件查詢限制；已刪帳號舊 token 且 school membership 尚存的全面撤權未在本輪完成。正式環境未修改、未執行 migration／token 清理、未合併部署。
+
+
+## 2026-11-08：已過期限動的 Firestore 單筆查詢與觀看紀錄撤權
+
+本次接續 `4a6e1e0e` 的 Storage 過期媒體修補，獨立追查 Firestore `campusStories` 的 `allow read`。原規則僅檢查學校成員，不核對 `expiresAt`；同校帳號可利用已知 storyId 直接 `get` 已過期本文，並透過 `storyViews` 的讀取／建立路徑繼續存取或寫入過期故事的觀看者資料。
+
+將根文件的單筆 `get` 限定為毫秒整數期限且必須晚於伺服器時間；`storyViews` 的讀取與建立需重新驗證父故事有效期限、學校成員資格與 viewerUid。保留刪除權限與既有建立流程，對無有效期限的舊資料採 fail-closed。新增既有 Firebase emulator 限動案例的正常／過期 Firestore 單筆讀取、正常 viewer 建立讀取，以及過期後同一 token 拒絕讀取／新增觀看紀錄斷言。
+
+**已知限制：** 為不在沒有查詢遷移與索引的情況下直接切斷目前手機端 `listActiveStoriesForSchool`（schoolId + createdAt 的列表查詢），此次保留 `allow list` 與既有學校資格檢查。因此過期故事的 Firestore 列表 metadata **仍可經原始 SDK 列表讀取**；這不是全面過期撤權，必須在後續版本把客戶端列表改成與伺服器授權相容的有效故事查詢或受權限控管的後端列表，再收斂 `allow list`。已簽發的 Firebase/GCS bearer URL 也不受此修補影響。
+
+**驗證界線：** 已以原始碼及官方 Firebase rules timestamp 文件確認 `request.time.toMillis()` 的型別與方法；目前隔離執行環境沒有 Firebase emulator／依賴，未在本機實際跑 Firebase 規則。本提交測試案例需要 GitHub 對精確 head 的 Rules CI 才能驗證；前一 head `4a6e1e0e` 於本輪查核沒有 GitHub check runs，PR 因與最新 main 衝突顯示 `mergeable_state=dirty`，不得宣稱已通過。未操作正式資料／token／migration／部署，指定 App 核可仍需獨立驗收。

@@ -1863,11 +1863,21 @@ describe('storage security rules', () => {
     await assertSucceeds(docRef.set({ ...doc, expiresAt: Date.now() + 120_000 }));
     await assertSucceeds(media.getMetadata());
     await assertSucceeds(bob.storage().ref(media.fullPath).getMetadata());
+    await assertSucceeds(bob.firestore().doc('campusStories/expiring').get());
+    const view = bob.firestore().doc('campusStories/expiring/storyViews/bob');
+    await assertSucceeds(view.set({ viewerUid: 'bob', viewedAt: Date.now() }));
+    await assertSucceeds(view.get());
     // Use the same issued auth contexts, without advancing the clock.
     await seedFirestore(async (db) =>
       db.doc('campusStories/expiring').update({ expiresAt: Date.now() - 60_000 }));
     await assertFails(bob.storage().ref(media.fullPath).getMetadata());
     await assertFails(media.getMetadata());
+    await assertFails(bob.firestore().doc('campusStories/expiring').get());
+    await assertFails(docRef.get());
+    await assertFails(view.get());
+    await assertFails(alice.firestore()
+      .doc('campusStories/expiring/storyViews/alice')
+      .set({ viewerUid: 'alice', viewedAt: Date.now() }));
   });
 
   for (const objectPath of [

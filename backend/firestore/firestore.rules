@@ -1738,7 +1738,13 @@ service cloud.firestore {
     }
 
     match /campusStories/{storyId} {
-      allow read: if isSignedIn() && isSchoolMember(resource.data.schoolId);
+      // Document lookup must not expose expired stories. List remains a
+      // compatibility path until clients use a server-validated active feed.
+      allow get: if isSignedIn()
+        && isSchoolMember(resource.data.schoolId)
+        && resource.data.expiresAt is int
+        && resource.data.expiresAt > request.time.toMillis();
+      allow list: if isSignedIn() && isSchoolMember(resource.data.schoolId);
       allow create: if isSignedIn()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.schoolId != null
@@ -1752,11 +1758,16 @@ service cloud.firestore {
       allow update: if false;
 
       match /storyViews/{viewerUid} {
-        allow read: if isSignedIn()
-          && isSchoolMember(get(/databases/$(database)/documents/campusStories/$(storyId)).data.schoolId);
+        function activeParentStory() {
+          let story = get(/databases/$(database)/documents/campusStories/$(storyId)).data;
+          return story.expiresAt is int
+            && story.expiresAt > request.time.toMillis()
+            && isSchoolMember(story.schoolId);
+        }
+        allow read: if isSignedIn() && activeParentStory();
         allow create: if isSignedIn()
           && viewerUid == request.auth.uid
-          && isSchoolMember(get(/databases/$(database)/documents/campusStories/$(storyId)).data.schoolId);
+          && activeParentStory();
         allow delete, update: if false;
       }
     }
