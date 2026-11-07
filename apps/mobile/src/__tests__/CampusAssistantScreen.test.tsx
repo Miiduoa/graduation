@@ -1107,6 +1107,88 @@ function usePlatformFixture(accountId: string, context = 'context-a') {
   };
 }
 
+test.each(['firebase', 'nuni'])('%s students can refine a saved timetable gap without retyping or syncing', async (account) => {
+  const isNuni = account === 'nuni';
+  if (isNuni) usePlatformFixture('student-b');
+  const today = { day: 'today', minMinutes: 0, owner: isNuni ? 'nuni:student-b' : 'firebase:A',
+    schoolId: 'pu', checkedAt: new Date().toISOString() };
+  const tomorrow = { ...today, day: 'tomorrow' };
+  const result = (classGapRead: typeof today, content: string) => ({
+    source: 'device', tool: 'saved-timetable', content, classGapRead,
+  });
+  request.mockResolvedValueOnce(result(today, '10:00–11:30'))
+    .mockResolvedValueOnce(result(tomorrow, '13:00–15:00'))
+    .mockResolvedValueOnce(result({ ...tomorrow, minMinutes: 60 }, '符合條件的空堂為 13:00–15:00'));
+  const view = render(<CampusAssistantScreen route={isNuni ? platformRoute : undefined} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查今日空堂' })));
+  expect(request.mock.calls[0][0]).toMatchObject({ mode: 'device', messages: [{ role: 'user', content: '今天有哪些空堂？' }] });
+  expect(view.getByText('今日空堂')).toBeTruthy();
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '接著想問的事');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '改查明天' })));
+  expect(request.mock.calls[1][0].messages.slice(-2)).toMatchObject([
+    { role: 'assistant', classGapRead: today }, { role: 'user', content: '那明天呢？' },
+  ]);
+  expect(view.getByText('明日空堂')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '改查明天' })).toBeNull();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '只看一小時以上' })));
+  expect(request.mock.calls[2][0].messages.slice(-2)).toMatchObject([
+    { role: 'assistant', classGapRead: tomorrow }, { role: 'user', content: '至少一小時呢？' },
+  ]);
+  expect(view.queryByRole('button', { name: '只看一小時以上' })).toBeNull();
+  expect(field.props.value).toBe('接著想問的事');
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
+test('the gap shortcut and its results stay in the signed-in local timetable scope', async () => {
+  request.mockResolvedValueOnce({ content: '另一個帳號的課表資料', source: 'device', tool: 'saved-timetable',
+    classGapRead: { day: 'today', minMinutes: 0, owner: 'firebase:B', schoolId: 'pu', checkedAt: new Date().toISOString() } });
+  const view = render(<CampusAssistantScreen />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查今日空堂' })));
+  expect(view.queryByText('另一個帳號的課表資料')).toBeNull();
+  expect(view.getByText('無法核對這筆課表，請再查一次。')).toBeTruthy();
+  selectCampusMode(view);
+  expect(view.queryByRole('button', { name: '查今日空堂' })).toBeNull();
+  mockUid = null;
+  await act(async () => view.rerender(<CampusAssistantScreen />));
+  expect(view.queryByRole('button', { name: '查今日空堂' })).toBeNull();
+});
+
+test('gap filter controls keep the latest query and draft when clearing a no-match result', async () => {
+  usePlatformFixture('student-b');
+  const query = { day: 'day-after-tomorrow', minMinutes: 90, fromMinute: 930,
+    owner: 'nuni:student-b', schoolId: 'pu', checkedAt: new Date().toISOString() };
+  const available = { ...query, minMinutes: 0 };
+  const allDay = { ...available, fromMinute: undefined };
+  const result = (classGapRead: typeof query, content: string) => ({
+    source: 'device', tool: 'saved-timetable', classGapRead, content,
+  });
+  request.mockResolvedValueOnce(result(query, '後天沒有符合條件的課間空堂。'))
+    .mockResolvedValueOnce(result(available, '15:30–16:00（30 分鐘）'))
+    .mockResolvedValueOnce(result(allDay, '10:00–12:00（120 分鐘）'));
+  const view = render(<CampusAssistantScreen route={platformRoute} />);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '後天下午三點半以後有一個半小時空堂嗎？');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
+  expect(view.getByText('後天空堂')).toBeTruthy();
+  fireEvent.changeText(field, '稍後再問這堂課的作業');
+
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '不限長度' })));
+  expect(request.mock.calls[1][0].messages.slice(-2)).toMatchObject([
+    { role: 'assistant', classGapRead: query }, { role: 'user', content: '不限長度' },
+  ]);
+  expect(view.queryByRole('button', { name: '不限長度' })).toBeNull();
+  expect(view.getByText('15:30–16:00（30 分鐘）')).toBeTruthy();
+
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '查看全天' })));
+  expect(request.mock.calls[2][0].messages.slice(-2)).toMatchObject([
+    { role: 'assistant', classGapRead: available }, { role: 'user', content: '全天' },
+  ]);
+  expect(view.queryByRole('button', { name: '查看全天' })).toBeNull();
+  expect(field.props.value).toBe('稍後再問這堂課的作業');
+  expect(refreshCampusSenseSnapshot).not.toHaveBeenCalled();
+});
+
 test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
   usePlatformFixture('student-b');
   const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',
