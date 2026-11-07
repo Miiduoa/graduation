@@ -1753,7 +1753,7 @@ service cloud.firestore {
         // to one day plus five minutes of client clock skew.
         && request.resource.data.expiresAt is int
         && request.resource.data.expiresAt > request.time.toMillis()
-        && request.resource.data.expiresAt <= request.time.toMillis() + 86_700_000;
+        && request.resource.data.expiresAt <= request.time.toMillis() + 86700000;
       allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
       allow update: if false;
 

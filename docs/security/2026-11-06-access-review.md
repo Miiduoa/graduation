@@ -258,3 +258,10 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 **已知限制：** 為不在沒有查詢遷移與索引的情況下直接切斷目前手機端 `listActiveStoriesForSchool`（schoolId + createdAt 的列表查詢），此次保留 `allow list` 與既有學校資格檢查。因此過期故事的 Firestore 列表 metadata **仍可經原始 SDK 列表讀取**；這不是全面過期撤權，必須在後續版本把客戶端列表改成與伺服器授權相容的有效故事查詢或受權限控管的後端列表，再收斂 `allow list`。已簽發的 Firebase/GCS bearer URL 也不受此修補影響。
 
 **驗證界線：** 已以原始碼及官方 Firebase rules timestamp 文件確認 `request.time.toMillis()` 的型別與方法；目前隔離執行環境沒有 Firebase emulator／依賴，未在本機實際跑 Firebase 規則。本提交測試案例需要 GitHub 對精確 head 的 Rules CI 才能驗證；前一 head `4a6e1e0e` 於本輪查核沒有 GitHub check runs，PR 因與最新 main 衝突顯示 `mergeable_state=dirty`，不得宣稱已通過。未操作正式資料／token／migration／部署，指定 App 核可仍需獨立驗收。
+
+
+## 2026-11-08：修正精確 head 的 Firebase Rules 編譯失敗
+
+整合 main 的提交 `98eb9eaa` 啟動了真正的 Rules CI [42412749640](https://github.com/Miiduoa/graduation/actions/runs/42412749640)。模擬器於規則載入階段報錯 `L1756:75 Unexpected '_700_000'`，原因是前輪新增限動建立時使用 JavaScript 風格數字底線 `86_700_000`，Firestore Security Rules 文法不接受。該次 263 項測試的失敗／取消是**規則未能編譯**，不能據此認定授權回歸通過或不通過。
+
+本次只將該數字字面值改為 `86700000`（仍為 24 小時加 5 分鐘的毫秒值），保留過期邊界、原有安全限制與新增測試。已比對整份 Firestore 規則中唯一含底線的數字；修補需再次以新精確 head 的 Firebase emulator 與完整 CI 重新驗證。CI 未完成前不得合併或部署。
