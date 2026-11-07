@@ -88,6 +88,36 @@ test('web order fallback preserves the platform or school account boundary', () 
   expect(nav.navigate).not.toHaveBeenCalled();
 });
 
+test('explicit App orders opens StudentOrders for a school audience and falls back to its exact page when unmounted', () => {
+  const routes = ['StudentOrders'];
+  const nav = navigator(routes);
+  expect(navigateMobileAssistantService('app-orders', 'campus', nav)).toBe(true);
+  expect(nav.navigate).toHaveBeenCalledWith('StudentOrders', undefined);
+  routes.length = 0;
+  expect(mobileAssistantServiceDestination('app-orders', 'campus', nav)).toEqual({ kind: 'web', url: 'https://nuni.tw/orders' });
+  expect(navigateMobileAssistantService('app-orders', 'campus', nav)).toBe(false);
+  expect(nav.navigate).toHaveBeenCalledTimes(1);
+});
+
+test.each(['platform', 'guest'] as const)('explicit App orders preserves the school service for %s without borrowing a mounted school navigator', (audience) => {
+  const nav = navigator(['StudentOrders', '學習', 'NuniWorkspace']);
+  expect(mobileAssistantServiceDestination('app-orders', audience, nav)).toEqual({ kind: 'web', url: 'https://nuni.tw/orders' });
+  expect(navigateMobileAssistantService('app-orders', audience, nav)).toBe(false);
+  expect(nav.navigate).not.toHaveBeenCalled();
+  if (audience === 'platform') {
+    expect(mobileAssistantServiceDestination('orders', audience, nav)).toEqual({ kind: 'native', route: 'NuniWorkspace', params: { tab: 'food' } });
+  }
+});
+
+test.each(['campus', 'platform', 'guest'] as const)('material bookmarks uses its real web page for %s instead of pretending the generic courses tab opens bookmarks', (audience) => {
+  const nav = navigator(['NuniWorkspace', 'CoursesHome', '學習']);
+  expect(mobileAssistantServiceDestination('material-bookmarks', audience, nav)).toEqual({
+    kind: 'web', url: 'https://nuni.tw/classroom/material-bookmarks',
+  });
+  expect(navigateMobileAssistantService('material-bookmarks', audience, nav)).toBe(false);
+  expect(nav.navigate).not.toHaveBeenCalled();
+});
+
 test('rechecking the navigator at click time prevents dispatch after its route disappears', () => {
   const routes = ['PersonalTimetable'];
   const nav = navigator(routes);

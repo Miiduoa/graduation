@@ -100,7 +100,7 @@ CI 執行 shared receipt 與單筆 acknowledgement 契約，以及 Web 全套測
 
 ## 本輪驗證紀錄
 
-使用 Node 22.23.4、pnpm 10.28.2 與既有 frozen lockfile。以下合計 **615 項測試通過**，同一個測試的重跑不重複加總：
+使用 Node 22.23.4、pnpm 10.28.2 與既有 frozen lockfile。以下為行事曆執行階段的 **615 項測試通過**，同一個測試的重跑不重複加總；後續主線整合的回歸另外記錄，避免混合重跑計數：
 
 | 範圍 | 通過 |
 | --- | ---: |
@@ -120,5 +120,19 @@ Shared 完整 TypeScript 通過。Web 變更檔分為 server 6、UI 4、client 1
 遠端 CI 的 `test-personal-import-sync.mjs` 額外啟用 `noUncheckedIndexedAccess` 與 `exactOptionalPropertyTypes`，捕捉到單筆 acknowledgement 解析器的陣列索引可能為空，以及可空 base 的型別收窄問題。已加上缺失 revision 的明確拒絕與 base 存在檢查，沒有降低編譯設定。本機重跑同一支腳本的嚴格編譯通過；因未提供測試資料庫，該次 PostgreSQL 測試為 skipped，實際資料庫驗證以修正提交的遠端 Security Gates 為準。
 
 同一組嚴格旗標亦用於 `assistantExecution.ts` 與 `syncEngine.ts` 及其相依模組；補齊屬性描述、日期匹配與衝突選擇索引的空值檢查後，編譯通過。這些檢查維持原本缺失證據即拒絕的行為。
+
+### 遠端整合與來源封裝
+
+修正提交 `2484e66` 的遠端 Web 測試為 520 suites／10,344 tests 通過、6 suites／40 tests skipped；手機為 451 suites／7,242 tests 通過、1 suite／1 test skipped。實際 PostgreSQL 的個人匯入同步 21 項與課程存取 39 項亦通過。該提交後續被封裝來源雜湊漂移擋下，不能將整個 Security Gates 算作通過。
+
+已依 `composed/prepare.py` 的正常維護流程修正：取得並核對固定上游 commit、302 個 tree 與 3,079 個 blob，於乾淨 checkout 套用四份已驗證補丁，產出既有 base tree；重新產生 manifest 後，再以另一份獨立乾淨 checkout 執行不含 refresh 的正常重建。兩輪 candidate tree 相同，第二輪沒有改動 manifest。變更只有 `sync.ts` 來源雜湊、overlay tree 與 candidate tree，封裝回歸 9／9 通過。完整記錄見 `deploy/nuni-api/composed/README.md`。
+
+開發期間主線新增 `162d3aa`（PR #510）。本輪整合它的請假／訂單改善與入口資料，保留語意成績預覽的原始 destination，並為教材收藏與明確 App 餐廳訂單提供獨立服務識別，避免平台帳號的通用訂單導向套用到學校 App 訂單。
+
+整合後目錄為 43 個 ID、41 個唯一 href，覆蓋正式服務目錄全部 39／39 個 href。共用目錄測試 60／60 通過；Web 首頁、Quick 入口、搜尋、服務選單、quick actions、V2 服務與 fallback 共 7 suites／191 tests 通過。首頁與搜尋先依目前帳號解析實際目的地，再套用入口開關及停用文案；新增回歸核對兩種訂單服務、教材收藏與玩課雲開關，不將導向 `/food` 後的關閉狀態漏掉。
+
+手機服務整合、導覽與回覆 UI 共 3 suites／57 tests 通過（18／35／4）；shared 完整 TypeScript 通過，這四個變更檔的 ESLint 為 0 errors／0 warnings。原生訂單仍依校園 navigator 的實際掛載狀態開啟；平台與訪客的 App 訂單、各端的教材收藏均使用真實 Web 目的頁，不虛構尚未註冊的原生頁籤。
+
+主線整合修改的五個 Web 檔案亦通過 scoped TypeScript（0 diagnostics）與 ESLint；獨立 V2 preview／模型失敗復原 2／2 再次通過，維持原本呼叫次數、確認冪等與預算斷言。
 
 本輪未進行桌面／手機瀏覽器截圖與 iOS／Android 真機視覺驗收。遠端完整 typecheck、lint、Web／Mobile build、全量測試與必要審查，須以這次推送的精確 commit 狀態另行確認，不沿用上一個提交的綠燈。

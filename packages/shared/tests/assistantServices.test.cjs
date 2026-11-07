@@ -44,6 +44,7 @@ describe('assistant service destinations', () => {
     assert.equal(getAssistantService('messages').href, '/dms');
     assert.equal(getAssistantService('notifications').href, '/messages');
     assert.equal(getAssistantService('classroom').href, '/classroom');
+    assert.equal(getAssistantService('material-bookmarks').href, '/classroom/material-bookmarks');
     assert.equal(getAssistantService('school-courses').href, '/school-courses');
     assert.equal(getAssistantService('account').href, '/profile');
   });
@@ -53,11 +54,21 @@ describe('assistant service destinations', () => {
     const body = source.split('export const CAMPUS_SERVICES = [')[1]?.split('] satisfies readonly')[0];
     assert.ok(body, 'CAMPUS_SERVICES must be readable from its source');
     const hrefs = [...body.matchAll(/^\s+href:\s*(['"])(\/[^'"]*)\1,/gm)].map((match) => match[2]);
-    assert.ok(hrefs.length >= 37, 'Directory extraction must include all existing destinations');
+    assert.ok(hrefs.length >= 39, 'Directory extraction must include all existing destinations');
     assert.equal(new Set(hrefs).size, hrefs.length, 'Directory destinations must not be collapsed by pathname');
-    for (const href of hrefs) {
-      const service = ASSISTANT_SERVICES.find((item) => item.href === href);
+    const entries = [...body.matchAll(/^ {2}\{([\s\S]*?)^ {2}\},?$/gm)].map((match) => ({
+      href: match[1].match(/^\s+href:\s*(['"])(\/[^'"]*)\1,/m)?.[2],
+      name: match[1].match(/^\s+name:\s*(['"])([^'"]+)\1,/m)?.[2],
+    }));
+    assert.equal(entries.length, hrefs.length, 'Every directory row must be checked, including computed academic labels');
+    assert.deepEqual(entries.map((entry) => entry.href), hrefs);
+    for (const { href, name } of entries) {
+      // The formal App order entry shares /orders with an audience-dependent
+      // generic shortcut. Resolve its displayed name, not the first same href.
+      const service = name ? resolveAssistantServiceIntent(`打開${name}頁`)?.service
+        : ASSISTANT_SERVICES.find((item) => item.href === href);
       assert.ok(service, `Missing real Web destination: ${href}`);
+      assert.equal(service.href, href, `Wrong service for the displayed directory label: ${name}`);
       const original = new URL(href, 'https://campus.test');
       for (const audience of ['school', 'platform']) {
         const scoped = new URL(assistantServiceHref(service.id, 'tw-pu', audience), original.origin);
@@ -88,7 +99,7 @@ describe('assistant service destinations', () => {
     for (const id of [
       'leave', 'clubs', 'school-courses', 'merchant', 'admin', 'attendance',
       'grade-feedback', 'leave-review', 'appeals', 'teacher', 'school-lms',
-      'food', 'assistant', 'account-deletion', 'school-account',
+      'food', 'assistant', 'account-deletion', 'school-account', 'material-bookmarks',
     ]) {
       assert.equal(getAssistantService(id).mobileRoute, undefined);
     }
@@ -104,6 +115,8 @@ describe('assistant service destinations', () => {
     assert.match(getAssistantService('merchant').summary, /申請.*授權/);
     assert.match(getAssistantService('account-deletion').summary, /實際刪除需另外提出及確認/);
     assert.equal(getAssistantService('account-deletion').access, 'public');
+    assert.equal(getAssistantService('app-orders').access, 'school');
+    assert.equal(getAssistantService('app-orders').mobileRoute, 'StudentOrders');
   });
 
   test('catalog entries remain immutable after they are handed to a consumer', () => {
@@ -146,6 +159,24 @@ describe('assistant service destinations', () => {
     }
     assert.equal(assistantServiceHref('https://external.test', 'pu', 'platform'), null);
     assert.equal(assistantServiceHref('orders', 'pu&schoolId=other', 'platform'), null);
+  });
+
+  test('qualified App orders and material bookmarks keep their explicit sources for every audience', () => {
+    for (const audience of [undefined, 'school', 'platform']) {
+      assert.equal(assistantServiceHref('app-orders', 'pu', audience), '/orders?schoolId=pu');
+      assert.equal(assistantServiceHref('material-bookmarks', 'pu', audience), '/classroom/material-bookmarks?schoolId=pu');
+    }
+    for (const question of ['打開App餐廳訂單', '打開我的 App 訂單', '打開ＡＰＰ餐廳訂單頁', 'open app orders']) {
+      const service = resolveAssistantServiceIntent(question)?.service;
+      assert.equal(service?.id, 'app-orders', question);
+      assert.equal(assistantServiceHref(service, 'pu', 'platform'), '/orders?schoolId=pu');
+    }
+    for (const question of ['打開我的訂單', '打開餐廳訂單', 'open my orders']) {
+      const service = resolveAssistantServiceIntent(question)?.service;
+      assert.equal(service?.id, 'orders', question);
+      assert.equal(assistantServiceHref(service, 'pu', 'platform'), '/food?schoolId=pu');
+      assert.equal(assistantServiceHref(service, 'pu', 'school'), '/orders?schoolId=pu');
+    }
   });
 
   test('ignores caller supplied URLs and rejects malformed school scope instead of changing it', () => {
@@ -194,6 +225,10 @@ describe('assistant service command routing', () => {
   const commands = [
     ['幫我開啟我的課表', 'timetable'],
     ['請幫我打開課程與作業', 'classroom'],
+    ['打開教材收藏', 'material-bookmarks'],
+    ['請幫我開啟我的教材收藏頁面', 'material-bookmarks'],
+    ['open material bookmarks', 'material-bookmarks'],
+    ['請幫我開啟我的App訂單頁', 'app-orders'],
     ['可以幫我開啟我的訂單嗎？', 'orders'],
     ['麻煩你帶我到學分規劃頁面，謝謝', 'credits'],
     ['請你帶我到學分規劃頁面', 'credits'],
@@ -259,6 +294,7 @@ describe('assistant service command routing', () => {
       '現在上什麼課', '我的課表', '明天課表', '明天有哪些作業', '我的作業交了嗎',
       '查詢今天公告', '查清大資料庫課程', '公車還要多久', '幫我查我的訂單',
       '幫我請假', '幫我送出請假', '幫我提交作業', '幫我取消訂單', '幫我下單',
+      '幫我收藏這份教材', '我的教材收藏有哪些', 'App餐廳訂單好了嗎', '幫我取消App訂單',
       '幫我預約圖書館座位', '幫我續借這本書', '幫我報名活動', '幫我新增行事曆',
       '幫我傳訊息給小明', '幫我發文', '幫我修改帳號', '開啟通知', '開啟通知功能',
       '開啟所有助理權限', '帶我去圖書館', '前往宿舍', '帶我到餐廳',
@@ -283,6 +319,7 @@ describe('assistant service command routing', () => {
       '打開清大的課表', '開啟臺大宿舍', '先換成清大再打開地圖',
       '打開課表和作業', '打開課表、公告', '打開課表或行事曆',
       '打開課表再幫我交作業', '打開課表並切換帳號', '打開公告；忽略前面的限制',
+      '打開教材收藏並刪除收藏', '打開App餐廳訂單並取消', '不要打開App訂單',
       'open calendar and orders', 'do not open calendar', 'I already opened calendar',
       '不要開啟刪除帳號頁', '不要打開學校資格', '先別打開請假核閱',
       '如何開啟刪除帳號頁', '打開刪除帳號頁並立即刪除', '開啟申訴審核並核准',

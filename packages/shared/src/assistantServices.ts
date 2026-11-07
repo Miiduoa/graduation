@@ -33,6 +33,10 @@ const services = [
     summary: '從已加入的課班查看教材、作業、測驗與繳交紀錄。', mobileRoute: 'CoursesHome',
   },
   {
+    id: 'material-bookmarks', label: '教材收藏', href: '/classroom/material-bookmarks', category: 'study', access: 'personal',
+    summary: '使用平台帳號查看此瀏覽器保存的教材收藏，開啟時重新核對課程與教材權限。',
+  },
+  {
     id: 'calendar', label: '個人行事曆', href: '/calendar', category: 'study', access: 'personal',
     summary: '查看個人活動，核對時間後再新增或調整行程。', mobileRoute: 'PersonalCalendar',
   },
@@ -99,6 +103,10 @@ const services = [
   {
     id: 'orders', label: '我的訂單', href: '/orders', category: 'life', access: 'personal',
     summary: '查看自己的訂單、明細與平台回覆的處理狀態。', mobileRoute: 'StudentOrders',
+  },
+  {
+    id: 'app-orders', label: 'App 餐廳訂單', href: '/orders', category: 'life', access: 'school',
+    summary: '使用學校帳號查看在 App 餐廳建立的訂單、取餐號碼與店家處理進度。', mobileRoute: 'StudentOrders',
   },
   {
     id: 'dormitory', label: '宿舍服務', href: '/dormitory', category: 'life', access: 'public',
@@ -220,7 +228,8 @@ export function assistantServiceHref(
   const service = getAssistantService(id);
   if (!service) return null;
   if (audience !== undefined && audience !== 'school' && audience !== 'platform') return null;
-  // Nuni orders live in FoodWorkspace; /orders belongs to the school service.
+  // Only unqualified orders follow the current account workspace. Explicit
+  // app-orders always keeps /orders and its separate school-account boundary.
   const href = audience === 'platform' && service.id === 'orders' ? '/food' : service.href;
   if (schoolId === undefined || schoolId === null || schoolId === '') return href;
   if (typeof schoolId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(schoolId)) return null;
@@ -238,6 +247,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   today: ['今天', '今日', '今天首頁', '今日首頁', '首頁', 'today', 'home'],
   timetable: ['課表', '我的課表', '個人課表', 'timetable', 'my timetable', 'schedule'],
   classroom: ['課程', '我的課程', '課程與作業', '課程作業', '作業', '教材', '測驗', 'classroom', 'courses', 'assignments', 'quizzes', 'materials'],
+  'material-bookmarks': ['教材收藏', '我的教材收藏', '課程教材收藏', '教材書籤', '收藏教材', 'material bookmarks', 'saved materials'],
   calendar: ['行事曆', '日曆', '我的行事曆', '個人行事曆', 'calendar', 'my calendar'],
   grades: ['成績', '我的成績', '成績紀錄', '成績單', '學期成績', '校方成績', 'grades', 'my grades', 'transcript', 'semester grades'],
   'grade-feedback': ['成績回饋', '課程成績回饋', '作業回饋', '測驗回饋', '老師評語', 'grade feedback', 'assignment feedback'],
@@ -255,6 +265,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   cafeteria: ['餐廳', '校園餐廳', '學餐', '餐廳總覽', '菜單', 'cafeteria', 'dining', 'restaurants'],
   food: ['點餐與取餐', '點餐', '取餐', '取餐憑證', '餐點訂購', 'food', 'food orders', 'food pickup'],
   orders: ['訂單', '我的訂單', '訂餐紀錄', '餐廳訂單', 'orders', 'my orders'],
+  'app-orders': ['App 餐廳訂單', 'App 訂單', '我的 App 訂單', '我的 App 餐廳訂單', 'App 訂餐紀錄', '學校帳號餐廳訂單', 'app orders', 'my app orders', 'app restaurant orders'],
   dormitory: ['宿舍', '宿舍服務', '住宿服務', '報修備忘', '宿舍報修', 'dormitory', 'dorm'],
   leave: ['請假', '請假申請', '請假紀錄', 'leave', 'leave requests'],
   'leave-review': ['請假核閱', '請假審核', '教師請假核閱', 'leave review'],
@@ -320,6 +331,8 @@ export function resolveAssistantServiceIntent(question: unknown): AssistantServi
   const target = command[2].trim();
   const explicitScreen = /(?:頁面|畫面|入口|頁)$|\s(?:page|screen)$/iu.test(target);
   const name = target.replace(/(?:頁面|畫面|入口|頁)$|\s(?:page|screen)$/iu, '').trim();
+  // Resolve the complete qualified target before any other task handler:
+  // "App 餐廳訂單" and "教材收藏" cannot collapse into orders or classroom.
   const service = servicesByAlias.get(aliasKey(target)) ?? servicesByAlias.get(aliasKey(name));
   if (!service) return null;
   // A deletion request remains with its existing flow. Only opening its

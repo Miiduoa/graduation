@@ -1,32 +1,52 @@
-import { suggestCampusDestinations } from '@campus/shared/src/campusIntent';
-import { resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
-import { CAMPUS_SERVICES, visibleCampusServices } from './campusServices';
+import { suggestCampusDestinations, type CampusQuickDestination } from '@campus/shared/src/campusIntent';
+import { assistantServiceHref, resolveAssistantServiceIntent, type AssistantServiceAudience, type AssistantServiceId } from '@campus/shared/src/assistantServices';
+import { CAMPUS_SERVICES, type CampusService, presentCampusService, visibleCampusServices } from './campusServices';
 
-export type QuickCampusAction = Pick<
-  (typeof CAMPUS_SERVICES)[number],
-  'name' | 'text' | 'href' | 'access'
->;
+type QuickCampusAction = Pick<CampusService, 'name' | 'text' | 'href' | 'access'> & {
+  destination: string;
+  serviceId?: AssistantServiceId;
+};
+
+export function resolveCampusActions(
+  destinations: readonly CampusQuickDestination[],
+  schoolLmsEnabled = false,
+): QuickCampusAction[] {
+  const services = visibleCampusServices(schoolLmsEnabled);
+  return destinations.flatMap((destination) => {
+    const href = destination === '/grades' ? '/grades?tab=semester' : destination;
+    const service = services.find((item) => item.href === href);
+    return service ? [{ ...presentCampusService(service), destination }] : [];
+  });
+}
 
 /** Show shortcuts for known services only; no submission, payment or update is executed. */
-export function getQuickCampusActions(input: string, schoolLmsEnabled = false): QuickCampusAction[] {
+export function getQuickCampusActions(
+  input: string,
+  schoolLmsEnabled = false,
+  audience: AssistantServiceAudience = 'school',
+): QuickCampusAction[] {
   const intent = resolveAssistantServiceIntent(input);
   if (intent?.kind === 'open') {
-    const existing = CAMPUS_SERVICES.find((item) => item.href === intent.service.href);
+    const href = assistantServiceHref(intent.service.id, undefined, audience);
+    if (!href) return [];
+    const directoryService = CAMPUS_SERVICES.find((item) => item.href === href);
+    if (directoryService && !visibleCampusServices(schoolLmsEnabled).some((item) => item.href === href)) return [];
+    // The directory's /orders row is school-only; generic orders keep their account-aware identity.
+    const existing = intent.service.id === 'orders'
+      ? undefined
+      : directoryService;
     return [{
-      name: existing?.name ?? intent.service.label,
-      text: intent.service.summary,
-      href: intent.service.href,
-      access: existing?.access ?? 'account',
+      ...presentCampusService({
+        name: existing?.name ?? intent.service.label,
+        text: intent.service.summary,
+        href,
+        access: existing?.access ?? 'account',
+      }),
+      destination: href,
+      serviceId: intent.service.id,
     }];
   }
-  return suggestCampusDestinations(input).flatMap((href) => {
-    // The shared intent keeps the mobile grade destination; Web uses an explicit semester tab.
-    const webHref = href === '/grades' ? '/grades?tab=semester' : href;
-    const service = visibleCampusServices(schoolLmsEnabled).find((item) => item.href === webHref);
-    return service
-      ? [{ name: service.name, text: service.text, href: service.href, access: service.access }]
-      : [];
-  });
+  return resolveCampusActions(suggestCampusDestinations(input), schoolLmsEnabled);
 }
 
 export const QUICK_CAMPUS_EXAMPLES = [

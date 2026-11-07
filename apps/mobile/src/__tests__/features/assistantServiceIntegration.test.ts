@@ -81,6 +81,20 @@ test('platform account can discover every catalog destination and select a publi
   expect(mockCallable).not.toHaveBeenCalled();
 });
 
+test.each([
+  ['打開App餐廳訂單', 'app-orders'],
+  ['打開教材收藏', 'material-bookmarks'],
+])('explicit %s retains its distinct service ID across platform and school assistants', async (content, id) => {
+  for (const args of [platform(content), { ...input(content), mode: 'campus' as const }]) {
+    const reply = await askCampusAssistant(args);
+    expect(reply).toMatchObject({ source: 'device', tool: 'open-service', hasActions: false,
+      serviceSelection: { kind: 'open', serviceIds: [id] } });
+  }
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  expect(mockCollect).not.toHaveBeenCalled();
+  expect(mockCallable).not.toHaveBeenCalled();
+});
+
 test('existing assignment lookup remains a data query, not an open-service shortcut', async () => {
   const answer = await askCampusAssistant(input('我還有哪些作業待交？'));
   expect(answer.serviceSelection).toBeUndefined();

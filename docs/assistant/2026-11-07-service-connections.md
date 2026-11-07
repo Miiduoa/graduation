@@ -1,8 +1,10 @@
 # 助理服務接通紀錄（2026-11-07）
 
-維護基準：本次工作樹以 `main` 的 `d155530` 為基底。本文記錄實際接通範圍、權限邊界及驗證結果，供後續整合與驗收使用。
+維護基準：初版以 `main` 的 `d155530` 為基底，後續已整合主線 `162d3aa`（PR #510）。本文記錄實際接通範圍、權限邊界及驗證結果，供後續整合與驗收使用。
 
-這次將 **41 項既有服務加入共用目錄與聊天入口**，新增個人匯入成績／學分的唯讀摘要，以及 V2 的服務目錄、已同步學業紀錄工具。41 項代表可以探索與前往的服務數量；各服務能否讀取資料、能否寫入，仍取決於既有介面、登入狀態及角色權限。本次沒有建立競品評測，不能據此宣稱已超越競品。
+這次將 **43 項既有服務加入共用目錄與聊天入口**，新增個人匯入成績／學分的唯讀摘要，以及 V2 的服務目錄、已同步學業紀錄工具。43 項代表可以探索與前往的服務數量；各服務能否讀取資料、能否寫入，仍取決於既有介面、登入狀態及角色權限。本次沒有建立競品評測，不能據此宣稱已超越競品。
+
+主線整合新增教材收藏與 App 餐廳訂單的獨立服務識別；後續行事曆的實際寫入、讀回核對與斷線恢復，記錄於 [可核對的行程執行](2026-11-07-verified-execution.md)。
 
 ## 1. 三種能力必須分開描述
 
@@ -10,7 +12,7 @@
 | --- | --- | --- |
 | 功能入口 | 共用服務目錄、明確開啟指令、Web 連結及手機原生導覽；V2 擴充既有 `propose_open_page` 的服務清單 | 找到入口並讓使用者選擇前往。尚未查詢該服務的私人資料，也尚未完成點名、申請、報名、下單或訊息發送。 |
 | 真實讀取 | 保留既有課表、課程／作業、公告、通知、餐飲等已接通的讀取；新增個人匯入成績／學分摘要 | 只根據本次成功讀到、屬於當前帳號與學校的資料回覆，明示來源、時間、缺漏及不可用狀態。 |
-| 確認後寫入 | 繼續使用既有行事曆、訂餐等提議卡與確認流程，或到目的服務確認 | 只有既有流程完成授權與確認、且後端回覆成功後，才可描述為已完成。新增目錄及學業摘要本身都是唯讀能力。 |
+| 確認後寫入 | 行事曆提議確認後實際寫入、重新讀回並核對原操作；其他操作依目的服務的真實流程處理 | 行事曆須取得相符回執才能描述為已儲存；訂餐導向頁面只代表交接，不能宣稱已下單或付款。新增目錄及學業摘要本身都是唯讀能力。 |
 
 服務目錄中的 `access` 是用途描述，不能拿來授予帳號、校務、店家或管理員權限。進入頁面後，原服務仍負責驗證使用資格。
 
@@ -18,19 +20,20 @@
 
 唯一目錄來源為 [`assistantServices.ts`](../../packages/shared/src/assistantServices.ts)。`resolveAssistantServiceIntent` 只辨識完整、明確的功能開啟指令，例如「你能做什麼？」「打開校園社群」「開啟圖書館頁面」。資料問題、否定句、引用文字、寫入要求及多目標複合指令不會被泛用關鍵字改成導覽。實體方向問題「帶我去圖書館」也保留給原本的問答流程。
 
-Web 的 `assistantServiceHref` 依固定服務 ID 產生路徑，驗證並保留 `schoolId`；既有 query，例如助理權限的 `section=assistant`，不會被覆蓋。平台訂單入口使用 `/food`，校園訂單維持 `/orders`。
+Web 的 `assistantServiceHref` 依固定服務 ID 產生路徑，驗證並保留 `schoolId`；既有 query，例如助理權限的 `section=assistant`，不會被覆蓋。通用「我的訂單」依帳號使用平台 `/food` 或校園 `/orders`；明確的「App 餐廳訂單」固定到學校服務 `/orders`，由該頁重新確認資格。
 
 手機導覽由 [`assistantServiceNavigation.ts`](../../apps/mobile/src/services/assistantServiceNavigation.ts) 在顯示及點擊時重新解析。下表的原生名稱是候選目的地，**仍須確認目前或父層 navigator 真正掛載該路由／分頁**。無可用原生目的地時顯示「在網頁開啟」，由使用者點擊固定的 `https://nuni.tw` 網址；不會把問題、登入憑證或帳號識別塞進網址。手機轉網頁時不轉移登入狀態或學校設定，介面會提醒在網頁確認帳號與學校。
 
 「平台手機」欄以目前 `PreAuthStack` 搭配有效 Nuni 平台 session 為準。`NuniWorkspace(courses)` 等標記代表 `NuniWorkspace` 與對應的 `tab` 參數；「網頁」代表沒有對應的已掛載原生入口。
 
-### 學習：14 項
+### 學習：15 項
 
 | ID | 顯示名稱 | Web 路徑 | 校園手機原生入口 | 平台手機原生入口 |
 | --- | --- | --- | --- | --- |
 | `today` | 今天 | `/today` | `TodayHome` | 網頁 |
 | `timetable` | 我的課表 | `/timetable` | `PersonalTimetable` | `PersonalTimetable` |
 | `classroom` | 課程與作業 | `/classroom` | `CoursesHome` | `NuniWorkspace(courses)` |
+| `material-bookmarks` | 教材收藏 | `/classroom/material-bookmarks` | 網頁 | 網頁 |
 | `calendar` | 個人行事曆 | `/calendar` | `PersonalCalendar` | `PersonalCalendar` |
 | `grades` | 成績 | `/grades?tab=semester` | `Grades` | 網頁 |
 | `grade-feedback` | 成績回饋 | `/grades?tab=feedback` | 網頁 | 網頁 |
@@ -54,13 +57,14 @@ Web 的 `assistantServiceHref` 依固定服務 ID 產生路徑，驗證並保留
 | `bus` | 公車 | `/bus` | `BusV2` | `BusSchedule` |
 | `school-info` | 學校資訊 | `/school-info` | `SchoolInfo` | `SchoolInfo` |
 
-### 生活：6 項
+### 生活：7 項
 
 | ID | 顯示名稱 | Web 路徑 | 校園手機原生入口 | 平台手機原生入口 |
 | --- | --- | --- | --- | --- |
 | `cafeteria` | 校園餐廳 | `/cafeteria` | `餐廳總覽` | `NuniWorkspace(food)` |
 | `food` | 點餐與取餐 | `/food` | 網頁 | `NuniWorkspace(food)` |
 | `orders` | 我的訂單 | 校園 `/orders`；平台 `/food` | `StudentOrders` | `NuniWorkspace(food)` |
+| `app-orders` | App 餐廳訂單 | `/orders` | `StudentOrders` | 網頁，重新確認學校帳號 |
 | `dormitory` | 宿舍服務 | `/dormitory` | `Dormitory` | `Dormitory` |
 | `leave` | 請假 | `/leave` | 網頁 | 網頁 |
 | `lost-found` | 失物招領 | `/lost-found` | `LostFound` | 網頁 |
@@ -142,7 +146,7 @@ Web 先確認登入身分再選擇助理來源：只有學校帳號時維持 Leg
 | --- | --- | --- |
 | `list_campus_services` | 新增；可指定服務 ID 或以 `offset`／`limit` 取得目錄，每頁最多 6 項，附 `nextOffset` | 回傳固定目錄、來源、學校與入口描述；不代表已連到私人資料。 |
 | `get_imported_academics` | 新增；讀取目前授權 ledger，支援明確學年度、學期與分頁 | `getLedger` 重新核對學校，共用摘要再驗證紀錄。工具只接受查詢條件，不接受任意帳號或學校覆寫。 |
-| `propose_open_page` | 擴充既有工具的 `page` allowlist 至共用 41 項服務 | 仍產生既有提議卡；不接受模型任意提供內部或外部 URL。特定課程／訂單入口仍依既有範圍檢查處理。 |
+| `propose_open_page` | 擴充既有工具的 `page` allowlist 至共用 43 項服務 | 仍產生既有提議卡；不接受模型任意提供內部或外部 URL。特定課程／訂單入口仍依既有範圍檢查處理。 |
 
 既有 `propose_personal_event`、`propose_study_plan` 與 `propose_food_order` 流程維持。寫入前仍需使用者確認提議卡，確認端驗證簽章、綁定的帳號／session／對話／學校、參數摘要、5 分鐘期限、撤銷／被新提議取代狀態及執行來源。
 
@@ -154,12 +158,12 @@ V2 的既有訂單入口改用實際 FoodWorkspace 的 `/food?schoolId=…&tenan
 
 ## 5. 已取得的驗證結果與待完成事項
 
-以下是本次開發工作已觀察到的結果，不等同目前 HEAD 已完成全量重新驗證。後續整合以實際 CI 結果補記，不把資源中止列為通過。
+下表保留初版 41 項目錄的驗證紀錄，不等同目前 HEAD 已完成全量重新驗證。主線整合與行事曆執行的後續結果見 [執行驗收紀錄](2026-11-07-verified-execution.md)，不把資源中止列為通過。
 
 | 範圍 | 已取得結果 | 說明 |
 | --- | --- | --- |
-| 手機三個新 focused suites | **49 / 49 通過** | 使用最終 41 項目錄與平台 food 映射，同一次執行通過：feature integration 16、navigation 29、reply UI 4，約 10.6 秒。 |
-| 共用服務目錄 | **55 / 55 通過** | 最新 41 項目錄；41 個服務 ID、40 個唯一 href，完整覆蓋既有 `CAMPUS_SERVICES` 的 37 / 37 個 href。 |
+| 手機三個新 focused suites | **49 / 49 通過** | 使用初版 41 項目錄與平台 food 映射，同一次執行通過：feature integration 16、navigation 29、reply UI 4，約 10.6 秒。 |
+| 共用服務目錄 | **55 / 55 通過** | 初版 41 項目錄；41 個服務 ID、40 個唯一 href，完整覆蓋當時 `CAMPUS_SERVICES` 的 37 / 37 個 href。 |
 | 共用學業摘要 | **99 / 99 通過** | 包含來源、學校隔離、無效／不可用、重複疑義、字面成績及窄範圍解析。 |
 | 手機 scoped TypeScript | **4 個 runtime 修改檔，0 diagnostics** | 檢查實際相依型別及這 4 個檔案的診斷；不是完整手機專案 typecheck。 |
 | 手機 changed-file ESLint | **0 errors** | 8 個修改／新增檔；`CampusAssistantScreen` 有 2 個既有 hook dependency warnings。 |
@@ -193,7 +197,7 @@ V2 的既有訂單入口改用實際 FoodWorkspace 的 `/food?schoolId=…&tenan
 
 ### 入口及可用性
 
-- [ ] Web 舊版助理、V2 助理、手機校園助理及平台課表助理都能找到服務目錄；41 項沒有重複、遺漏或不存在的目的頁面。
+- [ ] Web 舊版助理、V2 助理、手機校園助理及平台課表助理都能找到服務目錄；43 項識別沒有重複、遺漏或不存在的目的頁面。
 - [ ] 沒有下載手機模型、沒有模型金鑰，或 V2 capability 不可用時，已提供的本機服務入口仍可使用；本機查詢沒有意外送出模型請求。
 - [ ] 輸入「打開校園社群」「開啟圖書館頁面」「開啟助理權限」能到正確入口；一般「設定」與「助理權限」不互相混淆，學校與既有 query 都保留。
 - [ ] 「我還有哪些作業待交？」「現在有課嗎？」「查今日公告」「帶我去圖書館」仍進入適用的資料查詢／方向流程；否定句、引述、未知 URL 及複合寫入句不會誤開頁面。
@@ -223,4 +227,4 @@ V2 的既有訂單入口改用實際 FoodWorkspace 的 `/food?schoolId=…&tenan
 
 調整助理入口、快速動作、公共 navigator 或帳號 session 的變更，應一起核對共用目錄、Web 連結與手機映射。不要只增加路由字串就認定能力已接通，也不要把另一個 provider 的同名工作區視為相同服務。
 
-若後續要讓某項入口升級為真實讀取或確認後寫入，需另行定義來源、帳號／學校範圍、不可用狀態、結果證據及操作確認，並新增對應的整合回歸。這份 41 項清單不會自動授予這些新能力。
+若後續要讓某項入口升級為真實讀取或確認後寫入，需另行定義來源、帳號／學校範圍、不可用狀態、結果證據及操作確認，並新增對應的整合回歸。這份 43 項清單不會自動授予這些新能力。
