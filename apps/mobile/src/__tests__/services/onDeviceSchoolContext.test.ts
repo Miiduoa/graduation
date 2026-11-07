@@ -52,10 +52,12 @@ test('only reads the selected account and campus copy, never a demo schedule', a
     updatedAt: '2026-10-25T09:00:00.000Z',
     courses: [{ name: '資料庫概論', day: 1, start: 2, end: 3 }],
   });
-  const prompt = formatOnDeviceSchoolPrompt(result);
+  const prompt = formatOnDeviceSchoolPrompt(result, null, 'alice');
   expect(prompt).toContain('資料庫概論');
   expect(prompt).toContain('不能冒充鐘點或官方');
   expect(prompt).toContain('不是本次即時查詢');
+  expect(formatOnDeviceSchoolPrompt(result, null, 'bob')).not.toContain('資料庫概論');
+  expect(formatOnDeviceSchoolPrompt(result, null, '')).not.toContain('資料庫概論');
 });
 
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
@@ -64,7 +66,7 @@ test('missing or invalid cached data does not become a fabricated timetable', as
   expect(result.timetable).toEqual({
     source: 'not-available', updatedAt: null, courses: [],
   });
-  expect(formatOnDeviceSchoolPrompt(result)).toContain('無法回答正式課程安排');
+  expect(formatOnDeviceSchoolPrompt(result, null, 'alice')).toContain('無法回答正式課程安排');
 });
 
 test('keeps the complete saved course set for offline tools, while limiting model context', async () => {
@@ -80,7 +82,7 @@ test('keeps the complete saved course set for offline tools, while limiting mode
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
   expect(result.timetable.courses).toHaveLength(12);
   expect(result.timetable.courses[11].name).toBe('測試課程12');
-  const prompt = formatOnDeviceSchoolPrompt(result);
+  const prompt = formatOnDeviceSchoolPrompt(result, null, 'alice');
   expect(prompt).toContain('測試課程8');
   expect(prompt).not.toContain('測試課程12');
   expect(prompt).toContain('尚有 4 門未列出');
@@ -99,10 +101,11 @@ test('only includes an authorized and fresh campus snapshot for its original acc
     announcements: { status: 'available', items: [] },
   };
   const containsPrivateTitle = (value: CampusSenseSnapshot, owner = local) =>
-    formatOnDeviceSchoolPrompt(owner, value).includes('Alice 專屬作業');
+    formatOnDeviceSchoolPrompt(owner, value, 'alice').includes('Alice 專屬作業');
 
   expect(local.ownerUid).toBe('alice');
   expect(containsPrivateTitle(saved)).toBe(true);
+  expect(formatOnDeviceSchoolPrompt(local, saved, 'bob')).not.toContain('Alice 專屬作業');
   expect(containsPrivateTitle({ ...saved, userId: 'bob' })).toBe(false);
   expect(containsPrivateTitle({ ...saved, schoolId: 'ncku' })).toBe(false);
   expect(containsPrivateTitle({
@@ -112,7 +115,7 @@ test('only includes an authorized and fresh campus snapshot for its original acc
     ...saved, checkedAt: new Date(Date.now() + 31_000).toISOString(),
   })).toBe(false);
   expect(containsPrivateTitle(saved, { ...local, ownerUid: undefined })).toBe(false);
-  expect(formatOnDeviceSchoolPrompt(local, { ...saved, userId: 'bob' }))
+  expect(formatOnDeviceSchoolPrompt(local, { ...saved, userId: 'bob' }, 'alice'))
     .toContain('此回合沒有主動同步且有效的校園資料');
 });
 

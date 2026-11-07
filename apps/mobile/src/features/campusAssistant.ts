@@ -309,6 +309,7 @@ export async function askCampusAssistant(input: {
         { role: 'system', content: formatOnDeviceSchoolPrompt(
           { ...snapshot, checkedAt: new Date().toISOString() },
           useCampusReads ? validCampusSenseSnapshot(input.senseSnapshot, { ...input.scope, uid }) : null,
+          uid,
         ) },
         ...compactHistory,
       ],
