@@ -28,6 +28,7 @@ import {
   LMS_SNAPSHOT_TTL_MS,
   cacheStillFresh,
   classifySchoolReadError,
+  schoolHttpStatus,
   formatHomeworkDeadlineTaipei,
   homeworkDescriptionText,
   homeworkPageAdvance,
@@ -232,6 +233,7 @@ async function readPagedHomework(
   for (let page = 1; page <= HOMEWORK_MAX_PAGES; page += 1) {
     const result = await source.fetchHomeworkPage(cookies, course.id, page, HOMEWORK_PAGE_SIZE);
     if (!result.ok) {
+      requireAuthorizedSchoolRead(result.status);
       return { items: [], error: { courseId: course.id, courseName: course.name, area: 'homework', status: result.status } };
     }
     const rows = result.value.homework_activities;
@@ -280,6 +282,9 @@ async function loadCourseContents(
     source.fetchActivities(cookies, course.id, ''),
     source.fetchCourseAnnouncements(cookies, course.id),
   ]);
+
+  if (!activitiesResult.ok) requireAuthorizedSchoolRead(activitiesResult.status);
+  if (!announcementResult.ok) requireAuthorizedSchoolRead(announcementResult.status);
 
   const materials: LmsMaterialItem[] = [];
   const activityAnnouncements: LmsAnnouncementItem[] = [];
@@ -372,6 +377,12 @@ function publicSnapshot(value: unknown, uid: string, nowMs: number): LmsReadonly
     !Array.isArray(row.homework) || !Array.isArray(row.announcements) || !Array.isArray(row.materials) ||
     !Array.isArray(row.courseErrors)) return null;
   return row as LmsReadonlySnapshot;
+}
+
+// A 401 can be returned as a per-feed failure rather than a thrown session error.
+// Never cache a partial course as successful when the school rejected authentication.
+function requireAuthorizedSchoolRead(status: number | null): void {
+  if (status === 401) reconnect();
 }
 
 function homeworkOnlySnapshot(snapshot: LmsReadonlySnapshot): LmsReadonlySnapshot {
@@ -552,7 +563,7 @@ export function createTronClassLmsHandler({
             status: 'ongoing',
           }));
         } catch (error) {
-          if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
+          if (classifySchoolReadError(error) === 'session' || schoolHttpStatus(error) === 401) reconnect();
           throw error;
         }
         try {
@@ -565,7 +576,7 @@ export function createTronClassLmsHandler({
             if (!seen.has(course.id)) courses.push(course);
           }
         } catch (error) {
-          if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
+          if (classifySchoolReadError(error) === 'session' || schoolHttpStatus(error) === 401) reconnect();
           upcomingCoursesError = { status: null };
         }
 
