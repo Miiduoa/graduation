@@ -430,7 +430,7 @@ it('pauses a practice round for source review, resumes drafts, and saves the pau
     practice: { mode: 'understand' },
   });
   expect(checkpoint).toContain('我暫停前的回答😀');
-  expect(downloads.filenames[0]).toMatch(/-逐題練習\\.campus-practice\\.json$/);
+  expect(downloads.filenames[0].endsWith('-逐題練習.campus-practice.json')).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
   expect((screen.getByLabelText(practiceLabel) as HTMLTextAreaElement).value).toBe('我暫停前的回答😀');
