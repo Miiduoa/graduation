@@ -196,3 +196,10 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 新增 Firebase Rules emulator 回歸：殘留 operator 但無 canonical profile、active 恢復、disabled／suspended／inactive／deleted、operator revoked、再次刪除 canonical profile 的存取重驗；原有合法店家與即時訂單監聽測試補齊 active canonical profile fixture，拒絕其他店家與停用店員的測試不移除。這一輪尚未取得**新精確 head** 的整體 CI／CodeQL／Supabase／Maestro 成功結果，不應用前次提交代替。
 
 **相容性注意：** 歷史上如果存在只有 operator 記錄、沒有 canonical profile 的合法店家帳號，更新規則後其訂單與菜單操作會拒絕；正式發佈前先盤點並透過受控 onboarding 補齊真正的 active profile，不應為求相容放寬「沒有 profile 仍授權」的條件。未改動正式環境或主線，尚待獨立 GCS、歷史簽發網址及正式審查核可。
+
+
+### 2026-11-07 00:51 UTC：精確 head `b868d8ed` 的 Rules CI 失敗與資料前提修補
+
+[Rules CI / run 42320495648](https://github.com/Miiduoa/graduation/actions/runs/42320495648) 已實際跑完第一輪規則測試：**258 案例、256 通過、2 失敗**。兩個失敗均為原本假設「合法店家 operator」但未建立 canonical `users/{uid}` 的測試 fixture：`school-responsibility-rules.test.cjs` 的外部 merchant 合法更新，以及 `security-rules.test.js` 的「學生和別家店不得改網址」中的 owner 合法更新。此次安全修補前，這兩組可因孤兒 operator 記錄而通過；新規則應拒絕缺失 canonical profile，所以原 fixture 已不滿足成功前提。
+
+本輪只補 `users/merchant` 與 `users/merchant-1`／`users/merchant-2` 的 `status: active` 合法身分 fixture，保留「外部 merchant 不能繼承校方管理權」、非 owner 拒絕修改、可用性與輸入檢查，沒有放寬任何 Firestore 規則；新增的孤兒或停權 operator 侵入測試原本已在同輪通過。修補提交須以新精確 head 的 Rules CI、全套 CI 與必要工作流重新驗證，在完整驗證前仍不能合併或部署。

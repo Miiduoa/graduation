@@ -587,6 +587,9 @@ describe('firestore security rules', () => {
 
   test('學生和別家店改不了別人的外連網址', async () => {
     await seedFirestore(async (db) => {
+      // Both merchants are real active users; the second is still not this store's operator.
+      await db.doc('users/merchant-1').set({ status: 'active' });
+      await db.doc('users/merchant-2').set({ status: 'active' });
       await db
         .collection('schools')
         .doc('tw-demo-uni')
