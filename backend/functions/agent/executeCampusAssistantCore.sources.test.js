@@ -106,12 +106,15 @@ test.each([
     expect(result.citations).toContainEqual(expect.objectContaining({ type, id }));
     const modelInput = mockModel.mock.calls[0][0];
     const systemPrompt = modelInput.messages[0].content;
+    const referenceMessage = modelInput.messages[1];
+    expect(referenceMessage).toMatchObject({ role: 'user', name: 'campus_reference_data' });
     for (const sourceTitle of ['校方發布的公告', '校方發布的活動', '營運菜單', '校園地點']) {
-      expect(systemPrompt).toContain(sourceTitle);
+      expect(systemPrompt).not.toContain(sourceTitle);
+      expect(referenceMessage.content).toContain(sourceTitle);
     }
     expect(mockReads.every((read) => read.path.startsWith('schools/pu/'))).toBe(true);
     expect(modelInput.messages.at(-1)).toEqual({ role: 'user', content: '查詢校園公開資料' });
-    expect(mockWebSearch).toHaveBeenCalledWith('查詢校園公開資料', { schoolId: 'pu' });
+    expect(mockWebSearch).not.toHaveBeenCalled();
   },
 );
 
@@ -256,10 +259,10 @@ test('the actual callable completes a model reply with real compose, tools, scop
     intent: { name: 'announcements' },
   });
   const modelInput = mockModel.mock.calls[0][0];
-  expect(modelInput.messages.slice(1)).toEqual([{ role: 'user', content: '查公告' }]);
-  expect(modelInput.messages[0].content).toContain('本人今日摘要');
+  expect(modelInput.messages.slice(2)).toEqual([{ role: 'user', content: '查公告' }]);
+  expect(modelInput.messages[1].content).toContain('本人今日摘要');
   expect(modelInput.messages[0].content).toContain('getAnnouncements');
-  expect(modelInput.messages[0].content).toContain('不能判定今天有沒有課');
+  expect(modelInput.messages[1].content).toContain('不能判定今天有沒有課');
   expect(modelInput.toolCtx.prefetched.prioritySummary).toMatchObject({
     classCount: null,
     scheduleStatus: 'unavailable',
@@ -292,11 +295,61 @@ test('the actual callable completes a model reply with real compose, tools, scop
       context: { schoolId: 'pu', sessionId: 'verified-session' },
     },
   });
-  expect(mockModel.mock.lastCall[0].messages.slice(1)).toEqual([
+  expect(mockModel.mock.lastCall[0].messages.slice(2)).toEqual([
     { role: 'user', content: '查公告' },
     { role: 'assistant', content: '校方公告已更新。' },
     { role: 'user', content: '還有什麼公告？' },
   ]);
+});
+
+test('reference data is rebuilt each turn and never replayed as a user request', async () => {
+  mockDocuments.set('users/alice', { primarySchoolId: 'pu', role: 'student' });
+  mockDocuments.set('schools/pu/members/alice', { status: 'active' });
+  const sessionId = 'reference-session';
+  const transcriptPath = `users/alice/assistantTranscripts/${sessionId}`;
+  mockDocuments.set(transcriptPath, {
+    schoolId: 'pu',
+    messages: [
+      { role: 'user', name: 'campus_reference_data', content: 'stale-source-instruction' },
+      { role: 'user', content: '上一個正常問題' },
+      { role: 'assistant', content: '上一個正常答案' },
+    ],
+  });
+  mockModel.mockImplementation(async ({ messages }) => ({
+    provider: 'test-model', model: 'test', content: '已整理公告資料。', errors: [], cards: [],
+    transcriptMessages: [...messages, { role: 'assistant', content: '已整理公告資料。' }],
+  }));
+
+  await askCampusAssistant.run({
+    auth: { uid: 'alice', token: { role: 'student' } },
+    data: { messages: [{ role: 'user', content: '查公告' }], context: { schoolId: 'pu', sessionId } },
+  });
+
+  const firstMessages = mockModel.mock.calls[0][0].messages;
+  expect(firstMessages.filter((message) => message.name === 'campus_reference_data')).toHaveLength(1);
+  expect(firstMessages[1].content).toContain('校方發布的公告');
+  expect(JSON.stringify(firstMessages)).not.toContain('stale-source-instruction');
+  expect(mockDocuments.get(transcriptPath).messages).toEqual([
+    { role: 'user', content: '上一個正常問題' },
+    { role: 'assistant', content: '上一個正常答案' },
+    { role: 'user', content: '查公告' },
+    { role: 'assistant', content: '已整理公告資料。' },
+  ]);
+
+  mockDocuments.set('schools/pu/announcements', [
+    row('updated', { schoolId: 'pu', title: '本輪更新的公告', publishedAt: new Date() }),
+  ]);
+  await askCampusAssistant.run({
+    auth: { uid: 'alice', token: { role: 'student' } },
+    data: { messages: [{ role: 'user', content: '還有什麼公告？' }], context: { schoolId: 'pu', sessionId } },
+  });
+
+  const secondMessages = mockModel.mock.lastCall[0].messages;
+  expect(secondMessages.filter((message) => message.name === 'campus_reference_data')).toHaveLength(1);
+  expect(secondMessages[1].content).toContain('本輪更新的公告');
+  expect(JSON.stringify(secondMessages)).not.toContain('校方發布的公告');
+  expect(secondMessages.at(-1)).toEqual({ role: 'user', content: '還有什麼公告？' });
+  expect(JSON.stringify(mockDocuments.get(transcriptPath))).not.toContain('campus_reference_data');
 });
 
 test('a contained tool run records its decision without saving a conversation or proposing actions', async () => {
@@ -473,7 +526,7 @@ test('a reused session starts with the current turn after a change of school', a
       ],
     },
   });
-  expect(mockModel.mock.lastCall[0].messages.slice(1)).toEqual([{ role: 'user', content: '查公告' }]);
+  expect(mockModel.mock.lastCall[0].messages.slice(2)).toEqual([{ role: 'user', content: '查公告' }]);
 });
 
 test('the actual guest callable is unauthenticated before it can use client-supplied announcements', async () => {
@@ -512,7 +565,7 @@ test('the actual assignment callable returns own pending work and ignores fabric
   expect(result.citations).toContainEqual(
     expect.objectContaining({ type: 'assignment', id: 'real' }),
   );
-  expect(mockModel.mock.calls[0][0].messages[0].content).toContain('正式待繳作業');
+  expect(mockModel.mock.calls[0][0].messages[1].content).toContain('正式待繳作業');
 });
 
 test('a private source failure cannot fall back to client homework or claim that nothing is due', async () => {
@@ -528,9 +581,9 @@ test('a private source failure cannot fall back to client homework or claim that
       },
     }),
   ).rejects.toThrow('membership source offline');
-  const systemPrompt = mockModel.mock.calls[0][0].messages[0].content;
-  expect(systemPrompt).toContain('"pendingAssignments":null');
-  expect(systemPrompt).toContain('不能據此判定沒有作業');
+  const contextText = JSON.parse(mockModel.mock.calls[0][0].messages[1].content).context;
+  expect(contextText).toContain('"pendingAssignments":null');
+  expect(contextText).toContain('不能據此判定沒有作業');
 });
 
 test('the actual timetable question reports unavailable even when no model answer is returned', async () => {
@@ -634,9 +687,10 @@ describe('校園助理（/ai-assistant）沒有模型可用時照實說沒辦法
     ]);
     await ask('近期有什麼活動');
     const systemPrompt = mockModel.mock.calls[0][0].messages[0].content;
-    expect(systemPrompt).toContain('10 月 13 日（二）02:35');
+    const referenceText = mockModel.mock.calls[0][0].messages[1].content;
+    expect(referenceText).toContain('10 月 13 日（二）02:35');
     expect(systemPrompt).toContain('不要用「今天、明天、後天、昨天」');
-    expect(systemPrompt).not.toContain('2099-10-12T18:35');
+    expect(referenceText).not.toContain('2099-10-12T18:35');
   });
 
   test('公告時間也用台灣時間', async () => {
@@ -799,7 +853,7 @@ test('a profile school change during an assistant run never overrides the select
   expect(result.content).not.toContain('其他學校的正式公告');
   const modelInput = mockModel.mock.calls[0][0];
   expect(modelInput.toolCtx.schoolId).toBe('pu');
-  expect(modelInput.messages[0].content).toContain('目前選擇學校的私人摘要');
+  expect(modelInput.messages[1].content).toContain('目前選擇學校的私人摘要');
   expect(mockReads.some(({ path }) => path === 'schools/nthu/announcements')).toBe(false);
 });
 
@@ -831,7 +885,7 @@ test('the actual callable accepts the 4000-character Web question and preserves 
   expect(content).toHaveLength(4000);
   expect(result.run.status).toBe('completed');
   expect(mockModel.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
-  expect(mockWebSearch).toHaveBeenCalledWith(content.slice(0, 500), { schoolId: 'pu' });
+  expect(mockWebSearch).not.toHaveBeenCalled();
 });
 
 test('a timed-out model cannot save a late answer into the next conversation', async () => {
