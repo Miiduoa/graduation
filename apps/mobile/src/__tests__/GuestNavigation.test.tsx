@@ -5,12 +5,15 @@ import { PreAuthStack } from '../screens/PreAuthStack';
 import { Text } from 'react-native';
 import { SchoolSessionBoundary, hasReadySchoolSession } from '../app/SchoolSessionBoundary';
 import { preAuthLinking } from '../app/preAuthLinking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { dormStorageKey } from '@campus/shared/src/dormitory';
 import {
   resetSchoolLoginProviderCache,
   setSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
 let mockBrowsingSchoolId = 'pu';
+let mockPlatformSession: { platformAccountId: string } | null = null;
 let mockSchoolAuth: {
   user: { uid: string } | null;
   profile: { uid: string; schoolId: string } | null;
@@ -43,6 +46,7 @@ jest.mock('expo-linking', () => ({
 }));
 beforeEach(() => {
   mockBrowsingSchoolId = 'pu';
+  mockPlatformSession = null;
   mockSchoolAuth = {
     user: null,
     profile: null,
@@ -65,7 +69,8 @@ jest.mock('../state/theme', () => ({
   useTheme: () => require('../ui/theme').getCurrentTheme(),
 }));
 jest.mock('../state/nuniSession', () => ({
-  useNuniSession: () => ({ session: null, loading: false, error: '', pendingLogout: false }),
+  useNuniSession: () => ({ session: mockPlatformSession, loading: false, error: '', pendingLogout: false }),
+  useOptionalNuniSession: () => ({ session: mockPlatformSession, loading: false, error: '', pendingLogout: false }),
 }));
 jest.mock('../state/schedule', () => ({
   useSchedule: () => ({
@@ -213,6 +218,27 @@ test('a warm platform link works in the school-signed-out stack and cleans up it
   expect(navigation.getCurrentRoute()?.name).toBe('NuniWorkspace');
   view.unmount();
   expect(mockRemoveLinkListener).toHaveBeenCalledTimes(1);
+});
+
+test('a dormitory link opens the selected campus workspace for a signed-in platform student', async () => {
+  mockBrowsingSchoolId = 'nthu';
+  mockPlatformSession = { platformAccountId: 'resident' };
+  mockInitialUrl = 'campus://dormitory?schoolId=pu&repairId=external';
+  const key = dormStorageKey('platform:resident', 'nthu');
+  await AsyncStorage.setItem(key, JSON.stringify({ building: '清大宿舍備忘' }));
+  try {
+    const navigation = createNavigationContainerRef();
+    const view = render(
+      <NavigationContainer ref={navigation} linking={preAuthLinking}>
+        <PreAuthStack />
+      </NavigationContainer>,
+    );
+    expect((await view.findAllByText('清大宿舍備忘')).length).toBeGreaterThan(0);
+    expect(navigation.getCurrentRoute()?.name).toBe('Dormitory');
+    expect(view.queryByText('external')).toBeNull();
+  } finally {
+    await AsyncStorage.removeItem(key);
+  }
 });
 
 test.each([

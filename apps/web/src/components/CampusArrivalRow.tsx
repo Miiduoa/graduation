@@ -18,13 +18,28 @@ function LiveSignal() {
   );
 }
 
-function Eta(props: { view: ReturnType<typeof campusEtaView> }) {
-  const { view } = props;
+function Eta(props: { view: ReturnType<typeof campusEtaView>; animateUpdates: boolean }) {
+  const { view, animateUpdates } = props;
+  const minutes = view.kind === 'live' ? view.minutes ?? null : null;
+  // Keep the numeric node stable through polling and route expansion.
+  const [display, setDisplay] = useState({ minutes, animateUpdates, changed: false });
+  if (display.minutes !== minutes || display.animateUpdates !== animateUpdates) {
+    setDisplay({
+      minutes,
+      animateUpdates,
+      changed: animateUpdates && display.animateUpdates && minutes !== null
+        && display.minutes !== null && display.minutes !== minutes,
+    });
+  }
   if (view.kind === 'live' && view.minutes != null) {
     return (
       <span className={css.rowEta} data-kind="live">
         <LiveSignal />
-        <span className={css.etaNumber}>{view.minutes}</span>
+        <span
+          key={view.minutes}
+          className={`${css.etaNumber}${display.changed ? ` ${css.etaNumberChanged}` : ''}`}
+          data-testid="campus-eta-minutes"
+        >{view.minutes}</span>
         <span className={css.etaUnit}>分</span>
       </span>
     );
@@ -38,6 +53,7 @@ function Eta(props: { view: ReturnType<typeof campusEtaView> }) {
 export function CampusArrivalRow(props: {
   row: CampusNextRow;
   now: number;
+  animateUpdates?: boolean;
   active?: boolean;
   onSelect?: () => void;
 }) {
@@ -55,7 +71,7 @@ export function CampusArrivalRow(props: {
   const wait = stopName ? waitingPlaceLine(stopName) : '';
   const label = campusArrivalA11yLabel(props.row, props.now);
   return (
-    <div ref={block} className={css.arrivalBlock} data-testid="campus-arrival-block">
+    <div ref={block} className={`${css.arrivalBlock} ${css.physicalArrival}`} data-testid="campus-arrival-block">
       <button
         type="button"
         className={`${css.arrivalRow}${ended ? ` ${css.arrivalRowEnded}` : ''}`}
@@ -72,7 +88,7 @@ export function CampusArrivalRow(props: {
           {heading ? <strong title={heading}>{heading}</strong> : null}
           {nextClock ? <small>下一班表定 {nextClock}</small> : null}
         </span>
-        <Eta view={view} />
+        <Eta view={view} animateUpdates={props.animateUpdates ?? true} />
       </button>
       {open ? (
         <div className={css.rowPanel} data-testid="opened-route-panel">

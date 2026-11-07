@@ -37,12 +37,39 @@ export const DORM_REPAIR_SHORTCUTS: ReadonlyArray<{
   { category: 'furniture', title: '門窗或家具損壞' },
 ];
 
+export const DORM_REPAIR_REFERENCE_LIMIT = 80;
+
+/** Phrases that imply this app submits to the school, issues a ticket, or tracks official progress. */
+export const DORM_REPAIR_DISALLOWED_COPY = /單號|已送出給學校|查詢進度|工單|已提交報修|查看處理狀況|修繕進度|查進度/;
+
+/** Shared web/app copy: personal memos only; official filing stays on school channels. */
+export const DORM_REPAIR_COPY = {
+  intro: '這裡只會存成我的報修備忘，不會送到學校。請依學校規定管道送出；已通報與否由你自行註記，不是校方系統回覆。',
+  saveMemo: '存成我的報修備忘',
+  referenceLabel: '校方給的編號（選填）',
+  referencePlaceholder: '若已依學校規定管道送出，可把校方給的編號記在這裡',
+  referenceDisplay: '自行記下的校方編號',
+  copyReference: '複製校方編號',
+  copiedReference: '已複製校方編號。',
+  copyReferenceFailed: '無法自動複製。請選取畫面上的校方編號，手動複製。',
+  missingRoute: '請向這所學校的住宿服務單位確認報修方式。',
+  officialChannelTitle: '校方報修管道',
+  officialTrackingFallback: '前往學校網站查看修繕紀錄',
+  emptyHint: '遇到設備問題時可以先記下細節，再到校方正式管道辦理。',
+  openIssues: '待處理備忘',
+  assistantSavedMemo: '已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。',
+  assistantCanHelp: '可以幫你先存成報修備忘，請依學校管道送出，或聯繫宿舍管理員。',
+  assistantConfirm: '確認存成報修備忘',
+  assistantCardTitle: '已存成報修備忘',
+} as const;
+
 export type DormRepair = {
   id: string;
   category: DormRepairCategory;
   title: string;
   location: string;
   description: string;
+  reference?: string; // Optional school-issued identifier the resident copied in after using an official channel.
   status: DormRepairStatus;
   createdAt: number;
   updatedAt: number;
@@ -71,6 +98,7 @@ export type DormWorkspace = {
   milestones: DormMilestone[];
   parcels: DormParcel[];
   laundryEndAt: number | null;
+  laundryReminder: boolean;
 };
 
 export const DORM_CHECKLISTS: ReadonlyArray<{
@@ -155,6 +183,7 @@ export function emptyDormWorkspace(): DormWorkspace {
     milestones: [],
     parcels: [],
     laundryEndAt: null,
+    laundryReminder: false,
   };
 }
 
@@ -223,7 +252,9 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
       const title = boundedText(row.title, 90);
       if (!id || !/^[a-zA-Z0-9_-]+$/.test(id) || used.has(id) || !title) continue;
       used.add(id);
+      const reference = boundedText(row.reference, DORM_REPAIR_REFERENCE_LIMIT);
       repairs.push({
+        ...(reference ? { reference } : {}),
         id,
         category: repairCategories.includes(row.category as DormRepairCategory)
           ? (row.category as DormRepairCategory)
@@ -293,6 +324,7 @@ export function normalizeDormWorkspace(raw: unknown): DormWorkspace {
     milestones,
     parcels,
     laundryEndAt: laundryEndAt || null,
+    laundryReminder: !!laundryEndAt && value.laundryReminder === true,
   };
 }
 

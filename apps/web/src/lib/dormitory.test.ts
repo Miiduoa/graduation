@@ -4,6 +4,8 @@ import {
   DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
+  DORM_REPAIR_COPY,
+  DORM_REPAIR_DISALLOWED_COPY,
   dormChecklistProgress,
   dormInspectionProgress,
   dormStorageKey,
@@ -63,6 +65,23 @@ it('copy template explicitly says that the app did not submit a school report', 
   expect(text).toContain('冷氣不冷');
   expect(text).toContain('風扇在轉但無冷風');
   expect(text).not.toContain('校方已受理');
+  expect(text).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+});
+
+it('keeps shared repair copy as a personal memo without ticket or school-progress claims', () => {
+  for (const value of Object.values(DORM_REPAIR_COPY)) {
+    expect(value).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  }
+  expect(DORM_REPAIR_COPY.saveMemo).toBe('存成我的報修備忘');
+  expect(DORM_REPAIR_COPY.intro).toContain('請依學校規定管道送出');
+  expect(DORM_REPAIR_COPY.officialTrackingFallback).toContain('網站');
+  expect(DORM_REPAIR_COPY.assistantSavedMemo).toContain('報修備忘');
+  expect('工單').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('已提交報修').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('已為你提交報修工單').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('查看處理狀況').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('修繕進度').toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  expect('查進度').toMatch(DORM_REPAIR_DISALLOWED_COPY);
 });
 
 

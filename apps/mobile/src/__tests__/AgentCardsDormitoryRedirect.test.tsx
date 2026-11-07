@@ -20,7 +20,7 @@ beforeEach(() => {
   mockNavigate.mockReset();
 });
 
-test('宿舍報修成功卡改走今天，不再導向已刪的 DormitoryScreen', () => {
+test('平台報修卡只開啟宿舍服務，不把平台案件編號帶入個人紀錄', () => {
   const view = render(
     <AgentCardList
       cards={[
@@ -31,19 +31,22 @@ test('宿舍報修成功卡改走今天，不再導向已刪的 DormitoryScreen'
       ]}
     />,
   );
-  fireEvent.press(view.getByText('查看報修紀錄'));
-  expect(mockSafeNavigate).toHaveBeenCalledWith('TodayHome', undefined);
+  expect(view.getByText('已存成報修備忘')).toBeTruthy();
+  expect(view.queryByText('平台案件編號：')).toBeNull();
+  expect(view.queryByText('R1')).toBeNull();
+  fireEvent.press(view.getByText('開啟宿舍服務'));
+  expect(mockSafeNavigate).toHaveBeenCalledWith('Dormitory', undefined);
   expect(mockNavigate).not.toHaveBeenCalledWith('DormitoryScreen');
   expect(mockNavigate).not.toHaveBeenCalledWith('Dormitory');
 });
 
-test('導覽卡遇到舊宿舍路由名也改走今天', () => {
+test.each(['DormitoryScreen', 'Dormitory'])('導覽卡的 %s 開啟目前校園宿舍', (screen) => {
   const view = render(
     <AgentCardList
-      cards={[{ kind: 'navigate', payload: { screen: 'DormitoryScreen', reason: '查看宿舍' } }]}
+      cards={[{ kind: 'navigate', payload: { screen, reason: '查看宿舍', params: { repairId: 'R1', schoolId: 'other' } } }]}
     />,
   );
-  fireEvent.press(view.getByText('前往Dormitory'));
-  expect(mockSafeNavigate).toHaveBeenCalledWith('TodayHome', {});
+  fireEvent.press(view.getByText('前往宿舍服務'));
+  expect(mockSafeNavigate).toHaveBeenCalledWith('Dormitory', undefined);
   expect(mockNavigate).not.toHaveBeenCalled();
 });

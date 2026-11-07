@@ -16,6 +16,7 @@ import {
   type Transaction,
 } from 'firebase/firestore';
 import { getAuth, getDb, isFirebaseConfigured } from './firebase';
+import { leaveRequestHref, parseLeaveRequestId } from './leaveRequestLink';
 import {
   courseHrefFromData,
   courseWorkHrefFromData,
@@ -670,6 +671,11 @@ export function notificationDestination(
       ? `/teacher/course/${encodeURIComponent(courseId)}?assignmentId=${encodeURIComponent(assignmentId)}`
       : `/teacher/course/${encodeURIComponent(courseId)}`;
     return { href, label: '查看待批改繳交' };
+  }
+  if (notification.type === 'leave') {
+    const requestId = parseLeaveRequestId(data.leaveRequestId) || parseLeaveRequestId(data.requestId);
+    const href = leaveRequestHref(requestId, data.schoolId);
+    return href ? { href, label: '查看站內請假紀錄' } : null;
   }
   if (notification.type === 'grade' || notification.type === 'feedback') {
     const work = courseWorkHrefFromData(

@@ -357,7 +357,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     name: '報修',
     icon: 'construct-outline',
     color: '#FF9500',
-    description: '提交宿舍設施維修申請',
+    description: '把宿舍設施問題存成報修備忘，不會送到學校',
     parameters: [
       {
         name: 'category',
@@ -1059,16 +1059,16 @@ export const TASK_CHAINS: TaskChain[] = [
     id: 'dorm_issue',
     trigger: '宿舍壞了|馬桶|水管|冷氣壞|冷氣壞了|宿舍冷氣|幫我報修|我要報修',
     name: '宿舍報修',
-    description: '回報問題 → 提交報修 → 追蹤進度',
+    description: '記下問題 → 存成報修備忘 → 依學校管道送出',
     icon: 'construct-outline',
     color: '#D70015',
     steps: [
-      { order: 1, toolId: 'report_repair', label: '提交維修單' },
+      { order: 1, toolId: 'report_repair', label: '存成報修備忘' },
       {
         order: 2,
         toolId: 'set_reminder',
-        label: '追蹤維修進度',
-        autoParams: { title: '確認報修處理狀態', datetime: '2天後' },
+        label: '提醒自己向校方確認',
+        autoParams: { title: '確認是否已依學校管道送出報修', datetime: '2天後' },
       },
     ],
   },
@@ -1836,7 +1836,7 @@ export const AGENT_ROLE_INTERACTIONS: AgentRoleInteraction[] = [
         id: 'auto_repair',
         label: 'AI 代理報修',
         icon: 'construct-outline',
-        description: 'AI 收集問題描述/照片後自動提交維修單',
+        description: 'AI 收集問題描述後存成報修備忘，正式通報請依學校管道辦理',
       },
       {
         id: 'auto_booking',
@@ -4180,7 +4180,7 @@ export function generateLocalAnswer(
   else if (tags.includes('dormitory')) {
     if (/報修|壞了|故障|漏水|冷氣/.test(q)) {
       answer =
-        '宿舍報修流程：\n\n1. 在 APP 提交維修單（或到管理室填表）\n2. 選擇類別：水電/冷氣/家具/網路\n3. 填寫房號和問題描述\n4. 預計 1-3 個工作天處理\n\n要幫你提交報修單嗎？';
+        '宿舍報修：\n\n1. 可先在 App 存成報修備忘（不會送到學校）\n2. 記下類別、房號和問題描述\n3. 請依學校規定管道送出，或到管理室填表\n4. 處理時間以校方為準\n\n要幫你先存成報修備忘嗎？';
     } else if (/洗衣|烘衣/.test(q)) {
       answer =
         '宿舍洗衣資訊：\n\n洗衣房位置：\n• 希嘉學苑 1F\n• 思高學苑 1F\n\n費用：洗衣 $20/次，烘衣 $10/次\n營業：24小時，但建議避開尖峰（晚上8-10點）\n\n要我幫你查詢目前機台狀態嗎？';
