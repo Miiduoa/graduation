@@ -8,7 +8,8 @@ const params = new URLSearchParams(window.location.search);
 const school = params.get('schoolId') || 'pu';
 const examples = [
   { label: '主顧303', schoolId: 'pu', location: '主顧303' },
-  { label: '未知教室 PH303', schoolId: 'pu', location: 'PH303' },
+  { label: '校方代碼 PH303', schoolId: 'pu', location: 'PH303' },
+  { label: '未知教室 ZZ303', schoolId: 'pu', location: 'ZZ303' },
   { label: '同名建築測試', schoolId: 'qa-campus', location: '測試教學101' },
 ];
 

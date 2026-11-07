@@ -24,6 +24,8 @@
 
 ## 本機單元與整合回歸
 
+校方代碼採用明確校別 allowlist：目前只支援靜宜大學的 `PH → Providence Hall → 主顧樓`，依 [綜合業務組 2026-05-06 樓別縮寫表](https://dorac.pu.edu.tw/p/16-1059-71708.php?Lang=zh-tw) 與 [資訊處雙語名稱](https://oits.pu.edu.tw/p/406-1002-2655,r207.php?Lang=zh-tw) 交叉核對。只匹配目前學校有效 POI 的精確建物名稱；無 POI 仍未知，多筆仍多義。未核對的其他代碼（尤其 `R`）不推測，尾數不代表已驗證房號／樓層。
+
 瀏覽器 fixture 以 esbuild 分割模組，Leaflet 使用同一個已安裝版本提供的官方 ESM 入口。這讓動態匯入保留 `map`、`control`、`tileLayer` 等真正的命名 API；沒有以假的地圖函式替代。專案的 Next.js 正式載入方式不變。
 
 專案使用 Node 22.23.4、pnpm 10.28.2。先依根目錄說明安裝相依套件。
@@ -72,8 +74,9 @@ python scripts/qa/campus-spatial/check.py
 | `motion-visibility` | 切換減少動態後不持續播放相機動畫；真實離屏停止繪圖，回到可視範圍再更新。 |
 | `context-loss` | 真正的 `WEBGL_lose_context` 可信事件觸發備援；地點、來源與導航仍可用，重試建立新的有效 WebGL2 canvas。 |
 | `map-classroom-unique` | `pu`／`主顧303` 對應主顧樓，導航座標精確符合快照，3D 接續該選取；解除篩選後可改選圖書館並帶回正式 MapClient。 |
+| `map-classroom-verified-code` | `pu`／`PH303` 只對應已存在的主顧樓 POI，導航座標相同，不推算房號或樓層。 |
 | `map-classroom-ambiguous` | 同名測試建築沒有自動選取或預先提供目的地導航；使用者選第二個候選後才使用該候選座標。 |
-| `map-classroom-unknown` | `pu`／`PH303` 不捏造目的地、不顯示地點詳情或導航，提供校方地圖核對連結。 |
+| `map-classroom-unknown` | `pu`／`ZZ303` 不捏造目的地或導航，先在手機地圖上方顯示說明、修改教室名稱（聚焦並全選）與校方地圖連結。 |
 
 繪圖探針只記錄原生 WebGL 與 RAF 呼叫，仍呼叫原方法，不以假的 renderer 或合成 context-loss 事件替代。觸控案例透過 Chromium 的標準輸入介面執行，不用 `dispatchEvent` 假裝頁面已捲動。所有案例要求沒有未處理的頁面 JavaScript 錯誤。預期的 WebGL context-loss console 警告與頁面例外分開記錄。
 

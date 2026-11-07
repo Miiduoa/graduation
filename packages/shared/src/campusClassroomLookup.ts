@@ -71,6 +71,29 @@ function nameMatchesRoom(query: string, suppliedName: unknown): boolean {
 }
 
 /**
+ * The sole building-code entry is from the University's 2026-05-06 table
+ * (https://dorac.pu.edu.tw/p/16-1059-71708.php?Lang=zh-tw)
+ * and OITS bilingual building name
+ * (https://oits.pu.edu.tw/p/406-1002-2655,r207.php?Lang=zh-tw).
+ * A code never establishes a room, floor, entrance or indoor route.
+ */
+const VERIFIED_CLASSROOM_BUILDING_CODES = [
+  { schoolId: 'pu', code: 'ph', buildingNames: ['主顧樓', 'Providence Hall'] },
+] as const;
+
+function nameMatchesVerifiedCode(school: string, query: string, suppliedName: unknown): boolean {
+  const name = comparisonText(suppliedName);
+  if (!name) return false;
+  return VERIFIED_CLASSROOM_BUILDING_CODES.some(
+    (entry) =>
+      entry.schoolId === school &&
+      query.startsWith(entry.code) &&
+      isRoomSuffix(query.slice(entry.code.length)) &&
+      entry.buildingNames.some((building) => comparisonText(building) === name),
+  );
+}
+
+/**
  * The caller supplies only the current school's published map locations. This helper never
  * loads a fallback campus, guesses an alphabetic building code, or derives a floor from a room
  * number. A result refers to the original POI object and its existing coordinates.
@@ -103,7 +126,10 @@ export function resolveCampusClassroom<T extends CampusMapPlaceLike>({
       return false;
     if ('schoolId' in location && location.schoolId !== school) return false;
     return (
-      nameMatchesRoom(comparable, location.name) || nameMatchesRoom(comparable, location.building)
+      nameMatchesRoom(comparable, location.name) ||
+      nameMatchesRoom(comparable, location.building) ||
+      nameMatchesVerifiedCode(school, comparable, location.name) ||
+      nameMatchesVerifiedCode(school, comparable, location.building)
     );
   });
   return {

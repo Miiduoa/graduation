@@ -27,7 +27,7 @@ Campus One 的空間圖目前表示公開地點座標的相對位置，不包含
 
 記錄成功／失敗、錯誤建築、無法確認、人工介入次數、操作次數與完成秒數。遇到多義或未知資料時，正確顯示不確定性可以算正確處理；自動導向未經支持的建築必須記為錯誤，不能因為畫面完成而算成功。
 
-**本專案可由測試證明：**解析及校別邊界的單元回歸，與真實 Chromium 中 `MapClient` 接收 `schoolId=pu&query=主顧303` 後選主顧樓、導航 href 的座標、3D／2D 選取銜接；兩個同名測試候選必須等使用者選取；`PH303` 顯示未知並提供校方核對連結。[I1]
+**本專案可由測試證明：**解析及校別邊界的單元回歸，與真實 Chromium 中 `MapClient` 接收 `schoolId=pu&query=主顧303` 後選主顧樓、導航 href 的座標、3D／2D 選取銜接；兩個同名測試候選必須等使用者選取；`PH303` 依校方英文樓別代碼與資訊處雙語名稱對應主顧樓 POI、不推算房號或樓層；未收錄 `ZZ303` 先顯示修正查詢與校方核對連結。[I1][P1][P2]
 
 **仍需補的證據：**正式登入狀態下從 Today 到 Next.js 地圖頁的完整流程、真實課表涵蓋率，以及競品相同輸入的逐筆結果。元件 fixture 不等於完整路由或正式環境測試。
 
@@ -91,4 +91,6 @@ Campus One 的空間圖目前表示公開地點座標的相對位置，不包含
 - [A2：Apple — 在 iPhone 地圖中取得步行路線](https://support.apple.com/zh-tw/guide/iphone/iph8eae299d1/27/ios/27)
 - [A3：Apple — 如何在 iPhone 下載地圖以離線使用](https://support.apple.com/zh-tw/105084)
 - [U1：UniTable 開發者的 App Store 頁面 — 準點課表：AI 課表管理](https://apps.apple.com/tw/app/unitable-ai-academic-partner/id6745899492)；教室標記、距離與時間說明位於版本記錄 2.45 的「前往教室所需時間」。這是開發者描述，不是獨立效能驗證。
+- [P1：靜宜大學綜合業務組 2026-05-06 樓別縮寫表](https://dorac.pu.edu.tw/p/16-1059-71708.php?Lang=zh-tw)：PH = Providence Hall。
+- [P2：靜宜大學資訊處「開放時間及使用規範」](https://oits.pu.edu.tw/p/406-1002-2655,r207.php?Lang=zh-tw)：Providence Hall (Zhu Gu Lou)／主顧樓；僅證明建物名稱，沒有教室門口資料。
 - [I1：本專案空間導覽與 MapClient 瀏覽器驗收](../scripts/qa/campus-spatial/README.md)；[驗收腳本](../scripts/qa/campus-spatial/check.py)；[GitHub workflow](../.github/workflows/campus-spatial-browser.yml)。

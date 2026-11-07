@@ -130,6 +130,7 @@ function MapContent({
   const [category, setCategory] = useState('全部');
   const initialQuery = normalizeCampusClassroomQuery(query);
   const [search, setSearch] = useState(initialQuery);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selection, setSelection] = useState<string | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
@@ -386,6 +387,7 @@ function MapContent({
             <input
               className="input"
               type="search"
+              ref={searchInputRef}
               aria-label="搜尋地點"
               placeholder="宿舍、影印或公車"
               value={search}
@@ -409,13 +411,6 @@ function MapContent({
           </p>
         )}
       </div>
-      <MapCanvas
-        locations={mapLocations}
-        selected={selected}
-        route={routeLocations}
-        myLocation={myLocation}
-        onSelect={selectLocation}
-      />
       {classroomLinkActive && (
         <section className={`card ${styles.classroom}`} aria-label="教室定位結果">
           <p className={styles.eyebrow}>課表教室</p>
@@ -445,11 +440,28 @@ function MapContent({
               ? '正在確認地點資料，尚未找到能對應這間教室的位置。'
               : '目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。'}</p>
           )}
-          {(classroom.status === 'ambiguous' || classroom.status === 'unmatched') && officialMapUrl && (
-            <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">核對校方地圖</a>
+          {(classroom.status === 'ambiguous' || classroom.status === 'unmatched') && (
+            <div className={styles.actions}>
+              <button className="btn" type="button" onClick={() => {
+                searchInputRef.current?.focus();
+                searchInputRef.current?.select();
+              }}>
+                修改教室名稱
+              </button>
+              {officialMapUrl && (
+                <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">核對校方地圖</a>
+              )}
+            </div>
           )}
         </section>
       )}
+      <MapCanvas
+        locations={mapLocations}
+        selected={selected}
+        route={routeLocations}
+        myLocation={myLocation}
+        onSelect={selectLocation}
+      />
       {placeState.source === 'error' && (
         <div className={styles.notice} role="alert">
           <p>校方地點資料暫時讀不到，先顯示目前可用的靜宜地點，收藏與部分地點可能缺少。</p>

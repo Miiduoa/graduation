@@ -92,7 +92,46 @@ it('uses a provided building field without interpreting the room code or fabrica
   expect(result.matches[0].floor).toBe('依現場標示');
 });
 
-it.each(['PH303', 'R201', '303', '主顧', '主顧樓旁邊', '主顧樓 PH303 / 任垣201', '線上課程'])(
+it.each(['PH303', 'ＰＨ３０３', 'ph 303', 'PH-303', 'PH：303'])(
+  'resolves verified PU code %s only against current campus POIs', (query) => {
+    const result = resolveCampusClassroom({ schoolId: 'pu', query, locations: places });
+    expect(result.status).toBe('matched');
+    expect(result.matches).toEqual([hall]);
+    expect(result.matches[0]).toBe(hall);
+    expect(result.matches[0].floor).toBeUndefined();
+  },
+);
+
+it('accepts the exact bilingual name, but not an approximate venue description', () => {
+  const english = { ...hall, id: 'english', name: 'Providence Hall' };
+  const nearby = { ...hall, id: 'nearby', name: '主顧樓旁廣場' };
+  const result = resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations: [english, nearby] });
+  expect(result.status).toBe('matched');
+  expect(result.matches).toEqual([english]);
+});
+
+it('does not cross school scopes or populate a missing school catalog', () => {
+  expect(resolveCampusClassroom({ schoolId: 'school-a', query: 'PH303', locations: places }).status).toBe('unmatched');
+  expect(resolveCampusClassroom({
+    schoolId: 'pu', query: 'PH303', locations: [{ ...hall, schoolId: 'school-b' }],
+  }).status).toBe('unmatched');
+  expect(resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations: [] }).status).toBe('unmatched');
+});
+
+it('requires a deliberate choice when two valid POIs describe the coded building', () => {
+  const desk = { ...hall, id: 'desk', name: '服務台', building: '主顧樓' };
+  const result = resolveCampusClassroom({ schoolId: 'pu', query: 'PH303', locations: [hall, desk] });
+  expect(result.status).toBe('ambiguous');
+  expect(result.matches).toEqual([hall, desk]);
+});
+
+it.each(['PH', 'PHxyz303', 'PH303旁', 'PH303 / 任垣201', 'SP303', 'AK303', 'R201'])(
+  'leaves incomplete, unverified, or composite PU code %s unresolved', (query) => {
+    expect(resolveCampusClassroom({ schoolId: 'pu', query, locations: places }).status).toBe('unmatched');
+  },
+);
+
+it.each(['ZZ303', 'R201', '303', '主顧', '主顧樓旁邊', '主顧樓 PH303 / 任垣201', '線上課程'])(
   'leaves an unknown or incomplete room unresolved: %s',
   (query) => {
     expect(resolveCampusClassroom({ schoolId: 'school-a', query, locations: places })).toEqual({

@@ -531,6 +531,23 @@ async def classroom_unique(page, requests, resources):
             "webgl": graphics, "selectionReturnedToMap": LIBRARY["id"]}
 
 
+async def classroom_verified_code(page, _requests, _resources):
+    result = await open_map_fixture(page, "pu", "PH303")
+    await expect(result).to_contain_text("可對應「主顧樓」的位置。")
+    details = page.get_by_role("region", name="地點詳情", exact=True)
+    await expect(details.get_by_role("heading", name=ZHUGU["name"], exact=True)).to_be_visible()
+    href = await assert_walking_link(
+        details.get_by_role("link", name="從目前位置導航", exact=True), ZHUGU
+    )
+    assert await result.evaluate("""section => {
+        const map = document.querySelector('.leaflet-container');
+        return map && Boolean(section.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }"""), "The verified room code should be explained before the map"
+    await page.screenshot(path=str(OUT / "map-classroom-verified-code.png"), full_page=True)
+    return {"query": "PH303", "verifiedBuilding": ZHUGU, "roomOrFloorInferred": False,
+            "navigationHref": href}
+
+
 async def classroom_ambiguous(page, _requests, _resources):
     result = await open_map_fixture(page, "qa-campus", "測試教學101")
     await expect(result).to_contain_text("有多個相符地點，請核對位置後選擇。")
@@ -557,7 +574,7 @@ async def classroom_ambiguous(page, _requests, _resources):
 
 
 async def classroom_unknown(page, _requests, _resources):
-    result = await open_map_fixture(page, "pu", "PH303")
+    result = await open_map_fixture(page, "pu", "ZZ303")
     await expect(result).to_contain_text("目前地點資料無法確認這間教室的位置。")
     await expect(page.get_by_role("region", name="地點詳情", exact=True)).to_have_count(0)
     await expect(page.get_by_role("link", name="從目前位置導航", exact=True)).to_have_count(0)
@@ -565,8 +582,18 @@ async def classroom_unknown(page, _requests, _resources):
     official = result.get_by_role("link", name="核對校方地圖", exact=True)
     href = "https://gnl.pu.edu.tw/p/426-1007-8.php?Lang=zh-tw"
     await expect(official).to_have_attribute("href", href)
+    assert await result.evaluate("""section => {
+        const map = document.querySelector('.leaflet-container');
+        return map && Boolean(section.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }"""), "Unknown-room recovery should appear above the map"
     await page.screenshot(path=str(OUT / "map-classroom-unknown.png"), full_page=True)
-    return {"query": "PH303", "noInventedDestination": True, "officialMapHref": href}
+    await result.get_by_role("button", name="修改教室名稱", exact=True).click()
+    search = page.get_by_role("searchbox", name="搜尋地點", exact=True)
+    await expect(search).to_be_focused()
+    selection = await search.evaluate("el => [el.selectionStart, el.selectionEnd, el.value.length]")
+    assert selection == [0, 5, 5], selection
+    return {"query": "ZZ303", "noInventedDestination": True, "officialMapHref": href,
+            "recoveryBeforeMap": True, "editFocusAndSelection": True}
 
 
 async def desktop(page, requests, resources):
@@ -894,6 +921,7 @@ async def main():
                     ("motion-visibility", {"width": 1440, "height": 1000}, motion_and_visibility),
                     ("context-loss", {"width": 1440, "height": 1000}, context_loss),
                     ("map-classroom-unique", {"width": 390, "height": 844}, classroom_unique),
+                    ("map-classroom-verified-code", {"width": 390, "height": 844}, classroom_verified_code),
                     ("map-classroom-ambiguous", {"width": 390, "height": 844}, classroom_ambiguous),
                     ("map-classroom-unknown", {"width": 320, "height": 568}, classroom_unknown),
                 ]

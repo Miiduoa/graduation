@@ -94,6 +94,20 @@ it('resolves classroom deep links to a unique real building while retaining the 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
 });
 
+it('resolves verified PH303 to the existing PU building without inferring a room or floor', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="PH303" />);
+  await sourceSettled();
+  const result = screen.getByRole('region', { name: '教室定位結果' });
+  expect(within(result).getByText(/可對應「主顧樓」的位置/)).toBeTruthy();
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('PH303');
+  const map = JSON.parse(screen.getByLabelText('地圖狀態').textContent!);
+  expect(map.selected.id).toBe('pu-zhugu');
+  expect(screen.queryByText(/PH303 已定位到教室|樓層：3|三樓教室/)).toBeNull();
+  const destination = new URL(screen.getByRole('link', { name: '從目前位置導航' }).getAttribute('href')!);
+  expect(destination.searchParams.get('destination')).toBe(`${map.selected.lat},${map.selected.lng}`);
+});
+
 it('requires a choice between ambiguous same-school buildings and never selects the first by default', async () => {
   const candidates = [
     { ...library, id: 'east', name: '教學大樓', description: '東側', lat: 25.01 },
@@ -103,6 +117,7 @@ it('requires a choice between ambiguous same-school buildings and never selects 
   render(<MapClient school="another-school" query="教學101" />);
   const result = await screen.findByRole('region', { name: '教室定位結果' });
   expect(within(result).getByText(/有多個相符地點/)).toBeTruthy();
+  expect(result.compareDocumentPosition(screen.getByLabelText('地圖狀態')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
   expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
   fireEvent.click(within(result).getByRole('button', { name: '選擇候選 2：教學大樓' }));
@@ -113,7 +128,7 @@ it('requires a choice between ambiguous same-school buildings and never selects 
 it('does not guess unknown building codes and preserves the classroom through an account reconnect', async () => {
   state.user = null;
   vi.mocked(loadMapLocations).mockResolvedValue([]);
-  render(<MapClient school="pu" query="PH303" focus="pu-library" />);
+  render(<MapClient school="pu" query="ZZ303" focus="pu-library" />);
   await sourceSettled();
   const result = screen.getByRole('region', { name: '教室定位結果' });
   expect(within(result).getByText(/目前地點資料無法確認/)).toBeTruthy();
@@ -121,9 +136,22 @@ it('does not guess unknown building codes and preserves the classroom through an
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-library');
   const login = new URL(screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!, window.location.origin);
   const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
-  expect(back.searchParams.get('query')).toBe('PH303');
+  expect(back.searchParams.get('query')).toBe('ZZ303');
   expect(back.searchParams.get('focus')).toBe('pu-library');
   expect(back.searchParams.get('schoolId')).toBe('pu');
+});
+
+it('puts unknown-room recovery above the map and selects the query to edit', async () => {
+  vi.mocked(loadMapLocations).mockResolvedValue([]);
+  render(<MapClient school="pu" query="ZZ303" />);
+  await sourceSettled();
+  const result = screen.getByRole('region', { name: '教室定位結果' });
+  expect(result.compareDocumentPosition(screen.getByLabelText('地圖狀態')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
+  fireEvent.click(within(result).getByRole('button', { name: '修改教室名稱' }));
+  const input = screen.getByRole('searchbox', { name: '搜尋地點' }) as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'ZZ303'.length]);
 });
 
 it('honors explicit focus over a resolved classroom and resets the request when URL query changes', async () => {
