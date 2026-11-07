@@ -236,11 +236,12 @@ export function resolvePublicCourseAssistantIntent(
   );
   text = text.replace(/^(?:courses?\s+(?:for\s+)?)/i, '');
   text = text.replace(/(?:嗎|呢)$/, '').trim();
-  text = text.replace(/(?:的)?(?:公開開課|開課|課程|課|\s+courses?)$/, '').trim();
-  if (/^(?:所有|全部|有哪些|有什麼|開設|清單|目錄)$/.test(text)) text = '';
+  // Inspect the complete condition before stripping a trailing course word:
+  // removing 課 from 沒課／不上課 would erase a negative requirement.
   const extracted = extractPublicCourseAssistantFilters(text);
   if ('error' in extracted) return clarify(extracted.error);
-  text = extracted.text;
+  text = extracted.text.replace(/(?:的)?(?:公開開課|開課|課程|課|\s+courses?)$/, '').trim();
+  if (/^(?:所有|全部|有哪些|有什麼|開設|清單|目錄)$/.test(text)) text = '';
   const quoted = text.match(/^[「『“"]([^「」『』“”"]*)[」』”"]$/);
   if (quoted) text = quoted[1].trim();
   else if (/[「」『』“”"]/.test(text)) return clarify(queryHelp);

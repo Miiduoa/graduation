@@ -133,7 +133,7 @@ GET /api/public-course-catalog?schoolId=nthu&q=資料庫&weekday=1&credits=3
 
 - `weekday` 為 1–7，表示至少一組上課時段在指定日。例如星期一與星期四都有課的課程，符合「星期一有課」；不表示只有星期一。結果與匯入保留全部上課時段及教室配對，不裁掉其他日。可辨識星期也不等於已驗證該學期鐘點，原本的學期、時段與匯入核對仍須通過。
 - `credits` 為 0–40 的有限數值，最多兩位小數，採數值完全相等；3 與來源的 3.0 可相符，0 學分也是有效條件。表單留白表示不限，送出時省略該參數；URL 的空值、超界值與重複值會被拒絕。校方學分欄位無法解析時，不能猜成 0 或已符合。
-- 自然語句只接受單一星期與單一精確學分。日期、上下週、多天、範圍、比較與排除條件會要求釐清，例如「下週三」、「星期一和三」、「至少 3 學分」或「除了星期一」。指定其他學期、鐘點、必選修與不衝堂也尚未支援。私人課務及寫入要求維持既有邊界，不因加上星期或學分而變成公開查課。[語句條件解析](../../packages/shared/src/publicCourseAssistantFilters.ts)
+- 自然語句只接受單一星期與單一精確學分。日期、上下週、多天、範圍、比較與排除條件會要求釐清，例如「下週三」、「星期一和三」、「至少 3 學分」或「除了星期一」。先辨識完整條件，再移除結尾的課程用語，避免「星期三沒課／不上課／無課」被截斷後反向套用正向篩選。指定其他學期、鐘點、必選修與不衝堂也尚未支援。私人課務及寫入要求維持既有邊界，不因加上星期或學分而變成公開查課。[語句條件解析](../../packages/shared/src/publicCourseAssistantFilters.ts)
 
 ### Web／Mobile 與後續核對
 
@@ -148,11 +148,11 @@ Mobile 全域搜尋等既有入口若帶入格式合法的 `semester`，會保�
 ### 第三階段驗證紀錄
 
 - 基底為第二階段提交 `777e582b575932922757e0e467adb3f1a6544f11`，繼續使用 PR #526 原分支。新提交的遠端 CI 由 [PR checks](https://github.com/Miiduoa/graduation/pull/526/checks) 追蹤，不沿用基底提交的 success 宣稱新篩選版本已通過。
-- 本輪 Web／shared 相關 10 個檔案共 428 項通過：共用條件、自然語句與 client 3 檔 176 項；API／操作與來源 4 檔 166 項；Web 表單／頁面與結果卡 3 檔 86 項。Web 表單 effect 收尾後另重跑其中 60 項通過，不重複加總。
-- Mobile 最後統一序列執行 7 suites、124 項全數通過，包含一般助理公開查課、feature、條件表單、路由交接、原查課頁、完整多日時段匯入與既有匯入核對。合法舊 semester handoff 的修正已納入此批驗證。先前測試計時器清理逾時已修正，遭 SIGKILL 的 suite 也重跑通過；沒有跳過測試或調高 timeout，早期 40 項的重跑不重複計數。
+- 本輪 Web／shared 相關 10 個檔案共 431 項通過：共用條件、自然語句與 client 3 檔 179 項（含短句否定的最後修正）；API／操作與來源 4 檔 166 項；Web 表單／頁面與結果卡 3 檔 86 項。Web 表單 effect 收尾後另重跑其中 60 項通過，不重複加總。
+- Mobile 最後統一序列執行 7 suites、124 項全數通過，包含一般助理公開查課、feature、條件表單、路由交接、原查課頁、完整多日時段匯入與既有匯入核對。合法舊 semester handoff 的修正已納入此批驗證。短句否定收尾後，受影響的助理畫面與 feature 2 suites、27 項再次通過，不重複計數。先前測試計時器清理逾時已修正，遭 SIGKILL 的 suite 也重跑通過；沒有跳過測試或調高 timeout，早期 40 項的重跑不重複計數。
 - 2026-11-07 21:29（台灣時間），以新增 shared 自然語句 client → 本機實際 GET route → 固定官方 HTTPS 來源串接，當前校別為靜宜 `pu`。「查清大星期三3學分的資料課程」取得清大 1 筆：`11510STAT202100`「資料結構與演算法」，學期 `1151`、學分 `3`、校方時間 `M3M4W2`；星期一及星期三的時段完整保留。
 - 將同一問句校別改為暨大，取得 1 筆：`130021`「資料結構與演算法(上)」，學期 `1151`、學分 `3.0`、校方時間 `3bcd`。兩校均為 HTTP 200、v2 回覆、預覽 1 筆、`truncated: false`、`unresolvedCount: 0`；這是當次條件的實際結果，不是對所有課程資料完整性的保證。
 - 上述實測各校僅一次固定官方 GET，只有 `Accept` header，`credentials: omit`、`redirect: error`；搜尋字、星期與學分條件皆未送到校方上游。這是本機 route 串接官方資料，並非已部署 production 端點驗收；原始執行輸出未納入公開文件。
-- Node `22.23.4`：shared 完整 TypeScript 檢查通過。Web 完整 TypeScript 在本機以 768 MiB heap 序列執行，仍因 heap out of memory 中止（exit 134），沒有產生型別診斷。本輪完整 Web／Mobile 型別驗證以新提交 CI 為準。
+- Node `22.23.4`：shared 完整 TypeScript 檢查通過。Web 完整 TypeScript 在本機以 768 MiB heap 序列執行，因 heap out of memory 中止（exit 134）；其後以 2 GiB heap 單獨重跑仍遭終止（exit 137），皆沒有產生型別診斷。第三階段初版提交 `2cd2f96e1c800045852c09a71c1b1df57a1cb17a` 的 [Lint／Type](https://github.com/Miiduoa/graduation/actions/runs/42377571625/job/128418208580) 與 [全量 Mobile Tests](https://github.com/Miiduoa/graduation/actions/runs/42377571625/job/128418208313) 已 success；後續短句否定修正的完整 CI 仍須以最新 head 核對。
 - 修改的 33 個 TypeScript／TSX 檔案以各自 ESLint 設定檢查，零錯誤；Mobile 僅保留基底 `CampusAssistantScreen` 的兩個 effect dependency 警告。`git diff --check` 通過。遠端樹、提交與最新 CI 結果另記錄於 PR 描述，尚不代表已合併或正式部署。
 - 本機元件瀏覽器視覺 QA 與真實手機驗收仍未完成，本輪沒有重試受阻的瀏覽器環境。互動測試、CI build 與前一提交的 Maestro／adoption 成功各有範圍，不代替本輪完整站或實機驗收；目前也不宣稱已部署或超越競品。
