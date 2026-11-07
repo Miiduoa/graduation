@@ -149,6 +149,27 @@ beforeEach(() => {
   vi.mocked(getDocsFromServer).mockResolvedValue({ docs: [] } as never);
 });
 
+it('reads photo arrays and the legacy URL, keeping only unique HTTPS photos', async () => {
+  vi.stubEnv('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET', 'campus.test');
+  try {
+    const campus = 'https://firebasestorage.googleapis.com/v0/b/campus.test/o/lost%2Fbag.jpg?alt=media';
+    const otherBucket = campus.replace('campus.test/', 'campus.test.other/');
+    const external = 'https://photos.example/bag-side.jpg';
+    records['schools/pu/lostFound/item-1'] = openItem({
+      imageUrls: [null, campus, campus + '#same', 'https://', 'data:image/png;base64,cG5n',
+        'http://photos.example/bag.jpg', 'https://user:pass@photos.example/', otherBucket],
+      imageUrl: external,
+    });
+    expect((await getLostFoundItem('item-1', 'pu'))?.photos).toEqual([
+      { src: campus, host: 'firebasestorage.googleapis.com', campusHosted: true },
+      { src: otherBucket, host: 'firebasestorage.googleapis.com', campusHosted: false },
+      { src: external, host: 'photos.example', campusHosted: false },
+    ]);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it('creates with a stable document id and confirms the server receipt', async () => {
   const item = await createLostFoundItem('pu', 'draft-1', baseFields);
   expect(pathKey(transaction.set.mock.calls[0]?.[0])).toBe('schools/pu/lostFound/draft-1');
