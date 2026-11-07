@@ -58,6 +58,14 @@ it('keeps manually typed questions private until the user asks for AI interpreta
   expect(await screen.findByText('要讀書還是借書？')).toBeTruthy();
 });
 
+it('offers an explicit private-message destination without sending the instruction to a model', () => {
+  render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), { target: { value: '開啟私人訊息' } });
+  expect(screen.getByRole('link', { name: /^訊息查看自己的私人對話/ }).getAttribute('href')).toBe('/dms');
+  expect(screen.queryByRole('button', { name: '用 AI 理解這句話' })).toBeNull();
+  expect(interpretCampusRequest).not.toHaveBeenCalled();
+});
+
 it('never exposes a previous AI answer after a transcript change or logout', async () => {
   let resolve!: (result: any) => void;
   vi.mocked(interpretCampusRequest).mockReturnValue(new Promise(done => { resolve = done; }));

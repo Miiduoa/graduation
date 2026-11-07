@@ -1,12 +1,16 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import AssistantPage, { dynamic } from './page';
+const identity = vi.hoisted(() => ({ loading: false, error: '', pendingLogout: false, platform: true, school: false }));
+vi.mock('@/components/AuthGuard', () => ({
+  useAuth: () => ({ user: identity.school ? { uid: 'school-user' } : null, loading: false, error: null }),
+}));
 vi.mock('./LegacyAssistant', () => ({
   default: ({ children }: { children?: ReactNode }) => <div>Legacy entry{children}</div>,
 }));
 vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({ loading: false, error: '', pendingLogout: false, session: { context: 'session-a' } }),
+  useNuniSession: () => ({ ...identity, session: identity.platform ? { context: 'session-a', platformAccountId: 'alice' } : null }),
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
 vi.mock('@/lib/useCampusBrowseContext', () => ({
@@ -15,7 +19,44 @@ vi.mock('@/lib/useCampusBrowseContext', () => ({
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
-afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); });
+afterEach(() => {
+  cleanup(); vi.unstubAllEnvs(); vi.unstubAllGlobals();
+  Object.assign(identity, { loading: false, error: '', pendingLogout: false, platform: true, school: false });
+});
+
+it('preserves the school account entry when only the platform infrastructure is enabled', () => {
+  vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
+  identity.platform = false;
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  render(<AssistantPage />);
+  expect(screen.getByText(/Legacy entry/)).toBeTruthy();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('retains the school engine for a dual session when platform cloud is disabled', () => {
+  vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
+  identity.school = true;
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  render(<AssistantPage />);
+  expect(screen.getByText(/Legacy entry/)).toBeTruthy();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(['loading', 'error', 'pendingLogout'] as const)('does not change identity while platform %s is unresolved', (field) => {
+  vi.stubEnv('NUNI_CLASSROOM_ENABLED', 'true');
+  vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', 'false');
+  identity.platform = false;
+  if (field === 'error') identity.error = 'unavailable';
+  else identity[field] = true;
+  render(<AssistantPage />);
+  expect(screen.queryByText(/Legacy entry/)).toBeNull();
+  expect(screen.queryByLabelText('問題')).toBeNull();
+});
 for (const gate of ['off', 'backend', 'classroom']) {
   for (const flag of [undefined, 'false', 'true', 'TRUE']) {
     it(`routes gate=${gate}, assistant=${flag} without capability requests when off`, async () => {
@@ -30,8 +71,12 @@ for (const gate of ['off', 'backend', 'classroom']) {
         expect(screen.queryByText('Legacy entry')).toBeNull();
         await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
         expect(fetch.mock.calls[0]?.[0]).toBe('/api/nuni/assistant/capability');
-      } else {
+      } else if (gate === 'off') {
         expect(screen.getByText('Legacy entry')).toBeTruthy();
+        expect(fetch).not.toHaveBeenCalled();
+      } else {
+        expect(screen.queryByText('Legacy entry')).toBeNull();
+        expect(screen.getByLabelText('問題')).toBeTruthy();
         expect(fetch).not.toHaveBeenCalled();
       }
     });

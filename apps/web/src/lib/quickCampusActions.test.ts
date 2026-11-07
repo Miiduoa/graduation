@@ -12,6 +12,9 @@ describe('natural-language campus shortcuts', () => {
     ['我想查公車的到站時間', '/bus'],
     ['宿舍洗衣機報修', '/dormitory'],
     ['要看學期成績', '/grades?tab=semester'],
+    ['開啟成績單', '/grades?tab=semester'],
+    ['開啟我的成績', '/grades?tab=semester'],
+    ['開啟成績回饋', '/grades?tab=feedback'],
     ['找附近的餐廳菜單', '/cafeteria'],
   ])('matches a spoken goal without inventing a service: %s', (utterance, href) => {
     expect(getQuickCampusActions(utterance)[0]?.href).toBe(href);

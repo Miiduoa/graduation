@@ -2,6 +2,7 @@ import { operationSignal } from './operation';
 import { cartArgs, foodCardArgs, priceCart } from './food';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { validatePersonalImportSyncRecords } from '@campus/shared/src/imports/sync';
+import { ASSISTANT_SERVICES, assistantServiceHref } from '@campus/shared/src/assistantServices';
 import {
   addDays,
   canonical,
@@ -59,26 +60,19 @@ export function revoke(binding: Binding, raw: unknown, secret: string, now: numb
   proposals.get(hash(binding))!.revoked.add(p.mutationId);
   return { revoked: true };
 }
-const routes: Record<string, string> = {
-  today: '/today',
-  timetable: '/timetable',
-  calendar: '/calendar',
-  classroom: '/classroom',
-  orders: '/orders',
-  clubs: '/clubs',
-  map: '/map',
-  bus: '/bus',
-  cafeteria: '/cafeteria',
-  announcements: '/announcements',
-  events: '/events',
-};
+const routes: Record<string, string> = Object.fromEntries(
+  ASSISTANT_SERVICES.map((service) => [service.id, service.href]),
+);
 export function pageArgs(raw: unknown): Obj {
-  const a = object(raw, ['page', 'entityId']);
+  // tenantId is added only after an order was observed in its permitted realm.
+  // The public propose_open_page tool schema intentionally does not accept it.
+  const a = object(raw, ['page', 'entityId', 'tenantId']);
   if (typeof a.page !== 'string') return fail();
   const page = a.page.replace(/^\//, '') === 'club' ? 'clubs' : a.page.replace(/^\//, '');
   if (!Object.hasOwn(routes, page)) return fail();
+  if (a.tenantId !== undefined && (page !== 'orders' || a.entityId === undefined)) return fail();
   if (a.entityId !== undefined && ['classroom', 'orders', 'cafeteria'].includes(page))
-    return { page, entityId: id(a.entityId) };
+    return { page, entityId: id(a.entityId), ...(a.tenantId !== undefined ? { tenantId: id(a.tenantId) } : {}) };
   if (a.entityId !== undefined) id(a.entityId);
   return { page };
 }
@@ -91,13 +85,15 @@ export function pageHref(raw: unknown, schoolId: string): string {
       ? '/classroom/course/' + entity
       : entity && page === 'cafeteria'
         ? '/cafeteria/' + entity
-        : routes[page];
-  return (
-    path +
-    '?schoolId=' +
-    encodeURIComponent(schoolId) +
-    (entity && page === 'orders' ? '&orderId=' + entity : '')
-  );
+        : null;
+  if (path) return path + '?schoolId=' + encodeURIComponent(schoolId);
+  const href = assistantServiceHref(page, schoolId, 'platform');
+  if (!href) return fail();
+  if (entity && page === 'orders') {
+    if (!a.tenantId) return fail('FORBIDDEN_SCOPE', 403);
+    return href + '&tenant=' + encodeURIComponent(String(a.tenantId)) + '&order=' + entity;
+  }
+  return href;
 }
 function mac(secret: string, body: string) {
   if (secret.length < 32) return fail('CONFIGURATION_REQUIRED', 503);

@@ -275,6 +275,9 @@ jobs:
       - name: Test shared ordering contracts
         run: pnpm --filter @campus/shared test:food
 
+      - name: Test assistant service and academic data contracts
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs
+
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
 
