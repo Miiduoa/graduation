@@ -57,7 +57,11 @@ jobs:
       - name: Complete Web typecheck
         run: pnpm --filter web typecheck
       - name: Focused ESLint
-        run: pnpm --filter web exec eslint src/lib/community/titleSearch.ts src/lib/community/titleSearch.test.ts src/lib/community/titleSearch.emulator.test.ts src/app/community/_components/TitleHistorySearch.tsx src/app/community/_components/TitleHistorySearch.test.tsx src/app/community/history/page.tsx
+        run: pnpm --filter web exec eslint src/lib/community/titleSearch.ts src/lib/community/titleSearch.test.ts src/lib/community/titleSearch.emulator.test.ts src/app/community/_components/TitleHistorySearch.tsx src/app/community/_components/TitleHistorySearch.test.tsx src/app/community/history/page.tsx src/app/community/page.tsx
+      - name: Compile the actual Next routes without deployment
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm --filter web build
   title-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 20
