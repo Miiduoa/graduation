@@ -121,6 +121,28 @@ test('a new repository session restores the full dated plan and personal progres
   expect((await readSavedCampusPlans(scope, session()))[0].plan.steps[0].title).toBe('資料庫報告');
 });
 
+test('live nuni lookup hints are stripped from every saved assignment position and from restored input', async () => {
+  const platformScope = { owner: 'nuni:student-a', schoolId: 'pu' };
+  const live = sample();
+  const source = { accountId: 'student-a', schoolId: 'pu', academicYear: '115', semester: '1',
+    workspaceId: 'cw_00000000-0000-4000-8000-000000000001',
+    assignmentId: 'cwa_00000000-0000-4000-8000-000000000001' };
+  live.steps[0].nuniSource = source;
+  live.agenda!.days[0].deadlines[0].nuniSource = source;
+  live.agenda!.outsideWindow[0].nuniSource = source;
+  const saved = await saveCampusPlan(platformScope, { question, plan: live }, session());
+  expect(saved[0].plan).toEqual(sample());
+  expect(live.steps[0].nuniSource).toEqual(source);
+  const key = savedCampusPlansStorageKey(platformScope);
+  expect(persisted.get(key)).not.toContain('nuniSource');
+  const oldInput = JSON.parse(persisted.get(key)!);
+  oldInput.plans[0].plan.steps[0].nuniSource = source;
+  oldInput.plans[0].plan.agenda.days[0].deadlines[0].nuniSource = source;
+  oldInput.plans[0].plan.agenda.outsideWindow[0].nuniSource = source;
+  persisted.set(key, JSON.stringify(oldInput));
+  expect((await readSavedCampusPlans(platformScope, session()))[0].plan).toEqual(sample());
+});
+
 test('a nuni clock plan survives real serialization with Sunday, overnight dates, offsets and explicitly empty days', async () => {
   const platformScope = { owner: 'nuni:student-a', schoolId: 'pu' };
   const plan = clockSample();

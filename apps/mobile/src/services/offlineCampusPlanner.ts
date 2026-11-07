@@ -3,6 +3,7 @@ import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
 import { parseCampusAssignmentSource } from './campusAssignmentSource';
 import type { CampusPlanComparisonBasis } from './campusPlanComparison';
+import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
 import {
   buildCampusStudyAgenda,
   formatCampusStudyAgenda,
@@ -27,6 +28,8 @@ export interface CampusPlanStep {
   /** Only server-authorized assignment steps may carry a verified deadline. */
   dueAt?: string;
   groupName?: string;
+  /** Live lookup hint only. Saved copies discard it and never restore permission to open a target. */
+  nuniSource?: NuniPlanAssignmentSource;
 }
 
 export interface CampusEvidencePlan {

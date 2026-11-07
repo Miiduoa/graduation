@@ -74,6 +74,10 @@ async function plan(overrides: Partial<typeof input> = {}): Promise<CampusEviden
   return result!;
 }
 
+function withoutLiveSources(value: CampusEvidencePlan): CampusEvidencePlan {
+  return JSON.parse(JSON.stringify(value, (key, item) => key === 'nuniSource' ? undefined : item));
+}
+
 test('builds seven Taiwan dates from imported records without a legacy timetable and saves a true planner roundtrip', async () => {
   const result = await plan();
   expect(result.agenda?.days.map((day) => day.date)).toEqual([
@@ -87,7 +91,7 @@ test('builds seven Taiwan dates from imported records without a legacy timetable
     status: 'complete', checkedAt, total: 1,
     items: [{ identity: [workspace().id, assignment().id], title: '作業 1', groupName: '資料庫', dueAt: assignment().dueAt }],
   });
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
   expect(result.content).toContain('10:10');
   expect(result.content).not.toMatch(/第\d+節|不可出現在|group-assignment/);
   expect(read).toHaveBeenCalledWith('', 'pu', input.platformTimetable);
@@ -100,7 +104,10 @@ test('builds seven Taiwan dates from imported records without a legacy timetable
   const saved = await saveCampusPlan(scope, { question, plan: result }, session);
   await setCampusPlanStepDone(scope, saved[0].id, result.steps[0].id, true, session);
   const restored = await readSavedCampusPlans(scope, createSavedCampusPlanSession(() => true));
-  expect(restored[0].plan).toEqual(result);
+  expect(restored[0].plan).toEqual(withoutLiveSources(result));
+  expect(result.steps[0].nuniSource).toEqual({ accountId, schoolId: 'pu', academicYear: '115', semester: '1',
+    workspaceId: workspace().id, assignmentId: assignment().id });
+  expect(restored[0].plan.steps[0]).not.toHaveProperty('nuniSource');
   expect(restored[0].completedStepIds).toEqual([result.steps[0].id]);
   expect(await readSavedCampusPlans({ owner: `nuni:${accountId}`, schoolId: 'ncku' }, session)).toEqual([]);
 });
@@ -126,7 +133,7 @@ test('uses saved one-day cancellation, Sunday room changes and overnight makeup 
   expect(result.agenda?.days[1].scheduledClasses).toEqual([overnight]);
   expect(result.agenda?.days[2].scheduledClasses).toEqual([overnight,
     { name: '週日專題', room: '901', startAt: '2026-11-08T05:00:00.000Z', endAt: '2026-11-08T06:00:00.000Z' }]);
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
 
 test('keeps full source identity for closed/submitted and outside-window items while only open unsubmitted work becomes a task', async () => {
@@ -146,7 +153,7 @@ test('keeps full source identity for closed/submitted and outside-window items w
   expect(result.agenda?.outsideWindow.map((item) => item.title).sort()).toEqual(['作業 4', '作業 5', '作業 6']);
   expect(result.comparisonBasis?.assignments.items).toHaveLength(6);
   expect(JSON.stringify(result)).not.toMatch(/不可出現在|mySubmission|instructions|group-assignment|platformAccountId/);
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
 
 test.each([null, source(record(1, { linkedCourseId: undefined }))])('does not infer workspace authority from a name or from a missing scoped timetable: %j', async (timetable) => {
@@ -156,7 +163,7 @@ test.each([null, source(record(1, { linkedCourseId: undefined }))])('does not in
   expect(input.bffRequest).not.toHaveBeenCalled();
   expect(result.comparisonBasis?.assignments.status).toBe('unavailable');
   expect(result.limitations.join(' ')).toContain(timetable ? '尚未連結' : '尚無法確認');
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
 
 test.each([
@@ -224,7 +231,7 @@ test('a failed source keeps successful student work partial and unlinked same-na
   expect(result.comparisonBasis?.assignments).toMatchObject({ status: 'partial', total: null, items: [{ title: '作業 1' }] });
   expect(input.bffRequest.mock.calls.flat().join(' ')).not.toContain(workspace(3).id);
   expect(result.limitations.join(' ')).toMatch(/未依同名自動配對/);
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
 
 test('retains at most 400 source assignments, labels 100-row pages partial and compares full identities beyond top steps', async () => {
@@ -240,7 +247,7 @@ test('retains at most 400 source assignments, labels 100-row pages partial and c
   expect(first.limitations.join(' ')).toContain('100 筆上限');
   expect(first.limitations.join(' ')).toContain('前 400 筆');
   expect(first.agenda!.days.flatMap((day) => day.deadlines).length + first.agenda!.outsideWindow.length).toBe(400);
-  expect(copyCampusEvidencePlan(first)).toEqual(first);
+  expect(copyCampusEvidencePlan(first)).toEqual(withoutLiveSources(first));
   input.bffRequest.mockImplementation(async (path) => ({ assignments: Array.from({ length: 100 }, (_, n) => assignment(n + 1, {
     workspaceId: path.split('/')[1], title: `練習 ${n + 1}`,
     dueAt: n === 49 ? '2026-11-06T13:00:00+08:00' : n === 99 ? '2026-12-01T23:59:00+08:00' : assignment().dueAt,
@@ -346,7 +353,7 @@ test('an unreadable or over-limit daily timetable never turns incomplete dates i
   read.mockResolvedValue(source(...Array.from({ length: 81 }, (_, n) => record(1, { id: `row-${n}` }))));
   result = await plan();
   expect(result.agenda?.timetableAvailable).toBe(false);
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
 
 function clockRecords(firstEnd = '10:00', secondStart = '13:00') {
@@ -371,13 +378,13 @@ test('suggests distinct buffered preparation slots in deadline order and preserv
   expect(tasks[2].detail).toContain('11/6（週五） 11:10–11:40（30 分鐘）');
   expect(result.content).toContain(tasks[1].detail);
   expect(result.limitations.join(' ')).toMatch(/08:00–22:00.*各保留 10 分鐘.*私人行程.*不代表能在 30 分鐘內完成.*尚未建立行事曆/);
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
   const scope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
   const session = createSavedCampusPlanSession(() => true);
   const saved = await saveCampusPlan(scope, { question, plan: result }, session);
   await setCampusPlanStepDone(scope, saved[0].id, tasks[0].id, true, session);
   const restored = await readSavedCampusPlans(scope, createSavedCampusPlanSession(() => true));
-  expect(restored[0].plan.steps).toEqual(result.steps);
+  expect(restored[0].plan.steps).toEqual(withoutLiveSources(result).steps);
   expect(restored[0].completedStepIds).toEqual([tasks[0].id]);
 });
 
@@ -438,7 +445,7 @@ test('an unplaced current course suppresses suggestions but an earlier term does
   expect(result.agenda?.ignoredCourses).toBe(1);
   expect(result.steps[0].detail).not.toContain('建議先用');
   expect(result.limitations.join(' ')).toContain('本次不建議準備時段');
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
   read.mockResolvedValue(source(...clockRecords(), record(3, { academicYear: '114', dayOfWeek: undefined, linkedCourseId: workspace().id })));
   result = await plan();
   expect(result.agenda?.ignoredCourses).toBe(0);
@@ -457,7 +464,7 @@ test('puts nested clock conflicts first and never schedules a task inside the en
   expect(result.steps[1].detail).toContain('12:10–12:40（30 分鐘）');
   expect(result.steps[2].detail).toContain('12:40–13:10（30 分鐘）');
   expect(result.steps[3].detail).toContain('13:10–13:40（30 分鐘）');
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
 });
 
 test('replanning uses the new class occurrence while leaving the saved preparation proposal unchanged', async () => {
@@ -487,7 +494,40 @@ test('partial assignment coverage only proposes time for observed tasks and keep
   expect(result.steps.filter((step) => step.evidence === 'authorized-assignments')).toHaveLength(1);
   expect(result.steps[0].detail).toContain('10:10–10:40（30 分鐘）');
   expect(result.limitations.join(' ')).toContain('缺資料不代表已完成');
-  expect(copyCampusEvidencePlan(result)).toEqual(result);
+  expect(copyCampusEvidencePlan(result)).toEqual(withoutLiveSources(result));
+});
+
+test('same-name tasks keep distinct live source IDs in priority, day and outside-window rows', async () => {
+  input.bffRequest.mockResolvedValue({ assignments: [
+    assignment(1, { title: '共同報告' }), assignment(2, { title: '共同報告' }),
+    assignment(3, { title: '共同報告', dueAt: '2026-11-20T23:59:00+08:00' }),
+    assignment(4, { title: '共同報告', dueAt: null }),
+  ] });
+  const result = await plan();
+  expect(result.steps.filter((step) => step.evidence === 'authorized-assignments')
+    .map((step) => step.nuniSource?.assignmentId)).toEqual([assignment(1).id, assignment(2).id, assignment(4).id]);
+  expect(result.agenda?.days[0].deadlines.map((row) => row.nuniSource?.assignmentId))
+    .toEqual([assignment(1).id, assignment(2).id]);
+  expect(result.agenda?.outsideWindow.map((row) => row.nuniSource?.assignmentId))
+    .toEqual([assignment(3).id, assignment(4).id]);
+  const stored = copyCampusEvidencePlan(result);
+  expect(stored).toEqual(withoutLiveSources(result));
+  expect(JSON.stringify(stored)).not.toContain('nuniSource');
+  expect(stored.comparisonBasis?.assignments.items.map((row) => row.identity?.[1]))
+    .toEqual([assignment(1).id, assignment(2).id, assignment(3).id, assignment(4).id]);
+});
+
+test('an unreviewed workspace linked to multiple terms has no precise live target hint', async () => {
+  read.mockResolvedValue(source(record(1, { semester: '1' }),
+    record(2, { semester: '2', linkedCourseId: workspace().id })));
+  input.request.mockImplementation(async (path, body) => path === 'class-workspaces' ? { workspaces: [workspace()] }
+    : { workspaceId: body?.workspaceId, status: 'unreviewed', course: null, membershipActive: true, memberRole: 'student' });
+  input.bffRequest.mockResolvedValue({ assignments: [assignment(1, { dueAt: '2027-02-02T23:59:00+08:00' })] });
+  const result = await plan({ now: Date.parse('2027-01-31T09:00:00+08:00') });
+  expect(result.comparisonBasis?.assignments.status).toBe('partial');
+  expect(result.steps.find((step) => step.evidence === 'authorized-assignments')).not.toHaveProperty('nuniSource');
+  expect(result.agenda?.days.flatMap((day) => day.deadlines)).toHaveLength(1);
+  expect(JSON.stringify(result.agenda)).not.toContain('nuniSource');
 });
 
 test.each(['幫我安排未來七天的課表與作業', '本週學習計畫', '明天作業優先順序', '下週讀書計畫'])('recognizes a read-only study plan: %s', (text) => {

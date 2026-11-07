@@ -2,7 +2,7 @@ import React from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
-import { act, cleanupAsync, fireEvent, fireEventAsync, render, renderAsync, within } from '@testing-library/react-native/pure';
+import { act, cleanupAsync, fireEvent, fireEventAsync, render, renderAsync, waitFor, within } from '@testing-library/react-native/pure';
 import * as Notifications from 'expo-notifications';
 import { PersonalEventReminderBridge } from '../components/PersonalEventReminderBridge';
 import { publicNavigationRef, markPublicNavigationReady, markPublicNavigationUnready } from '../app/publicNavigation';
@@ -14,6 +14,7 @@ import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { personalImportStorageKey } from '../services/personalImports';
 import type { NuniAssignment } from '@campus/shared/src/nuni';
 import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
+import * as nuniPlanAssignmentTarget from '../services/nuniPlanAssignmentTarget';
 import type { StoredTimetable } from '../services/personalTimetable';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
@@ -268,6 +269,230 @@ async function linkedWorkspaceFixture() {
   });
   return { course, other, assignment };
 }
+
+async function linkedPlanningFixture() {
+  const fixture = await linkedWorkspaceFixture();
+  const direct = mockRequest.getMockImplementation()!;
+  mockRequest.mockImplementation(async (path, session, input, ...rest) => {
+    if (path === 'course-access/workspace-course') {
+      expect(input).toEqual({ workspaceId: fixture.course.id, schoolId: 'pu' });
+      return {
+        workspaceId: fixture.course.id, memberRole: 'student', membershipActive: true,
+        status: 'reviewed', course: {
+          id: 'ccd_11111111-1111-4111-8111-111111111111', workspaceId: fixture.course.id,
+          version: 1, verification: 'administrator-reviewed', schoolId: 'pu', academicYear: '115', semester: '1',
+          title: fixture.course.title, courseCode: 'MIS302', teacher: '張老師', className: '資管三甲',
+        },
+      };
+    }
+    return direct(path, session, input, ...rest);
+  });
+  const decoy: NuniAssignment = {
+    ...fixture.assignment, id: 'cwa_33333333-3333-4333-8333-333333333333',
+    instructions: '另一份同名作業，不能代替目標作業。', state: 'closed', closedAt: '2026-11-04T08:00:00Z',
+  };
+  const assignmentPath = `class-workspaces/${fixture.course.id}/assignments`;
+  mockAssignmentBff.mockImplementation(async (path) => {
+    if (path === assignmentPath) return { assignments: [decoy, fixture.assignment] };
+    throw Error('unexpected assignment read ' + path);
+  });
+  return { ...fixture, decoy, assignmentPath };
+}
+
+async function openPlatformWeekPlan() {
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const unhandled = jest.fn();
+  const screen = await renderAsync(
+    <NuniSessionProvider>
+      <NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+        <PreAuthStack />
+      </NavigationContainer>
+    </NuniSessionProvider>,
+  );
+  await fireEventAsync.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  await fireEventAsync.press(await screen.findByRole('button', { name: '規劃未來七天' }));
+  await screen.findByText('接下來七天的學習行動');
+  const actions = await screen.findAllByRole('button', { name: '查看這份作業' });
+  return { screen, navigation, unhandled, openAssignment: actions[0] };
+}
+
+test('a platform plan freshly checks its exact assignment and the real receiver focuses the updated record', async () => {
+  const { course, other, assignment, decoy, assignmentPath } = await linkedPlanningFixture();
+  const { screen, navigation, unhandled, openAssignment } = await openPlatformWeekPlan();
+  expect(mockAssignmentBff.mock.calls.map(([path]) => path)).toEqual([assignmentPath]);
+  const latest: NuniAssignment = {
+    ...assignment, title: '小考報告：更新要求', instructions: '最新要求：請補上關聯模型與資料字典。',
+    dueAt: '2026-11-06T09:00:00Z',
+  };
+  let resolveFresh!: (value: unknown) => void;
+  let readsAfterPlan = 0;
+  mockAssignmentBff.mockImplementation(async (path) => {
+    if (path !== assignmentPath) throw Error('unexpected assignment read ' + path);
+    readsAfterPlan += 1;
+    if (readsAfterPlan === 1) return new Promise((resolve) => { resolveFresh = resolve; });
+    return { assignments: [decoy, latest] };
+  });
+  await fireEventAsync.press(openAssignment);
+  await waitFor(() => expect(resolveFresh).toBeDefined());
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+  expect(screen.queryByLabelText('作業繳交區：' + latest.title)).toBeNull();
+  await act(async () => resolveFresh({ assignments: [decoy, latest] }));
+
+  await screen.findByLabelText('作業繳交區：' + latest.title);
+  const target = within(screen.getByTestId(`assignment-${assignment.id}`));
+  expect(target.getByText(latest.instructions)).toBeTruthy();
+  expect(target.getByLabelText('作業繳交區：' + latest.title)).toBeTruthy();
+  expect(within(screen.getByTestId(`assignment-${decoy.id}`)).queryByLabelText('作業繳交區：' + decoy.title)).toBeNull();
+  expect(readsAfterPlan).toBeGreaterThanOrEqual(2);
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'NuniWorkspace', params: {
+      tab: 'courses', workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account,
+    },
+  });
+  expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls].some(([path]) => path.includes(other.id))).toBe(false);
+  expect(mockAssignmentBff.mock.calls.every(([, , input]) => input === undefined)).toBe(true);
+  expect(unhandled).not.toHaveBeenCalled();
+
+  await act(async () => navigation.goBack());
+  await screen.findByText('接下來七天的學習行動');
+  expect(navigation.getCurrentRoute()?.name).toBe('NuniTimetableAssistant');
+  expect(screen.queryByText('已收到伺服器繳交紀錄。')).toBeNull();
+});
+
+test('leaving a pending exact-assignment check for the course overview prevents late navigation, including after returning', async () => {
+  const lookup = jest.spyOn(nuniPlanAssignmentTarget, 'readNuniPlanAssignmentTarget');
+  const { course, other, assignment, decoy, assignmentPath } = await linkedPlanningFixture();
+  const direct = mockRequest.getMockImplementation()!;
+  mockRequest.mockImplementation(async (path, ...args) => path === `class-workspaces/${other.id}/quizzes`
+    ? { quizzes: [] } : direct(path, ...args));
+  const { screen, navigation, unhandled } = await openPlatformWeekPlan();
+  const assistantKey = navigation.getCurrentRoute()!.key;
+  const otherAssignmentPath = `class-workspaces/${other.id}/assignments`;
+
+  for (const returnBeforeReply of [false, true]) {
+    let resolveFresh!: (value: unknown) => void;
+    let deferFresh = true;
+    let overviewRead = false;
+    mockAssignmentBff.mockImplementation(async (path) => {
+      if (path === otherAssignmentPath) return { assignments: [] };
+      if (path !== assignmentPath) throw Error('unexpected assignment read ' + path);
+      if (deferFresh) {
+        deferFresh = false;
+        return new Promise((resolve) => { resolveFresh = resolve; });
+      }
+      overviewRead = true;
+      return { assignments: [decoy, assignment] };
+    });
+    await fireEventAsync.press((await screen.findAllByRole('button', { name: '查看這份作業' }))[0]);
+    await waitFor(() => expect(resolveFresh).toBeDefined());
+    const pendingLookup = lookup.mock.results[lookup.mock.results.length - 1];
+    expect(pendingLookup.type).toBe('return');
+    expect(screen.getByRole('button', { name: '正在核對作業…' })).toBeDisabled();
+
+    await fireEventAsync.press(screen.getByRole('button', { name: '開啟課程與作業核對' }));
+    await screen.findByText('我的課程');
+    await screen.findAllByRole('button', { name: course.title });
+    await waitFor(() => expect(overviewRead).toBe(true));
+    const destination = navigation.getCurrentRoute();
+    expect(destination).toMatchObject({ name: 'NuniWorkspace', params: { tab: 'courses' } });
+    expect(destination?.params).toEqual({ tab: 'courses' });
+    // A new workspace is pushed above the existing assistant. The pending
+    // button stays mounted, so this exercises blur rather than unmount cleanup.
+    expect(navigation.getRootState().routes.some((route) =>
+      route.key === assistantKey && route.name === 'NuniTimetableAssistant')).toBe(true);
+    expect(screen.queryByLabelText('作業繳交區：' + assignment.title)).toBeNull();
+    if (returnBeforeReply) {
+      await act(async () => navigation.goBack());
+      await screen.findByText('接下來七天的學習行動');
+      expect(navigation.getCurrentRoute()?.key).toBe(assistantKey);
+    }
+
+    await act(async () => {
+      resolveFresh({ assignments: [decoy, assignment] });
+      // Observe the real reader's promise, including its final binding read;
+      // no arbitrary delay or mocked resolver hides a late navigation.
+      await pendingLookup.value;
+    });
+    if (!returnBeforeReply) {
+      expect(navigation.getCurrentRoute()).toEqual(destination);
+      expect(screen.getByText('我的課程')).toBeTruthy();
+      expect(screen.queryByLabelText('作業繳交區：' + assignment.title)).toBeNull();
+      await act(async () => navigation.goBack());
+    }
+    await screen.findByText('接下來七天的學習行動');
+    expect(navigation.getCurrentRoute()?.key).toBe(assistantKey);
+    expect(screen.queryByRole('button', { name: '正在核對作業…' })).toBeNull();
+    expect(screen.queryByLabelText('作業繳交區：' + assignment.title)).toBeNull();
+  }
+  expect(mockAssignmentBff.mock.calls.every(([path, session, input]) =>
+    [assignmentPath, otherAssignmentPath].includes(path) && session === 'ps_' + 'a'.repeat(43) && input === undefined)).toBe(true);
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
+test('the real receiver rejects assignment params produced by a plan after the platform account changes', async () => {
+  const { course, assignment } = await linkedPlanningFixture();
+  const { screen, navigation, openAssignment } = await openPlatformWeekPlan();
+  await fireEventAsync.press(openAssignment);
+  await screen.findByLabelText('作業繳交區：' + assignment.title);
+  const params = navigation.getCurrentRoute()?.params as PreAuthStackParamList['NuniWorkspace'];
+  expect(params).toMatchObject({ workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account });
+  await screen.unmountAsync();
+
+  const nextAccount = 'pa_22222222-2222-4222-8222-222222222222';
+  const nextCourse = { ...course, id: 'cw_44444444-4444-4444-8444-444444444444', title: '目前帳號的課程' };
+  const nextHandle = 'ps_' + 'b'.repeat(43);
+  const nextAssignmentPath = `class-workspaces/${nextCourse.id}/assignments`;
+  mockStored = JSON.stringify({
+    platformAccountId: nextAccount, sessionHandle: nextHandle,
+    expiresAt: Date.now() + 3_600_000, pendingLogout: false,
+  });
+  mockRequest.mockReset().mockImplementation(async (path) => {
+    if (path === 'sessions/current') return { authenticated: true, platformAccountId: nextAccount, isPlatformOperator: false };
+    if (path === 'class-workspaces') return { workspaces: [nextCourse] };
+    throw Error('a previous-account target must not be read: ' + path);
+  });
+  mockAssignmentBff.mockReset().mockImplementation(async (path, session, input) => {
+    // The receiver may load the current account's overview, never the prior plan's target.
+    if (path === nextAssignmentPath && session === nextHandle && input === undefined) return { assignments: [] };
+    throw Error('a previous-account assignment must not be read: ' + path);
+  });
+  const restored = await renderAsync(
+    <NuniSessionProvider>
+      <NavigationContainer initialState={{ index: 0, routes: [{ name: 'NuniWorkspace', params }] }}>
+        <PreAuthStack />
+      </NavigationContainer>
+    </NuniSessionProvider>,
+  );
+  await restored.findByText('已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。');
+  await restored.findByText(nextCourse.title);
+  expect(restored.queryByLabelText('作業繳交區：' + assignment.title)).toBeNull();
+  expect(restored.queryByText(assignment.instructions)).toBeNull();
+  expect(mockRequest.mock.calls.some(([path]) => path.includes(course.id))).toBe(false);
+  expect(mockAssignmentBff.mock.calls.every(([path, session, input]) =>
+    path === nextAssignmentPath && session === nextHandle && input === undefined)).toBe(true);
+});
+
+test('the real receiver reports an assignment removed after fresh verification instead of focusing a same-name item', async () => {
+  const { course, assignment, decoy, assignmentPath } = await linkedPlanningFixture();
+  const { screen, navigation, unhandled, openAssignment } = await openPlatformWeekPlan();
+  let readsAfterPlan = 0;
+  mockAssignmentBff.mockImplementation(async (path) => {
+    if (path !== assignmentPath) throw Error('unexpected assignment read ' + path);
+    readsAfterPlan += 1;
+    return { assignments: readsAfterPlan === 1 ? [decoy, assignment] : [decoy] };
+  });
+  await fireEventAsync.press(openAssignment);
+  await screen.findByText('找不到這份作業。可能已被老師刪除，或你沒有查看權限。請從作業列表選擇其他作業。');
+  expect(navigation.getCurrentRoute()).toMatchObject({
+    name: 'NuniWorkspace', params: { workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account },
+  });
+  expect(screen.getByTestId(`assignment-${decoy.id}`)).toBeTruthy();
+  expect(screen.queryByTestId(`assignment-${assignment.id}`)).toBeNull();
+  expect(screen.queryByLabelText('作業繳交區：' + assignment.title)).toBeNull();
+  expect(readsAfterPlan).toBeGreaterThanOrEqual(2);
+  expect(mockAssignmentBff.mock.calls.every(([, , input]) => input === undefined)).toBe(true);
+  expect(unhandled).not.toHaveBeenCalled();
+});
 
 test('the assistant opens the exact assignment in the linked workspace even when another joined class has the same name', async () => {
   const { course, other, assignment } = await linkedWorkspaceFixture();

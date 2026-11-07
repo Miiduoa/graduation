@@ -4,6 +4,7 @@ import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusEvidencePlan, CampusPlanPriority, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import type { CampusAssignmentIdentity } from '../services/campusAssignmentTarget';
+import type { NuniPlanAssignmentSource } from '../services/nuniPlanAssignmentTarget';
 import type { safeNavigate } from '../utils/safeNavigate';
 import { CampusAssignmentReminderAction } from './CampusAssignmentReminderAction';
 import { CampusStudyAgendaCard } from './CampusStudyAgendaCard';
@@ -38,6 +39,7 @@ export function CampusEvidencePlanCard({
   navigation,
   historical = false,
   progress,
+  renderAssignmentAction,
 }: {
   plan: CampusEvidencePlan;
   disabled: boolean;
@@ -45,6 +47,8 @@ export function CampusEvidencePlanCard({
   navigation?: Parameters<typeof safeNavigate>[0];
   /** Saved copies retain their original dates and never restore a live data grant. */
   historical?: boolean;
+  /** Live actions come from the current session, never from a saved plan's evidence. */
+  renderAssignmentAction?: (assignment: CampusAssignmentIdentity & { nuniSource?: NuniPlanAssignmentSource }) => React.ReactNode;
   progress?: {
     completedStepIds: string[];
     onToggleStep: (stepId: string, done: boolean) => void;
@@ -57,14 +61,18 @@ export function CampusEvidencePlanCard({
   };
 }) {
   const [showAllLimitations, setShowAllLimitations] = useState(false);
-  const assignmentAction = (assignment: CampusAssignmentIdentity) => !historical && reminderContext && navigation ? (
-    <CampusAssignmentOpenButton
-      assignment={assignment}
-      context={reminderContext}
-      navigation={navigation}
-      disabled={disabled}
-    />
-  ) : null;
+  const assignmentAction = (assignment: CampusAssignmentIdentity & { nuniSource?: NuniPlanAssignmentSource }) => {
+    if (historical) return null;
+    if (renderAssignmentAction) return renderAssignmentAction(assignment);
+    return reminderContext && navigation ? (
+      <CampusAssignmentOpenButton
+        assignment={assignment}
+        context={reminderContext}
+        navigation={navigation}
+        disabled={disabled}
+      />
+    ) : null;
+  };
   return (
     <View style={{ gap: 12, marginTop: 14 }}>
       <View style={{ gap: 4 }}>

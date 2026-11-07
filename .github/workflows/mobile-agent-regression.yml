@@ -64,6 +64,7 @@ jobs:
           pnpm --filter mobile exec jest \
             src/__tests__/services/offlineCampusPlanner.test.ts \
             src/__tests__/services/nuniCampusPlanner.test.ts \
+            src/__tests__/services/nuniPlanAssignmentTarget.test.ts \
             src/__tests__/services/campusPlanComparison.test.ts \
             src/__tests__/services/savedCampusPlans.test.ts \
             src/__tests__/services/campusStudyAgenda.test.ts \
@@ -92,6 +93,8 @@ jobs:
             src/__tests__/SavedClassReplyCard.test.tsx \
             src/__tests__/ClassGapReplyCard.test.tsx \
             src/__tests__/CampusAssistantScreen.test.tsx \
+            src/__tests__/CampusEvidencePlanCard.test.tsx \
+            src/__tests__/NuniPlanAssignmentOpenButton.test.tsx \
             src/__tests__/SavedCampusPlansPanel.test.tsx \
             src/__tests__/CampusPlanComparisonCard.test.tsx \
             src/__tests__/CampusAssignmentWorkbench.test.tsx \
