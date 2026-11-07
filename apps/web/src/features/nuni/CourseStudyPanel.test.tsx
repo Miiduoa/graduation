@@ -98,6 +98,46 @@ it('preserves PDF page labels and reports unreadable pages instead of inventing 
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+
+it('moves between real PDF pages with next/previous while keeping the original note and cancelling a late response', async () => {
+  let finish!: (value: TutorExplanation) => void;
+  mocks.run.mockImplementationOnce(() => new Promise<TutorExplanation>((resolve) => { finish = resolve; }));
+  const firstPage = '主鍵用來唯一識別一筆資料，不能重複或為空值。';
+  const secondPage = '交易失敗時，要把整組操作復原。';
+  mocks.read.mockResolvedValueOnce({ format: 'pdf', name: '跨頁講義.pdf', warnings: [], sections: [
+    { id: 'page-2', label: '第 2 頁', rows: [{ line: 1, cells: [firstPage] }], needsOcr: false, warnings: [] },
+    { id: 'page-5', label: '第 5 頁', rows: [{ line: 1, cells: [secondPage] }], needsOcr: false, warnings: [] },
+  ] });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('選擇講義'), {
+    target: { files: [new File(['test'], '跨頁講義.pdf', { type: 'application/pdf' })] },
+  });
+  expect(await screen.findByText(firstPage)).toBeTruthy();
+  expect(screen.getByRole('button', { name: '上一段' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '下一段' }).hasAttribute('disabled')).toBe(false);
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), {
+    target: { value: '第一頁的專屬筆記' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  const signal = mocks.run.mock.calls[0][0].signal as AbortSignal;
+  fireEvent.click(screen.getByRole('button', { name: '下一段' }));
+  expect(signal.aborted).toBe(true);
+  expect(await screen.findByText(secondPage)).toBeTruthy();
+  expect((screen.getByLabelText('閱讀範圍') as HTMLSelectElement).value).toBe('1');
+  expect(screen.getByRole('button', { name: '下一段' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '上一段' }).hasAttribute('disabled')).toBe(false);
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  await act(async () => finish(explanation));
+  expect(screen.queryByRole('region', { name: '本段 AI 講解' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '上一段' }));
+  expect(screen.getByText(firstPage)).toBeTruthy();
+  expect((screen.getByLabelText('閱讀範圍') as HTMLSelectElement).value).toBe('0');
+  expect((screen.getByLabelText('這次怎麼讀') as HTMLSelectElement).value).toBe('exam');
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('第一頁的專屬筆記');
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+});
+
 it('ignores a cancelled file read and does not leak its content into a later selection', async () => {
   let finish!: (value: unknown) => void;
   mocks.read.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));

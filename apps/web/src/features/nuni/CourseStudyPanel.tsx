@@ -15,6 +15,7 @@ import { CourseStudyPassage } from './CourseStudyPassage';
 import { CourseStudyPractice } from './CourseStudyPractice';
 import { emptyStudyPassage, type StudySessionMemory } from './courseStudySession';
 import { adjacentStudyReview } from './courseStudyReview';
+import { adjacentStudyPassage } from './courseStudyNavigation';
 import {
   buildCourseStudyPracticeNotes,
   buildStudyPracticeDeck,
@@ -91,6 +92,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const passages = sectionPassages[sectionIndex] ?? [];
   const passage = passages[passageIndex];
   const passageKey = `${sectionIndex}:${passageIndex}`;
+  const currentLocation = { sectionNumber: sectionIndex, partNumber: passageIndex };
+  const previousPassage = adjacentStudyPassage(sectionPassages, currentLocation, 'previous');
+  const nextPassage = adjacentStudyPassage(sectionPassages, currentLocation, 'next');
   const memory = session.passages[passageKey] ?? emptyStudyPassage();
   const hasNotes = Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
@@ -102,6 +106,12 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     item.sectionNumber === sectionIndex && item.partNumber === passageIndex);
   const practiceDeck = useMemo(() => buildStudyPracticeDeck(sectionPassages, session.passages, mode),
     [sectionPassages, session.passages, mode]);
+
+  function movePassage(target: { sectionNumber: number; partNumber: number } | null) {
+    if (!target) return;
+    setSectionIndex(target.sectionNumber);
+    setPassageIndex(target.partNumber);
+  }
 
   function moveReview(direction: 'previous' | 'next') {
     const target = adjacentStudyReview(reviewPassages, { sectionNumber: sectionIndex, partNumber: passageIndex }, direction);
@@ -438,11 +448,11 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
               passages: { ...previous.passages, [passageKey]: update(previous.passages[passageKey] ?? emptyStudyPassage()) },
             })} />
           <nav className={styles.stepNavigation} aria-label="白板段落導覽">
-            <button type="button" className={styles.button} disabled={passageIndex === 0}
-              onClick={() => setPassageIndex((previous) => previous - 1)}>上一段</button>
+            <button type="button" className={styles.button} disabled={!previousPassage}
+              onClick={() => movePassage(previousPassage)}>上一段</button>
             <span>{passageIndex + 1} / {passages.length}</span>
-            <button type="button" className={styles.button} disabled={passageIndex >= passages.length - 1}
-              onClick={() => setPassageIndex((previous) => previous + 1)}>下一段</button>
+            <button type="button" className={styles.button} disabled={!nextPassage}
+              onClick={() => movePassage(nextPassage)}>下一段</button>
           </nav>
         </div>
         </>}

@@ -9,6 +9,7 @@
 ## 本次行為
 
 - 顯示原始教材文字及 PDF 頁碼，以最多 1,600 字元的完整片段閱讀。
+- 一般閱讀「上一段／下一段」會接續走到相鄰可讀 PDF 頁的末段／首段，跳過無可讀文字的頁面但保留原有缺頁警示；頭尾不循環，跨頁不清除原段筆記、讀法或講解，切換時仍會取消未完成的推論。
 - 可選理解概念、考前複習、練習思路。模式只影響明確啟用後的 AI 提示。
 - AI 提供本段講解、逐字引用與一題自我檢查。先輸入自己的想法，再展開參考回答。
 - 切換段落或閱讀模式後，回來仍能看到個人筆記、問題草稿、成功的講解與各次試答。
@@ -149,6 +150,7 @@ LaTeX、隱含乘法、多字母函數、中文、缺漏括號或其他不支援
 - `apps/web/src/features/nuni/studyFormula.ts`：受限算式語法、運算優先序與解析上限。
 - `apps/web/src/features/nuni/courseStudySession.ts`：會話記憶、各模式的保留上限及追問分支。
 - `apps/web/src/features/nuni/courseStudyReview.ts`：依教材位置循環跳轉使用者標記的待複習段落。
+- `apps/web/src/features/nuni/courseStudyNavigation.ts`：一般閱讀的跨頁連續前後段導覽（非循環，跳過無文字頁）。
 - `apps/web/src/features/nuni/courseStudyNotes.ts`：按來源順序匯出純文字筆記與安全檔名。
 - `apps/web/src/features/nuni/courseStudyProgress.ts`：進度檔格式、範圍與內容驗證、序列化與還原資料。
 - `apps/web/src/features/nuni/StudyReadAloud.tsx`：本機語音與播放生命週期。
@@ -164,14 +166,15 @@ pnpm --filter web exec vitest run \
   src/features/nuni/CourseMaterials.test.tsx src/features/nuni/courseStudyNotes.test.ts \
   src/features/nuni/courseStudyProgress.test.ts src/features/nuni/CourseStudyProgress.test.tsx \
   src/features/nuni/studyEvidence.test.ts src/features/nuni/StudyFormula.test.tsx \
-  src/features/nuni/courseStudyReview.test.ts src/features/nuni/courseStudyPractice.test.ts \
+  src/features/nuni/courseStudyReview.test.ts src/features/nuni/courseStudyNavigation.test.ts \
+  src/features/nuni/courseStudyPractice.test.ts \
   src/features/nuni/CourseStudyPractice.test.tsx src/features/nuni/CourseStudyPracticeIntegration.test.tsx \
   src/features/nuni/CourseStudyPracticeBoundaries.test.tsx \
   src/features/nuni/courseStudyPracticeCheckpoint.test.ts
 ```
 
 測試另覆蓋引用精確定位、原文完整保留、重複引句提示與三步對照的焦點行為。
-測試涵蓋待複習循環跳轉、從未標記位置就近尋找、跨 PDF 頁與保留筆記／讀法，
+測試涵蓋待複習循環跳轉、從未標記位置就近尋找、一般閱讀跨 PDF 頁連續導覽與跳過空頁、前後停止及保留筆記／讀法，
 完整分段、缺頁、錯引、HTML 文字處理、不自動啟動模型、worker 實際終止、
 過期回應隔離、頁面／模式切換後還原、追問分支、長歷史縮減、同名來源替換、匯入失敗保留、
 帳號切換與權限撤銷、本機聲音限制、輸入超限、下載失敗恢復及文字筆記不提前匯出隱藏答案。
@@ -196,7 +199,7 @@ v1 舊檔還原、v2 保存後重開與步驟／公式完整保留，以及還�
 | --- | --- | --- |
 | 從課程開始讀講義 | 已授權教材帶入；PDF 原頁碼與缺頁警示 | 真實課程、掃描頁與手機檔案選取驗收 |
 | 看懂一段後連續追問 | 同段近期上下文、原文引用、失敗可恢復 | 實機教學品質、首次／後續講解延遲與記憶體 |
-| 翻頁後回來繼續 | 筆記、試答、講解記錄、待複習跨頁循環導覽 | iPhone／Android 觸控、鍵盤、輔助功能與縮放驗收 |
+| 翻頁後回來繼續 | 筆記、試答、講解記錄、一般閱讀跨可讀頁連續導覽及待複習跨頁循環導覽 | iPhone／Android 觸控、鍵盤、輔助功能與縮放驗收 |
 | 逐題檢查理解 | 既有題目組成有限一輪、獨立試答、原文提示、本人自評與紀錄下載 | 真實題目品質、實機操作與學習效果；沒有自動評分 |
 | 下次繼續複習 | 可主動儲存閱讀進度及完整練習進度 JSON、預覽並還原；亦可下載純文字筆記 | 實機檔案下載／選取、自動保存、跨裝置同步與衝突處理 |
 | 核對講解與原文 | 原文逐字標記、焦點定位、AI 解讀與自我試答三步卡片 | iPhone／Android 觸控及讀屏驗收、解釋正確性實測 |
