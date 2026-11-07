@@ -18,10 +18,10 @@ import type { DiningReceipt } from '../features/dining';
 import { UNVERIFIED_CAFETERIA_BADGE } from '@campus/shared/src/cafeteriaCatalog';
 
 let mockUser: { uid: string } | null = { uid: 'student-a' };
-let mockSchool = { id: 'pu' };
+let mockSchool: { id: string; name?: string } = { id: 'pu' };
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn(async () => {}) }));
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser }) }));
-jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool }) }));
+jest.mock('../state/school', () => ({ useSchool: () => ({ school: mockSchool, selectionReady: true, selection: { schoolId: mockSchool.id } }) }));
 jest.mock('../ui/navigationTheme', () => ({ useTabBarContentBottomPadding: () => 80 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../features/dining', () => ({
@@ -877,3 +877,14 @@ test.each(['search', 'budget'] as const)(
     expect(view.queryByText('飯食 4')).toBeNull();
   },
 );
+
+test('a school without a catalog can open its official website and a mismatched name removes the link', async () => {
+  mockSchool = { id: 'nkust', name: '國立高雄科技大學' };
+  const view = render(<LibraryAiFirstScreen />);
+  await act(async () => fireEvent.press(view.getByRole('link', { name: '開啟國立高雄科技大學官網' })));
+  expect(Linking.openURL).toHaveBeenCalledWith('http://www.nkust.edu.tw');
+  expect(view.queryByLabelText('館藏關鍵字')).toBeNull();
+  mockSchool = { id: 'nkust', name: '國立高雄大學' };
+  view.rerender(<LibraryAiFirstScreen />);
+  expect(view.queryByRole('link')).toBeNull();
+});

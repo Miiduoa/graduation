@@ -164,11 +164,37 @@ export function appendPersonalImports(
   scope: PersonalImportScope,
   rows: PersonalImportRow[],
   active = () => true,
-  options: { restoreBackup?: boolean } = {},
+  options: { restoreBackup?: boolean; protectCatalogTimetableSlots?: boolean; expectedRecordsJson?: string } = {},
 ) {
   return mutate(scope, active, (current) => {
     if (rows.some((row) => row.schoolId !== scope.schoolId))
       throw new Error('資料的學校與目前選擇不同。');
+    // A conflict acknowledgement is valid only for the exact records reviewed.
+    if (options.expectedRecordsJson !== undefined && JSON.stringify(current.records) !== options.expectedRecordsJson)
+      throw new Error('個人課表已更新，請重新核對衝堂後再加入。');
+    if (options.protectCatalogTimetableSlots) {
+      // Run alongside normal duplicate checks under the same owner/school lock.
+      // Instructor changes must not create another copy of the same class slot.
+      const clean = (value?: string) =>
+        (value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+      const conflictingTeacher = rows.some((row) =>
+        row.kind === 'timetable' && !!row.courseCode?.trim() && !!row.startTime && !!row.endTime &&
+        current.records.some((previous) =>
+          previous.kind === 'timetable' &&
+          previous.schoolId === row.schoolId &&
+          previous.academicYear === row.academicYear &&
+          previous.semester === row.semester &&
+          clean(previous.courseCode) === clean(row.courseCode) &&
+          clean(previous.className) === clean(row.className) &&
+          previous.dayOfWeek === row.dayOfWeek &&
+          previous.startTime === row.startTime &&
+          previous.endTime === row.endTime &&
+          clean(previous.teacher) !== clean(row.teacher),
+        ),
+      );
+      if (conflictingTeacher)
+        throw new Error('相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。');
+    }
     const id = createPersonalImportId();
     const createdAt = new Date().toISOString();
     const incoming = options.restoreBackup

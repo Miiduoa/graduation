@@ -158,7 +158,7 @@ export function requireSession(request: NextRequest): PlatformSession {
   return session;
 }
 
-export async function boundedBytes(source: Request, limit: number): Promise<Uint8Array> {
+export async function boundedBytes(source: Request | Response, limit: number): Promise<Uint8Array> {
   const declared = source.headers.get('content-length');
   if (declared && Number(declared) > limit) throw new NuniError(413, 'BODY_TOO_LARGE');
   if (!source.body) throw new NuniError(400, 'INVALID_INPUT');

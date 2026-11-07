@@ -76,7 +76,7 @@ it('retains all existing services and search while adding a separate classroom e
   expect(screen.getByRole('link', { name: '成績回饋' }).getAttribute('href')).toBe(
     '/grades?tab=feedback',
   );
-  expect(screen.getByRole('link', { name: '玩課雲課程' }).getAttribute('href')).toBe(
+  expect(screen.getByRole('link', { name: '校方課程' }).getAttribute('href')).toBe(
     '/school-courses',
   );
   expect(screen.getByRole('link', { name: '餐廳' }).getAttribute('href')).toBe('/cafeteria');
@@ -439,14 +439,14 @@ it('opens a keyboard-dismissible voice AI entry without leaving the current serv
 it('hides readonly homework by default and restores it when enabled', () => {
   const view = render(<CampusServiceMenu />);
   fireEvent.click(screen.getByText('所有服務'));
-  expect(screen.queryByRole('link', { name: /^玩課雲作業$/ })).toBeNull();
+  expect(screen.queryByRole('link', { name: /^校方作業與教材$/ })).toBeNull();
   view.rerender(
     <SchoolLmsReadonlyProvider enabled={true}>
       <CampusServiceMenu />
     </SchoolLmsReadonlyProvider>,
   );
   fireEvent.click(screen.getByText('所有服務'));
-  expect(screen.getByRole('link', { name: /^玩課雲作業$/ }).getAttribute('href')).toContain(
+  expect(screen.getByRole('link', { name: /^校方作業與教材$/ }).getAttribute('href')).toContain(
     '/school-lms',
   );
 });

@@ -35,9 +35,12 @@ function quoteCsv(value: unknown): string {
 }
 
 /** UTF-8 BOM and CRLF preserve Chinese characters when opening the file in Excel. */
-export function serializePersonalImportsCsv(rows: readonly PersonalImportRow[]): string {
+export function serializePersonalImportsCsv(
+  rows: readonly PersonalImportRow[],
+  fields: readonly (typeof PERSONAL_IMPORT_CSV_FIELDS)[number][] = PERSONAL_IMPORT_CSV_FIELDS,
+): string {
   return '\uFEFF' + [
-    PERSONAL_IMPORT_CSV_FIELDS.join(','),
-    ...rows.map((row) => PERSONAL_IMPORT_CSV_FIELDS.map((field) => quoteCsv(row[field])).join(',')),
+    fields.join(','),
+    ...rows.map((row) => fields.map((field) => quoteCsv(row[field])).join(',')),
   ].join('\r\n');
 }

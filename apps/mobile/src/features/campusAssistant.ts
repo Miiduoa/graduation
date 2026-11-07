@@ -1,3 +1,6 @@
+import { getSchoolContactAnswer } from '@campus/shared/src/schoolContactAnswer';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { answerPublicCourseQuestion, type PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
 import { httpsCallable } from 'firebase/functions';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
@@ -18,12 +21,13 @@ import { assignmentFollowUp } from '../services/assignmentFollowUp';
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'school-directory' | 'public-course-catalog';
   route?: string;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
+  publicCourseRead?: PublicCourseAssistantRead;
 };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
@@ -95,19 +99,20 @@ export async function askCampusAssistant(input: {
   schoolName?: string | null;
   /** Authorized campus reads are only used after an explicit user refresh. */
   senseSnapshot?: CampusSenseSnapshot | null;
-  /** Offline by default. Campus mode is explicit and requires an authenticated backend. */
+  /** Device mode also supports explicit anonymous public lookups. Campus mode requires authentication. */
   mode?: CampusAssistantMode;
 }): Promise<{
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
+  tool?: CampusAssistantMessage['tool'];
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
   announcementRead?: AnnouncementRead;
+  publicCourseRead?: PublicCourseAssistantRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
 }> {
@@ -120,6 +125,15 @@ export async function askCampusAssistant(input: {
   assertNotCancelled();
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
+    // Public catalog turns may describe another campus. Keep them in the UI,
+    // but omit each public reply and its preceding question from model history.
+    // The current question and input.messages used by scoped follow-ups stay intact.
+    .filter((message, index, history) => {
+      if (index === history.length - 1) return true;
+      if (message.role === 'assistant' && message.tool === 'public-course-catalog') return false;
+      const next = history[index + 1];
+      return !(message.role === 'user' && next?.role === 'assistant' && next.tool === 'public-course-catalog');
+    })
     .slice(-20)
     .map((message) => ({
       role: message.role,
@@ -131,10 +145,34 @@ export async function askCampusAssistant(input: {
   }
 
   if (mode === 'device') {
+    const question = messages[messages.length - 1].content;
+    const contact = getSchoolContactAnswer(input.scope.schoolId, question, input.schoolName);
+    if (contact && !input.courseworkChoice) {
+      return { content: contact, source: 'device', hasActions: false, tool: 'school-directory' };
+    }
+    // Public catalog reads need no account, personal timetable or downloaded model.
+    // Keep the platform-account timetable assistant limited to its existing scope.
+    if (!input.platformTimetable && !input.courseworkChoice &&
+        resolvePublicCourseAssistantIntent(question, input.scope.schoolId)) {
+      const publicCourses = await answerPublicCourseQuestion({
+        question, schoolId: input.scope.schoolId, origin: 'mobile',
+        signal: input.signal, isCurrent: input.isCurrent,
+      }).catch((error: unknown) => {
+        scopeCheck(input, false);
+        assertNotCancelled();
+        throw error;
+      });
+      scopeCheck(input, false);
+      assertNotCancelled();
+      if (publicCourses) return {
+        content: publicCourses.content, source: 'device', hasActions: false,
+        tool: 'public-course-catalog',
+        ...(publicCourses.read ? { publicCourseRead: publicCourses.read } : {}),
+      };
+    }
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
-    const question = messages[messages.length - 1].content;
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;

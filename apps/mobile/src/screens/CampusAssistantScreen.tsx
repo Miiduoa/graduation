@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { Linking, ScrollView, Text, TextInput, View, type LayoutChangeEvent } from 'react-native';
 import { AssistantConversationLayout, type AssistantPanel } from './AssistantConversationLayout';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
@@ -34,6 +35,7 @@ import { CampusAnnouncementRows } from './CampusAnnouncementRows';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
+import { PublicCourseAssistantReply } from './PublicCourseAssistantReply';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 import type { CampusEvidencePlan, CampusPlanRoute } from '../services/offlineCampusPlanner';
 import {
@@ -97,12 +99,14 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   useAssistantSessionExpiry(platformRoute ? platform : null);
   const uid = loading || platform?.loading || platform?.pendingLogout || platform?.error || platform?.session
     ? '' : user?.uid ?? '';
-  const { school } = useSchool();
+  const { school, selection, selectionReady } = useSchool();
+  const schoolId = selectionReady ? selection.schoolId ?? '' : '';
+  const schoolName = schoolId ? school.name : '尚未選校';
   const session = platform?.loading || platform?.error || platform?.pendingLogout ? null : platform?.session;
   const accountId = session?.platformAccountId;
   const context = session?.context;
   const verifyPlatform = platform?.isSessionCurrent;
-  const scope = JSON.stringify([uid, accountId, context, school.id, platformRoute]);
+  const scope = JSON.stringify([uid, accountId, context, schoolId, schoolName, platformRoute]);
   const active = useRef(scope);
   active.current = scope;
   const platformTimetable = useMemo<PlatformTimetableAccess | undefined>(() =>
@@ -121,8 +125,8 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
         request: (path, input) => platform.request(path, context, input),
         bffRequest: (path) => platform.bffRequest(path, context),
       } : undefined}
-      schoolId={school.id}
-      schoolName={school.name}
+      schoolId={schoolId}
+      schoolName={schoolName}
       initialPrompt={initialScope.current === scope ? prompt : ''}
       isScopeCurrent={() => active.current === scope}
       navigation={navigation}
@@ -195,6 +199,8 @@ function AssistantConversation({
     ? activeShortcut.choice.reminder : undefined;
   const updatingReminder = reminderChoice === 'confirm' || reminderChoice === 'remove';
   const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(draft, hasClass)));
+  const queryingPublicCourses = !platformTimetable && mode === 'device' &&
+    resolvePublicCourseAssistantIntent(draft, schoolId)?.kind === 'search';
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
   const latestSense = useRef(currentSense);
@@ -364,6 +370,7 @@ function AssistantConversation({
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
             announcementRead: reply.announcementRead,
+            publicCourseRead: reply.publicCourseRead,
           },
         ]);
         setActiveShortcut(null);
@@ -416,7 +423,7 @@ function AssistantConversation({
         return;
       }
       if (controller.signal.aborted && current()) {
-        setError(platformTimetable ? '已取消查詢。' : '已停止本機回答。');
+        setError(platformTimetable ? '已取消查詢。' : queryingPublicCourses ? '已取消公開課程查詢。' : '已停止本機回答。');
         return;
       }
       if (current()) {
@@ -437,6 +444,7 @@ function AssistantConversation({
             savedClassRead: reply.savedClassRead,
             courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
             announcementRead: reply.announcementRead,
+            publicCourseRead: reply.publicCourseRead,
             proposals: reply.proposals,
           },
         ]);
@@ -455,14 +463,14 @@ function AssistantConversation({
           } else if (failure.code === 'model-busy') {
             setError('手機 AI 正在執行其他任務或安裝模型；這次問題已保留，請稍後再送出。');
           } else if (failure.code === 'cancelled') {
-            setError('已停止本機回答。');
+            setError(queryingPublicCourses ? '已取消公開課程查詢。' : '已停止本機回答。');
           } else if (failure.code === 'session-changed') {
             setError('帳號或學校已變更，這次回覆已捨棄。');
           } else {
             setError('手機模型無法產生回答，請到模型管理頁確認模型是否已啟用。');
           }
         } else {
-          setError(mode === 'device'
+          setError(queryingPublicCourses ? '公開課程暫時無法查詢，請確認網路後重試。問題已保留。' : mode === 'device'
             ? '手機 AI 暫時無法回覆。請檢查本地模型，內容沒有傳送到雲端。'
             : '校園即時查詢失敗，問題已保留。請確認登入與網路狀態。');
         }
@@ -525,6 +533,9 @@ function AssistantConversation({
               </Text>
               <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 12 }}>
                 查課表、找已同步作業都能直接在手機上完成。可以先問「明天有哪些作業要交？」，再問「那下週呢？」。自由問答需下載免費模型。
+              </Text>
+              <Text style={{ color: aiTokens.muted, lineHeight: 21, fontSize: 12 }}>
+                也可以問「幫我查清大的資料庫課程」。公開開課資料會連網查詢，不需下載模型或使用付費 AI。
               </Text>
               <AIButton
                 label={deviceStatus?.ready ? '管理手機 AI 模型' : '下載／管理免費 AI 模型'}
@@ -625,7 +636,7 @@ function AssistantConversation({
               backgroundColor: aiTokens.panel, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
           />
           {updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
-            <AIButton label={syncBusy ? '取消這次同步' : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
+            <AIButton label={syncBusy ? '取消這次同步' : queryingWork ? '取消作業查詢' : queryingPublicCourses ? '取消公開課程查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
           ) : (
             <AIButton label={busy ? '正在查詢…' : error && !activeShortcut ? '重試查詢' : '送出問題'}
@@ -700,9 +711,20 @@ function AssistantConversation({
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
           <AICard title={message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
-            : message.announcementRead ? '校園公告'
+            : message.tool === 'public-course-catalog' ? '公開開課查詢'
+            : message.tool === 'school-directory' ? '學校聯絡資訊' : message.announcementRead ? '校園公告'
             : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
-            {platformTimetable && message.courseworkRead ? (
+            {message.publicCourseRead && !platformTimetable ? (
+              <PublicCourseAssistantReply read={message.publicCourseRead} content={message.content}
+                disabled={busy || syncBusy}
+                onOpenCatalog={typeof navigation?.navigate === 'function' ? () => {
+                  const read = message.publicCourseRead;
+                  if (!current() || lock.current || syncLock.current || !read) return;
+                  safeNavigate(navigation, 'CourseCatalog', {
+                    publicSchoolId: read.schoolId, filter: { keyword: read.query, ...read.filters }, autoSearch: true,
+                  });
+                } : undefined} />
+            ) : platformTimetable && message.courseworkRead ? (
               <NuniCourseworkReply read={message.courseworkRead} latest={index === messages.length - 1}
                 busy={busy || syncBusy}
                 onSelect={(choice, label) => void send({ kind: 'coursework', choice, question: label })}
@@ -817,7 +839,10 @@ function AssistantConversation({
                     : undefined}
                 />
               ))}
-            {!platformTimetable && message.source === 'device' && !message.savedClassRead && (
+            {!platformTimetable && message.tool === 'public-course-catalog' && <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
+              公開開課查詢需連網，不需下載 AI 模型或使用付費 AI。
+            </Text>}
+            {!platformTimetable && message.source === 'device' && message.tool !== 'school-directory' && message.tool !== 'public-course-catalog' && !message.savedClassRead && (
               <Text style={{ color: aiTokens.muted, fontSize: 12, marginTop: 10 }}>
                 {message.tool === 'local-agent'
                   ? '手機模型理解需求 · 本機工具核對資料 · 僅執行唯讀查詢'
@@ -848,7 +873,7 @@ function AssistantConversation({
                   }}
                 />
               </View>
-            ) : !platformTimetable && !message.savedClassRead && !message.plan && !message.localReads?.length && index > 0 ? (
+            ) : !platformTimetable && message.tool !== 'public-course-catalog' && !message.savedClassRead && !message.plan && !message.localReads?.length && index > 0 ? (
               <View style={{ marginTop: 12, gap: 8 }}>
                 {getMobileQuickActions(messages[index - 1]?.role === 'user' ? messages[index - 1].content : '')
                   .slice(0, 3)

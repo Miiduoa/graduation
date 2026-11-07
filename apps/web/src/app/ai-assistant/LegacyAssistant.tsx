@@ -12,6 +12,9 @@ import {
   type ReactNode,
 } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { PublicCourseAssistantResult } from '@/components/PublicCourseAssistantResult';
+import { resolvePublicCourseAssistantIntent } from '@campus/shared/src/publicCourseAssistant';
+import { answerPublicCourseQuestion, type PublicCourseAssistantRead } from '@campus/shared/src/publicCourseAssistantClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
@@ -41,9 +44,10 @@ import {
 import home from '../home.module.css';
 import styles from './assistant.module.css';
 
-type Message =
+type Message = (
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; response: CampusAssistantEnvelope };
+  | { role: 'assistant'; content: string; response: CampusAssistantEnvelope }
+) & { publicCourse?: { read?: PublicCourseAssistantRead } };
 function requestError(error: unknown): string {
   if (error instanceof CampusAssistantError && error.code === 'unconfigured')
     return '雲端助理尚未啟用。';
@@ -83,6 +87,11 @@ function AssistantConversation({
   const composer = useRef<HTMLTextAreaElement>(null);
   const seededUrlDraft = useRef(false);
   const functionsReady = areFunctionsConfigured();
+  const publicCourseIntent = resolvePublicCourseAssistantIntent(draft, schoolId);
+  const lastCloudReply = messages.reduce(
+    (last, message, index) => message.role === 'assistant' && !message.publicCourse ? index : last,
+    -1,
+  );
 
   useLayoutEffect(() => {
     // 網址 ?q= 有值且與現有草稿不同：以網址為準覆寫（明確深連結手遞）；無 q 才保留草稿。
@@ -103,8 +112,8 @@ function AssistantConversation({
   async function send(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || request.current || !functionsReady) return;
-    if (!isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
+    if (!content || request.current || (!publicCourseIntent && !functionsReady)) return;
+    if (!publicCourseIntent && !isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
       setMessages((previous) => [
         ...previous,
         { role: 'user', content },
@@ -121,10 +130,32 @@ function AssistantConversation({
     }
     const controller = new AbortController();
     request.current = controller;
-    sessionId.current ??= crypto.randomUUID();
     setPending(true);
     setError('');
     try {
+      if (publicCourseIntent) {
+        const result = await answerPublicCourseQuestion({
+          question: content,
+          schoolId,
+          origin: 'web',
+          signal: controller.signal,
+          isCurrent: () => request.current === controller && !controller.signal.aborted,
+        });
+        if (controller.signal.aborted || request.current !== controller || !result) return;
+        setMessages((previous) => [
+          ...previous,
+          { role: 'user', content, publicCourse: {} },
+          {
+            role: 'assistant',
+            content: result.content,
+            response: { content: result.content },
+            publicCourse: { read: result.read },
+          },
+        ]);
+        setDraft('');
+        return;
+      }
+      sessionId.current ??= crypto.randomUUID();
       const response = await callCampusAssistant(
         {
           userId,
@@ -132,7 +163,7 @@ function AssistantConversation({
           groupId: groupId || undefined,
           sessionId: sessionId.current,
           messages: [
-            ...messages.map(({ role, content: text }) => ({ role, content: text })),
+            ...messages.filter((message) => !message.publicCourse).map(({ role, content: text }) => ({ role, content: text })),
             { role: 'user', content },
           ],
         },
@@ -185,7 +216,7 @@ function AssistantConversation({
       <div className={styles.toolbar}>
         <p className={home.intro}>
           {!functionsReady
-            ? '雲端助理尚未啟用。'
+            ? '雲端助理尚未啟用，可先查詢清大、暨大的公開開課資料。'
             : groupId
               ? '正在這門課的範圍內詢問。'
               : '查詢課務、校園地點或服務資訊。'}
@@ -202,7 +233,7 @@ function AssistantConversation({
           <p>
             {functionsReady
               ? '寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。'
-              : '正式站尚未接上雲端函式服務，因此無法詢問助理。設定完成前請改用課表、地圖、公車與公開公告。'}
+              : '正式站尚未接上雲端函式服務。仍可輸入「幫我查清大資料庫課程」，直接查詢校方公開開課資料。'}
           </p>
           {functionsReady && (
             <div className={styles.exampleQuestions} aria-label="常用問題">
@@ -241,16 +272,19 @@ function AssistantConversation({
             className={message.role === 'user' ? styles.question : styles.answer}
           >
             <p className={styles.author}>{message.role === 'user' ? '你' : '校園助理'}</p>
-            <p className={styles.content}>
-              {message.role === 'assistant' &&
-              !isWebOnlineOrderingEnabled() &&
-              hasOrderProposal(message.response)
-                ? ONLINE_ORDERING_OFF_TEXT
-                : message.content}
-            </p>
+            {!message.publicCourse?.read && (
+              <p className={styles.content}>
+                {message.role === 'assistant' &&
+                !isWebOnlineOrderingEnabled() &&
+                hasOrderProposal(message.response)
+                  ? ONLINE_ORDERING_OFF_TEXT
+                  : message.content}
+              </p>
+            )}
             {message.role === 'assistant' && (
               <>
-                {index === messages.length - 1 && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
+                {message.publicCourse?.read && <PublicCourseAssistantResult read={message.publicCourse.read} />}
+                {index === lastCloudReply && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
                   <AgentWritePanel
                     key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
                     proposal={proposal}
@@ -320,9 +354,8 @@ function AssistantConversation({
           value={draft}
           maxLength={4000}
           rows={3}
-          readOnly={pending || !functionsReady}
-          disabled={!functionsReady}
-          placeholder={functionsReady ? '例如：圖書館怎麼走？' : '雲端助理尚未啟用'}
+          readOnly={pending}
+          placeholder={functionsReady ? '例如：圖書館怎麼走？' : '例如：幫我查清大資料庫課程'}
           onChange={(event) => {
             setDraft(event.target.value);
             setError('');
@@ -337,7 +370,7 @@ function AssistantConversation({
         />
         <div className={styles.voiceRow}>
           <VoiceDictationButton
-            disabled={pending || !functionsReady}
+            disabled={pending}
             onTranscript={(text) => {
               setDraft((previous) => [previous.trim(), text.trim()].filter(Boolean).join(' ').slice(0, 4000));
               setError('');
@@ -354,15 +387,17 @@ function AssistantConversation({
         <div className={styles.submitRow}>
           <p id="assistant-note" className={styles.note}>
             {!functionsReady
-              ? '尚未接上雲端函式服務，輸入與送出已停用。'
-              : isWebOnlineOrderingEnabled()
-                ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
-                : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
+              ? '目前可查詢公開開課資料；其他問題需待雲端助理啟用。'
+              : publicCourseIntent
+                ? '這次會直接查詢校方公開資料，選課與課表匯入請在服務頁核對。'
+                : isWebOnlineOrderingEnabled()
+                  ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
+                  : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
           </p>
           <button
             type="submit"
             className={home.primary}
-            disabled={!functionsReady || pending || !draft.trim()}
+            disabled={(!functionsReady && !publicCourseIntent) || pending || !draft.trim()}
           >
             {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
           </button>

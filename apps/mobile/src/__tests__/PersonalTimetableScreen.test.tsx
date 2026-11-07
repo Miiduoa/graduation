@@ -136,7 +136,11 @@ test('the term selected on Today remains selected in the complete timetable', as
   expect(view.queryByText('成大課程')).toBeNull();
 });
 
-test('unknown school clock times remain readable without borrowing another school period table', async () => {
+test.each([
+  { startTime: '09:00', endTime: '10:00', periodLabel: 'ab', expected: '09:00–10:00' },
+  { startTime: undefined, endTime: undefined, periodLabel: 'cd', expected: '校方節次 cd' },
+  { startTime: undefined, endTime: undefined, periodLabel: '', expected: '時間未確認' },
+])('unknown school imports preserve their schedule $expected', async ({ expected, ...schedule }) => {
   mockSchool = { id: 'unknown', name: '其他學校' };
   mockScope = { owner: 'guest:device', schoolId: 'unknown' };
   jest
@@ -150,8 +154,7 @@ test('unknown school clock times remain readable without borrowing another schoo
           dayOfWeek: 6,
           startPeriod: undefined,
           endPeriod: undefined,
-          startTime: '09:00',
-          endTime: '10:00',
+          ...schedule,
         }),
       ],
       batches: [],
@@ -159,7 +162,7 @@ test('unknown school clock times remain readable without borrowing another schoo
   const view = render(<PersonalTimetableScreen />);
   await view.findByText('週末課程');
   expect(view.queryByText('開啟課前提醒')).toBeNull();
-  expect(view.getByText(/週六 · 09:00–10:00/)).toBeTruthy();
+  expect(view.getByText(new RegExp(`週六 · ${expected}`))).toBeTruthy();
   expect(view.getByRole('button', { name: '格子' })).toBeDisabled();
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
 });
