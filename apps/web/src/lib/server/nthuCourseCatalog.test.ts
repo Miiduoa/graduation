@@ -33,7 +33,7 @@ describe('NTHU official public JSON catalog', () => {
     const { searchNthuCourseCatalog } = await import('./nthuCourseCatalog');
     const chemistryResult = await searchNthuCourseCatalog('chemistry doong');
     expect(chemistryResult).toEqual({
-      schoolId: 'nthu', sourceUrl, truncated: false,
+      schoolId: 'nthu', sourceUrl, truncated: false, fetchedAt: expect.any(String),
       courses: [{
         code: '11510AES 520300', section: '00', title: '環境化學', department: 'AES',
         teacher: '董瑞安\tDOONG, RUEY-AN', time: 'M3M4\nF3F4', room: 'BMES醫環618\nBMES醫環501',

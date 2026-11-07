@@ -54,7 +54,7 @@ function parseCatalog(json: string): CatalogEntry[] {
   });
 }
 
-async function loadCourses(): Promise<CatalogEntry[]> {
+async function loadCourses(): Promise<{ rows: CatalogEntry[]; fetchedAt: string }> {
   const response = await fetch(JSON_URL, {
     headers: { Accept: 'application/json, text/plain' },
     redirect: 'error',
@@ -66,7 +66,7 @@ async function loadCourses(): Promise<CatalogEntry[]> {
     const mime = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
     if (!response.ok || (mime !== 'application/json' && mime !== 'text/plain')) throw new Error('Course catalog unavailable');
     const bytes = await boundedBytes(response, MAX_BYTES);
-    return parseCatalog(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return { rows: parseCatalog(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), fetchedAt: new Date().toISOString() };
   } finally {
     if (!response.bodyUsed) await response.body?.cancel();
   }
@@ -74,7 +74,7 @@ async function loadCourses(): Promise<CatalogEntry[]> {
 
 // Cache one complete public snapshot per process. Searches share in-flight reads
 // and a failed refresh remains rejected for 15 seconds before retrying upstream.
-let snapshot: { rows: Promise<CatalogEntry[]>; expires: number } | undefined;
+let snapshot: { rows: Promise<{ rows: CatalogEntry[]; fetchedAt: string }>; expires: number } | undefined;
 
 export async function searchNthuCourseCatalog(query: string): Promise<PublicCourseCatalogResponse> {
   if (!snapshot || Date.now() >= snapshot.expires) {
@@ -83,9 +83,12 @@ export async function searchNthuCourseCatalog(query: string): Promise<PublicCour
     next.rows.catch(() => { next.expires = Date.now() + 15_000; });
   }
   const terms = normalize(query).trim().split(/\s+/).filter(Boolean);
-  const matches = (await snapshot.rows).filter(row => terms.every(term => row.searchText.includes(term)));
+  const currentSnapshot = snapshot;
+  if (!currentSnapshot) throw new Error('Public catalog snapshot unavailable');
+  const { rows, fetchedAt } = await currentSnapshot.rows;
+  const matches = rows.filter(row => terms.every(term => row.searchText.includes(term)));
   return {
-    schoolId: 'nthu', sourceUrl: JSON_URL,
+    schoolId: 'nthu', sourceUrl: JSON_URL, fetchedAt,
     courses: matches.slice(0, MATCH_LIMIT).map(row => row.course),
     truncated: matches.length > MATCH_LIMIT,
   };

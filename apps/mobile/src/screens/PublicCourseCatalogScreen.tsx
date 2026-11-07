@@ -4,7 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { resolveOfficialCourseQueryLink } from '@campus/shared/src/courseCatalogCapability';
 import { ncnuCourseMeetings, ncnuTimetableImportCsv } from '@campus/shared/src/ncnuCourseSchedule';
 import { nthuCourseMeetings, nthuTimetableImportCsv } from '@campus/shared/src/nthuCourseSchedule';
-import { isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
+import { formatPublicCatalogFetchedAt, isPublicCourseCatalog, type PublicCatalogCourse, type PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { Button, Card, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -147,6 +147,9 @@ export function PublicCourseCatalogScreen({ schoolId, initialQuery = '', navigat
           {result?.status === 'ready' && <Text accessibilityLiveRegion="polite" style={body}>
             {result.data.courses.length === 0 ? '找不到' + label + '的開課資料。' :
               result.data.truncated ? '顯示前 50 筆，輸入更明確的關鍵字可縮小範圍。' : '找到 ' + result.data.courses.length + ' 筆' + label + '開課資料。'}
+          </Text>}
+          {result?.status === 'ready' && result.data.fetchedAt && <Text style={body}>
+            校方資料擷取：{formatPublicCatalogFetchedAt(result.data.fetchedAt)}（台灣時間；非校方更新時間）
           </Text>}
         </View>}
         renderItem={({ item }) => <CourseCard course={item} schoolId={schoolId} navigation={navigation} />}

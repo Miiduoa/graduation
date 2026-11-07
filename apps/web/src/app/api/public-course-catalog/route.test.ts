@@ -120,6 +120,7 @@ describe('school-scoped public course catalog dispatch', () => {
       expect(result.headers.get('Cache-Control')).toBe('no-store');
       const body = await result.json();
       expect(body.schoolId).toBe(schoolId);
+      expect(body.fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(body.courses[0].title).toBe(schoolId === 'nthu' ? '環境化學' : '普通心理學');
     }
     expect(fetchSource).toHaveBeenCalledTimes(2);

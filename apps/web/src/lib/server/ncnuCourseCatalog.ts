@@ -43,7 +43,7 @@ async function loadCourses() {
       throw new Error('Course catalog unavailable');
     }
     const bytes = await boundedBytes(response, MAX_BYTES);
-    return parseCatalog(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return { rows: parseCatalog(new TextDecoder('utf-8', { fatal: true }).decode(bytes)), fetchedAt: new Date().toISOString() };
   } finally {
     // Release unconsumed bodies as well (e.g. wrong MIME type or declared size).
     if (!response.bodyUsed) await response.body?.cancel();
@@ -56,7 +56,7 @@ function normalize(value: string) {
 
 // Per-process, one public catalog regardless of query. Coalesce concurrent refreshes
 // and back off briefly on failure so each keystroke cannot trigger an upstream download.
-let snapshot: { rows: Promise<PublicCatalogCourse[]>; expires: number } | undefined;
+let snapshot: { rows: Promise<{ rows: PublicCatalogCourse[]; fetchedAt: string }>; expires: number } | undefined;
 
 export async function searchNcnuCourseCatalog(query: string): Promise<PublicCourseCatalogResponse> {
   if (!snapshot || Date.now() >= snapshot.expires) {
@@ -65,9 +65,12 @@ export async function searchNcnuCourseCatalog(query: string): Promise<PublicCour
     next.rows.catch(() => { next.expires = Date.now() + 15_000; });
   }
   const terms = normalize(query).trim().split(/\s+/).filter(Boolean);
-  const matches = (await snapshot.rows).filter(row => {
+  const currentSnapshot = snapshot;
+  if (!currentSnapshot) throw new Error('Public catalog snapshot unavailable');
+  const { rows, fetchedAt } = await currentSnapshot.rows;
+  const matches = rows.filter(row => {
     const text = normalize([row.code, row.title, row.department, row.teacher, row.room].join(' '));
     return terms.every(term => text.includes(term));
   });
-  return { schoolId: 'ncnu', sourceUrl: SOURCE_URL, courses: matches.slice(0, MATCH_LIMIT), truncated: matches.length > MATCH_LIMIT };
+  return { schoolId: 'ncnu', sourceUrl: SOURCE_URL, fetchedAt, courses: matches.slice(0, MATCH_LIMIT), truncated: matches.length > MATCH_LIMIT };
 }
