@@ -329,6 +329,11 @@ window.__feed.switchScope('alice','pu'); window.__fixtureToken=location.search;
       await check('long-list:recommendation may reorder same-timestamp posts',()=>
         document.querySelector('article h3')?.textContent==='校園貼文 243');
       await clickButton('最新');
+      // Confirm the React choice has committed before asserting card order.
+      // An immediate CDP read races the click event on busy CI runners.
+      await until(()=>call(()=>[...document.querySelectorAll('button')].some(
+        button=>button.textContent.trim()==='最新' && button.getAttribute('aria-pressed')==='true'
+      )),'latest order control updated');
       await check('long-list:latest matches SDK createdAt and document-ID order',()=>{
         const titles=[...document.querySelectorAll('article h3')].map(heading=>heading.textContent);
         return titles.length===245 && titles.every((title,position)=>{
