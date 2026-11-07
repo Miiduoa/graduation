@@ -6,6 +6,8 @@ import {
   orderBy,
   query,
   startAfter,
+  startAt,
+  Timestamp,
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
@@ -17,6 +19,7 @@ export const CAMPUS_FEED_PAGE_SIZE = 60;
 export type CampusPostCursor = Readonly<{
   schoolId: string;
   document: QueryDocumentSnapshot<DocumentData>;
+  beforeMillis?: number | null;
 }>;
 
 export type CampusPostPage = {
@@ -29,14 +32,20 @@ export type CampusPostPage = {
 export async function fetchCampusPostPage(
   schoolId: string,
   cursor: CampusPostCursor | null = null,
+  before: Date | null = null,
 ): Promise<CampusPostPage> {
   if (!schoolId || schoolId.includes('/')) {
     throw Object.assign(new Error('Invalid campus feed scope'), { code: 'invalid-argument' });
   }
+  const beforeMillis = before === null ? null : before.getTime();
+  if (before !== null && !Number.isFinite(beforeMillis)) {
+    throw Object.assign(new Error('Invalid campus feed date'), { code: 'invalid-argument' });
+  }
   const path = `schools/${schoolId}/campusPosts`;
   if (cursor && (
     cursor.schoolId !== schoolId ||
-    cursor.document.ref.parent.path !== path
+    cursor.document.ref.parent.path !== path ||
+    (cursor.beforeMillis ?? null) !== beforeMillis
   )) {
     throw Object.assign(new Error('The feed cursor belongs to another school'), {
       code: 'invalid-argument',
@@ -47,7 +56,7 @@ export async function fetchCampusPostPage(
     collection(getDb(), path),
     orderBy('createdAt', 'desc'),
     orderBy(documentId(), 'desc'),
-    ...(cursor ? [startAfter(cursor.document)] : []),
+    ...(cursor ? [startAfter(cursor.document)] : before ? [startAt(Timestamp.fromDate(before))] : []),
     limit(CAMPUS_FEED_PAGE_SIZE),
   ));
   if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
@@ -63,7 +72,7 @@ export async function fetchCampusPostPage(
         id: document.id,
       }))
       .filter((post) => post.schoolId === schoolId),
-    nextCursor: last ? { schoolId, document: last } : null,
+    nextCursor: last ? { schoolId, document: last, beforeMillis } : null,
     hasMore: snapshot.docs.length === CAMPUS_FEED_PAGE_SIZE,
   };
 }

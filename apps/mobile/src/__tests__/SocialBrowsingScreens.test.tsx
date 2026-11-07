@@ -879,3 +879,91 @@ test('mobile long list offers a search return without changing pagination or que
   expect(sdk).toHaveBeenCalledTimes(2);
   expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('');
 });
+
+test('native date jump reads an older server page and returns to latest without losing the query', async () => {
+  const sdk = jest.mocked(fetchCampusPostPage);
+  sdk.mockResolvedValueOnce({ posts: [post], hasMore: false, nextCursor: null } as any)
+    .mockResolvedValueOnce({ posts: [{ ...post, id: 'year-2022', title: '2022迎新活動' }], hasMore: false, nextCursor: null } as any)
+    .mockResolvedValueOnce({ posts: [post], hasMore: false, nextCursor: null } as any);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByText(post.title)).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '活動');
+  fireEvent.changeText(view.getByLabelText('要找的貼文日期'), '2022-09-03');
+  await act(async () => fireEvent.press(view.getByLabelText('從這天往前找')));
+  expect(sdk.mock.calls[1][0]).toBe('pu');
+  expect(sdk.mock.calls[1][1]).toBeNull();
+  expect(sdk.mock.calls[1][2]?.toISOString()).toBe('2022-09-03T15:59:59.999Z');
+  expect(view.getByText('2022迎新活動')).toBeTruthy();
+  expect(view.getByText('目前範圍：2022-09-03（台灣時間）及更早')).toBeTruthy();
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('活動');
+  await act(async () => fireEvent.press(view.getByLabelText('回到最新貼文')));
+  expect(sdk.mock.calls[2][1]).toBeNull();
+  expect(sdk.mock.calls[2][2]).toBeNull();
+  expect(view.getByLabelText('要找的貼文日期').props.value).toBe('');
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('活動');
+  expect(view.queryByText('目前範圍：2022-09-03（台灣時間）及更早')).toBeNull();
+});
+
+test('invalid date makes no query and offline date retry preserves the prior cards', async () => {
+  const sdk = jest.mocked(fetchCampusPostPage);
+  sdk.mockResolvedValueOnce({ posts: [post], hasMore: false, nextCursor: null } as any)
+    .mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }))
+    .mockResolvedValueOnce({ posts: [{ ...post, id: 'old-note', title: '2022校園筆記' }], hasMore: false, nextCursor: null } as any);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText(post.title);
+  fireEvent.changeText(view.getByLabelText('要找的貼文日期'), '2023-02-29');
+  await act(async () => fireEvent.press(view.getByLabelText('從這天往前找')));
+  expect(view.getByText('請輸入有效的台灣日期，例如 2022-09-03。')).toBeTruthy();
+  expect(sdk).toHaveBeenCalledTimes(1);
+  fireEvent.changeText(view.getByLabelText('要找的貼文日期'), '2022-09-03');
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '筆記');
+  await act(async () => fireEvent.press(view.getByLabelText('從這天往前找')));
+  expect(view.getByText('日期定位失敗，已保留原有貼文。請確認連線後重試。')).toBeTruthy();
+  expect(sdk).toHaveBeenCalledTimes(2);
+  expect(view.getByLabelText('搜尋本校貼文').props.value).toBe('筆記');
+  expect(view.UNSAFE_getByType(FlatList).props.data).toEqual([]);
+  fireEvent.changeText(view.getByLabelText('搜尋本校貼文'), '');
+  expect(view.getByText(post.title)).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByLabelText('從這天往前找')));
+  expect(view.getByText('2022校園筆記')).toBeTruthy();
+  expect(sdk.mock.calls[1][2]?.getTime()).toBe(sdk.mock.calls[2][2]?.getTime());
+});
+
+test('native date permission loss clears school posts and story identities', async () => {
+  const sdk = jest.mocked(fetchCampusPostPage);
+  sdk.mockResolvedValueOnce({ posts: [post], hasMore: false, nextCursor: null } as any)
+    .mockRejectedValueOnce(Object.assign(new Error('revoked'), { code: 'permission-denied' }));
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValue([{
+    id: 'story-bob', schoolId: 'pu', authorUid: 'bob', kind: 'text',
+    text: '校園社團', expiresAt: Date.now() + 60000,
+  } as any]);
+  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
+  const view = render(<HomeFeedScreen />);
+  expect(await view.findByLabelText('查看 小柏 的限時動態')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText('要找的貼文日期'), '2022-09-03');
+  await act(async () => fireEvent.press(view.getByLabelText('從這天往前找')));
+  expect(view.getByText('校籍或貼文存取權限已變更，請重新驗證後載入。')).toBeTruthy();
+  expect(view.UNSAFE_getByType(FlatList).props.data).toEqual([]);
+  expect(view.queryByLabelText('查看 小柏 的限時動態')).toBeNull();
+  expect(view.queryByLabelText('從這天往前找')).toBeNull();
+});
+
+test('a late mobile continuation cannot replace a newer date jump', async () => {
+  const recent = Array.from({ length: 60 }, (_, i) => ({ ...post, id: `recent-${i}`, title: `近期貼文 ${i}` }));
+  const cursor = { schoolId: 'pu', document: { id: 'recent-59', ref: { parent: { path: 'schools/pu/campusPosts' } } } };
+  let finishOld!: (value: any) => void;
+  jest.mocked(fetchCampusPostPage)
+    .mockResolvedValueOnce({ posts: recent, hasMore: true, nextCursor: cursor } as any)
+    .mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce({ posts: [{ ...post, id: 'old-2022', title: '2022年活動' }], hasMore: false, nextCursor: null } as any);
+  const view = render(<HomeFeedScreen />);
+  await view.findByText('已載入 60 則 · 顯示 60 則');
+  fireEvent.press(view.getByLabelText('載入更多貼文'));
+  fireEvent.changeText(view.getByLabelText('要找的貼文日期'), '2022-09-03');
+  await act(async () => fireEvent.press(view.getByLabelText('從這天往前找')));
+  await act(async () => finishOld({
+    posts: [{ ...post, id: 'late', title: '不應出現的晚到貼文' }], hasMore: false, nextCursor: null,
+  }));
+  expect(view.getByText('2022年活動')).toBeTruthy();
+  expect(view.queryByText('不應出現的晚到貼文')).toBeNull();
+});
