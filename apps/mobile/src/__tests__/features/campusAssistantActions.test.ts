@@ -25,7 +25,7 @@ function envelope(overrides: Record<string, unknown> = {}) {
       action: 'queue_action',
       status: 'pending_confirmation',
       requiresConfirmation: true,
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       params: { toolName: 'createDormRepairRequest', input, agentRunId: runId },
     }],
     ...overrides,
@@ -42,7 +42,7 @@ beforeEach(() => {
 
 test('only trusted completed run actions become executable proposals', () => {
   expect(campusAgentWriteProposals(envelope())).toEqual([{
-    label: '確認送出報修',
+    label: '確認存成報修備忘',
     agentRunId: runId,
     toolName: 'createDormRepairRequest',
     input,

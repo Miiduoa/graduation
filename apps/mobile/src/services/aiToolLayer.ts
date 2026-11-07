@@ -503,7 +503,7 @@ export function getCrossRoleEffectsForIntent(params: {
     add({
       action: '宿舍/校園報修',
       targetRoles: ['staff'],
-      targetWork: '宿舍管理員或總務維修人員收到工單、派工、回覆處理狀態',
+      targetWork: '宿舍管理員或總務維修人員依學校管道受理報修、派工、回覆處理狀態',
       confirmationRequired: true,
       dataScope: 'cross_role',
       notes: '需要房號、問題描述、照片/位置等資料才能正式送出。',

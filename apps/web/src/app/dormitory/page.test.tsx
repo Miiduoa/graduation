@@ -98,7 +98,7 @@ it('routes an NTOU repair by category and keeps its handwritten ticket number pr
   expect(screen.getByText('R-1358')).toBeTruthy();
   expect(JSON.parse(localStorage.getItem(key)!).repairs[0]).toMatchObject({ reference: 'R-1358', status: 'draft' });
   expect(handoff().getAllByRole('link')).toHaveLength(1);
-  expect(handoff().getByRole('link', { name: '查海大修繕處理狀況' }).getAttribute('href')).toBe(generalUrl);
+  expect(handoff().getByRole('link', { name: '到海大教務系統網站查修繕紀錄' }).getAttribute('href')).toBe(generalUrl);
   expect(screen.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '編輯' }));
   expect((screen.getByRole('textbox', { name: DORM_REPAIR_COPY.referenceLabel }) as HTMLInputElement).value).toBe('R-1358');
