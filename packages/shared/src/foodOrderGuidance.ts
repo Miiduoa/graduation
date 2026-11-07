@@ -1,6 +1,19 @@
+export const FOOD_POLL_MS = 10_000;
+export const FOOD_TERMINAL_STATES = new Set([
+  'fulfilled',
+  'canceled',
+  'rejected',
+  'payment-expired',
+]);
+
+export function isFoodOrderInProgress(state: string): boolean {
+  return !FOOD_TERMINAL_STATES.has(state);
+}
+
 type CustomerNextStepInput = {
   state: string;
   allowedActions: readonly string[];
+  // The order list omits pickup credentials and payment sessions.
   mode?: 'summary' | 'detail';
   pickup?: {
     allowedActions: readonly string[];
@@ -14,21 +27,24 @@ type CustomerNextStepInput = {
   now?: number;
 };
 
-export function foodCustomerNextStep(input: CustomerNextStepInput): string {
-  const mode = input.mode ?? 'detail';
-  const now = input.now ?? Date.now();
-  const actions = new Set(input.allowedActions);
-  const pickupActions = new Set(input.pickup?.allowedActions ?? []);
-  const token = input.pickup?.credential;
-  const canPresent =
-    actions.has('show-pickup-credential') &&
-    pickupActions.has('present-one-time-token') &&
-    !!token &&
-    Date.parse(token.expiresAt) > now;
+export function canShowPickupCredential(
+  order: Pick<CustomerNextStepInput, 'allowedActions' | 'pickup'>,
+  now: number,
+): boolean {
+  const pickup = order.pickup;
+  return (
+    order.allowedActions.includes('show-pickup-credential') &&
+    !!pickup?.credential &&
+    pickup.allowedActions.includes('present-one-time-token') &&
+    Date.parse(pickup.credential.expiresAt) > now
+  );
+}
 
+export function foodCustomerNextStep(input: CustomerNextStepInput): string {
+  const now = input.now ?? Date.now();
   if (input.state === 'ready') {
-    if (mode === 'summary') return '餐點好了，查看訂單並出示取餐憑證。';
-    if (canPresent) return '餐點好了。請到店出示取餐憑證。';
+    if (input.mode === 'summary') return '餐點好了，查看訂單並出示取餐憑證。';
+    if (canShowPickupCredential(input, now)) return '餐點好了。請到店出示取餐憑證。';
     return '餐點好了。請先更新這筆訂單，再出示取餐憑證。';
   }
   if (input.state === 'fulfilled') return '這筆訂單已取餐完成。';
@@ -43,7 +59,7 @@ export function foodCustomerNextStep(input: CustomerNextStepInput): string {
   if (input.state === 'paid') return '已付款，等待店家接單。';
 
   if (input.state === 'payment-pending') {
-    if (mode === 'summary') return '查看訂單，確認付款進度與方式。';
+    if (input.mode === 'summary') return '查看訂單，確認付款進度與方式。';
     const payment = input.payment;
     if (
       payment &&
@@ -52,7 +68,7 @@ export function foodCustomerNextStep(input: CustomerNextStepInput): string {
       return '付款確認中，請稍候或更新這筆訂單。';
     }
     if (
-      actions.has('create-payment-session') &&
+      input.allowedActions.includes('create-payment-session') &&
       (!payment || payment.allowedActions.includes('start-over') || payment.progress === 'failed')
     ) {
       return '請選擇付款方式，完成線上結帳。';

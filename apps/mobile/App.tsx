@@ -1,3 +1,4 @@
+import { useDormLaundryReminder } from './src/hooks/useDormLaundryReminder';
 import { useClassReminders } from './src/hooks/useClassReminders';
 import { useNextClassWidget } from './src/widgets/useNextClassWidget';
 /* eslint-disable */
@@ -200,6 +201,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           Ordering: 'ordering/:menuId',
           MenuSubscription: 'menu-subscription',
           Library: 'library',
+          Dormitory: 'dormitory',
           SchoolInfo: 'school-info',
           Health: 'health',
           PrintService: 'print',
@@ -510,6 +512,7 @@ function TokenErrorHandler() {
 function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   useNextClassWidget();
   useClassReminders();
+  useDormLaundryReminder();
   const auth = useAuth();
   const { school } = useSchool();
   const schoolSessionReady = hasReadySchoolSession(auth, school?.id ?? null);

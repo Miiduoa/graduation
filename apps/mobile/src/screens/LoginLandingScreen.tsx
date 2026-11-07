@@ -152,7 +152,7 @@ export default function LoginLandingScreen() {
               ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
               ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],
               ['Health', '校園健康', `查看${school.name}諮商、就醫與健康檢查資訊`],
-              ['Dormitory', '宿舍服務', `前往${school.name}住宿相關校方入口`],
+              ['Dormitory', '宿舍服務', `查${school.name}報修管道、記下單號與入住事項`],
               ['Career', '職涯資訊', `前往${school.name}職涯與就業輔導公開資訊`],
             ] as const
           ).map(([route, title, detail], index) => (
