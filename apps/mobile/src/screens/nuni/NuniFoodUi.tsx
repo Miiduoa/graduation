@@ -625,16 +625,18 @@ export function FoodStorageRecovery({
 export function FoodReadState({
   resource,
   disabled = false,
+  reloadLabel = '重新讀取',
 }: {
   resource: { error: string; loading: boolean; load(): Promise<void> };
   disabled?: boolean;
+  reloadLabel?: string;
 }) {
   return (
     <>
       {resource.loading ? <FoodText status>正在讀取最新狀態…</FoodText> : null}
       {resource.error ? <FoodText alert>{resource.error}</FoodText> : null}
       <FoodButton disabled={resource.loading || disabled} onPress={() => void resource.load()}>
-        重新讀取
+        {reloadLabel}
       </FoodButton>
     </>
   );

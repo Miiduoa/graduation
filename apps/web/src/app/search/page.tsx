@@ -12,14 +12,15 @@ import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
-import { getQuickCampusActions } from '@/lib/quickCampusActions';
+import { resolveCampusActions, getQuickCampusActions } from '@/lib/quickCampusActions';
 import styles from './search.module.css';
 import {
   serviceAccessLabel,
   SERVICE_CATEGORIES,
   searchCampusServices,
   secondaryCampusServices,
-  visibleCampusServices,
+  countCampusSearchResults,
+  writeCampusServiceFilters,
   type ServiceCategory,
 } from '@/lib/campusServices';
 
@@ -64,18 +65,9 @@ function ServiceDirectory() {
   const semantic = active?.status === 'ready' ? active.result : undefined;
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
   const browsing = !term;
-  const directoryCount = browsing
-    ? matches.reduce(
-        (total, service) =>
-          total + 1 + secondaryCampusServices(service.href, schoolLmsEnabled).length,
-        0,
-      )
-    : matches.length;
+  const directoryCount = countCampusSearchResults(matches, browsing, schoolLmsEnabled);
   const suggested = semantic?.status === 'understood'
-    ? semantic.destinations.flatMap((href) => {
-        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
-        return service ? [service] : [];
-      })
+    ? resolveCampusActions(semantic.destinations, schoolLmsEnabled)
     : getQuickCampusActions(query, schoolLmsEnabled).filter(
         (action) => !matches.some((match) => match.href === action.href),
       );
@@ -105,10 +97,7 @@ function ServiceDirectory() {
     setAnalysis(null);
     setFilters(next);
     const url = new URL(window.location.href);
-    if (next.query) url.searchParams.set('q', next.query);
-    else url.searchParams.delete('q');
-    if (next.category !== 'all') url.searchParams.set('category', next.category);
-    else url.searchParams.delete('category');
+    writeCampusServiceFilters(url.searchParams, next.query, next.category);
     // Next.js observes native history changes without a server request per keystroke.
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
@@ -208,7 +197,7 @@ function ServiceDirectory() {
                 >
                   <strong>{action.name}</strong>
                   <small>{action.text}</small>
-                  {semantic?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
+                  {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
                     <span className={styles.preview} key={preview.destination}>
                       <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
                       {preview.items.map((item, index) => (

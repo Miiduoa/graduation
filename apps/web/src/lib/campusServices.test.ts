@@ -117,7 +117,7 @@ it('merges course-work aliases under one directory primary with shared academic 
     CAMPUS_SERVICES.filter((service) => 'parentHref' in service && service.parentHref === '/classroom').map(
       (service) => service.href,
     ),
-  ).toEqual(['/school-courses', '/school-lms', '/groups']);
+  ).toEqual(['/classroom/material-bookmarks', '/school-courses', '/school-lms', '/groups']);
 });
 
 it('merges cafeteria under the food primary while keeping both reachable', () => {
