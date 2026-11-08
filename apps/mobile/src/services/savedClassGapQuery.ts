@@ -269,11 +269,20 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
     : query.fromMinute !== undefined ? `${time(startMinute)} 之後`
       : query.untilMinute !== undefined ? `${time(endMinute)} 之前` : '';
   const minimum = query.minMinutes ? '至少 ' + query.minMinutes + ' 分鐘的' : '';
-  const windows = timetable.classGaps.map(({ startAt, endAt }) => ({
-    start: Math.ceil(Math.max(startAt, from) / MINUTE) * MINUTE,
-    end: Math.floor(Math.min(endAt, until) / MINUTE) * MINUTE,
-  })).filter(({ start, end }) => end > start && end - start >= query.minMinutes * MINUTE)
-    .sort((a, b) => a.start - b.start);
+  // A damaged snapshot may hold duplicate or overlapping free intervals.
+  // They cannot prove two separate openings, even if each timestamp looks valid.
+  // Only compare intervals that occupy the requested Taiwan date.
+  const dailyGaps = timetable.classGaps.map(({ startAt, endAt }) => ({
+    start: Math.max(startAt, midnight),
+    end: Math.min(endAt, midnight + DAY),
+  })).filter(({ start, end }) => end > start).sort((a, b) => a.start - b.start);
+  if (dailyGaps.some((gap, index) => index > 0 && gap.start < dailyGaps[index - 1].end)) {
+    return reply('這份手機課表有重疊的空堂紀錄，無法核對可用時間。請開啟「我的課表」重新確認課程。');
+  }
+  const windows = dailyGaps.map(({ start, end }) => ({
+    start: Math.ceil(Math.max(start, from) / MINUTE) * MINUTE,
+    end: Math.floor(Math.min(end, until) / MINUTE) * MINUTE,
+  })).filter(({ start, end }) => end > start && end - start >= query.minMinutes * MINUTE);
   const saved = timetable.updatedAt && formatTaipeiDateTime(timetable.updatedAt, { seconds: false });
   const source = saved ? '依手機課表計算，課表儲存於 ' + saved + '。' : '依手機課表計算，儲存時間不詳。';
   const lines = windows.map(({ start, end }) =>
