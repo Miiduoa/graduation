@@ -630,7 +630,9 @@ export function createTronClassLmsHandler({
       return merged;
     } catch (error) {
       if (error instanceof HttpsError) throw error;
-      if (error instanceof Error && /session 已失效/.test(error.message)) reconnect();
+      // Some adapters throw raw HTTP errors instead of returning { ok: false }.
+      // Handle those 401s as expired authentication, never as a retryable outage.
+      if (classifySchoolReadError(error) === 'session' || schoolHttpStatus(error) === 401) reconnect();
       throw new HttpsError('unavailable', '暫時無法讀取 WOW Class，校務成績與學分可分別查看。');
     }
   };
