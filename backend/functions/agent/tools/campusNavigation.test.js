@@ -150,6 +150,50 @@ test('a valid destination beyond the first 100 records remains searchable and na
   expect(await planCampusRoute.execute({ schoolId: 'pu' }, { fromPoiId: 'gate', toPoiId: 'place-119' })).toMatchObject({ success: true, to: expect.objectContaining({ id: 'place-119' }) });
 });
 
+describe.each([
+  ['listCafeterias', listCafeterias, {}, 'schools/pu/cafeterias'],
+  ['findCampusPoi', findCampusPoi, { query: '圖書館' }, 'schools/pu/pois'],
+  ['planCampusRoute', planCampusRoute, routeInput, 'schools/pu/pois'],
+])('%s authorization errors', (name, tool, input, path) => {
+  test.each(['permission-denied', 'unauthenticated', 7, 16])('propagates %p to the dispatcher', async (code) => {
+    const error = Object.assign(new Error('private-document-id'), { code });
+    mockDocuments.set(path, error);
+
+    await expect(tool.execute({ schoolId: 'pu' }, input)).rejects.toBe(error);
+    expect(mockReads.map((read) => read.path)).toEqual([path]);
+  });
+});
+
+test.each(['permission-denied', 'unauthenticated', 7, 16])(
+  'the real tool loop stops after a reader rejects with %p',
+  async (code) => {
+    process.env.GROQ_API_KEY = 'navigation-test-key';
+    process.env.GROQ_MODEL = 'navigation-test-model';
+    mockDocuments.set('schools/pu/cafeterias', Object.assign(new Error('private-document-id'), { code }));
+    mockDocuments.set('schools/pu/pois', points('pu'));
+    const reply = (message) => ({ ok: true, status: 200, json: async () => ({ choices: [{ message }] }) });
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(reply({ content: '', tool_calls: [
+        { id: 'cafeterias', type: 'function', function: { name: 'listCafeterias', arguments: '{}' } },
+        { id: 'route', type: 'function', function: { name: 'planCampusRoute', arguments: JSON.stringify(routeInput) } },
+      ] }))
+      .mockResolvedValueOnce(reply({ content: '不應繼續的模型回合' }));
+
+    const result = await callAssistantModelWithTools({
+      messages: [{ role: 'user', content: '有哪些餐廳，從校門走到圖書館怎麼走' }],
+      toolCtx: { schoolId: 'pu' }, providerOrder: ['groq'], fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(mockReads.map((read) => read.path)).toEqual(['schools/pu/cafeterias']);
+    expect(result.toolsInvoked).toEqual(['listCafeterias']);
+    expect(result.securityEvent).toEqual({ action: 'stop_tool_run', reason: 'authorization_denied' });
+    expect(result.transcriptMessages).toEqual([]);
+    expect(result.cards).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain('private-document-id');
+  },
+);
+
 test('the real model tool loop executes the scoped reader and produces the directions card', async () => {
   process.env.GROQ_API_KEY = 'navigation-test-key';
   process.env.GROQ_MODEL = 'navigation-test-model';

@@ -6,8 +6,10 @@ import {
   directoryCampusServices,
   flattenCampusServices,
   presentCampusService,
+  readCampusServiceFilters,
   searchCampusServices,
   visibleCampusServices,
+  writeCampusServiceFilters,
 } from './campusServices';
 
 it('keeps announcements and bus, and shows ordering-off copy for /food as a note', () => {
@@ -72,6 +74,8 @@ it('does not rewrite non-food services when ordering is off', () => {
 it('lists the local dormitory workspace without implying an official application', () => {
   const dorm = CAMPUS_SERVICES.find((service) => service.href === '/dormitory');
   expect(dorm?.access).toBe('device');
+  expect(dorm?.text).toContain('宿舍備忘');
+  expect(dorm?.text).not.toMatch(/單號|已送出給學校|查詢進度/);
   expect(searchCampusServices('報修').some((service) => service.href === '/dormitory')).toBe(true);
 });
 
@@ -115,7 +119,7 @@ it('merges course-work aliases under one directory primary with shared academic 
     CAMPUS_SERVICES.filter((service) => 'parentHref' in service && service.parentHref === '/classroom').map(
       (service) => service.href,
     ),
-  ).toEqual(['/school-courses', '/school-lms', '/groups']);
+  ).toEqual(['/classroom/material-bookmarks', '/school-courses', '/school-lms', '/groups']);
 });
 
 it('merges cafeteria under the food primary while keeping both reachable', () => {
@@ -135,6 +139,15 @@ it('keeps academic vocabulary aligned across directory primaries', () => {
   expect(byHref.get('/school-courses')).toBe('玩課雲課程');
   expect(byHref.get('/school-lms')).toBe('玩課雲作業');
   expect(byHref.get('/grades?tab=feedback')).toBe('成績回饋');
+});
+
+it('reads and writes directory query filters without keeping an unknown category', () => {
+  const params = new URLSearchParams('q=借書&category=missing&session=old');
+  expect(readCampusServiceFilters(params)).toEqual({ query: '借書', category: 'all' });
+  writeCampusServiceFilters(params, '借書', 'campus');
+  expect(params.get('q')).toBe('借書');
+  expect(params.get('category')).toBe('campus');
+  expect(params.get('session')).toBe('old');
 });
 
 it('exposes merchant and leave entries in the flattened catalog for intent lookup', () => {

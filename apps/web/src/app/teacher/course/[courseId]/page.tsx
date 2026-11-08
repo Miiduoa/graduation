@@ -53,9 +53,9 @@ export default function TeacherCoursePage(props: {
             <Link className={styles.primary} href={`${studentPath}${q}`}>
               開啟課程內容
             </Link>
-            <Link className={styles.secondary} href={`${path}/attendance${q}`}>
+            <a className={styles.secondary} href={`${path}/attendance${q}`}>
               課堂點名
-            </Link>
+            </a>
             <Link className={styles.secondary} href={`${path}/gradebook${q}`}>
               查看成績簿
             </Link>

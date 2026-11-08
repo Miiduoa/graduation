@@ -234,7 +234,7 @@ describe('confirmation and CAS', () => {
     expect(f.writes).toHaveLength(1);
   });
   it('signs server routes and falls back when writes unavailable', async () => {
-    expect(pageHref({ page: 'orders' }, binding.schoolId)).toBe('/orders?schoolId=fixture-school');
+    expect(pageHref({ page: 'orders' }, binding.schoolId)).toBe('/food?schoolId=fixture-school');
     const f = fixtureAdapter(),
       tools = createTools(f.adapter, binding, secret, now, false);
     await tools.call('propose_personal_event', event);
