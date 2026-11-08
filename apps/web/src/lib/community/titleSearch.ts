@@ -1,6 +1,6 @@
 import {
   collection, doc, documentId, endBefore, getDocFromServer, getDocsFromServer, limit, orderBy,
-  query, startAfter, startAt, type DocumentData, type QueryDocumentSnapshot,
+  query, startAfter, startAt, type DocumentData, type Firestore, type QueryConstraint, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase';
 import {
@@ -35,23 +35,52 @@ export async function searchCampusPostTitles(
     typeof cursor.document.data().title !== 'string' ||
     !cursor.document.data().title.startsWith(prefix)
   )) throw invalidTitleSearch();
+  return readTitlePage(getDb(), schoolId, prefix, cursor ? startAfter(cursor.document) : startAt(prefix));
+}
+
+/** Revalidate an ID rather than replaying a cached title result after navigation. */
+export async function resumeCampusPostTitles(
+  schoolId: string, input: string, postId: string,
+): Promise<TitleSearchPage> {
+  const prefix = parseTitlePrefix(input);
+  if (!schoolId || schoolId.includes('/') || !postId || postId.includes('/')) throw invalidTitleSearch();
+  const db = getDb();
+  const anchor = await getDocFromServer(doc(db, 'schools', schoolId, 'campusPosts', postId));
+  if (anchor.metadata.fromCache || anchor.metadata.hasPendingWrites) {
+    throw Object.assign(new Error('閱讀位置尚未取得伺服器確認。'), { code: 'unavailable' });
+  }
+  if (!anchor.exists() || !titleSearchPost(anchor.id, anchor.data(), schoolId, prefix)) {
+    throw unavailableReadingPosition();
+  }
+  return readTitlePage(db, schoolId, prefix, startAt(anchor), postId);
+}
+
+function unavailableReadingPosition() {
+  return Object.assign(new Error('上次閱讀的貼文已無法定位。'), { code: 'history-position-unavailable' });
+}
+
+async function readTitlePage(
+  db: Firestore, schoolId: string, prefix: string, boundary: QueryConstraint, expectedFirstId?: string,
+): Promise<TitleSearchPage> {
   const upperBound = titlePrefixUpperBound(prefix);
   const snapshot = await getDocsFromServer(query(
-    collection(getDb(), path),
-    orderBy('title', 'asc'), orderBy(documentId(), 'asc'),
-    cursor ? startAfter(cursor.document) : startAt(prefix),
+    collection(db, `schools/${schoolId}/campusPosts`),
+    orderBy('title', 'asc'), orderBy(documentId(), 'asc'), boundary,
     ...(upperBound === null ? [] : [endBefore(upperBound)]),
     limit(TITLE_SEARCH_PAGE_SIZE),
   ));
   if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
     throw Object.assign(new Error('搜尋尚未取得伺服器確認。'), { code: 'unavailable' });
   }
+  const posts = snapshot.docs.flatMap((document) => {
+    const post = titleSearchPost(document.id, document.data(), schoolId, prefix);
+    return post ? [post] : [];
+  });
+  // A deletion or title change between the two reads must not select an adjacent post.
+  if (expectedFirstId && posts[0]?.id !== expectedFirstId) throw unavailableReadingPosition();
   const last = snapshot.docs.at(-1);
   return {
-    posts: snapshot.docs.flatMap((document) => {
-      const post = titleSearchPost(document.id, document.data(), schoolId, prefix);
-      return post ? [post] : [];
-    }),
+    posts,
     nextCursor: last ? { schoolId, prefix, document: last } : null,
     hasMore: snapshot.docs.length === TITLE_SEARCH_PAGE_SIZE,
   };

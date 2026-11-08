@@ -4,7 +4,7 @@ import type { TitleSearchPage } from '@/lib/community/titleSearch';
 
 const mocks = vi.hoisted(() => ({
   auth: { user: { uid: 'alice' } as { uid: string } | null, loading: false },
-  search: vi.fn(), confirm: vi.fn(), navigate: vi.fn(),
+  search: vi.fn(), resume: vi.fn(), confirm: vi.fn(), navigate: vi.fn(),
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.navigate }) }));
@@ -12,6 +12,7 @@ vi.mock('next/link', () => ({ default: ({ children, ...props }: React.AnchorHTML
 vi.mock('@/lib/community/titleSearch', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/community/titleSearch')>(),
   searchCampusPostTitles: mocks.search,
+  resumeCampusPostTitles: mocks.resume,
   confirmCampusPostTitleOpen: mocks.confirm,
 }));
 import { TitleHistorySearch } from './TitleHistorySearch';
@@ -35,6 +36,8 @@ function submit(prefix = '二手書') {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  window.sessionStorage.clear();
+  mocks.resume.mockResolvedValue(page());
   mocks.auth = { user: { uid: 'alice' }, loading: false };
   mocks.search.mockResolvedValue(page());
   mocks.confirm.mockResolvedValue(true);
@@ -315,3 +318,82 @@ it('returns from a confirmed old post with only a scoped query and a fresh-posit
   expect(mocks.search).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: '回到上次閱讀位置' })).toBeTruthy();
 });
+
+it('revalidates remembered position instead of replaying results and continues from a fresh cursor', async () => {
+  const first = page(['old-1001'], true);
+  mocks.search.mockResolvedValueOnce(first);
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+  view.unmount();
+  const resumed = page(['old-1001', 'old-1002'], true);
+  mocks.resume.mockResolvedValueOnce(resumed);
+  mocks.search.mockResolvedValueOnce(page(['old-1003']));
+  render(<TitleHistorySearch schoolId="pu" />);
+  await screen.findByRole('button', { name: '回到上次閱讀位置' });
+  expect(screen.queryByRole('article')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '回到上次閱讀位置' }));
+  expect(mocks.resume).toHaveBeenCalledExactlyOnceWith('pu', '二手書', 'old-1001');
+  await screen.findByRole('link', { name: '二手書 old-1002' });
+  fireEvent.click(screen.getByRole('button', { name: '載入更多符合的標題' }));
+  await screen.findByRole('link', { name: '二手書 old-1003' });
+  expect(mocks.search).toHaveBeenLastCalledWith('pu', '二手書', resumed.nextCursor);
+  expect(screen.queryByRole('button', { name: '回到上次閱讀位置' })).toBeNull();
+});
+
+it.each(['account', 'school', 'signed-out', 'edit'])(
+  'does not reuse remembered Web history on %s scope change', async (change) => {
+    const view = render(<TitleHistorySearch schoolId="pu" />);
+    submit();
+    fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+    view.unmount();
+    if (change === 'account') mocks.auth.user = { uid: 'bob' };
+    if (change === 'signed-out') mocks.auth.user = null;
+    render(<TitleHistorySearch schoolId={change === 'school' ? 'other' : 'pu'} />);
+    if (change === 'edit') {
+      await screen.findByRole('button', { name: '回到上次閱讀位置' });
+      fireEvent.change(screen.getByRole('searchbox'), { target: { value: '租屋' } });
+    } else if (change !== 'signed-out') {
+      await waitFor(() => expect(screen.getByRole('searchbox')).toHaveProperty('value', ''));
+    }
+    expect(screen.queryByRole('button', { name: '回到上次閱讀位置' })).toBeNull();
+    expect(mocks.resume).not.toHaveBeenCalled();
+  },
+);
+
+it('retains only the ID on offline resume and retries that exact ID once connected', async () => {
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+  view.unmount();
+  mocks.resume.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }))
+    .mockResolvedValueOnce(page(['old-1001']));
+  render(<TitleHistorySearch schoolId="pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: '回到上次閱讀位置' }));
+  expect(await screen.findByRole('button', { name: '重試上次閱讀位置' })).toBeTruthy();
+  expect(screen.queryByRole('article')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重試上次閱讀位置' }));
+  await screen.findByRole('link', { name: '二手書 old-1001' });
+  expect(mocks.resume).toHaveBeenCalledTimes(2);
+  expect(mocks.resume.mock.calls[0]).toEqual(mocks.resume.mock.calls[1]);
+});
+
+it.each(['history-position-unavailable', 'permission-denied'])(
+  'does not replay private results after a %s on reading-position verification', async (code) => {
+    const view = render(<TitleHistorySearch schoolId="pu" />);
+    submit();
+    fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+    view.unmount();
+    mocks.resume.mockRejectedValueOnce(Object.assign(new Error(code), { code }));
+    render(<TitleHistorySearch schoolId="pu" />);
+    fireEvent.click(await screen.findByRole('button', { name: '回到上次閱讀位置' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('article')).toBeNull();
+    expect(screen.queryByRole('button', { name: '回到上次閱讀位置' })).toBeNull();
+    expect(mocks.navigate).toHaveBeenCalledTimes(1);
+  },
+);

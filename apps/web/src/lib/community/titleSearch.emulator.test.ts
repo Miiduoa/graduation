@@ -4,7 +4,7 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/
 import { disableNetwork, enableNetwork, type Firestore } from 'firebase/firestore';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getDb } from '@/lib/firebase';
-import { confirmCampusPostTitleOpen, searchCampusPostTitles, type TitleSearchCursor } from './titleSearch';
+import { confirmCampusPostTitleOpen, resumeCampusPostTitles, searchCampusPostTitles, type TitleSearchCursor } from './titleSearch';
 import { fetchCampusPostPage } from './feedPages';
 
 vi.mock('@/lib/firebase', () => ({ getDb: vi.fn() }));
@@ -128,6 +128,56 @@ suite('title search using the real SDK and repository authorization rules', () =
     vi.mocked(getDb).mockReturnValue(environment.authenticatedContext('charlie').firestore() as unknown as Firestore);
     await expect(searchCampusPostTitles('other', '二手書', first.nextCursor)).rejects.toMatchObject({ code: 'invalid-argument' });
     expect((await searchCampusPostTitles('other', '二手書')).posts.map((row) => row.id)).toEqual(['private']);
+  });
+  it('resumes at an exact authorized older document using a fresh server cursor', async () => {
+    vi.mocked(getDb).mockReturnValue(alice);
+    const from = await resumeCampusPostTitles('pu', '二手書', 'old-006');
+    expect(from.posts[0].id).toBe('old-006');
+    expect(from.posts).toHaveLength(20);
+    expect(from.hasMore).toBe(true);
+    const next = await searchCampusPostTitles('pu', '二手書', from.nextCursor);
+    expect(new Set([...from.posts, ...next.posts].map((post) => post.id)).size)
+      .toBe(from.posts.length + next.posts.length);
+    expect(next.posts.every((post) => post.schoolId === 'pu')).toBe(true);
+  });
+  it('rejects deleted, changed-title, revoked and cross-school resume IDs', async () => {
+    vi.mocked(getDb).mockReturnValue(alice);
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc('schools/pu/campusPosts/resume-removed').set({
+        schoolId: 'pu', title: '二手書 已刪除', authorUid: 'alice',
+      });
+      await context.firestore().doc('schools/pu/campusPosts/resume-removed').delete();
+    });
+    await expect(resumeCampusPostTitles('pu', '二手書', 'resume-removed'))
+      .rejects.toMatchObject({ code: 'history-position-unavailable' });
+    await expect(resumeCampusPostTitles('pu', '二手書', 'upper'))
+      .rejects.toMatchObject({ code: 'history-position-unavailable' });
+    const membership = 'schools/pu/members/alice';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(membership).update({ status: 'inactive' });
+    });
+    try {
+      await expect(resumeCampusPostTitles('pu', '二手書', 'old-006'))
+        .rejects.toMatchObject({ code: 'permission-denied' });
+    } finally {
+      await environment.withSecurityRulesDisabled(async (context) => {
+        await context.firestore().doc(membership).update({ status: 'active' });
+      });
+    }
+    vi.mocked(getDb).mockReturnValue(environment.authenticatedContext('charlie').firestore() as unknown as Firestore);
+    await expect(resumeCampusPostTitles('pu', '二手書', 'old-006'))
+      .rejects.toMatchObject({ code: 'permission-denied' });
+    expect((await resumeCampusPostTitles('other', '二手書', 'private')).posts[0].id)
+      .toBe('private');
+  });
+  it('does not return a cached resume page when offline', async () => {
+    vi.mocked(getDb).mockReturnValue(alice);
+    await resumeCampusPostTitles('pu', '二手書', 'old-006');
+    await disableNetwork(alice);
+    try {
+      await expect(resumeCampusPostTitles('pu', '二手書', 'old-006'))
+        .rejects.toMatchObject({ code: 'unavailable' });
+    } finally { await enableNetwork(alice); }
   });
   it('rechecks existing, deleted, revoked, offline and cross-campus links with real rules', async () => {
     vi.mocked(getDb).mockReturnValue(alice);
