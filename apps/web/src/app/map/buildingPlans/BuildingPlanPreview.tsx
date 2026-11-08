@@ -6,6 +6,8 @@ import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, 
 import { importBuildingPlanProject } from './buildingPlanProject';
 import type { BuildingPlanView, BuildingPlanScene } from './buildingPlanScene';
 import BuildingPlanTracer from './BuildingPlanTracer';
+import BuildingPlanFloorImporter from './BuildingPlanFloorImporter';
+import BuildingPlanFloorManager from './BuildingPlanFloorManager';
 import styles from './BuildingPlanPreview.module.css';
 
 type Props = { schoolId: string; buildingId: string; buildingName: string; onClose: () => void };
@@ -120,8 +122,11 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
   const floorId = useId();
   const searchId = useId();
   const [plan, setPlan] = useState<BuildingPlan | null>(null);
+  const [planRevision, setPlanRevision] = useState(0);
   const [example, setExample] = useState(false);
   const [roomQuery, setRoomQuery] = useState('');
+  const [floorNotice, setFloorNotice] = useState('');
+  const [floorTool, setFloorTool] = useState<'importer' | 'manager' | null>(null);
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
   const [readingProject, setReadingProject] = useState(false);
@@ -139,8 +144,16 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
   const traceStart = useRef<HTMLButtonElement>(null);
   const floorSelect = useRef<HTMLSelectElement>(null);
   const roomSearch = useRef<HTMLInputElement>(null);
+  const floorTools = useRef<HTMLDivElement>(null);
+  const focusAfterFloorImport = useRef(false);
   const focusAfterTrace = useRef<'preview' | 'return' | null>(null);
   const dark = useSyncExternalStore(subscribeAppearance, readDark, serverAppearance);
+  const onFloorStagingChange = useCallback((active: boolean) => {
+    setFloorTool(current => active ? 'importer' : current === 'importer' ? null : current);
+  }, []);
+  const onFloorEditingChange = useCallback((active: boolean) => {
+    setFloorTool(current => active ? 'manager' : current === 'manager' ? null : current);
+  }, []);
   useEffect(() => () => { generation.current += 1; projectRead.current?.abort(); }, []);
   function cancelPendingRead() {
     projectRead.current?.abort();
@@ -149,7 +162,13 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
     setReadingProject(false);
     return ++generation.current;
   }
-  const clearPlan = () => { setPlan(null); setRoomQuery(''); setExample(false); setError(''); setReading(false); setReadingProject(false); setMode('flat'); setView(initialView); setTracing(false); setTraceSession(false); setInitialProject(undefined); };
+  const clearPlan = () => { setPlan(null); setPlanRevision(value => value + 1); setRoomQuery(''); setFloorNotice(''); setFloorTool(null); setExample(false); setError(''); setReading(false); setReadingProject(false); setMode('flat'); setView(initialView); setTracing(false); setTraceSession(false); setInitialProject(undefined); };
+  useEffect(() => {
+    if (focusAfterFloorImport.current) {
+      focusAfterFloorImport.current = false;
+      floorTools.current?.querySelector<HTMLElement>('summary')?.focus();
+    }
+  }, [planRevision]);
   useEffect(() => {
     if (tracing) {
       traceWorkspace.current?.focus();
@@ -213,7 +232,10 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
     setPlan(createExampleBuildingPlan({ schoolId, buildingId }));
   }
   function downloadPlan(drawing: BuildingPlan, filename: string) {
-    const blob = new Blob([JSON.stringify(drawing, null, 2)], { type: 'application/json' });
+    const formatted = JSON.stringify(drawing, null, 2);
+    const contents = new TextEncoder().encode(formatted).byteLength <= MAX_BUILDING_PLAN_BYTES
+      ? formatted : JSON.stringify(drawing);
+    const blob = new Blob([contents], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -231,6 +253,23 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
     if (!traceSession) { setInitialProject(undefined); setTraceRevision(value => value + 1); }
     setTraceSession(true);
     setTracing(true);
+  }
+  function changeFloors(next: BuildingPlan, addedFloorId?: string) {
+    if (reading || readingProject || traceSession) return;
+    cancelPendingRead();
+    setPlan(next);
+    setPlanRevision(value => value + 1);
+    setError('');
+    setExample(false);
+    setRoomQuery('');
+    setFloorNotice(addedFloorId ? `已加入 ${next.floors.find(floor => floor.id === addedFloorId)?.label}，目前共 ${next.floors.length} 層。` : '');
+    setView(current => {
+      if (addedFloorId) return { ...current, floorId: null, roomId: null };
+      const selected = next.floors.find(floor => floor.id === current.floorId);
+      return { ...current, floorId: selected?.id ?? null,
+        roomId: selected?.rooms.some(room => room.id === current.roomId) ? current.roomId : null };
+    });
+    if (addedFloorId) focusAfterFloorImport.current = true;
   }
   const floors = plan?.floors.filter(floor => !view.floorId || floor.id === view.floorId) ?? [];
   const selectedFloor = plan?.floors.find(floor => floor.id === view.floorId);
@@ -263,7 +302,9 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
           onComplete={drawing => {
             cancelPendingRead();
             setPlan(drawing);
+            setPlanRevision(value => value + 1);
             setRoomQuery('');
+            setFloorNotice('');
             setExample(false);
             setError('');
             setView(initialView);
@@ -316,6 +357,13 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             {traceSession && <button type="button" onClick={startTracing}>返回圖面編輯</button>}
           </div>
           <p className={styles.hint}>下載內容包含圖面與來源標示，不含底圖圖片。{traceSession && '要保存可續編的版本，請返回圖面編輯並下載編輯檔。'}</p>
+        </div>
+        <div ref={floorTools}>
+          {floorNotice && <p className={styles.floorEditingHint} role="status">{floorNotice}</p>}
+          {traceSession && <p className={styles.floorEditingHint}>目前保留原圖片編輯內容。要組合或管理樓層，請先下載各層圖面與需要保留的編輯檔，再從「匯入 JSON 圖面」開啟第一份圖面。</p>}
+          {floorTool && <p className={styles.floorEditingHint}>{floorTool === 'importer' ? '請先完成或取消加入樓層，再編輯其他樓層設定。' : '請先套用或取消樓層設定，再加入其他樓層。'}</p>}
+          <BuildingPlanFloorImporter key={planRevision} plan={plan} disabled={reading || readingProject || traceSession || floorTool === 'manager'} onChange={changeFloors} onStagingChange={onFloorStagingChange} />
+          <BuildingPlanFloorManager plan={plan} disabled={reading || readingProject || traceSession || floorTool === 'importer'} onChange={changeFloors} onEditingChange={onFloorEditingChange} />
         </div>
         <div className={styles.toolbar}>
           <label htmlFor={floorId}>樓層</label>

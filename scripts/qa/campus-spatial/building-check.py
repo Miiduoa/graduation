@@ -560,6 +560,209 @@ async def building_room_search_mobile(page, _requests, _resources):
             'clearKeepsFloorAndFocus': True, 'unverifiedPlanOnly': True}
 
 
+async def expand_details(page, label):
+    summary = preview(page).get_by_text(label, exact=True)
+    details = summary.locator('xpath=..')
+    if await details.get_attribute('open') is None:
+        await summary.click()
+    return details
+
+
+async def building_floor_assembly_mobile(page, _requests, _resources):
+    """Join two measured drawings using explicit, independently checked placement."""
+    await open_plan(page, example=False)
+    base_source = {'label': '一樓合成圖，非校園實測', 'url': 'https://example.com/fictional-1f'}
+    upper_source = {'label': '二樓獨立合成來源', 'url': 'https://example.com/fictional-2f'}
+    base = {
+        'version': 1, 'schoolId': 'pu', 'buildingId': spatial.LIBRARY['id'],
+        'name': '兩層組合驗收，非校園實測', 'units': 'm', 'source': base_source,
+        'floors': [{'id': 'traced-floor', 'label': '1F', 'elevation': 0, 'height': 3.2,
+                    'outline': [[0, 0], [12, 0], [12, 8], [0, 8]],
+                    'rooms': [{'id': 'traced-room-1', 'name': '組合教室 101',
+                               'polygon': [[1, 1], [4, 1], [4, 3], [1, 3]]}],
+                    'walls': [{'start': [0, 0], 'end': [12, 0], 'thickness': 0.2}]}],
+    }
+    incoming = {
+        'version': 1, 'schoolId': 'pu', 'buildingId': spatial.LIBRARY['id'],
+        'name': '二樓單層合成圖', 'units': 'm', 'source': {'label': '整份來源不覆蓋樓層來源'},
+        # Both IDs deliberately match the existing traced floor and room.
+        # The file's elevation is deliberately unrelated to this building.
+        'floors': [{'id': 'traced-floor', 'label': '原始二樓', 'elevation': 20, 'height': 3.6,
+                    'outline': [[0, 0], [10, 0], [10, 6], [0, 6]],
+                    'rooms': [{'id': 'traced-room-1', 'name': '組合教室 201',
+                               'polygon': [[1, 1], [3, 1], [3, 3], [1, 3]]}],
+                    'walls': [{'start': [0, 0], 'end': [10, 0], 'thickness': 0.2}],
+                    'source': upper_source}],
+    }
+    await preview(page).get_by_label('匯入 JSON 圖面', exact=True).set_input_files({
+        'name': 'fictional-1f.json', 'mimeType': 'application/json', 'buffer': json.dumps(base).encode()})
+    original = await download_plan(page)
+    await open_3d(page)
+    original_canvas = await page.locator(CANVAS).element_handle()
+    assert original_canvas is not None
+    importer = await expand_details(page, '加入樓層圖面')
+    floor_file = importer.get_by_label('選擇要加入的圖面', exact=True)
+    try:
+        await floor_file.set_input_files({
+            'name': 'unmeasured-2f.json', 'mimeType': 'application/json',
+            'buffer': json.dumps(dict(incoming, units='relative')).encode()})
+        await expect(importer.get_by_role('alert')).to_contain_text('尚未校正為公尺')
+        assert await download_plan(page) == original
+        assert await page.locator(CANVAS).evaluate('(canvas, previous) => canvas === previous', original_canvas)
+
+        await floor_file.set_input_files({
+            'name': 'fictional-2f.json', 'mimeType': 'application/json', 'buffer': json.dumps(incoming).encode()})
+        await expect(importer.get_by_label('加入哪一層', exact=True)).to_have_value('traced-floor')
+        await expect(importer.get_by_label('樓底標高（公尺）', exact=True)).to_have_value('')
+        await expect(importer.get_by_role('link', name=f"{upper_source['label']} ↗", exact=True)).to_have_attribute('href', upper_source['url'])
+        await importer.get_by_label('新增樓層名稱', exact=True).fill('2F')
+        await importer.get_by_label('樓底標高（公尺）', exact=True).fill('4')
+        await importer.get_by_label('水平位移（公尺）', exact=True).fill('6')
+        await importer.get_by_label('垂直位移（公尺）', exact=True).fill('2')
+        await importer.get_by_label('圖面旋轉', exact=True).select_option('90')
+        await importer.get_by_role('button', name='預覽樓層位置', exact=True).click()
+        alignment = importer.get_by_role('img', name='樓層位置預覽', exact=True)
+        await expect(alignment).to_be_visible()
+        candidate = alignment.locator('polygon').filter(has=page.locator('title', has_text=re.compile(r'^待加入樓層：2F$')))
+        expected_outline = [[6, 2], [6, 12], [0, 12], [0, 2]]
+        assert await candidate.evaluate('node => Array.from(node.points, point => [point.x, point.y])') == expected_outline
+        assert await download_plan(page) == original, 'Position preview committed a floor without confirmation'
+        assert await page.locator(CANVAS).evaluate('(canvas, previous) => canvas === previous', original_canvas)
+        await no_overflow(page)
+        await alignment.scroll_into_view_if_needed()
+        await page.screenshot(path=str(OUT / 'building-floor-alignment-mobile.png'))
+    finally:
+        await original_canvas.dispose()
+
+    add_button = importer.get_by_role('button', name='加入這個樓層', exact=True)
+    await add_button.evaluate('''button => {
+      window.__floorAssemblyTouches = [];
+      button.addEventListener('pointerdown', event => window.__floorAssemblyTouches.push({
+        trusted:event.isTrusted, type:event.pointerType}));
+    }''')
+    before = await page.evaluate('window.__campusSpatialProbe.draws')
+    await add_button.tap()
+    webgl = await assert_building_3d(page, before)
+    assembled = await download_plan(page)
+    assert assembled['units'] == 'm' and len(assembled['floors']) == 2, assembled
+    first, second = assembled['floors']
+    for key in ['id', 'label', 'elevation', 'height', 'outline', 'rooms', 'walls']:
+        assert first[key] == original['floors'][0][key], {'field': key, 'floor': first}
+    assert first['source'] == base_source and second['source'] == upper_source, assembled
+    assert second['label'] == '2F' and second['elevation'] == 4 and second['height'] == 3.6, second
+    assert second['outline'] == expected_outline, second
+    assert second['rooms'][0]['polygon'] == [[5, 3], [5, 5], [3, 5], [3, 3]], second
+    assert second['walls'] == [{'start': [6, 2], 'end': [6, 12], 'thickness': 0.2}], second
+    assert len({floor['id'] for floor in assembled['floors']}) == 2, assembled
+    assert len({room['id'] for floor in assembled['floors'] for room in floor['rooms']}) == 2, assembled
+    assert all('verified' not in floor for floor in assembled['floors']), assembled
+    floor_select = preview(page).get_by_role('combobox', name='樓層', exact=True)
+    await floor_select.select_option('')
+    await expect(preview(page).get_by_role('region', name='平面圖', exact=True).locator('svg')).to_have_count(2)
+    await preview(page).get_by_role('group', name='立體圖面', exact=True).scroll_into_view_if_needed()
+    await expect(page.locator(CANVAS)).to_be_visible()
+    await page.screenshot(path=str(OUT / 'building-floor-assembled-3d.png'))
+
+    rooms = preview(page).get_by_role('region', name='房間清單', exact=True)
+    search = rooms.get_by_label('搜尋圖面房間', exact=True)
+    await floor_select.select_option(first['id'])
+    await search.fill('組合教室 201')
+    await expect(floor_select).to_have_value(first['id'])
+    await rooms.get_by_role('button', name='2F 組合教室 201', exact=True).tap()
+    await expect(floor_select).to_have_value(second['id'])
+    await expect(preview(page)).to_contain_text('已選取：2F · 組合教室 201')
+    await preview(page).get_by_role('group', name='立體圖面', exact=True).scroll_into_view_if_needed()
+    await expect(page.locator(f'[data-building-room-id="{second["rooms"][0]["id"]}"]')).to_have_attribute('aria-pressed', 'true')
+
+    await expand_details(page, '管理樓層')
+    manager = preview(page).get_by_role('region', name='樓層管理', exact=True)
+    upper = manager.get_by_role('group', name='2F 樓層設定', exact=True)
+    await expect(upper.get_by_role('link', name=f"{upper_source['label']} ↗", exact=True)).to_have_attribute('href', upper_source['url'])
+    await upper.get_by_role('button', name='編輯樓層', exact=True).click()
+    await upper.get_by_label('樓層名稱', exact=True).fill('2F 教學層')
+    await upper.get_by_label('樓底標高（公尺）', exact=True).fill('4.5')
+    await upper.get_by_label('樓高（公尺）', exact=True).fill('3.8')
+    await upper.get_by_role('button', name='套用樓層設定', exact=True).click()
+    edited = await download_plan(page)
+    updated = next(floor for floor in edited['floors'] if floor['id'] == second['id'])
+    assert {key: updated[key] for key in ['label', 'elevation', 'height']} == {
+        'label': '2F 教學層', 'elevation': 4.5, 'height': 3.8}, updated
+    for key in ['id', 'outline', 'rooms', 'walls', 'source']:
+        assert updated[key] == second[key], {'field': key, 'floor': updated}
+    assert edited['floors'][0] == first, edited
+    await no_overflow(page)
+
+    # Use actual downloaded bytes for the round trip, including floor-level
+    # provenance and the user-supplied placement. Retain the file as evidence.
+    async with page.expect_download() as pending_download:
+        await preview(page).get_by_role('button', name='下載目前圖面', exact=True).click()
+    download = await pending_download.value
+    assert download.suggested_filename == 'building-plan.json'
+    saved_path = OUT / 'building-floor-assembly.json'
+    await download.save_as(str(saved_path))
+    saved_bytes = saved_path.read_bytes()
+    assert json.loads(saved_bytes) == edited
+    await expand_details(page, '更換圖面與範本')
+    await preview(page).get_by_label('匯入 JSON 圖面', exact=True).set_input_files({
+        'name': 'assembled-round-trip.json', 'mimeType': 'application/json', 'buffer': saved_bytes})
+    await expect(preview(page)).to_contain_text('待核對圖面')
+    assert await download_plan(page) == edited
+    await open_3d(page)
+    await search.fill('組合教室 201')
+    await rooms.get_by_role('button', name='2F 教學層 組合教室 201', exact=True).tap()
+    await expect(floor_select).to_have_value(second['id'])
+
+    await expand_details(page, '管理樓層')
+    upper = manager.get_by_role('group', name='2F 教學層 樓層設定', exact=True)
+    await upper.get_by_role('button', name='移除樓層', exact=True).click()
+    await expect(upper.get_by_role('button', name='確認移除', exact=True)).to_be_visible()
+    assert await download_plan(page) == edited, 'Requesting removal already deleted the floor'
+    await upper.get_by_role('button', name='保留樓層', exact=True).click()
+    await expect(upper.get_by_role('button', name='確認移除', exact=True)).to_have_count(0)
+    assert await download_plan(page) == edited
+    await upper.get_by_role('button', name='移除樓層', exact=True).click()
+    await upper.get_by_role('button', name='確認移除', exact=True).click()
+    reduced = await download_plan(page)
+    assert reduced['floors'] == [first], reduced
+    assert await floor_select.input_value() != second['id']
+    await expect(preview(page).get_by_text('已選取：2F 教學層 · 組合教室 201', exact=True)).to_have_count(0)
+    await expect(preview(page).get_by_role('region', name='平面圖', exact=True).locator('svg')).to_have_count(1)
+    remaining = manager.get_by_role('group', name='1F 樓層設定', exact=True)
+    remove_last = remaining.get_by_role('button', name='移除樓層', exact=True)
+    await expect(remove_last).to_have_attribute('aria-disabled', 'true')
+    await remove_last.focus()
+    await page.keyboard.press('Enter')
+    await expect(remove_last).to_be_focused()
+    await expect(manager.get_by_role('button', name='確認移除', exact=True)).to_have_count(0)
+    assert await download_plan(page) == reduced
+    await no_overflow(page)
+    await remaining.scroll_into_view_if_needed()
+    await page.screenshot(path=str(OUT / 'building-floor-manager-mobile.png'))
+    await expect(preview(page).get_by_role('link', name='開啟步行導航')).to_have_count(0)
+
+    # A relative drawing remains viewable, but cannot accept another floor:
+    # two independent image scales must never silently become the same scale.
+    await expand_details(page, '更換圖面與範本')
+    await preview(page).get_by_label('匯入 JSON 圖面', exact=True).set_input_files({
+        'name': 'unmeasured-base.json', 'mimeType': 'application/json',
+        'buffer': json.dumps(dict(base, units='relative')).encode()})
+    importer = await expand_details(page, '加入樓層圖面')
+    await expect(importer.get_by_label('選擇要加入的圖面', exact=True)).to_be_disabled()
+    await expect(importer).to_contain_text('目前圖面尚未校正比例')
+    touch = await page.evaluate('window.__floorAssemblyTouches')
+    assert touch == [{'trusted': True, 'type': 'touch'}], touch
+    return {'webgl': webgl, 'width': 320, 'mixedUnitsKeepPreview': True,
+            'previewRequiresConfirmation': True, 'nativeTouchConfirmation': touch,
+            'baseGeometryAndIdsPreserved': True, 'incomingIdsRemapped': True,
+            'placement': {'rotationDegrees': 90, 'offset': [6, 2], 'elevation': 4,
+                          'outline': expected_outline},
+            'perFloorSourcesPreserved': True, 'editedLabelAndHeights': True,
+            'modelBytes': len(saved_bytes), 'modelSha256': hashlib.sha256(saved_bytes).hexdigest(),
+            'downloadReimport': True, 'removalRequiresConfirmation': True,
+            'removedFloorClearsSelection': True, 'lastFloorProtected': True,
+            'relativeBaseCannotAppend': True, 'unverifiedPlanOnly': True}
+
+
 async def no_overflow(page):
     result = await preview(page).evaluate('''dialog => {
       const visible = el => el.getClientRects().length > 0;
@@ -685,12 +888,13 @@ async def main():
                     ('building-tracing-mobile', {'width': 320, 'height': 568}, tracing_mobile),
                     ('building-project-desktop', {'width': 1440, 'height': 1100}, building_project_desktop),
                     ('building-room-search-mobile', {'width': 320, 'height': 568}, building_room_search_mobile),
+                    ('building-floor-assembly-mobile', {'width': 320, 'height': 568}, building_floor_assembly_mobile),
                 ]:
                     report['checks'].append(await spatial.run_case(browser, f'http://127.0.0.1:{server.server_port}',
                                                                    name, viewport, test, set()))
             finally:
                 await browser.close()
-        if all(item['status'] == 'passed' for item in report['checks']) and len(report['checks']) == 7:
+        if all(item['status'] == 'passed' for item in report['checks']) and len(report['checks']) == 8:
             report['status'] = 'passed'
     except Exception:
         report['failure'] = traceback.format_exc()

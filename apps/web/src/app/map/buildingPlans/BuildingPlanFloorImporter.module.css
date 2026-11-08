@@ -1,0 +1,30 @@
+.importer { min-width: 0; border: 1px solid var(--plan-border); border-radius: 12px; margin-bottom: 12px; }
+.importer summary { cursor: pointer; min-height: 44px; padding: 12px 14px; font-weight: 600; font-size: 0.875rem; }
+.importer summary:focus-visible, .fields input:focus-visible, .fields select:focus-visible, .fileButton:has(+ input:focus-visible), .prepared:focus-visible { outline: 3px solid var(--plan-accent); outline-offset: 3px; }
+.content { padding: 0 14px 16px; display: grid; gap: 12px; min-width: 0; }
+.fields { display: grid; gap: 12px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.fields:disabled > .actions { opacity: 0.5; }
+.fields label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 0.8125rem; }
+.fields input, .fields select { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--plan-border); border-radius: 9px; background: var(--plan-panel); color: var(--plan-text); padding: 9px 10px; font: inherit; font-size: 0.875rem; }
+.fields input:disabled, .fields select:disabled { opacity: 0.5; }
+.fields button { justify-self: start; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.fields .fileButton { display: inline-flex; min-height: 44px; justify-content: center; max-width: 100%; padding: 9px 13px; box-sizing: border-box; border: 1px solid var(--plan-accent); border-radius: 10px; background: var(--plan-panel); font-size: 0.875rem; cursor: pointer; }
+.fields .fileInput, .srOnly { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.hint { color: var(--plan-muted); font-size: 0.8125rem; overflow-wrap: anywhere; }
+.hint a { color: var(--plan-accent); text-decoration: underline; text-underline-offset: 3px; }
+.error { color: var(--plan-text); background: color-mix(in srgb, #df6750 12%, var(--plan-panel)); border: 1px solid #bf6856; border-radius: 10px; padding: 10px 12px; font-size: 0.875rem; }
+.prepared { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--plan-border); border-radius: 10px; padding: 12px; }
+.prepared p { overflow-wrap: anywhere; font-size: 0.875rem; }
+.alignment { margin: 0; min-width: 0; }
+.alignment figcaption { font-size: 0.875rem; font-weight: 600; margin-bottom: 8px; }
+.alignment svg { display: block; width: 100%; height: 240px; }
+.referenceOutline { fill: color-mix(in srgb, var(--plan-muted) 8%, transparent); stroke: var(--plan-muted); stroke-width: 2px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.candidateOutline { fill: color-mix(in srgb, var(--plan-accent) 15%, transparent); stroke: var(--plan-accent); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px !important; }
+@media (max-width: 640px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .content { padding-inline: 10px; }
+  .prepared { padding: 9px; }
+}
