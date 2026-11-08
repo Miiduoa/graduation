@@ -447,3 +447,71 @@ it('keeps input focus if a student selects it while the remembered article is re
   expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
   expect(document.activeElement).toBe(field);
 });
+
+
+it('recovers a stalled first server search, then ignores the late old result', async () => {
+  const pending = deferred<TitleSearchPage>();
+  mocks.search.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(page(['fresh']));
+  render(<TitleHistorySearch schoolId="pu" />);
+  vi.useFakeTimers();
+  try {
+    submit();
+    expect(screen.getByRole('button', { name: '搜尋歷史標題' }).getAttribute('aria-busy')).toBe('true');
+    await act(async () => { vi.advanceTimersByTime(15_000); await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: '重試搜尋' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '搜尋歷史標題' }).getAttribute('aria-busy')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: '重試搜尋' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('link', { name: '二手書 fresh' })).toBeTruthy();
+    await act(async () => { pending.resolve(page(['stale'])); await Promise.resolve(); });
+    expect(screen.queryByRole('link', { name: '二手書 stale' })).toBeNull();
+    expect(mocks.search).toHaveBeenCalledTimes(2);
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps the confirmed page and exact cursor when the next server page stalls', async () => {
+  const first = page(['old-1001'], true);
+  const pending = deferred<TitleSearchPage>();
+  mocks.search.mockResolvedValueOnce(first)
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce(page(['old-1002']));
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const more = await screen.findByRole('button', { name: '載入更多符合的標題' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(more);
+    await act(async () => { vi.advanceTimersByTime(15_000); await Promise.resolve(); });
+    expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '重試下一頁' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('link', { name: '二手書 old-1002' })).toBeTruthy();
+    expect(mocks.search.mock.calls[1][2]).toBe(first.nextCursor);
+    expect(mocks.search.mock.calls[2][2]).toBe(first.nextCursor);
+    await act(async () => { pending.resolve(page(['stale'])); await Promise.resolve(); });
+    expect(screen.queryByRole('link', { name: '二手書 stale' })).toBeNull();
+  } finally { vi.useRealTimers(); }
+});
+
+it('times out reading-position lookup without replaying a cached article or losing its ID', async () => {
+  window.sessionStorage.setItem('nuni:community-history-reading-position:v1',
+    JSON.stringify({ uid: 'alice', schoolId: 'pu', query: '二手書', postId: 'old-1001', savedAt: Date.now() }));
+  const pending = deferred<TitleSearchPage>();
+  mocks.resume.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(page(['old-1001']));
+  render(<TitleHistorySearch schoolId="pu" />);
+  const resume = await screen.findByRole('button', { name: '回到上次閱讀位置' });
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(resume);
+    expect(screen.queryByRole('article')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(15_000); await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: '重試上次閱讀位置' })).toBeTruthy();
+    expect(screen.queryByRole('article')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '重試上次閱讀位置' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
+    expect(mocks.resume.mock.calls[0]).toEqual(mocks.resume.mock.calls[1]);
+    await act(async () => { pending.reject(Object.assign(new Error('late denied'), { code: 'permission-denied' })); await Promise.resolve(); });
+    expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
+  } finally { vi.useRealTimers(); }
+});
