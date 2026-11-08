@@ -3,9 +3,14 @@
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useAuth } from './AuthGuard';
+import {
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+} from '@/lib/campusDirectorySearch';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { VoiceDictationButton } from './VoiceDictationButton';
@@ -42,6 +47,13 @@ export function QuickCampusEntry() {
   const [query, setQuery] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const sequence = useRef(0);
+  useLayoutEffect(() => {
+    const snapshot = restoreDirectorySearch('quick', window.location.pathname || '/');
+    if (!snapshot) return;
+    // Restore the typed request after history navigation back to this page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setQuery(snapshot.query.slice(0, 160));
+  }, []);
   useEffect(() => () => {
     sequence.current += 1;
   }, []);
@@ -67,6 +79,15 @@ export function QuickCampusEntry() {
     sequence.current += 1;
     setAnalysis(null);
     setQuery(value.slice(0, 160));
+  }
+
+  function rememberQuick(href: string) {
+    rememberDirectorySearch('quick', {
+      path: window.location.pathname || '/',
+      destination: href,
+      query,
+      open: true,
+    });
   }
 
   async function analyze(input: string) {
@@ -105,7 +126,7 @@ export function QuickCampusEntry() {
             說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
           </p>
         </div>
-        <Link className={styles.allServices} href={searchHref}>
+        <Link className={styles.allServices} href={searchHref} onClick={() => rememberQuick(searchHref)}>
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
       </div>
@@ -179,7 +200,12 @@ export function QuickCampusEntry() {
               </p>
               <div className={styles.actionGrid}>
                 {actions.map((action) => (
-                  <Link key={action.href} href={route(action.href, action.serviceId)} className={styles.action}>
+                  <Link
+                    key={action.href}
+                    href={route(action.href, action.serviceId)}
+                    className={styles.action}
+                    onClick={() => rememberQuick(route(action.href, action.serviceId))}
+                  >
                     <span>
                       <strong>{action.name}</strong>
                       <small>{action.text}</small>
@@ -203,9 +229,21 @@ export function QuickCampusEntry() {
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref}>搜尋更多服務</Link>
-            <Link href={assistantHref}>詢問校園助理</Link>
-            <button type="button" onClick={() => updateQuery('')}>重新輸入</button>
+            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>
+              搜尋更多服務
+            </Link>
+            <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
+              詢問校園助理
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                forgetDirectorySearch('quick');
+                updateQuery('');
+              }}
+            >
+              重新輸入
+            </button>
           </div>
         </div>
       )}

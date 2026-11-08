@@ -34,6 +34,7 @@ vi.mock('next/navigation', () => ({
 }));
 beforeEach(() => {
   window.history.replaceState({}, '', '/search');
+  sessionStorage.clear();
   selection.current = null;
   userState.uid = null;
   userState.platform = false;
@@ -235,6 +236,40 @@ it('makes management and school qualifications discoverable without implying aut
     '/classroom/account',
   );
 });
+it('restores directory filters after returning from a service without the query in the address', () => {
+  const view = render(<SearchPage />);
+  fireEvent.click(screen.getByRole('button', { name: '校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: /^圖書館/ }));
+  view.unmount();
+  window.history.replaceState({}, '', '/library');
+  window.history.replaceState({}, '', '/search');
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox', { name: '想找什麼？' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('button', { name: '校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('link', { name: /^圖書館/ })).toBeTruthy();
+});
+
+it('does not restore directory filters after they have been cleared', () => {
+  const view = render(<SearchPage />);
+  fireEvent.change(screen.getByRole('searchbox', { name: '想找什麼？' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  view.unmount();
+  window.history.replaceState({}, '', '/search');
+  render(<SearchPage />);
+  expect((screen.getByRole('searchbox', { name: '想找什麼？' }) as HTMLInputElement).value).toBe(
+    '',
+  );
+});
+
 it('restores filters after navigation and ignores unsupported categories', () => {
   const view = render(<SearchPage />);
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '公車' } });
