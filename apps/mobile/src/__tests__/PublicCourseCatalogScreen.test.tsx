@@ -283,3 +283,33 @@ test.each([
     expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
   } finally { globalThis.fetch = original; }
 });
+
+test.each([
+  { earlier: true, later: false, feedback: '請選取下方資料複製，再到匯入頁貼上。' },
+  { earlier: false, later: true, feedback: '已複製，請到匯入頁貼上並核對上課時間。' },
+])('overlapping clipboard attempts keep only the latest result (earlier=$earlier, later=$later)', async ({ earlier, later, feedback }) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  let resolveEarlier!: (value: boolean) => void;
+  const clipboard = jest.mocked(Clipboard.setStringAsync);
+  clipboard.mockImplementationOnce(() => new Promise<boolean>(resolve => { resolveEarlier = resolve; }));
+  clipboard.mockResolvedValueOnce(later);
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson());
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    await view.findByText('分析化學專題');
+    fireEvent.press(view.getByText('複製課表匯入資料'));
+    expect(clipboard).toHaveBeenCalledTimes(1);
+    fireEvent.press(view.getByText('複製課表匯入資料'));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledTimes(2));
+    expect(await view.findByText(feedback)).toBeTruthy();
+    await act(async () => { resolveEarlier(earlier); });
+    expect(view.getByText(feedback)).toBeTruthy();
+    if (later) {
+      expect(view.queryByLabelText('可複製的課表資料')).toBeNull();
+    } else {
+      expect(view.queryByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeNull();
+      expect(view.getByLabelText('可複製的課表資料').props.selectable).toBe(true);
+    }
+  } finally { globalThis.fetch = original; }
+});

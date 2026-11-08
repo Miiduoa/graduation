@@ -33,24 +33,30 @@ type Props = {
 };
 
 function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCatalogCourse }) {
-  const [copied, setCopied] = useState(false);
-  const [manualCopy, setManualCopy] = useState(false);
+  const [copyState, setCopyState] = useState<{ csv: string; status: 'copied' | 'manual' } | null>(null);
+  const copyAttempt = useRef(0);
   const meetings = schoolId === 'nthu'
     ? nthuCourseMeetings(course.meetings ?? [], course.semester)
     : ncnuCourseMeetings(course.time, course.semester)?.map(meeting => ({ ...meeting, room: course.room }));
   const rawMeetings = course.meetings ?? [{ time: course.time, room: course.room }];
   const csv = schoolId === 'nthu' ? nthuTimetableImportCsv(course) : ncnuTimetableImportCsv(course);
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
+  // A second tap or a new course invalidates a pending clipboard result.
+  // The displayed feedback must describe the exact CSV currently on screen.
+  const copied = copyState?.csv === csv && copyState.status === 'copied';
+  const manualCopy = copyState?.csv === csv && copyState.status === 'manual';
+  useEffect(() => () => { copyAttempt.current += 1; }, []);
   async function copy() {
     if (!csv) return;
+    const attempt = ++copyAttempt.current;
+    setCopyState(null);
     try {
       const success = await Clipboard.setStringAsync(csv);
-      if (!success) throw new Error('Clipboard unavailable');
-      setCopied(true);
-      setManualCopy(false);
+      if (attempt !== copyAttempt.current) return;
+      setCopyState({ csv, status: success ? 'copied' : 'manual' });
     } catch {
-      setCopied(false);
-      setManualCopy(true);
+      if (attempt !== copyAttempt.current) return;
+      setCopyState({ csv, status: 'manual' });
     }
   }
   // Keep the title separate: grouping the whole Card as an accessible header
