@@ -64,7 +64,7 @@ PROBE = """(() => {
   const getContext = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (...args) {
     const context = Reflect.apply(getContext, this, args);
-    if (this.dataset.spatialCanvas && context instanceof WebGL2RenderingContext &&
+    if ((this.dataset.spatialCanvas || this.dataset.buildingPlanCanvas) && context instanceof WebGL2RenderingContext &&
         !contexts.has(context)) {
       contexts.add(context);
       probe.contexts += 1;
@@ -76,7 +76,7 @@ PROBE = """(() => {
     const original = WebGL2RenderingContext.prototype[name];
     WebGL2RenderingContext.prototype[name] = function (...args) {
       const result = Reflect.apply(original, this, args);
-      if (this.canvas?.dataset.spatialCanvas) {
+      if (this.canvas?.dataset.spatialCanvas || this.canvas?.dataset.buildingPlanCanvas) {
         if (name === 'clear') probe.clears += 1;
         else probe.draws += 1;
       }

@@ -16,6 +16,7 @@ import {
 import type { CampusSpatialScene } from './campusSpatialScene';
 import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
+import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
 import styles from './CampusSpatialExplorer.module.css';
 
 type Props = {
@@ -186,6 +187,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [selection, setSelection] = useState<string | null>(null);
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
+  const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
   const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
@@ -200,6 +202,18 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }, []);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
+
+  // Replace the spatial modal so there is only one focus trap and graphics context.
+  // The key prevents a late local-file read from crossing a school/building boundary.
+  if (buildingPlanOpen && place) {
+    return <BuildingPlanPreview
+      key={`${school}:${place.id}`}
+      schoolId={school}
+      buildingId={place.id}
+      buildingName={place.name}
+      onClose={() => setBuildingPlanOpen(false)}
+    />;
+  }
 
   return (
     <Modal
@@ -286,6 +300,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                   在平面地圖查看
                 </button>
                 <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer">開啟步行導航</a>
+                <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
               </> : <p className={styles.note} role="status">請選擇地點，確認位置後再開啟導航。</p>}

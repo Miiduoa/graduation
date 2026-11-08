@@ -59,7 +59,9 @@ jobs:
       - name: Build production component fixture
         run: node scripts/qa/campus-spatial/build.mjs
       - name: Check local interactions and real WebGL recovery
-        run: python scripts/qa/campus-spatial/check.py
+        run: |
+          python scripts/qa/campus-spatial/check.py
+          python scripts/qa/campus-spatial/building-check.py
       - name: Upload screenshots and results
         if: always()
         uses: actions/upload-artifact@v7

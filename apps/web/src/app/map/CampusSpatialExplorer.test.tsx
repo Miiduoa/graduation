@@ -292,3 +292,33 @@ it('requires a fresh choice when the selected location disappears instead of usi
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ selectedId: null }));
 });
+
+it('opens a scoped building preview with one dialog and releases the campus graphics', async () => {
+  const onSelect = vi.fn();
+  render(<CampusSpatialExplorer school="other-school" locations={places} selected={places[0]} onSelect={onSelect} />);
+  const dialog = await open();
+  fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
+  const preview = await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+  expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  expect(screen.queryByRole('dialog', { name: '校園空間導覽' })).toBeNull();
+  expect(preview.textContent).toContain('本校圖書館');
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
+  expect(within(preview).queryByRole('link', { name: '開啟步行導航' })).toBeNull();
+  fireEvent.click(within(preview).getByRole('button', { name: '關閉視窗' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  expect(screen.getByRole('heading', { name: '本校圖書館' })).toBeTruthy();
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+it('drops a building preview when its selected campus location is withdrawn', async () => {
+  const props = { school: 'other-school', locations: places, onSelect: vi.fn() };
+  const view = render(<CampusSpatialExplorer {...props} selected={places[0]} />);
+  const dialog = await open();
+  fireEvent.click(within(dialog).getByRole('button', { name: '平面圖建模預覽' }));
+  await screen.findByRole('dialog', { name: '平面圖建模預覽' });
+  view.rerender(<CampusSpatialExplorer {...props} selected={null} />);
+  expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
+  expect(screen.getByRole('dialog', { name: '校園空間導覽' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
+});
