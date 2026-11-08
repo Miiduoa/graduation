@@ -9,6 +9,7 @@ import {
 import { getAuthInstance, getFunctionsInstance } from '../firebase';
 import { safeNavigate } from '../utils/safeNavigate';
 import { resolveDeprecatedRouteRedirect } from '../app/deprecatedRouteRedirect';
+import { DORM_REPAIR_COPY, dormRepairAssistantStatusLabel } from '@campus/shared/src/dormitory';
 import { describePickupNumber, formatShortOrderCode } from '@campus/shared/src/ordering/pickupNumber';
 import {
   ORDER_NOT_SENT_TEXT,
@@ -571,10 +572,10 @@ function RepairSubmittedCard({ payload }: { payload: any }) {
   const nav = useNavigation<any>();
   return (
     <View style={[styles.card, styles.successCard]}>
-      <CardHeader icon="✅" title="平台報修已建立" color="#1B5E20" />
+      <CardHeader icon="✅" title={DORM_REPAIR_COPY.assistantCardTitle} color="#1B5E20" />
       <InfoRow label="地點" value={payload.location || payload.dormitory || '—'} />
       <InfoRow label="類別" value={payload.category || '—'} />
-      <InfoRow label="平台案件編號" value={payload.repairId || payload.requestId || '—'} />
+      <Text style={styles.emptyText}>{DORM_REPAIR_COPY.assistantSavedMemo}</Text>
       <TouchableOpacity style={styles.actionButton} onPress={() => safeNavigate(nav, 'Dormitory')}>
         <Text style={styles.actionButtonText}>開啟宿舍服務</Text>
       </TouchableOpacity>
@@ -584,17 +585,11 @@ function RepairSubmittedCard({ payload }: { payload: any }) {
 
 function RepairListCard({ payload }: { payload: any }) {
   const items: any[] = payload.items || [];
-  const STATUS_ZH: Record<string, string> = {
-    pending: '待處理',
-    in_progress: '處理中',
-    resolved: '已完成',
-    cancelled: '已取消',
-  };
   return (
     <View style={styles.card}>
-      <CardHeader icon="🔧" title={`報修紀錄（${payload.count ?? items.length} 筆）`} />
+      <CardHeader icon="🔧" title={`${DORM_REPAIR_COPY.assistantListTitle}（${payload.count ?? items.length} 筆）`} />
       {items.length === 0 ? (
-        <Text style={styles.emptyText}>目前沒有任何報修紀錄。</Text>
+        <Text style={styles.emptyText}>{DORM_REPAIR_COPY.assistantListEmpty}</Text>
       ) : (
         items.slice(0, 5).map((it, i) => (
           <View key={i} style={styles.listRow}>
@@ -602,7 +597,7 @@ function RepairListCard({ payload }: { payload: any }) {
             <View style={styles.listRowContent}>
               <Text style={styles.listRowTitle}>{it.category || '報修'}</Text>
               <Text style={styles.listRowMeta}>
-                {STATUS_ZH[it.status] || it.status || '未知'}
+                {dormRepairAssistantStatusLabel(it.status)}
                 {it.dormitory ? ` ${it.dormitory}` : ''}
                 {it.room ? ` ${it.room}` : ''}
               </Text>

@@ -83,5 +83,6 @@ tmp/
 .test-env/
 artifacts/campus-visual/
 artifacts/timetable-browser/
+artifacts/saved-campus-plans/
 artifacts/announcement-browser/
 artifacts/campus-services/

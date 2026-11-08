@@ -1,18 +1,52 @@
 import Link from 'next/link';
 import { formatEventWhen, formatPickup, formatYuan, inAppHref, pageLabel } from './copy';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
+import { canConfirmAction, priorCalendarActionsVerified } from './execution';
 import styles from './AssistantReply.module.css';
-import type { V2Card } from './types';
+import type { V2ActionState, V2ActionStates, V2Card } from './types';
 
-function Status({ value }: { value: string }) {
-  const href = inAppHref(value);
-  if (href)
-    return (
-      <Link className={styles.pageLink} href={href}>
-        開啟確認的頁面
-      </Link>
-    );
-  const ok = value === '已加入個人行事曆' || value === '已送出訂單';
-  return <p className={`${styles.status} ${ok ? styles.statusOk : styles.statusMuted}`}>{value}</p>;
+function Status({ value, card, pending, onReconcile }: {
+  value: V2ActionState;
+  card: V2Card;
+  pending: boolean;
+  onReconcile?: (card: V2Card) => void;
+}) {
+  if (value.status === 'handoff') {
+    const href = inAppHref(value.href);
+    return <div>
+      <p className={styles.note}>{value.message}</p>
+      {href && <Link className={styles.pageLink} href={href}>開啟確認的頁面</Link>}
+    </div>;
+  }
+  if (value.status === 'verified') {
+    const href = '/calendar?schoolId=' + encodeURIComponent(card.schoolId);
+    return <div className={styles.receipt} aria-label="行程執行回執">
+      <p className={`${styles.status} ${styles.statusOk}`}>已核對並加入個人行事曆</p>
+      <p className={styles.note}>核對時間：{formatTaipeiDateTime(value.receipt.verifiedAt, { seconds: true })}（台灣時間）</p>
+      {value.verificationWarning && <p className={styles.reason}>{value.verificationWarning}</p>}
+      {value.local === 'ready'
+        ? <Link className={styles.pageLink} href={href + '&eventId=' + encodeURIComponent(value.receipt.record.id)}>開啟這筆行程</Link>
+        : <>
+          <p className={styles.reason}>帳號中已儲存，此裝置尚未更新。{value.localMessage}</p>
+          <Link className={styles.pageLink} href={href}>開啟個人行事曆</Link>
+        </>}
+      {onReconcile && <button type="button" className={styles.secondary} disabled={pending} onClick={() => onReconcile(card)}>
+        {value.local === 'ready' ? '重新核對結果' : '重新核對並更新此裝置'}
+      </button>}
+    </div>;
+  }
+  const message = value.status === 'executing' ? '正在執行並核對…'
+    : value.status === 'checking' ? '正在讀回核對，沒有重新送出…'
+      : value.status === 'cancelled' ? '已撤銷未執行提議'
+        : value.status === 'superseded' ? '已被新提議取代'
+          : 'message' in value ? value.message : '正在核對執行狀態…';
+  const canCheck = card.tool === 'propose_personal_event' &&
+    ['unknown', 'absent', 'conflict'].includes(value.status);
+  return <div>
+    <p className={`${styles.status} ${styles.statusMuted}`}>{message}</p>
+    {canCheck && onReconcile && <button type="button" className={styles.secondary} disabled={pending} onClick={() => onReconcile(card)}>重新核對結果</button>}
+    {value.status === 'conflict' && <Link className={styles.pageLink} href={'/calendar?schoolId=' + encodeURIComponent(card.schoolId)}>開啟個人行事曆</Link>}
+  </div>;
 }
 
 function EventBody({ args }: { args: Record<string, unknown> }) {
@@ -25,7 +59,7 @@ function EventBody({ args }: { args: Record<string, unknown> }) {
         <h3>{title}</h3>
       </div>
       {when ? <p className={styles.when}>{when}</p> : null}
-      <p className={styles.note}>確認後才會寫入個人行事曆，不會發送推播提醒。</p>
+      <p className={styles.note}>確認後才會寫入帳號的個人行事曆，核對後顯示在此裝置。不會發送推播提醒。</p>
     </>
   );
 }
@@ -99,14 +133,16 @@ export function AssistantCard({
   pending,
   onConfirm,
   onCancel,
+  onReconcile,
 }: {
   card: V2Card;
   index: number;
   cards: V2Card[];
-  states: Record<string, string>;
+  states: V2ActionStates;
   pending: boolean;
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
+  onReconcile?: (card: V2Card) => void;
 }) {
   const state = states[card.mutationId];
   return (
@@ -127,26 +163,19 @@ export function AssistantCard({
       ) : (
         <PageBody card={card} />
       )}
-      {state ? (
-        <Status value={state} />
-      ) : (
+      {state && <Status value={state} card={card} pending={pending} onReconcile={onReconcile} />}
+      {canConfirmAction(state) && (
         <div className={styles.actions}>
           <button
             type="button"
             className={styles.primary}
             disabled={
               pending ||
-              cards
-                .slice(0, index)
-                .some(
-                  (c) =>
-                    states[c.mutationId] !== '已加入個人行事曆' &&
-                    c.tool === 'propose_personal_event',
-                )
+              !priorCalendarActionsVerified(cards, index, states)
             }
             onClick={() => onConfirm([card])}
           >
-            確認
+            {state ? '重試原確認' : '確認'}
           </button>
           <button type="button" className={styles.secondary} disabled={pending} onClick={() => onCancel(index)}>
             取消
@@ -163,19 +192,28 @@ export function AssistantCardStack({
   pending,
   onConfirm,
   onCancel,
+  onReconcile,
 }: {
   cards: V2Card[];
-  states: Record<string, string>;
+  states: V2ActionStates;
   pending: boolean;
   onConfirm: (cards: V2Card[]) => void;
   onCancel: (index: number) => void;
+  onReconcile?: (card: V2Card) => void;
 }) {
   if (!cards.length) return null;
-  const open = cards.filter((c) => !states[c.mutationId]);
+  const open = cards.filter((c) => canConfirmAction(states[c.mutationId]));
+  const calendar = cards.filter((card) => card.tool === 'propose_personal_event');
+  const verified = calendar.filter((card) => states[card.mutationId]?.status === 'verified').length;
+  const uncertain = calendar.filter((card) => ['unknown', 'executing', 'checking'].includes(states[card.mutationId]?.status)).length;
+  const retired = calendar.filter((card) => ['cancelled', 'superseded'].includes(states[card.mutationId]?.status)).length;
   return (
     <div className={styles.stack}>
+      {calendar.length > 0 && <p className={styles.executionSummary} role="status" aria-label="行程執行進度">
+        已核對 {verified}/{calendar.length} 項{uncertain ? ` · 待核對 ${uncertain} 項` : ''}{calendar.length - verified - uncertain - retired ? ` · 尚未完成 ${calendar.length - verified - uncertain - retired} 項` : ''}{retired ? ` · 已停止 ${retired} 項提議` : ''}
+      </p>}
       {open.length > 1 ? (
-        <button type="button" className={styles.batch} disabled={pending} onClick={() => onConfirm(open)}>
+        <button type="button" className={styles.batch} disabled={pending || !priorCalendarActionsVerified(cards, cards.indexOf(open[0]), states)} onClick={() => onConfirm(open)}>
           依序全部確認
         </button>
       ) : null}
@@ -192,6 +230,7 @@ export function AssistantCardStack({
           pending={pending}
           onConfirm={onConfirm}
           onCancel={onCancel}
+          onReconcile={onReconcile}
         />
       ))}
     </div>

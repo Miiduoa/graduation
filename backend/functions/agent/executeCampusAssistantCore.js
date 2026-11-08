@@ -582,7 +582,7 @@ async function executeCampusAssistantCore({
         }
         await recordStep('getDormRepairStatus', { repairId }, one, Date.now() - tOne);
         if (!one?.found) {
-          response.content = '找不到這筆報修；若剛送出，請稍後到宿舍「我的報修」確認，或改問「我的報修」。';
+          response.content = '找不到這筆報修備忘；若剛存下，請稍後到宿舍「我的報修」確認，或改問「我的報修」。';
           response.suggestions = ['我的報修'];
           return await finalizeResponse();
         }
@@ -600,7 +600,7 @@ async function executeCampusAssistantCore({
         const loc = `${one.dormitory || '—'} ${one.room || ''}`.trim();
         const descShort = one.description ? String(one.description).slice(0, 48) : '';
         response.content = [
-          `報修單 ${one.repairId}：${stZh}｜${loc}｜${one.category || '—'}`,
+          `報修備忘：${stZh}｜${loc}｜${one.category || '—'}`,
           descShort ? `摘要：${descShort}${String(one.description).length > 48 ? '…' : ''}` : '',
         ]
           .filter(Boolean)
@@ -642,7 +642,7 @@ async function executeCampusAssistantCore({
 
     const items = Array.isArray(listRows.items) ? listRows.items : [];
     if (items.length === 0) {
-      response.content = '最近沒有宿舍報修紀錄；若剛送出，請稍後再問或到宿舍頁確認。';
+      response.content = '最近沒有宿舍報修備忘；若剛存下，請稍後再問或到宿舍頁確認。';
       response.suggestions = ['我要報修'];
       return await finalizeResponse();
     }
@@ -658,10 +658,10 @@ async function executeCampusAssistantCore({
 
     const lines = items.map((row, i) => {
       const loc = `${row.dormitory || ''} ${row.room || ''}`.trim() || '—';
-      return `${i + 1}. ${row.repairId}｜${statusZh(row.status)}｜${loc}`;
+      return `${i + 1}. ${statusZh(row.status)}｜${loc}`;
     });
 
-    response.content = [`宿舍報修 ${items.length} 筆（最多顯示 15）：`, '', ...lines].join('\n');
+    response.content = [`宿舍報修備忘 ${items.length} 筆（最多顯示 15）：`, '', ...lines].join('\n');
     response.suggestions = ['我要報修'];
     response.actions = [
       assistantAction({
@@ -891,13 +891,13 @@ async function executeCampusAssistantCore({
       return await finalizeResponse();
     }
     const descSnippet = repairInput.description.slice(0, 120);
-    response.content = `已整理好報修草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
+    response.content = `已整理好報修備忘草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
       repairInput.description.length > 120 ? '…' : ''
-    }`;
+    }。確認後只會存在此應用，請依學校規定管道送出。`;
     response.suggestions = ['我的報修'];
     response.actions = [
       assistantAction({
-        label: '確認送出報修',
+        label: '確認存成報修備忘',
         action: 'queue_action',
         params: { toolName: 'createDormRepairRequest', input: repairInput, agentRunId: requestId },
         requiresConfirmation: true,

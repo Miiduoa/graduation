@@ -441,8 +441,9 @@ async function openLeaveForm() {
     ...timetable,
     courses: [{ id: 'c1', name: '資料庫', day: 0, start: 0, end: 0, teacher: '', room: '', color: 'blue' }],
   });
-  render(<LeavePage />);
+  const page = render(<LeavePage />);
   fireEvent.click(await screen.findByRole('checkbox', { name: /資料庫/ }));
+  return page;
 }
 
 it('opens the confirmed request even when a different history filter was active', async () => {
@@ -459,6 +460,77 @@ it('opens the confirmed request even when a different history filter was active'
   expect(document.activeElement).toBe(screen.getByRole('status'));
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
 });
+
+it.each(['success', 'failure'] as const)(
+  'hands focus to a confirmed receipt once and preserves the user focus when history refresh ends in %s', async (result) => {
+    await openLeaveForm();
+    let confirm!: (value: Awaited<ReturnType<typeof submitLeaveRequest>>) => void;
+    vi.mocked(submitLeaveRequest).mockReturnValueOnce(new Promise((resolve) => { confirm = resolve; }));
+    let finish!: (rows: typeof record[]) => void;
+    let fail!: (error: unknown) => void;
+    vi.mocked(listMyLeaveRequests).mockReturnValueOnce(new Promise((resolve, reject) => {
+      finish = resolve; fail = reject;
+    }));
+    const focusedReceipts: EventTarget[] = [];
+    const onFocus = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && event.target.getAttribute('role') === 'status' &&
+          event.target.textContent?.startsWith('已建立 nuni 請假紀錄，站內單號')) focusedReceipts.push(event.target);
+    };
+    document.addEventListener('focusin', onFocus);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: '建立請假紀錄' }));
+      await waitFor(() => expect(submitLeaveRequest).toHaveBeenCalledTimes(1));
+      const id = vi.mocked(submitLeaveRequest).mock.calls[0][1].requestId;
+      await act(async () => confirm({ id, alreadySubmitted: false }));
+      const receipt = screen.getByRole('status');
+      expect(receipt.textContent).toContain(id);
+      expect(document.activeElement).toBe(receipt);
+      expect(focusedReceipts).toEqual([receipt]);
+
+      // The confirmed receipt is available while the separate history read is pending.
+      const officialGuide = screen.getByRole('link', { name: '查看靜宜學生請假說明 ↗' });
+      officialGuide.focus();
+      await act(async () => {
+        if (result === 'success') finish([{ ...record, id }]);
+        else fail(new TypeError('Failed to fetch'));
+      });
+      expect(screen.getByRole('status')).toBe(receipt);
+      expect(document.activeElement).toBe(officialGuide);
+      expect(focusedReceipts).toEqual([receipt]);
+      if (result === 'success') expect(screen.getByRole('button', { name: '收合明細' })).toBeTruthy();
+      else expect(screen.getByText(LEAVE_COPY.network)).toBeTruthy();
+      expect(submitLeaveRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('focusin', onFocus);
+      await act(async () => finish([]));
+    }
+  },
+);
+
+it.each(['account', 'school'] as const)(
+  'does not reveal or focus an old receipt after the %s changes before confirmation', async (scope) => {
+    const page = await openLeaveForm();
+    let confirm!: (value: Awaited<ReturnType<typeof submitLeaveRequest>>) => void;
+    vi.mocked(submitLeaveRequest).mockReturnValueOnce(new Promise((resolve) => { confirm = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '建立請假紀錄' }));
+    await waitFor(() => expect(submitLeaveRequest).toHaveBeenCalledTimes(1));
+    const id = vi.mocked(submitLeaveRequest).mock.calls[0][1].requestId;
+
+    if (scope === 'account') runtime.user = { uid: 'another-student' };
+    else runtime.schoolId = 'ntu';
+    page.rerender(<LeavePage />);
+    const filter = await screen.findByRole('button', { name: '全部' });
+    filter.focus();
+    const historyReads = vi.mocked(listMyLeaveRequests).mock.calls.length;
+    await act(async () => confirm({ id, alreadySubmitted: false }));
+
+    expect(document.activeElement).toBe(filter);
+    expect(screen.queryByText(/已建立 nuni 請假紀錄，站內單號/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '收合明細' })).toBeNull();
+    expect(listMyLeaveRequests).toHaveBeenCalledTimes(historyReads);
+    expect(submitLeaveRequest).toHaveBeenCalledTimes(1);
+  },
+);
 
 it('keeps the confirmed receipt visible if refreshing the history fails', async () => {
   await openLeaveForm();
