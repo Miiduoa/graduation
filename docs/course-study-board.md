@@ -1,5 +1,11 @@
 # 課程讀書白板
 
+## 2026-11-08 CI 修復：逐題練習畫面 JSX 三元分支封閉
+
+- 在 `4850095` 精確 head 的 [CI #42425354117](https://github.com/Miiduoa/graduation/actions/runs/42425354117) 查到 Web Tests 14 個 suite 連帶無法轉譯、Lint/Type Check 失敗，真正共同原因是 `CourseStudyPractice.tsx` 第 141 行的條件式 JSX 缺少最後的 `}`，不是 14 個獨立功能回歸。
+- 僅補上三元分支的封閉大括號，保留新增的非破壞性「下一題」、原文核對、跳題與備份行為。既有逐題／教材 UI 測試和 TypeScript／ESLint 會在新 SHA 重新檢查，不將前版 CI 結果沿用。
+- 未改動帳號／課程權限、讀書紀錄格式、外部服務或部署。PR 保持 Draft，不合併、不部署；仍待 GitHub App 5504170 與真機／競品對測。
+
 從課程的「教材櫃」選擇「陪我讀這份教材」，可以在原頁分段閱讀教材文字。
 「讀講義」入口也接受本機 PDF、TXT、Markdown，或貼上的筆記。
 

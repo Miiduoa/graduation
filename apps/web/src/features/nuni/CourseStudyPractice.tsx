@@ -138,7 +138,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           <button type="button" className={styles.button} onClick={() => onAction({ type: 'skip' })}>略過這題</button>
         </nav>
         <p className={styles.note}>上一題／下一題只移動閱讀位置，保留每題草稿與自評；只有按「略過這題」才會標記略過。</p>
-      </section> : <p className={styles.note}>請回到閱讀，選擇有講解記錄的待複習段落再開始。</p>
+      </section> : <p className={styles.note}>請回到閱讀，選擇有講解記錄的待複習段落再開始。</p>}
 
       <nav className={styles.overview} aria-label="本輪題目">
         <h5>本輪題目</h5>
