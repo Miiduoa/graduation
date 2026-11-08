@@ -18,13 +18,14 @@ import {
   beginSavedCampusPlansSignOutCleanup,
   endSavedCampusPlansSignOutCleanup,
 } from '../services/savedCampusPlans';
+import { NuniDraftScopeProvider, NuniDraftScopeStore } from './nuniDrafts';
 
 const KEY = 'campus-one.nuni.native-session.v1';
 type Auth = NativeNuniState &
   Pick<NuniSessionController, 'refresh' | 'signIn' | 'logout' | 'request' | 'upload' | 'bffRequest' | 'isSessionCurrent'>;
 const Context = createContext<Auth | null>(null);
 
-function createController() {
+function createController(drafts: NuniDraftScopeStore) {
   return new NuniSessionController({
     storage: {
       async read() {
@@ -47,6 +48,7 @@ function createController() {
       begin: beginSavedCampusPlansSignOutCleanup,
       end: endSavedCampusPlansSignOutCleanup,
     },
+    invalidateLocalDrafts: drafts.clear,
     request: nuniPlatformRequest,
     credential: requestGoogleCredential,
     clearCredential: clearGoogleCredentialState,
@@ -55,7 +57,13 @@ function createController() {
 
 export function NuniSessionProvider({ children }: { children: ReactNode }) {
   const reference = useRef<NuniSessionController | null>(null);
-  if (!reference.current) reference.current = createController();
+  const drafts = useRef<NuniDraftScopeStore | null>(null);
+  if (!drafts.current) {
+    drafts.current = new NuniDraftScopeStore(
+      (accountId) => reference.current?.canRetainLocalDrafts(accountId) ?? false,
+    );
+  }
+  if (!reference.current) reference.current = createController(drafts.current);
   const controller = reference.current;
   const [state, setState] = useState(controller.state);
   useEffect(() => {
@@ -94,7 +102,7 @@ export function NuniSessionProvider({ children }: { children: ReactNode }) {
         bffRequest: controller.bffRequest,
       }}
     >
-      {children}
+      <NuniDraftScopeProvider store={drafts.current}>{children}</NuniDraftScopeProvider>
     </Context.Provider>
   );
 }

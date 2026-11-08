@@ -11,7 +11,7 @@
     "deploy/nuni-api/assistant/publicContext.ts": "9e5bd8fba0f409bea988922c4867c9a29fe895921699b5202ad40dec4c237e55",
     "deploy/nuni-api/assistant/routes.ts": "e74557a5a133a13639ca09411da661b8cd3ade262fa044de99f97cd12612baf4",
     "deploy/nuni-api/assistant/service.ts": "e1453c6f3c4bea0f2cdc76f60d20fae01e0d4d6614070988bcaf0f8bb390ddcc",
-    "packages/shared/src/assistantPermissions.ts": "16921b8e82150848914443469935ca71f7f00b8bc3bb3c18949552fc1819e270",
+    "packages/shared/src/assistantPermissions.ts": "22f14e600555a6e5167007b080d0914f8cbf3b2121c1f20f9a8eeeb5f31e960c",
     "packages/shared/src/campusMapLookup.ts": "f864101ec100f99bd6da9eb8af73d3fe59d854574bd21c669b0cad6c7a30d445"
   },
   "releaseSourceCommit": "c93b4ac3851df68f76d607af29b086030735dc55",

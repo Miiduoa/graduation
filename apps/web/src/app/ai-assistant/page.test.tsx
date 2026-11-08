@@ -372,7 +372,7 @@ it('requires a second explicit confirmation before executing a validated action'
     run: { runId, status: 'completed' },
     actions: [{
       action: 'queue_action',
-      label: '確認送出報修',
+      label: '確認存成報修備忘',
       requiresConfirmation: true,
       params: {
         toolName: 'createDormRepairRequest',
@@ -391,13 +391,46 @@ it('requires a second explicit confirmation before executing a validated action'
   fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
   expect(screen.getByText('301')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
-  await screen.findByText('伺服器已確認執行成功');
+  await screen.findByText('報修備忘已存好');
   expect(executeCampusAgentWrite).toHaveBeenCalledTimes(1);
   expect(vi.mocked(executeCampusAgentWrite).mock.calls[0][0]).toMatchObject({
     userId: 'alice', schoolId: 'pu', agentRunId: runId,
     toolName: 'createDormRepairRequest',
   });
-  expect(screen.getByText(/repair-123/)).toBeTruthy();
+  expect(screen.queryByText(/repair-123/)).toBeNull();
+  expect(screen.getByText('已幫你存成報修備忘，請依學校規定管道送出。此應用沒有送到學校。')).toBeTruthy();
+  expect(screen.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(screen.queryByText(/送出後即使離開此頁/)).toBeNull();
+  expect(screen.queryByText(/避免重複送出/)).toBeNull();
+});
+
+it('leave confirmation still uses the generic success copy, not the repair memo wording', async () => {
+  const runId = '01234567-89ab-4cde-8012-3456789abcde';
+  vi.mocked(callCampusAssistant).mockResolvedValue({
+    content: '請先確認請假內容',
+    run: { runId, status: 'completed' },
+    actions: [{
+      action: 'queue_action',
+      label: '確認請假',
+      requiresConfirmation: true,
+      params: {
+        toolName: 'submitLeaveRequest',
+        agentRunId: runId,
+        input: { courseId: 'course-1', date: '2026-10-29', type: '事假' },
+      },
+    }],
+  });
+  vi.mocked(executeCampusAgentWrite).mockResolvedValue({
+    success: true, toolName: 'submitLeaveRequest', requestId: 'leave-123',
+  });
+  render(<AssistantPage />);
+  ask('明天請假');
+  await screen.findByText('請先確認請假內容');
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText(/送出後即使離開此頁，操作也可能繼續完成/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  await screen.findByText('伺服器已確認執行成功');
+  expect(screen.queryByText('報修備忘已存好')).toBeNull();
 });
 
 it('never offers execution for an action not bound to its server run', async () => {

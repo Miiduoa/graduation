@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createNavigationContainerRef, NavigationContainer } from '@react-navigation/native';
 import { act, cleanupAsync, fireEvent, fireEventAsync, render, renderAsync, waitFor, within } from '@testing-library/react-native/pure';
 import * as Notifications from 'expo-notifications';
+import * as DocumentPicker from 'expo-document-picker';
 import { PersonalEventReminderBridge } from '../components/PersonalEventReminderBridge';
 import { publicNavigationRef, markPublicNavigationReady, markPublicNavigationUnready } from '../app/publicNavigation';
 import { __resetPersonalEventReminderNavigationForTests } from '../services/personalEventReminderNavigation';
@@ -12,7 +13,7 @@ import { PreAuthStack } from '../screens/PreAuthStack';
 import { MeStack } from '../screens/MeStack';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { personalImportStorageKey } from '../services/personalImports';
-import type { NuniAssignment, NuniQuiz } from '@campus/shared/src/nuni';
+import { NuniError, type NuniAssignment, type NuniQuiz } from '@campus/shared/src/nuni';
 import * as assignmentFileSubmit from '../screens/nuni/assignmentFileSubmit';
 import * as nuniPlanAssignmentTarget from '../services/nuniPlanAssignmentTarget';
 import type { StoredTimetable } from '../services/personalTimetable';
@@ -26,6 +27,7 @@ const mockSchool = { id: 'pu', name: '靜宜大學' };
 let mockStored: string | null;
 const mockRequest = jest.fn();
 const mockAssignmentBff = jest.fn();
+const mockAssignmentUpload = jest.fn();
 jest.unmock('@react-navigation/native');
 jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
@@ -50,6 +52,7 @@ jest.mock('../services/nuniClient', () => ({
   ...jest.requireActual('../services/nuniClient'),
   nuniPlatformRequest: (...args: unknown[]) => mockRequest(...args),
   nuniBffRequest: (...args: unknown[]) => mockAssignmentBff(...args),
+  nuniBffFilePut: (...args: unknown[]) => mockAssignmentUpload(...args),
 }));
 let mockAuthUser: { uid: string; displayName?: string } | null = null;
 jest.mock('../state/auth', () => ({
@@ -96,6 +99,8 @@ beforeEach(async () => {
     expiresAt: Date.now() + 3_600_000, pendingLogout: false,
   });
   mockAssignmentBff.mockReset().mockRejectedValue(new Error('unexpected assignment BFF request'));
+  mockAssignmentUpload.mockReset().mockRejectedValue(new Error('unexpected assignment upload'));
+  jest.mocked(DocumentPicker.getDocumentAsync).mockReset().mockResolvedValue({ canceled: true, assets: null });
   mockRequest.mockReset().mockImplementation(async (path) => {
     if (path !== 'sessions/current') throw Error('unexpected request: ' + path);
     return { authenticated: true, platformAccountId: account, isPlatformOperator: false };
@@ -327,6 +332,206 @@ async function linkedPlanningQuizFixture() {
   mockRequest.mockImplementation(async (path, ...args) => path === quizPath ? { quizzes: [decoyQuiz, quiz] } : direct(path, ...args));
   return { ...fixture, quiz, decoyQuiz, quizPath };
 }
+
+test.each(['assignment', 'quiz'] as const)(
+  'returning to an exact %s from the assistant restores its private draft and compares fresh server content',
+  async (kind) => {
+    jest.spyOn(assignmentFileSubmit, 'assignmentFileSubmitEnabledNative').mockReturnValue(true);
+    const fixture = await linkedPlanningQuizFixture();
+    const { course, assignment, quiz, assignmentPath, quizPath } = fixture;
+    const { screen, navigation, unhandled } = await openPlatformWeekPlan();
+    const label = kind === 'assignment' ? '作業' : '測驗';
+    const target = kind === 'assignment' ? assignment : quiz;
+    const action = `查看這份${label}`;
+    const privateDraft = `尚未送出的${label}草稿，只能留在本人編輯區。`;
+    const latestBody = `另一台裝置已更新的${label}內容。`;
+    const inputLabel = `${label}內容：${target.title}`;
+    await fireEventAsync.press((await screen.findAllByRole('button', { name: action }))[0]);
+    const firstRoute = navigation.getCurrentRoute()?.key;
+    const card = within(await screen.findByTestId(`${kind}-${target.id}`));
+    fireEvent.changeText(card.getByLabelText(inputLabel), privateDraft);
+    await act(async () => navigation.goBack());
+    await screen.findByText('接下來七天的學習行動');
+    expect(screen.queryByDisplayValue(privateDraft)).toBeNull();
+    expect(screen.queryByText(privateDraft)).toBeNull();
+
+    const submittedAt = '2026-11-05T01:46:00Z';
+    if (kind === 'assignment') {
+      const latest: NuniAssignment = { ...assignment, submissionCount: 1, mySubmission: {
+        assignmentId: assignment.id, platformAccountId: account, displayName: '測試學生',
+        body: latestBody, state: 'submitted', submittedAt, teacherFeedback: null, reviewedAt: null,
+      } };
+      mockAssignmentBff.mockImplementation(async (path) => {
+        if (path === assignmentPath) return { assignments: [fixture.decoy, latest] };
+        throw Error('unexpected assignment request ' + path);
+      });
+    } else {
+      const latest: NuniQuiz = { ...quiz, responseCount: 1, myResponse: {
+        quizId: quiz.id, platformAccountId: account, displayName: '測試學生',
+        answer: latestBody, state: 'submitted', submittedAt, teacherFeedback: null, reviewedAt: null,
+      } };
+      const direct = mockRequest.getMockImplementation()!;
+      mockRequest.mockImplementation(async (path, ...args) =>
+        path === quizPath ? { quizzes: [fixture.decoyQuiz, latest] } : direct(path, ...args));
+    }
+
+    await fireEventAsync.press((await screen.findAllByRole('button', { name: action }))[0]);
+    await screen.findByText('這份內容已有更新。你的草稿尚未儲存，請選擇接下來要編輯的內容。');
+    expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: {
+      workspaceId: course.id, assignmentId: target.id, assistantAccountId: account,
+    } });
+    expect(navigation.getCurrentRoute()?.key).not.toBe(firstRoute);
+    const restored = within(screen.getByTestId(`${kind}-${target.id}`));
+    expect(restored.getByLabelText(inputLabel).props.value).toBe(privateDraft);
+    expect(restored.getByRole('button', { name: '保留草稿，儲存時覆寫' })).toBeTruthy();
+    await fireEventAsync.press(restored.getByRole('button', { name: '改用目前內容' }));
+    expect(restored.getByLabelText(inputLabel).props.value).toBe(latestBody);
+    const writes = [...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls]
+      .filter(([path]) => /\/submit(?:-files)?$/.test(path));
+    expect(writes).toEqual([]);
+    expect(jest.mocked(AsyncStorage.setItem).mock.calls.some(([, value]) => value.includes(privateDraft))).toBe(false);
+    expect(jest.mocked(AsyncStorage.multiSet).mock.calls.some(([entries]) =>
+      entries.some(([, value]) => value.includes(privateDraft)))).toBe(false);
+    expect(unhandled).not.toHaveBeenCalled();
+  },
+);
+
+test('returning through two workspace routes keeps the latest draft and ignores the older editor callback', async () => {
+  const { course, assignment } = await linkedPlanningFixture();
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const unhandled = jest.fn();
+  const screen = await renderAsync(
+    <NuniSessionProvider>
+      <NavigationContainer ref={navigation} onUnhandledAction={unhandled}><PreAuthStack /></NavigationContainer>
+    </NuniSessionProvider>,
+  );
+  await screen.findByRole('button', { name: '開啟課表助理' });
+  await act(async () => navigation.navigate('NuniWorkspace', {
+    tab: 'courses', workspaceId: course.id, assignmentId: assignment.id, assistantAccountId: account,
+  }));
+  const firstRoute = navigation.getCurrentRoute()?.key;
+  const inputLabel = '作業內容：' + assignment.title;
+  const firstInput = await screen.findByLabelText(inputLabel);
+  const oldChangeText = firstInput.props.onChangeText as (value: string) => void;
+  fireEvent.changeText(firstInput, '從課程頁開始的草稿');
+  await fireEventAsync.press(screen.getByRole('button', { name: '問課表' }));
+  await fireEventAsync.press(await screen.findByRole('button', { name: '規劃未來七天' }));
+  await fireEventAsync.press((await screen.findAllByRole('button', { name: '查看這份作業' }))[0]);
+  expect(navigation.getCurrentRoute()?.key).not.toBe(firstRoute);
+  expect(navigation.getRootState().routes.filter((route) => route.name === 'NuniWorkspace')).toHaveLength(2);
+  const secondInput = await screen.findByLabelText(inputLabel);
+  expect(secondInput.props.value).toBe('從課程頁開始的草稿');
+  fireEvent.changeText(secondInput, '從助理返回後繼續完成的內容');
+  act(() => oldChangeText('較早畫面延遲送來的輸入'));
+  await act(async () => navigation.goBack());
+  await screen.findByText('接下來七天的學習行動');
+  await act(async () => navigation.goBack());
+  expect(navigation.getCurrentRoute()?.key).toBe(firstRoute);
+  expect((await screen.findByLabelText(inputLabel)).props.value).toBe('從助理返回後繼續完成的內容');
+  expect([...mockRequest.mock.calls, ...mockAssignmentBff.mock.calls]
+    .filter(([path]) => /\/submit(?:-files)?$/.test(path))).toEqual([]);
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
+test.each(['text', 'attachments', 'attachments-pending', 'attachments-closed'] as const)('an uncertain assignment with %s survives a real pop to the assistant and retries only the original submission', async (payloadKind) => {
+  jest.spyOn(assignmentFileSubmit, 'assignmentFileSubmitEnabledNative').mockReturnValue(true);
+  const { course, assignment, decoy, assignmentPath } = await linkedPlanningFixture();
+  const submitPath = `${assignmentPath}/${assignment.id}/submit-files`;
+  const intentsPath = `${assignmentPath}/${assignment.id}/files/intents`;
+  const files = payloadKind !== 'text' ? [
+    { id: 'cwf_77777777-7777-4777-8777-777777777777', name: 'report.pdf' },
+    { id: 'cwf_88888888-8888-4888-8888-888888888888', name: 'appendix.pdf' },
+  ].map(({ id, name }) => ({
+    id, originalName: name, contentType: 'application/pdf', byteSize: 12, kind: 'file' as const,
+    downloadPath: `${assignmentPath}/${assignment.id}/files/${id}/content`, downloadExp: '1', downloadSig: 'sig',
+  })) : [];
+  mockAssignmentUpload.mockImplementation(async (path, _session, bytes, contentType) => {
+    expect(bytes).toEqual(new Uint8Array([1, 2, 3]));
+    expect(contentType).toBe('application/pdf');
+    const file = files.find((entry) => entry.downloadPath === path);
+    if (!file) throw Error('unexpected file upload ' + path);
+    return file;
+  });
+  const privateDraft = '已嘗試送出但仍需核對的原始內容。';
+  let writes = 0;
+  let latest = assignment;
+  let finishPending: (() => void) | undefined;
+  const confirm = () => {
+    latest = { ...latest, submissionCount: 1, mySubmission: {
+      assignmentId: assignment.id, platformAccountId: account, displayName: '測試學生',
+      body: privateDraft, state: 'submitted', submittedAt: '2026-11-05T01:46:00Z',
+      teacherFeedback: null, reviewedAt: null, files,
+    } };
+    return latest;
+  };
+  mockAssignmentBff.mockImplementation(async (path, _session, input) => {
+    if (path === assignmentPath) return { assignments: [decoy, latest] };
+    if (path === intentsPath) return { intents: files.map((file) => ({ ...file, uploadPath: file.downloadPath })) };
+    if (path === submitPath) {
+      expect(input).toEqual({ body: privateDraft, fileIds: files.map((file) => file.id), idempotencyKey: expect.any(String) });
+      writes += 1;
+      if (payloadKind === 'attachments-pending') {
+        if (writes !== 1) throw Error('a pending submission must be joined before retrying');
+        return new Promise((resolve) => { finishPending = () => resolve(confirm()); });
+      }
+      if (writes === 1) throw new NuniError(503, 'UNAVAILABLE');
+      if (payloadKind === 'attachments-closed') throw new NuniError(409, 'ASSIGNMENT_CLOSED');
+      return confirm();
+    }
+    throw Error('unexpected assignment request ' + path);
+  });
+  const { screen, navigation, unhandled, openAssignment } = await openPlatformWeekPlan();
+  await fireEventAsync.press(openAssignment);
+  const firstRoute = navigation.getCurrentRoute()?.key;
+  const card = within(await screen.findByTestId(`assignment-${assignment.id}`));
+  fireEvent.changeText(card.getByLabelText('作業內容：' + assignment.title), privateDraft);
+  if (files.length) {
+    jest.mocked(DocumentPicker.getDocumentAsync).mockResolvedValueOnce({ canceled: false, assets: files.map((file) => ({
+      uri: 'file:///' + file.originalName, name: file.originalName, mimeType: file.contentType,
+    })) });
+    await fireEventAsync.press(card.getByRole('button', { name: '檔案' }));
+    for (const file of files) await screen.findByText(file.originalName + ' · 12 B');
+  }
+  await fireEventAsync.press(card.getByRole('button', { name: '繳交作業' }));
+  if (payloadKind === 'attachments-pending') await waitFor(() => expect(finishPending).toBeDefined());
+  else await screen.findByRole('button', { name: '重試確認這次送出' });
+  expect(writes).toBe(1);
+  await act(async () => navigation.goBack());
+  await screen.findByText('接下來七天的學習行動');
+  expect(screen.queryByText(privateDraft)).toBeNull();
+  if (payloadKind === 'attachments-closed') latest = {
+    ...latest, state: 'closed', closedAt: '2026-11-05T01:45:30Z',
+  };
+  await fireEventAsync.press((await screen.findAllByRole('button', { name: '查看這份作業' }))[0]);
+  await screen.findByRole('button', { name: '重試確認這次送出' });
+  expect(navigation.getCurrentRoute()?.key).not.toBe(firstRoute);
+  expect(navigation.getCurrentRoute()?.params).toMatchObject({ workspaceId: course.id, assignmentId: assignment.id });
+  const reopened = within(screen.getByTestId(`assignment-${assignment.id}`));
+  expect(reopened.getByLabelText('作業內容：' + assignment.title).props).toMatchObject({ value: privateDraft, editable: false });
+  expect(reopened.queryByRole('button', { name: '檔案' })).toBeNull();
+  expect(writes).toBe(1);
+  await fireEventAsync.press(reopened.getByRole('button', { name: '重試確認這次送出' }));
+  if (payloadKind === 'attachments-pending') {
+    expect(writes).toBe(1);
+    await act(async () => finishPending!());
+  }
+  if (payloadKind === 'attachments-closed') {
+    await screen.findByRole('button', { name: '重試確認這次送出' });
+    expect(reopened.getByLabelText('作業內容：' + assignment.title).props).toMatchObject({ value: privateDraft, editable: false });
+    expect(screen.queryByText('已收到伺服器繳交紀錄。')).toBeNull();
+    expect(screen.queryByRole('button', { name: '更新作業繳交' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '繳交作業' })).toBeNull();
+  } else await screen.findByText('已收到伺服器繳交紀錄。');
+  const requests = mockAssignmentBff.mock.calls.filter(([path]) => path === submitPath);
+  expect(requests).toHaveLength(payloadKind === 'attachments-pending' ? 1 : 2);
+  if (requests.length === 2) expect(requests[1][2]).toEqual(requests[0][2]);
+  expect(mockAssignmentUpload).toHaveBeenCalledTimes(files.length);
+  expect(mockAssignmentBff.mock.calls.filter(([path]) => path === intentsPath)).toHaveLength(files.length ? 1 : 0);
+  if (payloadKind !== 'attachments-closed') {
+    for (const file of files) expect(screen.getByText(file.originalName + ' · 檔案')).toBeTruthy();
+  }
+  expect(unhandled).not.toHaveBeenCalled();
+});
 
 test('a mixed plan opens the exact quiz through its real platform reader and receiver without choosing a namesake assignment', async () => {
   const { course, other, assignment, quiz, decoyQuiz, quizPath, assignmentPath } = await linkedPlanningQuizFixture();

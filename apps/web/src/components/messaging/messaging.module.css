@@ -47,6 +47,7 @@
   max-width: 520px;
 }
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   box-sizing: border-box;
@@ -59,9 +60,14 @@
   min-width: 0;
   resize: vertical;
 }
+.field input,
+.field select {
+  min-height: 44px;
+}
 .button,
 .primary {
   display: inline-flex;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
@@ -88,6 +94,7 @@
 .button:focus-visible,
 .primary:focus-visible,
 .field input:focus-visible,
+.field select:focus-visible,
 .field textarea:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
@@ -231,6 +238,7 @@
 }
 .checkbox {
   display: flex;
+  min-height: 44px;
   gap: 8px;
   align-items: center;
   color: var(--text);
@@ -375,6 +383,8 @@
   .inboxHeading, .chatHeader { align-items: flex-start; flex-direction: column; }
   .inboxToolbar { padding: 12px; }
   .inboxToolbar .field { flex-basis: 100%; }
+  .inboxToolbar .field input,
+  .inboxToolbar .field select { font-size: 16px; }
   .inboxToolbar > .button { margin-left: auto; }
   .stack .messages { padding: 12px; min-height: 170px; }
   .messages li { max-width: 90%; }

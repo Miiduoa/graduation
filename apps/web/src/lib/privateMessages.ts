@@ -624,28 +624,51 @@ function safeNoticeId(value: unknown): string | null {
     : null;
 }
 
-/** 通知中心／推播共用深連；未知類型落到通知列表，不臆造業務頁。 */
+/** 通知中心／首頁共用深連，僅連到現有服務與明確的資料來源。 */
 export function notificationDestination(
   notification: AccountNotification,
 ): { href: string; label: string } | null {
   const data = notification.data ?? {};
+  const schoolId = safeNoticeId(data.schoolId);
+  const schoolParams = new URLSearchParams();
+  if (schoolId) {
+    schoolParams.set('campus', schoolId);
+    schoolParams.set('schoolId', schoolId);
+  }
+  const schoolSearch = schoolId ? `?${schoolParams.toString()}` : '';
   if (notification.type === 'announcement') {
     const announcementId = safeNoticeId(data.announcementId);
     return announcementId
       ? {
-          href: `/announcements/${encodeURIComponent(announcementId)}`,
+          href: `/announcements/${encodeURIComponent(announcementId)}${schoolSearch}`,
           label: '查看公告',
         }
-      : { href: '/announcements', label: '查看公告' };
+      : { href: `/announcements${schoolSearch}`, label: '查看公告' };
+  }
+  if (notification.type === 'event') {
+    const eventId = safeNoticeId(data.eventId);
+    const source = data.source;
+    if (
+      eventId &&
+      (source === 'school-club-events' || source === 'school-events' || source === 'legacy-events')
+    ) {
+      schoolParams.set('source', source);
+      return {
+        href: `/events/${encodeURIComponent(eventId)}?${schoolParams.toString()}`,
+        label: '查看活動詳情',
+      };
+    }
+    return { href: `/events${schoolSearch}`, label: '查看活動列表' };
+  }
+  if (notification.type === 'library_due') {
+    return { href: `/library${schoolSearch}`, label: '查看本校借閱服務' };
+  }
+  if (['friend_request', 'friend_invite', 'friend_accepted'].includes(notification.type)) {
+    return { href: `/friends${schoolSearch}`, label: '開啟好友與邀請' };
   }
   if (notification.type === 'order') {
     const orderId = safeNoticeId(data.orderId);
-    const schoolId = safeNoticeId(data.schoolId);
-    const params = new URLSearchParams();
-    if (schoolId) {
-      params.set('campus', schoolId);
-      params.set('schoolId', schoolId);
-    }
+    const params = schoolParams;
     if (orderId) params.set('orderId', orderId);
     const query = params.toString();
     return {
@@ -655,7 +678,7 @@ export function notificationDestination(
   }
   if (notification.type === 'live_session') {
     const groupId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
-    if (!groupId) return { href: '/messages', label: '開啟通知中心' };
+    if (!groupId) return null;
     const sessionId = safeNoticeId(data.sessionId);
     const base = `/course/${encodeURIComponent(groupId)}/attendance`;
     return {
@@ -665,7 +688,7 @@ export function notificationDestination(
   }
   if (notification.type === 'assignment_submission') {
     const courseId = safeNoticeId(data.groupId) || safeNoticeId(data.courseId);
-    if (!courseId) return { href: '/messages', label: '開啟通知中心' };
+    if (!courseId) return null;
     const assignmentId = safeNoticeId(data.assignmentId);
     const href = assignmentId
       ? `/teacher/course/${encodeURIComponent(courseId)}?assignmentId=${encodeURIComponent(assignmentId)}`
@@ -687,21 +710,21 @@ export function notificationDestination(
     if (course) return { href: course, label: courseWorkOpenLabel(course) };
     return { href: '/grades?tab=feedback', label: '查看課業成績與回饋' };
   }
-  if (
-    notification.type === 'message' &&
-    typeof notification.data.conversationId === 'string' &&
-    notification.data.conversationId &&
-    !notification.data.conversationId.includes('/')
-  )
-    return {
-      href: `/dms/${encodeURIComponent(notification.data.conversationId)}`,
-      label: '開啟對話',
-    };
+  if (notification.type === 'message') {
+    const conversationId = data.conversationId;
+    return typeof conversationId === 'string' &&
+      conversationId.length > 0 &&
+      !conversationId.includes('/') &&
+      conversationId !== '.' &&
+      conversationId !== '..'
+      ? { href: `/dms/${encodeURIComponent(conversationId)}`, label: '開啟對話' }
+      : null;
+  }
   if (isAssignmentNotificationType(notification.type) || isMaterialNotificationType(notification.type)) {
     const href =
       courseWorkHrefFromData(notification.data, notification.type) ||
       courseHrefFromData(notification.data);
     if (href) return { href, label: courseWorkOpenLabel(href) };
   }
-  return { href: '/messages', label: '開啟通知中心' };
+  return null;
 }

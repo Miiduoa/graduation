@@ -3,6 +3,7 @@ import {
   NuniSessionController,
   type NuniSessionDependencies,
 } from '../services/nuniSessionController';
+import { NuniDraftScopeStore } from '../state/nuniDrafts';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 const handle = `ps_${'a'.repeat(43)}`;
@@ -63,10 +64,12 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     begin: jest.fn(async () => {}),
     end: jest.fn(() => {}),
   };
+  const invalidateLocalDrafts = jest.fn();
   const controller = new NuniSessionController({
     storage,
     logoutFence,
     savedPlansCleanup,
+    invalidateLocalDrafts,
     request,
     credential,
     clearCredential,
@@ -80,6 +83,7 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     credential,
     clearCredential,
     savedPlansCleanup,
+    invalidateLocalDrafts,
     persisted: () => persisted,
     fenced: () => fenced,
   };
@@ -671,4 +675,148 @@ it('removes a late pending-credential fallback write when logout finishes while 
   expect(persisted()).toBeNull();
   expect(fenced()).toBe(false);
   expect(controller.state).toMatchObject({ session: null, pendingLogout: false });
+});
+
+it('retains local input through a transient foreground check but revokes it before logout awaits anything', async () => {
+  const { controller, request, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '未完成的課業內容');
+  request.mockRejectedValueOnce(new NuniError(503, 'TEMPORARY_UNAVAILABLE'));
+  await controller.refresh();
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(drafts.forAccount(account)).toBe(original);
+  expect(original.cache.get('body')).toBe('未完成的課業內容');
+  const leaving = controller.logout();
+  // This check intentionally precedes the first awaited logout result and any UI render.
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '舊表單的晚到內容');
+  expect(original.cache.size).toBe(0);
+  await leaving;
+  await controller.signIn();
+  const returned = drafts.forAccount(account);
+  expect(returned.revision).toBeGreaterThan(original.revision);
+  expect(returned.cache).not.toBe(original.cache);
+  expect(returned.cache.has('body')).toBe(false);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+});
+
+it.each([401, 409])('revokes detached route input after confirmed status %i even while the old credential remains', async (status) => {
+  const { controller, request, storage, persisted, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '已離開畫面但仍保留的內容');
+  storage.clear.mockRejectedValueOnce(new Error('secure deletion unavailable'));
+  request.mockRejectedValueOnce(new NuniError(status, 'SESSION_REVOKED'));
+  await controller.refresh();
+  expect(persisted()).not.toBeNull();
+  expect(controller.state.session).toBeNull();
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '舊回應');
+  expect(original.cache.size).toBe(0);
+  // A later server verification of the same account cannot revive the revoked Map.
+  await controller.refresh();
+  const verifiedAgain = drafts.forAccount(account);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(verifiedAgain.revision).toBeGreaterThan(original.revision);
+  expect(verifiedAgain.cache.has('body')).toBe(false);
+});
+
+it('revokes a confirmed unauthorized draft before slow credential deletion finishes', async () => {
+  const { controller, request, storage, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '等待中的私人內容');
+  const pendingRead = deferred<unknown>();
+  request.mockReturnValueOnce(pendingRead.promise);
+  const reading = controller.request('class-workspaces', context);
+  const rejectedRead = expect(reading).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  const signal = request.mock.calls.at(-1)![3]!;
+  const deletion = deferred<void>();
+  storage.clear.mockReturnValueOnce(deletion.promise);
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  expect(storage.clear).toHaveBeenCalledTimes(1);
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+  expect(controller.state).toMatchObject({ session: null, loading: true });
+  expect(signal.aborted).toBe(true);
+  expect(original.cache.get('body')).toBeUndefined();
+  const callsBefore = request.mock.calls.length;
+  await expect(controller.request('class-workspaces', context)).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  await controller.refresh();
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_IN_BUSY' });
+  expect(request).toHaveBeenCalledTimes(callsBefore);
+  pendingRead.resolve({ workspaces: [] });
+  await rejectedRead;
+  deletion.resolve();
+  await refresh;
+});
+
+it('does not start a replacement login until every earlier revoked-credential deletion has settled', async () => {
+  const { controller, request, storage, persisted } = setup(stored());
+  await controller.refresh();
+  const deletion = deferred<void>();
+  const clear = storage.clear.getMockImplementation()!;
+  storage.clear.mockImplementationOnce(async () => { await deletion.promise; await clear(); });
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  await controller.logout();
+  expect(controller.state).toMatchObject({ session: null, loading: false, pendingLogout: false });
+  expect(storage.clear).toHaveBeenCalledTimes(2);
+  // Logout's own cleanup finished, but the earlier 401 cleanup can still delete storage.
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_IN_BUSY' });
+  deletion.resolve();
+  await refresh;
+  await controller.signIn();
+  expect(controller.state.session?.platformAccountId).toBe(account);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(persisted()).not.toBeNull();
+});
+
+it('finishes verification after provider reactivation during an earlier secure deletion', async () => {
+  const { controller, request, storage } = setup(stored());
+  await controller.refresh();
+  const deletion = deferred<void>();
+  storage.clear.mockReturnValueOnce(deletion.promise);
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  controller.dispose();
+  controller.activate();
+  await controller.refresh();
+  expect(controller.state.loading).toBe(true);
+  deletion.resolve();
+  await refresh;
+  for (let i = 0; i < 30 && controller.state.loading; i++) await Promise.resolve();
+  expect(controller.state).toMatchObject({ session: null, loading: false, pendingLogout: false });
+});
+
+it('cannot read or refill expired input before the next refresh or after controller disposal', async () => {
+  let now = 1000;
+  const { controller, invalidateLocalDrafts } = setup(stored(false, 2000), false, () => now);
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '即將逾時的草稿');
+  now = 2000;
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '逾時後的晚到內容');
+  expect(original.cache.size).toBe(0);
+  controller.dispose();
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(invalidateLocalDrafts).toHaveBeenCalled();
 });
