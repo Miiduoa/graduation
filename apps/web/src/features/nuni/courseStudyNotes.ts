@@ -14,7 +14,7 @@ export function buildCourseStudyNotes(
   passages: Record<string, StudyPassageMemory>,
 ): string {
   const lines = [
-    'Campus One 讀書白板・本次學習筆記',
+    'nuni 讀書白板・本次學習筆記',
     `課程：${courseTitle}`,
     `講義：${source.title}`,
     '',

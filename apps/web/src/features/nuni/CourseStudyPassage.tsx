@@ -80,6 +80,18 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
     setProgress('已停止，原文、筆記與先前講解仍保留。');
   }
 
+  // WebGPU/Worker support can change after browser resume or settings changes.
+  // This is a capability probe only: it never downloads or starts the model.
+  function refreshAvailability() {
+    if (current.current) return;
+    const checked = getStudyTutorAvailability();
+    setAvailability(checked);
+    setError('');
+    setProgress(checked.available
+      ? '瀏覽器目前具備嘗試啟動裝置端 AI 的條件；尚未下載或驗證模型，可再按講解按鈕重試。'
+      : '重新檢查後仍無法使用裝置端 AI；原文、筆記與自行練習不受影響。');
+  }
+
   async function explain(withHistory = true) {
     if (current.current || !availability?.available || !passage.text.trim()) return;
     const controller = new AbortController();
@@ -153,6 +165,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
           講解在裝置上產生，使用目前原文及同一讀法的近期追問；內容可能有誤，請對照教材。
         </p>
         {availability && !availability.available && <p className={styles.note} role="status">{availability.reason}</p>}
+        {availability && (!availability.available || !!error) && !busy && <button type="button" className={styles.button}
+          onClick={refreshAvailability}>重新檢查裝置端 AI 支援</button>}
         {modeMemory.lessons.length > 0 && <div className={styles.lessonHistory}>
           <label className={styles.field} htmlFor={lessonId}>這一段的講解記錄
             <select id={lessonId} value={selected?.id ?? ''} disabled={busy} onChange={(event) => {

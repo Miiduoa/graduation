@@ -231,7 +231,7 @@ export function buildCourseStudyPracticeNotes(
 ): string {
   const summary = getStudyPracticeSummary(round);
   const lines = [
-    'Campus One 讀書白板・本輪逐題複習',
+    'nuni 讀書白板・本輪逐題複習',
     `課程：${courseTitle}`,
     `講義：${sourceTitle}`,
     `讀法：${modeLabels[round.mode]}`,

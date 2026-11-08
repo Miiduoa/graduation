@@ -485,7 +485,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPendingSource(null);
     setError('');
     try {
-      if (!/\.json$/i.test(file.name)) throw new Error('請選擇之前儲存的 Campus One 閱讀進度檔（JSON）。');
+      if (!/\.json$/i.test(file.name)) throw new Error('請選擇之前儲存的 nuni 讀書白板進度檔（JSON）。');
       if (!file.size || file.size > COURSE_STUDY_PROGRESS_LIMITS.bytes)
         throw new Error('請選擇有內容且不超過 8 MiB 的閱讀進度檔。');
       const text = await file.text();

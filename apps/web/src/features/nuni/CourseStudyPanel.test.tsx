@@ -53,6 +53,45 @@ it('keeps reading available when the browser cannot run a model', () => {
   expect(screen.getByRole('region', { name: '待複習段落' })).toBeTruthy();
 });
 
+it('rechecks device AI availability without launching a model or losing an offline note', async () => {
+  mocks.available = false;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: 'WebGPU 尚不可用時先記下主鍵定義。' } });
+  const explain = screen.getByRole('button', { name: '啟用 AI 講解本段' });
+  const recheck = screen.getByRole('button', { name: '重新檢查裝置端 AI 支援' });
+  expect(explain.hasAttribute('disabled')).toBe(true);
+  fireEvent.click(recheck);
+  expect(explain.hasAttribute('disabled')).toBe(true);
+  expect(screen.getByText(/重新檢查後仍無法使用裝置端 AI/)).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+  mocks.available = true;
+  fireEvent.click(recheck);
+  expect(explain.hasAttribute('disabled')).toBe(false);
+  expect(screen.getByText(/尚未下載或驗證模型/)).toBeTruthy();
+  expect(note.value).toBe('WebGPU 尚不可用時先記下主鍵定義。');
+  expect(mocks.run).not.toHaveBeenCalled();
+  fireEvent.click(explain);
+  expect(await screen.findByRole('region', { name: '本段 AI 講解' })).toBeTruthy();
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+});
+
+it('offers capability recheck after a worker failure without silently retrying or removing notes', async () => {
+  mocks.run.mockRejectedValueOnce(new Error('本機模型啟動失敗'));
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '錯誤發生前記下的筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  expect(await screen.findByText('本機模型啟動失敗')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新檢查裝置端 AI 支援' }));
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(/尚未下載或驗證模型/)).toBeTruthy();
+  expect(note.value).toBe('錯誤發生前記下的筆記');
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  expect(await screen.findByRole('region', { name: '本段 AI 講解' })).toBeTruthy();
+  expect(mocks.run).toHaveBeenCalledTimes(2);
+});
+
 it('closes an untouched board without an unnecessary confirmation', () => {
   const onClose = vi.fn();
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);

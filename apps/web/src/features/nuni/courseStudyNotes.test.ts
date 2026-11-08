@@ -35,6 +35,7 @@ describe('course study note downloads', () => {
     const before = JSON.stringify({ pdf, memories });
     const text = buildCourseStudyNotes('資料庫系統', pdf, memories);
 
+    expect(text.startsWith('nuni 讀書白板・本次學習筆記\n')).toBe(true);
     expect(text).toContain('課程：資料庫系統\n講義：資料庫.pdf');
     expect(text).toContain('第 1 頁沒有可讀取的文字');
     const first = text.indexOf('第 3 頁 · 第 1 段');

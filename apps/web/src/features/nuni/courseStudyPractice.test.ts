@@ -135,6 +135,7 @@ describe('source-ordered review deck snapshots', () => {
     });
     expect(Object.values(deck.cards[0]).every((value) => typeof value === 'string' || typeof value === 'number')).toBe(true);
     expect(JSON.stringify(memory)).toBe(before);
+    expect(buildCourseStudyPracticeNotes('資料庫', '講義', started).startsWith('nuni 讀書白板・本輪逐題複習\n')).toBe(true);
     expect(buildCourseStudyPracticeNotes('資料庫', '講義', started)).not.toContain('閱讀時寫過的舊試答');
     expect(buildCourseStudyPracticeNotes('資料庫', '講義', started)).not.toContain('參考答案秘密');
     memory.modes.understand.lessons[0].response.question = '稍後改變的問題';
