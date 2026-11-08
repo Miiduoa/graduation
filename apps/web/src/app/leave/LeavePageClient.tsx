@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type PersonalCourse } from '@campus/shared';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
@@ -196,8 +196,9 @@ function LeaveWorkspace({ uid, schoolId, schoolName, leaveApiEnabled, linkedRequ
   const activeRef = useRef(true);
   const loadGeneration = useRef(0);
   const noticeRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    if (notice) noticeRef.current?.focus();
+  useLayoutEffect(() => {
+    // Hand off once the notice is committed, before a user can act on the refreshed history.
+    if (notice && activeRef.current) noticeRef.current?.focus();
   }, [notice]);
 
   const revealSubmission = useCallback((id: string) => {

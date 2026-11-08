@@ -8,6 +8,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
 import {
   forgetDirectorySearch,
@@ -42,6 +43,8 @@ function ServiceDirectory() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
   const { user } = useAuth();
+  const platform = useOptionalNuniSession();
+  const platformAudience = !!(platform?.session && !platform.loading && !platform.error && !platform.pendingLogout);
   const uid = user?.uid || '';
   const searchInput = useRef<HTMLInputElement>(null);
   const requestSequence = useRef(0);
@@ -85,7 +88,7 @@ function ServiceDirectory() {
   const directoryCount = countCampusSearchResults(matches, browsing, schoolLmsEnabled);
   const suggested = semantic?.status === 'understood'
     ? resolveCampusActions(semantic.destinations, schoolLmsEnabled)
-    : getQuickCampusActions(query, schoolLmsEnabled).filter(
+    : getQuickCampusActions(query, schoolLmsEnabled, platformAudience ? 'platform' : 'school').filter(
         (action) => !matches.some((match) => match.href === action.href),
       );
 

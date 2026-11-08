@@ -1,4 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
+import { ASSISTANT_SERVICES, resolveAssistantServiceIntent } from '@campus/shared/src/assistantServices';
+import { parseImportedAcademicIntent, summarizeImportedAcademics,
+  formatImportedAcademicSummary } from '@campus/shared/src/importedAcademicSummary';
 import { getAuthInstance, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { campusAgentWriteProposals, type CampusAgentWriteProposal } from './campusAssistantActions';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from '../services/campusSenseSnapshot';
@@ -11,20 +14,36 @@ import type { AnnouncementRead, AssignmentRead, OfflineCampusToolResult } from '
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
+import { answerCourseworkStudyIntent, type CourseworkStudyChoice, type CourseworkStudySelection } from './nuniCourseworkStudyIntent';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
+import type { AssistantServiceSelection } from '../services/assistantServiceNavigation';
+import { parseAssistantCalendarIntent } from '../services/assistantCalendarIntent';
+import { parseAssistantCalendarBatchIntent } from '../services/assistantCalendarBatchIntent';
+import { prepareAssistantCalendarBatch, type AssistantCalendarBatchView } from '../services/assistantCalendarBatchExecution';
+import { assistantCalendarOwner, createAssistantCalendarTask, findPersistedAssistantCalendarTask,
+  recheckAssistantCalendarTask, sameAssistantCalendarEvent,
+  type AssistantCalendarTask } from '../services/assistantCalendarExecution';
 import { isNuniCampusPlanningQuestion } from '../services/nuniCampusPlanner';
+
+export type ImportedAcademicRead = { owner: string; schoolId: string; checkedAt: string };
 
 export type CampusAssistantMessage = {
   role: 'user' | 'assistant';
   content: string;
-  tool?: OfflineCampusToolResult['tool'] | 'local-agent';
+  tool?: OfflineCampusToolResult['tool'] | 'local-agent' | 'saved-academics' | 'calendar-action';
   route?: string;
+  serviceSelection?: AssistantServiceSelection;
+  academicRead?: ImportedAcademicRead;
+  calendarTask?: AssistantCalendarTask;
+  calendarBatch?: AssistantCalendarBatchView;
   assignmentRead?: AssignmentRead;
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
+  courseworkStudy?: CourseworkStudySelection;
+  courseworkStudyCheckedAt?: string;
 };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
@@ -91,6 +110,7 @@ export async function askCampusAssistant(input: {
   platformTimetable?: PlatformTimetableAccess;
   courseworkRequests?: CourseworkRequests;
   courseworkChoice?: CourseworkChoice;
+  courseworkStudyChoice?: CourseworkStudyChoice;
   /** Optional per-request native cancellation; never cancels unrelated tasks. */
   signal?: AbortSignal;
   schoolName?: string | null;
@@ -104,12 +124,17 @@ export async function askCampusAssistant(input: {
   content: string;
   hasActions: boolean;
   source: CampusAssistantMode;
-  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent';
+  tool?: 'saved-timetable' | 'campus-snapshot' | 'campus-plan' | 'online-required' | 'open-service' | 'local-agent' | 'saved-academics' | 'calendar-action';
+  serviceSelection?: AssistantServiceSelection;
+  academicRead?: ImportedAcademicRead;
+  calendarTask?: AssistantCalendarTask;
+  calendarBatch?: AssistantCalendarBatchView;
   plan?: CampusEvidencePlan;
   localReads?: LocalCampusReadResult[];
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
+  courseworkStudy?: CourseworkStudySelection;
   announcementRead?: AnnouncementRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
@@ -124,6 +149,13 @@ export async function askCampusAssistant(input: {
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
     .slice(-20)
+    // Source-backed plans, local records and calendar tasks stay in the conversation without being
+    // forwarded, together with their preceding question, to a later model.
+    .filter((message, index, history) => {
+      const privateRead = (item?: CampusAssistantMessage) => !!item &&
+        (!!item.courseworkRead || !!item.courseworkStudy || ['campus-plan', 'saved-academics', 'calendar-action'].includes(item.tool ?? ''));
+      return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
+    })
     .map((message) => ({
       role: message.role,
       content: message.content.trim().slice(0, 1600),
@@ -133,11 +165,139 @@ export async function askCampusAssistant(input: {
     throw new Error('Missing question');
   }
 
+  const question = messages[messages.length - 1].content;
+  const prior = input.messages[input.messages.length - 2];
+  const sourceReply = prior?.role === 'assistant' ? prior : undefined;
+  const study = answerCourseworkStudyIntent({
+    question, read: sourceReply?.courseworkRead, previous: sourceReply?.courseworkStudy,
+    choice: input.courseworkStudyChoice, accountId: input.platformTimetable?.accountId,
+    schoolId: input.scope.schoolId,
+    isCurrent: () => input.isCurrent() && !!input.platformTimetable?.isCurrent() && !input.signal?.aborted,
+  });
+  if (study) return { ...study, source: 'device', tool: 'calendar-action', hasActions: false };
+  const batchIntent = parseAssistantCalendarBatchIntent(question);
+  if (batchIntent) {
+    if (batchIntent.kind === 'invalid') return { content: batchIntent.message,
+      source: 'device', tool: 'calendar-action', hasActions: false };
+    const context = { ...input.scope, platformTimetable: input.platformTimetable,
+      isCurrent: () => input.isCurrent() && !input.signal?.aborted };
+    if (!assistantCalendarOwner(context)) return { content: '請先登入自己的帳號，再建立多筆個人行程草稿。',
+      source: 'device', tool: 'calendar-action', hasActions: false,
+      serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    try {
+      const calendarBatch = await abortableCampusRead(
+        () => prepareAssistantCalendarBatch(batchIntent.events, context), input.signal);
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { content: '請逐筆核對下方安排。確認後會依序加入個人行事曆，每筆保存後都會讀回核對。',
+        source: 'device', tool: 'calendar-action', hasActions: false, calendarBatch };
+    } catch {
+      scopeCheck(input, false);
+      assertNotCancelled();
+      return { content: '目前無法完整讀取或保存這份多筆行程草稿，尚未開始新的行程操作。請重新載入行程紀錄後再試。',
+        source: 'device', tool: 'calendar-action', hasActions: false,
+        serviceSelection: { kind: 'open', serviceIds: ['calendar'] } };
+    }
+  }
+  const calendarIntent = parseAssistantCalendarIntent(question);
+  if (calendarIntent) {
+    if (calendarIntent.kind === 'invalid') return { content: calendarIntent.message,
+      source: 'device', tool: 'calendar-action', hasActions: false };
+    const context = { ...input.scope, platformTimetable: input.platformTimetable, isCurrent: input.isCurrent };
+    const owner = assistantCalendarOwner(context);
+    if (!owner) return { content: '請先登入自己的帳號，再建立個人行事曆草稿。',
+      source: 'device', tool: 'calendar-action', hasActions: false,
+      serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    // Rephrasing the same appointment must not mint a fresh operation while a
+    // previous attempt is unknown or already completed. Cancellation only
+    // applies to a draft whose explicit confirmation has not happened yet.
+    const previous = [...input.messages].reverse().find((message) => message.role === 'assistant' &&
+      message.calendarTask && message.calendarTask.proposal.owner === owner &&
+      message.calendarTask.proposal.schoolId === input.scope.schoolId && !['cancelled', 'blocked'].includes(message.calendarTask.state) &&
+      sameAssistantCalendarEvent(message.calendarTask.proposal.event, calendarIntent.event))?.calendarTask;
+    let restored: AssistantCalendarTask | null = null;
+    if (!previous) {
+      try {
+        restored = await abortableCampusRead(() => findPersistedAssistantCalendarTask(calendarIntent.event,
+          { ...context, isCurrent: () => input.isCurrent() && !input.signal?.aborted }), input.signal);
+      } catch {
+        scopeCheck(input, false);
+        assertNotCancelled();
+        return { content: '目前無法讀取先前的行程操作紀錄，暫時無法建立新的行程草稿。請重新載入行程紀錄，或先到個人行事曆查看。',
+          source: 'device', tool: 'calendar-action', hasActions: false,
+          serviceSelection: { kind: 'open', serviceIds: ['calendar'] } };
+      }
+    }
+    const calendarTask = previous?.state === 'verified'
+      ? await abortableCampusRead(() => recheckAssistantCalendarTask(previous.proposal,
+        { ...context, isCurrent: () => input.isCurrent() && !input.signal?.aborted }, previous), input.signal)
+        .catch((error: unknown) => { assertNotCancelled(); throw error; })
+      : previous ?? restored ?? createAssistantCalendarTask(calendarIntent.event, context);
+    scopeCheck(input, false);
+    assertNotCancelled();
+    return { content: previous || restored ? '這是先前同一筆行程的處理紀錄。' : '請核對行程名稱與時間，再確認加入個人行事曆。',
+      source: 'device', tool: 'calendar-action', hasActions: false, calendarTask };
+  }
+  const serviceIntent = resolveAssistantServiceIntent(question);
+  if (serviceIntent) {
+    return {
+      source: 'device', tool: 'open-service', hasActions: false,
+      content: serviceIntent.kind === 'catalog'
+        ? '選擇想使用的功能。查課表與已儲存成績也可以直接提問；送出申請、下單及發訊息仍在原服務確認。'
+        : `可以從下方開啟${serviceIntent.service.label}，再接續處理。`,
+      serviceSelection: serviceIntent.kind === 'catalog'
+        ? { kind: 'catalog', serviceIds: ASSISTANT_SERVICES.map((service) => service.id) }
+        : { kind: 'open', serviceIds: [serviceIntent.service.id] },
+    };
+  }
+  // An explicit campus/live grade request retains the existing school reader.
+  // Only an explicit saved/imported request can use the local source in that mode.
+  const academicIntent = mode === 'device' || /匯入|儲存|保存/.test(question)
+    ? parseImportedAcademicIntent(question) : null;
+  if (academicIntent) {
+    const platform = input.platformTimetable;
+    const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
+    const owner = platform ? `nuni:${platform.accountId}` : uid ? `firebase:${uid}` : '';
+    if (!owner) {
+      return { content: '請先登入自己的帳號，再查詢這台手機保存的成績與學分紀錄。',
+        hasActions: false, source: 'device', tool: 'saved-academics',
+        serviceSelection: { kind: 'open', serviceIds: ['account'] } };
+    }
+    const { snapshotPersonalImports } = require('../services/personalImports') as typeof import('../services/personalImports');
+    const assertAcademicCurrent = () => {
+      scopeCheck(input, false);
+      if (input.signal?.aborted) throw new OnDeviceAssistantError('cancelled');
+    };
+    const active = () => {
+      try { assertAcademicCurrent(); return true; } catch { return false; }
+    };
+    let ledger: Awaited<ReturnType<typeof snapshotPersonalImports>> | null = null;
+    try {
+      ledger = await abortableCampusRead(() => snapshotPersonalImports({ owner, schoolId: input.scope.schoolId }, active), input.signal);
+    } catch {
+      // Unreadable data is not an empty transcript. Account changes and aborts
+      // must still discard the entire reply rather than expose the old scope.
+      assertAcademicCurrent();
+    }
+    assertAcademicCurrent();
+    const checkedAt = new Date().toISOString();
+    const summary = summarizeImportedAcademics({
+      records: ledger?.records,
+      schoolId: input.scope.schoolId,
+      availability: ledger ? 'available' : 'unavailable',
+      fetchedAt: checkedAt,
+      academicYear: academicIntent.academicYear,
+      semester: academicIntent.semester,
+    });
+    return { content: formatImportedAcademicSummary(summary), hasActions: false,
+      source: 'device', tool: 'saved-academics', academicRead: { owner, schoolId: input.scope.schoolId, checkedAt },
+      serviceSelection: { kind: 'open', serviceIds: ['import'], importKind: 'grades' } };
+  }
+
   if (mode === 'device') {
     const { collectOnDeviceSchoolContext, formatOnDeviceSchoolPrompt } =
       require('../services/onDeviceSchoolContext') as typeof import('../services/onDeviceSchoolContext');
     const uid = input.scope.uid && !isFirebaseMockMode() ? input.scope.uid : '';
-    const question = messages[messages.length - 1].content;
     const previous = input.messages[input.messages.length - 2];
     const lastReply = previous?.role === 'assistant' ? previous : undefined;
     const lastClass = lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor;

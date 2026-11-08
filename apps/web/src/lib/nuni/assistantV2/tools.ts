@@ -1,5 +1,7 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
+import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -38,6 +40,23 @@ const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  list_campus_services: [
+    {
+      serviceId: { enum: ASSISTANT_SERVICES.map((service) => service.id) },
+      offset: { type: 'integer', minimum: 0, maximum: 100 },
+      limit: { type: 'integer', minimum: 1, maximum: 6 },
+    },
+    [],
+  ],
+  get_imported_academics: [
+    {
+      academicYear: { type: 'string', maxLength: 4 },
+      semester: { enum: ['1', '2', '3'] },
+      offset: { type: 'integer', minimum: 0, maximum: 2000 },
+      limit: { type: 'integer', minimum: 1, maximum: 10 },
+    },
+    [],
+  ],
   get_food_locations: [{ tenantId: s }, []],
   get_food_menu: [{ tenantId: s, locationId: s }, []],
   propose_food_order: [
@@ -143,19 +162,7 @@ const definitions: Record<string, [Obj, string[]]> = {
   propose_open_page: [
     {
       page: {
-        enum: [
-          'today',
-          'timetable',
-          'calendar',
-          'classroom',
-          'orders',
-          'clubs',
-          'map',
-          'bus',
-          'cafeteria',
-          'announcements',
-          'events',
-        ],
+        enum: ASSISTANT_SERVICES.map((service) => service.id),
       },
       entityId: s,
     },
@@ -424,6 +431,10 @@ export const toolNames = Object.keys(definitions);
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  // School grades stay on campus readers; imported records need an explicit local source.
+  if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
+  if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
+    add('list_campus_services');
   if (
     /作業|測驗|要交|規劃|剛剛|剛才/.test(question) ||
     studyPlanSelect(question) ||
@@ -545,6 +556,8 @@ export function validateTool(name: string, raw: unknown): Obj {
   }
   if (name === 'propose_personal_event') return { ...eventArgs(a) };
   if (name === 'propose_open_page') return pageArgs(a);
+  if (name === 'get_imported_academics' && a.academicYear !== undefined &&
+      !/^\d{2,4}$/.test(String(a.academicYear))) return fail();
   if (
     name === 'get_transit' &&
     (a.action === 'arrivals' ? !a.city || !a.stopId : a.city || a.stopId)
@@ -803,6 +816,39 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'list_campus_services': {
+        const selected = a.serviceId ? getAssistantService(a.serviceId) : null;
+        const services = a.serviceId ? (selected ? [selected] : []) : ASSISTANT_SERVICES;
+        const offset = Number(a.offset || 0), limit = Number(a.limit || 6);
+        return {
+          source: 'service-directory',
+          schoolId: binding.schoolId,
+          services: services.slice(offset, offset + limit).map((service) => ({
+            id: service.id,
+            label: service.label,
+            summary: service.summary,
+            access: service.access,
+            href: assistantServiceHref(service.id, binding.schoolId, 'platform'),
+          })),
+          total: services.length,
+          nextOffset: offset + limit < services.length ? offset + limit : null,
+          note: '這是服務入口與接通範圍，不代表已查詢私人資料或已執行操作；登入與角色權限由目的服務確認。',
+        };
+      }
+      case 'get_imported_academics': {
+        const ledger = await getLedger();
+        return summarizeImportedAcademics({
+          records: ledger.records,
+          schoolId: binding.schoolId,
+          availability: 'available',
+          fetchedAt: new Date(now).toISOString(),
+          updatedAt: ledger.updatedAt,
+          ...(a.academicYear !== undefined && { academicYear: String(a.academicYear) }),
+          ...(a.semester !== undefined && { semester: String(a.semester) }),
+          offset: Number(a.offset || 0),
+          limit: Number(a.limit || 5),
+        });
+      }
       case 'get_food_locations': {
         if (!a.tenantId) {
           const visible = (await getRealms()).filter((r) => r.schoolId === binding.schoolId);
@@ -1055,9 +1101,9 @@ export function createTools(
                 ? getOfficialCampusMapUrl(binding.schoolId)
                 : null,
           source: '站內入口，未讀完整內容',
-          href: pageHref({ page: a.kind === 'library' ? 'map' : a.kind }, binding.schoolId),
+          href: pageHref({ page: a.kind }, binding.schoolId),
           note:
-            a.kind === 'library' ? '請在校園地圖查圖書館；未提供步行時間' : '請以頁面最新資料為準',
+            a.kind === 'library' ? '可前往圖書館查詢館藏與服務；此步驟未查借閱紀錄或預約座位' : '請以頁面最新資料為準',
         };
       case 'find_free_time':
         return freeTime(await getLedger(), a, a.date === taipeiDate(now) ? now : undefined);
@@ -1066,13 +1112,17 @@ export function createTools(
       case 'propose_open_page': {
         if (a.entityId) {
           const entity = String(a.entityId);
+          const observedOrders = a.page === 'orders'
+            ? [...orders].filter((key) => key.endsWith(':' + entity))
+            : [];
           const allowed =
             a.page === 'classroom'
               ? (await getCourses()).some((c) => c.id === entity)
               : a.page === 'orders'
-                ? [...orders].some((key) => key.endsWith(':' + entity))
+                ? observedOrders.length === 1
                 : a.page === 'cafeteria' && diningIds.has(entity);
           if (!allowed) return fail('FORBIDDEN_SCOPE', 403);
+          if (a.page === 'orders') a.tenantId = id(observedOrders[0].slice(0, -entity.length - 1));
         }
         const card = signCard(binding, name, a, 0, secret, now, sequence());
         cards.push(card);

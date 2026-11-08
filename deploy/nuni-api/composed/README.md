@@ -1,5 +1,13 @@
 # 281 與撤回過濾的 API 發布來源
 
+## 2026-11-07：Agent 單筆行程核對的來源增量
+
+Agent 的單筆行程核對新增可選的 `acknowledged` 裝置同步元資料，對應來源為 `packages/shared/src/imports/sync.ts`。本輪以既有固定上游 commit、四份 checksum 相符的補丁與 base tree，重新執行 `prepare.py --refresh-manifest`；再於另一份獨立乾淨 checkout 執行一般 prepare，兩次產出相同的 candidate tree。
+
+這次 manifest 只有三個值更新：該份 `sync.ts` 的 SHA256、`overlayTree` 與 `candidateTree`。目前 overlay tree 為 `530a378f0b3df9b282805488521e24c0e03daeb4`，candidate tree 為 `83381c1b04e3a603389f562ada17ef11b9d5facf`；完整固定來源見 `source.json`。封裝回歸測試 9／9 通過。這是來源重建紀錄，正式部署仍需完成下列發布前驗證與既有合併閘門。
+
+## 既有 281 發布紀錄
+
 本次範圍固定為 `build.py --imports-candidate`。相較正式映像 `be815455fbb2ccce844b69f004e416e44465e3421f9da654d0cd5db8379c3dc2`（OCI revision tree `b0a10ac814cd03fbfb45132566035acce8339f17`），僅六個檔案不同：撤回過濾、281 SQL、匯入型別、餐廳文案及兩個測試檔。**本次不含安全依賴更新**；`--security-candidate` 另案發布，不能宣稱本次是「main 全部 API 修正」。也不含 food-ordering opt-in。
 
 278、279、公開餐廳、課班審核、個人匯入同步與教材穩定游標分頁均已在正式來源。本次唯一新增的 API migration manifest 是 281；不重跑或修改 278／279、不加入缺號 277。280 是既有 BFF 表，並不在 API manifest。正式 DB 狀態來自來源與既有審查推定，發布者仍需安全核對。

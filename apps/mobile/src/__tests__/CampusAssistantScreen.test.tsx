@@ -1160,6 +1160,10 @@ function setPlatformFixture(accountId: string, context = 'context-a') {
   };
 }
 
+async function waitForCalendarRecovery(view: ReturnType<typeof render>) {
+  await waitFor(() => expect(view.queryByText('正在找回並核對先前的行程操作…')).toBeNull());
+}
+
 test('platform lookup, room follow-up and exact class link use the same nuni owner with no Firebase features', async () => {
   setPlatformFixture('student-b');
   const item = { courseId: 'manual:n1', term: '115|1', name: '平台帳號的專題', room: 'A301',
@@ -1169,6 +1173,7 @@ test('platform lookup, room follow-up and exact class link use the same nuni own
     .mockResolvedValueOnce({ content: item.room, source: 'device', tool: 'saved-timetable', savedClassRead: { ...read, focus: 'room' } });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalTimetable', 'PersonalImport'] }) }} />);
+  await waitForCalendarRecovery(view);
   expect(view.getByText('課業助理')).toBeTruthy();
   expect(view.getByRole('tab', { name: '已儲存計畫' })).toBeTruthy();
   expect(view.getByText('整理今日重點')).toBeTruthy();
@@ -1220,12 +1225,14 @@ test('a platform session replacement discards pending results even for the same 
   const response = deferred<object>();
   request.mockReturnValue(response.promise);
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   fireEvent.press(view.getByText('現在有課嗎？'));
   const claim = request.mock.calls[0][0].platformTimetable;
   setPlatformFixture('student-b', 'context-new');
   expect(claim.isCurrent()).toBe(false);
   view.rerender(<CampusAssistantScreen route={platformRoute} />);
   await act(async () => response.resolve({ content: '舊學生的課表', source: 'device' }));
+  await waitForCalendarRecovery(view);
   expect(view.queryByText('舊學生的課表')).toBeNull();
   expect(view.getByText('現在有課嗎？')).toBeTruthy();
 });
@@ -1236,6 +1243,7 @@ test('a missing nuni timetable opens the public import screen; unrelated questio
     .mockResolvedValueOnce({ content: '可查現在或下一堂課。', source: 'device', tool: 'saved-timetable' });
   const navigate = jest.fn();
   const view = render(<CampusAssistantScreen route={platformRoute} navigation={{ navigate, getState: () => ({ routeNames: ['PersonalImport'] }) }} />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByText('現在有課嗎？')));
   fireEvent.press(view.getByRole('button', { name: '匯入課表' }));
   expect(navigate).toHaveBeenCalledWith('PersonalImport', { kind: 'timetable' });
@@ -1270,6 +1278,7 @@ test('the nuni course action opens a specific assignment and keeps a typed draft
     } });
   const screen = render(<CampusAssistantScreen route={platformRoute}
     navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace', 'PersonalImport', 'PersonalTimetable'] }) }} />);
+  await waitForCalendarRecovery(screen);
   await act(async () => fireEvent.press(screen.getByText('查下一堂課')));
   const input = screen.getByLabelText('詢問校園助理');
   fireEvent.changeText(input, '保留我的草稿');
@@ -1301,6 +1310,7 @@ test('course choices show reviewed class details, verify the selected ID, and ma
     ],
   }));
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
   await act(async () => fireEvent.press(view.getByText('送出問題')));
   await act(async () => fireEvent.press(view.getByRole('button', { name: /資料結構.*115學年度.*乙班.*林老師/ })));
@@ -1336,6 +1346,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
         .mockResolvedValueOnce(card({ step: 'review', message: '請核對作業和提醒時間。' }))
         .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
       const screen = render(<CampusAssistantScreen route={platformRoute} />);
+      await waitForCalendarRecovery(screen);
       fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這堂課有什麼作業？');
       await act(async () => fireEvent.press(screen.getByText('送出問題')));
       await act(async () => fireEvent.press(screen.getByRole('button', { name: '提醒我交這份' })));
@@ -1368,6 +1379,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
       .mockResolvedValueOnce(reply());
     const screen = render(<CampusAssistantScreen route={platformRoute}
       navigation={{ navigate, getState: () => ({ routeNames: ['NuniWorkspace'] }) }} />);
+    await waitForCalendarRecovery(screen);
     const input = screen.getByLabelText('詢問校園助理');
     fireEvent.changeText(input, '這堂課有什麼作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
@@ -1392,6 +1404,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
     request.mockResolvedValueOnce(reply())
       .mockResolvedValueOnce(reply({ view: { kind: 'priority', ids: ['first'], message: '最早逾期、仍在收件的作業。' } }));
     const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    await waitForCalendarRecovery(screen);
     fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
     await act(async () => fireEvent.press(screen.getByRole('button', { name: '哪個最急？' })));
@@ -1408,6 +1421,7 @@ describe('class assignment follow-ups in the nuni timetable assistant', () => {
       view: { kind: 'receipt', ids: ['first'], message: '舊的收據回答' } }))
       .mockResolvedValueOnce(reply());
     const screen = render(<CampusAssistantScreen route={platformRoute} />);
+    await waitForCalendarRecovery(screen);
     fireEvent.changeText(screen.getByLabelText('詢問校園助理'), '這門課有哪些作業？');
     await act(async () => fireEvent.press(screen.getByText('送出問題')));
     expect(screen.getByText('作業已更新，這是上次查詢的紀錄。')).toBeTruthy();
@@ -1470,6 +1484,7 @@ function resumablePlan(): CampusEvidencePlan {
 }
 
 async function askForSavedPlan(view: ReturnType<typeof render>, plan = resumablePlan()) {
+  await waitForCalendarRecovery(view);
   request.mockResolvedValueOnce({ content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan });
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '今天要先處理什麼？');
   await act(async () => fireEvent.press(view.getByRole('button', { name: '送出問題' })));
@@ -1701,6 +1716,7 @@ test('platform weekly planning uses its captured session and saves a resumable n
   const plan = planWithComparisonEvidence();
   request.mockResolvedValueOnce({ content: plan.content, source: 'device', tool: 'campus-plan', hasActions: false, plan });
   let view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   await act(async () => fireEvent.press(view.getByRole('button', { name: '規劃未來七天' })));
   const input = request.mock.calls[0][0];
   expect(input).toMatchObject({ scope: { uid: '', schoolId: 'pu' }, mode: 'device',
@@ -1721,6 +1737,7 @@ test('platform weekly planning uses its captured session and saves a resumable n
   view.unmount();
 
   view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
   fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
@@ -1791,6 +1808,7 @@ test('a live platform plan retries the same precise assignment, preserves the dr
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
   view.unmount();
   view = render(<CampusAssistantScreen route={platformRoute} navigation={navigation} />);
+  await waitForCalendarRecovery(view);
   await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
   fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));
@@ -1862,6 +1880,7 @@ test('platform saved plans stay separate from a Firebase account with the same i
 async function openPlatformPlanForReplanning() {
   setPlatformFixture('student-b');
   const view = render(<CampusAssistantScreen route={platformRoute} />);
+  await waitForCalendarRecovery(view);
   await askForSavedPlan(view, planWithComparisonEvidence());
   request.mockClear();
   fireEvent.changeText(view.getByLabelText('詢問校園助理'), '待會再問教室');

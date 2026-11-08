@@ -18,6 +18,7 @@ const firebase = vi.hoisted(() => ({
 vi.mock('./SchoolSelector', () => ({ SchoolSelector: () => null }));
 vi.mock('@/features/nuni/Session', () => ({
   useNuniSession: () => auth,
+  useOptionalNuniSession: () => auth,
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,

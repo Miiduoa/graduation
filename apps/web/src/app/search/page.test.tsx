@@ -16,9 +16,14 @@ vi.mock('@/components/SelectedSchoolProvider', () => ({
   useOptionalSelectedSchool: () => selection.current,
 }));
 
-const userState = vi.hoisted(() => ({ uid: null as string | null }));
+const userState = vi.hoisted(() => ({ uid: null as string | null, platform: false }));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: userState.uid ? { uid: userState.uid } : null }),
+}));
+vi.mock('@/features/nuni/Session', () => ({
+  useOptionalNuniSession: () => userState.platform
+    ? { session: { account: { id: 'platform-account' } }, loading: false, error: null, pendingLogout: false }
+    : null,
 }));
 vi.mock('@/lib/campusIntentClient', () => ({ interpretCampusRequest: vi.fn() }));
 const options = { studentId: false, loading: false, error: false, retry: vi.fn() };
@@ -32,6 +37,7 @@ beforeEach(() => {
   sessionStorage.clear();
   selection.current = null;
   userState.uid = null;
+  userState.platform = false;
   vi.mocked(interpretCampusRequest).mockReset();
   options.studentId = false;
   options.loading = false;
@@ -360,6 +366,37 @@ it.each([false, true])('shows App restaurant orders only when ordering is enable
     const orders = screen.queryByRole('link', { name: /App 餐廳訂單/ });
     expect(orders?.getAttribute('href')).toBe(enabled ? '/orders?campus=nthu' : undefined);
     expect(screen.getByRole('link', { name: /^點餐與取餐/ }).getAttribute('href')).toBe('/food?campus=nthu');
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it.each([
+  ['打開我的訂單', '我的訂單', '/food'],
+  ['打開 App 餐廳訂單', 'App 餐廳訂單', '/orders'],
+])('resolves a named order service for a platform account before building search links: %s', (query, label, path) => {
+  userState.platform = true;
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'true');
+  try {
+    window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent(query));
+    render(<SearchPage />);
+    expect(screen.getByRole('link', { name: (name) => name.startsWith(label) }).getAttribute('href')).toBe(`${path}?campus=nthu`);
+    expect(interpretCampusRequest).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it('shows disabled ordering copy after resolving platform search shortcuts to food', () => {
+  userState.platform = true;
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  try {
+    window.history.replaceState({}, '', '/search?campus=nthu&q=' + encodeURIComponent('打開我的訂單'));
+    render(<SearchPage />);
+    const orders = screen.getByRole('link', { name: /^我的訂單/ });
+    expect(orders.getAttribute('href')).toBe('/food?campus=nthu');
+    expect(orders.textContent).toContain('目前還不能線上點餐');
+    expect(screen.queryByRole('link', { name: /^App 餐廳訂單/ })).toBeNull();
   } finally {
     vi.unstubAllEnvs();
   }

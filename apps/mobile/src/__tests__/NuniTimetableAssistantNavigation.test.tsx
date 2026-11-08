@@ -176,6 +176,61 @@ test('signed-out landing has no timetable assistant shortcut and a restored priv
   expect(mockRequest).not.toHaveBeenCalled();
 });
 
+test('platform service discovery reaches the real calendar and course workspace without dispatching school tabs', async () => {
+  mockRequest.mockImplementation(async (path) => {
+    if (path === 'sessions/current') return { authenticated: true, platformAccountId: account, isPlatformOperator: false };
+    if (path === 'class-workspaces') return { workspaces: [] };
+    throw Error('unexpected request: ' + path);
+  });
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const unhandled = jest.fn();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+      <PreAuthStack />
+    </NavigationContainer></NuniSessionProvider>,
+  );
+  fireEvent.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  fireEvent.press(await screen.findByRole('button', { name: '查看所有功能' }));
+  fireEvent.press(await screen.findByRole('button', { name: '開啟個人行事曆' }));
+  expect(navigation.getCurrentRoute()?.name).toBe('PersonalCalendar');
+  act(() => navigation.goBack());
+  fireEvent.press(await screen.findByRole('button', { name: '開啟課程與作業' }));
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'NuniWorkspace', params: { tab: 'courses' } });
+  const firebase = jest.requireMock('../firebase');
+  expect(firebase.getAuthInstance).not.toHaveBeenCalled();
+  expect(firebase.getDb).not.toHaveBeenCalled();
+  expect(firebase.getFunctionsInstance).not.toHaveBeenCalled();
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
+test('a platform academic answer reads its saved grades and opens the grade review screen', async () => {
+  await AsyncStorage.setItem(personalImportStorageKey({ owner: `nuni:${account}`, schoolId: 'pu' }), JSON.stringify({
+    version: 1, batches: [], records: [{
+      id: 'saved-grade', batchId: 'grade-batch', kind: 'grades', title: '資料探勘',
+      schoolId: 'pu', academicYear: '115', semester: '1', grade: 'A-', credits: 3,
+      importedAt: '2026-11-04T05:00:00Z', source: { type: 'paste', line: 1, rawText: '私人原始文字' },
+    }],
+  }));
+  const navigation = createNavigationContainerRef<PreAuthStackParamList>();
+  const unhandled = jest.fn();
+  const screen = render(
+    <NuniSessionProvider><NavigationContainer ref={navigation} onUnhandledAction={unhandled}>
+      <PreAuthStack />
+    </NavigationContainer></NuniSessionProvider>,
+  );
+  fireEvent.press(await screen.findByRole('button', { name: '開啟課表助理' }));
+  fireEvent.changeText(await screen.findByLabelText('詢問校園助理'), '查我的匯入成績');
+  fireEvent.press(screen.getByRole('button', { name: '送出問題' }));
+  const answer = await screen.findByText(/資料探勘[\s\S]*成績：A-/);
+  expect(answer).toHaveTextContent(/紀錄學分：3/);
+  expect(answer).not.toHaveTextContent(/私人原始文字/);
+  expect(mockRequest.mock.calls.map(([path]) => path)).toEqual(['sessions/current']);
+  fireEvent.press(await screen.findByRole('button', { name: '開啟匯入我的資料' }));
+  expect(navigation.getCurrentRoute()).toMatchObject({ name: 'PersonalImport', params: { kind: 'grades' } });
+  expect(jest.requireMock('../firebase').getFunctionsInstance).not.toHaveBeenCalled();
+  expect(unhandled).not.toHaveBeenCalled();
+});
+
 test('a signed-in student can enter the same assistant directly from the workspace header', async () => {
   const navigation = createNavigationContainerRef<PreAuthStackParamList>();
   const screen = render(
