@@ -188,7 +188,7 @@ export function createPeopleParser(expectedTenantId: string): (value: unknown) =
   };
 }
 
-function parseInterest(value: unknown): OversightMerchantInterest {
+export function parseOversightMerchantInterest(value: unknown): OversightMerchantInterest {
   const row = nuniRecord(value);
   return {
     id: text(row.id),
@@ -200,6 +200,29 @@ function parseInterest(value: unknown): OversightMerchantInterest {
     state: enumeration(row.state, interestStates),
     createdAt: requireIso(row.createdAt),
     decidedAt: nullableIso(row.decidedAt),
+  };
+}
+
+/** The pinned onboarding state machine allows a decision in all three states. */
+export function isMerchantApplicationReviewable(state: string): boolean {
+  return ['submitted', 'under-review', 'needs-information'].includes(state);
+}
+
+/** Decision responses are application projections and do not include tenantName. */
+export function parseMerchantApplicationDecision(value: unknown): {
+  tenantId: string;
+  applicationId: string;
+  state: 'approved' | 'rejected';
+  version: number;
+} {
+  const row = nuniRecord(value);
+  const version = count(row.version);
+  if (version < 1) invalid();
+  return {
+    tenantId: text(row.tenantId),
+    applicationId: text(row.applicationId),
+    state: enumeration(row.state, ['approved', 'rejected']),
+    version,
   };
 }
 
@@ -246,7 +269,7 @@ export function parseOversightMerchants(value: unknown): OversightMerchants {
   if (!Array.isArray(interest) || !Array.isArray(applications) || !Array.isArray(catalog))
     invalid();
   return {
-    interest: interest.map(parseInterest),
+    interest: interest.map(parseOversightMerchantInterest),
     applications: applications.map(parseApplication),
     catalog: catalog.map(parseCatalogRow),
     honesty: text(row.honesty),
