@@ -317,3 +317,21 @@ test('membership revoked after search prevents opening old cached results', asyn
     await membership('active');
   }
 });
+
+
+test('returning from a confirmed historical post restores query but requires a fresh authorized search', async () => {
+  const { view, onOpenPost } = launch(); submit(view);
+  await count(view, 20);
+  const searchCalls = search.mock.calls.length;
+  fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 00')[0]);
+  await waitFor(() => expect(onOpenPost).toHaveBeenCalledWith({ id: 'old-000', schoolId: 'pu' }));
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+  expect(rows(view)).toEqual([]);
+  expect(search).toHaveBeenCalledTimes(searchCalls);
+  expect(view.getByText(/重新搜尋.*確認/)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+  await count(view, 20);
+  expect(search).toHaveBeenCalledTimes(searchCalls + 1);
+  record({ restoredQuery: '二手書', stalePostsShownBeforeRefresh: 0, newlyAuthorizedResults: 20 });
+});
