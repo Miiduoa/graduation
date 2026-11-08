@@ -493,6 +493,10 @@ it('pauses a practice round for source review, resumes drafts, and saves the pau
   expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
   expect(document.activeElement).toBe(screen.getByRole('button', { name: '結束暫停的練習' }));
   fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
+  // The first question was explicitly skipped, so resuming stays on question two.
+  // Navigate without resetting outcomes to verify that the first draft survived.
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /^第 1 題：/ }));
   expect(value(practiceLabel)).toBe('我暫停前的回答😀');
   fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
   fireEvent.click(screen.getByRole('button', { name: '結束暫停的練習' }));
