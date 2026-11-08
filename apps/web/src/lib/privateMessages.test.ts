@@ -472,6 +472,33 @@ it('notification destinations only use supported local tasks and never arbitrary
   });
 });
 
+it.each(['leaveRequestId', 'requestId'])('opens an owned leave lookup from the %s notification field', (field) => {
+  expect(notificationDestination({
+    ...notice, type: 'leave', data: { [field]: 'leave-2026-good-id', schoolId: 'pu' },
+  })).toEqual({
+    href: '/leave?schoolId=pu&requestId=leave-2026-good-id', label: '查看站內請假紀錄',
+  });
+});
+
+it('can use the current school for a valid leave ID and never trusts an arbitrary notification URL', () => {
+  expect(notificationDestination({
+    ...notice, type: 'leave', data: { requestId: 'leave-2026-good-id', url: '/fake-approve' },
+  })).toEqual({ href: '/leave?requestId=leave-2026-good-id', label: '查看站內請假紀錄' });
+  expect(notificationDestination({
+    ...notice, type: 'leave', data: { leaveRequestId: '../invalid', requestId: 'leave-2026-good-id' },
+  })).toEqual({ href: '/leave?requestId=leave-2026-good-id', label: '查看站內請假紀錄' });
+});
+
+it.each([
+  { requestId: '../leave-2026-good-id' },
+  { leaveRequestId: 'too-short' },
+  { requestId: 'a'.repeat(65) },
+  { requestId: 'leave-2026-good-id', schoolId: '../pu' },
+  { url: '/fake-approve' },
+])('does not construct a leave destination from invalid notification data %s', (data) => {
+  expect(notificationDestination({ ...notice, type: 'leave', data })).toBeNull();
+});
+
 it('toggles a permitted message reaction with the authenticated school session', async () => {
   const original = tx.get.getMockImplementation()!;
   tx.get.mockImplementation(async (reference: { path: string }) =>

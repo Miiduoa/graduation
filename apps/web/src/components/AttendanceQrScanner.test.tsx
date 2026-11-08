@@ -54,3 +54,20 @@ it('allows retrying after a permission error without turning it into attendance 
   expect(startAttendanceCamera).toHaveBeenCalledTimes(2);
   expect(onToken).not.toHaveBeenCalled();
 });
+
+it('offers a document reload when navigation inherited a policy that blocks the camera', () => {
+  const allowed = vi.fn(() => false);
+  vi.stubGlobal('performance', { ...performance, getEntriesByType: () => [{ name: 'http://localhost/messages' }] });
+  Object.defineProperty(document, 'featurePolicy', { configurable: true, value: { allowsFeature: allowed } });
+  try {
+    render(<AttendanceQrScanner groupId="course" sessionId="session" onToken={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '開啟相機掃碼' }));
+    expect(allowed).toHaveBeenCalledWith('camera');
+    expect(startAttendanceCamera).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '重新載入簽到頁' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('輸入下方簽到碼');
+  } finally {
+    Reflect.deleteProperty(document, 'featurePolicy');
+    vi.unstubAllGlobals();
+  }
+});

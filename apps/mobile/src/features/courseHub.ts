@@ -1,4 +1,4 @@
-import { collection, doc, getDocFromServer, getDocsFromServer } from 'firebase/firestore';
+import { collection, doc, getDocFromServer, getDocsFromServer, type Firestore } from 'firebase/firestore';
 import { parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { getAuthInstance, getDb, isFirebaseMockMode } from '../firebase';
 import { tcFetchCourseDetail } from '../services/tronClassClient';
@@ -30,7 +30,7 @@ export type CourseHubData = {
   details: string[];
   canTeach?: boolean;
   assignments: Section<HubAssignment>;
-  materials: Section<HubMaterial>;
+  materials: Section<HubMaterial> | { status: 'partial'; items: HubMaterial[] };
 };
 const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 export function courseResourceUrl(value: unknown): string | null {
@@ -113,6 +113,63 @@ async function authorize(scope: CourseHubScope, current: () => boolean) {
   };
 }
 
+function isAvailableInCourse(
+  id: string,
+  row: Record<string, unknown>,
+  schoolId: string,
+  groupId: string,
+): boolean {
+  return (
+    !['draft', 'retracted', 'archived', 'deleted'].includes(String(row.status)) &&
+    row.isDemo !== true &&
+    row.source !== 'demo' &&
+    !/^demo-/i.test(id) &&
+    (row.schoolId == null || row.schoolId === schoolId) &&
+    (row.groupId == null || row.groupId === groupId)
+  );
+}
+
+async function loadModuleMaterials(
+  db: Firestore,
+  schoolId: string,
+  groupId: string,
+  module: HubMaterial,
+): Promise<HubMaterial[]> {
+  const snapshot = await getDocsFromServer(
+    collection(db, 'groups', groupId, 'modules', module.id, 'materials'),
+  );
+  const files: HubMaterial[] = [];
+  let overviewUrl = module.url;
+  for (const entry of snapshot.docs) {
+    const row = entry.data();
+    // Legacy attachments inherit publication and scope from their published module.
+    const released =
+      (row.published == null || row.published === true) &&
+      (row.moduleId == null || row.moduleId === module.id) &&
+      isAvailableInCourse(entry.id, row, schoolId, groupId);
+    if (!released) {
+      // The publisher also copies the primary attachment URL onto the module.
+      if (
+        overviewUrl &&
+        [row.url, row.resourceUrl].some((url) => courseResourceUrl(url) === overviewUrl)
+      ) {
+        overviewUrl = null;
+      }
+      continue;
+    }
+    const url = courseResourceUrl(row.url) ?? courseResourceUrl(row.resourceUrl);
+    if (!url) continue;
+    files.push({
+      id: `${module.id}:${entry.id}`,
+      title: text(row.label) || text(row.title) || module.title,
+      description: text(row.description) || module.description,
+      url,
+      order: module.order + files.length / 1000,
+    });
+  }
+  return files.length ? files : [{ ...module, url: overviewUrl }];
+}
+
 export async function loadCourseHub(
   scope: CourseHubScope,
   current: () => boolean = () => true,
@@ -156,19 +213,7 @@ export async function loadCourseHub(
   assertCurrent(scope, current);
   await authorize(scope, current);
   const visible = (id: string, row: Record<string, unknown>) =>
-    row.published === true &&
-    !['draft', 'retracted', 'archived', 'deleted'].includes(String(row.status)) &&
-    row.isDemo !== true &&
-    row.source !== 'demo' &&
-    !/^demo-/i.test(id) &&
-    (row.schoolId == null || row.schoolId === scope.schoolId) &&
-    (row.groupId == null || row.groupId === groupId);
-  const releasedFile = (id: string, row: Record<string, unknown>) =>
-    row.published !== false &&
-    !['draft', 'retracted', 'archived', 'deleted'].includes(String(row.status ?? '')) &&
-    row.isDemo !== true &&
-    row.source !== 'demo' &&
-    !/^demo-/i.test(id);
+    row.published === true && isAvailableInCourse(id, row, scope.schoolId, groupId);
   const modules =
     materials.status === 'fulfilled'
       ? materials.value.docs
@@ -185,43 +230,16 @@ export async function loadCourseHub(
           })
           .sort((a, b) => a.order - b.order)
       : [];
-  const nested =
-    materials.status === 'fulfilled'
-      ? await Promise.all(
-          modules.map(async (module) => {
-            try {
-              const snap = await getDocsFromServer(
-                collection(db, 'groups', groupId, 'modules', module.id, 'materials'),
-              );
-              return { moduleId: module.id, ok: true as const, docs: snap.docs };
-            } catch {
-              return { moduleId: module.id, ok: false as const, docs: [] };
-            }
-          }),
-        )
-      : [];
-  if (nested.length) {
+  const fileLists = await Promise.allSettled(
+    modules.map((module) => loadModuleMaterials(db, scope.schoolId, groupId, module)),
+  );
+  if (fileLists.length) {
     assertCurrent(scope, current);
     await authorize(scope, current);
   }
-  const files = modules.flatMap((module) => {
-    const folder = nested.find((row) => row.moduleId === module.id);
-    const cabinet = (folder?.docs ?? [])
-      .filter((entry) => releasedFile(entry.id, entry.data()))
-      .map((entry, index) => {
-        const row = entry.data();
-        return {
-          id: `${module.id}:${entry.id}`,
-          title: text(row.label) || text(row.title) || module.title,
-          description: text(row.description) || module.description,
-          url: courseResourceUrl(row.url) ?? courseResourceUrl(row.resourceUrl),
-          order: module.order + index / 1000,
-        };
-      })
-      .filter((item) => item.url);
-    if (cabinet.length) return cabinet;
-    return [module];
-  });
+  const materialItems = fileLists.flatMap((result, index) =>
+    result.status === 'fulfilled' ? result.value : [{ ...modules[index], url: null }],
+  );
   const published = assignments.status === 'fulfilled'
     ? assignments.value.docs.filter(
         (entry) =>
@@ -276,6 +294,9 @@ export async function loadCourseHub(
     materials:
       materials.status === 'rejected'
         ? { status: 'error', items: [] }
-        : { status: 'ready', items: files },
+        : {
+            status: fileLists.some((result) => result.status === 'rejected') ? 'partial' : 'ready',
+            items: materialItems,
+          },
   };
 }

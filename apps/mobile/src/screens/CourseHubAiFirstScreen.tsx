@@ -338,37 +338,39 @@ function CourseContent({
                   <Text style={body}>
                     列出教師已發布的教材連結。目前沒有課程檔案上傳路徑，無法在 App 內傳檔。
                   </Text>
-                  {data.materials.status === 'error' ? (
-                    <Text accessibilityRole="alert" style={body}>
-                      教材讀取失敗，請更新課程資料後重試。
-                    </Text>
+                  {data.materials.status !== 'ready' ? (
+                    <>
+                      <Text accessibilityRole="alert" style={body}>
+                        {data.materials.status === 'partial' ? '部分教材未能載入。' : '教材讀取失敗。'}
+                      </Text>
+                      <AIButton label="重新載入教材" variant="ghost" onPress={() => void load()} />
+                    </>
                   ) : data.materials.items.length === 0 ? (
                     <Text style={body}>尚未發布教材或單元。</Text>
-                  ) : (
-                    data.materials.items.map((item) => (
-                      <View key={item.id} style={gap}>
-                        <Text
-                          style={{
-                            ...theme.typography.body,
-                            color: theme.colors.text,
-                            fontWeight: '700',
-                          }}
-                        >
-                          {item.title}
-                        </Text>
-                        {item.description ? <Text style={body}>{item.description}</Text> : null}
-                        {item.url ? (
-                          <AIButton
-                            label={`開啟教材：${item.title}`}
-                            variant="ghost"
-                            onPress={() => openMaterial(item.title, item.url!)}
-                          />
-                        ) : (
-                          <Text style={body}>這個單元未附教材連結。</Text>
-                        )}
-                      </View>
-                    ))
-                  )}
+                  ) : null}
+                  {data.materials.items.map(({ id, title, description, url }) => (
+                    <View key={id} style={gap}>
+                      <Text
+                        style={{
+                          ...theme.typography.body,
+                          color: theme.colors.text,
+                          fontWeight: '700',
+                        }}
+                      >
+                        {title}
+                      </Text>
+                      {description ? <Text style={body}>{description}</Text> : null}
+                      {url ? (
+                        <AIButton
+                          label={`開啟教材：${title}`}
+                          variant="ghost"
+                          onPress={() => openMaterial(title, url)}
+                        />
+                      ) : data.materials.status === 'ready' ? (
+                        <Text style={body}>這個單元未附教材連結。</Text>
+                      ) : null}
+                    </View>
+                  ))}
                 </View>
               </AICard>
               <AICard title="作業與繳交">

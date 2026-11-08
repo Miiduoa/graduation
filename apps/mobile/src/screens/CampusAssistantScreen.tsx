@@ -186,6 +186,7 @@ function AssistantConversation({
   const mounted = useRef(true);
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
+  const campusSessionId = useRef<string | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const canAsk = mode === 'device' || Boolean(uid);
   const timetableOwner = platformTimetable ? `nuni:${platformTimetable.accountId}` : `firebase:${uid}`;
@@ -399,6 +400,11 @@ function AssistantConversation({
     changesDuringRead.current = duringRead;
     const asked: CampusAssistantMessage = { role: 'user', content: question };
     const next = [...messages, asked];
+    if (mode === 'campus') {
+      campusSessionId.current ??= typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `campus-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+    }
     try {
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
@@ -409,6 +415,9 @@ function AssistantConversation({
         isCurrent: current,
         mode,
         ...(mode === 'device' ? { signal: controller.signal } : {}),
+        ...(mode === 'campus' && campusSessionId.current
+          ? { sessionId: campusSessionId.current }
+          : {}),
       });
       const anchor = reply.savedClassRead ?? reply.courseworkRead?.anchor;
       if (platformTimetable && anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {

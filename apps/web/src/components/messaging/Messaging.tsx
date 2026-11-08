@@ -835,6 +835,7 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
             <div className={styles.list}>
               {rows.map((notification) => {
                 const target = notificationDestination(notification);
+                const DestinationLink = notification.type === 'live_session' ? 'a' : Link;
                 const id = `${notification.source}:${notification.id}`;
                 return (
                   <article
@@ -856,9 +857,9 @@ export function PrivateNotifications({ session }: { session: MessagingSession })
                     </time>
                     <div className={styles.actions}>
                       {target && (
-                        <Link className={styles.button} href={target.href}>
+                        <DestinationLink className={styles.button} href={target.href}>
                           {target.label}
-                        </Link>
+                        </DestinationLink>
                       )}
                       {!target && (
                         <p className={styles.muted}>這則通知目前沒有可開啟的服務連結。</p>
