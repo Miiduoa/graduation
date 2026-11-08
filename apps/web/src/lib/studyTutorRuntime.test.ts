@@ -227,6 +227,34 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { label: 'null data', data: null },
+    { label: 'array data', data: [] },
+    { label: 'missing id', data: { type: 'result', raw: JSON.stringify(lesson()) } },
+    { label: 'non-numeric id', data: { id: 'other', type: 'progress', phase: 'generating' } },
+  ])('fails fast on malformed worker envelopes ($label) and can retry', async ({ data }) => {
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand',
+      signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.onmessage?.({ data } as MessageEvent<unknown>);
+    await expect(pending).rejects.toThrow('無法對照原文');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'failed', generationMs: null,
+    }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('ignores another request id without exposing its progress or explanation', async () => {
     const progress = vi.fn();
     const pending = runStudyTutor({ passage: passage(), mode: 'exam', signal: new AbortController().signal, onProgress: progress });

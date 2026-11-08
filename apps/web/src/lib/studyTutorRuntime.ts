@@ -148,9 +148,19 @@ export async function runStudyTutor({
       worker.onmessage = (event: MessageEvent<unknown>) => {
         if (settled || signal.aborted) return;
         const value = event.data;
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          // This dedicated worker must send an object envelope. Waiting for the
+          // preparation timeout would leave the student stuck for ten minutes.
+          finish(workerError('invalid_response'));
+          return;
+        }
         const data = value as Record<string, unknown>;
-        if (data.id !== id) return;
+        if (data.id !== id) {
+          // An old numeric request may finish late. Ignore it, but fail fast
+          // if the worker omitted or corrupted its request identifier.
+          if (!Number.isSafeInteger(data.id)) finish(workerError('invalid_response'));
+          return;
+        }
         if (data.type === 'progress') {
           if (data.phase === 'generating' && !generating) {
             generating = true;
