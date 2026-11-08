@@ -1741,9 +1741,14 @@ service cloud.firestore {
       // Both document lookups and queries must exclude expired content.
       // Query callers constrain expiresAt ahead of request.time so Firestore
       // can prove the read is safe without inspecting each returned document.
-      allow get, list: if isSignedIn()
+      allow get: if isSignedIn()
         && isSchoolMember(resource.data.schoolId)
         && resource.data.expiresAt is int
+        && resource.data.expiresAt > request.time.toMillis();
+      // Query range filters cannot prove the stored field has an integer
+      // type; the numeric expiry comparison is still enforced server-side.
+      allow list: if isSignedIn()
+        && isSchoolMember(resource.data.schoolId)
         && resource.data.expiresAt > request.time.toMillis();
       allow create: if isSignedIn()
         && request.resource.data.authorUid == request.auth.uid

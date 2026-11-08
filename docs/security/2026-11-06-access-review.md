@@ -288,3 +288,9 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 隔離回歸涵蓋不帶到期條件的廣泛查詢應拒絕、允許包含過期的弱界線查詢應拒絕、有效界線只回傳目前有效紀錄、非同校及匿名查詢應拒絕。若在精確 head CI 因 Firestore 動態數值比較的查詢可證明性、索引或 emulator 差異失敗，必須保留失敗證據並修正，不得放寬過期撤權或關閉斷言。
 
 **部署相容性：** 正式環境必須先建成複合索引並發布支援有效期查詢的手機版本，再啟用收緊後的 Firestore 規則；舊手機版將因 school-only 列表查詢遭拒絕。這是刻意 fail-closed 而非相容回退，需由發布窗口檢查舊版客戶端覆蓋率與降級畫面後分階段切換。本輪只變更開發分支並等待 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 的精確提交結果。舊 GCS bearer URL、Supabase 已簽網址、GCS staging、相依套件與指定 App 審查仍屬未處理缺口，沒有正式資料、金鑰、migration、token 清理或部署操作。
+
+### 04:43 UTC Firebase emulator 失敗：列表證明與型別檢查
+
+精確 head `ca1db5eb` 的 [Firestore Rules CI #42447833539](https://github.com/Miiduoa/graduation/actions/runs/42447833539) 真正執行 264 個測試，263 通過、1 失敗。失敗的是新增的 `story lists cannot include expired metadata or cross-school rows`，合法、已帶有效期限範圍的列表查詢仍回傳 `permission-denied`、`false for 'list' @ L1744`；沒有把此版列為已驗證成功。
+
+候選原因為 `resource.data.expiresAt is int` 不能由單純 `where('expiresAt','>', 整數)` 的查詢約束證明。這次保留單筆 `get` 的嚴格整數型別判斷，將 `list` 拆開為伺服器時間的 `expiresAt > request.time.toMillis()`，仍嚴格拒絕過期資料，不回退 school-only 的廣泛讀取。原有測試完整保留，是否可由 Firestore 查詢分析器證明範圍仍待新的精確 head CI。若再次失敗，應停止嘗試放寬清單規則，改為由可信後端逐筆確認期限的清單入口。
