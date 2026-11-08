@@ -69,8 +69,13 @@ export async function getFirstStorageValue(keys: string[]): Promise<string | nul
   return null;
 }
 
-export async function clearUserScopedStorage(context: TenantContext = {}): Promise<void> {
+export async function clearUserScopedStorage(
+  context: TenantContext = {},
+  assertCurrent?: () => void,
+): Promise<void> {
+  assertCurrent?.();
   const keys = await AsyncStorage.getAllKeys();
+  assertCurrent?.();
   const scopedPrefix = makeScopedStoragePrefix();
   const keysToRemove = keys.filter((key) => {
     if (LEGACY_GLOBAL_STORAGE_KEYS.has(key)) return true;

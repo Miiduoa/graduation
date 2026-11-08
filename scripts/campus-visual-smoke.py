@@ -59,6 +59,11 @@ def session_fixtures(authenticated, operator=False):
                     'contactName': '王老師',
                     'contactEmail': 'wang@pending.edu.tw',
                     'justification': '請協助接入',
+                    'state': 'pending',
+                    'createdAt': '2026-11-06T08:00:00.000Z',
+                    'decidedAt': None,
+                    'tenantId': None,
+                    'tenantState': None,
                 }]})
         elif url.path == '/api/platform-admin/schools':
             if not authenticated:
@@ -84,7 +89,15 @@ def session_fixtures(authenticated, operator=False):
             elif not operator:
                 await route.fulfill(status=403, json={'error': 'OPERATOR_REQUIRED'})
             else:
-                await route.fulfill(json={'schools': [], 'records': [], 'items': []})
+                if url.path == '/api/platform-admin/merchants':
+                    await route.fulfill(json={
+                        'interest': [], 'applications': [], 'catalog': [],
+                        'honesty': '本次載入',
+                    })
+                elif url.path == '/api/platform-admin/class-workspace-affiliation-applications':
+                    await route.fulfill(json={'applications': []})
+                else:
+                    await route.fulfill(json={'schools': [], 'records': [], 'items': []})
         else:
             await route.continue_()
     return fixtures
@@ -771,6 +784,7 @@ async def main():
             results.append('signed-in account visits follow allowed return paths')
 
             async def capture_platform(name, operator):
+                nonlocal active_page
                 context = await browser.new_context(
                     viewport={'width': 390, 'height': 844},
                     color_scheme='light',
@@ -779,6 +793,7 @@ async def main():
                 )
                 await context.route('**/*', session_fixtures(True, operator))
                 shot = await context.new_page()
+                active_page = shot
                 shot.set_default_timeout(10000)
                 await shot.goto(BASE + '/auth/platform/class-workspace/join', wait_until='load')
                 await expect(shot.get_by_role('heading', name='加入課班')).to_be_visible()
@@ -789,9 +804,12 @@ async def main():
                 )
                 await shot.goto(BASE + '/admin/school-review', wait_until='load')
                 if operator:
-                    await expect(shot.get_by_role('heading', name='接入審核')).to_be_visible()
+                    await expect(shot.get_by_role('heading', name='學校接入申請', exact=True)).to_be_visible()
+                    await expect(shot.get_by_text('待審學校', exact=True)).to_be_visible()
                 else:
-                    await expect(shot.get_by_text('這台帳號不是平台營運人員', exact=False)).to_be_visible()
+                    # Both legacy admin URLs now use the unified AdminWorkspace gate.
+                    await expect(shot.get_by_role('heading', name='沒有管理權限')).to_be_visible()
+                    await expect(shot.get_by_text('目前帳號無法查看或修改平台管理資料。這與學校管理員身分不同。', exact=True)).to_be_visible()
                 await shot.screenshot(
                     path=str(OUT / f'school-review-{name}.png'),
                     full_page=True,
@@ -799,7 +817,17 @@ async def main():
                 )
                 await shot.goto(BASE + '/admin/ops', wait_until='load')
                 if operator:
-                    await expect(shot.get_by_role('heading', name='完整管理台')).to_be_visible()
+                    # The legacy ops entry defaults to schools; overview lives at /admin.
+                    await expect(shot.get_by_role('heading', name='學校管理', exact=True)).to_be_visible()
+                    await expect(shot).to_have_url(BASE + '/admin#schools')
+                    await shot.get_by_role('button', name='回工作總覽', exact=True).click()
+                    await expect(shot.get_by_role('heading', name='工作總覽', exact=True)).to_be_visible()
+                    await expect(shot).to_have_url(BASE + '/admin#overview')
+                    await expect(shot.get_by_role('button', name='查看學校申請：待審學校', exact=True)).to_be_visible()
+                    await expect(shot.get_by_text('目前沒有待審核的店家申請。', exact=True)).to_be_visible()
+                    await expect(shot.get_by_text('目前沒有待審核的掛靠申請。', exact=True)).to_be_visible()
+                    await expect(shot.get_by_text('目前沒有待處理的社群檢舉。', exact=True)).to_be_visible()
+                    await expect(shot.get_by_role('button', name='確認管理員：待開放學校', exact=True)).to_be_visible()
                 else:
                     await expect(shot.get_by_role('heading', name='沒有管理權限')).to_be_visible()
                 await shot.screenshot(

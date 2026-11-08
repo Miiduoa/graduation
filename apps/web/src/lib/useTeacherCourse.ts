@@ -32,7 +32,7 @@ export function useTeacherCourse(schoolId: string, courseId: string, view: Teach
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
   const load = useCallback(async () => {
     const request = ++generation.current;
-    if (!uid || authLoading) return;
+    if (!uid || !schoolId || authLoading) return;
     const isCurrent = () => activeScope.current === scopeKey && generation.current === request;
     setState({ scope: scopeKey, status: 'loading' });
     try {
@@ -68,7 +68,7 @@ export function useTeacherCourse(schoolId: string, courseId: string, view: Teach
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
     let stop: (() => void) | undefined;
-    if (uid && !authLoading) {
+    if (uid && schoolId && !authLoading) {
       try {
         stop = watchTeacherAccess({ uid, schoolId, courseId }, invalidate);
       } catch {
