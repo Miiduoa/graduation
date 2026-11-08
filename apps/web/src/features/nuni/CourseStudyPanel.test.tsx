@@ -100,6 +100,53 @@ it('closes an untouched board without an unnecessary confirmation', () => {
   expect(screen.queryByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeNull();
 });
 
+
+it('warns before page unload only while an unexported note or pasted backup is present', () => {
+  const { unmount } = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const wouldWarn = () => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(wouldWarn()).toBe(false);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  // Whitespace-only drafts still represent a learner edit, even if not exported as a note.
+  fireEvent.change(note, { target: { value: '  ' } });
+  expect(wouldWarn()).toBe(true);
+  fireEvent.change(note, { target: { value: '' } });
+  expect(wouldWarn()).toBe(false);
+  const backup = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  fireEvent.change(backup, { target: { value: '{"unfinished":true}' } });
+  expect(wouldWarn()).toBe(true);
+  fireEvent.change(backup, { target: { value: '' } });
+  expect(wouldWarn()).toBe(false);
+  unmount();
+  expect(wouldWarn()).toBe(false);
+});
+
+it('protects a changed reading position on unload and before replacing the source, even without notes', async () => {
+  const longMaterial = { ...material, body: `${'甲'.repeat(1600)}${'乙'.repeat(1600)}${'丙'.repeat(100)}` };
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={longMaterial} onClose={vi.fn()} />);
+  const wouldWarn = () => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(wouldWarn()).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: '下一段' }));
+  expect(wouldWarn()).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(screen.getByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  const input = screen.getByLabelText('選擇講義') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['新章節'], '另一份講義.txt', { type: 'text/plain' })] } });
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(wouldWarn()).toBe(true);
+  expect(screen.getByText(/目前第 2 \/ /)).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('protects a not-yet-imported pasted draft from mobile close and explains backup limits', () => {
   const onClose = vi.fn();
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={onClose} />);

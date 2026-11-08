@@ -140,9 +140,12 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const hasNotes = Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
   // Include unsent questions and active practice: importing a new source would otherwise erase them.
-  const hasStudyChanges = !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
-    item.note.trim() || item.needsReview || Object.values(item.modes).some((value) =>
-      value.question.trim() || value.lessons.length));
+  // Even a changed reading position, mode, or whitespace-only draft is unsaved work.
+  const hasStudyChanges = !!practiceRound || !!pausedRound ||
+    (!!source && (sectionIndex !== 0 || passageIndex !== 0 || mode !== 'understand')) ||
+    Object.values(session.passages).some((item) =>
+      item.note.length > 0 || item.needsReview || Object.values(item.modes).some((value) =>
+        value.question.length > 0 || value.lessons.length > 0));
   const hasWorkToKeep = paste.length > 0 || progressPaste.length > 0 || hasStudyChanges;
   const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
     parts.flatMap((part, partNumber) =>
@@ -235,6 +238,18 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   useEffect(() => {
     if (confirmClose) closeHeading.current?.focus();
   }, [confirmClose]);
+
+  // Protect unsaved reading position, notes and practice on page reload/close.
+  // Some mobile browsers suppress beforeunload prompts; this does not save anything.
+  useEffect(() => {
+    if (!hasWorkToKeep) return;
+    const confirmLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', confirmLeaving);
+    return () => window.removeEventListener('beforeunload', confirmLeaving);
+  }, [hasWorkToKeep]);
 
   // File.text()/PDF parsing is async: read the latest committed study state, not a stale closure.
   // React refs must be updated in an effect, never during render.
@@ -715,7 +730,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       {error && <p className={styles.error} role="alert">{error}</p>}
       {!reading && source && passage && <>
         <div className={styles.sourceMeta}>
-          <strong>{source.title}</strong><span>{practiceRound ? '本輪回答獨立保留，離開前可下載練習紀錄' : '關閉後會清除，想下次繼續可先儲存閱讀進度'}</span>
+          <strong>{source.title}</strong><span>{practiceRound ? '本輪回答只在目前分頁；重新整理前請先儲存練習與閱讀進度 JSON' : '進度只在目前分頁；重新整理或關閉前請先儲存進度 JSON'}</span>
         </div>
         {!practiceRound && pausedRound?.revision === session.revision && <section className={styles.reviewList} aria-label="暫停的逐題複習">
           <h4>這輪練習已暫停</h4>
