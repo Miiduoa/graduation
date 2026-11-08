@@ -121,8 +121,6 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) =>
       value.question.trim() || value.lessons.length));
   const hasWorkToKeep = paste.length > 0 || hasStudyChanges;
-  // A local file can finish reading after the student has edited a note.
-  latestSourceState.current = { hasSource: !!source, hasStudyChanges };
   const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
     parts.flatMap((part, partNumber) =>
       session.passages[`${sectionNumber}:${partNumber}`]?.needsReview
@@ -204,6 +202,12 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   useEffect(() => {
     if (confirmClose) closeHeading.current?.focus();
   }, [confirmClose]);
+
+  // File.text()/PDF parsing is async: read the latest committed study state, not a stale closure.
+  // React refs must be updated in an effect, never during render.
+  useEffect(() => {
+    latestSourceState.current = { hasSource: !!source, hasStudyChanges };
+  }, [source, hasStudyChanges]);
 
   useEffect(() => {
     if (pendingSource) replaceHeading.current?.focus();
