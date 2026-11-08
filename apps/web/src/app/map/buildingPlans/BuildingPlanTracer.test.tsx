@@ -172,17 +172,19 @@ it('validates edited provenance before completing and never trusts it as verific
   expect(screen.getByText(/仍為待核對圖面/)).toBeTruthy();
 });
 
-it('clears the old image and geometry on replacement and ignores late decodes', async () => {
+it('keeps the old image and geometry until replacement succeeds and ignores late decodes', async () => {
   render(<BuildingPlanTracer {...props} />);
   await openImage();
   outline();
   let resolveOld!: (value: ReturnType<typeof prepared>) => void;
   vi.mocked(prepareBuildingPlanReference).mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
   chooseFile('slow.png');
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:trace-1');
-  expect(screen.queryByRole('group', { name: '圖片描圖區' })).toBeNull();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  expect(screen.getByRole('group', { name: '圖片描圖區' }).querySelector('polygon')).toBeTruthy();
   chooseFile('latest.png');
-  const canvas = await screen.findByRole('group', { name: '圖片描圖區' });
+  await waitFor(() => expect((screen.getByLabelText('來源名稱') as HTMLInputElement).value).toBe('latest.png'));
+  const canvas = screen.getByRole('group', { name: '圖片描圖區' });
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:trace-1');
   await act(async () => resolveOld(prepared('slow.png')));
   expect(canvas.querySelector('image')?.getAttribute('href')).toBe('blob:trace-2');
   expect((screen.getByLabelText('來源名稱') as HTMLInputElement).value).toBe('latest.png');
@@ -214,16 +216,26 @@ it('aborts a pending decode on scope changes or unmount and releases an installe
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
 });
 
-it('shows a failed decode without restoring the previous drawing', async () => {
-  render(<BuildingPlanTracer {...props} />);
-  await openImage();
-  outline();
-  vi.mocked(prepareBuildingPlanReference).mockRejectedValueOnce(new Error('請選 PNG、JPEG 或 WebP 圖片。'));
+it('preserves the reference, rooms and unfinished draft when a replacement image fails to decode', async () => {
+  const draft = restoredDraft();
+  const reference = prepared();
+  render(<BuildingPlanTracer {...props} initialProject={{ draft, reference }} />);
+  const canvas = screen.getByRole('group', { name: '圖片描圖區' });
+  const drawing = canvas.innerHTML;
+  vi.mocked(prepareBuildingPlanReference).mockRejectedValueOnce(new Error('圖片無法解碼。'));
   chooseFile('bad.png');
-  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('請選 PNG'));
-  expect(screen.queryByRole('group', { name: '圖片描圖區' })).toBeNull();
-  expect(screen.queryByRole('button', { name: '建立立體預覽' })).toBeNull();
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:trace-1');
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('圖片無法解碼。'));
+  expect(screen.getByRole('group', { name: '圖片描圖區' })).toBe(canvas);
+  expect(canvas.innerHTML).toBe(drawing);
+  expect((screen.getByLabelText('房間 1 名稱') as HTMLInputElement).value).toBe('討論室');
+  expect((screen.getByLabelText('新房間名稱') as HTMLInputElement).value).toBe('自習室');
+  expect(screen.getByText('房間描點：2 / 64')).toBeTruthy();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  fireEvent.click(screen.getByRole('button', { name: '下載編輯檔' }));
+  await waitFor(() => expect(exportBuildingPlanProject).toHaveBeenCalledWith(
+    { schoolId: props.schoolId, buildingId: props.buildingId }, draft, reference, expect.any(AbortSignal),
+  ));
 });
 
 function restoredDraft(): BuildingPlanProjectDraft {

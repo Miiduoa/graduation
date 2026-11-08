@@ -169,7 +169,7 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
   }, []);
   async function importFile(file: File) {
     const request = cancelPendingRead();
-    clearPlan();
+    setError('');
     if (!/\.json$/i.test(file.name)) { setError('請選擇 .json 圖面檔案。'); return; }
     if (file.size > MAX_BUILDING_PLAN_BYTES) { setError('圖面檔案不可超過 256 KB。'); return; }
     setReading(true);
@@ -177,7 +177,7 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
       const contents = await file.text();
       if (request !== generation.current) return;
       const result = parseBuildingPlan(contents, { schoolId, buildingId });
-      if (result.ok) setPlan(result.plan);
+      if (result.ok) { clearPlan(); setPlan(result.plan); }
       else setError(result.message);
     } catch {
       if (request === generation.current) setError('無法讀取檔案，請重新選擇 JSON 圖面。');

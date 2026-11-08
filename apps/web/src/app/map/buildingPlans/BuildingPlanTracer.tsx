@@ -72,42 +72,45 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, initialProject, o
     }
   }, [reference]);
 
-  function releaseReference() {
+  function cancelPendingRead() {
     generation.current += 1;
     job.current?.abort();
     job.current = null;
     saveJob.current?.abort();
     saveJob.current = null;
-    setReference(null);
     setReading(false);
     setSaving(false);
     setNotice('');
   }
+  function releaseReference() {
+    cancelPendingRead();
+    setReference(null);
+  }
   async function chooseFile(file: File) {
-    releaseReference();
+    cancelPendingRead();
     const request = generation.current;
     const controller = new AbortController();
     job.current = controller;
     setReading(true);
     setError('');
-    setOutline([]);
-    setRooms([]);
-    roomSequence.current = 0;
-    setPoints([]);
-    setMode('outline');
-    setRoomName('');
-    setCalibration(null);
-    setMetres('');
-    setFloorHeight('');
-    setName(`${buildingName} · 圖面草稿`.slice(0, 100));
-    setFloorLabel('1F');
-    setSourceLabel('');
-    setSourceUrl('');
-    setX('50');
-    setY('50');
     try {
       const prepared = await prepareBuildingPlanReference(file, controller.signal);
       if (request !== generation.current || controller.signal.aborted) return;
+      setOutline([]);
+      setRooms([]);
+      roomSequence.current = 0;
+      setPoints([]);
+      setMode('outline');
+      setRoomName('');
+      setCalibration(null);
+      setMetres('');
+      setFloorHeight('');
+      setName(`${buildingName} · 圖面草稿`.slice(0, 100));
+      setFloorLabel('1F');
+      setSourceLabel('');
+      setSourceUrl('');
+      setX('50');
+      setY('50');
       setReference(prepared);
       setSourceLabel(prepared.name.slice(0, 160));
     } catch (cause) {

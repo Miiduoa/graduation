@@ -193,13 +193,13 @@ it('treats imported data as pending review despite a verified field and preserve
   expect(scene.create.mock.calls[0][1]).not.toHaveProperty('verified');
 });
 
-it('clears the old drawing before a failing import and rejects oversized or non-JSON files without reading them', async () => {
+it('preserves the old drawing on a failing import and rejects oversized or non-JSON files without reading them', async () => {
   render(<BuildingPlanPreview {...props} />);
   loadExample();
   upload(fileWithText('{broken'));
-  expect(screen.queryByText('示意範例，不代表測試館')).toBeNull();
+  expect(screen.getByText('示意範例，不代表測試館')).toBeTruthy();
   expect(await screen.findByRole('alert')).toBeTruthy();
-  expect(screen.getByText('尚未載入圖面')).toBeTruthy();
+  expect(screen.queryByText('尚未載入圖面')).toBeNull();
   const image = fileWithText(planJson(), 'plan.png');
   upload(image);
   expect(image.text).not.toHaveBeenCalled();
@@ -523,4 +523,32 @@ it.each(['json', 'example', 'clear', 'trace', 'scope', 'unmount'] as const)('abo
   else expect(screen.queryByRole('region', { name: '測試描圖工作區' })).toBeNull();
   if (action === 'json') expect(screen.getByRole('heading', { name: '新的 JSON 圖面' })).toBeTruthy();
   if (action === 'clear' || action === 'scope') expect(screen.getByText('尚未載入圖面')).toBeTruthy();
+});
+
+it.each(['{broken', '{}'])('preserves the plan, view, query and editable draft after invalid JSON: %s', async contents => {
+  render(<BuildingPlanPreview {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '從圖片建立圖面' }));
+  const draft = screen.getByLabelText('測試描圖備註') as HTMLInputElement;
+  fireEvent.change(draft, { target: { value: '尚未下載的描點' } });
+  fireEvent.click(screen.getByRole('button', { name: '完成測試描圖' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: '平面圖 2F 範例教室 201' }));
+  const search = screen.getByRole('searchbox', { name: '搜尋圖面房間' }) as HTMLInputElement;
+  fireEvent.change(search, { target: { value: '201' } });
+  let finish!: (text: string) => void;
+  upload(fileWithText(new Promise(resolve => { finish = resolve; })));
+  expect(screen.getByRole('heading', { name: '描圖草稿' })).toBeTruthy();
+  expect(search.value).toBe('201');
+  expect(draft.isConnected).toBe(true);
+  await act(async () => finish(contents));
+  expect(screen.getByRole('alert')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '描圖草稿' })).toBeTruthy();
+  expect(screen.getByRole('searchbox', { name: '搜尋圖面房間' })).toBe(search);
+  expect(search.value).toBe('201');
+  expect(screen.getByText('已選取：2F · 範例教室 201')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '立體' }).getAttribute('aria-pressed')).toBe('true');
+  expect(scene.dispose).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '返回圖面編輯' }));
+  expect(screen.getByLabelText('測試描圖備註')).toBe(draft);
+  expect(draft.value).toBe('尚未下載的描點');
 });
