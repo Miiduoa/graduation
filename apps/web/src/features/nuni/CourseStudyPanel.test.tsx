@@ -51,6 +51,57 @@ it('keeps reading available when the browser cannot run a model', () => {
   expect(screen.getByRole('region', { name: '待複習段落' })).toBeTruthy();
 });
 
+it('closes an untouched board without an unnecessary confirmation', () => {
+  const onClose = vi.fn();
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeNull();
+});
+
+it('protects unsent question drafts and notes from accidental close, with a keyboard focus return', () => {
+  const onClose = vi.fn();
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);
+  fireEvent.change(screen.getByLabelText('卡在哪裡？也可以直接開始講解'), {
+    target: { value: '先記著這個問題，不要因為手機誤觸消失。' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '要關閉讀書白板嗎？' }));
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '收起白板' }));
+  expect((screen.getByLabelText('卡在哪裡？也可以直接開始講解') as HTMLTextAreaElement).value)
+    .toBe('先記著這個問題，不要因為手機誤觸消失。');
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), {
+    target: { value: '保留本次原文筆記' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('保留本次原文筆記');
+  fireEvent.click(screen.getByRole('button', { name: '確認關閉白板' }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('warns before closing an active practice round, preserving the answer if cancelled', async () => {
+  const onClose = vi.fn();
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  await generate();
+  fireEvent.click(screen.getByRole('button', { name: '開始逐題複習' }));
+  fireEvent.change(screen.getByLabelText('這一題，我的回答'), {
+    target: { value: '這是本輪還沒有備份的草稿。' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '儲存練習與閱讀進度' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect((screen.getByLabelText('這一題，我的回答') as HTMLTextAreaElement).value)
+    .toBe('這是本輪還沒有備份的草稿。');
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
 it('aborts a previous passage and ignores a late model response after navigation', async () => {
   let finish!: (value: TutorExplanation) => void;
   mocks.run.mockImplementation(() => new Promise<TutorExplanation>((resolve) => { finish = resolve; }));

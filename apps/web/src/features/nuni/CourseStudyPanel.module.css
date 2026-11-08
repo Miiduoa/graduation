@@ -84,6 +84,9 @@
 .lessonHistory { margin: 20px 0; }
 .studentQuestion { padding: 12px; background: var(--surface-raised); white-space: pre-wrap; line-height: 1.8; }
 .restorePreview { margin: 20px 0; padding: 20px; border: 1px solid var(--brand); background: var(--surface); }
+.closeWarning { margin: 16px 0; padding: 20px; border: 1px solid var(--border-strong); background: var(--surface); }
+.closeWarning h4 { margin: 0; font-size: 17px; }
+.closeWarning h4:focus { outline: 2px solid var(--brand); outline-offset: 4px; }
 .restorePreview h4 { margin: 0; font-size: 17px; }
 .progressFacts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin: 18px 0; }
 .progressFacts div { min-width: 0; }
@@ -110,7 +113,7 @@
   .root { padding: 14px; }
   .board { padding: 14px; }
   .sourceText { font-size: 16px; padding-left: 12px; }
-  .exercise, .personalNotes, .reviewList, .restorePreview { padding: 14px; }
+  .exercise, .personalNotes, .reviewList, .restorePreview, .closeWarning { padding: 14px; }
   .actions > .primary { flex: 1 1 160px; }
 }
 

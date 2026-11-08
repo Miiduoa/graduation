@@ -77,11 +77,14 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [error, setError] = useState(initial.error);
   const [downloadStatus, setDownloadStatus] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const [confirmClose, setConfirmClose] = useState(false);
   const [manualCopyText, setManualCopyText] = useState<string | null>(null);
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const closeHeading = useRef<HTMLHeadingElement>(null);
   const readingFocus = useRef<HTMLDivElement>(null);
   const focusReadingOnReturn = useRef(false);
   const restoreHeading = useRef<HTMLHeadingElement>(null);
@@ -94,6 +97,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const sectionId = useId();
   const modeId = useId();
   const headingId = useId();
+  const closeHeadingId = useId();
   const sectionPassages = useMemo(() => source?.sections.map(splitStudySection) ?? [], [source]);
   const section = source?.sections[sectionIndex];
   const passages = sectionPassages[sectionIndex] ?? [];
@@ -105,6 +109,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const memory = session.passages[passageKey] ?? emptyStudyPassage();
   const hasNotes = Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
+  // Question drafts are not part of hasNotes, but closing must protect them too.
+  const hasWorkToKeep = !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
+    item.note.trim() || item.needsReview || Object.values(item.modes).some((value) =>
+      value.question.trim() || value.lessons.length));
   const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
     parts.flatMap((part, partNumber) =>
       session.passages[`${sectionNumber}:${partNumber}`]?.needsReview
@@ -184,6 +192,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }, [restorePreview]);
 
   useEffect(() => {
+    if (confirmClose) closeHeading.current?.focus();
+  }, [confirmClose]);
+
+  useEffect(() => {
     if (manualCopyText !== null) manualCopyInput.current?.focus();
   }, [manualCopyText]);
 
@@ -216,6 +228,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPausedRound(null);
     setRestorePreview(null);
     setRestoredFile(null);
+    setConfirmClose(false);
     clearDownload();
     setError('');
   }
@@ -354,6 +367,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPausedRound(null);
     setRestoredFile(filename);
     setRestorePreview(null);
+    setConfirmClose(false);
     setPaste('');
     clearDownload();
     setError('');
@@ -393,8 +407,21 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     <section className={styles.root} aria-labelledby={headingId}>
       <header className={styles.heading}>
         <div><p className={styles.eyebrow}>{courseTitle}</p><h3 id={headingId} ref={heading} tabIndex={-1}>讀書白板</h3></div>
-        <button type="button" className={styles.button} onClick={onClose}>收起白板</button>
+        <button ref={closeButton} type="button" className={styles.button}
+          onClick={() => {
+            if (!hasWorkToKeep) { onClose(); return; }
+            setConfirmClose(true);
+          }}>收起白板</button>
       </header>
+      {confirmClose && <section className={styles.closeWarning} aria-labelledby={closeHeadingId}>
+        <h4 id={closeHeadingId} ref={closeHeading} tabIndex={-1}>要關閉讀書白板嗎？</h4>
+        <p className={styles.note}>關閉會清除目前分頁的筆記、未送出問題與逐題練習。若要下次繼續，請先取消關閉並儲存閱讀或練習進度；下載檔案不會自動上傳。</p>
+        <div className={styles.actions}>
+          <button type="button" className={`${styles.button} ${styles.primary}`}
+            onClick={() => { setConfirmClose(false); closeButton.current?.focus(); }}>繼續讀書</button>
+          <button type="button" className={styles.button} onClick={onClose}>確認關閉白板</button>
+        </div>
+      </section>}
       <p className={styles.intro}>{practiceRound ? '先試著回想，再核對答案與教材，找出還想加強的地方。' : '一次讀一段，對照原文，再試著用自己的話說明。'}</p>
       {!restoredFile && material && source?.id === material.id && <p className={styles.note}>已帶入「{material.title}」的教材文字。附件與外部連結的內容需另外選擇檔案或貼上文字。</p>}
       {restoredFile && <p className={styles.note} role="status">已從「{restoredFile}」還原閱讀進度。目前顯示的是進度檔中的教材副本，教材可能已更新，請對照課程內容。</p>}
