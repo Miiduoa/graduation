@@ -22,9 +22,9 @@ function clearReadingPosition() {
   if (typeof window === 'undefined') return;
   try { window.sessionStorage.removeItem(POSITION_STORAGE_KEY); } catch { /* Storage can be disabled. */ }
 }
-function saveReadingPosition(value: ReadingPosition) {
+function saveReadingPosition(value: Omit<ReadingPosition, 'savedAt'>) {
   if (typeof window === 'undefined') return;
-  try { window.sessionStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(value)); }
+  try { window.sessionStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify({ ...value, savedAt: Date.now() })); }
   catch { /* Navigation still works without browser storage. */ }
 }
 function readReadingPosition(uid: string, schoolId: string): ReadingPosition | null {
@@ -99,12 +99,18 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
   const focusAfter = useRef<'summary' | 'error' | null>(null);
   useEffect(() => () => { version.current += 1; }, []);
   useEffect(() => {
-    const remembered = readReadingPosition(accountId, schoolId);
-    if (remembered) {
-      setResumePosition(remembered);
-      setDraft(remembered.query);
-      setNotice('已保留上次搜尋文字，請重新搜尋或重新確認閱讀位置。');
-    }
+    // Browser session state is read only after hydration, never during server rendering.
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      const remembered = readReadingPosition(accountId, schoolId);
+      if (remembered) {
+        setResumePosition(remembered);
+        setDraft(remembered.query);
+        setNotice('已保留上次搜尋文字，請重新搜尋或重新確認閱讀位置。');
+      }
+    });
+    return () => { active = false; };
   }, [accountId, schoolId]);
   useLayoutEffect(() => {
     if (busy || !focusAfter.current) return;
@@ -239,7 +245,7 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
         return;
       }
       navigated = true;
-      saveReadingPosition({ uid: accountId, schoolId, query: searched, postId: id, savedAt: Date.now() });
+      saveReadingPosition({ uid: accountId, schoolId, query: searched, postId: id });
       router.push(`/community/post/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(schoolId)}`);
     } catch (cause) {
       if (request !== version.current) return;

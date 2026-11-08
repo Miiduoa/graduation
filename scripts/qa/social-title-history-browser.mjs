@@ -82,10 +82,11 @@ export async function offline(value){if(value)await disableNetwork(db);else awai
   await writeFile(path.join(fixture, 'identity.ts'), `export function useAuth(){return {user:{uid:'alice'},loading:false};}`);
   await writeFile(path.join(fixture, 'link.tsx'), `import React from 'react';export default function Link({children,...props}){return <a {...props}>{children}</a>;}`);
   await writeFile(path.join(fixture, 'observed-search.ts'), `
-import {searchCampusPostTitles as real,confirmCampusPostTitleOpen as realConfirm,parseTitlePrefix} from '../src/lib/community/titleSearch';
+import {searchCampusPostTitles as real,confirmCampusPostTitleOpen as realConfirm,resumeCampusPostTitles as realResume,parseTitlePrefix} from '../src/lib/community/titleSearch';
 export {parseTitlePrefix};
 export const calls=[];
 export const opens=[];
+export const resumes=[];
 export async function confirmCampusPostTitleOpen(school,id) {
  const entry={school,id};opens.push(entry);
  try{entry.available=await realConfirm(school,id);return entry.available;}
@@ -96,6 +97,11 @@ export async function searchCampusPostTitles(school,prefix,cursor){
  try{const result=await real(school,prefix,cursor);call.returned=result.posts.length;call.ids=result.posts.map(p=>p.id);return result;}
  catch(error){call.error=error?.code??'unknown';throw error;}
 }
+export async function resumeCampusPostTitles(school,prefix,id){
+ const call={school,prefix,id};resumes.push(call);
+ try{const result=await realResume(school,prefix,id);call.returned=result.posts.length;call.ids=result.posts.map(p=>p.id);return result;}
+ catch(error){call.error=error?.code??'unknown';throw error;}
+}
 `);
   await writeFile(path.join(fixture, 'navigation.ts'), `
 export const routes=[];
@@ -104,12 +110,15 @@ export function useRouter(){return {push:(href)=>{routes.push(href);}};}
   await writeFile(path.join(fixture, 'entry.tsx'), `
 import React from 'react';import {createRoot} from 'react-dom/client';
 import {TitleHistorySearch} from '../src/app/community/_components/TitleHistorySearch';
-import {offline} from './firebase';import {calls,opens} from './observed-search';import {routes} from './navigation';
+import {offline} from './firebase';import {calls,opens,resumes} from './observed-search';import {routes} from './navigation';
 import '../src/app/globals.css';
 const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')||'light';
 const root=createRoot(document.getElementById('root'));
 root.render(<TitleHistorySearch schoolId="pu"/>);
-window.__history={offline,calls,opens,routes,school:(value)=>root.render(<TitleHistorySearch schoolId={value}/>)};
+window.__history={offline,calls,opens,resumes,routes,
+  school:(value)=>root.render(<TitleHistorySearch schoolId={value}/>),
+  showDetail:()=>root.render(<div id="post-detail-placeholder">PostDetail route adapter</div>),
+  returnToHistory:()=>root.render(<TitleHistorySearch schoolId="pu"/>)};
 window.__fixtureToken=location.search;
 `);
   const bundled = await build({
@@ -324,7 +333,28 @@ window.__fixtureToken=location.search;
   await check('390: a normal result click performs fresh server confirmation before navigation', () =>
     window.__history.opens.length === 1 && window.__history.opens[0].available === true &&
     window.__history.routes[0].includes('/community/post/old-'));
-  report.flows.push({ label: 'web-confirm-open', completed: true, note: 'Actual SDK and rules, router callback adapter only' });
+  const rememberedId = await call(() => window.__history.opens[0].id);
+  // Simulate route unmount/remount. The PostDetail view is an adapter, not a full App route.
+  await call(() => window.__history.showDetail());
+  await until(() => call(() => document.querySelector('input[type="search"]') === null), 'left history route');
+  await call(() => window.__history.returnToHistory());
+  await until(() => call(() =>
+    document.querySelector('input[type="search"]')?.value === '二手書' &&
+    [...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '回到上次閱讀位置')),
+    'remembered query and position');
+  await check('390: returning stores no private result or cursor and does not auto-query', () =>
+    document.querySelectorAll('article').length === 0 &&
+    window.__history.calls.length === 1 && window.__history.resumes.length === 0);
+  await click('回到上次閱讀位置'); await count(20);
+  await check('390: explicit resume revalidates the exact ID through real SDK and rules', (id) => {
+    const resume = window.__history.resumes[0];
+    return window.__history.resumes.length === 1 && resume.id === id && resume.ids?.[0] === id &&
+      document.querySelectorAll('article').length === 20 &&
+      new URL(document.querySelector('article a').href).pathname.endsWith('/' + id);
+  }, rememberedId);
+  await screenshot('390-return-to-reading-position.png');
+  report.flows.push({ label: 'web-confirm-open-and-resume', completed: true,
+    note: 'Actual SDK + rules, route unmount/remount simulated; not the full PostDetail route or real account switch' });
 
   await begin(320, 720, 'light', 'deleted-opening');
   await type('二手書'); await click('搜尋歷史標題'); await count(20);
