@@ -7,6 +7,9 @@ on:
       - 'apps/mobile/src/screens/CommunityScreen.tsx'
       - 'apps/mobile/src/screens/social/TitleHistorySearch.tsx'
       - 'apps/mobile/src/services/titleSearch.ts'
+      - 'apps/mobile/src/services/feed.ts'
+      - 'apps/mobile/src/screens/social/PostDetailScreen.tsx'
+      - 'apps/mobile/src/__tests__/PostDetailRecovery.test.tsx'
       - 'apps/mobile/src/__tests__/TitleHistorySearch.test.tsx'
       - 'apps/mobile/integration/title-history/**'
       - 'apps/mobile/jest.title-history-integration.config.cjs'
@@ -20,6 +23,9 @@ on:
       - 'apps/mobile/src/screens/CommunityScreen.tsx'
       - 'apps/mobile/src/screens/social/TitleHistorySearch.tsx'
       - 'apps/mobile/src/services/titleSearch.ts'
+      - 'apps/mobile/src/services/feed.ts'
+      - 'apps/mobile/src/screens/social/PostDetailScreen.tsx'
+      - 'apps/mobile/src/__tests__/PostDetailRecovery.test.tsx'
       - 'apps/mobile/src/__tests__/TitleHistorySearch.test.tsx'
       - 'apps/mobile/integration/title-history/**'
       - 'apps/mobile/jest.title-history-integration.config.cjs'
@@ -60,7 +66,7 @@ jobs:
       - name: Native history interactions and existing feed regression
         run: |
           mkdir -p artifacts/mobile-title-history artifacts/mobile-title-integration
-          pnpm --filter mobile exec jest src/__tests__/TitleHistorySearch.test.tsx src/__tests__/SocialBrowsingScreens.test.tsx src/__tests__/feedPages.test.ts src/__tests__/feedDiscoveryModel.test.ts --runInBand --json --outputFile=../../artifacts/mobile-title-history/jest.json
+          pnpm --filter mobile exec jest src/__tests__/PostDetailRecovery.test.tsx src/__tests__/TitleHistorySearch.test.tsx src/__tests__/SocialBrowsingScreens.test.tsx src/__tests__/feedPages.test.ts src/__tests__/feedDiscoveryModel.test.ts --runInBand --json --outputFile=../../artifacts/mobile-title-history/jest.json
       - name: Native service against real SDK and repository rules
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
