@@ -26,6 +26,12 @@ export type AssistantCalendarContext = {
   platformTimetable?: PlatformTimetableAccess;
   isCurrent: () => boolean;
 };
+/** Additional evidence may only restrict a fresh write; it never authorizes a retry. */
+export type AssistantCalendarWriteCheck = {
+  isCurrent: () => boolean;
+  matches: (ledger: PersonalImportLedger) => boolean;
+  message: string;
+};
 export type AssistantCalendarProposal = AssistantCalendarJournalProposal;
 export type AssistantCalendarTask = { proposal: AssistantCalendarProposal } & (
   | { state: 'review' }
@@ -216,7 +222,7 @@ function matchingEntry(entries: AssistantCalendarJournalEntry[], proposal: Assis
 
 /** Only the explicit review button calls this. A retry of an attempted ID can only read. */
 export async function confirmAssistantCalendarTask(proposal: AssistantCalendarProposal,
-  context: AssistantCalendarContext): Promise<AssistantCalendarTask> {
+  context: AssistantCalendarContext, writeCheck?: AssistantCalendarWriteCheck): Promise<AssistantCalendarTask> {
   const scope = scopeFor(proposal, context);
   const key = personalImportStorageKey(scope) + ':' + proposal.mutationId;
   if (!freshProposals.delete(proposal) || attempted.has(key)) return recheckAssistantCalendarTask(proposal, context);
@@ -228,10 +234,17 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
   let previous: AssistantCalendarTask | undefined;
   let latest: AssistantCalendarTask | undefined;
   const active = () => mayWrite && current(proposal, context);
+  // The event's own durable write changes the calendar version. Readback and
+  // journal observation retain the account guard rather than this write guard.
+  const canWrite = () => active() && (!writeCheck || writeCheck.isCurrent());
+  const verifyWrite = (ledger: PersonalImportLedger) => {
+    if (writeCheck && (!writeCheck.isCurrent() || !writeCheck.matches(ledger)))
+      throw new CalendarBlocked(writeCheck.message);
+  };
   const result = await bounded(proposal, context, async () => {
     try {
       const record = recordFor(proposal);
-      await mutatePersonalImportLedger(scope, active, async (ledger) => {
+      await mutatePersonalImportLedger(scope, canWrite, async (ledger) => {
         scopeFor(proposal, context);
         const known = matchingEntry(await readAssistantCalendarJournal(scope, active), proposal);
         if (known) {
@@ -261,7 +274,8 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
           throw new CalendarBlocked('原先確認的開始時間已經過了，請重新提供未來的起訖時間。');
         if (ledger.records.length >= PERSONAL_IMPORT_BACKUP_MAX_RECORDS)
           throw new CalendarBlocked('這台裝置的個人紀錄已達上限，請先到匯入頁整理資料。');
-        const reservation = await reserveAssistantCalendarAttempt(proposal, active);
+        verifyWrite(ledger);
+        const reservation = await reserveAssistantCalendarAttempt(proposal, canWrite);
         if (reservation.kind === 'existing') {
           canonical = reservation.entry.proposal; previous = historicalTask(reservation.entry); replay = true;
           return { ledger, result: undefined };
@@ -269,9 +283,10 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
         // Reservation can wait on native storage. Re-check the original time
         // and guard after its readback, before consuming this call's permit.
         if (!active()) throw new AssistantCalendarScopeError();
+        verifyWrite(ledger);
         if (startAt <= Date.now())
           throw new CalendarBlocked('原先確認的開始時間已經過了，請重新提供未來的起訖時間。');
-        if (!consumeAssistantCalendarJournalPermit(reservation.permit, proposal, active))
+        if (!consumeAssistantCalendarJournalPermit(reservation.permit, proposal, canWrite))
           throw new AssistantCalendarJournalError('journal-write-unverified');
         dispatched = true;
         return { ledger: { ...ledger, records: [...ledger.records, record],
@@ -279,6 +294,8 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
       });
     } catch (error) {
       scopeFor(proposal, context);
+      if (!dispatched && writeCheck && !writeCheck.isCurrent())
+        return { proposal, state: 'blocked', message: writeCheck.message };
       if (!dispatched && error instanceof CalendarBlocked)
         return { proposal, state: 'blocked', message: error.message };
       if (!dispatched && error instanceof AssistantCalendarJournalError)

@@ -94,6 +94,9 @@ jobs:
             src/__tests__/features/campusAssistantCalendarBatchIntegration.test.tsx \
             src/__tests__/features/nuniCourseworkStudyIntent.test.ts \
             src/__tests__/features/nuniCourseworkStudy.test.ts \
+            src/__tests__/features/nuniCourseworkStudyAvailability.test.ts \
+            src/__tests__/features/nuniCourseworkStudySuggestions.test.tsx \
+            src/__tests__/services/courseworkClockAvailability.test.ts \
             src/__tests__/features/campusAssistantCourseworkStudy.test.ts \
             src/__tests__/features/campusAssistantCourseworkStudyScreen.test.tsx \
             src/__tests__/services/nuniAssignmentReminders.test.ts \

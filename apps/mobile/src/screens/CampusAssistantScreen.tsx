@@ -845,6 +845,7 @@ function AssistantConversation({
                 <Text style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>{message.content}</Text>
                 <NuniCourseworkStudyAction read={message.courseworkRead}
                   assignmentIds={message.courseworkStudy.assignmentIds} initialTime={message.courseworkStudy.time}
+                  suggestTime={message.courseworkStudy.suggestTime}
                   context={calendarContext} requests={courseworkRequests}
                   task={message.calendarTask} sourceCheckedAt={message.courseworkStudyCheckedAt}
                   latest={index === messages.length - 1} disabled={busy || syncBusy || calendarBusy}

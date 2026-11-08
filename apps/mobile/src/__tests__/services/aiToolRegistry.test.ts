@@ -279,4 +279,13 @@ describe('aiToolRegistry — Stage 4：草稿 vs 真送出', () => {
     expect(r.summary).not.toContain('repair-1');
     expect(formatStandardToolMessage(r)).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
   });
+
+  it('報修預設描述是備忘，不是申請', () => {
+    const source = require('fs').readFileSync(
+      require('path').join(__dirname, '../../services/aiToolRegistry.ts'),
+      'utf8',
+    );
+    expect(source).toContain('DORM_REPAIR_COPY.defaultMemoDescription');
+    expect(source).not.toContain('AI 代理建立的報修申請');
+  });
 });

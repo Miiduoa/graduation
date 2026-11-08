@@ -17,6 +17,51 @@ const now = Date.parse('2026-11-08T15:30:00Z');
 const input = (question: string) => ({ question, read, accountId: 'student-a', schoolId: 'pu', isCurrent: () => true, now });
 
 test.each([
+  '幫這份作業找 30 分鐘準備時間', '幫我這份作業找三十分鐘準備時段',
+  '幫這份作業找空堂', '幫我找這份作業的準備空堂',
+  '替第二份作業尋找30分鐘準備時間', '找「期末報告」的空堂',
+])('finding time retains an exact source selection without inventing a clock: %s', (question) => {
+  const result = answerCourseworkStudyIntent(input(question));
+  expect(result?.courseworkStudy?.assignmentIds).toEqual(question.includes('第二份') ? ['second'] : ['first', 'second']);
+  expect(result?.courseworkStudy?.time).toBeUndefined();
+  expect(result?.courseworkStudy?.suggestTime).toBe(true);
+  expect(result?.courseworkRead).toBe(read);
+});
+
+test('an exact follow-up keeps read-only finding intent while explicit clocks return to manual review', () => {
+  const previous = { assignmentIds: ['first', 'second'], suggestTime: true as const };
+  const choice = answerCourseworkStudyIntent({ ...input('第二份'), previous });
+  expect(choice?.courseworkStudy).toEqual({ assignmentIds: ['second'], suggestTime: true });
+  const dated = answerCourseworkStudyIntent({ ...input('明天 19:00 到 19:30'), previous: choice?.courseworkStudy });
+  expect(dated?.courseworkStudy).toEqual({ assignmentIds: ['second'],
+    time: { date: '2026-11-09', startTime: '19:00', endTime: '19:30' } });
+});
+
+test('an unsupported duration remains a manual choice without silently starting a thirty-minute search', () => {
+  const result = answerCourseworkStudyIntent(input('幫這份作業找 60 分鐘準備時間'));
+  expect(result?.courseworkStudy?.assignmentIds).toEqual(['first', 'second']);
+  expect(result?.courseworkStudy?.suggestTime).toBeUndefined();
+  expect(result?.courseworkStudy?.time).toBeUndefined();
+});
+
+test('a missing ordinal does not automatically search a different remaining assignment', () => {
+  const result = answerCourseworkStudyIntent({ ...input('替第十一份作業找空堂'), previous: { assignmentIds: ['first'] } });
+  expect(result?.content).toContain('找不到指定的作業');
+  expect(result?.courseworkStudy?.assignmentIds).toEqual(['first']);
+  expect(result?.courseworkStudy?.suggestTime).toBeUndefined();
+});
+
+test('a source-free time request cannot borrow an assignment or become a literal calendar event', () => {
+  expect(answerCourseworkStudyIntent({ ...input('幫這份作業找空堂'), read: undefined })?.courseworkStudy).toBeUndefined();
+});
+
+test.each(['不要幫這份作業找空堂', '幫這份作業找空堂然後提交', '幫這份作業找空堂並且通知老師'])(
+  'finding time does not grant compound or negated actions: %s', (question) => {
+    expect(answerCourseworkStudyIntent(input(question))?.courseworkStudy).toBeUndefined();
+  },
+);
+
+test.each([
   '幫這份作業明天 19:00 到 19:30 安排準備',
   '幫我明天 19:00 到 19:30 安排這份作業的準備時間',
   '幫我安排明天 19:00 到 19:30 這份作業的準備時間',

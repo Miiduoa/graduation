@@ -8,6 +8,7 @@ import {
 import { assistantCalendarEventIdentity } from '../services/assistantCalendarJournal';
 import { subscribeNuniAssignmentChanges } from '../services/nuniAssignmentChanges';
 import { abortableCampusRead } from '../services/abortableCampusRead';
+import { findCourseworkStudySlots, recheckCourseworkStudySlot, type CourseworkStudySlot } from '../services/courseworkStudyAvailability';
 import { answerNuniCoursework, type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 
 export type CourseworkStudyTime = { date: string; startTime: string; endTime: string };
@@ -18,7 +19,11 @@ export type CourseworkStudySource = Readonly<{
 export type CourseworkStudyDraft = Readonly<{
   source: CourseworkStudySource;
   event: Readonly<AssistantCalendarEvent>;
+  availability?: Readonly<{ checkedAt: string; summary: string }>;
 }>;
+export type CourseworkStudySuggestions =
+  | { kind: 'available'; drafts: readonly CourseworkStudyDraft[]; checkedAt: string; message: string }
+  | { kind: 'blocked' | 'unavailable' | 'no-slot'; message: string };
 export type CourseworkStudyResult =
   | { kind: 'calendar'; task: AssistantCalendarTask; sourceCheckedAt?: string }
   | { kind: 'blocked' | 'changed' | 'unavailable'; message: string; refreshed?: CourseworkRead };
@@ -37,6 +42,7 @@ type PrivateDraft = {
   flight?: Promise<CourseworkStudyResult>;
   attempt?: AssistantCalendarTask;
   sourceCheckedAt?: string;
+  slot?: CourseworkStudySlot;
 };
 const drafts = new WeakMap<CourseworkStudyDraft, PrivateDraft>();
 const claims = new Map<string, object>();
@@ -93,8 +99,8 @@ function validWindow(event: AssistantCalendarEvent, dueAt: string) {
   return due !== null && Number.isFinite(start) && Number.isFinite(end) && Date.now() < start && start < end && end <= due;
 }
 
-export function prepareCourseworkStudyDraft(read: CourseworkRead, assignmentId: string,
-  time: CourseworkStudyTime, context: AssistantCalendarContext): CourseworkStudyDraft {
+function resolveStudySource(read: CourseworkRead, assignmentId: string,
+  context: AssistantCalendarContext): CourseworkStudySource {
   if (!current(context)) throw new CourseworkStudyError('session-changed', STOPPED);
   const platform = context.platformTimetable!;
   if (!read?.anchor || read.result?.kind !== 'assignments' || !Array.isArray(read.anchor.classes) ||
@@ -117,8 +123,18 @@ export function prepareCourseworkStudyDraft(read: CourseworkRead, assignmentId: 
   if (strictInstant(row.dueAt) === null) {
     throw new CourseworkStudyError('invalid-source', '這份作業沒有可核對的明確截止時間，請先到原作業確認。');
   }
-  const fullTitle = `準備：${row.title.trim()}`;
-  const title = fullTitle.length <= 200 ? fullTitle : `準備：${Array.from(row.title.trim()).slice(0, 90).join('')}…`;
+  return Object.freeze({
+    owner: read.anchor.owner!, schoolId: context.schoolId, workspaceId: read.result.workspace.id,
+    assignmentId: row.id, title: row.title, courseName: read.result.workspace.title,
+    dueAt: row.dueAt!, checkedAt: read.checkedAt!,
+  });
+}
+
+function prepareDraft(read: CourseworkRead, assignmentId: string, time: CourseworkStudyTime,
+  context: AssistantCalendarContext, slot?: CourseworkStudySlot): CourseworkStudyDraft {
+  const source = resolveStudySource(read, assignmentId, context);
+  const fullTitle = `準備：${source.title.trim()}`;
+  const title = fullTitle.length <= 200 ? fullTitle : `準備：${Array.from(source.title.trim()).slice(0, 90).join('')}…`;
   let event: AssistantCalendarEvent;
   try {
     event = parseAssistantCalendarEvent({ title, date: time.date.trim(), allDay: false,
@@ -126,23 +142,62 @@ export function prepareCourseworkStudyDraft(read: CourseworkRead, assignmentId: 
   } catch {
     throw new CourseworkStudyError('invalid-time', '請填寫有效日期，以及同一天由早到晚的起訖時間。');
   }
-  if (!validWindow(event, row.dueAt!)) {
+  if (!validWindow(event, source.dueAt)) {
     throw new CourseworkStudyError('invalid-time', '請選擇尚未開始、且能在作業截止前結束的準備時段。');
   }
-  const source = Object.freeze({
-    owner: read.anchor.owner!, schoolId: context.schoolId, workspaceId: read.result.workspace.id,
-    assignmentId: row.id, title: row.title, courseName: read.result.workspace.title,
-    dueAt: row.dueAt!, checkedAt: read.checkedAt!,
+  const draft = Object.freeze({ source, event: Object.freeze(event),
+    ...(slot && { availability: Object.freeze({ checkedAt: slot.checkedAt, summary: slot.summary }) }),
   });
-  const draft = Object.freeze({ source, event: Object.freeze(event) });
   let saved: CourseworkRead;
   try { saved = deepFreeze(JSON.parse(JSON.stringify(read)) as CourseworkRead); }
   catch { throw new CourseworkStudyError('invalid-source', '無法保存這次預覽的作業來源，請重新查詢。'); }
   drafts.set(draft, { read: saved,
-    sourceVersion: sourceVersions.get(sourceKey(platform.accountId, source.workspaceId, source.assignmentId)) ?? 0,
-    claim: Object.freeze({}),
+    sourceVersion: sourceVersions.get(sourceKey(context.platformTimetable!.accountId, source.workspaceId, source.assignmentId)) ?? 0,
+    claim: Object.freeze({}), ...(slot && { slot }),
   });
   return draft;
+}
+
+export function prepareCourseworkStudyDraft(read: CourseworkRead, assignmentId: string,
+  time: CourseworkStudyTime, context: AssistantCalendarContext): CourseworkStudyDraft {
+  return prepareDraft(read, assignmentId, time, context);
+}
+
+/** Read-only suggestions retain both the exact assignment and private clock evidence. */
+export async function findCourseworkStudyDrafts(read: CourseworkRead, assignmentId: string,
+  context: AssistantCalendarContext, options: { signal?: AbortSignal } = {}): Promise<CourseworkStudySuggestions> {
+  const abort = new AbortController();
+  const stop = () => abort.abort();
+  let running = true;
+  let unsubscribe: (() => void) | undefined;
+  options.signal?.addEventListener('abort', stop, { once: true });
+  if (options.signal?.aborted) stop();
+  try {
+    if (abort.signal.aborted) return { kind: 'blocked', message: STOPPED };
+    const source = resolveStudySource(read, assignmentId, context);
+    const saved = deepFreeze(JSON.parse(JSON.stringify(read)) as CourseworkRead);
+    const id = sourceKey(context.platformTimetable!.accountId, source.workspaceId, source.assignmentId);
+    const version = sourceVersions.get(id) ?? 0;
+    const active = () => running && !abort.signal.aborted && current(context, source) &&
+      (sourceVersions.get(id) ?? 0) === version;
+    unsubscribe = subscribeNuniAssignmentChanges((event) => {
+      if (sourceKey(event.accountId, event.workspaceId, event.assignmentId) === id) stop();
+    });
+    const access = { ...context, isCurrent: active };
+    const result = await findCourseworkStudySlots(access, source.dueAt, { signal: abort.signal });
+    if (!active()) return { kind: 'blocked', message: (sourceVersions.get(id) ?? 0) !== version ? SOURCE_CHANGED : STOPPED };
+    if (result.kind !== 'available') return result;
+    return { kind: 'available', checkedAt: result.checkedAt, message: result.message,
+      drafts: Object.freeze(result.slots.map((slot) => prepareDraft(saved, assignmentId, slot, access, slot))),
+    };
+  } catch (error) {
+    return { kind: error instanceof CourseworkStudyError ? 'blocked' : 'unavailable',
+      message: error instanceof CourseworkStudyError ? error.message : UNAVAILABLE };
+  } finally {
+    running = false;
+    options.signal?.removeEventListener('abort', stop);
+    unsubscribe?.();
+  }
 }
 
 function waitingResult(state: PrivateDraft): CourseworkStudyResult {
@@ -220,10 +275,15 @@ async function run(draft: CourseworkStudyDraft, state: PrivateDraft, context: As
     }
     if (!active()) return waitingResult(state);
     if (!validWindow(draft.event, draft.source.dueAt)) return { kind: 'blocked', message: '原先預覽的開始時間已經過了，請重新選擇日期與時間。' };
+    const availability = state.slot ? await abortableCampusRead(() => recheckCourseworkStudySlot(state.slot!,
+      access, { signal: abort.signal }), abort.signal) : undefined;
+    if (!active()) return waitingResult(state);
+    if (availability && availability.kind !== 'ready') return availability;
     state.sourceCheckedAt = newest.checkedAt;
     state.attempt = createAssistantCalendarTask(draft.event, access);
     const proposal = state.attempt.proposal;
-    const task = await abortableCampusRead(() => confirmAssistantCalendarTask(proposal, access), abort.signal);
+    const task = await abortableCampusRead(() => confirmAssistantCalendarTask(proposal, access,
+      availability?.kind === 'ready' ? availability.writeCheck : undefined), abort.signal);
     if (!active()) return waitingResult(state);
     if (task.proposal.mutationId !== proposal.mutationId) {
       // A generic operation may have won the ledger lock since our initial read.

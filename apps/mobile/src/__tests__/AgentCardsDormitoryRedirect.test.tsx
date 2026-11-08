@@ -13,6 +13,7 @@ jest.mock('@react-navigation/native', () => ({
   useNavigation: () => ({ navigate: mockNavigate }),
 }));
 
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import { AgentCardList } from '../components/AgentCards';
 
 beforeEach(() => {
@@ -38,6 +39,40 @@ test('平台報修卡只開啟宿舍服務，不把平台案件編號帶入個�
   expect(mockSafeNavigate).toHaveBeenCalledWith('Dormitory', undefined);
   expect(mockNavigate).not.toHaveBeenCalledWith('DormitoryScreen');
   expect(mockNavigate).not.toHaveBeenCalledWith('Dormitory');
+});
+
+test('報修列表卡用備忘標題與狀態，不暗示校方已在處理', () => {
+  const view = render(
+    <AgentCardList
+      cards={[
+        {
+          kind: 'repair_list',
+          payload: {
+            count: 2,
+            items: [
+              { category: '冷氣', status: 'pending', dormitory: 'A棟', room: '301' },
+              { category: '水管', status: 'in_progress', dormitory: 'B棟', room: '102' },
+            ],
+          },
+        },
+      ]}
+    />,
+  );
+  expect(view.getByText(`${DORM_REPAIR_COPY.assistantListTitle}（2 筆）`)).toBeTruthy();
+  expect(view.getAllByText(new RegExp(DORM_REPAIR_COPY.assistantStatusSaved))).toHaveLength(2);
+  expect(view.queryByText('報修紀錄（2 筆）')).toBeNull();
+  expect(view.queryByText('待處理')).toBeNull();
+  expect(view.queryByText('處理中')).toBeNull();
+  expect(view.queryByText('已完成')).toBeNull();
+});
+
+test('報修列表卡空狀態寫備忘，不寫報修紀錄', () => {
+  const view = render(
+    <AgentCardList cards={[{ kind: 'repair_list', payload: { count: 0, items: [] } }]} />,
+  );
+  expect(view.getByText(`${DORM_REPAIR_COPY.assistantListTitle}（0 筆）`)).toBeTruthy();
+  expect(view.getByText(DORM_REPAIR_COPY.assistantListEmpty)).toBeTruthy();
+  expect(view.queryByText('目前沒有任何報修紀錄。')).toBeNull();
 });
 
 test.each(['DormitoryScreen', 'Dormitory'])('導覽卡的 %s 開啟目前校園宿舍', (screen) => {

@@ -4,16 +4,19 @@ import { classDate } from '@campus/shared/src/timetable/classExceptions';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import type { CourseworkRead, CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import {
-  CourseworkStudyError, confirmCourseworkStudyDraft, prepareCourseworkStudyDraft, isCourseworkStudyInstant,
+  CourseworkStudyError, confirmCourseworkStudyDraft, findCourseworkStudyDrafts,
+  prepareCourseworkStudyDraft, isCourseworkStudyInstant,
   type CourseworkStudyDraft, type CourseworkStudyTime,
 } from '../features/nuniCourseworkStudy';
 import { sameAssistantCalendarEvent, type AssistantCalendarContext, type AssistantCalendarTask } from '../services/assistantCalendarExecution';
+import { abortableCampusRead } from '../services/abortableCampusRead';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 
 export type NuniCourseworkStudyActionProps = {
   read: CourseworkRead;
   assignmentIds: readonly string[];
   initialTime?: CourseworkStudyTime;
+  suggestTime?: boolean;
   context: AssistantCalendarContext;
   requests?: CourseworkRequests;
   disabled?: boolean;
@@ -29,6 +32,8 @@ export type NuniCourseworkStudyActionProps = {
 
 type Stage =
   | { kind: 'editing'; error?: string }
+  | { kind: 'finding' }
+  | { kind: 'suggestions'; drafts: readonly CourseworkStudyDraft[]; checkedAt: string; message: string }
   | { kind: 'review' | 'saving'; draft: CourseworkStudyDraft }
   | { kind: 'blocked'; message: string; refreshed?: CourseworkRead }
   | { kind: 'cancelled' | 'stopped' | 'handed-off' };
@@ -37,6 +42,7 @@ const DAY = 86_400_000;
 const EMPTY_TIME: CourseworkStudyTime = { date: '', startTime: '', endTime: '' };
 const SOURCE_CHANGED = '作業來源或帳號狀態已變更，請重新查詢作業後再安排。';
 const RETRY_SOURCE = '目前無法核對這次處理結果。請重新查詢作業；若已送出行程，可在行程紀錄中核對。';
+const RETRY_AVAILABILITY = '目前無法完整核對空堂，請稍後重新尋找，或自行填寫準備時間。';
 
 function sourceIdentity(props: NuniCourseworkStudyActionProps): string {
   const { read, context } = props;
@@ -44,7 +50,7 @@ function sourceIdentity(props: NuniCourseworkStudyActionProps): string {
     context.uid, context.schoolId, context.platformTimetable?.accountId,
     read.anchor, read.checkedAt, read.changedAssignmentId,
     read.selectedWorkspaceId, read.expectedReviewed, read.expectedLinkedWorkspaceId,
-    read.result, props.assignmentIds, props.initialTime,
+    read.result, props.assignmentIds, props.initialTime, props.suggestTime,
   ]);
 }
 
@@ -77,6 +83,7 @@ function StudyActionInstance({ props, live, identity }: {
 }) {
   const mounted = useRef(true);
   const lock = useRef(false);
+  const automaticSearchStarted = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const releaseBusy = useRef<(() => void) | null>(null);
   const current = () => mounted.current && sourceIdentity(live.current) === identity &&
@@ -120,6 +127,58 @@ function StudyActionInstance({ props, live, identity }: {
     if (props.disabled || lock.current || !current() || !selectedId) return;
     try { setStage({ kind: 'review', draft: makeDraft(selectedId, time) }); }
     catch (error) { setStage({ kind: 'editing', error: errorMessage(error) }); }
+  };
+  const findTimes = async () => {
+    if (live.current.disabled || lock.current || !current() || stage.kind !== 'editing' || !selectedId) return;
+    automaticSearchStarted.current = true;
+    lock.current = true;
+    const abort = new AbortController();
+    controller.current = abort;
+    const notifying = live.current.onBusyChange;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      notifying?.(false);
+    };
+    releaseBusy.current = release;
+    const findingCurrent = () => current() && !abort.signal.aborted;
+    setPending(true);
+    setStage({ kind: 'finding' });
+    notifying?.(true);
+    try {
+      const result = await abortableCampusRead(() => findCourseworkStudyDrafts(read, selectedId,
+        { ...props.context, isCurrent: findingCurrent }, { signal: abort.signal }), abort.signal);
+      if (!findingCurrent()) return;
+      if (result.kind !== 'available') {
+        setStage(result.kind === 'blocked' ? { kind: 'blocked', message: result.message }
+          : { kind: 'editing', error: result.message });
+        return;
+      }
+      const verifiedChoices = result.drafts.length > 0 && isCourseworkStudyInstant(result.checkedAt) &&
+        result.drafts.every((draft) => read.result.kind === 'assignments' &&
+          draft.source.owner === read.anchor.owner && draft.source.schoolId === props.context.schoolId &&
+          draft.source.workspaceId === read.result.workspace.id && draft.source.assignmentId === selectedId &&
+          draft.availability && isCourseworkStudyInstant(draft.availability.checkedAt));
+      if (!verifiedChoices) {
+        setStage({ kind: 'editing', error: RETRY_AVAILABILITY });
+        return;
+      }
+      setStage({ kind: 'suggestions', drafts: result.drafts.slice(0, 3), checkedAt: result.checkedAt, message: result.message });
+    } catch {
+      if (findingCurrent()) setStage({ kind: 'editing', error: RETRY_AVAILABILITY });
+    } finally {
+      if (controller.current === abort) controller.current = null;
+      lock.current = false;
+      release();
+      if (releaseBusy.current === release) releaseBusy.current = null;
+      if (mounted.current) setPending(false);
+    }
+  };
+  const stopFinding = () => {
+    if (stage.kind !== 'finding' || !controller.current || controller.current.signal.aborted) return;
+    controller.current.abort();
+    setStage({ kind: 'editing', error: '已停止尋找空堂，尚未建立行程。你可以重新尋找或自行填寫時間。' });
   };
   const confirm = async () => {
     if (live.current.disabled || lock.current || !current() || stage.kind !== 'review') return;
@@ -182,8 +241,6 @@ function StudyActionInstance({ props, live, identity }: {
   const inputStyle = { color: aiTokens.text, backgroundColor: aiTokens.panel, borderColor: aiTokens.border,
     borderWidth: 1, borderRadius: 10, minHeight: 46, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 };
   const unavailable = !sourceScopeCurrent(props);
-  if (unavailable) return <Text accessibilityRole="alert" style={secondary}>{SOURCE_CHANGED}</Text>;
-
   const outdated = !props.latest || !!read.changedAssignmentId;
   const locked = !!props.disabled || pending || outdated;
   const selected = candidates.find((item) => item.id === selectedId);
@@ -196,6 +253,12 @@ function StudyActionInstance({ props, live, identity }: {
     : selected?.submittedAt ? '這份作業已有繳交紀錄，請先到原作業確認。'
       : selected?.state === 'closed' ? '這份作業已停止收件，請先到原作業確認。'
         : selected && !isCourseworkStudyInstant(dueAt) ? '這份作業沒有可核對的明確截止時間，請先到原作業確認。' : undefined;
+  useEffect(() => {
+    if (!props.suggestTime || props.initialTime || automaticSearchStarted.current || locked || lock.current ||
+        stage.kind !== 'editing' || !validChoices || !selected || sourceProblem || unavailable || !current()) return;
+    void findTimes();
+  });
+  if (unavailable) return <Text accessibilityRole="alert" style={secondary}>{SOURCE_CHANGED}</Text>;
   const refreshed = stage.kind === 'blocked' ? stage.refreshed : undefined;
   const freshAssignment = refreshed?.result.kind === 'assignments'
     ? refreshed.result.assignments.find((item) => item.id === selectedId) : undefined;
@@ -222,6 +285,7 @@ function StudyActionInstance({ props, live, identity }: {
       }} />}
     {props.task ? <>
       {!!read.changedAssignmentId && <Text style={secondary}>原作業後來有更新；上方保留當時安排的來源資料，行程狀態請以下方核對結果為準。</Text>}
+      {props.latest && props.task.state === 'blocked' && refreshButton}
     </> : outdated ? <>
       <Text accessibilityRole="alert" style={secondary}>{read.changedAssignmentId
         ? '作業已更新，這是先前預覽的來源。若剛才已按確認，請先核對行程紀錄，再依最新作業決定下一步。'
@@ -244,7 +308,8 @@ function StudyActionInstance({ props, live, identity }: {
           setStage(initialStage(item.id));
         }} />)}
     </> : stage.kind === 'editing' ? <>
-      <Text style={secondary}>請填寫你想投入的時間，日期與鐘點皆為台灣時間。</Text>
+      <AIButton label="幫我找 30 分鐘空堂" variant="ghost" disabled={locked} onPress={() => void findTimes()} />
+      <Text style={secondary}>也可以自行填寫準備時間，日期與鐘點皆為台灣時間。</Text>
       <Text style={secondary}>日期（YYYY-MM-DD）</Text>
       <TextInput accessibilityLabel="準備行程日期" placeholder="YYYY-MM-DD" value={time.date} editable={!locked}
         autoCapitalize="none" autoCorrect={false} maxLength={10} style={inputStyle}
@@ -264,10 +329,34 @@ function StudyActionInstance({ props, live, identity }: {
       {!!stage.error && <Text accessibilityRole="alert" style={{ ...secondary, color: aiTokens.danger }}>{stage.error}</Text>}
       <AIButton label="預覽準備行程" disabled={locked} onPress={preview} />
       <AIButton label="先不要" variant="ghost" disabled={locked} onPress={() => { if (!locked && current()) setStage({ kind: 'cancelled' }); }} />
+    </> : stage.kind === 'finding' ? <>
+      <Text accessibilityLiveRegion="polite" style={body}>正在核對已存課表與個人行程，尋找 30 分鐘空堂…</Text>
+      <AIButton label="停止尋找空堂" variant="ghost" onPress={stopFinding} />
+    </> : stage.kind === 'suggestions' ? <>
+      <Text accessibilityLiveRegion="polite" style={body}>{stage.message}</Text>
+      <Text style={secondary}>請選擇一個時段，接著核對完整行程；目前尚未建立。</Text>
+      <Text style={secondary}>空堂核對時間：{formatTaipeiDateTime(stage.checkedAt, { seconds: true })}（台灣時間）</Text>
+      {stage.drafts.map((draft, index) => <AIButton key={index} variant="ghost" disabled={locked}
+        label={`時段 ${index + 1}：${draft.event.date} ${draft.event.startTime}–${draft.event.endTime}（台灣時間）`}
+        onPress={() => {
+          if (locked || lock.current || !current()) return;
+          setTime({ date: draft.event.date, startTime: draft.event.startTime!, endTime: draft.event.endTime! });
+          setStage({ kind: 'review', draft });
+        }} />)}
+      <AIButton label="自行輸入日期與時間" variant="ghost" disabled={locked}
+        onPress={() => { if (!locked && current()) setStage({ kind: 'editing' }); }} />
+      <AIButton label="先不要" variant="ghost" disabled={locked}
+        onPress={() => { if (!locked && current()) setStage({ kind: 'cancelled' }); }} />
     </> : review ? <>
       <Text style={{ ...body, fontWeight: '600' }}>{review.event.title}</Text>
       <Text style={body}>{review.event.date} · {review.event.startTime}–{review.event.endTime}（台灣時間）</Text>
-      <Text style={secondary}>確認時會重新核對這份作業，再加入目前帳號與學校的個人行事曆，並讀回核對保存結果。請自行核對這段時間是否適合，這裡沒有判定課表空堂。</Text>
+      {review.availability && <View style={{ gap: 5 }}>
+        <Text style={secondary}>{review.availability.summary}</Text>
+        <Text style={secondary}>空堂核對時間：{formatTaipeiDateTime(review.availability.checkedAt, { seconds: true })}（台灣時間）</Text>
+      </View>}
+      <Text style={secondary}>{review.availability
+        ? '確認時會重新核對原作業、已存課表與個人行程，再加入目前帳號與學校的個人行事曆，並讀回核對保存結果。未保存到這台手機的其他安排仍需自行確認。'
+        : '確認時會重新核對這份作業，再加入目前帳號與學校的個人行事曆，並讀回核對保存結果。請自行核對這段時間是否適合，這裡沒有判定課表空堂。'}</Text>
       {stage.kind === 'saving' ? <>
         <Text accessibilityLiveRegion="polite" style={body}>正在重新核對作業並處理準備行程…</Text>
         <AIButton label="停止後續處理" variant="ghost" onPress={stop} />

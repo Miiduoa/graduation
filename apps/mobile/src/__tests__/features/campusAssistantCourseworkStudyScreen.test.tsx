@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { PersonalImportRecord } from '@campus/shared';
 import type { NuniAssignment } from '@campus/shared/src/nuni';
 import { CampusAssistantScreen } from '../../screens/CampusAssistantScreen';
-import { loadPersonalImports, personalImportStorageKey } from '../../services/personalImports';
+import { appendPersonalImports, loadPersonalImports, personalImportStorageKey } from '../../services/personalImports';
 import { readAssistantCalendarJournal } from '../../services/assistantCalendarJournal';
 import { notifyNuniAssignmentChanged } from '../../services/nuniAssignmentChanges';
 
@@ -114,7 +114,67 @@ beforeEach(async () => {
   mockRequest.mockResolvedValue({ workspaces: [{ id: workspaceId, title: '資料庫 A 班', state: 'active', memberRole: 'student' }] });
   mockBff.mockResolvedValue({ assignments: [assignment()] });
 });
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
+
+async function suggested(view: ReturnType<typeof render>) {
+  await queried(view);
+  await send(view, '幫這份作業找 30 分鐘準備時間');
+  const choice = await view.findByRole('button', { name: '時段 1：2026-11-12 10:10–10:40（台灣時間）' });
+  expect(view.queryByRole('button', { name: '確認建立準備行程' })).toBeNull();
+  expect(ledgerWrites()).toHaveLength(0);
+  fireEvent.press(choice);
+  await view.findByRole('button', { name: '確認建立準備行程' });
+}
+
+function automaticTimetable() {
+  jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout',
+    'setInterval', 'clearInterval', 'performance', 'queueMicrotask'] });
+  jest.setSystemTime(new Date('2026-11-09T07:00:00+08:00'));
+  mockCollect.mockResolvedValue({ ownerUid: '', checkedAt: new Date().toISOString(), schoolId: 'pu', schoolName: '靜宜大學',
+    timetable: { source: 'saved-device-copy', updatedAt: record.importedAt, courses: [], currentClasses: [occurrence] } });
+  mockTimetable.mockResolvedValue({ timetable: null, schoolId: 'pu', updatedAt: record.importedAt, records: [record,
+    { ...record, id: 'afternoon', title: '網頁設計', startPeriod: 6, endPeriod: 7, linkedCourseId: undefined },
+  ] });
+}
+
+test('the real conversation finds a slot and saves its exact selection without typing dates or clocks', async () => {
+  automaticTimetable();
+  const nav = navigation();
+  const view = render(<CampusAssistantScreen route={route} navigation={nav} />);
+  await suggested(view);
+  expect(view.getByText(/依這台手機已存課表與個人行程，保留前後各 10 分鐘/)).toBeTruthy();
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(0);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '確認建立準備行程' })));
+  await view.findByText('已在這台手機保存並核對行程。');
+  const ledger = await loadPersonalImports(scope);
+  expect(ledger.records).toHaveLength(1);
+  expect(ledger.records[0]).toMatchObject({ title: '準備：期末資料模型', date: '2026-11-12', startTime: '10:10', endTime: '10:40' });
+  expect(ledgerWrites()).toHaveLength(1);
+  expect(mockBff).toHaveBeenCalledTimes(2);
+  expect(mockCallable).not.toHaveBeenCalled();
+  expect(jest.requireMock('../../services/localLLMInference').localLLM.generate).not.toHaveBeenCalled();
+  fireEvent.press(view.getByRole('button', { name: '查看已建立的行程' }));
+  expect(nav.navigate).toHaveBeenLastCalledWith('PersonalCalendar', { eventId: ledger.records[0]!.id });
+  view.unmount();
+  const reopened = render(<CampusAssistantScreen route={route} navigation={nav} />);
+  await reopened.findByText('已在這台手機保存並核對行程。');
+  expect(ledgerWrites()).toHaveLength(1);
+});
+
+test('a personal event added after selecting an automatic slot blocks confirmation in the real conversation', async () => {
+  automaticTimetable();
+  const view = render(<CampusAssistantScreen route={route} />);
+  await suggested(view);
+  await act(async () => { await appendPersonalImports(scope, [{ id: 'other-plan', kind: 'events', schoolId: 'pu',
+    academicYear: '', semester: '', title: '小組討論', date: '2026-11-12', startTime: '10:00', endTime: '11:00',
+    source: { type: 'paste', line: 1, rawText: '' } }]); });
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '確認建立準備行程' })));
+  await view.findByText(/課表或個人行程已更新/);
+  expect(view.queryByText('已在這台手機保存並核對行程。')).toBeNull();
+  expect(ledgerWrites()).toHaveLength(1);
+  expect((await loadPersonalImports(scope)).records.map((row) => row.title)).toEqual(['小組討論']);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(0);
+});
 
 test('the real conversation carries an exact assignment through editable time, confirmation, ledger readback and restart', async () => {
   const nav = navigation();

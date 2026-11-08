@@ -40,7 +40,7 @@ export const DORM_REPAIR_SHORTCUTS: ReadonlyArray<{
 export const DORM_REPAIR_REFERENCE_LIMIT = 80;
 
 /** Phrases that imply this app submits to the school, issues a ticket, or tracks official progress. */
-export const DORM_REPAIR_DISALLOWED_COPY = /單號|已送出給學校|查詢進度|工單|已提交報修|查看處理狀況|修繕進度|查進度/;
+export const DORM_REPAIR_DISALLOWED_COPY = /單號|已送出給學校|查詢進度|工單|已提交報修|查看處理狀況|修繕進度|查進度|已受理|派員處理|即時提交/;
 
 /** Shared web/app copy: personal memos only; official filing stays on school channels. */
 export const DORM_REPAIR_COPY = {
@@ -61,7 +61,36 @@ export const DORM_REPAIR_COPY = {
   assistantCanHelp: '可以幫你先存成報修備忘，請依學校管道送出，或聯繫宿舍管理員。',
   assistantConfirm: '確認存成報修備忘',
   assistantCardTitle: '已存成報修備忘',
+  assistantListTitle: '報修備忘',
+  assistantListEmpty: '目前沒有報修備忘。',
+  assistantStatusSaved: '已存備忘',
+  assistantStatusNotedDone: '已自行註記完成',
+  assistantStatusCancelled: '已取消備忘',
+  assistantWriteStayNote: '請先核對內容。確認後只會存成報修備忘，不會送到學校。即使離開此頁也不會改成校方通報。',
+  assistantWriteSuccess: '報修備忘已存好',
+  assistantWritePending: '正在存成報修備忘，請核對結果',
+  assistantWriteUncertain: '尚未確定備忘是否已存下。請到宿舍頁核對；重複存下只會多一筆備忘，此應用沒有送到學校。',
+  defaultMemoDescription: '自行記下的報修備忘',
+  pushMemoTitle: '報修備忘狀態已更新',
+  pushMemoBody: '此應用沒有送到學校。這只是備忘狀態變更，不是校方回覆。',
+  pushMemoUpdatedTitle: '報修備忘已更新',
+  pushMemoUpdatedBody: '此應用沒有送到學校。實際是否修好請向校方確認。',
+  estimatedDuration: '即時存成備忘，不會送到學校',
+  descriptionHint: '請寫清楚地點與狀況，方便你之後向學校通報',
 } as const;
+
+/** Backend repairRequest.status values shown as personal memo labels, not school workflow. */
+export function dormRepairAssistantStatusLabel(status: string | undefined | null): string {
+  const value = String(status || '').toLowerCase();
+  if (value === 'pending' || value === 'assigned' || value === 'in_progress') {
+    return DORM_REPAIR_COPY.assistantStatusSaved;
+  }
+  if (value === 'completed' || value === 'resolved') {
+    return DORM_REPAIR_COPY.assistantStatusNotedDone;
+  }
+  if (value === 'cancelled') return DORM_REPAIR_COPY.assistantStatusCancelled;
+  return status || '未知';
+}
 
 export type DormRepair = {
   id: string;
