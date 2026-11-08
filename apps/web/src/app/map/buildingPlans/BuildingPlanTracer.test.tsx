@@ -193,6 +193,38 @@ it('keeps the old image and geometry until replacement succeeds and ignores late
   expect(vi.mocked(prepareBuildingPlanReference).mock.calls[1][1]?.aborted).toBe(true);
 });
 
+it('blocks preview while replacing the image and preserves the completed draft against late decodes', async () => {
+  const draft = restoredDraft();
+  draft.mode = null; draft.points = []; draft.roomName = '';
+  render(<BuildingPlanTracer {...props} initialProject={{ draft, reference: prepared() }} />);
+  const canvas = screen.getByRole('group', { name: '圖片描圖區' });
+  const drawing = canvas.innerHTML;
+  let finish!: (value: ReturnType<typeof prepared>) => void;
+  vi.mocked(prepareBuildingPlanReference).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  chooseFile('slow.png');
+  const signal = vi.mocked(prepareBuildingPlanReference).mock.calls[0][1];
+  const complete = screen.getByRole('button', { name: '建立立體預覽' }) as HTMLButtonElement;
+  expect(complete.disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '下載編輯檔' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(complete);
+  expect(props.onComplete).not.toHaveBeenCalled();
+
+  // A failed newer replacement leaves the original draft ready to complete.
+  vi.mocked(prepareBuildingPlanReference).mockRejectedValueOnce(new Error('圖片無法解碼。'));
+  chooseFile('bad.png');
+  await waitFor(() => expect(complete.disabled).toBe(false));
+  fireEvent.click(complete);
+  expect(props.onComplete).toHaveBeenCalledTimes(1);
+  expect(props.onComplete.mock.calls[0][0]).toMatchObject({ name: draft.name, units: 'm', floors: [{ label: '2F', rooms: [{ name: '討論室' }, { name: '閱覽區' }] }] });
+  expect(signal?.aborted).toBe(true);
+  // Keep the editor mounted, as the parent does when displaying the preview.
+  await act(async () => finish(prepared('slow.png')));
+  expect(canvas.innerHTML).toBe(drawing);
+  expect((screen.getByLabelText('圖面名稱') as HTMLInputElement).value).toBe(draft.name);
+  expect((screen.getByLabelText('兩點實際距離（公尺）') as HTMLInputElement).value).toBe('9');
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+});
+
 it('aborts a pending decode on scope changes or unmount and releases an installed image on cancel', async () => {
   let finish!: (value: ReturnType<typeof prepared>) => void;
   vi.mocked(prepareBuildingPlanReference).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));

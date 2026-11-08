@@ -220,9 +220,10 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, initialProject, o
     setError('');
   }
   function complete() {
-    if (!reference || !outline.length || mode) return;
+    if (!reference || !outline.length || mode || reading || job.current) return;
     const checked = buildTracedBuildingPlan(makeDraft(), { schoolId, buildingId });
     if (!checked.ok) { setError(checked.message); return; }
+    cancelPendingRead();
     setError('');
     onComplete(checked.plan);
   }
@@ -336,7 +337,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, initialProject, o
       <div className={styles.footer}>
         {!calibration && <p className={styles.hint}>未校正時使用示意單位：圖片長邊為 20、樓高為 3，不代表實際尺寸。</p>}
         <p className={styles.hint}>外框會產生示意牆線；房間只表示命名區域，未標示門窗或可通行動線。</p>
-        <button type="button" className={styles.primary} disabled={!outline.length || !!mode} onClick={complete}>建立立體預覽</button>
+        <button type="button" className={styles.primary} disabled={reading || !outline.length || !!mode} onClick={complete}>建立立體預覽</button>
       </div>
     </>}
   </section>;
