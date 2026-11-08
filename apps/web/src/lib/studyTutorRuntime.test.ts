@@ -95,6 +95,54 @@ describe('explicit local study generation', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
+  it('measures local worker preparation and generation without claiming a cold or warm start', async () => {
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'progress', phase: 'generating' });
+    worker.emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(pending).resolves.toEqual(lesson());
+    expect(onTiming).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'success', preparationMs: expect.any(Number),
+      generationMs: expect.any(Number), totalMs: expect.any(Number),
+    }));
+    const measured = onTiming.mock.calls[0][0];
+    expect(measured.preparationMs).toBeGreaterThanOrEqual(0);
+    expect(measured.generationMs).toBeGreaterThanOrEqual(0);
+    expect(measured.totalMs).toBeGreaterThanOrEqual(measured.preparationMs);
+    expect(measured.totalMs).toBeGreaterThanOrEqual(measured.generationMs);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('includes failed and stopped local AI attempts without inventing a generation phase', async () => {
+    const failedTiming = vi.fn();
+    const failed = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+      onTiming: failedTiming,
+    });
+    lastWorker().emit({ type: 'error', code: 'memory' });
+    await expect(failed).rejects.toThrow('記憶體不足');
+    expect(failedTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'failed', generationMs: null,
+    }));
+
+    const controller = new AbortController();
+    const stoppedTiming = vi.fn();
+    const stopped = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: controller.signal, onTiming: stoppedTiming,
+    });
+    controller.abort();
+    await expect(stopped).rejects.toMatchObject({ name: 'AbortError' });
+    expect(stoppedTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'cancelled', generationMs: null,
+    }));
+    expect(FakeWorker.instances).toHaveLength(2);
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects invalid source input before creating a worker', async () => {
     await expect(runStudyTutor({ passage: { ...passage(), text: '字'.repeat(1_601) }, mode: 'understand', signal: new AbortController().signal }))
       .rejects.toThrow('過長');

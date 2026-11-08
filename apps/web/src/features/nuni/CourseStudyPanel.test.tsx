@@ -978,3 +978,18 @@ it('moves directly between marked PDF pages while retaining page identity and cu
   expect(screen.getByText('外鍵建立表格關聯。')).toBeTruthy();
   expect(mocks.run).not.toHaveBeenCalled();
 });
+
+it('shows observed local AI phase timings without suggesting a verified benchmark', async () => {
+  mocks.run.mockImplementationOnce(async (request) => {
+    request.onTiming?.({ preparationMs: 840, generationMs: 1370, totalMs: 2210, outcome: 'success' });
+    return explanation;
+  });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  expect(screen.getByText((_, element) => element?.tagName === 'P' &&
+    !!element.textContent?.includes('準備 840 毫秒') &&
+    !!element.textContent?.includes('生成 1370 毫秒') &&
+    !!element.textContent?.includes('合計 2210 毫秒'))).toBeTruthy();
+  expect(screen.getByText(/不能據此認定冷啟、暖啟或回答正確/)).toBeTruthy();
+});

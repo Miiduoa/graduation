@@ -26,6 +26,14 @@ export function getStudyTutorAvailability(): {
   };
 }
 
+/** Browser-observed wall time for one local worker run. No cold/warm or quality inference. */
+export type StudyTutorTiming = {
+  preparationMs: number;
+  generationMs: number | null;
+  totalMs: number;
+  outcome: 'success' | 'failed' | 'cancelled';
+};
+
 export type StudyTutorRequest = {
   passage: StudyPassage;
   mode: StudyMode;
@@ -33,6 +41,7 @@ export type StudyTutorRequest = {
   history?: StudyTutorHistory;
   signal: AbortSignal;
   onProgress?: (message: string) => void;
+  onTiming?: (timing: StudyTutorTiming) => void;
 };
 
 let sequence = 0;
@@ -73,6 +82,7 @@ export async function runStudyTutor({
   history,
   signal,
   onProgress,
+  onTiming,
 }: StudyTutorRequest): Promise<TutorExplanation> {
   if (signal.aborted) throw aborted();
   // Snapshot the source before awaiting the worker so a later selection cannot change validation.
@@ -83,6 +93,7 @@ export async function runStudyTutor({
   if (!availability.available) throw new Error(availability.reason);
   running = true;
   try {
+    const startedAt = performance.now();
     let worker: Worker;
     try {
       worker = new Worker(new URL('./personalImportAi.worker.ts', import.meta.url), { type: 'module' });
@@ -93,6 +104,7 @@ export async function runStudyTutor({
       const id = ++sequence;
       let settled = false;
       let generating = false;
+      let generationStartedAt: number | null = null;
       const finish = (error?: Error, explanation?: TutorExplanation) => {
         if (settled) return;
         settled = true;
@@ -102,6 +114,17 @@ export async function runStudyTutor({
         worker.onerror = null;
         worker.onmessageerror = null;
         worker.terminate();
+        const endedAt = performance.now();
+        try {
+          onTiming?.({
+            preparationMs: Math.max(0, (generationStartedAt ?? endedAt) - startedAt),
+            generationMs: generationStartedAt === null ? null : Math.max(0, endedAt - generationStartedAt),
+            totalMs: Math.max(0, endedAt - startedAt),
+            outcome: error?.name === 'AbortError' ? 'cancelled' : error ? 'failed' : 'success',
+          });
+        } catch {
+          // A timing display failure must not replace the worker result.
+        }
         if (error) reject(error);
         else resolve(explanation!);
       };
@@ -126,6 +149,7 @@ export async function runStudyTutor({
         if (data.type === 'progress') {
           if (data.phase === 'generating' && !generating) {
             generating = true;
+            generationStartedAt = performance.now();
             clearTimeout(timer);
             timer = setTimeout(
               () => finish(new Error('這段講解逾時，工作已停止。可縮短問題後重試。')),

@@ -8,7 +8,7 @@ import {
   type StudyMode,
   type StudyPassage,
 } from '@/lib/studyTutor';
-import { getStudyTutorAvailability, runStudyTutor } from '@/lib/studyTutorRuntime';
+import { getStudyTutorAvailability, runStudyTutor, type StudyTutorTiming } from '@/lib/studyTutorRuntime';
 import {
   appendStudyLesson,
   studyLessonHistory,
@@ -35,6 +35,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [speaking, setSpeaking] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
+  const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
   const current = useRef<AbortController | null>(null);
   const passageHeading = useRef<HTMLHeadingElement>(null);
@@ -86,6 +87,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
     const question = modeMemory.question.trim();
     setBusy(true);
     setError('');
+    setTiming(null);
     setProgress('正在準備這一段的講解…');
     try {
       // Following an older lesson starts a branch from that point, never from a later answer.
@@ -95,6 +97,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         signal: controller.signal,
         onProgress: (message) => {
           if (current.current === controller && !controller.signal.aborted) setProgress(message);
+        },
+        onTiming: (measurement) => {
+          if (current.current === controller) setTiming(measurement);
         },
       });
       if (current.current !== controller || controller.signal.aborted) return;
@@ -155,6 +160,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
               setStepSelection(null);
               onChange((previous) => updateStudyMode(previous, mode, (state) => ({ ...state, selectedLessonId })));
               setError('');
+              setTiming(null);
               setProgress('');
             }}>
               {modeMemory.lessons.map((lesson) => <option value={lesson.id} key={lesson.id}>
@@ -185,6 +191,12 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         <p className={styles.note}>語音輸入由瀏覽器提供，可能使用線上辨識服務；轉成文字後，由你決定是否送出。</p>
         {speaking && <p className={styles.note}>停止朗讀後，就能用語音提問。</p>}
         <p className={styles.status} role="status" aria-live="polite">{progress}</p>
+        {timing && <p className={styles.note}>
+          本次裝置端講解{timing.outcome === 'success' ? '完成' : timing.outcome === 'cancelled' ? '已停止' : '未完成'}：
+          準備 {Math.round(timing.preparationMs)} 毫秒，
+          {timing.generationMs === null ? '尚未收到生成階段訊號' : `生成 ${Math.round(timing.generationMs)} 毫秒`}，
+          合計 {Math.round(timing.totalMs)} 毫秒。僅為本次瀏覽器量測，不能據此認定冷啟、暖啟或回答正確。
+        </p>}
         {error && <p className={styles.error} role="alert">{error}</p>}
         {selected && result && <section className={styles.explanation} aria-label="本段 AI 講解">
           <h4>{result.title}</h4>
