@@ -246,7 +246,10 @@ function StorefrontMenu({ menus, shop }: { menus: MenuItem[]; shop: CatalogCafet
   return (
     <section id="shop-menu" className={styles.menuPanel} aria-labelledby="shop-menu-title">
       <header className={styles.menuHeader}>
-        <h2 id="shop-menu-title">菜單</h2>
+        <div>
+          <p className={styles.menuShopName}>{shop.name}</p>
+          <h2 id="shop-menu-title">菜單</h2>
+        </div>
         <span>{menus.length} 道餐點</span>
       </header>
       {menus.length ? (
@@ -284,58 +287,60 @@ function StorefrontMenu({ menus, shop }: { menus: MenuItem[]; shop: CatalogCafet
           <p className={styles.resultCount} role="status" aria-live="polite">
             {needle || category ? `找到 ${filtered.length} 道餐點` : '價格與供應依店家現場為準'}
           </p>
-          {filtered.length ? (
-            groups.map((group) => (
-              <section key={group.name} className={styles.menuGroup} aria-label={group.name}>
-                <h3>
-                  {group.name}
-                  <span>{group.items.length}</span>
-                </h3>
-                <ul className={styles.menuList}>
-                  {group.items.map((item) => (
-                    <li key={item.id} className={styles.menuItem}>
-                      <div className={styles.itemBody}>
-                        <div className={styles.itemHeading}>
-                          <h4>{item.name}</h4>
-                          {showAvailability && (item.soldOut || item.available === false) ? (
-                            <span className={styles.unavailable}>
-                              {item.soldOut ? '已售完' : '暫停供應'}
-                            </span>
+          <div key={category} className={styles.menuPages} data-testid="storefront-menu-page">
+            {filtered.length ? (
+              groups.map((group) => (
+                <section key={group.name} className={styles.menuGroup} aria-label={group.name}>
+                  <h3>
+                    {group.name}
+                    <span>{group.items.length}</span>
+                  </h3>
+                  <ul className={styles.menuList}>
+                    {group.items.map((item) => (
+                      <li key={item.id} className={styles.menuItem}>
+                        <div className={styles.itemBody}>
+                          <div className={styles.itemHeading}>
+                            <h4>{item.name}</h4>
+                            {showAvailability && (item.soldOut || item.available === false) ? (
+                              <span className={styles.unavailable}>
+                                {item.soldOut ? '已售完' : '暫停供應'}
+                              </span>
+                            ) : null}
+                          </div>
+                          {item.description ? <p>{item.description}</p> : null}
+                          {item.tags?.length ? (
+                            <span className={styles.tags}>{item.tags.join(' · ')}</span>
                           ) : null}
                         </div>
-                        {item.description ? <p>{item.description}</p> : null}
-                        {item.tags?.length ? (
-                          <span className={styles.tags}>{item.tags.join(' · ')}</span>
-                        ) : null}
-                      </div>
-                      <span className={styles.price}>
-                        {typeof item.price === 'number' &&
-                        Number.isFinite(item.price) &&
-                        item.price >= 0
-                          ? `NT$${item.price.toLocaleString('zh-TW')}`
-                          : '價格洽店家'}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))
-          ) : (
-            <div className={styles.empty}>
-              <h3>沒有符合的餐點</h3>
-              <p>換個關鍵字，或查看這間店的全部菜單。</p>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setQuery('');
-                  setCategory('');
-                }}
-              >
-                清除篩選
-              </button>
-            </div>
-          )}
+                        <span className={styles.price}>
+                          {typeof item.price === 'number' &&
+                          Number.isFinite(item.price) &&
+                          item.price >= 0
+                            ? `NT$${item.price.toLocaleString('zh-TW')}`
+                            : '價格洽店家'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))
+            ) : (
+              <div className={styles.empty}>
+                <h3>沒有符合的餐點</h3>
+                <p>換個關鍵字，或查看這間店的全部菜單。</p>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setQuery('');
+                    setCategory('');
+                  }}
+                >
+                  清除篩選
+                </button>
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <div className={styles.emptyMenu}>

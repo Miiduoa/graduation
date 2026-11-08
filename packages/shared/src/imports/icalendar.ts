@@ -51,9 +51,8 @@ export function parsePersonalImportCalendar(
       severity: 'error',
       message: '行事曆檔案缺少完整的開頭或結尾，請重新匯出。',
     });
-  const calendarTimezone = lines
-    .map((line) => property(line.text))
-    .find((item) => item?.name === 'X-WR-TIMEZONE')?.value;
+  let calendarTimezone: string | undefined;
+  let taipeiFormatter: Intl.DateTimeFormat | undefined;
   let current: PersonalImportRow | undefined;
   let properties: CalendarProperty[] = [];
   let nested = 0;
@@ -104,7 +103,7 @@ export function parsePersonalImportCalendar(
     if (match[7] || ['UTC', 'Etc/UTC', 'GMT', 'Etc/GMT'].includes(timezone ?? '')) {
       const instant = new Date(`${isoDate}T${clock}:00.000Z`);
       // Use the named zone rather than the device timezone (including its historical rules).
-      const parts = new Intl.DateTimeFormat('en-CA', {
+      taipeiFormatter ??= new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Asia/Taipei',
         year: 'numeric',
         month: '2-digit',
@@ -112,7 +111,8 @@ export function parsePersonalImportCalendar(
         hour: '2-digit',
         minute: '2-digit',
         hourCycle: 'h23',
-      }).formatToParts(instant);
+      });
+      const parts = taipeiFormatter.formatToParts(instant);
       const part = (type: string) => parts.find((value) => value.type === type)?.value ?? '';
       current[dateField] = `${part('year')}-${part('month')}-${part('day')}`;
       current[timeField] = `${part('hour')}:${part('minute')}`;
@@ -173,9 +173,13 @@ export function parsePersonalImportCalendar(
     current = undefined;
     properties = [];
   };
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const upper = line.text.toUpperCase();
-    if (upper === 'BEGIN:VEVENT') {
+    if (!current && upper === 'BEGIN:VCALENDAR') {
+      calendarTimezone = readCalendarTimezone(lines, index);
+    } else if (!current && upper === 'END:VCALENDAR') {
+      calendarTimezone = undefined;
+    } else if (upper === 'BEGIN:VEVENT') {
       if (current) {
         addIssue('malformed-calendar', '行事曆活動沒有正常結束，請重新匯出檔案。');
         finish();
@@ -218,4 +222,15 @@ export function parsePersonalImportCalendar(
     finish();
   }
   return { rows, issues };
+}
+
+function readCalendarTimezone(lines: readonly { text: string }[], beginIndex: number): string | undefined {
+  let depth = 0;
+  for (let index = beginIndex + 1; index < lines.length; index++) {
+    const { text } = lines[index];
+    if (/^(?:BEGIN|END):VCALENDAR$/i.test(text)) break;
+    if (/^BEGIN:/i.test(text)) depth++;
+    else if (/^END:/i.test(text)) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /^X-WR-TIMEZONE[;:]/i.test(text)) return property(text)?.value;
+  }
 }

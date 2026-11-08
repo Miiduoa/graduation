@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
+const { isAuthorizationFailure } = require('../authorizationFailure');
 const {
   computeSpriteState,
 } = require('../../generated/shared/companion/spriteEngine');
@@ -37,7 +38,10 @@ async function execute(ctx, rawInput) {
     .where('dateMs', '>=', sinceMs)
     .orderBy('dateMs', 'asc')
     .get()
-    .catch(() => null);
+    .catch((error) => {
+      if (isAuthorizationFailure(error)) throw error;
+      return null;
+    });
 
   const signals = signalsSnap
     ? signalsSnap.docs.map((d) => {
@@ -61,7 +65,10 @@ async function execute(ctx, rawInput) {
     : [];
 
   // 2) profile
-  const userSnap = await db.collection('users').doc(ctx.uid).get().catch(() => null);
+  const userSnap = await db.collection('users').doc(ctx.uid).get().catch((error) => {
+    if (isAuthorizationFailure(error)) throw error;
+    return null;
+  });
   const userData = userSnap?.data() ?? {};
   const profile = {
     createdAt: userData.createdAt?.toDate?.()?.toISOString?.() ?? new Date().toISOString(),
@@ -88,7 +95,10 @@ async function execute(ctx, rawInput) {
     .collection('gardenCache')
     .doc('current')
     .get()
-    .catch(() => null);
+    .catch((error) => {
+      if (isAuthorizationFailure(error)) throw error;
+      return null;
+    });
   const courseSignals = gardenCacheSnap?.exists ? gardenCacheSnap.data().courses ?? [] : [];
   const garden = computeGarden(courseSignals);
 
