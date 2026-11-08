@@ -89,9 +89,17 @@ export function CampusServiceMenu() {
   const menu = useRef<HTMLDetailsElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
+  const skipToggleSideEffects = useRef(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const id = useId();
+  function assignMenuOpen(open: boolean) {
+    const element = menu.current;
+    if (!element || element.open === open) return;
+    skipToggleSideEffects.current = true;
+    element.open = open;
+    skipToggleSideEffects.current = false;
+  }
   useLayoutEffect(() => {
     const snapshot = restoreDirectorySearch('menu', pathname || '/');
     if (!snapshot) return;
@@ -99,7 +107,16 @@ export function CampusServiceMenu() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setQuery(snapshot.query.slice(0, 100));
     setCategory(snapshot.category);
-    if (snapshot.open && menu.current) menu.current.open = true;
+    if (!snapshot.open) return;
+    const previouslyFocused = document.activeElement;
+    assignMenuOpen(true);
+    if (
+      previouslyFocused instanceof HTMLElement &&
+      previouslyFocused !== document.activeElement &&
+      previouslyFocused.isConnected
+    ) {
+      previouslyFocused.focus({ preventScroll: true });
+    }
   }, [pathname]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
@@ -144,7 +161,7 @@ export function CampusServiceMenu() {
   writeCampusServiceFilters(directoryParams, query, category);
   function closeMenu() {
     if (!menu.current?.open) return;
-    menu.current.open = false;
+    assignMenuOpen(false);
     setQuery('');
     setCategory('all');
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
@@ -164,6 +181,7 @@ export function CampusServiceMenu() {
     closeMenu();
   }
   function resetSearch() {
+    forgetDirectorySearch('menu');
     setQuery('');
     setCategory('all');
     search.current?.focus({ preventScroll: true });
@@ -175,7 +193,9 @@ export function CampusServiceMenu() {
       className={styles.menu}
       key={pathname}
       onToggle={(event) => {
+        if (skipToggleSideEffects.current) return;
         if (!event.currentTarget.open) {
+          if (event.currentTarget.isConnected) forgetDirectorySearch('menu');
           setQuery('');
           setCategory('all');
         }
@@ -202,6 +222,9 @@ export function CampusServiceMenu() {
         aria-controls={`${id}-services`}
         aria-keyshortcuts="Control+k Meta+k"
         aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
+        onClick={() => {
+          if (menu.current?.open) forgetDirectorySearch('menu');
+        }}
       >
         <CampusIcon name="services" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">

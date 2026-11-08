@@ -119,6 +119,29 @@ it('keeps the quick-entry query after returning from a matched service', () => {
   expect(screen.getByRole('link', { name: /圖書館/ })).toBeTruthy();
 });
 
+it('does not restore the quick-entry query after starting over', () => {
+  const view = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  view.unmount();
+  window.history.replaceState({}, '', '/');
+  const home = render(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  fireEvent.click(screen.getByRole('button', { name: '重新輸入' }));
+  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
+    '',
+  );
+  home.unmount();
+  render(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
+    '',
+  );
+});
+
 it('offers semester grades and their preview when the model returns the shared grades destination', async () => {
   vi.mocked(interpretCampusRequest).mockResolvedValue({
     status: 'understood', source: 'model', summary: '查詢學期成績',

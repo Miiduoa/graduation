@@ -6,7 +6,11 @@ import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useAuth } from './AuthGuard';
-import { rememberDirectorySearch, restoreDirectorySearch } from '@/lib/campusDirectorySearch';
+import {
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+} from '@/lib/campusDirectorySearch';
 import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigation';
 import { useOptionalSelectedSchool } from './SelectedSchoolProvider';
 import { VoiceDictationButton } from './VoiceDictationButton';
@@ -211,7 +215,15 @@ export function QuickCampusEntry() {
             <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
               詢問校園助理
             </Link>
-            <button type="button" onClick={() => updateQuery('')}>重新輸入</button>
+            <button
+              type="button"
+              onClick={() => {
+                forgetDirectorySearch('quick');
+                updateQuery('');
+              }}
+            >
+              重新輸入
+            </button>
           </div>
         </div>
       )}

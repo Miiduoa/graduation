@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import {
   DIRECTORY_SEARCH_STORAGE_KEY,
   forgetDirectorySearch,
@@ -9,6 +9,7 @@ import {
 
 afterEach(() => {
   sessionStorage.clear();
+  vi.restoreAllMocks();
 });
 
 it('keeps only in-site paths', () => {
@@ -72,4 +73,28 @@ it('does not store an off-site destination and forgets a source independently', 
   expect(restoreDirectorySearch('search', '/search')?.query).toBe('借書');
   forgetDirectorySearch('search');
   expect(restoreDirectorySearch('search', '/search')).toBeNull();
+});
+
+it('does not throw when sessionStorage rejects reads and writes', () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('quota');
+  });
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  expect(() =>
+    rememberDirectorySearch('menu', {
+      path: '/map',
+      destination: '/library',
+      query: '借書',
+      category: 'campus',
+      open: true,
+    }),
+  ).not.toThrow();
+  expect(() => restoreDirectorySearch('menu', '/map')).not.toThrow();
+  expect(restoreDirectorySearch('menu', '/map')).toBeNull();
+  expect(() => forgetDirectorySearch('menu')).not.toThrow();
 });
