@@ -110,7 +110,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const hasNotes = Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
   // Question drafts are not part of hasNotes, but closing must protect them too.
-  const hasWorkToKeep = !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
+  const hasWorkToKeep = paste.length > 0 || !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) =>
       value.question.trim() || value.lessons.length));
   const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
@@ -416,6 +416,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       {confirmClose && <section className={styles.closeWarning} aria-labelledby={closeHeadingId}>
         <h4 id={closeHeadingId} ref={closeHeading} tabIndex={-1}>要關閉讀書白板嗎？</h4>
         <p className={styles.note}>關閉會清除目前分頁的筆記、未送出問題與逐題練習。若要下次繼續，請先取消關閉並儲存閱讀或練習進度；下載檔案不會自動上傳。</p>
+        {paste.length > 0 && <p className={styles.note}>尚未加入白板的貼上文字不包含在閱讀或練習進度備份中。若要保留，請先取消關閉並複製貼上文字；也可以先將它加入白板再另存進度，但加入新教材會取代目前的閱讀內容。</p>}
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`}
             onClick={() => { setConfirmClose(false); closeButton.current?.focus(); }}>繼續讀書</button>

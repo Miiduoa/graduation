@@ -59,6 +59,37 @@ it('closes an untouched board without an unnecessary confirmation', () => {
   expect(screen.queryByRole('heading', { name: '要關閉讀書白板嗎？' })).toBeNull();
 });
 
+it('protects a not-yet-imported pasted draft from mobile close and explains backup limits', () => {
+  const onClose = vi.fn();
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={onClose} />);
+  const pasted = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(pasted, { target: { value: '還沒按開始讀的講義草稿，不該因誤觸關閉消失。' } });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '要關閉讀書白板嗎？' }));
+  expect(screen.getByText(/尚未加入白板的貼上文字不包含在閱讀或練習進度備份中/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect(pasted.value).toBe('還沒按開始讀的講義草稿，不該因誤觸關閉消失。');
+  expect(onClose).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+  fireEvent.change(pasted, { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('also guards pasted text on top of an existing course material without silently saving it', () => {
+  const onClose = vi.fn();
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);
+  const pasted = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(pasted, { target: { value: '這段還沒有正式換成新的教材。' } });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByText(/加入新教材會取代目前的閱讀內容/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect(pasted.value).toBe('這段還沒有正式換成新的教材。');
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('protects unsent question drafts and notes from accidental close, with a keyboard focus return', () => {
   const onClose = vi.fn();
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);
