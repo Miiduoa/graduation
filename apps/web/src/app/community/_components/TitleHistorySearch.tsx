@@ -143,9 +143,16 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
 
 
   async function openResult(id: string) {
-    if (opening.current || inFlight.current || !searched) return;
-    // The search snapshot is historical; opening requires a new server authorization.
+    if (opening.current || !searched) return;
+    // An older result remains usable while the next page loads. Cancel only the
+    // pending delivery; the last confirmed cursor stays available for retry.
     const request = ++version.current;
+    if (inFlight.current) {
+      inFlight.current = false;
+      setBusy(false);
+      focusAfter.current = null;
+    }
+    // The search snapshot is historical; opening requires a new server authorization.
     opening.current = true;
     setOpeningId(id);
     setFailure(null);
@@ -242,7 +249,8 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
             ))}
           </ol>
           {page.hasMore && <button ref={more} type="button" className={styles.more}
-            aria-disabled={busy} aria-busy={busy} onClick={() => void search(true)}>
+            aria-disabled={busy || Boolean(openingId)} aria-busy={busy || Boolean(openingId)}
+            onClick={() => void search(true)}>
             {busy ? '正在搜尋下一頁…' : failure?.kind === 'more' ? '重試下一頁' : '載入更多符合的標題'}
           </button>}
         </>
