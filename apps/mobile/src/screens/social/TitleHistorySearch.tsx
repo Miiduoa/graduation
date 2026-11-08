@@ -34,7 +34,14 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
   const [open, setOpen] = useState(false);
   const live = useRef(true);
   const modalActive = useRef(false);
-  const dismiss = () => { modalActive.current = false; setOpen(false); };
+  // Keep only the student's typed query while the detail is on top.
+  // Never retain private results or Firestore cursors across navigation.
+  const resumeQuery = useRef('');
+  const dismiss = () => {
+    modalActive.current = false;
+    resumeQuery.current = '';
+    setOpen(false);
+  };
   useLayoutEffect(() => {
     live.current = true;
     return () => { live.current = false; };
@@ -49,27 +56,37 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
       </Pressable>
       {open && (
         <Modal visible presentationStyle="fullScreen" animationType="none" onRequestClose={dismiss}>
-          <TitleHistorySearch schoolId={schoolId} onClose={dismiss} onOpenPost={(post) => {
-            if (!live.current || !modalActive.current || post.schoolId !== schoolId) return;
-            dismiss();
-            onOpenPost(post);
-          }} />
+          <TitleHistorySearch
+            schoolId={schoolId}
+            initialQuery={resumeQuery.current}
+            onRememberQuery={(query) => { if (modalActive.current) resumeQuery.current = query; }}
+            onClose={dismiss}
+            onOpenPost={(post) => {
+              if (!live.current || !modalActive.current || post.schoolId !== schoolId) return;
+              modalActive.current = false;
+              setOpen(false);
+              onOpenPost(post);
+            }}
+          />
         </Modal>
       )}
     </View>
   );
 }
 
-export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
+export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery = '', onRememberQuery }: {
   schoolId: string;
   onClose: () => void;
   onOpenPost: OpenPost;
+  initialQuery?: string;
+  onRememberQuery?: (query: string) => void;
 }) {
   // The launcher remounts this panel when account/school changes or it is reopened.
   const styles = useThemeStyleSheet(createStyles);
   const insets = useSafeAreaInsets();
   const input = useRef<TextInput>(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialQuery);
+  const [resumeHint, setResumeHint] = useState(Boolean(initialQuery));
   const [posts, setPosts] = useState<TitleSearchPost[]>([]);
   const [busy, setBusy] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -92,6 +109,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
     inFlight.current = false;
     openingPost.current = false;
     setOpening(false);
+    setResumeHint(false);
     cursor.current = null;
     retry.current = null;
     setText(value); setPosts([]); setHasMore(false); setBusy(false); setError(''); setNotice('');
@@ -111,6 +129,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
       return;
     }
     const attempt = ++version.current;
+    setResumeHint(false);
     inFlight.current = true;
     retry.current = null;
     setBusy(true); setError(''); setNotice('');
@@ -167,6 +186,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
         return;
       }
       navigated = true;
+      onRememberQuery?.(text);
       onOpenPost({ id: item.id, schoolId });
     } catch (cause) {
       if (!live.current || attempt !== version.current) return;
@@ -198,6 +218,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost }: {
         </View>
         <View style={styles.controls}>
           <Text style={styles.muted}>搜尋本校歷史文章的標題開頭，英文區分大小寫；不搜尋內文。</Text>
+          {resumeHint && <Text accessibilityLiveRegion="polite" style={styles.message}>已保留上次的搜尋文字；請重新搜尋以確認最新結果與校籍權限。</Text>}
           <Text style={styles.label}>記得的標題開頭</Text>
           <TextInput ref={input} value={text} onChangeText={change} style={styles.input}
             accessibilityLabel="記得的標題開頭" placeholder="例如：二手書" placeholderTextColor={theme.colors.textSecondary}
