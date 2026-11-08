@@ -323,3 +323,12 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 另一項可重現的 Firestore 輸入邊界：`campusStories` 的 create 原先只驗作者、同校與到期，允許有效同校帳號注入任意新欄位、偽造初始 `viewCount`，或在 1 MiB Firestore 文件上限內使用極長 `text` 造成資料量放大。新規則以固定欄位白名單、`kind` 列舉、初始觀看數必須為零、文字字串型別與上限 2,000 字元封閉此範圍，保留原有手機發布欄位、有效期限與正常閱讀。新 Firebase emulator 回歸測試涵蓋合法發文、偽造觀看數、陌生欄位、超長文字、非法媒體種類與跨校發布。舊規則會錯誤放行前三種非法資料；**本輪先記錄修補與可重跑測試，待精確新 head 的 Rules CI 驗證後才能標為隔離測試通過。**
 
 尚未解決的發布風險包括已發 Firebase/GCS 與 Supabase URL 撤權、隔離真 GCS bucket CAS、legacy 帳號、限動索引／手機／Rules 分階段推出、minimatch 的 pnpm 與 Functions 兩圖，以及指定 `nuni-merge-gate` App 5504170 對精確 head 的審查通過。本輪不重新發送未獲授權的 npm/pnpm audit payload，未碰觸正式資料、金鑰、token、migration、部署或 main 合併。
+
+
+## 2026-11-09：私有檔案入口的群組根目錄讀取範圍修補
+
+原 `parsePrivateGroupFilePath()` 為歷史下載 token 清理涵蓋所有 `groups/{groupId}/{filename}` 三段式物件；HTTP `privateGroupFile` 入口卻直接將這類路徑視為群組封面。寫入僅允許 `cover.<副檔名>`，但 **GET 沒有相同檔名限制**。因此合法群組成員只要知道非封面物件名稱，便可透過群組封面入口嘗試下載 `groups/{groupId}/roster.pdf` 等不屬於封面的根目錄檔案。這是 URL namespace 的授權範圍問題，不能以群組成員身分已通過驗證取代物件類型限制。
+
+最小修補是在 HTTP 入口解析路徑後、查詢授權與建立 bucket 物件前，對 group-cover 統一強制 `^cover\\.[A-Za-z0-9]+$`；有效封面的 GET/POST 流程不變。**保留既有 parser 的廣泛辨識供歷史 token 清理**，避免因此遺漏非封面、但曾誤暴露在相同 namespace 的舊物件。新增合成物件 `roster.pdf`、`private-notes.txt`、`cover.jpg.backup` 的 GET/POST 負向回歸，要求全部在操作 Storage 前返回 400；原既有測試已涵蓋正常封面、跨帳號與校籍撤銷。
+
+驗證界線：此提交只涵蓋應用程式 HTTP 入口的路徑授權，不證明既有 bearer 下載 URL 已失效；GCS 真實 staging、Firebase bearer token 全版本清理、Supabase 已簽 URL、legacy 帳號與限動索引/手機/規則分階段發布仍需獨立處理。新精確 head 的 Functions、Rules、完整 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 須依實際 GitHub 結果核對。未合併 main、部署、執行 migration、清除正式 token 或重送未核准的 npm/pnpm audit。

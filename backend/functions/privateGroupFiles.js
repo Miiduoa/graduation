@@ -153,7 +153,9 @@ function createPrivateGroupFileHandler({
       const user = await verifyRequestFirebaseUser(req, (token) => verify(token, true));
       if (!validSegment(user.uid)) throw failure(401, 'Invalid Firebase ID token');
       const scope = parsePrivateGroupFilePath(req.query?.path);
-      if (!scope) throw failure(400, 'Invalid private file path');
+      if (!scope || (scope.kind === 'group-cover' && !/^cover\.[A-Za-z0-9]+$/.test(scope.filename))) {
+        throw failure(400, 'Invalid private file path');
+      }
       const writing = req.method === 'POST';
       await authorize(db, scope, user.uid, writing);
       if (writing) {
@@ -196,7 +198,7 @@ function createPrivateGroupFileHandler({
 
       const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
       const image = /^image\/[\w.+-]+$/.test(contentType);
-      if ((scope.kind === 'group-cover' && (!/^cover\.[A-Za-z0-9]+$/.test(scope.filename) || !image))
+      if ((scope.kind === 'group-cover' && !image)
         || (!image && !DOCUMENT_TYPES.has(contentType))) {
         throw failure(400, 'Unsupported file type or filename');
       }

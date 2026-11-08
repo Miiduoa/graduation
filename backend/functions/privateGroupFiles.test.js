@@ -258,6 +258,26 @@ describe('private group file HTTP handler', () => {
     expect((await invoke({ path: missing })).status).toBe(404);
   });
 
+  test.each([
+    'groups/course/roster.pdf',
+    'groups/course/private-notes.txt',
+    'groups/course/cover.jpg.backup',
+  ])('does not expose unrelated group-root objects through the cover gateway: %s', async (path) => {
+    // Keep broad namespace parsing for the separate legacy token migration,
+    // but only actual cover filenames may be served by this HTTP endpoint.
+    expect(parsePrivateGroupFilePath(path)?.kind).toBe('group-cover');
+    put(path, 'synthetic confidential bytes');
+    for (const method of ['GET', 'POST']) {
+      expect(await invoke({ path, method })).toMatchObject({
+        status: 400,
+        body: JSON.stringify({ error: 'Invalid private file path' }),
+      });
+    }
+    expect(bucket.file).not.toHaveBeenCalled();
+    expect(reads).toHaveLength(0);
+    expect(saves).toHaveLength(0);
+  });
+
   test('rejects unsupported methods, MIME types and cover filenames', async () => {
     expect((await invoke({ method: 'DELETE' })).status).toBe(405);
     expect((await invoke({ method: 'POST', headers: { 'content-type': 'text/html' } })).status).toBe(400);
