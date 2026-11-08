@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const { readAssistantPois, matchPois } = require('../../lib/assistantPois');
+const { isAuthorizationFailure } = require('../authorizationFailure');
 
 const inputSchema = z.object({
   query: z.string().min(1).max(80),
@@ -56,6 +57,7 @@ async function execute(ctx, rawInput) {
       })),
     };
   } catch (e) {
+    if (isAuthorizationFailure(e)) throw e;
     return {
       success: false,
       errorCode: e?.name === 'ZodError' ? 'invalid_input' : 'search_failed',

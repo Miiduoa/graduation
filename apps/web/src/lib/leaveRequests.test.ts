@@ -86,6 +86,7 @@ describe('leave mutation errors', () => {
   });
 
   it('mentions the network only for network-layer failures', () => {
-    expect(leaveRequestError(new TypeError('Failed to fetch'))).toBe(LEAVE_COPY.network);
+    expect(leaveRequestError(new TypeError('Failed to fetch'))).toContain('連線中斷，尚未確認這次操作');
+    expect(leaveRequestError({ code: 'functions/deadline-exceeded' })).toContain('請先更新請假紀錄');
   });
 });
