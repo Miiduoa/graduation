@@ -789,9 +789,11 @@ async def main():
                 )
                 await shot.goto(BASE + '/admin/school-review', wait_until='load')
                 if operator:
-                    await expect(shot.get_by_role('heading', name='接入審核')).to_be_visible()
+                    await expect(shot.get_by_role('heading', name='學校接入申請', exact=True)).to_be_visible()
                 else:
-                    await expect(shot.get_by_text('這台帳號不是平台營運人員', exact=False)).to_be_visible()
+                    # Both legacy admin URLs now use the unified AdminWorkspace gate.
+                    await expect(shot.get_by_role('heading', name='沒有管理權限')).to_be_visible()
+                    await expect(shot.get_by_text('目前帳號無法查看或修改平台管理資料。這與學校管理員身分不同。', exact=True)).to_be_visible()
                 await shot.screenshot(
                     path=str(OUT / f'school-review-{name}.png'),
                     full_page=True,
@@ -799,7 +801,7 @@ async def main():
                 )
                 await shot.goto(BASE + '/admin/ops', wait_until='load')
                 if operator:
-                    await expect(shot.get_by_role('heading', name='完整管理台')).to_be_visible()
+                    await expect(shot.get_by_role('heading', name='工作總覽', exact=True)).to_be_visible()
                 else:
                     await expect(shot.get_by_role('heading', name='沒有管理權限')).to_be_visible()
                 await shot.screenshot(

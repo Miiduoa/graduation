@@ -213,6 +213,11 @@ function makeMissingInfo(
   };
 }
 
+const ACADEMIC_SNAPSHOT_TOOLS = new Set([
+  'grade_predict_what_if', 'study_plan_today', 'urgent_notifications',
+  'ai_full_context', 'ai_data_inventory',
+]);
+
 function isExplicitAcademicDemo(ctx: ToolExecutionContext): boolean {
   if (!isDevelopmentDemoSession(ctx.userId)) return false;
   const persona = ctx.userId ? getDemoUserStory(ctx.userId) : null;
@@ -2578,7 +2583,9 @@ export async function executeToolStandard(
     typeof ctx.userId === 'string' &&
     ctx.userId.startsWith('demo_') &&
     (roleName === 'alumni' || roleName === 'guest');
-  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride) {
+  const demoAcademicRoleOverride = ACADEMIC_SNAPSHOT_TOOLS.has(spec.name) &&
+    roleName === 'guest' && ctx.userId === 'demo_guest' && isExplicitAcademicDemo(ctx);
+  if (!spec.allowedRoles.includes(role) && !demoDiningRoleOverride && !demoAcademicRoleOverride) {
     return makeFailure(
       spec.name,
       'role_denied',

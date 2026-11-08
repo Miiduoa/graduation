@@ -325,6 +325,29 @@ test('the explicit demo guest retains the existing empty course permissions', as
   expect(result).toMatchObject({ success: true, data: { source: 'demo', courses: [] } });
   expect(result.summary).toContain('示範資料');
   expect(source.listCourseSpaces).not.toHaveBeenCalled();
+  expect(source.listInboxTasks).not.toHaveBeenCalled();
+  expect(source.getCourseGradebook).not.toHaveBeenCalled();
+  expect(getDataSource).not.toHaveBeenCalled();
+  expect(buildFullAIContext).not.toHaveBeenCalled();
+  expect(buildWideAISnapshot).not.toHaveBeenCalled();
+  expect(AsyncStorage.getAllKeys).not.toHaveBeenCalled();
+});
+
+test.each([
+  { userId: 'guest', schoolId: 'pu', demo: true },
+  { userId: 'demo_unknown', schoolId: 'pu', demo: true },
+  { userId: 'demo_student_kuchih', schoolId: 'pu', demo: true },
+  { userId: 'demo_guest', schoolId: 'nthu', demo: true },
+  { userId: 'demo_guest', schoolId: 'pu', demo: false },
+])('denies academic tools to a guest outside the explicit demo guest scope: %j', async ({ demo, ...identity }) => {
+  jest.mocked(isDevelopmentDemoSession).mockReturnValue(demo);
+  for (const tool of tools) {
+    expect(await executeToolStandard(tool, { courseId: '71378' }, {
+      ...identity, role: 'guest' as ToolExecutionContext['role'],
+    })).toMatchObject({ success: false, errorCode: 'role_denied' });
+  }
+  expect(getDataSource).not.toHaveBeenCalled();
+  expect(getDemoCoursesForUid).not.toHaveBeenCalled();
 });
 
 test.each([
