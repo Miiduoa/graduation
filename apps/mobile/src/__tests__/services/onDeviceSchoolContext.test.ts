@@ -7,6 +7,7 @@ import {
 import { classMeetingKey, type ClassException, type PersonalImportRecord } from '@campus/shared';
 import { loadPersonalImports } from '../../services/personalImports';
 import { loadOfflinePersonalTimetable, type StoredTimetable } from '../../services/personalTimetable';
+import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 jest.mock('../../services/personalTimetable', () => ({
   ...jest.requireActual('../../services/personalTimetable'),
@@ -51,10 +52,12 @@ test('only reads the selected account and campus copy, never a demo schedule', a
     updatedAt: '2026-10-25T09:00:00.000Z',
     courses: [{ name: '資料庫概論', day: 1, start: 2, end: 3 }],
   });
-  const prompt = formatOnDeviceSchoolPrompt(result);
+  const prompt = formatOnDeviceSchoolPrompt(result, null, 'alice');
   expect(prompt).toContain('資料庫概論');
   expect(prompt).toContain('不能冒充鐘點或官方');
   expect(prompt).toContain('不是本次即時查詢');
+  expect(formatOnDeviceSchoolPrompt(result, null, 'bob')).not.toContain('資料庫概論');
+  expect(formatOnDeviceSchoolPrompt(result, null, '')).not.toContain('資料庫概論');
 });
 
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
@@ -63,7 +66,7 @@ test('missing or invalid cached data does not become a fabricated timetable', as
   expect(result.timetable).toEqual({
     source: 'not-available', updatedAt: null, courses: [],
   });
-  expect(formatOnDeviceSchoolPrompt(result)).toContain('無法回答正式課程安排');
+  expect(formatOnDeviceSchoolPrompt(result, null, 'alice')).toContain('無法回答正式課程安排');
 });
 
 test('keeps the complete saved course set for offline tools, while limiting model context', async () => {
@@ -79,11 +82,41 @@ test('keeps the complete saved course set for offline tools, while limiting mode
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
   expect(result.timetable.courses).toHaveLength(12);
   expect(result.timetable.courses[11].name).toBe('測試課程12');
-  const prompt = formatOnDeviceSchoolPrompt(result);
+  const prompt = formatOnDeviceSchoolPrompt(result, null, 'alice');
   expect(prompt).toContain('測試課程8');
   expect(prompt).not.toContain('測試課程12');
   expect(prompt).toContain('尚有 4 門未列出');
   expect(prompt).toContain('不可據此判定某天沒課');
+});
+
+test('only includes an authorized and fresh campus snapshot for its original account', async () => {
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const saved: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 專屬作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const containsPrivateTitle = (value: CampusSenseSnapshot, owner = local) =>
+    formatOnDeviceSchoolPrompt(owner, value, 'alice').includes('Alice 專屬作業');
+
+  expect(local.ownerUid).toBe('alice');
+  expect(containsPrivateTitle(saved)).toBe(true);
+  expect(formatOnDeviceSchoolPrompt(local, saved, 'bob')).not.toContain('Alice 專屬作業');
+  expect(containsPrivateTitle({ ...saved, userId: 'bob' })).toBe(false);
+  expect(containsPrivateTitle({ ...saved, schoolId: 'ncku' })).toBe(false);
+  expect(containsPrivateTitle({
+    ...saved, checkedAt: new Date(Date.now() - 16 * 60_000).toISOString(),
+  })).toBe(false);
+  expect(containsPrivateTitle({
+    ...saved, checkedAt: new Date(Date.now() + 31_000).toISOString(),
+  })).toBe(false);
+  expect(containsPrivateTitle(saved, { ...local, ownerUid: undefined })).toBe(false);
+  expect(formatOnDeviceSchoolPrompt(local, { ...saved, userId: 'bob' }, 'alice'))
+    .toContain('此回合沒有主動同步且有效的校園資料');
 });
 
 describe('class lookups from saved timetables and imports', () => {
@@ -111,6 +144,31 @@ describe('class lookups from saved timetables and imports', () => {
 
   beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date(now)); });
   afterEach(() => { jest.useRealTimers(); });
+
+  test.each([false, true])('reads class gaps from the selected account and applies a cancellation (platform: %p)', async (platform) => {
+    const params = { uid: platform ? '' : 'alice', schoolId: 'pu', gapDay: 'today' as const,
+      ...(platform && { platformTimetable: { accountId: 'alice', isCurrent: () => true } }) };
+    const later = { ...original, id: 'lab', title: '實驗課', startTime: '13:00', endTime: '14:00' };
+    saveImports(original, later);
+    const { timetable: before } = await collectOnDeviceSchoolContext(params);
+    expect(loadPersonalImports).toHaveBeenCalledWith({ owner: platform ? 'nuni:alice' : 'firebase:alice', schoolId: 'pu' });
+    expect(before.classGaps).toEqual([{ startAt: Date.parse('2026-11-05T10:00:00+08:00'), endAt: Date.parse('2026-11-05T13:00:00+08:00') }]);
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue({ ...manual, classExceptions: [adjust({})] });
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([]);
+  });
+
+  test.each([false, true])('reads the day after tomorrow and rejects an incomplete active schedule (platform: %p)', async (platform) => {
+    const params = { uid: platform ? '' : 'alice', schoolId: 'pu', gapDay: 'day-after-tomorrow' as const,
+      ...(platform && { platformTimetable: { accountId: 'alice', isCurrent: () => true } }) };
+    const morning = { ...original, dayOfWeek: 6, startTime: '09:00', endTime: '10:00' };
+    const afternoon = { ...morning, id: 'lab', title: '實驗課', startTime: '13:00', endTime: '14:00' };
+    saveImports(morning, afternoon);
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([{
+      startAt: Date.parse('2026-11-07T10:00:00+08:00'), endAt: Date.parse('2026-11-07T13:00:00+08:00'),
+    }]);
+    saveImports(morning, afternoon, { ...original, id: 'unfinished', title: '未填星期的課', dayOfWeek: undefined });
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toBeUndefined();
+  });
 
   test('deduplicates manual and imported copies, retaining every class with the earliest start', async () => {
     jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);

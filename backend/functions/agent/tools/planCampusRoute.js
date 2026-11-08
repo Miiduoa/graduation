@@ -2,6 +2,7 @@
 
 const { z } = require('zod');
 const { readAssistantPois, hasCoordinates, resolvePoi, walkingDirectionsUrl } = require('../../lib/assistantPois');
+const { isAuthorizationFailure } = require('../authorizationFailure');
 
 const inputSchema = z.object({
   fromPoiId: z.string().min(1).optional(),
@@ -37,6 +38,7 @@ async function execute(ctx, rawInput) {
       message: '開啟 Google 地圖查詢可通行的步行路線與時間；目前不提供未驗證的距離或估時。',
     };
   } catch (error) {
+    if (isAuthorizationFailure(error)) throw error;
     return {
       success: false, errorCode: error?.name === 'ZodError' ? 'invalid_input' : 'read_failed',
       errorMessage: error?.name === 'ZodError' ? '請提供起點與終點。' : '目前無法讀取校園地點，請稍後再試。',

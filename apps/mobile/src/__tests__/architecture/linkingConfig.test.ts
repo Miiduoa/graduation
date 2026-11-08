@@ -14,6 +14,11 @@ function extractLinkingConfigSource(): string {
 }
 
 describe('navigation linking config', () => {
+  it('registers the dormitory deep link in the school-session campus tab', () => {
+    const campus = extractLinkingConfigSource().split('校園: {')[1]?.split('訊息: {')[0];
+    expect(campus).toContain("Dormitory: 'dormitory'");
+  });
+
   it('does not reuse the same path for multiple screens', () => {
     const linkingConfigSource = extractLinkingConfigSource();
     const paths = [

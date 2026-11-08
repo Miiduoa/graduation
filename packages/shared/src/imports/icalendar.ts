@@ -2,17 +2,33 @@ import { createPersonalImportId } from './records';
 import { isPersonalImportDate, isPersonalImportTime } from './validation';
 import type { ImportIssue, PersonalImportOptions, PersonalImportRow } from './types';
 
-type CalendarProperty = { name: string; parameters: string; value: string };
+type CalendarProperty = { name: string; parameters: string[]; value: string };
 const unescapeText = (value: string) =>
   value.replace(/\\([nN,;\\])/g, (_, character: string) =>
     /[nN]/.test(character) ? '\n' : character,
   );
-const property = (line: string): CalendarProperty | undefined => {
-  const match = /^([A-Z0-9-]+)((?:;[^:]*)?):(.*)$/i.exec(line);
-  return match
-    ? { name: match[1].toUpperCase(), parameters: match[2], value: match[3] }
-    : undefined;
-};
+function property(line: string): CalendarProperty | undefined {
+  const name = /^[A-Z0-9-]+(?=[;:])/i.exec(line)?.[0];
+  if (!name) return;
+  // Colons and semicolons inside a quoted parameter belong to its value.
+  const parameters: string[] = [];
+  let parameterStart = name.length + 1;
+  let quoted = false;
+  for (let i = name.length; i < line.length; i++) {
+    const character = line[i];
+    if (character === '"') quoted = !quoted;
+    if (quoted || (character !== ';' && character !== ':')) continue;
+    if (i > parameterStart) parameters.push(line.slice(parameterStart, i));
+    if (character === ':') return { name: name.toUpperCase(), parameters, value: line.slice(i + 1) };
+    parameterStart = i + 1;
+  }
+}
+
+function parameterValue(item: CalendarProperty, name: string): string | undefined {
+  const prefix = name + '=';
+  const parameter = item.parameters.find((part) => part.slice(0, prefix.length).toUpperCase() === prefix);
+  return parameter?.slice(prefix.length).replace(/^"(.*)"$/, '$1');
+}
 
 /** Parses calendar evidence only. Recurrences and unknown timezone rules must be resolved by the user. */
 export function parsePersonalImportCalendar(
@@ -35,9 +51,8 @@ export function parsePersonalImportCalendar(
       severity: 'error',
       message: '行事曆檔案缺少完整的開頭或結尾，請重新匯出。',
     });
-  const calendarTimezone = lines
-    .map((line) => property(line.text))
-    .find((item) => item?.name === 'X-WR-TIMEZONE')?.value;
+  let calendarTimezone: string | undefined;
+  let taipeiFormatter: Intl.DateTimeFormat | undefined;
   let current: PersonalImportRow | undefined;
   let properties: CalendarProperty[] = [];
   let nested = 0;
@@ -48,7 +63,7 @@ export function parsePersonalImportCalendar(
     const dateField = end ? 'endDate' : 'date';
     const timeField = end ? 'endTime' : 'startTime';
     const dateOnly =
-      /(?:^|;)VALUE=DATE(?:;|$)/i.test(item.parameters) || /^\d{8}$/.test(item.value);
+      parameterValue(item, 'VALUE')?.toUpperCase() === 'DATE' || /^\d{8}$/.test(item.value);
     if (dateOnly) {
       const match = /^(\d{4})(\d{2})(\d{2})$/.exec(item.value);
       if (!match) {
@@ -70,8 +85,8 @@ export function parsePersonalImportCalendar(
       addIssue('mixed-calendar-date', '全天活動的結束值含有時間，請確認。');
     const isoDate = `${match[1]}-${match[2]}-${match[3]}`;
     const clock = `${match[4]}:${match[5]}`;
-    const zone = /(?:^|;)TZID=(?:"([^"]+)"|([^;]+))/i.exec(item.parameters);
-    const timezone = zone?.[1] ?? zone?.[2] ?? calendarTimezone;
+    const zone = parameterValue(item, 'TZID');
+    const timezone = zone || calendarTimezone;
     current[dateField] = isoDate;
     current[timeField] = clock;
     if (match[6] && match[6] !== '00')
@@ -88,7 +103,7 @@ export function parsePersonalImportCalendar(
     if (match[7] || ['UTC', 'Etc/UTC', 'GMT', 'Etc/GMT'].includes(timezone ?? '')) {
       const instant = new Date(`${isoDate}T${clock}:00.000Z`);
       // Use the named zone rather than the device timezone (including its historical rules).
-      const parts = new Intl.DateTimeFormat('en-CA', {
+      taipeiFormatter ??= new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Asia/Taipei',
         year: 'numeric',
         month: '2-digit',
@@ -96,7 +111,8 @@ export function parsePersonalImportCalendar(
         hour: '2-digit',
         minute: '2-digit',
         hourCycle: 'h23',
-      }).formatToParts(instant);
+      });
+      const parts = taipeiFormatter.formatToParts(instant);
       const part = (type: string) => parts.find((value) => value.type === type)?.value ?? '';
       current[dateField] = `${part('year')}-${part('month')}-${part('day')}`;
       current[timeField] = `${part('hour')}:${part('minute')}`;
@@ -157,9 +173,13 @@ export function parsePersonalImportCalendar(
     current = undefined;
     properties = [];
   };
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const upper = line.text.toUpperCase();
-    if (upper === 'BEGIN:VEVENT') {
+    if (!current && upper === 'BEGIN:VCALENDAR') {
+      calendarTimezone = readCalendarTimezone(lines, index);
+    } else if (!current && upper === 'END:VCALENDAR') {
+      calendarTimezone = undefined;
+    } else if (upper === 'BEGIN:VEVENT') {
       if (current) {
         addIssue('malformed-calendar', '行事曆活動沒有正常結束，請重新匯出檔案。');
         finish();
@@ -202,4 +222,15 @@ export function parsePersonalImportCalendar(
     finish();
   }
   return { rows, issues };
+}
+
+function readCalendarTimezone(lines: readonly { text: string }[], beginIndex: number): string | undefined {
+  let depth = 0;
+  for (let index = beginIndex + 1; index < lines.length; index++) {
+    const { text } = lines[index];
+    if (/^(?:BEGIN|END):VCALENDAR$/i.test(text)) break;
+    if (/^BEGIN:/i.test(text)) depth++;
+    else if (/^END:/i.test(text)) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /^X-WR-TIMEZONE[;:]/i.test(text)) return property(text)?.value;
+  }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { buildPersonalToday } from '@campus/shared';
+import { buildCampusClassroomMapHref } from '@campus/shared/src/campusClassroomLookup';
 import {
   formatClassMeta,
   formatTodayHeaderDate,
@@ -39,6 +40,8 @@ export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigne
 
 type Props = {
   scopeKey?: string;
+  /** The actual personal timetable scope, which can differ from the signed-in school. */
+  timetableSchoolId?: string | null;
   now: Date | null;
   updatedAt: Date | null;
   unsigned: boolean;
@@ -81,6 +84,7 @@ export function StudentToday(props: Props) {
   const todos = sortTodayTodos(props.todos);
   const visibleClasses = classes.slice(0, 4);
   const extraClasses = classes.length > 4;
+  const timetableSchoolId = props.timetableStatus === 'ready' ? props.timetableSchoolId : null;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -131,7 +135,7 @@ export function StudentToday(props: Props) {
             />
           ) : (
             <NextActionCard
-              key={`action:${props.scopeKey ?? ''}`}
+              key={`action:${props.scopeKey ?? ''}:${props.timetableSchoolId ?? ''}`}
               action={action}
               unsigned={props.unsigned}
               todosError={props.todosError}
@@ -139,6 +143,7 @@ export function StudentToday(props: Props) {
               lmsUnconnected={props.lmsUnconnected}
               now={now}
               weekHref={props.weekHref}
+              timetableSchoolId={timetableSchoolId}
             />
           )}
           <div className={styles.flow} data-testid="today-unified-flow">
@@ -150,6 +155,7 @@ export function StudentToday(props: Props) {
               onRetry={props.onRetryTimetable}
               importHref={props.importHref}
               timetableHref={props.timetableHref}
+              timetableSchoolId={timetableSchoolId}
             />
             <TodoList
               key={`todos:${props.scopeKey ?? ''}`}
@@ -196,6 +202,7 @@ function NextActionCard({
   lmsUnconnected,
   now,
   weekHref,
+  timetableSchoolId,
 }: {
   action: NextAction;
   unsigned: boolean;
@@ -204,6 +211,7 @@ function NextActionCard({
   lmsUnconnected: boolean;
   now: Date;
   weekHref: string;
+  timetableSchoolId?: string | null;
 }) {
   const incomingKey = actionKey(action, unsigned);
   const [shown, setShown] = useState({ action, unsigned });
@@ -256,6 +264,7 @@ function NextActionCard({
         lmsUnconnected={lmsUnconnected}
         now={now}
         weekHref={weekHref}
+        timetableSchoolId={timetableSchoolId}
       />
     </div>
   );
@@ -276,6 +285,7 @@ function NextActionBody({
   lmsUnconnected,
   now,
   weekHref,
+  timetableSchoolId,
 }: {
   action: NextAction;
   unsigned: boolean;
@@ -284,6 +294,7 @@ function NextActionBody({
   lmsUnconnected: boolean;
   now: Date;
   weekHref: string;
+  timetableSchoolId?: string | null;
 }) {
   if (unsigned && action.type !== 'class') {
     return <p className={styles.headline}>{TODAY_COPY.unsigned}</p>;
@@ -364,6 +375,10 @@ function NextActionBody({
   if (action.type === 'class') {
     const courseHref = courseWeekHref(action.class.courseId);
     const href = courseHref === '/timetable' ? weekHref : courseHref;
+    const mapHref = buildCampusClassroomMapHref({
+      schoolId: timetableSchoolId,
+      location: action.class.location,
+    });
     return (
       <>
         <Link href={href} className={styles.cardMain}>
@@ -371,9 +386,20 @@ function NextActionBody({
           <p className={styles.headline}>{action.class.title}</p>
           <p className={styles.meta}>{formatClassMeta(action.class)}</p>
         </Link>
-        <Link className={styles.action} href={href}>
-          {courseHref === '/timetable' ? TODAY_COPY.viewWeek : TODAY_COPY.viewCourse}
-        </Link>
+        <div className={styles.classActions}>
+          <Link className={styles.action} href={href}>
+            {courseHref === '/timetable' ? TODAY_COPY.viewWeek : TODAY_COPY.viewCourse}
+          </Link>
+          {mapHref ? (
+            <Link
+              className={styles.action}
+              href={mapHref}
+              aria-label={`找教室：${action.class.location}`}
+            >
+              找教室
+            </Link>
+          ) : null}
+        </div>
       </>
     );
   }
@@ -433,6 +459,7 @@ function TodayClassList({
   onRetry,
   importHref,
   timetableHref,
+  timetableSchoolId,
 }: {
   classes: TodayClass[];
   extra: boolean;
@@ -441,6 +468,7 @@ function TodayClassList({
   onRetry: () => void;
   importHref: string;
   timetableHref: string;
+  timetableSchoolId?: string | null;
 }) {
   return (
     <section className={styles.section} aria-labelledby="today-class-title" data-testid="today-classes">
@@ -483,8 +511,12 @@ function TodayClassList({
             const ended = item.endAt <= now.getTime();
             const courseHref = courseWeekHref(item.courseId);
             const href = courseHref === '/timetable' ? timetableHref : courseHref;
+            const mapHref = buildCampusClassroomMapHref({
+              schoolId: timetableSchoolId,
+              location: item.location,
+            });
             return (
-              <li key={item.id}>
+              <li key={item.id} className={styles.classRow}>
                 <Link
                   href={href}
                   className={`${styles.row} ${styles.withTime} ${ended ? styles.ended : ''}`}
@@ -496,6 +528,15 @@ function TodayClassList({
                     <span className={styles.rowMeta}>{item.location || '教室未填'}</span>
                   </span>
                 </Link>
+                {mapHref ? (
+                  <Link
+                    className={styles.classroomLink}
+                    href={mapHref}
+                    aria-label={`找教室：${item.location}`}
+                  >
+                    找教室
+                  </Link>
+                ) : null}
               </li>
             );
           })}
@@ -631,6 +672,7 @@ export function StudentTodayPage(props: BoundProps) {
   return (
     <StudentToday
       scopeKey={records.scopeKey}
+      timetableSchoolId={schoolId}
       now={props.now}
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}

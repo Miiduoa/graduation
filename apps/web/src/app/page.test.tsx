@@ -55,17 +55,21 @@ vi.mock('@/lib/usePersonalImports', async (original) => {
     usePersonalImportScope: () => state.importScope,
   };
 });
-vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({
+vi.mock('@/features/nuni/Session', () => {
+  const useSession = () => ({
     session: state.session,
     loading: state.sessionLoading,
     error: state.sessionError,
     pendingLogout: state.pendingLogout,
     logout: vi.fn(),
     refresh: state.refresh,
-  }),
-  browserRequest: (path: string) => state.request(path),
-}));
+  });
+  return {
+    useNuniSession: useSession,
+    useOptionalNuniSession: useSession,
+    browserRequest: (path: string) => state.request(path),
+  };
+});
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({
     user: state.uid ? { uid: state.uid } : null,

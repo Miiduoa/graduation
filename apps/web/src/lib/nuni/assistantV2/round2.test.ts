@@ -43,7 +43,7 @@ it('rejects replaced and server-cancelled tokens', async () => {
   await expect(
     confirm(binding, { token: old.token, args: old.args }, secret, now, f.adapter, true),
   ).rejects.toThrow();
-  revoke(binding, { token: fresh.token, args: fresh.args }, secret, now);
+  await revoke(binding, { token: fresh.token, args: fresh.args }, secret, now, f.adapter);
   await expect(
     confirm(binding, { token: fresh.token, args: fresh.args }, secret, now, f.adapter, true),
   ).rejects.toThrow();

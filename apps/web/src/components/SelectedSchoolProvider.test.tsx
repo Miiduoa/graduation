@@ -443,9 +443,9 @@ it('clears an old code when changing to a school listed only by the live directo
   expect(params.has('school')).toBe(false);
 });
 
-it('clears map deep links when changing campuses while preserving unrelated map search filters', () => {
+it('clears every map destination and classroom query when changing campuses', () => {
   navigation.pathname = '/map';
-  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=%E8%87%AA%E7%BF%92';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&q=自習&query=主顧303&room=PH303&view=list';
   render(<View />);
   expect(screen.getByTestId('selected-school').textContent).toBe('甲校');
   fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: 'school-b' } });
@@ -454,17 +454,27 @@ it('clears map deep links when changing campuses while preserving unrelated map 
   expect(next.get('campus')).toBe('school-b');
   expect(next.has('route')).toBe(false);
   expect(next.has('focus')).toBe(false);
-  expect(next.get('q')).toBe('自習');
+  for (const key of ['q', 'query', 'room']) expect(next.has(key)).toBe(false);
+  expect(next.get('view')).toBe('list');
 });
 
 it('keeps a current-school map link intact when choosing the same campus again', () => {
   navigation.pathname = '/map';
-  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library';
+  navigation.search = '?schoolId=school-a&campus=school-a&route=library,gate&focus=library&query=主顧303';
   render(<View />);
   act(() => capturedSelection.selectSchool('school-a'));
   const next = new URLSearchParams(navigation.search);
   expect(next.get('route')).toBe('library,gate');
   expect(next.get('focus')).toBe('library');
+  expect(next.get('query')).toBe('主顧303');
+});
+
+it('clears classroom requests when switching a map to all campuses', () => {
+  navigation.pathname = '/map';
+  navigation.search = '?campus=school-a&query=主顧303&q=主顧&room=303';
+  render(<View />);
+  fireEvent.change(screen.getByLabelText('瀏覽校園'), { target: { value: '' } });
+  expect(navigation.replace).toHaveBeenCalledWith('/map?campus=all', { scroll: false });
 });
 
 function DraftField() {

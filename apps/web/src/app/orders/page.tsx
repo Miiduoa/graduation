@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
+import { Button } from '@/components/ui/Button';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
-import { watchMyOrders, type MyOrder } from '@/lib/myOrders';
+import { watchMyOrder, watchMyOrders, type MyOrder } from '@/lib/myOrders';
 import {
   describePickupNumber,
   formatShortOrderCode,
@@ -111,30 +112,50 @@ function OrdersList({
   schoolId: string;
   focusOrderId: string | null;
 }) {
-  const [orders, setOrders] = useState<MyOrder[] | null>(null);
+  const [recent, setRecent] = useState<{ orders: MyOrder[]; fromCache: boolean } | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [linked, setLinked] = useState<{ order: MyOrder | null; fromCache: boolean } | 'error' | null>(null);
+  const [linkedAttempt, setLinkedAttempt] = useState(0);
+  const landed = useRef(false);
   useEffect(() => {
     let active = true;
-    setOrders(null);
+    setRecent(null);
     setFailed(false);
-    const stop = watchMyOrders(
-      uid,
-      schoolId,
-      (next) => {
-        if (active) {
-          setOrders(next);
-          setFailed(false);
-        }
-      },
-      () => {
-        if (active) setFailed(true);
-      },
-    );
+    const stop = watchMyOrders(uid, schoolId, (orders, fromCache) => {
+      if (active) setRecent({ orders, fromCache });
+    }, () => {
+      if (active) setFailed(true);
+    });
     return () => {
       active = false;
       stop();
     };
-  }, [uid, schoolId]);
+  }, [uid, schoolId, attempt]);
+
+  const lookupId = recent && !failed && !recent.orders.some((order) => order.id === focusOrderId)
+    ? focusOrderId
+    : null;
+  useEffect(() => {
+    setLinked(null);
+    if (!lookupId) return;
+    let active = true;
+    const stop = watchMyOrder(uid, schoolId, lookupId, (order, fromCache) => {
+      if (active) setLinked({ order, fromCache });
+    }, () => {
+      if (active) setLinked('error');
+    });
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [uid, schoolId, lookupId, linkedAttempt]);
+
+  const extra = lookupId && linked !== 'error' ? linked : null;
+  const orders = useMemo(() => recent && (
+    extra?.order ? [...recent.orders, extra.order] : recent.orders
+  ), [recent, extra]);
+  const fromCache = recent?.fromCache || extra?.fromCache;
 
   const grouped = useMemo(() => {
     const rows = orders ?? [];
@@ -144,24 +165,42 @@ function OrdersList({
     };
   }, [orders]);
 
-  const closedDeepLink = !isWebOnlineOrderingEnabled() && !!focusOrderId;
   const focus = resolveOrderFocus(
     (orders ?? []).map((order) => order.id),
     focusOrderId,
   );
 
   useEffect(() => {
-    if (closedDeepLink || !focus.found || !focusOrderId) return;
+    if (landed.current || !focus.found || !focusOrderId) return;
     const frame = window.requestAnimationFrame(() => {
-      landOnOrder(focusOrderId);
+      landed.current = landOnOrder(focusOrderId);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [closedDeepLink, focus.found, focusOrderId, orders]);
+  }, [focus.found, focusOrderId]);
 
-  if (closedDeepLink) return <ClosedOrderNotice schoolId={schoolId} />;
-
-  if (failed) return <p role="alert">目前讀不到訂單，請確認連線後重新整理。</p>;
+  if (failed) {
+    return (
+      <div className={styles.empty}>
+        <p role="alert">目前讀不到訂單，請確認連線後再試一次。</p>
+        <div className={styles.actions}>
+          <Button onClick={() => setAttempt((n) => n + 1)}>重新讀取訂單</Button>
+        </div>
+      </div>
+    );
+  }
   if (orders === null) return <p role="status">正在讀取訂單…</p>;
+  const lookupNotice = lookupId && linked === 'error' ? (
+    <div className={styles.empty}>
+      <p role="alert">目前讀不到通知中的訂單。</p>
+      <div className={styles.actions}>
+        <Button onClick={() => setLinkedAttempt((n) => n + 1)}>重新讀取這筆訂單</Button>
+      </div>
+    </div>
+  ) : lookupId && !linked ? <p role="status">正在查詢通知中的訂單…</p> : null;
+  if (!orders.length && lookupNotice) return lookupNotice;
+  if (!orders.length && fromCache) {
+    return <p role="status">正在等候連線確認訂單，這台裝置尚無可顯示的紀錄。</p>;
+  }
   if (orders.length === 0) {
     return (
       <div className={styles.empty}>
@@ -193,7 +232,12 @@ function OrdersList({
 
   return (
     <section className={styles.list} aria-label="訂單列表">
-      {focus.missing ? (
+      {lookupNotice}
+      {fromCache ? (
+        <p role="status" className={styles.routeNote}>
+          目前顯示上次同步的訂單，取餐號碼及進度會在連線後更新。
+        </p>
+      ) : !lookupNotice && focus.missing ? (
         <p role="status" className={styles.routeNote}>
           {ORDER_FOCUS_MISSING}
         </p>
@@ -230,11 +274,11 @@ function OrdersRoute({
   focusOrderId: string | null;
 }) {
   const { user, loading, error } = useAuth();
+  if (!isWebOnlineOrderingEnabled() && focusOrderId) return <ClosedOrderNotice schoolId={schoolId} />;
   if (loading) return <p role="status">正在確認登入狀態…</p>;
   if (error) return <p role="alert">無法確認登入狀態，請重新整理後再試。</p>;
   if (!user) {
     if (!isWebOnlineOrderingEnabled()) {
-      if (focusOrderId) return <ClosedOrderNotice schoolId={schoolId} />;
       return (
         <div className={styles.empty}>
           <h2>{ONLINE_ORDERING_OFF_TEXT}</h2>

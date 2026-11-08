@@ -17,7 +17,7 @@ function BusMark() {
   );
 }
 
-export function CampusApproachTrack(props: { model: CampusApproachModel }) {
+export function CampusApproachTrack(props: { model: CampusApproachModel; animateUpdates?: boolean }) {
   const { model } = props;
   const count = Math.max(2, model.stops.length);
   const busIndex = model.busIndex === null ? null : Math.min(count - 1, Math.max(0, model.busIndex));
@@ -30,7 +30,7 @@ export function CampusApproachTrack(props: { model: CampusApproachModel }) {
       data-testid="campus-approach"
       data-sticky-cover="true"
       data-status={model.status}
-      aria-label={model.a11y}
+      aria-label={model.status === 'scheduled' ? model.a11y : `${model.a11y}，依到站預估示意`}
     >
       <p className={css.approachCaption}>
         <strong>{model.route} 路</strong>
@@ -42,6 +42,7 @@ export function CampusApproachTrack(props: { model: CampusApproachModel }) {
           <span>約 {model.minutes} 分</span>
         ) : null}
         {model.status === 'scheduled' && model.clock ? <span>{model.clock}</span> : null}
+        {model.status !== 'scheduled' ? <span className={css.approachEstimate}>依到站預估示意</span> : null}
       </p>
       <div className={css.approachTrack} style={trackStyle} aria-hidden="true">
         <div className={css.approachRail} data-kind={model.status}>
@@ -55,7 +56,7 @@ export function CampusApproachTrack(props: { model: CampusApproachModel }) {
           ))}
           {showBus ? (
             <span
-              className={`${css.approachBus} ${css.approachBusReady}`}
+              className={`${css.approachBus}${props.animateUpdates !== false ? ` ${css.approachBusReady}` : ''}`}
               data-kind={model.status}
               data-testid="campus-approach-bus"
             >
@@ -67,7 +68,7 @@ export function CampusApproachTrack(props: { model: CampusApproachModel }) {
           {model.stops.map((stop) => (
             <li key={stop.key} data-here={stop.here ? 'true' : undefined}>
               <strong>{stop.name}</strong>
-              {stop.here ? <small>你在這裡</small> : null}
+              {stop.here ? <small>候車站</small> : null}
             </li>
           ))}
         </ol>

@@ -801,6 +801,13 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
       const cleanupErrors: Error[] = [];
       const cleanupTasks: Promise<unknown>[] = [
+        (async () => {
+          const plans = require('../services/savedCampusPlans') as typeof import('../services/savedCampusPlans');
+          return plans.beginSavedCampusPlansSignOutCleanup();
+        })().catch((e) => {
+          console.warn('[auth] Saved plan cleanup failed:', e);
+          throw e;
+        }),
         // Cancel only Campus Agent's own device notifications before Firebase
         // changes identity; this synchronously fences in-flight local writes.
         (async () => {
@@ -905,6 +912,12 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         throw e;
       } finally {
         isSigningOutRef.current = false;
+        try {
+          const plans = require('../services/savedCampusPlans') as typeof import('../services/savedCampusPlans');
+          plans.endSavedCampusPlansSignOutCleanup();
+        } catch (e) {
+          console.warn('[auth] Saved plan sign-out fence cleanup failed:', e);
+        }
         // A failed sign-out must not permanently disable reminders for a
         // still-signed-in account. An epoch bump invalidates prior tasks.
         try {
