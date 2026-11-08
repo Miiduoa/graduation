@@ -722,6 +722,7 @@ it('previews pasted reading JSON without changing current notes and restores onl
     expect(document.activeElement).toBe(within(preview).getByRole('heading'));
     expect(note.value).toBe('目前還沒存檔的更新筆記');
     fireEvent.click(screen.getByRole('button', { name: '取消還原' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '預覽貼上的進度' }));
     expect(pasted.value).toBe(json);
     expect(note.value).toBe('目前還沒存檔的更新筆記');
     fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
@@ -754,6 +755,11 @@ it('restores pasted practice checkpoint with its unanswered draft and original s
     fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
     expect(screen.getByRole('region', { name: '閱讀進度預覽' }).textContent).toContain('逐題練習');
     expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '取消還原' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    expect((screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement).value).toBe(json);
+    expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
     fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
     expect((screen.getByLabelText('這一題，我的回答') as HTMLTextAreaElement).value).toBe('未自評也要保留的作答');
     expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();

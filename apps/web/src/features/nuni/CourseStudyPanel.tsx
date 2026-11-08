@@ -45,7 +45,7 @@ import styles from './CourseStudyPanel.module.css';
 
 type Material = { id: string; title: string; body: string };
 type Props = { courseTitle: string; scope: CourseStudyProgressScope; material?: Material; onClose: () => void };
-type RestorePreview = { filename: string; progress: CourseStudyProgressData; round: StudyPracticeRound | null };
+type RestorePreview = { filename: string; progress: CourseStudyProgressData; round: StudyPracticeRound | null; origin: 'file' | 'paste' };
 type PendingSource = { source: StudySource; clearPaste: boolean };
 type ManualCopyKind = 'notes' | 'practice' | 'reading-progress' | 'practice-progress';
 
@@ -115,6 +115,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const focusReadingOnReturn = useRef(false);
   const restoreHeading = useRef<HTMLHeadingElement>(null);
   const progressInput = useRef<HTMLInputElement>(null);
+  const progressPastePreviewButton = useRef<HTMLButtonElement>(null);
   const read = useRef<AbortController | null>(null);
   const inputId = useId();
   const progressInputId = useId();
@@ -490,7 +491,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       const text = await file.text();
       if (read.current !== controller || controller.signal.aborted) return;
       const { progress, round } = decodeStudyBackup(text, scope);
-      setRestorePreview({ filename: file.name, progress, round });
+      setRestorePreview({ filename: file.name, progress, round, origin: 'file' });
     } catch (failure) {
       if (read.current !== controller || controller.signal.aborted) return;
       setError(failure instanceof Error ? failure.message : '閱讀進度無法載入，目前內容仍保留。');
@@ -511,7 +512,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       if (new Blob([progressPaste]).size > COURSE_STUDY_PROGRESS_LIMITS.bytes)
         throw new Error('貼上的閱讀進度超過 8 MiB，請改用較小份的完整 JSON 備份。');
       const { progress, round } = decodeStudyBackup(progressPaste, scope);
-      setRestorePreview({ filename: '貼上的進度 JSON', progress, round });
+      setRestorePreview({ filename: '貼上的進度 JSON', progress, round, origin: 'paste' });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '貼上的進度無法讀取，目前學習內容仍保留。');
     }
@@ -659,7 +660,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
                 setError('');
               }} placeholder="貼上先前複製的完整閱讀或練習進度 JSON…" />
           </label>
-          <button type="button" className={styles.button} disabled={!!reading || !progressPaste.trim()}
+          <button ref={progressPastePreviewButton} type="button" className={styles.button} disabled={!!reading || !progressPaste.trim()}
             onClick={previewPastedProgress}>預覽貼上的進度</button>
           <p className={styles.note}>貼上的 JSON 只在此裝置解析，仍須通過格式、8 MiB、帳號與課程檢查，再由你確認還原。貼上不會直接覆寫目前內容，也不會傳送至伺服器。</p>
         </div>
@@ -677,7 +678,11 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         <p className={styles.note}>還原會取代目前白板內容；需要保留時，可先{practiceRound ? '儲存本輪練習與閱讀進度' : '儲存目前的閱讀進度'}。檔案中的教材副本可能與最新課程不同。</p>
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`} onClick={restoreProgress}>還原這份進度</button>
-          <button type="button" className={styles.button} onClick={() => { setRestorePreview(null); progressInput.current?.focus(); }}>取消還原</button>
+          <button type="button" className={styles.button} onClick={() => {
+            const trigger = restorePreview.origin === 'paste' ? progressPastePreviewButton : progressInput;
+            setRestorePreview(null);
+            trigger.current?.focus();
+          }}>取消還原</button>
         </div>
       </section>}
       <details className={styles.import} open={!source || undefined}>
