@@ -703,6 +703,111 @@ it('ignores a late JSON clipboard failure after the learner edits the notes', as
   }
 });
 
+it('previews pasted reading JSON without changing current notes and restores only after confirmation', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const note = screen.getByLabelText(noteLabel) as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '備份時的原筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const json = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    fireEvent.change(note, { target: { value: '目前還沒存檔的更新筆記' } });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    const pasted = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+    fireEvent.change(pasted, { target: { value: json } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    const preview = screen.getByRole('region', { name: '閱讀進度預覽' });
+    expect(preview.textContent).toContain('貼上的進度 JSON');
+    expect(document.activeElement).toBe(within(preview).getByRole('heading'));
+    expect(note.value).toBe('目前還沒存檔的更新筆記');
+    fireEvent.click(screen.getByRole('button', { name: '取消還原' }));
+    expect(pasted.value).toBe(json);
+    expect(note.value).toBe('目前還沒存檔的更新筆記');
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+    expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('備份時的原筆記');
+    expect(pasted.value).toBe('');
+    expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('restores pasted practice checkpoint with its unanswered draft and original study mode', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+    await generate();
+    fireEvent.click(screen.getByRole('button', { name: '開始逐題複習' }));
+    fireEvent.change(screen.getByLabelText('這一題，我的回答'), { target: { value: '未自評也要保留的作答' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製練習與閱讀進度 JSON' }));
+    const json = (screen.getByRole('textbox', { name: '可選取的練習與閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+    fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    fireEvent.change(screen.getByLabelText('貼上已備份的進度 JSON'), { target: { value: json } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    expect(screen.getByRole('region', { name: '閱讀進度預覽' }).textContent).toContain('逐題練習');
+    expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '還原這份進度' }));
+    expect((screen.getByLabelText('這一題，我的回答') as HTMLTextAreaElement).value).toBe('未自評也要保留的作答');
+    expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+    expect((screen.getByLabelText('這次怎麼讀') as HTMLSelectElement).value).toBe('understand');
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('rejects malformed and cross-course pasted JSON without clearing the current lesson or draft', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '尚未備份的現在筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const json = (screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement).value;
+    fireEvent.click(screen.getByText('接著上次的進度'));
+    const pasted = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+    fireEvent.change(pasted, { target: { value: '{invalid' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+    const crossCourse = JSON.parse(json);
+    crossCourse.scope.workspaceId = 'cw_22222222-2222-4222-8222-222222222222';
+    fireEvent.change(pasted, { target: { value: JSON.stringify(crossCourse) } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    expect(screen.getByRole('alert').textContent).toContain('帳號或課程');
+    expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('尚未備份的現在筆記');
+    expect(screen.getByText(material.body)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('guards an unconfirmed pasted progress backup from accidental close on an empty board', () => {
+  const onClose = vi.fn();
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={onClose} />);
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const pasted = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  fireEvent.change(pasted, { target: { value: '{"format":"still-pasting"}' } });
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByText(/貼上的進度 JSON 尚未確認還原/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續讀書' }));
+  expect(pasted.value).toBe('{"format":"still-pasting"}');
+  expect(onClose).not.toHaveBeenCalled();
+});
+
 it('shows a source-linked three-step explanation and focuses its exact quotation', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));

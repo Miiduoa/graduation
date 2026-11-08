@@ -69,6 +69,12 @@ export function CourseStudyPanel(props: Props) {
   return <StudySessionPanel key={`${props.scope.platformAccountId}:${props.scope.workspaceId}`} {...props} />;
 }
 
+function decodeStudyBackup(text: string, scope: CourseStudyProgressScope) {
+  return isStudyPracticeCheckpoint(text)
+    ? parseStudyPracticeCheckpoint(text, scope)
+    : { progress: parseCourseStudyProgress(text, scope), round: null };
+}
+
 function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [initial] = useState(() => initialMaterial(material));
   const [source, setSource] = useState<StudySource | null>(initial.source);
@@ -81,6 +87,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
   const [paste, setPaste] = useState('');
+  const [progressPaste, setProgressPaste] = useState('');
   const [reading, setReading] = useState<'source' | 'progress' | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
   const [restoredFile, setRestoredFile] = useState<string | null>(null);
@@ -111,6 +118,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const read = useRef<AbortController | null>(null);
   const inputId = useId();
   const progressInputId = useId();
+  const progressPasteId = useId();
   const pasteId = useId();
   const manualCopyId = useId();
   const sectionId = useId();
@@ -134,7 +142,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const hasStudyChanges = !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) =>
       value.question.trim() || value.lessons.length));
-  const hasWorkToKeep = paste.length > 0 || hasStudyChanges;
+  const hasWorkToKeep = paste.length > 0 || progressPaste.length > 0 || hasStudyChanges;
   const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
     parts.flatMap((part, partNumber) =>
       session.passages[`${sectionNumber}:${partNumber}`]?.needsReview
@@ -279,6 +287,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPausedRound(null);
     setRestorePreview(null);
     setRestoredFile(null);
+    setProgressPaste('');
     setConfirmClose(false);
     setPendingSource(null);
     setPendingPracticeAction(null);
@@ -480,15 +489,31 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         throw new Error('請選擇有內容且不超過 8 MiB 的閱讀進度檔。');
       const text = await file.text();
       if (read.current !== controller || controller.signal.aborted) return;
-      const { progress, round } = isStudyPracticeCheckpoint(text)
-        ? parseStudyPracticeCheckpoint(text, scope)
-        : { progress: parseCourseStudyProgress(text, scope), round: null };
+      const { progress, round } = decodeStudyBackup(text, scope);
       setRestorePreview({ filename: file.name, progress, round });
     } catch (failure) {
       if (read.current !== controller || controller.signal.aborted) return;
       setError(failure instanceof Error ? failure.message : '閱讀進度無法載入，目前內容仍保留。');
     } finally {
       if (read.current === controller) { read.current = null; setReading(null); }
+    }
+  }
+
+  // A copied backup can be restored on mobile without first creating a .json file.
+  // Reuse the same strict scope/format parser and preview gate as a selected file.
+  function previewPastedProgress() {
+    if (!progressPaste.trim() || reading) return;
+    setRestorePreview(null);
+    setPendingPracticeAction(null);
+    setPendingSource(null);
+    setError('');
+    try {
+      if (new Blob([progressPaste]).size > COURSE_STUDY_PROGRESS_LIMITS.bytes)
+        throw new Error('貼上的閱讀進度超過 8 MiB，請改用較小份的完整 JSON 備份。');
+      const { progress, round } = decodeStudyBackup(progressPaste, scope);
+      setRestorePreview({ filename: '貼上的進度 JSON', progress, round });
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '貼上的進度無法讀取，目前學習內容仍保留。');
     }
   }
 
@@ -513,6 +538,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPendingSource(null);
     setPendingPracticeAction(null);
     setPaste('');
+    setProgressPaste('');
     clearDownload();
     setError('');
   }
@@ -603,6 +629,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         <h4 id={closeHeadingId} ref={closeHeading} tabIndex={-1}>要關閉讀書白板嗎？</h4>
         <p className={styles.note}>關閉會清除目前分頁的筆記、未送出問題與逐題練習。若要下次繼續，請先取消關閉並儲存閱讀或練習進度；下載檔案不會自動上傳。</p>
         {paste.length > 0 && <p className={styles.note}>尚未加入白板的貼上文字不包含在閱讀或練習進度備份中。若要保留，請先取消關閉並複製貼上文字；也可以先將它加入白板再另存進度，但加入新教材會取代目前的閱讀內容。</p>}
+        {progressPaste.length > 0 && <p className={styles.note}>貼上的進度 JSON 尚未確認還原，關閉後會清除貼上的文字。若要保留，請先取消關閉。</p>}
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`}
             onClick={() => { setConfirmClose(false); closeButton.current?.focus(); }}>繼續讀書</button>
@@ -624,6 +651,17 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
               }} />
           </label>
           <p className={styles.note}>可載入閱讀進度或逐題練習進度 JSON，先核對帳號與課程，再預覽確認。檔案未加密，含教材、筆記、講解與完整參考回答，請自行保管。</p>
+          <label className={styles.field} htmlFor={progressPasteId}>貼上已備份的進度 JSON
+            <textarea id={progressPasteId} rows={5} value={progressPaste} disabled={!!reading}
+              onChange={(event) => {
+                setProgressPaste(event.target.value);
+                setRestorePreview(null);
+                setError('');
+              }} placeholder="貼上先前複製的完整閱讀或練習進度 JSON…" />
+          </label>
+          <button type="button" className={styles.button} disabled={!!reading || !progressPaste.trim()}
+            onClick={previewPastedProgress}>預覽貼上的進度</button>
+          <p className={styles.note}>貼上的 JSON 只在此裝置解析，仍須通過格式、8 MiB、帳號與課程檢查，再由你確認還原。貼上不會直接覆寫目前內容，也不會傳送至伺服器。</p>
         </div>
       </details>
       {restorePreview && <section className={styles.restorePreview} aria-label="閱讀進度預覽">
