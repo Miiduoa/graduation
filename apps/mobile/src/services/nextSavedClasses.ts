@@ -56,7 +56,7 @@ function refreshSavedClasses(records: PersonalImportRecord[], schoolId: string, 
 
 type TimetableGroup = { term: string; rows: PersonalImportRecord[] };
 
-function timetableGroups(records: readonly PersonalImportRecord[]) {
+function timetableGroups(records: readonly PersonalImportRecord[], requirePlacedTerm?: string) {
   const groups = new Map<string, TimetableGroup>();
   for (const row of records) {
     const key = `${row.academicYear}|${row.semester}`;
@@ -71,8 +71,8 @@ function timetableGroups(records: readonly PersonalImportRecord[]) {
         return undefined;
       }
     }
-    // A course with no assigned weekday has no scheduled occurrence.
-    if (row.dayOfWeek) group.rows.push(row);
+    // Named class queries can skip unscheduled courses. Gaps need every row in the requested term.
+    if (row.dayOfWeek || group.term === requirePlacedTerm) group.rows.push(row);
   }
 
   return [...groups.values()];
@@ -93,6 +93,43 @@ function scheduledDay(groups: TimetableGroup[], schoolId: string, date: Date, in
       previousTerm === term || academicTerm(new Date(entry.startAt)) === group.term));
   }
   return entries;
+}
+
+/** Remaining time between saved meetings on one Taiwan date. An unknown timetable cannot establish a gap. */
+export function savedClassGaps(
+  records: readonly PersonalImportRecord[], schoolId: string, now: Date, day: 'today' | 'tomorrow' | 'day-after-tomorrow',
+): { startAt: number; endAt: number }[] | undefined {
+  const offset = day === 'today' ? 0 : day === 'tomorrow' ? 1 : 2;
+  const date = new Date(now.getTime() + offset * DAY);
+  const groups = timetableGroups(
+    records.filter((row) => row.kind === 'timetable' && row.schoolId === schoolId), academicTerm(date),
+  );
+  if (!groups) return undefined;
+  const entries = scheduledDay(groups, schoolId, date, true);
+  if (!entries) return undefined;
+  // Dated makeup meetings can occupy this day regardless of their course's term.
+  // Keep the term-limited schedule used by current/next class queries unchanged.
+  for (const group of groups.filter((group) => group.term !== academicTerm(date))) {
+    const plan = buildPersonalToday(group.rows, { schoolId, now: date });
+    entries.push(...plan.today.filter((entry) => entry.row.classExceptions?.some((change) =>
+      change.kind === 'move' && change.originalDate === entry.originalDate &&
+      change.date === classDate(new Date(entry.startAt)) && change.startTime === entry.startTime)));
+  }
+  const midnight = Date.parse(`${classDate(date)}T00:00:00+08:00`);
+  // buildPersonalToday also lists the previous weekday; gaps only use meetings that occupy this date.
+  const onDay = entries.filter((entry) => entry.endAt > midnight && entry.startAt < midnight + DAY);
+  if (onDay.length < 2) return [];
+
+  onDay.sort((a, b) => a.startAt - b.startAt);
+  const gaps: { startAt: number; endAt: number }[] = [];
+  let busyUntil = onDay[0].endAt;
+  for (let i = 1; i < onDay.length; i++) {
+    const entry = onDay[i];
+    const startAt = Math.max(busyUntil, now.getTime());
+    if (startAt < entry.startAt) gaps.push({ startAt, endAt: entry.startAt });
+    busyUntil = Math.max(busyUntil, entry.endAt);
+  }
+  return gaps;
 }
 
 /** Actual meetings intersecting this Taiwan date, including saved single-day changes. Incomplete relevant terms cannot establish an available gap. */

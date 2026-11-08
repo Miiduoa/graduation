@@ -110,6 +110,8 @@ jobs:
             src/__tests__/services/nuniAssignmentReminders.test.ts \
             src/__tests__/services/nuniClassCoursework.test.ts \
             src/__tests__/services/onDeviceSchoolContext.test.ts \
+            src/__tests__/services/nextSavedClasses.test.ts \
+            src/__tests__/services/savedClassGapQuery.test.ts \
             src/__tests__/NativeLoginLifecycle.test.tsx \
             src/__tests__/nuniSession.test.ts \
             src/__tests__/NuniSessionProvider.test.tsx \
@@ -118,6 +120,7 @@ jobs:
             src/__tests__/NuniTimetableAssistantNavigation.test.tsx \
             src/__tests__/AssistantClassNowHint.test.tsx \
             src/__tests__/SavedClassReplyCard.test.tsx \
+            src/__tests__/ClassGapReplyCard.test.tsx \
             src/__tests__/CampusAssistantScreen.test.tsx \
             src/__tests__/CampusEvidencePlanCard.test.tsx \
             src/__tests__/NuniPlanAssignmentOpenButton.test.tsx \
