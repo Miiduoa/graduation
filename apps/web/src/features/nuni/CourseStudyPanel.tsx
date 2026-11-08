@@ -47,6 +47,14 @@ type Material = { id: string; title: string; body: string };
 type Props = { courseTitle: string; scope: CourseStudyProgressScope; material?: Material; onClose: () => void };
 type RestorePreview = { filename: string; progress: CourseStudyProgressData; round: StudyPracticeRound | null };
 type PendingSource = { source: StudySource; clearPaste: boolean };
+type ManualCopyKind = 'notes' | 'practice' | 'reading-progress' | 'practice-progress';
+
+const MANUAL_COPY_LABELS: Record<ManualCopyKind, { region: string; field: string }> = {
+  notes: { region: '手動複製本次筆記', field: '可選取的本次筆記文字' },
+  practice: { region: '手動複製本輪紀錄', field: '可選取的本輪紀錄文字' },
+  'reading-progress': { region: '手動複製閱讀進度 JSON', field: '可選取的閱讀進度 JSON' },
+  'practice-progress': { region: '手動複製練習與閱讀進度 JSON', field: '可選取的練習與閱讀進度 JSON' },
+};
 
 function initialMaterial(material?: Material): { source: StudySource | null; error: string } {
   if (!material?.body.trim()) return { source: null, error: '' };
@@ -82,6 +90,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [confirmClose, setConfirmClose] = useState(false);
   const [pendingSource, setPendingSource] = useState<PendingSource | null>(null);
   const [manualCopyText, setManualCopyText] = useState<string | null>(null);
+  const [manualCopyKind, setManualCopyKind] = useState<ManualCopyKind>('notes');
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
   const copyRequest = useRef(0);
@@ -137,6 +146,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   function movePassage(target: { sectionNumber: number; partNumber: number } | null) {
     if (!target) return;
+    invalidateCopyFeedback();
     focusReadingOnReturn.current = true;
     setSectionIndex(target.sectionNumber);
     setPassageIndex(target.partNumber);
@@ -145,6 +155,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   function moveReview(direction: 'previous' | 'next') {
     const target = adjacentStudyReview(reviewPassages, { sectionNumber: sectionIndex, partNumber: passageIndex }, direction);
     if (!target) return;
+    invalidateCopyFeedback();
     focusReadingOnReturn.current = true;
     setSectionIndex(target.sectionNumber);
     setPassageIndex(target.partNumber);
@@ -170,10 +181,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   function changePractice(action: StudyPracticeAction) {
     // A copied snapshot must not linger after an answer, hint or question changes.
-    copyRequest.current += 1;
-    setManualCopyText(null);
-    setDownloadStatus('');
-    setDownloadError('');
+    invalidateCopyFeedback();
     setPracticeRound((previous) => !previous || previous.revision !== session.revision
       ? previous : updateStudyPracticeRound(previous, action));
   }
@@ -246,13 +254,18 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     (readingFocus.current ?? heading.current)?.focus();
   }, [reading, practiceRound, source, sectionIndex, passageIndex]);
 
-  function clearDownload() {
+  // Invalidate an outstanding clipboard result whenever the source position or study state changes.
+  function invalidateCopyFeedback() {
     copyRequest.current += 1;
     setManualCopyText(null);
-    if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
-    downloadUrl.current = null;
     setDownloadStatus('');
     setDownloadError('');
+  }
+
+  function clearDownload() {
+    invalidateCopyFeedback();
+    if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+    downloadUrl.current = null;
   }
 
   function replaceSource(value: StudySource) {
@@ -321,6 +334,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setDownloadError('');
     setManualCopyText(null);
     if (!navigator.clipboard?.writeText) {
+      setManualCopyKind('notes');
       setManualCopyText(text);
       setDownloadError('這個瀏覽器無法直接複製筆記，請在下方選取文字手動複製，或下載 TXT。');
       return;
@@ -332,6 +346,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       }
     } catch {
       if (copyRequest.current === request) {
+        setManualCopyKind('notes');
         setManualCopyText(text);
         setDownloadError('無法存取剪貼簿，已提供手動選取的筆記；內容仍保留在白板，也可下載 TXT。');
       }
@@ -353,6 +368,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setDownloadError('');
     setManualCopyText(null);
     if (!navigator.clipboard?.writeText) {
+      setManualCopyKind('practice');
       setManualCopyText(text);
       setDownloadError('這個瀏覽器無法直接複製，請在下方選取文字手動複製，或下載 TXT／JSON。');
       return;
@@ -364,9 +380,58 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       }
     } catch {
       if (copyRequest.current === request) {
+        setManualCopyKind('practice');
         setManualCopyText(text);
         setDownloadError('無法存取剪貼簿，已提供手動選取的文字；本輪試答仍保留，也可下載 TXT／JSON。');
       }
+    }
+  }
+
+  // The JSON is the same validated payload as the download, never a reduced notes export.
+  // A user gesture is required for clipboard access; failed writes keep a selectable local copy.
+  async function copyProgressText(text: string, kind: 'reading-progress' | 'practice-progress') {
+    const request = ++copyRequest.current;
+    setManualCopyText(null);
+    setDownloadStatus('');
+    setDownloadError('');
+    const fallback = () => {
+      setManualCopyKind(kind);
+      setManualCopyText(text);
+      setDownloadError('無法直接複製進度 JSON。請選取下方文字，貼到純文字編輯器並儲存為 .json；原本學習內容仍保留。');
+    };
+    if (!navigator.clipboard?.writeText) { fallback(); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (copyRequest.current === request) {
+        setDownloadStatus('已複製完整進度 JSON；請貼入純文字檔並儲存為 .json。內容含教材、筆記與參考回答，請勿公開分享。');
+      }
+    } catch {
+      if (copyRequest.current === request) fallback();
+    }
+  }
+
+  function copyReadingProgress() {
+    if (!source) return;
+    try {
+      const text = serializeCourseStudyProgress({
+        scope, source, position: { sectionIndex, passageIndex, mode }, passages: session.passages,
+      });
+      void copyProgressText(text, 'reading-progress');
+    } catch (failure) {
+      setDownloadError(failure instanceof Error ? failure.message : '無法整理閱讀進度；原有內容仍保留。');
+    }
+  }
+
+  function copyPracticeCheckpoint(round: StudyPracticeRound | null) {
+    if (!source || !round || round.revision !== session.revision) return;
+    try {
+      const text = serializeStudyPracticeCheckpoint({
+        progress: { scope, source, position: { sectionIndex, passageIndex, mode: round.mode }, passages: session.passages },
+        round,
+      });
+      void copyProgressText(text, 'practice-progress');
+    } catch (failure) {
+      setDownloadError(failure instanceof Error ? failure.message : '無法整理練習進度；本輪回答仍保留。');
     }
   }
 
@@ -615,12 +680,14 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <div className={styles.actions}>
             <button type="button" className={`${styles.button} ${styles.primary}`} onClick={resumePractice}>繼續這輪練習</button>
             <button type="button" className={styles.button} onClick={() => savePracticeCheckpoint(pausedRound)}>儲存暫停的練習與閱讀進度</button>
+            <button type="button" className={styles.button} onClick={() => copyPracticeCheckpoint(pausedRound)}>複製暫停的練習與閱讀進度 JSON</button>
             <button ref={endPausedPracticeButton} type="button" className={styles.button}
               onClick={() => setPendingPracticeAction('discard')}>結束暫停的練習</button>
           </div>
         </section>}
         {!practiceRound && <div className={styles.actions}>
           <button type="button" className={styles.button} onClick={saveProgress}>儲存閱讀進度</button>
+          <button type="button" className={styles.button} onClick={copyReadingProgress}>複製閱讀進度 JSON</button>
           <button type="button" className={styles.button} disabled={!hasNotes} onClick={downloadNotes}>下載本次筆記</button>
           <button type="button" className={styles.button} disabled={!hasNotes} onClick={() => { void copyNotes(); }}>複製本次筆記</button>
         </div>}
@@ -628,8 +695,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
         {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
         {manualCopyText !== null && <section className={styles.manualCopy}
-          aria-label={practiceRound ? '手動複製本輪紀錄' : '手動複製本次筆記'}>
-          <label className={styles.field} htmlFor={manualCopyId}>{practiceRound ? '可選取的本輪紀錄文字' : '可選取的本次筆記文字'}
+          aria-label={MANUAL_COPY_LABELS[manualCopyKind].region}>
+          <label className={styles.field} htmlFor={manualCopyId}>{MANUAL_COPY_LABELS[manualCopyKind].field}
             <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
               onFocus={(event) => event.currentTarget.select()}
               onClick={(event) => event.currentTarget.select()} />
@@ -659,7 +726,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <div className={styles.actions}>{reviewPassages.map((item) => <button type="button" className={styles.button}
             key={`${item.sectionNumber}:${item.partNumber}`}
             aria-current={sectionIndex === item.sectionNumber && passageIndex === item.partNumber ? 'location' : undefined}
-            onClick={() => { focusReadingOnReturn.current = true; setSectionIndex(item.sectionNumber); setPassageIndex(item.partNumber); }}>{item.label}</button>)}</div>
+            onClick={() => { invalidateCopyFeedback(); focusReadingOnReturn.current = true; setSectionIndex(item.sectionNumber); setPassageIndex(item.partNumber); }}>{item.label}</button>)}</div>
           <div className={styles.actions}>
             <button ref={startPracticeButton} type="button" className={`${styles.button} ${styles.primary}`} disabled={!practiceDeck.cards.length}
               onClick={startPractice}>開始逐題複習</button>
@@ -669,15 +736,16 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         </section>}
         {practiceRound ? <CourseStudyPractice round={practiceRound} onAction={changePractice}
           onExit={() => readPracticeSource()} onReadSource={readPracticeSource}
-          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={() => savePracticeCheckpoint(practiceRound)} /> : <>
+          onDownload={downloadPractice} onCopy={copyPracticeNotes} onSave={() => savePracticeCheckpoint(practiceRound)}
+          onCopyCheckpoint={() => copyPracticeCheckpoint(practiceRound)} /> : <>
         <div className={styles.selectors}>
           <label className={styles.field} htmlFor={sectionId}>閱讀範圍
-            <select id={sectionId} value={sectionIndex} onChange={(event) => { setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>
+            <select id={sectionId} value={sectionIndex} onChange={(event) => { invalidateCopyFeedback(); setSectionIndex(Number(event.target.value)); setPassageIndex(0); }}>
               {source.sections.map((item, index) => <option value={index} key={item.id}>{item.label}</option>)}
             </select>
           </label>
           <label className={styles.field} htmlFor={modeId}>這次怎麼讀
-            <select id={modeId} value={mode} onChange={(event) => setMode(event.target.value as StudyMode)}>
+            <select id={modeId} value={mode} onChange={(event) => { invalidateCopyFeedback(); setMode(event.target.value as StudyMode); }}>
               <option value="understand">理解概念</option><option value="exam">考前複習</option><option value="practice">練習思路</option>
             </select>
           </label>
@@ -689,10 +757,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           </div>
           <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}
             onChange={(update) => {
-              copyRequest.current += 1;
-              setManualCopyText(null);
-              setDownloadStatus('');
-              setDownloadError('');
+              invalidateCopyFeedback();
               setSession((previous) => previous.revision !== session.revision ? previous : {
                 ...previous,
                 passages: { ...previous.passages, [passageKey]: update(previous.passages[passageKey] ?? emptyStudyPassage()) },

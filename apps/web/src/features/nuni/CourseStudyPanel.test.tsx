@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel } from './CourseStudyPanel';
+import { parseCourseStudyProgress } from './courseStudyProgress';
+import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), read: vi.fn(), available: true }));
 vi.mock('@/lib/studyTutorRuntime', () => ({
@@ -621,6 +623,80 @@ it('copies the current reading note and ignores a delayed clipboard denial after
     await screen.findByText(/已複製本次筆記到剪貼簿/);
     expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('最終筆記');
     expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('copies a restorable reading-progress JSON with selectable fallback when download or clipboard is blocked', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '本機備份筆記' } });
+    fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(screen.getByRole('region', { name: '手動複製閱讀進度 JSON' }).contains(manual)).toBe(true);
+    expect(manual.readOnly).toBe(true);
+    expect(document.activeElement).toBe(manual);
+    const parsed = parseCourseStudyProgress(manual.value, scope);
+    expect(parsed.source.title).toBe(material.title);
+    expect(parsed.position.mode).toBe('exam');
+    expect(parsed.passages['0:0'].note).toBe('本機備份筆記');
+    expect(screen.getByRole('alert').textContent).toContain('儲存為 .json');
+    fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'understand' } });
+    expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('copies the full active or paused practice checkpoint without dropping the draft', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+    await generate();
+    fireEvent.click(screen.getByRole('button', { name: '開始逐題複習' }));
+    fireEvent.change(screen.getByLabelText('這一題，我的回答'), { target: { value: '手機上的未完成練習回答' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製練習與閱讀進度 JSON' }));
+    const active = screen.getByRole('textbox', { name: '可選取的練習與閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const saved = parseStudyPracticeCheckpoint(active.value, scope);
+    expect(saved.round.responses[saved.round.cards[0].id].attempt).toBe('手機上的未完成練習回答');
+    expect(saved.round.finished).toBe(false);
+    expect(saved.progress.position.mode).toBe(saved.round.mode);
+    fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+    expect(screen.queryByRole('region', { name: '手動複製練習與閱讀進度 JSON' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '複製暫停的練習與閱讀進度 JSON' }));
+    const paused = screen.getByRole('textbox', { name: '可選取的練習與閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const resumed = parseStudyPracticeCheckpoint(paused.value, scope);
+    expect(resumed.round.responses[resumed.round.cards[0].id].attempt).toBe('手機上的未完成練習回答');
+    expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('ignores a late JSON clipboard failure after the learner edits the notes', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  let rejectCopy!: (error: Error) => void;
+  const writeText = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectCopy = reject; }));
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '備份操作後才寫入的筆記' } });
+    await act(async () => rejectCopy(new Error('clipboard denied')));
+    expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(inputValue(noteLabel)).toBe('備份操作後才寫入的筆記');
   } finally {
     if (original) Object.defineProperty(window.navigator, 'clipboard', original);
     else Reflect.deleteProperty(window.navigator, 'clipboard');

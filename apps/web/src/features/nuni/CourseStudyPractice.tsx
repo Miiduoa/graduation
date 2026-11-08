@@ -22,6 +22,7 @@ type Props = {
   onDownload: () => void;
   onCopy?: () => void;
   onSave?: () => void;
+  onCopyCheckpoint?: () => void;
 };
 
 const modeLabels: Record<StudyMode, string> = {
@@ -35,7 +36,7 @@ function outcomeLabel(outcome: StudyPracticeResponse['outcome'] | undefined): st
   return '未完成';
 }
 
-export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onDownload, onCopy, onSave }: Props) {
+export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onDownload, onCopy, onSave, onCopyCheckpoint }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const attemptId = useId();
@@ -60,6 +61,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
         <p className={styles.eyebrow}>逐題複習 · {modeLabels[round.mode]}</p>
         <div className={styles.actions}>
           {onSave && <button type="button" className={styles.button} onClick={onSave}>儲存練習與閱讀進度</button>}
+          {onCopyCheckpoint && <button type="button" className={styles.button} onClick={onCopyCheckpoint}>複製練習與閱讀進度 JSON</button>}
           <button type="button" className={styles.button} onClick={onDownload}>下載本輪練習</button>
           {onCopy && <button type="button" className={styles.button} onClick={onCopy}>複製本輪紀錄</button>}
           <button type="button" className={styles.button} onClick={onExit}>回到閱讀</button>
