@@ -109,6 +109,10 @@ export type PUSession = {
   backendSessionId?: string | null;
   /** 伺服器登入並完成 Firebase 身分驗證的使用者；不是原生 Cookie 的持有人證明。 */
   backendOwnerUid?: string;
+  schoolId?: string;
+  localMock?: boolean;
+  /** 可信 session 還原流程提供的期限（毫秒）；未知時不得用來還原 AI 範圍。 */
+  expiresAt?: number;
 };
 
 export type PUStudentInfo = {

@@ -57,6 +57,11 @@ import {
   type SmartActionResult,
 } from './aiSmartActions';
 import {
+  getVerifiedSchoolAiScope,
+  isVerifiedSchoolAiScopeCurrent,
+  type VerifiedSchoolAiScope,
+} from './verifiedSchoolAiScope';
+import {
   toGeminiToolsPayload,
   parseGeminiFunctionCalls,
   executeTool,
@@ -103,28 +108,32 @@ import {
 export type AIProvider = 'offline' | 'cloud' | 'mock' | 'local-llm' | 'gemini';
 
 // ─── 即時洞察快取（避免每次對話重算）──
-let _insightsCache: { data: RealtimeInsights; expiry: number } | null = null;
-let _crossInsightsCache: { data: string; expiry: number } | null = null;
+let _insightsCache: { scope: VerifiedSchoolAiScope; data: RealtimeInsights; expiry: number } | null = null;
+let _crossInsightsCache: { scope: VerifiedSchoolAiScope; data: string; expiry: number } | null = null;
 const INSIGHTS_TTL = 60_000; // 1 分鐘快取
 
-async function getCachedInsightsPrompt(): Promise<string> {
+async function getCachedInsightsPrompt(scope: VerifiedSchoolAiScope): Promise<string> {
+  if (!isVerifiedSchoolAiScopeCurrent(scope)) return '';
   const now = Date.now();
   try {
     // Realtime insights
-    if (!_insightsCache || _insightsCache.expiry < now) {
+    if (!_insightsCache || _insightsCache.scope !== scope || _insightsCache.expiry < now) {
       const data = await computeRealtimeInsights();
-      _insightsCache = { data, expiry: now + INSIGHTS_TTL };
+      if (!isVerifiedSchoolAiScopeCurrent(scope)) return '';
+      _insightsCache = { scope, data, expiry: now + INSIGHTS_TTL };
     }
     // Cross-module insights
-    if (!_crossInsightsCache || _crossInsightsCache.expiry < now) {
+    if (!_crossInsightsCache || _crossInsightsCache.scope !== scope || _crossInsightsCache.expiry < now) {
       const crossInsights = await computeCrossModuleInsights();
+      if (!isVerifiedSchoolAiScopeCurrent(scope)) return '';
       const briefing = await generateDailyBriefing();
+      if (!isVerifiedSchoolAiScopeCurrent(scope)) return '';
       const parts = [
         insightsToPromptText(_insightsCache.data),
         crossInsightsToPromptText(crossInsights),
         dailyBriefingToPromptText(briefing),
       ].filter(Boolean);
-      _crossInsightsCache = { data: parts.join('\n\n'), expiry: now + INSIGHTS_TTL };
+      _crossInsightsCache = { scope, data: parts.join('\n\n'), expiry: now + INSIGHTS_TTL };
     }
     return _crossInsightsCache.data;
   } catch (e) {
@@ -4022,19 +4031,26 @@ export async function chatWithLocalLLMStreaming(
   const config = getConfig();
 
   // ── 即時演算 + 智慧行動注入 ──
-  try {
-    const lastMsg = messages[messages.length - 1]?.content ?? '';
-    const insightsPrompt = await getCachedInsightsPrompt();
-    if (insightsPrompt) context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
-    if (lastMsg.length > 0 && lastMsg.length < 200) {
-      const actionResult = await detectAndExecuteSmartAction(lastMsg);
-      if (actionResult?.success) {
-        console.log(`[AI] Streaming smart action: ${actionResult.action}`);
-        context = { ...context, _smartActionResult: actionResult };
+  const verifiedScope = getVerifiedSchoolAiScope(context);
+  if (verifiedScope) {
+    try {
+      const lastMsg = messages[messages.length - 1]?.content ?? '';
+      const insightsPrompt = await getCachedInsightsPrompt(verifiedScope);
+      if (isVerifiedSchoolAiScopeCurrent(verifiedScope)) {
+        const actionResult = lastMsg.length > 0 && lastMsg.length < 200
+          ? await detectAndExecuteSmartAction(lastMsg, context)
+          : null;
+        if (isVerifiedSchoolAiScopeCurrent(verifiedScope)) {
+          context = {
+            ...context,
+            ...(insightsPrompt ? { _realtimeInsightsPrompt: insightsPrompt } : {}),
+            ...(actionResult?.success ? { _smartActionResult: actionResult } : {}),
+          };
+        }
       }
+    } catch (e) {
+      console.warn('[AI] Streaming insights injection failed:', e);
     }
-  } catch (e) {
-    console.warn('[AI] Streaming insights injection failed:', e);
   }
 
   if (!config.isReleaseLike) {
