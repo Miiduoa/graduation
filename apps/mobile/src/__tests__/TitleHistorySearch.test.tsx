@@ -262,3 +262,35 @@ test('changing the query invalidates a late confirmation without navigating', as
   expect(view.open).not.toHaveBeenCalled();
   expect(view.getByLabelText('記得的標題開頭').props.value).toBe('租屋');
 });
+
+
+test('returning from a historical detail restores the scoped title query without reusing stale result cards', async () => {
+  const navigate = jest.fn();
+  const view = render(<TitleHistoryLauncher onOpenPost={navigate} />);
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  enter(view, '二手書');
+  await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' }));
+  expect(view.queryByLabelText('記得的標題開頭')).toBeNull();
+
+  // The detail screen goes back to the existing community stack entry.
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+  expect(view.queryByText('二手書 one')).toBeNull();
+  expect(search).toHaveBeenCalledTimes(1);
+  expect(view.getByText(/重新搜尋.*確認/)).toBeTruthy();
+  fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+  await view.findByText('二手書 one');
+  expect(search).toHaveBeenCalledTimes(2);
+});
+
+test('explicitly closing a historical search discards its draft instead of restoring it', async () => {
+  const view = render(<TitleHistoryLauncher onOpenPost={jest.fn()} />);
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  fireEvent.changeText(view.getByLabelText('記得的標題開頭'), '租屋');
+  fireEvent.press(view.getByLabelText('關閉歷史搜尋'));
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('');
+  expect(search).not.toHaveBeenCalled();
+});
