@@ -69,6 +69,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [session, setSession] = useState<StudySessionMemory>({ revision: 0, passages: {} });
   const [practiceRound, setPracticeRound] = useState<StudyPracticeRound | null>(null);
   const [pausedRound, setPausedRound] = useState<StudyPracticeRound | null>(null);
+  const [pendingPracticeAction, setPendingPracticeAction] = useState<'replace' | 'discard' | null>(null);
   const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
   const [paste, setPaste] = useState('');
@@ -88,6 +89,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const closeHeading = useRef<HTMLHeadingElement>(null);
   const replaceHeading = useRef<HTMLHeadingElement>(null);
+  const practiceConfirmHeading = useRef<HTMLHeadingElement>(null);
+  const startPracticeButton = useRef<HTMLButtonElement>(null);
+  const endPausedPracticeButton = useRef<HTMLButtonElement>(null);
   const sourceInput = useRef<HTMLInputElement>(null);
   const pasteStart = useRef<HTMLButtonElement>(null);
   const latestSourceState = useRef({ hasSource: false, hasStudyChanges: false });
@@ -105,6 +109,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const headingId = useId();
   const closeHeadingId = useId();
   const replaceHeadingId = useId();
+  const practiceConfirmHeadingId = useId();
   const sectionPassages = useMemo(() => source?.sections.map(splitStudySection) ?? [], [source]);
   const section = source?.sections[sectionIndex];
   const passages = sectionPassages[sectionIndex] ?? [];
@@ -145,12 +150,22 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPassageIndex(target.partNumber);
   }
 
-  function startPractice() {
+  function beginPractice() {
     const round = startStudyPracticeRound(session.revision, mode, practiceDeck.cards);
     if (!round) return;
     setPracticeRound(round);
     setPausedRound(null);
+    setPendingPracticeAction(null);
     clearDownload();
+  }
+
+  function startPractice() {
+    // A paused round can still contain unexported answers even if another mode is selected.
+    if (pausedRound?.revision === session.revision) {
+      setPendingPracticeAction('replace');
+      return;
+    }
+    beginPractice();
   }
 
   function changePractice(action: StudyPracticeAction) {
@@ -182,6 +197,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setMode(pausedRound.mode);
     setPracticeRound(pausedRound);
     setPausedRound(null);
+    setPendingPracticeAction(null);
     clearDownload();
   }
 
@@ -212,6 +228,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   useEffect(() => {
     if (pendingSource) replaceHeading.current?.focus();
   }, [pendingSource]);
+
+  useEffect(() => {
+    if (pendingPracticeAction) practiceConfirmHeading.current?.focus();
+  }, [pendingPracticeAction]);
 
   useEffect(() => {
     if (manualCopyText !== null) manualCopyInput.current?.focus();
@@ -248,6 +268,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setRestoredFile(null);
     setConfirmClose(false);
     setPendingSource(null);
+    setPendingPracticeAction(null);
     clearDownload();
     setError('');
   }
@@ -359,6 +380,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     const controller = new AbortController();
     read.current = controller;
     setReading('progress');
+    setPendingPracticeAction(null);
     setRestorePreview(null);
     setPendingSource(null);
     setError('');
@@ -399,6 +421,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setRestorePreview(null);
     setConfirmClose(false);
     setPendingSource(null);
+    setPendingPracticeAction(null);
     setPaste('');
     clearDownload();
     setError('');
@@ -409,6 +432,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     const controller = new AbortController();
     read.current = controller;
     setReading('source');
+    setPendingPracticeAction(null);
     setRestorePreview(null);
     setPendingSource(null);
     setError('');
@@ -459,6 +483,30 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
             setPendingSource(null);
             trigger?.focus();
           }}>保留原本的學習內容</button>
+        </div>
+      </section>}
+      {pendingPracticeAction && pausedRound?.revision === session.revision && <section className={styles.closeWarning}
+        aria-labelledby={practiceConfirmHeadingId}>
+        <h4 id={practiceConfirmHeadingId} ref={practiceConfirmHeading} tabIndex={-1}>
+          {pendingPracticeAction === 'replace' ? '要取代暫停的練習嗎？' : '要結束暫停的練習嗎？'}
+        </h4>
+        <p className={styles.note}>這輪練習可能有尚未備份的草稿、提示、揭答與自評。
+          {pendingPracticeAction === 'replace'
+            ? ' 確認開始新一輪會清空原練習，並以目前讀法的題目從空白回答開始。'
+            : ' 確認結束後會清除暫停的練習，但目前閱讀、筆記與待複習標記仍保留。'}
+          想保留這輪作答，請先取消並儲存完整練習與閱讀進度。
+        </p>
+        <div className={styles.actions}>
+          <button type="button" className={`${styles.button} ${styles.primary}`}
+            onClick={() => {
+              if (pendingPracticeAction === 'replace') beginPractice();
+              else { setPausedRound(null); setPendingPracticeAction(null); clearDownload(); }
+            }}>{pendingPracticeAction === 'replace' ? '確認開始新一輪' : '確認結束暫停練習'}</button>
+          <button type="button" className={styles.button} onClick={() => {
+            const trigger = pendingPracticeAction === 'replace' ? startPracticeButton.current : endPausedPracticeButton.current;
+            setPendingPracticeAction(null);
+            trigger?.focus();
+          }}>取消，保留這輪練習</button>
         </div>
       </section>}
       {confirmClose && <section className={styles.closeWarning} aria-labelledby={closeHeadingId}>
@@ -542,7 +590,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <div className={styles.actions}>
             <button type="button" className={`${styles.button} ${styles.primary}`} onClick={resumePractice}>繼續這輪練習</button>
             <button type="button" className={styles.button} onClick={() => savePracticeCheckpoint(pausedRound)}>儲存暫停的練習與閱讀進度</button>
-            <button type="button" className={styles.button} onClick={() => { setPausedRound(null); clearDownload(); }}>結束暫停的練習</button>
+            <button ref={endPausedPracticeButton} type="button" className={styles.button}
+              onClick={() => setPendingPracticeAction('discard')}>結束暫停的練習</button>
           </div>
         </section>}
         {!practiceRound && <div className={styles.actions}>
@@ -585,7 +634,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
             aria-current={sectionIndex === item.sectionNumber && passageIndex === item.partNumber ? 'location' : undefined}
             onClick={() => { focusReadingOnReturn.current = true; setSectionIndex(item.sectionNumber); setPassageIndex(item.partNumber); }}>{item.label}</button>)}</div>
           <div className={styles.actions}>
-            <button type="button" className={`${styles.button} ${styles.primary}`} disabled={!practiceDeck.cards.length}
+            <button ref={startPracticeButton} type="button" className={`${styles.button} ${styles.primary}`} disabled={!practiceDeck.cards.length}
               onClick={startPractice}>開始逐題複習</button>
             <span className={styles.note}>目前讀法有 {practiceDeck.cards.length} 題可練習</span>
           </div>

@@ -114,6 +114,8 @@ it('uses the selected lesson and reading mode, reports missing questions, and re
   fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
   expect(screen.getByText('目前讀法有 1 題可練習')).toBeTruthy();
   begin();
+  expect(screen.getByRole('heading', { name: '要取代暫停的練習嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認開始新一輪' }));
   expect(screen.getByText('考前模式的另一題')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
   fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'practice' } });
@@ -429,6 +431,30 @@ it('ignores a late clipboard denial after a learner switches questions', async (
   }
 });
 
+it('asks before replacing a paused draft with a new round and preserves it on cancellation', async () => {
+  mount();
+  await restore();
+  begin();
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '還沒有備份的第一題草稿' } });
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+  begin();
+  const heading = screen.getByRole('heading', { name: '要取代暫停的練習嗎？' });
+  expect(document.activeElement).toBe(heading);
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消，保留這輪練習' }));
+  expect(screen.queryByRole('heading', { name: '要取代暫停的練習嗎？' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '開始逐題複習' }));
+  fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
+  expect(value(practiceLabel)).toBe('還沒有備份的第一題草稿');
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+  begin();
+  fireEvent.click(screen.getByRole('button', { name: '確認開始新一輪' }));
+  expect(value(practiceLabel)).toBe('');
+  expect(screen.getByText('逐題複習 · 理解概念')).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('pauses a practice round for source review, resumes drafts, and saves the paused round independently', async () => {
   const downloads = downloadMock();
   mount();
@@ -462,6 +488,15 @@ it('pauses a practice round for source review, resumes drafts, and saves the pau
   fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
   expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '結束暫停的練習' }));
+  expect(screen.getByRole('heading', { name: '要結束暫停的練習嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消，保留這輪練習' }));
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '結束暫停的練習' }));
+  fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
+  expect(value(practiceLabel)).toBe('我暫停前的回答😀');
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+  fireEvent.click(screen.getByRole('button', { name: '結束暫停的練習' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認結束暫停練習' }));
   expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
   expect(screen.getByRole('button', { name: '開始逐題複習' }).hasAttribute('disabled')).toBe(false);
   expect(mocks.run).not.toHaveBeenCalled();
