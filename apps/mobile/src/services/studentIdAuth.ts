@@ -108,6 +108,11 @@ function isLocalMockAuthAllowed(): boolean {
 
 // ─── Backend Unified Login ──────────────────────────────
 
+// 與 backend/functions/index.js 的 PU_BACKEND_SESSION_TTL_MS、
+// apps/web/src/lib/server/signInPuStudentId.ts 的 SESSION_TTL_MS 一致。
+// 回應未提供期限，從請求前起算，避免網路等待延長本機 AI 授權期限。
+const PU_BACKEND_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 /**
  * 嘗試使用後端 signInPuStudentId 統一登入。
  * 一次呼叫同時搞定 E校園 + TronClass。
@@ -125,6 +130,7 @@ async function tryBackendUnifiedLogin(
     displayName: string;
     department: string;
     puSessionId: string | null;
+    expiresAt: number;
     tronClassSessionId: string | null;
     tronClassUserId: number | null;
     studentInfo: PUStudentInfo | null;
@@ -138,6 +144,7 @@ async function tryBackendUnifiedLogin(
   code?: string;
   allowNativeFallback?: boolean;
 }> {
+  const expiresAt = Date.now() + PU_BACKEND_SESSION_TTL_MS;
   const url = getCloudFunctionUrl('signInPuStudentId');
   const hostedUrl = 'https://nuni.tw/api/fn/signInPuStudentId';
   const useLocalMockAuth = !hasUsableFirebaseConfig() && isLocalMockAuthAllowed();
@@ -203,6 +210,7 @@ async function tryBackendUnifiedLogin(
     return {
       success: true,
       data: {
+        expiresAt,
         uid: data.uid as string,
         customToken: data.customToken as string | undefined,
         studentId: (data.studentId as string) || studentId,
@@ -533,12 +541,14 @@ async function handleBackendLoginSuccess(
     data;
   let requester: User | null = null;
   let loginSession: PUSession | null = null;
+  let assertSchoolSession: (() => void) | null = null;
   const assertCurrent = () => {
     assertAttempt();
     if ((requester && getAuthInstance().currentUser !== requester) ||
         (loginSession && _currentPUSession !== loginSession)) {
       throw new Error('帳號已變更，請重新登入。');
     }
+    assertSchoolSession?.();
   };
 
   progress('linking', '連上學校帳號');
@@ -581,12 +591,16 @@ async function handleBackendLoginSuccess(
     loggedIn: true,
     studentName: displayName,
     backendSessionId: puSessionId,
+    expiresAt: data.expiresAt,
     backendOwnerUid: data.localMock ? undefined : uid,
     schoolId: params.schoolId,
     localMock: Boolean(data.localMock),
   };
   loginSession = session;
   _currentPUSession = session;
+  if (requester && !data.localMock) {
+    assertSchoolSession = captureSchoolSessionAssertion({ uid, schoolId: params.schoolId });
+  }
 
   // 注入 PUAdapter
   let adapter: Awaited<ReturnType<typeof getAdapter>>;
