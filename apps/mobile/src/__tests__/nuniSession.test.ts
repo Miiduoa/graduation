@@ -3,6 +3,7 @@ import {
   NuniSessionController,
   type NuniSessionDependencies,
 } from '../services/nuniSessionController';
+import { NuniDraftScopeStore } from '../state/nuniDrafts';
 
 const account = 'pa_11111111-1111-4111-8111-111111111111';
 const handle = `ps_${'a'.repeat(43)}`;
@@ -58,12 +59,20 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     },
   );
   const credential = jest.fn(async () => 'verified-by-server-id-token');
+  const clearCredential = jest.fn(async () => {});
+  const savedPlansCleanup = {
+    begin: jest.fn(async () => {}),
+    end: jest.fn(() => {}),
+  };
+  const invalidateLocalDrafts = jest.fn();
   const controller = new NuniSessionController({
     storage,
     logoutFence,
+    savedPlansCleanup,
+    invalidateLocalDrafts,
     request,
     credential,
-    clearCredential: jest.fn(async () => {}),
+    clearCredential,
     now,
   });
   return {
@@ -72,6 +81,9 @@ function setup(initial: string | null = null, initialFence = false, now = () => 
     logoutFence,
     request,
     credential,
+    clearCredential,
+    savedPlansCleanup,
+    invalidateLocalDrafts,
     persisted: () => persisted,
     fenced: () => fenced,
   };
@@ -480,4 +492,331 @@ it('binds a merchant settings PUT to the current account and aborts it on logout
   expect(last[3]?.aborted).toBe(true);
   update.resolve({ readinessVersion: 2 });
   await rejected;
+});
+
+it('fences saved plans synchronously and attempts server revocation before a pending local cleanup completes', async () => {
+  const { controller, storage, request, savedPlansCleanup, fenced } = setup(stored());
+  const cleanup = deferred<void>();
+  savedPlansCleanup.begin.mockReturnValueOnce(cleanup.promise);
+  const logout = controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(1);
+  expect(storage.read).not.toHaveBeenCalled();
+  for (let i = 0; i < 20 && !request.mock.calls.length; i++) await Promise.resolve();
+  expect(request).toHaveBeenCalledWith('logout', handle, {}, expect.any(AbortSignal));
+  expect(fenced()).toBe(true);
+  expect(storage.clear).not.toHaveBeenCalled();
+  expect(savedPlansCleanup.end).not.toHaveBeenCalled();
+  expect(controller.state).toMatchObject({ session: null, loading: true, pendingLogout: true });
+  cleanup.resolve();
+  await logout;
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(1);
+  expect(controller.state).toEqual({ session: null, loading: false, error: '', pendingLogout: false });
+});
+
+it.each(['rejected', 'thrown'] as const)('keeps failed saved-plan cleanup retryable (%s) while still revoking the server session', async (failure) => {
+  const { controller, savedPlansCleanup, clearCredential, request, persisted, fenced } = setup(stored());
+  await controller.refresh();
+  if (failure === 'thrown') savedPlansCleanup.begin.mockImplementationOnce(() => { throw new Error('disk'); });
+  else savedPlansCleanup.begin.mockRejectedValueOnce(new Error('disk'));
+  clearCredential.mockRejectedValueOnce(new Error('Google chooser'));
+  await controller.logout();
+  expect(request).toHaveBeenCalledWith('logout', handle, {}, expect.any(AbortSignal));
+  expect(clearCredential).toHaveBeenCalledTimes(1);
+  expect(controller.state).toEqual({
+    session: null, loading: false, pendingLogout: true,
+    error: '手機內的已儲存計畫尚未清除，請重試登出。',
+  });
+  expect(fenced()).toBe(true);
+  expect(JSON.parse(persisted()!).pendingLogout).toBe(true);
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(1);
+  await controller.refresh();
+  expect(controller.state.error).toContain('已儲存計畫尚未清除');
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_OUT_REQUIRED' });
+  await controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(2);
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(2);
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(false);
+  expect(controller.state).toEqual({ session: null, loading: false, error: '', pendingLogout: false });
+});
+
+it('preserves a pending cleanup across restart even after the secure credential is absent', async () => {
+  const first = setup();
+  await first.controller.refresh();
+  first.savedPlansCleanup.begin.mockRejectedValueOnce(new Error('local cleanup failed'));
+  await first.controller.logout();
+  expect(first.persisted()).toBeNull();
+  expect(first.fenced()).toBe(true);
+  const second = setup(first.persisted(), first.fenced());
+  await second.controller.refresh();
+  expect(second.controller.state).toMatchObject({ session: null, pendingLogout: true });
+  expect(second.logoutFence.clear).not.toHaveBeenCalled();
+  expect(second.request).not.toHaveBeenCalled();
+  await expect(second.controller.signIn()).rejects.toMatchObject({ code: 'SIGN_OUT_REQUIRED' });
+  await second.controller.logout();
+  expect(second.savedPlansCleanup.begin).toHaveBeenCalledTimes(1);
+  expect(second.fenced()).toBe(false);
+  expect(second.controller.state.pendingLogout).toBe(false);
+});
+
+it('retains the secure pending marker when the independent fence and saved-plan cleanup fail', async () => {
+  const first = setup(stored());
+  await first.controller.refresh();
+  first.logoutFence.mark.mockRejectedValue(new Error('AsyncStorage unavailable'));
+  first.savedPlansCleanup.begin.mockRejectedValueOnce(new Error('plans unavailable'));
+  await first.controller.logout();
+  expect(first.request).toHaveBeenCalledWith('logout', handle, {}, expect.any(AbortSignal));
+  expect(first.fenced()).toBe(false);
+  expect(JSON.parse(first.persisted()!).pendingLogout).toBe(true);
+  expect(first.storage.clear).not.toHaveBeenCalled();
+  const second = setup(first.persisted(), first.fenced());
+  await second.controller.refresh();
+  expect(second.controller.state.pendingLogout).toBe(true);
+  expect(second.request).not.toHaveBeenCalled();
+  await second.controller.logout();
+  expect(second.persisted()).toBeNull();
+  expect(second.controller.state.pendingLogout).toBe(false);
+});
+
+it('does not mislabel a failed fence removal as Google credential cleanup and retries without a session', async () => {
+  const { controller, logoutFence, savedPlansCleanup, persisted, fenced } = setup(stored());
+  await controller.refresh();
+  logoutFence.clear.mockRejectedValueOnce(new Error('disk unavailable'));
+  await controller.logout();
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(true);
+  expect(controller.state.pendingLogout).toBe(true);
+  expect(controller.state.error).toContain('請重試');
+  expect(controller.state.error).not.toContain('Google');
+  await controller.refresh();
+  expect(controller.state.pendingLogout).toBe(true);
+  await controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(2);
+  expect(controller.state.error).toBe('');
+  expect(fenced()).toBe(false);
+});
+
+it('completes saved-plan cleanup even when the server cannot confirm logout', async () => {
+  const { controller, request, savedPlansCleanup, clearCredential, fenced } = setup(stored());
+  await controller.refresh();
+  request.mockRejectedValueOnce(new NuniError(0, 'NETWORK_ERROR'));
+  await controller.logout();
+  expect(savedPlansCleanup.begin).toHaveBeenCalledTimes(1);
+  expect(savedPlansCleanup.end).toHaveBeenCalledTimes(1);
+  expect(clearCredential).toHaveBeenCalledTimes(1);
+  expect(fenced()).toBe(true);
+  expect(controller.state.pendingLogout).toBe(true);
+});
+
+it('a late token exchange cannot clear the fence for failed saved-plan cleanup', async () => {
+  const { controller, request, savedPlansCleanup, logoutFence, fenced } = setup();
+  await controller.refresh();
+  const late = deferred<unknown>();
+  request.mockImplementation(async (path) =>
+    path === 'login-transactions' ? transaction : path === 'sessions' ? late.promise : { signedOut: true },
+  );
+  const login = controller.signIn();
+  const rejected = expect(login).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  for (let i = 0; i < 40 && !request.mock.calls.some(([path]) => path === 'sessions'); i++) await Promise.resolve();
+  expect(request.mock.calls.some(([path]) => path === 'sessions')).toBe(true);
+  savedPlansCleanup.begin.mockRejectedValueOnce(new Error('disk'));
+  await controller.logout();
+  late.resolve({ ...principal, sessionHandle: handle, expiresInSeconds: 3600 });
+  await rejected;
+  expect(request).toHaveBeenCalledWith('logout', handle, {});
+  expect(logoutFence.clear).not.toHaveBeenCalled();
+  expect(fenced()).toBe(true);
+  expect(controller.state).toMatchObject({ session: null, pendingLogout: true });
+  expect(controller.state.error).toContain('已儲存計畫尚未清除');
+  await controller.logout();
+  expect(fenced()).toBe(false);
+});
+
+it('keeps the Google-only error distinct after the session and saved plans are cleared', async () => {
+  const { controller, clearCredential, persisted, fenced } = setup(stored());
+  await controller.refresh();
+  clearCredential.mockRejectedValueOnce(new Error('chooser'));
+  await controller.logout();
+  expect(controller.state).toEqual({
+    session: null, loading: false, pendingLogout: false,
+    error: '已登出；裝置上的 Google 帳號選擇狀態尚未清除。',
+  });
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(false);
+});
+
+it('removes a late pending-credential fallback write when logout finishes while that write is in flight', async () => {
+  const { controller, storage, savedPlansCleanup, persisted, fenced } = setup();
+  await controller.refresh();
+  const write = storage.write.getMockImplementation()!;
+  const loginWrite = deferred<void>();
+  const fallbackWrite = deferred<void>();
+  const cleanup = deferred<void>();
+  storage.write
+    .mockImplementationOnce(async (value) => { await loginWrite.promise; await write(value); })
+    .mockImplementationOnce(write)
+    .mockImplementationOnce(async (value) => { await fallbackWrite.promise; await write(value); });
+  const login = controller.signIn();
+  const rejected = expect(login).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  for (let i = 0; i < 40 && storage.write.mock.calls.length < 1; i++) await Promise.resolve();
+  expect(storage.write).toHaveBeenCalledTimes(1);
+  savedPlansCleanup.begin.mockReturnValueOnce(cleanup.promise);
+  const logout = controller.logout();
+  for (let i = 0; i < 40 && storage.write.mock.calls.length < 2; i++) await Promise.resolve();
+  expect(storage.write).toHaveBeenCalledTimes(2);
+  loginWrite.resolve();
+  for (let i = 0; i < 40 && storage.write.mock.calls.length < 3; i++) await Promise.resolve();
+  expect(storage.write).toHaveBeenCalledTimes(3);
+  cleanup.resolve();
+  await logout;
+  expect(persisted()).toBeNull();
+  fallbackWrite.resolve();
+  await rejected;
+  expect(persisted()).toBeNull();
+  expect(fenced()).toBe(false);
+  expect(controller.state).toMatchObject({ session: null, pendingLogout: false });
+});
+
+it('retains local input through a transient foreground check but revokes it before logout awaits anything', async () => {
+  const { controller, request, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '未完成的課業內容');
+  request.mockRejectedValueOnce(new NuniError(503, 'TEMPORARY_UNAVAILABLE'));
+  await controller.refresh();
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(drafts.forAccount(account)).toBe(original);
+  expect(original.cache.get('body')).toBe('未完成的課業內容');
+  const leaving = controller.logout();
+  // This check intentionally precedes the first awaited logout result and any UI render.
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '舊表單的晚到內容');
+  expect(original.cache.size).toBe(0);
+  await leaving;
+  await controller.signIn();
+  const returned = drafts.forAccount(account);
+  expect(returned.revision).toBeGreaterThan(original.revision);
+  expect(returned.cache).not.toBe(original.cache);
+  expect(returned.cache.has('body')).toBe(false);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+});
+
+it.each([401, 409])('revokes detached route input after confirmed status %i even while the old credential remains', async (status) => {
+  const { controller, request, storage, persisted, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '已離開畫面但仍保留的內容');
+  storage.clear.mockRejectedValueOnce(new Error('secure deletion unavailable'));
+  request.mockRejectedValueOnce(new NuniError(status, 'SESSION_REVOKED'));
+  await controller.refresh();
+  expect(persisted()).not.toBeNull();
+  expect(controller.state.session).toBeNull();
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '舊回應');
+  expect(original.cache.size).toBe(0);
+  // A later server verification of the same account cannot revive the revoked Map.
+  await controller.refresh();
+  const verifiedAgain = drafts.forAccount(account);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(verifiedAgain.revision).toBeGreaterThan(original.revision);
+  expect(verifiedAgain.cache.has('body')).toBe(false);
+});
+
+it('revokes a confirmed unauthorized draft before slow credential deletion finishes', async () => {
+  const { controller, request, storage, invalidateLocalDrafts } = setup(stored());
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const context = controller.state.session!.context;
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '等待中的私人內容');
+  const pendingRead = deferred<unknown>();
+  request.mockReturnValueOnce(pendingRead.promise);
+  const reading = controller.request('class-workspaces', context);
+  const rejectedRead = expect(reading).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  const signal = request.mock.calls.at(-1)![3]!;
+  const deletion = deferred<void>();
+  storage.clear.mockReturnValueOnce(deletion.promise);
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  expect(storage.clear).toHaveBeenCalledTimes(1);
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(controller.isSessionCurrent(account, context)).toBe(false);
+  expect(controller.state).toMatchObject({ session: null, loading: true });
+  expect(signal.aborted).toBe(true);
+  expect(original.cache.get('body')).toBeUndefined();
+  const callsBefore = request.mock.calls.length;
+  await expect(controller.request('class-workspaces', context)).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  await controller.refresh();
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_IN_BUSY' });
+  expect(request).toHaveBeenCalledTimes(callsBefore);
+  pendingRead.resolve({ workspaces: [] });
+  await rejectedRead;
+  deletion.resolve();
+  await refresh;
+});
+
+it('does not start a replacement login until every earlier revoked-credential deletion has settled', async () => {
+  const { controller, request, storage, persisted } = setup(stored());
+  await controller.refresh();
+  const deletion = deferred<void>();
+  const clear = storage.clear.getMockImplementation()!;
+  storage.clear.mockImplementationOnce(async () => { await deletion.promise; await clear(); });
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  await controller.logout();
+  expect(controller.state).toMatchObject({ session: null, loading: false, pendingLogout: false });
+  expect(storage.clear).toHaveBeenCalledTimes(2);
+  // Logout's own cleanup finished, but the earlier 401 cleanup can still delete storage.
+  await expect(controller.signIn()).rejects.toMatchObject({ code: 'SIGN_IN_BUSY' });
+  deletion.resolve();
+  await refresh;
+  await controller.signIn();
+  expect(controller.state.session?.platformAccountId).toBe(account);
+  expect(controller.canRetainLocalDrafts(account)).toBe(true);
+  expect(persisted()).not.toBeNull();
+});
+
+it('finishes verification after provider reactivation during an earlier secure deletion', async () => {
+  const { controller, request, storage } = setup(stored());
+  await controller.refresh();
+  const deletion = deferred<void>();
+  storage.clear.mockReturnValueOnce(deletion.promise);
+  request.mockRejectedValueOnce(new NuniError(401, 'SESSION_REVOKED'));
+  const refresh = controller.refresh();
+  for (let i = 0; i < 30 && storage.clear.mock.calls.length === 0; i++) await Promise.resolve();
+  controller.dispose();
+  controller.activate();
+  await controller.refresh();
+  expect(controller.state.loading).toBe(true);
+  deletion.resolve();
+  await refresh;
+  for (let i = 0; i < 30 && controller.state.loading; i++) await Promise.resolve();
+  expect(controller.state).toMatchObject({ session: null, loading: false, pendingLogout: false });
+});
+
+it('cannot read or refill expired input before the next refresh or after controller disposal', async () => {
+  let now = 1000;
+  const { controller, invalidateLocalDrafts } = setup(stored(false, 2000), false, () => now);
+  const drafts = new NuniDraftScopeStore(controller.canRetainLocalDrafts);
+  invalidateLocalDrafts.mockImplementation(drafts.clear);
+  await controller.refresh();
+  const original = drafts.forAccount(account);
+  original.cache.set('body', '即將逾時的草稿');
+  now = 2000;
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(original.cache.get('body')).toBeUndefined();
+  original.cache.set('body', '逾時後的晚到內容');
+  expect(original.cache.size).toBe(0);
+  controller.dispose();
+  expect(controller.canRetainLocalDrafts(account)).toBe(false);
+  expect(invalidateLocalDrafts).toHaveBeenCalled();
 });
