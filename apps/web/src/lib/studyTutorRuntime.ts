@@ -128,7 +128,11 @@ export async function runStudyTutor({
         worker.onmessage = null;
         worker.onerror = null;
         worker.onmessageerror = null;
-        worker.terminate();
+        try {
+          worker.terminate();
+        } catch {
+          // Some browsers throw after a worker crash. Still release the UI and settle the request.
+        }
         reportTiming(generationStartedAt, error?.name === 'AbortError' ? 'cancelled' : error ? 'failed' : 'success');
         if (error) reject(error);
         else resolve(explanation!);
@@ -158,7 +162,9 @@ export async function runStudyTutor({
         if (data.id !== id) {
           // An old numeric request may finish late. Ignore it, but fail fast
           // if the worker omitted or corrupted its request identifier.
-          if (!Number.isSafeInteger(data.id)) finish(workerError('invalid_response'));
+          // A request id must be a positive safe integer, never zero or negative.
+          if (typeof data.id !== 'number' || !Number.isSafeInteger(data.id) || data.id <= 0)
+            finish(workerError('invalid_response'));
           return;
         }
         if (data.type === 'progress') {

@@ -154,6 +154,28 @@ describe('explicit local study generation', () => {
     })).rejects.toThrow('無法啟動裝置端 AI');
   });
 
+  it('settles the lesson and permits retry even if a crashed worker throws on termination', async () => {
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.terminate.mockImplementationOnce(() => {
+      throw new Error('private worker crash details');
+    });
+    worker.emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(pending).resolves.toEqual(lesson());
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'success' }));
+    expect(worker.onmessage).toBeNull();
+    expect(worker.onerror).toBeNull();
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
   it('includes failed and stopped local AI attempts without inventing a generation phase', async () => {
     const failedTiming = vi.fn();
     const failed = runStudyTutor({
@@ -232,6 +254,9 @@ describe('explicit local study generation', () => {
     { label: 'array data', data: [] },
     { label: 'missing id', data: { type: 'result', raw: JSON.stringify(lesson()) } },
     { label: 'non-numeric id', data: { id: 'other', type: 'progress', phase: 'generating' } },
+    { label: 'zero id', data: { id: 0, type: 'progress', phase: 'generating' } },
+    { label: 'negative id', data: { id: -1, type: 'error', code: 'runtime' } },
+    { label: 'fractional id', data: { id: 1.5, type: 'result', raw: JSON.stringify(lesson()) } },
   ])('fails fast on malformed worker envelopes ($label) and can retry', async ({ data }) => {
     const onTiming = vi.fn();
     const pending = runStudyTutor({
