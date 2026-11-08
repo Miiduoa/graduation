@@ -94,10 +94,25 @@ export async function runStudyTutor({
   running = true;
   try {
     const startedAt = performance.now();
+    const reportTiming = (generationStartedAt: number | null, outcome: StudyTutorTiming['outcome']) => {
+      const endedAt = performance.now();
+      try {
+        onTiming?.({
+          preparationMs: Math.max(0, (generationStartedAt ?? endedAt) - startedAt),
+          generationMs: generationStartedAt === null ? null : Math.max(0, endedAt - generationStartedAt),
+          totalMs: Math.max(0, endedAt - startedAt),
+          outcome,
+        });
+      } catch {
+        // A timing display failure must never replace the worker outcome.
+      }
+    };
     let worker: Worker;
     try {
       worker = new Worker(new URL('./personalImportAi.worker.ts', import.meta.url), { type: 'module' });
     } catch {
+      // A constructor failure occurs before the Promise and would otherwise skip timing.
+      reportTiming(null, 'failed');
       throw new Error('無法啟動裝置端 AI，請重新整理後再試；原文仍可閱讀。');
     }
     return await new Promise<TutorExplanation>((resolve, reject) => {
@@ -114,17 +129,7 @@ export async function runStudyTutor({
         worker.onerror = null;
         worker.onmessageerror = null;
         worker.terminate();
-        const endedAt = performance.now();
-        try {
-          onTiming?.({
-            preparationMs: Math.max(0, (generationStartedAt ?? endedAt) - startedAt),
-            generationMs: generationStartedAt === null ? null : Math.max(0, endedAt - generationStartedAt),
-            totalMs: Math.max(0, endedAt - startedAt),
-            outcome: error?.name === 'AbortError' ? 'cancelled' : error ? 'failed' : 'success',
-          });
-        } catch {
-          // A timing display failure must not replace the worker result.
-        }
+        reportTiming(generationStartedAt, error?.name === 'AbortError' ? 'cancelled' : error ? 'failed' : 'success');
         if (error) reject(error);
         else resolve(explanation!);
       };

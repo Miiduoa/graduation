@@ -117,6 +117,43 @@ describe('explicit local study generation', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
+  it('records startup failure timing before the model can generate and allows a later retry', async () => {
+    const onTiming = vi.fn();
+    vi.stubGlobal('Worker', class {
+      constructor() { throw new Error('private worker path and lesson contents'); }
+    });
+    await expect(runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    })).rejects.toThrow('無法啟動裝置端 AI');
+    expect(onTiming).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith({
+      preparationMs: expect.any(Number), generationMs: null,
+      totalMs: expect.any(Number), outcome: 'failed',
+    });
+    const result = onTiming.mock.calls[0][0];
+    expect(result.preparationMs).toBeGreaterThanOrEqual(0);
+    expect(result.preparationMs).toBe(result.totalMs);
+    expect(FakeWorker.instances).toHaveLength(0);
+
+    vi.stubGlobal('Worker', FakeWorker);
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a worker startup error authoritative even if the timing callback throws', async () => {
+    vi.stubGlobal('Worker', class {
+      constructor() { throw new Error('private source location'); }
+    });
+    await expect(runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+      onTiming: () => { throw new Error('timing display failure'); },
+    })).rejects.toThrow('無法啟動裝置端 AI');
+  });
+
   it('includes failed and stopped local AI attempts without inventing a generation phase', async () => {
     const failedTiming = vi.fn();
     const failed = runStudyTutor({
