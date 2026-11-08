@@ -4,7 +4,7 @@
 .content { padding: 0 14px 16px; display: grid; gap: 12px; min-width: 0; }
 .fields { display: grid; gap: 12px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .fields:disabled > .actions { opacity: 0.5; }
-.fields label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 0.8125rem; }
+.fields label, .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 0.8125rem; }
 .fields input, .fields select { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--plan-border); border-radius: 9px; background: var(--plan-panel); color: var(--plan-text); padding: 9px 10px; font: inherit; font-size: 0.875rem; }
 .fields input:disabled, .fields select:disabled { opacity: 0.5; }
 .fields button { justify-self: start; }

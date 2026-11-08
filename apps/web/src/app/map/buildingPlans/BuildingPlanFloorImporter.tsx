@@ -155,11 +155,11 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
         {incoming && <fieldset disabled={reading} className={styles.fields}>
           <legend className={styles.srOnly}>新增樓層設定</legend>
           <p className={styles.hint}>來源圖面：{incoming.name}</p>
-          <label>加入哪一層<select value={sourceFloorId} onChange={event => {
+          <div className={styles.field}><label htmlFor={`${fileId}-floor`}>加入哪一層</label><select id={`${fileId}-floor`} value={sourceFloorId} onChange={event => {
             const floor = incoming.floors.find(item => item.id === event.target.value);
             if (!floor) return;
             setSourceFloorId(floor.id); setLabel(floor.label); invalidatePreview();
-          }}>{incoming.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}</select></label>
+          }}>{incoming.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}</select></div>
           <p className={styles.hint}>此層來源：{source?.url
             ? <a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
             : source?.label ?? '原檔未提供來源'}</p>
@@ -168,12 +168,12 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
             <label>樓底標高（公尺）<input type="number" min={-30} max={150} step="any" value={elevation} onChange={event => { setElevation(event.target.value); invalidatePreview(); }} /></label>
             <label>水平位移（公尺）<input type="number" step="any" value={offsetX} onChange={event => { setOffsetX(event.target.value); invalidatePreview(); }} /></label>
             <label>垂直位移（公尺）<input type="number" step="any" value={offsetY} onChange={event => { setOffsetY(event.target.value); invalidatePreview(); }} /></label>
-            <label>圖面旋轉<select value={rotation} onChange={event => { setRotation(Number(event.target.value) as BuildingPlanFloorPlacement['rotationDegrees']); invalidatePreview(); }}>
+            <div className={styles.field}><label htmlFor={`${fileId}-rotation`}>圖面旋轉</label><select id={`${fileId}-rotation`} value={rotation} onChange={event => { setRotation(Number(event.target.value) as BuildingPlanFloorPlacement['rotationDegrees']); invalidatePreview(); }}>
               <option value="0">不旋轉</option><option value="90">順時針 90°</option><option value="180">旋轉 180°</option><option value="270">順時針 270°</option>
-            </select></label>
-            <label>位置參考樓層<select value={reference.id} onChange={event => setReferenceId(event.target.value)}>
+            </select></div>
+            <div className={styles.field}><label htmlFor={`${fileId}-reference`}>位置參考樓層</label><select id={`${fileId}-reference`} value={reference.id} onChange={event => setReferenceId(event.target.value)}>
               {plan.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}
-            </select></label>
+            </select></div>
           </div>
           <p className={styles.hint}>樓底標高沿用目前建築的高度基準。平面位置先繞來源原點旋轉，再平移；正值向右、向下。來源樓高為 {sourceFloor?.height} 公尺，組合不縮放圖面。</p>
           <button type="button" onClick={prepareFloor}>預覽樓層位置</button>
