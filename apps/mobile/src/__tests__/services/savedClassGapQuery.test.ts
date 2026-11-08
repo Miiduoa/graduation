@@ -219,7 +219,12 @@ describe('saved class gap answer', () => {
     expect(answer({ untilMinute: 900, minMinutes: 60 })).toContain('14:00–15:00（60 分鐘）');
     expect(answer({ untilMinute: 1440 })).toContain('24:00 之前');
     expect(answer({ untilMinute: 1440 })).toContain('23:00–24:00（60 分鐘）');
-    expect(answer({ part: 'afternoon', fromMinute: 930, untilMinute: 1140 })).toContain('下午（12:00–18:00） 15:30–19:00');
+    const clipped = answer({ part: 'afternoon', fromMinute: 930, untilMinute: 1140 });
+    expect(clipped).toContain('下午（12:00–18:00） 15:30–18:00');
+    expect(clipped).toContain('15:30–17:00（90 分鐘）');
+    expect(clipped).not.toContain('15:30–19:00');
+    expect(answer({ part: 'afternoon', untilMinute: 1140 })).toContain('18:00 之前');
+    expect(answer({ part: 'afternoon', fromMinute: 600 })).toContain('12:00 之後');
   });
 
   test('does not mistake a corrupt saved gap for evidence that no class gaps exist', () => {
