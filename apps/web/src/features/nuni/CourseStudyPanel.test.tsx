@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel } from './CourseStudyPanel';
-import { parseCourseStudyProgress } from './courseStudyProgress';
+import { COURSE_STUDY_PROGRESS_LIMITS, parseCourseStudyProgress } from './courseStudyProgress';
 import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
 
 const mocks = vi.hoisted(() => ({ run: vi.fn(), read: vi.fn(), available: true }));
@@ -764,6 +764,10 @@ it('offers a selectable reading-note fallback when mobile clipboard support is m
     expect(manual.value).toContain('本機筆記甲');
     expect(manual.value).toContain(material.body);
     expect(document.activeElement).toBe(manual);
+    fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }));
+    expect(document.activeElement).toBe(manual);
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(manual.value.length);
     expect(screen.getByRole('alert').textContent).toContain('無法直接複製筆記');
     fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '修改後的筆記乙' } });
     expect(screen.queryByRole('region', { name: '手動複製本次筆記' })).toBeNull();
@@ -1166,4 +1170,28 @@ it('shows observed local AI phase timings without suggesting a verified benchmar
     !!element.textContent?.includes('生成 1370 毫秒') &&
     !!element.textContent?.includes('合計 2210 毫秒'))).toBeTruthy();
   expect(screen.getByText(/不能據此認定冷啟、暖啟或回答正確/)).toBeTruthy();
+});
+
+it('rejects oversized pasted JSON before retaining it in state, without losing an earlier backup or the course', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const paste = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  fireEvent.change(paste, { target: { value: '原本貼上的備份文字' } });
+  expect(paste.value).toBe('原本貼上的備份文字');
+
+  // Both a too-long ASCII clipboard and a shorter UTF-16 / larger UTF-8 paste
+  // must fail before becoming the controlled textarea value.
+  fireEvent.change(paste, { target: { value: 'x'.repeat(COURSE_STUDY_PROGRESS_LIMITS.bytes + 1) } });
+  expect(paste.value).toBe('原本貼上的備份文字');
+  expect(screen.getByRole('alert').textContent).toContain('超過 8 MiB');
+
+  fireEvent.change(paste, { target: { value: '中'.repeat(Math.ceil(COURSE_STUDY_PROGRESS_LIMITS.bytes / 3) + 1) } });
+  expect(paste.value).toBe('原本貼上的備份文字');
+  expect(screen.getByRole('alert').textContent).toContain('超過 8 MiB');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+
+  fireEvent.change(paste, { target: { value: '已改用較小份的 JSON 草稿' } });
+  expect(paste.value).toBe('已改用較小份的 JSON 草稿');
+  expect(screen.queryByRole('alert')).toBeNull();
 });

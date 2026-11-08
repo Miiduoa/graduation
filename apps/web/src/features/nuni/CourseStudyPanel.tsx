@@ -533,6 +533,19 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     }
   }
 
+  // Reject oversized clipboard content before storing it in React state.
+  // Keep the previous paste intact, so a failed attempt cannot erase a backup.
+  function updatePastedProgress(value: string) {
+    setRestorePreview(null);
+    if (value.length > COURSE_STUDY_PROGRESS_LIMITS.bytes ||
+      new Blob([value]).size > COURSE_STUDY_PROGRESS_LIMITS.bytes) {
+      setError('貼上的進度 JSON 超過 8 MiB；原本貼上的文字仍保留。請使用較小份的備份。');
+      return;
+    }
+    setProgressPaste(value);
+    setError('');
+  }
+
   // A copied backup can be restored on mobile without first creating a .json file.
   // Reuse the same strict scope/format parser and preview gate as a selected file.
   function previewPastedProgress() {
@@ -691,11 +704,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <p className={styles.note}>可載入閱讀進度或逐題練習進度 JSON，先核對帳號與課程，再預覽確認。檔案未加密，含教材、筆記、講解與完整參考回答，請自行保管。</p>
           <label className={styles.field} htmlFor={progressPasteId}>貼上已備份的進度 JSON
             <textarea id={progressPasteId} rows={5} value={progressPaste} disabled={!!reading}
-              onChange={(event) => {
-                setProgressPaste(event.target.value);
-                setRestorePreview(null);
-                setError('');
-              }} placeholder="貼上先前複製的完整閱讀或練習進度 JSON…" />
+              onChange={(event) => updatePastedProgress(event.target.value)}
+              placeholder="貼上先前複製的完整閱讀或練習進度 JSON…" />
           </label>
           <button ref={progressPastePreviewButton} type="button" className={styles.button} disabled={!!reading || !progressPaste.trim()}
             onClick={previewPastedProgress}>預覽貼上的進度</button>
@@ -781,7 +791,11 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
               onFocus={(event) => event.currentTarget.select()}
               onClick={(event) => event.currentTarget.select()} />
           </label>
-          <p className={styles.note}>可長按選取文字，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
+          <button type="button" className={styles.button} onClick={() => {
+            manualCopyInput.current?.focus();
+            manualCopyInput.current?.select();
+          }}>全選上方文字</button>
+          <p className={styles.note}>可長按選取文字或按「全選上方文字」，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
             內容可能含教材與個人試答，請注意貼上位置。</p>
           <button type="button" className={styles.button} onClick={() => setManualCopyText(null)}>收起手動複製文字</button>
         </section>}
