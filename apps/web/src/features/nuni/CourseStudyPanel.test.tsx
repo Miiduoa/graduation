@@ -777,13 +777,18 @@ it('rejects malformed and cross-course pasted JSON without clearing the current 
     const pasted = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
     fireEvent.change(pasted, { target: { value: '{invalid' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
-    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(screen.getAllByRole('alert').some((alert) =>
+      alert.textContent?.includes('無法讀取這個進度檔'))).toBe(true);
+    // The clipboard backup fallback can remain visible with a distinct error message.
+    expect(screen.getAllByRole('alert').some((alert) =>
+      alert.textContent?.includes('無法直接複製進度 JSON'))).toBe(true);
     expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
     const crossCourse = JSON.parse(json);
     crossCourse.scope.workspaceId = 'cw_22222222-2222-4222-8222-222222222222';
     fireEvent.change(pasted, { target: { value: JSON.stringify(crossCourse) } });
     fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
-    expect(screen.getByRole('alert').textContent).toContain('帳號或課程');
+    expect(screen.getAllByRole('alert').some((alert) =>
+      alert.textContent?.includes('帳號或課程'))).toBe(true);
     expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('尚未備份的現在筆記');
     expect(screen.getByText(material.body)).toBeTruthy();
     expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
