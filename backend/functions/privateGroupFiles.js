@@ -62,7 +62,7 @@ async function authorize(db, scope, uid, writing) {
     );
     const accountData = account.data() || {};
     const schoolId = group.data()?.schoolId;
-    if (accountData.accountDeletionInProgress === true
+    if (!account.exists || accountData.accountDeletionInProgress === true
       || ['deleted', 'disabled', 'suspended', 'inactive'].includes(accountData.status)
       || !group.exists || !validSegment(schoolId)
       || !member.exists || member.data().status !== 'active') {

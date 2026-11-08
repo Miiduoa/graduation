@@ -144,11 +144,27 @@ describe('private group file HTTP handler', () => {
     expect(bucket.file).not.toHaveBeenCalled();
   });
 
-  test('preserves the existing missing-account compatibility while requiring canonical memberships', async () => {
+  test.each([COVER, POST, ANSWER])('missing account denies reads and uploads at %s despite active memberships', async (path) => {
     store.docs.delete('users/alice');
-    expect((await invoke()).status).toBe(200);
-    store.docs.delete('schools/pu/members/alice');
-    expect((await invoke()).status).toBe(403);
+    for (const method of ['GET', 'POST']) {
+      expect(await invoke({ path, method })).toMatchObject({
+        status: 403, body: JSON.stringify({ error: 'File access denied' }),
+      });
+    }
+    expect(bucket.file).not.toHaveBeenCalled();
+  });
+
+  test('legacy token metadata never becomes a download URL and each download rechecks access', async () => {
+    put(POST, 'private bytes', { metadata: { firebaseStorageDownloadTokens: 'legacy-secret' } });
+    const result = await invoke();
+    expect(result).toMatchObject({ status: 200, body: 'private bytes' });
+    expect(JSON.stringify(result)).not.toMatch(/legacy-secret|token=|https:\/\//);
+    expect(result.headers.location).toBeUndefined();
+    expect(result.headers['cache-control']).toBe('private, no-store');
+    bucket.file.mockClear();
+    store.docs.set('groups/course/members/alice', { status: 'left', role: 'member' });
+    expect(await invoke()).toMatchObject({ status: 403 });
+    expect(bucket.file).not.toHaveBeenCalled();
   });
 
   test('submission reads require owner or current manager and writes require the owner', async () => {

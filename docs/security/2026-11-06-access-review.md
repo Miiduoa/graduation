@@ -32,6 +32,15 @@
 
 ## 發布與適用範圍
 
+### PR #517 合併後補查（2026-11-09）
+
+- 私有 Firebase 附件的 canonical `users/{uid}` 文件必須存在；文件已刪除時，即使群組與學校會員文件仍為 active，GET／POST 均回傳相同的 403 `File access denied`，不揭露拒絕原因。單元、transport 及 emulator 的正常授權 fixture 均建立帳號文件。
+- 下載方案選擇保留現有的「每次驗權後直接串流」，不另發 signed URL：`privateGroupFiles.js` 每次重新查核帳號、群組及學校資格，GET 只回傳附件 bytes，POST 只回傳 path，不回傳或保存 Firebase token URL。回歸測試使用帶有 legacy token metadata 的物件，確認回應不含 token／導向網址，並驗證同一 ID token 在撤權後再次下載會被拒絕。這比增加 60 秒 bearer URL 更少改動，也沒有新簽發 URL 的撤權空窗。
+- Supabase 作業附件目前已拒絕新的 signed URL 簽發，保留每次受 RLS 驗權的 authenticated 下載；另一個 materials bucket 的教材入口 `lmsV2MaterialAccess.ts` 已使用每次開啟重新簽發的 60 秒網址，不延長或保存它。
+- **上述方案不會追溯撤銷已發出的 bearer URL。** Firebase 舊 token 仍須由既有清理工具清除並驗證；Supabase 舊 signed URL 仍須等原期限結束，或另行完成既有部署程序的撤銷處置。不得將入口修補視為舊網址已立即失效。本次沒有執行清理、正式環境腳本或新增 migration。
+- 範圍判斷以 `git diff origin/main HEAD` 為準，以下均保留：SSO ACS 的 256 KiB 串流上限與對應測試防止匿名過量讀取；GET 回應建構方式確保可設定既有安全標頭。登入返回網址的正規化後檢查與回歸測試防止 open redirect。RAG indexer 的 Rust backend 與原始 embedding/schema 白名單避免不受信任的持久化設定重建可執行 loader，相關邊界／相容性測試與 CI 是這項安全限制的驗證。`package.json` 和 `pnpm-lock.yaml` 的 Hono adapter 1.19.17 → 2.1.3 是下述安全公告修補，MCP JSON／SSE 測試驗證相容性；`test:rules` 新增的兩個 emulator 套件則直接涵蓋課堂與附件安全。本次沒有無關片段需要還原，也沒有改動依賴版本或 lockfile。
+- 本次驗證：工作目錄未安裝依賴，借用本機既有依賴，以 Node 24.22.1／Jest 關閉 Babel transform 執行 `privateGroupFiles.test.js`，57/57 通過；不是專案指定 Node 22 的乾淨安裝驗證。擴大執行時，migration 套件 20 項通過、2 項 CLI 子行程受 `spawnSync EPERM` 限制失敗；transport／HTTP adapter 因借用依賴的 ESM 載入問題未能啟動。預設 Babel 設定亦缺少 plugin，未改動專案測試設定來掩蓋環境問題。`git diff --check` 通過。
+
 部署時先更新含舊連結讀取路由的 Web 及兩個課表分享寫入入口，再發布限制直接讀取的 Firestore 規則。Storage 規則、Cloud Functions 與 Supabase migration 也都需要各自發布。既有繳交紀錄保留原時間，本次未嘗試回推歷史繳交時間。
 
 本機 RAG 使用嵌入式 ChromaDB。1.5.9 仍有上游重大公告，雲端鎖檔未包含此套件。現有邊界測試確認 FastAPI 沒有掛載 Chroma HTTP API，程式碼追蹤也尚未找到遠端使用者能控制 collection 模型設定的完整路徑。完整本機 ML 相依圖仍待驗證。[上游安全公告](https://github.com/advisories/GHSA-f4j7-r4q5-qw2c)
