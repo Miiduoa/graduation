@@ -279,7 +279,16 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (dailyGaps.some((gap, index) => index > 0 && gap.start < dailyGaps[index - 1].end)) {
     return reply('這份手機課表有重疊的空堂紀錄，無法核對可用時間。請開啟「我的課表」重新確認課程。');
   }
-  const windows = dailyGaps.map(({ start, end }) => ({
+  // Adjacent saved gaps describe one continuous opening. Combine them before
+  // checking the requested duration, or two 60-minute pieces would hide a
+  // usable two-hour slot from a student asking for at least 90 minutes.
+  const continuousGaps: typeof dailyGaps = [];
+  for (const gap of dailyGaps) {
+    const last = continuousGaps[continuousGaps.length - 1];
+    if (last && last.end === gap.start) last.end = gap.end;
+    else continuousGaps.push({ ...gap });
+  }
+  const windows = continuousGaps.map(({ start, end }) => ({
     start: Math.ceil(Math.max(start, from) / MINUTE) * MINUTE,
     end: Math.floor(Math.min(end, until) / MINUTE) * MINUTE,
   })).filter(({ start, end }) => end > start && end - start >= query.minMinutes * MINUTE);

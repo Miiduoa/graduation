@@ -296,6 +296,20 @@ describe('saved class gap answer', () => {
     expect(unrelatedDay).toContain('14:00–15:00（60 分鐘）');
   });
 
+  test('combines touching free intervals before enforcing the minimum without bridging a real class', () => {
+    const timetable = { ...context.timetable, classGaps: [
+      gap('15:00', '16:00'), gap('14:00', '15:00'), gap('16:10', '17:10'),
+    ] };
+    const answer = (query: Partial<SavedClassGapQuery>) =>
+      answerSavedClassGapQuery({ ...today, ...query }, { ...context, timetable }).content;
+    const ninetyMinutes = answer({ minMinutes: 90 });
+    expect(ninetyMinutes).toContain('有 1 段至少 90 分鐘');
+    expect(ninetyMinutes).toContain('14:00–16:00（120 分鐘）');
+    expect(ninetyMinutes).not.toContain('16:10–17:10');
+    expect(answer({ fromMinute: 870, minMinutes: 90 })).toContain('14:30–16:00（90 分鐘）');
+    expect(answer({ minMinutes: 121 })).toContain('沒有至少 121 分鐘');
+  });
+
   test('distinguishes a known empty result from missing, unreadable or incomplete evidence', () => {
     const answer = (timetable: Partial<OnDeviceSchoolContext['timetable']>, checkedAt = context.checkedAt) =>
       answerSavedClassGapQuery(today, { ...context, checkedAt, timetable: { ...context.timetable, ...timetable } }).content;
