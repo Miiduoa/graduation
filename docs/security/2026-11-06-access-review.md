@@ -332,3 +332,12 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 最小修補是在 HTTP 入口解析路徑後、查詢授權與建立 bucket 物件前，對 group-cover 統一強制 `^cover\.[A-Za-z0-9]+$`；有效封面的 GET/POST 流程不變。**保留既有 parser 的廣泛辨識供歷史 token 清理**，避免因此遺漏非封面、但曾誤暴露在相同 namespace 的舊物件。新增合成物件 `roster.pdf`、`private-notes.txt`、`cover.jpg.backup` 的 GET/POST 負向回歸，要求全部在操作 Storage 前返回 400；原既有測試已涵蓋正常封面、跨帳號與校籍撤銷。
 
 驗證界線：此提交只涵蓋應用程式 HTTP 入口的路徑授權，不證明既有 bearer 下載 URL 已失效；GCS 真實 staging、Firebase bearer token 全版本清理、Supabase 已簽 URL、legacy 帳號與限動索引/手機/規則分階段發布仍需獨立處理。新精確 head 的 Functions、Rules、完整 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 須依實際 GitHub 結果核對。未合併 main、部署、執行 migration、清除正式 token 或重送未核准的 npm/pnpm audit。
+
+
+## 2026-11-09：修正封面白名單造成的安全回歸測試誤判
+
+精確 head 的 [CI #42502931270](https://github.com/Miiduoa/graduation/actions/runs/42502931270) 的 Firestore Rules Tests 並非全綠：265 項中 264 通過、1 失敗。失敗位於 `privateGroupFiles.emulator.cjs` 的「校籍撤銷後 GET/POST」測試：測試在撤銷後對所有路徑使用 `.replace('.', '-new.')` 產生新檔名，將唯一合法的群組封面 `cover.jpg` 變成 `cover-new.jpg`。上一輪已刻意禁止非 `cover.<ext>` 的群組根目錄檔名；因此此 POST 在授權前正確以 400 拒絕，舊測試卻期待 403，並非已撤銷校籍可繞過驗權。
+
+這次保留同一測試的身分撤銷／跨校情境，但針對封面使用原合法路徑 `cover.jpg` 重新 POST，以確保拒絕原因真的走到授權檢查並回傳 403；貼文與作業附件仍用不同新檔名，避免混淆 create-only 重送與授權拒絕。應用程式的封面白名單、CAS、權限判斷均**不放寬**。原本的非法 `cover-new.jpg` 路徑拒絕仍由 `privateGroupFiles.test.js` 的負向測試覆蓋。修補可用 `pnpm test:rules` 的 Firebase emulator 及完整 Functions 測試重跑，最新精確提交需以 GitHub CI 實際結果另行驗收，不得借用舊 head 綠燈。
+
+另 [Timetable Browser #42502931306](https://github.com/Miiduoa/graduation/actions/runs/42502931306) 的 Playwright smoke 失敗於等待文字「這台帳號不是平台營運人員」，屬不同功能的 UI 斷言；未在本次資安變更中改動課表功能或放寬安全規則。已提醒需由相關功能開發線檢查產品畫面與測試預期差異。未操作正式資料、金鑰、migration、舊 URL token 或部署；指定 App 5504170 對新 head 的核可仍須獨立確認。

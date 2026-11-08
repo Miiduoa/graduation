@@ -141,7 +141,8 @@ test('active HTTP reads work, direct SDK access is denied, and canonical school 
     await db.doc(`users/${uid}/groups/${groupId}`).set({ status: 'active', role: 'owner', schoolId: 'other' });
     for (const objectPath of Object.values(paths())) {
       assert.equal((await request('GET', objectPath, uid)).status, 403);
-      assert.equal((await request('POST', objectPath.replace('.', '-new.'), uid)).status, 403);
+      const revokedUploadPath = objectPath === paths().cover ? objectPath : objectPath.replace('.', '-new.');
+      assert.equal((await request('POST', revokedUploadPath, uid)).status, 403);
     }
   }
 });
