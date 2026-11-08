@@ -298,3 +298,11 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 ### 04:47 UTC 第二次 Firebase CI：有效清單查詢已被允許，修正測試 API
 
 精確 head `0ac481dc` 的 [Rules CI #42448027270](https://github.com/Miiduoa/graduation/actions/runs/42448027270) 確認新的有效期範圍列表查詢已由規則允許，原本的 `false for list` 授權錯誤解除。263/264 通過，唯一失敗是新測試誤用本檔沒有匯入的 Jest `expect`，拋出 `ReferenceError: expect is not defined`，不是資料被錯誤允許或拒絕。本次更正為本檔已有的 Node `assert.deepEqual`，維持查詢前的拒絕與合法查詢後內容比對，並依新 head 重跑完整驗證；不以此暫時修正宣稱整套通過。
+
+## 2026-11-08：修復完整 Mobile CI 的舊回退測試（待新精確 head 驗證）
+
+精確 head `a6a53604749bc616922398415e6fa99cee522273` 的 [主 CI 42448246208](https://github.com/Miiduoa/graduation/actions/runs/42448246208) 已 completed/failure，非全綠：**Mobile Tests 7171 passed、1 failed、1 skipped**；Web Tests、Web Build、Functions、Rules 264/264、Security Gates、CodeQL、Supabase permissions、Python Security、Mobile Agent Regression、Chroma、Zod、Maestro 均 completed/success（Build Mobile 是受 CI Summary 影響的 skipped）。唯一 Mobile 失敗為 `apps/mobile/src/__tests__/services/socialOptionalReads.test.ts` 原 `story read failures reach recovery after the fallback also fails` 要求 `getDocs` 被呼叫兩次，實際只有一次。這不是安全功能失效：上輪修正 `listActiveStoriesForSchool` 時，已刻意移除會在 Firestore 規則外洩過期限動 metadata 的 **school-only fallback**。舊測試錯把不安全的第二次讀取當作正常行為。
+
+本次先修 CI：保留 `throwOnError` 將原始錯誤交給畫面復原邏輯，將預期呼叫次數明確改為一次，並新增不要求丟錯時的測試，確認 optional-read 回傳空列表且同樣只發出一次查詢。這些斷言在舊版的 school-only fallback 實作上應會失敗，避免之後為了相容誤恢復第二次廣泛查詢。未修改 Firestore 授權、服務程式、E 校園暫停政策或正式資料；請以新 head 的 Mobile Jest 和完整 CI 實際結果驗收，**不得拿舊 head 成功結果替代**。
+
+**保留風險：** 此修補是測試與預期行為的一致化，並不處理已簽發 GCS／Supabase URL 撤銷、真 GCS staging CAS、legacy 主資料、minimatch 兩圖相容升級或索引／行動端／Rules 正式分階段發布。主線現已至 `067436cd830f92d9ebbd301408b9500bbf29c295`，本 PR 落後主線 4 提交；正式合併仍需最新 main 精確整合、全項 CI 與指定 `nuni-merge-gate` App 5504170 對精確 head 核發審查通過。未合併 main／部署／migration／清理正式 token。
