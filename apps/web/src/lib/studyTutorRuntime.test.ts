@@ -280,6 +280,34 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { label: 'unknown loading phase', before: false, invalid: 'decoding' },
+    { label: 'loading after generation begins', before: true, invalid: 'loading' },
+  ])('fails fast on inconsistent worker progress ($label) and retries safely', async ({ before, invalid }) => {
+    const onTiming = vi.fn();
+    const progress = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand',
+      signal: new AbortController().signal, onProgress: progress, onTiming,
+    });
+    const worker = lastWorker();
+    if (before) worker.emit({ type: 'progress', phase: 'generating' });
+    const delivered = progress.mock.calls.length;
+    worker.emit({ type: 'progress', phase: invalid, message: 'private worker details' });
+    await expect(pending).rejects.toThrow('無法對照原文');
+    expect(progress).toHaveBeenCalledTimes(delivered);
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'failed', generationMs: before ? expect.any(Number) : null,
+    }));
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('ignores another request id without exposing its progress or explanation', async () => {
     const progress = vi.fn();
     const pending = runStudyTutor({ passage: passage(), mode: 'exam', signal: new AbortController().signal, onProgress: progress });

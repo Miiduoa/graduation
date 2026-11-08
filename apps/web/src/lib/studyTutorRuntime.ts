@@ -168,6 +168,16 @@ export async function runStudyTutor({
           return;
         }
         if (data.type === 'progress') {
+          // A corrupted phase or a return to loading after generation indicates
+          // a broken worker protocol, not useful progress. Fail immediately so
+          // students can retry instead of waiting for the long model timeout.
+          if (
+            (data.phase !== undefined && data.phase !== 'loading' && data.phase !== 'generating')
+            || (generating && data.phase === 'loading')
+          ) {
+            finish(workerError('invalid_response'));
+            return;
+          }
           if (data.phase === 'generating' && !generating) {
             generating = true;
             generationStartedAt = performance.now();
