@@ -100,6 +100,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [manualCopyKind, setManualCopyKind] = useState<ManualCopyKind>('notes');
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
+  const manualCopyReturnTarget = useRef<HTMLElement | null>(null);
   const copyRequest = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -369,6 +370,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   async function copyNotes() {
     if (!source || !hasNotes) return;
+    manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const request = ++copyRequest.current;
     const text = buildCourseStudyNotes(courseTitle, source, session.passages);
     setDownloadStatus('');
@@ -402,6 +404,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   async function copyPracticeNotes() {
     if (!source || !practiceRound || practiceRound.revision !== session.revision) return;
+    manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const request = ++copyRequest.current;
     // Snapshot exactly the current user-visible disclosures at the click.
     const text = buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound);
@@ -431,6 +434,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   // The JSON is the same validated payload as the download, never a reduced notes export.
   // A user gesture is required for clipboard access; failed writes keep a selectable local copy.
   async function copyProgressText(text: string, kind: 'reading-progress' | 'practice-progress') {
+    manualCopyReturnTarget.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const request = ++copyRequest.current;
     setManualCopyText(null);
     setDownloadStatus('');
@@ -797,7 +801,12 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           }}>全選上方文字</button>
           <p className={styles.note}>可長按選取文字或按「全選上方文字」，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
             內容可能含教材與個人試答，請注意貼上位置。</p>
-          <button type="button" className={styles.button} onClick={() => setManualCopyText(null)}>收起手動複製文字</button>
+          <button type="button" className={styles.button} onClick={() => {
+            const target = manualCopyReturnTarget.current;
+            setManualCopyText(null);
+            (target?.isConnected ? target : heading.current)?.focus();
+            manualCopyReturnTarget.current = null;
+          }}>收起手動複製文字</button>
         </section>}
         {source.warnings.length > 0 && <details className={styles.reference}>
           <summary>來源注意事項（{source.warnings.length}）</summary>

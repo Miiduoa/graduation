@@ -757,6 +757,7 @@ it('offers a selectable reading-note fallback when mobile clipboard support is m
     expect(copy.hasAttribute('disabled')).toBe(true);
     fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '本機筆記甲' } });
     expect(copy.hasAttribute('disabled')).toBe(false);
+    copy.focus();
     fireEvent.click(copy);
     const manual = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
     expect(screen.getByRole('region', { name: '手動複製本次筆記' }).contains(manual)).toBe(true);
@@ -769,6 +770,11 @@ it('offers a selectable reading-note fallback when mobile clipboard support is m
     expect(manual.selectionStart).toBe(0);
     expect(manual.selectionEnd).toBe(manual.value.length);
     expect(screen.getByRole('alert').textContent).toContain('無法直接複製筆記');
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(screen.queryByRole('region', { name: '手動複製本次筆記' })).toBeNull();
+    expect(document.activeElement).toBe(copy);
+    fireEvent.click(copy);
+    expect(screen.getByRole('region', { name: '手動複製本次筆記' })).toBeTruthy();
     fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '修改後的筆記乙' } });
     expect(screen.queryByRole('region', { name: '手動複製本次筆記' })).toBeNull();
     expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('修改後的筆記乙');
@@ -908,6 +914,26 @@ it('previews pasted reading JSON without changing current notes and restores onl
     expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('備份時的原筆記');
     expect(pasted.value).toBe('');
     expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('restores keyboard focus to the JSON copy trigger after closing manual mobile copy', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: '複製閱讀進度 JSON' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' });
+    expect(document.activeElement).toBe(manual);
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
     expect(mocks.run).not.toHaveBeenCalled();
   } finally {
     if (original) Object.defineProperty(window.navigator, 'clipboard', original);
