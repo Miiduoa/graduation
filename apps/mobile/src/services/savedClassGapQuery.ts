@@ -256,13 +256,18 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   const midnight = Date.parse(date + 'T00:00:00+08:00');
   const label = (offset === 0 ? '今天剩下的時間' : offset === 1 ? '明天' : '後天') + '（' + date.slice(5).replace('-', '/') + '）';
   const bounds = query.part && partBounds[query.part];
-  const from = Math.max(now, midnight + Math.max((bounds?.start ?? 0) * 60, query.fromMinute ?? 0) * MINUTE);
-  const until = midnight + Math.min((bounds?.end ?? 24) * 60, query.untilMinute ?? 1440) * MINUTE;
+  // The clock label must describe the same interval used to calculate gaps.
+  // A part-of-day restriction can narrow an explicit clock range (e.g. 15:30–19:00
+  // during the afternoon really means 15:30–18:00).
+  const startMinute = Math.max((bounds?.start ?? 0) * 60, query.fromMinute ?? 0);
+  const endMinute = Math.min((bounds?.end ?? 24) * 60, query.untilMinute ?? 1440);
+  const from = Math.max(now, midnight + startMinute * MINUTE);
+  const until = midnight + endMinute * MINUTE;
   const time = (minute: number) => minute === 1440 ? '24:00' : clock.format(midnight + minute * MINUTE);
   const clockFilter = query.fromMinute !== undefined && query.untilMinute !== undefined
-    ? `${time(query.fromMinute)}–${time(query.untilMinute)}`
-    : query.fromMinute !== undefined ? `${time(query.fromMinute)} 之後`
-      : query.untilMinute !== undefined ? `${time(query.untilMinute)} 之前` : '';
+    ? `${time(startMinute)}–${time(endMinute)}`
+    : query.fromMinute !== undefined ? `${time(startMinute)} 之後`
+      : query.untilMinute !== undefined ? `${time(endMinute)} 之前` : '';
   const minimum = query.minMinutes ? '至少 ' + query.minMinutes + ' 分鐘的' : '';
   const windows = timetable.classGaps.map(({ startAt, endAt }) => ({
     start: Math.ceil(Math.max(startAt, from) / MINUTE) * MINUTE,
