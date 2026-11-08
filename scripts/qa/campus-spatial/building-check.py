@@ -108,10 +108,14 @@ async def building_mobile(page, _requests, _resources):
     await page.screenshot(path=str(OUT / 'building-mobile-320.png'))
     await page.locator(CANVAS).evaluate("canvas => canvas.getContext('webgl2').getExtension('WEBGL_lose_context').loseContext()")
     await expect(preview(page)).to_contain_text('無法', timeout=10_000)
-    await expect(preview(page).locator('svg')).not_to_have_count(0)
+    await expect(preview(page).get_by_role('region', name='平面圖', exact=True).locator('svg')).to_have_count(2)
+    await preview(page).get_by_role('region', name='房間清單', exact=True).get_by_role(
+        'button', name='1F 範例教室 101', exact=True).click()
+    await expect(preview(page)).to_contain_text('已選取：1F · 範例教室 101')
+    await expect(preview(page).get_by_role('region', name='平面圖', exact=True).locator('svg')).to_have_count(1)
     await no_overflow(page)
     await page.screenshot(path=str(OUT / 'building-webgl-fallback.png'))
-    return {'webgl': info, 'width': 320, 'contextLossFallback': True}
+    return {'webgl': info, 'width': 320, 'contextLossFallback': True, 'fallbackRoomSelection': True}
 
 
 async def building_import(page, _requests, _resources):
