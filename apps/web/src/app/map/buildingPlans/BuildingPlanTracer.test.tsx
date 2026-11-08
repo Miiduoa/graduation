@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import BuildingPlanTracer from './BuildingPlanTracer';
 import { prepareBuildingPlanReference } from './buildingPlanReference';
+import { exportBuildingPlanProject, type BuildingPlanProjectDraft } from './buildingPlanProject';
 
 vi.mock('./buildingPlanReference', () => ({ prepareBuildingPlanReference: vi.fn() }));
+vi.mock('./buildingPlanProject', () => ({ exportBuildingPlanProject: vi.fn() }));
 const props = { schoolId: 'pu', buildingId: 'test-building', buildingName: '測試館', onComplete: vi.fn(), onCancel: vi.fn() };
 const prepared = (name = 'floor.png') => ({ blob: new Blob(['safe pixels'], { type: 'image/png' }), width: 1000, height: 500, name });
 
@@ -12,6 +15,7 @@ beforeEach(() => {
   props.onComplete.mockReset();
   props.onCancel.mockReset();
   vi.mocked(prepareBuildingPlanReference).mockReset().mockImplementation(async file => prepared(file.name));
+  vi.mocked(exportBuildingPlanProject).mockReset().mockResolvedValue(new Blob(['project'], { type: 'application/json' }));
   let sequence = 0;
   vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:trace-${++sequence}`);
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -220,4 +224,120 @@ it('shows a failed decode without restoring the previous drawing', async () => {
   expect(screen.queryByRole('group', { name: '圖片描圖區' })).toBeNull();
   expect(screen.queryByRole('button', { name: '建立立體預覽' })).toBeNull();
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:trace-1');
+});
+
+function restoredDraft(): BuildingPlanProjectDraft {
+  return {
+    name: '可續編的二樓', floorLabel: '2F', sourceLabel: '自有圖面', sourceUrl: '',
+    outline: [[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]],
+    rooms: [
+      { id: 'traced-room-1', name: '討論室', polygon: [[0.1, 0.2], [0.3, 0.2], [0.3, 0.4], [0.1, 0.4]] },
+      { id: 'traced-room-3', name: '閱覽區', polygon: [[0.1, 0.5], [0.3, 0.5], [0.3, 0.7], [0.1, 0.7]] },
+    ],
+    mode: 'room', points: [[0.5, 0.2], [0.7, 0.2]], roomName: '自習室',
+    calibration: [[0.05, 0.05], [0.95, 0.05]], metres: '9', floorHeight: '3.2', x: '70', y: '20',
+  };
+}
+
+it('resumes a pending room with its reference and calibration without reusing a removed room id', () => {
+  const view = render(<BuildingPlanTracer {...props} initialProject={{ draft: restoredDraft(), reference: prepared() }} />);
+  const canvas = screen.getByRole('group', { name: '圖片描圖區' });
+  expect(prepareBuildingPlanReference).not.toHaveBeenCalled();
+  expect(canvas.querySelector('image')?.getAttribute('href')).toBe('blob:trace-1');
+  expect((screen.getByLabelText('圖面名稱') as HTMLInputElement).value).toBe('可續編的二樓');
+  expect((screen.getByLabelText('樓層名稱') as HTMLInputElement).value).toBe('2F');
+  expect((screen.getByLabelText('新房間名稱') as HTMLInputElement).value).toBe('自習室');
+  expect((screen.getByLabelText('兩點實際距離（公尺）') as HTMLInputElement).value).toBe('9');
+  expect((screen.getByLabelText('樓高（公尺）') as HTMLInputElement).value).toBe('3.2');
+  expect(screen.getByText('房間描點：2 / 64')).toBeTruthy();
+  expect(props.onComplete).not.toHaveBeenCalled();
+  point(70, 40); point(50, 40);
+  fireEvent.click(screen.getByRole('button', { name: '完成房間' }));
+  fireEvent.click(screen.getByRole('button', { name: '建立立體預覽' }));
+  const plan = props.onComplete.mock.calls[0][0];
+  expect(plan).toMatchObject({ name: '可續編的二樓', units: 'm', floors: [{ label: '2F', height: 3.2 }] });
+  expect(plan.floors[0].rooms.map((item: { id: string }) => item.id)).toEqual(['traced-room-1', 'traced-room-3', 'traced-room-4']);
+  expect(plan.floors[0].rooms[2].name).toBe('自習室');
+  view.unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:trace-1');
+});
+
+it('downloads the complete editable snapshot even before the outline is finished', async () => {
+  const downloads: Array<{ href: string; name: string }> = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloads.push({ href: this.href, name: this.download });
+  });
+  render(<BuildingPlanTracer {...props} />);
+  await openImage();
+  point(10, 20); point(80, 20);
+  fireEvent.click(screen.getByRole('button', { name: '下載編輯檔' }));
+  await waitFor(() => expect(downloads).toEqual([{ href: 'blob:trace-2', name: 'building-plan-project.json' }]));
+  expect(exportBuildingPlanProject).toHaveBeenCalledTimes(1);
+  const [scope, draft, reference, signal] = vi.mocked(exportBuildingPlanProject).mock.calls[0];
+  expect(scope).toEqual({ schoolId: 'pu', buildingId: 'test-building' });
+  expect(draft).toMatchObject({ mode: 'outline', outline: [], points: [[0.1, 0.2], [0.8, 0.2]], x: '80', y: '20' });
+  expect(reference).toMatchObject({ width: 1000, height: 500, name: 'floor.png' });
+  expect(reference.blob.type).toBe('image/png');
+  expect(reference).not.toHaveProperty('url');
+  expect(signal?.aborted).toBe(false);
+  expect(screen.getByText('樓層外框描點：2 / 64')).toBeTruthy();
+  expect(screen.getByText('編輯檔已準備下載，內含底圖與目前描點。')).toBeTruthy();
+  expect(props.onComplete).not.toHaveBeenCalled();
+});
+
+it('preserves the editable image and points when exporting fails', async () => {
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  vi.mocked(exportBuildingPlanProject).mockRejectedValueOnce(new Error('編輯檔底圖不可超過 10 MiB。'));
+  render(<BuildingPlanTracer {...props} />);
+  const canvas = await openImage();
+  point(10, 20);
+  fireEvent.click(screen.getByRole('button', { name: '下載編輯檔' }));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('10 MiB'));
+  expect(canvas.querySelector('image')?.getAttribute('href')).toBe('blob:trace-1');
+  expect(screen.getByText('樓層外框描點：1 / 64')).toBeTruthy();
+  expect(click).not.toHaveBeenCalled();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  expect((screen.getByRole('button', { name: '下載編輯檔' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it.each(['replace', 'scope', 'cancel', 'unmount'] as const)('does not download an old snapshot after %s', async action => {
+  let finish!: (blob: Blob) => void;
+  vi.mocked(exportBuildingPlanProject).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const view = render(<BuildingPlanTracer {...props} />);
+  await openImage();
+  point(10, 20);
+  fireEvent.click(screen.getByRole('button', { name: '下載編輯檔' }));
+  const signal = vi.mocked(exportBuildingPlanProject).mock.calls[0][3];
+  if (action === 'replace') {
+    chooseFile('replacement.png');
+    await screen.findByRole('group', { name: '圖片描圖區' });
+  } else if (action === 'scope') view.rerender(<BuildingPlanTracer {...props} schoolId="another-school" />);
+  else if (action === 'cancel') fireEvent.click(screen.getByRole('button', { name: '取消描圖' }));
+  else view.unmount();
+  expect(signal?.aborted).toBe(true);
+  await act(async () => finish(new Blob(['late project'])));
+  expect(click).not.toHaveBeenCalled();
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(action === 'replace' ? 2 : 1);
+});
+
+it('keeps the active reference URL valid during StrictMode and releases it on unmount', () => {
+  const view = render(<StrictMode><BuildingPlanTracer {...props} initialProject={{ draft: restoredDraft(), reference: prepared() }} /></StrictMode>);
+  const href = screen.getByRole('group', { name: '圖片描圖區' }).querySelector('image')?.getAttribute('href');
+  expect(href).toMatch(/^blob:trace-/);
+  expect(vi.mocked(URL.revokeObjectURL).mock.calls.flat()).not.toContain(href);
+  view.unmount();
+  expect(vi.mocked(URL.revokeObjectURL).mock.calls.flat().filter(value => value === href)).toHaveLength(1);
+});
+
+it('clears old scale calibration when redrawing the outline', () => {
+  const draft = restoredDraft();
+  draft.mode = null; draft.points = []; draft.roomName = '';
+  render(<BuildingPlanTracer {...props} initialProject={{ draft, reference: prepared() }} />);
+  fireEvent.click(screen.getByRole('button', { name: '重畫外框與房間' }));
+  expect(screen.queryByLabelText('兩點實際距離（公尺）')).toBeNull();
+  expect(screen.getByText(/未校正比例／示意單位/)).toBeTruthy();
+  outline();
+  fireEvent.click(screen.getByRole('button', { name: '建立立體預覽' }));
+  expect(props.onComplete.mock.calls[0][0]).toMatchObject({ units: 'relative', floors: [{ height: 3, rooms: [] }] });
 });

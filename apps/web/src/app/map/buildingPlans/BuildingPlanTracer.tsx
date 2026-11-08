@@ -1,63 +1,87 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { BuildingPlan, PlanPoint } from './buildingPlan';
 import { buildTracedBuildingPlan, type PlanTraceDraft } from './buildingPlanTracing';
 import { prepareBuildingPlanReference } from './buildingPlanReference';
+import { exportBuildingPlanProject, type BuildingPlanProjectDraft, type BuildingPlanProjectReference } from './buildingPlanProject';
 import styles from './BuildingPlanTracer.module.css';
 
 type Props = {
   schoolId: string;
   buildingId: string;
   buildingName: string;
+  initialProject?: { draft: BuildingPlanProjectDraft; reference: BuildingPlanProjectReference };
   onComplete: (plan: BuildingPlan) => void;
   onCancel: () => void;
 };
-type Reference = { url: string; width: number; height: number; name: string };
-type Mode = 'outline' | 'room' | 'calibration' | null;
+type Reference = BuildingPlanProjectReference;
+type Mode = BuildingPlanProjectDraft['mode'];
 type Rooms = PlanTraceDraft['rooms'];
 const percentage = (value: number) => String(Math.round(value * 10_000) / 100);
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
-function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCancel }: Props) {
+function initialRoomSequence(rooms: Rooms): number {
+  return rooms.reduce((maximum, room) => {
+    const match = /^traced-room-(\d+)$/.exec(room.id);
+    const value = match ? Number(match[1]) : 0;
+    return Number.isSafeInteger(value) ? Math.max(maximum, value) : maximum;
+  }, 0);
+}
+
+function TracerWorkspace({ schoolId, buildingId, buildingName, initialProject, onComplete, onCancel }: Props) {
   const fileId = useId();
   const helpId = useId();
-  const [reference, setReference] = useState<Reference | null>(null);
+  const restored = initialProject?.draft;
+  const [reference, setReference] = useState<Reference | null>(initialProject?.reference ?? null);
   const [reading, setReading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const [name, setName] = useState(`${buildingName} · 圖面草稿`.slice(0, 100));
-  const [floorLabel, setFloorLabel] = useState('1F');
-  const [sourceLabel, setSourceLabel] = useState('');
-  const [sourceUrl, setSourceUrl] = useState('');
-  const [outline, setOutline] = useState<PlanPoint[]>([]);
-  const [rooms, setRooms] = useState<Rooms>([]);
-  const [mode, setMode] = useState<Mode>('outline');
-  const [points, setPoints] = useState<PlanPoint[]>([]);
-  const [roomName, setRoomName] = useState('');
-  const [calibration, setCalibration] = useState<[PlanPoint, PlanPoint] | null>(null);
-  const [metres, setMetres] = useState('');
-  const [floorHeight, setFloorHeight] = useState('');
-  const [x, setX] = useState('50');
-  const [y, setY] = useState('50');
+  const [name, setName] = useState(restored?.name ?? `${buildingName} · 圖面草稿`.slice(0, 100));
+  const [floorLabel, setFloorLabel] = useState(restored?.floorLabel ?? '1F');
+  const [sourceLabel, setSourceLabel] = useState(restored?.sourceLabel ?? '');
+  const [sourceUrl, setSourceUrl] = useState(restored?.sourceUrl ?? '');
+  const [outline, setOutline] = useState<PlanPoint[]>(restored?.outline ?? []);
+  const [rooms, setRooms] = useState<Rooms>(restored?.rooms ?? []);
+  const [mode, setMode] = useState<Mode>(restored ? restored.mode : 'outline');
+  const [points, setPoints] = useState<PlanPoint[]>(restored?.points ?? []);
+  const [roomName, setRoomName] = useState(restored?.roomName ?? '');
+  const [calibration, setCalibration] = useState<[PlanPoint, PlanPoint] | null>(restored?.calibration ?? null);
+  const [metres, setMetres] = useState(restored?.metres ?? '');
+  const [floorHeight, setFloorHeight] = useState(restored?.floorHeight ?? '');
+  const [x, setX] = useState(restored?.x ?? '50');
+  const [y, setY] = useState(restored?.y ?? '50');
   const generation = useRef(0);
   const job = useRef<AbortController | null>(null);
+  const saveJob = useRef<AbortController | null>(null);
   const objectUrl = useRef('');
-  const roomSequence = useRef(0);
+  const roomSequence = useRef(initialRoomSequence(restored?.rooms ?? []));
   useEffect(() => () => {
     generation.current += 1;
     job.current?.abort();
+    saveJob.current?.abort();
+  }, []);
+  const referenceImage = useCallback((image: SVGImageElement | null) => {
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = '';
-  }, []);
+    if (image && reference) {
+      const url = URL.createObjectURL(reference.blob);
+      objectUrl.current = url;
+      image.setAttribute('href', url);
+    }
+  }, [reference]);
 
   function releaseReference() {
     generation.current += 1;
     job.current?.abort();
     job.current = null;
-    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
-    objectUrl.current = '';
+    saveJob.current?.abort();
+    saveJob.current = null;
     setReference(null);
     setReading(false);
+    setSaving(false);
+    setNotice('');
   }
   async function chooseFile(file: File) {
     releaseReference();
@@ -68,6 +92,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
     setError('');
     setOutline([]);
     setRooms([]);
+    roomSequence.current = 0;
     setPoints([]);
     setMode('outline');
     setRoomName('');
@@ -83,9 +108,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
     try {
       const prepared = await prepareBuildingPlanReference(file, controller.signal);
       if (request !== generation.current || controller.signal.aborted) return;
-      const url = URL.createObjectURL(prepared.blob);
-      objectUrl.current = url;
-      setReference({ url, width: prepared.width, height: prepared.height, name: prepared.name });
+      setReference(prepared);
       setSourceLabel(prepared.name.slice(0, 160));
     } catch (cause) {
       if (request === generation.current && !controller.signal.aborted)
@@ -100,6 +123,41 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
       outline, rooms, source: { label: sourceLabel, ...(sourceUrl.trim() ? { url: sourceUrl.trim() } : {}) },
       ...(calibration ? { calibration: { start: calibration[0], end: calibration[1], metres: Number(metres) }, floorHeight: Number(floorHeight) } : {}),
     };
+  }
+  async function downloadProject() {
+    if (!reference || reading || saving) return;
+    const request = generation.current;
+    const controller = new AbortController();
+    saveJob.current?.abort();
+    saveJob.current = controller;
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const file = await exportBuildingPlanProject({ schoolId, buildingId }, {
+        name, floorLabel, sourceLabel, sourceUrl, outline, rooms, mode, points,
+        roomName, calibration, metres, floorHeight, x, y,
+      }, reference, controller.signal);
+      if (controller.signal.aborted || request !== generation.current) return;
+      const url = URL.createObjectURL(file);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'building-plan-project.json';
+      document.body.append(anchor);
+      try { anchor.click(); } finally {
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      }
+      setNotice('編輯檔已準備下載，內含底圖與目前描點。');
+    } catch (cause) {
+      if (!controller.signal.aborted && request === generation.current)
+        setError(cause instanceof Error ? cause.message : '無法建立編輯檔，請稍後再試。');
+    } finally {
+      if (request === generation.current && saveJob.current === controller) {
+        saveJob.current = null;
+        setSaving(false);
+      }
+    }
   }
   function addPoint(point: PlanPoint) {
     if (!mode || !reference) return;
@@ -131,7 +189,10 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
   function finishPolygon() {
     if (!reference || (mode !== 'outline' && mode !== 'room')) return;
     if (mode === 'room' && !roomName.trim()) { setError('請填寫房間名稱。'); return; }
-    const room = { id: `traced-room-${roomSequence.current + 1}`, name: roomName.trim(), polygon: points };
+    let nextSequence = roomSequence.current;
+    do { nextSequence = nextSequence < Number.MAX_SAFE_INTEGER ? nextSequence + 1 : 1; }
+    while (rooms.some(room => room.id === `traced-room-${nextSequence}`));
+    const room = { id: `traced-room-${nextSequence}`, name: roomName.trim(), polygon: points };
     const nextOutline = mode === 'outline' ? points : outline;
     const nextRooms = mode === 'room' ? [...rooms, room] : [];
     const checked = buildTracedBuildingPlan({
@@ -139,7 +200,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
       outline: nextOutline, rooms: nextRooms, source: { label: '圖片描圖' },
     }, { schoolId, buildingId });
     if (!checked.ok) { setError(checked.message); return; }
-    if (mode === 'room') { roomSequence.current += 1; setRooms(nextRooms); }
+    if (mode === 'room') { roomSequence.current = nextSequence; setRooms(nextRooms); }
     else setOutline(nextOutline);
     setPoints([]);
     setMode(null);
@@ -169,7 +230,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
   return <section className={styles.tracer} aria-label="從圖片描圖">
     <div className={styles.heading}><div><h3>從圖片描圖</h3><p>{buildingName}（{schoolId} / {buildingId}）</p></div>
       <button type="button" onClick={() => { releaseReference(); onCancel(); }}>取消描圖</button></div>
-    <p className={styles.hint}>圖片只保留在本次視窗。先描外框，再依需要標記房間；這是手動描圖，不會自動辨識圖片。</p>
+    <p className={styles.hint}>先描外框，再依需要標記房間。下載編輯檔可保留底圖與未完成描點，下次開啟後繼續；這是手動描圖，不會自動辨識圖片。</p>
     <div className={styles.actions}>
       <label htmlFor={fileId} className={styles.fileButton}>{reference ? '更換圖面圖片' : '選擇圖面圖片'}</label>
       <input id={fileId} aria-label="選擇圖面圖片" className={styles.fileInput} type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
@@ -177,9 +238,13 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
         event.currentTarget.value = '';
         if (file) void chooseFile(file);
       }} />
+      {reference && <button type="button" disabled={reading || saving} onClick={() => { void downloadProject(); }}>
+        {saving ? '正在準備編輯檔…' : '下載編輯檔'}
+      </button>}
       <span className={styles.hint}>PNG／JPEG／WebP，10 MiB 內。換圖會清除描點與比例。</span>
     </div>
     {reading && <p role="status">正在讀取圖面圖片…</p>}
+    {notice && <p role="status" className={styles.hint}>{notice}</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     {reference && <>
       <p className={styles.badge}>{calibration ? '使用公尺比例 · 仍為待核對圖面' : '未校正比例／示意單位 · 仍為待核對圖面'}</p>
@@ -191,7 +256,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
         {outline.length > 0 && <>
           <button type="button" disabled={!!mode || rooms.length >= 200} onClick={() => { setMode('room'); setPoints([]); setRoomName(''); setError(''); }}>新增房間</button>
           <button type="button" disabled={!!mode} onClick={() => { setMode('calibration'); setPoints([]); setError(''); }}>選兩點校正比例</button>
-          <button type="button" disabled={!!mode} onClick={() => { setOutline([]); setRooms([]); setPoints([]); setMode('outline'); setError(''); }}>重畫外框與房間</button>
+          <button type="button" disabled={!!mode} onClick={() => { setOutline([]); setRooms([]); setPoints([]); setCalibration(null); setMetres(''); setFloorHeight(''); setMode('outline'); setError(''); }}>重畫外框與房間</button>
         </>}
       </div>
       <p id={helpId} className={styles.hint}>{mode ? `正在描${drawingLabel}。點按圖片加點；也可聚焦圖片後用方向鍵移動準星（Shift 加速），按 Enter 加點。` : '外框已完成。可以新增房間、校正比例，或直接建立預覽。'}</p>
@@ -218,7 +283,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, onComplete, onCan
             setY(percentage(clamp(cursor[1] + steps[event.key][1] * step)));
           } else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); addCoordinates(); }
         }}>
-        <image href={reference.url} width={reference.width} height={reference.height} aria-hidden="true" />
+        <image ref={referenceImage} width={reference.width} height={reference.height} aria-hidden="true" />
         {outline.length > 0 && <polygon className={styles.outline} points={renderPoints(outline)} />}
         {rooms.map(room => <polygon key={room.id} className={styles.room} points={renderPoints(room.polygon)}><title>{room.name}</title></polygon>)}
         {mode !== 'calibration' && points.length > 0 && <polyline className={styles.pending} points={renderPoints(points)} />}

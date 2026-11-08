@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, type BuildingPlan, type PlanFloor } from './buildingPlan';
+import { importBuildingPlanProject } from './buildingPlanProject';
 import type { BuildingPlanView, BuildingPlanScene } from './buildingPlanScene';
 import BuildingPlanTracer from './BuildingPlanTracer';
 import styles from './BuildingPlanPreview.module.css';
@@ -115,24 +116,40 @@ function FloorDrawing({ floor, selected, onSelect }: { floor: PlanFloor; selecte
 
 function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
   const inputId = useId();
+  const projectInputId = useId();
   const floorId = useId();
+  const searchId = useId();
   const [plan, setPlan] = useState<BuildingPlan | null>(null);
   const [example, setExample] = useState(false);
+  const [roomQuery, setRoomQuery] = useState('');
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
+  const [readingProject, setReadingProject] = useState(false);
   const [tracing, setTracing] = useState(false);
   const [traceSession, setTraceSession] = useState(false);
+  const [initialProject, setInitialProject] = useState<Awaited<ReturnType<typeof importBuildingPlanProject>>>();
+  const [traceRevision, setTraceRevision] = useState(0);
   const [mode, setMode] = useState<'flat' | '3d'>('flat');
   const [view, setView] = useState<Omit<BuildingPlanView, 'dark'>>(initialView);
   const generation = useRef(0);
+  const projectRead = useRef<AbortController | null>(null);
+  const projectFile = useRef<HTMLInputElement>(null);
   const workspace = useRef<HTMLDivElement>(null);
   const traceWorkspace = useRef<HTMLDivElement>(null);
   const traceStart = useRef<HTMLButtonElement>(null);
   const floorSelect = useRef<HTMLSelectElement>(null);
+  const roomSearch = useRef<HTMLInputElement>(null);
   const focusAfterTrace = useRef<'preview' | 'return' | null>(null);
   const dark = useSyncExternalStore(subscribeAppearance, readDark, serverAppearance);
-  useEffect(() => () => { generation.current += 1; }, []);
-  const clearPlan = () => { setPlan(null); setExample(false); setError(''); setReading(false); setMode('flat'); setView(initialView); setTracing(false); setTraceSession(false); };
+  useEffect(() => () => { generation.current += 1; projectRead.current?.abort(); }, []);
+  function cancelPendingRead() {
+    projectRead.current?.abort();
+    projectRead.current = null;
+    setReading(false);
+    setReadingProject(false);
+    return ++generation.current;
+  }
+  const clearPlan = () => { setPlan(null); setRoomQuery(''); setExample(false); setError(''); setReading(false); setReadingProject(false); setMode('flat'); setView(initialView); setTracing(false); setTraceSession(false); setInitialProject(undefined); };
   useEffect(() => {
     if (tracing) {
       traceWorkspace.current?.focus();
@@ -146,12 +163,12 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
       : plan ? floorSelect.current : traceStart.current;
     target?.focus();
     target?.scrollIntoView?.({ block: 'center' });
-  }, [tracing, plan]);
+  }, [tracing, plan, traceRevision]);
   const onSelect = useCallback((selectedFloor: string, selectedRoom: string) => {
     setView(current => ({ ...current, floorId: selectedFloor, roomId: selectedRoom }));
   }, []);
   async function importFile(file: File) {
-    const request = ++generation.current;
+    const request = cancelPendingRead();
     clearPlan();
     if (!/\.json$/i.test(file.name)) { setError('請選擇 .json 圖面檔案。'); return; }
     if (file.size > MAX_BUILDING_PLAN_BYTES) { setError('圖面檔案不可超過 256 KB。'); return; }
@@ -168,8 +185,29 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
       if (request === generation.current) setReading(false);
     }
   }
+  async function importProject(file: File) {
+    const request = cancelPendingRead();
+    const controller = new AbortController();
+    projectRead.current = controller;
+    setReadingProject(true);
+    setError('');
+    try {
+      const restored = await importBuildingPlanProject(file, { schoolId, buildingId }, controller.signal);
+      if (request !== generation.current || controller.signal.aborted) return;
+      clearPlan();
+      setInitialProject(restored);
+      setTraceRevision(value => value + 1);
+      setTraceSession(true);
+      setTracing(true);
+    } catch (cause) {
+      if (request !== generation.current || controller.signal.aborted || (cause instanceof Error && cause.name === 'AbortError')) return;
+      setError(cause instanceof Error ? cause.message : '無法開啟編輯檔，請重新選擇已保存的編輯檔。');
+    } finally {
+      if (request === generation.current) { projectRead.current = null; setReadingProject(false); }
+    }
+  }
   function loadExample() {
-    generation.current += 1;
+    cancelPendingRead();
     clearPlan();
     setExample(true);
     setPlan(createExampleBuildingPlan({ schoolId, buildingId }));
@@ -187,23 +225,45 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
     }
   }
   function startTracing() {
-    generation.current += 1;
-    setReading(false);
+    cancelPendingRead();
     setError('');
     setMode('flat');
+    if (!traceSession) { setInitialProject(undefined); setTraceRevision(value => value + 1); }
     setTraceSession(true);
     setTracing(true);
   }
   const floors = plan?.floors.filter(floor => !view.floorId || floor.id === view.floorId) ?? [];
   const selectedFloor = plan?.floors.find(floor => floor.id === view.floorId);
   const selectedRoom = selectedFloor?.rooms.find(room => room.id === view.roomId);
+  const searchTerms = roomQuery.normalize('NFKC').trim().toLocaleLowerCase('zh-TW').split(/\s+/u).filter(Boolean);
+  const matchingRooms = (searchTerms.length ? plan?.floors ?? [] : floors).flatMap(floor =>
+    floor.rooms.map(room => ({ floor, room })).filter(({ room }) => {
+      const label = `${floor.label} ${room.name}`.normalize('NFKC').toLocaleLowerCase('zh-TW');
+      return searchTerms.every(term => label.includes(term));
+    }));
   return <Modal isOpen onClose={onClose} title="平面圖建模預覽" description={buildingName} size="full">
     <div ref={workspace} className={styles.workspace}>
-      {traceSession && <div ref={traceWorkspace} tabIndex={-1} hidden={!tracing}>
-        <BuildingPlanTracer schoolId={schoolId} buildingId={buildingId} buildingName={buildingName}
+      <div className={styles.projectControls}>
+        <div className={styles.actions}>
+          <label htmlFor={projectInputId} className={styles.fileButton}>開啟編輯檔</label>
+          <input ref={projectFile} id={projectInputId} className={styles.fileInput} type="file" accept=".json,application/json" onChange={event => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void importProject(file);
+          }} />
+          {readingProject && <button type="button" onClick={() => { cancelPendingRead(); projectFile.current?.focus(); }}>取消開啟</button>}
+        </div>
+        <p className={styles.hint}>載入先前儲存的底圖與描點。</p>
+      </div>
+      {readingProject && <p role="status">正在開啟編輯檔…</p>}
+      {reading && <p role="status">正在讀取圖面…</p>}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
+      {traceSession && <div ref={traceWorkspace} className={styles.traceWorkspace} tabIndex={-1} hidden={!tracing} inert={readingProject} aria-busy={readingProject}>
+        <BuildingPlanTracer key={traceRevision} schoolId={schoolId} buildingId={buildingId} buildingName={buildingName} initialProject={initialProject}
           onComplete={drawing => {
-            generation.current += 1;
+            cancelPendingRead();
             setPlan(drawing);
+            setRoomQuery('');
             setExample(false);
             setError('');
             setView(initialView);
@@ -212,16 +272,19 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             setTracing(false);
           }}
           onCancel={() => {
+            cancelPendingRead();
+            setError('');
             focusAfterTrace.current = 'return';
             setTracing(false);
             setTraceSession(false);
+            setInitialProject(undefined);
           }} />
       </div>}
       {!tracing && <>
       <details className={styles.importer} open={!plan}>
         <summary hidden={!plan}>更換圖面與範本</summary>
         <div><p className={styles.intro}>從平面圖圖片標出外框與房間，或匯入 JSON 圖面，查看立體結構。</p>
-          <p className={styles.hint}>圖片由你描點建立，不會自動辨識。檔案只在本次視窗使用，不會上傳；關閉或切換建築後清除。</p></div>
+          <p className={styles.hint}>圖片由你描點建立，不會自動辨識。離開前下載編輯檔，可保留底圖與描點；檔案不會上傳。</p></div>
         <div className={styles.actions}>
           <button ref={traceStart} type="button" onClick={startTracing}>{traceSession ? '繼續圖片描圖' : '從圖片建立圖面'}</button>
           <label htmlFor={inputId} className={styles.fileButton}>匯入 JSON 圖面</label>
@@ -232,11 +295,9 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
           }} />
           <button type="button" onClick={loadExample}>載入示意範例</button>
           <button type="button" onClick={() => downloadPlan(createExampleBuildingPlan({ schoolId, buildingId }), 'building-plan-template.json')}>下載圖面範本</button>
-          {plan && <button type="button" onClick={() => { generation.current += 1; clearPlan(); }}>清除圖面</button>}
+          {plan && <button type="button" onClick={() => { cancelPendingRead(); clearPlan(); }}>清除圖面</button>}
         </div>
       </details>
-      {reading && <p role="status">正在讀取圖面…</p>}
-      {error && <p role="alert" className={styles.error}>{error}</p>}
       {!plan && !reading && <div className={styles.empty}><strong>尚未載入圖面</strong><p>可從單張平面圖圖片開始描點、匯入 JSON（上限 256 KB），或先操作示意範例。</p></div>}
       {plan && <>
         <div className={styles.metadata}>
@@ -254,7 +315,7 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             <button type="button" onClick={() => downloadPlan(plan, 'building-plan.json')}>下載目前圖面</button>
             {traceSession && <button type="button" onClick={startTracing}>返回圖面編輯</button>}
           </div>
-          <p className={styles.hint}>下載內容包含圖面與來源標示，不含底圖圖片。</p>
+          <p className={styles.hint}>下載內容包含圖面與來源標示，不含底圖圖片。{traceSession && '要保存可續編的版本，請返回圖面編輯並下載編輯檔。'}</p>
         </div>
         <div className={styles.toolbar}>
           <label htmlFor={floorId}>樓層</label>
@@ -283,8 +344,20 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
         <div className={styles.planLayout}>
           <section aria-label="平面圖" className={styles.drawings}>{floors.map(floor => <FloorDrawing key={floor.id} floor={floor} selected={view.roomId} onSelect={onSelect} />)}</section>
           <section className={styles.rooms} aria-label="房間清單"><h3>房間清單</h3>
-            {floors.flatMap(floor => floor.rooms.map(room => <button key={room.id} type="button" aria-label={`${floor.label} ${room.name}`} aria-pressed={view.roomId === room.id} onClick={() => onSelect(floor.id, room.id)}><span>{floor.label}</span>{room.name}</button>))}
-            {floors.every(floor => floor.rooms.length === 0) && <p className={styles.hint}>這些樓層尚未標示房間。</p>}
+            <label htmlFor={searchId} className={styles.searchLabel}>搜尋圖面房間</label>
+            <div className={styles.searchControls}>
+              <input ref={roomSearch} id={searchId} type="search" value={roomQuery} maxLength={100}
+                placeholder="房名或樓層" autoComplete="off" aria-describedby={`${searchId}-hint`}
+                onChange={event => setRoomQuery(event.target.value)} />
+              {roomQuery && <button type="button" onClick={() => { setRoomQuery(''); roomSearch.current?.focus(); }}>清除搜尋</button>}
+            </div>
+            <p id={`${searchId}-hint`} className={styles.hint}>搜尋本次圖面的所有樓層，選擇房間後才切換樓層。</p>
+            <p className={styles.hint} role="status">{searchTerms.length
+              ? matchingRooms.length ? `找到 ${matchingRooms.length} 個房間，請選擇。` : '找不到符合的房間，請換個房名或樓層，或清除搜尋。'
+              : matchingRooms.length ? `${selectedFloor?.label ?? '全部樓層'}：${matchingRooms.length} 個房間。` : '這些樓層尚未標示房間。'}</p>
+            <div className={styles.roomResults}>
+              {matchingRooms.map(({ floor, room }) => <button key={room.id} type="button" aria-label={`${floor.label} ${room.name}`} aria-pressed={view.roomId === room.id} onClick={() => onSelect(floor.id, room.id)}><span>{floor.label}</span>{room.name}</button>)}
+            </div>
           </section>
         </div>
       </>}

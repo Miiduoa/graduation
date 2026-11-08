@@ -1,9 +1,12 @@
 """Exercise the production building preview with fictional local geometry only."""
 
 import asyncio
+import base64
 import functools
+import hashlib
 import json
 import math
+import re
 import struct
 import threading
 import traceback
@@ -281,6 +284,268 @@ async def tracing_mobile(page, _requests, _resources):
             'outlineOnlyPreview': True, 'badReplacementClearsReference': True}
 
 
+async def building_project_desktop(page, _requests, _resources):
+    uploads = []
+    page.on('request', lambda request: uploads.append(request.url) if request.method == 'POST' else None)
+    canvas = await open_tracer(page)
+    await expect(canvas.locator('image')).to_have_attribute('href', re.compile(r'^blob:'))
+    original_url = await canvas.locator('image').get_attribute('href')
+    name = '可續編的合成樓層'
+    floor_label = '示意 1F'
+    room_name = '已完成教室 101'
+    pending_name = '續編教室 102'
+    source_label = '合成測試圖，非校園實測'
+    source_url = 'https://example.com/fictional-floor-plan'
+    await preview(page).get_by_label('圖面名稱', exact=True).fill(name)
+    await preview(page).get_by_label('樓層名稱', exact=True).fill(floor_label)
+    await preview(page).get_by_text('圖面來源', exact=True).click()
+    await preview(page).get_by_label('來源名稱', exact=True).fill(source_label)
+    await preview(page).get_by_label('來源網址（選填，HTTPS）', exact=True).fill(source_url)
+    for point in [(10, 10), (90, 10), (90, 90), (10, 90)]:
+        await add_coordinates(page, *point)
+    await preview(page).get_by_role('button', name='完成外框', exact=True).click()
+    await preview(page).get_by_role('button', name='新增房間', exact=True).click()
+    await preview(page).get_by_label('新房間名稱', exact=True).fill(room_name)
+    for point in [(20, 20), (40, 20), (40, 50), (20, 50)]:
+        await add_coordinates(page, *point)
+    await preview(page).get_by_role('button', name='完成房間', exact=True).click()
+    await preview(page).get_by_role('button', name='選兩點校正比例', exact=True).click()
+    await add_coordinates(page, 10, 10)
+    await add_coordinates(page, 90, 10)
+    await preview(page).get_by_label('兩點實際距離（公尺）', exact=True).fill('12')
+    await preview(page).get_by_label('樓高（公尺）', exact=True).fill('3.2')
+    await preview(page).get_by_role('button', name='套用比例', exact=True).click()
+    await preview(page).get_by_role('button', name='新增房間', exact=True).click()
+    await preview(page).get_by_label('新房間名稱', exact=True).fill(pending_name)
+    await add_coordinates(page, 60, 20)
+    await add_coordinates(page, 80, 20)
+    await expect(preview(page)).to_contain_text('房間描點：2 / 64')
+    await expect(preview(page).get_by_role('button', name='建立立體預覽', exact=True)).to_be_disabled()
+
+    # Capture the browser's real download, including the prepared PNG. The file
+    # is retained in the artifact and is the sole source used after reload.
+    async with page.expect_download() as pending_download:
+        await preview(page).get_by_role('button', name='下載編輯檔', exact=True).click()
+    download = await pending_download.value
+    assert download.suggested_filename == 'building-plan-project.json', download.suggested_filename
+    project_path = OUT / 'building-plan-project.json'
+    await download.save_as(str(project_path))
+    saved_bytes = project_path.read_bytes()
+    project = json.loads(saved_bytes)
+    assert project['format'] == 'nuni.building-plan-project' and project['version'] == 1
+    assert project['schoolId'] == 'pu' and project['buildingId'] == spatial.LIBRARY['id']
+    draft = project['draft']
+    assert draft['name'] == name and draft['floorLabel'] == floor_label
+    assert draft['mode'] == 'room' and draft['roomName'] == pending_name
+    assert draft['points'] == [[0.6, 0.2], [0.8, 0.2]], draft['points']
+    assert draft['calibration'] == [[0.1, 0.1], [0.9, 0.1]], draft['calibration']
+    assert draft['metres'] == '12' and draft['floorHeight'] == '3.2'
+    assert len(draft['rooms']) == 1 and draft['rooms'][0]['name'] == room_name
+    png = base64.b64decode(project['reference']['base64'], validate=True)
+    assert png.startswith(b'\x89PNG\r\n\x1a\n') and project['reference']['mime'] == 'image/png'
+    assert (project['reference']['width'], project['reference']['height']) == (600, 400)
+
+    await page.reload(wait_until='networkidle')
+    await open_plan(page, example=False)
+    await expect(preview(page).get_by_text('尚未載入圖面', exact=True)).to_be_visible()
+    await expect(preview(page).get_by_role('group', name='圖片描圖區', exact=True)).to_have_count(0)
+    await preview(page).get_by_label('開啟編輯檔', exact=True).set_input_files({
+        'name': download.suggested_filename, 'mimeType': 'application/json', 'buffer': saved_bytes})
+    canvas = preview(page).get_by_role('group', name='圖片描圖區', exact=True)
+    await expect(canvas).to_be_visible()
+    await expect(canvas.locator('image')).to_have_attribute('href', re.compile(r'^blob:'))
+    restored_url = await canvas.locator('image').get_attribute('href')
+    assert restored_url != original_url, 'Restored editor reused a URL from the discarded document'
+    # Decode the restored, actually displayed URL with a native Image and check
+    # known pixels. A metadata-only or placeholder image cannot satisfy this.
+    decoded = await canvas.locator('image').evaluate('''async node => {
+      const image = new Image();
+      image.src = node.getAttribute('href');
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      return {width: image.naturalWidth, height: image.naturalHeight,
+        background: [...context.getImageData(5, 5, 1, 1).data],
+        room: [...context.getImageData(180, 140, 1, 1).data]};
+    }''')
+    assert decoded == {'width': 600, 'height': 400, 'background': [250, 249, 245, 255],
+                       'room': [220, 234, 228, 255]}, decoded
+    await expect(preview(page).get_by_label('圖面名稱', exact=True)).to_have_value(name)
+    await expect(preview(page).get_by_label('樓層名稱', exact=True)).to_have_value(floor_label)
+    await expect(preview(page).get_by_label('房間 1 名稱', exact=True)).to_have_value(room_name)
+    await expect(preview(page).get_by_label('新房間名稱', exact=True)).to_have_value(pending_name)
+    await expect(preview(page)).to_contain_text('房間描點：2 / 64')
+    await expect(preview(page)).to_contain_text('使用公尺比例')
+    await expect(preview(page).get_by_label('兩點實際距離（公尺）', exact=True)).to_have_value('12')
+    await expect(preview(page).get_by_label('樓高（公尺）', exact=True)).to_have_value('3.2')
+    await expect(preview(page).get_by_role('button', name='建立立體預覽', exact=True)).to_be_disabled()
+    await expect(page.locator(CANVAS)).to_have_count(0)
+    await preview(page).get_by_text('圖面來源', exact=True).click()
+    await expect(preview(page).get_by_label('來源名稱', exact=True)).to_have_value(source_label)
+    await expect(preview(page).get_by_label('來源網址（選填，HTTPS）', exact=True)).to_have_value(source_url)
+    await no_overflow(page)
+    await canvas.scroll_into_view_if_needed()
+    await page.screenshot(path=str(OUT / 'building-project-restored.png'))
+
+    await add_coordinates(page, 80, 50)
+    await add_coordinates(page, 60, 50)
+    await preview(page).get_by_role('button', name='完成房間', exact=True).click()
+    await expect(preview(page).get_by_label('房間 2 名稱', exact=True)).to_have_value(pending_name)
+    webgl = await build_tracing(page)
+    exported = await download_plan(page)
+    floor = exported['floors'][0]
+    assert exported['name'] == name and exported['units'] == 'm'
+    assert exported['source'] == {'label': source_label, 'url': source_url}, exported['source']
+    assert floor['label'] == floor_label and floor['height'] == 3.2
+    assert [room['name'] for room in floor['rooms']] == [room_name, pending_name]
+    assert len({room['id'] for room in floor['rooms']}) == 2, 'Resumed room IDs collided'
+    assert len(floor['outline']) == 4, floor['outline']
+    for actual, expected in zip(floor['outline'], [(0, 0), (12, 0), (12, 8), (0, 8)]):
+        assert all(math.isclose(actual[axis], expected[axis], abs_tol=1e-7) for axis in (0, 1)), actual
+
+    # Failure must be transactional: retain both the visible preview and its
+    # exact export instead of clearing the user's current work before parsing.
+    previous_canvas = await page.locator(CANVAS).element_handle()
+    assert previous_canvas is not None
+    cross_school = dict(project, schoolId='another-school')
+    try:
+        for filename, contents, expected_error in [
+            ('broken-project.json', b'{"format":', None),
+            ('other-school-project.json', json.dumps(cross_school).encode(), '不屬於目前學校或建築'),
+        ]:
+            await preview(page).get_by_label('開啟編輯檔', exact=True).set_input_files({
+                'name': filename, 'mimeType': 'application/json', 'buffer': contents})
+            await expect(preview(page).get_by_role('alert')).to_be_visible()
+            if expected_error:
+                await expect(preview(page).get_by_role('alert')).to_contain_text(expected_error)
+            await expect(preview(page).get_by_role('heading', name=name, exact=True)).to_be_visible()
+            assert await page.locator(CANVAS).evaluate('(canvas, previous) => canvas === previous', previous_canvas)
+            assert await download_plan(page) == exported, filename
+            await preview(page).get_by_role('group', name='立體圖面', exact=True).scroll_into_view_if_needed()
+            await expect(page.locator(CANVAS)).to_be_visible()
+            assert await page.locator(CANVAS).evaluate("canvas => !canvas.getContext('webgl2').isContextLost()")
+    finally:
+        await previous_canvas.dispose()
+    await expect(preview(page)).to_contain_text('待核對圖面')
+    await expect(preview(page).get_by_role('link', name='開啟步行導航')).to_have_count(0)
+    await no_overflow(page)
+    await page.screenshot(path=str(OUT / 'building-project-preview.png'))
+    await preview(page).get_by_role('button', name='返回圖面編輯', exact=True).click()
+    await expect(preview(page).get_by_role('group', name='圖片描圖區', exact=True).locator('image')).to_have_attribute('href', restored_url)
+    await expect(preview(page).get_by_label('房間 1 名稱', exact=True)).to_have_value(room_name)
+    await expect(preview(page).get_by_label('房間 2 名稱', exact=True)).to_have_value(pending_name)
+    await expect(page.locator(CANVAS)).to_have_count(0)
+    assert not uploads, uploads
+    return {'webgl': webgl, 'projectBytes': len(saved_bytes), 'preparedPngBytes': len(png),
+            'projectSha256': hashlib.sha256(saved_bytes).hexdigest(), 'realDownloadAndReload': True,
+            'decodedReference': decoded, 'newReferenceBlobUrl': True, 'pendingRoomPointsRestored': 2,
+            'calibrationMetres': 12, 'completedRooms': [room_name, pending_name],
+            'badProjectPreservesPreview': True, 'crossSchoolProjectPreservesPreview': True,
+            'rejectedProjectsPreserveEditor': True, 'imageUploadRequests': len(uploads)}
+
+
+async def building_room_search_mobile(page, _requests, _resources):
+    await open_plan(page, example=False)
+    common_name = '同名研討室'
+    unique_name = '跨樓教室 201'
+    outline = [[0, 0], [12, 0], [12, 8], [0, 8]]
+    room_polygon = [[1, 1], [5, 1], [5, 6], [1, 6]]
+    plan = {
+        'version': 1, 'schoolId': 'pu', 'buildingId': spatial.LIBRARY['id'],
+        'name': '跨樓同名房間搜尋示意圖', 'units': 'relative',
+        'source': {'label': '合成搜尋驗收，非校園實測'},
+        'floors': [
+            {'id': 'search-1', 'label': '1F', 'elevation': 0, 'height': 3,
+             'outline': outline, 'walls': [],
+             'rooms': [{'id': 'search-1-a', 'name': common_name, 'polygon': room_polygon}]},
+            {'id': 'search-2', 'label': '2F', 'elevation': 4, 'height': 3,
+             'outline': outline, 'walls': [],
+             'rooms': [{'id': 'search-2-a', 'name': common_name, 'polygon': room_polygon},
+                       {'id': 'search-2-b', 'name': unique_name,
+                        'polygon': [[6, 1], [10, 1], [10, 6], [6, 6]]}]},
+        ],
+    }
+    await preview(page).get_by_label('匯入 JSON 圖面', exact=True).set_input_files({
+        'name': 'fictional-room-search.json', 'mimeType': 'application/json',
+        'buffer': json.dumps(plan).encode()})
+    await expect(preview(page)).to_contain_text('待核對圖面')
+    webgl = await open_3d(page)
+    rooms = preview(page).get_by_role('region', name='房間清單', exact=True)
+    search = rooms.get_by_label('搜尋圖面房間', exact=True)
+    floor_select = preview(page).get_by_role('combobox', name='樓層', exact=True)
+    await rooms.evaluate('''region => {
+      window.__roomSearchTouches = [];
+      region.addEventListener('pointerdown', event => {
+        if (event.target.closest('button[aria-pressed]'))
+          window.__roomSearchTouches.push({trusted:event.isTrusted, type:event.pointerType});
+      });
+    }''')
+    await floor_select.select_option('search-1')
+    await search.fill(unique_name)
+    await expect(rooms.locator('button[aria-pressed]')).to_have_count(1)
+    await expect(rooms.get_by_role('button', name=f'2F {unique_name}', exact=True)).to_have_attribute('aria-pressed', 'false')
+    await expect(floor_select).to_have_value('search-1')
+    await expect(preview(page)).to_contain_text('點選平面圖或清單中的房間，查看所在樓層。')
+    await rooms.get_by_role('button', name=f'2F {unique_name}', exact=True).tap()
+
+    async def selected_room(floor_id, floor_label, room_id, room_name):
+        await expect(floor_select).to_have_value(floor_id)
+        await expect(preview(page)).to_contain_text(f'已選取：{floor_label} · {room_name}')
+        flat = preview(page).get_by_role('region', name='平面圖', exact=True)
+        await expect(flat.locator('svg')).to_have_count(1)
+        await expect(flat.get_by_role('button', name=f'平面圖 {floor_label} {room_name}', exact=True)).to_have_attribute('aria-pressed', 'true')
+        await preview(page).get_by_role('group', name='立體圖面', exact=True).scroll_into_view_if_needed()
+        await expect(page.locator(CANVAS)).to_be_visible()
+        await expect(page.locator(f'[data-building-room-id="{room_id}"]')).to_have_attribute('aria-pressed', 'true')
+
+    await selected_room('search-2', '2F', 'search-2-b', unique_name)
+    await expect(search).to_have_value(unique_name)
+    await search.fill(common_name)
+    await expect(rooms.locator('button[aria-pressed]')).to_have_count(2)
+    for label in ['1F', '2F']:
+        await expect(rooms.get_by_role('button', name=f'{label} {common_name}', exact=True)).to_have_attribute('aria-pressed', 'false')
+    await expect(floor_select).to_have_value('search-2')
+    await expect(preview(page)).to_contain_text(f'已選取：2F · {unique_name}')
+    await no_overflow(page)
+    await search.scroll_into_view_if_needed()
+    await page.screenshot(path=str(OUT / 'building-room-search-mobile.png'))
+    await rooms.get_by_role('button', name=f'1F {common_name}', exact=True).tap()
+    await selected_room('search-1', '1F', 'search-1-a', common_name)
+    await expect(page.locator('[data-building-room-id="search-2-b"]')).to_have_attribute('aria-pressed', 'false')
+    await expect(search).to_have_value(common_name)
+
+    # Switching renderers must preserve the explicitly selected room as well.
+    await preview(page).get_by_role('button', name='平面', exact=True).click()
+    await expect(page.locator(CANVAS)).to_have_count(0)
+    await expect(preview(page).get_by_role('button', name=f'平面圖 1F {common_name}', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await open_3d(page)
+    await selected_room('search-1', '1F', 'search-1-a', common_name)
+    await search.fill('找不到的教室 999')
+    await expect(rooms).to_contain_text('找不到符合的房間')
+    await expect(rooms.locator('button[aria-pressed]')).to_have_count(0)
+    await expect(floor_select).to_have_value('search-1')
+    await expect(preview(page)).to_contain_text(f'已選取：1F · {common_name}')
+    await no_overflow(page)
+    await rooms.get_by_role('button', name='清除搜尋', exact=True).tap()
+    await expect(search).to_have_value('')
+    await expect(search).to_be_focused()
+    await expect(rooms.locator('button[aria-pressed]')).to_have_count(1)
+    await expect(rooms.get_by_role('button', name=f'1F {common_name}', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await expect(rooms.get_by_role('button', name=f'2F {common_name}', exact=True)).to_have_count(0)
+    await expect(floor_select).to_have_value('search-1')
+    await expect(preview(page).get_by_role('link', name='開啟步行導航')).to_have_count(0)
+    await no_overflow(page)
+    await page.screenshot(path=str(OUT / 'building-room-search-cleared.png'))
+    touch = await page.evaluate('window.__roomSearchTouches')
+    assert len(touch) == 2 and all(item == {'trusted': True, 'type': 'touch'} for item in touch), touch
+    return {'webgl': webgl, 'width': 320, 'crossFloorSearch': True, 'sameNameCandidates': 2,
+            'searchDoesNotSelect': True, 'nativeTouchSelection': touch,
+            'flatAnd3dSelection': True, 'noResultsPreserveSelection': True,
+            'clearKeepsFloorAndFocus': True, 'unverifiedPlanOnly': True}
+
+
 async def no_overflow(page):
     result = await preview(page).evaluate('''dialog => {
       const visible = el => el.getClientRects().length > 0;
@@ -359,7 +624,7 @@ async def building_import(page, _requests, _resources):
                     'rooms': [{'id': '101', 'name': '測試教室 101',
                                'polygon': [[1, 1], [5, 1], [5, 6], [1, 6]]}], 'walls': []}],
     }
-    upload = preview(page).locator('input[type=file]')
+    upload = preview(page).get_by_label('匯入 JSON 圖面', exact=True)
     await upload.set_input_files({'name': 'wrong-school.json', 'mimeType': 'application/json',
                                  'buffer': json.dumps(plan).encode()})
     await expect(preview(page)).to_contain_text('不屬於目前學校或建築')
@@ -392,12 +657,14 @@ async def main():
                     ('building-import', {'width': 390, 'height': 844}, building_import),
                     ('building-tracing-desktop', {'width': 1440, 'height': 1100}, tracing_desktop),
                     ('building-tracing-mobile', {'width': 320, 'height': 568}, tracing_mobile),
+                    ('building-project-desktop', {'width': 1440, 'height': 1100}, building_project_desktop),
+                    ('building-room-search-mobile', {'width': 320, 'height': 568}, building_room_search_mobile),
                 ]:
                     report['checks'].append(await spatial.run_case(browser, f'http://127.0.0.1:{server.server_port}',
                                                                    name, viewport, test, set()))
             finally:
                 await browser.close()
-        if all(item['status'] == 'passed' for item in report['checks']) and len(report['checks']) == 5:
+        if all(item['status'] == 'passed' for item in report['checks']) and len(report['checks']) == 7:
             report['status'] = 'passed'
     except Exception:
         report['failure'] = traceback.format_exc()
