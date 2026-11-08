@@ -313,3 +313,37 @@ test.each([
     }
   } finally { globalThis.fetch = original; }
 });
+
+test.each([
+  {
+    name: 'older than 24 hours', fetchedAt: '2026-11-06T08:00:00.000Z',
+    now: '2026-11-07T08:00:01.000Z', warning: /距離伺服器上次取得校方資料已超過 24 小時/,
+  },
+  {
+    name: 'within 24 hours', fetchedAt: '2026-11-06T08:00:00.000Z',
+    now: '2026-11-07T07:59:59.000Z', warning: null,
+  },
+  {
+    name: 'missing timestamp', fetchedAt: undefined,
+    now: '2026-11-08T08:00:00.000Z', warning: /目前沒有校方資料的擷取時間/,
+  },
+])('public course data freshness: $name', async ({ fetchedAt, now, warning }) => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  jest.spyOn(Date, 'now').mockReturnValue(Date.parse(now));
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson([nthuCourse], { fetchedAt }));
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    expect(await view.findByText('分析化學專題')).toBeTruthy();
+    if (warning) expect(view.getByText(warning)).toBeTruthy();
+    else {
+      expect(view.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+      expect(view.queryByText(/目前沒有校方資料的擷取時間/)).toBeNull();
+    }
+    // Freshness is a warning, not proof of enrollment or a silent private write.
+    expect(view.getByText('複製課表匯入資料')).toBeTruthy();
+    expect(Clipboard.setStringAsync).not.toHaveBeenCalled();
+  } finally {
+    globalThis.fetch = original;
+  }
+});
