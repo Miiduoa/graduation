@@ -190,12 +190,17 @@ it.each(['PDF', 'identical pasted content'] as const)('ends the previous round w
   if (kind === 'PDF') {
     mocks.read.mockResolvedValueOnce(pdfDocument('成功換入的新講義內容。'));
     choosePdf();
-    await screen.findByText('成功換入的新講義內容。');
   } else {
     // Both the id "pasted" and the complete source text match the old source.
     fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: sourceText } });
     fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
   }
+  // A successful read is not an accepted replacement: the learner must explicitly confirm.
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expectSecondQuestion();
+  if (kind === 'PDF') expect(screen.queryByText('成功換入的新講義內容。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  if (kind === 'PDF') await screen.findByText('成功換入的新講義內容。');
   expect(screen.queryByLabelText(attemptLabel)).toBeNull();
   expect(screen.queryByRole('button', { name: '下載本輪練習' })).toBeNull();
   expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();
@@ -242,6 +247,14 @@ it('keeps a paused round through a cancelled progress read, then clears it on id
 
   fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: sourceText } });
   fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '暫停的逐題複習' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  // A repeated same-id, same-text source import still needs consent and a new revision.
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
   expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
   expect(screen.queryByRole('button', { name: '繼續這輪練習' })).toBeNull();
   expect(screen.queryByLabelText(attemptLabel)).toBeNull();

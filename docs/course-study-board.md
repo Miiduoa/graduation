@@ -251,3 +251,8 @@ v1 舊檔還原、v2 保存後重開與步驟／公式完整保留，以及還�
 #### 2026-11-08：本輪 CI 續修
 
 新 head `eaa6c4e` 的真實 Lint & Type Check job 128627731387 指出 `CourseStudyPanel.tsx:125` 在 render 中寫入 ref，違反 `react-hooks/refs`。修補將非同步匯入所需的最新有變更狀態更新移至帶依賴的 `useEffect`，不在 render 存取 ref；繼續在確定替換前使用最新已提交的狀態。修補後需以更新 SHA 的 CI 重驗，先前成功紀錄不沿用。
+
+
+#### 2026-11-08：成功換教材前的確認流程回歸（Web CI 修補）
+
+在精確 head `b6e5999f607b2ebca4135a5b6e8131023a933dfd` 的 CI #42447073304 中，Web Tests 有 3 項失敗（`CourseStudyPracticeBoundaries.test.tsx`），其餘 Lint/Type Check、Build Web/Mobile、Security Gates、Mobile/Functions/Firestore、CodeQL 與 Course access review 成功。真實 Web job #128628345180 顯示測試仍假設讀取 PDF 或貼上同一份教材後會立即清除練習，而新的防誤刪流程會先詢問「確認改讀新教材」。已修正邊界回歸：必須先確認舊題回答在確認視窗期間仍存在、來源尚未替換，再明確確認後才檢查原練習清除；暫停練習測試額外先取消再重試，即使來源 id 與內容完全相同也不可繞過確認。未變更實際匯入程式、備份資料格式或課程權限；新 SHA 需重跑完整 CI，不沿用前一版的綠燈。這些是模擬 DOM 的回歸，不是 iPhone／Android 實機或同機競品驗證。
