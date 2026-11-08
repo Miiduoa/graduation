@@ -224,8 +224,19 @@ window.__fixtureToken=location.search;
     await send('Input.insertText', { text: value });
   }
   async function count(expected) {
-    await until(() => call((size) => document.querySelectorAll('article').length === size &&
-      !document.querySelector('button[aria-busy="true"]'), expected), `${expected} search cards`);
+    try {
+      await until(() => call((size) => document.querySelectorAll('article').length === size &&
+        !document.querySelector('button[aria-busy="true"]'), expected), `${expected} search cards`);
+    } catch (error) {
+      const state = await call(() => ({
+        cards: document.querySelectorAll('article').length,
+        notice: document.querySelector('[role="status"]')?.textContent,
+        alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent),
+        calls: window.__history?.calls,
+        url: location.href,
+      })).catch((cause) => ({ captureError: String(cause) }));
+      throw new Error(`${String(error)}; UI state=${JSON.stringify(state)}`);
+    }
   }
   async function screenshot(name) {
     await call(() => window.scrollTo({ top: 0, behavior: 'instant' })); await delay(80);

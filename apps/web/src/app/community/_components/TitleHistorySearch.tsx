@@ -136,6 +136,7 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
       const available = await confirmCampusPostTitleOpen(schoolId, id);
       if (request !== version.current) return;
       if (!available) {
+        focusAfter.current = 'summary';
         setPage((current) => current ? {
           ...current, posts: current.posts.filter((post) => post.id !== id),
         } : null);
@@ -147,6 +148,7 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
     } catch (cause) {
       if (request !== version.current) return;
       if (isPermissionDeniedError(cause)) {
+        focusAfter.current = 'error';
         setPage(null);
         setSearched('');
         setFailure({ kind: 'denied', text: '校籍或貼文存取權限已變更，先前結果已清除。' });

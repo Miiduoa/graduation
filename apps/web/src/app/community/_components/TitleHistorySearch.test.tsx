@@ -243,3 +243,24 @@ it.each(['query', 'school', 'account'])('ignores a stale open result after %s ch
   expect(mocks.navigate).not.toHaveBeenCalled();
   expect(screen.queryByRole('article')).toBeNull();
 });
+
+it('restores keyboard focus to the status when a deleted result disappears', async () => {
+  mocks.confirm.mockResolvedValueOnce(false);
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const link = await screen.findByRole('link', { name: '二手書 old-1001' });
+  link.focus();
+  fireEvent.click(link);
+  await waitFor(() => expect(screen.queryByRole('link', { name: '二手書 old-1001' })).toBeNull());
+  expect(document.activeElement).toBe(screen.getByRole('status'));
+});
+it('moves keyboard focus to permission recovery after losing school access', async () => {
+  mocks.confirm.mockRejectedValueOnce(Object.assign(new Error('revoked'), { code: 'permission-denied' }));
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const link = await screen.findByRole('link', { name: '二手書 old-1001' });
+  link.focus();
+  fireEvent.click(link);
+  await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
+  expect(document.activeElement).toBe(screen.getByRole('alert'));
+});
