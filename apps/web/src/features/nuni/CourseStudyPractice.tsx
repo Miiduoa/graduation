@@ -141,7 +141,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           <button type="button" className={styles.button} onClick={() => onReadSource(card)}>回白板看這段</button>
           <button type="button" className={styles.button} onClick={() => onAction({ type: 'skip' })}>略過這題</button>
         </nav>
-        <p className={styles.note}>上一題／下一題只移動閱讀位置；「下一題未自評」會循環尋找其他尚未自評的題目（包含已寫草稿的題目），不會自動略過或評分。</p>
+        <p className={styles.note}>上一題／下一題只移動閱讀位置；「下一題未自評」會循環尋找其他尚未自評的題目（包含已寫草稿的題目），不會自動評分。只有按「略過這題」才會標記略過。</p>
       </section> : <p className={styles.note}>請回到閱讀，選擇有講解記錄的待複習段落再開始。</p>}
 
       <nav className={styles.overview} aria-label="本輪題目">
