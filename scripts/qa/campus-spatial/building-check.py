@@ -140,6 +140,15 @@ async def tracing_desktop(page, _requests, _resources):
     page.on('request', lambda request: uploads.append(request.url) if request.method == 'POST' else None)
     canvas = await open_tracer(page)
     source_url = await canvas.locator('image').get_attribute('href')
+    # Native click coordinates can be quantized to integer CSS pixels. Derive
+    # the maximum error from one pixel at each endpoint, including the origin
+    # translation, instead of requiring subpixel accuracy from a real mouse.
+    pointer_tolerance = await canvas.evaluate('''svg => {
+      const inverse = svg.getScreenCTM().inverse();
+      const box = svg.viewBox.baseVal, unit = 20 / Math.max(box.width, box.height);
+      return [2 * unit * (Math.abs(inverse.a) + Math.abs(inverse.c)),
+        2 * unit * (Math.abs(inverse.b) + Math.abs(inverse.d))];
+    }''')
     for x, y in [(0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)]:
         point = await image_point(canvas, x, y)
         await page.mouse.click(point['x'], point['y'])
@@ -159,7 +168,12 @@ async def tracing_desktop(page, _requests, _resources):
     await page.screenshot(path=str(OUT / 'building-traced-3d.png'))
     relative = await download_plan(page)
     assert relative['units'] == 'relative' and relative['floors'][0]['height'] == 3, relative
-    assert math.isclose(max(p[0] for p in relative['floors'][0]['outline']), 16, abs_tol=0.01), relative
+    relative_outline = relative['floors'][0]['outline']
+    assert len(relative_outline) == 4, relative_outline
+    for actual, expected in zip(relative_outline, [(0, 0), (16, 0), (16, 32 / 3), (0, 32 / 3)]):
+        for axis in (0, 1):
+            assert math.isclose(actual[axis], expected[axis], abs_tol=pointer_tolerance[axis]), {
+                'actual': actual, 'expected': expected, 'pixelTolerance': pointer_tolerance}
     await preview(page).get_by_role('button', name='返回圖面編輯', exact=True).click()
     await expect(page.locator(CANVAS)).to_have_count(0)
     await expect(preview(page).get_by_label('房間 1 名稱', exact=True)).to_have_value('圖面教室 101')
@@ -174,10 +188,16 @@ async def tracing_desktop(page, _requests, _resources):
     measured = await download_plan(page)
     floor = measured['floors'][0]
     assert measured['units'] == 'm' and floor['height'] == 3.2, measured
-    assert math.isclose(max(p[0] for p in floor['outline']), 12, abs_tol=0.01), floor
-    assert math.isclose(max(p[1] for p in floor['outline']), 8, abs_tol=0.01), floor
+    # Numeric calibration spans exactly 80% of the image width: 12 metres
+    # replaces 16 relative units. Every existing vertex must scale by 0.75;
+    # this remains strict even though the original native clicks were rounded.
+    assert len(floor['outline']) == len(relative_outline), floor
+    for actual, original in zip(floor['outline'], relative_outline):
+        for axis in (0, 1):
+            assert math.isclose(actual[axis], original[axis] * 0.75, abs_tol=1e-7), {
+                'actual': actual, 'relative': original}
     room = floor['rooms'][0]['polygon']
-    assert math.isclose(max(p[0] for p in room) - min(p[0] for p in room), 3, abs_tol=0.01), room
+    assert math.isclose(max(p[0] for p in room) - min(p[0] for p in room), 3, abs_tol=1e-7), room
     await preview(page).get_by_text('更換圖面與範本', exact=True).click()
     await preview(page).get_by_label('匯入 JSON 圖面', exact=True).set_input_files({
         'name': 'round-trip.json', 'mimeType': 'application/json', 'buffer': json.dumps(measured).encode()})
@@ -187,7 +207,9 @@ async def tracing_desktop(page, _requests, _resources):
     assert source_url in await page.evaluate('window.__planUrls.revoked')
     assert not uploads, uploads
     return {'webgl': webgl, 'realImageDecode': True, 'imageUploadRequests': len(uploads),
-            'uncalibratedExport': True, 'calibratedMetres': [12, 8, 3.2], 'editableDraftPreserved': True,
+            'uncalibratedExport': True, 'pointerPixelTolerance': pointer_tolerance,
+            'calibrationMetres': 12, 'calibratedMetres': [max(p[0] for p in floor['outline']),
+                max(p[1] for p in floor['outline']), floor['height']], 'editableDraftPreserved': True,
             'exportReimport': True, 'referenceUrlReleased': True}
 
 
