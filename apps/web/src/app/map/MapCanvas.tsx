@@ -1,19 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { Map as LeafletMap } from 'leaflet';
+import { useEffect, useRef, useState } from 'react';
+import type { LeafletKeyboardEvent, Map as LeafletMap } from 'leaflet';
 import type { MapCoordinate, MapLocation } from './mapService';
 import styles from './map.module.css';
 
 type LeafletModule = typeof import('leaflet');
 
 export default function MapCanvas({
+  schoolName,
   locations,
   selected,
   route,
   onSelect,
   myLocation = null,
 }: {
+  schoolName?: string;
   locations: MapLocation[];
   selected: MapLocation | null;
   route: [MapLocation, MapLocation] | null;
@@ -24,17 +26,50 @@ export default function MapCanvas({
   const [runtime, setRuntime] = useState<{ map: LeafletMap; L: LeafletModule } | null>(null);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const focusedMarker = useRef<string | null>(null);
 
   useEffect(() => {
     if (!container) return;
     let active = true;
     let map: LeafletMap | null = null;
     let resize: ResizeObserver | null = null;
+    let stopWatchingMotion: (() => void) | undefined;
     void import('leaflet')
       .then((L) => {
         if (!active) return;
-        map = L.map(container, { zoomControl: false, fadeAnimation: false });
-        L.control.zoom({ zoomInTitle: '放大地圖', zoomOutTitle: '縮小地圖' }).addTo(map);
+        const createdMap = L.map(container, { zoomControl: false, fadeAnimation: false });
+        map = createdMap;
+        const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const motionEnabled = () =>
+          document.documentElement.dataset.reducedMotion === 'false' && !systemMotion.matches;
+        const motionDefaults = {
+          inertia: createdMap.options.inertia,
+          zoomAnimation: createdMap.options.zoomAnimation,
+          zoomAnimationThreshold: createdMap.options.zoomAnimationThreshold,
+        };
+        // Leaflet's keyboard handler calls panBy directly without an animation option.
+        const panBy = createdMap.panBy.bind(createdMap);
+        createdMap.panBy = (offset, options) =>
+          panBy(offset, motionEnabled() ? options : { ...options, animate: false });
+        const applyMotion = () => {
+          const enabled = motionEnabled();
+          createdMap.options.inertia = enabled && motionDefaults.inertia;
+          createdMap.options.zoomAnimation = enabled && motionDefaults.zoomAnimation;
+          createdMap.options.zoomAnimationThreshold = enabled ? motionDefaults.zoomAnimationThreshold : 0;
+          if (!enabled && Number.isFinite(createdMap.getZoom())) createdMap.stop();
+        };
+        const motionObserver = new MutationObserver(applyMotion);
+        motionObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-reduced-motion'],
+        });
+        systemMotion.addEventListener('change', applyMotion);
+        applyMotion();
+        stopWatchingMotion = () => {
+          motionObserver.disconnect();
+          systemMotion.removeEventListener('change', applyMotion);
+        };
+        L.control.zoom({ zoomInTitle: '放大地圖', zoomOutTitle: '縮小地圖' }).addTo(createdMap);
         // OSM raster is free and keyless. detectRetina loads z+1 tiles at 2x.
         // 3x screens still only get 2x bitmaps; a sharp vector layer would need a
         // new engine (for example OpenFreeMap + MapLibre) rather than a paid key.
@@ -47,21 +82,22 @@ export default function MapCanvas({
         tiles.on('tileerror', () => {
           if (active) setError(true);
         });
-        tiles.addTo(map);
-        map.invalidateSize();
+        tiles.addTo(createdMap);
+        createdMap.invalidateSize();
         if (typeof ResizeObserver !== 'undefined') {
           resize = new ResizeObserver(() => {
-            map?.invalidateSize();
+            createdMap.invalidateSize();
           });
           resize.observe(container);
         }
-        setRuntime({ map, L });
+        setRuntime({ map: createdMap, L });
       })
       .catch(() => {
         if (active) setError(true);
       });
     return () => {
       active = false;
+      stopWatchingMotion?.();
       resize?.disconnect();
       map?.remove();
     };
@@ -77,7 +113,7 @@ export default function MapCanvas({
       const tooltip = document.createElement('span');
       // Leaflet interprets string tooltips as HTML; location names are plain text.
       tooltip.textContent = location.name;
-      L.marker([location.lat, location.lng], {
+      const marker = L.marker([location.lat, location.lng], {
         icon: L.divIcon({ html: pin, className: '', iconSize: [28, 28], iconAnchor: [14, 28] }),
         title: location.name,
         alt: location.name,
@@ -85,9 +121,29 @@ export default function MapCanvas({
       })
         .bindTooltip(tooltip, { direction: 'top', offset: [0, -28] })
         .on('click', () => onSelect(location))
-        .addTo(markers);
+        .on('keydown', (event: LeafletKeyboardEvent) => {
+          const keyboardEvent = event.originalEvent;
+          if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+            L.DomEvent.stop(keyboardEvent);
+            if (!keyboardEvent.repeat) onSelect(location);
+          }
+        });
+      marker.on('add', () => {
+        const element = marker.getElement();
+        if (element) {
+          element.dataset.mapLocationId = location.id;
+          if (focusedMarker.current === location.id) element.focus({ preventScroll: true });
+        }
+      });
+      marker.addTo(markers);
     }
+    focusedMarker.current = null;
     return () => {
+      const active = document.activeElement;
+      focusedMarker.current =
+        active instanceof HTMLElement && map.getContainer().contains(active)
+          ? active.dataset.mapLocationId ?? null
+          : null;
       markers.remove();
     };
   }, [runtime, locations, selected, onSelect]);
@@ -140,13 +196,22 @@ export default function MapCanvas({
 
   return (
     <div className={styles.mapFrame}>
-      <div
-        ref={setContainer}
-        className={styles.map}
-        role="region"
-        aria-label="校園地點地圖"
-        data-map-canvas="true"
-      />
+      <div className={styles.mapMasthead} aria-hidden="true">
+        <div>
+          <span className={styles.mapCaption}>CAMPUS MAP</span>
+          <strong>{schoolName || '校園地圖'}</strong>
+        </div>
+        <span className={styles.north}>N</span>
+      </div>
+      <div className={styles.mapSheet}>
+        <div
+          ref={setContainer}
+          className={styles.map}
+          role="region"
+          aria-label="校園地點地圖"
+          data-map-canvas="true"
+        />
+      </div>
       {error && (
         <div className={styles.mapNotice} role="status">
           <p>底圖暫時無法載入。仍可使用下方地點列表與步行導航。</p>

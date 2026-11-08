@@ -98,9 +98,14 @@ it('offers copy instead of dial for ambiguous range telephone rows', async () =>
   render(<SchoolInfoPage />);
   expect(screen.getByText(/學校總機：\(03\)5374281~5/)).toBeTruthy();
   expect(screen.queryByRole('link', { name: '撥打學校總機' })).toBeNull();
-  screen.getByRole('button', { name: '複製學校總機' }).click();
+  const plaque = screen.getByTestId('school-info-plaque');
+  const copy = screen.getByRole('button', { name: '複製學校總機' });
+  copy.focus();
+  copy.click();
   expect(writeText).toHaveBeenCalledWith('(03)5374281~5');
   expect(await screen.findByText('已複製學校總機號碼。')).toBeTruthy();
+  expect(screen.getByTestId('school-info-plaque')).toBe(plaque);
+  expect(document.activeElement).toBe(copy);
 });
 
 it('shows loading, error, and unselected states without foreign school content', () => {
@@ -147,10 +152,14 @@ it('clears previous school content when the selection switches', () => {
   const { rerender } = render(<SchoolInfoPage />);
   expect(screen.getByRole('heading', { name: '靜宜大學' })).toBeTruthy();
   expect(screen.getByRole('link', { name: /靜宜職涯/ })).toBeTruthy();
+  const plaque = screen.getByTestId('school-info-plaque');
+  rerender(<SchoolInfoPage />);
+  expect(screen.getByTestId('school-info-plaque')).toBe(plaque);
 
   context.schoolId = 'nthu';
   context.schoolName = '國立清華大學';
   rerender(<SchoolInfoPage />);
+  expect(screen.getByTestId('school-info-plaque')).not.toBe(plaque);
   expect(screen.getByRole('heading', { name: '國立清華大學' })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: '靜宜大學' })).toBeNull();
   expect(screen.getByTestId('shell-school').textContent).toBe('國立清華大學');
