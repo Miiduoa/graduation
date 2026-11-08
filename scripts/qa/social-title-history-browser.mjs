@@ -352,6 +352,9 @@ window.__fixtureToken=location.search;
       document.querySelectorAll('article').length === 20 &&
       new URL(document.querySelector('article a').href).pathname.endsWith('/' + id);
   }, rememberedId);
+  await check('390: reading position recovery restores focus to the result status', () =>
+    document.activeElement?.getAttribute('role') === 'status' &&
+    ![...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '回到上次閱讀位置'));
   await screenshot('390-return-to-reading-position.png');
   report.flows.push({ label: 'web-confirm-open-and-resume', completed: true,
     note: 'Actual SDK + rules, route unmount/remount simulated; not the full PostDetail route or real account switch' });

@@ -94,6 +94,7 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
   const [openingId, setOpeningId] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const more = useRef<HTMLButtonElement>(null);
+  const resumeControl = useRef<HTMLButtonElement>(null);
   const summary = useRef<HTMLParagraphElement>(null);
   const errorRegion = useRef<HTMLDivElement>(null);
   const focusAfter = useRef<'summary' | 'error' | null>(null);
@@ -149,6 +150,8 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
       return;
     }
     const cursor = continuation ? page!.nextCursor : null;
+    // Capture focus before the resume control is disabled or removed by a response.
+    const focusWasOnResume = Boolean(fromPostId) && document.activeElement === resumeControl.current;
     const request = ++version.current;
     if (!continuation && !fromPostId) {
       setResumePosition(null);
@@ -175,7 +178,8 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
         clearReadingPosition();
         setResumePosition(null);
       }
-      focusAfter.current = continuation && !result.hasMore && document.activeElement === more.current
+      focusAfter.current = focusWasOnResume ||
+        (continuation && !result.hasMore && document.activeElement === more.current)
         ? 'summary' : null;
       setPage({ ...result, posts });
       setSearched(prefix);
@@ -187,11 +191,12 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
       if (isPermissionDeniedError(cause)) {
         clearReadingPosition();
         setResumePosition(null);
-        if (document.activeElement === more.current) focusAfter.current = 'error';
+        if (document.activeElement === more.current || focusWasOnResume) focusAfter.current = 'error';
         setPage(null);
         setSearched('');
         setFailure({ kind: 'denied', text: '校籍或貼文存取權限已變更，先前結果已清除。' });
       } else if ((cause as { code?: string } | null)?.code === 'history-position-unavailable') {
+        if (focusWasOnResume) focusAfter.current = 'error';
         clearReadingPosition();
         setResumePosition(null);
         setPage(null);
@@ -285,7 +290,7 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
           <button type="submit" aria-disabled={busy || Boolean(openingId)} aria-busy={busy || Boolean(openingId)}>搜尋歷史標題</button>
           <button type="button" onClick={() => { edit(''); input.current?.focus(); }}>清除</button>
           {resumePosition && draft === resumePosition.query && (
-            <button type="button" aria-label="回到上次閱讀位置"
+            <button ref={resumeControl} type="button" aria-label="回到上次閱讀位置"
               aria-describedby={hintId} aria-busy={busy} disabled={busy || Boolean(openingId)}
               onClick={() => void search(false, resumePosition.postId)}>
               回到上次閱讀位置
