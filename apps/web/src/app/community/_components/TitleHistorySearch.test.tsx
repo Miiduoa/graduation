@@ -299,3 +299,19 @@ it('moves keyboard focus to permission recovery after losing school access', asy
   await waitFor(() => expect(screen.queryByRole('article')).toBeNull());
   expect(document.activeElement).toBe(screen.getByRole('alert'));
 });
+
+
+it('returns from a confirmed old post with only a scoped query and a fresh-position option', async () => {
+  const first = page(['old-1001'], true);
+  mocks.search.mockResolvedValueOnce(first);
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+  view.unmount();
+  render(<TitleHistorySearch schoolId="pu" />);
+  await waitFor(() => expect(screen.getByRole('searchbox')).toHaveProperty('value', '二手書'));
+  expect(screen.queryByRole('article')).toBeNull();
+  expect(mocks.search).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '回到上次閱讀位置' })).toBeTruthy();
+});
