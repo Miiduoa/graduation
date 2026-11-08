@@ -73,6 +73,65 @@ it('keeps reading separate, saves only identity and time, and restores the bookm
   expect(within(row).getByRole('button', { name: `開啟「${material.title}」原教材` })).toBeTruthy();
 });
 
+it('prints the saved date and complete verified material text on the bookmark sheet', async () => {
+  const longMaterial = {
+    ...material,
+    title: '進階資料庫設計與實作 DataModelingAndInformationSystems 閱讀與專題教材',
+    unitTitle: '第三週跨領域專題實作與完整教材閱讀事項',
+  };
+  persist();
+  state.request.mockResolvedValue(page([longMaterial]));
+  render(<MaterialBookmarks />);
+
+  const sheet = await screen.findByRole('article', { name: longMaterial.title });
+  expect(within(sheet).getByRole('heading', { name: longMaterial.title }).textContent).toBe(longMaterial.title);
+  expect(within(sheet).getByText(longMaterial.unitTitle)).toBeTruthy();
+  const date = sheet.querySelector('time');
+  expect(date?.getAttribute('datetime')).toBe(bookmark.savedAt);
+  expect(date?.textContent).toContain('收藏於');
+  expect(date?.textContent).toContain('2026');
+  expect(within(sheet).getByRole('button', { name: `開啟「${longMaterial.title}」原教材` })).toBeTruthy();
+});
+
+it('keeps the folder entrance mounted through refreshes and same-account session changes', async () => {
+  persist();
+  const view = render(<MaterialBookmarks />);
+  await screen.findByRole('heading', { name: material.title });
+  const folder = screen.getByTestId('material-bookmark-folder');
+
+  fireEvent.click(screen.getByRole('button', { name: '更新收藏' }));
+  await screen.findByRole('heading', { name: material.title });
+  expect(screen.getByTestId('material-bookmark-folder')).toBe(folder);
+
+  fireEvent(window, new Event('focus'));
+  await screen.findByRole('heading', { name: material.title });
+  expect(screen.getByTestId('material-bookmark-folder')).toBe(folder);
+
+  const sheet = screen.getByRole('article', { name: material.title });
+  state.context = 'session-b';
+  view.rerender(<MaterialBookmarks />);
+  await screen.findByRole('heading', { name: material.title });
+  expect(screen.getByTestId('material-bookmark-folder')).toBe(folder);
+  expect(screen.getByRole('article', { name: material.title })).not.toBe(sheet);
+  expect(state.request).toHaveBeenLastCalledWith(`class-workspaces/${workspace.id}/materials/page`, 'session-b', undefined);
+});
+
+it('replaces the folder entrance when the account changes', async () => {
+  persist();
+  const view = render(<MaterialBookmarks />);
+  await screen.findByRole('heading', { name: material.title });
+  const folder = screen.getByTestId('material-bookmark-folder');
+
+  state.account += 1;
+  persist();
+  state.request.mockResolvedValue(page([{ ...material, title: '目前帳號的教材' }]));
+  view.rerender(<MaterialBookmarks />);
+
+  expect(screen.getByTestId('material-bookmark-folder')).not.toBe(folder);
+  expect(screen.queryByRole('heading', { name: material.title })).toBeNull();
+  expect(await screen.findByRole('heading', { name: '目前帳號的教材' })).toBeTruthy();
+});
+
 it('does not report success on a storage failure and offers a working retry', async () => {
   render(<CourseMaterials workspace={workspace} />);
   const save = await screen.findByRole('button', { name: `加入「${material.title}」的此裝置收藏` });
