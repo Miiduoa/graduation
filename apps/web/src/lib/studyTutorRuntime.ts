@@ -187,7 +187,9 @@ export async function runStudyTutor({
               STUDY_TUTOR_GENERATION_TIMEOUT_MS,
             );
           }
-          report(progressMessage(data.message, data.phase));
+          // Legacy unphased progress remains valid. Once generation has started,
+          // do not mistake a late unphased download message for a new loading phase.
+          report(progressMessage(data.message, generating ? 'generating' : data.phase));
         } else if (data.type === 'result') {
           try {
             if (typeof data.raw !== 'string') throw workerError('invalid_response');

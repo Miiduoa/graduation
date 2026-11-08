@@ -308,6 +308,46 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it('keeps unphased legacy progress in the generation stage after generation begins', async () => {
+    const onProgress = vi.fn();
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand',
+      signal: new AbortController().signal, onProgress, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'progress', message: '正在下載辨識模型（已接收 12 MB）' });
+    expect(onProgress).toHaveBeenLastCalledWith('正在下載講解模型（已接收 12 MB）');
+
+    worker.emit({ type: 'progress', phase: 'generating' });
+    worker.emit({ type: 'progress', message: '正在下載辨識模型（已接收 99 MB）' });
+    expect(onProgress).toHaveBeenLastCalledWith('正在依本段原文準備講解與自我檢查題…');
+
+    worker.emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(pending).resolves.toEqual(lesson());
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'success', generationMs: expect.any(Number),
+    }));
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('does not restart the generation deadline for unphased late progress', async () => {
+    vi.useFakeTimers();
+    const onProgress = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand',
+      signal: new AbortController().signal, onProgress,
+    }).catch((error: Error) => error);
+    const worker = lastWorker();
+    worker.emit({ type: 'progress', phase: 'generating' });
+    await vi.advanceTimersByTimeAsync(STUDY_TUTOR_GENERATION_TIMEOUT_MS / 2);
+    worker.emit({ type: 'progress', message: '正在下載辨識模型（已接收 101 MB）' });
+    expect(onProgress).toHaveBeenLastCalledWith('正在依本段原文準備講解與自我檢查題…');
+    await vi.advanceTimersByTimeAsync(STUDY_TUTOR_GENERATION_TIMEOUT_MS / 2);
+    expect(await pending).toMatchObject({ message: expect.stringContaining('這段講解逾時') });
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
   it('ignores another request id without exposing its progress or explanation', async () => {
     const progress = vi.fn();
     const pending = runStudyTutor({ passage: passage(), mode: 'exam', signal: new AbortController().signal, onProgress: progress });
