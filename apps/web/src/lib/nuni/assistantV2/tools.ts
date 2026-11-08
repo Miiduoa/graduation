@@ -431,7 +431,8 @@ export const toolNames = Object.keys(definitions);
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
-  if (/成績|學分/.test(question)) add('get_imported_academics');
+  // School grades stay on campus readers; imported records need an explicit local source.
+  if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
   if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
     add('list_campus_services');
   if (

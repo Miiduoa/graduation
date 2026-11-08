@@ -91,8 +91,13 @@ describe('cross-feature agent tools', () => {
       .rejects.toMatchObject({ status: 403 });
   });
 
+  it('selects imported academics only when the question asks for saved records', () => {
+    expect(selectTools('我的成績', false)).not.toContain('get_imported_academics');
+    expect(selectTools('我匯入的成績', false)).toContain('get_imported_academics');
+  });
+
   it('enforces schema bounds and selects the new tools for the appropriate domain', () => {
-    expect(selectTools('我想核對成績與學分紀錄', false)).toContain('get_imported_academics');
+    expect(selectTools('我想核對匯入成績與學分紀錄', false)).toContain('get_imported_academics');
     expect(selectTools('有哪些功能可以使用', false)).toContain('list_campus_services');
     for (const args of [{ schoolId: 'other' }, { limit: 100 }, { offset: -1 }, { academicYear: '今年' }])
       expect(() => validateTool('get_imported_academics', args)).toThrow();
@@ -118,7 +123,7 @@ describe('cross-feature agent tools', () => {
         function: { name: 'get_imported_academics', arguments: '{}' } }] },
         usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } };
     };
-    const result = await run({ question: '核對我的成績紀錄', history: [], binding,
+    const result = await run({ question: '核對我匯入的成績紀錄', history: [], binding,
       adapter: f.adapter, model, secret, writes: false, signal: new AbortController().signal, now, log: () => {} });
     expect(result.answer).toContain('成績：87');
     expect(result.answer).not.toContain('成績 99');
