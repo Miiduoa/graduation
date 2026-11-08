@@ -294,3 +294,50 @@ test('explicitly closing a historical search discards its draft instead of resto
   expect(view.getByLabelText('記得的標題開頭').props.value).toBe('');
   expect(search).not.toHaveBeenCalled();
 });
+
+
+test('a revoked membership while a next page is pending must leave the first-page retry usable', async () => {
+  const pending = deferred<TitleSearchPage>();
+  const first = result([row('one')], true);
+  search.mockResolvedValueOnce(first).mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce(result([row('restored')]));
+  confirmOpen.mockRejectedValueOnce({ code: 'permission-denied' });
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+  expect(search).toHaveBeenCalledTimes(2);
+  try {
+    // A result from the first page remains tappable while the next page is loading.
+    fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+    await view.findByText(/搜尋結果已清除/);
+    expect(view.open).not.toHaveBeenCalled();
+    expect(view.queryByText('二手書 one')).toBeNull();
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+  } finally {
+    await act(async () => pending.resolve(result([row('late')])));
+  }
+  expect(view.queryByText('二手書 late')).toBeNull();
+  fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+  await view.findByText('二手書 restored');
+  expect(search).toHaveBeenLastCalledWith('pu', '二手書', null);
+});
+
+test('offline post confirmation during a pending next page offers both post and page recovery', async () => {
+  const pending = deferred<TitleSearchPage>();
+  search.mockResolvedValueOnce(result([row('one')], true))
+    .mockReturnValueOnce(pending.promise).mockResolvedValueOnce(result([row('two')]));
+  confirmOpen.mockRejectedValueOnce({ code: 'unavailable' }).mockResolvedValueOnce(true);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+  try {
+    fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+    await view.findByText(/暫時無法向伺服器確認/);
+    expect(view.open).not.toHaveBeenCalled();
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+  } finally {
+    await act(async () => pending.resolve(result([row('late')])));
+  }
+  fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+  await view.findByText('二手書 two');
+  expect(search.mock.calls[2]).toEqual(search.mock.calls[1]);
+  expect(view.queryByText('二手書 late')).toBeNull();
+});

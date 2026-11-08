@@ -335,3 +335,35 @@ test('returning from a confirmed historical post restores query but requires a f
   expect(search).toHaveBeenCalledTimes(searchCalls + 1);
   record({ restoredQuery: '二手書', stalePostsShownBeforeRefresh: 0, newlyAuthorizedResults: 20 });
 });
+
+
+test('a revoked school membership while the real next-page SDK read is held does not strand search controls', async () => {
+  const { view, onOpenPost } = launch(); submit(view); await count(view, 20);
+  let releasePage;
+  let pageReady;
+  const queryDelivered = new Promise((resolve) => { pageReady = resolve; });
+  // The SDK and rules supply the actual result. Only delivery to the UI is delayed.
+  search.mockImplementationOnce((...args) => realSearch(...args).then((page) =>
+    new Promise((resolve) => {
+      releasePage = () => resolve(page);
+      pageReady();
+    })));
+  fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+  await queryDelivered;
+  await membership('inactive');
+  try {
+    fireEvent.press(view.getAllByLabelText('開啟貼文：二手書 00')[0]);
+    await view.findByText(/搜尋結果已清除/, {}, { timeout: 10000 });
+    expect(onOpenPost).not.toHaveBeenCalled();
+    expect(rows(view)).toHaveLength(0);
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+  } finally {
+    await act(async () => { if (releasePage) releasePage(); });
+    await membership('active');
+  }
+  expect(rows(view)).toHaveLength(0);
+  fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+  await count(view, 20);
+  expect(search.mock.calls[2][2]).toBeNull();
+  record({ inFlightNextPage: true, revokedWithActualRules: true, stalePageRejected: true, restoredFromPageOne: 20 });
+});
