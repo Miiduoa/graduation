@@ -1808,6 +1808,7 @@ test('a live platform plan retries the same precise assignment, preserves the dr
   expect(confirmCampusAgentWrite).not.toHaveBeenCalled();
   view.unmount();
   view = render(<CampusAssistantScreen route={platformRoute} navigation={navigation} />);
+  await waitForCalendarRecovery(view);
   await waitFor(() => expect(view.getByRole('button', { name: '繼續已儲存的計畫（1）' })).toBeTruthy());
   fireEvent.press(view.getByRole('button', { name: '繼續已儲存的計畫（1）' }));
   fireEvent.press(view.getByRole('button', { name: /查看今日優先行動/ }));

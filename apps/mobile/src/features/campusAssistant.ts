@@ -149,11 +149,11 @@ export async function askCampusAssistant(input: {
   scopeCheck(input, mode === 'campus');
   const messages = input.messages
     .slice(-20)
-    // Local records and calendar tasks stay in the conversation without being
+    // Source-backed plans, local records and calendar tasks stay in the conversation without being
     // forwarded, together with their preceding question, to a later model.
     .filter((message, index, history) => {
       const privateRead = (item?: CampusAssistantMessage) => !!item &&
-        (!!item.courseworkRead || !!item.courseworkStudy || ['saved-academics', 'calendar-action'].includes(item.tool ?? ''));
+        (!!item.courseworkRead || !!item.courseworkStudy || ['campus-plan', 'saved-academics', 'calendar-action'].includes(item.tool ?? ''));
       return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
     })
     .map((message) => ({

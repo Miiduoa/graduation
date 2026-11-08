@@ -206,3 +206,59 @@ test('a later campus request excludes local academic results and their preceding
     messages: [{ role: 'user', content: '這週有哪些校園活動？' }],
   }));
 });
+
+test.each(['device', 'campus'] as const)(
+  'later %s inference keeps ordinary context while excluding a source-backed plan and its question',
+  async (mode) => {
+    const privateQuestion = '幫我安排未公開專題「個人收入預測」與課堂小考';
+    const privatePlan = '私人作業：收入預測報告，11/9 23:59 截止。私人測驗：資料庫期中小考。';
+    const ordinaryHistory: CampusAssistantMessage[] = [
+      { role: 'user', content: '回答請用繁體中文。' },
+      { role: 'assistant', content: '可以，我會使用繁體中文。' },
+    ];
+    const currentQuestion = { role: 'user' as const, content: '請用簡單例子解釋二分搜尋。' };
+    const messages: CampusAssistantMessage[] = [
+      ...ordinaryHistory,
+      { role: 'user', content: privateQuestion },
+      { role: 'assistant', content: privatePlan, tool: 'campus-plan' },
+      currentQuestion,
+    ];
+    const { localLLM } = require('../../services/localLLMInference');
+    if (mode === 'device') {
+      localLLM.getRuntimeAvailability.mockReturnValueOnce({ available: true });
+      localLLM.isModelDownloaded.mockResolvedValueOnce(true);
+      localLLM.getState
+        .mockReturnValueOnce({ status: 'ready', modelId: 'qwen2.5-0.5b' })
+        .mockReturnValueOnce({ status: 'ready', modelId: 'qwen2.5-0.5b' });
+      // Exercise both model entry points: tool selection, then ordinary chat.
+      mockCollect.mockResolvedValueOnce({ ownerUid: 'A', schoolId: 'pu', schoolName: '靜宜大學',
+        checkedAt: new Date().toISOString(),
+        timetable: { source: 'saved-device-copy', updatedAt: new Date().toISOString(), courses: [] } });
+      localLLM.generate
+        .mockResolvedValueOnce({ content: '{"v":1,"calls":[]}', finishReason: 'stop' })
+        .mockResolvedValueOnce({ content: '一般回答', finishReason: 'stop' });
+    }
+
+    const result = await askCampusAssistant({ ...input(''), mode, messages });
+    expect(result).toMatchObject({ source: mode, content: '一般回答' });
+    const expectedMessages = [...ordinaryHistory, currentQuestion];
+    if (mode === 'campus') {
+      expect(mockCallable).toHaveBeenCalledWith(expect.objectContaining({ messages: expectedMessages }));
+      expect(localLLM.generate).not.toHaveBeenCalled();
+    } else {
+      expect(localLLM.generate).toHaveBeenCalledTimes(2);
+      const selectionPrompt = localLLM.generate.mock.calls[0][0].messages;
+      expect(JSON.parse(selectionPrompt[1].content)).toEqual({
+        history: ordinaryHistory.map((message) => ({ role: message.role, text: message.content, truncated: false })),
+        current: currentQuestion.content,
+      });
+      expect(localLLM.generate.mock.calls[1][0].messages).toEqual([
+        { role: 'system', content: 'device context' }, ...expectedMessages,
+      ]);
+      expect(mockCallable).not.toHaveBeenCalled();
+    }
+    // The private result remains visible to its owner; only model input is projected.
+    expect(messages).toHaveLength(5);
+    expect(messages[3]).toEqual({ role: 'assistant', content: privatePlan, tool: 'campus-plan' });
+  },
+);

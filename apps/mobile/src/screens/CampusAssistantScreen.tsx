@@ -8,6 +8,7 @@ import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
 import { NuniCourseworkStudyAction } from './NuniCourseworkStudyAction';
+import { readNuniPlanCourseworkStudy } from '../features/nuniPlanCourseworkStudy';
 import { classCourseworkQuestion, type CourseworkChoice, type CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
 import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
@@ -44,8 +45,8 @@ import { CampusSenseDashboard } from './CampusSenseDashboard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
 import { CampusPlanComparisonCard } from './CampusPlanComparisonCard';
 import { NuniStudyPlanActions } from './NuniStudyPlanActions';
-import { NuniPlanAssignmentOpenButton } from './NuniPlanAssignmentOpenButton';
-import { readNuniPlanAssignmentTarget, readNuniPlanQuizTarget } from '../services/nuniPlanAssignmentTarget';
+import { NuniPlanAssignmentOpenButton, type NuniPlanAssignmentNavigation } from './NuniPlanAssignmentOpenButton';
+import { readNuniPlanAssignmentTarget, readNuniPlanQuizTarget, type NuniPlanAssignmentSource } from '../services/nuniPlanAssignmentTarget';
 import { SavedCampusPlansPanel } from './SavedCampusPlansPanel';
 import { useSavedCampusPlans } from '../state/useSavedCampusPlans';
 import { createSavedCampusPlanSession, subscribeSavedCampusPlanInvalidation } from '../services/savedCampusPlans';
@@ -149,6 +150,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
 }
 type AssistantShortcut =
   | { kind: 'brief'; question: string; savedPlanId?: string }
+  | { kind: 'plan-study'; question: string; source: NuniPlanAssignmentSource }
   | { kind: 'services'; question: string }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
@@ -210,6 +212,7 @@ function AssistantConversation({
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
   const replanInFlight = useRef<AbortController | null>(null);
+  const planStudyInFlight = useRef<AbortController | null>(null);
   const campusSessionId = useRef<string | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const canAsk = mode === 'device' || Boolean(uid);
@@ -308,9 +311,15 @@ function AssistantConversation({
   const savedPlanScope = useMemo(() => canSavePlans ? { owner: timetableOwner, schoolId } : null,
     [canSavePlans, timetableOwner, schoolId]);
   const savedPlans = useSavedCampusPlans(savedPlanScope, current);
+  const canStartPlanAction = () => current() && !lock.current && !syncLock.current &&
+    !studyLock.current && !calendarBusy;
+  const selectPanel = (next: AssistantPanel) => {
+    if (canStartPlanAction() && !savedPlans.busy) setPanel(next);
+  };
   useEffect(() => subscribeSavedCampusPlanInvalidation(() => {
     if (!mounted.current || !isScopeCurrent()) return;
     replanInFlight.current?.abort();
+    planStudyInFlight.current?.abort();
     setOpenedSavedPlan(null);
     setMessages((previous) => previous.map((message) => {
       if (!message.planComparison) return message;
@@ -390,7 +399,7 @@ function AssistantConversation({
     }
   };
   const briefPlan = async (question: string, savedPlanId?: string) => {
-    if ((!uid && !platformTimetable) || lock.current || syncLock.current || calendarBusy || !current()) return;
+    if ((!uid && !platformTimetable) || !canStartPlanAction()) return;
     const original = savedPlanId ? savedPlans.plans.find((saved) => saved.id === savedPlanId) : undefined;
     if (savedPlanId && !original) {
       setError('原計畫已不在清單中，請重新開啟已儲存計畫。');
@@ -507,7 +516,61 @@ function AssistantConversation({
     }
   };
 
-  const send = async (shortcut?: Exclude<AssistantShortcut, { kind: 'brief' }>) => {
+  const startPlanStudy = async (source: NuniPlanAssignmentSource, question: string) => {
+    const focusedNavigation = navigation as NuniPlanAssignmentNavigation | undefined;
+    if (!platformTimetable || !courseworkRequests || !canStartPlanAction() ||
+        focusedNavigation?.isFocused?.() === false) return;
+    const selected = { ...source };
+    const controller = new AbortController();
+    const savedSession = createSavedCampusPlanSession(current);
+    lock.current = true;
+    inFlight.current = controller;
+    planStudyInFlight.current = controller;
+    setBusy(true);
+    setError('');
+    setActiveShortcut({ kind: 'plan-study', source: selected, question });
+    setPanel('chat');
+    const active = () => inFlight.current === controller && !controller.signal.aborted &&
+      current() && savedSession() && focusedNavigation?.isFocused?.() !== false;
+    const unsubscribeBlur = focusedNavigation?.addListener?.('blur', () => controller.abort());
+    try {
+      const result = await readNuniPlanCourseworkStudy({ source: selected,
+        context: { ...calendarContext, isCurrent: active }, transport: courseworkRequests,
+        signal: controller.signal });
+      if (!active()) return;
+      if (result.kind !== 'ready') {
+        setError(result.message);
+        return;
+      }
+      const read = result.read;
+      if (read.anchor.owner !== timetableOwner || read.anchor.schoolId !== schoolId ||
+          read.result.kind !== 'assignments' || read.result.workspace.id !== selected.workspaceId ||
+          result.assignmentId !== selected.assignmentId ||
+          !read.result.assignments.some((item) => item.id === result.assignmentId)) {
+        setError('無法核對計畫中選取的原作業，請重新整理計畫。');
+        return;
+      }
+      setMessages((previous) => [...previous, { role: 'user', content: question }, {
+        role: 'assistant', source: 'device', tool: 'calendar-action',
+        content: '已重新核對這份作業，接著依目前課表與個人行程尋找準備時間。選定並確認後才會建立行程。',
+        courseworkRead: read, courseworkStudy: { assignmentIds: [result.assignmentId], suggestTime: true },
+      }]);
+      setActiveShortcut(null);
+    } catch {
+      if (active()) setError('暫時無法核對這份作業，請重試，或先查看原作業。');
+    } finally {
+      unsubscribeBlur?.();
+      if (inFlight.current === controller) inFlight.current = null;
+      if (planStudyInFlight.current === controller) planStudyInFlight.current = null;
+      lock.current = false;
+      if (current()) {
+        if (controller.signal.aborted) setError('已停止這次準備時間查詢，尚未建立行程。');
+        setBusy(false);
+      }
+    }
+  };
+
+  const send = async (shortcut?: Exclude<AssistantShortcut, { kind: 'brief' | 'plan-study' }>) => {
     const question = shortcut?.question ?? draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || studyLock.current || calendarBusy || !current()) return;
     if (shortcut?.kind === 'selection' && shortcut.checkedAt !== validCampusSenseSnapshot(sense, { uid, schoolId })?.checkedAt) return;
@@ -652,7 +715,7 @@ function AssistantConversation({
     scrollToEntry(event);
   };
   const openPlanRoute = (route: CampusPlanRoute) => {
-    if (!current() || lock.current || syncLock.current) return;
+    if (!canStartPlanAction()) return;
     if (platformTimetable) {
       if (route === '/timetable') safeNavigate(navigation, 'PersonalTimetable');
       else if (route === '/classroom') safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' });
@@ -668,9 +731,9 @@ function AssistantConversation({
           loading={savedPlans.loading}
           busy={busy || syncBusy || calendarBusy || savedPlans.busy}
           error={savedPlans.error}
-          onRetry={savedPlans.retry}
-          onDelete={(id) => { void savedPlans.remove(id); }}
-          onToggleStep={(id, stepId, done) => { void savedPlans.toggle(id, stepId, done); }}
+          onRetry={() => { if (canStartPlanAction()) savedPlans.retry(); }}
+          onDelete={(id) => { if (canStartPlanAction()) void savedPlans.remove(id); }}
+          onToggleStep={(id, stepId, done) => { if (canStartPlanAction()) void savedPlans.toggle(id, stepId, done); }}
           onReplan={(saved) => { if (current()) void briefPlan(saved.question, saved.id); }}
           onOpenRoute={openPlanRoute}
         />
@@ -792,7 +855,7 @@ function AssistantConversation({
     <AssistantConversationLayout
       title={platformTimetable ? '課業助理' : '校園助理'}
       subtitle={schoolName + ' · ' + (platformTimetable ? 'nuni 個人課表' : mode === 'device' ? '手機本地' : '校園連線')}
-      panel={panel} onSelect={setPanel} locked={busy || syncBusy || calendarBusy} chatScroll={chatScroll}
+      panel={panel} onSelect={selectPanel} locked={busy || syncBusy || calendarBusy} chatScroll={chatScroll}
       onBack={() => {
         inFlight.current?.abort();
         navigation?.goBack?.();
@@ -813,6 +876,7 @@ function AssistantConversation({
           />
           {calendarBusy ? <AIButton label="核對行程中…" size="sm" disabled /> : updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
             <AIButton label={syncBusy ? '取消這次同步' : platformTimetable && activeShortcut?.kind === 'brief' ? '取消這次規劃'
+              : activeShortcut?.kind === 'plan-study' ? '取消準備時間查詢'
               : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
           ) : (
@@ -825,7 +889,7 @@ function AssistantConversation({
       {canSavePlans && savedPlans.plans.length > 0 ? (
         <View style={{ marginHorizontal: 16, marginBottom: 8 }}>
           <AIButton label={`繼續已儲存的計畫（${savedPlans.plans.length}）`} variant="ghost"
-            disabled={busy || syncBusy || calendarBusy || savedPlans.busy} onPress={() => setPanel('tools')} />
+            disabled={busy || syncBusy || calendarBusy || savedPlans.busy} onPress={() => selectPanel('tools')} />
         </View>
       ) : null}
       {!uid && mode === 'campus' && (
@@ -1062,10 +1126,10 @@ function AssistantConversation({
                 {message.planComparison ? (
                   <CampusPlanComparisonCard
                     comparison={message.planComparison}
-                    disabled={busy || syncBusy || savedPlans.busy}
+                    disabled={busy || syncBusy || calendarBusy || savedPlans.busy}
                     onOpenOriginal={message.originalPlanId && savedPlans.plans.some((saved) => saved.id === message.originalPlanId)
                       ? () => {
-                        if (!current() || lock.current || syncLock.current || !message.originalPlanId) return;
+                        if (!canStartPlanAction() || !message.originalPlanId) return;
                         setOpenedSavedPlan((previous) => ({ id: message.originalPlanId!, request: (previous?.request ?? 0) + 1 }));
                         setPanel('tools');
                       } : undefined}
@@ -1073,7 +1137,7 @@ function AssistantConversation({
                 ) : null}
                 <CampusEvidencePlanCard
                 plan={message.plan}
-                disabled={busy || syncBusy}
+                disabled={busy || syncBusy || calendarBusy}
                 navigation={navigation}
                 reminderContext={platformTimetable ? undefined : {
                   userId: uid,
@@ -1082,16 +1146,24 @@ function AssistantConversation({
                   isCurrent: current,
                 }}
                 renderAssignmentAction={platformTimetable && courseworkRequests ? (assignment) => (
-                  <NuniPlanAssignmentOpenButton
-                    assignment={assignment}
-                    context={{
-                      accountId: platformTimetable.accountId, schoolId,
-                      isCurrent: current, ...courseworkRequests, readTarget: readNuniPlanAssignmentTarget,
-                      readQuizTarget: readNuniPlanQuizTarget,
-                    }}
-                    navigation={navigation}
-                    disabled={busy || syncBusy}
-                  />
+                  <View style={{ gap: 8 }}>
+                    <NuniPlanAssignmentOpenButton
+                      assignment={assignment}
+                      context={{
+                        accountId: platformTimetable.accountId, schoolId,
+                        isCurrent: current, ...courseworkRequests, readTarget: readNuniPlanAssignmentTarget,
+                        readQuizTarget: readNuniPlanQuizTarget,
+                      }}
+                      navigation={navigation}
+                      disabled={busy || syncBusy || calendarBusy}
+                    />
+                    {assignment.kind !== 'quiz' && assignment.nuniSource &&
+                      assignment.nuniSource.accountId === platformTimetable.accountId && assignment.nuniSource.schoolId === schoolId ? (
+                      <AIButton label={`安排「${assignment.title}」的準備時間`} variant="ghost" size="sm"
+                        disabled={busy || syncBusy || calendarBusy}
+                        onPress={() => void startPlanStudy(assignment.nuniSource!, `為「${assignment.title}」找 30 分鐘準備時間`)} />
+                    ) : null}
+                  </View>
                 ) : undefined}
                 onOpenRoute={openPlanRoute}
                 />
@@ -1101,14 +1173,14 @@ function AssistantConversation({
                       saved.plan.checkedAt === message.plan?.checkedAt && saved.plan.content === message.plan.content) ? (
                       <>
                         <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.success, fontSize: 13 }}>計畫已儲存</Text>
-                        <AIButton label="查看已儲存計畫" variant="ghost" disabled={busy || syncBusy || savedPlans.busy}
-                          onPress={() => setPanel('tools')} />
+                        <AIButton label="查看已儲存計畫" variant="ghost" disabled={busy || syncBusy || calendarBusy || savedPlans.busy}
+                          onPress={() => selectPanel('tools')} />
                       </>
                     ) : (
                       <AIButton label={savedPlans.busy ? '正在儲存計畫…' : '儲存這份計畫'} variant="ghost"
-                        disabled={busy || syncBusy || savedPlans.loading || savedPlans.busy}
+                        disabled={busy || syncBusy || calendarBusy || savedPlans.loading || savedPlans.busy}
                         onPress={() => {
-                          if (current() && message.plan) void savedPlans.save(messages[index - 1].content, message.plan);
+                          if (canStartPlanAction() && message.plan) void savedPlans.save(messages[index - 1].content, message.plan);
                         }} />
                     )}
                     <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
@@ -1117,8 +1189,8 @@ function AssistantConversation({
                     {savedPlans.error ? (
                       <View style={{ gap: 6 }}>
                         <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{savedPlans.error}</Text>
-                        <AIButton label="重新載入計畫" variant="ghost" disabled={savedPlans.busy || savedPlans.loading}
-                          onPress={savedPlans.retry} />
+                        <AIButton label="重新載入計畫" variant="ghost" disabled={busy || syncBusy || calendarBusy || savedPlans.busy || savedPlans.loading}
+                          onPress={() => { if (canStartPlanAction()) savedPlans.retry(); }} />
                       </View>
                     ) : null}
                   </View>
@@ -1206,6 +1278,7 @@ function AssistantConversation({
       {busy && (
         <View onLayout={scrollToEntry}>
           <AICard title={updatingReminder ? '正在處理作業提醒…' : platformTimetable && activeShortcut?.kind === 'brief' ? '正在整理學習計畫…'
+            : activeShortcut?.kind === 'plan-study' ? '正在核對計畫中的作業…'
             : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
               {activeShortcut?.question ?? draft.trim()}
@@ -1253,9 +1326,11 @@ function AssistantConversation({
                 : activeShortcut.question === TODAY_ANNOUNCEMENTS ? '重新查今日公告'
                 : activeShortcut.question === TODAY_BRIEF ? '重新整理今日重點'
                 : activeShortcut.question === WEEK_BRIEF ? '重新規劃未來七天' : '重試這次規劃'} variant="ghost"
-              disabled={busy || syncBusy}
+              disabled={busy || syncBusy || calendarBusy}
               onPress={() => void (activeShortcut.kind === 'brief'
-                ? briefPlan(activeShortcut.question, activeShortcut.savedPlanId) : send(activeShortcut))} />
+                ? briefPlan(activeShortcut.question, activeShortcut.savedPlanId)
+                : activeShortcut.kind === 'plan-study' ? startPlanStudy(activeShortcut.source, activeShortcut.question)
+                : send(activeShortcut))} />
           ) : null}
         </View>
       ) : null}
