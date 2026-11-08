@@ -10,7 +10,7 @@ import Constants from 'expo-constants';
 import { signInWithCustomToken, signOut } from 'firebase/auth';
 import { getAdapter } from '../../data/apiAdapters';
 import { PUAdapter } from '../../data/apiAdapters/PUAdapter';
-import { clearPUSession, signInWithStudentId } from '../../services/studentIdAuth';
+import { captureSchoolSessionAssertion, clearPUSession, signInWithStudentId } from '../../services/studentIdAuth';
 import {
   clearMockAuthSession,
   loadMockAuthSession,
@@ -611,4 +611,18 @@ test('verified AI scope uses the actual school-login user and session revocation
   } finally {
     memory.mockRestore();
   }
+});
+
+
+test('a restored school session assertion is invalidated by logout', () => {
+  const assertCurrent = captureSchoolSessionAssertion();
+  expect(assertCurrent).not.toThrow();
+  clearPUSession();
+  expect(assertCurrent).toThrow('學校登入已變更');
+});
+
+test('a restored school session assertion cannot survive a new login round for the same owner', async () => {
+  const assertCurrent = captureSchoolSessionAssertion();
+  await signInWithStudentId(params);
+  expect(assertCurrent).toThrow('學校登入已變更');
 });

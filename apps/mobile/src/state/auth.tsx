@@ -37,8 +37,8 @@ import { clearUserScopedStorage } from '../services/scopedStorage';
 import { puCacheClearAll } from '../data/puDataCache';
 import { clearPUCache } from '../services/puDataCache';
 import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
-import { revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
-import { clearPUSession } from '../services/studentIdAuth';
+import { bindVerifiedSchoolAiScope, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
+import { captureSchoolSessionAssertion, clearPUSession } from '../services/studentIdAuth';
 import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 import {
   clearTCSession,
@@ -517,16 +517,27 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       setInMemoryPostLoginContext(null);
     }
     if (!validProfile || !isProvidenceSchoolId(readySchoolId) || !isProvidenceSchoolId(profileSchoolId) ||
+        readySchoolId !== profileSchoolId ||
         !hasUsableFirebaseConfig() || getAuthInstance().currentUser !== user || isSigningOutRef.current) return;
     let active = true;
     let restored: Awaited<ReturnType<typeof getPostLoginContext>> = null;
     const auth = getAuthInstance();
+    const assertSchoolSession = captureSchoolSessionAssertion();
+    const assertRestoredSession = () => {
+      assertSchoolSession();
+      if (!active || auth.currentUser !== user || isSigningOutRef.current) {
+        throw new Error('登入狀態已變更，請重新登入。');
+      }
+    };
     void getPostLoginContext(profileSchoolId, uid).then((ctx) => {
       if (active && auth.currentUser === user && !isSigningOutRef.current &&
-          ctx?.origin === 'verified-school-login' && ctx.uid === uid && isProvidenceSchoolId(ctx.schoolId) &&
+          ctx?.origin === 'verified-school-login' && ctx.uid === uid && ctx.schoolId === profileSchoolId &&
+          isProvidenceSchoolId(ctx.schoolId) &&
           !getInMemoryPostLoginContext()) {
+        assertRestoredSession();
         restored = ctx;
         setInMemoryPostLoginContext(ctx);
+        bindVerifiedSchoolAiScope(ctx, assertRestoredSession);
       }
     }).catch((failure) => {
       if (active) console.warn('[auth] Could not restore the school context:', failure);

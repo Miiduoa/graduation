@@ -67,6 +67,17 @@ export function getPUSession(): PUSession | null {
   return _currentPUSession;
 }
 
+/** 還原的快照也必須隨後續學校登入或 session 清除而失效。 */
+export function captureSchoolSessionAssertion(): () => void {
+  const generation = schoolLoginGeneration;
+  const session = _currentPUSession;
+  return () => {
+    if (generation !== schoolLoginGeneration || session !== _currentPUSession) {
+      throw new Error('學校登入已變更，請重新登入。');
+    }
+  };
+}
+
 export function clearPUSession(): void {
   schoolLoginGeneration += 1;
   _currentPUSession = null;
