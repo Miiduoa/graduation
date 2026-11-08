@@ -313,6 +313,31 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       { type: 'text/plain;charset=utf-8' }), courseStudyNotesFilename(source.title), '本次筆記');
   }
 
+  async function copyNotes() {
+    if (!source || !hasNotes) return;
+    const request = ++copyRequest.current;
+    const text = buildCourseStudyNotes(courseTitle, source, session.passages);
+    setDownloadStatus('');
+    setDownloadError('');
+    setManualCopyText(null);
+    if (!navigator.clipboard?.writeText) {
+      setManualCopyText(text);
+      setDownloadError('這個瀏覽器無法直接複製筆記，請在下方選取文字手動複製，或下載 TXT。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (copyRequest.current === request) {
+        setDownloadStatus('已複製本次筆記到剪貼簿；內容含教材及個人筆記，請留意貼上位置。');
+      }
+    } catch {
+      if (copyRequest.current === request) {
+        setManualCopyText(text);
+        setDownloadError('無法存取剪貼簿，已提供手動選取的筆記；內容仍保留在白板，也可下載 TXT。');
+      }
+    }
+  }
+
   function downloadPractice() {
     if (!source || !practiceRound) return;
     downloadFile(() => new Blob(['\uFEFF', buildCourseStudyPracticeNotes(courseTitle, source.title, practiceRound)],
@@ -597,12 +622,14 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         {!practiceRound && <div className={styles.actions}>
           <button type="button" className={styles.button} onClick={saveProgress}>儲存閱讀進度</button>
           <button type="button" className={styles.button} disabled={!hasNotes} onClick={downloadNotes}>下載本次筆記</button>
+          <button type="button" className={styles.button} disabled={!hasNotes} onClick={() => { void copyNotes(); }}>複製本次筆記</button>
         </div>}
         {!practiceRound && <p className={styles.note}>進度檔可還原閱讀位置、筆記、講解、試答與問題草稿，也含練習參考回答；文字筆記方便直接閱讀。檔案未加密，請自行保管。</p>}
         {downloadStatus && <p className={styles.note} role="status">{downloadStatus}</p>}
         {downloadError && <p className={styles.error} role="alert">{downloadError}</p>}
-        {practiceRound && manualCopyText !== null && <section className={styles.manualCopy} aria-label="手動複製本輪紀錄">
-          <label className={styles.field} htmlFor={manualCopyId}>可選取的本輪紀錄文字
+        {manualCopyText !== null && <section className={styles.manualCopy}
+          aria-label={practiceRound ? '手動複製本輪紀錄' : '手動複製本次筆記'}>
+          <label className={styles.field} htmlFor={manualCopyId}>{practiceRound ? '可選取的本輪紀錄文字' : '可選取的本次筆記文字'}
             <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
               onFocus={(event) => event.currentTarget.select()}
               onClick={(event) => event.currentTarget.select()} />
@@ -661,10 +688,16 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
             <span>第 {passageIndex + 1} 段，共 {passages.length} 段</span><span>{section?.label}</span>
           </div>
           <CourseStudyPassage key={`${session.revision}:${passageKey}:${mode}`} passage={passage} mode={mode} memory={memory}
-            onChange={(update) => setSession((previous) => previous.revision !== session.revision ? previous : {
-              ...previous,
-              passages: { ...previous.passages, [passageKey]: update(previous.passages[passageKey] ?? emptyStudyPassage()) },
-            })} />
+            onChange={(update) => {
+              copyRequest.current += 1;
+              setManualCopyText(null);
+              setDownloadStatus('');
+              setDownloadError('');
+              setSession((previous) => previous.revision !== session.revision ? previous : {
+                ...previous,
+                passages: { ...previous.passages, [passageKey]: update(previous.passages[passageKey] ?? emptyStudyPassage()) },
+              });
+            }} />
           <nav className={styles.stepNavigation} aria-label="白板段落導覽">
             <button type="button" className={styles.button} disabled={!previousPassage}
               onClick={() => movePassage(previousPassage)}>上一段</button>

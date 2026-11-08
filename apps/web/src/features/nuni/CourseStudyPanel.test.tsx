@@ -572,6 +572,61 @@ it('downloads only after an explicit click, recovers from download failure, and 
   }
 });
 
+it('offers a selectable reading-note fallback when mobile clipboard support is missing', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    const copy = screen.getByRole('button', { name: '複製本次筆記' });
+    expect(copy.hasAttribute('disabled')).toBe(true);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '本機筆記甲' } });
+    expect(copy.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(copy);
+    const manual = screen.getByRole('textbox', { name: '可選取的本次筆記文字' }) as HTMLTextAreaElement;
+    expect(screen.getByRole('region', { name: '手動複製本次筆記' }).contains(manual)).toBe(true);
+    expect(manual.readOnly).toBe(true);
+    expect(manual.value).toContain('本機筆記甲');
+    expect(manual.value).toContain(material.body);
+    expect(document.activeElement).toBe(manual);
+    expect(screen.getByRole('alert').textContent).toContain('無法直接複製筆記');
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '修改後的筆記乙' } });
+    expect(screen.queryByRole('region', { name: '手動複製本次筆記' })).toBeNull();
+    expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('修改後的筆記乙');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('copies the current reading note and ignores a delayed clipboard denial after editing', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  let rejectCopy!: (error: Error) => void;
+  const writeText = vi.fn().mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectCopy = reject; }))
+    .mockResolvedValue(undefined);
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '初稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製本次筆記' }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '最終筆記' } });
+    await act(async () => rejectCopy(new Error('clipboard denied')));
+    expect(screen.queryByRole('region', { name: '手動複製本次筆記' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '複製本次筆記' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+    expect(writeText.mock.calls[1][0] as string).toContain('最終筆記');
+    expect(writeText.mock.calls[1][0] as string).not.toContain('初稿');
+    await screen.findByText(/已複製本次筆記到剪貼簿/);
+    expect((screen.getByLabelText(noteLabel) as HTMLTextAreaElement).value).toBe('最終筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('shows a source-linked three-step explanation and focuses its exact quotation', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
