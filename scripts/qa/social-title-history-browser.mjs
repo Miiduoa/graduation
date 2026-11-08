@@ -326,6 +326,20 @@ window.__fixtureToken=location.search;
     window.__history.routes[0].includes('/community/post/old-'));
   report.flows.push({ label: 'web-confirm-open', completed: true, note: 'Actual SDK and rules, router callback adapter only' });
 
+  await begin(320, 720, 'light', 'deleted-opening');
+  await type('二手書'); await click('搜尋歷史標題'); await count(20);
+  const missingId = await call(() => new URL(document.querySelector('article a').href).pathname.split('/').at(-1));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc(`schools/pu/campusPosts/${missingId}`).delete();
+  });
+  await clickFirstResult();
+  await until(() => call(() => document.body.textContent.includes('已從搜尋結果移除')), 'deleted result rejected');
+  await check('320: deleted post cannot navigate and its stale card disappears', () =>
+    window.__history.routes.length === 0 && window.__history.opens.length === 1 &&
+    window.__history.opens[0].available === false && document.querySelectorAll('article').length === 19);
+  await check('320: deleted result restores keyboard focus to the live status', () =>
+    document.activeElement?.getAttribute('role') === 'status');
+
   await begin(320, 720, 'light', 'offline-opening');
   await type('二手書'); await click('搜尋歷史標題'); await count(20);
   await call(() => window.__history.offline(true));
@@ -339,18 +353,6 @@ window.__fixtureToken=location.search;
   await until(() => call(() => window.__history.routes.length === 1), 'offline opening retry');
   await check('320: retry confirms from server before opening', () =>
     window.__history.opens.length === 2 && window.__history.opens[1].available === true);
-
-  await begin(320, 720, 'light', 'deleted-opening');
-  await type('二手書'); await click('搜尋歷史標題'); await count(20);
-  const missingId = await call(() => new URL(document.querySelector('article a').href).pathname.split('/').at(-1));
-  await environment.withSecurityRulesDisabled(async (context) => {
-    await context.firestore().doc(`schools/pu/campusPosts/${missingId}`).delete();
-  });
-  await clickFirstResult();
-  await until(() => call(() => document.body.textContent.includes('已從搜尋結果移除')), 'deleted result rejected');
-  await check('320: deleted post cannot navigate and its stale card disappears', () =>
-    window.__history.routes.length === 0 && window.__history.opens.length === 1 &&
-    window.__history.opens[0].available === false && document.querySelectorAll('article').length === 19);
 
   assert.equal(report.errors.length, 0, 'Browser exceptions');
   assert.equal(report.externalRequests.length, 0, 'Unexpected external requests');
