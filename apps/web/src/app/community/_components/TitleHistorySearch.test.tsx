@@ -397,3 +397,34 @@ it.each(['history-position-unavailable', 'permission-denied'])(
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
   },
 );
+
+it('returns keyboard focus to the result announcement after the resume button disappears', async () => {
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+  view.unmount();
+  render(<TitleHistorySearch schoolId="pu" />);
+  const resume = await screen.findByRole('button', { name: '回到上次閱讀位置' });
+  resume.focus();
+  fireEvent.click(resume);
+  await screen.findByRole('link', { name: '二手書 old-1001' });
+  expect(screen.queryByRole('button', { name: '回到上次閱讀位置' })).toBeNull();
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('status')));
+});
+
+it('returns keyboard focus to recovery when the remembered article is no longer available', async () => {
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+  view.unmount();
+  mocks.resume.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'history-position-unavailable' }));
+  render(<TitleHistorySearch schoolId="pu" />);
+  const resume = await screen.findByRole('button', { name: '回到上次閱讀位置' });
+  resume.focus();
+  fireEvent.click(resume);
+  const error = await screen.findByRole('alert');
+  expect(screen.queryByRole('button', { name: '回到上次閱讀位置' })).toBeNull();
+  await waitFor(() => expect(document.activeElement).toBe(error));
+});
