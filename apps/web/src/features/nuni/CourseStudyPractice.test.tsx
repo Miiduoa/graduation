@@ -148,6 +148,34 @@ it('lets students move forward without accidentally skipping an unanswered quest
   expect(screen.queryByRole('region', { name: '本輪練習摘要' })).toBeNull();
 });
 
+it('jumps to the next not-yet-self-assessed card, wrapping without marking a draft skipped', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  decide('understood');
+  selectQuestion(3);
+  expect(screen.getByRole('heading', { name: '第 3 題' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一題未自評' }));
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 1 });
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 2 題' }));
+  writeAnswer('第二題暫時只有草稿');
+  fireEvent.click(screen.getByRole('button', { name: '下一題未自評' }));
+  expect(screen.getByRole('heading', { name: '第 3 題' })).toBeTruthy();
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 2 題：第 5 頁 · 第 1 段，未完成' })).toBeTruthy();
+  selectQuestion(2);
+  expect(answerInput().value).toBe('第二題暫時只有草稿');
+  expect(screen.getByRole('button', { name: '下一題未自評' }).hasAttribute('disabled')).toBe(false);
+  expect(screen.queryByRole('region', { name: '本輪練習摘要' })).toBeNull();
+});
+
+it('disables next-unreviewed navigation when the current question is the only one left', () => {
+  render(<Controller deck={cards.slice(0, 2)} />);
+  decide('understood');
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '下一題未自評' }).hasAttribute('disabled')).toBe(true);
+});
+
 it('keeps a revealed answer and self-assessment when navigating without modifying them', () => {
   render(<Controller />);
   decide('understood');

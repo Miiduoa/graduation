@@ -7,6 +7,7 @@ import {
   buildStudyPracticeDeck,
   courseStudyPracticeFilename,
   getStudyPracticeSummary,
+  nextUnreviewedStudyPracticeIndex,
   startStudyPracticeRound,
   updateStudyPracticeRound,
   type StudyPracticeAction,
@@ -313,6 +314,50 @@ describe('finite independent practice rounds', () => {
     expect(restarted.cards).not.toBe(completed.cards);
     expect(getStudyPracticeSummary(restarted)).toMatchObject({ answered: 0, understood: 0, pending: 2 });
     expect(getStudyPracticeSummary(completed).understood).toBe(2);
+  });
+});
+
+describe('unreviewed question navigation', () => {
+  it('wraps to an earlier unanswered question without mutating drafts, assessments or source order', () => {
+    let current = decide(round(3), 'understood');
+    current = updateStudyPracticeRound(current, { type: 'go', index: 2 });
+    const before = JSON.stringify(current);
+    expect(nextUnreviewedStudyPracticeIndex(current)).toBe(1);
+    const jumped = updateStudyPracticeRound(current, { type: 'go', index: nextUnreviewedStudyPracticeIndex(current)! });
+    expect(jumped.index).toBe(1);
+    expect(jumped.responses[jumped.cards[0].id].outcome).toBe('understood');
+    expect(jumped.responses[jumped.cards[1].id].outcome).toBeNull();
+    expect(jumped.responses[jumped.cards[2].id].outcome).toBeNull();
+    expect(JSON.stringify(current)).toBe(before);
+  });
+
+  it('treats a draft without self-assessment as unreviewed, ignores skipped cards, and stops when no other card qualifies', () => {
+    let current = round(3);
+    current = updateStudyPracticeRound(current, { type: 'attempt', value: '先寫第一題草稿' });
+    current = updateStudyPracticeRound(current, { type: 'go', index: 1 });
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    expect(current.index).toBe(2);
+    expect(nextUnreviewedStudyPracticeIndex(current)).toBe(0);
+    current = updateStudyPracticeRound(current, { type: 'go', index: 0 });
+    expect(nextUnreviewedStudyPracticeIndex(current)).toBe(2);
+    current = updateStudyPracticeRound(current, { type: 'go', index: 2 });
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    expect(current.finished).toBe(true);
+    expect(nextUnreviewedStudyPracticeIndex(current)).toBe(0);
+    current = updateStudyPracticeRound(current, { type: 'go', index: 0 });
+    expect(nextUnreviewedStudyPracticeIndex(current)).toBeNull();
+    expect(current.responses[current.cards[0].id].attempt).toBe('先寫第一題草稿');
+  });
+
+  it('does not jump outside a retry subset or leave a single-card round', () => {
+    let current = decide(round(3), 'understood');
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    const retry = updateStudyPracticeRound(current, { type: 'restart', scope: 'pending' });
+    expect(retry.cards).toHaveLength(2);
+    expect(nextUnreviewedStudyPracticeIndex(retry)).toBe(1);
+    expect(nextUnreviewedStudyPracticeIndex(updateStudyPracticeRound(retry, { type: 'go', index: 1 }))).toBe(0);
+    expect(nextUnreviewedStudyPracticeIndex(round(1))).toBeNull();
   });
 });
 

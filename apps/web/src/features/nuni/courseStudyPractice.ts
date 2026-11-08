@@ -191,6 +191,20 @@ export function updateStudyPracticeRound(
   }
 }
 
+/**
+ * Find another not-yet-self-assessed card in source order, wrapping at the end.
+ * A written draft is still unreviewed until the learner explicitly decides;
+ * visiting another card must never mark the current one skipped.
+ */
+export function nextUnreviewedStudyPracticeIndex(round: StudyPracticeRound): number | null {
+  for (let offset = 1; offset < round.cards.length; offset += 1) {
+    const index = (round.index + offset) % round.cards.length;
+    const response = round.responses[round.cards[index].id];
+    if (!response || response.outcome === null) return index;
+  }
+  return null;
+}
+
 export function getStudyPracticeSummary(round: StudyPracticeRound): StudyPracticeSummary {
   const summary: StudyPracticeSummary = {
     total: round.cards.length, answered: 0, understood: 0, again: 0, skipped: 0, unreviewed: 0, pending: 0,
