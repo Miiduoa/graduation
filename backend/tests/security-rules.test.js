@@ -1880,6 +1880,31 @@ describe('storage security rules', () => {
       .set({ viewerUid: 'alice', viewedAt: Date.now() }));
   });
 
+  test('story view receipts are visible only to their viewer and story author', async () => {
+    const viewPath = 'campusStories/private-views/storyViews/bob';
+    const viewCollection = 'campusStories/private-views/storyViews';
+    await seedFirestore(async (db) => {
+      for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+      }
+      await db.doc('campusStories/private-views').set({
+        schoolId: 'pu', authorUid: 'alice', kind: 'text',
+        expiresAt: Date.now() + 120_000,
+      });
+      await db.doc(viewPath).set({ viewerUid: 'bob', viewedAt: Date.now() });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    await assertSucceeds(bob.doc(viewPath).get());
+    await assertSucceeds(alice.doc(viewPath).get());
+    await assertFails(charlie.doc(viewPath).get());
+    await assertSucceeds(alice.collection(viewCollection).get());
+    await assertFails(charlie.collection(viewCollection).get());
+    await assertFails(bob.collection(viewCollection).get());
+    await assertFails(testEnv.unauthenticatedContext().firestore().doc(viewPath).get());
+  });
+
   for (const objectPath of [
     'conversations/orphan/messages/one/private.pdf',
     'conversations/orphan/media/one/private.pdf',

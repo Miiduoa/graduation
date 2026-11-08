@@ -265,3 +265,16 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 整合 main 的提交 `98eb9eaa` 啟動了真正的 Rules CI [42412749640](https://github.com/Miiduoa/graduation/actions/runs/42412749640)。模擬器於規則載入階段報錯 `L1756:75 Unexpected '_700_000'`，原因是前輪新增限動建立時使用 JavaScript 風格數字底線 `86_700_000`，Firestore Security Rules 文法不接受。該次 263 項測試的失敗／取消是**規則未能編譯**，不能據此認定授權回歸通過或不通過。
 
 本次只將該數字字面值改為 `86700000`（仍為 24 小時加 5 分鐘的毫秒值），保留過期邊界、原有安全限制與新增測試。已比對整份 Firestore 規則中唯一含底線的數字；修補需再次以新精確 head 的 Firebase emulator 與完整 CI 重新驗證。CI 未完成前不得合併或部署。
+
+
+## 2026-11-08：限動觀看者紀錄的同校橫向讀取邊界
+
+核對精確 head `60fdfed2d284184ede02f9d1ecbef24c1d286f00`：主 CI [42413042242](https://github.com/Miiduoa/graduation/actions/runs/42413042242)、CodeQL [42413042235](https://github.com/Miiduoa/graduation/actions/runs/42413042235)、Supabase permissions、Python security、Mobile Agent Regression 與 Maestro [42413042436](https://github.com/Miiduoa/graduation/actions/runs/42413042436) 已 completed/success；PR reviews／review threads 為空，`main` 是 `c686b16cc250e54c529a83043b0bb9489a360f05`，PR head 領先 41 提交、落後 0 提交。未發現由指定 nuni-merge-gate App 5504170 核發的「審查通過」證據，不能以 CI 綠燈取代。
+
+新增檢查發現 `campusStories/{storyId}/storyViews/{viewerUid}` 既有 `allow read` 只驗證故事尚未過期及同校有效會員，並未限制 `viewerUid` 或故事作者。即使不是觀看者、也不是原作者的同校成員，也可能讀取已知觀看紀錄甚至列舉觀看者，造成觀看活動的橫向隱私曝露。
+
+本次將 `allow read` 拆成 `get` 與 `list`：在既有故事有效期限與校籍檢查外，`get` 只允許觀看者本人或原故事作者；`list` 只允許原故事作者。新的故事作者判斷沿用 `activeParentStory()` 已讀取的同一份父故事文件，Firestore 規則引擎可對相同路徑使用快取。保留既有由本人新增觀看紀錄的權限，並未改動父故事列表、媒體或其他服務。
+
+加入 Firebase 規則模擬器回歸：本人與作者可讀單筆；第三位同校成員讀取被拒；作者可查觀看列表、非作者的同校成員不得列舉；訪客被拒。舊版規則會允許第三位同校成員讀取及列舉；**目前僅新增可重跑測試與原始碼，應以新精確提交的 emulator 和完整 CI 結果判定，不預先聲稱通過**。如果舊版手機端嘗試讓非作者列舉別人限動觀看紀錄，新的限制會拒絕該行為；需要以實機操作確認此預期隱私邊界。
+
+仍未處理：`campusStories` 的舊 SDK `allow list` 可返回過期 metadata；已簽發 Firebase/GCS bearer URL 及 Supabase signed URL 的即時失效、隔離真實 GCS staging、legacy canonical profile 資料修復、minimatch 相容性與正式發布前核可。沒有操作正式環境、資料、金鑰、token 或 migration，也沒有合併 `main`。
