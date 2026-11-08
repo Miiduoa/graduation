@@ -333,7 +333,18 @@ window.__fixtureToken=location.search;
     await context.firestore().doc(`schools/pu/campusPosts/${missingId}`).delete();
   });
   await clickFirstResult();
-  await until(() => call(() => document.body.textContent.includes('已從搜尋結果移除')), 'deleted result rejected');
+  try {
+    await until(() => call(() => document.body.textContent.includes('已從搜尋結果移除')), 'deleted result rejected');
+  } catch (error) {
+    const state = await call(() => ({
+      opens: window.__history.opens,
+      routes: window.__history.routes,
+      cards: document.querySelectorAll('article').length,
+      notice: document.querySelector('[role="status"]')?.textContent,
+      alerts: [...document.querySelectorAll('[role="alert"]')].map((el) => el.textContent),
+    }));
+    throw new Error(`${String(error)}; deleted-open state=${JSON.stringify(state)}`);
+  }
   await check('320: deleted post cannot navigate and its stale card disappears', () =>
     window.__history.routes.length === 0 && window.__history.opens.length === 1 &&
     window.__history.opens[0].available === false && document.querySelectorAll('article').length === 19);
