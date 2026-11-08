@@ -186,6 +186,11 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
 
   const label = result?.query ? '「' + result.query + '」' : '';
   const filterLabel = publicCourseFilterLabel(result?.filters);
+  const fetchedAt = result?.status === 'ready' ? result.data.fetchedAt : undefined;
+  // A server fetch timestamp is not a publication or semester verification time.
+  // When it is missing or old, students need to confirm current offerings at the school.
+  const fetchAgeMs = fetchedAt ? Date.now() - Date.parse(fetchedAt) : null;
+  const fetchIsOld = fetchAgeMs !== null && fetchAgeMs > 24 * 60 * 60 * 1000;
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
   return (
     <Screen title={schoolName + '開課查詢'} subtitle={fullSchoolName + ' · 本學期公開課程'}>
@@ -256,8 +261,14 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
             {result.data.courses.length === 0 ? '找不到' + label + '的開課資料。' :
               result.data.truncated ? '顯示前 50 筆，輸入更明確的關鍵字可縮小範圍。' : '找到 ' + result.data.courses.length + ' 筆' + label + '開課資料。'}
           </Text>}
-          {result?.status === 'ready' && result.data.fetchedAt && <Text style={body}>
-            校方資料擷取：{formatPublicCatalogFetchedAt(result.data.fetchedAt)}（台灣時間；非校方更新時間）
+          {result?.status === 'ready' && fetchedAt && <Text style={body}>
+            校方資料擷取：{formatPublicCatalogFetchedAt(fetchedAt)}（台灣時間；非校方更新時間）
+          </Text>}
+          {result?.status === 'ready' && !fetchedAt && <Text accessibilityRole="alert" style={body}>
+            目前沒有校方資料的擷取時間。加入個人課表前，請先至官方課程目錄核對。
+          </Text>}
+          {result?.status === 'ready' && fetchIsOld && <Text accessibilityRole="alert" style={body}>
+            距離伺服器上次取得校方資料已超過 24 小時，課程與教室可能變動。加入前請先查看官方課程目錄。
           </Text>}
           {result?.status === 'ready' && (result.data.unresolvedCount ?? 0) > 0 && <Text style={body}>
             另有 {result.data.unresolvedCount} 筆課程的篩選資料不足，未列入符合結果。
