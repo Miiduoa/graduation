@@ -14,6 +14,7 @@ type Props = { schoolId: string };
 type Failure = { kind: 'initial' | 'more' | 'denied' | 'open' | 'position'; text: string };
 
 const OPEN_CONFIRM_TIMEOUT_MS = 7000;
+const SEARCH_TIMEOUT_MS = 15_000;
 const POSITION_STORAGE_KEY = 'nuni:community-history-reading-position:v1';
 const POSITION_AGE_MS = 10 * 60 * 1000;
 type ReadingPosition = { uid: string; schoolId: string; query: string; postId: string; savedAt: number };
@@ -59,6 +60,25 @@ async function confirmWithinDeadline(schoolId: string, postId: string): Promise<
         timer = setTimeout(() => reject(
           Object.assign(new Error('貼文確認逾時。'), { code: 'deadline-exceeded' }),
         ), OPEN_CONFIRM_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** A hung Firestore server read must not hold the history form or cursor indefinitely.
+ * The late SDK promise is not cancelled, but its result never reaches this component.
+ */
+async function searchWithinDeadline<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(
+          Object.assign(new Error('歷史搜尋伺服器讀取逾時。'), { code: 'deadline-exceeded' }),
+        ), SEARCH_TIMEOUT_MS);
       }),
     ]);
   } finally {
@@ -165,9 +185,9 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
     setFailure(null);
     setNotice(continuation ? '正在搜尋下一頁…' : '正在搜尋歷史標題…');
     try {
-      const result = fromPostId
-        ? await resumeCampusPostTitles(schoolId, prefix, fromPostId)
-        : await searchCampusPostTitles(schoolId, prefix, cursor);
+      const result = await searchWithinDeadline(fromPostId
+        ? resumeCampusPostTitles(schoolId, prefix, fromPostId)
+        : searchCampusPostTitles(schoolId, prefix, cursor));
       if (request !== version.current) return;
       const oldPosts = continuation ? page!.posts : [];
       const ids = new Set(oldPosts.map((post) => post.id));
