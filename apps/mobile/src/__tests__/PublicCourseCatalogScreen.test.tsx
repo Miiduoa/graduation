@@ -301,16 +301,51 @@ test.each([
     fireEvent.press(view.getByText('複製課表匯入資料'));
     expect(clipboard).toHaveBeenCalledTimes(1);
     fireEvent.press(view.getByText('複製課表匯入資料'));
+    // The newer native write must start only after the older write finishes:
+    // otherwise the earlier OS completion could replace the latest clipboard.
+    expect(clipboard).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveEarlier(earlier); });
     await waitFor(() => expect(clipboard).toHaveBeenCalledTimes(2));
     expect(await view.findByText(feedback)).toBeTruthy();
-    await act(async () => { resolveEarlier(earlier); });
-    expect(view.getByText(feedback)).toBeTruthy();
     if (later) {
       expect(view.queryByLabelText('可複製的課表資料')).toBeNull();
     } else {
       expect(view.queryByText('已複製，請到匯入頁貼上並核對上課時間。')).toBeNull();
       expect(view.getByLabelText('可複製的課表資料').props.selectable).toBe(true);
     }
+  } finally { globalThis.fetch = original; }
+});
+
+test('copying a different course while the old native write is pending leaves the later course on the OS clipboard', async () => {
+  setBrowsingSchoolId('nthu');
+  const original = globalThis.fetch;
+  const secondCourse = {
+    ...nthuCourse, code: '11510AES 520401', section: '01', title: '第二門課',
+    meetings: [{ time: 'T3T4', room: '第二教室' }],
+  };
+  const clipboard = jest.mocked(Clipboard.setStringAsync);
+  let finishFirst!: () => void;
+  let actualClipboard = '';
+  clipboard.mockImplementationOnce((value) => new Promise<boolean>((resolve) => {
+    finishFirst = () => { actualClipboard = value; resolve(true); };
+  }));
+  clipboard.mockImplementationOnce(async (value) => { actualClipboard = value; return true; });
+  try {
+    globalThis.fetch = jest.fn().mockResolvedValue(nthuJson([nthuCourse, secondCourse]));
+    const view = render(<CourseCatalogScreen route={{ params: { filter: { keyword: 'AES' } } }} />);
+    await view.findByText('第二門課');
+    const actions = view.getAllByText('複製課表匯入資料');
+    expect(actions).toHaveLength(2);
+    fireEvent.press(actions[0]);
+    await waitFor(() => expect(clipboard).toHaveBeenCalledTimes(1));
+    fireEvent.press(actions[1]);
+    expect(clipboard).toHaveBeenCalledTimes(1);
+    await act(async () => { finishFirst(); });
+    await waitFor(() => expect(clipboard).toHaveBeenCalledTimes(2));
+    await view.findByText('已複製，請到匯入頁貼上並核對上課時間。');
+    expect(clipboard.mock.calls[0][0]).toContain('11510AES 520300');
+    expect(clipboard.mock.calls[1][0]).toContain('11510AES 520401');
+    expect(actualClipboard).toContain('11510AES 520401');
   } finally { globalThis.fetch = original; }
 });
 

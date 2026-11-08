@@ -12,6 +12,7 @@ import { Button, Card, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { safeNavigate } from '../utils/safeNavigate';
 import { PublicCourseImportAction } from '../components/PublicCourseImportAction';
+import { queuePublicCourseClipboardCopy } from '../services/publicCourseClipboardQueue';
 
 type Result = { filters: PublicCourseFilters } & (
   | { status: 'loading' | 'error'; query: string }
@@ -45,19 +46,18 @@ function CourseCard({ course, schoolId, navigation }: Props & { course: PublicCa
   // The displayed feedback must describe the exact CSV currently on screen.
   const copied = copyState?.csv === csv && copyState.status === 'copied';
   const manualCopy = copyState?.csv === csv && copyState.status === 'manual';
-  useEffect(() => () => { copyAttempt.current += 1; }, []);
+  useEffect(() => () => { copyAttempt.current += 1; }, [csv]);
   async function copy() {
     if (!csv) return;
     const attempt = ++copyAttempt.current;
     setCopyState(null);
-    try {
-      const success = await Clipboard.setStringAsync(csv);
-      if (attempt !== copyAttempt.current) return;
-      setCopyState({ csv, status: success ? 'copied' : 'manual' });
-    } catch {
-      if (attempt !== copyAttempt.current) return;
-      setCopyState({ csv, status: 'manual' });
-    }
+    // Native clipboard writes cannot be cancelled. Queue all course-card writes
+    // so a slow earlier copy cannot replace a different course copied later.
+    const status = await queuePublicCourseClipboardCopy(
+      () => Clipboard.setStringAsync(csv),
+      () => attempt === copyAttempt.current,
+    );
+    if (status !== 'superseded') setCopyState({ csv, status });
   }
   // Keep the title separate: grouping the whole Card as an accessible header
   // prevents VoiceOver from reaching its nested review and copy controls.
