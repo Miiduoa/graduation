@@ -324,6 +324,14 @@ test.each([
     now: '2026-11-07T07:59:59.000Z', warning: null,
   },
   {
+    name: 'future timestamp beyond clock-skew tolerance', fetchedAt: '2026-11-08T08:05:01.000Z',
+    now: '2026-11-08T08:00:00.000Z', warning: /擷取時間比此裝置時間晚超過 5 分鐘/,
+  },
+  {
+    name: 'five-minute clock skew is tolerated', fetchedAt: '2026-11-08T08:05:00.000Z',
+    now: '2026-11-08T08:00:00.000Z', warning: null,
+  },
+  {
     name: 'missing timestamp', fetchedAt: undefined,
     now: '2026-11-08T08:00:00.000Z', warning: /目前沒有校方資料的擷取時間/,
   },
@@ -338,6 +346,7 @@ test.each([
     if (warning) expect(view.getByText(warning)).toBeTruthy();
     else {
       expect(view.queryByText(/距離伺服器上次取得校方資料已超過 24 小時/)).toBeNull();
+      expect(view.queryByText(/擷取時間比此裝置時間晚超過 5 分鐘/)).toBeNull();
       expect(view.queryByText(/目前沒有校方資料的擷取時間/)).toBeNull();
     }
     // Freshness is a warning, not proof of enrollment or a silent private write.
