@@ -40,6 +40,7 @@ const report = {
 let environment;
 let clients = [];
 let search;
+let resume;
 const rows = (view) => view.UNSAFE_getByType(FlatList).props.data;
 const count = async (view, size) => {
   await view.findByText(new RegExp(`目前顯示 ${size} 篇`), {}, { timeout: 10000 });
@@ -114,11 +115,12 @@ beforeEach(async () => {
   mockUser = { uid: 'alice' }; mockSchool = 'pu'; mockLoading = false;
   clients = []; mockDb = client('alice'); await membership('active');
   search = jest.spyOn(service, 'searchCampusPostTitles');
+  resume = jest.spyOn(service, 'resumeCampusPostTitles');
 });
 afterEach(async () => {
   cleanup();
   await Promise.all(clients.map((db) => sdk.enableNetwork(db)));
-  await Promise.allSettled(search.mock.results.filter((item) => item.type === 'return').map((item) => item.value));
+  await Promise.allSettled([search, resume].flatMap((spy) => spy.mock.results.filter((item) => item.type === 'return').map((item) => item.value)));
   jest.restoreAllMocks();
 });
 afterAll(async () => {
@@ -139,4 +141,148 @@ test('returning student explicitly resumes at the last opened post using newly a
   await count(view, 40);
   expect(new Set(rows(view).map((post) => post.id)).size).toBe(40);
   record({ anchor: 'old-004', staleRowsBeforeResume: 0, newlyAuthorizedPages: [20, 20] });
+});
+
+async function changeAnchor(run) {
+  const reference = 'schools/pu/campusPosts/old-004';
+  let saved;
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const doc = context.firestore().doc(reference); saved = (await doc.get()).data(); await run(doc);
+  });
+  return () => environment.withSecurityRulesDisabled((context) => context.firestore().doc(reference).set(saved));
+}
+
+test('fresh snapshot resumes inside a title tie without traversing preceding matching pages', async () => {
+  const page = await service.resumeCampusPostTitles('pu', '二手書', 'old-064');
+  expect(page.posts.map((post) => post.id)).toEqual(Array.from({ length: 20 }, (_, i) => `old-${String(i + 64).padStart(3, '0')}`));
+  expect(page.hasMore).toBe(true);
+  const last = await service.searchCampusPostTitles('pu', '二手書', page.nextCursor);
+  expect(last.posts.map((post) => post.id)).toEqual(['old-084']);
+  expect(last.hasMore).toBe(false);
+  record({ anchor: 'old-064', matchingFixtures: 85, nonmatchingFixtures: 1000, pageSizes: [20, 1] });
+});
+
+test('offline resume rejects a cached anchor and retries the same ID with fresh content', async () => {
+  const { view } = await returnedPanel();
+  expect((await sdk.getDocFromCache(sdk.doc(mockDb, 'schools/pu/campusPosts/old-004'))).exists()).toBe(true);
+  await sdk.disableNetwork(mockDb);
+  let restore;
+  try {
+    fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+    await view.findByLabelText('重試歷史搜尋', {}, { timeout: 10000 });
+    expect(rows(view)).toEqual([]);
+    expect(view.queryByText(/目前無法定位/)).toBeNull();
+    restore = await changeAnchor((doc) => doc.update({ content: '伺服器剛更新的內容' }));
+    await sdk.enableNetwork(mockDb);
+    fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+    await count(view, 20);
+    expect(resume.mock.calls).toEqual([['pu', '二手書', 'old-004'], ['pu', '二手書', 'old-004']]);
+    expect(rows(view)[0]).toMatchObject({ id: 'old-004', excerpt: '伺服器剛更新的內容' });
+    record({ cacheConfirmed: true, staleRowsShown: 0, retryAnchor: 'old-004', freshContent: true });
+  } finally { await sdk.enableNetwork(mockDb); await restore?.(); }
+});
+
+test.each(['deleted', 'retitled'])('a %s anchor is not replaced by its neighbour and offers a fresh first-page search', async (reason) => {
+  const { view } = await returnedPanel();
+  const restore = await changeAnchor((doc) => reason === 'deleted' ? doc.delete() : doc.update({ title: '租屋 已改標題' }));
+  try {
+    fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+    await view.findByText(/目前無法定位上次閱讀的貼文/, {}, { timeout: 10000 });
+    expect(rows(view)).toEqual([]);
+    expect(view.queryByLabelText('回到上次閱讀位置')).toBeNull();
+    fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+    await count(view, 20);
+    expect(rows(view)[0].id).toBe('old-000');
+    expect(rows(view).some((post) => post.id === 'old-004')).toBe(false);
+    record({ reason, wrongNeighbourSelected: false, restartFrom: 'old-000' });
+  } finally { await restore(); }
+});
+
+test('revocation while reading refuses resume; restored membership restarts from the first page', async () => {
+  const { view } = await returnedPanel(); await membership('inactive');
+  try {
+    fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+    await view.findByText(/搜尋結果已清除/, {}, { timeout: 10000 });
+    expect(rows(view)).toEqual([]);
+    expect(view.queryByLabelText('回到上次閱讀位置')).toBeNull();
+    await membership('active');
+    fireEvent.press(view.getByLabelText('重試歷史搜尋')); await count(view, 20);
+    expect(rows(view)[0].id).toBe('old-000');
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenLastCalledWith('pu', '二手書', null);
+    record({ revokedRows: 0, restoredFromFirstPage: true });
+  } finally { await membership('active'); }
+});
+
+test('cross-school resume is refused while the other school member keeps their legitimate flow', async () => {
+  await expect(service.resumeCampusPostTitles('other', '二手書', 'private')).rejects.toMatchObject({ code: 'permission-denied' });
+  mockDb = client('charlie');
+  await expect(service.resumeCampusPostTitles('other', '二手書', 'private')).resolves.toMatchObject({ posts: [{ id: 'private', schoolId: 'other' }] });
+  await expect(service.resumeCampusPostTitles('pu', '二手書', 'old-064')).rejects.toMatchObject({ code: 'permission-denied' });
+  record({ crossSchoolDenied: true, otherSchoolMemberAllowed: true });
+});
+
+test('invalid IDs and changed query scope cannot be used as a remembered cursor', async () => {
+  await expect(service.resumeCampusPostTitles('pu/other', '二手書', 'old-004')).rejects.toMatchObject({ code: 'invalid-argument' });
+  await expect(service.resumeCampusPostTitles('pu', '二手書', '../old-004')).rejects.toMatchObject({ code: 'invalid-argument' });
+  await expect(service.resumeCampusPostTitles('pu', '租屋', 'old-004')).rejects.toMatchObject({ code: 'history-position-unavailable' });
+  record({ scopeValidation: true });
+});
+
+test('editing the query discards a pending real resume result', async () => {
+  const { view } = await returnedPanel();
+  fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+  const pending = resume.mock.results[0].value;
+  fireEvent.changeText(view.getByLabelText('記得的標題開頭'), '近期活動');
+  fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+  await count(view, 20);
+  await act(async () => { expect((await pending).posts[0].id).toBe('old-004'); });
+  expect(rows(view).every((post) => post.id.startsWith('recent-'))).toBe(true);
+  expect(view.queryByLabelText('回到上次閱讀位置')).toBeNull();
+  record({ lateResumeDiscarded: true, currentQuery: '近期活動' });
+});
+
+test.each(['close', 'native-back'])('%s clears the remembered position while a real resume is pending', async (method) => {
+  const { view } = await returnedPanel();
+  fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+  const pending = resume.mock.results[0].value;
+  if (method === 'close') fireEvent.press(view.getByLabelText('關閉歷史搜尋'));
+  else fireEvent(view.UNSAFE_getByType(Modal), 'requestClose');
+  await act(async () => { expect((await pending).posts).toHaveLength(20); });
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('');
+  expect(view.queryByLabelText('回到上次閱讀位置')).toBeNull();
+  expect(rows(view)).toEqual([]);
+  record({ method, rememberedPositionCleared: true });
+});
+
+test.each(['account', 'school', 'sign-out', 'loading'])('pending resume cannot leak into a new %s scope', async (scope) => {
+  const { view, onOpenPost } = await returnedPanel();
+  fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+  const pending = resume.mock.results[0].value;
+  if (scope === 'account') mockUser = { uid: 'bob' };
+  if (scope === 'school') { mockUser = { uid: 'charlie' }; mockSchool = 'other'; mockDb = client('charlie'); }
+  if (scope === 'sign-out') mockUser = null;
+  if (scope === 'loading') mockLoading = true;
+  view.rerender(<TitleHistoryLauncher onOpenPost={onOpenPost} />);
+  await act(async () => { expect((await pending).posts).toHaveLength(20); });
+  expect(view.queryByLabelText('記得的標題開頭')).toBeNull();
+  expect(view.queryByLabelText('回到上次閱讀位置')).toBeNull();
+  expect(onOpenPost).toHaveBeenCalledTimes(1);
+  record({ scope, discardedRealResults: 20 });
+});
+
+test('deletion between fresh anchor and page reads cannot silently resume at another post', async () => {
+  const originalGet = sdk.getDocFromServer;
+  let restore;
+  const observed = jest.spyOn(sdk, 'getDocFromServer').mockImplementationOnce(async (...args) => {
+    const snapshot = await originalGet(...args);
+    restore = await changeAnchor((doc) => doc.delete());
+    return snapshot;
+  });
+  try {
+    await expect(service.resumeCampusPostTitles('pu', '二手書', 'old-004')).rejects.toMatchObject({ code: 'history-position-unavailable' });
+    expect(observed).toHaveBeenCalledTimes(1);
+    record({ realInterleavedDeletion: true, neighbourNotReturned: true });
+  } finally { observed.mockRestore(); await restore?.(); }
 });

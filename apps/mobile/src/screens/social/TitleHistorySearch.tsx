@@ -11,7 +11,7 @@ import { isDemoUid } from '../../services/demoSession';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import {
-  confirmCampusPostTitleOpen, parseTitlePrefix, searchCampusPostTitles,
+  confirmCampusPostTitleOpen, parseTitlePrefix, resumeCampusPostTitles, searchCampusPostTitles,
   type TitleSearchCursor, type TitleSearchPost,
 } from '../../services/titleSearch';
 
@@ -34,12 +34,14 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
   const [open, setOpen] = useState(false);
   const live = useRef(true);
   const modalActive = useRef(false);
-  // Keep only the student's typed query while the detail is on top.
+  // Keep only the typed query and a document ID while the detail is on top.
   // Never retain private results or Firestore cursors across navigation.
   const resumeQuery = useRef('');
+  const resumePostId = useRef<string | undefined>(undefined);
   const dismiss = () => {
     modalActive.current = false;
     resumeQuery.current = '';
+    resumePostId.current = undefined;
     setOpen(false);
   };
   useLayoutEffect(() => {
@@ -59,7 +61,10 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
           <TitleHistorySearch
             schoolId={schoolId}
             initialQuery={resumeQuery.current}
-            onRememberQuery={(query) => { if (modalActive.current) resumeQuery.current = query; }}
+            initialPostId={resumePostId.current}
+            onRememberQuery={(query, postId) => {
+              if (modalActive.current) { resumeQuery.current = query; resumePostId.current = postId; }
+            }}
             onClose={dismiss}
             onOpenPost={(post) => {
               if (!live.current || !modalActive.current || post.schoolId !== schoolId) return;
@@ -74,12 +79,13 @@ function ScopedLauncher({ schoolId, onOpenPost }: { schoolId: string; onOpenPost
   );
 }
 
-export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery = '', onRememberQuery }: {
+export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery = '', initialPostId, onRememberQuery }: {
   schoolId: string;
   onClose: () => void;
   onOpenPost: OpenPost;
   initialQuery?: string;
-  onRememberQuery?: (query: string) => void;
+  initialPostId?: string;
+  onRememberQuery?: (query: string, postId: string) => void;
 }) {
   // The launcher remounts this panel when account/school changes or it is reopened.
   const styles = useThemeStyleSheet(createStyles);
@@ -87,6 +93,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const input = useRef<TextInput>(null);
   const [text, setText] = useState(initialQuery);
   const [resumeHint, setResumeHint] = useState(Boolean(initialQuery));
+  const [resumePostId, setResumePostId] = useState(initialPostId);
   const [posts, setPosts] = useState<TitleSearchPost[]>([]);
   const [busy, setBusy] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -94,7 +101,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const cursor = useRef<TitleSearchCursor | null>(null);
-  const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean } | null>(null);
+  const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
   const inFlight = useRef(false);
   const openingPost = useRef(false);
   const version = useRef(0);
@@ -110,6 +117,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     openingPost.current = false;
     setOpening(false);
     setResumeHint(false);
+    setResumePostId(undefined);
     cursor.current = null;
     retry.current = null;
     setText(value); setPosts([]); setHasMore(false); setBusy(false); setError(''); setNotice('');
@@ -120,7 +128,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     inFlight.current = false;
     onClose();
   };
-  const request = async (boundary: TitleSearchCursor | null, append: boolean) => {
+  const request = async (boundary: TitleSearchCursor | null, append: boolean, fromPostId?: string) => {
     if (inFlight.current || openingPost.current || !live.current) return;
     let prefix: string;
     try { prefix = parseTitlePrefix(text); } catch {
@@ -130,12 +138,15 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     }
     const attempt = ++version.current;
     setResumeHint(false);
+    if (!fromPostId) setResumePostId(undefined);
     inFlight.current = true;
     retry.current = null;
     setBusy(true); setError(''); setNotice('');
     Keyboard.dismiss();
     try {
-      const page = await searchCampusPostTitles(schoolId, prefix, boundary);
+      const page = fromPostId
+        ? await resumeCampusPostTitles(schoolId, prefix, fromPostId)
+        : await searchCampusPostTitles(schoolId, prefix, boundary);
       if (!live.current || attempt !== version.current) return;
       const valid = page.posts.filter((post) => post.schoolId === schoolId && post.title.startsWith(prefix));
       setPosts((current) => {
@@ -149,17 +160,26 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
       });
       cursor.current = page.nextCursor;
       setHasMore(page.hasMore);
-      setNotice(page.hasMore ? '已載入一頁符合標題的貼文，可繼續載入。' : '已讀到本次搜尋的最後一頁。');
+      setResumePostId(undefined);
+      const pageNotice = page.hasMore ? '已載入一頁符合標題的貼文，可繼續載入。' : '已讀到本次搜尋的最後一頁。';
+      setNotice(fromPostId ? `已重新確認上次閱讀的貼文，從這篇接續。${pageNotice}` : pageNotice);
     } catch (cause) {
       if (!live.current || attempt !== version.current) return;
       if (denied(cause)) {
+        setResumePostId(undefined);
         cursor.current = null;
         setPosts([]); setHasMore(false);
         retry.current = { cursor: null, append: false };
         setError('校籍或存取權限已變更，搜尋結果已清除。確認校籍後可重試搜尋。');
+      } else if ((cause as { code?: string } | null)?.code === 'history-position-unavailable') {
+        setResumePostId(undefined);
+        cursor.current = null;
+        retry.current = null;
+        setPosts([]); setHasMore(false);
+        setError('目前無法定位上次閱讀的貼文，可能已刪除或標題變更；請從頭搜尋。');
       } else {
         // A retry uses the same boundary; it must not skip a failed page.
-        retry.current = { cursor: boundary, append };
+        retry.current = { cursor: boundary, append, ...(fromPostId ? { fromPostId } : {}) };
         setError('搜尋暫時失敗，已保留目前結果。確認連線後可原地重試。');
       }
     } finally {
@@ -186,11 +206,12 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
         return;
       }
       navigated = true;
-      onRememberQuery?.(text);
+      onRememberQuery?.(text, item.id);
       onOpenPost({ id: item.id, schoolId });
     } catch (cause) {
       if (!live.current || attempt !== version.current) return;
       if (denied(cause)) {
+        setResumePostId(undefined);
         cursor.current = null;
         retry.current = { cursor: null, append: false };
         setPosts([]);
@@ -235,12 +256,20 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
               <Text style={styles.actionText}>清除</Text>
             </Pressable>
           </View>
+          {resumePostId && (
+            <Pressable accessibilityRole="button" accessibilityLabel="回到上次閱讀位置"
+              accessibilityHint="重新確認權限，從上次開啟的貼文接續，不還原舊結果"
+              accessibilityState={{ disabled: busy || opening, busy }} disabled={busy || opening}
+              style={styles.button} onPress={() => { void request(null, false, resumePostId); }}>
+              <Text style={styles.actionText}>回到上次閱讀位置</Text>
+            </Pressable>
+          )}
           {busy && <ActivityIndicator accessibilityLabel="正在讀取歷史標題" color={theme.colors.accent} />}
           {opening && <ActivityIndicator accessibilityLabel="正在確認貼文仍可閱讀" color={theme.colors.accent} />}
           {!!error && <Text accessibilityRole="alert" style={styles.message}>{error}</Text>}
           {!!error && retry.current && !busy && (
             <Pressable accessibilityRole="button" accessibilityLabel="重試歷史搜尋" style={styles.button}
-              onPress={() => { const previous = retry.current; if (previous) void request(previous.cursor, previous.append); }}>
+              onPress={() => { const previous = retry.current; if (previous) void request(previous.cursor, previous.append, previous.fromPostId); }}>
               <Text style={styles.actionText}>原地重試</Text>
             </Pressable>
           )}
