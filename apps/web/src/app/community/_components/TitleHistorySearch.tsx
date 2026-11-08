@@ -13,6 +13,25 @@ import styles from './TitleHistorySearch.module.css';
 type Props = { schoolId: string };
 type Failure = { kind: 'initial' | 'more' | 'denied' | 'open'; text: string };
 
+const OPEN_CONFIRM_TIMEOUT_MS = 7000;
+
+/** Do not leave a student's result link permanently locked if a server read stalls. */
+async function confirmWithinDeadline(schoolId: string, postId: string): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      confirmCampusPostTitleOpen(schoolId, postId),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(
+          Object.assign(new Error('貼文確認逾時。'), { code: 'deadline-exceeded' }),
+        ), OPEN_CONFIRM_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function TitleHistorySearch({ schoolId }: Props) {
   const { user, loading } = useAuth();
   if (loading) return <p role="status">正在確認登入狀態…</p>;
@@ -133,7 +152,7 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
     setNotice('正在向伺服器確認這篇貼文…');
     let navigated = false;
     try {
-      const available = await confirmCampusPostTitleOpen(schoolId, id);
+      const available = await confirmWithinDeadline(schoolId, id);
       if (request !== version.current) return;
       if (!available) {
         focusAfter.current = 'summary';
