@@ -63,7 +63,22 @@ import {
 } from '../../services/campusPostBookmarks';
 import { flattenCampusRepliesThread } from '../../utils/campusReplyThread';
 
+/** Keep each post's private state bound to the current identity and campus. */
 export function PostDetailScreen(props: any) {
+  const { user, loading } = useAuth();
+  const { school } = useSchool();
+  const postId = props?.route?.params?.postId as string | undefined;
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: 'center', padding: 20 }}>
+        <Text style={{ color: theme.colors.textSecondary }}>正在確認登入狀態…</Text>
+      </View>
+    );
+  }
+  return <ScopedPostDetailScreen key={JSON.stringify([user?.uid ?? null, school?.id ?? null, postId ?? null])} {...props} />;
+}
+
+function ScopedPostDetailScreen(props: any) {
   const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
@@ -75,6 +90,13 @@ export function PostDetailScreen(props: any) {
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [readIssue, setReadIssue] = useState<'denied' | 'unavailable' | null>(null);
+  const readRevision = React.useRef(0);
+  const mounted = React.useRef(true);
+  React.useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; readRevision.current += 1; };
+  }, []);
   const [replyText, setReplyText] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(true);
   const [sendingReply, setSendingReply] = useState(false);
@@ -123,22 +145,68 @@ export function PostDetailScreen(props: any) {
     }
   };
 
-  const loadPost = useCallback(async () => {
-    if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
-      setPost(null);
-      return;
-    }
-    const row = await getCampusPostById(school.id, postId);
-    setPost(row);
-  }, [postId, school?.id, auth.user?.uid]);
+  const clearPrivatePost = useCallback(() => {
+    setPost(null);
+    setReplies([]);
+    setNameByUid({});
+    setAvatarByUid({});
+    setBookmarkState(null);
+    setReplyText('');
+    setReplyParentId(null);
+    setShowEdit(false);
+  }, []);
 
-  const loadReplies = useCallback(async () => {
+  const isPermissionError = (cause: unknown) => {
+    const code = (cause as { code?: string } | null)?.code ?? '';
+    return code.endsWith('permission-denied') || code.endsWith('unauthenticated');
+  };
+
+  const handleReadError = (cause: unknown) => {
+    if (isPermissionError(cause)) {
+      clearPrivatePost();
+      setReadIssue('denied');
+    } else {
+      // Network failure does not establish that the post was deleted.
+      setReadIssue('unavailable');
+    }
+  };
+
+  const loadPost = useCallback(async () => {
+    const revision = ++readRevision.current;
     if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
-      setReplies([]);
+      if (mounted.current) clearPrivatePost();
+      return false;
+    }
+    try {
+      const row = await getCampusPostById(school.id, postId);
+      if (!mounted.current || revision !== readRevision.current) return false;
+      if (row && row.schoolId !== school.id) {
+        clearPrivatePost();
+        setReadIssue('denied');
+        return false;
+      }
+      if (!row) {
+        clearPrivatePost();
+        setReadIssue(null);
+        return false;
+      }
+      setPost(row);
+      setReadIssue(null);
+      return true;
+    } catch (cause) {
+      if (!mounted.current || revision !== readRevision.current) return false;
+      handleReadError(cause);
+      return false;
+    }
+  }, [postId, school?.id, auth.user?.uid, clearPrivatePost]);
+
+  const loadReplies = useCallback(async (revision = readRevision.current) => {
+    if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
+      if (mounted.current && revision === readRevision.current) setReplies([]);
       return;
     }
     const rows = await listCampusReplies(school.id, postId);
-    setReplies(rows);
+    if (mounted.current && revision === readRevision.current) setReplies(rows);
   }, [postId, school?.id, auth.user?.uid]);
 
   const hydrateProfiles = useCallback(async () => {
@@ -165,19 +233,23 @@ export function PostDetailScreen(props: any) {
   }, [school?.id, post, replies]);
 
   const reload = useCallback(async () => {
-    await Promise.all([loadPost(), loadReplies()]);
+    const found = await loadPost();
+    if (!found || !mounted.current) return;
+    const revision = readRevision.current;
+    try {
+      await loadReplies(revision);
+    } catch (cause) {
+      if (mounted.current && revision === readRevision.current) handleReadError(cause);
+    }
   }, [loadPost, loadReplies]);
 
   React.useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setLoading(true);
-      await reload();
+    setLoading(true);
+    void reload().finally(() => {
       if (!cancelled) setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    });
+    return () => { cancelled = true; };
   }, [reload]);
 
   React.useEffect(() => {
@@ -185,10 +257,14 @@ export function PostDetailScreen(props: any) {
   }, [hydrateProfiles]);
 
   const onRefresh = useCallback(async () => {
+    if (refreshing) return;
     setRefreshing(true);
-    await reload();
-    setRefreshing(false);
-  }, [reload]);
+    try {
+      await reload();
+    } finally {
+      if (mounted.current) setRefreshing(false);
+    }
+  }, [reload, refreshing]);
 
   const threadedReplies = useMemo(() => flattenCampusRepliesThread(replies), [replies]);
 
@@ -403,10 +479,27 @@ export function PostDetailScreen(props: any) {
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.accent} />
-      ) : !post ? (
-        <Text style={{ color: theme.colors.textSecondary, textAlign: 'center', marginTop: 40 }}>
-          找不到貼文，可能已被刪除。
-        </Text>
+      ) : readIssue === 'denied' || !post ? (
+        <View style={{ alignItems: 'center', padding: 20, gap: 12, marginTop: 28 }}>
+          <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, textAlign: 'center' }}>
+            {readIssue === 'denied'
+              ? '校籍或貼文權限已變更，無法查看這篇貼文。'
+              : readIssue === 'unavailable'
+                ? '目前無法連線確認貼文，請重試。'
+                : '找不到貼文，可能已被刪除。'}
+          </Text>
+          {readIssue === 'unavailable' && (
+            <Pressable accessibilityRole="button" accessibilityLabel="重新載入貼文詳情"
+              onPress={() => void onRefresh()} style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
+              <Text style={{ color: theme.colors.accent }}>重新載入</Text>
+            </Pressable>
+          )}
+          <Pressable accessibilityRole="button" accessibilityLabel="返回校園社群"
+            onPress={() => props?.navigation?.goBack?.()}
+            style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
+            <Text style={{ color: theme.colors.accent }}>返回校園社群</Text>
+          </Pressable>
+        </View>
       ) : (() => {
         const viewerUid = auth.user?.uid;
         const likedNow = !!(viewerUid && Array.isArray(post.likedBy) && post.likedBy.includes(viewerUid));
@@ -426,6 +519,17 @@ export function PostDetailScreen(props: any) {
             contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 80 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           >
+            {readIssue === 'unavailable' && (
+              <View style={{ padding: 16, gap: 8 }}>
+                <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary }}>
+                  暫時無法確認貼文最新狀態，仍顯示先前讀取的內容。
+                </Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="重新載入貼文詳情"
+                  onPress={() => void onRefresh()} style={{ minHeight: 44, justifyContent: 'center' }}>
+                  <Text style={{ color: theme.colors.accent }}>重新載入</Text>
+                </Pressable>
+              </View>
+            )}
             <View style={styles.headerRow}>
               <View style={styles.headerLeft}>
                 {post.anonymous ? (

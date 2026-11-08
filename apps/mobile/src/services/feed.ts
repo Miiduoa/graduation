@@ -4,6 +4,7 @@ import {
   addDoc,
   deleteDoc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   orderBy,
@@ -214,7 +215,11 @@ export async function getCampusPostById(
   postId: string,
 ): Promise<CampusPostDoc | null> {
   const db = getDb();
-  const snap = await getDoc(doc(db, 'schools', schoolId, 'campusPosts', postId));
+  const snap = await getDocFromServer(doc(db, 'schools', schoolId, 'campusPosts', postId));
   if (!snap.exists()) return null;
-  return { id: snap.id, ...(snap.data() as Omit<CampusPostDoc, 'id'>) };
+  const data = snap.data() as Omit<CampusPostDoc, 'id'>;
+  if (data.schoolId !== schoolId) {
+    throw Object.assign(new Error('貼文學校不符'), { code: 'permission-denied' });
+  }
+  return { id: snap.id, ...data };
 }
