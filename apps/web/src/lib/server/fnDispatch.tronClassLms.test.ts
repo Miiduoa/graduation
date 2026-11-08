@@ -172,6 +172,48 @@ it('requires reconnect when the upcoming course source rejects the session with 
   expect(store.docs.has(CACHE)).toBe(false);
 });
 
+it.each(['homework', 'activities', 'announcements'] as const)(
+  'requires reconnect when the %s feed throws HTTP 401 instead of returning an error result',
+  async (feed) => {
+    const { request, source, store } = setup();
+    const rejection = Object.assign(new Error('HTTP 401'), { status: 401 });
+    if (feed === 'homework') {
+      vi.mocked(source.fetchHomeworkPage).mockRejectedValue(rejection);
+    } else if (feed === 'activities') {
+      vi.mocked(source.fetchActivities).mockRejectedValue(rejection);
+    } else {
+      vi.mocked(source.fetchCourseAnnouncements).mockRejectedValue(rejection);
+    }
+
+    const response = await request({ courseId: 10001 });
+    const body = await response.json();
+    expect(body.error.status).toBe('FAILED_PRECONDITION');
+    expect(body.result).toBeUndefined();
+    expect(store.docs.has(CACHE)).toBe(false);
+    expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+  },
+);
+
+it('does not retain a partial homework page when page two rejects with HTTP 401', async () => {
+  const { request, source, store } = setup();
+  vi.mocked(source.fetchHomeworkPage)
+    .mockResolvedValueOnce({
+      ok: true,
+      value: { homework_activities: Array.from({ length: 50 }, (_, index) => ({
+        id: 31000 + index, title: `作業 ${index + 1}`, submitted: false,
+      })), total: 51 },
+    })
+    .mockRejectedValueOnce(Object.assign(new Error('HTTP 401'), { status: 401 }));
+
+  const response = await request();
+  const body = await response.json();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.result).toBeUndefined();
+  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(2);
+  expect(store.docs.has(CACHE)).toBe(false);
+  expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+});
+
 it('uses activity announcements on 404 without marking the course as empty success', async () => {
   const { request, source } = setup();
   vi.mocked(source.fetchCourseAnnouncements).mockResolvedValue({ ok: false, status: 404 });
