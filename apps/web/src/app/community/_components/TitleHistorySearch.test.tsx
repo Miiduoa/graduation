@@ -428,3 +428,22 @@ it('returns keyboard focus to recovery when the remembered article is no longer 
   expect(screen.queryByRole('button', { name: '回到上次閱讀位置' })).toBeNull();
   await waitFor(() => expect(document.activeElement).toBe(error));
 });
+
+it('keeps input focus if a student selects it while the remembered article is rechecked', async () => {
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1));
+  view.unmount();
+  const pending = deferred<TitleSearchPage>();
+  mocks.resume.mockReturnValueOnce(pending.promise);
+  render(<TitleHistorySearch schoolId="pu" />);
+  const resume = await screen.findByRole('button', { name: '回到上次閱讀位置' });
+  resume.focus();
+  fireEvent.click(resume);
+  const field = screen.getByRole('searchbox');
+  field.focus();
+  await act(async () => pending.resolve(page(['old-1001'])));
+  expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
+  expect(document.activeElement).toBe(field);
+});

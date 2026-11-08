@@ -152,6 +152,9 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
     const cursor = continuation ? page!.nextCursor : null;
     // Capture focus before the resume control is disabled or removed by a response.
     const focusWasOnResume = Boolean(fromPostId) && document.activeElement === resumeControl.current;
+    // Do not move focus if the student selected another control during the server read.
+    const restoreResumeFocus = () => focusWasOnResume &&
+      (document.activeElement === resumeControl.current || document.activeElement === document.body);
     const request = ++version.current;
     if (!continuation && !fromPostId) {
       setResumePosition(null);
@@ -178,7 +181,7 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
         clearReadingPosition();
         setResumePosition(null);
       }
-      focusAfter.current = focusWasOnResume ||
+      focusAfter.current = restoreResumeFocus() ||
         (continuation && !result.hasMore && document.activeElement === more.current)
         ? 'summary' : null;
       setPage({ ...result, posts });
@@ -191,12 +194,12 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
       if (isPermissionDeniedError(cause)) {
         clearReadingPosition();
         setResumePosition(null);
-        if (document.activeElement === more.current || focusWasOnResume) focusAfter.current = 'error';
+        if (document.activeElement === more.current || restoreResumeFocus()) focusAfter.current = 'error';
         setPage(null);
         setSearched('');
         setFailure({ kind: 'denied', text: '校籍或貼文存取權限已變更，先前結果已清除。' });
       } else if ((cause as { code?: string } | null)?.code === 'history-position-unavailable') {
-        if (focusWasOnResume) focusAfter.current = 'error';
+        if (restoreResumeFocus()) focusAfter.current = 'error';
         clearReadingPosition();
         setResumePosition(null);
         setPage(null);
