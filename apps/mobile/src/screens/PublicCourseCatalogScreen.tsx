@@ -191,6 +191,9 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
   // When it is missing or old, students need to confirm current offerings at the school.
   const fetchAgeMs = fetchedAt ? Date.now() - Date.parse(fetchedAt) : null;
   const fetchIsOld = fetchAgeMs !== null && fetchAgeMs > 24 * 60 * 60 * 1000;
+  // An impossible future server timestamp cannot establish freshness. Allow a
+  // small device clock skew, but direct students to the authoritative catalog.
+  const fetchIsFuture = fetchAgeMs !== null && fetchAgeMs < -5 * 60 * 1000;
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
   return (
     <Screen title={schoolName + '開課查詢'} subtitle={fullSchoolName + ' · 本學期公開課程'}>
@@ -269,6 +272,9 @@ function PublicCourseCatalogForm({ schoolId, initialQuery = '', initialFilters, 
           </Text>}
           {result?.status === 'ready' && fetchIsOld && <Text accessibilityRole="alert" style={body}>
             距離伺服器上次取得校方資料已超過 24 小時，課程與教室可能變動。加入前請先查看官方課程目錄。
+          </Text>}
+          {result?.status === 'ready' && fetchIsFuture && <Text accessibilityRole="alert" style={body}>
+            伺服器提供的擷取時間比此裝置時間晚超過 5 分鐘，無法確認課程資料時效。加入前請先查看官方課程目錄。
           </Text>}
           {result?.status === 'ready' && (result.data.unresolvedCount ?? 0) > 0 && <Text style={body}>
             另有 {result.data.unresolvedCount} 筆課程的篩選資料不足，未列入符合結果。
