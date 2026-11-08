@@ -316,18 +316,18 @@ test.each(tools)('%s preserves explicitly enabled demo data with a visible label
   expect(AsyncStorage.getAllKeys).not.toHaveBeenCalled();
 });
 
-test('the explicit demo guest retains the existing empty course permissions', async () => {
+test.each(tools)('%s denies the explicit demo guest without accessing any data source', async (tool) => {
   jest.mocked(isDevelopmentDemoSession).mockReturnValue(true);
-  const result = await executeToolStandard('ai_full_context', {}, {
+  const result = await executeToolStandard(tool, { courseId: '71378' }, {
     userId: 'demo_guest', schoolId: 'pu', role: 'guest' as ToolExecutionContext['role'],
   });
-  if (!result.success) throw new Error(result.summary);
-  expect(result).toMatchObject({ success: true, data: { source: 'demo', courses: [] } });
-  expect(result.summary).toContain('示範資料');
+  expect(result).toMatchObject({ success: false, errorCode: 'role_denied' });
   expect(source.listCourseSpaces).not.toHaveBeenCalled();
   expect(source.listInboxTasks).not.toHaveBeenCalled();
   expect(source.getCourseGradebook).not.toHaveBeenCalled();
   expect(getDataSource).not.toHaveBeenCalled();
+  expect(getDemoCoursesForUid).not.toHaveBeenCalled();
+  expect(getDemoScoreItemsByCourse).not.toHaveBeenCalled();
   expect(buildFullAIContext).not.toHaveBeenCalled();
   expect(buildWideAISnapshot).not.toHaveBeenCalled();
   expect(AsyncStorage.getAllKeys).not.toHaveBeenCalled();
