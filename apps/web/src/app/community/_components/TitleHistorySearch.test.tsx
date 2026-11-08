@@ -85,6 +85,41 @@ it('retries the same cursor after failure, keeps cards and deduplicates repeated
   expect(mocks.search.mock.calls[2][2]).toBe(first.nextCursor);
   expect(screen.getByRole('searchbox')).toHaveProperty('value', '二手書');
 });
+it('opens an already visible post while its next page is pending', async () => {
+  const nextPage = deferred<TitleSearchPage>();
+  const confirmation = deferred<boolean>();
+  mocks.search.mockResolvedValueOnce(page(['old-1001'], true))
+    .mockReturnValueOnce(nextPage.promise);
+  mocks.confirm.mockReturnValueOnce(confirmation.promise);
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多符合的標題' }));
+  fireEvent.click(screen.getByRole('link', { name: '二手書 old-1001' }));
+  expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001');
+  await act(async () => nextPage.resolve(page(['stale-delivery'])));
+  expect(screen.queryByRole('link', { name: '二手書 stale-delivery' })).toBeNull();
+  await act(async () => confirmation.resolve(true));
+  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/community/post/old-1001?schoolId=pu');
+});
+it('can retry the interrupted cursor after an offline post confirmation', async () => {
+  const nextPage = deferred<TitleSearchPage>();
+  const first = page(['old-1001'], true);
+  mocks.search.mockResolvedValueOnce(first)
+    .mockReturnValueOnce(nextPage.promise)
+    .mockResolvedValueOnce(page(['old-1002']));
+  mocks.confirm.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('button', { name: '載入更多符合的標題' }));
+  fireEvent.click(screen.getByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001'));
+  fireEvent.click(screen.getByRole('button', { name: '載入更多符合的標題' }));
+  await screen.findByRole('link', { name: '二手書 old-1002' });
+  expect(mocks.search.mock.calls[2][2]).toBe(first.nextCursor);
+  await act(async () => nextPage.resolve(page(['stale-delivery'])));
+  expect(screen.queryByRole('link', { name: '二手書 stale-delivery' })).toBeNull();
+  expect(mocks.navigate).not.toHaveBeenCalled();
+});
 it('ignores repeated submits while a request is pending', async () => {
   const pending = deferred<TitleSearchPage>();
   mocks.search.mockReturnValueOnce(pending.promise);
