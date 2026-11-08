@@ -456,6 +456,7 @@ function MapContent({
         </section>
       )}
       <MapCanvas
+        schoolName={schoolName}
         locations={mapLocations}
         selected={selected}
         route={routeLocations}
@@ -564,7 +565,7 @@ function MapContent({
         ))}
       </div>
       {selected && (
-        <section className={`card ${styles.detail}`} aria-label="地點詳情">
+        <section key={selected.id} className={`card ${styles.detail}`} aria-label="地點詳情">
           <div>
             <p className={styles.eyebrow}>{selected.category}</p>
             <h2>{selected.name}</h2>

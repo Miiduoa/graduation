@@ -47,6 +47,11 @@ class NormalizeTests(unittest.TestCase):
         self.assertIn("餐廳下單", msg)
         self.assertIn("settings?section=assistant", msg)
 
+    def test_repair_denied_message_is_memo_not_ticket(self) -> None:
+        msg = permission_denied_message("createDormRepairRequest")
+        self.assertIn("存成宿舍報修備忘", msg)
+        self.assertNotIn("送出宿舍報修", msg)
+
 
 class LoadPermissionsTests(unittest.TestCase):
     def test_missing_uid_returns_none(self) -> None:

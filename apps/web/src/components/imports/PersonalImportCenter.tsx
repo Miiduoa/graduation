@@ -489,7 +489,7 @@ function ImportWorkspace({
   const fileInput = useRef<HTMLInputElement>(null);
   const aiImageInput = useRef<HTMLInputElement>(null);
   const originalText = useRef<HTMLTextAreaElement>(null);
-  const repairTextFocus = useRef<AbortSignal | null>(null);
+  const pendingOriginalTextFocus = useRef<AbortController | null>(null);
   const reviewRows = useRef(new Map<string, HTMLElement>());
   const pdfInput = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
@@ -502,19 +502,17 @@ function ImportWorkspace({
     if (active.current) setPreviewState(url);
   };
   useLayoutEffect(() => {
-    const signal = repairTextFocus.current;
-    if (reading || !signal) return;
-    repairTextFocus.current = null;
-    // A frame may run before React opens the editor and unlocks its fieldset.
-    // Consume this request only after that DOM commit, without stealing later focus.
-    if (
-      active.current &&
-      !suspended.current &&
-      !signal.aborted &&
-      !originalText.current?.matches(':disabled')
-    )
-      originalText.current?.focus();
-  });
+    const controller = pendingOriginalTextFocus.current;
+    if (!controller) return;
+    if (!active.current || paused || controller.signal.aborted) {
+      pendingOriginalTextFocus.current = null;
+      return;
+    }
+    if (reading) return;
+    pendingOriginalTextFocus.current = null;
+    // Focus only after React commits both the recovered text and the enabled fieldset.
+    if (!saving && !rows.length && !importDocument) originalText.current?.focus();
+  }, [importDocument, paused, reading, rows.length, saving, sourceImage, text]);
   useEffect(() => {
     if (undoOpen) undoKeep.current?.focus();
   }, [undoOpen]);
@@ -562,6 +560,7 @@ function ImportWorkspace({
     return () => {
       active.current = false;
       job.current?.abort();
+      pendingOriginalTextFocus.current = null;
       documentFile.current = null;
     };
     // Account or school changes remount this workspace with its own storage key.
@@ -778,8 +777,8 @@ function ImportWorkspace({
     if (!preserveDraft) setRetryAi(null);
     const controller = new AbortController();
     job.current?.abort();
+    pendingOriginalTextFocus.current = null;
     job.current = controller;
-    repairTextFocus.current = null;
     setPendingAi(null);
     setReading(true);
     setProgress('正在準備雲端整理；無法使用時會自動切換本機或規則解析。');
@@ -909,7 +908,7 @@ function ImportWorkspace({
             result.issues.find((issue) => issue.code === 'screenshot-grid-layout')?.message ??
               '已讀到截圖文字，但還沒整理出資料。請對照截圖修正原文，再整理成待確認清單。',
           );
-          repairTextFocus.current = controller.signal;
+          pendingOriginalTextFocus.current = controller;
           return;
         }
         setNotice(
@@ -1034,8 +1033,8 @@ function ImportWorkspace({
     setRetryAi(null);
     const controller = new AbortController();
     job.current?.abort();
+    pendingOriginalTextFocus.current = null;
     job.current = controller;
-    repairTextFocus.current = null;
     setReading(true);
     setNotice('');
     setSchoolPage(null);

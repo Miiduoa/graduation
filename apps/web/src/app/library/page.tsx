@@ -9,6 +9,7 @@ import {
 } from '@campus/shared/src/officialLibraries';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext, type CampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import styles from './library.module.css';
 
 export default function LibraryPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
@@ -77,12 +78,17 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
       schoolName={schoolName}
     >
       <div className="pageStack">
-        <section className="card">
-          <p className="eyebrow">{library.name}</p>
-          <h2>找一本書</h2>
+        <section className={styles.catalogCard} aria-labelledby="library-catalog-title">
+          <span className={styles.catalogTab} aria-hidden="true">
+            館藏檢索
+          </span>
+          <header className={styles.catalogHeader}>
+            <p className={styles.libraryName}>{library.name}</p>
+            <h2 id="library-catalog-title">找一本書</h2>
+          </header>
           {library.catalogSearch === 'pu-webpac' ? (
             <>
-              <p style={{ color: 'var(--muted)' }}>
+              <p className={styles.catalogDescription}>
                 搜尋會在新分頁開啟學校館藏系統，顯示圖書館提供的資料。
               </p>
               <form
@@ -90,12 +96,12 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                 method="get"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="pageStack"
+                className={styles.catalogForm}
               >
-                <label>
-                  搜尋範圍
+                <label className={styles.searchField}>
+                  <span>搜尋範圍</span>
                   <select
-                    className="input"
+                    className={styles.searchControl}
                     name="searchField"
                     value={field}
                     onChange={(event) => setField(event.target.value)}
@@ -107,10 +113,10 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                     <option value="Subject">主題</option>
                   </select>
                 </label>
-                <label>
-                  關鍵字
+                <label className={styles.searchField}>
+                  <span>關鍵字</span>
                   <input
-                    className="input"
+                    className={styles.searchControl}
                     type="search"
                     name="searchInput"
                     placeholder="書名、作者或 ISBN"
@@ -120,8 +126,12 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                     required
                   />
                 </label>
-                <div>
-                  <button className="btn primary" type="submit" disabled={!keyword.trim()}>
+                <div className={styles.catalogActions}>
+                  <button
+                    className={`${styles.catalogAction} ${styles.primaryAction}`}
+                    type="submit"
+                    disabled={!keyword.trim()}
+                  >
                     搜尋學校館藏 ↗
                   </button>
                 </div>
@@ -129,16 +139,16 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
             </>
           ) : (
             <CatalogSearchPanel enabled={verifiedSearch} searchUrl={catalogSearchUrl}>
-              <p style={{ color: 'var(--muted)' }}>
+              <p className={styles.catalogDescription}>
                 {verifiedSearch
                   ? '輸入關鍵字，按 Enter 或搜尋按鈕，在新分頁查看本校館藏；可借與預約狀態以館方系統為準。'
                   : '請前往校方館藏網站搜尋。可先在這裡輸入並複製關鍵字，開啟後再貼上。'}
               </p>
               {verifiedSearch && library.catalogSearch !== 'primo-ve' ? (
-                <label>
-                  搜尋範圍
+                <label className={styles.searchField}>
+                  <span>搜尋範圍</span>
                   <select
-                    className="input"
+                    className={styles.searchControl}
                     value={field}
                     onChange={(event) => setField(event.target.value)}
                   >
@@ -150,31 +160,38 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                   </select>
                 </label>
               ) : null}
-              <label>
-                想找的書或關鍵字
+              <label className={styles.searchField}>
+                <span>想找的書或關鍵字</span>
                 <input
-                  className="input"
+                  className={styles.searchControl}
                   type="search"
                   placeholder="書名、作者或 ISBN"
                   value={keyword}
-                  onChange={(event) => { setKeyword(event.target.value); setCopyMessage(''); }}
+                  onChange={(event) => {
+                    setKeyword(event.target.value);
+                    setCopyMessage('');
+                  }}
                   maxLength={queryMaxLength}
                   required={verifiedSearch}
                 />
               </label>
               {library.catalogQueryMaxLength ? (
-                <p style={{ color: 'var(--muted)', margin: 0 }}>
+                <p className={styles.queryLimit}>
                   此校官方館藏關鍵字上限為 {library.catalogQueryMaxLength} 字。
                 </p>
               ) : null}
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div className={styles.catalogActions}>
                 {verifiedSearch && (
-                  <button className="btn primary" type="submit" disabled={!catalogSearchUrl}>
+                  <button
+                    className={`${styles.catalogAction} ${styles.primaryAction}`}
+                    type="submit"
+                    disabled={!catalogSearchUrl}
+                  >
                     直接搜尋本校館藏 ↗
                   </button>
                 )}
                 <a
-                  className={verifiedSearch ? 'btn' : 'btn primary'}
+                  className={`${styles.catalogAction} ${verifiedSearch ? '' : styles.primaryAction}`}
                   href={library.catalogUrl}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -182,12 +199,21 @@ function LibraryContent({ schoolId, schoolName, status }: CampusBrowseContext) {
                   前往官方館藏入口 ↗
                 </a>
                 {!verifiedSearch && (
-                  <button className="btn" type="button" disabled={!keyword.trim()} onClick={() => void copyKeyword()}>
+                  <button
+                    className={styles.catalogAction}
+                    type="button"
+                    disabled={!keyword.trim()}
+                    onClick={() => void copyKeyword()}
+                  >
                     複製關鍵字
                   </button>
                 )}
               </div>
-              {copyMessage && <p role="status">{copyMessage}</p>}
+              {copyMessage && (
+                <p className={styles.copyMessage} role="status">
+                  {copyMessage}
+                </p>
+              )}
             </CatalogSearchPanel>
           )}
         </section>
@@ -244,21 +270,24 @@ function CatalogSearchPanel({
   searchUrl: string | null;
   children: ReactNode;
 }) {
-  if (!enabled) return <div className="pageStack">{children}</div>;
+  if (!enabled) return <div className={styles.catalogForm}>{children}</div>;
   const destination = searchUrl ? new URL(searchUrl) : null;
   return (
     <form
-      className="pageStack"
+      className={styles.catalogForm}
       aria-label="搜尋本校館藏"
       action={destination ? `${destination.origin}${destination.pathname}` : undefined}
       method="get"
       target="_blank"
       rel="noopener noreferrer"
-      onSubmit={(event) => { if (!destination) event.preventDefault(); }}
+      onSubmit={(event) => {
+        if (!destination) event.preventDefault();
+      }}
     >
-      {destination && Array.from(destination.searchParams.entries()).map(([name, value], index) => (
-        <input key={`${name}:${index}`} type="hidden" name={name} value={value} />
-      ))}
+      {destination &&
+        Array.from(destination.searchParams.entries()).map(([name, value], index) => (
+          <input key={`${name}:${index}`} type="hidden" name={name} value={value} />
+        ))}
       {children}
     </form>
   );

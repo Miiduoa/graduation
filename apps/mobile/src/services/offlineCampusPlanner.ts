@@ -1,6 +1,9 @@
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import type { CampusSenseSnapshot } from './campusSenseSnapshot';
 import { CAMPUS_SENSE_MAX_AGE_MS } from './campusSenseSnapshot';
+import { parseCampusAssignmentSource } from './campusAssignmentSource';
+import type { CampusPlanComparisonBasis } from './campusPlanComparison';
+import type { NuniPlanAssignmentSource, NuniPlanQuizSource } from './nuniPlanAssignmentTarget';
 import {
   buildCampusStudyAgenda,
   formatCampusStudyAgenda,
@@ -13,18 +16,23 @@ import {
 /** A plan is read-only; local reminder creation has its own explicit confirmation. */
 export type CampusPlanRoute = '/classroom' | '/timetable' | '/announcements';
 export type CampusPlanPriority = 'overdue' | 'urgent' | 'soon' | 'normal' | 'verify';
-export type CampusPlanEvidence = 'authorized-assignments' | 'saved-timetable' | 'authorized-announcements' | 'verification';
+export type CampusPlanEvidence = 'authorized-assignments' | 'authorized-quizzes' | 'saved-timetable' | 'authorized-announcements' | 'verification';
 
 export interface CampusPlanStep {
+  /** Absent on older plans, whose course tasks are assignments. */
+  kind?: 'assignment' | 'quiz';
   id: string;
   title: string;
   detail: string;
   priority: CampusPlanPriority;
   evidence: CampusPlanEvidence;
   route: CampusPlanRoute;
-  /** Only server-authorized assignment steps may carry a verified deadline. */
+  /** Only server-authorized assignment or quiz steps may carry a source deadline. */
   dueAt?: string;
   groupName?: string;
+  /** Live lookup hint only. Saved copies discard it and never restore permission to open a target. */
+  nuniSource?: NuniPlanAssignmentSource;
+  nuniQuizSource?: NuniPlanQuizSource;
 }
 
 export interface CampusEvidencePlan {
@@ -35,6 +43,8 @@ export interface CampusEvidencePlan {
   limitations: string[];
   /** Complete dated view; optional for existing clients and stored replies. */
   agenda?: CampusStudyAgenda;
+  /** Historical display evidence only; never restores permission to act on an assignment. */
+  comparisonBasis?: CampusPlanComparisonBasis;
   /** Plain-text fallback for text-to-speech and non-card clients. */
   content: string;
 }
@@ -217,5 +227,26 @@ export function buildOfflineCampusPlan(input: {
   return {
     title, overview, checkedAt: input.context.checkedAt,
     steps: steps.slice(0, 5), limitations: limitations.slice(0, 4), agenda, content,
+    comparisonBasis: {
+      assignments: sense?.assignments.status === 'available' ? {
+        status: sense.assignments.coverage?.complete === true &&
+          sense.assignments.coverage.reason === 'complete' &&
+          sense.assignments.count === sense.assignments.items.length ? 'complete' : 'partial',
+        checkedAt: sense.checkedAt,
+        total: sense.assignments.count,
+        // Keep every observed assignment, including those outside the selected dates.
+        // Summary positions such as assignment-0 are not stable source identities.
+        items: sense.assignments.items.map((assignment) => {
+          const source = parseCampusAssignmentSource(assignment.source);
+          return {
+            identity: source ? [source.groupId, source.assignmentId] : null,
+            title: assignment.title,
+            groupName: assignment.groupName,
+            dueAt: Number.isFinite(dueTimestamp(assignment.dueAt)) ? assignment.dueAt : null,
+          };
+        }),
+      } : { status: 'unavailable', checkedAt: null, total: null, items: [] },
+      timetableUpdatedAt: hasTimetable ? input.context.timetable.updatedAt : null,
+    },
   };
 }

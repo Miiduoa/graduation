@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { normalizeDormWorkspace } from '@campus/shared/src/dormitory';
+import { DORM_REPAIR_DISALLOWED_COPY, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
 import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
 
 it.each([
@@ -50,6 +50,25 @@ it('only offers a status lookup when documented for that channel', () => {
   expect(resolveDormRepairRoute('ncu', 'air')?.trackingUrl).toBe('https://repair.ncu.edu.tw/RepairSystem/report');
   expect(resolveDormRepairRoute('ntou', 'network')?.trackingUrl).toBeUndefined();
   expect(resolveDormRepairRoute('nsysu', 'network')?.trackingUrl).toBeUndefined();
+});
+
+it('does not phrase official repair channels as in-app tickets or school submissions', () => {
+  const schools = ['pu', 'ntou', 'nsysu', 'nthu', 'ncku', 'ntu', 'ncu', 'nchu', 'nccu'];
+  const locations = ['', '希嘉', '太子', '南投宿舍', '水源A棟'];
+  for (const school of schools) {
+    for (const category of ['water', 'network', 'air'] as const) {
+      for (const location of locations) {
+        const route = resolveDormRepairRoute(school, category, location);
+        if (!route) continue;
+        for (const text of [route.label, route.detail, route.trackingLabel ?? '']) {
+          expect(text).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+        }
+        if (route.trackingLabel) expect(route.trackingLabel).toMatch(/網站/);
+      }
+    }
+  }
+  expect(resolveDormRepairRoute('nsysu', 'water')?.trackingLabel).toBe('到中山宿舍網站查修繕紀錄');
+  expect(resolveDormRepairRoute('unknown-campus', 'other')).toBeNull();
 });
 
 it('falls back to the selected university and never assigns an unknown tenant a real campus', () => {

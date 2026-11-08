@@ -1305,27 +1305,41 @@ it('repairs screenshot text against the decoded preview when AI returns no rows'
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
 });
 
-it('focuses screenshot repair text after commit even when an animation frame runs early', async () => {
-  // A frame can run before React commits the text/preview and unlocks the fieldset.
+it('focuses recovered screenshot text after enabling the editor when a frame precedes the commit', async () => {
+  const frames: FrameRequestCallback[] = [];
   vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-    callback(0);
-    return 0;
+    frames.push(callback);
+    return frames.length;
   });
-  const sourceText = '需要校對的截圖原文';
-  vi.mocked(runPersonalImportAi).mockResolvedValue({ rows: [], issues: [], sourceText });
+  let finish!: (result: Awaited<ReturnType<typeof runPersonalImportAi>>) => void;
+  vi.mocked(runPersonalImportAi).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
   render(<PersonalImportCenter />);
   chooseAiScreenshot();
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+  const editor = screen.getByLabelText('原始文字');
+  expect(editor.matches(':disabled')).toBe(true);
 
-  const editor = await screen.findByDisplayValue(sourceText);
-  expect(editor.closest('fieldset')?.disabled).toBe(false);
-  expect(editor.closest('details')?.open).toBe(true);
+  await act(async () => {
+    finish({ rows: [], issues: [], sourceText: '需要校對的截圖文字' });
+    await Promise.resolve();
+    // A frame may run before React commits the result and enables this fieldset.
+    expect(editor.matches(':disabled')).toBe(true);
+    frames.splice(0).forEach((callback) => callback(performance.now()));
+  });
+
+  expect(editor.matches(':disabled')).toBe(false);
   expect(document.activeElement).toBe(editor);
-
-  // This is a one-time focus request, not a reason to interrupt later edits.
-  const year = screen.getByLabelText('這份資料的學年度');
-  year.focus();
-  fireEvent.change(year, { target: { value: '116' } });
-  expect(document.activeElement).toBe(year);
+  expect(screen.getByDisplayValue('需要校對的截圖文字')).toBe(editor);
+  expect(readPersonalImports(context)).toHaveLength(0);
+  const otherField = screen.getByLabelText('這份資料的學年度');
+  otherField.focus();
+  fireEvent.change(otherField, { target: { value: '116' } });
+  expect(document.activeElement).toBe(otherField);
 });
 
 it('keeps unparsed text when another screenshot produces no rows', async () => {

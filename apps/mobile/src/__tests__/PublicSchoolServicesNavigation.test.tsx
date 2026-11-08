@@ -4,7 +4,7 @@ import { createNavigationContainerRef, NavigationContainer } from '@react-naviga
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Linking } from 'react-native';
 import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
-import { dormStorageKey, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
+import { DORM_REPAIR_COPY, DORM_REPAIR_DISALLOWED_COPY, dormStorageKey, normalizeDormWorkspace } from '@campus/shared/src/dormitory';
 import { PreAuthStack } from '../screens/PreAuthStack';
 import { getDefaultCatalogFilter } from '../data/courseCatalogConstants';
 import { CourseCatalogScreen } from '../screens/CourseCatalogScreen';
@@ -425,14 +425,18 @@ test('guest Dormitory provides an editable personal workspace without claiming s
   expect(await view.findByText('住得安心，事情好處理')).toBeTruthy();
   expect(view.getByText(/訪客紀錄只存在此裝置/)).toBeTruthy();
   fireEvent.press(view.getByText('設備問題'));
+  expect(view.getByText(DORM_REPAIR_COPY.intro)).toBeTruthy();
   expect(view.getByText('＋ 記錄問題')).toBeTruthy();
+  expect(view.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   fireEvent.press(view.getByText('＋ 記錄問題'));
   expect(view.getByText('新增問題')).toBeTruthy();
+  expect(view.getByText(DORM_REPAIR_COPY.saveMemo)).toBeTruthy();
+  expect(view.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   expect(view.queryByTestId('school-login-form')).toBeNull();
   expect(onUnhandledAction).not.toHaveBeenCalled();
 });
 
-test('residents can open the current school repair channel without saving and later record a case number', async () => {
+test('residents can open the current school repair channel without saving and later record a school-issued identifier', async () => {
   setBrowsingSchoolId('ntou');
   const key = dormStorageKey('guest', 'ntou');
   await AsyncStorage.removeItem(key);
@@ -451,11 +455,12 @@ test('residents can open the current school repair channel without saving and la
   fireEvent.press(view.getByText(network.label));
   expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
   expect(await AsyncStorage.getItem(key)).toBeNull();
-  fireEvent.press(view.getByText('儲存紀錄'));
+  fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
   fireEvent.press(await view.findByText('編輯'));
-  fireEvent.changeText(view.getByLabelText('校方案號（選填）'), '  CASE-168  ');
-  fireEvent.press(view.getByText('儲存紀錄'));
-  expect(await view.findByText('校方案號：CASE-168')).toBeTruthy();
+  fireEvent.changeText(view.getByLabelText(DORM_REPAIR_COPY.referenceLabel), '  CASE-168  ');
+  fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
+  expect(await view.findByText(DORM_REPAIR_COPY.referenceDisplay + '：CASE-168')).toBeTruthy();
+  expect(view.queryByText(DORM_REPAIR_DISALLOWED_COPY)).toBeNull();
   fireEvent.press(view.getByText(network.label));
   expect(Linking.openURL).toHaveBeenLastCalledWith('tel:0800080412');
   const stored = normalizeDormWorkspace(JSON.parse((await AsyncStorage.getItem(key))!));
@@ -464,16 +469,16 @@ test('residents can open the current school repair channel without saving and la
 
   fireEvent.press(view.getByText('編輯'));
   fireEvent.press(view.getByText('水電與漏水'));
-  fireEvent.press(view.getByText('儲存紀錄'));
+  fireEvent.press(view.getByText(DORM_REPAIR_COPY.saveMemo));
   await view.findByText('編輯');
-  fireEvent.press(view.getByText('查海大修繕處理狀況'));
+  fireEvent.press(view.getByText('到海大教務系統網站查修繕紀錄'));
   expect(Linking.openURL).toHaveBeenLastCalledWith(general.url);
   expect(view.queryByText(general.label)).toBeNull();
 
   act(() => setBrowsingSchoolId('ncku'));
   fireEvent.press(await view.findByText('設備問題'));
   await view.findByText('＋ 記錄問題');
-  expect(view.queryByText('校方案號：CASE-168')).toBeNull();
+  expect(view.queryByText(DORM_REPAIR_COPY.referenceDisplay + '：CASE-168')).toBeNull();
   expect(view.queryByText(network.label)).toBeNull();
   await AsyncStorage.removeItem(key);
 });

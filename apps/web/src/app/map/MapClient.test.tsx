@@ -19,17 +19,19 @@ vi.mock('./mapService', async (original) => ({
 }));
 vi.mock('./MapCanvas', () => ({
   default: ({
+    schoolName,
     locations,
     selected,
     route,
     myLocation,
   }: {
+    schoolName?: string;
     locations: MapLocation[];
     selected: MapLocation | null;
     route: MapLocation[] | null;
     myLocation?: { lat: number; lng: number } | null;
   }) => (
-    <output aria-label="地圖狀態">{JSON.stringify({ locations, selected, route, myLocation })}</output>
+    <output aria-label="地圖狀態">{JSON.stringify({ schoolName, locations, selected, route, myLocation })}</output>
   ),
 }));
 
@@ -306,6 +308,19 @@ it('provides keyboard-operable search, categories, selection and reset', async (
   fireEvent.change(input, { target: { value: '不存在' } });
   fireEvent.click(screen.getByRole('button', { name: '清除搜尋條件' }));
   expect(screen.getByRole('button', { name: '查看正門' })).toBeTruthy();
+});
+
+it('keeps a place card mounted for the same selection and replaces it for a different place', async () => {
+  render(<MapClient school="pu" schoolName="靜宜大學" />);
+  await sourceSettled();
+  expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).schoolName).toBe('靜宜大學');
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  const card = screen.getByRole('region', { name: '地點詳情' });
+  fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
+  expect(screen.getByRole('region', { name: '地點詳情' })).toBe(card);
+  fireEvent.click(screen.getByRole('button', { name: '查看正門' }));
+  expect(screen.getByRole('region', { name: '地點詳情' })).not.toBe(card);
+  expect(screen.getByRole('heading', { name: '正門' })).toBeTruthy();
 });
 
 it('uses an explicit school flow for legacy favorites while keeping public navigation available', async () => {
