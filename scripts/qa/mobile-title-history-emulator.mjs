@@ -71,7 +71,7 @@ try {
     bundle: true, platform: 'node', format: 'cjs', target: 'node22',
     external: ['firebase/*'],
     plugins: [{ name: 'isolated-native-feed-db', setup(builder) {
-      builder.onResolve({ filter: /^\\.\\.\\/firebase$/ }, (args) => args.importer === feedPath ? { path: adapter } : undefined);
+      builder.onResolve({ filter: /^\.\.\/firebase$/ }, (args) => args.importer === feedPath ? { path: adapter } : undefined);
     } }],
   });
   const { getCampusPostById } = requireMobile(feedBundle);
