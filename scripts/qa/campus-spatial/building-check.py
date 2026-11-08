@@ -37,8 +37,10 @@ async def open_plan(page):
 async def open_3d(page):
     before = await page.evaluate('window.__campusSpatialProbe.draws')
     await preview(page).get_by_role('button', name='立體', exact=True).click()
+    # Offscreen previews intentionally pause and hide their renderer. Scroll the
+    # host into view before waiting for its IntersectionObserver to activate it.
+    await preview(page).get_by_role('group', name='立體圖面', exact=True).scroll_into_view_if_needed()
     await expect(page.locator(CANVAS)).to_be_visible(timeout=20_000)
-    await page.locator(CANVAS).scroll_into_view_if_needed()
     await page.wait_for_function('before => window.__campusSpatialProbe.draws > before', arg=before)
     context = await page.locator(CANVAS).evaluate('''canvas => {
       const gl = canvas.getContext('webgl2');
@@ -71,10 +73,14 @@ async def building_desktop(page, _requests, _resources):
     await open_plan(page)
     info = await open_3d(page)
     await no_overflow(page)
+    before = await page.evaluate('window.__campusSpatialProbe.draws')
     await preview(page).get_by_role('button', name='組合樓層', exact=True).click()
-    await expect(preview(page).get_by_role('button', name='分層展開', exact=True)).to_have_attribute('aria-pressed', 'false')
+    await expect(preview(page).get_by_role('button', name='分層展開', exact=True)).to_be_visible()
+    await page.wait_for_function('before => window.__campusSpatialProbe.draws > before', arg=before)
+    before = await page.evaluate('window.__campusSpatialProbe.draws')
     await preview(page).get_by_role('button', name='分層展開', exact=True).click()
-    await expect(preview(page).get_by_role('button', name='組合樓層', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await expect(preview(page).get_by_role('button', name='組合樓層', exact=True)).to_be_visible()
+    await page.wait_for_function('before => window.__campusSpatialProbe.draws > before', arg=before)
     await page.screenshot(path=str(OUT / 'building-exploded-desktop.png'))
     await preview(page).get_by_role('combobox', name='樓層', exact=True).select_option('example-2')
     await expect(page.locator('[data-building-room-id="example-1-a"]')).to_be_hidden()
