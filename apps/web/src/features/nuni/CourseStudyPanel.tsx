@@ -115,6 +115,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const focusReadingOnReturn = useRef(false);
   const restoreHeading = useRef<HTMLHeadingElement>(null);
   const progressInput = useRef<HTMLInputElement>(null);
+  const progressSummary = useRef<HTMLElement>(null);
+  const sourceSummary = useRef<HTMLElement>(null);
+  const importReturnFocus = useRef<'source' | 'progress' | null>(null);
   const progressPastePreviewButton = useRef<HTMLButtonElement>(null);
   const read = useRef<AbortController | null>(null);
   const inputId = useId();
@@ -268,6 +271,18 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   useEffect(() => {
     if (manualCopyText !== null) manualCopyInput.current?.focus();
   }, [manualCopyText]);
+
+  // A cancelled/failed import removes its status button. Return focus to the
+  // file picker if its details are open, otherwise to the visible summary.
+  useEffect(() => {
+    if (reading || !importReturnFocus.current) return;
+    const from = importReturnFocus.current;
+    importReturnFocus.current = null;
+    const picker = from === 'progress' ? progressInput.current : sourceInput.current;
+    const summary = from === 'progress' ? progressSummary.current : sourceSummary.current;
+    if (picker?.closest('details')?.hasAttribute('open')) picker.focus();
+    else summary?.focus();
+  }, [reading]);
 
   // The practice action buttons disappear when returning to a passage. Move
   // keyboard/screen-reader focus to the newly visible source instead of body.
@@ -492,6 +507,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   async function chooseProgress(file: File) {
+    importReturnFocus.current = null;
     read.current?.abort();
     const controller = new AbortController();
     read.current = controller;
@@ -510,6 +526,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       setRestorePreview({ filename: file.name, progress, round, origin: 'file' });
     } catch (failure) {
       if (read.current !== controller || controller.signal.aborted) return;
+      importReturnFocus.current = 'progress';
       setError(failure instanceof Error ? failure.message : '閱讀進度無法載入，目前內容仍保留。');
     } finally {
       if (read.current === controller) { read.current = null; setReading(null); }
@@ -561,6 +578,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   async function chooseFile(file: File) {
+    importReturnFocus.current = null;
     read.current?.abort();
     const controller = new AbortController();
     read.current = controller;
@@ -579,6 +597,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       requestSourceReplacement(value, false);
     } catch (failure) {
       if (read.current !== controller || controller.signal.aborted) return;
+      importReturnFocus.current = 'source';
       setError(failure instanceof Error ? failure.message : '檔案未能讀取，請重試。');
     } finally {
       if (read.current === controller) { read.current = null; setReading(null); }
@@ -586,7 +605,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   function cancelRead() {
-    focusReadingOnReturn.current = true;
+    importReturnFocus.current = reading;
+    focusReadingOnReturn.current = false;
     read.current?.abort();
     read.current = null;
     setReading(null);
@@ -658,7 +678,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       {!restoredFile && material && source?.id === material.id && <p className={styles.note}>已帶入「{material.title}」的教材文字。附件與外部連結的內容需另外選擇檔案或貼上文字。</p>}
       {restoredFile && <p className={styles.note} role="status">已從「{restoredFile}」還原閱讀進度。目前顯示的是進度檔中的教材副本，教材可能已更新，請對照課程內容。</p>}
       <details className={styles.import}>
-        <summary>接著上次的進度</summary>
+        <summary ref={progressSummary}>接著上次的進度</summary>
         <div className={styles.importBody}>
           <label className={styles.field} htmlFor={progressInputId}>載入閱讀進度檔
             <input ref={progressInput} id={progressInputId} type="file" accept=".campus-study.json,.campus-practice.json,.json,application/json" disabled={!!reading}
@@ -703,7 +723,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         </div>
       </section>}
       <details className={styles.import} open={!source || undefined}>
-        <summary>{source ? '換一份講義或貼上內容' : '選擇要讀的內容'}</summary>
+        <summary ref={sourceSummary}>{source ? '換一份講義或貼上內容' : '選擇要讀的內容'}</summary>
         <div className={styles.importBody}>
           <label className={styles.field} htmlFor={inputId}>選擇講義
             <input ref={sourceInput} id={inputId} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"

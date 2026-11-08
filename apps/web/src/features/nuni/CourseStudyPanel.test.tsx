@@ -602,6 +602,51 @@ it('keeps the existing notes if replacing the source fails or is cancelled', asy
   expect(inputValue(noteLabel)).toBe('不要因為匯入失敗消失');
 });
 
+it('returns to the progress picker after cancelling a pending file read and ignores its late result', async () => {
+  let finish!: (value: string) => void;
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const input = screen.getByLabelText('載入閱讀進度檔') as HTMLInputElement;
+  const file = new File(['pending'], 'reading.campus-study.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', {
+    value: () => new Promise<string>((resolve) => { finish = resolve; }),
+  });
+  fireEvent.change(input, { target: { files: [file] } });
+  expect(screen.getByRole('button', { name: '取消讀取' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  expect(document.activeElement).toBe(input);
+  await act(async () => finish('{"invalid":"late"}'));
+  expect(screen.queryByRole('heading', { name: /接著讀「/ })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
+it('returns to the visible source summary if the chooser collapses during a cancelled import', async () => {
+  let rejectImport!: (failure: Error) => void;
+  mocks.read.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectImport = reject; }));
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const summary = screen.getByText('換一份講義或貼上內容');
+  fireEvent.click(summary);
+  const input = screen.getByLabelText('選擇講義') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['pdf'], 'waiting.pdf')] } });
+  fireEvent.click(summary);
+  fireEvent.click(screen.getByRole('button', { name: '取消讀取' }));
+  expect(document.activeElement).toBe(summary);
+  await act(async () => rejectImport(new Error('取消後才到的讀檔錯誤')));
+  expect(screen.queryByText('取消後才到的讀檔錯誤')).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
+it('returns to the import control after a file error instead of leaving focus at a removed status', async () => {
+  mocks.read.mockRejectedValueOnce(new Error('無法讀取這份 PDF'));
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByText('換一份講義或貼上內容'));
+  const input = screen.getByLabelText('選擇講義') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['pdf'], 'bad.pdf')] } });
+  expect(await screen.findByText('無法讀取這份 PDF')).toBeTruthy();
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('does not restore study memory after the panel has been closed and reopened', async () => {
   const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   await generate();
