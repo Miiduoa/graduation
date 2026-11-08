@@ -9,6 +9,8 @@ import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
 import { NuniCourseworkStudyAction } from './NuniCourseworkStudyAction';
 import { readNuniPlanCourseworkStudy } from '../features/nuniPlanCourseworkStudy';
+import { createNuniCourseworkStudyBatchChecks, prepareNuniCourseworkStudyBatch } from '../features/nuniCourseworkStudyBatch';
+import { NuniPlanStudyBatchPicker } from './NuniPlanStudyBatchPicker';
 import { classCourseworkQuestion, type CourseworkChoice, type CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
 import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
@@ -21,6 +23,7 @@ import { AssistantCalendarRecovery } from './AssistantCalendarRecovery';
 import { AssistantCalendarBatchAction } from './AssistantCalendarBatchAction';
 import { AssistantCalendarBatchRecovery } from './AssistantCalendarBatchRecovery';
 import { sameAssistantCalendarEvent, type AssistantCalendarTask } from '../services/assistantCalendarExecution';
+import { sameAssistantCalendarOrigin } from '../services/assistantCalendarJournal';
 import { updateAssistantCalendarBatchTask, type AssistantCalendarBatchView } from '../services/assistantCalendarBatchExecution';
 import { calendarTaskFromBatch, mergeCalendarBatchEvidence, useAssistantCalendarRecovery } from '../state/useAssistantCalendarRecovery';
 import { useAssistantSessionExpiry } from '../state/useAssistantSessionExpiry';
@@ -151,6 +154,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
 type AssistantShortcut =
   | { kind: 'brief'; question: string; savedPlanId?: string }
   | { kind: 'plan-study'; question: string; source: NuniPlanAssignmentSource }
+  | { kind: 'plan-study-batch'; question: string; sources: readonly NuniPlanAssignmentSource[] }
   | { kind: 'services'; question: string }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
@@ -258,6 +262,8 @@ function AssistantConversation({
   }, [platformContext, platformTimetable]);
   const current = () => mounted.current && isScopeCurrent() && (!platformTimetable || platformTimetable.isCurrent());
   const calendarContext = { uid, schoolId, platformTimetable, isCurrent: current };
+  const courseworkBatchChecks = useMemo(() => courseworkRequests
+    ? createNuniCourseworkStudyBatchChecks(courseworkRequests) : undefined, [courseworkRequests]);
   const calendarRecovery = useAssistantCalendarRecovery(calendarContext, (restored) => {
     if (!current()) return;
     setMessages((previous) => previous.map((message) => {
@@ -290,6 +296,9 @@ function AssistantConversation({
     calendarRecovery.updateTask(task, originalId);
     setMessages((previous) => previous.map((entry) => ({ ...entry,
       ...(entry.calendarTask && [originalId, task.proposal.mutationId].includes(entry.calendarTask.proposal.mutationId)
+        && sameAssistantCalendarOrigin(entry.calendarTask.proposal.origin, task.proposal.origin)
+        && (!task.proposal.origin || (entry.calendarTask.proposal.mutationId === task.proposal.mutationId &&
+          sameAssistantCalendarEvent(entry.calendarTask.proposal.event, task.proposal.event)))
         ? { calendarTask: task } : {}),
       ...(entry.calendarBatch ? { calendarBatch: updateAssistantCalendarBatchTask(entry.calendarBatch, task) } : {}),
     })));
@@ -300,7 +309,8 @@ function AssistantConversation({
     setMessages((previous) => previous.map((entry) => ({ ...entry,
       ...(entry.calendarTask ? { calendarTask: calendarTaskFromBatch(entry.calendarTask, batch) } : {}),
       ...(entry.calendarBatch ? { calendarBatch: entry.calendarBatch.plan.id === originalId
-        ? batch : mergeCalendarBatchEvidence(entry.calendarBatch, batch) } : {}),
+        ? (entry.calendarBatch.plan.kind || batch.plan.kind ? mergeCalendarBatchEvidence(entry.calendarBatch, batch) : batch)
+        : mergeCalendarBatchEvidence(entry.calendarBatch, batch) } : {}),
     })));
   };
   const batchOperationIds = new Set([...calendarRecovery.batches, ...messages.flatMap((message) =>
@@ -570,7 +580,56 @@ function AssistantConversation({
     }
   };
 
-  const send = async (shortcut?: Exclude<AssistantShortcut, { kind: 'brief' | 'plan-study' }>) => {
+  const startPlanStudyBatch = async (sources: readonly NuniPlanAssignmentSource[],
+    question = `替選取的 ${sources.length} 份作業各安排 30 分鐘準備時間`) => {
+    const focusedNavigation = navigation as NuniPlanAssignmentNavigation | undefined;
+    if (!platformTimetable || !courseworkRequests || !canStartPlanAction() ||
+        focusedNavigation?.isFocused?.() === false) return;
+    const selected = sources.map((source) => ({ ...source }));
+    const controller = new AbortController();
+    const savedSession = createSavedCampusPlanSession(current);
+    lock.current = true;
+    inFlight.current = controller;
+    planStudyInFlight.current = controller;
+    setBusy(true);
+    setError('');
+    setActiveShortcut({ kind: 'plan-study-batch', sources: selected, question });
+    setPanel('chat');
+    const active = () => inFlight.current === controller && !controller.signal.aborted &&
+      current() && savedSession() && focusedNavigation?.isFocused?.() !== false;
+    const unsubscribeBlur = focusedNavigation?.addListener?.('blur', () => controller.abort());
+    try {
+      const result = await prepareNuniCourseworkStudyBatch({ sources: selected,
+        context: { ...calendarContext, isCurrent: active }, transport: courseworkRequests,
+        signal: controller.signal });
+      if (!active()) return;
+      if (result.kind !== 'ready') { setError(result.message); return; }
+      if (result.batch.plan.owner !== timetableOwner || result.batch.plan.schoolId !== schoolId ||
+          result.batch.plan.kind !== 'coursework-study') {
+        setError('無法核對這份準備安排的來源，請重新選取作業。');
+        return;
+      }
+      setMessages((previous) => [...previous, { role: 'user', content: question }, {
+        role: 'assistant', source: 'device', tool: 'calendar-action',
+        content: '已依作業期限、目前課表與個人行程整理整份準備安排。請核對下方各筆時間，確認後會逐筆建立並讀回結果。',
+        calendarBatch: result.batch,
+      }]);
+      setActiveShortcut(null);
+    } catch {
+      if (active()) setError('目前無法完整核對這組作業與準備時段，請稍後重新預覽。');
+    } finally {
+      unsubscribeBlur?.();
+      if (inFlight.current === controller) inFlight.current = null;
+      if (planStudyInFlight.current === controller) planStudyInFlight.current = null;
+      lock.current = false;
+      if (current()) {
+        if (controller.signal.aborted) setError('已停止這次整體準備安排，尚未建立行程。');
+        setBusy(false);
+      }
+    }
+  };
+
+  const send = async (shortcut?: Exclude<AssistantShortcut, { kind: 'brief' | 'plan-study' | 'plan-study-batch' }>) => {
     const question = shortcut?.question ?? draft.trim();
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || studyLock.current || calendarBusy || !current()) return;
     if (shortcut?.kind === 'selection' && shortcut.checkedAt !== validCampusSenseSnapshot(sense, { uid, schoolId })?.checkedAt) return;
@@ -876,6 +935,7 @@ function AssistantConversation({
           />
           {calendarBusy ? <AIButton label="核對行程中…" size="sm" disabled /> : updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
             <AIButton label={syncBusy ? '取消這次同步' : platformTimetable && activeShortcut?.kind === 'brief' ? '取消這次規劃'
+              : activeShortcut?.kind === 'plan-study-batch' ? '取消整體準備安排'
               : activeShortcut?.kind === 'plan-study' ? '取消準備時間查詢'
               : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
@@ -908,6 +968,7 @@ function AssistantConversation({
         batches={calendarRecovery.batches.filter((batch) => !messages.some((message) => message.calendarBatch?.plan.id === batch.plan.id))}
         error={calendarRecovery.batchError} context={calendarContext} navigation={navigation}
         disabled={busy || syncBusy || calendarBusy}
+        sourceChecks={courseworkBatchChecks}
         onRetry={() => { if (!busy && !syncBusy && !calendarBusy && current()) void calendarRecovery.reload(); }}
         onChange={changeCalendarBatch} />
       {(uid || platformTimetable) && messages.length === 0 && !busy && !calendarBusy && !draft.trim() ? (
@@ -1101,6 +1162,7 @@ function AssistantConversation({
             ) : null}
             {message.calendarBatch ? (
               <AssistantCalendarBatchAction batch={message.calendarBatch} context={calendarContext}
+                sourceChecks={courseworkBatchChecks}
                 navigation={navigation} disabled={busy || syncBusy || calendarBusy}
                 onChange={(next) => changeCalendarBatch(next, message.calendarBatch!.plan.id)} />
             ) : null}
@@ -1167,6 +1229,11 @@ function AssistantConversation({
                 ) : undefined}
                 onOpenRoute={openPlanRoute}
                 />
+                {platformTimetable && courseworkRequests ? (
+                  <NuniPlanStudyBatchPicker plan={message.plan} accountId={platformTimetable.accountId}
+                    schoolId={schoolId} disabled={busy || syncBusy || calendarBusy}
+                    onPrepare={(sources) => void startPlanStudyBatch(sources)} />
+                ) : null}
                 {canSavePlans && messages[index - 1]?.role === 'user' ? (
                   <View style={{ marginTop: 14, gap: 8 }}>
                     {savedPlans.plans.some((saved) => saved.question === messages[index - 1].content.trim() &&
@@ -1278,6 +1345,7 @@ function AssistantConversation({
       {busy && (
         <View onLayout={scrollToEntry}>
           <AICard title={updatingReminder ? '正在處理作業提醒…' : platformTimetable && activeShortcut?.kind === 'brief' ? '正在整理學習計畫…'
+            : activeShortcut?.kind === 'plan-study-batch' ? '正在核對作業並安排整體準備時間…'
             : activeShortcut?.kind === 'plan-study' ? '正在核對計畫中的作業…'
             : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
@@ -1330,6 +1398,7 @@ function AssistantConversation({
               onPress={() => void (activeShortcut.kind === 'brief'
                 ? briefPlan(activeShortcut.question, activeShortcut.savedPlanId)
                 : activeShortcut.kind === 'plan-study' ? startPlanStudy(activeShortcut.source, activeShortcut.question)
+                : activeShortcut.kind === 'plan-study-batch' ? startPlanStudyBatch(activeShortcut.sources, activeShortcut.question)
                 : send(activeShortcut))} />
           ) : null}
         </View>
