@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore }
 import { Modal } from '@/components/ui/Modal';
 import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, type BuildingPlan, type PlanFloor } from './buildingPlan';
 import type { BuildingPlanView, BuildingPlanScene } from './buildingPlanScene';
+import BuildingPlanTracer from './BuildingPlanTracer';
 import styles from './BuildingPlanPreview.module.css';
 
 type Props = { schoolId: string; buildingId: string; buildingName: string; onClose: () => void };
@@ -119,12 +120,33 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
   const [example, setExample] = useState(false);
   const [error, setError] = useState('');
   const [reading, setReading] = useState(false);
+  const [tracing, setTracing] = useState(false);
+  const [traceSession, setTraceSession] = useState(false);
   const [mode, setMode] = useState<'flat' | '3d'>('flat');
   const [view, setView] = useState<Omit<BuildingPlanView, 'dark'>>(initialView);
   const generation = useRef(0);
+  const workspace = useRef<HTMLDivElement>(null);
+  const traceWorkspace = useRef<HTMLDivElement>(null);
+  const traceStart = useRef<HTMLButtonElement>(null);
+  const floorSelect = useRef<HTMLSelectElement>(null);
+  const focusAfterTrace = useRef<'preview' | 'return' | null>(null);
   const dark = useSyncExternalStore(subscribeAppearance, readDark, serverAppearance);
   useEffect(() => () => { generation.current += 1; }, []);
-  const clearPlan = () => { setPlan(null); setExample(false); setError(''); setReading(false); setMode('flat'); setView(initialView); };
+  const clearPlan = () => { setPlan(null); setExample(false); setError(''); setReading(false); setMode('flat'); setView(initialView); setTracing(false); setTraceSession(false); };
+  useEffect(() => {
+    if (tracing) {
+      traceWorkspace.current?.focus();
+      return;
+    }
+    const requested = focusAfterTrace.current;
+    if (!requested) return;
+    focusAfterTrace.current = null;
+    const target = requested === 'preview'
+      ? workspace.current?.querySelector<HTMLElement>('[data-building-plan-state]')
+      : plan ? floorSelect.current : traceStart.current;
+    target?.focus();
+    target?.scrollIntoView?.({ block: 'center' });
+  }, [tracing, plan]);
   const onSelect = useCallback((selectedFloor: string, selectedRoom: string) => {
     setView(current => ({ ...current, floorId: selectedFloor, roomId: selectedRoom }));
   }, []);
@@ -152,28 +174,56 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
     setExample(true);
     setPlan(createExampleBuildingPlan({ schoolId, buildingId }));
   }
-  function downloadTemplate() {
-    const blob = new Blob([JSON.stringify(createExampleBuildingPlan({ schoolId, buildingId }), null, 2)], { type: 'application/json' });
+  function downloadPlan(drawing: BuildingPlan, filename: string) {
+    const blob = new Blob([JSON.stringify(drawing, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'building-plan-template.json';
+    anchor.download = filename;
     document.body.append(anchor);
     try { anchor.click(); } finally {
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     }
   }
+  function startTracing() {
+    generation.current += 1;
+    setReading(false);
+    setError('');
+    setMode('flat');
+    setTraceSession(true);
+    setTracing(true);
+  }
   const floors = plan?.floors.filter(floor => !view.floorId || floor.id === view.floorId) ?? [];
   const selectedFloor = plan?.floors.find(floor => floor.id === view.floorId);
   const selectedRoom = selectedFloor?.rooms.find(room => room.id === view.roomId);
   return <Modal isOpen onClose={onClose} title="平面圖建模預覽" description={buildingName} size="full">
-    <div className={styles.workspace}>
+    <div ref={workspace} className={styles.workspace}>
+      {traceSession && <div ref={traceWorkspace} tabIndex={-1} hidden={!tracing}>
+        <BuildingPlanTracer schoolId={schoolId} buildingId={buildingId} buildingName={buildingName}
+          onComplete={drawing => {
+            generation.current += 1;
+            setPlan(drawing);
+            setExample(false);
+            setError('');
+            setView(initialView);
+            setMode('3d');
+            focusAfterTrace.current = 'preview';
+            setTracing(false);
+          }}
+          onCancel={() => {
+            focusAfterTrace.current = 'return';
+            setTracing(false);
+            setTraceSession(false);
+          }} />
+      </div>}
+      {!tracing && <>
       <details className={styles.importer} open={!plan}>
         <summary hidden={!plan}>更換圖面與範本</summary>
-        <div><p className={styles.intro}>匯入以公尺（m）為單位的 JSON 圖面，查看樓層、房間與立體結構。</p>
-          <p className={styles.hint}>檔案只在本次視窗中使用，不會上傳；關閉或切換建築後清除。目前不支援照片自動辨識。</p></div>
+        <div><p className={styles.intro}>從平面圖圖片標出外框與房間，或匯入 JSON 圖面，查看立體結構。</p>
+          <p className={styles.hint}>圖片由你描點建立，不會自動辨識。檔案只在本次視窗使用，不會上傳；關閉或切換建築後清除。</p></div>
         <div className={styles.actions}>
+          <button ref={traceStart} type="button" onClick={startTracing}>{traceSession ? '繼續圖片描圖' : '從圖片建立圖面'}</button>
           <label htmlFor={inputId} className={styles.fileButton}>匯入 JSON 圖面</label>
           <input id={inputId} className={styles.fileInput} type="file" accept=".json,application/json" onChange={event => {
             const file = event.currentTarget.files?.[0];
@@ -181,26 +231,34 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             if (file) void importFile(file);
           }} />
           <button type="button" onClick={loadExample}>載入示意範例</button>
-          <button type="button" onClick={downloadTemplate}>下載圖面範本</button>
+          <button type="button" onClick={() => downloadPlan(createExampleBuildingPlan({ schoolId, buildingId }), 'building-plan-template.json')}>下載圖面範本</button>
           {plan && <button type="button" onClick={() => { generation.current += 1; clearPlan(); }}>清除圖面</button>}
         </div>
       </details>
       {reading && <p role="status">正在讀取圖面…</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
-      {!plan && !reading && <div className={styles.empty}><strong>尚未載入圖面</strong><p>選擇 JSON 檔案（上限 256 KB），或先操作示意範例。範本可下載後依實際圖面修改。</p></div>}
+      {!plan && !reading && <div className={styles.empty}><strong>尚未載入圖面</strong><p>可從單張平面圖圖片開始描點、匯入 JSON（上限 256 KB），或先操作示意範例。</p></div>}
       {plan && <>
         <div className={styles.metadata}>
           <p className={styles.badge}>{example ? `示意範例，不代表${buildingName}` : '待核對圖面'}</p>
           <h3>{plan.name}</h3>
           <p>{example ? '範例套用範圍' : '圖面範圍'}：{buildingName}（{schoolId} / {buildingId}）</p>
           {!example && <p className={styles.hint}>尚未與現場核對，請勿作為室內導航或尺寸量測依據。</p>}
+          <p className={styles.hint}>{plan.units === 'relative'
+            ? '未校正比例：使用示意單位，尺寸與樓高僅供預覽。'
+            : '圖面單位：公尺（m），比例與樓高仍需與來源核對。'}</p>
           {plan.source && <p className={styles.hint}>來源：{plan.source.url
             ? <a href={plan.source.url} target="_blank" rel="noreferrer">{plan.source.label} ↗</a>
             : plan.source.label}</p>}
+          <div className={styles.actions}>
+            <button type="button" onClick={() => downloadPlan(plan, 'building-plan.json')}>下載目前圖面</button>
+            {traceSession && <button type="button" onClick={startTracing}>返回圖面編輯</button>}
+          </div>
+          <p className={styles.hint}>下載內容包含圖面與來源標示，不含底圖圖片。</p>
         </div>
         <div className={styles.toolbar}>
           <label htmlFor={floorId}>樓層</label>
-          <select id={floorId} value={view.floorId ?? ''} onChange={event => setView(current => ({ ...current, floorId: event.target.value || null, roomId: null }))}>
+          <select ref={floorSelect} id={floorId} value={view.floorId ?? ''} onChange={event => setView(current => ({ ...current, floorId: event.target.value || null, roomId: null }))}>
             <option value="">全部樓層</option>{plan.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}
           </select>
           <div className={styles.actions} aria-label="預覽模式">
@@ -229,6 +287,7 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             {floors.every(floor => floor.rooms.length === 0) && <p className={styles.hint}>這些樓層尚未標示房間。</p>}
           </section>
         </div>
+      </>}
       </>}
     </div>
   </Modal>;

@@ -16,7 +16,7 @@ export type BuildingPlan = {
   schoolId: string;
   buildingId: string;
   name: string;
-  units: 'm';
+  units: 'm' | 'relative';
   source?: { label: string; url?: string };
   floors: PlanFloor[];
 };
@@ -49,7 +49,7 @@ function number(value: unknown, label: string, min: number, max: number): number
 }
 
 function point(value: unknown): PlanPoint {
-  requireValue(Array.isArray(value) && value.length === 2, '座標請使用 [x, y]，單位為公尺。');
+  requireValue(Array.isArray(value) && value.length === 2, '座標請使用 [x, y]。');
   return [number(value[0], '平面座標', -500, 500), number(value[1], '平面座標', -500, 500)];
 }
 
@@ -144,7 +144,8 @@ export function parseBuildingPlan(input: string, scope: BuildingPlanScope):
     requireValue(input.length <= MAX_BUILDING_PLAN_BYTES && new TextEncoder().encode(input).byteLength <= MAX_BUILDING_PLAN_BYTES,
       '圖面檔案太大，請使用 256 KB 以內的 JSON。');
     const data = record(JSON.parse(input));
-    requireValue(data.version === 1 && data.units === 'm', '請使用第 1 版圖面格式，座標單位必須為公尺（m）。');
+    requireValue(data.version === 1 && (data.units === 'm' || data.units === 'relative'),
+      '請使用第 1 版圖面格式，單位為公尺（m）或未校正的示意單位（relative）。');
     requireValue(data.schoolId === scope.schoolId && data.buildingId === scope.buildingId,
       '這份圖面不屬於目前學校或建築，請確認後重新匯入。');
     requireValue(Array.isArray(data.floors) && data.floors.length > 0 && data.floors.length <= 12,
@@ -186,7 +187,7 @@ export function parseBuildingPlan(input: string, scope: BuildingPlanScope):
       Math.max(...points.map((p) => p[1])) - Math.min(...points.map((p) => p[1])) <= 300,
     '圖面範圍過大，請以單棟建築匯入。');
     return { ok: true, plan: { version: 1, schoolId: scope.schoolId, buildingId: scope.buildingId,
-      name: text(data.name, '圖面名稱'), units: 'm', source: source(data.source), floors } };
+      name: text(data.name, '圖面名稱'), units: data.units, source: source(data.source), floors } };
   } catch (error) {
     return { ok: false, message: error instanceof SyntaxError ? '無法讀取 JSON，請檢查圖面檔案格式。' :
       error instanceof Error ? error.message : '無法讀取圖面，請重新選擇檔案。' };

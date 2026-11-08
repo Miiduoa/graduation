@@ -4,7 +4,9 @@ import BuildingPlanPreview from './BuildingPlanPreview';
 import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES } from './buildingPlan';
 
 const scene = vi.hoisted(() => ({ create: vi.fn(), setView: vi.fn(), setActive: vi.fn(), dispose: vi.fn() }));
+const tracer = vi.hoisted(() => ({ render: vi.fn() }));
 vi.mock('./buildingPlanScene', () => ({ createBuildingPlanScene: scene.create }));
+vi.mock('./BuildingPlanTracer', () => ({ default: tracer.render }));
 const scope = { schoolId: 'pu', buildingId: 'test-building' };
 const props = { ...scope, buildingName: '測試館', onClose: vi.fn() };
 let intersection: IntersectionObserverCallback | null = null;
@@ -13,6 +15,12 @@ const disconnect = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   scene.create.mockImplementation(() => scene);
+  tracer.render.mockImplementation(({ schoolId, buildingId, onComplete, onCancel }) => <section aria-label="測試描圖工作區">
+    <input aria-label="測試描圖備註" />
+    <button type="button" onClick={() => onComplete({ ...createExampleBuildingPlan({ schoolId, buildingId }),
+      name: '描圖草稿', units: 'relative', source: { label: '底圖.png' } })}>完成測試描圖</button>
+    <button type="button" onClick={onCancel}>取消測試描圖</button>
+  </section>);
   intersection = null;
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.setAttribute('open', ''); } });
@@ -225,5 +233,56 @@ it('downloads a scoped fictional template and revokes its temporary URL', async 
   expect(JSON.parse(contents)).toMatchObject({ ...scope, units: 'm', source: { label: expect.stringContaining('虛構範例') } });
   expect(click).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith('blob:plan-template'), { timeout: 2_000 });
+  expect(screen.getByText('尚未載入圖面')).toBeTruthy();
+});
+
+it('opens a traced plan in 3D, retains its draft for editing and returns focus when cancelling edits', async () => {
+  render(<BuildingPlanPreview {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '從圖片建立圖面' }));
+  fireEvent.change(screen.getByLabelText('測試描圖備註'), { target: { value: '保留描點' } });
+  fireEvent.click(screen.getByRole('button', { name: '完成測試描圖' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  expect(scene.create.mock.calls[0][1]).toMatchObject({ ...scope, units: 'relative' });
+  expect(screen.getByText('待核對圖面')).toBeTruthy();
+  expect(screen.getByText(/未校正比例：使用示意單位/)).toBeTruthy();
+  expect(document.activeElement).toBe(document.querySelector('[data-building-plan-state]'));
+  expect(screen.queryByRole('region', { name: '測試描圖工作區' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '返回圖面編輯' }));
+  expect((screen.getByLabelText('測試描圖備註') as HTMLInputElement).value).toBe('保留描點');
+  expect(scene.dispose).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '取消測試描圖' }));
+  expect(screen.getByRole('heading', { name: '描圖草稿' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '返回圖面編輯' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('combobox', { name: '樓層' }));
+});
+
+it('exports the current unscaled plan and discards stale file reads or drawing drafts when replaced', async () => {
+  const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:current-plan');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  let finish!: (text: string) => void;
+  const view = render(<BuildingPlanPreview {...props} />);
+  upload(fileWithText(new Promise<string>(resolve => { finish = resolve; })));
+  fireEvent.click(screen.getByRole('button', { name: '從圖片建立圖面' }));
+  fireEvent.click(screen.getByRole('button', { name: '完成測試描圖' }));
+  await act(async () => finish(planJson('晚到的 JSON')));
+  expect(screen.queryByRole('heading', { name: '晚到的 JSON' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '下載目前圖面' }));
+  const blob = createUrl.mock.calls[0][0] as Blob;
+  const contents = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsText(blob);
+  });
+  const exported = JSON.parse(contents);
+  expect(exported).toMatchObject({ ...scope, name: '描圖草稿', units: 'relative', source: { label: '底圖.png' } });
+  expect(exported).not.toHaveProperty('image');
+  expect(exported).not.toHaveProperty('verified');
+  loadExample();
+  expect(screen.queryByRole('button', { name: '返回圖面編輯' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '從圖片建立圖面' }));
+  view.rerender(<BuildingPlanPreview {...props} schoolId="other" buildingId="other-building" />);
+  expect(screen.queryByRole('region', { name: '測試描圖工作區' })).toBeNull();
   expect(screen.getByText('尚未載入圖面')).toBeTruthy();
 });

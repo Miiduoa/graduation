@@ -94,6 +94,17 @@ describe('building plan import boundary', () => {
     expectRejected({ ...drawing(), units }, /公尺/);
   });
 
+  it('preserves an uncalibrated drawing as relative units through export and reimport', () => {
+    const uncalibrated = { ...drawing(), units: 'relative', verified: true };
+    const result = parse(uncalibrated);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.plan.units).toBe('relative');
+    expect(result.plan).not.toHaveProperty('verified');
+    expect(parse(result.plan)).toEqual(result);
+    expect(parse(result.plan, { ...scope, schoolId: 'another-school' }).ok).toBe(false);
+  });
+
   it('reports malformed JSON without throwing', () => {
     expect(parseBuildingPlan('{"floors":', scope)).toEqual({
       ok: false,

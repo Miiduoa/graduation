@@ -9,6 +9,7 @@ on:
       - 'apps/web/src/components/ui/Modal*'
       - 'apps/web/src/components/ui/modalSession*'
       - 'apps/web/src/components/ui/Button*'
+      - 'apps/web/src/lib/personalImportImagePreview*'
       - 'packages/shared/src/providenceCampus*'
       - 'packages/shared/src/campusGeo*'
       - 'packages/shared/src/campusMapRecords*'
