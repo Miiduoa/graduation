@@ -534,6 +534,49 @@ it('requires explicit confirmation before pasted text replaces a practice, and c
   expect(pasted.value).toBe('');
 });
 
+it('keeps a pasted but unconfirmed progress backup until the learner accepts a different source', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const progress = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  fireEvent.change(progress, { target: { value: '{"unfinished":"keep this JSON"}' } });
+  const pastedSource = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(pastedSource, { target: { value: '下一份教材的文字' } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect(screen.getByText(/尚未確認還原的進度 JSON 也會被清除/)).toBeTruthy();
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(progress.value).toBe('{"unfinished":"keep this JSON"}');
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(progress.value).toBe('{"unfinished":"keep this JSON"}');
+  expect(pastedSource.value).toBe('下一份教材的文字');
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect(screen.getByText('下一份教材的文字')).toBeTruthy();
+  expect(progress.value).toBe('');
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('protects a pasted progress draft when importing the first local file', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const progress = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  fireEvent.change(progress, { target: { value: '{"incomplete":true}' } });
+  fireEvent.change(screen.getByLabelText('選擇講義'), {
+    target: { files: [new File(['剛選的教材內容'], '新教材.txt', { type: 'text/plain' })] },
+  });
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect(screen.queryByText('剛選的教材內容')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(progress.value).toBe('{"incomplete":true}');
+  fireEvent.change(screen.getByLabelText('選擇講義'), {
+    target: { files: [new File(['剛選的教材內容'], '新教材.txt', { type: 'text/plain' })] },
+  });
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect(screen.getByText('剛選的教材內容')).toBeTruthy();
+  expect(progress.value).toBe('');
+});
+
 it('keeps a fresh untouched source replacement direct without extra confirmation', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: '直接改讀新的講義內容' } });

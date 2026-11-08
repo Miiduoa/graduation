@@ -110,7 +110,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const endPausedPracticeButton = useRef<HTMLButtonElement>(null);
   const sourceInput = useRef<HTMLInputElement>(null);
   const pasteStart = useRef<HTMLButtonElement>(null);
-  const latestSourceState = useRef({ hasSource: false, hasStudyChanges: false });
+  const latestSourceState = useRef({ hasSource: false, hasStudyChanges: false, hasProgressPaste: false });
   const readingFocus = useRef<HTMLDivElement>(null);
   const focusReadingOnReturn = useRef(false);
   const restoreHeading = useRef<HTMLHeadingElement>(null);
@@ -254,8 +254,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   // File.text()/PDF parsing is async: read the latest committed study state, not a stale closure.
   // React refs must be updated in an effect, never during render.
   useEffect(() => {
-    latestSourceState.current = { hasSource: !!source, hasStudyChanges };
-  }, [source, hasStudyChanges]);
+    latestSourceState.current = { hasSource: !!source, hasStudyChanges, hasProgressPaste: progressPaste.length > 0 };
+  }, [source, hasStudyChanges, progressPaste]);
 
   useEffect(() => {
     if (pendingSource) replaceHeading.current?.focus();
@@ -313,7 +313,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
 
   // Keep the current notes and practice until the learner explicitly accepts a replacement.
   function requestSourceReplacement(value: StudySource, clearPaste: boolean) {
-    if (latestSourceState.current.hasSource && latestSourceState.current.hasStudyChanges) {
+    if ((latestSourceState.current.hasSource && latestSourceState.current.hasStudyChanges)
+      || latestSourceState.current.hasProgressPaste) {
       setPendingSource({ source: value, clearPaste });
       return;
     }
@@ -604,6 +605,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       {pendingSource && <section className={styles.restorePreview} aria-labelledby={replaceHeadingId}>
         <h4 id={replaceHeadingId} ref={replaceHeading} tabIndex={-1}>要改讀另一份教材嗎？</h4>
         <p className={styles.note}>準備改讀「{pendingSource.source.title}」。確認後會取代目前教材、筆記、未送出的問題和逐題練習，且無法從這個分頁復原。需要保留請先取消並儲存閱讀或練習 JSON。</p>
+        {progressPaste.length > 0 && <p className={styles.note}>尚未確認還原的進度 JSON 也會被清除。需要保留請先取消並複製這段 JSON；它不會自動儲存。</p>}
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`} onClick={() => {
             const next = pendingSource;
