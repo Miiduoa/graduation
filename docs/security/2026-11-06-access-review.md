@@ -294,3 +294,7 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 精確 head `ca1db5eb` 的 [Firestore Rules CI #42447833539](https://github.com/Miiduoa/graduation/actions/runs/42447833539) 真正執行 264 個測試，263 通過、1 失敗。失敗的是新增的 `story lists cannot include expired metadata or cross-school rows`，合法、已帶有效期限範圍的列表查詢仍回傳 `permission-denied`、`false for 'list' @ L1744`；沒有把此版列為已驗證成功。
 
 候選原因為 `resource.data.expiresAt is int` 不能由單純 `where('expiresAt','>', 整數)` 的查詢約束證明。這次保留單筆 `get` 的嚴格整數型別判斷，將 `list` 拆開為伺服器時間的 `expiresAt > request.time.toMillis()`，仍嚴格拒絕過期資料，不回退 school-only 的廣泛讀取。原有測試完整保留，是否可由 Firestore 查詢分析器證明範圍仍待新的精確 head CI。若再次失敗，應停止嘗試放寬清單規則，改為由可信後端逐筆確認期限的清單入口。
+
+### 04:47 UTC 第二次 Firebase CI：有效清單查詢已被允許，修正測試 API
+
+精確 head `0ac481dc` 的 [Rules CI #42448027270](https://github.com/Miiduoa/graduation/actions/runs/42448027270) 確認新的有效期範圍列表查詢已由規則允許，原本的 `false for list` 授權錯誤解除。263/264 通過，唯一失敗是新測試誤用本檔沒有匯入的 Jest `expect`，拋出 `ReferenceError: expect is not defined`，不是資料被錯誤允許或拒絕。本次更正為本檔已有的 Node `assert.deepEqual`，維持查詢前的拒絕與合法查詢後內容比對，並依新 head 重跑完整驗證；不以此暫時修正宣稱整套通過。

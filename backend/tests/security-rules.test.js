@@ -1905,7 +1905,7 @@ describe('storage security rules', () => {
     const active = await assertSucceeds(stories.where('schoolId', '==', 'pu')
       .where('expiresAt', '>', now + 120_000)
       .orderBy('expiresAt', 'desc').limit(80).get());
-    expect(active.docs.map((row) => row.id)).toEqual(['active-list-proof']);
+    assert.deepEqual(active.docs.map((row) => row.id), ['active-list-proof']);
     await assertFails(bob.collection('campusStories')
       .where('schoolId', '==', 'pu')
       .where('expiresAt', '>', now + 120_000).get());
