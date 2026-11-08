@@ -21,7 +21,7 @@ const output = path.join(root, 'artifacts/campus-title-history');
 const dist = path.join(fixture, 'dist');
 const report = {
   sourceHead: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-  boundary: 'Real product component, service, Firebase SDK and localhost rules; mockUserToken identity and Next Link adapter. SDK network disabling, not OS disconnection. Not native-device, cloud or full-text verification.',
+  boundary: 'Real product component, service, Firebase SDK and localhost rules; mockUserToken identity and Next Link/router adapters. SDK network disabling, not OS disconnection. Not native-device, cloud or full-text verification.',
   fixture: { newerNonmatches: 1000, olderMatches: 45, pageSize: 20 },
   checks: [], errors: [], externalRequests: [], screenshots: [], flows: [], sourceFiles: [],
 };
@@ -82,24 +82,34 @@ export async function offline(value){if(value)await disableNetwork(db);else awai
   await writeFile(path.join(fixture, 'identity.ts'), `export function useAuth(){return {user:{uid:'alice'},loading:false};}`);
   await writeFile(path.join(fixture, 'link.tsx'), `import React from 'react';export default function Link({children,...props}){return <a {...props}>{children}</a>;}`);
   await writeFile(path.join(fixture, 'observed-search.ts'), `
-import {searchCampusPostTitles as real,parseTitlePrefix} from '../src/lib/community/titleSearch';
+import {searchCampusPostTitles as real,confirmCampusPostTitleOpen as realConfirm,parseTitlePrefix} from '../src/lib/community/titleSearch';
 export {parseTitlePrefix};
 export const calls=[];
+export const opens=[];
+export async function confirmCampusPostTitleOpen(school,id) {
+ const entry={school,id};opens.push(entry);
+ try{entry.available=await realConfirm(school,id);return entry.available;}
+ catch(error){entry.error=error?.code??'unknown';throw error;}
+}
 export async function searchCampusPostTitles(school,prefix,cursor){
  const call={school,prefix,cursor:cursor?.document.id??null};calls.push(call);
  try{const result=await real(school,prefix,cursor);call.returned=result.posts.length;call.ids=result.posts.map(p=>p.id);return result;}
  catch(error){call.error=error?.code??'unknown';throw error;}
 }
 `);
+  await writeFile(path.join(fixture, 'navigation.ts'), `
+export const routes=[];
+export function useRouter(){return {push:(href)=>{routes.push(href);}};}
+`);
   await writeFile(path.join(fixture, 'entry.tsx'), `
 import React from 'react';import {createRoot} from 'react-dom/client';
 import {TitleHistorySearch} from '../src/app/community/_components/TitleHistorySearch';
-import {offline} from './firebase';import {calls} from './observed-search';
+import {offline} from './firebase';import {calls,opens} from './observed-search';import {routes} from './navigation';
 import '../src/app/globals.css';
 const params=new URLSearchParams(location.search);document.documentElement.dataset.theme=params.get('theme')||'light';
 const root=createRoot(document.getElementById('root'));
 root.render(<TitleHistorySearch schoolId="pu"/>);
-window.__history={offline,calls,school:(value)=>root.render(<TitleHistorySearch schoolId={value}/>)};
+window.__history={offline,calls,opens,routes,school:(value)=>root.render(<TitleHistorySearch schoolId={value}/>)};
 window.__fixtureToken=location.search;
 `);
   const bundled = await build({
@@ -110,7 +120,8 @@ window.__fixtureToken=location.search;
       '@/components/AuthGuard': path.join(fixture, 'identity.ts'),
       '@/lib/firebase': path.join(fixture, 'firebase.ts'),
       '@/lib/community/titleSearch': path.join(fixture, 'observed-search.ts'),
-      'next/link': path.join(fixture, 'link.tsx'), '@': path.join(web, 'src'),
+      'next/link': path.join(fixture, 'link.tsx'),
+      'next/navigation': path.join(fixture, 'navigation.ts'), '@': path.join(web, 'src'),
       '@campus/shared': path.join(root, 'packages/shared'),
     },
     loader: { '.module.css': 'local-css', '.png': 'dataurl', '.jpg': 'dataurl', '.svg': 'dataurl', '.woff2': 'dataurl', '.woff': 'dataurl' },
@@ -194,6 +205,17 @@ window.__fixtureToken=location.search;
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     }, text);
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+  }
+  async function clickFirstResult() {
+    const point = await call(() => {
+      const link = document.querySelector('article a');
+      if (!link) throw new Error('Missing a historical result link');
+      link.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = link.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   }
@@ -282,6 +304,43 @@ window.__fixtureToken=location.search;
   await until(() => call(() => document.body.textContent.includes('先前結果已清除')), 'cross school rejected');
   await check('another school is denied without disclosing its matching post', () =>
     document.querySelectorAll('article').length === 0 && !document.body.textContent.includes('二手書 他校'));
+  // Actual Chromium click -> real component -> real SDK -> repository rules.
+  // Navigation is observed through a route adapter, not a full PostDetail page.
+  await begin(390, 844, 'light', 'open-verified');
+  await type('二手書'); await click('搜尋歷史標題'); await count(20);
+  await clickFirstResult();
+  await until(() => call(() => window.__history.routes.length === 1), 'authorized result navigation');
+  await check('390: a normal result click performs fresh server confirmation before navigation', () =>
+    window.__history.opens.length === 1 && window.__history.opens[0].available === true &&
+    window.__history.routes[0].includes('/community/post/old-'));
+  report.flows.push({ label: 'web-confirm-open', completed: true, note: 'Actual SDK and rules, router callback adapter only' });
+
+  await begin(320, 720, 'light', 'offline-opening');
+  await type('二手書'); await click('搜尋歷史標題'); await count(20);
+  await call(() => window.__history.offline(true));
+  await clickFirstResult();
+  await until(() => call(() => document.body.textContent.includes('暫時無法向伺服器確認')), 'offline open');
+  await check('320: offline link stays on the list without an unauthorized navigation', () =>
+    window.__history.routes.length === 0 && window.__history.opens[0].error === 'unavailable' &&
+    document.querySelectorAll('article').length === 20);
+  await call(() => window.__history.offline(false));
+  await clickFirstResult();
+  await until(() => call(() => window.__history.routes.length === 1), 'offline opening retry');
+  await check('320: retry confirms from server before opening', () =>
+    window.__history.opens.length === 2 && window.__history.opens[1].available === true);
+
+  await begin(320, 720, 'light', 'deleted-opening');
+  await type('二手書'); await click('搜尋歷史標題'); await count(20);
+  const missingId = await call(() => new URL(document.querySelector('article a').href).pathname.split('/').at(-1));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc(`schools/pu/campusPosts/${missingId}`).delete();
+  });
+  await clickFirstResult();
+  await until(() => call(() => document.body.textContent.includes('已從搜尋結果移除')), 'deleted result rejected');
+  await check('320: deleted post cannot navigate and its stale card disappears', () =>
+    window.__history.routes.length === 0 && window.__history.opens.length === 1 &&
+    window.__history.opens[0].available === false && document.querySelectorAll('article').length === 19);
+
   assert.equal(report.errors.length, 0, 'Browser exceptions');
   assert.equal(report.externalRequests.length, 0, 'Unexpected external requests');
   await writeFile(path.join(output, 'chrome.log'), chromeLog);
