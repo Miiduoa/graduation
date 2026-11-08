@@ -471,6 +471,13 @@ it('does not reopen the directory from an off-site stored destination', () => {
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
 });
 
+async function dispatchToggleAfterTask(menu: HTMLDetailsElement) {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    menu.dispatchEvent(new Event('toggle'));
+  });
+}
+
 function restoreOpenDirectory(view: ReturnType<typeof render>) {
   fireEvent.click(screen.getByText('所有服務'));
   fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
@@ -492,6 +499,97 @@ function expectDirectoryNotRestored() {
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
   next.unmount();
 }
+
+it('keeps the snapshot when a delayed close toggle arrives after opening a service', async () => {
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(false);
+  await dispatchToggleAfterTask(menu);
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+});
+
+it('does not forget the snapshot when a delayed toggle arrives after restoring open', async () => {
+  const view = render(<CampusServiceMenu />);
+  restoreOpenDirectory(view);
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(true);
+  await dispatchToggleAfterTask(menu);
+  expect(menu.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  view.unmount();
+  render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+});
+
+it('does not close or forget when restoring open moves focus back to the page', () => {
+  const view = render(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  const page = screen.getByRole('button', { name: '頁面內容' });
+  page.focus();
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(
+    <>
+      <button type="button">頁面內容</button>
+      <CampusServiceMenu />
+    </>,
+  );
+  const menu = screen.getByText('所有服務').closest('details')!;
+  expect(menu.open).toBe(true);
+  fireEvent.blur(menu, { relatedTarget: page });
+  expect(menu.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  view.unmount();
+  render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+});
 
 it('does not restore after clearing filters, viewing all services, or collapsing the summary', () => {
   const cleared = render(<CampusServiceMenu />);

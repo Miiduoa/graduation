@@ -98,6 +98,13 @@ export function CampusServiceMenu() {
     if (!element || element.open === open) return;
     skipToggleSideEffects.current = true;
     element.open = open;
+    if (open) {
+      // 還原打開後，瀏覽器可能延遲派發 toggle，並在把焦點移回頁面時觸發 blur。
+      setTimeout(() => {
+        skipToggleSideEffects.current = false;
+      }, 0);
+      return;
+    }
     skipToggleSideEffects.current = false;
   }
   useLayoutEffect(() => {
@@ -195,7 +202,6 @@ export function CampusServiceMenu() {
       onToggle={(event) => {
         if (skipToggleSideEffects.current) return;
         if (!event.currentTarget.open) {
-          if (event.currentTarget.isConnected) forgetDirectorySearch('menu');
           setQuery('');
           setCategory('all');
         }
@@ -208,11 +214,11 @@ export function CampusServiceMenu() {
         }
       }}
       onBlur={(event) => {
+        if (skipToggleSideEffects.current) return;
         if (
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget)
         ) {
-          forgetDirectorySearch('menu');
           event.currentTarget.open = false;
         }
       }}
