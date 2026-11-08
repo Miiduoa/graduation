@@ -9,6 +9,8 @@ import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessio
 const mockFirebaseAuth: { currentUser: { uid: string } | null } = { currentUser: { uid: 'u1' } };
 const mockBeginReminderCleanup = jest.fn(async () => 0);
 const mockEndReminderCleanup = jest.fn();
+const mockBeginPlanCleanup = jest.fn(async () => undefined);
+const mockEndPlanCleanup = jest.fn();
 jest.mock('../firebase', () => ({
   getAuthInstance: () => mockFirebaseAuth,
   hasUsableFirebaseConfig: () => true,
@@ -22,6 +24,10 @@ jest.mock('../data/postLoginDataRouter', () => ({ buildPostLoginContext: jest.fn
 jest.mock('../services/campusAssignmentReminders', () => ({
   beginCampusAssignmentReminderSignOutCleanup: () => mockBeginReminderCleanup(),
   endCampusAssignmentReminderSignOutCleanup: () => mockEndReminderCleanup(),
+}));
+jest.mock('../services/savedCampusPlans', () => ({
+  beginSavedCampusPlansSignOutCleanup: () => mockBeginPlanCleanup(),
+  endSavedCampusPlansSignOutCleanup: () => mockEndPlanCleanup(),
 }));
 jest.mock('../data/cachedSource', () => ({ clearAllCache: jest.fn() }));
 jest.mock('../services/offline', () => ({
@@ -68,6 +74,7 @@ function deferred() {
 beforeEach(() => {
   jest.clearAllMocks();
   mockBeginReminderCleanup.mockResolvedValue(0);
+  mockBeginPlanCleanup.mockResolvedValue(undefined);
   mockFirebaseAuth.currentUser = { uid: 'u1' };
   for (const [module, names] of [
     ['../data/cachedSource', ['clearAllCache']],
@@ -97,6 +104,7 @@ test('a deletion logout for a former account performs no cache cleanup or SDK si
   await expect(auth.signOut('u1')).rejects.toThrow('account changed');
   expect(clearAllCache).not.toHaveBeenCalled();
   expect(mockBeginReminderCleanup).not.toHaveBeenCalled();
+  expect(mockBeginPlanCleanup).not.toHaveBeenCalled();
   expect(clearMockAuthSession).not.toHaveBeenCalled();
   expect(signOut).not.toHaveBeenCalled();
 });
@@ -132,6 +140,8 @@ test('matching-account deletion logout completes actual SDK signout', async () =
   expect(clearOwnedPuCampusSessions).toHaveBeenCalled();
   expect(mockBeginReminderCleanup).toHaveBeenCalledTimes(1);
   expect(mockEndReminderCleanup).toHaveBeenCalledTimes(1);
+  expect(mockBeginPlanCleanup).toHaveBeenCalledTimes(1);
+  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
   expect(mockFirebaseAuth.currentUser).toBeNull();
 });
 
@@ -196,5 +206,31 @@ test('failed Agent reminder cleanup is surfaced yet releases the sign-out fence'
   expect(mockBeginReminderCleanup).toHaveBeenCalledTimes(1);
   expect(mockEndReminderCleanup).toHaveBeenCalledTimes(1);
   expect(signOut).toHaveBeenCalledTimes(1);
+  warning.mockRestore();
+});
+
+test('sign-out waits for pending saved-plan writes to be fenced and removed', async () => {
+  const pending = deferred();
+  mockBeginPlanCleanup.mockReturnValueOnce(pending.promise);
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await act(async () => undefined);
+  const outcome = auth.signOut('u1');
+  expect(mockBeginPlanCleanup).toHaveBeenCalledTimes(1);
+  expect(signOut).not.toHaveBeenCalled();
+  await act(async () => { pending.resolve(); await outcome; });
+  expect(signOut).toHaveBeenCalledTimes(1);
+  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
+});
+
+test('saved-plan cleanup failure reports incomplete cleanup and releases its fence', async () => {
+  mockBeginPlanCleanup.mockRejectedValueOnce(new Error('Unable to remove saved plans'));
+  render(<AuthProvider><Probe /></AuthProvider>);
+  await act(async () => undefined);
+  const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  await act(async () => auth.signOut('u1'));
+  expect(signOut).toHaveBeenCalledTimes(1);
+  expect(warning).toHaveBeenCalledWith('[auth] Some cleanup operations failed:',
+    expect.arrayContaining([expect.objectContaining({ message: 'Unable to remove saved plans' })]));
+  expect(mockEndPlanCleanup).toHaveBeenCalledTimes(1);
   warning.mockRestore();
 });

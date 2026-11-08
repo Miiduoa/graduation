@@ -1,7 +1,8 @@
-import { validClassDate } from '@campus/shared/src/timetable/classExceptions';
+import type { AgendaScheduledClass } from './campusStudyAgenda';
+import { savedPlanTimestamp } from './savedCampusPlanValidation';
 
 /** The same dated clock evidence used by the nuni planner; no account data is retained here. */
-export type CampusClockClass = { name: string; room: string; startAt: string; endAt: string };
+export type CampusClockClass = AgendaScheduledClass;
 /** Half-open clock intervals; derived results use ISO timestamps with an explicit Z offset. */
 export type CampusClockInterval = { startAt: string; endAt: string };
 type InvalidReason = 'unavailable' | 'invalid-date' | 'invalid-course' | 'out-of-day' | 'too-many-courses';
@@ -20,13 +21,8 @@ function invalid(reason: InvalidReason): CampusClockAvailability {
 }
 
 function timestamp(value: unknown): number | null {
-  if (typeof value !== 'string' || value.length > 40) return null;
-  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$/i.exec(value);
-  if (!match || !validClassDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 ||
-      Number(match[4] || 0) > 59 || (match[7] && (Number(match[8]) > 14 || Number(match[9]) > 59 ||
-        (Number(match[8]) === 14 && Number(match[9]) !== 0)))) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  // Share the persisted schema's calendar, clock and offset checks; Date.parse alone normalizes invalid dates.
+  try { return Date.parse(savedPlanTimestamp(value)); } catch { return null; }
 }
 
 function interval(value: unknown): Interval | null {

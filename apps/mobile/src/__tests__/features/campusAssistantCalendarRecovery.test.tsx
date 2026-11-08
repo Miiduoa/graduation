@@ -11,6 +11,7 @@ import {
 import type { AssistantCalendarProposal } from '../../services/assistantCalendarExecution';
 import { assistantCalendarBatchStorageKey } from '../../services/assistantCalendarBatchStore';
 import { personalImportStorageKey } from '../../services/personalImports';
+import { savedCampusPlansStorageKey } from '../../services/savedCampusPlans';
 
 let mockUid: string | null = 'A';
 let mockFake = false;
@@ -151,7 +152,7 @@ test.each(['campus', 'dual-login-platform'] as const)('a fresh %s screen restore
   fireEvent.press(view.getByRole('button', { name: '查看已建立的行程' }));
   expect(nav.navigate).toHaveBeenCalledWith('PersonalCalendar', { eventId: value.mutationId });
   const allowed = new Set([assistantCalendarJournalStorageKey(scopeFor(value)), personalImportStorageKey(scopeFor(value)),
-    assistantCalendarBatchStorageKey(scopeFor(value))]);
+    assistantCalendarBatchStorageKey(scopeFor(value)), savedCampusPlansStorageKey(scopeFor(value))]);
   expect(jest.mocked(AsyncStorage.getItem).mock.calls.length).toBeGreaterThan(0);
   expect(jest.mocked(AsyncStorage.getItem).mock.calls.every(([key]) => allowed.has(key))).toBe(true);
   expect(ledgerWrites()).toHaveLength(0);
@@ -413,7 +414,10 @@ test.each(['guest', 'mock', 'unresolved'] as const)('a %s screen never reads or 
   await ready(view);
   expect(view.queryByText(value.event.title)).toBeNull();
   expect(view.queryByText('找回的行程紀錄')).toBeNull();
-  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  const calendarKeys = new Set([assistantCalendarJournalStorageKey(scopeFor(value)),
+    assistantCalendarBatchStorageKey(scopeFor(value)), personalImportStorageKey(scopeFor(value))]);
+  expect(jest.mocked(AsyncStorage.getItem).mock.calls.every(([key]) =>
+    !calendarKeys.has(String(key)))).toBe(true);
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   expectNoModelCalls();
 });

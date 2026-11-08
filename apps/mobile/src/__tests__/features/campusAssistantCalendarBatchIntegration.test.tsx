@@ -9,6 +9,7 @@ import { assistantCalendarBatchStorageKey, readAssistantCalendarBatchPlans } fro
 import { assistantCalendarJournalStorageKey, readAssistantCalendarJournal } from '../../services/assistantCalendarJournal';
 import { confirmAssistantCalendarTask, createAssistantCalendarTask } from '../../services/assistantCalendarExecution';
 import { deletePersonalImport, editPersonalImport, loadPersonalImports, personalImportStorageKey } from '../../services/personalImports';
+import { savedCampusPlansStorageKey } from '../../services/savedCampusPlans';
 
 let mockUid: string | null = 'A';
 let mockSchool = 'pu';
@@ -131,7 +132,7 @@ test.each(['campus', 'dual-login-platform'] as const)('the real %s screen saves 
     expect(nav.navigate).toHaveBeenLastCalledWith('PersonalCalendar', { eventId: row.id });
   }
   const allowed = new Set([assistantCalendarBatchStorageKey(target), assistantCalendarJournalStorageKey(target),
-    personalImportStorageKey(target)]);
+    personalImportStorageKey(target), savedCampusPlansStorageKey(target)]);
   expect(jest.mocked(AsyncStorage.getItem).mock.calls.every(([key]) => allowed.has(key))).toBe(true);
   expect(jest.mocked(AsyncStorage.setItem).mock.calls.every(([key]) => allowed.has(key))).toBe(true);
   expectNoModelCalls();

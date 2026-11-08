@@ -38,6 +38,14 @@ export type NuniSessionDependencies = {
     mark(): Promise<void>;
     clear(): Promise<void>;
   };
+  savedPlansCleanup: {
+    /** Must invalidate existing save leases synchronously, before returning its promise. */
+    begin(): Promise<void>;
+    /** Release the cleanup barrier after both local cleanup and logout have settled. */
+    end(): void;
+  };
+  /** Revoke in-memory input synchronously, including callbacks held by closed routes. */
+  invalidateLocalDrafts(): void;
   request: NuniTransport;
   credential(clientId: string, nonce: string): Promise<string>;
   clearCredential(): Promise<void>;
@@ -69,7 +77,12 @@ export class NuniSessionController {
   private storageRead = false;
   private signingIn = false;
   private loggingOut = false;
+  private logoutPending = false;
+  private savedPlansCleanupFailed = false;
   private disposed = false;
+  private localDraftsRevoked = true;
+  private credentialCleanups = 0;
+  private refreshAfterCleanup = false;
   private readonly now: () => number;
   constructor(private readonly deps: NuniSessionDependencies) {
     this.now = deps.now ?? Date.now;
@@ -134,6 +147,17 @@ export class NuniSessionController {
     this.invalidate();
     this.update(next);
   }
+  private revokeLocalDrafts() {
+    this.localDraftsRevoked = true;
+    this.deps.invalidateLocalDrafts();
+  }
+  /** Retention is not authorization: masked revalidation can keep input but cannot send it. */
+  canRetainLocalDrafts = (accountId: string): boolean => {
+    return !this.disposed && !this.localDraftsRevoked && !this.loggingOut &&
+      !this.logoutPending && !this.state.pendingLogout && !!this.record &&
+      !this.record.pendingLogout && this.record.platformAccountId === accountId &&
+      this.record.expiresAt > this.now();
+  };
   // A transient foreground refresh or offline verification must preserve the owner's local alarms.
   localReminderOwner(): string | null | undefined {
     if (this.loggingOut || this.state.pendingLogout) return null;
@@ -151,6 +175,8 @@ export class NuniSessionController {
   };
   activate = () => {
     this.disposed = false;
+    // React can reactivate a provider while an earlier secure deletion is pending.
+    if (this.credentialCleanups) this.refreshAfterCleanup = true;
   };
   private async save() {
     if (this.record) await this.deps.storage.write(JSON.stringify(this.record));
@@ -168,6 +194,7 @@ export class NuniSessionController {
     }
   }
   private async markPendingLogout() {
+    this.logoutPending = true;
     // This independent, non-secret marker survives a Keychain/Keystore write failure.
     // Neither failure may prevent an attempt to revoke the server session.
     try {
@@ -185,12 +212,22 @@ export class NuniSessionController {
     }
   }
   private async forget() {
-    await this.deps.storage.clear();
-    this.record = null;
-    this.storageRead = true;
+    ++this.credentialCleanups;
+    try {
+      await this.deps.storage.clear();
+      this.record = null;
+      this.storageRead = true;
+    } finally {
+      --this.credentialCleanups;
+      if (!this.credentialCleanups && this.refreshAfterCleanup && !this.disposed) {
+        this.refreshAfterCleanup = false;
+        void this.refresh();
+      }
+    }
   }
   refresh = async (): Promise<void> => {
-    if (this.signingIn || this.loggingOut || this.disposed) return;
+    if (this.signingIn || this.loggingOut || this.disposed || this.credentialCleanups) return;
+    if (this.record && this.record.expiresAt <= this.now()) this.revokeLocalDrafts();
     const live = this.liveVerifiedSession();
     const run = live ? this.generation : this.invalidate();
     if (!live) {
@@ -198,7 +235,7 @@ export class NuniSessionController {
         session: null,
         loading: true,
         error: '',
-        pendingLogout: !!this.record?.pendingLogout,
+        pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
       });
     }
     const finish = (next: NativeNuniState) => {
@@ -215,22 +252,28 @@ export class NuniSessionController {
       const fenced = await this.deps.logoutFence.read();
       if (!this.current(run)) return;
       if (fenced && this.record) this.record = { ...this.record, pendingLogout: true };
-      if (fenced && !this.record) await this.deps.logoutFence.clear();
-      if (!this.current(run)) return;
-      if (!this.record) {
-        finish({ session: null, loading: false, error: '', pendingLogout: false });
-        return;
-      }
-      if (this.record.pendingLogout) {
+      if (fenced || this.record?.pendingLogout) this.logoutPending = true;
+      // A fence without a credential can still mean local plans were not removed.
+      // Only an explicit, successful cleanup retry may release this intent.
+      if (this.logoutPending) {
+        this.revokeLocalDrafts();
         finish({
           session: null,
           loading: false,
-          error: '登出尚未完成，請重試以結束這次登入。',
+          error: this.savedPlansCleanupFailed
+            ? '手機內的已儲存計畫尚未清除，請重試登出。'
+            : '登出尚未完成，請重試以結束這次登入。',
           pendingLogout: true,
         });
         return;
       }
+      if (!this.record) {
+        this.revokeLocalDrafts();
+        finish({ session: null, loading: false, error: '', pendingLogout: false });
+        return;
+      }
       if (this.record.expiresAt <= this.now()) {
+        this.revokeLocalDrafts();
         await this.forget();
         if (this.current(run))
           finish({
@@ -250,6 +293,7 @@ export class NuniSessionController {
         (live && principal.platformAccountId !== live.platformAccountId)
       )
         throw new NuniError(409, 'SESSION_CHANGED');
+      this.localDraftsRevoked = false;
       this.update({
         session: {
           ...principal,
@@ -265,26 +309,46 @@ export class NuniSessionController {
       const closed =
         error instanceof NuniError && (error.status === 401 || error.status === 409);
       if (live && !closed) return;
-      if (error instanceof NuniError && error.status === 401) {
-        try {
-          await this.forget();
-        } catch {
-          /* Retain a hidden session until secure deletion can be retried. */
+      if (closed) {
+        this.revokeLocalDrafts();
+        const closedRun = this.invalidate();
+        const rejectedState: NativeNuniState = {
+          session: null,
+          loading: false,
+          error: '無法確認登入狀態，請重新連線後再試。',
+          pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
+        };
+        if (error.status === 401) {
+          // Stop using the revoked authority before waiting for Keychain/Keystore.
+          // The cleanup fence also prevents another login from being erased by
+          // this deletion after a concurrent logout has already finished.
+          const cleanup = this.forget();
+          this.update({ ...rejectedState, loading: true });
+          try {
+            await cleanup;
+          } catch {
+            /* Retain a hidden credential until secure deletion can be retried. */
+          }
+          if (this.current(closedRun)) this.update(rejectedState);
+        } else {
+          this.update(rejectedState);
         }
+        return;
       }
       if (this.current(run))
         finish({
           session: null,
           loading: false,
           error: '無法確認登入狀態，請重新連線後再試。',
-          pendingLogout: !!this.record?.pendingLogout,
+          pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
         });
     }
   };
   signIn = async (): Promise<'signed-in' | 'cancelled'> => {
-    if (this.disposed || this.signingIn || this.loggingOut || this.state.loading)
+    if (this.disposed || this.signingIn || this.loggingOut || this.state.loading || this.credentialCleanups)
       throw new NuniError(409, 'SIGN_IN_BUSY');
     if (this.record || this.state.pendingLogout) throw new NuniError(409, 'SIGN_OUT_REQUIRED');
+    this.revokeLocalDrafts();
     this.signingIn = true;
     const run = this.invalidate();
     let issued: StoredSession | null = null;
@@ -324,6 +388,7 @@ export class NuniSessionController {
       await this.save();
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
       this.storageRead = true;
+      this.localDraftsRevoked = false;
       this.update({
         session: { ...principal, context: `native-${this.now()}-${run}`, expiresAt: this.record.expiresAt },
         loading: false,
@@ -337,8 +402,19 @@ export class NuniSessionController {
         try {
           await this.revoke(issued.sessionHandle, false);
           if (!this.record || this.record.sessionHandle === issued.sessionHandle) {
-            await this.forget();
-            await this.deps.logoutFence.clear();
+            if (this.logoutPending) {
+              // Preserve the secure-storage fallback if another logout cleanup failed.
+              this.record = { ...issued, pendingLogout: true };
+              await this.markPendingLogout();
+              // Logout may finish while this fallback write is still in flight.
+              if (!this.logoutPending) {
+                await this.forget();
+                await this.deps.logoutFence.clear();
+              }
+            } else {
+              await this.forget();
+              await this.deps.logoutFence.clear();
+            }
           }
         } catch {
           this.record = { ...issued, pendingLogout: true };
@@ -346,16 +422,18 @@ export class NuniSessionController {
         }
       }
       const cancelled = (error as { code?: unknown } | null)?.code === 'CANCELLED';
-      if (!this.disposed && (this.current(run) || this.record?.pendingLogout))
+      if (!this.disposed && (this.current(run) || this.logoutPending || this.record?.pendingLogout))
         this.update({
           session: null,
           loading: false,
-          error: this.record?.pendingLogout
-            ? '登出尚未完成，請重試以結束這次登入。'
-            : cancelled
-              ? ''
-              : '登入沒有完成，請重新連線後再試。',
-          pendingLogout: !!this.record?.pendingLogout,
+          error: this.savedPlansCleanupFailed
+            ? '手機內的已儲存計畫尚未清除，請重試登出。'
+            : this.logoutPending || this.record?.pendingLogout
+              ? '登出尚未完成，請重試以結束這次登入。'
+              : cancelled
+                ? ''
+                : '登入沒有完成，請重新連線後再試。',
+          pendingLogout: this.logoutPending || !!this.record?.pendingLogout,
         });
       if (cancelled) return 'cancelled';
       throw error;
@@ -365,36 +443,70 @@ export class NuniSessionController {
   };
   logout = async (): Promise<void> => {
     if (this.loggingOut || this.disposed) return;
+    this.revokeLocalDrafts();
     this.loggingOut = true;
     const run = this.invalidate();
-    this.update({ session: null, loading: true, error: '', pendingLogout: !!this.record });
+    this.logoutPending = true;
+    // begin() fences saved-plan leases before the first await (including startup reads).
+    const plansCleaned = (async () => {
+      try {
+        await this.deps.savedPlansCleanup.begin();
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    this.update({ session: null, loading: true, error: '', pendingLogout: true });
+    let sessionCleanupFailed = false;
+    let credentialCleanupFailed = false;
     try {
-      if (!this.storageRead) {
-        const value = await this.deps.storage.read();
-        if (!this.current(run)) return;
-        this.record = value ? storedSession(value) : null;
-        this.storageRead = true;
+      // Persist the intent even when there is no credential left to revoke.
+      await this.markPendingLogout();
+      try {
+        if (!this.storageRead) {
+          const value = await this.deps.storage.read();
+          if (!this.current(run)) return;
+          this.record = value ? storedSession(value) : null;
+          this.storageRead = true;
+          if (this.record) await this.markPendingLogout();
+        }
+        if (this.record) await this.revoke(this.record.sessionHandle);
+      } catch {
+        sessionCleanupFailed = true;
       }
-      if (this.record) {
-        await this.markPendingLogout();
-        await this.revoke(this.record!.sessionHandle);
-        await this.forget();
+      this.savedPlansCleanupFailed = !(await plansCleaned);
+      if (!sessionCleanupFailed && !this.savedPlansCleanupFailed) {
+        try {
+          // Retain the pending secure record until local cleanup also succeeds. It
+          // remains a durable fallback when writing the independent fence failed.
+          if (this.record) await this.forget();
+          await this.deps.logoutFence.clear();
+          this.logoutPending = false;
+        } catch {
+          sessionCleanupFailed = true;
+        }
       }
-      await this.deps.logoutFence.clear();
-      await this.deps.clearCredential();
-      if (this.current(run))
-        this.update({ session: null, loading: false, error: '', pendingLogout: false });
-    } catch {
+      try {
+        await this.deps.clearCredential();
+      } catch {
+        credentialCleanupFailed = true;
+      }
       if (this.current(run))
         this.update({
           session: null,
           loading: false,
-          error: this.record
-            ? '登出尚未完成，請重試以結束這次登入。'
-            : '已登出；裝置上的 Google 帳號選擇狀態尚未清除。',
-          pendingLogout: !!this.record,
+          error: this.savedPlansCleanupFailed
+            ? '手機內的已儲存計畫尚未清除，請重試登出。'
+            : sessionCleanupFailed
+              ? '登出尚未完成，請重試以結束這次登入。'
+              : credentialCleanupFailed
+                ? '已登出；裝置上的 Google 帳號選擇狀態尚未清除。'
+                : '',
+          pendingLogout: this.logoutPending,
         });
     } finally {
+      await plansCleaned;
+      this.deps.savedPlansCleanup.end();
       this.loggingOut = false;
     }
   };
@@ -521,6 +633,7 @@ export class NuniSessionController {
   };
   dispose = () => {
     this.disposed = true;
+    this.revokeLocalDrafts();
     this.invalidate();
     this.listeners.clear();
   };

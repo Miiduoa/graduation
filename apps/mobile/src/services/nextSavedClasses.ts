@@ -95,7 +95,7 @@ function scheduledDay(groups: TimetableGroup[], schoolId: string, date: Date, in
   return entries;
 }
 
-/** Actual meetings on one Taiwan date. Incomplete relevant terms cannot establish an available gap. */
+/** Actual meetings intersecting this Taiwan date, including saved single-day changes. Incomplete relevant terms cannot establish an available gap. */
 export function scheduledSavedClasses(
   records: readonly PersonalImportRecord[], schoolId: string, date: string,
 ): PersonalTodayEntry[] | undefined {

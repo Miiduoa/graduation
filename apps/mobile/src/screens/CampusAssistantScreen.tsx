@@ -42,9 +42,17 @@ import { CampusAgentActionReview } from './CampusAgentActionReview';
 import { CampusAnnouncementRows } from './CampusAnnouncementRows';
 import { CampusSenseDashboard } from './CampusSenseDashboard';
 import { CampusEvidencePlanCard } from './CampusEvidencePlanCard';
+import { CampusPlanComparisonCard } from './CampusPlanComparisonCard';
+import { NuniStudyPlanActions } from './NuniStudyPlanActions';
+import { NuniPlanAssignmentOpenButton } from './NuniPlanAssignmentOpenButton';
+import { readNuniPlanAssignmentTarget, readNuniPlanQuizTarget } from '../services/nuniPlanAssignmentTarget';
+import { SavedCampusPlansPanel } from './SavedCampusPlansPanel';
+import { useSavedCampusPlans } from '../state/useSavedCampusPlans';
+import { createSavedCampusPlanSession, subscribeSavedCampusPlanInvalidation } from '../services/savedCampusPlans';
 import { CampusLocalReadResults } from './CampusLocalReadResults';
 import type { LocalCampusReadResult } from '../services/localCampusToolProtocol';
 import type { CampusEvidencePlan, CampusPlanRoute } from '../services/offlineCampusPlanner';
+import { compareCampusPlans, type CampusPlanComparison } from '../services/campusPlanComparison';
 import {
   CAMPUS_SENSE_MAX_AGE_MS,
   refreshCampusSenseSnapshot,
@@ -104,7 +112,7 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
   const platform = useOptionalNuniSession();
   const platformRoute = route?.name === 'NuniTimetableAssistant';
   useAssistantSessionExpiry(platformRoute ? platform : null);
-  const uid = loading || platform?.loading || platform?.pendingLogout || platform?.error || platform?.session
+  const uid = loading || platformRoute || platform?.loading || platform?.pendingLogout || platform?.error || platform?.session
     ? '' : user?.uid ?? '';
   const { school, selectionReady } = useSchool();
   const resolved = !(selectionReady === false || loading || platform?.loading || platform?.pendingLogout || platform?.error);
@@ -139,9 +147,8 @@ export function CampusAssistantScreen({ navigation, route }: ServiceScreenProps)
     />
   );
 }
-type SyncQuestion = typeof TODAY_BRIEF | typeof WEEK_BRIEF | typeof TODAY_ANNOUNCEMENTS;
 type AssistantShortcut =
-  | { kind: 'brief'; question: SyncQuestion }
+  | { kind: 'brief'; question: string; savedPlanId?: string }
   | { kind: 'services'; question: string }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
@@ -173,6 +180,8 @@ function AssistantConversation({
       requiresService?: boolean;
       source?: CampusAssistantMode;
       plan?: CampusEvidencePlan;
+      planComparison?: CampusPlanComparison;
+      originalPlanId?: string;
       localReads?: LocalCampusReadResult[];
       proposals?: CampusAgentWriteProposal[];
     }>
@@ -187,6 +196,7 @@ function AssistantConversation({
   const [senseError, setSenseError] = useState('');
   const syncLock = useRef(false);
   const [panel, setPanel] = useState<AssistantPanel>('chat');
+  const [openedSavedPlan, setOpenedSavedPlan] = useState<{ id: string; request: number } | null>(null);
   const chatScroll = useRef<ScrollView>(null);
   const lastRevealed = useRef(-1);
   const [deviceCheck, setDeviceCheck] = useState(0);
@@ -199,6 +209,7 @@ function AssistantConversation({
   const mounted = useRef(true);
   const lock = useRef(false);
   const inFlight = useRef<AbortController | null>(null);
+  const replanInFlight = useRef<AbortController | null>(null);
   const campusSessionId = useRef<string | null>(null);
   const publicServices = resolveSchoolPublicServices(schoolId);
   const canAsk = mode === 'device' || Boolean(uid);
@@ -293,6 +304,22 @@ function AssistantConversation({
     message.calendarBatch ? [message.calendarBatch] : [])].flatMap((batch) => batch.steps.flatMap((step) =>
     step.state === 'recorded' && sameAssistantCalendarEvent(step.event, step.task.proposal.event)
       ? [step.task.proposal.mutationId] : [])));
+  const canSavePlans = Boolean(uid || platformTimetable);
+  const savedPlanScope = useMemo(() => canSavePlans ? { owner: timetableOwner, schoolId } : null,
+    [canSavePlans, timetableOwner, schoolId]);
+  const savedPlans = useSavedCampusPlans(savedPlanScope, current);
+  useEffect(() => subscribeSavedCampusPlanInvalidation(() => {
+    if (!mounted.current || !isScopeCurrent()) return;
+    replanInFlight.current?.abort();
+    setOpenedSavedPlan(null);
+    setMessages((previous) => previous.map((message) => {
+      if (!message.planComparison) return message;
+      const reply = { ...message };
+      delete reply.planComparison;
+      delete reply.originalPlanId;
+      return reply;
+    }));
+  }), [isScopeCurrent]);
   useEffect(() => {
     if (platformTimetable) return;
     let active = true;
@@ -362,44 +389,55 @@ function AssistantConversation({
       }
     }
   };
-  const briefPlan = async (question: SyncQuestion) => {
-    if (!uid || lock.current || syncLock.current || calendarBusy || !current()) return;
+  const briefPlan = async (question: string, savedPlanId?: string) => {
+    if ((!uid && !platformTimetable) || lock.current || syncLock.current || calendarBusy || !current()) return;
+    const original = savedPlanId ? savedPlans.plans.find((saved) => saved.id === savedPlanId) : undefined;
+    if (savedPlanId && !original) {
+      setError('原計畫已不在清單中，請重新開啟已儲存計畫。');
+      return;
+    }
+    // Sign-out can revoke saved data before the account itself changes.
+    const savedSession = original ? createSavedCampusPlanSession(current) : null;
+    const planCurrent = () => current() && (!savedSession || savedSession());
     lock.current = true;
     syncLock.current = true;
     setBusy(true);
-    setActiveShortcut({ kind: 'brief', question });
+    setActiveShortcut({ kind: 'brief', question, ...(savedPlanId ? { savedPlanId } : {}) });
     setPanel('chat');
-    setSyncBusy(true);
+    setSyncBusy(!platformTimetable);
     setSyncProgress(null);
     setError('');
     setSenseError('');
     const controller = new AbortController();
     inFlight.current = controller;
+    if (original) replanInFlight.current = controller;
     try {
       let snapshot: CampusSenseSnapshot | null = null;
-      try {
-        snapshot = await refreshCampusSenseSnapshot({
-          scope: { uid, schoolId },
-          isCurrent: current,
-          signal: controller.signal,
-          onProgress: progressFor(controller),
-        });
-        if (!current() || controller.signal.aborted) return;
-        setSense(snapshot);
-      } catch (syncError) {
-        if (!current()) return;
-        if (controller.signal.aborted) { cancelledSync(); return; }
-        // A permission or contract failure revokes reliance on any prior summary.
-        const transient = isTransientCampusSyncError(syncError);
-        snapshot = transient ? validCampusSenseSnapshot(sense, { uid, schoolId }) : null;
-        if (!snapshot) setSense(null);
-        setSenseError(snapshot
-          ? '校園連線失敗，改用先前已授權且未過期的摘要；這不是即時學校狀態。'
-          : transient
-            ? '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。'
-            : '校園權限或資料無法驗證，已捨棄校園摘要；僅能使用手機內已保存的個人課表。');
+      if (!platformTimetable) {
+        try {
+          snapshot = await refreshCampusSenseSnapshot({
+            scope: { uid, schoolId },
+            isCurrent: planCurrent,
+            signal: controller.signal,
+            onProgress: progressFor(controller),
+          });
+          if (!planCurrent() || controller.signal.aborted) return;
+          setSense(snapshot);
+        } catch (syncError) {
+          if (!planCurrent()) return;
+          if (controller.signal.aborted) { cancelledSync(); return; }
+          // A permission or contract failure revokes reliance on any prior summary.
+          const transient = isTransientCampusSyncError(syncError);
+          snapshot = transient ? validCampusSenseSnapshot(sense, { uid, schoolId }) : null;
+          if (!snapshot) setSense(null);
+          setSenseError(snapshot
+            ? '校園連線失敗，改用先前已授權且未過期的摘要；這不是即時學校狀態。'
+            : transient
+              ? '校園連線失敗，改用手機已保存的個人課表；作業與公告沒有即時查證。'
+              : '校園權限或資料無法驗證，已捨棄校園摘要；僅能使用手機內已保存的個人課表。');
+        }
       }
-      if (!current() || controller.signal.aborted) return;
+      if (!planCurrent() || controller.signal.aborted) return;
       setSyncBusy(false);
       setSyncProgress(null);
       const next: CampusAssistantMessage[] = [
@@ -409,14 +447,17 @@ function AssistantConversation({
       const reply = await askCampusAssistant({
         scope: { uid, schoolId },
         schoolName,
-        senseSnapshot: snapshot,
+        ...(platformTimetable ? { platformTimetable, courseworkRequests } : { senseSnapshot: snapshot }),
         messages: next,
         mode: 'device',
-        isCurrent: current,
+        isCurrent: planCurrent,
         signal: controller.signal,
       });
-      if (controller.signal.aborted) return;
-      if (current()) {
+      if (controller.signal.aborted) {
+        if (platformTimetable && planCurrent()) setError('已取消這次規劃，原計畫與進度仍保留。');
+        return;
+      }
+      if (planCurrent()) {
         setMessages([
           ...next,
           {
@@ -431,6 +472,10 @@ function AssistantConversation({
             calendarTask: reply.calendarTask,
             calendarBatch: reply.calendarBatch,
             plan: reply.plan,
+            ...(original && reply.plan ? {
+              planComparison: compareCampusPlans(original.plan, reply.plan),
+              originalPlanId: original.id,
+            } : {}),
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
@@ -440,15 +485,21 @@ function AssistantConversation({
         setActiveShortcut(null);
       }
     } catch {
-      if (current() && !controller.signal.aborted) {
-        setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型。');
+      if (planCurrent()) {
+        if (platformTimetable) {
+          setError(controller.signal.aborted ? '已取消這次規劃，原計畫與進度仍保留。'
+            : '暫時無法整理這次計畫。請核對個人課表與 nuni 課程後再試一次。');
+        } else if (!controller.signal.aborted) {
+          setError('本機無法完成這次整理。請檢查已儲存課表或免費手機模型。');
+        }
       }
     } finally {
       if (inFlight.current === controller) inFlight.current = null;
+      if (replanInFlight.current === controller) replanInFlight.current = null;
       lock.current = false;
       syncLock.current = false;
       if (current()) {
-        if (controller.signal.aborted) setError('已停止這次本地整理。');
+        if (controller.signal.aborted) setError(platformTimetable ? '已取消這次規劃，原計畫與進度仍保留。' : '已停止這次本地整理。');
         setBusy(false);
         setSyncBusy(false);
         setSyncProgress(null);
@@ -600,8 +651,33 @@ function AssistantConversation({
     lastRevealed.current = index;
     scrollToEntry(event);
   };
-  const campusTools = platformTimetable ? null : (
+  const openPlanRoute = (route: CampusPlanRoute) => {
+    if (!current() || lock.current || syncLock.current) return;
+    if (platformTimetable) {
+      if (route === '/timetable') safeNavigate(navigation, 'PersonalTimetable');
+      else if (route === '/classroom') safeNavigate(navigation, 'NuniWorkspace', { tab: 'courses' });
+      return;
+    }
+    safeNavigate(navigation, VERIFIED_SERVICE_ROUTES[route].route);
+  };
+  const savedPlanTools = canSavePlans ? (
+        <SavedCampusPlansPanel
+          key={openedSavedPlan?.request ?? 'saved-plans'}
+          initialExpandedId={openedSavedPlan?.id}
+          plans={savedPlans.plans}
+          loading={savedPlans.loading}
+          busy={busy || syncBusy || calendarBusy || savedPlans.busy}
+          error={savedPlans.error}
+          onRetry={savedPlans.retry}
+          onDelete={(id) => { void savedPlans.remove(id); }}
+          onToggleStep={(id, stepId, done) => { void savedPlans.toggle(id, stepId, done); }}
+          onReplan={(saved) => { if (current()) void briefPlan(saved.question, saved.id); }}
+          onOpenRoute={openPlanRoute}
+        />
+      ) : null;
+  const campusTools = platformTimetable ? savedPlanTools : (
     <>
+      {savedPlanTools}
       <AICard
         title="工作模式"
         badge={mode === 'device' ? '手機內推論' : '校園連線'}
@@ -714,7 +790,7 @@ function AssistantConversation({
   );
   return (
     <AssistantConversationLayout
-      title={platformTimetable ? '課表助理' : '校園助理'}
+      title={platformTimetable ? '課業助理' : '校園助理'}
       subtitle={schoolName + ' · ' + (platformTimetable ? 'nuni 個人課表' : mode === 'device' ? '手機本地' : '校園連線')}
       panel={panel} onSelect={setPanel} locked={busy || syncBusy || calendarBusy} chatScroll={chatScroll}
       onBack={() => {
@@ -722,20 +798,22 @@ function AssistantConversation({
         navigation?.goBack?.();
       }}
       tools={campusTools}
+      toolsLabel={platformTimetable ? '已儲存計畫' : '校園工具'}
       composer={canAsk ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
           paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
           <TextInput
             accessibilityLabel="詢問校園助理"
             value={draft} maxLength={1600} multiline editable={!busy && !calendarBusy} onChangeText={editDraft}
-            placeholder={platformTimetable ? '問上課時間、教室或作業…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
+            placeholder={platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
             placeholderTextColor={aiTokens.muted}
             style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
               borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
               backgroundColor: aiTokens.panel, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16 }}
           />
           {calendarBusy ? <AIButton label="核對行程中…" size="sm" disabled /> : updatingReminder && busy ? <AIButton label="處理提醒中…" size="sm" disabled /> : busy && mode === 'device' ? (
-            <AIButton label={syncBusy ? '取消這次同步' : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
+            <AIButton label={syncBusy ? '取消這次同步' : platformTimetable && activeShortcut?.kind === 'brief' ? '取消這次規劃'
+              : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
           ) : (
             <AIButton label={busy ? '正在查詢…' : error && !activeShortcut ? '重試查詢' : '送出問題'}
@@ -744,6 +822,12 @@ function AssistantConversation({
         </View>
       ) : null}
     >
+      {canSavePlans && savedPlans.plans.length > 0 ? (
+        <View style={{ marginHorizontal: 16, marginBottom: 8 }}>
+          <AIButton label={`繼續已儲存的計畫（${savedPlans.plans.length}）`} variant="ghost"
+            disabled={busy || syncBusy || calendarBusy || savedPlans.busy} onPress={() => setPanel('tools')} />
+        </View>
+      ) : null}
       {!uid && mode === 'campus' && (
         <AICard title="校園即時查詢需要登入">
           <AIButton label="改問手機助理" onPress={() => changeMode('device')} />
@@ -791,6 +875,10 @@ function AssistantConversation({
               </View>
             )}
           </AssistantClassNowHint>
+          {platformTimetable ? (
+            <NuniStudyPlanActions disabled={busy || syncBusy || calendarBusy}
+              onToday={() => void briefPlan(TODAY_BRIEF)} onWeek={() => void briefPlan(WEEK_BRIEF)} />
+          ) : null}
         </AICard>
       ) : null}
       {platformTimetable && messages.length === 0 && !draft.trim() && !busy && !error ? (
@@ -970,22 +1058,72 @@ function AssistantConversation({
                 onAsk={(question) => void send({ kind: 'selection', question, checkedAt: currentSense.checkedAt })} />
             )}
             {message.plan ? (
-              <CampusEvidencePlanCard
+              <>
+                {message.planComparison ? (
+                  <CampusPlanComparisonCard
+                    comparison={message.planComparison}
+                    disabled={busy || syncBusy || savedPlans.busy}
+                    onOpenOriginal={message.originalPlanId && savedPlans.plans.some((saved) => saved.id === message.originalPlanId)
+                      ? () => {
+                        if (!current() || lock.current || syncLock.current || !message.originalPlanId) return;
+                        setOpenedSavedPlan((previous) => ({ id: message.originalPlanId!, request: (previous?.request ?? 0) + 1 }));
+                        setPanel('tools');
+                      } : undefined}
+                  />
+                ) : null}
+                <CampusEvidencePlanCard
                 plan={message.plan}
                 disabled={busy || syncBusy}
                 navigation={navigation}
-                reminderContext={{
+                reminderContext={platformTimetable ? undefined : {
                   userId: uid,
                   schoolId,
                   snapshot: currentSense,
                   isCurrent: current,
                 }}
-                onOpenRoute={(route: CampusPlanRoute) => {
-                  if (!current()) return;
-                  const destination = VERIFIED_SERVICE_ROUTES[route];
-                  if (current() && destination) safeNavigate(navigation, destination.route);
-                }}
-              />
+                renderAssignmentAction={platformTimetable && courseworkRequests ? (assignment) => (
+                  <NuniPlanAssignmentOpenButton
+                    assignment={assignment}
+                    context={{
+                      accountId: platformTimetable.accountId, schoolId,
+                      isCurrent: current, ...courseworkRequests, readTarget: readNuniPlanAssignmentTarget,
+                      readQuizTarget: readNuniPlanQuizTarget,
+                    }}
+                    navigation={navigation}
+                    disabled={busy || syncBusy}
+                  />
+                ) : undefined}
+                onOpenRoute={openPlanRoute}
+                />
+                {canSavePlans && messages[index - 1]?.role === 'user' ? (
+                  <View style={{ marginTop: 14, gap: 8 }}>
+                    {savedPlans.plans.some((saved) => saved.question === messages[index - 1].content.trim() &&
+                      saved.plan.checkedAt === message.plan?.checkedAt && saved.plan.content === message.plan.content) ? (
+                      <>
+                        <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.success, fontSize: 13 }}>計畫已儲存</Text>
+                        <AIButton label="查看已儲存計畫" variant="ghost" disabled={busy || syncBusy || savedPlans.busy}
+                          onPress={() => setPanel('tools')} />
+                      </>
+                    ) : (
+                      <AIButton label={savedPlans.busy ? '正在儲存計畫…' : '儲存這份計畫'} variant="ghost"
+                        disabled={busy || syncBusy || savedPlans.loading || savedPlans.busy}
+                        onPress={() => {
+                          if (current() && message.plan) void savedPlans.save(messages[index - 1].content, message.plan);
+                        }} />
+                    )}
+                    <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 19 }}>
+                      保留這次的安排，之後可回來記錄處理進度。只存於這台手機，登出時清除。
+                    </Text>
+                    {savedPlans.error ? (
+                      <View style={{ gap: 6 }}>
+                        <Text accessibilityRole="alert" style={{ color: aiTokens.danger }}>{savedPlans.error}</Text>
+                        <AIButton label="重新載入計畫" variant="ghost" disabled={savedPlans.busy || savedPlans.loading}
+                          onPress={savedPlans.retry} />
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+              </>
             ) : null}
             {message.source === 'campus' &&
               index === messages.length - 1 && message.proposals?.map((proposal, proposalIndex) => (
@@ -1067,7 +1205,8 @@ function AssistantConversation({
       ))}
       {busy && (
         <View onLayout={scrollToEntry}>
-          <AICard title={updatingReminder ? '正在處理作業提醒…' : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
+          <AICard title={updatingReminder ? '正在處理作業提醒…' : platformTimetable && activeShortcut?.kind === 'brief' ? '正在整理學習計畫…'
+            : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
               {activeShortcut?.question ?? draft.trim()}
             </Text>
@@ -1112,9 +1251,11 @@ function AssistantConversation({
           {activeShortcut && (activeShortcut.kind !== 'selection' || activeShortcut.checkedAt === currentSense?.checkedAt) ? (
             <AIButton label={activeShortcut.kind !== 'brief' ? `重試「${activeShortcut.question}」`
                 : activeShortcut.question === TODAY_ANNOUNCEMENTS ? '重新查今日公告'
-                : activeShortcut.question === TODAY_BRIEF ? '重新整理今日重點' : '重新規劃未來七天'} variant="ghost"
+                : activeShortcut.question === TODAY_BRIEF ? '重新整理今日重點'
+                : activeShortcut.question === WEEK_BRIEF ? '重新規劃未來七天' : '重試這次規劃'} variant="ghost"
               disabled={busy || syncBusy}
-              onPress={() => void (activeShortcut.kind === 'brief' ? briefPlan(activeShortcut.question) : send(activeShortcut))} />
+              onPress={() => void (activeShortcut.kind === 'brief'
+                ? briefPlan(activeShortcut.question, activeShortcut.savedPlanId) : send(activeShortcut))} />
           ) : null}
         </View>
       ) : null}
