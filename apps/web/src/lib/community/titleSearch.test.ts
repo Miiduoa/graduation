@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ server: vi.fn(), cache: vi.fn(), db: {} }));
+const mocks = vi.hoisted(() => ({ server: vi.fn(), cache: vi.fn(), open: vi.fn(), db: {} }));
 vi.mock('@/lib/firebase', () => ({ getDb: () => mocks.db }));
 vi.mock('firebase/firestore', async (importOriginal) => ({
   ...await importOriginal<typeof import('firebase/firestore')>(),
   collection: (_db: unknown, path: string) => ({ path }),
+  doc: (_db: unknown, ...parts: string[]) => ({ path: parts.join('/') }),
   documentId: () => '__name__',
   query: (source: unknown, ...constraints: unknown[]) => ({ source, constraints }),
   orderBy: (field: string, direction: string) => ({ orderBy: [field, direction] }),
@@ -13,10 +14,11 @@ vi.mock('firebase/firestore', async (importOriginal) => ({
   endBefore: (value: unknown) => ({ endBefore: value }),
   limit: (value: number) => ({ limit: value }),
   getDocsFromServer: mocks.server,
+  getDocFromServer: mocks.open,
   getDocs: mocks.cache,
 }));
 
-import { parseTitlePrefix, searchCampusPostTitles, titlePrefixUpperBound } from './titleSearch';
+import { confirmCampusPostTitleOpen, parseTitlePrefix, searchCampusPostTitles, titlePrefixUpperBound } from './titleSearch';
 
 function document(id: string, fields: Record<string, unknown> = {}) {
   return {
@@ -123,4 +125,44 @@ describe('authorized historical title index', () => {
     expect(Array.from(page.posts[0].excerpt)).toHaveLength(160);
     expect(page.nextCursor?.document.id).toBe('missing-title');
   });
+});
+
+describe('fresh server check before opening an older Web result', () => {
+  beforeEach(() => {
+    mocks.open.mockResolvedValue({ id: 'old-1001', exists: () => true,
+      metadata: { fromCache: false, hasPendingWrites: false },
+      data: () => ({ schoolId: 'pu', title: '二手書 old-1001', content: '可閱讀' }) });
+  });
+  it('reads the exact campus post document without a cached fallback', async () => {
+    await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).resolves.toBe(true);
+    expect(mocks.open).toHaveBeenCalledExactlyOnceWith({ path: 'schools/pu/campusPosts/old-1001' });
+    expect(mocks.cache).not.toHaveBeenCalled();
+  });
+  it('rejects a deleted or wrong-campus result', async () => {
+    mocks.open.mockResolvedValueOnce({ exists: () => false, metadata: { fromCache: false, hasPendingWrites: false } });
+    await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).resolves.toBe(false);
+    mocks.open.mockResolvedValueOnce({ id: 'old-1001', exists: () => true,
+      metadata: { fromCache: false, hasPendingWrites: false }, data: () => ({ schoolId: 'other' }) });
+    await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).resolves.toBe(false);
+  });
+  it('will not accept stale cache or optimistic writes', async () => {
+    for (const field of ['fromCache', 'hasPendingWrites']) {
+      mocks.open.mockResolvedValueOnce({ id: 'old-1001', exists: () => true,
+        metadata: { fromCache: false, hasPendingWrites: false, [field]: true },
+        data: () => ({ schoolId: 'pu' }) });
+      await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).rejects.toMatchObject({ code: 'unavailable' });
+    }
+  });
+  it('propagates a permission denial or an offline read', async () => {
+    for (const code of ['permission-denied', 'unavailable']) {
+      const failure = Object.assign(new Error(code), { code });
+      mocks.open.mockRejectedValueOnce(failure);
+      await expect(confirmCampusPostTitleOpen('pu', 'old-1001')).rejects.toBe(failure);
+    }
+  });
+  it.each([['', 'ok'], ['pu/other', 'ok'], ['pu', ''], ['pu', 'post/id']])
+    ('rejects an unsafe document path (%s, %s) before fetching', async (school, id) => {
+      await expect(confirmCampusPostTitleOpen(school, id)).rejects.toMatchObject({ code: 'invalid-argument' });
+      expect(mocks.open).not.toHaveBeenCalled();
+    });
 });

@@ -4,7 +4,7 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/
 import { disableNetwork, enableNetwork, type Firestore } from 'firebase/firestore';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getDb } from '@/lib/firebase';
-import { searchCampusPostTitles, type TitleSearchCursor } from './titleSearch';
+import { confirmCampusPostTitleOpen, searchCampusPostTitles, type TitleSearchCursor } from './titleSearch';
 import { fetchCampusPostPage } from './feedPages';
 
 vi.mock('@/lib/firebase', () => ({ getDb: vi.fn() }));
@@ -128,5 +128,34 @@ suite('title search using the real SDK and repository authorization rules', () =
     vi.mocked(getDb).mockReturnValue(environment.authenticatedContext('charlie').firestore() as unknown as Firestore);
     await expect(searchCampusPostTitles('other', '二手書', first.nextCursor)).rejects.toMatchObject({ code: 'invalid-argument' });
     expect((await searchCampusPostTitles('other', '二手書')).posts.map((row) => row.id)).toEqual(['private']);
+  });
+  it('rechecks existing, deleted, revoked, offline and cross-campus links with real rules', async () => {
+    vi.mocked(getDb).mockReturnValue(alice);
+    const path = 'schools/pu/campusPosts/web-check';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(path).set({ schoolId: 'pu', boardId: 'public',
+        title: '二手書 伺服器確認', content: '仍在校內', authorUid: 'alice' });
+    });
+    expect(await confirmCampusPostTitleOpen('pu', 'web-check')).toBe(true);
+    await disableNetwork(alice);
+    try {
+      await expect(confirmCampusPostTitleOpen('pu', 'web-check')).rejects.toMatchObject({ code: 'unavailable' });
+    } finally { await enableNetwork(alice); }
+    const membership = 'schools/pu/members/alice';
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(membership).update({ status: 'inactive' });
+    });
+    try {
+      await expect(confirmCampusPostTitleOpen('pu', 'web-check')).rejects.toMatchObject({ code: 'permission-denied' });
+    } finally {
+      await environment.withSecurityRulesDisabled(async (context) => {
+        await context.firestore().doc(membership).update({ status: 'active' });
+      });
+    }
+    await expect(confirmCampusPostTitleOpen('other', 'private')).rejects.toMatchObject({ code: 'permission-denied' });
+    await environment.withSecurityRulesDisabled(async (context) => {
+      await context.firestore().doc(path).delete();
+    });
+    expect(await confirmCampusPostTitleOpen('pu', 'web-check')).toBe(false);
   });
 });

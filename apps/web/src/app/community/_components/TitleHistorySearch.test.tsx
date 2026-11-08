@@ -211,3 +211,35 @@ it('does not navigate offline, keeps the result for a fresh on-demand retry', as
   await waitFor(() => expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/community/post/old-1001?schoolId=pu'));
   expect(mocks.confirm).toHaveBeenCalledTimes(2);
 });
+
+it('confirms at most once during two rapid clicks and navigates only after success', async () => {
+  const pending = deferred<boolean>();
+  mocks.confirm.mockReturnValueOnce(pending.promise);
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const link = await screen.findByRole('link', { name: '二手書 old-1001' });
+  fireEvent.click(link);
+  fireEvent.click(link);
+  expect(mocks.confirm).toHaveBeenCalledTimes(1);
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  await act(async () => pending.resolve(true));
+  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/community/post/old-1001?schoolId=pu');
+  fireEvent.click(link);
+  expect(mocks.navigate).toHaveBeenCalledTimes(1);
+});
+it.each(['query', 'school', 'account'])('ignores a stale open result after %s changes', async (scope) => {
+  const pending = deferred<boolean>();
+  mocks.confirm.mockReturnValueOnce(pending.promise);
+  const view = render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  if (scope === 'query') fireEvent.change(screen.getByRole('searchbox'), { target: { value: '租屋' } });
+  if (scope === 'school') view.rerender(<TitleHistorySearch schoolId="other" />);
+  if (scope === 'account') {
+    mocks.auth.user = { uid: 'bob' };
+    view.rerender(<TitleHistorySearch schoolId="pu" />);
+  }
+  await act(async () => pending.resolve(true));
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  expect(screen.queryByRole('article')).toBeNull();
+});
