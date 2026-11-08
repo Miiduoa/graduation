@@ -46,6 +46,7 @@ import styles from './CourseStudyPanel.module.css';
 type Material = { id: string; title: string; body: string };
 type Props = { courseTitle: string; scope: CourseStudyProgressScope; material?: Material; onClose: () => void };
 type RestorePreview = { filename: string; progress: CourseStudyProgressData; round: StudyPracticeRound | null };
+type PendingSource = { source: StudySource; clearPaste: boolean };
 
 function initialMaterial(material?: Material): { source: StudySource | null; error: string } {
   if (!material?.body.trim()) return { source: null, error: '' };
@@ -78,6 +79,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [downloadStatus, setDownloadStatus] = useState('');
   const [downloadError, setDownloadError] = useState('');
   const [confirmClose, setConfirmClose] = useState(false);
+  const [pendingSource, setPendingSource] = useState<PendingSource | null>(null);
   const [manualCopyText, setManualCopyText] = useState<string | null>(null);
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
@@ -85,6 +87,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const closeHeading = useRef<HTMLHeadingElement>(null);
+  const replaceHeading = useRef<HTMLHeadingElement>(null);
+  const sourceInput = useRef<HTMLInputElement>(null);
+  const pasteStart = useRef<HTMLButtonElement>(null);
+  const latestSourceState = useRef({ hasSource: false, hasStudyChanges: false });
   const readingFocus = useRef<HTMLDivElement>(null);
   const focusReadingOnReturn = useRef(false);
   const restoreHeading = useRef<HTMLHeadingElement>(null);
@@ -98,6 +104,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const modeId = useId();
   const headingId = useId();
   const closeHeadingId = useId();
+  const replaceHeadingId = useId();
   const sectionPassages = useMemo(() => source?.sections.map(splitStudySection) ?? [], [source]);
   const section = source?.sections[sectionIndex];
   const passages = sectionPassages[sectionIndex] ?? [];
@@ -109,10 +116,13 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const memory = session.passages[passageKey] ?? emptyStudyPassage();
   const hasNotes = Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) => value.lessons.length));
-  // Question drafts are not part of hasNotes, but closing must protect them too.
-  const hasWorkToKeep = paste.length > 0 || !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
+  // Include unsent questions and active practice: importing a new source would otherwise erase them.
+  const hasStudyChanges = !!practiceRound || !!pausedRound || Object.values(session.passages).some((item) =>
     item.note.trim() || item.needsReview || Object.values(item.modes).some((value) =>
       value.question.trim() || value.lessons.length));
+  const hasWorkToKeep = paste.length > 0 || hasStudyChanges;
+  // A local file can finish reading after the student has edited a note.
+  latestSourceState.current = { hasSource: !!source, hasStudyChanges };
   const reviewPassages = sectionPassages.flatMap((parts, sectionNumber) =>
     parts.flatMap((part, partNumber) =>
       session.passages[`${sectionNumber}:${partNumber}`]?.needsReview
@@ -196,6 +206,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }, [confirmClose]);
 
   useEffect(() => {
+    if (pendingSource) replaceHeading.current?.focus();
+  }, [pendingSource]);
+
+  useEffect(() => {
     if (manualCopyText !== null) manualCopyInput.current?.focus();
   }, [manualCopyText]);
 
@@ -229,8 +243,19 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setRestorePreview(null);
     setRestoredFile(null);
     setConfirmClose(false);
+    setPendingSource(null);
     clearDownload();
     setError('');
+  }
+
+  // Keep the current notes and practice until the learner explicitly accepts a replacement.
+  function requestSourceReplacement(value: StudySource, clearPaste: boolean) {
+    if (latestSourceState.current.hasSource && latestSourceState.current.hasStudyChanges) {
+      setPendingSource({ source: value, clearPaste });
+      return;
+    }
+    replaceSource(value);
+    if (clearPaste) setPaste('');
   }
 
   function downloadFile(contents: () => Blob, filename: string, label: string) {
@@ -331,6 +356,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     read.current = controller;
     setReading('progress');
     setRestorePreview(null);
+    setPendingSource(null);
     setError('');
     try {
       if (!/\.json$/i.test(file.name)) throw new Error('請選擇之前儲存的 Campus One 閱讀進度檔（JSON）。');
@@ -368,6 +394,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setRestoredFile(filename);
     setRestorePreview(null);
     setConfirmClose(false);
+    setPendingSource(null);
     setPaste('');
     clearDownload();
     setError('');
@@ -379,6 +406,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     read.current = controller;
     setReading('source');
     setRestorePreview(null);
+    setPendingSource(null);
     setError('');
     try {
       if (!/\.(pdf|txt|md)$/i.test(file.name)) throw new Error('請選擇 PDF、TXT 或 Markdown 文字檔。');
@@ -387,7 +415,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         ? studySourceFromDocument(await readPersonalImportDocumentFile(file, controller.signal))
         : studySourceFromText({ id: 'local-text', title: file.name, text: await file.text() });
       if (read.current !== controller || controller.signal.aborted) return;
-      replaceSource(value);
+      requestSourceReplacement(value, false);
     } catch (failure) {
       if (read.current !== controller || controller.signal.aborted) return;
       setError(failure instanceof Error ? failure.message : '檔案未能讀取，請重試。');
@@ -413,6 +441,22 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
             setConfirmClose(true);
           }}>收起白板</button>
       </header>
+      {pendingSource && <section className={styles.restorePreview} aria-labelledby={replaceHeadingId}>
+        <h4 id={replaceHeadingId} ref={replaceHeading} tabIndex={-1}>要改讀另一份教材嗎？</h4>
+        <p className={styles.note}>準備改讀「{pendingSource.source.title}」。確認後會取代目前教材、筆記、未送出的問題和逐題練習，且無法從這個分頁復原。需要保留請先取消並儲存閱讀或練習 JSON。</p>
+        <div className={styles.actions}>
+          <button type="button" className={`${styles.button} ${styles.primary}`} onClick={() => {
+            const next = pendingSource;
+            replaceSource(next.source);
+            if (next.clearPaste) setPaste('');
+          }}>確認改讀新教材</button>
+          <button type="button" className={styles.button} onClick={() => {
+            const trigger = pendingSource.clearPaste ? pasteStart.current : sourceInput.current;
+            setPendingSource(null);
+            trigger?.focus();
+          }}>保留原本的學習內容</button>
+        </div>
+      </section>}
       {confirmClose && <section className={styles.closeWarning} aria-labelledby={closeHeadingId}>
         <h4 id={closeHeadingId} ref={closeHeading} tabIndex={-1}>要關閉讀書白板嗎？</h4>
         <p className={styles.note}>關閉會清除目前分頁的筆記、未送出問題與逐題練習。若要下次繼續，請先取消關閉並儲存閱讀或練習進度；下載檔案不會自動上傳。</p>
@@ -460,7 +504,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
         <summary>{source ? '換一份講義或貼上內容' : '選擇要讀的內容'}</summary>
         <div className={styles.importBody}>
           <label className={styles.field} htmlFor={inputId}>選擇講義
-            <input id={inputId} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+            <input ref={sourceInput} id={inputId} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
               disabled={!!reading} onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
@@ -470,14 +514,14 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <p className={styles.note}>PDF 最多 20 頁、8 MiB；文字最多 60,000 字元。檔案在此裝置讀取，公式、圖表與掃描辨識結果請對照原檔。</p>
           <label className={styles.field} htmlFor={pasteId}>或貼上課文與筆記
             <textarea id={pasteId} rows={4} value={paste} disabled={!!reading}
-              onChange={(event) => setPaste(event.target.value)} placeholder="貼上想理解的段落…" />
+              onChange={(event) => { setPaste(event.target.value); setPendingSource(null); }} placeholder="貼上想理解的段落…" />
           </label>
           <p className={paste.length > STUDY_TUTOR_LIMITS.textCharacters ? styles.error : styles.note}>
             {paste.length.toLocaleString('zh-TW')} / 60,000 字元{paste.length > STUDY_TUTOR_LIMITS.textCharacters ? '，請分成較短的章節；內容尚未加入白板。' : ''}
           </p>
-          <button type="button" className={styles.button} disabled={!!reading || !paste.trim() || paste.length > STUDY_TUTOR_LIMITS.textCharacters}
+          <button ref={pasteStart} type="button" className={styles.button} disabled={!!reading || !paste.trim() || paste.length > STUDY_TUTOR_LIMITS.textCharacters}
             onClick={() => {
-              try { replaceSource(studySourceFromText({ id: 'pasted', title: '貼上的筆記', text: paste })); setPaste(''); }
+              try { requestSourceReplacement(studySourceFromText({ id: 'pasted', title: '貼上的筆記', text: paste }), true); }
               catch (failure) { setError(failure instanceof Error ? failure.message : '文字無法讀取。'); }
             }}>開始讀這份內容</button>
         </div>

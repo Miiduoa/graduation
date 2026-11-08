@@ -395,12 +395,64 @@ it('clears all study memory when another PDF has the same filename and page IDs'
   fireEvent.change(screen.getByLabelText(questionLabel), { target: { value: '舊教材的問題' } });
   fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
   upload();
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('舊教材的私有筆記');
+  expect(screen.queryByText('新的一份檔案，主題是交易。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
   await screen.findByText('新的一份檔案，主題是交易。');
   expect(inputValue(noteLabel)).toBe('');
   expect(inputValue(questionLabel)).toBe('');
   expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();
   expect(screen.queryByRole('region', { name: '本段 AI 講解' })).toBeNull();
   expect(screen.queryByLabelText('這一段的講解記錄')).toBeNull();
+});
+
+it('cancels a successful local file replacement without losing the study draft or source', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '保留這份資料庫筆記' } });
+  fireEvent.change(screen.getByLabelText(questionLabel), { target: { value: '未送出的問題也要保留' } });
+  const input = screen.getByLabelText('選擇講義') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['交易必須一致。'], '其他講義.txt', { type: 'text/plain' })] } });
+  expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' }));
+  expect(inputValue(noteLabel)).toBe('保留這份資料庫筆記');
+  expect(screen.queryByText('交易必須一致。')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(document.activeElement).toBe(input);
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('保留這份資料庫筆記');
+  expect(inputValue(questionLabel)).toBe('未送出的問題也要保留');
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('requires explicit confirmation before pasted text replaces a practice, and cancels without losing the answer', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  await generate();
+  fireEvent.click(screen.getByRole('button', { name: '開始逐題複習' }));
+  fireEvent.change(screen.getByLabelText('這一題，我的回答'), { target: { value: '未保存的本輪回答' } });
+  const pasted = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(pasted, { target: { value: '下一份教材的內容' } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect((screen.getByLabelText('這一題，我的回答') as HTMLTextAreaElement).value).toBe('未保存的本輪回答');
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(pasted.value).toBe('下一份教材的內容');
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect(screen.getByText('下一份教材的內容')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '第 1 題' })).toBeNull();
+  expect(pasted.value).toBe('');
+});
+
+it('keeps a fresh untouched source replacement direct without extra confirmation', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: '直接改讀新的講義內容' } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+  expect(screen.getByText('直接改讀新的講義內容')).toBeTruthy();
+  expect((screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement).value).toBe('');
 });
 
 it('keeps the existing notes if replacing the source fails or is cancelled', async () => {
@@ -508,6 +560,9 @@ it('downloads only after an explicit click, recovers from download failure, and 
     expect(revoke).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: '另一份教材' } });
     fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+    expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+    expect(revoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
     expect(revoke).toHaveBeenCalledWith('blob:study-notes');
     expect(screen.getByRole('button', { name: '下載本次筆記' }).hasAttribute('disabled')).toBe(true);
   } finally {
