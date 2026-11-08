@@ -272,6 +272,30 @@ describe('saved class gap answer', () => {
     expect(invalidContainer.content).not.toContain('沒有課間空堂');
   });
 
+  test('rejects duplicate and overlapping free intervals without treating another day as an overlap', () => {
+    const invalid = [
+      [gap('14:00', '15:00'), gap('14:30', '16:00')],
+      [gap('14:00', '15:00'), gap('14:00', '15:00')],
+      [gap('14:00', '15:00'), gap('13:30', '14:01')],
+    ];
+    for (const classGaps of invalid) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, classGaps },
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('無法核對');
+      expect(answer.content).not.toContain('有 2 段');
+      expect(answer.content).not.toContain('沒有課間空堂');
+    }
+    const unrelatedDay = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [
+        gap('14:00', '15:00'), gap('14:30', '16:00', '2026-11-07'),
+      ] },
+    }).content;
+    expect(unrelatedDay).toContain('有 1 段');
+    expect(unrelatedDay).toContain('14:00–15:00（60 分鐘）');
+  });
+
   test('distinguishes a known empty result from missing, unreadable or incomplete evidence', () => {
     const answer = (timetable: Partial<OnDeviceSchoolContext['timetable']>, checkedAt = context.checkedAt) =>
       answerSavedClassGapQuery(today, { ...context, checkedAt, timetable: { ...context.timetable, ...timetable } }).content;
