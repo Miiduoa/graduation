@@ -4,13 +4,15 @@ import type { TitleSearchPage } from '@/lib/community/titleSearch';
 
 const mocks = vi.hoisted(() => ({
   auth: { user: { uid: 'alice' } as { uid: string } | null, loading: false },
-  search: vi.fn(),
+  search: vi.fn(), confirm: vi.fn(), navigate: vi.fn(),
 }));
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => mocks.auth }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.navigate }) }));
 vi.mock('next/link', () => ({ default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a> }));
 vi.mock('@/lib/community/titleSearch', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/community/titleSearch')>(),
   searchCampusPostTitles: mocks.search,
+  confirmCampusPostTitleOpen: mocks.confirm,
 }));
 import { TitleHistorySearch } from './TitleHistorySearch';
 
@@ -35,6 +37,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.auth = { user: { uid: 'alice' }, loading: false };
   mocks.search.mockResolvedValue(page());
+  mocks.confirm.mockResolvedValue(true);
 });
 afterEach(cleanup);
 
@@ -172,4 +175,39 @@ it('waits for authentication and never searches as a signed-out student', async 
   view.rerender(<TitleHistorySearch schoolId="pu" />);
   await waitFor(() => expect(screen.queryByRole('searchbox')).toBeNull());
   expect(mocks.search).not.toHaveBeenCalled();
+});
+
+it('prevents opening a deleted result and does not navigate to an invalid old post', async () => {
+  mocks.confirm.mockResolvedValueOnce(false);
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const link = await screen.findByRole('link', { name: '二手書 old-1001' });
+  fireEvent.click(link);
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001'));
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  expect(screen.queryByRole('link', { name: '二手書 old-1001' })).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('已刪除');
+});
+it('verifies permission before navigation; revoked membership clears the old list', async () => {
+  mocks.confirm.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledTimes(1));
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  expect(screen.queryByRole('article')).toBeNull();
+  expect(screen.getByRole('alert').textContent).toContain('權限');
+});
+it('does not navigate offline, keeps the result for a fresh on-demand retry', async () => {
+  mocks.confirm.mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const link = await screen.findByRole('link', { name: '二手書 old-1001' });
+  fireEvent.click(link);
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledTimes(1));
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
+  fireEvent.click(link);
+  await waitFor(() => expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/community/post/old-1001?schoolId=pu'));
+  expect(mocks.confirm).toHaveBeenCalledTimes(2);
 });
