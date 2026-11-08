@@ -270,18 +270,32 @@ async def tracing_mobile(page, _requests, _resources):
     await canvas.scroll_into_view_if_needed()
     await page.screenshot(path=str(OUT / 'building-tracing-mobile.png'))
     await build_tracing(page)
+    original_plan = await download_plan(page)
     await no_overflow(page)
     await preview(page).get_by_role('button', name='返回圖面編輯', exact=True).click()
     await preview(page).get_by_label('選擇圖面圖片', exact=True).set_input_files({
         'name': 'broken.png', 'mimeType': 'image/png', 'buffer': b'not image pixels'})
     await expect(preview(page).get_by_role('alert')).to_be_visible()
-    await expect(canvas).to_have_count(0)
-    await expect(preview(page).get_by_role('button', name='建立立體預覽', exact=True)).to_have_count(0)
+    # A decode failure leaves the same reference and completed outline usable.
+    await expect(canvas).to_be_visible()
+    await expect(canvas.locator('image')).to_have_attribute('href', source_url)
+    await expect(preview(page).get_by_role('button', name='建立立體預覽', exact=True)).to_be_enabled()
+    assert source_url not in await page.evaluate('window.__planUrls.revoked')
+    await build_tracing(page)
+    assert await download_plan(page) == original_plan
+    await preview(page).get_by_role('button', name='返回圖面編輯', exact=True).click()
+    # A valid replacement still releases the old reference and resets geometry.
+    await preview(page).get_by_label('選擇圖面圖片', exact=True).set_input_files({
+        'name': 'replacement.png', 'mimeType': 'image/png', 'buffer': reference_png()})
+    await expect(canvas.locator('image')).not_to_have_attribute('href', source_url)
+    await expect(preview(page).get_by_role('alert')).to_have_count(0)
+    await expect(preview(page)).to_contain_text('樓層外框描點：0 / 64')
+    await expect(preview(page).get_by_role('button', name='建立立體預覽', exact=True)).to_be_disabled()
     assert source_url in await page.evaluate('window.__planUrls.revoked')
     await no_overflow(page)
     return {'width': 320, 'nativeTouchInputs': touch, 'keyboardPointInput': True,
             'nativeVerticalScroll': {'before': before, 'after': after}, 'scrollAddsNoPoints': True,
-            'outlineOnlyPreview': True, 'badReplacementClearsReference': True}
+            'outlineOnlyPreview': True, 'badReplacementPreservesDraft': True, 'successfulReplacementResetsDraft': True}
 
 
 async def building_project_desktop(page, _requests, _resources):
@@ -616,6 +630,9 @@ async def building_mobile(page, _requests, _resources):
 async def building_import(page, _requests, _resources):
     await open_plan(page)
     await open_3d(page)
+    original_plan = await download_plan(page)
+    original_canvas = await page.locator(CANVAS).element_handle()
+    assert original_canvas is not None
     plan = {
         'version': 1, 'schoolId': 'another-school', 'buildingId': spatial.LIBRARY['id'],
         'name': '待核對測試圖面', 'units': 'm', 'verified': True,
@@ -627,16 +644,25 @@ async def building_import(page, _requests, _resources):
     upload = preview(page).get_by_label('匯入 JSON 圖面', exact=True)
     await upload.set_input_files({'name': 'wrong-school.json', 'mimeType': 'application/json',
                                  'buffer': json.dumps(plan).encode()})
-    await expect(preview(page)).to_contain_text('不屬於目前學校或建築')
-    await expect(page.locator(CANVAS)).to_have_count(0)
+    await expect(preview(page).get_by_role('alert')).to_contain_text('不屬於目前學校或建築')
+    try:
+        await expect(page.locator(CANVAS)).to_have_count(1)
+        assert await page.locator(CANVAS).evaluate('(canvas, original) => canvas === original', original_canvas)
+        assert await download_plan(page) == original_plan
+    finally:
+        await original_canvas.dispose()
     plan['schoolId'] = 'pu'
     await upload.set_input_files({'name': 'local-plan.json', 'mimeType': 'application/json',
                                  'buffer': json.dumps(plan).encode()})
     await expect(preview(page)).to_contain_text('待核對圖面')
     await expect(preview(page)).to_contain_text('測試教室 101')
+    await expect(preview(page).get_by_role('alert')).to_have_count(0)
+    await expect(page.locator(CANVAS)).to_have_count(0)
+    imported = await download_plan(page)
+    assert imported['name'] == plan['name'] and imported['floors'] == plan['floors'], imported
     await expect(preview(page).get_by_role('link', name='開啟步行導航')).to_have_count(0)
     await page.screenshot(path=str(OUT / 'building-import-pending.png'))
-    return {'crossSchoolRejected': True, 'localImport': True, 'importStaysUnverified': True}
+    return {'crossSchoolRejected': True, 'rejectedImportPreservesPreview': True, 'localImport': True, 'importStaysUnverified': True}
 
 
 async def main():

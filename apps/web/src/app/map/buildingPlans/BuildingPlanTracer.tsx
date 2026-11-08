@@ -245,7 +245,7 @@ function TracerWorkspace({ schoolId, buildingId, buildingName, initialProject, o
       {reference && <button type="button" disabled={reading || saving} onClick={() => { void downloadProject(); }}>
         {saving ? '正在準備編輯檔…' : '下載編輯檔'}
       </button>}
-      <span className={styles.hint}>PNG／JPEG／WebP，10 MiB 內。換圖會清除描點與比例。</span>
+      <span className={styles.hint}>PNG／JPEG／WebP，10 MiB 內。成功換圖後會清除房間、描點與比例；讀取失敗則保留原有內容。</span>
     </div>
     {reading && <p role="status">正在讀取圖面圖片…</p>}
     {notice && <p role="status" className={styles.hint}>{notice}</p>}
