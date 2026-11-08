@@ -107,6 +107,14 @@ export function savedClassGaps(
   if (!groups) return undefined;
   const entries = scheduledDay(groups, schoolId, date, true);
   if (!entries) return undefined;
+  // Dated makeup meetings can occupy this day regardless of their course's term.
+  // Keep the term-limited schedule used by current/next class queries unchanged.
+  for (const group of groups.filter((group) => group.term !== academicTerm(date))) {
+    const plan = buildPersonalToday(group.rows, { schoolId, now: date });
+    entries.push(...plan.today.filter((entry) => entry.row.classExceptions?.some((change) =>
+      change.kind === 'move' && change.originalDate === entry.originalDate &&
+      change.date === classDate(new Date(entry.startAt)) && change.startTime === entry.startTime)));
+  }
   const midnight = Date.parse(`${classDate(date)}T00:00:00+08:00`);
   // buildPersonalToday also lists the previous weekday; gaps only use meetings that occupy this date.
   const onDay = entries.filter((entry) => entry.endAt > midnight && entry.startAt < midnight + DAY);

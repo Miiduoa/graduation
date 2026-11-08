@@ -103,6 +103,23 @@ test('a previous-term class ending after midnight bounds the first gap of the ne
   }]);
 });
 
+test('a previous-term makeup on the second day of the new term splits the free period', () => {
+  const makeup = meeting('前學期補課', '08:00', '09:00');
+  const rows: PersonalImportRecord[] = [
+    { ...meeting('上午課', '09:00', '10:00', 2), semester: '2' },
+    { ...meeting('下午課', '14:00', '15:00', 2), semester: '2' },
+    { ...makeup, classExceptions: [{
+      id: 'makeup', kind: 'move', original: makeup, originalDate: '2027-01-29',
+      courseKey: classMeetingKey(makeup), createdAt: makeup.importedAt,
+      date: '2027-02-02', startTime: '11:00', endTime: '12:00',
+    }] },
+  ];
+  expect(savedClassGaps(rows, 'pu', new Date('2027-02-02T08:00:00+08:00'), 'today')).toEqual([
+    { startAt: Date.parse('2027-02-02T10:00:00+08:00'), endAt: Date.parse('2027-02-02T11:00:00+08:00') },
+    { startAt: Date.parse('2027-02-02T12:00:00+08:00'), endAt: Date.parse('2027-02-02T14:00:00+08:00') },
+  ]);
+});
+
 test('the day after tomorrow uses the Taiwan date and retains Sunday meetings', () => {
   const sunday = [meeting('週日上午', '09:00', '10:00', 7), meeting('週日下午', '14:00', '15:00', 7)];
   expect(savedClassGaps([first, last, ...sunday], 'pu', new Date('2026-11-05T16:30:00Z'), 'day-after-tomorrow')).toEqual([{
