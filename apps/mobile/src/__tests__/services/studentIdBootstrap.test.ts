@@ -614,15 +614,22 @@ test('verified AI scope uses the actual school-login user and session revocation
 });
 
 
-test('a restored school session assertion is invalidated by logout', () => {
-  const assertCurrent = captureSchoolSessionAssertion();
-  expect(assertCurrent).not.toThrow();
+test('a missing school session is rejected and logout invalidates its assertion', () => {
+  const assertCurrent = captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' });
+  expect(assertCurrent).toThrow('學校 session 無效或已過期');
   clearPUSession();
   expect(assertCurrent).toThrow('學校登入已變更');
 });
 
 test('a restored school session assertion cannot survive a new login round for the same owner', async () => {
-  const assertCurrent = captureSchoolSessionAssertion();
+  const assertCurrent = captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' });
   await signInWithStudentId(params);
   expect(assertCurrent).toThrow('學校登入已變更');
+});
+
+
+test('a successful login without a known session expiry cannot authorize cache restoration', async () => {
+  await signInWithStudentId(params);
+  const assertCurrent = captureSchoolSessionAssertion({ uid: serverUid, schoolId: 'pu' });
+  expect(assertCurrent).toThrow('學校 session 無效或已過期');
 });

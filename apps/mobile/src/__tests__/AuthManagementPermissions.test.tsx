@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getPostLoginContext } from '../data/postLoginDataRouter';
 import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
 import { getAnyCachedAnnouncements, getAnyCachedCourses, getAnyCachedTCCourses } from '../services/puDataCache';
+import type { PUSession } from '../services/puDirectScraper';
 import type { PostLoginContext } from '../data/postLoginTypes';
 import { AuthProvider, useAuth } from '../state/auth';
 import { SchoolProvider, useSchool } from '../state/school';
@@ -13,6 +14,8 @@ import { executeSmartAction } from '../services/aiSmartActions';
 import { loadMockAuthSession } from '../services/mockAuth';
 import { getVerifiedSchoolAiScope, isVerifiedSchoolAiScopeCurrent, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
 
+let mockPUSession: PUSession | null;
+let mockSchoolGeneration = 0;
 let mockAuthCallback: ((user: User | null) => Promise<void>) | null = null;
 let mockHasFirebaseConfig = true;
 let mockTokenCallback: (user: User | null, error: Error | null) => void;
@@ -78,8 +81,11 @@ jest.mock('../services/supabaseLmsCache', () => ({
   getAnyCachedTCCourses: jest.fn(async () => null),
 }));
 jest.mock('../services/studentIdAuth', () => ({
-  clearPUSession: jest.fn(),
-  captureSchoolSessionAssertion: () => () => undefined,
+  clearPUSession: jest.fn(() => { mockPUSession = null; mockSchoolGeneration += 1; }),
+  captureSchoolSessionAssertion: (identity: { uid: string; schoolId: string }) =>
+    jest.requireActual('../services/schoolSessionAssertion').createSchoolSessionAssertion(
+      identity, () => mockPUSession, () => mockSchoolGeneration,
+    ),
 }));
 jest.mock('../services/clearOwnedPuCampusSessions', () => ({
   clearOwnedPuCampusSessions: jest.fn().mockResolvedValue(undefined),
@@ -132,6 +138,10 @@ async function signIn(uid = 'u1') {
 beforeEach(async () => {
   jest.clearAllMocks();
   revokeVerifiedSchoolAiScope();
+  mockPUSession = {
+    loggedIn: true, studentName: '同學', backendOwnerUid: 'u1', schoolId: 'pu',
+    localMock: false, expiresAt: Date.now() + 60_000,
+  };
   let held: PostLoginContext | null = null;
   jest.mocked(getPostLoginContext).mockReset().mockResolvedValue(null);
   jest.mocked(getInMemoryPostLoginContext).mockImplementation(() => held);
@@ -508,3 +518,37 @@ test.each(['signout', 'account', 'expired'])(
     expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
   },
 );
+
+
+test.each([
+  ['no session', null],
+  ['localMock', { localMock: true }],
+  ['expired', { expiresAt: 0 }],
+  ['expires now', { expiresAt: Date.now() }],
+  ['unknown expiry', { expiresAt: undefined }],
+  ['different uid', { backendOwnerUid: 'u2' }],
+  ['missing verified owner', { backendOwnerUid: undefined }],
+  ['different school', { schoolId: 'nthu' }],
+  ['school alias mismatch', { schoolId: 'tw-pu' }],
+] as const)('restoration with %s cannot bind AI scope or expose campus caches', async (_label, patch) => {
+  mockPUSession = patch === null ? null : { ...mockPUSession!, ...patch };
+  jest.mocked(getPostLoginContext).mockResolvedValue(taggedContext('u1'));
+  mountProvider();
+  await signIn();
+  expect(getInMemoryPostLoginContext()).toBeNull();
+  const identity = { userId: 'u1', schoolId: 'pu' };
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  expect(await executeSmartAction('query_assignments', identity)).toMatchObject({ success: false });
+  expect(getAnyCachedCourses).not.toHaveBeenCalled();
+});
+
+test('a valid restored session expires during use and loses AI access', async () => {
+  jest.mocked(getPostLoginContext).mockResolvedValue(taggedContext('u1'));
+  mountProvider();
+  await signIn();
+  const identity = { userId: 'u1', schoolId: 'pu' };
+  expect(getVerifiedSchoolAiScope(identity)).not.toBeNull();
+  mockPUSession!.expiresAt = Date.now() - 1;
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  expect(await executeSmartAction('query_assignments', identity)).toMatchObject({ success: false });
+});

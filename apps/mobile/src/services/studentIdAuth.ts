@@ -6,6 +6,7 @@
  */
 
 import Constants from 'expo-constants';
+import { createSchoolSessionAssertion } from './schoolSessionAssertion';
 import { assertPuEcampusDataFetchEnabled } from '@campus/shared/src/puEcampusDataPolicy';
 import {
   STUDENT_LOGIN_CLIENT_TIMEOUT_MS,
@@ -67,15 +68,9 @@ export function getPUSession(): PUSession | null {
   return _currentPUSession;
 }
 
-/** 還原的快照也必須隨後續學校登入或 session 清除而失效。 */
-export function captureSchoolSessionAssertion(): () => void {
-  const generation = schoolLoginGeneration;
-  const session = _currentPUSession;
-  return () => {
-    if (generation !== schoolLoginGeneration || session !== _currentPUSession) {
-      throw new Error('學校登入已變更，請重新登入。');
-    }
-  };
+/** 重啟沒有還原 PU session 時拒絕；快取 origin 不是 session 證明。 */
+export function captureSchoolSessionAssertion(identity: { uid: string; schoolId: string }): () => void {
+  return createSchoolSessionAssertion(identity, () => _currentPUSession, () => schoolLoginGeneration);
 }
 
 export function clearPUSession(): void {
@@ -587,6 +582,8 @@ async function handleBackendLoginSuccess(
     studentName: displayName,
     backendSessionId: puSessionId,
     backendOwnerUid: data.localMock ? undefined : uid,
+    schoolId: params.schoolId,
+    localMock: Boolean(data.localMock),
   };
   loginSession = session;
   _currentPUSession = session;

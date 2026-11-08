@@ -522,7 +522,9 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     let active = true;
     let restored: Awaited<ReturnType<typeof getPostLoginContext>> = null;
     const auth = getAuthInstance();
-    const assertSchoolSession = captureSchoolSessionAssertion();
+    // PU session 目前僅存在記憶體，冷啟動不會還原；期限未知也拒絕綁定。
+    // 下一次成功學校登入仍由 studentIdAuth 的已驗證登入流程綁定。
+    const assertSchoolSession = captureSchoolSessionAssertion({ uid, schoolId: profileSchoolId });
     const assertRestoredSession = () => {
       assertSchoolSession();
       if (!active || auth.currentUser !== user || isSigningOutRef.current) {
