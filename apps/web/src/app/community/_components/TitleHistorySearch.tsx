@@ -1,16 +1,17 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { useAuth } from '@/components/AuthGuard';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import {
-  parseTitlePrefix, searchCampusPostTitles, type TitleSearchPage,
+  confirmCampusPostTitleOpen, parseTitlePrefix, searchCampusPostTitles, type TitleSearchPage,
 } from '@/lib/community/titleSearch';
 import styles from './TitleHistorySearch.module.css';
 
 type Props = { schoolId: string };
-type Failure = { kind: 'initial' | 'more' | 'denied'; text: string };
+type Failure = { kind: 'initial' | 'more' | 'denied' | 'open'; text: string };
 
 export function TitleHistorySearch({ schoolId }: Props) {
   const { user, loading } = useAuth();
@@ -20,6 +21,7 @@ export function TitleHistorySearch({ schoolId }: Props) {
 }
 
 function ScopedTitleHistorySearch({ schoolId }: Props) {
+  const router = useRouter();
   const fieldId = useId();
   const hintId = useId();
   const [draft, setDraft] = useState('');
@@ -30,6 +32,8 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
   const [notice, setNotice] = useState('輸入標題開頭，再按搜尋。');
   const version = useRef(0);
   const inFlight = useRef(false);
+  const opening = useRef(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const more = useRef<HTMLButtonElement>(null);
   const summary = useRef<HTMLParagraphElement>(null);
@@ -50,6 +54,8 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
     // Editing cancels delivery of the previous query, not just its spinner.
     version.current += 1;
     inFlight.current = false;
+    opening.current = false;
+    setOpeningId(null);
     focusAfter.current = null;
     setDraft(value);
     setSearched('');
@@ -60,7 +66,7 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
   }
 
   async function search(continuation = false) {
-    if (inFlight.current || (continuation && (!page?.hasMore || !page.nextCursor))) return;
+    if (inFlight.current || opening.current || (continuation && (!page?.hasMore || !page.nextCursor))) return;
     let prefix: string;
     try { prefix = parseTitlePrefix(draft); }
     catch {
@@ -116,6 +122,47 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
     }
   }
 
+
+  async function openResult(id: string) {
+    if (opening.current || inFlight.current || !searched) return;
+    // The search snapshot is historical; opening requires a new server authorization.
+    const request = ++version.current;
+    opening.current = true;
+    setOpeningId(id);
+    setFailure(null);
+    setNotice('正在向伺服器確認這篇貼文…');
+    let navigated = false;
+    try {
+      const available = await confirmCampusPostTitleOpen(schoolId, id);
+      if (request !== version.current) return;
+      if (!available) {
+        setPage((current) => current ? {
+          ...current, posts: current.posts.filter((post) => post.id !== id),
+        } : null);
+        setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
+        return;
+      }
+      navigated = true;
+      router.push(`/community/post/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(schoolId)}`);
+    } catch (cause) {
+      if (request !== version.current) return;
+      if (isPermissionDeniedError(cause)) {
+        setPage(null);
+        setSearched('');
+        setFailure({ kind: 'denied', text: '校籍或貼文存取權限已變更，先前結果已清除。' });
+        setNotice('搜尋未完成。');
+      } else {
+        setFailure({ kind: 'open', text: '暫時無法向伺服器確認這篇貼文，搜尋結果已保留。連線恢復後可再次點擊。' });
+        setNotice('貼文尚未通過伺服器確認。');
+      }
+    } finally {
+      if (request === version.current && !navigated) {
+        opening.current = false;
+        setOpeningId(null);
+      }
+    }
+  }
+
   function submit(event: FormEvent) { event.preventDefault(); void search(); }
 
   return (
@@ -131,7 +178,7 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
             }} />
         </div>
         <div className={styles.actions}>
-          <button type="submit" aria-disabled={busy} aria-busy={busy}>搜尋歷史標題</button>
+          <button type="submit" aria-disabled={busy || Boolean(openingId)} aria-busy={busy || Boolean(openingId)}>搜尋歷史標題</button>
           <button type="button" onClick={() => { edit(''); input.current?.focus(); }}>清除</button>
         </div>
       </form>
@@ -143,7 +190,7 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
       {failure && (
         <div ref={errorRegion} tabIndex={-1} role="alert" className={styles.error}>
           <p>{failure.text}</p>
-          {failure.kind !== 'more' && (
+          {failure.kind !== 'more' && failure.kind !== 'open' && (
             <button type="button" aria-disabled={busy} onClick={() => void search()}>
               {failure.kind === 'denied' ? '重新驗證並搜尋' : '重試搜尋'}
             </button>
@@ -156,7 +203,15 @@ function ScopedTitleHistorySearch({ schoolId }: Props) {
             {page.posts.map((post) => (
               <li key={post.id}>
                 <article className={styles.card}>
-                  <h3><Link href={`/community/post/${encodeURIComponent(post.id)}?schoolId=${encodeURIComponent(schoolId)}`}>
+                  <h3><Link href={`/community/post/${encodeURIComponent(post.id)}?schoolId=${encodeURIComponent(schoolId)}`}
+                    aria-busy={openingId === post.id} aria-disabled={Boolean(openingId)}
+                    onClick={(event) => {
+                      // Modified clicks keep the normal browser link behavior.
+                      // This guard covers ordinary same-tab navigation.
+                      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+                      event.preventDefault();
+                      void openResult(post.id);
+                    }}>
                     {post.title}
                   </Link></h3>
                   {post.excerpt && <p>{post.excerpt}</p>}

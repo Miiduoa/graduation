@@ -1,5 +1,5 @@
 import {
-  collection, documentId, endBefore, getDocsFromServer, limit, orderBy,
+  collection, doc, documentId, endBefore, getDocFromServer, getDocsFromServer, limit, orderBy,
   query, startAfter, startAt, type DocumentData, type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase';
@@ -55,4 +55,15 @@ export async function searchCampusPostTitles(
     nextCursor: last ? { schoolId, prefix, document: last } : null,
     hasMore: snapshot.docs.length === TITLE_SEARCH_PAGE_SIZE,
   };
+}
+
+/** Confirm an old result from the server before the ordinary Web open action. */
+export async function confirmCampusPostTitleOpen(schoolId: string, postId: string): Promise<boolean> {
+  if (!schoolId || schoolId.includes('/') || !postId || postId.includes('/')) throw invalidTitleSearch();
+  const db = getDb();
+  const snapshot = await getDocFromServer(doc(db, 'schools', schoolId, 'campusPosts', postId));
+  if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
+    throw Object.assign(new Error('貼文尚未取得伺服器確認。'), { code: 'unavailable' });
+  }
+  return snapshot.exists() && snapshot.data().schoolId === schoolId;
 }
