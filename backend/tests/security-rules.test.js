@@ -1841,6 +1841,30 @@ describe('storage security rules', () => {
     }
   });
 
+  test('story creation rejects forged counters and oversized or unexpected fields', async () => {
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/other/members/bob').set({ status: 'active' });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const content = {
+      schoolId: 'pu', authorUid: 'alice', kind: 'text',
+      text: '合規限時動態', expiresAt: Date.now() + 120_000, viewCount: 0,
+    };
+    await assertSucceeds(alice.doc('campusStories/valid-payload').set(content));
+    await assertFails(alice.doc('campusStories/forged-count')
+      .set({ ...content, viewCount: 999999 }));
+    await assertFails(alice.doc('campusStories/unexpected-claim')
+      .set({ ...content, moderatorApproved: true }));
+    await assertFails(alice.doc('campusStories/large-payload')
+      .set({ ...content, text: 'x'.repeat(2001) }));
+    await assertFails(alice.doc('campusStories/unknown-kind')
+      .set({ ...content, kind: 'privileged' }));
+    await assertFails(bob.doc('campusStories/cross-school-create')
+      .set({ ...content, authorUid: 'bob' }));
+  });
+
   test('story expiry prevents overlong publication and closes published media reads', async () => {
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({ status: 'active' });

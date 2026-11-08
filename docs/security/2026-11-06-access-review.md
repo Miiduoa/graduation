@@ -306,3 +306,11 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 本次先修 CI：保留 `throwOnError` 將原始錯誤交給畫面復原邏輯，將預期呼叫次數明確改為一次，並新增不要求丟錯時的測試，確認 optional-read 回傳空列表且同樣只發出一次查詢。這些斷言在舊版的 school-only fallback 實作上應會失敗，避免之後為了相容誤恢復第二次廣泛查詢。未修改 Firestore 授權、服務程式、E 校園暫停政策或正式資料；請以新 head 的 Mobile Jest 和完整 CI 實際結果驗收，**不得拿舊 head 成功結果替代**。
 
 **保留風險：** 此修補是測試與預期行為的一致化，並不處理已簽發 GCS／Supabase URL 撤銷、真 GCS staging CAS、legacy 主資料、minimatch 兩圖相容升級或索引／行動端／Rules 正式分階段發布。主線現已至 `067436cd830f92d9ebbd301408b9500bbf29c295`，本 PR 落後主線 4 提交；正式合併仍需最新 main 精確整合、全項 CI 與指定 `nuni-merge-gate` App 5504170 對精確 head 核發審查通過。未合併 main／部署／migration／清理正式 token。
+
+## 2026-11-08：限動建立資料邊界與 Maestro 安裝 HTTP 504
+
+核對精確 head `1ea5587af4d29809d20e719586eac0513df25c43` 的檢查結果：主 CI `42464432189`、Firestore Rules、Web/Mobile、Web/Mobile Build、CodeQL、Supabase permissions、Python security、Mobile Agent Regression、Chroma、Zod 均 completed/success。**Maestro workflow `42464432188` 為 failure**：job `128680537683` 的 `https://get.maestro.mobile.dev` 安裝入口回應 HTTP 504；舊 `curl -Ls ... | bash` 因未啟用 pipefail 導致安裝步驟被誤判成功，下一步 `maestro --version` 才以 command not found (127) 失敗。iOS 模擬器、App 建置與 smoke **都未執行**，不應誤稱行動功能失敗或已成功。本次安裝修補增加 HTTP 失敗判定、有界重試、先下載至暫存檔且確認非空再執行。沒有 JUnit 時不執行報告發布器，避免製造第二個失敗；不隱藏真正的 installer 失敗。新版本 iOS smoke 須等精確 head 工作流實跑才能驗證，無本機 macOS 安裝證據。
+
+另一項可重現的 Firestore 輸入邊界：`campusStories` 的 create 原先只驗作者、同校與到期，允許有效同校帳號注入任意新欄位、偽造初始 `viewCount`，或在 1 MiB Firestore 文件上限內使用極長 `text` 造成資料量放大。新規則以固定欄位白名單、`kind` 列舉、初始觀看數必須為零、文字字串型別與上限 2,000 字元封閉此範圍，保留原有手機發布欄位、有效期限與正常閱讀。新 Firebase emulator 回歸測試涵蓋合法發文、偽造觀看數、陌生欄位、超長文字、非法媒體種類與跨校發布。舊規則會錯誤放行前三種非法資料；**本輪先記錄修補與可重跑測試，待精確新 head 的 Rules CI 驗證後才能標為隔離測試通過。**
+
+尚未解決的發布風險包括已發 Firebase/GCS 與 Supabase URL 撤權、隔離真 GCS bucket CAS、legacy 帳號、限動索引／手機／Rules 分階段推出、minimatch 的 pnpm 與 Functions 兩圖，以及指定 `nuni-merge-gate` App 5504170 對精確 head 的審查通過。本輪不重新發送未獲授權的 npm/pnpm audit payload，未碰觸正式資料、金鑰、token、migration、部署或 main 合併。

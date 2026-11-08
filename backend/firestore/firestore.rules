@@ -1754,6 +1754,16 @@ service cloud.firestore {
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.schoolId != null
         && isSchoolMember(request.resource.data.schoolId)
+        // School-wide story readers must not accept arbitrary client claims,
+        // forged view counters or unbounded text payloads.
+        && request.resource.data.keys().hasOnly([
+          'schoolId', 'authorUid', 'kind', 'text', 'mediaUrl', 'bgColor',
+          'poiId', 'poiName', 'createdAt', 'expiresAt', 'viewCount'
+        ])
+        && request.resource.data.kind in ['image', 'video', 'text']
+        && request.resource.data.get('viewCount', 0) == 0
+        && request.resource.data.get('text', '') is string
+        && request.resource.data.get('text', '').size() <= 2000
         // The mobile publisher stores epoch milliseconds. Bound the lifetime
         // to one day plus five minutes of client clock skew.
         && request.resource.data.expiresAt is int
