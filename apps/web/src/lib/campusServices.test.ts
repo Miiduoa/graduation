@@ -6,8 +6,10 @@ import {
   directoryCampusServices,
   flattenCampusServices,
   presentCampusService,
+  readCampusServiceFilters,
   searchCampusServices,
   visibleCampusServices,
+  writeCampusServiceFilters,
 } from './campusServices';
 
 it('keeps announcements and bus, and shows ordering-off copy for /food as a note', () => {
@@ -137,6 +139,15 @@ it('keeps academic vocabulary aligned across directory primaries', () => {
   expect(byHref.get('/school-courses')).toBe('玩課雲課程');
   expect(byHref.get('/school-lms')).toBe('玩課雲作業');
   expect(byHref.get('/grades?tab=feedback')).toBe('成績回饋');
+});
+
+it('reads and writes directory query filters without keeping an unknown category', () => {
+  const params = new URLSearchParams('q=借書&category=missing&session=old');
+  expect(readCampusServiceFilters(params)).toEqual({ query: '借書', category: 'all' });
+  writeCampusServiceFilters(params, '借書', 'campus');
+  expect(params.get('q')).toBe('借書');
+  expect(params.get('category')).toBe('campus');
+  expect(params.get('session')).toBe('old');
 });
 
 it('exposes merchant and leave entries in the flattened catalog for intent lookup', () => {

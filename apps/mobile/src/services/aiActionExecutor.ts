@@ -544,7 +544,7 @@ async function executeRepairRequest(
     schoolId: schoolId!,
     type,
     title: asString(params.title) || `${type === 'ac' ? '冷氣' : '宿舍'}報修`,
-    description: asString(params.description) || asString(userMessage) || 'AI 代理建立的報修申請',
+    description: asString(params.description) || asString(userMessage) || DORM_REPAIR_COPY.defaultMemoDescription,
     room,
     priority: mapRepairPriority(params.urgency ?? params.priority),
     images: Array.isArray(params.images) ? params.images : undefined,

@@ -895,7 +895,7 @@ async function createRepairRequestHandler(
     const ds = getDataSource();
     const type = asString(args.type) || 'other';
     const room = asString(args.room);
-    const description = asString(args.description) || asString(ctx.lastUserMessage) || 'AI 代理建立的報修申請';
+    const description = asString(args.description) || asString(ctx.lastUserMessage) || DORM_REPAIR_COPY.defaultMemoDescription;
     const title =
       asString(args.title) || `${type === 'ac' ? '冷氣' : type === 'plumbing' ? '水電' : '宿舍'}報修`;
 

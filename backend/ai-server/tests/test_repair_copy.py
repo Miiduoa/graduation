@@ -59,6 +59,10 @@ class RepairCopyTests(unittest.TestCase):
         self.assertNotIn("#{rid}", PLANNER_SOURCE)
         self.assertNotIn("，#{rid}", PLANNER_SOURCE)
 
+    def test_planner_empty_list_copy_is_a_memo(self) -> None:
+        self.assertIn("目前查無你的宿舍報修備忘。", PLANNER_SOURCE)
+        self.assertNotIn("目前查無你的宿舍報修紀錄。", PLANNER_SOURCE)
+
 
 if __name__ == "__main__":
     unittest.main()

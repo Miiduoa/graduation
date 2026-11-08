@@ -185,7 +185,7 @@ def _format_reminder_success(output: dict[str, Any]) -> str:
 def _format_list_repairs_success(output: dict[str, Any]) -> str:
     items = output.get("items") or []
     if not items:
-        return "目前查無你的宿舍報修紀錄。"
+        return "目前查無你的宿舍報修備忘。"
     lines = [f"找到 {len(items)} 筆宿舍報修備忘："]
     for it in items[:10]:
         loc = it.get("location") or "未知地點"

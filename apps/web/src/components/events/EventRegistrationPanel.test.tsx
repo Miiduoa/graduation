@@ -179,6 +179,7 @@ it('keeps noncanonical sources informational only and never calls registration A
   expect(screen.getByText(/目前只提供活動資訊。報名方式請查看主辦單位公告/)).toBeTruthy();
   expect(registration.loadEventRegistrationStates).not.toHaveBeenCalled();
   expect(registration.prepareCampusEventIntent).not.toHaveBeenCalled();
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
 });
 
 it('keeps informational content usable when the school auth watcher throws', async () => {
@@ -364,6 +365,7 @@ it('lets an active selected-school Firebase member read and register', async () 
     expect.any(Function),
   );
   expect(await screen.findByText('報名已確認。')).toBeTruthy();
+  expect(screen.getByRole('region', { name: '報名票根' })).toBeTruthy();
 });
 
 it('restores durable unknown pending with identical payload and ignores ordinary status refresh clearing', async () => {
@@ -386,12 +388,14 @@ it('restores durable unknown pending with identical payload and ignores ordinary
   );
   expect(await screen.findByRole('button', { name: '繼續確認這次報名' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '報名' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
 
   fireEvent.click(screen.getByRole('button', { name: '更新報名狀態' }));
   await waitFor(() =>
     expect(registration.loadEventRegistrationStates.mock.calls.length).toBeGreaterThan(1),
   );
   expect(screen.getByRole('button', { name: '繼續確認這次報名' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
   expect(registration.prepareCampusEventIntent).not.toHaveBeenCalled();
 
   view.unmount();
@@ -409,6 +413,7 @@ it('restores durable unknown pending with identical payload and ignores ordinary
   expect(
     await screen.findByText('這次待確認的報名已對應到目前狀態：已取消報名。'),
   ).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
   restored.unmount();
 });
 
@@ -433,6 +438,7 @@ it('does not create a network request when storage prepare fails', async () => {
 it('disables actions while pending ledger read fails and recovers via retry', async () => {
   auth.user = { uid: 'alice' };
   mockReadyMembership();
+  registration.loadEventRegistrationStates.mockResolvedValue([registeredState()]);
   registration.readPendingCampusEventIntent
     .mockRejectedValueOnce(new Error('這份待確認操作暫時讀不到，原始資料仍保留。請勿清除瀏覽器資料，稍後再試。'))
     .mockResolvedValue(null);
@@ -444,8 +450,10 @@ it('disables actions while pending ledger read fails and recovers via retry', as
   );
   expect(await screen.findByRole('button', { name: '重新讀取報名紀錄' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '報名' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '重新讀取報名紀錄' }));
   expect(await screen.findByRole('button', { name: '報名' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '報名票根' })).toBeTruthy();
 });
 
 it('requires cancel confirmation before prepare/send and invalidates stale confirmation', async () => {
@@ -473,7 +481,7 @@ it('requires cancel confirmation before prepare/send and invalidates stale confi
   await screen.findByRole('button', { name: '取消報名' });
   fireEvent.click(screen.getByRole('button', { name: '取消報名' }));
   expect(await screen.findByRole('heading', { name: '確認取消報名' })).toBeTruthy();
-  expect(screen.getByText(/社團講座/)).toBeTruthy();
+  expect(screen.getByText(/確定要取消「社團講座」/)).toBeTruthy();
   expect(registration.prepareCampusEventIntent).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole('button', { name: '返回' }));
@@ -596,6 +604,7 @@ it('owner uid switch clears prior registration UI before passive reset completes
   );
   expect(await screen.findByText('本系統報名 2 / 10 人')).toBeTruthy();
   expect(screen.getByRole('button', { name: '取消報名' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: '報名票根' })).toBeTruthy();
 
   await act(async () => {
     auth.user = { uid: 'bob' };
@@ -610,6 +619,7 @@ it('owner uid switch clears prior registration UI before passive reset completes
   await waitFor(() => {
     expect(screen.queryByRole('button', { name: '取消報名' })).toBeNull();
     expect(screen.queryByText('本系統報名 2 / 10 人')).toBeNull();
+    expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
   });
   expect(screen.getByText(/正在確認學校帳號資格/)).toBeTruthy();
   expect(bobReceive).toBeTruthy();
@@ -818,3 +828,107 @@ it('does not submit a queued registration after membership is revoked and immedi
   });
   expect(registration.submitCampusEventIntent).not.toHaveBeenCalled();
 });
+
+it('waits for both server registration and the pending ledger before displaying a ticket', async () => {
+  auth.user = { uid: 'alice' };
+  mockReadyMembership();
+  registration.loadEventRegistrationStates.mockResolvedValue([registeredState()]);
+  let finishReading: () => void = () => {};
+  registration.readPendingCampusEventIntent.mockImplementation(() => new Promise((resolve) => {
+    finishReading = () => resolve(null);
+  }));
+  render(
+    <EventRegistrationPanel
+      event={clubEvent}
+      returnPath="/events/evt-1?schoolId=nthu&source=school-club-events"
+    />,
+  );
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+  await screen.findByText('本系統報名 2 / 10 人');
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+  await act(async () => finishReading());
+  expect(await screen.findByRole('region', { name: '報名票根' })).toBeTruthy();
+});
+
+it('hides a completed registration ticket while rereading and after a read failure', async () => {
+  auth.user = { uid: 'alice' };
+  mockReadyMembership();
+  registration.prepareCampusEventIntent.mockResolvedValue(intent('register'));
+  registration.submitCampusEventIntent.mockResolvedValue({ state: registeredState(), reused: false });
+  registration.finalizeCampusEventIntent.mockResolvedValue(true);
+  render(
+    <EventRegistrationPanel
+      event={clubEvent}
+      returnPath="/events/evt-1?schoolId=nthu&source=school-club-events"
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: '報名' }));
+  await screen.findByRole('region', { name: '報名票根' });
+
+  let failRead: () => void = () => {};
+  registration.loadEventRegistrationStates.mockImplementationOnce(() => new Promise((_, reject) => {
+    failRead = () => reject(new Error('unavailable'));
+  }));
+  fireEvent.click(screen.getByRole('button', { name: '更新報名狀態' }));
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+  await act(async () => failRead());
+  await screen.findByRole('alert');
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+
+  registration.loadEventRegistrationStates.mockResolvedValue([registeredState()]);
+  fireEvent.click(screen.getByRole('button', { name: '重新確認報名狀態' }));
+  expect(await screen.findByRole('region', { name: '報名票根' })).toBeTruthy();
+});
+
+it('removes the ticket during cancellation and keeps it absent after server confirmation', async () => {
+  auth.user = { uid: 'alice' };
+  mockReadyMembership();
+  registration.loadEventRegistrationStates.mockResolvedValue([registeredState()]);
+  registration.prepareCampusEventIntent.mockResolvedValue(intent('cancel'));
+  registration.finalizeCampusEventIntent.mockResolvedValue(true);
+  let finishCancel: () => void = () => {};
+  registration.submitCampusEventIntent.mockImplementation(() => new Promise((resolve) => {
+    finishCancel = () => resolve({
+      state: openState({ status: 'cancelled', canRegister: false, availability: 'closed' }),
+      reused: false,
+    });
+  }));
+  render(
+    <EventRegistrationPanel
+      event={clubEvent}
+      returnPath="/events/evt-1?schoolId=nthu&source=school-club-events"
+    />,
+  );
+  await screen.findByRole('region', { name: '報名票根' });
+  fireEvent.click(screen.getByRole('button', { name: '取消報名' }));
+  fireEvent.click(await screen.findByRole('button', { name: '確認取消報名' }));
+  await screen.findByText('正在確認這次操作，請勿重複送出。');
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+  await act(async () => finishCancel());
+  await screen.findByText('取消報名已確認。');
+  expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+});
+
+it.each(['stale', 'permission'] as const)(
+  'removes the ticket when membership becomes %s',
+  async (reason) => {
+    auth.user = { uid: 'alice' };
+    let failMembership: (failure: 'stale' | 'permission') => void = () => {};
+    membership.watch.mockImplementation((_uid, receive, fail) => {
+      receive({ uid: 'alice', schoolId: 'nthu' });
+      failMembership = fail;
+      return () => {};
+    });
+    registration.loadEventRegistrationStates.mockResolvedValue([registeredState()]);
+    render(
+      <EventRegistrationPanel
+        event={clubEvent}
+        returnPath="/events/evt-1?schoolId=nthu&source=school-club-events"
+      />,
+    );
+    await screen.findByRole('region', { name: '報名票根' });
+    await act(async () => failMembership(reason));
+    expect(screen.queryByRole('region', { name: '報名票根' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '取消報名' })).toBeNull();
+  },
+);

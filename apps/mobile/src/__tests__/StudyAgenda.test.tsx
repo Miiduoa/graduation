@@ -554,7 +554,7 @@ it('carries tomorrow across deadline-to-receipt questions and does not include n
     ask('那已交的呢？');
     expect(view.getByRole('button', { name: '查看作業：資料庫管理 · 期中報告' })).toBeTruthy();
     expect(view.queryByRole('button', { name: '查看作業：工程倫理 · 期中報告' })).toBeNull();
-    expect(view.getByText(/延續上一個查詢的「明天」截止範圍/)).toBeTruthy();
+    expect(view.getByText('截止範圍：「明天」（台灣時間），依作業參考期限篩選。')).toBeTruthy();
     ask('那還沒交的呢？');
     expect(view.getByRole('button', { name: '查看作業：資料庫設計 · 期中報告' })).toBeTruthy();
     fireEvent.press(view.getByRole('button', { name: '查看作業：資料庫設計 · 期中報告' }));
@@ -803,4 +803,194 @@ it('keeps quiz follow-ups inside the selected course and date and opens only the
     press('篩選課程：網路');
     expect(view.queryAllByRole('button', { name: /^查看測驗：/ })).toHaveLength(0);
   } finally { jest.useRealTimers(); }
+});
+
+describe('assignment receipt dates in the real agenda assistant', () => {
+  beforeEach(() => jest.useFakeTimers({ now: new Date('2026-11-07T23:59:50+08:00') }));
+  afterEach(() => jest.useRealTimers());
+
+  function receiptAgenda(): NuniStudyAgenda {
+    const submittedAt = '2026-11-07T09:00:00+08:00';
+    return agenda([
+      task('pending-tomorrow', { title: '期中報告', dueAt: '2026-11-08T10:00:00+08:00' }),
+      task('submitted-tomorrow', { title: '同名練習', dueAt: '2026-11-08T11:00:00+08:00', submittedAt }),
+      task('pending-next-week', { title: '下週練習', dueAt: '2026-11-10T10:00:00+08:00' }),
+      task('submitted-next-week', { title: '同名練習', dueAt: '2026-11-10T11:00:00+08:00', submittedAt }),
+      task('undated', { title: '無期限練習' }),
+      task('other-pending', { courseId: 'other', courseTitle: '工程倫理', title: '期中報告',
+        dueAt: '2026-11-08T12:00:00+08:00' }),
+      task('other-submitted', { courseId: 'other', courseTitle: '工程倫理', title: '同名練習',
+        dueAt: '2026-11-10T12:00:00+08:00', submittedAt }),
+    ], { workspaces: [
+      { id: 'course', title: '資料庫', state: 'active', memberRole: 'student' },
+      { id: 'other', title: '工程倫理', state: 'active', memberRole: 'student' },
+    ], studiedCourseCount: 2 });
+  }
+
+  function openReceiptAssistant() {
+    const data = receiptAgenda();
+    const open = jest.fn(), retry = jest.fn();
+    const view = render(<StudyAgenda data={data} loading={false} error="" retry={retry} open={open} />);
+    const press = (name: string) => fireEvent.press(view.getByRole('button', { name }));
+    press('問課業助理');
+    const ask = (question: string) => {
+      fireEvent.changeText(view.getByLabelText('輸入課業問題'), question);
+      press('查詢課業');
+    };
+    const names = () => view.queryAllByRole('button', { name: /^查看作業：/ })
+      .map((row) => row.props.accessibilityLabel).sort();
+    return { view, data, open, retry, press, ask, names };
+  }
+
+  it('makes a direct tomorrow missing-receipt question match the existing two-step lookup and opens the exact namesake', () => {
+    const { view, open, retry, press, ask, names } = openReceiptAssistant();
+    ask('我明天還沒交的作業有哪些？');
+    const direct = names();
+    expect(direct).toEqual(['查看作業：工程倫理 · 期中報告', '查看作業：資料庫 · 期中報告'].sort());
+    expect(view.getByText('截止範圍：「明天」（台灣時間），依作業參考期限篩選。')).toBeTruthy();
+    expect(view.getByText('另有 1 筆無可核對的參考期限，無法依日期判斷。')).toBeTruthy();
+    for (const row of view.getAllByRole('button', { name: /^查看作業：/ })) {
+      expect(row.props.accessibilityValue.text).toMatch(/未見繳交紀錄/);
+      expect(row.props.accessibilityValue.text).toMatch(/參考期限/);
+    }
+    expect(open).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    press('查看作業：工程倫理 · 期中報告');
+    expect(open.mock.calls).toEqual([['other', 'other-pending']]);
+    press('收起課業助理');
+    press('問課業助理');
+    ask('明天有哪些作業？');
+    ask('那還沒交的呢？');
+    expect(names()).toEqual(direct);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('changes only the requested date while keeping the course, receipt status and a deliberately selected exact source', () => {
+    const { view, open, retry, press, ask, names } = openReceiptAssistant();
+    ask('資料庫明天截止的已繳交作業有哪些？');
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    expect(view.getByRole('button', { name: '查看作業：資料庫 · 同名練習' }).props.accessibilityValue.text)
+      .toMatch(/繳交時間.*參考期限/);
+    ask('那下週呢？');
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    expect(view.getByText('截止範圍：「下週」（台灣時間），依作業參考期限篩選。')).toBeTruthy();
+    expect(open).not.toHaveBeenCalled();
+    press('查看作業：資料庫 · 同名練習');
+    expect(open.mock.calls).toEqual([['course', 'submitted-next-week']]);
+    ask('第一筆');
+    ask('這份作業交了嗎？');
+    ask('那明天呢？');
+    // A date change cannot silently substitute tomorrow's same-title assignment.
+    expect(names()).toEqual([]);
+    expect(view.getByText('已載入的課程紀錄中沒有符合的作業，請到原課程核對。')).toBeTruthy();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('keeps a direct receipt query anchored to its original Taiwan day across a midnight status follow-up', () => {
+    const { view, open, retry, press, ask, names } = openReceiptAssistant();
+    ask('我明天還沒交的作業有哪些？');
+    jest.setSystemTime(new Date('2026-11-08T00:01:00+08:00'));
+    ask('那已交的呢？');
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    expect(view.getByText('截止範圍：「明天」（台灣時間），依作業參考期限篩選。')).toBeTruthy();
+    press('查看作業：資料庫 · 同名練習');
+    expect(open.mock.calls).toEqual([['course', 'submitted-tomorrow']]);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('clarifies unsupported dates and retains the course and submitted filter when the user supplies a supported date', () => {
+    const { view, open, retry, press, ask, names } = openReceiptAssistant();
+    const clarification = '想查哪一天或哪一週的作業參考期限？可以指定「明天」或「下週」。';
+    ask('資料庫下下週截止的已繳交作業有哪些？');
+    expect(view.getByText(clarification)).toBeTruthy();
+    expect(names()).toEqual([]);
+    ask('那明天呢？');
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    press('查看作業：資料庫 · 同名練習');
+    expect(open.mock.calls).toEqual([['course', 'submitted-tomorrow']]);
+    ask('那下下週呢？');
+    expect(view.getByText(clarification)).toBeTruthy();
+    expect(names()).toEqual([]);
+    ask('那下週呢？');
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    press('查看作業：資料庫 · 同名練習');
+    expect(open.mock.calls).toEqual([['course', 'submitted-tomorrow'], ['course', 'submitted-next-week']]);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '我昨天已交的作業有哪些？',
+    '我昨天繳交的作業有哪些？',
+    '我昨天交了哪些作業？',
+  ])('keeps an unconfirmed submission-date request in clarification until the user explicitly asks about deadlines: %s', (initialQuestion) => {
+    const { view, open, retry, press, ask, names } = openReceiptAssistant();
+    const clarification = '這裡目前只能依作業參考期限查日期，不能按繳交時間篩選。請明確指定要查哪一天截止的作業。';
+    for (const question of [initialQuestion, '那還沒交的呢？', '那明天呢？']) {
+      ask(question);
+      expect(view.getByText(clarification)).toBeTruthy();
+      expect(names()).toEqual([]);
+      expect(view.queryByText(/^截止範圍：/)).toBeNull();
+    }
+    expect(open).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+    ask('我明天截止的作業有哪些已繳交？');
+    expect(view.queryByText(clarification)).toBeNull();
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    expect(view.getByText('截止範圍：「明天」（台灣時間），依作業參考期限篩選。')).toBeTruthy();
+    expect(view.getByRole('button', { name: '查看作業：資料庫 · 同名練習' }).props.accessibilityValue.text)
+      .toMatch(/已載入繳交紀錄.*參考期限/);
+    press('查看作業：資料庫 · 同名練習');
+    expect(open.mock.calls).toEqual([['course', 'submitted-tomorrow']]);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('a new complete receipt question drops the previous date, named course and selected source', () => {
+    const { view, open, retry, ask, names } = openReceiptAssistant();
+    ask('資料庫明天截止的已繳交作業有哪些？');
+    ask('第一筆');
+    ask('這份作業交了嗎？');
+    expect(names()).toEqual(['查看作業：資料庫 · 同名練習']);
+    ask('我已繳交的作業有哪些？');
+    expect(names()).toEqual([
+      '查看作業：工程倫理 · 同名練習', '查看作業：資料庫 · 同名練習', '查看作業：資料庫 · 同名練習',
+    ].sort());
+    expect(view.queryByText(/^截止範圍：/)).toBeNull();
+    expect(view.queryByText('這份作業的繳交紀錄')).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it.each(['refreshed snapshot', 'another account snapshot'] as const)(
+    'clears the receipt context and stale exact-open action for a %s',
+    (change) => {
+      const { view, data, open, retry, press, ask, names } = openReceiptAssistant();
+      ask('資料庫明天截止的已繳交作業有哪些？');
+      let button = view.getByRole('button', { name: '查看作業：資料庫 · 同名練習' });
+      while (button.parent && !button.props.onPress) button = button.parent;
+      const staleOpen = button.props.onPress;
+      expect(typeof staleOpen).toBe('function');
+      const courseId = change === 'refreshed snapshot' ? 'course' : 'another-account-course';
+      const courseTitle = change === 'refreshed snapshot' ? '資料庫' : '另一帳號的課程';
+      const next: NuniStudyAgenda = { ...data,
+        tasks: [task('submitted-tomorrow', { courseId, courseTitle, title: '更新後的紀錄',
+          dueAt: '2026-11-10T11:00:00+08:00', submittedAt: '2026-11-07T10:00:00+08:00' })],
+        workspaces: [{ id: courseId, title: courseTitle, state: 'active', memberRole: 'student' }],
+        studiedCourseCount: 1,
+      };
+      // Replace the loaded source as the real screen does after refresh or account validation.
+      view.rerender(<StudyAgenda data={next} loading={false} error="" retry={retry} open={open} />);
+      expect(names()).toEqual([]);
+      expect(view.queryByText(/^截止範圍：/)).toBeNull();
+      act(() => staleOpen());
+      expect(open).not.toHaveBeenCalled();
+      press('問課業助理');
+      ask('我已繳交的作業有哪些？');
+      expect(names()).toEqual([`查看作業：${courseTitle} · 更新後的紀錄`]);
+      press(`查看作業：${courseTitle} · 更新後的紀錄`);
+      expect(open.mock.calls).toEqual([[courseId, 'submitted-tomorrow']]);
+      expect(retry).not.toHaveBeenCalled();
+    },
+  );
 });

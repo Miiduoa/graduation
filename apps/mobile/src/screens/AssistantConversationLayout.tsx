@@ -24,6 +24,7 @@ type Props = {
   onBack: () => void;
   chatScroll: React.Ref<ScrollView>;
   tools: React.ReactNode;
+  toolsLabel?: string;
   composer: React.ReactNode;
   children: React.ReactNode;
 };
@@ -36,6 +37,7 @@ export function AssistantConversationLayout({
   onBack,
   chatScroll,
   tools,
+  toolsLabel = '校園工具',
   composer,
   children,
 }: Props) {
@@ -98,7 +100,7 @@ export function AssistantConversationLayout({
                   fontWeight: selected ? '700' : '500',
                 }}
               >
-                {id === 'chat' ? '對話' : '校園工具'}
+                {id === 'chat' ? '對話' : toolsLabel}
               </Text>
             </Pressable>
           );

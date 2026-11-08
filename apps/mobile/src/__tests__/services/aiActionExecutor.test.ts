@@ -129,7 +129,9 @@ describe('aiActionExecutor', () => {
       }),
     ).resolves.toMatchObject({ kind: 'executed', recordId: 'seat-res-1' });
 
-    expect(ds.createRepairRequest).toHaveBeenCalled();
+    expect(ds.createRepairRequest).toHaveBeenCalledWith(expect.objectContaining({
+      description: '冷氣壞了',
+    }));
     expect(ds.createLostFoundItem).toHaveBeenCalled();
     expect(ds.createCalendarEvent).toHaveBeenCalled();
     expect(ds.createHealthAppointment).toHaveBeenCalled();
@@ -173,6 +175,22 @@ describe('aiActionExecutor', () => {
     expect(ds.createRepairRequest).not.toHaveBeenCalled();
     expect(ds.createLostFoundItem).not.toHaveBeenCalled();
     expect(ds.reserveSeat).not.toHaveBeenCalled();
+  });
+
+  it('uses a personal memo fallback when the repair description is missing', async () => {
+    const ds = buildDataSource();
+    await executeAgentToolAction({
+      ...baseContext,
+      dataSource: ds,
+      tool: tool('report_repair'),
+      params: { category: 'ac', room: 'A101' },
+    });
+    expect(ds.createRepairRequest).toHaveBeenCalledWith(expect.objectContaining({
+      description: '自行記下的報修備忘',
+    }));
+    expect(ds.createRepairRequest).not.toHaveBeenCalledWith(expect.objectContaining({
+      description: 'AI 代理建立的報修申請',
+    }));
   });
 
   it('denies role-mismatched tools and drafts unresolved social actions', async () => {
