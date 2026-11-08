@@ -236,6 +236,32 @@ it('counts untouched questions as unfinished when jumping to the last card and a
   expect(answerInput().value).toBe('');
 });
 
+it('continues unfinished questions from the summary without clearing earlier drafts or self-assessments', () => {
+  render(<Controller />);
+  writeAnswer('第一題尚待自評，必須保留草稿');
+  selectQuestion(3);
+  skip();
+  expect(summaryCount('未完成')).toBe('2 題');
+  expect(screen.getByRole('button', { name: '接續未自評題（2 題）' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '接續未自評題（2 題）' }));
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 1 題' }));
+  expect(answerInput().value).toBe('第一題尚待自評，必須保留草稿');
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 3 題：第 5 頁 · 第 2 段，略過' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一題未自評' }));
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+});
+
+it('does not offer continue-unreviewed after every question has an explicit outcome', () => {
+  render(<Controller deck={cards.slice(0, 2)} />);
+  decide('understood');
+  skip();
+  expect(summaryCount('未完成')).toBe('0 題');
+  expect(screen.queryByRole('button', { name: /接續未自評題/ })).toBeNull();
+  expect(screen.getByRole('button', { name: '重練待加強題（1 題）' })).toBeTruthy();
+});
+
 it('retries only cards not marked understood in source order with fresh drafts and hidden disclosures', () => {
   render(<Controller />);
   decide('understood');

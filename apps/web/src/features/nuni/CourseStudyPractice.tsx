@@ -83,6 +83,11 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
           <div><dt>未完成</dt><dd>{summary.unreviewed} 題</dd></div>
         </dl>
         <div className={styles.actions}>
+          {summary.unreviewed > 0 && <button type="button" className={`${styles.button} ${styles.primary}`}
+            onClick={() => {
+              const index = round.cards.findIndex((item) => round.responses[item.id]?.outcome == null);
+              if (index >= 0) onAction({ type: 'go', index });
+            }}>接續未自評題（{summary.unreviewed} 題）</button>}
           <button type="button" className={`${styles.button} ${styles.primary}`} disabled={summary.pending === 0}
             onClick={() => onAction({ type: 'restart', scope: 'pending' })}>重練待加強題（{summary.pending} 題）</button>
           <button type="button" className={styles.button}
