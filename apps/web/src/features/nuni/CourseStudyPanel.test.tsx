@@ -143,7 +143,7 @@ it('protects a changed reading position on unload and before replacing the sourc
   expect(await screen.findByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
   expect(wouldWarn()).toBe(true);
-  expect(screen.getByText(/目前第 2 \/ /)).toBeTruthy();
+  expect(screen.getByRole('group', { name: /目前閱讀段落/ }).textContent).toContain('第 2 段');
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
