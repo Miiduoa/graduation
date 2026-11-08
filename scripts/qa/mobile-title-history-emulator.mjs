@@ -33,6 +33,9 @@ async function check(name, run) {
 try {
   const sourcePaths = [
     'apps/mobile/src/services/titleSearch.ts',
+    'apps/mobile/src/services/feed.ts',
+    'apps/mobile/src/screens/social/PostDetailScreen.tsx',
+    'apps/mobile/src/__tests__/PostDetailRecovery.test.tsx',
     'apps/mobile/src/screens/social/TitleHistorySearch.tsx',
     'apps/mobile/src/screens/CommunityScreen.tsx',
     'apps/mobile/src/__tests__/TitleHistorySearch.test.tsx',
@@ -60,6 +63,18 @@ try {
     } }],
   });
   const { searchCampusPostTitles } = requireMobile(bundled);
+  // Verify the same server-only detail reader used after opening a search result.
+  const feedPath = path.join(root, 'apps/mobile/src/services/feed.ts');
+  const feedBundle = path.join(fixture, 'feed.cjs');
+  await build({
+    absWorkingDir: root, entryPoints: [feedPath], outfile: feedBundle,
+    bundle: true, platform: 'node', format: 'cjs', target: 'node22',
+    external: ['firebase/*'],
+    plugins: [{ name: 'isolated-native-feed-db', setup(builder) {
+      builder.onResolve({ filter: /^\\.\\.\\/firebase$/ }, (args) => args.importer === feedPath ? { path: adapter } : undefined);
+    } }],
+  });
+  const { getCampusPostById } = requireMobile(feedBundle);
   const [hostname, port] = host.split(':');
   environment = await initializeTestEnvironment({ projectId, firestore: {
     host: hostname, port: Number(port), rules: await readFile(path.join(root, 'backend/firestore/firestore.rules'), 'utf8'),
@@ -159,6 +174,27 @@ try {
     assert.equal(next.posts.length, 20);
     const prior = new Set(first.posts.map((post) => post.id));
     assert.ok(next.posts.every((post) => !prior.has(post.id)));
+  });
+  await check('native post detail uses server confirmation even with an offline cached document', async () => {
+    assert.equal((await getCampusPostById('pu', 'old-001'))?.id, 'old-001');
+    await sdk.disableNetwork(alice);
+    try { await assert.rejects(getCampusPostById('pu', 'old-001'), { code: 'unavailable' }); }
+    finally { await sdk.enableNetwork(alice); }
+    assert.equal((await getCampusPostById('pu', 'old-001'))?.schoolId, 'pu');
+  });
+  await check('native post detail denies a revoked member and recovers for an active student', async () => {
+    const setStatus = (value) => environment.withSecurityRulesDisabled((context) =>
+      context.firestore().doc('schools/pu/members/alice').update({ status: value }));
+    await setStatus('inactive');
+    try { await assert.rejects(getCampusPostById('pu', 'old-001'), { code: 'permission-denied' }); }
+    finally { await setStatus('active'); }
+    assert.equal((await getCampusPostById('pu', 'old-001'))?.id, 'old-001');
+  });
+  await check('native post detail returns no deleted document and refuses the other school', async () => {
+    await environment.withSecurityRulesDisabled((context) =>
+      context.firestore().doc('schools/pu/campusPosts/old-001').delete());
+    assert.equal(await getCampusPostById('pu', 'old-001'), null);
+    await assert.rejects(getCampusPostById('other', 'private'), { code: 'permission-denied' });
   });
 } catch (error) {
   report.failures.push({ name: 'setup or execution', error: String(error?.stack || error) });
