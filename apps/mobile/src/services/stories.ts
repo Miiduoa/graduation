@@ -83,30 +83,26 @@ export async function listActiveStoriesForSchool(
   const db = getDb();
   const now = Date.now();
   try {
+    // Firestore rules cannot filter query results: the server must be able to
+    // prove every returned story is still active. A two-minute lead covers
+    // request latency and prevents almost-expired stories from failing the query.
+    const expiresAfter = now + 120_000;
     const snap = await getDocs(
       query(
         storiesCollection(db),
         where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
+        where('expiresAt', '>', expiresAfter),
+        orderBy('expiresAt', 'desc'),
         limit(lim),
       ),
     );
     return snap.docs
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    // 缺索引 fallback：不排序
-    try {
-      const snap = await getDocs(
-        query(storiesCollection(db), where('schoolId', '==', schoolId), limit(lim)),
-      );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-        .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch (error) {
-      if (options.throwOnError) throw error;
-      return [];
-    }
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
+  } catch (error) {
+    // Never fall back to a school-only query: it exposes expired metadata.
+    if (options.throwOnError) throw error;
+    return [];
   }
 }
 

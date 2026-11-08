@@ -278,3 +278,13 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 加入 Firebase 規則模擬器回歸：本人與作者可讀單筆；第三位同校成員讀取被拒；作者可查觀看列表、非作者的同校成員不得列舉；訪客被拒。舊版規則會允許第三位同校成員讀取及列舉；**目前僅新增可重跑測試與原始碼，應以新精確提交的 emulator 和完整 CI 結果判定，不預先聲稱通過**。如果舊版手機端嘗試讓非作者列舉別人限動觀看紀錄，新的限制會拒絕該行為；需要以實機操作確認此預期隱私邊界。
 
 仍未處理：`campusStories` 的舊 SDK `allow list` 可返回過期 metadata；已簽發 Firebase/GCS bearer URL 及 Supabase signed URL 的即時失效、隔離真實 GCS staging、legacy canonical profile 資料修復、minimatch 相容性與正式發布前核可。沒有操作正式環境、資料、金鑰、token 或 migration，也沒有合併 `main`。
+
+## 2026-11-08：限時動態列表 metadata 過期撤權（精確 head CI 待驗證）
+
+前輪已禁止過期限動的單筆 `get` 與 Storage SDK 讀取，但 `campusStories` 的 `list` 仍只驗證校籍，手機原查詢只帶 `schoolId` 並在下載後才過濾 `expiresAt`。已過期限動的文字、媒體網址及 metadata 仍可能先送到用戶端；前端 `filter` 不構成撤權。
+
+本輪將 Firestore 的 `get/list` 共用伺服器時間界線：`expiresAt` 必須是 epoch milliseconds 整數，且嚴格晚於 `request.time.toMillis()`。手機 `listActiveStoriesForSchool` 加入 `where('expiresAt','>',Date.now()+120000)`，依過期時間降冪查詢，限量後僅再做有效期防護；兩分鐘提前量避免在傳輸途中到期的資料讓整個查詢被拒絕。移除未使用到期條件的舊 school-only fallback，錯誤依既有 `throwOnError` 契約回報或回傳空陣列。新增 schoolId+expiresAt DESC 組合索引。
+
+隔離回歸涵蓋不帶到期條件的廣泛查詢應拒絕、允許包含過期的弱界線查詢應拒絕、有效界線只回傳目前有效紀錄、非同校及匿名查詢應拒絕。若在精確 head CI 因 Firestore 動態數值比較的查詢可證明性、索引或 emulator 差異失敗，必須保留失敗證據並修正，不得放寬過期撤權或關閉斷言。
+
+**部署相容性：** 正式環境必須先建成複合索引並發布支援有效期查詢的手機版本，再啟用收緊後的 Firestore 規則；舊手機版將因 school-only 列表查詢遭拒絕。這是刻意 fail-closed 而非相容回退，需由發布窗口檢查舊版客戶端覆蓋率與降級畫面後分階段切換。本輪只變更開發分支並等待 CI、CodeQL、Supabase、Python、Mobile Agent 與適用 Maestro 的精確提交結果。舊 GCS bearer URL、Supabase 已簽網址、GCS staging、相依套件與指定 App 審查仍屬未處理缺口，沒有正式資料、金鑰、migration、token 清理或部署操作。

@@ -1880,6 +1880,40 @@ describe('storage security rules', () => {
       .set({ viewerUid: 'alice', viewedAt: Date.now() }));
   });
 
+
+  test('story lists cannot include expired metadata or cross-school rows', async () => {
+    const now = Date.now();
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/other/members/bob').set({ status: 'active' });
+      await db.doc('campusStories/active-list-proof').set({
+        schoolId: 'pu', authorUid: 'alice', kind: 'text',
+        expiresAt: now + 3_600_000, createdAt: now,
+      });
+      await db.doc('campusStories/expired-list-proof').set({
+        schoolId: 'pu', authorUid: 'alice', kind: 'text',
+        expiresAt: now - 60_000, createdAt: now - 3_600_000,
+      });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const stories = alice.collection('campusStories');
+    // A school-only query could previously return the expired document.
+    await assertFails(stories.where('schoolId', '==', 'pu').get());
+    await assertFails(stories.where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now - 120_000).get());
+    const active = await assertSucceeds(stories.where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000)
+      .orderBy('expiresAt', 'desc').limit(80).get());
+    expect(active.docs.map((row) => row.id)).toEqual(['active-list-proof']);
+    await assertFails(bob.collection('campusStories')
+      .where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000).get());
+    await assertFails(testEnv.unauthenticatedContext().firestore()
+      .collection('campusStories').where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000).get());
+  });
+
   test('story view receipts are visible only to their viewer and story author', async () => {
     const viewPath = 'campusStories/private-views/storyViews/bob';
     const viewCollection = 'campusStories/private-views/storyViews';
