@@ -1305,6 +1305,29 @@ it('repairs screenshot text against the decoded preview when AI returns no rows'
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
 });
 
+it('focuses screenshot repair text after commit even when an animation frame runs early', async () => {
+  // A frame can run before React commits the text/preview and unlocks the fieldset.
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    callback(0);
+    return 0;
+  });
+  const sourceText = '需要校對的截圖原文';
+  vi.mocked(runPersonalImportAi).mockResolvedValue({ rows: [], issues: [], sourceText });
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+
+  const editor = await screen.findByDisplayValue(sourceText);
+  expect(editor.closest('fieldset')?.disabled).toBe(false);
+  expect(editor.closest('details')?.open).toBe(true);
+  expect(document.activeElement).toBe(editor);
+
+  // This is a one-time focus request, not a reason to interrupt later edits.
+  const year = screen.getByLabelText('這份資料的學年度');
+  year.focus();
+  fireEvent.change(year, { target: { value: '116' } });
+  expect(document.activeElement).toBe(year);
+});
+
 it('keeps unparsed text when another screenshot produces no rows', async () => {
   vi.mocked(runPersonalImportAi).mockResolvedValue({
     rows: [],
