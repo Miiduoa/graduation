@@ -1,3 +1,4 @@
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import { getAssistantProfileTrainingSeeds } from './aiAssistantProfile';
 import { getPuDiningMenuItems } from './puDiningCatalog';
 
@@ -378,7 +379,7 @@ export const AGENT_TOOLS: AgentTool[] = [
         type: 'string',
         label: '問題描述',
         required: true,
-        hint: '越詳細越快處理',
+        hint: DORM_REPAIR_COPY.descriptionHint,
       },
       { name: 'room', type: 'string', label: '房號', required: true },
       {
@@ -395,7 +396,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     ],
     requiresConfirmation: true,
     isReversible: true,
-    estimatedDuration: '即時提交，1-3 天處理',
+    estimatedDuration: DORM_REPAIR_COPY.estimatedDuration,
     roleAccess: ['student'],
   },
   {
