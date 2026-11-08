@@ -247,6 +247,31 @@ describe('saved class gap answer', () => {
     }).content).toContain('沒有課間空堂');
   });
 
+  test('malformed saved gap containers and entries fail closed instead of crashing or claiming no free time', () => {
+    const malformed: unknown[] = [
+      null, undefined, 12, 'invalid', [], {},
+      { startAt: instant('09:00') }, { startAt: '09:00', endAt: instant('10:00') },
+    ];
+    for (const entry of malformed) {
+      const result = answerSavedClassGapQuery(today, {
+        ...context,
+        timetable: {
+          ...context.timetable,
+          classGaps: [entry] as unknown as NonNullable<OnDeviceSchoolContext['timetable']['classGaps']>,
+        },
+      });
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('資料不足');
+      expect(result.content).not.toContain('沒有課間空堂');
+    }
+    const invalidContainer = answerSavedClassGapQuery(today, {
+      ...context,
+      timetable: { ...context.timetable, classGaps: {} as never },
+    });
+    expect(invalidContainer.content).toContain('資料不足');
+    expect(invalidContainer.content).not.toContain('沒有課間空堂');
+  });
+
   test('distinguishes a known empty result from missing, unreadable or incomplete evidence', () => {
     const answer = (timetable: Partial<OnDeviceSchoolContext['timetable']>, checkedAt = context.checkedAt) =>
       answerSavedClassGapQuery(today, { ...context, checkedAt, timetable: { ...context.timetable, ...timetable } }).content;

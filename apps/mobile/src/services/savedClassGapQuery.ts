@@ -243,12 +243,12 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (timetable.source === 'not-available') return reply('這台手機還沒有這個帳號的個人課表。請先在「我的課表」匯入或儲存課程。');
 
   const now = Date.parse(context.checkedAt);
-  if (!timetable.classGaps || !Number.isFinite(now)) {
+  if (!Array.isArray(timetable.classGaps) || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
   }
   // A damaged local snapshot cannot be treated as proof that a student has no free period.
-  if (timetable.classGaps.some(({ startAt, endAt }) =>
-    !Number.isSafeInteger(startAt) || !Number.isSafeInteger(endAt) || startAt >= endAt)) {
+  if (timetable.classGaps.some((gap) => !gap || typeof gap !== 'object' ||
+    !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) || gap.startAt >= gap.endAt)) {
     return reply('這份手機課表的空堂時間資料不足，無法核對。請開啟「我的課表」重新確認上課時間。');
   }
   const offset = savedClassGapDayOffset(query.day);
