@@ -25,6 +25,8 @@ vi.mock('./VoiceDictationButton', () => ({
 beforeEach(() => {
   state.uid = 'alice';
   vi.clearAllMocks();
+  sessionStorage.clear();
+  window.history.replaceState({}, '', '/');
 });
 
 it('sends the finished voice transcript through AI and renders multiple validated actions', async () => {
@@ -94,6 +96,27 @@ it.each([false, true])('filters readonly destinations from voice results with en
   expect(
     screen.getByRole('link', { name: (_, el) => (el.getAttribute('href') || '').startsWith('/classroom') }).getAttribute('href'),
   ).toContain('/classroom');
+});
+
+it('keeps the quick-entry query after returning from a matched service', () => {
+  const view = render(<QuickCampusEntry />);
+  fireEvent.change(screen.getByRole('searchbox', { name: '想做什麼？' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: /圖書館/ }));
+  view.unmount();
+  window.history.replaceState({}, '', '/library');
+  const away = render(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
+    '',
+  );
+  away.unmount();
+  window.history.replaceState({}, '', '/');
+  render(<QuickCampusEntry />);
+  expect((screen.getByRole('searchbox', { name: '想做什麼？' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('link', { name: /圖書館/ })).toBeTruthy();
 });
 
 it('offers semester grades and their preview when the model returns the shared grades destination', async () => {

@@ -5,7 +5,7 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
@@ -16,6 +16,11 @@ import {
   type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
+import {
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+} from '@/lib/campusDirectorySearch';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import {
@@ -47,7 +52,7 @@ function ServiceMenuLink({
   id: string;
   filtering: boolean;
   secondary?: boolean;
-  onClose: () => void;
+  onClose: (href: string) => void;
 }) {
   return (
     <Link
@@ -59,7 +64,7 @@ function ServiceMenuLink({
         service.href === '/food' && !isWebOnlineOrderingEnabled() ? `${id}-food-status` : undefined
       }
       aria-current={currentService === service.href ? 'page' : undefined}
-      onClick={onClose}
+      onClick={() => onClose(href)}
     >
       <span className={styles.serviceName}>
         {service.name}
@@ -87,10 +92,20 @@ export function CampusServiceMenu() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const id = useId();
+  useLayoutEffect(() => {
+    const snapshot = restoreDirectorySearch('menu', pathname || '/');
+    if (!snapshot) return;
+    // Restore filters after history navigation back to this page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setQuery(snapshot.query.slice(0, 100));
+    setCategory(snapshot.category);
+    if (snapshot.open && menu.current) menu.current.open = true;
+  }, [pathname]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
       if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
+        forgetDirectorySearch('menu');
         element.open = false;
       }
     }
@@ -134,6 +149,20 @@ export function CampusServiceMenu() {
     setCategory('all');
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
+  function dismissMenu() {
+    forgetDirectorySearch('menu');
+    closeMenu();
+  }
+  function persistAndClose(destination: string) {
+    rememberDirectorySearch('menu', {
+      path: pathname || '/',
+      destination,
+      query,
+      category,
+      open: true,
+    });
+    closeMenu();
+  }
   function resetSearch() {
     setQuery('');
     setCategory('all');
@@ -155,7 +184,7 @@ export function CampusServiceMenu() {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.currentTarget.open) {
           event.preventDefault();
           event.stopPropagation();
-          closeMenu();
+          dismissMenu();
         }
       }}
       onBlur={(event) => {
@@ -163,6 +192,7 @@ export function CampusServiceMenu() {
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget)
         ) {
+          forgetDirectorySearch('menu');
           event.currentTarget.open = false;
         }
       }}
@@ -188,7 +218,7 @@ export function CampusServiceMenu() {
             type="button"
             className={styles.closeButton}
             aria-label="關閉所有服務"
-            onClick={closeMenu}
+            onClick={dismissMenu}
           >
             <svg
               viewBox="0 0 24 24"
@@ -287,7 +317,9 @@ export function CampusServiceMenu() {
             href={campusServiceHref('/search', directoryParams.toString())}
             className={styles.menuOverview}
             aria-current={pathname === '/search' ? 'page' : undefined}
-            onClick={closeMenu}
+            onClick={() =>
+              persistAndClose(campusServiceHref('/search', directoryParams.toString()))
+            }
           >
             尋找校園服務 <span aria-hidden="true">→</span>
           </Link>
@@ -309,7 +341,7 @@ export function CampusServiceMenu() {
                         currentService={currentService}
                         id={id}
                         filtering={filtering}
-                        onClose={closeMenu}
+                        onClose={persistAndClose}
                       />
                       {children.map((child) => (
                         <ServiceMenuLink
@@ -320,7 +352,7 @@ export function CampusServiceMenu() {
                           id={id}
                           filtering={filtering}
                           secondary
-                          onClose={closeMenu}
+                          onClose={persistAndClose}
                         />
                       ))}
                     </div>

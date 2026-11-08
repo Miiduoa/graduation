@@ -57,6 +57,7 @@ beforeEach(() => {
   navigation.pathname = '/map';
   navigation.search = '';
   window.history.replaceState({}, '', '/map');
+  sessionStorage.clear();
   auth.session = null;
   auth.loading = false;
   auth.pendingLogout = false;
@@ -419,10 +420,55 @@ it('clears a completed search immediately before a route change can remove the d
   });
   fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
   navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
   view.rerender(<CampusServiceMenu />);
   screen.getByText('所有服務').closest('details')!.open = true;
   expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
   expect(screen.getByRole('link', { name: '課表' })).toBeTruthy();
+});
+
+it('reopens the directory with the same query and category after returning from a service', () => {
+  const view = render(<CampusServiceMenu />);
+  fireEvent.click(screen.getByText('所有服務'));
+  fireEvent.click(screen.getByRole('button', { name: '篩選校園生活' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋服務' }), {
+    target: { value: '借書' },
+  });
+  fireEvent.click(screen.getByRole('link', { name: '圖書館' }));
+  navigation.pathname = '/library';
+  window.history.replaceState({}, '', '/library');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  navigation.pathname = '/map';
+  window.history.replaceState({}, '', '/map');
+  view.rerender(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(true);
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe(
+    '借書',
+  );
+  expect(screen.getByRole('button', { name: '篩選校園生活' }).getAttribute('aria-pressed')).toBe(
+    'true',
+  );
+  expect(screen.getByRole('link', { name: '圖書館' })).toBeTruthy();
+});
+
+it('does not reopen the directory from an off-site stored destination', () => {
+  sessionStorage.setItem(
+    'campus.directory.search.v1',
+    JSON.stringify({
+      menu: {
+        path: '/map',
+        destination: 'https://evil.test/library',
+        query: '借書',
+        category: 'campus',
+        open: true,
+      },
+    }),
+  );
+  render(<CampusServiceMenu />);
+  expect(screen.getByText('所有服務').closest('details')!.open).toBe(false);
+  fireEvent.click(screen.getByText('所有服務'));
+  expect((screen.getByRole('searchbox', { name: '搜尋服務' }) as HTMLInputElement).value).toBe('');
 });
 
 
