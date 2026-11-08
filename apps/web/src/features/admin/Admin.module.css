@@ -1,6 +1,6 @@
 .workbench {
   display: grid;
-  grid-template-columns: minmax(216px, 248px) minmax(0, 1fr);
+  grid-template-columns: minmax(196px, 216px) minmax(0, 1fr);
   gap: clamp(16px, 2.5vw, 30px);
   align-items: start;
   min-width: 0;
@@ -20,16 +20,46 @@
   min-width: 0;
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--surface);
 }
 
 .brandBlock {
   display: grid;
   gap: 6px;
-  padding: 14px;
-  border-radius: 10px;
-  background: var(--bg-soft);
+  padding: 8px 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebarTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.brandBlock .muted,
+.scopeHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.mobileMenuToggle {
+  display: none;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  min-height: 44px;
+}
+
+.breadcrumb .linkButton {
+  font-size: 13px;
 }
 
 .eyebrow {
@@ -124,6 +154,11 @@
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: -0.01em;
+}
+
+.workspaceTitle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 5px;
 }
 
 .sectionIntro {
@@ -595,7 +630,6 @@
   font-size: 12px;
 }
 
-
 /* The landing view is organized around decisions, not a directory of features. */
 .overviewHero {
   display: flex;
@@ -701,40 +735,50 @@
   }
 
   .brandBlock {
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    padding: 10px 12px;
-  }
-
-  .brandBlock .muted {
     display: none;
   }
 
   .sideNav {
-    display: flex;
-    gap: 16px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    scroll-snap-type: x proximity;
-  }
-
-  .navGroup {
-    display: flex;
-    gap: 6px;
-    flex: 0 0 auto;
-  }
-
-  .navGroup .sideLabel {
     display: none;
   }
 
+  .sideNav.menuOpen {
+    display: grid;
+    gap: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .mobileMenuToggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    width: 100%;
+    padding: 4px 8px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .mobileMenuToggle > span:last-child {
+    color: var(--muted);
+  }
+
+  .mobileMenuToggle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
   .navItem {
-    width: auto;
-    white-space: nowrap;
+    width: 100%;
+    white-space: normal;
     padding-inline: 12px;
-    scroll-snap-align: start;
   }
 
   .sideSecondary {
@@ -798,13 +842,16 @@
 }
 
 /* Workbench navigation and scoped actions */
-.navGroup { display: grid; gap: 4px; }
+.navGroup {
+  display: grid;
+  gap: 4px;
+}
 .navGroupLabel {
   margin: 4px 14px 2px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: .035em;
+  letter-spacing: 0.035em;
 }
 .scopeStrip {
   display: flex;
@@ -819,7 +866,12 @@
   font-size: 14px;
   overflow-wrap: anywhere;
 }
-.scopeActions { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+.scopeActions {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
 .linkButton {
   min-height: 44px;
   padding: 0;
@@ -831,7 +883,8 @@
   cursor: pointer;
   font: inherit;
 }
-.linkButton:focus-visible, .taskTile:focus-visible {
+.linkButton:focus-visible,
+.taskTile:focus-visible {
   outline: 2px solid var(--focus-ring, var(--brand));
   outline-offset: 3px;
 }
@@ -852,17 +905,297 @@
   background: var(--bg-soft);
   color: var(--text);
   text-decoration: none;
-  transition: border-color var(--motion-fast), background var(--motion-fast);
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast);
 }
-.taskTile strong { font-size: 15px; }
-.taskTile span { color: var(--muted); font-size: 13px; line-height: 1.6; }
-.taskTile:hover { border-color: var(--brand); background: var(--accent-soft); }
+.taskTile strong {
+  font-size: 15px;
+}
+.taskTile span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.taskTile:hover {
+  border-color: var(--brand);
+  background: var(--accent-soft);
+}
 @media (max-width: 860px) {
-  .navGroup { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .navGroupLabel { margin: 0 8px 0 0; }
-  .taskGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .navGroup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .navGroupLabel {
+    grid-column: 1 / -1;
+    margin: 0 12px 4px;
+  }
+  .taskGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.overviewHeading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.reviewQueueGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+
+.taskQueue {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.queueHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 20px 14px;
+}
+
+.queueHeading h3 {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.queueHeading .muted {
+  font-size: 13px;
+}
+
+.queueCount {
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding-inline: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--brand);
+  font-size: 19px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.queueRows {
+  margin: 0;
+  padding: 0 20px;
+  list-style: none;
+}
+
+.queueRows li + li {
+  border-top: 1px solid var(--border);
+}
+
+.queueRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  min-height: 64px;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.queueRow:hover strong,
+.queueArrow {
+  color: var(--brand);
+}
+
+.queueRow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.queueRowBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.queueRowBody strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.queueRowBody > span,
+.queueRowBody time {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.queueArrow {
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.queueMessage {
+  margin: 0;
+  padding: 12px 20px 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.queueFailure {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 12px 20px 20px;
+  color: var(--danger);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.queueFailure p {
+  margin: 0;
+}
+
+.queueFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-top: auto;
+  padding: 4px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.queueFooter > span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.queueFooter .linkButton {
+  font-size: 13px;
+}
+
+.setupSteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  list-style: none;
+}
+
+.setupSteps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.setupSteps li > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.setupSchools {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setupSchools li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-block: 12px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setupSchools li:last-child {
+  border-bottom: 0;
+}
+
+.setupSchools li > div:first-child {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setupSchools strong {
+  font-size: 15px;
+}
+
+.setupSchools .linkButton,
+.quickActions .linkButton {
+  font-size: 14px;
+}
+
+.quickActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+}
+
+@media (max-width: 1080px) {
+  .setupSteps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .reviewQueueGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .queueHeading {
+    padding: 18px 18px 12px;
+  }
+  .queueRows {
+    padding-inline: 18px;
+  }
+  .queueFooter {
+    padding-inline: 18px;
+  }
 }
 @media (max-width: 580px) {
-  .taskGrid { grid-template-columns: minmax(0, 1fr); }
-  .taskTile { min-height: 0; }
+  .taskGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .taskTile {
+    min-height: 0;
+  }
 }
