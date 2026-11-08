@@ -14,6 +14,7 @@ import type { AnnouncementRead, AssignmentRead, OfflineCampusToolResult } from '
 import { answerSavedClassQuery, savedClassQuery, type SavedClassRead } from '../services/savedClassQuery';
 import { answerCourseworkReminder, isCourseworkReminderQuestion } from './nuniCourseworkReminder';
 import { courseworkSnapshotAnswer } from './nuniCourseworkSnapshot';
+import { answerCourseworkStudyIntent, type CourseworkStudyChoice, type CourseworkStudySelection } from './nuniCourseworkStudyIntent';
 import { answerNuniCoursework, classCourseworkQuestion, type CourseworkChoice,
   type CourseworkRead, type CourseworkRequests } from './nuniCourseworkFollowUp';
 import { assignmentFollowUp } from '../services/assignmentFollowUp';
@@ -40,6 +41,8 @@ export type CampusAssistantMessage = {
   announcementRead?: AnnouncementRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
+  courseworkStudy?: CourseworkStudySelection;
+  courseworkStudyCheckedAt?: string;
 };
 export type CampusAssistantScope = { uid: string; schoolId: string };
 export type CampusAssistantMode = 'device' | 'campus';
@@ -106,6 +109,7 @@ export async function askCampusAssistant(input: {
   platformTimetable?: PlatformTimetableAccess;
   courseworkRequests?: CourseworkRequests;
   courseworkChoice?: CourseworkChoice;
+  courseworkStudyChoice?: CourseworkStudyChoice;
   /** Optional per-request native cancellation; never cancels unrelated tasks. */
   signal?: AbortSignal;
   schoolName?: string | null;
@@ -129,6 +133,7 @@ export async function askCampusAssistant(input: {
   assignmentRead?: AssignmentRead;
   savedClassRead?: SavedClassRead;
   courseworkRead?: CourseworkRead;
+  courseworkStudy?: CourseworkStudySelection;
   announcementRead?: AnnouncementRead;
   route?: string;
   proposals?: CampusAgentWriteProposal[];
@@ -145,8 +150,11 @@ export async function askCampusAssistant(input: {
     .slice(-20)
     // Local records and calendar tasks stay in the conversation without being
     // forwarded, together with their preceding question, to a later model.
-    .filter((message, index, history) => !['saved-academics', 'calendar-action'].includes(message.tool ?? '') &&
-      !(message.role === 'user' && ['saved-academics', 'calendar-action'].includes(history[index + 1]?.tool ?? '')))
+    .filter((message, index, history) => {
+      const privateRead = (item?: CampusAssistantMessage) => !!item &&
+        (!!item.courseworkRead || !!item.courseworkStudy || ['saved-academics', 'calendar-action'].includes(item.tool ?? ''));
+      return !privateRead(message) && !(message.role === 'user' && privateRead(history[index + 1]));
+    })
     .map((message) => ({
       role: message.role,
       content: message.content.trim().slice(0, 1600),
@@ -157,6 +165,15 @@ export async function askCampusAssistant(input: {
   }
 
   const question = messages[messages.length - 1].content;
+  const prior = input.messages[input.messages.length - 2];
+  const sourceReply = prior?.role === 'assistant' ? prior : undefined;
+  const study = answerCourseworkStudyIntent({
+    question, read: sourceReply?.courseworkRead, previous: sourceReply?.courseworkStudy,
+    choice: input.courseworkStudyChoice, accountId: input.platformTimetable?.accountId,
+    schoolId: input.scope.schoolId,
+    isCurrent: () => input.isCurrent() && !!input.platformTimetable?.isCurrent() && !input.signal?.aborted,
+  });
+  if (study) return { ...study, source: 'device', tool: 'calendar-action', hasActions: false };
   const batchIntent = parseAssistantCalendarBatchIntent(question);
   if (batchIntent) {
     if (batchIntent.kind === 'invalid') return { content: batchIntent.message,

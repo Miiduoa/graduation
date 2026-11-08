@@ -7,6 +7,7 @@ import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServ
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { NuniCourseworkReply, courseworkReplyTitle } from './NuniCourseworkReply';
+import { NuniCourseworkStudyAction } from './NuniCourseworkStudyAction';
 import { classCourseworkQuestion, type CourseworkChoice, type CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
 import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
@@ -192,6 +193,8 @@ function AssistantConversation({
   const [error, setError] = useState('');
   const [activeShortcut, setActiveShortcut] = useState<AssistantShortcut | null>(null);
   const [busy, setBusy] = useState(false);
+  const [studyBusy, setStudyBusy] = useState(false);
+  const studyLock = useRef(false);
   const [linkError, setLinkError] = useState('');
   const mounted = useRef(true);
   const lock = useRef(false);
@@ -265,7 +268,7 @@ function AssistantConversation({
   const taskIsBusy = (task?: AssistantCalendarTask) => task?.state === 'saving' || task?.state === 'checking' ||
     (task?.state === 'verified' && task.checking);
   const batchIsBusy = (batch?: AssistantCalendarBatchView) => batch?.state === 'running' || batch?.checking;
-  const calendarBusy = calendarRecovery.loading || messages.some(({ calendarTask }) => taskIsBusy(calendarTask)) ||
+  const calendarBusy = studyBusy || calendarRecovery.loading || messages.some(({ calendarTask }) => taskIsBusy(calendarTask)) ||
     calendarRecovery.tasks.some(taskIsBusy) || messages.some(({ calendarBatch }) => batchIsBusy(calendarBatch)) ||
     calendarRecovery.batches.some(batchIsBusy);
   const changeCalendarTask = (task: AssistantCalendarTask, originalId = task.proposal.mutationId) => {
@@ -301,13 +304,13 @@ function AssistantConversation({
     return () => { active = false; };
   }, [deviceCheck, platformTimetable]);
   const editDraft = (text: string) => {
-    if (lock.current || calendarBusy) return;
+    if (lock.current || studyLock.current || calendarBusy) return;
     setDraft(text);
     setError('');
     setActiveShortcut(null);
   };
   const changeMode = (next: CampusAssistantMode) => {
-    if (lock.current || syncLock.current || calendarBusy || next === mode) return;
+    if (lock.current || syncLock.current || studyLock.current || calendarBusy || next === mode) return;
     lastRevealed.current = -1;
     setMode(next);
     setPanel('chat');
@@ -455,7 +458,7 @@ function AssistantConversation({
 
   const send = async (shortcut?: Exclude<AssistantShortcut, { kind: 'brief' }>) => {
     const question = shortcut?.question ?? draft.trim();
-    if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || calendarBusy || !current()) return;
+    if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || studyLock.current || calendarBusy || !current()) return;
     if (shortcut?.kind === 'selection' && shortcut.checkedAt !== validCampusSenseSnapshot(sense, { uid, schoolId })?.checkedAt) return;
     lock.current = true;
     setActiveShortcut(shortcut ?? null);
@@ -542,6 +545,7 @@ function AssistantConversation({
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
             courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
+            courseworkStudy: reply.courseworkStudy,
             announcementRead: reply.announcementRead,
             proposals: reply.proposals,
           },
@@ -830,15 +834,46 @@ function AssistantConversation({
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
-          <AICard title={message.calendarBatch ? '多筆個人行程' : message.tool === 'calendar-action' ? '個人行程'
+          <AICard title={message.courseworkStudy ? '作業準備行程' : message.calendarBatch ? '多筆個人行程' : message.tool === 'calendar-action' ? '個人行程'
             : message.tool === 'saved-academics' ? '成績與學分紀錄'
             : message.serviceSelection ? '功能入口'
             : message.courseworkRead ? courseworkReplyTitle(message.courseworkRead)
             : message.announcementRead ? '校園公告'
             : message.savedClassRead ? savedClassReplyTitle(message.savedClassRead) : message.localReads?.length ? '手機工具查詢' : message.plan ? '校園行動計畫' : message.tool ? '手機離線工具' : platformTimetable ? '課表助理' : message.source === 'device' ? '手機本地 AI' : '校園即時助理'}>
-            {platformTimetable && message.courseworkRead ? (
+            {platformTimetable && message.courseworkRead && message.courseworkStudy ? (
+              <View style={{ gap: 10 }}>
+                <Text style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>{message.content}</Text>
+                <NuniCourseworkStudyAction read={message.courseworkRead}
+                  assignmentIds={message.courseworkStudy.assignmentIds} initialTime={message.courseworkStudy.time}
+                  context={calendarContext} requests={courseworkRequests}
+                  task={message.calendarTask} sourceCheckedAt={message.courseworkStudyCheckedAt}
+                  latest={index === messages.length - 1} disabled={busy || syncBusy || calendarBusy}
+                  onBusyChange={(value) => {
+                    studyLock.current = value;
+                    if (current()) setStudyBusy(value);
+                  }}
+                  onRefresh={() => void send({ kind: 'coursework', question: '重新查詢這門課的作業' })}
+                  onOpenAssignment={(workspaceId, assignmentId) => {
+                    if (current()) safeNavigate(navigation, 'NuniWorkspace', {
+                      tab: 'courses', workspaceId, assignmentId, assistantAccountId: platformTimetable.accountId,
+                    });
+                  }}
+                  onRecheckOperations={() => {
+                    if (!busy && !syncBusy && !studyLock.current && !calendarBusy && current()) void calendarRecovery.reload();
+                  }}
+                  onTask={(task, sourceCheckedAt, assignmentId) => {
+                    if (!current() || task.proposal.owner !== timetableOwner || task.proposal.schoolId !== schoolId) return;
+                    changeCalendarTask(task);
+                    setMessages((previous) => previous.map((entry, entryIndex) => entryIndex === index
+                      ? { ...entry, calendarTask: task, courseworkStudyCheckedAt: sourceCheckedAt,
+                        ...(entry.courseworkStudy && assignmentId && { courseworkStudy: {
+                          ...entry.courseworkStudy, assignmentIds: [assignmentId],
+                        } }) } : entry));
+                  }} />
+              </View>
+            ) : platformTimetable && message.courseworkRead ? (
               <NuniCourseworkReply read={message.courseworkRead} latest={index === messages.length - 1}
-                busy={busy || syncBusy}
+                busy={busy || syncBusy || calendarBusy}
                 onSelect={(choice, label) => void send({ kind: 'coursework', choice, question: label })}
                 onAsk={(question) => void send({ kind: 'coursework', question })}
                 onRetry={() => void send({ kind: 'coursework', question: CLASS_WORK })}
