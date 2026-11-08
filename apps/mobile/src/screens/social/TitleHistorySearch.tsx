@@ -102,6 +102,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const [notice, setNotice] = useState('');
   const cursor = useRef<TitleSearchCursor | null>(null);
   const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
+  const activeRequest = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
   const inFlight = useRef(false);
   const openingPost = useRef(false);
   const version = useRef(0);
@@ -120,12 +121,14 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     setResumePostId(undefined);
     cursor.current = null;
     retry.current = null;
+    activeRequest.current = null;
     setText(value); setPosts([]); setHasMore(false); setBusy(false); setError(''); setNotice('');
   };
   const close = () => {
     openingPost.current = true;
     version.current += 1;
     inFlight.current = false;
+    activeRequest.current = null;
     onClose();
   };
   const request = async (boundary: TitleSearchCursor | null, append: boolean, fromPostId?: string) => {
@@ -137,6 +140,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
       return;
     }
     const attempt = ++version.current;
+    activeRequest.current = { cursor: boundary, append, ...(fromPostId ? { fromPostId } : {}) };
     setResumeHint(false);
     if (!fromPostId) setResumePostId(undefined);
     inFlight.current = true;
@@ -184,6 +188,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
       }
     } finally {
       if (live.current && attempt === version.current) {
+        activeRequest.current = null;
         inFlight.current = false;
         setBusy(false);
       }
@@ -191,9 +196,14 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   };
   const openResult = async (item: TitleSearchPost) => {
     if (!live.current || openingPost.current || item.schoolId !== schoolId) return;
+    // A student can select an already loaded card while the next page is pending.
+    // Cancel that delivery and release its spinner before revalidating the post.
+    const interrupted = inFlight.current ? activeRequest.current : null;
     const attempt = ++version.current;
     openingPost.current = true;
     inFlight.current = false;
+    activeRequest.current = null;
+    setBusy(false);
     setOpening(true);
     setError('');
     let navigated = false;
@@ -219,7 +229,12 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
         setNotice('');
         setError('校籍或存取權限已變更，搜尋結果已清除。確認校籍後可重試搜尋。');
       } else {
-        setError('暫時無法向伺服器確認這篇貼文，已保留搜尋結果。確認連線後可再點一次。');
+        // The canceled page retains its exact boundary, even when confirmation
+        // fails before navigation. Never skip it or leave the retry controls stuck.
+        if (interrupted) retry.current = interrupted;
+        setError(interrupted
+          ? '暫時無法向伺服器確認這篇貼文，已保留搜尋結果。可再點一次貼文，或原地重試未完成的搜尋。'
+          : '暫時無法向伺服器確認這篇貼文，已保留搜尋結果。確認連線後可再點一次。');
       }
     } finally {
       if (live.current && attempt === version.current) {
@@ -247,7 +262,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
             onSubmitEditing={() => { void request(null, false); }} />
           <View style={styles.actions}>
             <Pressable accessibilityRole="button" accessibilityLabel="搜尋歷史標題"
-              accessibilityState={{ disabled: busy, busy }} disabled={busy}
+              accessibilityState={{ disabled: busy || opening, busy: busy || opening }} disabled={busy || opening}
               onPress={() => { void request(null, false); }} style={[styles.button, styles.primary]}>
               <Text style={styles.primaryText}>{busy ? '搜尋中…' : '搜尋'}</Text>
             </Pressable>
@@ -291,7 +306,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
           ListEmptyComponent={!busy && notice && !notice.startsWith('這篇貼文') && !error ? <Text style={styles.message}>沒有符合這個標題開頭的貼文。</Text> : null}
           ListFooterComponent={hasMore && !error ? (
             <Pressable accessibilityRole="button" accessibilityLabel="載入更多歷史貼文"
-              accessibilityState={{ disabled: busy, busy }} disabled={busy} style={styles.button}
+              accessibilityState={{ disabled: busy || opening, busy: busy || opening }} disabled={busy || opening} style={styles.button}
               onPress={() => { if (cursor.current) void request(cursor.current, true); }}>
               <Text style={styles.actionText}>{busy ? '搜尋中…' : '載入更多歷史貼文'}</Text>
             </Pressable>
