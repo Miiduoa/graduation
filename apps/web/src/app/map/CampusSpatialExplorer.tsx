@@ -218,6 +218,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     if (school !== 'pu' || model.unavailableReason) return;
     let active = true;
     const controller = new AbortController();
+    // An overloaded proxy can hang even after our server's own Overpass timeout.
+    // Give the marker-only map a bounded fallback instead of a permanent spinner.
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('footprint source unavailable');
@@ -236,8 +239,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         if (!active) return;
         // Keep the existing marker-only canvas; do not recreate the GPU context on failure.
         setFootprintStatus('unavailable');
-      });
-    return () => { active = false; controller.abort(); };
+      })
+      .finally(() => window.clearTimeout(timeout));
+    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
   }, [school, model.unavailableReason]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.

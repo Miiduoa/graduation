@@ -344,18 +344,46 @@ it('adds source-checked Providence building shapes without changing navigation o
     elements: [{ type: 'way', id: 255784049, geometry: outline,
       tags: { building: 'yes' }, version: 7, timestamp: '2026-10-15T08:09:10Z' }],
   });
+  const fetchedAt = new Date().toISOString();
   await act(async () => {
     resolveFetch?.({ ok: true, json: async () => ({
-      schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt: new Date().toISOString(), stale: false,
+      schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, stale: false,
     }) });
   });
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
-  expect(within(dialog).getByText(/2026-11-09/)).toBeTruthy();
+  expect(within(dialog).getByText(new RegExp(fetchedAt.slice(0, 10)))).toBeTruthy();
   expect(within(dialog).getByText(/OSM way 版本 v7.*2026-10-15/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('falls back to the usable map if the building API stalls instead of leaving a loading spinner', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  let signal: AbortSignal | undefined;
+  vi.stubGlobal('fetch', vi.fn((_url: string, init: { signal: AbortSignal }) => {
+    signal = init.signal;
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('building request timed out')), { once: true });
+    });
+  }));
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+    const callback = timeoutSpy.mock.calls.find(([, delay]) => delay === 15_000)?.[0];
+    expect(typeof callback).toBe('function');
+    await act(async () => { (callback as () => void)(); });
+    expect(signal?.aborted).toBe(true);
+    expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(scene.create).toHaveBeenCalledTimes(1);
+    expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
+  } finally {
+    timeoutSpy.mockRestore();
+  }
 });
 
 it('keeps the spatial map usable when Providence building geometry is unavailable', async () => {
