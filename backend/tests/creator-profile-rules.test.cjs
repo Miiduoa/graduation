@@ -122,6 +122,25 @@ async function seedFeaturedPosts() {
   });
 }
 
+
+test('missing highlights remain readable, but stale pointers cannot reveal formerly signed posts', async () => {
+  await seedFeaturedPosts();
+  const alice = environment.authenticatedContext('alice').firestore();
+  const bob = environment.authenticatedContext('bob').firestore();
+  const empty = await assertSucceeds(featureRef(bob).get({ source: 'server' }));
+  if (empty.exists) throw Error('Unexpected creator highlight');
+  await assertSucceeds(featureRef(alice).set(featured()));
+  await assertSucceeds(featureRef(bob).get({ source: 'server' }));
+
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/mine').update({ anonymous: true });
+  });
+  // A stale pointer still exists, but only its owner may read it to unfeature.
+  await assertFails(featureRef(bob).get({ source: 'server' }));
+  await assertSucceeds(featureRef(alice).get({ source: 'server' }));
+  await assertSucceeds(featureRef(alice).delete());
+});
+
 test('creator can feature only their signed post; same-campus peers see the pointer', async () => {
   await seedFeaturedPosts();
   const alice = environment.authenticatedContext('alice').firestore();
