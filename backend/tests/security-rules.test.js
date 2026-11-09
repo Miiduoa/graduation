@@ -2041,6 +2041,7 @@ describe('storage security rules', () => {
       await db.doc('users/bob').delete();
       await db.doc(bobView.path).delete();
     });
+    await assertFails(bobMedia.getMetadata());
     await assertFails(bob.doc(story.path).get());
     await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
@@ -2062,7 +2063,7 @@ describe('storage security rules', () => {
     await assertFails(bob.doc('campusStories/rebuilt-publish').set({
       ...payload, authorUid: 'bob',
     }));
-    await assertSucceeds(bobMedia.getMetadata());
+    await assertFails(bobMedia.getMetadata());
 
     await seedFirestore(async (db) => db.doc('users/alice').delete());
     await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
@@ -2077,14 +2078,70 @@ describe('storage security rules', () => {
     await assertFails(story.delete());
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
+    });
+    await assertSucceeds(story.get());
+    await assertSucceeds(aliceMedia.getMetadata());
+    await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
     });
     await assertFails(alice.doc('campusStories/revoked-school').set(payload));
     await assertFails(story.delete());
+    // Storage cannot also read the membership document. Media stays readable
+    // until the membership trigger removes the matching profile school fields.
+    await assertSucceeds(aliceMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+    });
     await assertFails(aliceMedia.getMetadata());
-    await seedFirestore(async (db) =>
-      db.doc('schools/pu/members/alice').set({ status: 'active' }));
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+    });
     await assertSucceeds(story.delete());
+  });
+
+  test('legacy school members regain stories after server binding, not after client rebuild', async () => {
+    const now = Date.now();
+    const payload = {
+      schoolId: 'pu', authorUid: 'dana', kind: 'text', text: 'legacy story',
+      expiresAt: now + 3_600_000, viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc('users/dana').set({ status: 'active', displayName: 'Dana' });
+      await db.doc('schools/pu/members/dana').set({ status: 'active', role: 'member' });
+      await db.doc('users/erin').set({ displayName: 'Erin', role: 'student' });
+      await db.doc('schools/pu/members/erin').set({ status: 'active', role: 'member' });
+    });
+    const danaCtx = testEnv.authenticatedContext('dana');
+    const erinCtx = testEnv.authenticatedContext('erin');
+    const dana = danaCtx.firestore();
+    const erin = erinCtx.firestore();
+    const media = danaCtx.storage().ref('schools/pu/stories/legacy-bind/image');
+
+    await assertFails(dana.doc('campusStories/legacy-bind').set(payload));
+    await assertFails(media.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'dana' },
+    }));
+    await assertFails(erin.doc('campusStories/legacy-stub').set({
+      ...payload, authorUid: 'erin',
+    }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/dana').set({
+        status: 'active', displayName: 'Dana', schoolId: 'pu', primarySchoolId: 'pu',
+      });
+    });
+    await assertSucceeds(media.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'dana' },
+    }));
+    const mediaUrl = await assertSucceeds(media.getDownloadURL());
+    await assertSucceeds(dana.doc('campusStories/legacy-bind').set({
+      ...payload, kind: 'image', mediaUrl,
+    }));
+    await assertSucceeds(dana.doc('campusStories/legacy-bind').get());
+    await assertSucceeds(danaCtx.storage().ref(media.fullPath).getMetadata());
+    await assertFails(erinCtx.storage().ref(media.fullPath).getMetadata());
+    await assertSucceeds(dana.doc('campusStories/legacy-bind').delete());
   });
 
   for (const objectPath of [
@@ -3057,6 +3114,7 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-status', { status: 'active' }],
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
@@ -3116,6 +3174,9 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(alice.update({ role: 'admin' }));
     await assertFails(alice.update({ status: 'active' }));
+    await assertFails(alice.update({ schoolId: 'other' }));
+    await assertFails(alice.update({ primarySchoolId: 'other' }));
+    await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
     await assertFails(bob.update({ postLoginRoles: ['admin', 'teacher'] }));
@@ -4239,6 +4300,7 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-status', { status: 'active' }],
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
@@ -4296,6 +4358,9 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ orgRoles: ['schoolAdmin'] }));
     await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(alice.update({ role: 'admin' }));
+    await assertFails(alice.update({ schoolId: 'other' }));
+    await assertFails(alice.update({ primarySchoolId: 'other' }));
+    await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
 
     // Change existing authority fields.
     await assertFails(bob.update({ primaryRole: 'admin' }));

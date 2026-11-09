@@ -143,6 +143,10 @@ const {
   createGradePublishedNotificationHandler,
 } = require('./firestoreTriggerHandlers');
 const {
+  clearProfileSchoolBindingForRevokedMembership,
+  inactivateLeftoverSchoolMemberships,
+} = require('./campusStoryAccessBinding');
+const {
   createAssignmentPublishedNotifyHandler,
   createSubmissionNotifyHandler,
   createSchoolAnnouncementNotifyHandler,
@@ -2548,6 +2552,12 @@ exports.onUserProfileChanged = onDocumentWritten(
   createUserProfileChangedHandler({
     syncAuthClaims,
     syncDirectoryEntriesForUser,
+    inactivateLeftoverSchoolMemberships: (uid) =>
+      inactivateLeftoverSchoolMemberships({
+        db,
+        uid,
+        loadMemberships: (memberUid) => directorySync.loadSchoolMembershipDocs(db, memberUid),
+      }),
   }),
 );
 
@@ -2558,6 +2568,14 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
   },
   createSchoolMembershipChangedHandler({
     syncSchoolDirectoryEntry,
+    syncProfileSchoolBinding: ({ schoolId, uid, membership }) =>
+      clearProfileSchoolBindingForRevokedMembership({
+        db,
+        FieldValue,
+        schoolId,
+        uid,
+        membership,
+      }),
   }),
 );
 

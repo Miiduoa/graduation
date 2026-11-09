@@ -3,6 +3,7 @@
 function createUserProfileChangedHandler({
   syncAuthClaims,
   syncDirectoryEntriesForUser,
+  inactivateLeftoverSchoolMemberships,
   log = console,
 }) {
   return async function onUserProfileChanged(event) {
@@ -10,6 +11,9 @@ function createUserProfileChangedHandler({
     const afterData = event.data.after?.data();
 
     if (!afterData) {
+      if (typeof inactivateLeftoverSchoolMemberships === 'function') {
+        await inactivateLeftoverSchoolMemberships(uid);
+      }
       await syncDirectoryEntriesForUser(uid, null);
       return;
     }
@@ -28,7 +32,11 @@ function createUserProfileChangedHandler({
   };
 }
 
-function createSchoolMembershipChangedHandler({ syncSchoolDirectoryEntry, log = console }) {
+function createSchoolMembershipChangedHandler({
+  syncSchoolDirectoryEntry,
+  syncProfileSchoolBinding,
+  log = console,
+}) {
   return async function onSchoolMembershipChanged(event) {
     const { schoolId, uid } = event.params;
     const membership = event.data.after?.data() || null;
@@ -41,6 +49,14 @@ function createSchoolMembershipChangedHandler({ syncSchoolDirectoryEntry, log = 
       });
     } catch (error) {
       log.error('Failed to sync school directory membership:', error);
+    }
+
+    if (typeof syncProfileSchoolBinding === 'function') {
+      try {
+        await syncProfileSchoolBinding({ schoolId, uid, membership });
+      } catch (error) {
+        log.error('Failed to sync profile school binding:', error);
+      }
     }
   };
 }

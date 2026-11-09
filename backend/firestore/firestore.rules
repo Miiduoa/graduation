@@ -1178,6 +1178,7 @@ service cloud.firestore {
           'status',
           'schoolId',
           'primarySchoolId',
+          'lastLoginAt',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress'
         ]);
@@ -1195,6 +1196,7 @@ service cloud.firestore {
           'balance',
           'schoolId',
           'primarySchoolId',
+          'lastLoginAt',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress',
           'createdAt'

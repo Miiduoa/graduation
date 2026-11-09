@@ -225,12 +225,15 @@ service firebase.storage {
     }
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
-      function activeStoryMember() {
-        // Membership plus the campusStories document already use the two
-        // Firestore lookups Storage rules allow, so this path cannot also
-        // require a canonical user profile on the same request.
-        return isAuthenticated()
-          && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
+      function storyAccountBoundToSchool() {
+        // Storage allows two Firestore documents. Published media already
+        // reads campusStories, so school access must live on the canonical
+        // profile rather than a leftover membership document.
+        return hasCanonicalActiveAccount()
+          && (
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
+            || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId
+          );
       }
       function isPublishedStory() {
         let story = firestore.get(/databases/(default)/documents/campusStories/$(storyId)).data;
@@ -242,7 +245,7 @@ service firebase.storage {
           && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
             || (story.kind == 'video' && resource.contentType.matches('video/.*')));
       }
-      allow get: if activeStoryMember()
+      allow get: if storyAccountBoundToSchool()
         && (
           // Before publication only the author can preview a draft. Once the
           // story exists, all readers (including its author) use the published
@@ -252,7 +255,7 @@ service firebase.storage {
           || isPublishedStory()
         );
       // Draft uploads may be retried until their Firestore story is published.
-      allow create, update: if activeStoryMember()
+      allow create, update: if storyAccountBoundToSchool()
         && request.resource.metadata.ownerUid == request.auth.uid
         && (resource == null || resource.metadata.ownerUid == request.auth.uid)
         && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
