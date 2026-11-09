@@ -330,10 +330,14 @@ export async function authorizePrivateFile(
           deny();
         }
         const memberData = asRecord(schoolMember.data());
+        // A stale membership stamp must never authorize a recreated user profile.
+        // Only the trusted school-login writer can bind both records in one transaction.
         if (
           memberData.profileBoundSchoolId !== schoolId ||
           typeof memberData.profileBoundGeneration !== 'string' ||
-          memberData.profileBoundGeneration.length === 0
+          memberData.profileBoundGeneration.length === 0 ||
+          memberData.profileBoundGeneration !== accountData.bindingGeneration ||
+          (accountData.schoolId !== schoolId && accountData.primarySchoolId !== schoolId)
         ) {
           deny();
         }

@@ -76,7 +76,10 @@ function seedStore() {
       'schools/pu/members/stamped',
       { status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1' },
     ],
-    ['users/stamped', { displayName: 'stamped' }],
+    ['users/stamped', {
+      displayName: 'stamped', schoolId: 'pu',
+      primarySchoolId: 'pu', bindingGeneration: 'gen-1',
+    }],
   ]);
 }
 
@@ -187,6 +190,36 @@ it('lets a stamped school member upload and download a draft story', async () =>
   expect(put(upload, 'photo')).toBe(200);
   expect((await invoke(runtime, { action: 'finalize', path: upload.body.path }, { uid: 'stamped' })).status).toBe(200);
   expect((await invoke(runtime, { action: 'download', path: STORY }, { uid: 'stamped' })).status).toBe(200);
+});
+
+it('does not issue story signed URLs to a recreated profile with a stale school stamp', async () => {
+  const auth = { uid: 'stamped' };
+  const upload = await invoke(
+    runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 5 }, auth,
+  );
+  expect(upload.status).toBe(200);
+  expect(put(upload, 'photo')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: STORY }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(200);
+
+  store.docs.delete('users/stamped');
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+  store.docs.set('users/stamped', { displayName: 'self recreated' });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+  expect((await invoke(runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 5 }, auth)).status).toBe(403);
+  store.docs.set('users/stamped', { schoolId: 'other', bindingGeneration: 'gen-1' });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+  store.docs.set('users/stamped', { schoolId: 'pu', bindingGeneration: 'new-generation' });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+
+  store.docs.set('users/stamped', {
+    schoolId: 'pu', primarySchoolId: 'pu', bindingGeneration: 'gen-1',
+  });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(200);
+  store.docs.set('schools/pu/members/stamped', {
+    status: 'inactive', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1',
+  });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
 });
 
 it('uploads and downloads an assignment file for the owner', async () => {

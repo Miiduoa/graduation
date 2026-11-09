@@ -115,6 +115,46 @@ it('requires an existing live post for downloads and author ownership for existi
 it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {
   await expect(authorize(fileStore([['groups/course/posts/one', { authorId: 'alice', ...tombstone }]]), POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
 });
+it('rejects stale campus story stamps after profile deletion, recreation and school change', async () => {
+  const store = fileStore([
+    ['users/alice', { schoolId: 'pu', primarySchoolId: 'pu', bindingGeneration: 'generation-one' }],
+    ['schools/pu/members/alice', {
+      status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'generation-one',
+    }],
+  ]);
+  const tryStory = (writing: boolean) => authorizePrivateFile(
+    store.db, parsePrivateFilePath(STORY)!, 'alice', writing,
+  );
+  await expect(tryStory(true)).resolves.toBeUndefined();
+  await expect(tryStory(false)).resolves.toBeUndefined();
+
+  // The same already-issued identity and active membership are not enough.
+  store.docs.delete('users/alice');
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('users/alice', { displayName: 'self recreated' });
+  for (const writing of [true, false]) {
+    await expect(tryStory(writing)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('users/alice', {
+    schoolId: 'other-school', bindingGeneration: 'generation-one',
+  });
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('users/alice', {
+    schoolId: 'pu', bindingGeneration: 'generation-two',
+  });
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+
+  // Server-controlled school-login transaction restores matching generations.
+  store.docs.set('users/alice', {
+    schoolId: 'pu', bindingGeneration: 'generation-one',
+  });
+  await expect(tryStory(false)).resolves.toBeUndefined();
+  store.docs.set('schools/pu/members/alice', {
+    status: 'inactive', profileBoundSchoolId: 'pu', profileBoundGeneration: 'generation-one',
+  });
+  await expect(tryStory(false)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it.each(['group-cover', 'group-post', 'story'] as const)('restricts %s image MIME types', (kind) => {
   for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(true);
   for (const mime of ['image/svg+xml', 'image/bmp', 'text/html']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(false);

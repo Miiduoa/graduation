@@ -381,3 +381,12 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 - `users` create／update 禁止客戶端寫入 `schoolId`、`primarySchoolId`、`profileBoundSchoolId`、`bindingGeneration`、`lastLoginAt`。`users` 文件 `allow delete: if false`，客戶端必須走 `deleteUserAccount`。
 
 舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。發布順序：先部署 Functions（登入蓋章與世代、刪／停權清蓋章），最後才發布 Storage 規則。不必執行回填寫入。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。
+
+
+## 2026-11-09：Supabase 私人限動 URL 簽發的帳號世代綁定（後續獨立 PR）
+
+新主線 #565 引入 nuni-web 私人附件簽發入口。獨立檢查發現 `authorizePrivateFile` 對限動只確認 canonical `users/{uid}` 存在、校籍仍 active，並要求 `profileBoundGeneration` 非空，但**沒有比對目前 profile 的 `bindingGeneration`**，也未確認 profile 的受信任 `schoolId`／`primarySchoolId` 屬於請求學校。當 profile 被刪除又自行重建、舊學校成員蓋章尚未經後端觸發器清理時，仍可能取得新的 Supabase 私人媒體 URL。這和已發出去的 bearer／signed URL 撤銷是兩個不同問題。
+
+修補僅收斂限動 Web 簽發入口：同一個 read-only transaction 讀到的 canonical profile 必須有相符校別，且 `bindingGeneration` 必須與活躍校籍上非空的 `profileBoundGeneration` 精確一致。伺服器可信校務登入流程已在同一交易寫入兩者；缺欄位的歷史帳號會 fail-closed，必須重新經過可信登入蓋章。其他群組／作業附件授權不變。
+
+可重跑的惰性／合成回歸：先合法上傳、finalize 與取得下載 URL，再使用相同身分模擬 profile 刪除、自建 profile、不同學校、世代更新不匹配與校籍撤銷，均不得再簽發下載 URL；可信流程恢復匹配世代後應恢復合法下載。原始 signed URL 不會因此立即失效。此修補限於新 Web Supabase 簽發端，不代表 Cloud Storage 舊 bearer URL、真 Supabase Storage、正式 bucket/migration 或發布驗收已完成，必須以此精確 head 的 Web tests、CI、CodeQL 和指定 App 5504170 審查為準。本輪不操作正式服務、權杖或受限 npm/pnpm audit。
