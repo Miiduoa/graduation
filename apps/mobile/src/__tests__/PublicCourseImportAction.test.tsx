@@ -332,3 +332,40 @@ test('partial duplicate undo preserves the original meeting and removes only the
   await view.findByText('已撤回這次加入的 1 個上課時段，其他課程不受影響。');
   expect((await ledger.loadPersonalImports(scope)).records).toEqual([existing]);
 });
+
+test('an updated official classroom closes a previous review for the same course identity', async () => {
+  const view = renderAction();
+  review(view);
+  expect(view.getByText(/分析化學專題 · 星期一 10:10–12:00 · 教室甲/)).toBeTruthy();
+
+  // A refreshed catalog row can retain its semester/code/section FlatList key.
+  // Confirmation must not carry over when the source changes the proposed room.
+  const updated: PublicCatalogCourse = {
+    ...nthu,
+    meetings: [{ time: 'M3M4', room: '新教室' }, { time: 'R5R6', room: '教室乙' }],
+  };
+  view.rerender(<PublicCourseImportAction schoolId="nthu" course={updated} navigation={navigation} />);
+  expect(view.getByText('核對並加入課表')).toBeTruthy();
+  expect(view.queryByText('確認加入個人課表')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+
+  review(view);
+  expect(view.getByText(/分析化學專題 · 星期一 10:10–12:00 · 新教室/)).toBeTruthy();
+  confirm(view);
+  await view.findByText('已加入 2 個上課時段。');
+  const saved = await ledger.loadPersonalImports(scope);
+  expect(saved.records.some((row) => row.location === '新教室')).toBe(true);
+  expect(saved.records.some((row) => row.location === '教室甲')).toBe(false);
+});
+
+test('switching the public campus cannot reuse a review opened for another school', () => {
+  const view = renderAction();
+  review(view);
+  mockScope = { owner: scope.owner, schoolId: 'ncnu' };
+  view.rerender(<PublicCourseImportAction schoolId="ncnu" course={ncnu} navigation={navigation} />);
+  expect(view.getByText('核對並加入課表')).toBeTruthy();
+  expect(view.queryByText('確認加入個人課表')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  review(view);
+  expect(view.getByText(/國立暨南國際大學/)).toBeTruthy();
+});

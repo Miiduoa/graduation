@@ -171,10 +171,14 @@ function AccountReview({ schoolId, ...props }: ReviewProps & { schoolId: Props['
 }
 
 export function PublicCourseImportAction({ schoolId, course, navigation }: Props) {
-  const [open, setOpen] = useState(false);
+  const [reviewedCsv, setReviewedCsv] = useState<string | null>(null);
   const preview = useMemo(() => preparePublicCourseTimetableImport(schoolId, course), [schoolId, course]);
   if (!preview) return null;
-  // Subscribe to private account state only after the student chooses to review.
-  if (!open) return <Button text="核對並加入課表" kind="primary" onPress={() => setOpen(true)} />;
-  return <AccountReview schoolId={schoolId} preview={preview} navigation={navigation} onClose={() => setOpen(false)} />;
+  // FlatList may reuse the same row when an official class changes its room,
+  // time or teacher. Never carry an open review over to that new proposal.
+  // CSV includes school, term, class identity and every proposed meeting.
+  if (reviewedCsv !== preview.csv) return <Button text="核對並加入課表" kind="primary"
+    onPress={() => setReviewedCsv(preview.csv)} />;
+  return <AccountReview schoolId={schoolId} preview={preview} navigation={navigation}
+    onClose={() => setReviewedCsv(null)} />;
 }
