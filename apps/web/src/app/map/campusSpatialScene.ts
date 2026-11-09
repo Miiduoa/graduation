@@ -115,6 +115,9 @@ export function createCampusSpatialScene(
   const camera = new PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, Math.max(10_000, model.radius * 20));
   const lookAt = new Vector3();
   const pointsById = new Map(model.points.map((point) => [point.id, point]));
+  const buildingHeightById = new Map((options.footprints ?? [])
+    .filter((footprint) => pointsById.has(footprint.poiId))
+    .map((footprint) => [footprint.poiId, footprint.heightMeters]));
   const geometries: BufferGeometry[] = [];
   const materials: Material[] = [];
   const instances: InstancedMesh[] = [];
@@ -286,7 +289,9 @@ export function createCampusSpatialScene(
     const point = view.selectedId ? pointsById.get(view.selectedId) : undefined;
     const target = new Vector3(point?.x ?? 0, 0, point?.z ?? 0);
     const aspect = width > 0 && height > 0 ? width / height : 1;
-    const focusSpan = Math.max(180, Math.min(450, model.radius * 0.85));
+    const focusSpan = point && buildingHeightById.has(point.id)
+      ? Math.max(140, Math.min(260, model.radius * 0.32))
+      : Math.max(180, Math.min(450, model.radius * 0.85));
     const offset = spatialCameraDirection(view.bearing, view.overhead);
     const direction = new Vector3(offset.x, offset.y, offset.z);
     const right = new Vector3().crossVectors(new Vector3(0, 1, 0), direction).normalize();
@@ -299,7 +304,7 @@ export function createCampusSpatialScene(
     // Fit the whole volume, including marker tops, rather than only its 2D width.
     for (const x of [-halfWidth, halfWidth]) {
       for (const z of [-halfDepth, halfDepth]) {
-        for (const y of [0, Math.max(pinHeight + pinRadius, tallestBuilding)]) {
+        for (const y of [0, Math.max(pinHeight + pinRadius, tallestBuilding + pinRadius * 2)]) {
           const corner = new Vector3(x, y, z);
           const nearOffset = corner.dot(direction);
           distance = Math.max(distance,
@@ -392,7 +397,13 @@ export function createCampusSpatialScene(
     const focusedButton = labels.find(({ button }) => button === container.ownerDocument.activeElement)?.button;
     const projected = labels.map((label) => ({
       ...label,
-      screen: new Vector3(label.point.x, pinHeight + pinRadius, label.point.z).project(camera),
+      screen: new Vector3(
+        label.point.x,
+        buildingHeightById.has(label.point.id)
+          ? buildingHeightById.get(label.point.id)! + pinRadius * 2
+          : pinHeight + pinRadius,
+        label.point.z,
+      ).project(camera),
     }));
     projected.sort((a, b) => {
       if (a.button === focusedButton) return -1;
@@ -580,9 +591,22 @@ export function createCampusSpatialScene(
     const matrix = new Matrix4();
     const flat = new Matrix4().makeRotationX(-Math.PI / 2);
     model.points.forEach((point, index) => {
-      stems.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight / 2, point.z));
-      feet.setMatrixAt(index, matrix.makeTranslation(point.x, 0.1, point.z).multiply(flat));
-      caps!.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight, point.z));
+      const roof = buildingHeightById.get(point.id);
+      if (roof === undefined) {
+        stems.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight / 2, point.z));
+        feet.setMatrixAt(index, matrix.makeTranslation(point.x, 0.1, point.z).multiply(flat));
+        caps!.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight, point.z));
+      } else {
+        // Keep an accessible marker above the roof without covering the whole
+        // geographic building footprint with the original oversized pin.
+        const roofStemHeight = pinRadius * 0.9;
+        stems.setMatrixAt(index, matrix.makeTranslation(point.x, roof + roofStemHeight / 2, point.z)
+          .scale(new Vector3(0.35, roofStemHeight / pinHeight, 0.35)));
+        feet.setMatrixAt(index, matrix.makeTranslation(point.x, roof + 0.15, point.z)
+          .multiply(flat).scale(new Vector3(0.32, 0.32, 0.32)));
+        caps!.setMatrixAt(index, matrix.makeTranslation(point.x, roof + roofStemHeight, point.z)
+          .scale(new Vector3(0.36, 0.36, 0.36)));
+      }
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = point.name;
