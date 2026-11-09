@@ -527,26 +527,23 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
+  // Firestore rules cannot filter query results: the server must be able to
+  // prove every returned story is still active. A two-minute lead covers
+  // request latency and prevents almost-expired stories from failing the query.
+  const expiresAfter = Date.now() + 120_000;
+  const activeBySchool = [where('schoolId', '==', schoolId), where('expiresAt', '>', expiresAfter)];
+  const toActiveStories = (docs: Array<{ id: string; data: () => unknown }>) =>
+    docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
   try {
     const snap = await getDocs(
-      query(
-        storiesCol(db),
-        where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
-        limit(lim),
-      ),
+      query(storiesCol(db), ...activeBySchool, orderBy('expiresAt', 'desc'), limit(lim)),
     );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
+    return toActiveStories(snap.docs);
   } catch {
-    const snap = await getDocs(
-      query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
+    const snap = await getDocs(query(storiesCol(db), ...activeBySchool, limit(lim)));
+    return toActiveStories(snap.docs);
   }
 }
 
