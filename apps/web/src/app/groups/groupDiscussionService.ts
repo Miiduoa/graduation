@@ -68,7 +68,11 @@ export function createPublicationIntentId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return `p_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+  throw new Error('Cryptographic randomness is unavailable');
 }
 
 function mapPost(
