@@ -373,8 +373,10 @@ Storage `schools/{schoolId}/stories/` 已使用校籍文件與 `campusStories` �
 
 根治不放寬規則、也不讓客戶端自填校籍：
 
-- Storage 改讀 canonical profile 的 `schoolId`／`primarySchoolId` 與 `campusStories`。沒有綁定校別的文件（含刪帳後自建 student profile）不能讀寫限動媒體。校籍文件改由伺服器在撤銷或刪除時清除對應的 profile 校別欄位，以維持撤權一致。profile 文件刪除時，僅將仍為 `active` 的殘留校籍標為 `inactive`；缺 status 的舊校籍本來就不能通過 `status == 'active'`。
-- 合法歷史帳維持「伺服器寫入校別後才能用限動」。提供 `scripts/bind-campus-story-profile-schools.cjs`，預設 dry-run。可回填單一學校、且 profile 帶真實帳號狀態（例如 `status: active`）的文件；預設跳過精簡 student stub，避免把重建資料接上殘留校籍。同一人有兩所以上 active 校籍且尚未綁定時只列出、不寫入。殘留無 profile 的校籍只列出，需另加旗標才會標為 inactive。套用時必須寫入 backup 檔，可用同一檔還原 `users.schoolId`／`users.primarySchoolId` 或校籍 `status`。本輪不執行正式寫入，也沒有新的 Firestore schema migration。
+- Storage 限動在讀取時同時檢查 canonical profile 的 `schoolId`／`primarySchoolId`、校籍 `status == 'active'`，以及 `campusStories` 的發布／到期條件。校籍一轉 inactive，媒體立即拒絕，不依賴觸發器先清掉 profile 校別。沒有綁定校別的文件（含刪帳後自建 student profile）不能讀寫限動媒體。
+- 校籍撤銷或刪除時，觸發器仍會清除對應的 profile 校別欄位。profile 文件刪除時，觸發器先重新讀取 profile，確認目前仍不存在，才把仍為 `active` 的殘留校籍標為 `inactive`。
+- 回填只接受「目前單一學校且 status 為 active 的校籍」作為證據。多校、缺 status、無 profile、已關閉帳號只列出筆數，不依 bio 或其他 profile 欄位判斷。`--apply` 先完整寫入並 fsync 備份檔，再用 transaction／update 寫入；profile 已刪除則跳過，不會 merge 重建。`--reverse` 預設 dry-run，核對 backup 的 project id，且只還原仍等於本腳本寫入值的欄位。
+- 校務登入在同一交易寫入 `members.profileBoundSchoolId`，供回填與後續核對。沒有新的 Firestore schema migration。
 - `users` create／update 禁止客戶端寫入 `lastLoginAt`。
 
-舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。校籍剛轉 inactive、觸發器尚未清掉 profile 校別時，Storage 媒體仍可能短暫可讀；Firestore 限動在該瞬間已 fail-closed。發布順序應先部署 Functions 觸發器，再視需要受控 dry-run／回填，最後才發布 Storage 規則；Firestore 校別判斷已在 #517。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。
+舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。發布順序：先部署 Functions（登入標記、撤權清校別、刪 profile 重讀後停用殘留校籍），再 dry-run／受控回填，最後才發布 Storage 規則。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。

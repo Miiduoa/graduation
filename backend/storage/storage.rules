@@ -226,10 +226,12 @@ service firebase.storage {
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
       function storyAccountBoundToSchool() {
-        // Storage allows two Firestore documents. Published media already
-        // reads campusStories, so school access must live on the canonical
-        // profile rather than a leftover membership document.
+        // Profile schoolId closes leftover rebuilt accounts. Membership
+        // status is read so revocation is visible immediately. Published
+        // media also reads campusStories for expiry. Repeated gets of the
+        // same document are cached.
         return hasCanonicalActiveAccount()
+          && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active'
           && (
             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
             || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId

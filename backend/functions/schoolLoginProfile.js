@@ -64,6 +64,7 @@ function createSchoolLoginProfileWriter({ db }) {
           status: 'active',
           role: resolved.memberRole,
           lastLoginAt: FieldValue.serverTimestamp(),
+          profileBoundSchoolId: schoolId,
           ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
         },
         { merge: true },

@@ -29,6 +29,10 @@ function campusBoundProfile(schoolId) {
   return { status: 'active', schoolId, primarySchoolId: schoolId };
 }
 
+function campusBoundMembership(schoolId) {
+  return { status: 'active', profileBoundSchoolId: schoolId };
+}
+
 function uploadString(ref, value, contentType) {
   return ref.putString(value, 'raw', { contentType });
 }
@@ -1785,8 +1789,8 @@ describe('storage security rules', () => {
 
   test('only a story draft owner can replace its photo before publication', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
     });
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -1820,9 +1824,9 @@ describe('storage security rules', () => {
 
   test('other members can read only the published story author’s matching media', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-      await db.doc('schools/other/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/alice').set(campusBoundMembership('other'));
     });
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -1860,8 +1864,8 @@ describe('storage security rules', () => {
 
   test('story creation rejects forged counters and oversized or unexpected fields', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/other/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/bob').set(campusBoundMembership('other'));
     });
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -1888,8 +1892,8 @@ describe('storage security rules', () => {
 
   test('story expiry prevents overlong publication and closes published media reads', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
     });
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
@@ -1933,8 +1937,8 @@ describe('storage security rules', () => {
   test('story lists cannot include expired metadata or cross-school rows', async () => {
     const now = Date.now();
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/other/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/bob').set(campusBoundMembership('other'));
       await db.doc('campusStories/active-list-proof').set({
         schoolId: 'pu', authorUid: 'alice', kind: 'text',
         expiresAt: now + 3_600_000, createdAt: now,
@@ -1973,7 +1977,7 @@ describe('storage security rules', () => {
     await seedFirestore(async (db) => {
       for (const uid of ['alice', 'bob', 'charlie']) {
         await db.doc(`users/${uid}`).set(campusBoundProfile('pu'));
-        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+        await db.doc(`schools/pu/members/${uid}`).set(campusBoundMembership('pu'));
       }
       await db.doc('campusStories/private-views').set({
         schoolId: 'pu', authorUid: 'alice', kind: 'text',
@@ -2005,9 +2009,9 @@ describe('storage security rules', () => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
       await db.doc('users/bob').set(campusBoundProfile('pu'));
       await db.doc('users/charlie').set(campusBoundProfile('other'));
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-      await db.doc('schools/other/members/charlie').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/charlie').set(campusBoundMembership('other'));
     });
     // Keep the same issued auth contexts across every change of permission.
     const aliceCtx = testEnv.authenticatedContext('alice');
@@ -2082,20 +2086,17 @@ describe('storage security rules', () => {
     await assertSucceeds(story.get());
     await assertSucceeds(aliceMedia.getMetadata());
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
+      await db.doc('schools/pu/members/alice').set({
+        ...campusBoundMembership('pu'),
+        status: 'inactive',
+      });
     });
     await assertFails(alice.doc('campusStories/revoked-school').set(payload));
     await assertFails(story.delete());
-    // Storage cannot also read the membership document. Media stays readable
-    // until the membership trigger removes the matching profile school fields.
-    await assertSucceeds(aliceMedia.getMetadata());
-    await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-    });
     await assertFails(aliceMedia.getMetadata());
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
     });
     await assertSucceeds(story.delete());
   });
@@ -2129,6 +2130,9 @@ describe('storage security rules', () => {
     await seedFirestore(async (db) => {
       await db.doc('users/dana').set({
         status: 'active', displayName: 'Dana', schoolId: 'pu', primarySchoolId: 'pu',
+      });
+      await db.doc('schools/pu/members/dana').set({
+        status: 'active', role: 'member', profileBoundSchoolId: 'pu',
       });
     });
     await assertSucceeds(media.putString('draft', 'raw', {

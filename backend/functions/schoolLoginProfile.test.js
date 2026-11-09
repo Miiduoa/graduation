@@ -50,7 +50,11 @@ test.each(['admin', 'editor', 'teacher', 'staff', 'principal'])(
   async (role) => {
     records.set('users/alice', { role, primaryRole: 'admin' });
     await login(role);
-    expect(records.get(memberPath)).toMatchObject({ role: 'member', status: 'active' });
+    expect(records.get(memberPath)).toMatchObject({
+      role: 'member',
+      status: 'active',
+      profileBoundSchoolId: 'pu',
+    });
     expect(records.get('users/alice').primaryRole).not.toBe('admin');
     expect(records.get('users/alice').role).not.toBe('admin');
   },

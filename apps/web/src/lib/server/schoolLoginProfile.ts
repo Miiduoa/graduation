@@ -131,6 +131,7 @@ export async function writeSchoolLoginProfile({
         status: 'active',
         role: resolved.memberRole,
         lastLoginAt: FieldValue.serverTimestamp(),
+        profileBoundSchoolId: membershipSchoolId,
         ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },
