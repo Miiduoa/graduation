@@ -51,6 +51,21 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('rejects a self-touching footprint even without strictly crossing edges', () => {
+    // A notch ends on the bottom edge. This would falsely extrude a folded building.
+    const point = (x: number, y: number) =>
+      ({ lat: 24.22624 + y * 0.00001, lon: 120.58131 + x * 0.00001 });
+    const touching = [[0, 0], [12, 0], [12, 12], [0, 12],
+      [0, 6], [6, 6], [6, 0], [0, 0]].map(([x, y]) => point(x, y));
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, touching)],
+    })).toEqual([]);
+    const valid = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [{
+      ...valid, outline: touching.slice(0, -1).map((p) => [p.lon, p.lat]),
+    }] })).toEqual([]);
+  });
+
   it('excludes unverified parking and raw nodes, duplicate IDs and excessive payloads', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [way(255784049), way(255784049), way(295686299), { type: 'node', id: 255784049, geometry: library }],

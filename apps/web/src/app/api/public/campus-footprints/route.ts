@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const REFRESH_MS = 24 * 60 * 60 * 1000;
 const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
-const MAX_RESPONSE_CHARS = 500_000;
+const MAX_RESPONSE_BYTES = 500_000;
 const query = '[out:json][timeout:12];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out geom;';
 
@@ -21,18 +21,56 @@ let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
 
+// Overpass can omit Content-Length or serve compressed responses. Stop reading at the
+// decoded byte limit; checking .text().length afterwards would still buffer an
+// unbounded upstream response in the Node process.
+async function readBoundedResponse(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length') ?? '0');
+  if (!Number.isFinite(declared) || declared < 0 || declared > MAX_RESPONSE_BYTES) {
+    throw new Error('OSM response too large');
+  }
+  if (!response.body) {
+    // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
+    const raw = await response.text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_RESPONSE_BYTES) {
+      throw new Error('OSM response too large');
+    }
+    return raw;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const segments: string[] = [];
+  let size = 0;
+  let completed = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { completed = true; break; }
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
+      segments.push(decoder.decode(value, { stream: true }));
+    }
+    segments.push(decoder.decode());
+    return segments.join('');
+  } finally {
+    if (!completed) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 async function readOsm(): Promise<Snapshot> {
   const url = OVERPASS_ENDPOINT + '?data=' + encodeURIComponent(query);
   const response = await fetch(url, {
     signal: AbortSignal.timeout(12_000),
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      // Identify this service to the public Overpass instance per its usage policy.
+      'User-Agent': 'nuni-campus-spatial/1.0 (https://nuni.tw)',
+    },
   });
   if (!response.ok) throw new Error('OSM service unavailable');
-  const declared = Number(response.headers.get('content-length') || '0');
-  if (declared > MAX_RESPONSE_CHARS) throw new Error('OSM response too large');
-  const raw = await response.text();
-  if (raw.length > MAX_RESPONSE_CHARS) throw new Error('OSM response too large');
+  const raw = await readBoundedResponse(response);
   const buildings = parseProvidenceOsmFootprints(JSON.parse(raw) as unknown);
   if (!buildings.length) throw new Error('No verified building outlines in response');
   const now = Date.now();

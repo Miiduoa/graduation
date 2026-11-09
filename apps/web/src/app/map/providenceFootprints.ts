@@ -68,12 +68,21 @@ function intersects(a: [number, number], b: [number, number],
   c: [number, number], d: [number, number]): boolean {
   const cross = (u: [number, number], v: [number, number], w: [number, number]) =>
     (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0]);
-  const abC = cross(a, b, c);
-  const abD = cross(a, b, d);
-  const cdA = cross(c, d, a);
-  const cdB = cross(c, d, b);
-  return ((abC > 0 && abD < 0) || (abC < 0 && abD > 0)) &&
-    ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0));
+  // A polygon must also reject a non-adjacent edge touching an endpoint,
+  // or overlapping a collinear edge: strict crossing alone misses both.
+  const orientation = (value: number) => value > 1e-15 ? 1 : value < -1e-15 ? -1 : 0;
+  const onSegment = (p: [number, number], u: [number, number], v: [number, number]) =>
+    p[0] >= Math.min(u[0], v[0]) - 1e-9 && p[0] <= Math.max(u[0], v[0]) + 1e-9 &&
+    p[1] >= Math.min(u[1], v[1]) - 1e-9 && p[1] <= Math.max(u[1], v[1]) + 1e-9;
+  const abC = orientation(cross(a, b, c));
+  const abD = orientation(cross(a, b, d));
+  const cdA = orientation(cross(c, d, a));
+  const cdB = orientation(cross(c, d, b));
+  return (abC * abD < 0 && cdA * cdB < 0) ||
+    (abC === 0 && onSegment(c, a, b)) ||
+    (abD === 0 && onSegment(d, a, b)) ||
+    (cdA === 0 && onSegment(a, c, d)) ||
+    (cdB === 0 && onSegment(b, c, d));
 }
 
 function safeOutline(value: unknown): Array<[number, number]> | null {

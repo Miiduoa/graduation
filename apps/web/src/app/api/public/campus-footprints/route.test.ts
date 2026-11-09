@@ -48,6 +48,39 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('reads a real streamed Overpass response and sends an identifiable service header', async () => {
+    const mockedFetch = vi.fn().mockResolvedValue(new Response(osmPayload, {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+    expect(mockedFetch.mock.calls[0][1].headers['User-Agent']).toContain('nuni.tw');
+  });
+
+  it('stops reading oversized streamed responses before buffering the whole payload', async () => {
+    let wasCancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(500_001));
+      },
+      cancel() { wasCancelled = true; },
+    });
+    const text = vi.fn();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      body,
+      text,
+    }));
+    const { GET } = await import('./route');
+    expect((await GET()).status).toBe(503);
+    expect(wasCancelled).toBe(true);
+    expect(text).not.toHaveBeenCalled();
+  });
+
   it('keeps the fallback explicit and rate limits repeated upstream failures', async () => {
     const mockedFetch = vi.fn().mockRejectedValue(new Error('timeout'));
     vi.stubGlobal('fetch', mockedFetch);
