@@ -219,6 +219,7 @@ function V2Conversation({
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
@@ -327,6 +328,9 @@ function V2Conversation({
     busy.current = true;
     setPending(true);
     setError('');
+    // Free the composer immediately so the next thought can be typed during a slow response.
+    // The sent content remains captured in `current` and can be recovered on failure.
+    setQuestion('');
     try {
       const history = turns.filter((turn) => !turn.reply.local &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
@@ -347,10 +351,12 @@ function V2Conversation({
         }
       }
       setTurns((t) => [...t, { question: current, reply }]);
-      setQuestion('');
+      setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
-      if (!controller.current?.signal.aborted)
+      if (!controller.current?.signal.aborted) {
         setError(e instanceof Error ? e.message : '查詢失敗');
+        setRecoverableQuestion(current);
+      }
     } finally {
       busy.current = false;
       if (!controller.current?.signal.aborted) setPending(false);
@@ -509,6 +515,14 @@ function V2Conversation({
       if (active()) setPending(false);
     }
   }
+  function recoverQuestion() {
+    if (busy.current || !recoverableQuestion) return;
+    const previousQuestion = recoverableQuestion;
+    // Swapping preserves a follow-up already typed while the failed request was running.
+    setRecoverableQuestion(question.trim() ? question : '');
+    setQuestion(previousQuestion);
+    setError('');
+  }
   return (
     <AssistantThread
       schoolId={schoolId}
@@ -522,6 +536,8 @@ function V2Conversation({
       states={states}
       pending={pending}
       error={error}
+      recoverableQuestion={recoverableQuestion}
+      onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}
