@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   assertStoryMediaRead,
   authorizePrivateFile,
@@ -127,7 +128,7 @@ function mapError(error: unknown): { status: number; body: { error: string } } {
 
 function parseScope(path: unknown): PrivateFileScope {
   const scope = parsePrivateFilePath(path);
-  if (!scope || (scope.kind === 'group-cover' && !isCoverFilenameAllowed(scope.filename))) {
+  if (!scope || (scope.kind === 'group-cover' && !isCoverFilenameAllowed(scope.filename) && !/^cover\.[0-9a-f-]{36}\.[A-Za-z0-9]+$/.test(scope.filename))) {
     throw new HttpsError('invalid-argument', 'Invalid private file path');
   }
   if (scope.kind === 'assignment' && !scope.groupId) {
@@ -157,25 +158,19 @@ async function issueUpload(
   checkPrivateFileUploadRate(uid);
   await authorizePrivateFile(runtime.db, scope, uid, true);
 
-  let ifMatch: string | undefined;
-  let ifNoneMatch: string | undefined;
   if (scope.kind === 'group-cover') {
-    const existing = await runtime.storage.head(scope.path);
-    if (existing?.etag) ifMatch = existing.etag;
-    else ifNoneMatch = '*';
-  } else {
-    ifNoneMatch = '*';
+    const extension = scope.filename.split('.').at(-1);
+    scope.path = `groups/${scope.groupId}/cover.${randomUUID()}.${extension}`;
+    scope.filename = scope.path.split('/').at(-1)!;
   }
 
   const metadata = scope.kind === 'story' ? { 'owner-uid': uid } : undefined;
   return {
     maxBytes,
-    signed: runtime.storage.presignPut({
+    signed: await runtime.storage.presignPut({
       key: scope.path,
       contentType,
       contentLength: byteSize,
-      ifMatch,
-      ifNoneMatch,
       metadata,
       now: runtime.now ? new Date(runtime.now()) : undefined,
     }),
@@ -192,10 +187,13 @@ async function issueDownload(
   if (!object) {
     throw Object.assign(new Error('File not found'), { statusCode: 404 });
   }
+  if (!isAllowedPrivateFileContentType(scope.kind, object.contentType)) {
+    throw new HttpsError('invalid-argument', 'Unsupported file type or filename');
+  }
   const maxBytes = privateFileMaxBytes(scope.kind, object.contentType);
   if (
     !Number.isSafeInteger(object.contentLength) ||
-    object.contentLength < 0 ||
+    object.contentLength <= 0 ||
     object.contentLength >= maxBytes
   ) {
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
@@ -218,13 +216,31 @@ async function issueDownload(
   }
   return {
     maxBytes,
-    signed: runtime.storage.presignGet({
+    signed: await runtime.storage.presignGet({
       key: scope.path,
-      contentType: isAllowedPrivateFileContentType(scope.kind, object.contentType || '') ? object.contentType : 'application/octet-stream',
-      attachment: scope.kind === 'assignment' || scope.kind === 'group-post' || !isAllowedPrivateFileContentType(scope.kind, object.contentType || ''),
+      contentType: object.contentType,
+      attachment: scope.kind === 'assignment' || scope.kind === 'group-post',
       now: runtime.now ? new Date(runtime.now()) : undefined,
     }),
   };
+}
+
+async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: PrivateFileScope) {
+  await authorizePrivateFile(runtime.db, scope, uid, true);
+  const object = await runtime.storage.head(scope.path);
+  if (!object) throw Object.assign(new Error('File not found'), { statusCode: 404 });
+  // Never let a different story uploader delete or finalize this owner's object.
+  if (scope.kind === 'story' && object.metadata['owner-uid'] !== uid) {
+    throw new HttpsError('permission-denied', 'File access denied');
+  }
+  const maxBytes = privateFileMaxBytes(scope.kind, object.contentType);
+  const validType = isAllowedPrivateFileContentType(scope.kind, object.contentType);
+  if (!validType || !Number.isSafeInteger(object.contentLength) || object.contentLength <= 0 || object.contentLength >= maxBytes) {
+    await runtime.storage.remove(scope.path);
+    if (!validType) throw new HttpsError('invalid-argument', 'Unsupported file type or filename');
+    throw Object.assign(new Error('File is too large'), { statusCode: 413 });
+  }
+  return { path: scope.path, finalized: true, maxBytes };
 }
 
 export async function dispatchPrivateFileRequest(
@@ -277,8 +293,9 @@ export async function dispatchPrivateFileRequest(
     const uid = await verifyUser(request.headers.get('authorization'), resolved.verifyIdToken);
     checkPrivateFileRequestRate(uid);
     const scope = parseScope(body.path);
-    const action = body.action === 'upload' || body.action === 'download' ? body.action : '';
+    const action = body.action === 'upload' || body.action === 'download' || body.action === 'finalize' ? body.action : '';
     if (!action) throw new HttpsError('invalid-argument', 'Invalid private file path');
+    if (action === 'finalize') return jsonResponse(200, await finalizeUpload(resolved, uid, scope), cors);
     const issued =
       action === 'upload'
         ? await issueUpload(resolved, uid, scope, body)
@@ -292,6 +309,7 @@ export async function dispatchPrivateFileRequest(
         headers: issued.signed.headers,
         expiresAt: issued.signed.expiresAt,
         maxBytes: issued.maxBytes,
+        ...(action === 'upload' ? { requiresFinalize: true } : {}),
       },
       cors,
     );

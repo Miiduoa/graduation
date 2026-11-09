@@ -21,9 +21,9 @@ export const PRIVATE_DOCUMENT_TYPES = new Set([
 export const PRIVATE_FILE_MAX_BYTES = {
   'group-cover': 5 * 1024 * 1024,
   'group-post': 20 * 1024 * 1024,
-  assignment: 50 * 1024 * 1024,
+  assignment: 25 * 1024 * 1024,
   'story-image': 10 * 1024 * 1024,
-  'story-video': 100 * 1024 * 1024,
+  'story-video': 45 * 1024 * 1024,
 } as const;
 
 export const GROUP_COVER_FILENAME = /^cover\.[A-Za-z0-9]+$/;

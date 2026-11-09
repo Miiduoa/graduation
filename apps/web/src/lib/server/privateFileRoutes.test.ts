@@ -1,8 +1,7 @@
 // @vitest-environment node
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createMemoryGroupStore } from './memoryGroupStore';
-import { createR2FileStorage } from './fileStorage';
+import { createSupabaseFileStorage } from './fileStorage';
 import { resetFirebaseAdminForTests } from './firebaseAdmin';
 import {
   createPrivateFileRateLimiter,
@@ -10,6 +9,8 @@ import {
   setPrivateFileRateLimiterForTests,
 } from './privateFileRateLimit';
 import { dispatchPrivateFileRequest, type PrivateFileRuntime } from './privateFileRoutes';
+
+vi.mock('server-only', () => ({}));
 
 const COVER = 'groups/course/cover.jpg';
 const POST = 'groups/course/posts/one/notes.pdf';
@@ -24,103 +25,37 @@ type Stored = {
   metadata: Record<string, string>;
 };
 
-function startMemoryS3() {
+async function startMemoryStorage() {
   const objects = new Map<string, Stored>();
-  let generation = 0;
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    void (async () => {
-      const host = String(req.headers.host || '127.0.0.1');
-      const url = new URL(req.url || '/', `http://${host}`);
-      const prefix = `/${BUCKET}/`;
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      if (req.method === 'OPTIONS') {
-        res.statusCode = 204;
-        res.end();
-        return;
-      }
-      if (!url.pathname.startsWith(prefix)) {
-        res.statusCode = 404;
-        res.end();
-        return;
-      }
-      const key = decodeURIComponent(url.pathname.slice(prefix.length));
-      if (req.method === 'HEAD' || req.method === 'GET') {
-        const object = objects.get(key);
-        if (!object) {
-          res.statusCode = 404;
-          res.end();
-          return;
-        }
-        res.statusCode = 200;
-        res.setHeader('Content-Type', object.contentType);
-        res.setHeader('Content-Length', String(object.body.length));
-        res.setHeader('ETag', `"${object.etag}"`);
-        for (const [name, value] of Object.entries(object.metadata)) {
-          res.setHeader(`x-amz-meta-${name}`, value);
-        }
-        if (req.method === 'GET') res.end(object.body);
-        else res.end();
-        return;
-      }
-      if (req.method !== 'PUT') {
-        res.statusCode = 405;
-        res.end();
-        return;
-      }
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) chunks.push(Buffer.from(chunk));
-      const body = Buffer.concat(chunks);
-      const existing = objects.get(key);
-      const ifNoneMatch = req.headers['if-none-match'];
-      const ifMatch = String(req.headers['if-match'] || '').replace(/"/g, '');
-      if (ifNoneMatch === '*' && existing) {
-        res.statusCode = 412;
-        res.end();
-        return;
-      }
-      if (ifMatch && existing?.etag !== ifMatch) {
-        res.statusCode = 412;
-        res.end();
-        return;
-      }
-      const metadata: Record<string, string> = {};
-      for (const [name, value] of Object.entries(req.headers)) {
-        const match = name.match(/^x-amz-meta-(.+)$/);
-        if (match && typeof value === 'string') metadata[match[1]] = value;
-      }
-      const stored: Stored = {
-        body,
-        contentType: String(req.headers['content-type'] || 'application/octet-stream'),
-        etag: String(++generation),
-        metadata,
-      };
-      objects.set(key, stored);
-      res.statusCode = existing ? 200 : 200;
-      res.setHeader('ETag', `"${stored.etag}"`);
-      res.end();
-    })().catch(() => {
-      res.statusCode = 500;
-      res.end();
-    });
-  });
-  return new Promise<{
-    origin: string;
-    objects: Map<string, Stored>;
-    close: () => Promise<void>;
-  }>((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      resolve({
-        origin: `http://127.0.0.1:${port}`,
-        objects,
-        close: () =>
-          new Promise((done, fail) => {
-            server.close((error) => (error ? fail(error) : done()));
-          }),
-      });
-    });
-  });
+  const fetchMock: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const route = url.pathname.replace('/storage/v1', '');
+    const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+    if (route.startsWith('/object/upload/sign/')) {
+      return json({ url: `${route}?token=upload-token` });
+    }
+    if (route.startsWith('/object/sign/')) return json({ signedURL: `${route}?token=download-token` });
+    if (route.startsWith('/object/info/')) {
+      const key = decodeURIComponent(route.slice(`/object/info/${BUCKET}/`.length));
+      const object = objects.get(key);
+      return object ? json({ size: object.body.length, content_type: object.contentType, metadata: object.metadata }) : json({ message: 'missing', statusCode: '404' }, 404);
+    }
+    if (init?.method === 'DELETE') {
+      const { prefixes } = JSON.parse(String(init.body));
+      for (const key of prefixes) objects.delete(key);
+      return json([]);
+    }
+    throw new Error('Unexpected storage request');
+  };
+  return { origin: 'https://storage.example', objects, fetchMock };
+}
+
+function put(upload: { body: Record<string, unknown> }, body: string) {
+  const key = String(upload.body.path);
+  if (memoryStorage.objects.has(key)) return 409;
+  const headers = upload.body.headers as Record<string, string>;
+  memoryStorage.objects.set(key, { body: Buffer.from(body), contentType: headers['content-type'], etag: '', metadata: headers['x-metadata'] ? JSON.parse(Buffer.from(headers['x-metadata'], 'base64').toString()) : {} });
+  return 200;
 }
 
 function seedStore() {
@@ -167,7 +102,7 @@ async function invoke(
   return { status: response.status, body: await response.json() };
 }
 
-let s3: Awaited<ReturnType<typeof startMemoryS3>>;
+let memoryStorage: Awaited<ReturnType<typeof startMemoryStorage>>;
 let store: ReturnType<typeof seedStore>;
 let runtime: PrivateFileRuntime;
 
@@ -177,7 +112,7 @@ beforeEach(async () => {
   setPrivateFileRateLimiterForTests(
     createPrivateFileRateLimiter({ requestsPerMinute: 1000, uploadsPerMinute: 1000 }),
   );
-  s3 = await startMemoryS3();
+  memoryStorage = await startMemoryStorage();
   store = seedStore();
   runtime = {
     db: store.db as never,
@@ -185,24 +120,16 @@ beforeEach(async () => {
       if (token === 'expired') throw new Error('Token revoked');
       return { uid: token };
     },
-    storage: createR2FileStorage({
-      backend: 'r2',
-      presignTtlSeconds: 60,
-      s3: {
-        accessKeyId: 'AKIA',
-        secretAccessKey: 'secret',
-        bucket: BUCKET,
-        endpoint: s3.origin,
-        region: 'auto',
-      },
-    }),
+    storage: createSupabaseFileStorage({
+      backend: 'supabase', presignTtlSeconds: 60, url: memoryStorage.origin,
+      serviceRoleKey: 'test-service-secret', bucket: BUCKET,
+    }, memoryStorage.fetchMock),
   };
 });
 
 afterEach(async () => {
   resetPrivateFileRateLimitForTests();
   resetFirebaseAdminForTests();
-  await s3.close();
 });
 
 it('returns 503 尚未啟用 when storage is not configured', async () => {
@@ -217,7 +144,7 @@ it('rejects missing or revoked authentication before looking up files', async ()
   expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'expired' })).status).toBe(
     401,
   );
-  expect(s3.objects.size).toBe(0);
+  expect(memoryStorage.objects.size).toBe(0);
 });
 
 it('rejects a non-member without disclosing whether the object exists', async () => {
@@ -256,18 +183,10 @@ it('lets a stamped school member upload and download a draft story', async () =>
     { uid: 'stamped' },
   );
   expect(upload.status).toBe(200);
-  expect(upload.body.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
-  expect(Number(new URL(String(upload.body.url)).searchParams.get('X-Amz-Expires'))).toBe(60);
-  const put = await fetch(String(upload.body.url), {
-    method: String(upload.body.method),
-    headers: upload.body.headers as Record<string, string>,
-    body: Buffer.from('photo'),
-  });
-  expect(put.status).toBe(200);
-  const download = await invoke(runtime, { action: 'download', path: STORY }, { uid: 'stamped' });
-  expect(download.status).toBe(200);
-  const got = await fetch(String(download.body.url), { method: String(download.body.method) });
-  expect(await got.text()).toBe('photo');
+  expect(upload.body.url).toContain('https://storage.example/storage/v1/');
+  expect(put(upload, 'photo')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: upload.body.path }, { uid: 'stamped' })).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: STORY }, { uid: 'stamped' })).status).toBe(200);
 });
 
 it('uploads and downloads an assignment file for the owner', async () => {
@@ -278,22 +197,11 @@ it('uploads and downloads an assignment file for the owner', async () => {
     byteSize: 8,
   });
   expect(upload.status).toBe(200);
-  expect(upload.body.headers).toMatchObject({
-    'content-type': 'application/pdf',
-    'if-none-match': '*',
-  });
-  const put = await fetch(String(upload.body.url), {
-    method: String(upload.body.method),
-    headers: upload.body.headers as Record<string, string>,
-    body: Buffer.from('homework'),
-  });
-  expect(put.status).toBe(200);
-  const duplicate = await fetch(String(upload.body.url), {
-    method: String(upload.body.method),
-    headers: upload.body.headers as Record<string, string>,
-    body: Buffer.from('forged!!'),
-  });
-  expect(duplicate.status).toBe(412);
+  expect(upload.body.requiresFinalize).toBe(true);
+  expect(JSON.stringify(upload.body)).not.toContain('test-service-secret');
+  expect(put(upload, 'homework')).toBe(200);
+  expect(put(upload, 'forged!!')).toBe(409);
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(200);
 
   const asBob = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' });
   expect(asBob.status).toBe(403);
@@ -307,8 +215,7 @@ it('uploads and downloads an assignment file for the owner', async () => {
   expect(teacherWrite.status).toBe(403);
   const download = await invoke(runtime, { action: 'download', path: ANSWER });
   expect(download.status).toBe(200);
-  const got = await fetch(String(download.body.url));
-  expect(await got.text()).toBe('homework');
+  expect(download.body.url).toContain('token=download-token');
 });
 
 it('lets a manager replace a group cover and rejects a member write', async () => {
@@ -328,27 +235,13 @@ it('lets a manager replace a group cover and rejects a member write', async () =
     { uid: 'teacher' },
   );
   expect(first.status).toBe(200);
-  expect(first.body.headers).toMatchObject({ 'if-none-match': '*' });
-  await fetch(String(first.body.url), {
-    method: String(first.body.method),
-    headers: first.body.headers as Record<string, string>,
-    body: Buffer.from('original'),
-  });
-  const second = await invoke(
-    runtime,
-    { action: 'upload', path: COVER, contentType: 'image/jpeg', byteSize: 7 },
-    { uid: 'teacher' },
-  );
+  expect(put(first, 'original')).toBe(200);
+  const second = await invoke(runtime, { action: 'upload', path: COVER, contentType: 'image/jpeg', byteSize: 7 }, { uid: 'teacher' });
   expect(second.status).toBe(200);
-  expect(String((second.body.headers as Record<string, string>)['if-match'])).toMatch(/"/);
-  await fetch(String(second.body.url), {
-    method: String(second.body.method),
-    headers: second.body.headers as Record<string, string>,
-    body: Buffer.from('updated'),
-  });
-  const download = await invoke(runtime, { action: 'download', path: COVER });
-  const got = await fetch(String(download.body.url));
-  expect(await got.text()).toBe('updated');
+  expect(second.body.path).not.toBe(first.body.path);
+  expect(put(second, 'updated')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: second.body.path }, { uid: 'teacher' })).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: second.body.path })).status).toBe(200);
 });
 
 it('rejects unsupported types and oversize uploads', async () => {
@@ -383,11 +276,50 @@ it('rejects inactive school membership even with a stale group mirror', async ()
   ).toBe(403);
 });
 
-it.each(['upload', 'download'])('rejects legacy assignment %s paths at the gateway', async (action) => {
+it.each(['upload', 'download', 'finalize'])('rejects legacy assignment %s paths at the gateway', async (action) => {
   const result = await invoke(runtime, { action, path: 'assignments/work/submissions/alice/answer.pdf', contentType: 'application/pdf', byteSize: 8 });
   expect(result).toEqual({ status: 403, body: { error: '不支援舊版作業附件路徑' } });
 });
 
 it.each(['image/svg+xml', 'text/html', 'application/xhtml+xml', 'application/javascript', 'text/javascript'])('rejects executable assignment MIME %s', async (contentType) => {
   expect((await invoke(runtime, { action: 'upload', path: ANSWER, contentType, byteSize: 8 })).status).toBe(400);
+});
+
+it.each([
+  ['text/html', 8, 400],
+  ['application/pdf', 25 * 1024 * 1024, 413],
+  ['application/pdf', 0, 413],
+])('deletes invalid finalized objects (%s, %i)', async (contentType, length, status) => {
+  memoryStorage.objects.set(ANSWER, { body: Buffer.alloc(Number(length)), contentType: String(contentType), etag: '', metadata: {} });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(status);
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(status);
+  expect(memoryStorage.objects.has(ANSWER)).toBe(false);
+});
+
+it('rechecks current authorization before finalize and does not delete another user file', async () => {
+  memoryStorage.objects.set(ANSWER, { body: Buffer.from('pdf'), contentType: 'application/pdf', etag: '', metadata: {} });
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER }, { uid: 'bob' })).status).toBe(403);
+  expect(memoryStorage.objects.has(ANSWER)).toBe(true);
+  store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(403);
+});
+
+it.each(['../notes.pdf', 'groups/course/posts/one/../notes.pdf', 'groups/course/posts/one/a\u0000.pdf', 'groups/course/posts/one/a\\b.pdf'])('rejects path injection %s', async path => {
+  for (const action of ['upload', 'download', 'finalize']) {
+    expect((await invoke(runtime, { action, path, contentType: 'application/pdf', byteSize: 8 })).status).toBe(400);
+  }
+});
+
+it('rejects forged story ownership metadata', async () => {
+  memoryStorage.objects.set(STORY, { body: Buffer.from('photo'), contentType: 'image/jpeg', etag: '', metadata: { 'owner-uid': 'stamped', 'owner-proof': 'forged' } });
+  for (const action of ['download', 'finalize']) {
+    expect((await invoke(runtime, { action, path: STORY }, { uid: 'stamped' })).status).toBe(403);
+  }
+});
+
+it('reissues downloads only after fresh authorization and metadata checks', async () => {
+  memoryStorage.objects.set(ANSWER, { body: Buffer.from('pdf'), contentType: 'application/pdf', etag: '', metadata: {} });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(200);
+  memoryStorage.objects.get(ANSWER)!.contentType = 'text/html';
+  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(400);
 });
