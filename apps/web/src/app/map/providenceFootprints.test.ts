@@ -264,15 +264,41 @@ describe('Providence footprint API snapshot freshness', () => {
 
   it('accepts a dated, source-identified snapshot without changing valid geometry', () => {
     expect(parseProvidenceFootprintSnapshot(response, now)).toEqual({
-      buildings: [footprint], fetchedAt: response.fetchedAt, stale: false,
+      buildings: [footprint], fetchedAt: response.fetchedAt, stale: false, osmBaseAt: null,
     });
   });
 
   it('does not call a 25-hour-old snapshot fresh even if a stale cache says otherwise', () => {
     const fetchedAt = new Date(now - 25 * 60 * 60 * 1000).toISOString();
     expect(parseProvidenceFootprintSnapshot({ ...response, fetchedAt }, now)).toEqual({
-      buildings: [footprint], fetchedAt, stale: true,
+      buildings: [footprint], fetchedAt, stale: true, osmBaseAt: null,
     });
+  });
+
+  it('retains the OSM replication date separately from HTTP snapshot fetch time', () => {
+    const osmBaseAt = '2026-11-09T08:30:00Z';
+    expect(parseProvidenceFootprintSnapshot({ ...response, osmBaseAt }, now)).toEqual({
+      buildings: [footprint], fetchedAt: response.fetchedAt, stale: false, osmBaseAt,
+    });
+    const staleFetchedAt = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+    const previousBaseAt = new Date(Date.parse(staleFetchedAt) - 60 * 60 * 1000)
+      .toISOString().replace('.000Z', 'Z');
+    expect(parseProvidenceFootprintSnapshot({
+      ...response, fetchedAt: staleFetchedAt, osmBaseAt: previousBaseAt,
+    }, now)).toMatchObject({ stale: true, osmBaseAt: previousBaseAt });
+  });
+
+  it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {
+    for (const osmBaseAt of [
+      '2099-01-01T00:00:00Z',
+      '2026-11-06T00:00:00Z',
+      '2026-11-09T08:30:00+00:00',
+      '2026-02-30T08:30:00Z',
+      42, {},
+    ]) {
+      expect(parseProvidenceFootprintSnapshot({ ...response, osmBaseAt }, now)).toBeNull();
+    }
+    expect(parseProvidenceFootprintSnapshot({ ...response, osmBaseAt: null }, now)?.osmBaseAt).toBeNull();
   });
 
   it('rejects snapshots older than seven days or with future dates beyond clock skew', () => {
