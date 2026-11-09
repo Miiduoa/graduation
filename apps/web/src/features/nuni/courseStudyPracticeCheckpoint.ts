@@ -1,7 +1,6 @@
 import { splitStudySection, type StudyMode } from '@/lib/studyTutor';
 import { STUDY_SESSION_LIMITS } from './courseStudySession';
 import {
-  COURSE_STUDY_PROGRESS_LIMITS,
   exceedsStudyBackupByteLimit,
   parseCourseStudyProgress,
   serializeCourseStudyProgress,
