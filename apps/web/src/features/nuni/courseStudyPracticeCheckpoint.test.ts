@@ -177,13 +177,26 @@ describe('versioned independent review checkpoint', () => {
     expect(isStudyPracticeCheckpoint('{oops')).toBe(false);
   });
 
-  it('never parses a text payload beyond the backup limit just to detect its format', () => {
+  it('rejects over-limit UTF-16 and multi-byte UTF-8 payloads before JSON parsing', () => {
+    // 3 MiB of Han characters fits the 8 MiB UTF-16 length guard but uses
+    // over 9 MiB on disk. Format detection must not parse it on mobile.
+    const multibyte = JSON.stringify({
+      format: 'campus-one-study-practice',
+      payload: '中'.repeat(3 * 1024 * 1024),
+    });
+    expect(multibyte.length).toBeLessThan(8 * 1024 * 1024);
+    expect(new TextEncoder().encode(multibyte).byteLength).toBeGreaterThan(8 * 1024 * 1024);
     const parse = vi.spyOn(JSON, 'parse');
     try {
       expect(isStudyPracticeCheckpoint(' '.repeat(8 * 1024 * 1024 + 1))).toBe(false);
+      expect(isStudyPracticeCheckpoint(multibyte)).toBe(false);
       expect(parse).not.toHaveBeenCalled();
     } finally {
       parse.mockRestore();
     }
+    // A small, valid Chinese backup must still be recognized and restored.
+    const valid = serializeStudyPracticeCheckpoint(checkpoint());
+    expect(isStudyPracticeCheckpoint(valid)).toBe(true);
+    expect(parseStudyPracticeCheckpoint(valid, scope).round.cards).toHaveLength(2);
   });
 });

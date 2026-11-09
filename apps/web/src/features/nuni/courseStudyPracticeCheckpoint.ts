@@ -150,10 +150,12 @@ export function parseStudyPracticeCheckpoint(
 }
 
 export function isStudyPracticeCheckpoint(raw: string): boolean {
-  // Probe the file type without parsing arbitrarily large pasted content.
-  // Full byte-accurate checks still run in the selected backup parser.
+  // UTF-16 length alone undercounts multi-byte Chinese text and emoji.
+  // Reject oversized UTF-8 input BEFORE probing with JSON.parse; full scope
+  // and document validation still belongs to the selected backup parser.
   if (typeof raw !== 'string' || raw.length > COURSE_STUDY_PROGRESS_LIMITS.bytes) return false;
   try {
+    bytes(raw);
     const parsed: unknown = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
     return !!parsed && typeof parsed === 'object' &&
       (parsed as Record<string, unknown>).format === STUDY_PRACTICE_CHECKPOINT_FORMAT;
