@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { StudySource } from '@/lib/studyTutor';
 import { appendStudyLesson, emptyStudyPassage } from './courseStudySession';
 import { parseCourseStudyProgress, serializeCourseStudyProgress, type CourseStudyProgressData } from './courseStudyProgress';
@@ -175,5 +175,15 @@ describe('versioned independent review checkpoint', () => {
     expect(courseStudyPracticeCheckpointFilename('../資料庫.pdf')).toBe('資料庫-逐題練習.campus-practice.json');
     expect(courseStudyPracticeCheckpointFilename('😀'.repeat(100))).toBe('😀'.repeat(48) + '-逐題練習.campus-practice.json');
     expect(isStudyPracticeCheckpoint('{oops')).toBe(false);
+  });
+
+  it('never parses a text payload beyond the backup limit just to detect its format', () => {
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      expect(isStudyPracticeCheckpoint(' '.repeat(8 * 1024 * 1024 + 1))).toBe(false);
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
   });
 });

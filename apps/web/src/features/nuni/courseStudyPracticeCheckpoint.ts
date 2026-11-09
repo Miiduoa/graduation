@@ -150,6 +150,9 @@ export function parseStudyPracticeCheckpoint(
 }
 
 export function isStudyPracticeCheckpoint(raw: string): boolean {
+  // Probe the file type without parsing arbitrarily large pasted content.
+  // Full byte-accurate checks still run in the selected backup parser.
+  if (typeof raw !== 'string' || raw.length > COURSE_STUDY_PROGRESS_LIMITS.bytes) return false;
   try {
     const parsed: unknown = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
     return !!parsed && typeof parsed === 'object' &&
