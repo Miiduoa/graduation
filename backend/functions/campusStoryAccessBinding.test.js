@@ -6,9 +6,8 @@ const {
   classifyCampusStoryBinding,
   planCampusStoryAccessBinding,
   summarizeBindingPlan,
-  applyCampusStoryAccessBinding,
-  reverseCampusStoryAccessBinding,
   loadCampusMembershipRows,
+  closeCampusStoryAccess,
   clearProfileSchoolBindingForRevokedMembership,
   revokeCampusStoryMembershipBinding,
   uniqueStoryStorageFirestoreDocs,
@@ -82,7 +81,7 @@ function fakeDb(seed = {}) {
   };
 }
 
-test('story storage match reads at most two Firestore documents', () => {
+test('story storage match reads at most two Firestore documents and requires a generation', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../storage/storage.rules'), 'utf8');
   const docs = uniqueStoryStorageFirestoreDocs(source);
   expect(docs).toEqual([
@@ -94,6 +93,7 @@ test('story storage match reads at most two Firestore documents', () => {
   );
   expect(storyMatch[1]).not.toContain('users/$(request.auth.uid)');
   expect(storyMatch[1]).not.toContain('hasCanonicalActiveAccount');
+  expect(storyMatch[1]).toContain('profileBoundGeneration');
 });
 
 test('dry-run only classifies current stamps; rebuilt stubs need another school login', () => {
@@ -104,6 +104,19 @@ test('dry-run only classifies current stamps; rebuilt stubs need another school 
       membership: { status: 'active', lastLoginAt: '2026-01-10T00:00:00.000Z', profileBoundSchoolId: 'pu' },
       profileExists: true,
       profile: { displayName: 'Rebuilt', role: 'student', createdAt: '2026-11-09T00:00:00.000Z' },
+    }).kind,
+  ).toBe('needs-login');
+  expect(
+    classifyCampusStoryBinding({
+      schoolId: 'pu',
+      uid: 'bound',
+      membership: {
+        status: 'active',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-login',
+      },
+      profileExists: true,
+      profile: { status: 'active', displayName: 'Bound' },
     }).kind,
   ).toBe('already-bound');
   expect(
@@ -126,7 +139,7 @@ test('dry-run only classifies current stamps; rebuilt stubs need another school 
   ).toBe('insufficient-evidence');
 });
 
-test('binding apply is disabled; dry-run only reports counts', async () => {
+test('binding plan is dry-run statistics only', async () => {
   const db = fakeDb({
     'schools/pu': { name: 'PU' },
     'schools/pu/members/dana': { status: 'active', lastLoginAt: '2026-01-10T00:00:00.000Z' },
@@ -137,53 +150,11 @@ test('binding apply is disabled; dry-run only reports counts', async () => {
   });
   const plan = planCampusStoryAccessBinding(await loadCampusMembershipRows(db));
   expect(summarizeBindingPlan(plan)).toEqual({
-    'needs-login': 1,
-    'already-bound': 1,
+    'needs-login': 2,
     'orphan-membership': 1,
   });
-  const dry = await applyCampusStoryAccessBinding({ db, plan, apply: false });
-  expect(dry.applied).toHaveLength(0);
   expect(db.docs.get('users/dana').schoolId).toBeUndefined();
-  await expect(applyCampusStoryAccessBinding({ db, plan, apply: true })).rejects.toThrow(/disabled/);
-});
-
-test('reverse compares current values inside a transaction and skips newer login stamps', async () => {
-  const db = fakeDb({
-    'users/dana': { status: 'active', schoolId: 'other', primarySchoolId: 'pu' },
-    'schools/pu/members/dana': {
-      status: 'active',
-      profileBoundSchoolId: 'pu',
-      profileBoundGeneration: 'gen-login',
-    },
-  });
-  const result = await reverseCampusStoryAccessBinding({
-    db,
-    FieldValue,
-    projectId: 'demo-campus-security',
-    backup: {
-      projectId: 'demo-campus-security',
-      entries: [
-        {
-          op: 'bind-profile',
-          path: 'users/dana',
-          before: { schoolId: null, primarySchoolId: null },
-          after: { schoolId: 'pu', primarySchoolId: 'pu' },
-        },
-        {
-          op: 'stamp-membership-binding',
-          path: 'schools/pu/members/dana',
-          before: { profileBoundSchoolId: null },
-          after: { profileBoundSchoolId: 'pu' },
-        },
-      ],
-    },
-    apply: true,
-  });
-  expect(result.restored).toEqual([{ path: 'users/dana', fields: ['primarySchoolId'], op: 'bind-profile' }]);
-  expect(result.skipped).toEqual([{ path: 'schools/pu/members/dana', reason: 'newer-generation' }]);
-  expect(db.docs.get('users/dana')).toEqual({ status: 'active', schoolId: 'other' });
-  expect(db.docs.get('schools/pu/members/dana').profileBoundSchoolId).toBe('pu');
-  expect(db.docs.get('schools/pu/members/dana').profileBoundGeneration).toBe('gen-login');
+  expect(db.docs.get('schools/pu/members/bob').profileBoundSchoolId).toBe('pu');
 });
 
 test('revoked membership clears matching school binding unless the live membership is active again', async () => {
@@ -213,63 +184,25 @@ test('revoked membership clears matching school binding unless the live membersh
   expect(db.docs.get('users/alice').primarySchoolId).toBe('other');
 });
 
-test('binding CLI is dry-run only and reverse apply writes an applied log', async () => {
-  const { runCli } = require('../../scripts/bind-campus-story-profile-schools.cjs');
+test('binding CLI is dry-run only and rejects write flags', async () => {
+  const { runCli, parseCli } = require('../../scripts/bind-campus-story-profile-schools.cjs');
   const db = fakeDb({
     'schools/pu': { name: 'PU' },
     'schools/pu/members/dana': { status: 'active' },
     'users/dana': { status: 'active', displayName: 'Dana' },
   });
-  const files = new Map();
   const dry = await runCli(['--project', 'demo-campus-security'], { db, FieldValue });
   expect(dry.mode).toBe('dry-run');
   expect(dry.counts['needs-login']).toBe(1);
   expect(db.docs.get('users/dana').schoolId).toBeUndefined();
+  expect(() => parseCli(['--project', 'demo-campus-security', '--apply'])).toThrow();
+  expect(() => parseCli(['--project', 'demo-campus-security', '--reverse'])).toThrow();
   await expect(
-    runCli(['--project', 'demo-campus-security', '--apply', '--backup-file', 'backup.json'], {
-      db,
-      FieldValue,
-    }),
-  ).rejects.toThrow(/disabled/);
-
-  files.set('backup.json', {
-    projectId: 'demo-campus-security',
-    createdAt: '2026-11-09T00:00:00.000Z',
-    entries: [
-      {
-        op: 'stamp-membership-binding',
-        path: 'schools/pu/members/dana',
-        before: { profileBoundSchoolId: null },
-        after: { profileBoundSchoolId: 'pu' },
-      },
-    ],
-  });
-  db.docs.set('schools/pu/members/dana', { status: 'active', profileBoundSchoolId: 'pu' });
-  const reverseApply = await runCli(
-    [
-      '--project',
-      'demo-campus-security',
-      '--reverse',
-      '--apply',
-      '--backup-file',
-      'backup.json',
-      '--applied-file',
-      'applied.json',
-    ],
-    {
-      db,
-      FieldValue,
-      readFile: (file) => files.get(file),
-      writeFile: (file, data) => {
-        files.set(file, data);
-      },
-    },
-  );
-  expect(reverseApply.mode).toBe('reverse');
-  expect(files.get('applied.json').restored).toEqual([
-    { path: 'schools/pu/members/dana', fields: ['profileBoundSchoolId'], op: 'stamp-membership-binding' },
-  ]);
-  expect(db.docs.get('schools/pu/members/dana').profileBoundSchoolId).toBeUndefined();
+    runCli(['--project', 'demo-campus-security', '--apply'], { db, FieldValue }),
+  ).rejects.toThrow();
+  await expect(
+    runCli(['--project', 'demo-campus-security', '--reverse', '--apply'], { db, FieldValue }),
+  ).rejects.toThrow();
 });
 
 test('unbound profiles with more than one active school are left as needs-login', async () => {
@@ -282,6 +215,32 @@ test('unbound profiles with more than one active school are left as needs-login'
   });
   const plan = planCampusStoryAccessBinding(await loadCampusMembershipRows(db));
   expect(summarizeBindingPlan(plan)).toEqual({ 'needs-login': 2 });
+});
+
+test('closing an account inactivates leftover stamps in the same transaction as the user update', async () => {
+  const db = fakeDb({
+    'users/bob': { status: 'active' },
+    'schools/pu/members/bob': {
+      status: 'active',
+      profileBoundSchoolId: 'pu',
+      profileBoundGeneration: 'gen-old',
+    },
+    'schools/other/members/bob': { status: 'inactive', profileBoundSchoolId: 'other' },
+  });
+  const changed = await closeCampusStoryAccess({
+    db,
+    uid: 'bob',
+    FieldValue,
+    userUpdate: { accountDeletionInProgress: true },
+    memberRefs: [
+      db.collection('schools').doc('pu').collection('members').doc('bob'),
+      db.collection('schools').doc('other').collection('members').doc('bob'),
+    ],
+  });
+  expect(changed).toEqual(['schools/pu/members/bob', 'schools/other/members/bob']);
+  expect(db.docs.get('users/bob')).toEqual({ status: 'active', accountDeletionInProgress: true });
+  expect(db.docs.get('schools/pu/members/bob')).toEqual({ status: 'inactive' });
+  expect(db.docs.get('schools/other/members/bob')).toEqual({ status: 'inactive' });
 });
 
 test('profile delete or closed status clears leftover stamps in one transaction', async () => {

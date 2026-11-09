@@ -48,7 +48,7 @@ function campusBoundProfile(schoolId) {
 }
 
 function campusBoundMembership(schoolId) {
-  return { status: 'active', profileBoundSchoolId: schoolId };
+  return { status: 'active', profileBoundSchoolId: schoolId, profileBoundGeneration: 'gen-login' };
 }
 
 function uploadString(ref, value, contentType) {
@@ -2058,12 +2058,26 @@ describe('storage security rules', () => {
     await assertFails(charlie.doc(story.path).get());
     await assertFails(charlie.doc(story.path).delete());
     await assertFails(charlieCtx.storage().ref(mediaPath).getMetadata());
+    await assertFails(bob.doc('users/bob').delete());
+    await assertSucceeds(bobMedia.getMetadata());
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ status: 'suspended' });
+      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
+    });
+    await assertFails(bobMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
+    });
+    await assertSucceeds(bobMedia.getMetadata());
 
     await seedFirestore(async (db) => {
       await db.doc('users/bob').delete();
+      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
       await db.doc(bobView.path).delete();
     });
-    await assertSucceeds(bobMedia.getMetadata());
+    await assertFails(bobMedia.getMetadata());
     await assertFails(bob.doc(story.path).get());
     await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
@@ -2090,16 +2104,15 @@ describe('storage security rules', () => {
     await assertFails(bob.doc('campusStories/rebuilt-publish').set({
       ...payload, authorUid: 'bob',
     }));
-    await assertSucceeds(bobMedia.getMetadata());
-    await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/bob').set({
-        ...campusBoundMembership('pu'),
-        status: 'inactive',
-      });
-    });
     await assertFails(bobMedia.getMetadata());
 
-    await seedFirestore(async (db) => db.doc('users/alice').delete());
+    await assertFails(alice.doc('users/alice').delete());
+    await assertSucceeds(aliceMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').delete();
+      await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
+    });
+    await assertFails(aliceMedia.getMetadata());
     await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
     await assertFails(story.get());
     await assertFails(story.delete());
@@ -2110,11 +2123,12 @@ describe('storage security rules', () => {
     await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
     await assertFails(story.get());
     await assertFails(story.delete());
+    await assertFails(aliceMedia.getMetadata());
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
     });
-    await assertSucceeds(story.get());
-    await assertSucceeds(aliceMedia.getMetadata());
+    await assertFails(story.get());
+    await assertFails(aliceMedia.getMetadata());
     await seedFirestore(async (db) => {
       await db.doc('schools/pu/members/alice').set({
         ...campusBoundMembership('pu'),
@@ -2167,6 +2181,15 @@ describe('storage security rules', () => {
       });
       await db.doc('schools/pu/members/dana').set({
         status: 'active', role: 'member', profileBoundSchoolId: 'pu',
+      });
+    });
+    await assertFails(media.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'dana' },
+    }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/dana').set({
+        status: 'active', role: 'member', profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-login',
       });
     });
     await assertSucceeds(media.putString('draft', 'raw', {
@@ -3239,6 +3262,8 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ accountDeletionInProgress: deleteField() }));
     await assertFails(alice.update({ notificationDeliveryDisabled: true }));
     await assertFails(alice.update({ accountDeletionInProgress: true }));
+    await assertFails(alice.delete());
+    await assertFails(bob.delete());
 
     await assertSucceeds(bob.update({ displayName: 'Bob Updated' }));
   });
@@ -4424,6 +4449,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ lastPostLoginResolvedAt: deleteField() }));
 
     // Legitimate edit still ok when protected optional fields already exist.
+    await assertFails(bob.delete());
     await assertSucceeds(bob.update({ displayName: 'Bob Updated' }));
   });
 });

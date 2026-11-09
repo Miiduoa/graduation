@@ -9,7 +9,11 @@ function isClosedAccount(profile) {
 }
 
 function membershipBoundToSchool(membership, schoolId) {
-  return membership?.status === 'active' && membership?.profileBoundSchoolId === schoolId;
+  return (
+    membership?.status === 'active' &&
+    membership?.profileBoundSchoolId === schoolId &&
+    Boolean(membership?.profileBoundGeneration)
+  );
 }
 
 function stampMatchesLiveProfile(membership, profile) {
@@ -43,15 +47,6 @@ function planCampusStoryAccessBinding(rows) {
   return rows.map((row) => classifyCampusStoryBinding(row));
 }
 
-function docFromPath(db, path) {
-  const parts = path.split('/');
-  let ref = db.collection(parts[0]).doc(parts[1]);
-  for (let index = 2; index < parts.length; index += 2) {
-    ref = ref.collection(parts[index]).doc(parts[index + 1]);
-  }
-  return ref;
-}
-
 async function loadCampusMembershipRows(db) {
   const schools = await db.collection('schools').get();
   const rows = [];
@@ -79,77 +74,37 @@ function summarizeBindingPlan(plan) {
   return counts;
 }
 
-async function applyCampusStoryAccessBinding({ apply = false } = {}) {
-  if (apply) {
-    throw new Error('Binding apply is disabled; historical accounts stamp on next school login');
+function storyStampClearUpdate(FieldValue) {
+  return {
+    profileBoundSchoolId: FieldValue.delete(),
+    profileBoundGeneration: FieldValue.delete(),
+    status: 'inactive',
+  };
+}
+
+async function closeCampusStoryAccess({ db, uid, FieldValue, userUpdate = null, memberRefs = [] }) {
+  const userRef = db.collection('users').doc(uid);
+  const chunks = [];
+  for (let index = 0; index < memberRefs.length; index += 400) {
+    chunks.push(memberRefs.slice(index, index + 400));
   }
-  return { backup: [], applied: [], apply: false };
-}
-
-function missingField(value) {
-  return value == null;
-}
-
-function sameField(current, expected) {
-  if (missingField(expected)) return missingField(current);
-  return current === expected;
-}
-
-function restoreFields(current, before, after, FieldValue) {
-  const next = {};
-  for (const key of Object.keys(after)) {
-    if (!sameField(current?.[key], after[key])) continue;
-    next[key] = missingField(before?.[key]) ? FieldValue.delete() : before[key];
-  }
-  return next;
-}
-
-function reverseBlockedByNewerBinding(current, item) {
-  const after = item.after || {};
-  if (!Object.prototype.hasOwnProperty.call(after, 'profileBoundSchoolId')) return false;
-  const backupGen = after.profileBoundGeneration ?? item.generation ?? null;
-  return Boolean(current.profileBoundGeneration) && current.profileBoundGeneration !== backupGen;
-}
-
-async function reverseCampusStoryAccessBinding({
-  db,
-  FieldValue,
-  backup,
-  apply = false,
-  projectId,
-}) {
-  const entries = Array.isArray(backup) ? backup : backup.entries || [];
-  const backupProjectId = backup.projectId;
-  if (backupProjectId && projectId && backupProjectId !== projectId) {
-    throw new Error('Backup project does not match --project');
-  }
-  const restored = [];
-  const skipped = [];
-  for (const item of [...entries].reverse()) {
-    const result = await db.runTransaction(async (tx) => {
-      const ref = docFromPath(db, item.path);
-      const snap = await tx.get(ref);
-      if (!snap.exists) {
-        return { applied: false, reason: 'missing', path: item.path };
+  if (chunks.length === 0) chunks.push([]);
+  const changed = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    await db.runTransaction(async (tx) => {
+      const snaps = await tx.getAll(userRef, ...chunk);
+      if (index === 0 && userUpdate) tx.set(userRef, userUpdate, { merge: true });
+      for (let offset = 0; offset < chunk.length; offset += 1) {
+        const snap = snaps[offset + 1];
+        const ref = chunk[offset];
+        if (!snap.exists) continue;
+        tx.update(ref, storyStampClearUpdate(FieldValue));
+        changed.push(ref.path);
       }
-      const current = snap.data() || {};
-      if (reverseBlockedByNewerBinding(current, item)) {
-        return { applied: false, reason: 'newer-generation', path: item.path };
-      }
-      const next = restoreFields(current, item.before, item.after, FieldValue);
-      if (Object.keys(next).length === 0) {
-        return { applied: false, reason: 'current-mismatch', path: item.path };
-      }
-      if (apply) tx.update(ref, next);
-      return { applied: apply, path: item.path, fields: Object.keys(next), op: item.op };
     });
-    if (result.fields) {
-      restored.push({ path: result.path, fields: result.fields, op: result.op });
-    } else {
-      skipped.push({ path: result.path, reason: result.reason });
-    }
   }
-  return { restored, skipped, apply };
+  return changed;
 }
 
 async function clearProfileSchoolBindingForRevokedMembership({ db, FieldValue, schoolId, uid }) {
@@ -254,8 +209,7 @@ module.exports = {
   planCampusStoryAccessBinding,
   loadCampusMembershipRows,
   summarizeBindingPlan,
-  applyCampusStoryAccessBinding,
-  reverseCampusStoryAccessBinding,
+  closeCampusStoryAccess,
   clearProfileSchoolBindingForRevokedMembership,
   revokeCampusStoryMembershipBinding,
   inactivateLeftoverSchoolMemberships,
