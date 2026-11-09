@@ -1,5 +1,5 @@
 const { createHash, randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
-const { FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { FieldPath, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 
 const SCHEMA_VERSION = 2;
@@ -105,6 +105,68 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
     };
   }
 
+  async function requireSchoolMember(transaction, group, uid) {
+    const schoolId = group.data()?.schoolId;
+    if (typeof schoolId !== 'string' || !schoolId || schoolId.includes('/')) {
+      throw new HttpsError('permission-denied', 'A school membership is required');
+    }
+    const schoolMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
+    const [membership] = await transaction.getAll(schoolMember);
+    requireMember(membership);
+  }
+
+  async function participate(request, write) {
+    const uid = actor(request);
+    const data = request.data || {};
+    const groupId = documentId(data.groupId, 'groupId');
+    const sessionId = documentId(data.sessionId, 'sessionId');
+    const { group, member, live } = refs(groupId, sessionId, uid);
+    return db.runTransaction(async (transaction) => {
+      const [course, membership, session] = await transaction.getAll(group, member, live);
+      requireMember(membership);
+      await requireSchoolMember(transaction, course, uid);
+      if (session.data()?.active !== true || session.data().schemaVersion !== SCHEMA_VERSION) {
+        throw new HttpsError('failed-precondition', 'Session is not active');
+      }
+      await write(transaction, live, uid, data);
+      return { success: true };
+    });
+  }
+
+  function submitPollResponse(request) {
+    return participate(request, async (transaction, live, uid, data) => {
+      const poll = live.collection('polls').doc(documentId(data.pollId, 'pollId'));
+      const snapshot = await transaction.get(poll);
+      const options = snapshot.data()?.options;
+      if (snapshot.data()?.active !== true) {
+        throw new HttpsError('failed-precondition', 'Poll is not active');
+      }
+      if (
+        !Array.isArray(options) ||
+        !Number.isInteger(data.optionIdx) ||
+        data.optionIdx < 0 ||
+        data.optionIdx >= options.length
+      ) {
+        throw new HttpsError('invalid-argument', 'Invalid poll option');
+      }
+      transaction.update(poll, new FieldPath('responses', uid), data.optionIdx);
+    });
+  }
+
+  function submitReaction(request) {
+    const allowed = ['understood', 'partial', 'confused'];
+    return participate(request, async (transaction, live, uid, { reaction }) => {
+      if (!allowed.includes(reaction)) throw new HttpsError('invalid-argument', 'Invalid reaction');
+      const receipt = live.collection('userReactions').doc(uid);
+      const previous = (await transaction.get(receipt)).data()?.reaction;
+      if (previous === reaction) return;
+      const updates = { [`reactions.${reaction}`]: FieldValue.increment(1) };
+      if (allowed.includes(previous)) updates[`reactions.${previous}`] = FieldValue.increment(-1);
+      transaction.update(live, updates);
+      transaction.set(receipt, { reaction, updatedAt: FieldValue.serverTimestamp() });
+    });
+  }
+
   async function otherActiveSessionIds(transaction, group, sessionId) {
     const [activeLive, activeAttendance] = await Promise.all([
       transaction.get(group.collection('liveSessions').where('active', '==', true)),
@@ -172,6 +234,7 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
       );
       requireMember(member, true);
       if (!group.exists) throw new HttpsError('not-found', 'Group not found');
+      await requireSchoolMember(transaction, group, uid);
       if (live.exists || attendance.exists || secret.exists) {
         if (!live.exists || !attendance.exists || !secret.exists) {
           throw new HttpsError(
@@ -273,12 +336,14 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
     const sessionId = documentId(data.sessionId, 'sessionId');
     const documents = refs(groupId, sessionId, uid);
     return db.runTransaction(async (transaction) => {
-      const [member, live, attendance] = await transaction.getAll(
+      const [group, member, live, attendance] = await transaction.getAll(
+        documents.group,
         documents.member,
         documents.live,
         documents.attendance,
       );
       requireMember(member, true);
+      await requireSchoolMember(transaction, group, uid);
       if (!live.exists) throw new HttpsError('not-found', 'Session not found');
       if (live.data().teacherId !== uid)
         throw new HttpsError('permission-denied', 'Only the session instructor can end it');
@@ -309,7 +374,8 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
     }
     const documents = refs(groupId, sessionId, uid);
     return db.runTransaction(async (transaction) => {
-      const [member, live, attendance, secret, record] = await transaction.getAll(
+      const [group, member, live, attendance, secret, record] = await transaction.getAll(
+        documents.group,
         documents.member,
         documents.live,
         documents.attendance,
@@ -317,6 +383,7 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
         documents.record,
       );
       const membership = requireMember(member);
+      await requireSchoolMember(transaction, group, uid);
       if (!live.exists || !attendance.exists) {
         throw new HttpsError('failed-precondition', 'Session records are missing');
       }
@@ -583,7 +650,14 @@ function createLiveSessionHandlers({ db, now = Date.now, notifyStarted, logger =
     });
   }
 
-  return { startLiveSession, endLiveSession, joinLiveSession, correctAttendanceRecord };
+  return {
+    startLiveSession,
+    endLiveSession,
+    joinLiveSession,
+    correctAttendanceRecord,
+    submitPollResponse,
+    submitReaction,
+  };
 }
 
 module.exports = { createLiveSessionHandlers };
