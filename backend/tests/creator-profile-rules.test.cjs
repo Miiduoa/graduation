@@ -95,3 +95,61 @@ test('revoked membership blocks reads and writes of an existing creator card', a
   // Losing school eligibility must not trap previously shared personal text forever.
   await assertSucceeds(doc(alice).delete());
 });
+
+
+test('a personal pin must reference one of the author’s current nonanonymous posts', async () => {
+  const alice = environment.authenticatedContext('alice').firestore();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc('schools/pu/campusPosts/photo1').set({
+      schoolId: 'pu', authorUid: 'alice', anonymous: false, title: '我的照片',
+    });
+    await db.doc('schools/pu/campusPosts/anonymousOld').set({
+      schoolId: 'pu', authorUid: 'alice', anonymous: true, title: '匿名舊貼文',
+    });
+    await db.doc('schools/pu/campusPosts/bobPost').set({
+      schoolId: 'pu', authorUid: 'bob', anonymous: false, title: '其他同學',
+    });
+    await db.doc('schools/pu/campusPosts/wrongSchool').set({
+      schoolId: 'other', authorUid: 'alice', anonymous: false, title: '錯誤校園',
+    });
+  });
+  await assertSucceeds(doc(alice).set(card({ pinnedPostId: 'photo1' })));
+  await assertSucceeds(doc(alice).set({ pinnedPostId: '', updatedAt: serverTimestamp() }, { merge: true }));
+  await assertSucceeds(doc(alice).set({ pinnedPostId: 'photo1', updatedAt: serverTimestamp() }, { merge: true }));
+
+  const snapshot = await assertSucceeds(doc(alice).get({ source: 'server' }));
+  if (snapshot.data()?.bio !== card().bio) throw Error('Changing the pin modified the biography');
+
+  for (const pinnedPostId of ['missing', 'anonymousOld', 'bobPost', 'wrongSchool', 'invalid/path', 'x'.repeat(129)]) {
+    await assertFails(doc(alice).set({ pinnedPostId, updatedAt: serverTimestamp() }, { merge: true }));
+  }
+  await assertFails(doc(alice).set({ pinnedPostId: 10, updatedAt: serverTimestamp() }, { merge: true }));
+});
+
+test('other members cannot pin another author’s post or modify their pinned profile', async () => {
+  const alice = environment.authenticatedContext('alice').firestore();
+  const bob = environment.authenticatedContext('bob').firestore();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/photo1').set({
+      schoolId: 'pu', authorUid: 'alice', anonymous: false, title: '照片',
+    });
+  });
+  await assertSucceeds(doc(alice).set(card({ pinnedPostId: 'photo1' })));
+  await assertFails(doc(bob).set({ pinnedPostId: '', updatedAt: serverTimestamp() }, { merge: true }));
+  await assertFails(doc(bob).set(card({ pinnedPostId: 'photo1' })));
+});
+
+test('bio edits preserve the creator pin and do not permit hidden private fields', async () => {
+  const alice = environment.authenticatedContext('alice').firestore();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/photo1').set({
+      schoolId: 'pu', authorUid: 'alice', anonymous: false, title: '照片',
+    });
+  });
+  await assertSucceeds(doc(alice).set(card({ pinnedPostId: 'photo1' })));
+  await assertSucceeds(doc(alice).set(card({ bio: '新簡介' }), { merge: true }));
+  const snapshot = await assertSucceeds(doc(alice).get({ source: 'server' }));
+  if (snapshot.data()?.pinnedPostId !== 'photo1') throw Error('Editing the bio discarded the pin');
+  await assertFails(doc(alice).set({ studentId: 'secret', updatedAt: serverTimestamp() }, { merge: true }));
+});
