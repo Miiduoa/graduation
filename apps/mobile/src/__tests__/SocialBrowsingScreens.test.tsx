@@ -4,6 +4,7 @@ import { feedChoiceKey } from '@campus/shared/src/communityFeedPreferences';
 import { ActivityIndicator, Alert, FlatList, RefreshControl } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { HomeFeedScreen } from '../screens/social/HomeFeedScreen';
+import { BoardDetailScreen } from '../screens/social/BoardDetailScreen';
 import { RealtimeSocialScreen } from '../screens/social/RealtimeSocialScreen';
 import { BoardsScreen } from '../screens/social/BoardsScreen';
 import { CommunityScreen } from '../screens/CommunityScreen';
@@ -84,6 +85,8 @@ jest.mock('../services/feed', () => ({
 }));
 jest.mock('../services/boards', () => ({
   listBoards: jest.fn(),
+  getBoardById: jest.fn(async () => ({ id: 'board', name: '讀書會', type: 'topic' })),
+  isSubscribedToBoard: jest.fn(async () => false),
   listSubscribedBoardIds: jest.fn(async () => []),
   subscribeToBoard: jest.fn(),
   unsubscribeFromBoard: jest.fn(),
@@ -966,4 +969,48 @@ test('a late mobile continuation cannot replace a newer date jump', async () => 
   }));
   expect(view.getByText('2022年活動')).toBeTruthy();
   expect(view.queryByText('不應出現的晚到貼文')).toBeNull();
+});
+
+
+test('the native feed card keeps the originating school when opening a post', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  const view = render(<HomeFeedScreen />);
+  fireEvent.press(await view.findByText('讀書會時間'));
+  expect(mockNavigate).toHaveBeenCalledWith('PostDetail', { postId: 'post', schoolId: 'pu' });
+});
+
+test('the native board card keeps the originating school when opening a post', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([post]);
+  const view = render(<BoardDetailScreen route={{ params: { boardId: 'board' } }} />);
+  fireEvent.press(await view.findByText('讀書會時間'));
+  expect(mockNavigate).toHaveBeenCalledWith('PostDetail', { postId: 'post', schoolId: 'pu' });
+});
+
+test('the board does not show a wrong-campus post returned from a stale or malformed page', async () => {
+  jest.mocked(fetchRecentCampusPosts).mockResolvedValueOnce([
+    { ...post, schoolId: 'other', id: 'shared', title: '外校誤傳的文章' },
+  ]);
+  const view = render(<BoardDetailScreen route={{ params: { boardId: 'board' } }} />);
+  await act(async () => {});
+  expect(view.queryByText('外校誤傳的文章')).toBeNull();
+  expect(view.UNSAFE_getByType(FlatList).props.data).toEqual([]);
+});
+
+test('the board hides a previous-campus read and ignores its late result after a school switch', async () => {
+  let finishPrevious!: (rows: typeof post[]) => void;
+  jest.mocked(fetchRecentCampusPosts)
+    .mockImplementationOnce(() => new Promise((resolve) => { finishPrevious = resolve; }))
+    .mockResolvedValueOnce([{ ...post, id: 'same', schoolId: 'other', title: '新學校的文章' }]);
+  const route = { params: { boardId: 'board' } };
+  const view = render(<BoardDetailScreen route={route} />);
+  expect(fetchRecentCampusPosts).toHaveBeenCalledWith('pu', 'board', 45);
+  mockSchoolId = 'other';
+  view.rerender(<BoardDetailScreen route={route} />);
+  expect(await view.findByText('新學校的文章')).toBeTruthy();
+  await act(async () => { finishPrevious([{ ...post, id: 'same', title: '舊學校晚到的文章' }]); });
+  expect(view.queryByText('舊學校晚到的文章')).toBeNull();
+  expect(view.getByText('新學校的文章')).toBeTruthy();
+  expect(view.UNSAFE_getByType(FlatList).props.data).toEqual([
+    expect.objectContaining({ id: 'same', schoolId: 'other' }),
+  ]);
 });
