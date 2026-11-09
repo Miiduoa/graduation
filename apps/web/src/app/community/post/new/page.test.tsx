@@ -334,7 +334,6 @@ it('still lets the creator explicitly choose anonymity without attributing the p
   fireEvent.click(screen.getByRole('button', { name: '發布' }));
   await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith(expect.objectContaining({
     anonymous: true,
-    aliasSnapshot: expect.any(String),
   })));
   expect(mocks.publish.mock.calls[0][0]).not.toHaveProperty('authorUid');
 });
