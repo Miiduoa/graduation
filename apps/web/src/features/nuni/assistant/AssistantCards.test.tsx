@@ -194,7 +194,7 @@ it('keeps service handoff distinct from verified calendar completion', () => {
 
 it('does not combine calendar writes and food-order review into one batch confirmation', () => {
   const onConfirm = vi.fn();
-  const calendar = eventCard('m1', '讀書：程式設計');
+  const calendar = eventCard('calendar-mixed-valid-1', '讀書：程式設計');
   const { rerender } = render(<AssistantCardStack
     cards={[calendar, foodCard]} states={{}} pending={false}
     onConfirm={onConfirm} onCancel={vi.fn()} />);
