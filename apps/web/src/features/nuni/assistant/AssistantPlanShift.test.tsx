@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PlanProtectionEvent } from '@/lib/assistantPlanProtection';
-import { AssistantPlanShift, AssistantPlanShiftComparison } from './AssistantPlanShift';
+import { AssistantPlanShift, AssistantPlanShiftComparison, type ShiftPlanDraftBridge } from './AssistantPlanShift';
+import type { ShiftPlanDraftContent } from '@/lib/assistantShiftPlanDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 function card(id = 'first', patch: Record<string, unknown> = {}): V2Card {
@@ -219,4 +220,167 @@ it('rejects comparison data that changed a title, duration, unselected row, or o
     view.rerender(<AssistantPlanShiftComparison before={before} after={candidate} selectedIndices={[0, 2]} offsetMinutes={30} />);
     expect(view.container.textContent).toBe('');
   }
+});
+
+
+function bridge(patch: Partial<ShiftPlanDraftBridge> = {}): ShiftPlanDraftBridge {
+  return { onChange: vi.fn(), onReplace: vi.fn(() => ({ ok: true })), onClear: vi.fn(() => ({ ok: true })),
+    onApply: vi.fn(() => ({ ok: false, message: '尚未恢復。' })), ...patch };
+}
+const savedContent = (patch: Partial<ShiftPlanDraftContent> = {}): ShiftPlanDraftContent => ({
+  mode: 'shift', direction: 'earlier', minutes: '45', selectedIndices: [1], protectedIndices: [], ...patch,
+});
+
+it('saves defaults only on the first explicit open, with no saves for close, reopen, rerender, or lock changes', () => {
+  const draft = bridge(), original = turn();
+  const view = render(<AssistantPlanShift {...base} turn={original} draft={draft} onPreview={vi.fn()} />);
+  expect(draft.onChange).not.toHaveBeenCalled();
+  open();
+  expect(draft.onChange).toHaveBeenCalledExactlyOnceWith(savedContent({ direction: 'later', minutes: '30', selectedIndices: [0, 1, 2] }));
+  fireEvent.click(screen.getByRole('button', { name: '收起整組調整' })); open();
+  view.rerender(<AssistantPlanShift {...base} turn={original} draft={draft} protectedIndices={[0]} onPreview={vi.fn()} />);
+  expect(checkbox(1).checked).toBe(false); expect(draft.onChange).toHaveBeenCalledTimes(1);
+  view.rerender(<AssistantPlanShift {...base} turn={original} draft={draft} onPreview={vi.fn()} />);
+  expect(checkbox(1).checked).toBe(false); expect(draft.onChange).toHaveBeenCalledTimes(1);
+  view.rerender(<AssistantPlanShift {...base} turn={original} draft={draft} protectedIndices={[2]} onPreview={vi.fn()} />);
+  setMinutes('90');
+  expect(draft.onChange).toHaveBeenLastCalledWith(savedContent({ direction: 'later', minutes: '90', selectedIndices: [1], protectedIndices: [2] }));
+  expect(draft.onChange).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(vi.mocked(draft.onChange).mock.calls)).not.toMatch(/PRIVATE_|mutationId|token|schoolId|first|second|third/);
+});
+
+it('saves unfinished raw minutes and empty selections without treating them as executable input', () => {
+  const draft = bridge(), onPreview = vi.fn();
+  render(<AssistantPlanShift {...base} turn={turn([card()])} draft={draft} onPreview={onPreview} />);
+  open();
+  for (const value of ['', '1.5', '1441']) {
+    setMinutes(value); submit();
+    expect(draft.onChange).toHaveBeenLastCalledWith(savedContent({ direction: 'later', minutes: value, selectedIndices: [0] }));
+    expect(onPreview).not.toHaveBeenCalled();
+  }
+  fireEvent.click(checkbox(1));
+  expect(draft.onChange).toHaveBeenLastCalledWith(savedContent({ direction: 'later', minutes: '1441', selectedIndices: [] }));
+});
+
+it('applies exact recovered settings only after explicit action without saving again or dispatching', () => {
+  const draft = bridge({ recovery: { id: 'saved', match: 'exact' },
+    onApply: vi.fn(() => ({ ok: true, content: savedContent() })) });
+  const onPreview = vi.fn();
+  render(<AssistantPlanShift {...base} turn={turn()} draft={draft} onPreview={onPreview} />);
+  open(); expect(minutes().value).toBe('30'); expect(draft.onApply).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '套用已恢復的平移草稿' }));
+  expect(minutes().value).toBe('45');
+  expect((screen.getByLabelText('調整方向') as HTMLSelectElement).value).toBe('earlier');
+  expect(checkbox(1).checked).toBe(false); expect(checkbox(2).checked).toBe(true); expect(checkbox(3).checked).toBe(false);
+  expect(document.activeElement).toBe(screen.getByLabelText('調整方向'));
+  expect(draft.onChange).toHaveBeenCalledTimes(1); expect(onPreview).not.toHaveBeenCalled();
+});
+
+it('applies only direction and minutes for a reselect source without restoring old locks or automatically selecting fresh IDs', async () => {
+  const draft = bridge({ recovery: { id: 'saved', match: 'reselect' },
+    onApply: vi.fn(() => ({ ok: true, content: savedContent({ selectedIndices: [], protectedIndices: [0] }) })) });
+  const onReleaseProtection = vi.fn(), onPreview = vi.fn(async () => ({ ok: false, message: '新來源的明確範圍已收到。' }));
+  render(<AssistantPlanShift {...base} turn={turn([card('fresh-a'), card('fresh-b')])} protectedIndices={[0]}
+    draft={draft} onReleaseProtection={onReleaseProtection} onPreview={onPreview} />);
+  open(); fireEvent.click(screen.getByRole('button', { name: '套用已恢復的平移草稿' }));
+  expect(minutes().value).toBe('45'); expect(checkbox(1).checked).toBe(false); expect(checkbox(1).disabled).toBe(true);
+  expect(checkbox(2).checked).toBe(false); submit(); expect(onPreview).not.toHaveBeenCalled();
+  expect(screen.getByText(/原選取與保留項目不會自動套用/)).toBeTruthy();
+  expect(onReleaseProtection).not.toHaveBeenCalled();
+  fireEvent.click(checkbox(2)); submit(); await screen.findByText('新來源的明確範圍已收到。');
+  expect(onPreview).toHaveBeenCalledExactlyOnceWith({ mutationIds: ['fresh-b'], offsetMinutes: -45 });
+});
+
+it('requires an explicit replace-current choice when recovered settings would overwrite local input', () => {
+  const draft = bridge({ pendingRecovery: true, recovery: { id: 'saved', match: 'exact' },
+    onApply: vi.fn(() => ({ ok: true, content: savedContent() })) });
+  render(<AssistantPlanShift {...base} turn={turn()} draft={draft} onPreview={vi.fn()} />);
+  open(); setMinutes('75');
+  expect(screen.queryByRole('button', { name: '套用已恢復的平移草稿' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '保留目前平移設定' }));
+  expect(minutes().value).toBe('75'); expect(draft.onApply).not.toHaveBeenCalled(); expect(draft.onReplace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '以恢復草稿取代目前平移設定' }));
+  expect(minutes().value).toBe('45'); expect(draft.onApply).toHaveBeenCalledTimes(1);
+  expect(draft.onChange).toHaveBeenCalledTimes(2);
+});
+
+it('offers explicit save-current for an unrestored offer and reports replacement failures without losing local input', () => {
+  const onReplace = vi.fn().mockReturnValueOnce({ ok: false, message: '暫存空間不足。' }).mockReturnValueOnce({ ok: true });
+  const draft = bridge({ pendingRecovery: true, onReplace });
+  render(<AssistantPlanShift {...base} turn={turn()} draft={draft} onPreview={vi.fn()} />);
+  open(); setMinutes('60');
+  expect(screen.queryByRole('button', { name: /套用已恢復|以恢復草稿取代/ })).toBeNull();
+  expect(onReplace).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '改存目前平移設定' }));
+  expect(screen.getByRole('alert').textContent).toContain('暫存空間不足'); expect(minutes().value).toBe('60');
+  fireEvent.click(screen.getByRole('button', { name: '改存目前平移設定' }));
+  expect(onReplace).toHaveBeenNthCalledWith(2, savedContent({ direction: 'later', minutes: '60', selectedIndices: [0, 1, 2] }));
+  expect(screen.getByText(/其他草稿未變更/)).toBeTruthy(); expect(draft.onApply).not.toHaveBeenCalled();
+});
+
+it('clears only after owner confirmation, retaining current locks and leaving scope selection empty', () => {
+  const onClear = vi.fn().mockReturnValueOnce({ ok: false, message: '清除尚未確認。' }).mockReturnValueOnce({ ok: true });
+  const draft = bridge({ onClear }), onReleaseProtection = vi.fn();
+  render(<AssistantPlanShift {...base} turn={turn()} protectedIndices={[0]} draft={draft}
+    onReleaseProtection={onReleaseProtection} onPreview={vi.fn()} />);
+  open(); setMinutes('90'); direction('earlier');
+  fireEvent.click(screen.getByRole('button', { name: '清除平移草稿' }));
+  expect(screen.getByRole('alert').textContent).toContain('清除尚未確認'); expect(minutes().value).toBe('90');
+  fireEvent.click(screen.getByRole('button', { name: '清除平移草稿' }));
+  expect(minutes().value).toBe('30'); expect((screen.getByLabelText('調整方向') as HTMLSelectElement).value).toBe('later');
+  expect(screen.getAllByRole('checkbox').every(value => !(value as HTMLInputElement).checked)).toBe(true);
+  expect(checkbox(1).disabled).toBe(true); expect(onReleaseProtection).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(screen.getByLabelText('調整方向'));
+  fireEvent.click(screen.getByRole('button', { name: '收起整組調整' })); open();
+  expect(draft.onChange).toHaveBeenCalledTimes(3);
+});
+
+it('stops recovery application, replacement and autosave when pending or unknown without losing memory input', () => {
+  const draft = bridge({ pendingRecovery: true, recovery: { id: 'saved', match: 'exact' } }), original = turn();
+  const view = render(<AssistantPlanShift {...base} turn={original} draft={draft} onPreview={vi.fn()} />);
+  open(); setMinutes('45');
+  view.rerender(<AssistantPlanShift {...base} turn={original} draft={draft} states={{ other: { status: 'unknown', message: '待核對' } }} onPreview={vi.fn()} />);
+  setMinutes('60'); expect(minutes().value).toBe('60'); expect(draft.onChange).toHaveBeenCalledTimes(2);
+  for (const name of ['以恢復草稿取代目前平移設定', '改存目前平移設定']) {
+    const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true); fireEvent.click(button);
+  }
+  view.rerender(<AssistantPlanShift {...base} turn={original} draft={draft} pending onPreview={vi.fn()} />);
+  expect((screen.getByRole('button', { name: '清除平移草稿' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(draft.onApply).not.toHaveBeenCalled(); expect(draft.onReplace).not.toHaveBeenCalled(); expect(draft.onClear).not.toHaveBeenCalled();
+});
+
+it('rejects invalid restored index or lock correspondence without partially applying direction or minutes', () => {
+  const onApply = vi.fn();
+  const draft = bridge({ recovery: { id: 'saved', match: 'exact' }, onApply });
+  render(<AssistantPlanShift {...base} turn={turn()} protectedIndices={[0]} draft={draft} onPreview={vi.fn()} />);
+  open();
+  for (const value of [savedContent({ selectedIndices: [99], protectedIndices: [0] }),
+    savedContent({ selectedIndices: [0], protectedIndices: [0] }), savedContent({ protectedIndices: [] })]) {
+    onApply.mockReturnValueOnce({ ok: true, content: value });
+    fireEvent.click(screen.getByRole('button', { name: '套用已恢復的平移草稿' }));
+    expect(screen.getByRole('alert').textContent).toContain('無法完整核對'); expect(minutes().value).toBe('30');
+    expect((screen.getByLabelText('調整方向') as HTMLSelectElement).value).toBe('later');
+  }
+});
+
+it('preserves an invalid recovered minute string in memory and subsequent selection saves while refusing preview', () => {
+  const draft = bridge({ recovery: { id: 'invalid', match: 'exact' },
+    onApply: vi.fn(() => ({ ok: true, content: savedContent({ minutes: 'not-a-minute' }) })) }), onPreview = vi.fn();
+  render(<AssistantPlanShift {...base} turn={turn()} draft={draft} onPreview={onPreview} />);
+  open(); fireEvent.click(screen.getByRole('button', { name: '套用已恢復的平移草稿' }));
+  expect(screen.getByText('not-a-minute')).toBeTruthy();
+  fireEvent.click(checkbox(1));
+  expect(draft.onChange).toHaveBeenLastCalledWith(savedContent({ minutes: 'not-a-minute', selectedIndices: [0, 1] }));
+  submit(); expect(onPreview).not.toHaveBeenCalled(); expect(screen.getByRole('alert')).toBeTruthy();
+});
+
+it('removes expired recovery actions without resetting local input or saving it again', () => {
+  const draft = bridge({ pendingRecovery: true, recovery: { id: 'expires', match: 'exact' } }), original = turn();
+  const view = render(<AssistantPlanShift {...base} turn={original} draft={draft} onPreview={vi.fn()} />);
+  open(); setMinutes('75');
+  view.rerender(<AssistantPlanShift {...base} turn={original} draft={{ ...draft, pendingRecovery: false, recovery: undefined, status: '平移草稿已超過 30 分鐘。' }} onPreview={vi.fn()} />);
+  expect(screen.queryByRole('button', { name: /套用已恢復|以恢復草稿取代|改存目前平移設定/ })).toBeNull();
+  expect(minutes().value).toBe('75'); expect(draft.onChange).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('平移草稿已超過 30 分鐘。')).toBeTruthy();
 });

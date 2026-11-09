@@ -17,6 +17,9 @@ import { buildShiftPlanRevision, type PlanShiftChange } from './assistant/shiftP
 import { AssistantPlanDraftRecovery } from './assistant/AssistantPlanDraftRecovery';
 import { usePlanRevisionDraft } from './assistant/usePlanRevisionDraft';
 import { usePrecisePlanDraft } from './assistant/usePrecisePlanDraft';
+import { useShiftPlanDraft } from './assistant/useShiftPlanDraft';
+import { AssistantShiftPlanDraftRecovery } from './assistant/AssistantShiftPlanDraftRecovery';
+import { shiftPlanDraftSourceMatch } from '@/lib/assistantShiftPlanDraft';
 import { AssistantPrecisePlanDraftRecovery } from './assistant/AssistantPrecisePlanDraftRecovery';
 import { precisePlanDraftSourceMatch } from '@/lib/assistantPrecisePlanDraft';
 import { revisionDraftContentMatches, revisionDraftSource } from '@/lib/assistantPlanRevisionDraft';
@@ -307,6 +310,7 @@ function V2Conversation({
   }, []);
   const drafts = usePlanRevisionDraft({ accountId, schoolId, context }, active);
   const timeDrafts = usePrecisePlanDraft({ accountId, schoolId, context }, active);
+  const shiftDrafts = useShiftPlanDraft({ accountId, schoolId, context }, active);
   function sourceForTurn(turn: V2Turn) {
     if (turn.reply.cards.some(card => card.schoolId !== schoolId)) return null;
     try { return revisionDraftSource(turn.reply.cards); } catch { return null; }
@@ -314,13 +318,15 @@ function V2Conversation({
   function clearTurnDraft(turn: V2Turn): { ok: boolean; message?: string } {
     const source = sourceForTurn(turn);
     if (!source) return { ok: true };
-    // Both are unfinished inputs for this exact source, never execution authority.
-    // Clear before dispatch and stop if either storage result cannot be verified.
+    // Each mode stores unfinished inputs for this exact source, never execution authority.
+    // Clear sequentially before dispatch; any unverified storage result stops dispatch.
     const textResult = drafts.clearSource(source.key, true);
     if (!textResult.ok) return textResult;
-    return timeDrafts.clearSource(source.key, true);
+    const timeResult = timeDrafts.clearSource(source.key, true);
+    if (!timeResult.ok) return timeResult;
+    return shiftDrafts.clearSource(source.key, true);
   }
-  function canSaveTimeDraft(turn: V2Turn) {
+  function canEditPlanDraft(turn: V2Turn) {
     return active() && !busy.current && journalReadyRef.current &&
       turns.includes(turn) && !hasUnresolvedAssistantAction(actionStates.current) &&
       isUnattemptedCalendarPlan(turn, actionStates.current) &&
@@ -832,6 +838,9 @@ function V2Conversation({
     <AssistantPrecisePlanDraftRecovery draft={timeDrafts.draft} restored={timeDrafts.restored} status={timeDrafts.status}
       blocked={!journalReady || pending || hasUnresolvedAssistantAction(states)}
       onRestore={timeDrafts.restore} onDiscard={timeDrafts.discard} />
+    <AssistantShiftPlanDraftRecovery draft={shiftDrafts.draft} restored={shiftDrafts.restored} status={shiftDrafts.status}
+      blocked={!journalReady || pending || hasUnresolvedAssistantAction(states)}
+      onRestore={shiftDrafts.restore} onDiscard={shiftDrafts.discard} />
     <AssistantThread
       schoolId={schoolId}
       ready={ready}
@@ -867,7 +876,29 @@ function V2Conversation({
           <AssistantPlanShift turn={turn} states={states} pending={pending} enabled={journalReady}
             protectedIndices={protectedSelections.current.get(turn) ?? []} onPreview={change => reviseShift(turn, change)}
             onReleaseProtection={index => changeProtectedSelection(turn,
-              (protectedSelections.current.get(turn) ?? []).filter(value => value !== index))} />
+              (protectedSelections.current.get(turn) ?? []).filter(value => value !== index))}
+            draft={source ? {
+              status: shiftDrafts.editorStatuses[source.key],
+              pendingRecovery: !!shiftDrafts.draft,
+              recovery: shiftDrafts.restored && shiftDrafts.draft ? {
+                id: shiftDrafts.draft.id,
+                match: shiftPlanDraftSourceMatch(shiftDrafts.draft, source, protectedSelections.current.get(turn) ?? []),
+              } : undefined,
+              onChange: content => {
+                if (canEditPlanDraft(turn)) shiftDrafts.saveEditor(source, content);
+              },
+              onReplace: content => {
+                if (!canEditPlanDraft(turn))
+                  return { ok: false, message: '目前提議或原操作仍待核對，尚未取代平移草稿。' };
+                return shiftDrafts.replaceEditor(source, content);
+              },
+              onClear: () => shiftDrafts.clearSource(source.key),
+              onApply: () => {
+                if (!canEditPlanDraft(turn))
+                  return { ok: false, message: '請先取得有效且未執行的提議，並核對原操作後再套用平移草稿。' };
+                return shiftDrafts.apply(source, protectedSelections.current.get(turn) ?? []);
+              },
+            } : undefined} />
           <AssistantPrecisePlanRevision turn={turn} states={states} pending={pending}
             enabled={journalReady} onPreview={change => reviseTime(turn, change)}
             draft={source ? {
@@ -877,16 +908,16 @@ function V2Conversation({
                 id: timeDrafts.draft.id, match: precisePlanDraftSourceMatch(timeDrafts.draft, source),
               } : undefined,
               onChange: content => {
-                if (canSaveTimeDraft(turn)) timeDrafts.saveEditor(source, content);
+                if (canEditPlanDraft(turn)) timeDrafts.saveEditor(source, content);
               },
               onReplace: content => {
-                if (!canSaveTimeDraft(turn))
+                if (!canEditPlanDraft(turn))
                   return { ok: false, message: '目前提議或原操作仍待核對，尚未取代時間草稿。' };
                 return timeDrafts.replaceEditor(source, content);
               },
               onClear: () => timeDrafts.clearSource(source.key),
               onApply: () => {
-                if (!canSaveTimeDraft(turn))
+                if (!canEditPlanDraft(turn))
                   return { ok: false, message: '請先取得有效且未執行的提議，並核對原操作後再套用時間草稿。' };
                 return timeDrafts.apply(source);
               },

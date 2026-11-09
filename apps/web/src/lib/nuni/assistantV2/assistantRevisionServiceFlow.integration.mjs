@@ -123,7 +123,7 @@ function storedDrafts(prefix) {
   const rows = [];
   for (let index = 0; index < sessionStorage.length; index++) {
     const key = sessionStorage.key(index);
-    if (prefix ? key.startsWith(prefix) : key.startsWith(TIME_DRAFT_PREFIX) || key.startsWith(FREE_DRAFT_PREFIX)) {
+    if (prefix ? key.startsWith(prefix) : key.startsWith(TIME_DRAFT_PREFIX) || key.startsWith(FREE_DRAFT_PREFIX) || key.startsWith(SHIFT_DRAFT_PREFIX)) {
       // Evidence reads bypass only our injected storage faults, never product logic.
       const raw = nativeStorageRead.call(sessionStorage, key);
       rows.push({ key, raw, value: JSON.parse(raw) });
@@ -1687,4 +1687,384 @@ it('group shift releases a protected row after conflict without selecting it or 
   expect(count('confirm')).toHaveLength(0);
   expect(database.writes).toHaveLength(0);
   assertNoAdditionalModel();
+});
+
+
+// Shift drafts store editable content only. A recovered draft never supplies
+// current transaction identity, protection choices or execution authority.
+const SHIFT_DRAFT_PREFIX = 'campus.assistant-shift-draft.v1:';
+const shiftRecovery = () => ui().getByRole('region', { name: '未送出的平移草稿' });
+function auditShiftDraft() {
+  const rows = storedDrafts(SHIFT_DRAFT_PREFIX);
+  expect(rows).toHaveLength(1);
+  const row = rows[0];
+  expect(row.key).toMatch(/^campus\.assistant-shift-draft\.v1:[a-f0-9]{64}$/);
+  expect(row.value.mode).toBe('shift');
+  expect(row.value.source.events).toEqual(planEvents);
+  for (const field of ['token', 'mutationId', 'routeToken', 'signature', 'permit', 'status',
+    'context', 'conversationId', 'accountId', 'schoolId', 'consent'])
+    expect(row.raw).not.toContain('"' + field + '"');
+  for (const request of requests) {
+    for (const card of request.response?.cards ?? []) {
+      expect(row.raw).not.toContain(card.token);
+      expect(row.raw).not.toContain(card.mutationId);
+    }
+    if (request.body?.routeToken) expect(row.raw).not.toContain(request.body.routeToken);
+  }
+  return row;
+}
+function restoreShiftDraft() {
+  const before = sentActions(), modelCalls = fixture.provider.mock.calls.length;
+  const panel = shiftRecovery();
+  expect(testing.within(panel).queryByRole('region', { name: '已恢復的平移草稿內容' })).toBeNull();
+  expect(testing.within(panel).queryByRole('list', { name: '平移草稿的原提議內容' })).toBeNull();
+  testing.fireEvent.click(testing.within(panel).getByRole('button', { name: '恢復平移草稿' }));
+  expect(ui().getByRole('region', { name: '已恢復的平移草稿內容' })).toBeTruthy();
+  expect(sentActions()).toEqual(before);
+  expect(fixture.provider).toHaveBeenCalledTimes(modelCalls);
+  expect(database.writes).toHaveLength(0);
+}
+function applyShiftDraft(form, replacing = false) {
+  const before = sentActions(), modelCalls = fixture.provider.mock.calls.length;
+  testing.fireEvent.click(testing.within(form).getByRole('button', {
+    name: replacing ? '以恢復草稿取代目前平移設定' : '套用已恢復的平移草稿',
+  }));
+  expect(sentActions()).toEqual(before);
+  expect(fixture.provider).toHaveBeenCalledTimes(modelCalls);
+}
+function expectNoShiftSelection(form, length) {
+  for (let index = 0; index < length; index++) expect(shiftedCheckbox(form, index).checked).toBe(false);
+  expect(testing.within(form).getByRole('button', { name: '預覽整組時間' }).disabled).toBe(true);
+}
+const shiftFields = form => ({
+  direction: testing.within(form).getByLabelText('調整方向').value,
+  minutes: testing.within(form).getByLabelText('調整分鐘數').value,
+});
+
+it('shift draft restores default thirty-minute content after real remount, requires fresh item selection, then confirms three new cards manually', async () => {
+  planEvents = threeSameNameEvents();
+  const original = await initialPlan(), source = structuredClone(planEvents);
+  currentGroupShift();
+  const saved = auditShiftDraft();
+  expect(saved.value).toMatchObject({ direction: 'later', minutes: '30', selectedIndices: [0, 1, 2], protectedIndices: [] });
+  const beforeReload = sentActions(), writes = vi.spyOn(database.adapter, 'write');
+  const clicks = vi.spyOn(testing.fireEvent, 'click');
+  try {
+    const view = await remountAssistant(original.view);
+    expect(ui().queryByRole('article', { name: '行程確認卡' })).toBeNull();
+    expect(ui().queryByRole('form', { name: '整組調整待確認時間' })).toBeNull();
+    restoreShiftDraft();
+    expect(sentActions()).toEqual(beforeReload);
+    expect(fixture.provider).toHaveBeenCalledTimes(2);
+    expect(auditShiftDraft()).toEqual(saved);
+    const fresh = await initialPlan(view);
+    expect(idsOf(fresh.entry).every(id => !idsOf(original.entry).includes(id))).toBe(true);
+    const form = currentGroupShift();
+    applyShiftDraft(form);
+    expect(shiftFields(form)).toEqual({ direction: 'later', minutes: '30' });
+    expectNoShiftSelection(form, 3);
+    const applied = auditShiftDraft();
+    expect(applied.value.source.key).not.toBe(saved.value.source.key);
+    expect(applied.value.savedAt).toBe(saved.value.savedAt);
+    expect(applied.value.selectedIndices).toEqual([]);
+    expect(form.textContent).toContain('重新');
+    const beforeSelection = sentActions();
+    for (const index of [0, 1, 2]) testing.fireEvent.click(shiftedCheckbox(form, index));
+    expect(sentActions()).toEqual(beforeSelection);
+    const start = requests.length;
+    testing.fireEvent.click(testing.within(form).getByRole('button', { name: '預覽整組時間' }));
+    await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
+    const replacement = count('revise')[0];
+    expect(replacement.body.originalCards).toEqual(originalCardsOf(fresh.entry));
+    expect(replacement.body.shift).toEqual({ mutationIds: idsOf(fresh.entry), offsetMinutes: 30, protectedMutationIds: [] });
+    const after = replacement.response.cards.map(card => card.args);
+    expect(after).toEqual([
+      { ...source[0], startTime: '18:30', endTime: '19:30' },
+      { ...source[1], startTime: '20:30', endTime: '21:30' },
+      { ...source[2], startTime: '22:30', endTime: '23:30' },
+    ]);
+    assertRealCards(replacement);
+    expect(ui().getByRole('heading', { name: '整組時間調整摘要' })).toBeTruthy();
+    expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+    expect(requests.slice(start).map(request => request.action)).toEqual(['cancel', 'cancel', 'cancel', 'revise']);
+    for (const request of requests.slice(start)) expect(request.draftsAtDispatch).toEqual([]);
+    expect(storedDrafts()).toEqual([]);
+    expect(writes).not.toHaveBeenCalled();
+    expect(count('confirm')).toHaveLength(0);
+    const previewClicks = clicks.mock.calls.length;
+    for (let index = 0; index < 3; index++) {
+      testing.fireEvent.click(testing.within(uiCards()[3 + index]).getByRole('button', { name: '確認' }));
+      await testing.waitFor(() => expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(index + 1));
+      expect(writes).toHaveBeenCalledTimes(index + 1);
+      expect(count('confirm')[index].body.token).toBe(replacement.response.cards[index].token);
+    }
+    expect(fixture.provider).toHaveBeenCalledTimes(4); // Only the two explicit requests for fresh plans.
+    expect(database.writes.map(write => write.mutationId)).toEqual(idsOf(replacement));
+    expect(deniedFetches).toEqual([]);
+    process.stdout.write('ASSISTANT_SHIFT_DRAFT_RELOAD_OK ' + JSON.stringify({
+      fixedFixture: true, trueReactRemount: true, sourceEvents: source, actualAfter: after,
+      restoredSettings: { direction: 'later', minutes: '30' }, selectionAfterApply: [], manualReselections: 3,
+      explicitFreshPlanRequests: 2, providerFixtureCalls: fixture.provider.mock.calls.length,
+      recoveryApplyModelCalls: 0, previewClicksAfterReload: previewClicks,
+      totalClicksAfterReloadThroughConfirmation: clicks.mock.calls.length,
+      previewWrites: 0, manualConfirmations: count('confirm').length, writeDispatches: writes.mock.calls.length,
+    }) + '\n');
+  } finally { clicks.mockRestore(); }
+});
+
+it('shift draft treats reordered same-name fresh cards as settings only and never guesses the saved indexes', async () => {
+  planEvents = threeSameNameEvents();
+  const original = await initialPlan(), source = structuredClone(planEvents);
+  const form = currentGroupShift();
+  setGroupShift(form, 'earlier', 15);
+  testing.fireEvent.click(shiftedCheckbox(form, 1));
+  const saved = auditShiftDraft();
+  expect(saved.value.selectedIndices).toEqual([0, 2]);
+  const view = await remountAssistant(original.view);
+  restoreShiftDraft();
+  planEvents = [source[2], source[0], source[1]];
+  await initialPlan(view);
+  const current = currentGroupShift();
+  applyShiftDraft(current);
+  expect(shiftFields(current)).toEqual({ direction: 'earlier', minutes: '15' });
+  expectNoShiftSelection(current, 3);
+  expect(current.textContent).toContain('重新');
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  expect(fixture.provider).toHaveBeenCalledTimes(4);
+});
+
+it('shift draft never restores old protection over the current proposal and requires selection when locks changed', async () => {
+  planEvents = jointEvents();
+  const original = await initialPlan();
+  currentFreeEditor('保留第一項，稍後調整其他時間');
+  const old = currentGroupShift();
+  setGroupShift(old, 'earlier', 15);
+  const saved = auditShiftDraft();
+  expect(saved.value.protectedIndices).toEqual([0]);
+  expect(saved.value.selectedIndices).toEqual([1, 2]);
+  const view = await remountAssistant(original.view);
+  restoreShiftDraft();
+  await initialPlan(view);
+  testing.fireEvent.click(currentButton('修改時間或條件'));
+  const text = lastForm('修改安排再預覽');
+  testing.fireEvent.click(testing.within(text).getByRole('checkbox', { name: /^保留原樣 第 2 項/ }));
+  const current = currentGroupShift();
+  applyShiftDraft(current);
+  expect(shiftFields(current)).toEqual({ direction: 'earlier', minutes: '15' });
+  expectNoShiftSelection(current, 3);
+  expect(shiftedCheckbox(current, 0).disabled).toBe(false);
+  expect(shiftedCheckbox(current, 1).disabled).toBe(true);
+  expect(testing.within(text).getByRole('checkbox', { name: /^保留原樣 第 1 項/ }).checked).toBe(false);
+  expect(testing.within(text).getByRole('checkbox', { name: /^保留原樣 第 2 項/ }).checked).toBe(true);
+  expect(auditShiftDraft().value.protectedIndices).toEqual([1]);
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+});
+
+it('shift draft requires an explicit replacement before recovered settings overwrite new local input', async () => {
+  const original = await initialPlan();
+  setGroupShift(currentGroupShift(), 'earlier', 15);
+  const saved = auditShiftDraft();
+  const view = await remountAssistant(original.view);
+  restoreShiftDraft();
+  await initialPlan(view);
+  const form = currentGroupShift();
+  setGroupShift(form, 'later', 75);
+  testing.fireEvent.click(shiftedCheckbox(form, 1));
+  const before = sentActions();
+  expect(storedDrafts(SHIFT_DRAFT_PREFIX)[0]).toEqual(saved);
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '保留目前平移設定' }));
+  expect(shiftFields(form)).toEqual({ direction: 'later', minutes: '75' });
+  expect(shiftedCheckbox(form, 0).checked).toBe(true);
+  expect(shiftedCheckbox(form, 1).checked).toBe(false);
+  expect(storedDrafts(SHIFT_DRAFT_PREFIX)[0]).toEqual(saved);
+  applyShiftDraft(form, true);
+  expect(shiftFields(form)).toEqual({ direction: 'earlier', minutes: '15' });
+  expectNoShiftSelection(form, 2);
+  expect(sentActions()).toEqual(before);
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+});
+
+it('shift draft coexists with both editing modes, clears all before dispatch and cannot authorize a stale restored unknown operation', async () => {
+  const original = await initialPlan();
+  openRevision();
+  const free = storedDrafts(FREE_DRAFT_PREFIX);
+  const time = openExactTime(original.entry, 1, { startTime: '21:30', endTime: '22:30' });
+  const exact = storedDrafts(TIME_DRAFT_PREFIX);
+  const form = currentGroupShift();
+  const saved = auditShiftDraft();
+  expect(storedDrafts()).toHaveLength(3);
+  setGroupShift(form, 'later', 45);
+  expect(storedDrafts(FREE_DRAFT_PREFIX)).toEqual(free);
+  expect(storedDrafts(TIME_DRAFT_PREFIX)).toEqual(exact);
+  const shift = auditShiftDraft();
+  setExactTime(time, { endTime: '22:45' });
+  expect(auditShiftDraft()).toEqual(shift);
+  expect(storedDrafts(FREE_DRAFT_PREFIX)).toEqual(free);
+  fault.dropNextCancel = true;
+  const before = requests.length;
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await ui().findByRole('button', { name: '重新核對結果' });
+  expect(requests.slice(before).map(request => request.action)).toEqual(['cancel', 'reconcile']);
+  expect(count('cancel')[0].draftsAtDispatch).toEqual([]);
+  expect(storedDrafts()).toEqual([]);
+  setGroupShift(form, 'later', 60);
+  expect(storedDrafts()).toEqual([]);
+  // A stale content-only entry is reintroduced by the storage fixture, not by
+  // product autosave. Recovery must not bypass the pending execution journal.
+  sessionStorage.setItem(saved.key, saved.raw);
+  const actions = sentActions();
+  await remountAssistant(original.view, ['reconcile']);
+  expect(count('reconcile').at(-1)).toMatchObject({ status: 503, body: { token: original.entry.response.cards[0].token } });
+  restoreShiftDraft();
+  expect(sentActions()).toEqual([...actions, 'reconcile']);
+  expect(ui().queryByRole('button', { name: '套用已恢復的平移草稿' })).toBeNull();
+  expect(ui().queryByRole('button', { name: '以恢復草稿取代目前平移設定' })).toBeNull();
+  for (const button of ui().queryAllByRole('button', { name: '整組調整時間' })) expect(button.disabled).toBe(true);
+  expect(count('ask')).toHaveLength(2);
+  expect(count('cancel')).toHaveLength(1);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+});
+
+it.each(['account', 'school'])('shift draft stays isolated through a %s switch and needs explicit recovery on return', async target => {
+  const identity = identitiesByContext.get(fixture.context), school = fixture.school;
+  const original = await initialPlan();
+  setGroupShift(currentGroupShift(), 'earlier', 15);
+  const saved = auditShiftDraft();
+  if (target === 'account') useIdentity(registerIdentity('shift-draft-other-account-' + serial));
+  else fixture.school = 'other-fixture-school';
+  const other = await remountAssistant(original.view);
+  expect(ui().queryByRole('region', { name: '未送出的平移草稿' })).toBeNull();
+  expect(ui().queryByRole('region', { name: '已恢復的平移草稿內容' })).toBeNull();
+  expect(document.body.textContent).not.toContain(proposed[0].title);
+  useIdentity(identity); fixture.school = school;
+  await remountAssistant(other);
+  expect(shiftRecovery()).toBeTruthy();
+  expect(ui().queryByRole('region', { name: '已恢復的平移草稿內容' })).toBeNull();
+  expect(auditShiftDraft()).toEqual(saved);
+  restoreShiftDraft();
+  expect(count('ask')).toHaveLength(2);
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+});
+
+it('shift draft retains durable input on denied reads and blocks every dispatch if its removal cannot be verified', async () => {
+  const original = await initialPlan();
+  setGroupShift(currentGroupShift(), 'later', 45);
+  const saved = auditShiftDraft(), prototype = dom.window.Storage.prototype;
+  const read = vi.spyOn(prototype, 'getItem').mockImplementation(function(key) {
+    if (key.startsWith(SHIFT_DRAFT_PREFIX)) throw new dom.window.DOMException('Synthetic shift read denied', 'SecurityError');
+    return nativeStorageRead.call(this, key);
+  });
+  let view;
+  try {
+    view = await remountAssistant(original.view);
+    expect(ui().queryByRole('region', { name: '未送出的平移草稿' })).toBeNull();
+    expect(storedDrafts(SHIFT_DRAFT_PREFIX)[0]).toEqual(saved);
+    expect(count('cancel')).toHaveLength(0);
+  } finally { read.mockRestore(); }
+  view = await remountAssistant(view);
+  restoreShiftDraft();
+  await initialPlan(view);
+  const form = currentGroupShift();
+  applyShiftDraft(form);
+  for (const index of [0, 1]) testing.fireEvent.click(shiftedCheckbox(form, index));
+  const before = sentActions(), fields = shiftFields(form), durable = storedDrafts(SHIFT_DRAFT_PREFIX);
+  const removeItem = prototype.removeItem;
+  const remove = vi.spyOn(prototype, 'removeItem').mockImplementation(function(key) {
+    if (key.startsWith(SHIFT_DRAFT_PREFIX)) throw new dom.window.DOMException('Synthetic shift removal denied', 'SecurityError');
+    return removeItem.call(this, key);
+  });
+  try {
+    submitGroupShift(form);
+    await testing.waitFor(() => expect(testing.within(form).getAllByRole('alert').some(node => node.textContent.includes('清除'))).toBe(true));
+    expect(sentActions()).toEqual(before);
+    expect(shiftFields(form)).toEqual(fields);
+    expect(storedDrafts(SHIFT_DRAFT_PREFIX)).toEqual(durable);
+    expect(count('cancel')).toHaveLength(0);
+    expect(count('revise')).toHaveLength(0);
+    expect(count('confirm')).toHaveLength(0);
+    expect(database.writes).toHaveLength(0);
+  } finally { remove.mockRestore(); }
+});
+
+it('shift draft keeps typed settings in memory after quota failure and saves only after storage recovers', async () => {
+  await initialPlan();
+  const prototype = dom.window.Storage.prototype, setItem = prototype.setItem;
+  const save = vi.spyOn(prototype, 'setItem').mockImplementation(function(key, value) {
+    if (key.startsWith(SHIFT_DRAFT_PREFIX)) throw new dom.window.DOMException('Synthetic shift quota', 'QuotaExceededError');
+    return setItem.call(this, key, value);
+  });
+  let form;
+  try {
+    form = currentGroupShift();
+    setGroupShift(form, 'earlier', 45);
+    testing.fireEvent.click(shiftedCheckbox(form, 1));
+    expect(shiftFields(form)).toEqual({ direction: 'earlier', minutes: '45' });
+    expect(shiftedCheckbox(form, 0).checked).toBe(true);
+    expect(shiftedCheckbox(form, 1).checked).toBe(false);
+    expect(storedDrafts(SHIFT_DRAFT_PREFIX)).toEqual([]);
+    expect(ui().getAllByRole('status').some(node => node.textContent.includes('尚未確認儲存'))).toBe(true);
+  } finally { save.mockRestore(); }
+  setGroupShift(form, 'earlier', 60);
+  const saved = auditShiftDraft();
+  expect(saved.value).toMatchObject({ direction: 'earlier', minutes: '60', selectedIndices: [0] });
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+});
+
+it.each(['expired', 'corrupt'])('shift draft does not reveal or apply %s content after remount', async kind => {
+  const original = await initialPlan();
+  setGroupShift(currentGroupShift(), 'earlier', 15);
+  const saved = auditShiftDraft(), before = sentActions();
+  if (kind === 'expired') now += 30 * 60 * 1000 + 1;
+  else sessionStorage.setItem(saved.key, JSON.stringify({ ...saved.value, token: 'invalid-fixture-token-field' }));
+  await remountAssistant(original.view);
+  expect(ui().queryByRole('region', { name: '未送出的平移草稿' })).toBeNull();
+  expect(ui().queryByRole('region', { name: '已恢復的平移草稿內容' })).toBeNull();
+  expect(ui().queryByRole('button', { name: '套用已恢復的平移草稿' })).toBeNull();
+  expect(document.body.textContent).not.toContain(proposed[0].title);
+  expect(sentActions()).toEqual(before);
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+});
+
+it('shift draft cannot make a previously revoked source actionable after a stale record is restored', async () => {
+  const original = await initialPlan();
+  const form = currentGroupShift(), saved = auditShiftDraft();
+  fault.dropNextCancel = true;
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await ui().findByRole('button', { name: '重新核對結果' });
+  fault.failLedger = false;
+  sessionStorage.setItem(saved.key, saved.raw);
+  await remountAssistant(original.view, ['reconcile']);
+  await ui().findByText('已撤銷未執行提議');
+  expect(count('reconcile').at(-1).response.status).toBe('revoked');
+  const before = sentActions();
+  restoreShiftDraft();
+  expect(sentActions()).toEqual(before);
+  expect(ui().queryByRole('button', { name: '套用已恢復的平移草稿' })).toBeNull();
+  expect(ui().queryByRole('button', { name: '以恢復草稿取代目前平移設定' })).toBeNull();
+  expect(ui().queryByRole('form', { name: '整組調整待確認時間' })).toBeNull();
+  expect(count('ask')).toHaveLength(2);
+  expect(count('cancel')).toHaveLength(1);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
 });
