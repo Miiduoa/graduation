@@ -187,6 +187,67 @@ describe('callable HTTP adapter', () => {
   });
 });
 
+describe('prebuffered HTTP body resource bounds', () => {
+  test.each(['rawBody', 'body-buffer', 'body-string', 'body-object'])(
+    'rejects oversized %s before invoking a callable',
+    async (kind) => {
+      const callable = jest.fn(async () => ({ ok: true }));
+      const listener = createRequestListener({
+        callables: { boundedOp: callable },
+        verifyIdToken: async () => ({ uid: 'student-1' }),
+      });
+      const oversized = JSON.stringify({ data: { text: 'a'.repeat(10 * 1024 * 1024) } });
+      const { server, port } = await listen((req, res) => {
+        if (kind === 'rawBody') req.rawBody = Buffer.from(oversized);
+        if (kind === 'body-buffer') req.body = Buffer.from(oversized);
+        if (kind === 'body-string') req.body = oversized;
+        if (kind === 'body-object') req.body = JSON.parse(oversized);
+        return listener(req, res);
+      });
+      try {
+        const response = await request(port, {
+          method: 'POST',
+          path: '/boundedOp',
+          body: { data: {} },
+          headers: { Authorization: 'Bearer test-token' },
+        });
+        expect(response.status).toBe(413);
+        expect(response.body.error.status).toBe('RESOURCE_EXHAUSTED');
+        expect(callable).not.toHaveBeenCalled();
+      } finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    },
+  );
+
+  test('allows small prebuffered JSON without changing the callable contract', async () => {
+    const callable = jest.fn(async (req) => ({ received: req.data.value }));
+    const listener = createRequestListener({
+      callables: { boundedOp: callable },
+      verifyIdToken: async () => ({ uid: 'student-1' }),
+    });
+    const { server, port } = await listen((req, res) => {
+      req.rawBody = Buffer.from(JSON.stringify({ data: { value: 'ok' } }));
+      return listener(req, res);
+    });
+    try {
+      const response = await request(port, {
+        method: 'POST',
+        path: '/boundedOp',
+        body: { data: { value: 'ignored' } },
+        headers: { Authorization: 'Bearer test-token' },
+      });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ result: { received: 'ok' } });
+      expect(callable).toHaveBeenCalledTimes(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
 describe('private file HTTP transport', () => {
   test('leaves binary upload limits and stream consumption to the authenticated handler', async () => {
     const handler = jest.fn(async (req, res) => {

@@ -366,3 +366,13 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 Storage `schools/{schoolId}/stories/` 已使用校籍文件與 `campusStories` 兩份查詢，同一請求無法再讀 canonical profile。回歸因此保留「刪帳並自建 profile 後，殘留校籍仍可讀已發布媒體」的現況，並拒絕已發布後覆寫與校籍 inactive 後的媒體讀取。這不是放寬，也不能當作已簽發 bearer URL 失效。
 
 新增／調整案例以 Firebase emulator 實際執行結果為準，不得沿用上一版 CI 綠燈。發布前除既有 legacy 無 profile 帳號外，還需盤點只有校籍、profile 未帶 `schoolId`／`primarySchoolId` 的帳號，否則限動 Firestore 會 fail-closed。未合併 main、部署、執行 migration、操作正式資料或 token。
+
+## 2026-11-09：HTTP adapter 已預先解析 request body 的資源上限（獨立後續 PR）
+
+PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b0e28a2841f5a559dd15506286fb`）。經 GitHub check-runs 精確核對，合併前 head `a950682200871084dfb797e981075885e335a120` 的指定 `nuni-merge-gate` App 5504170／「審查通過」為 completed/success，同 head 主 CI、CodeQL、Supabase、Python、Mobile Agent 和 Maestro 均成功。舊 PR 已關閉，不能再向它推送修補。限動媒體的校籍綁定由獨立 PR #557 處理，本輪不碰該分支。
+
+新發現：`backend/functions/httpAdapter.js` 的 `readRawBody` 僅在直接讀取 Node request stream 時限制 10 MiB，當上游（例如前置 middleware）已提供 `req.rawBody` Buffer，或預解析的 `req.body` Buffer／string／object 時直接回傳，不檢查實際位元組長度。這會使函式請求在預解析途徑繞過原設的資料量上限；不能只依賴外部反向代理限制。修補統一對四種預解析輸入實施相同實際 bytes 上限，超過時依既有錯誤映射回 413 RESOURCE_EXHAUSTED；一般串流與私有附件的獨立授權＋串流路徑保持不變。
+
+新增五個惰性 HTTP 合成測試：四種 10 MiB 以上的預解析輸入都應在 callable 被呼叫前拒絕；一般小型預解析 JSON 仍須正常執行。既有私有檔案測試也會保留大於 10 MiB 的已授權串流案例，確保不誤套到另一條附件路徑。**修補尚需新 PR 精確 head 的 Functions 測試及完整 CI 驗證，不把尚未執行的測試列為成功。** 無正式資料、金鑰、E 校園連線、migration、部署、token 清理或本機 npm/pnpm audit。
+
+保留風險：已簽發 Firebase/GCS 與 Supabase URL 撤銷、真 GCS staging CAS、#557 帳號撤權時序與發布相容、minimatch 雙套鎖檔的可達風險均需獨立驗收。所有後續 PR 仍須對精確 head 取得指定 App 5504170 核可，未通過不能合併。
