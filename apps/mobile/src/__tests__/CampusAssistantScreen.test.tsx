@@ -2053,3 +2053,65 @@ test('all platform source limitations remain accessible in both live and saved p
   fireEvent.press(view.getByRole('button', { name: '查看全部 4 項資料限制' }));
   expect(view.getByText(/本次已達資料來源上限，不能判定其他課程沒有作業/)).toBeTruthy();
 });
+
+test.each(['device', 'campus'])(
+  '%s question leaves the composer usable and never clears a follow-up typed during the reply',
+  async (mode) => {
+    const waiting = deferred<{ content: string; hasActions: boolean }>();
+    request.mockReturnValueOnce(waiting.promise);
+    const view = render(<CampusAssistantScreen />);
+    if (mode === 'campus') selectCampusMode(view);
+    const field = view.getByLabelText('詢問校園助理');
+    fireEvent.changeText(field, '幫我核對這週作業');
+    act(() => fireEvent.press(view.getByText('送出問題')));
+    expect(field.props.editable).toBe(true);
+    expect(field.props.value).toBe('');
+    expect(view.getByText('幫我核對這週作業')).toBeTruthy();
+    fireEvent.changeText(field, '下一題請查空堂');
+    expect(field.props.value).toBe('下一題請查空堂');
+    expect(request).toHaveBeenCalledTimes(1);
+    await act(async () => waiting.resolve({ content: '本週作業已核對', hasActions: false }));
+    expect(view.getByText('本週作業已核對')).toBeTruthy();
+    expect(field.props.value).toBe('下一題請查空堂');
+    expect(request).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('an unsuccessful mobile question can be recovered without deleting the newer draft', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  selectCampusMode(view);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '查明天的公告');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '下一題先寫好了');
+  await act(async () => waiting.reject(new Error('network unavailable')));
+  expect(field.props.value).toBe('下一題先寫好了');
+  expect(view.getByText('查明天的公告')).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+  fireEvent.press(view.getByText('切換到保留的問題'));
+  expect(field.props.value).toBe('查明天的公告');
+  expect(view.getByText('下一題先寫好了')).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
+test('cancelling device inference restores its original question without wiping a follow-up', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '排今晚讀書時間');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  fireEvent.changeText(field, '下一週也要安排');
+  expect(view.getByText('排今晚讀書時間')).toBeTruthy();
+  fireEvent.press(view.getByText('停止本機回答'));
+  expect(request.mock.calls[0][0].signal.aborted).toBe(true);
+  await act(async () => waiting.resolve({ content: '不該顯示的過期回答', hasActions: false }));
+  expect(view.queryByText('不該顯示的過期回答')).toBeNull();
+  expect(field.props.value).toBe('下一週也要安排');
+  expect(view.getByText('切換到保留的問題')).toBeTruthy();
+  fireEvent.press(view.getByText('切換到保留的問題'));
+  expect(field.props.value).toBe('排今晚讀書時間');
+  expect(request).toHaveBeenCalledTimes(1);
+});
