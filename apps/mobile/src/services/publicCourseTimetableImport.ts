@@ -58,9 +58,14 @@ export function findCatalogTimetableOverlaps(
       const savedStart = minutes(saved.startTime), savedEnd = minutes(saved.endTime);
       if (savedStart === null || savedEnd === null || savedStart >= savedEnd ||
         savedStart >= end || start >= savedEnd) continue;
-      // Exact same slot and official class is already deduplicated by the ledger.
-      if (normalize(saved.courseCode) === normalize(next.courseCode) &&
+      // Skip only an identical class slot. If the official teacher or room has
+      // changed, flag the existing personal copy for review instead of silently
+      // treating the updated offering as a harmless duplicate.
+      if (normalize(next.courseCode) !== '' &&
+        normalize(saved.courseCode) === normalize(next.courseCode) &&
         normalize(saved.className) === normalize(next.className) &&
+        normalize(saved.teacher) === normalize(next.teacher) &&
+        normalize(saved.location) === normalize(next.location) &&
         savedStart === start && savedEnd === end) continue;
       overlaps.push({
         dayOfWeek: next.dayOfWeek,
