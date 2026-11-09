@@ -90,6 +90,16 @@
 .footprintInfo strong { color: var(--text); font-weight: 650; }
 .footprintInfo span { flex: 1 1 100%; }
 .footprintInfo small { color: var(--muted); font-size: 0.75rem; }
+.footprintInfo .retryFootprints {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface, var(--bg));
+  font: inherit;
+  cursor: pointer;
+}
 .footprintInfo a, .officialFloors a {
   display: inline-flex;
   align-items: center;

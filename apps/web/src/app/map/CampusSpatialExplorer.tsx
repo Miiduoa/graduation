@@ -192,6 +192,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [overhead, setOverhead] = useState(false);
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
   const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
+  const [footprintAttempt, setFootprintAttempt] = useState(0);
   const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable'>(
     school === 'pu' ? 'loading' : 'unavailable',
   );
@@ -217,6 +218,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) return;
     let active = true;
+    setFootprintStatus('loading');
     const controller = new AbortController();
     // An overloaded proxy can hang even after our server's own Overpass timeout.
     // Give the marker-only map a bounded fallback instead of a permanent spinner.
@@ -242,7 +244,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       })
       .finally(() => window.clearTimeout(timeout));
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
-  }, [school, model.unavailableReason]);
+  }, [school, model.unavailableReason, footprintAttempt]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
@@ -299,7 +301,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
             {school === 'pu' && (
               <div className={styles.footprintInfo} role="status">
                 {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
-                {footprintStatus === 'unavailable' && '公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。'}
+                {footprintStatus === 'unavailable' && <>
+                  <span>公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。</span>
+                  <button className={styles.retryFootprints} type="button" onClick={() => setFootprintAttempt((value) => value + 1)}>
+                    重新讀取建築輪廓
+                  </button>
+                </>}
                 {footprintStatus === 'ready' && (
                   <>
                     <strong>{footprints.length} 棟公開建築輪廓</strong>
