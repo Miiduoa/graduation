@@ -299,3 +299,42 @@ it('moves to the title after retry restores a fixed board whose picker is disabl
   expect((await screen.findByRole('combobox', { name: '發布看板' }) as HTMLSelectElement).disabled).toBe(true);
   expect(document.activeElement).toBe(screen.getByPlaceholderText('一句話描述你的貼文'));
 });
+
+it('starts a creator-profile post as attributed, even in a board that normally defaults anonymous', async () => {
+  mocks.search = new URLSearchParams('schoolId=ncku&source=profile&boardId=science');
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic', defaultAnonymous: true },
+  ]);
+  mocks.publish.mockResolvedValue('creator-post');
+  render(<PostComposePage />);
+  await screen.findByRole('combobox', { name: '發布看板' });
+  const anonymous = screen.getByRole('checkbox', { name: '匿名貼文' }) as HTMLInputElement;
+  expect(anonymous.checked).toBe(false);
+  expect(screen.getByText(/將以你的帳號署名發表/)).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText('一句話描述你的貼文'), { target: { value: '第一則作品' } });
+  fireEvent.change(screen.getByPlaceholderText('想分享什麼？'), { target: { value: '校園成果' } });
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith(expect.objectContaining({
+    authorUid: 'student', anonymous: false, schoolId: 'ncku',
+  })));
+});
+
+it('still lets the creator explicitly choose anonymity without attributing the post', async () => {
+  mocks.search = new URLSearchParams('source=profile&boardId=science');
+  mocks.list.mockResolvedValue([
+    { id: 'science', name: '科學討論', type: 'topic', defaultAnonymous: true },
+  ]);
+  mocks.publish.mockResolvedValue('anonymous-post');
+  render(<PostComposePage />);
+  await screen.findByRole('combobox', { name: '發布看板' });
+  fireEvent.click(screen.getByRole('checkbox', { name: '匿名貼文' }));
+  expect(screen.getByText(/匿名貼文不會出現在個人作品中/)).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText('一句話描述你的貼文'), { target: { value: '匿名問題' } });
+  fireEvent.change(screen.getByPlaceholderText('想分享什麼？'), { target: { value: '還是保持匿名' } });
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith(expect.objectContaining({
+    anonymous: true,
+    aliasSnapshot: expect.any(String),
+  })));
+  expect(mocks.publish.mock.calls[0][0]).not.toHaveProperty('authorUid');
+});
