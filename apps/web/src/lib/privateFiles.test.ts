@@ -113,3 +113,28 @@ it.each([412, 429])('does not finalize failed object uploads (%s)', async (statu
   await expect(uploadPrivateFile({ path: 'groups/g/cover.png', body: new Blob(['image']), contentType: 'image/png' })).rejects.toThrow(status === 412 ? 'File already exists or changed' : '上傳太頻繁，請稍後再試');
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+
+it.each([200, 410])('claims only the target document namespace and propagates expiry (%s)', async (status) => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const path = 'groups/course/posts/one/notes.pdf';
+  const network = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ path, claimed: true }), { status }));
+  vi.stubGlobal('fetch', network);
+  const { claimPrivateFile } = await import('./privateFiles');
+  await expect(claimPrivateFile(path, 'groups/course/posts/two')).rejects.toThrow('附件不屬於此文件');
+  expect(network).not.toHaveBeenCalled();
+  if (status === 200) await expect(claimPrivateFile(path, 'groups/course/posts/one')).resolves.toBeUndefined();
+  else await expect(claimPrivateFile(path, 'groups/course/posts/one')).rejects.toMatchObject({ statusCode: 410 });
+  expect(JSON.parse(network.mock.calls[0][1]!.body as string)).toMatchObject({ action: 'claim', path });
+});
+
+it.each([
+  ['groups/g/posts/p/file.pdf', 'groups/g/posts/p', 'groups/g/posts/other'],
+  ['groups/g/assignments/a/submissions/u/file.pdf', 'groups/g/assignments/a/submissions/u', 'groups/g/assignments/a/submissions/other'],
+  ['groups/g/cover.old.jpg', 'groups/g', 'groups/other'],
+  ['schools/s/stories/story/image.jpg', 'schools/s/stories/story', 'schools/s/stories/other'],
+])('allows only the owning container for %s', async (path, own, other) => {
+  const { assertPrivateFileNamespace } = await import('./privateFiles');
+  expect(() => assertPrivateFileNamespace(path, own)).not.toThrow();
+  expect(() => assertPrivateFileNamespace(path, other)).toThrow('附件不屬於此文件');
+  expect(() => assertPrivateFileNamespace('groups/g/cover.old.jpg', 'groups/g/posts/p')).toThrow('附件不屬於此文件');
+});

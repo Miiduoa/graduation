@@ -87,56 +87,109 @@ it('does not create reservation when transaction commit fails', async () => {
   expect(docs.size).toBe(0);
 });
 
+
+const day = 24 * 3600_000;
 const cases = [
-  ['schools/school/stories/story/image.jpg', 'campusStories/story', { expiresAt: 10 ** 12 }, { expiresAt: 0 }, 2 * 3600_000],
-  ['groups/course/posts/post/file.pdf', 'groups/course/posts/post', { attachments: [{ url: 'groups/course/posts/post/file.pdf' }] }, { attachments: [] }, 2 * 3600_000],
-  ['groups/course/assignments/work/submissions/alice/file.pdf', 'groups/course/assignments/work/submissions/alice', { attachments: [{ url: 'groups/course/assignments/work/submissions/alice/file.pdf' }] }, { attachments: [] }, 24 * 3600_000],
-  ['assignments/work/submissions/alice/file.pdf', 'assignments/work/submissions/alice', { attachments: ['assignments/work/submissions/alice/file.pdf'] }, { attachments: [] }, 24 * 3600_000],
-  ['groups/course/cover.jpg', 'groups/course', { coverUrl: 'groups/course/cover.jpg' }, { coverUrl: 'groups/course/new.jpg' }, 2 * 3600_000],
+  ['schools/school/stories/story/image.jpg', 'campusStories/story', { expiresAt: 10 ** 12 }],
+  ['groups/course/posts/post/file.pdf', 'groups/course/posts/post', { attachments: [] }],
+  ['groups/course/assignments/work/submissions/alice/file.pdf', 'groups/course/assignments/work/submissions/alice', { attachments: [] }],
+  ['assignments/work/submissions/alice/file.pdf', 'assignments/work/submissions/alice', { attachments: [] }],
+  ['groups/course/cover.jpg', 'groups/course', { coverUrl: 'groups/course/cover.new.jpg' }],
 ] as const;
 
-it.each(cases)('keeps references and grace, then deletes orphan %s', async (path, ref, live, orphan, grace) => {
+it.each(cases)('retains claimed files while container exists regardless of references: %s', async (path, ref, live) => {
   const { uploads, docs, storage } = setup();
   await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
   await uploads.finalize(path, 'alice', 123, now + 1);
-  expect(await uploads.cleanup(now + grace)).toBe(0);
+  await uploads.claim(path, 'alice', now + 2);
   docs.set(ref, live);
-  expect(await uploads.cleanup(now + grace + 2)).toBe(0);
-  // A scan wraps at the end; the next pass revisits the reference.
-  await uploads.cleanup(now + grace + 2);
-  docs.set(ref, orphan);
-  expect(await uploads.cleanup(now + grace + 2)).toBe(1);
-  expect(storage.remove).toHaveBeenCalledWith(path);
+  docs.set('groups/course/posts/other', { attachments: [path] });
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+  docs.delete(ref);
+  expect(await uploads.cleanup(now + 2 * day)).toBe(1);
   expect((await uploads.read(path)).status).toBe('deleted');
   expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
-  const personal = [...docs.entries()].find(([key]) => key.startsWith('privateFileQuota/user-'))![1];
-  expect(personal).toMatchObject({ finalizedBytes: 0, reservedBytes: 0, pendingCount: 0 });
 });
 
-it.each(cases)('deletes missing reference %s only after grace', async (path, _ref, _live, _orphan, grace) => {
+it.each(cases)('keeps missing claimed containers for a full day: %s', async (path) => {
   const { uploads } = setup();
   await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
   await uploads.finalize(path, 'alice', 3, now + 1);
-  expect(await uploads.cleanup(now + grace + 2)).toBe(1);
+  await uploads.claim(path, 'alice', now + 2);
+  expect(await uploads.cleanup(now + day + 2)).toBe(0);
+  expect(await uploads.cleanup(now + day + 3)).toBe(1);
 });
 
-it.each([{ deleted: true }, { isDeleted: true }, { deletedAt: now }, { status: 'deleted' }])('cleans a deleted post even when its old attachments remain (%j)', async (tombstone) => {
+it('reclaims unclaimed finalized drafts only after 24 hours', async () => {
+  const { uploads } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  expect(await uploads.cleanup(now + day + 1)).toBe(0);
+  expect(await uploads.cleanup(now + day + 2)).toBe(1);
+  await expect(uploads.claim(scope(0).path, 'alice', now + day + 3)).rejects.toMatchObject({ statusCode: 410 });
+});
+
+it('refreshes claim to protect a publication retry', async () => {
+  const { uploads } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  await uploads.claim(scope(0).path, 'alice', now + 2);
+  await uploads.claim(scope(0).path, 'alice', now + day);
+  expect(await uploads.cleanup(now + day + 3)).toBe(0);
+});
+
+it.each(['pending', 'deleting', 'deleted', 'missing'])('claim rejects unavailable %s records with 410', async (status) => {
+  const { uploads, docs } = setup();
+  if (status !== 'missing') {
+    await uploads.reserve(scope(0), 'alice', now);
+    docs.get(`privateFileUploads/${uploadId(scope(0).path)}`)!.status = status;
+  }
+  await expect(uploads.claim(scope(0).path, 'alice', now)).rejects.toMatchObject({ statusCode: 410 });
+});
+
+it('abandons deletion when claimedAt changes between scan and transaction', async () => {
+  const { uploads, docs, db, storage } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  await uploads.claim(scope(0).path, 'alice', now + 2);
+  const original = db.runTransaction.bind(db);
+  vi.spyOn(db, 'runTransaction').mockImplementationOnce((...args) => {
+    docs.get(`privateFileUploads/${uploadId(scope(0).path)}`)!.claimedAt = now + 3;
+    return original(...args);
+  });
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+});
+
+it('honors the two hour story expiry grace', async () => {
+  const { uploads, docs } = setup();
+  const path = cases[0][0];
+  await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+  await uploads.finalize(path, 'alice', 8, now + 1);
+  await uploads.claim(path, 'alice', now + 2);
+  docs.set(cases[0][1], { expiresAt: now + 2 * day });
+  expect(await uploads.cleanup(now + 2 * day + 2 * 3600_000)).toBe(0);
+  expect(await uploads.cleanup(now + 2 * day + 2 * 3600_000 + 1)).toBe(1);
+});
+
+it.each([{ deleted: true }, { isDeleted: true }, { deletedAt: now }, { status: 'deleted' }])('cleans tombstoned posts after claim grace (%j)', async (tombstone) => {
   const { uploads, docs } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  docs.set('groups/course/posts/post', { ...tombstone, attachments: [{ url: scope(0).path }] });
-  expect(await uploads.cleanup(now + 3 * 3600_000)).toBe(1);
+  await uploads.claim(scope(0).path, 'alice', now + 2);
+  docs.set('groups/course/posts/post', tombstone);
+  expect(await uploads.cleanup(now + day + 3)).toBe(1);
 });
 
-it('retries finalized deletion and accounting commits without double debit', async () => {
+it('retries deletion and quota settlement without double debit', async () => {
   const { uploads, storage, docs, failNextCommit } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  const later = now + 3 * 3600_000;
+  const later = now + 2 * day;
   vi.mocked(storage.remove).mockRejectedValueOnce(new Error('unavailable'));
   await expect(uploads.cleanup(later)).rejects.toThrow();
-  expect((await uploads.read(scope(0).path)).status).toBe('deleting');
-  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
+  await expect(uploads.claim(scope(0).path, 'alice', later)).rejects.toMatchObject({ statusCode: 410 });
   vi.mocked(storage.remove).mockImplementationOnce(async () => { failNextCommit(); });
   await expect(uploads.cleanup(later)).rejects.toThrow();
   expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
@@ -145,25 +198,25 @@ it('retries finalized deletion and accounting commits without double debit', asy
   expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
 });
 
-it('bounds batches and scans past retained references without starvation', async () => {
-  const { uploads, docs } = setup();
-  const paths = [scope(0).path, scope(1).path].sort((a, b) => uploadId(a).localeCompare(uploadId(b)));
-  for (const path of paths) {
-    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
-    await uploads.finalize(path, 'alice', 8, now + 1);
-  }
-  docs.set('groups/course/posts/post', { attachments: [paths[0]] });
-  expect(await uploads.cleanup(now + 3 * 3600_000, 1)).toBe(0);
-  expect(await uploads.cleanup(now + 3 * 3600_000, 1)).toBe(1);
-  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
-});
-
-it('gives older finalized records a fresh grace period without a migration', async () => {
+it('gives older records a fresh day without a migration', async () => {
   const { uploads, docs } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
   delete docs.get(`privateFileUploads/${uploadId(scope(0).path)}`)!.finalizedAt;
-  const later = now + 3 * 3600_000;
-  expect(await uploads.cleanup(later)).toBe(0);
-  expect(await uploads.cleanup(later + 2 * 3600_000)).toBe(1);
+  expect(await uploads.cleanup(now + day)).toBe(0);
+  expect(await uploads.cleanup(now + 2 * day + 1)).toBe(1);
+});
+
+it('advances the bounded scan past retained claimed containers', async () => {
+  const { uploads, docs } = setup();
+  const paths = ['groups/course/posts/live/a.pdf', 'groups/course/posts/missing/b.pdf']
+    .sort((a, b) => uploadId(a).localeCompare(uploadId(b)));
+  for (const path of paths) {
+    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+    await uploads.finalize(path, 'alice', 8, now + 1);
+    await uploads.claim(path, 'alice', now + 2);
+  }
+  docs.set(paths[0].slice(0, paths[0].lastIndexOf('/')), { attachments: [] });
+  expect(await uploads.cleanup(now + 2 * day, 1)).toBe(0);
+  expect(await uploads.cleanup(now + 2 * day, 1)).toBe(1);
 });

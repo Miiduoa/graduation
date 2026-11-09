@@ -2,7 +2,7 @@ import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/pri
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import * as DocumentPicker from 'expo-document-picker';
-import { isSupabaseFileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
+import { isSupabaseFileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile, claimPrivateFile } from '../services/privateFiles';
 import { PrivateAttachment } from '../ui/PrivateAttachment';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -288,12 +288,21 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       if (isSupabaseFileStorageEnabled() && files.length) {
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
-          if (index < uploadedFiles.current.length) continue;
+          const completed = uploadedFiles.current[index];
+          if (completed) {
+            try { await claimPrivateFile(completed.url, `groups/${courseId}/assignments/${hwId}/submissions/${uid}`); continue; }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              delete uploadedFiles.current[index];
+            }
+          }
           const path = privateGroupAssignmentPath(courseId, hwId, uid, safePrivateFileName(`${batch}-${index}-${Math.random().toString(36).slice(2)}`, file.name));
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
           await uploadPrivateFile({ path, body: blob, originalFilename: file.name, contentType: file.mimeType || blob.type });
-          uploadedFiles.current.push({ id: path, name: file.name, url: path, type: file.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size });
+          uploadedFiles.current[index] = { id: path, name: file.name, url: path, type: file.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size };
+          try { await claimPrivateFile(path, `groups/${courseId}/assignments/${hwId}/submissions/${uid}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) delete uploadedFiles.current[index]; throw error; }
         }
       }
       if (!current()) return;

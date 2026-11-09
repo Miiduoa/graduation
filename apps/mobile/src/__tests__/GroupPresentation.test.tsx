@@ -103,6 +103,7 @@ jest.mock('firebase/firestore', () => {
 });
 
 beforeEach(() => {
+  jest.spyOn(require('../services/privateFiles'), 'claimPrivateFile').mockResolvedValue(undefined);
   mockMemberRole = 'member';
   clearSchoolTheme();
   applyTheme('light');

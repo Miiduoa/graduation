@@ -119,7 +119,7 @@ function mapError(error: unknown): { status: number; body: { error: string } } {
     return { status: error.httpErrorCode.status, body: { error: error.message } };
   }
   const statusCode = Number((error as { statusCode?: unknown })?.statusCode);
-  if ([400, 401, 403, 404, 405, 409, 413, 429, 507].includes(statusCode)) {
+  if ([400, 401, 403, 404, 405, 409, 410, 413, 429, 507].includes(statusCode)) {
     return {
       status: statusCode,
       body: { error: error instanceof Error ? error.message : 'File request failed' },
@@ -194,7 +194,7 @@ async function issueDownload(
   await authorizePrivateFile(runtime.db, scope, uid, false);
   const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
   const record = await uploads.read(scope.path);
-  if (record.status !== 'finalized') throw Object.assign(new Error('找不到檔案'), { statusCode: 404 });
+  if (!['finalized', 'claimed'].includes(record.status)) throw Object.assign(new Error('找不到檔案'), { statusCode: 404 });
   const object = await runtime.storage.head(scope.path);
   if (!object) {
     throw Object.assign(new Error('File not found'), { statusCode: 404 });
@@ -241,7 +241,7 @@ async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: P
   await authorizePrivateFile(runtime.db, scope, uid, true);
   const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
   const record = await uploads.read(scope.path, uid);
-  if (record.status === 'finalized') return { path: scope.path, finalized: true, maxBytes: scope.maxBytes };
+  if (['finalized', 'claimed'].includes(record.status)) return { path: scope.path, finalized: true, maxBytes: scope.maxBytes };
   if (record.status !== 'pending' || record.invalid || record.expiresAt <= (runtime.now?.() ?? Date.now())) {
     throw Object.assign(new Error('上傳已過期或無效，請重新上傳'), { statusCode: 409 });
   }
@@ -312,8 +312,13 @@ export async function dispatchPrivateFileRequest(
     const uid = await verifyUser(request.headers.get('authorization'), resolved.verifyIdToken);
     checkPrivateFileRequestRate(uid);
     const scope = parseScope(body.path);
-    const action = body.action === 'upload' || body.action === 'download' || body.action === 'finalize' ? body.action : '';
+    const action = body.action === 'upload' || body.action === 'download' || body.action === 'finalize' || body.action === 'claim' ? body.action : '';
     if (!action) throw new HttpsError('invalid-argument', 'Invalid private file path');
+    if (action === 'claim') {
+      await authorizePrivateFile(resolved.db, scope, uid, true);
+      await createPrivateFileUploads(resolved.db as unknown as Firestore, resolved.storage).claim(scope.path, uid, resolved.now?.() ?? Date.now());
+      return jsonResponse(200, { path: scope.path, claimed: true }, cors);
+    }
     if (action === 'finalize') return jsonResponse(200, await finalizeUpload(resolved, uid, scope), cors);
     const issued =
       action === 'upload'

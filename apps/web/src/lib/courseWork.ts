@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
@@ -152,6 +153,7 @@ export async function submitCourseText(
   text: string,
   attachments: string[] = [],
 ): Promise<void> {
+  for (const path of attachments) assertPrivateFileNamespace(path, `groups/${courseId}/assignments/${assignmentId}/submissions/${uid}`);
   const answer = text.trim();
   if (!uid || (!answer && !attachments.length) || answer.length > 20000)
     throw new Error('請輸入 1 至 20,000 字的作業內容。');

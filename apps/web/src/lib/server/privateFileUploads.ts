@@ -2,7 +2,6 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
 import { parsePrivateFilePath, type PrivateFileScope } from '@campus/shared/src/privateFileAccess';
-import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import type { FileStorage } from './fileStorage';
 
 export const UPLOAD_URL_TTL_MS = 7200_000;
@@ -35,12 +34,11 @@ async function isOrphan(db: Firestore, tx: FirebaseFirestore.Transaction, path: 
     const value = row.expiresAt;
     const expiry = typeof value === 'number' ? value : value instanceof Date ? value.getTime()
       : typeof value?.toMillis === 'function' ? value.toMillis() : Date.parse(value);
-    return Number.isFinite(expiry) && expiry <= now;
+    return Number.isFinite(expiry) && expiry + ORPHAN_GRACE_MS < now;
   }
-  if (scope.kind === 'group-cover') return row.coverUrl !== path;
-  return (scope.kind === 'group-post' &&
-    (row.deleted === true || row.isDeleted === true || row.deletedAt != null || row.status === 'deleted')) ||
-    !privateAttachmentPaths(row.attachments).includes(path);
+  // Cleanup relies on writers restricting paths to their own container namespace.
+  return scope.kind === 'group-post' &&
+    (row.deleted === true || row.isDeleted === true || row.deletedAt != null || row.status === 'deleted');
 }
 const fail = (statusCode: number, message: string): never => {
   throw Object.assign(new Error(message), { statusCode });
@@ -65,7 +63,7 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
       const [record, globalSnap, userSnap] = await tx.getAll(ref, global, user);
       const row = record.data();
       if (!row || row.path !== path || row.uid !== uid) fail(404, '找不到檔案');
-      if (row!.status === 'finalized') return;
+      if (['finalized', 'claimed'].includes(row!.status)) return;
       if (bytes !== null && (row!.status !== 'pending' || row!.invalid || row!.expiresAt <= now))
         fail(409, '上傳已過期或無效，請重新上傳');
       if (bytes === null && row!.status !== 'cleaning') return;
@@ -95,6 +93,16 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
   }
   return {
     read,
+    async claim(path: string, uid: string, now: number) {
+      await db.runTransaction(async (tx) => {
+        const ref = uploads.doc(uploadId(path));
+        const row = (await tx.get(ref)).data();
+        if (!row || row.path !== path || !['finalized', 'claimed'].includes(row.status))
+          fail(410, '檔案已失效，請重新上傳');
+        if (row!.uid !== uid) fail(403, 'File access denied');
+        tx.update(ref, { status: 'claimed', claimedAt: now });
+      });
+    },
     async reserve(scope: PrivateFileScope, uid: string, now: number) {
       await db.runTransaction(async (tx) => {
         const ref = uploads.doc(uploadId(scope.path));
@@ -171,34 +179,39 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
       const deleting = await uploads.where('status', '==', 'deleting').limit(maximum).get();
       // Single-field indexes only. Persist the scan position so live references
       // cannot starve later finalized rows; wrap after reaching the end.
-      let scan = uploads.where('status', '==', 'finalized').orderBy('__name__');
+      let scan = uploads.where('status', 'in', ['finalized', 'claimed']).orderBy('__name__');
       if (typeof cursorId === 'string') scan = scan.startAfter(cursorId);
       let finalized = await scan.limit(maximum).get();
       if (finalized.empty && cursorId)
-        finalized = await uploads.where('status', '==', 'finalized').orderBy('__name__').limit(maximum).get();
+        finalized = await uploads.where('status', 'in', ['finalized', 'claimed']).orderBy('__name__').limit(maximum).get();
       let cleaned = 0;
       const candidates = new Map([...ownRows, ...pending.docs, ...deleting.docs, ...finalized.docs].map((snap) => [snap.id, snap]));
       let lastScanned: string | null = null;
       for (const snap of [...candidates.values()].slice(0, maximum)) {
         const row = snap.data();
         if (!row) continue;
-        if (row.status === 'finalized') lastScanned = snap.id;
+        if (['finalized', 'claimed'].includes(row.status)) lastScanned = snap.id;
         const claimed = await db.runTransaction(async (tx) => {
           const current = (await tx.get(snap.ref)).data();
           if (!current || current.path !== row.path) return false;
           if (current.status === 'deleting') return true;
-          if (current.status === 'finalized') {
-            const scope = parsePrivateFilePath(current.path);
-            const grace = scope?.kind === 'assignment' ? SUBMISSION_GRACE_MS : ORPHAN_GRACE_MS;
-            // Old records lack a finalization timestamp. Start a fresh grace
-            // period on first observation rather than guessing their age.
-            if (current.finalizedAt == null) {
-              tx.update(snap.ref, { finalizedAt: now });
-              return false;
+          if (['finalized', 'claimed'].includes(current.status)) {
+            // A claim after the scan always wins, including on transaction retry.
+            if (current.status !== row.status || current.claimedAt !== row.claimedAt) return false;
+            if (current.status === 'finalized') {
+              if (current.finalizedAt == null) {
+                tx.update(snap.ref, { finalizedAt: now });
+                return false;
+              }
+              if (!Number.isFinite(current.finalizedAt) || current.finalizedAt + SUBMISSION_GRACE_MS >= now)
+                return false;
+            } else {
+              const scope = parsePrivateFilePath(current.path);
+              if (!scope || !Number.isFinite(current.claimedAt)) return false;
+              // Give every claimed container a full day to finish publication.
+              if (current.claimedAt + SUBMISSION_GRACE_MS >= now ||
+                !await isOrphan(db, tx, current.path, now)) return false;
             }
-            const finalizedAt = current.finalizedAt;
-            if (!Number.isFinite(finalizedAt) || finalizedAt + grace > now ||
-              !await isOrphan(db, tx, current.path, now)) return false;
             tx.update(snap.ref, { status: 'deleting' });
           } else {
             if (!['pending', 'cleaning'].includes(current.status) || current.expiresAt > now) return false;
@@ -208,7 +221,7 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
         });
         if (!claimed) continue;
         await storage.remove(row.path);
-        if (['finalized', 'deleting'].includes(row.status)) {
+        if (['finalized', 'claimed', 'deleting'].includes(row.status)) {
           await db.runTransaction(async (tx) => {
             const user = quota.doc(userId(row.uid));
             const [record, globalSnap, userSnap] = await tx.getAll(snap.ref, global, user);

@@ -1,3 +1,4 @@
+import { claimPrivateFile } from '../services/privateFiles';
 import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 /* eslint-disable */
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
@@ -578,7 +579,15 @@ export function GroupDetailScreen(props: any) {
       const attachments: string[] = [];
       if (isSupabaseFileStorageEnabled()) {
         for (const [index, file] of postFiles.entries()) {
-          const completed = progress.completed.get(file);
+          let completed = progress.completed.get(file);
+          if (completed) {
+            try { await claimPrivateFile(completed, `groups/${groupId}/posts/${postRef.id}`); }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              progress.completed.delete(file);
+              completed = undefined;
+            }
+          }
           if (completed) {
             attachments.push(completed);
             continue;
@@ -592,6 +601,8 @@ export function GroupDetailScreen(props: any) {
           const blob = await (await fetch(file.uri)).blob();
           await uploadPrivateFile({ path, body: blob, originalFilename: file.name, contentType: file.mimeType || blob.type });
           progress.completed.set(file, path);
+          try { await claimPrivateFile(path, `groups/${groupId}/posts/${postRef.id}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) progress.completed.delete(file); throw error; }
           attachments.push(path);
         }
       }
@@ -798,6 +809,7 @@ export function GroupDetailScreen(props: any) {
                     body: blob,
                     contentType: file.type || blob.type,
                   });
+                  await claimPrivateFile(uploaded.path, `groups/${groupId}`);
                   await updateDoc(doc(db, 'groups', groupId), { coverUrl: uploaded.path });
                   setCoverPath(uploaded.path);
                   setCoverRevision((value) => value + 1);

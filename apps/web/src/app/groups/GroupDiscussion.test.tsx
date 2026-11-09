@@ -13,6 +13,7 @@ vi.mock('@/lib/privateFiles', async () => ({
   ...await vi.importActual<typeof import('@/lib/privateFiles')>('@/lib/privateFiles'),
   privateFilesEnabled: vi.fn(() => false),
   uploadPrivateFile: vi.fn(),
+  claimPrivateFile: vi.fn(async () => {}),
 }));
 
 const account = vi.hoisted(() => ({
@@ -497,4 +498,29 @@ it.each(['upload response', 'finalization'])('retries failed %s with a new path 
     delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND;
     vi.unstubAllGlobals();
   }
+});
+
+it('reuploads only a cached attachment whose claim returns 410', async () => {
+  const { claimPrivateFile } = await import('@/lib/privateFiles');
+  vi.mocked(privateFilesEnabled).mockReturnValue(true);
+  vi.mocked(uploadPrivateFile)
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  vi.mocked(claimPrivateFile).mockResolvedValue(undefined);
+  await act(async () => { renderPage(); });
+  await screen.findByText('週三外拍');
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+  fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+  fireEvent.change(screen.getByLabelText('附加圖片或文件'), {
+    target: { files: [new File(['a'], 'one.txt', { type: 'text/plain' }), new File(['b'], 'two.txt', { type: 'text/plain' })] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('上傳太頻繁，請稍後再試');
+  const expired = vi.mocked(uploadPrivateFile).mock.calls[0][0].path;
+  vi.mocked(claimPrivateFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { statusCode: 410 }));
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('已發布貼文。');
+  expect(uploadPrivateFile).toHaveBeenCalledTimes(4);
+  expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments).not.toContain(expired);
 });

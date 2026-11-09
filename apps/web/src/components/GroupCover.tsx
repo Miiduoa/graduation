@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase';
-import { privateFilesEnabled, privateGroupCoverPath, uploadPrivateFile } from '@/lib/privateFiles';
+import { privateFilesEnabled, privateGroupCoverPath, uploadPrivateFile, claimPrivateFile } from '@/lib/privateFiles';
 import { PrivateImage } from './PrivateImage';
 
 export function GroupCover({
@@ -48,6 +48,7 @@ export function GroupCover({
                 const nextPath = privateGroupCoverPath(groupId, extension);
                 if (!nextPath) throw new Error('封面路徑無效');
                 const uploaded = await uploadPrivateFile({ path: nextPath, body: file, contentType: file.type });
+                await claimPrivateFile(uploaded.path, `groups/${groupId}`);
                 await updateDoc(doc(getDb(), 'groups', groupId), { coverUrl: uploaded.path });
                 setSaved(uploaded.path);
                 setRevision((value) => value + 1);

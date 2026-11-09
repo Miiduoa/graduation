@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
@@ -180,6 +181,7 @@ export async function createGroupDiscussionPost(
     throw new Error('Only group managers can post announcements');
   }
 
+  for (const path of input.attachments ?? []) assertPrivateFileNamespace(path, `groups/${groupId}/posts/${input.postId}`);
   const ref = doc(getDb(), 'groups', groupId, 'posts', input.postId);
   const memberRef = doc(getDb(), 'groups', groupId, 'members', uid);
   const author = authorName?.trim() || null;

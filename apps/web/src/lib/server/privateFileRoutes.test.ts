@@ -338,3 +338,20 @@ it('requires finalize before download and ignores self reported size for quota',
   expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(200);
   expect(store.docs.get('privateFileQuota/global')).toEqual({ reservedBytes: 0, finalizedBytes: 20 });
 });
+
+it('claims finalized uploads, refreshes timestamps, permits download and rechecks membership', async () => {
+  const upload = await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 1 });
+  put(upload, 'answer');
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER })).status).toBe(410);
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(200);
+  runtime.now = () => 1000;
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER })).body).toMatchObject({ path: ANSWER, claimed: true });
+  runtime.now = () => 2000;
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER })).status).toBe(200);
+  const record = [...store.docs.values()].find((row) => row.path === ANSWER)!;
+  expect(record).toMatchObject({ status: 'claimed', claimedAt: 2000 });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(200);
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER }, { uid: 'bob' })).status).toBe(403);
+  record.status = 'deleting';
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER })).status).toBe(410);
+});

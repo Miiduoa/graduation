@@ -126,3 +126,16 @@ it.each([412, 429])('does not finalize a failed object upload %s', async (status
   await expect(load().uploadPrivateFile({ path: 'groups/g/cover.png', body: new Uint8Array([1]), contentType: 'image/png' })).rejects.toThrow(status === 412 ? 'File already exists or changed' : '上傳太頻繁，請稍後再試');
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+
+test.each([200, 410])('claim checks the document namespace and exposes expiry (%s)', async (status) => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const path = 'groups/course/posts/one/file.pdf';
+  const network = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: status === 200, status, json: async () => ({ path, claimed: true }) } as Response);
+  network.mockClear();
+  const { claimPrivateFile } = load();
+  await expect(claimPrivateFile(path, 'groups/course/posts/two')).rejects.toThrow('附件不屬於此文件');
+  expect(network).not.toHaveBeenCalled();
+  if (status === 200) await expect(claimPrivateFile(path, 'groups/course/posts/one')).resolves.toBeUndefined();
+  else await expect(claimPrivateFile(path, 'groups/course/posts/one')).rejects.toMatchObject({ statusCode: 410 });
+  expect(JSON.parse(network.mock.calls[0][1]!.body as string)).toMatchObject({ action: 'claim', path });
+});

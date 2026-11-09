@@ -45,3 +45,15 @@ export function privateAttachmentPaths(value: unknown): string[] {
       : [];
   });
 }
+
+/** Cleanup assumes every writer keeps private references inside its own container. */
+export function assertPrivateFileNamespace(path: string, namespace: string): void {
+  const scope = parsePrivateFilePath(path);
+  if (!scope) {
+    if (/^https?:\/\//.test(path)) return;
+    throw new Error('附件路徑無效');
+  }
+  const container = path.slice(0, path.lastIndexOf('/'));
+  if (container !== namespace || (scope.kind === 'group-cover' && !scope.filename.startsWith('cover.')))
+    throw new Error('附件不屬於此文件');
+}

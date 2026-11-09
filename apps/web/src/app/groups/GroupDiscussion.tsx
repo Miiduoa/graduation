@@ -1,4 +1,5 @@
 'use client';
+import { claimPrivateFile } from '@/lib/privateFiles';
 import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
@@ -265,7 +266,15 @@ function DiscussionBoard({
         setAttachmentsLocked(true);
         const attachments: string[] = [];
         for (const [index, file] of files.entries()) {
-          const completed = progress.completed.get(file);
+          let completed = progress.completed.get(file);
+          if (completed) {
+            try { await claimPrivateFile(completed, `groups/${groupId}/posts/${intent.postId}`); }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              progress.completed.delete(file);
+              completed = undefined;
+            }
+          }
           if (completed) {
             attachments.push(completed);
             continue;
@@ -283,6 +292,8 @@ function DiscussionBoard({
             contentType: file.type || 'application/octet-stream',
           });
           progress.completed.set(file, path);
+          try { await claimPrivateFile(path, `groups/${groupId}/posts/${intent.postId}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) progress.completed.delete(file); throw error; }
           attachments.push(path);
         }
         intent = { ...intent, attachments };
@@ -310,6 +321,22 @@ function DiscussionBoard({
     setNotice(null);
 
     try {
+      for (const path of intent.attachments ?? []) {
+        try { await claimPrivateFile(path, `groups/${groupId}/posts/${intent.postId}`); }
+        catch (error) {
+          if ((error as { statusCode?: number }).statusCode === 410) {
+            for (const [file, completed] of uploadDraft.current?.completed ?? [])
+              if (completed === path) uploadDraft.current?.completed.delete(file);
+            setLockedIntent(null);
+            setPhase('idle');
+            setAttachmentsLocked(false);
+            writeStoredCompose(draftKey, null);
+            setNotice({ text: '附件已失效，請重新選擇或重試上傳。', error: true });
+            return;
+          }
+          throw error;
+        }
+      }
       const created = await createGroupDiscussionPost(
         uid,
         schoolId,

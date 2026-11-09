@@ -4,7 +4,7 @@ import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/pri
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
-import { privateFilesEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '@/lib/privateFiles';
+import { privateFilesEnabled, privateGroupAssignmentPath, uploadPrivateFile, claimPrivateFile } from '@/lib/privateFiles';
 import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
@@ -91,7 +91,14 @@ function Assignment({
       if (privateFilesEnabled() && files.length) {
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
-          if (index < uploadedFiles.current.length) continue;
+          const completed = uploadedFiles.current[index];
+          if (completed) {
+            try { await claimPrivateFile(completed, `groups/${courseId}/assignments/${assignment.id}/submissions/${uid}`); continue; }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              delete uploadedFiles.current[index];
+            }
+          }
           const path = privateGroupAssignmentPath(
             courseId,
             assignment.id,
@@ -105,7 +112,9 @@ function Assignment({
             originalFilename: file.name,
             contentType: file.type || 'application/octet-stream',
           });
-          uploadedFiles.current.push(path);
+          uploadedFiles.current[index] = path;
+          try { await claimPrivateFile(path, `groups/${courseId}/assignments/${assignment.id}/submissions/${uid}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) delete uploadedFiles.current[index]; throw error; }
         }
       }
       if (!active.current) return;

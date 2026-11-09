@@ -39,7 +39,7 @@ async function idToken(): Promise<string> {
 }
 
 async function requestPrivateFile(
-  action: 'upload' | 'download' | 'finalize',
+  action: 'upload' | 'download' | 'finalize' | 'claim',
   path: string,
   extra: Record<string, unknown> = {},
 ): Promise<Record<string, unknown>> {
@@ -135,9 +135,20 @@ export async function downloadPrivateFile(path: string): Promise<Blob> {
   return response.blob();
 }
 
+import { isPrivateFileObjectPath } from '@campus/shared/src/privateFileMedia';
 export { isPrivateFileObjectPath } from '@campus/shared/src/privateFileMedia';
 import { resolvePrivateFileMedia } from '@campus/shared/src/privateFileMedia';
 
 export async function resolvePrivateMedia(value: string | null | undefined): Promise<string | Blob | null> {
   return resolvePrivateFileMedia(value, privateFilesEnabled(), downloadPrivateFile);
+}
+
+export { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
+
+export async function claimPrivateFile(path: string, namespace: string): Promise<void> {
+  assertPrivateFileNamespace(path, namespace);
+  if (!isPrivateFileObjectPath(path)) return;
+  const result = await requestPrivateFile('claim', path);
+  if (result.claimed !== true || result.path !== path) throw new Error('File claim failed');
 }

@@ -43,6 +43,7 @@ jest.mock('../utils/safeNavigate', () => ({
 }));
 
 beforeEach(() => {
+  jest.spyOn(require('../services/privateFiles'), 'claimPrivateFile').mockResolvedValue(undefined);
   jest.clearAllMocks();
   mockUid = 'alice';
   mockSchool = 'pu';

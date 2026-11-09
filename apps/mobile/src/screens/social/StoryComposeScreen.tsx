@@ -1,3 +1,4 @@
+import { claimPrivateFile } from '../../services/privateFiles';
 /* eslint-disable */
 /**
  * 校園社群 — 發 Story Compose
@@ -129,6 +130,10 @@ function StoryComposer(props: any) {
       const entry = draft.current;
       if (uri && !entry.url) {
         entry.url = await uploadStoryImage(sid, entry.id, uid, uri, imageMime ?? '');
+      }
+      if (entry.url) {
+        try { await claimPrivateFile(entry.url, `schools/${sid}/stories/${entry.id}`); }
+        catch (error) { if ((error as { statusCode?: number }).statusCode === 410) entry.url = null; throw error; }
       }
       if (!active.current) return;
       await publishStory(entry.id, {

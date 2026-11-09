@@ -84,3 +84,23 @@ test('switching school while the upload finishes cannot publish into the previou
   expect(publishStory).not.toHaveBeenCalled();
   expect(view.getByText('選擇圖片')).toBeTruthy();
 });
+
+test('expired claimed media is cleared and uploaded again before retrying publication', async () => {
+  const files = require('../services/privateFiles');
+  const claim = jest.spyOn(files, 'claimPrivateFile')
+    .mockRejectedValueOnce(Object.assign(new Error('gone'), { statusCode: 410 }))
+    .mockResolvedValue(undefined);
+  jest.mocked(uploadStoryImage)
+    .mockResolvedValueOnce('schools/pu/stories/s1/old.jpg')
+    .mockResolvedValueOnce('schools/pu/stories/s1/new.jpg');
+  jest.mocked(publishStory).mockResolvedValue('s1');
+  const view = render(<StoryComposeScreen />);
+  try {
+    await act(async () => fireEvent.press(view.getByText('選擇圖片')));
+    await act(async () => fireEvent.press(view.getByText('發布限時動態')));
+    expect(publishStory).not.toHaveBeenCalled();
+    await act(async () => fireEvent.press(view.getByText('發布限時動態')));
+    expect(uploadStoryImage).toHaveBeenCalledTimes(2);
+    expect(publishStory).toHaveBeenCalledWith('s1', expect.objectContaining({ mediaUrl: 'schools/pu/stories/s1/new.jpg' }));
+  } finally { view.unmount(); claim.mockRestore(); }
+});

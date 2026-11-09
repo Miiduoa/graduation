@@ -1,3 +1,4 @@
+import * as privateFileService from '@/lib/privateFiles';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import CoursePage from './page';
@@ -69,6 +70,7 @@ function submit(id: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.spyOn(privateFileService, 'claimPrivateFile').mockResolvedValue(undefined);
   window.localStorage.clear();
   auth.user = { uid: 'alice' };
   auth.loading = false;
