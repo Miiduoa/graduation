@@ -124,6 +124,56 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('uses recent Overpass database replication metadata without confusing it with a way edit', async () => {
+    const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000).toISOString()
+      .replace('.000Z', 'Z');
+    const payload = JSON.stringify({
+      osm3s: { timestamp_osm_base: baseTime },
+      ...JSON.parse(osmPayload),
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const snapshot = await response.json();
+    expect(snapshot.stale).toBe(false);
+    expect(snapshot.buildings).toHaveLength(1);
+    expect(snapshot.buildings[0].osmEditedAt).toBe('2026-10-15T08:09:10Z');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not promote a days-old Overpass database state into a new fresh snapshot', async () => {
+    const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 3 * 24 * 60 * 60 * 1000)
+      .toISOString().replace('.000Z', 'Z');
+    const payload = JSON.stringify({
+      osm3s: { timestamp_osm_base: baseTime },
+      ...JSON.parse(osmPayload),
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed on implausible future or malformed Overpass replication metadata', async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      osm3s: { timestamp_osm_base: '2099-01-01T00:00:00Z' },
+      ...JSON.parse(osmPayload),
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('reads a real streamed Overpass response and sends an identifiable service header', async () => {
     const mockedFetch = vi.fn().mockResolvedValue(new Response(osmPayload, {
       status: 200, headers: { 'Content-Type': 'application/json' },
