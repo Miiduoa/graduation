@@ -274,6 +274,7 @@ export function assertStoryMediaRead(input: {
   schoolId: string;
   uid: string;
   story: Record<string, unknown> | null;
+  path: string;
   object: StoryObjectInfo;
   nowMs?: number;
 }): void {
@@ -291,7 +292,7 @@ export function assertStoryMediaRead(input: {
     input.story.schoolId !== input.schoolId ||
     input.story.authorUid !== ownerUid ||
     typeof mediaUrl !== 'string' ||
-    mediaUrl.length === 0 ||
+    mediaUrl !== input.path ||
     expiresAt === null ||
     expiresAt <= nowMs ||
     !((kind === 'image' && isPrivateFileImage(contentType)) ||

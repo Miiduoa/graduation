@@ -390,3 +390,10 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 修補僅收斂限動 Web 簽發入口：同一個 read-only transaction 讀到的 canonical profile 必須有相符校別，且 `bindingGeneration` 必須與活躍校籍上非空的 `profileBoundGeneration` 精確一致。伺服器可信校務登入流程已在同一交易寫入兩者；缺欄位的歷史帳號會 fail-closed，必須重新經過可信登入蓋章。其他群組／作業附件授權不變。
 
 可重跑的惰性／合成回歸：先合法上傳、finalize 與取得下載 URL，再使用相同身分模擬 profile 刪除、自建 profile、不同學校、世代更新不匹配與校籍撤銷，均不得再簽發下載 URL；可信流程恢復匹配世代後應恢復合法下載。原始 signed URL 不會因此立即失效。此修補限於新 Web Supabase 簽發端，不代表 Cloud Storage 舊 bearer URL、真 Supabase Storage、正式 bucket/migration 或發布驗收已完成，必須以此精確 head 的 Web tests、CI、CodeQL 和指定 App 5504170 審查為準。本輪不操作正式服務、權杖或受限 npm/pnpm audit。
+
+
+### 2026-11-09 補驗：已發布限動不得簽發同 story 其他附件
+
+同一 Web 入口另一個可重現授權缺口：`assertStoryMediaRead` 原只確認已發布 story 的 `mediaUrl` 非空、期限、學校、作者與 MIME 相符，沒有將**要求下載的 object path**和 `story.mediaUrl` 綁在一起。若同一作者在同一 story 下預先 finalize 兩個影像物件，發布時只引用其中之一，其他同校成員仍可用已知的第二個路徑取得新的短效下載 URL。修補在 `issueDownload` 傳入要求的精確路徑，要求已發布 story 的 `mediaUrl === path`；尚未發布、無 story 文件時仍只允許物件 owner 本人下載。
+
+新增同 story 雙物件回歸：合法已發布的路徑維持 200，未引用的相同 owner 物件對作者與同校其他有效成員皆 403；已簽發 URL 不因此立即撤銷。新回歸在記憶體 DB 與合成 Supabase storage 执行，實際 CI 以最新精確提交為準。真 Supabase／GCS staging、舊 bearer／signed URL 撤銷、migration 與發布依舊未完成，不能宣稱正式安全。

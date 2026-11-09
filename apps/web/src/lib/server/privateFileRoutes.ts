@@ -218,6 +218,7 @@ async function issueDownload(
       schoolId: scope.schoolId || '',
       uid,
       story: snap.exists ? snap.data() || null : null,
+      path: scope.path,
       object: {
         ownerUid: object.metadata['owner-uid'],
         contentType: object.contentType,

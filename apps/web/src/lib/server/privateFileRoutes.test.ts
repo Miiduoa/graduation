@@ -421,6 +421,37 @@ it('confirms only the original claimed story object after publication while uplo
   expect((await invoke(runtime, { action: 'claim', path: STORY }, auth)).status).toBe(403);
 });
 
+it('never signs a finalized sibling story object that the published story does not reference', async () => {
+  const auth = { uid: 'stamped' };
+  const unused = STORY.replace('/image', '/unpublished.jpg');
+  for (const path of [STORY, unused]) {
+    const ticket = await invoke(
+      runtime, { action: 'upload', path, contentType: 'image/jpeg', byteSize: 5 }, auth,
+    );
+    expect(ticket.status).toBe(200);
+    expect(put(ticket, 'photo')).toBe(200);
+    expect((await invoke(runtime, { action: 'finalize', path }, auth)).status).toBe(200);
+  }
+
+  // Two objects have the same author, school and story ID. Only the referenced
+  // one may be newly signed after publication (including for the author).
+  store.docs.set('campusStories/story-1', {
+    schoolId: 'pu', authorUid: 'stamped', kind: 'image',
+    expiresAt: Date.now() + 600_000, mediaUrl: STORY,
+  });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: unused }, auth)).status).toBe(403);
+  // Replaying the same path must not issue a URL to a different campus member.
+  store.docs.set('users/bob', {
+    schoolId: 'pu', bindingGeneration: 'bob-generation',
+  });
+  store.docs.set('schools/pu/members/bob', {
+    status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'bob-generation',
+  });
+  expect((await invoke(runtime, { action: 'download', path: unused }, { uid: 'bob' })).status).toBe(403);
+  expect((await invoke(runtime, { action: 'download', path: STORY }, { uid: 'bob' })).status).toBe(200);
+});
+
 it('keeps a released cover downloadable while the group still references it', async () => {
   const auth = { uid: 'teacher' };
   const old = await invoke(runtime, { action: 'upload', path: COVER, contentType: 'image/jpeg', byteSize: 4 }, auth);
