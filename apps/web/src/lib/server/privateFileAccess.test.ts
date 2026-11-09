@@ -114,12 +114,29 @@ it('requires an existing live post for downloads and author ownership for existi
   const store = fileStore();
   await expect(authorize(store, POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, POST)).resolves.toBeUndefined();
-  const existing = fileStore([['groups/course/posts/one', { authorId: 'alice' }]]);
+  const existing = fileStore([['groups/course/posts/one', { authorId: 'alice', attachments: [POST] }]]);
   await expect(authorize(existing, POST, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(existing, POST, 'teacher', true)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(existing, POST, 'alice', true)).resolves.toBeUndefined();
   await expect(authorize(existing, POST, 'bob', false)).resolves.toBeUndefined();
 });
+it('does not turn a finalized but unreferenced post attachment into a group-wide download', async () => {
+  const store = fileStore([['groups/course/posts/one', { authorId: 'alice' }]]);
+  const sibling = POST.replace('notes.pdf', 'unpublished.pdf');
+  // Author previews remain usable; the same path is not yet shared with Bob.
+  await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [{ url: POST }] });
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+  await expect(authorize(store, sibling, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  // Even a manager cannot browse a file absent from the post's attachment list.
+  await expect(authorize(store, sibling, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('schools/pu/members/bob', { status: 'inactive' });
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('schools/pu/members/bob', { status: 'active' });
+  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+});
+
 it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {
   await expect(authorize(fileStore([['groups/course/posts/one', { authorId: 'alice', ...tombstone }]]), POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
 });

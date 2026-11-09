@@ -406,3 +406,12 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 本輪最小收斂：保留學生本人在提交前預覽自己的附件，manager 跨身分下載則必須同時滿足存在對應 submission、路徑學生與 receipt owner 相符、`submittedAt` 非空，而且 `attachments` 含精確的 private path（字串或 `url`／`path` 欄位）。普通同組學生仍不可讀他人的作業；正常 manager 已提交附件仍可讀。已新增記憶體 DB／惰性 Supabase storage 定向回歸：未提交拒絕、合法提交可讀、未引用 sibling／撤權／其他學生拒絕及本人預覽。請以本輪新的精確 head 的 Web tests、CI、CodeQL 確認成功，不以前一 head 綠燈替代。
 
 已發布的 Supabase 短效網址與 GCS bearer URL 不會因本檢查即時失效。正式資料、migration、金鑰、token 清理、E 校園連線及受限 npm/pnpm audit 均未觸及；合併仍依指定 App 5504170 對精確 head 核可及主線窗口處理。
+
+
+## 2026-11-10：群組貼文「已上傳不等於已公開」的附件讀取邊界
+
+延續 #569 附件提交收據修補，獨立檢查共用 `authorizePrivateFile` 發現 group-post 原只要貼文文件存在、讀者有同組資格，就能對該貼文路徑下的任意檔名嘗試新簽發 URL，或經 GCS HTTP 入口讀取；即使該物件只由作者上傳、尚未列在貼文 `attachments`，已知路徑的同組使用者仍可能讀取。這與已發布的附件不同，不能靠同組資格自動視為公開。
+
+最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。此限制會讓歷史貼文只有檔案存在但未儲存 `attachments` 的連結對其他組員 fail-closed；發布前須在隔離資料確認此相容性，不能繞過檢查。
+
+新增 shared authorization、Web 惰性 Storage 完整 upload→finalize→download、Functions GCS 惰性物件回歸：合法作者預覽、原附件正常分享、同貼文 sibling 草稿與 manager 猜路徑拒絕、撤銷校籍拒絕。這是**開發分支修補**，尚非正式已發布／舊 bearer 或 signed URL 已撤銷的證據；必須以精確 head 的 CI、CodeQL、指定 App 5504170 審查與獨立 staging 發布相容驗證為準。遵守 E 校園暫停及未授權 npm/pnpm audit 限制。

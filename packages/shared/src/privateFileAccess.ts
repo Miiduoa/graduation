@@ -126,8 +126,8 @@ function deny(): never {
   throw new PrivateFileAccessError(403, 'File access denied');
 }
 
-/** Exact submitted attachment reference, not merely a guessable submission folder. */
-function referencesSubmittedFile(attachments: unknown, path: string): boolean {
+/** Exact published/submitted attachment reference, never merely a known object path. */
+function referencesPrivateFile(attachments: unknown, path: string): boolean {
   return Array.isArray(attachments) && attachments.some((item: unknown) =>
     item === path || (
       item !== null && typeof item === 'object' && !Array.isArray(item) &&
@@ -397,6 +397,10 @@ export async function authorizePrivateFile(
         // Group posts are hard-deleted; also reject tombstones if present.
         if ((!writing && !post.exists) || data.deletedAt != null || data.deleted === true || data.isDeleted === true || data.status === 'deleted') deny();
         if (writing && post.exists && data.authorId !== uid) deny();
+        // The author can preview an uploaded draft. Other group members may
+        // download only the precise object referenced by the live post.
+        // Finalizing a private upload must not publish a sibling by guessable path.
+        if (!writing && data.authorId !== uid && !referencesPrivateFile(data.attachments, scope.path)) deny();
       }
       if (scope.kind === 'assignment' && scope.groupId) {
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
@@ -433,7 +437,7 @@ export async function authorizePrivateFile(
           if (scope.userId !== uid && (
             !manager || !submission.exists || owner !== scope.userId ||
             previous.submittedAt == null ||
-            !referencesSubmittedFile(previous.attachments, scope.path)
+            !referencesPrivateFile(previous.attachments, scope.path)
           )) deny();
         }
       }

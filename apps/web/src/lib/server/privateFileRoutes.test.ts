@@ -161,6 +161,29 @@ it('rejects a non-member without disclosing whether the object exists', async ()
   });
 });
 
+it('signs only published post attachments for other group members', async () => {
+  const auth = { uid: 'alice' };
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  }, auth);
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'text')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: POST }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: POST }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(403);
+  store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(200);
+  const sibling = POST.replace('notes.pdf', 'draft.pdf');
+  const draft = await invoke(runtime, { action: 'upload', path: sibling, contentType: 'application/pdf', byteSize: 4 }, auth);
+  expect(draft.status).toBe(200);
+  expect(put(draft, 'text')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: sibling }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: sibling }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: sibling }, { uid: 'bob' })).status).toBe(403);
+  store.docs.set('schools/pu/members/bob', { status: 'inactive' });
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(403);
+});
+
 it('rejects an unstamped campus story reader (未蓋章)', async () => {
   expect(await invoke(runtime, { action: 'download', path: STORY })).toEqual({
     status: 403,

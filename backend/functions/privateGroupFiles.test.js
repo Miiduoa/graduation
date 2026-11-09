@@ -168,6 +168,20 @@ describe('private group file HTTP handler', () => {
     expect(bucket.file).not.toHaveBeenCalled();
   });
 
+  test('does not stream another author’s unpublished group-post draft', async () => {
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);
+    expect((await invoke({ path: POST, uid: 'alice' })).status).toBe(200);
+    store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(200);
+    const sibling = POST.replace('notes.pdf', 'draft.pdf');
+    put(sibling, 'draft-only');
+    expect((await invoke({ path: sibling, uid: 'bob' })).status).toBe(403);
+    expect((await invoke({ path: sibling, uid: 'teacher' })).status).toBe(403);
+    expect((await invoke({ path: sibling, uid: 'alice' })).status).toBe(200);
+    store.docs.set('groups/course/members/bob', { status: 'inactive', role: 'member' });
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);
+  });
+
   test('submission reads require owner or current manager and writes require the owner', async () => {
     expect((await invoke({ path: ANSWER, uid: 'bob' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'outsider' })).status).toBe(403);
