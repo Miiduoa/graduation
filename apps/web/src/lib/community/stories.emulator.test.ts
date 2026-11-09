@@ -16,7 +16,7 @@ const describeEmulator = /^(?:127\.0\.0\.1|localhost):([0-9]{1,5})$/.test(emulat
 describeEmulator('story list client against the repository Firestore rules', () => {
   let environment: RulesTestEnvironment;
   let alice: Firestore;
-  const now = Date.now();
+  let now: number;
 
   beforeAll(async () => {
     const [host, port] = emulatorHost.split(':');
@@ -38,6 +38,7 @@ describeEmulator('story list client against the repository Firestore rules', () 
   });
 
   beforeEach(async () => {
+    now = Date.now();
     await environment.clearFirestore();
     await environment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
@@ -83,6 +84,7 @@ describeEmulator('story list client against the repository Firestore rules', () 
   it('lists only unexpired same-school stories through the web query', async () => {
     await expect(listActiveStoriesForSchool('pu', 80)).resolves.toEqual([
       expect.objectContaining({ id: 'active-web', schoolId: 'pu' }),
+      expect.objectContaining({ id: 'soon-web', schoolId: 'pu' }),
     ]);
   });
 
@@ -91,11 +93,11 @@ describeEmulator('story list client against the repository Firestore rules', () 
       query(
         collection(alice, 'campusStories'),
         where('schoolId', '==', 'pu'),
-        where('expiresAt', '>', now + 120_000),
+        where('expiresAt', '>', Date.now() + 3_000),
         limit(80),
       ),
     );
-    expect(rows.docs.map((row) => row.id)).toEqual(['active-web']);
+    expect(rows.docs.map((row) => row.id)).toEqual(['soon-web', 'active-web']);
   });
 
   it('rejects a school-only list that cannot prove expiry', async () => {

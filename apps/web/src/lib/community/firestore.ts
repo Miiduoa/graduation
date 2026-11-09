@@ -527,22 +527,38 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  // Firestore rules cannot filter query results: the server must be able to
-  // prove every returned story is still active. A two-minute lead covers
-  // request latency and prevents almost-expired stories from failing the query.
-  const expiresAfter = Date.now() + 120_000;
-  const activeBySchool = [where('schoolId', '==', schoolId), where('expiresAt', '>', expiresAfter)];
+  // Keep near-expiry stories visible while allowing a small request-latency buffer.
+  let expiresAfter = Date.now() + 3_000;
+  let permissionRetried = false;
+  const readStories = async (sorted: boolean) => {
+    const read = () => getDocs(query(
+      storiesCol(db),
+      where('schoolId', '==', schoolId),
+      where('expiresAt', '>', expiresAfter),
+      ...(sorted ? [orderBy('expiresAt', 'desc')] : []),
+      limit(lim),
+    ));
+    try {
+      return await read();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied' || permissionRetried) {
+        throw error;
+      }
+      permissionRetried = true;
+      expiresAfter = Date.now() + 15_000;
+      return read();
+    }
+  };
   const toActiveStories = (docs: Array<{ id: string; data: () => unknown }>) =>
     docs
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
       .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
   try {
-    const snap = await getDocs(
-      query(storiesCol(db), ...activeBySchool, orderBy('expiresAt', 'desc'), limit(lim)),
-    );
+    const snap = await readStories(true);
     return toActiveStories(snap.docs);
-  } catch {
-    const snap = await getDocs(query(storiesCol(db), ...activeBySchool, limit(lim)));
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'permission-denied') throw error;
+    const snap = await readStories(false);
     return toActiveStories(snap.docs);
   }
 }
