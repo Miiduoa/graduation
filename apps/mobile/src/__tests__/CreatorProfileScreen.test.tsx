@@ -162,3 +162,50 @@ test('requires authenticated campus scope before querying', () => {
   expect(readCreatorIdentity).not.toHaveBeenCalled();
   expect(listCreatorPosts).not.toHaveBeenCalled();
 });
+
+
+test('an owner can pin a post and later unpin without losing the post', async () => {
+  jest.mocked(saveCreatorPin)
+    .mockResolvedValueOnce({ postId: myPost.id, post: myPost })
+    .mockResolvedValueOnce({ postId: null, post: null });
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} navigation={{ navigate }} />);
+  await view.findByText('我的校園貼文');
+  await act(async () => { fireEvent.press(await view.findByLabelText('置頂到個人頁')); });
+  expect(saveCreatorPin).toHaveBeenCalledWith('pu', 'alice', myPost.id);
+  expect(view.getByLabelText('閱讀置頂貼文：我的校園貼文')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByLabelText('取消置頂')); });
+  expect(saveCreatorPin).toHaveBeenCalledWith('pu', 'alice', '');
+  expect(await view.findByLabelText('置頂到個人頁')).toBeTruthy();
+  expect(view.queryByLabelText('閱讀置頂貼文：我的校園貼文')).toBeNull();
+});
+
+test('a visitor can read a verified pinned post but cannot modify it', async () => {
+  jest.mocked(readCreatorIdentity).mockResolvedValue({ displayName: 'Bob', avatarUrl: null });
+  jest.mocked(listCreatorPosts).mockResolvedValue(page([]));
+  jest.mocked(readCreatorPin).mockResolvedValue({ postId: theirPost.id, post: theirPost });
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'bob' } }} navigation={{ navigate }} />);
+  expect(await view.findByLabelText('閱讀置頂貼文：同學的社團貼文')).toBeTruthy();
+  expect(view.queryByLabelText('取消置頂')).toBeNull();
+  expect(view.queryByLabelText('置頂到個人頁')).toBeNull();
+  expect(saveCreatorPin).not.toHaveBeenCalled();
+});
+
+test('an unconfirmed pin write does not claim success or remove the post', async () => {
+  jest.mocked(saveCreatorPin).mockRejectedValueOnce(new Error('offline'));
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} navigation={{ navigate }} />);
+  await view.findByText('我的校園貼文');
+  await act(async () => { fireEvent.press(await view.findByLabelText('置頂到個人頁')); });
+  expect(view.getByText(/尚未確認置頂變更/)).toBeTruthy();
+  expect(view.getByText('我的校園貼文')).toBeTruthy();
+  expect(view.queryByLabelText('取消置頂')).toBeNull();
+});
+
+test('a denied pin read is retried, never treated as an empty pin', async () => {
+  jest.mocked(readCreatorPin)
+    .mockRejectedValueOnce(new Error('permission-denied'))
+    .mockResolvedValueOnce({ postId: null, post: null });
+  const view = render(<CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} navigation={{ navigate }} />);
+  fireEvent.press(await view.findByLabelText('重新讀取置頂'));
+  expect(await view.findByLabelText('置頂到個人頁')).toBeTruthy();
+  expect(readCreatorPin).toHaveBeenCalledTimes(2);
+});
