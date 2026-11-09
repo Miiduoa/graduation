@@ -723,3 +723,48 @@ it('v2 renders markdown, assignment rows and food cards without raw paths', asyn
   expect(screen.getByRole('link', { name: '前往點餐頁' }).getAttribute('href')).toContain('/food?');
   expect(screen.getByText('確認')).toBeTruthy();
 });
+
+it('keeps the next draft typed while a cloud answer is pending', async () => {
+  let resolveAnswer: (response: Response) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return new Promise<Response>((resolve) => { resolveAnswer = resolve; });
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '幫我整理專題介紹的流程' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(field.value).toBe(''));
+  fireEvent.change(field, { target: { value: '也幫我找校園活動' } });
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  resolveAnswer(json({ answer: '已整理專題說明流程', steps: [], cards: [] }));
+  await screen.findByText('已整理專題說明流程');
+  expect(field.value).toBe('也幫我找校園活動');
+});
+
+it('keeps an unsuccessful question recoverable without discarding a later draft', async () => {
+  let resolveAnswer: (response: Response) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return new Promise<Response>((resolve) => { resolveAnswer = resolve; });
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '請核對明天的專題會議' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(field.value).toBe(''));
+  fireEvent.change(field, { target: { value: '新的草稿不能消失' } });
+  resolveAnswer(new Response(JSON.stringify({ message: '查詢服務暫時無法連線' }), {
+    status: 503, headers: { 'Content-Type': 'application/json' },
+  }));
+  await screen.findByRole('group', { name: '未完成的問題' });
+  expect(field.value).toBe('新的草稿不能消失');
+  expect(screen.getByText('請核對明天的專題會議')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(field.value).toBe('請核對明天的專題會議');
+  expect(screen.getByText('新的草稿不能消失')).toBeTruthy();
+});
