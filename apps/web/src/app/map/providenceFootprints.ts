@@ -171,7 +171,7 @@ function isStandingBuilding(value: unknown): boolean {
   // We do not yet have verified floor/base elevations for elevated OSM ways.
   // Unknown units or ambiguous offset values must not become a fictitious wall.
   const zeroOffset = (value: unknown) => typeof value === 'string' &&
-    /^0+(?:\\.0+)?(?:\\s*m)?$/i.test(value.trim());
+    /^0+(?:\.0+)?(?:\s*m)?$/i.test(value.trim());
   for (const key of ['min_height', 'building:min_level']) {
     const offset = tags?.[key];
     if (offset !== undefined && !zeroOffset(offset)) return false;
