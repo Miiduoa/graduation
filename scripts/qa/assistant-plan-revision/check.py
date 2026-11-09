@@ -54,21 +54,23 @@ async def idle(page):
     await expect(page.get_by_role('log')).not_to_have_attribute('aria-busy', 'true')
 
 
-async def start_plan(page):
+async def start_plan(page, events=None):
+    events = ORIGINAL if events is None else events
     await expect(page.get_by_role('checkbox')).to_be_enabled()
     await page.get_by_role('checkbox').check()
     question = page.get_by_role('textbox', name='問題', exact=True)
     await question.fill('請幫我安排兩段讀書時間')
     await question.press('Enter')
-    await expect(card_list(page)).to_have_count(2)
-    await expect(card_list(page).nth(0)).to_contain_text('19:00–19:30')
-    await expect(card_list(page).nth(1)).to_contain_text('20:00–20:30')
+    await expect(card_list(page)).to_have_count(len(events))
+    for index, event in enumerate(events):
+        await expect(card_list(page).nth(index)).to_contain_text(event['title'])
+        await expect(card_list(page).nth(index)).to_contain_text(event['startTime'] + '–' + event['endTime'])
     await expect(card_list(page).nth(0).get_by_role('button', name='確認', exact=True)).to_be_enabled()
     await expect(card_list(page).nth(1).get_by_role('button', name='確認', exact=True)).to_be_disabled()
     await no_writes(page)
 
 
-async def open_revision(page, keyboard=False):
+async def open_revision(page, keyboard=False, instruction=CHANGE):
     entry = page.get_by_role('button', name='修改時間或條件', exact=True).first
     if keyboard:
         await entry.focus()
@@ -77,7 +79,7 @@ async def open_revision(page, keyboard=False):
         await entry.click()
     field = page.get_by_role('textbox', name='修改條件', exact=True)
     await expect(field).to_be_focused()
-    await field.fill(CHANGE)
+    await field.fill(instruction)
     if keyboard:
         await page.keyboard.press('Tab')
         await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_focused()
@@ -112,6 +114,163 @@ async def assert_preview(page, expected_asks=2):
         if row['action'] == 'cancel':
             assert row['body']['token'] not in body['question'], body
     assert state['revoked'] == ['qa-original-1', 'qa-original-2'], state
+    await basic_comparison(page)
+
+
+def comparison(page):
+    return page.get_by_role('region', name='這次提議改了什麼', exact=True)
+
+
+async def changed_field(row, label, before, after):
+    term = row.get_by_text(label, exact=True)
+    await expect(term).to_have_count(1)
+    values = term.locator('xpath=following-sibling::dd').locator(':scope > div')
+    await expect(values).to_have_count(2)
+    await expect(values.nth(0)).to_have_text('原提議：' + before)
+    await expect(values.nth(1)).to_have_text('新提議：' + after)
+
+
+async def comparison_before_cards(page):
+    panel = comparison(page)
+    await expect(panel).to_be_visible()
+    assert await panel.evaluate('''node => {
+      const firstNewCard = document.querySelectorAll('article[aria-label="行程確認卡"]')[2];
+      return !!firstNewCard && Boolean(node.compareDocumentPosition(firstNewCard) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }'''), 'Comparison must precede the revised confirmation cards'
+    return panel
+
+
+async def basic_comparison(page):
+    panel = await comparison_before_cards(page)
+    ledger = await snapshot(page)
+    await expect(panel.get_by_text('內容未變更：1 項。', exact=True)).to_be_visible()
+    changed = panel.get_by_role('list', name='內容變更的提議', exact=True)
+    await expect(changed.get_by_role('listitem')).to_have_count(1)
+    row = changed.get_by_role('listitem', name='測試英文閱讀', exact=True)
+    assert sorted(await row.locator('dt').all_text_contents()) == ['結束時間', '開始時間']
+    await changed_field(row, '開始時間', '2026-11-12 20:00（台灣時間）', '2026-11-12 21:00（台灣時間）')
+    await changed_field(row, '結束時間', '2026-11-12 20:30（台灣時間）', '2026-11-12 21:30（台灣時間）')
+    for label in ['新提議新增', '新提議不再列入', '原提議行程', '新提議行程']:
+        await expect(panel.get_by_role('list', name=label, exact=True)).to_have_count(0)
+    assert await snapshot(page) == ledger, 'Reading the comparison caused an API call or write'
+
+
+async def comparison_case(page, name):
+    # Independent fixed scenarios: no production comparison helper is used as an oracle.
+    before = [dict(event) for event in ORIGINAL]
+    after = [dict(event) for event in ORIGINAL]
+    scenario = name.removesuffix('-320')
+    if scenario == 'cross-day-rename':
+        after[0].update(date='2026-11-13', endDate='2026-11-14', startTime='23:30', endTime='00:30')
+        after[1]['title'] = '測試英文精讀'
+        instruction = '第一筆改到11月13日23:30至11月14日00:30，第二筆改名為測試英文精讀，時間不變'
+    elif scenario == 'reordered':
+        after.reverse()
+        instruction = '交換兩筆安排的順序，日期與時間不變'
+    elif scenario == 'added':
+        after.append({**ORIGINAL[1], 'title': '測試整理筆記', 'startTime': '22:00', 'endTime': '22:30'})
+        instruction = '新增11月12日22:00至22:30的測試整理筆記，原安排保持不變'
+    elif scenario == 'removed':
+        after = after[:1]
+        instruction = '新版只列出第一筆提議'
+    elif scenario == 'same-name-ambiguous':
+        for event in before + after:
+            event['title'] = '測試讀書'
+        after[0].update(startTime='21:00', endTime='21:30')
+        after[1].update(startTime='22:00', endTime='22:30')
+        instruction = '把兩段測試讀書改為21:00與22:00，各30分鐘'
+    else:
+        assert scenario == 'unchanged', scenario
+        instruction = '保留兩筆安排的日期、時間與名稱'
+    await page.evaluate('value => window.__agentQA.configurePlan(value)', {'originalEvents': before, 'revisedEvents': after})
+    await start_plan(page, before)
+    await expect(comparison(page)).to_have_count(0)
+    await open_revision(page, keyboard=True, instruction=instruction)
+    await page.keyboard.press('Enter')
+    await expect(card_list(page)).to_have_count(len(before) + len(after))
+    await idle(page)
+    for index in range(len(before)):
+        await expect(card_list(page).nth(index)).to_contain_text('已撤銷未執行提議')
+        await expect(card_list(page).nth(index).get_by_role('button', name='確認', exact=True)).to_have_count(0)
+    for index, event in enumerate(after):
+        card = card_list(page).nth(len(before) + index)
+        await expect(card.get_by_role('heading', name=event['title'], exact=True)).to_be_visible()
+        await expect(card).to_contain_text(event['startTime'] + '–' + event['endTime'])
+        button = card.get_by_role('button', name='確認', exact=True)
+        if index == 0:
+            await expect(button).to_be_enabled()
+        else:
+            await expect(button).to_be_disabled()
+    await no_writes(page)
+    ledger = await snapshot(page)
+    assert actions(ledger) == ['ask', 'cancel', 'cancel', 'ask'], ledger
+    request = [row for row in ledger['requests'] if row['action'] == 'ask'][-1]['body']
+    assert request['history'] == [] and request['consent'] is True, request
+    assert instruction in request['question'], request
+    payload = request['question'].split('原安排：', 1)[1].split('\n修改條件：', 1)[0]
+    assert json.loads(payload) == before, payload
+    assert 'token' not in request['question'] and 'mutationId' not in request['question'], request
+    panel = await comparison_before_cards(page)
+    changed = panel.get_by_role('list', name='內容變更的提議', exact=True)
+    if scenario == 'cross-day-rename':
+        await expect(changed.get_by_role('listitem')).to_have_count(2)
+        row = changed.get_by_role('listitem', name='測試微積分複習', exact=True)
+        assert set(await row.locator('dt').all_text_contents()) == {'開始日期', '結束日期', '開始時間', '結束時間'}
+        for label, old, new in [
+            ('開始日期', '2026-11-12', '2026-11-13'),
+            ('結束日期', '2026-11-12', '2026-11-14'),
+            ('開始時間', '2026-11-12 19:00（台灣時間）', '2026-11-13 23:30（台灣時間）'),
+            ('結束時間', '2026-11-12 19:30（台灣時間）', '2026-11-14 00:30（台灣時間）'),
+        ]:
+            await changed_field(row, label, old, new)
+        rename = changed.get_by_role('listitem', name='測試英文精讀', exact=True)
+        assert await rename.locator('dt').all_text_contents() == ['名稱']
+        await changed_field(rename, '名稱', '測試英文閱讀', '測試英文精讀')
+    else:
+        await expect(changed).to_have_count(0)
+    unchanged_count = {'cross-day-rename': 0, 'reordered': 2, 'added': 2, 'removed': 1, 'same-name-ambiguous': 0, 'unchanged': 2}[scenario]
+    unchanged_note = panel.locator('p').filter(has_text='內容未變更：')
+    await expect(unchanged_note).to_have_count(1 if unchanged_count else 0)
+    if unchanged_count:
+        await expect(unchanged_note).to_have_text(f'內容未變更：{unchanged_count} 項。')
+    await expect(panel.get_by_text('兩份提議的安排內容相同。', exact=True)).to_have_count(
+        1 if scenario in ['reordered', 'unchanged'] else 0)
+    order_note = panel.get_by_text('顯示順序與原提議不同，請依新版確認卡的順序核對。', exact=True)
+    await expect(order_note).to_have_count(1 if scenario == 'reordered' else 0)
+    for label, expected in [('新提議新增', [after[-1]] if scenario == 'added' else []),
+                            ('新提議不再列入', [before[-1]] if scenario == 'removed' else [])]:
+        listing = panel.get_by_role('list', name=label, exact=True)
+        if expected:
+            await expect(listing.get_by_role('listitem')).to_have_count(1)
+            event = expected[0]
+            await expect(listing).to_contain_text(event['title'])
+            await expect(listing).to_contain_text(f"{event['date']} {event['startTime']} – {event['date']} {event['endTime']}（台灣時間）")
+        else:
+            await expect(listing).to_have_count(0)
+    if scenario == 'removed':
+        await expect(panel.get_by_text('只表示新版提議未列入這些項目，不代表刪除既有行程。', exact=True)).to_be_visible()
+    await expect(panel.get_by_role('heading', name='無法可靠逐筆對照', exact=True)).to_have_count(1 if scenario == 'same-name-ambiguous' else 0)
+    for label, events in [('原提議行程', before), ('新提議行程', after)]:
+        listing = panel.get_by_role('list', name=label, exact=True)
+        if scenario == 'same-name-ambiguous':
+            await expect(listing.get_by_role('listitem')).to_have_count(2)
+            for index, event in enumerate(events):
+                item = listing.get_by_role('listitem').nth(index)
+                await expect(item).to_contain_text(event['title'])
+                await expect(item).to_contain_text(
+                    f"{event['date']} {event['startTime']} – {event['date']} {event['endTime']}（台灣時間）")
+        else:
+            await expect(listing).to_have_count(0)
+    overflow = await no_overflow(page)
+    panel_size = await panel.evaluate('node => ({client:node.clientWidth,scroll:node.scrollWidth})')
+    assert panel_size['scroll'] <= panel_size['client'] + 1, panel_size
+    await panel.screenshot(path=str(OUT / f'comparison-{name}-summary.png'))
+    await capture(page, f'comparison-{name}-zero-writes')
+    assert await snapshot(page) == ledger, 'Comparison rendering or reading caused another API call or write'
+    assert await page.evaluate("localStorage.getItem('campus.personal-imports.v1:platform%3Aqa-agent:fixture-campus-a')") is None
+    return {'mode': 'native UI with configured fixed comparison data; no model or backend',
+            'fixtureOriginal': before, 'fixtureRevised': after, 'summaryText': await panel.inner_text(),
+            'overflow': overflow, 'panelSize': panel_size, 'ledgerUnchangedWhileReading': True}
 
 
 async def capture(page, name):
@@ -135,6 +294,8 @@ async def native_case(page, width):
     await page.keyboard.press('Enter')
     await assert_preview(page)
     assert actions(await snapshot(page)) == ['ask', 'cancel', 'cancel', 'ask']
+    await no_overflow(page)
+    await comparison(page).screenshot(path=str(OUT / f'native-{width}-comparison.png'))
     await capture(page, f'native-{width}-preview-zero-writes')
     first = card_list(page).nth(2)
     second = card_list(page).nth(3)
@@ -177,6 +338,8 @@ async def ask_error_case(page, fault):
         await expect(card_list(page).nth(index)).to_contain_text('已撤銷未執行提議')
         await expect(card_list(page).nth(index).get_by_role('button', name='確認', exact=True)).to_have_count(0)
     await no_writes(page)
+    await expect(comparison(page)).to_have_count(0)
+    assert actions(await snapshot(page)) == ['ask', 'cancel', 'cancel', 'ask']
     await capture(page, f'controlled-{fault}-retained-draft')
     await page.get_by_role('button', name='重新預覽', exact=True).click()
     await assert_preview(page, expected_asks=3)
@@ -250,7 +413,7 @@ def build_evidence():
     meta = json.loads((OUT / 'bundle-meta.json').read_text())
     paths = [name for name in meta['inputs'] if not name.startswith(('fixture:', '<')) and 'node_modules/' not in name]
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
-    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts']:
+    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts']:
         assert any(name.endswith('/' + required) for name in hashes), f'Real implementation missing: {required}'
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
@@ -275,7 +438,12 @@ async def main():
                          ('controlled-empty-preview', 1440, lambda p: ask_error_case(p, 'empty')),
                          ('controlled-unknown-cancel', 1440, unknown_case),
                          ('controlled-late-school-switch', 1440, late_school_case),
-                         ('controlled-double-preview', 1440, double_case)]
+                         ('controlled-double-preview', 1440, double_case),
+                         ('controlled-malformed-preview', 1440, lambda p: ask_error_case(p, 'malformed'))]
+                cases.extend((f'comparison-{name}', width, lambda p, value=name: comparison_case(p, value))
+                             for name, width in [('cross-day-rename', 1440), ('cross-day-rename-320', 320),
+                                                 ('reordered', 1440), ('added', 1440), ('removed', 1440),
+                                                 ('same-name-ambiguous', 1440), ('unchanged', 1440)])
                 for name, width, run in cases:
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
                                                         reduced_motion='reduce', locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')

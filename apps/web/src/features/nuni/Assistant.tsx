@@ -8,7 +8,8 @@ import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import { AssistantPlanRevision } from './assistant/AssistantPlanRevision';
-import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan } from './assistant/planRevision';
+import { AssistantPlanComparison } from './assistant/AssistantPlanComparison';
+import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan, type PlanRevisionEvent } from './assistant/planRevision';
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import { inAppHref } from './assistant/copy';
@@ -224,6 +225,7 @@ function V2Conversation({
   const routeToken = useRef<string | undefined>(undefined);
   const revisionConsent = useRef(false);
   const revisionTurns = useRef(new Set<V2Turn>());
+  const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[] }>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
   const journalScope = { ...localScope, context };
@@ -466,7 +468,11 @@ function V2Conversation({
       (!isUnattemptedCalendarPlan(turn, actionStates.current) && !continuing))
       return { ok: false, message: '原提議尚未完成核對，請先核對原操作結果；這次沒有產生新安排。' };
     let current: string;
-    try { current = buildPlanRevisionQuestion(turn, instruction); }
+    let before: PlanRevisionEvent[];
+    try {
+      before = getPlanRevisionEvents(turn);
+      current = buildPlanRevisionQuestion(turn, instruction);
+    }
     catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : '請核對修改條件後再試。' }; }
 
     // Keep the original signed cards intact. A failed cancellation is never
@@ -506,13 +512,16 @@ function V2Conversation({
         typeof card.mutationId !== 'string' || !card.mutationId || previousIds.has(card.mutationId) ||
         typeof card.token !== 'string' || !card.token))
         return { ok: false, message: '尚未取得新的純行程預覽。舊提議已撤銷，其他服務請另外提出並分開確認。' };
-      getPlanRevisionEvents({ question: current, reply });
+      const after = getPlanRevisionEvents({ question: current, reply });
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
         if (canConfirmAction(actionStates.current[card.mutationId]))
           setAction(card, { status: 'superseded' });
       }
-      setTurns(previous => [...previous, { question: '修改原先安排：' + instruction.trim(), reply }]);
+      const revisedTurn = { question: '修改原先安排：' + instruction.trim(), reply };
+      // Comparison is local presentation data, never a replacement for signed cards.
+      planComparisons.current.set(revisedTurn, { before, after });
+      setTurns(previous => [...previous, revisedTurn]);
       revisionTurns.current.delete(turn);
       return { ok: true, message: '這次重新預覽沒有寫入行程。請核對下方新卡，再決定是否確認。' };
     } catch (cause) {
@@ -597,6 +606,10 @@ function V2Conversation({
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
+      renderPlanComparison={turn => {
+        const comparison = planComparisons.current.get(turn);
+        return comparison ? <AssistantPlanComparison {...comparison} /> : null;
+      }}
       renderPlanRevision={turn => <AssistantPlanRevision turn={turn} states={states} pending={pending}
         enabled={ready && consent} onPreview={instruction => revisePlan(turn, instruction)} />}
     />

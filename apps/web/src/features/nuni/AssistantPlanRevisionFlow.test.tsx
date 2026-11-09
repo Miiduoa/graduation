@@ -118,6 +118,7 @@ it('revokes both original cards serially before one new preview, preserving the 
   });
   render(<Assistant />);
   const composer = await askForPlan();
+  expect(screen.queryByRole('heading', { name: '這次提議改了什麼' })).toBeNull();
   fireEvent.change(composer, { target: { value: '下一個問題先留在這裡' } });
   openEditor();
   const snapshot = screen.getByRole('list', { name: '原提議行程' });
@@ -133,6 +134,7 @@ it('revokes both original cards serially before one new preview, preserving the 
   await act(async () => firstCancellation.resolve(json(checkFor(originals[0]))));
   await waitFor(() => expect(screen.getAllByRole('article', { name: '行程確認卡' })).toHaveLength(4));
   expect(calls.map(call => call.action)).toEqual(['ask', 'cancel', 'cancel', 'ask']);
+  expect(screen.getByRole('heading', { name: '這次提議改了什麼' })).toBeTruthy();
   expect(count(calls, 'cancel').map(call => call.body.token)).toEqual(originals.map(card => card.token));
   const revision = count(calls, 'ask')[1].body;
   expect(revision.history).toEqual([]);

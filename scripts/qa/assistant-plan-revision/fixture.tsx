@@ -6,11 +6,12 @@ import '../../../apps/web/src/app/globals.css';
 // Real Assistant, cards, journal, receipt parser and local mirroring remain bundled.
 const DATE = '2026-11-12';
 const INSTANT = '2026-11-09T12:00:00.000Z';
-const original = [
+type FixtureEvent = { title: string; date: string; allDay: boolean; endDate?: string; startTime?: string; endTime?: string };
+const original: FixtureEvent[] = [
   { title: '測試微積分複習', date: DATE, allDay: false, startTime: '19:00', endTime: '19:30' },
   { title: '測試英文閱讀', date: DATE, allDay: false, startTime: '20:00', endTime: '20:30' },
 ];
-type Card = { tool: string; args: typeof original[number]; token: string; mutationId: string; schoolId: string; destination: string };
+type Card = { tool: string; args: FixtureEvent; token: string; mutationId: string; schoolId: string; destination: string };
 type RequestRow = { sequence: number; action: string; body: Record<string, any>; outcome?: string };
 const cards = new Map<string, Card>();
 const revoked = new Set<string>();
@@ -20,11 +21,14 @@ const writes: { mutationId: string; record: Record<string, unknown> }[] = [];
 let askCount = 0;
 let release: (() => void) | undefined;
 const faults = { revisionAsk: 'none', unknownCancellation: false, holdAsk: false, holdCancel: false };
+const planFixture: { originalEvents: FixtureEvent[]; revisedEvents: FixtureEvent[] | null } = { originalEvents: original, revisedEvents: null };
 const qa = {
   school: 'fixture-campus-a',
   requests, writes,
   snapshot: () => ({ school: qa.school, requests, writes, revoked: [...revoked], records: [...records.values()], waiting: !!release }),
   configure: (value: Partial<typeof faults>) => Object.assign(faults, value),
+  // Fixed response data only; changing this does not run the model or write a calendar.
+  configurePlan: (value: Partial<typeof planFixture>) => Object.assign(planFixture, structuredClone(value)),
   release: () => { const resume = release; release = undefined; resume?.(); },
   switchSchool: (school: string) => {
     if (!['fixture-campus-a', 'fixture-campus-b'].includes(school)) throw new Error('Unknown fixture school');
@@ -48,15 +52,17 @@ function verifiedResult(card: Card, replay: boolean) {
   return { ...scope(card), status: 'verified', verifiedAt: INSTANT, revision: writes.length, replay, record: records.get(card.mutationId) };
 }
 function preview(schoolId: string, revised: boolean) {
-  const next = original.map((event, index) => {
+  const events = revised ? planFixture.revisedEvents || planFixture.originalEvents.map((event, index) =>
+    index === 1 ? { ...event, startTime: '21:00', endTime: '21:30' } : event) : planFixture.originalEvents;
+  const next = events.map((event, index) => {
     const mutationId = `qa-${revised ? `revised-${askCount}` : 'original'}-${index + 1}`;
     const card: Card = { tool: 'propose_personal_event', schoolId, mutationId,
       token: `fixture-token-${mutationId}`, destination: '/calendar',
-      args: revised && index === 1 ? { ...event, startTime: '21:00', endTime: '21:30' } : { ...event } };
+      args: { ...event } };
     cards.set(card.token, card);
     return card;
   });
-  return { answer: revised ? '已重新預覽兩筆測試安排；請逐筆確認。' : '這是兩筆尚未寫入的測試安排。',
+  return { answer: revised ? '已重新預覽測試安排；請逐筆確認。' : '這是尚未寫入的測試安排。',
     steps: [], cards: next, simulation: true };
 }
 window.fetch = async (input, init) => {
@@ -77,6 +83,11 @@ window.fetch = async (input, init) => {
     if (revised && faults.revisionAsk !== 'none') {
       const fault = faults.revisionAsk;
       faults.revisionAsk = 'none';
+      if (fault === 'malformed') {
+        const result = preview(body.schoolId, true);
+        delete result.cards[1].args.startTime;
+        return finish(result);
+      }
       return fault === 'empty' ? finish({ answer: '受控空預覽', steps: [], cards: [] }) : finish({ message: '受控重新預覽失敗' }, 503);
     }
     return finish(preview(body.schoolId, revised));

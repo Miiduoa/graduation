@@ -26,6 +26,7 @@ export function AssistantThread({
   onCancel,
   onReconcile,
   renderPlanRevision,
+  renderPlanComparison,
 }: {
   schoolId: string;
   ready: boolean;
@@ -43,6 +44,7 @@ export function AssistantThread({
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
+  renderPlanComparison?: (turn: V2Turn) => ReactNode;
 }) {
   const shell = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -136,6 +138,7 @@ export function AssistantThread({
                 ) : null}
               </div>
             </div>
+            {renderPlanComparison?.(turn)}
             <AssistantCardStack
               cards={turn.reply.cards}
               states={states}
