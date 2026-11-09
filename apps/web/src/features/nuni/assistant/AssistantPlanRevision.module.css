@@ -67,3 +67,9 @@
 .protection:has(input:disabled) { cursor: default; opacity: .5; }
 .protection input:focus-visible, .panel:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
 .visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* Focusable children do not inherit the thread's scroll margins. */
+.panel :is(button, input, textarea) {
+  scroll-margin-block-start: 12px;
+  scroll-margin-block-end: calc(var(--assistant-dock-height, 88px) + var(--assistant-dock-clearance, 0px) + 12px);
+}

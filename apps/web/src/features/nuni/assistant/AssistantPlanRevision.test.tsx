@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { AssistantPlanRevision } from './AssistantPlanRevision';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
@@ -9,6 +9,7 @@ function event(id = 'first', args: Record<string, unknown> = {}): V2Card {
 }
 const turn = (cards = [event()]): V2Turn => ({ question: '幫我安排讀書', reply: { answer: '請核對確認卡', steps: [], cards } });
 const base = { states: {}, pending: false, enabled: true };
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function open() { fireEvent.click(screen.getByRole('button', { name: '修改時間或條件' })); }
 function enter(value = '第一項改成明晚，其他安排不變') { fireEvent.change(screen.getByLabelText('修改條件'), { target: { value } }); }
 function submit() { fireEvent.submit(screen.getByRole('form', { name: '修改安排再預覽' })); }
@@ -290,4 +291,82 @@ it('clears old protection choices on a new proposal and ignores its predecessor\
   render(<AssistantPlanRevision {...base} turn={original} onPreview={onPreview} />);
   open();
   expect(screen.getAllByRole('checkbox').every(checkbox => !(checkbox as HTMLInputElement).checked)).toBe(true);
+});
+
+
+// jsdom does not perform layout. These explicit geometry/computed-style fixtures
+// model a 720px viewport, a 150px dock, 72px bottom clearance and 12px focus gap.
+function focusVisibilityFixture(top: number) {
+  let frameId = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+    frames.set(++frameId, callback);
+    return frameId;
+  });
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id); });
+  vi.stubGlobal('visualViewport', { offsetTop: 0, height: 720 });
+  const view = render(<>
+    <AssistantPlanRevision {...base} turn={turn()} onPreview={vi.fn()} />
+    <button type="button">表單外的控制項</button>
+  </>);
+  open(); enter();
+  const button = screen.getByRole('button', { name: '重新預覽' });
+  const scroll = vi.fn();
+  Object.defineProperty(button, 'scrollIntoView', { configurable: true, value: scroll });
+  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, top, 88, 44));
+  const computedStyle = window.getComputedStyle.bind(window);
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+    const style = computedStyle(element, pseudo);
+    if (element === button) {
+      style.scrollMarginBlockStart = '12px';
+      style.scrollMarginBlockEnd = '234px';
+    }
+    return style;
+  });
+  const flush = () => act(() => {
+    const callbacks = [...frames.values()];
+    frames.clear();
+    for (const callback of callbacks) callback(0);
+  });
+  return { view, button, scroll, request, cancel, frames, flush };
+}
+
+it('reveals a partly dock-obscured focused control using the resolved margin and an instant nearest scroll', () => {
+  const { button, scroll, flush } = focusVisibilityFixture(485.94);
+  act(() => button.focus());
+  expect(document.activeElement).toBe(button);
+  expect(scroll).not.toHaveBeenCalled();
+  flush();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+});
+
+it('does not scroll an already visible focused control or schedule focus scrolling for ordinary state changes', () => {
+  const { button, scroll, request, flush } = focusVisibilityFixture(430);
+  act(() => button.focus());
+  flush();
+  expect(scroll).not.toHaveBeenCalled();
+  request.mockClear();
+  enter('更新條件而不重新聚焦');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  expect(request).not.toHaveBeenCalled();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it('does not scroll a formerly obscured control after focus has moved outside the revision form', () => {
+  const { button, scroll, flush } = focusVisibilityFixture(485.94);
+  act(() => button.focus());
+  act(() => screen.getByRole('button', { name: '表單外的控制項' }).focus());
+  flush();
+  expect(scroll).not.toHaveBeenCalled();
+});
+
+it('cancels a pending focus frame on unmount and ignores a late callback from the old proposal', () => {
+  const { view, button, scroll, cancel, frames } = focusVisibilityFixture(485.94);
+  act(() => button.focus());
+  const [id, lateCallback] = [...frames.entries()][0];
+  view.unmount();
+  expect(cancel).toHaveBeenCalledWith(id);
+  expect(frames.size).toBe(0);
+  act(() => lateCallback(0));
+  expect(scroll).not.toHaveBeenCalled();
 });

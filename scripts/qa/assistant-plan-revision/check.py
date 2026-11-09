@@ -852,8 +852,9 @@ async def main():
                 cases.extend((f'controlled-protected-{fault}', 1440, lambda p, value=fault: protected_bad_case(p, value))
                              for fault in ['missing', 'changed-time', 'duplicate', 'same-name-ambiguous'])
                 for name, width, run in cases:
+                    motion = 'no-preference' if name == 'protected-single-320' else 'reduce'
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
-                                                        reduced_motion='reduce', locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')
+                                                        reduced_motion=motion, locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')
                     page = await context.new_page()
                     page.set_default_timeout(10_000)
                     errors, blocked = [], []
@@ -865,7 +866,7 @@ async def main():
                             blocked.append(request_route.request.url)
                             await request_route.abort()
                     await context.route('**/*', route)
-                    result = {'name': name, 'viewport': width, 'status': 'failed'}
+                    result = {'name': name, 'viewport': width, 'motion': motion, 'status': 'failed'}
                     try:
                         await page.goto(base + '/index.html', wait_until='networkidle')
                         result.update(await run(page))

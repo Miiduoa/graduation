@@ -30,6 +30,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
   const entry = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const mounted = useRef(false);
+  const focusFrame = useRef<number | null>(null);
   const busy = useRef(false);
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
@@ -40,7 +41,11 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
   const [message, setMessage] = useState('');
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+      if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
+      focusFrame.current = null;
+    };
   }, []);
   useEffect(() => { if (open) field.current?.focus(); }, [open]);
   const pristine = isUnattemptedCalendarPlan(turn, states);
@@ -57,6 +62,26 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
     : pristine
       ? '全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。'
       : '全部項目已勾選保留原樣，這次不會重新預覽；請依原確認卡顯示的結果核對。';
+
+  function revealFocusedControl(target: EventTarget) {
+    if (!(target instanceof HTMLElement) || !target.matches('button, input, textarea')) return;
+    if (focusFrame.current !== null) window.cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = window.requestAnimationFrame(() => {
+      focusFrame.current = null;
+      if (!mounted.current || document.activeElement !== target || !panel.current?.contains(target)) return;
+      // Read the resolved CSS margins so the inherited dock height and bottom
+      // navigation clearance stay in sync with the actual focus scroll target.
+      const style = window.getComputedStyle(target);
+      const topMargin = Number.parseFloat(style.scrollMarginBlockStart) || 0;
+      const bottomMargin = Number.parseFloat(style.scrollMarginBlockEnd) || 0;
+      const viewport = window.visualViewport;
+      const top = viewport?.offsetTop ?? 0;
+      const bottom = top + (viewport?.height ?? window.innerHeight);
+      const bounds = target.getBoundingClientRect();
+      if (bounds.top < top + topMargin || bounds.bottom > bottom - bottomMargin)
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    });
+  }
 
   function closeEditor() {
     setOpen(false);
@@ -92,7 +117,8 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
   }
 
   if (!open && !started && !pristine) return null;
-  return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議">
+  return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議"
+    onFocusCapture={event => revealFocusedControl(event.target)}>
     {complete ? <p role="status" className={styles.notice}>{message}</p> : <>
       <button ref={entry} type="button" className={styles.secondary}
         aria-expanded={open} aria-controls={id + '-editor'} disabled={!available || waiting}
