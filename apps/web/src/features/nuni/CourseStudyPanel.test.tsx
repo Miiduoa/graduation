@@ -165,6 +165,44 @@ it('protects a not-yet-imported pasted draft from mobile close and explains back
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
+it('rejects oversized pasted lessons before storing them without erasing an earlier draft or notes', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const pasted = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '尚未保存的課堂筆記' } });
+  fireEvent.change(pasted, { target: { value: '先前輸入的教材草稿' } });
+  fireEvent.change(pasted, { target: { value: '甲'.repeat(60_001) } });
+  expect(pasted.value).toBe('先前輸入的教材草稿');
+  expect(screen.getByRole('alert').textContent).toContain('貼上的教材超過 60,000 字元');
+  expect(note.value).toBe('尚未保存的課堂筆記');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  fireEvent.change(pasted, { target: { value: '乙'.repeat(60_000) } });
+  expect(pasted.value).toHaveLength(60_000);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('button', { name: '開始讀這份內容' }).hasAttribute('disabled')).toBe(false);
+});
+
+it('invalidates a pending lesson replacement when an oversized pasted edit is rejected', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), {
+    target: { value: '原教材的私人筆記' },
+  });
+  const pasted = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(pasted, { target: { value: '另一份教材草稿' } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.change(pasted, { target: { value: '😀'.repeat(30_001) } });
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+  expect(pasted.value).toBe('另一份教材草稿');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('原教材的私人筆記');
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('also guards pasted text on top of an existing course material without silently saving it', () => {
   const onClose = vi.fn();
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={onClose} />);

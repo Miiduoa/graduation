@@ -537,6 +537,19 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     }
   }
 
+  // Reject an oversized pasted lesson before React stores it. A failed paste
+  // must not erase a smaller draft, notes, or the currently authorized source.
+  function updatePastedSource(value: string) {
+    // Even a rejected edit invalidates an earlier source replacement preview.
+    setPendingSource(null);
+    if (value.length > STUDY_TUTOR_LIMITS.textCharacters) {
+      setError('貼上的教材超過 60,000 字元；原本貼上的草稿仍保留。請分成較短的章節再試。');
+      return;
+    }
+    setPaste(value);
+    setError('');
+  }
+
   // Reject oversized clipboard content before storing it in React state.
   // Keep the previous paste intact, so a failed attempt cannot erase a backup.
   function updatePastedProgress(value: string) {
@@ -750,7 +763,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <p className={styles.note}>PDF 最多 20 頁、8 MiB；文字最多 60,000 字元。檔案在此裝置讀取，公式、圖表與掃描辨識結果請對照原檔。</p>
           <label className={styles.field} htmlFor={pasteId}>或貼上課文與筆記
             <textarea id={pasteId} rows={4} value={paste} disabled={!!reading}
-              onChange={(event) => { setPaste(event.target.value); setPendingSource(null); }} placeholder="貼上想理解的段落…" />
+              onChange={(event) => updatePastedSource(event.target.value)} placeholder="貼上想理解的段落…" />
           </label>
           <p className={paste.length > STUDY_TUTOR_LIMITS.textCharacters ? styles.error : styles.note}>
             {paste.length.toLocaleString('zh-TW')} / 60,000 字元{paste.length > STUDY_TUTOR_LIMITS.textCharacters ? '，請分成較短的章節；內容尚未加入白板。' : ''}
