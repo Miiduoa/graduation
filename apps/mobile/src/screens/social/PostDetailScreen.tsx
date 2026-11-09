@@ -63,6 +63,19 @@ import {
 } from '../../services/campusPostBookmarks';
 import { flattenCampusRepliesThread } from '../../utils/campusReplyThread';
 
+/** Native cold-start links have no prior HomeStack screen: replace the dead detail
+ * instead of calling goBack() when there is no navigation history. In-app
+ * navigation still pops to the existing feed / board / history surface.
+ */
+function returnToCampusCommunity(navigation: any) {
+  if (navigation?.canGoBack?.() === false) {
+    if (typeof navigation.replace === 'function') navigation.replace('CampusSocialScreen');
+    else navigation.navigate?.('CampusSocialScreen');
+    return;
+  }
+  navigation?.goBack?.();
+}
+
 /** Keep each post's private state bound to the current identity and campus. */
 export function PostDetailScreen(props: any) {
   const { user, loading } = useAuth();
@@ -85,7 +98,7 @@ export function PostDetailScreen(props: any) {
           搜尋文章的學校已切換，請返回校園社群重新搜尋。
         </Text>
         <Pressable accessibilityRole="button" accessibilityLabel="返回校園社群"
-          onPress={() => props?.navigation?.goBack?.()}
+          onPress={() => returnToCampusCommunity(props?.navigation)}
           style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
           <Text style={{ color: theme.colors.accent }}>返回校園社群</Text>
         </Pressable>
@@ -466,7 +479,7 @@ function ScopedPostDetailScreen(props: any) {
           try {
             await deleteCampusPost(school.id, postId);
             Alert.alert('已刪除');
-            props?.navigation?.goBack?.();
+            returnToCampusCommunity(props?.navigation);
           } catch (e: any) {
             Alert.alert('刪除失敗', e?.message ?? String(e));
           }
@@ -562,7 +575,7 @@ function ScopedPostDetailScreen(props: any) {
             </Pressable>
           )}
           <Pressable accessibilityRole="button" accessibilityLabel="返回校園社群"
-            onPress={() => props?.navigation?.goBack?.()}
+            onPress={() => returnToCampusCommunity(props?.navigation)}
             style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
             <Text style={{ color: theme.colors.accent }}>返回校園社群</Text>
           </Pressable>
