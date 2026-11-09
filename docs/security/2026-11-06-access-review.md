@@ -341,3 +341,13 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 這次保留同一測試的身分撤銷／跨校情境，但針對封面使用原合法路徑 `cover.jpg` 重新 POST，以確保拒絕原因真的走到授權檢查並回傳 403；貼文與作業附件仍用不同新檔名，避免混淆 create-only 重送與授權拒絕。應用程式的封面白名單、CAS、權限判斷均**不放寬**。原本的非法 `cover-new.jpg` 路徑拒絕仍由 `privateGroupFiles.test.js` 的負向測試覆蓋。修補可用 `pnpm test:rules` 的 Firebase emulator 及完整 Functions 測試重跑，最新精確提交需以 GitHub CI 實際結果另行驗收，不得借用舊 head 綠燈。
 
 另 [Timetable Browser #42502931306](https://github.com/Miiduoa/graduation/actions/runs/42502931306) 的 Playwright smoke 失敗於等待文字「這台帳號不是平台營運人員」，屬不同功能的 UI 斷言；未在本次資安變更中改動課表功能或放寬安全規則。已提醒需由相關功能開發線檢查產品畫面與測試預期差異。未操作正式資料、金鑰、migration、舊 URL token 或部署；指定 App 5504170 對新 head 的核可仍須獨立確認。
+
+## 2026-11-09：限動 Firestore 的孤兒帳號與校籍撤權（待精確提交 CI）
+
+追查 Firestore `isSignedIn()` 發現，為相容舊資料，當 `users/{uid}` 不存在時仍可通過；原 `campusStories` 的單筆／列表讀取、建立與作者刪除，及 `storyViews` 的讀取／建立，依賴 `isSchoolMember`，因而在 canonical 帳號已刪但校籍 member 記錄仍 active、舊 Firebase ID token 尚有效時可能保留存取。作者刪除甚至只核對 `authorUid`，校籍撤銷後仍可嘗試刪除限動。這是 Firestore SDK 路徑，不代表已簽發 Firebase/GCS 下載 URL 已失效。
+
+本輪在**限動專屬的規則邊界**新增 `isCanonicalStoryMember(schoolId)`：必須同時存在 canonical `users/{uid}` 文件及 active 校籍。單筆 get、list、建立、作者刪除與觀看收據之 get/list/create 均重新檢查，既有帳號的停權／刪除狀態仍交給 `isSchoolMember` 的 `isSignedIn` 處理。沒有全域收緊其他服務的舊帳號策略；未修改 Storage Rules 或已簽發 bearer URL 撤銷途徑。
+
+新增隔離 Firebase emulator 回歸以**同一批已核發測試身分**驗證正常故事建立及同校閱讀、跨校拒絕、canonical user 刪除後讀取／列表／觀看收據與新發布、作者刪除拒絕；補回 active profile 後正常存取恢復；校籍轉 inactive 後不得發布或刪除，重啟後才能正常刪除。既有合法 story fixture 補建 active canonical user，沒有移除既有非授權斷言。**是否通過必須以新精確 head 的 Rules CI 判斷，不能沿用上一版綠燈。**
+
+發布相容性：歷史上只有校籍 member、沒有 `users/{uid}` 的合法舊帳號，限動讀寫將 fail-closed；發布前須由受控帳號流程盤點並補齊有依據的 active canonical profile。Storage stories 媒體的跨服務兩份文件查詢限制仍未解決，舊 bearer URLs、真 GCS staging、Supabase signed URL、限動索引／手機版本／Rules 分階段上線、minimatch 雙鎖檔及指定 App 核可均仍待獨立處理。沒有正式資料、金鑰、migration、token 清理或 main 合併。

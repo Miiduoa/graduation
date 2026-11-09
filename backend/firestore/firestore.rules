@@ -19,6 +19,12 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
+    // A leftover school membership must not authorize a deleted canonical account.
+    function isCanonicalStoryMember(schoolId) {
+      return isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function hasAnyServiceRole(schoolId, uid) {
       return exists(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid))
         && get(/databases/$(database)/documents/schools/$(schoolId)/serviceRoles/$(uid)).data.status == 'active'
@@ -1742,18 +1748,18 @@ service cloud.firestore {
       // Query callers constrain expiresAt ahead of request.time so Firestore
       // can prove the read is safe without inspecting each returned document.
       allow get: if isSignedIn()
-        && isSchoolMember(resource.data.schoolId)
+        && isCanonicalStoryMember(resource.data.schoolId)
         && resource.data.expiresAt is int
         && resource.data.expiresAt > request.time.toMillis();
       // Query range filters cannot prove the stored field has an integer
       // type; the numeric expiry comparison is still enforced server-side.
       allow list: if isSignedIn()
-        && isSchoolMember(resource.data.schoolId)
+        && isCanonicalStoryMember(resource.data.schoolId)
         && resource.data.expiresAt > request.time.toMillis();
       allow create: if isSignedIn()
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.schoolId != null
-        && isSchoolMember(request.resource.data.schoolId)
+        && isCanonicalStoryMember(request.resource.data.schoolId)
         // School-wide story readers must not accept arbitrary client claims,
         // forged view counters or unbounded text payloads.
         && request.resource.data.keys().hasOnly([
@@ -1769,7 +1775,8 @@ service cloud.firestore {
         && request.resource.data.expiresAt is int
         && request.resource.data.expiresAt > request.time.toMillis()
         && request.resource.data.expiresAt <= request.time.toMillis() + 86700000;
-      allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid
+        && isCanonicalStoryMember(resource.data.schoolId);
       allow update: if false;
 
       match /storyViews/{viewerUid} {
@@ -1777,7 +1784,7 @@ service cloud.firestore {
           let story = get(/databases/$(database)/documents/campusStories/$(storyId)).data;
           return story.expiresAt is int
             && story.expiresAt > request.time.toMillis()
-            && isSchoolMember(story.schoolId);
+            && isCanonicalStoryMember(story.schoolId);
         }
         // Watching a story is personal activity: only that viewer and the
         // story's author may read a viewer receipt. Lists are author-only.

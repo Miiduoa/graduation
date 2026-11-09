@@ -1784,6 +1784,10 @@ describe('storage security rules', () => {
       await db.doc('schools/pu/members/alice').set({ status: 'active' });
       await db.doc('schools/pu/members/bob').set({ status: 'active' });
     });
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+    });
     const path = 'schools/pu/stories/story-1/image';
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
@@ -1816,6 +1820,10 @@ describe('storage security rules', () => {
       await db.doc('schools/pu/members/bob').set({ status: 'active' });
       await db.doc('schools/other/members/alice').set({ status: 'active' });
     });
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+    });
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
     for (const [id, story] of [
@@ -1846,6 +1854,10 @@ describe('storage security rules', () => {
       await db.doc('schools/pu/members/alice').set({ status: 'active' });
       await db.doc('schools/other/members/bob').set({ status: 'active' });
     });
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+    });
     const alice = testEnv.authenticatedContext('alice').firestore();
     const bob = testEnv.authenticatedContext('bob').firestore();
     const content = {
@@ -1872,6 +1884,10 @@ describe('storage security rules', () => {
     });
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+    });
     const media = alice.storage().ref('schools/pu/stories/expiring/photo.jpg');
     await assertSucceeds(media.putString('draft photo', 'raw', {
       contentType: 'image/jpeg', customMetadata: { ownerUid: 'alice' },
@@ -1919,6 +1935,10 @@ describe('storage security rules', () => {
         expiresAt: now - 60_000, createdAt: now - 3_600_000,
       });
     });
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+    });
     const alice = testEnv.authenticatedContext('alice').firestore();
     const bob = testEnv.authenticatedContext('bob').firestore();
     const stories = alice.collection('campusStories');
@@ -1943,6 +1963,7 @@ describe('storage security rules', () => {
     const viewCollection = 'campusStories/private-views/storyViews';
     await seedFirestore(async (db) => {
       for (const uid of ['alice', 'bob', 'charlie']) {
+        await db.doc(`users/${uid}`).set({ status: 'active' });
         await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
       }
       await db.doc('campusStories/private-views').set({
@@ -1961,6 +1982,64 @@ describe('storage security rules', () => {
     await assertFails(charlie.collection(viewCollection).get());
     await assertFails(bob.collection(viewCollection).get());
     await assertFails(testEnv.unauthenticatedContext().firestore().doc(viewPath).get());
+  });
+
+
+  test('stale story tokens lose reads, writes and deletion after account or school revocation', async () => {
+    const now = Date.now();
+    const payload = {
+      schoolId: 'pu', authorUid: 'alice', kind: 'text', text: 'synthetic story',
+      expiresAt: now + 3_600_000, viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('users/charlie').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/other/members/charlie').set({ status: 'active' });
+    });
+    // Keep the same issued auth contexts across every change of permission.
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const story = alice.doc('campusStories/revocation-check');
+    const bobView = bob.doc('campusStories/revocation-check/storyViews/bob');
+
+    await assertSucceeds(story.set(payload));
+    await assertSucceeds(bob.doc(story.path).get());
+    await assertSucceeds(bobView.set({ viewerUid: 'bob', viewedAt: now }));
+    await assertFails(charlie.doc(story.path).get());
+    await assertFails(charlie.doc(story.path).delete());
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').delete();
+      await db.doc(bobView.path).delete();
+    });
+    await assertFails(bob.doc(story.path).get());
+    await assertFails(bob.collection('campusStories')
+      .where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000).get());
+    await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
+    await assertFails(bobView.get());
+
+    await seedFirestore(async (db) => db.doc('users/bob').set({ status: 'active' }));
+    await assertSucceeds(bob.doc(story.path).get());
+    await assertSucceeds(bobView.set({ viewerUid: 'bob', viewedAt: now }));
+
+    await seedFirestore(async (db) => db.doc('users/alice').delete());
+    await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
+    await assertFails(story.get());
+    await assertFails(story.delete());
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
+    });
+    await assertFails(alice.doc('campusStories/revoked-school').set(payload));
+    await assertFails(story.delete());
+    await seedFirestore(async (db) =>
+      db.doc('schools/pu/members/alice').set({ status: 'active' }));
+    await assertSucceeds(story.delete());
   });
 
   for (const objectPath of [
