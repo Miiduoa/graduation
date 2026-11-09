@@ -109,7 +109,9 @@ service cloud.firestore {
           || (
             data.get('pinnedPostId', '') is string
             && data.get('pinnedPostId', '').size() <= 128
-            && data.get('pinnedPostId', '').matches('^[A-Za-z0-9_-]+
+            && data.get('pinnedPostId', '').matches('^[A-Za-z0-9_-]{1,128}$')
+          )
+        )
         && data.headline is string
         && data.headline.size() <= 64
         && data.bio is string
@@ -118,6 +120,19 @@ service cloud.firestore {
         && data.linkUrl.size() <= 512
         && (data.linkUrl == '' || isHttpsStorefrontUrl(data.linkUrl))
         && data.updatedAt == request.time;
+    }
+
+    function creatorPinTargetValid(schoolId, uid, postId) {
+      return postId == ''
+        || (
+          postId is string
+          && postId.size() <= 128
+          && postId.matches('^[A-Za-z0-9_-]{1,128}$')
+          && exists(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId))
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('authorUid', '') == uid
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('anonymous', true) == false
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('schoolId', '') == schoolId
+        );
     }
 
     function isActiveGroupMember(groupId) {
@@ -458,11 +473,16 @@ service cloud.firestore {
         allow get: if isSchoolMember(schoolId);
         allow list: if false;
         allow create: if isSelf(uid) && isSchoolMember(schoolId)
-          && creatorCardValid(schoolId, uid);
+          && creatorCardValid(schoolId, uid)
+          && creatorPinTargetValid(schoolId, uid, request.resource.data.get('pinnedPostId', ''));
         allow update: if isSelf(uid) && isSchoolMember(schoolId)
           && resource.data.get('schoolId', '') == schoolId
           && resource.data.get('ownerUid', '') == uid
-          && creatorCardValid(schoolId, uid);
+          && creatorCardValid(schoolId, uid)
+          && (
+            request.resource.data.get('pinnedPostId', '') == resource.data.get('pinnedPostId', '')
+            || creatorPinTargetValid(schoolId, uid, request.resource.data.get('pinnedPostId', ''))
+          );
         // The owner may withdraw an already-published card after losing school membership.
         allow delete: if isSelf(uid);
       }
