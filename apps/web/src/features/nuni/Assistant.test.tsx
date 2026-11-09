@@ -768,3 +768,67 @@ it('keeps an unsuccessful question recoverable without discarding a later draft'
   expect(field.value).toBe('請核對明天的專題會議');
   expect(screen.getByText('新的草稿不能消失')).toBeTruthy();
 });
+
+it('stops only an in-flight model read, ignores late transport data, and keeps the next draft', async () => {
+  let lateAnswer: (response: Response) => void = () => {};
+  let stoppedSignal: AbortSignal | undefined;
+  let asks = 0;
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, options?: RequestInit) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('/ask')) {
+      asks += 1;
+      if (asks === 1) {
+        stoppedSignal = options?.signal as AbortSignal;
+        return new Promise<Response>((resolve) => { lateAnswer = resolve; });
+      }
+      return json({ answer: '新問題已回答', steps: [], cards: [] });
+    }
+    throw new Error('unexpected mutation endpoint');
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '先幫我規劃本週作業' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  const stop = await screen.findByRole('button', { name: '停止這次回答' });
+  fireEvent.change(field, { target: { value: '下一句已先寫好了' } });
+  fireEvent.click(stop);
+  await screen.findByRole('group', { name: '未完成的問題' });
+  expect(stoppedSignal?.aborted).toBe(true);
+  expect(field.value).toBe('下一句已先寫好了');
+  expect(screen.getByText('先幫我規劃本週作業')).toBeTruthy();
+  lateAnswer(json({ answer: '取消後晚到的舊答案', steps: [], cards: [] }));
+  await waitFor(() => expect(screen.queryByText('取消後晚到的舊答案')).toBeNull());
+  expect(calls.every((path) => !/\/(confirm|cancel|reconcile)$/.test(path))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('新問題已回答');
+  expect(asks).toBe(2);
+  expect(field.value).toBe('');
+});
+
+it('stopping a cloud read never treats action confirmation as cancelled', async () => {
+  let lateAnswer: (response: Response) => void = () => {};
+  let calls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('/ask')) {
+      calls += 1;
+      if (calls === 1) return new Promise<Response>((resolve) => { lateAnswer = resolve; });
+      return json({ answer: '已再次核對需求', steps: [], cards: [] });
+    }
+    throw new Error('should never call a write endpoint');
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '請給我行程建議' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  fireEvent.click(await screen.findByRole('button', { name: '停止這次回答' }));
+  await screen.findByText(/已停止這次回答/);
+  lateAnswer(json({ answer: '這筆不是可執行的回執', steps: [], cards: [] }));
+  expect(screen.queryByText('這筆不是可執行的回執')).toBeNull();
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+});
