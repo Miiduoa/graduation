@@ -342,6 +342,7 @@ function ImportWorkspace({
   const [aiReviewed, setAiReviewed] = useState(false);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [cloudImageConsent, setCloudImageConsent] = useState(false);
+  const [cloudImageStatus, setCloudImageStatus] = useState('');
   const [reviewFilter, setReviewFilter] = useState<'all' | 'attention'>('all');
   const [attentionSnapshot, setAttentionSnapshot] = useState<Set<string>>(() => new Set());
   const [sourceImage, setSourceImage] = useState<{
@@ -966,6 +967,7 @@ function ImportWorkspace({
     const run = generation.current;
     setBusy(true);
     setNotice('');
+    setCloudImageStatus('');
     setSchoolPage(null);
     try {
       const picked = await ImagePicker.launchImageLibraryAsync({
@@ -1031,6 +1033,7 @@ function ImportWorkspace({
               code: 'import-provider', severity: 'warning',
               message: '這次由雲端視覺模型直接辨識原圖，請逐堂對照確認。',
             }]);
+            setCloudImageStatus('雲端視覺辨識成功：圖片已直接交給雲端模型，未經本機 OCR。');
             setNotice('雲端已直接辨識 ' + result.rows.length + ' 堂課。請核對星期、節次、教室，再確認新增。');
             return;
           }
@@ -1041,6 +1044,7 @@ function ImportWorkspace({
         }
       }
       if (!ocr.current) throw new Error('辨識程式尚未就緒，請改貼文字。');
+      if (cloudFailure) setCloudImageStatus(cloudFailure);
       setNotice(cloudFailure || '正在本機讀取截圖，可隨時取消。');
       const readGrid = mode === 'ai' && mime === 'image/png' && asset.width <= 4096 &&
         asset.height <= 4096 && asset.width * asset.height <= 4_000_000;
@@ -1661,6 +1665,11 @@ function ImportWorkspace({
                     onPress={() => hasScreenshotText ? void organizeWithAi() : void pickImage('ai')}
                   />
                 )}
+                {cloudImageStatus ? (
+                  <Text accessibilityRole="alert" style={{ color: theme.colors.muted, lineHeight: 21 }}>
+                    {cloudImageStatus}
+                  </Text>
+                ) : null}
                 {feedback}
               </>
             ) : (
