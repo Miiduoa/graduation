@@ -290,7 +290,7 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
  * stale CDN response, or unrelated API payload must not be portrayed as current OSM.
  */
 export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now()): {
-  buildings: ProvidenceFootprint[]; fetchedAt: string; stale: boolean;
+  buildings: ProvidenceFootprint[]; fetchedAt: string; stale: boolean; osmBaseAt: string | null;
 } | null {
   const data = object(value);
   if (!data || data.schoolId !== 'pu' || data.source !== 'OpenStreetMap' ||
@@ -299,6 +299,18 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
       !Number.isFinite(now)) return null;
   const fetchedAtMs = Date.parse(data.fetchedAt);
   if (!Number.isFinite(fetchedAtMs) || new Date(fetchedAtMs).toISOString() !== data.fetchedAt) return null;
+  // Fetch time is not the Overpass database replication time. Retain older
+  // snapshots without this optional field, but reject misleading metadata.
+  const osmBaseAt = data.osmBaseAt;
+  if (osmBaseAt !== undefined && osmBaseAt !== null) {
+    if (typeof osmBaseAt !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(osmBaseAt)) return null;
+    const baseMs = Date.parse(osmBaseAt);
+    if (!Number.isFinite(baseMs) ||
+        new Date(baseMs).toISOString().replace('.000Z', 'Z') !== osmBaseAt ||
+        baseMs > fetchedAtMs + 5 * 60 * 1000 ||
+        fetchedAtMs - baseMs > 48 * 60 * 60 * 1000) return null;
+  }
   const ageMs = now - fetchedAtMs;
   const day = 24 * 60 * 60 * 1000;
   // Match the server's seven-day expiry; do not let clock skew invent fresh data.
@@ -308,5 +320,6 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
   return {
     buildings, fetchedAt: data.fetchedAt,
     stale: data.stale || ageMs >= day,
+    osmBaseAt: typeof osmBaseAt === 'string' ? osmBaseAt : null,
   };
 }
