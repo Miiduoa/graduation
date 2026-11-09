@@ -24,6 +24,10 @@ jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
   readCreatorIdentity: jest.fn(),
 }));
+jest.mock('../services/creatorCard', () => ({
+  readCreatorCard: jest.fn(async () => null),
+  saveCreatorCard: jest.fn(),
+}));
 jest.mock('../services/campusPostBookmarks', () => ({
   loadCampusPostBookmarks: jest.fn(),
 }));
