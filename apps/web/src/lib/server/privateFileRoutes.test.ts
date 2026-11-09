@@ -238,6 +238,11 @@ it('uploads and downloads an assignment file for the owner', async () => {
 
   const asBob = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' });
   expect(asBob.status).toBe(403);
+  // A finalized upload is not a submitted answer until a trusted receipt references it.
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(403);
+  store.docs.set('groups/course/assignments/work/submissions/alice', {
+    userId: 'alice', submittedAt: Date.now(), attachments: [{ url: ANSWER }],
+  });
   const asTeacher = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' });
   expect(asTeacher.status).toBe(200);
   const teacherWrite = await invoke(
@@ -249,6 +254,19 @@ it('uploads and downloads an assignment file for the owner', async () => {
   const download = await invoke(runtime, { action: 'download', path: ANSWER });
   expect(download.status).toBe(200);
   expect(download.body.url).toContain('token=download-token');
+
+  // A second finalized file in the same submission directory remains a private
+  // draft: known path + teacher role must not be enough to sign its URL.
+  const draftPath = ANSWER.replace('answer.pdf', 'unsubmitted.pdf');
+  const draft = await invoke(runtime, {
+    action: 'upload', path: draftPath, contentType: 'application/pdf', byteSize: 8,
+  });
+  expect(draft.status).toBe(403); // Student submitted already; no new file may be uploaded.
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' })).status).toBe(403);
+  store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(403);
+  store.docs.set('schools/pu/members/teacher', { status: 'active' });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(200);
 });
 
 it('lets a manager replace a group cover and rejects a member write', async () => {

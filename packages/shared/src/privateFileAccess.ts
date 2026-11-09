@@ -126,6 +126,15 @@ function deny(): never {
   throw new PrivateFileAccessError(403, 'File access denied');
 }
 
+/** Exact submitted attachment reference, not merely a guessable submission folder. */
+function referencesSubmittedFile(attachments: unknown, path: string): boolean {
+  return Array.isArray(attachments) && attachments.some((item: unknown) =>
+    item === path || (
+      item !== null && typeof item === 'object' && !Array.isArray(item) &&
+      ((item as { path?: unknown }).path === path || (item as { url?: unknown }).url === path)
+    ));
+}
+
 function accountBlocked(data: Record<string, unknown>): boolean {
   return (
     data.accountDeletionInProgress === true ||
@@ -417,9 +426,15 @@ export async function authorizePrivateFile(
           // Submission update: isSubmissionOwner and submittedAt must still be null.
           if (submission.exists && (owner !== uid || previous.submittedAt != null)) deny();
         } else {
-          // Submission read: own document or canReadSubmissionDoc/canManageGroup.
-          // Assigned peer reviewers are deliberately excluded from file access.
-          if (scope.userId !== uid && !manager && (!submission.exists || owner !== uid)) deny();
+          // A student's finalized but unsubmitted/upload-only object is still private,
+          // including from group managers. Grant manager access only to the precise
+          // attachment on an actual submitted receipt; owner previews remain possible.
+          // Assigned peer reviewers remain excluded from file access.
+          if (scope.userId !== uid && (
+            !manager || !submission.exists || owner !== scope.userId ||
+            previous.submittedAt == null ||
+            !referencesSubmittedFile(previous.attachments, scope.path)
+          )) deny();
         }
       }
       if (

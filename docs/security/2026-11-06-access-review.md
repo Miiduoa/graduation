@@ -397,3 +397,12 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 同一 Web 入口另一個可重現授權缺口：`assertStoryMediaRead` 原只確認已發布 story 的 `mediaUrl` 非空、期限、學校、作者與 MIME 相符，沒有將**要求下載的 object path**和 `story.mediaUrl` 綁在一起。若同一作者在同一 story 下預先 finalize 兩個影像物件，發布時只引用其中之一，其他同校成員仍可用已知的第二個路徑取得新的短效下載 URL。修補在 `issueDownload` 傳入要求的精確路徑，要求已發布 story 的 `mediaUrl === path`；尚未發布、無 story 文件時仍只允許物件 owner 本人下載。
 
 新增同 story 雙物件回歸：合法已發布的路徑維持 200，未引用的相同 owner 物件對作者與同校其他有效成員皆 403；已簽發 URL 不因此立即撤銷。新回歸在記憶體 DB 與合成 Supabase storage 执行，實際 CI 以最新精確提交為準。真 Supabase／GCS staging、舊 bearer／signed URL 撤銷、migration 與發布依舊未完成，不能宣稱正式安全。
+
+
+## 2026-11-10（台灣時間）：私有作業附件的提交收據精確授權
+
+新 Web Supabase `/api/files/private` 的 group-assignment 下載授權原本只要是群組 manager，即使學生尚未有 `submissions/{uid}` 文件，仍能以已知 object path 為學生已 finalized、未提交的附件簽發下載 URL。已有 submission 時也沒有要求附件真的被 submission.attachments 引用。這是新的預簽 URL 權限邊界，不等於先前已簽 URL 的撤銷。
+
+本輪最小收斂：保留學生本人在提交前預覽自己的附件，manager 跨身分下載則必須同時滿足存在對應 submission、路徑學生與 receipt owner 相符、`submittedAt` 非空，而且 `attachments` 含精確的 private path（字串或 `url`／`path` 欄位）。普通同組學生仍不可讀他人的作業；正常 manager 已提交附件仍可讀。已新增記憶體 DB／惰性 Supabase storage 定向回歸：未提交拒絕、合法提交可讀、未引用 sibling／撤權／其他學生拒絕及本人預覽。請以本輪新的精確 head 的 Web tests、CI、CodeQL 確認成功，不以前一 head 綠燈替代。
+
+已發布的 Supabase 短效網址與 GCS bearer URL 不會因本檢查即時失效。正式資料、migration、金鑰、token 清理、E 校園連線及受限 npm/pnpm audit 均未觸及；合併仍依指定 App 5504170 對精確 head 核可及主線窗口處理。

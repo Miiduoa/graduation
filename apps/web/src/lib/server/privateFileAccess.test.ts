@@ -98,7 +98,15 @@ it('allows managers and owners to read, but refuses another student', async () =
   store.docs.delete('groups/course/members/bob');
   await expect(authorize(store, GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('groups/course/members/bob', { status: 'active', role: 'member' });
+  // A manager may grade submitted attachments, not browse filenames in a student's draft.
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
+  const receipt = 'groups/course/assignments/work/submissions/alice';
+  store.docs.set(receipt, { userId: 'alice', attachments: [{ url: GROUP_ANSWER }], submittedAt: Date.now() });
   await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER.replace('answer.pdf', 'draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receipt, { userId: 'alice', attachments: [GROUP_ANSWER], submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
   await expect(authorize(store, GROUP_ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
 });
