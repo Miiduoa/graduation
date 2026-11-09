@@ -34,18 +34,24 @@ export function HomeCampusBusCard({ schoolId }: { schoolId: string }) {
     const resume = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) reconnect();
     };
+    const poll = window.setInterval(() => {
+      if (hasCampusNext(schoolId) && document.visibilityState === 'visible' && navigator.onLine) {
+        reconnect();
+      }
+    }, 60_000);
     window.addEventListener('offline', disconnect);
     window.addEventListener('online', reconnect);
     document.addEventListener('visibilitychange', resume);
     return () => {
+      window.clearInterval(poll);
       window.removeEventListener('offline', disconnect);
       window.removeEventListener('online', reconnect);
       document.removeEventListener('visibilitychange', resume);
     };
-  }, []);
+  }, [schoolId]);
 
   useEffect(() => {
-    if (!hasCampusNext(schoolId) || !online) return;
+    if (!hasCampusNext(schoolId) || !online || document.visibilityState === 'hidden') return;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
     void queryTransit({ action: 'campus-next', schoolId }, controller.signal).then((result) => {

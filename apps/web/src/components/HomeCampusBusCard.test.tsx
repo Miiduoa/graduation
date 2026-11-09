@@ -54,6 +54,7 @@ it('shows the real next campus-gate bus and does not invent a destination', asyn
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 it('never carries the previous school bus into an unsupported campus', async () => {
@@ -110,4 +111,29 @@ it('does not offer a next-bus countdown from a stale source snapshot', async () 
   const { container } = render(<HomeCampusBusCard schoolId="pu" />);
   await waitFor(() => expect(queryTransit).toHaveBeenCalledTimes(1));
   expect(container.textContent).toBe('');
+});
+
+it('refreshes the home preview periodically only while the page is visible and online', async () => {
+  let visible = true;
+  let connected = true;
+  vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visible ? 'visible' : 'hidden');
+  vi.spyOn(navigator, 'onLine', 'get').mockImplementation(() => connected);
+  vi.useFakeTimers();
+  vi.mocked(queryTransit).mockResolvedValue({ status: 'unavailable', reason: 'rate-limited' });
+
+  render(<HomeCampusBusCard schoolId="pu" />);
+  await act(async () => { await Promise.resolve(); });
+  expect(queryTransit).toHaveBeenCalledTimes(1);
+
+  await act(async () => { vi.advanceTimersByTime(60_000); await Promise.resolve(); });
+  expect(queryTransit).toHaveBeenCalledTimes(2);
+
+  visible = false;
+  await act(async () => { vi.advanceTimersByTime(60_000); await Promise.resolve(); });
+  expect(queryTransit).toHaveBeenCalledTimes(2);
+
+  visible = true;
+  connected = false;
+  await act(async () => { vi.advanceTimersByTime(60_000); await Promise.resolve(); });
+  expect(queryTransit).toHaveBeenCalledTimes(2);
 });
