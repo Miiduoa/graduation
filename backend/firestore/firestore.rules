@@ -464,7 +464,8 @@ service cloud.firestore {
           && resource.data.get('schoolId', '') == schoolId
           && resource.data.get('ownerUid', '') == uid
           && creatorCardValid(schoolId, uid);
-        allow delete: if isSelf(uid) && isSchoolMember(schoolId);
+        // The owner may withdraw an already-published card after losing school membership.
+        allow delete: if isSelf(uid);
       }
 
       match /members/{uid} {
