@@ -165,10 +165,12 @@ async def workflow(page, _requests, _resources):
 
     # Open the native downloaded artifact itself to verify it renders independently.
     exported = await page.context.new_page()
+    # SVG documents have no HTML body; capture a bounded viewport, not full-page layout.
+    await exported.set_viewport_size({"width": 960, "height": 900})
     await exported.goto(page.url.rsplit("/", 1)[0] + f"/{prefix}-all.svg")
     await expect(exported.locator("svg")).to_be_visible()
     await expect(exported.locator("text").filter(has_text=ROOMS[1])).to_be_visible()
-    await exported.screenshot(path=str(OUT / f"{prefix}-rendered.png"), full_page=True)
+    await exported.screenshot(path=str(OUT / f"{prefix}-rendered.png"))
     await exported.close()
     return {"downloads": downloads, "objectURLs": urls, "cancelPreservedSelection": True,
             "rejectedImportPreservedSelection": True, "replacementResetSelection": True,
