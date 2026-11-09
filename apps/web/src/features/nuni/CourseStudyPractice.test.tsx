@@ -233,7 +233,7 @@ it('navigates every exact repeated hint quote without losing the answer, focus o
   selectQuestion(1);
   expect(screen.getByRole('region', { name: '本題原文提示' }).textContent).toContain('目前標示第 1 處');
   expect(answerInput().value).toBe('還沒自評的第一題草稿');
-  expect(handlers.onAction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'attempt' }));
+  expect(handlers.onAction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'decide' }));
   expect(model.run).not.toHaveBeenCalled();
 });
 
