@@ -153,3 +153,22 @@ test('bio edits preserve the creator pin and do not permit hidden private fields
   if (snapshot.data()?.pinnedPostId !== 'photo1') throw Error('Editing the bio discarded the pin');
   await assertFails(doc(alice).set({ studentId: 'secret', updatedAt: serverTimestamp() }, { merge: true }));
 });
+
+
+test('a deleted pinned post does not lock the owner out of editing or clearing their biography', async () => {
+  const alice = environment.authenticatedContext('alice').firestore();
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/onceHere').set({
+      schoolId: 'pu', authorUid: 'alice', anonymous: false, title: 'My older post',
+    });
+  });
+  await assertSucceeds(doc(alice).set(card({ pinnedPostId: 'onceHere' })));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/onceHere').delete();
+  });
+  await assertSucceeds(doc(alice).set({ bio: '仍能更新自我介紹', updatedAt: serverTimestamp() }, { merge: true }));
+  const changed = await assertSucceeds(doc(alice).get({ source: 'server' }));
+  if (changed.data()?.bio !== '仍能更新自我介紹') throw Error('Stale pin blocked biography edits');
+  await assertFails(doc(alice).set({ pinnedPostId: 'unrelated', updatedAt: serverTimestamp() }, { merge: true }));
+  await assertSucceeds(doc(alice).set({ pinnedPostId: '', updatedAt: serverTimestamp() }, { merge: true }));
+});
