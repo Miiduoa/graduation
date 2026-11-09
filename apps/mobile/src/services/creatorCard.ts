@@ -27,7 +27,7 @@ export async function saveCreatorCard(
   const normalized = validateCreatorCard(draft);
   await setDoc(cardRef(schoolId, ownerUid), {
     schoolId, ownerUid, ...normalized, updatedAt: serverTimestamp(),
-  });
+  }, { merge: true });
   const confirmed = await readCreatorCard(schoolId, ownerUid);
   if (!confirmed ||
     confirmed.headline !== normalized.headline ||
