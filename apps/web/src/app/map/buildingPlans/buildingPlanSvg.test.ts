@@ -15,7 +15,7 @@ describe('printable building plan SVG', () => {
     expect(svg).toContain('範例教室 101');
     expect(svg).toContain('範例教室 202');
     expect(svg).toContain('待核對圖面');
-    expect(svg).not.toMatch(/<(script|image|foreignObject)\b|href=|url\(/);
+    expect(svg).not.toMatch(/<(script|image|foreignObject)\b|href=|url\(/i);
   });
   it('can download only the explicitly selected floor', () => {
     const plan = createExampleBuildingPlan(scope);
@@ -25,18 +25,30 @@ describe('printable building plan SVG', () => {
     expect(svg).not.toContain('範例教室 101');
     expect(() => exportBuildingPlanSvg(plan, 'missing')).toThrow(/找不到所選樓層/);
   });
-  it('escapes unsafe user-supplied names and never exports provenance URLs', () => {
+  it.each([
+    { script: 'script', svgTag: 'svg', onload: 'onload', img: 'img' },
+    { script: 'SCRIPT', svgTag: 'SVG', onload: 'ONLOAD', img: 'IMG' },
+    { script: 'ScRiPt', svgTag: 'SvG', onload: 'OnLoAd', img: 'ImG' },
+  ])('escapes unsafe $script names and never exports provenance URLs', ({ script, svgTag, onload, img }) => {
     const plan = createExampleBuildingPlan(scope);
-    plan.name = '<script>alert("oops")</script> & test';
-    plan.floors[0].label = '1F <svg onload="x">';
-    plan.floors[0].rooms[0].name = 'A&B <img src=x>';
-    plan.source = { label: '來源 <test>', url: 'https://example.com/path?token=secret' };
+    plan.name = `<${script}>alert("oops")</${script}> & test`;
+    plan.floors[0].label = `1F <${svgTag} ${onload}="x">`;
+    plan.floors[0].rooms[0].name = `A&B <${img} src=x>`;
+    plan.source = { label: `來源 <${script}>`, url: 'https://example.com/path?token=secret' };
     const svg = exportBuildingPlanSvg(plan, 'example-1');
-    expect(svg).toContain('&lt;script&gt;');
-    expect(svg).toContain('A&amp;B &lt;img src=x&gt;');
-    expect(svg).toContain('來源 &lt;test&gt;');
+    expect(svg).toContain(`&lt;${script}&gt;alert(&quot;oops&quot;)&lt;/${script}&gt; &amp; test`);
+    expect(svg).toContain(`A&amp;B &lt;${img} src=x&gt;`);
+    expect(svg).toContain(`來源 &lt;${script}&gt;`);
     expect(svg).not.toContain('https://example.com');
-    expect(svg).not.toMatch(/<script|<img|<svg[^>]+onload=|href=/);
+    expect(svg).not.toMatch(/<script|<img|<svg[^>]+onload=|href=/i);
+
+    // Parse the exported document to verify names remain text, not executable markup.
+    const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    expect(document.querySelector('parsererror')).toBeNull();
+    expect(document.querySelector('#plan-title')?.textContent).toBe(`${plan.name} · 待核對平面圖`);
+    expect(Array.from(document.querySelectorAll('text'), element => element.textContent)).toEqual(
+      expect.arrayContaining([plan.name, plan.floors[0].label, plan.floors[0].rooms[0].name, `來源：${plan.source.label}`]),
+    );
   });
   it('does not suggest an unknown scale is measured in metres', () => {
     const plan = createExampleBuildingPlan(scope);
