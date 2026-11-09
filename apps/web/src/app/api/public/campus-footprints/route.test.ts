@@ -81,6 +81,61 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch.mock.calls[0][1].headers['User-Agent']).toContain('nuni.tw');
   });
 
+  it('rejects a partial Overpass JSON result even when the service returns HTTP 200', async () => {
+    // Overpass can return 200 + elements + remark on query timeout/memory exhaustion.
+    // The partial collection must never become a successful 24-hour cache entry.
+    const partial = JSON.stringify({
+      ...JSON.parse(osmPayload),
+      remark: 'runtime error: Query timed out in "query"',
+    });
+    const mockedFetch = vi.fn().mockResolvedValue(new Response(partial, { status: 200 }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    // Error cooldown must apply; retrying immediately does not repeatedly hit OSM.
+    expect((await GET()).status).toBe(503);
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the last good snapshot when an HTTP 200 Overpass timeout has partial buildings', async () => {
+    const partial = JSON.stringify({
+      elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', height: '90' } }],
+      remark: 'runtime error: Query run out of memory',
+    });
+    const mockedFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+      .mockResolvedValueOnce(new Response(partial, { status: 200 }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const initial = await GET();
+      expect(initial.status).toBe(200);
+      const first = await initial.json();
+      expect(first.buildings[0]).toMatchObject({
+        poiId: 'pu-library', heightMeters: 12, heightBasis: 'illustrative',
+      });
+
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      const body = await fallback.json();
+      expect(body.stale).toBe(true);
+      expect(body.fetchedAt).toBe(first.fetchedAt);
+      expect(body.buildings).toEqual(first.buildings);
+      expect((await GET()).status).toBe(200);
+      expect(mockedFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('stops reading oversized streamed responses before buffering the whole payload', async () => {
     let wasCancelled = false;
     const body = new ReadableStream<Uint8Array>({
