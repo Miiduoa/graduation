@@ -76,7 +76,7 @@ export default function MeAiFirstScreen() {
         <AIRow
           title="發表貼文"
           subtitle="用文字或照片分享校園生活"
-          onPress={() => rootNavigateNested('Today', 'PostCompose')}
+          onPress={() => rootNavigateNested('Today', 'PostCompose', { profileCompose: true })}
         />
       </AISection>
       <AISection title="Google 帳號">
