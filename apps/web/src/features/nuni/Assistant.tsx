@@ -50,14 +50,26 @@ function Conversation({ context, schoolId, accountId, cloudEnabled }: { context:
       },
       ...(input ? { body: JSON.stringify(input) } : {}),
     });
-    if (!response.ok)
+    if (!response.ok) {
+      let serviceDisabled = false;
+      if (response.status === 403) {
+        try {
+          const details = await response.json();
+          serviceDisabled = details?.error === 'PLATFORM_SERVICE_DISABLED';
+        } catch {
+          // Other access failures must not be mistaken for a user's preference.
+        }
+      }
       throw new Error(
-        response.status === 404
-          ? '雲端助理尚未啟用。'
-          : response.status === 429
-            ? '查詢次數已達上限，請稍後再試。'
-            : '目前無法查詢，請重新選擇或稍後再試。',
+        serviceDisabled
+          ? '雲端 AI 已在「設定 → 平台權限」關閉。'
+          : response.status === 404
+            ? '雲端助理尚未啟用。'
+            : response.status === 429
+              ? '查詢次數已達上限，請稍後再試。'
+              : '目前無法查詢，請重新選擇或稍後再試。',
       );
+    }
     return response.json();
     });
   }
@@ -118,6 +130,7 @@ function Conversation({ context, schoolId, accountId, cloudEnabled }: { context:
   }
   if (v2 || capabilityUnavailable) return <>
     {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
+    {error.includes('設定 → 平台權限') && <Link href="/settings?section=platform">管理平台權限</Link>}
     <V2Conversation context={context} schoolId={schoolId} accountId={accountId} ready={providerReady} fallback={fallback} />
   </>;
   return (
@@ -284,9 +297,11 @@ function V2Conversation({
     const result = await response.json();
     if (!response.ok)
       throw new Error(
-        typeof result.message === 'string' && result.message
-          ? result.message
-          : response.status === 409
+        result?.error === 'PLATFORM_SERVICE_DISABLED'
+          ? '雲端 AI 已在「設定 → 平台權限」關閉。'
+          : typeof result.message === 'string' && result.message
+            ? result.message
+            : response.status === 409
             ? '資料或登入狀態已變更，請重新提議。'
             : response.status === 429
               ? '已達查詢預算，請稍後再試。'
@@ -510,6 +525,7 @@ function V2Conversation({
     }
   }
   return (
+    <>
     <AssistantThread
       schoolId={schoolId}
       ready={ready}
@@ -527,6 +543,10 @@ function V2Conversation({
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
     />
+    {error.includes('設定 → 平台權限') && (
+      <Link href="/settings?section=platform">管理平台權限</Link>
+    )}
+    </>
   );
 }
 function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {
