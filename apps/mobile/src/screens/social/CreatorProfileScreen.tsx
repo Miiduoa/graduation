@@ -254,7 +254,7 @@ function ScopedCreatorProfile({
         key: `media:${post.id}:${mediaIndex}`, post, mediaUrl: url, mediaIndex,
       })))
     : visiblePosts.map((post) => ({ key: `post:${post.id}`, post }));
-  const reading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading';
+  const reading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading' || (tab === 'posts' && pin.status === 'loading');
   const failed = tab === 'saved' ? saved.status === 'error' : posts.status === 'error';
 
   const retry = () => tab === 'saved'
