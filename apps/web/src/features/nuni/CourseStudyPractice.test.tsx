@@ -200,10 +200,41 @@ it('only reveals the source on request and marks the exact first quotation', () 
   expect(source.querySelector('blockquote')?.textContent).toBe(sourceText);
   expect(source.querySelectorAll('mark')).toHaveLength(1);
   expect(source.querySelector('mark')?.textContent).toBe(cards[0].sourceQuote);
-  expect(within(source).getByText('相同引句在本段出現 2 處，目前標示第一處。')).toBeTruthy();
+  expect(within(source).getByText('相同引句在本段出現 2 處，目前標示第 1 處。')).toBeTruthy();
   expect(screen.queryByText(cards[0].answer)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '收起原文提示' }));
   expect(screen.queryByRole('region', { name: '本題原文提示' })).toBeNull();
+});
+
+
+it('navigates every exact repeated hint quote without losing the answer, focus or source', () => {
+  const quote = cards[0].sourceQuote;
+  const sourceText = `前文：${quote}；後文再次強調${quote}。`;
+  const handlers = callbacks();
+  render(<Controller deck={[{ ...cards[0], sourceText }, cards[1]]} handlers={handlers} />);
+  writeAnswer('還沒自評的第一題草稿');
+  fireEvent.click(screen.getByRole('button', { name: '查看原文提示' }));
+  const region = screen.getByRole('region', { name: '本題原文提示' });
+  const next = screen.getByRole('button', { name: '下一處相同引句' });
+  next.focus();
+  expect(region.textContent).toContain('目前標示第 1 處');
+  fireEvent.click(next);
+  expect(document.activeElement).toBe(next);
+  expect(region.textContent).toContain('目前標示第 2 處');
+  expect(region.querySelector('mark')?.previousSibling?.textContent).toContain('後文再次強調');
+  expect(region.querySelector('blockquote')?.textContent).toBe(sourceText);
+  expect(answerInput().value).toBe('還沒自評的第一題草稿');
+  fireEvent.click(next);
+  expect(region.textContent).toContain('目前標示第 1 處');
+  fireEvent.click(screen.getByRole('button', { name: '上一處相同引句' }));
+  expect(region.textContent).toContain('目前標示第 2 處');
+  selectQuestion(2);
+  expect(screen.queryByRole('region', { name: '本題原文提示' })).toBeNull();
+  selectQuestion(1);
+  expect(screen.getByRole('region', { name: '本題原文提示' }).textContent).toContain('目前標示第 1 處');
+  expect(answerInput().value).toBe('還沒自評的第一題草稿');
+  expect(handlers.onAction).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'attempt' }));
+  expect(model.run).not.toHaveBeenCalled();
 });
 
 it('shows each self-assessment count after a finite round without inventing a score', () => {

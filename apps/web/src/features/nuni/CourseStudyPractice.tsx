@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { StudyMode } from '@/lib/studyTutor';
 import { STUDY_SESSION_LIMITS } from './courseStudySession';
 import {
@@ -38,6 +38,8 @@ function outcomeLabel(outcome: StudyPracticeResponse['outcome'] | undefined): st
 
 export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onDownload, onCopy, onSave, onCopyCheckpoint }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const evidenceMark = useRef<HTMLElement>(null);
+  const [evidencePosition, setEvidencePosition] = useState<{ key: string; occurrence: number } | null>(null);
   const headingId = useId();
   const attemptId = useId();
   const attemptHelpId = useId();
@@ -49,7 +51,22 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
   const nextUnreviewedIndex = round.finished ? null : nextUnreviewedStudyPracticeIndex(round);
   const canRevealAnswer = !!response?.attempt.trim();
   const answerVisible = !!response?.answerVisible && canRevealAnswer;
-  const evidence = card && response?.hintVisible ? locateStudyEvidence(card.sourceText, card.sourceQuote) : null;
+  // A position belongs to this exact question within this practice round, not
+  // to another card that happens to quote the same text.
+  const evidenceKey = `${round.revision}:${round.index}:${card?.id ?? ''}`;
+  const evidenceOccurrence = evidencePosition?.key === evidenceKey ? evidencePosition.occurrence : 0;
+  const evidence = useMemo(() => card && response?.hintVisible
+    ? locateStudyEvidence(card.sourceText, card.sourceQuote, evidenceOccurrence) : null,
+  [card?.sourceText, card?.sourceQuote, response?.hintVisible, evidenceOccurrence]);
+
+  useEffect(() => { setEvidencePosition(null); }, [evidenceKey, response?.hintVisible]);
+
+  // Move the highlight into view without taking focus from the navigation
+  // button. Editing an answer does not re-scan or scroll the source.
+  useEffect(() => {
+    if (!evidence || evidencePosition?.key !== evidenceKey) return;
+    evidenceMark.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [evidence, evidenceKey, evidencePosition]);
 
   useEffect(() => {
     heading.current?.focus();
@@ -111,9 +128,21 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
         {response.hintVisible && <section id={hintId} className={styles.hint} aria-label="本題原文提示">
           <h5>原文提示</h5>
           <blockquote className={styles.source}>
-            {evidence ? <>{evidence.before}<mark className={styles.highlight}>{evidence.quote}</mark>{evidence.after}</> : card.sourceText}
+            {evidence ? <>{evidence.before}<mark ref={evidenceMark} className={styles.highlight}>{evidence.quote}</mark>{evidence.after}</> : card.sourceText}
           </blockquote>
-          {evidence && evidence.occurrences > 1 && <p className={styles.note}>相同引句在本段出現 {evidence.occurrences} 處，目前標示第一處。</p>}
+          {evidence && evidence.occurrences > 1 && <>
+            <p className={styles.note} role="status" aria-live="polite">
+              相同引句在本段出現 {evidence.occurrences} 處，目前標示第 {evidenceOccurrence + 1} 處。
+            </p>
+            <div className={styles.actions}>
+              <button type="button" className={styles.button}
+                onClick={() => setEvidencePosition({ key: evidenceKey,
+                  occurrence: (evidenceOccurrence + evidence.occurrences - 1) % evidence.occurrences })}>上一處相同引句</button>
+              <button type="button" className={styles.button}
+                onClick={() => setEvidencePosition({ key: evidenceKey,
+                  occurrence: (evidenceOccurrence + 1) % evidence.occurrences })}>下一處相同引句</button>
+            </div>
+          </>}
           {!evidence && <p className={styles.note}>這句引文目前無法在原文定位，請回白板核對。</p>}
         </section>}
 
