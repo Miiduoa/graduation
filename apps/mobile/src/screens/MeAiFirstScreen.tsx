@@ -63,10 +63,22 @@ export default function MeAiFirstScreen() {
   return (
     <AIScreen>
       <AIHero
-        eyebrow="CAMPUS ONE"
+        eyebrow="nuni"
         title={displayName}
         subtitle={details || '管理帳號、課務資料與個人設定。'}
       />
+      <AISection title="我的社群">
+        <AIRow
+          title="個人社群首頁"
+          subtitle="署名貼文、圖文作品與內容管理"
+          onPress={go('MySocialProfile')}
+        />
+        <AIRow
+          title="發表貼文"
+          subtitle="用文字或照片分享校園生活"
+          onPress={() => rootNavigateNested('Today', 'PostCompose')}
+        />
+      </AISection>
       <AISection title="Google 帳號">
         <AIRow
           title="課程、店家與 Google 帳號"
