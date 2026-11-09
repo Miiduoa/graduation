@@ -162,3 +162,47 @@ test('a stalled detail refresh can finish with retry and ignores late permission
     expect(read).toHaveBeenCalledTimes(3);
   } finally { jest.useRealTimers(); }
 });
+
+
+test('renders the confirmed post before replies finish, then retries a stalled reply read without stale denial', async () => {
+  const stalled = deferred<Awaited<ReturnType<typeof listCampusReplies>>>();
+  replies.mockReturnValueOnce(stalled.promise).mockResolvedValueOnce([
+    { id: 'reply-1', schoolId: 'pu', postId: 'old-1', anonymous: true, content: '有補充的二手書資訊' },
+  ] as Awaited<ReturnType<typeof listCampusReplies>>);
+  jest.useFakeTimers();
+  try {
+    const view = screen();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(view.getByText('舊學期的二手書')).toBeTruthy();
+    expect(view.getByText('正在載入留言…')).toBeTruthy();
+    expect(view.queryByText('尚無留言，當第一人吧。')).toBeNull();
+    act(() => { jest.advanceTimersByTime(15_000); });
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('留言暫時無法載入，貼文仍可閱讀。')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重試留言'));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(view.getByText('有補充的二手書資訊')).toBeTruthy();
+    expect(replies).toHaveBeenCalledTimes(2);
+    await act(async () => { stalled.reject(error('permission-denied')); });
+    expect(view.getByText('舊學期的二手書')).toBeTruthy();
+    expect(view.getByText('有補充的二手書資訊')).toBeTruthy();
+    expect(view.queryByText('校籍或貼文權限已變更，無法查看這篇貼文。')).toBeNull();
+  } finally { jest.useRealTimers(); }
+});
+
+test('offline reply fetch is not reported as an empty discussion while the main post stays readable', async () => {
+  replies.mockRejectedValueOnce(error('unavailable'));
+  const view = screen();
+  await view.findByText('舊學期的二手書');
+  expect(await view.findByText('留言暫時無法載入，貼文仍可閱讀。')).toBeTruthy();
+  expect(view.queryByText('尚無留言，當第一人吧。')).toBeNull();
+  expect(view.getByLabelText('重試留言')).toBeTruthy();
+});
+
+test('a server rejection of replies still revokes the whole post instead of showing comments', async () => {
+  replies.mockRejectedValueOnce(error('permission-denied'));
+  const view = screen();
+  await view.findByText('校籍或貼文權限已變更，無法查看這篇貼文。');
+  expect(view.queryByText('舊學期的二手書')).toBeNull();
+  expect(view.queryByLabelText('重試留言')).toBeNull();
+});
