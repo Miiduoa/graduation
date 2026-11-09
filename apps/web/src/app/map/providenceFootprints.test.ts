@@ -161,6 +161,30 @@ describe('Providence OSM building outlines', () => {
     ] })).toEqual([base]);
   });
 
+  it('does not label future-dated OSM way edits as verified provenance', () => {
+    const base = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
+    const stamp = (milliseconds: number) =>
+      new Date(Math.floor(milliseconds / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+    const reasonableClockSkew = stamp(Date.now() + 4 * 60 * 1000);
+    const implausibleFuture = stamp(Date.now() + 6 * 60 * 1000);
+
+    // Overpass geometry may remain usable, but impossible revision metadata must
+    // not appear in the selected building's source/details section.
+    const accepted = parseProvidenceOsmFootprints({ elements: [
+      { ...way(255784049), version: 11, timestamp: reasonableClockSkew },
+    ] });
+    expect(accepted[0]).toMatchObject({ osmVersion: 11, osmEditedAt: reasonableClockSkew });
+    const rejected = parseProvidenceOsmFootprints({ elements: [
+      { ...way(255784049), version: 12, timestamp: implausibleFuture },
+    ] });
+    expect(rejected).toEqual([base]);
+
+    // The browser must also distrust a tampered API timestamp independently.
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [
+      { ...base, osmVersion: 99, osmEditedAt: implausibleFuture },
+    ] })).toEqual([base]);
+  });
+
   it('rejects inflated illustrative heights from the API instead of drawing fictitious towers', () => {
     const footprint = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
     expect(footprint).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
