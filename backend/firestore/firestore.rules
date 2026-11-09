@@ -98,20 +98,24 @@ service cloud.firestore {
         && data.updatedAt == request.time;
     }
 
-    function creatorHighlightValid(schoolId, uid) {
-      let data = request.resource.data;
-      let postPath = /databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(data.postId);
-      return data.keys().hasAll(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
-        && data.keys().hasOnly(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
-        && data.schoolId == schoolId
-        && data.ownerUid == uid
-        && data.postId is string
-        && data.postId.matches('^[A-Za-z0-9_-]{1,128}$')
-        && data.updatedAt == request.time
+    function creatorHighlightPostSigned(schoolId, uid, postId) {
+      let postPath = /databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId);
+      return postId is string
+        && postId.matches('^[A-Za-z0-9_-]{1,128}$')
         && exists(postPath)
         && get(postPath).data.get('schoolId', '') == schoolId
         && get(postPath).data.get('authorUid', '') == uid
         && get(postPath).data.get('anonymous', true) == false;
+    }
+
+    function creatorHighlightValid(schoolId, uid) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
+        && data.keys().hasOnly(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
+        && data.schoolId == schoolId
+        && data.ownerUid == uid
+        && data.updatedAt == request.time
+        && creatorHighlightPostSigned(schoolId, uid, data.postId);
     }
 
     function isActiveGroupMember(groupId) {
@@ -486,7 +490,11 @@ service cloud.firestore {
 
       // Only a member's own signed post can be featured. Owners may unfeature after revocation.
       match /creatorHighlights/{uid} {
-        allow get: if isSelf(uid) || isSchoolMember(schoolId);
+        allow get: if isSelf(uid)
+          || (isSchoolMember(schoolId) && (
+            resource == null
+            || creatorHighlightPostSigned(schoolId, uid, resource.data.get('postId', ''))
+          ));
         allow list: if false;
         allow create: if isSelf(uid) && isSchoolMember(schoolId)
           && creatorHighlightValid(schoolId, uid);
