@@ -197,6 +197,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     school === 'pu' ? 'loading' : 'unavailable',
   );
   const [footprintDate, setFootprintDate] = useState<string | null>(null);
+  const [footprintBaseDate, setFootprintBaseDate] = useState<string | null>(null);
   const [footprintStale, setFootprintStale] = useState(false);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
@@ -234,6 +235,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         if (!snapshot) throw new Error('No recent, source-checked building outlines');
         setFootprints(snapshot.buildings);
         setFootprintDate(snapshot.fetchedAt.slice(0, 10));
+        setFootprintBaseDate(snapshot.osmBaseAt?.slice(0, 10) ?? null);
         setFootprintStale(snapshot.stale);
         setFootprintStatus('ready');
       })
@@ -312,6 +314,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                     <strong>{footprints.length} 棟公開建築輪廓</strong>
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
+                    {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
                   </>
                 )}
                 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap 貢獻者</a>
