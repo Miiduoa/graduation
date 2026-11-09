@@ -227,7 +227,8 @@ it.each(['returned', 'thrown'] as const)(
     await vi.waitFor(() => expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(3));
     if (failure === 'returned') resolveFirst({ ok: false, status: 401 });
     else rejectFirst(Object.assign(new Error('HTTP 401'), { status: 401 }));
-    await Promise.resolve();
+    // Let the rejected worker classify the failure before releasing peers.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     releasePeers();
     await peersDone;
     const response = await pending;
