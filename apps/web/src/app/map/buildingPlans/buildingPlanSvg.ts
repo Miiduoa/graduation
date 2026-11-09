@@ -1,9 +1,14 @@
 import type { BuildingPlan, PlanFloor, PlanPoint } from './buildingPlan';
 
 /** Static, self-contained SVG for reviewing an unverified drawing. No URLs or raster data. */
-const escapeXml = (value: string) => value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/[&<>"']/g, character => ({
+const XML_ENTITIES: Record<string, string> = {
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
-})[character]!);
+};
+const escapeXml = (value: string) => Array.from(value, character => {
+  const codePoint = character.codePointAt(0)!;
+  if (codePoint < 0x20 || codePoint === 0x7f) return ' ';
+  return XML_ENTITIES[character] ?? character;
+}).join('');
 
 const coord = (value: number) => Number(value.toFixed(3));
 const points = (vertices: PlanPoint[], transform: (point: PlanPoint) => PlanPoint) =>
