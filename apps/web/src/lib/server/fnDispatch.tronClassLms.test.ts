@@ -194,6 +194,55 @@ it.each(['homework', 'activities', 'announcements'] as const)(
   },
 );
 
+it.each(['returned', 'thrown'] as const)(
+  'stops scheduling queued homework reads after the first 401 (%s)',
+  async (failure) => {
+    const { request, source, store } = setup();
+    const courses = Array.from({ length: 5 }, (_, index) => ({
+      id: 10001 + index, name: `Course ${index + 1}`,
+    }));
+    vi.mocked(source.fetchCourses).mockImplementation(async (_cookies, options) =>
+      options.status === 'ongoing' ? courses : []);
+
+    type PageResult = Awaited<ReturnType<LmsReadonlySource['fetchHomeworkPage']>>;
+    let resolveFirst!: (result: PageResult) => void;
+    let rejectFirst!: (error: Error) => void;
+    const first = new Promise<PageResult>((resolve, reject) => {
+      resolveFirst = resolve;
+      rejectFirst = reject;
+    });
+    let releasePeers!: () => void;
+    const peerGate = new Promise<void>((resolve) => { releasePeers = () => resolve(); });
+    let markPeersDone!: () => void;
+    const peersDone = new Promise<void>((resolve) => { markPeersDone = resolve; });
+    let completedPeers = 0;
+    vi.mocked(source.fetchHomeworkPage).mockImplementation(async (_cookies, courseId) => {
+      if (courseId === 10001) return first;
+      await peerGate;
+      if (++completedPeers === 2) markPeersDone();
+      return { ok: true, value: { homework_activities: [], total: 0 } };
+    });
+
+    const pending = request();
+    await vi.waitFor(() => expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(3));
+    if (failure === 'returned') resolveFirst({ ok: false, status: 401 });
+    else rejectFirst(Object.assign(new Error('HTTP 401'), { status: 401 }));
+    await Promise.resolve();
+    releasePeers();
+    await peersDone;
+    const response = await pending;
+    const body = await response.json();
+    await Promise.resolve();
+    expect(body.error.status).toBe('FAILED_PRECONDITION');
+    expect(body.result).toBeUndefined();
+    expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(source.fetchHomeworkPage).mock.calls.map((args) => args[1]))
+      .toEqual([10001, 10002, 10003]);
+    expect(store.docs.has(CACHE)).toBe(false);
+    expect(JSON.stringify(body)).not.toMatch(/lms-secret|cookies/);
+  },
+);
+
 it('does not retain a partial homework page when page two rejects with HTTP 401', async () => {
   const { request, source, store } = setup();
   vi.mocked(source.fetchHomeworkPage)

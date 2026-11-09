@@ -208,7 +208,10 @@ async function mapPool<T, R>(
       try {
         results[index] = await worker(items[index]);
       } catch (error) {
-        if (classifySchoolReadError(error) === 'session') {
+        // Stop dispatching queued courses after an authentication failure.
+        // Already in-flight reads may finish, but their data must not be returned.
+        if ((error instanceof HttpsError && error.code === 'failed-precondition') ||
+          classifySchoolReadError(error) === 'session' || schoolHttpStatus(error) === 401) {
           sessionError = error;
           return;
         }
