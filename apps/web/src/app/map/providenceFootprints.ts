@@ -183,7 +183,11 @@ function osmWayRevision(value: Record<string, unknown>): Pick<ProvidenceFootprin
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1 ||
       typeof timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(timestamp)) return {};
   const time = Date.parse(timestamp);
-  if (!Number.isFinite(time) || new Date(time).toISOString().replace('.000Z', 'Z') !== timestamp) return {};
+  // An upstream edit time substantially in the future is not a credible
+  // provenance label. Keep the valid outline, but omit the dubious revision.
+  // Allow a small clock skew across Overpass, our server and the device.
+  if (!Number.isFinite(time) || time > Date.now() + 5 * 60 * 1000 ||
+      new Date(time).toISOString().replace('.000Z', 'Z') !== timestamp) return {};
   return { osmVersion: version, osmEditedAt: timestamp };
 }
 
