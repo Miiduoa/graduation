@@ -288,6 +288,32 @@ describe('Providence footprint API snapshot freshness', () => {
     }, now)).toMatchObject({ stale: true, osmBaseAt: previousBaseAt });
   });
 
+  it('marks a cached snapshot stale when its OSM replication age reaches 48 hours', () => {
+    // An intermediary can still return stale=false after origin freshness expires.
+    // A 46.5h-old database at HTTP fetch time reaches 48h before the 24h
+    // HTTP snapshot age limit. Do not call that geometry fresh on the device.
+    const osmBaseAt = '2026-11-07T10:30:00Z';
+    const snapshot = { ...response, osmBaseAt };
+    expect(parseProvidenceFootprintSnapshot(snapshot, now)).toMatchObject({
+      stale: false, osmBaseAt,
+    });
+    const deadline = Date.parse(osmBaseAt) + 48 * 60 * 60 * 1000;
+    expect(parseProvidenceFootprintSnapshot(snapshot, deadline - 1)).toMatchObject({
+      stale: false, osmBaseAt,
+    });
+    expect(parseProvidenceFootprintSnapshot(snapshot, deadline)).toMatchObject({
+      stale: true, osmBaseAt, buildings: [footprint],
+    });
+    expect(parseProvidenceFootprintSnapshot(snapshot, deadline + 60_000)).toMatchObject({
+      stale: true, osmBaseAt,
+    });
+    // Legacy responses without the optional replication metadata keep the
+    // existing 24h fetch-age rule; do not fabricate a replication timestamp.
+    expect(parseProvidenceFootprintSnapshot(response, deadline + 60_000)).toMatchObject({
+      stale: false, osmBaseAt: null,
+    });
+  });
+
   it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {
     for (const osmBaseAt of [
       '2099-01-01T00:00:00Z',
