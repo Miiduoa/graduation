@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BufferGeometry, Camera, InstancedMesh, Material, Matrix4, Scene, Vector3 } from 'three';
+import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
+import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
+import { parseProvidenceOsmFootprints, type ProvidenceFootprint } from './providenceFootprints';
 import { createCampusSpatialScene, type CampusSpatialScene, type CampusSpatialView } from './campusSpatialScene';
 import {
   DEFAULT_SPATIAL_BEARING,
@@ -98,7 +100,8 @@ function drawFrame(elapsed = 16) {
   for (const callback of pending) callback(time);
 }
 
-function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) => void) {
+function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) => void,
+  footprints: readonly ProvidenceFootprint[] = []) {
   const container = document.createElement('div');
   container.tabIndex = -1;
   const bounds = { width: 800, height: 480 };
@@ -109,7 +112,7 @@ function setup(source = model, onCameraChange?: (camera: CampusSpatialCamera) =>
   document.body.append(container);
   const onSelect = vi.fn();
   const onError = vi.fn();
-  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange });
+  const scene = createCampusSpatialScene(container, source, { onSelect, onError, onCameraChange, footprints });
   scenes.push(scene);
   return { scene, container, bounds, onSelect, onError, renderer: webgl.renderers.at(-1)! };
 }
@@ -746,4 +749,42 @@ describe('controlled spatial camera input', () => {
     expect(onCameraChange).not.toHaveBeenCalled();
     expect(frames.size).toBe(0);
   });
+});
+
+it('extrudes OSM footprints in geographically aligned meters only for known spatial points', () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const outlines = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049,
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  const { renderer } = setup(campus, undefined, outlines);
+  drawFrame();
+  const graph = renderer.render.mock.calls.at(-1)?.[0] as Scene;
+  const volumes: Mesh[] = [];
+  graph.traverse((object) => {
+    if (object instanceof Mesh && object.geometry instanceof ExtrudeGeometry) volumes.push(object);
+  });
+  expect(volumes).toHaveLength(1);
+  const volume = volumes[0];
+  volume.geometry.computeBoundingBox();
+  const bounds = volume.geometry.boundingBox!;
+  expect(bounds.max.z - bounds.min.z).toBeCloseTo(12, 6); // not a measured building height
+  expect(bounds.max.x - bounds.min.x).toBeGreaterThan(10); // geographic longitude span in meters
+  expect(bounds.max.y - bounds.min.y).toBeGreaterThan(10); // geographic latitude span in meters
+  const otherSchool = buildCampusSpatialModel(locations);
+  const other = setup(otherSchool, undefined, outlines);
+  drawFrame();
+  const otherGraph = other.renderer.render.mock.calls.at(-1)?.[0] as Scene;
+  let otherVolumes = 0;
+  otherGraph.traverse((object) => {
+    if (object instanceof Mesh && object.geometry instanceof ExtrudeGeometry) otherVolumes += 1;
+  });
+  expect(otherVolumes).toBe(0);
 });
