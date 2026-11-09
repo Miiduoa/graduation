@@ -544,7 +544,26 @@
   background: var(--accent-soft);
 }
 
+.stopReply {
+  min-height: 44px;
+  margin-left: auto;
+  padding: 7px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.stopReply:hover {
+  background: var(--accent-soft);
+}
+
 .typing {
+  flex-wrap: wrap;
   display: inline-flex;
   align-items: center;
   gap: 6px;
