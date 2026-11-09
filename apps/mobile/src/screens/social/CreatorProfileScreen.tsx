@@ -316,7 +316,7 @@ function ScopedCreatorProfile({
               <Text style={styles.postTitle} numberOfLines={2}>{item.title || '未命名貼文'}</Text>
               <Text style={styles.postExcerpt} numberOfLines={3}>{item.content}</Text>
               <Text style={styles.postStats}>
-                喜歡 {Math.max(0, typeof item.likes === 'number' ? item.likes : 0)}　回覆 {Math.max(0, typeof item.commentCount === 'number' ? item.commentCount : 0)}
+                喜歡 {Math.max(0, typeof item.likes === 'number' ? item.likes : 0)} · 回覆 {Math.max(0, typeof item.commentCount === 'number' ? item.commentCount : 0)}
               </Text>
             </View>
             {!!first && (
