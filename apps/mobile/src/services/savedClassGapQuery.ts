@@ -242,6 +242,17 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (timetable.source === 'unreadable') return reply('這台手機暫時讀不到已存的課表。請開啟「我的課表」重新讀取。');
   if (timetable.source === 'not-available') return reply('這台手機還沒有這個帳號的個人課表。請先在「我的課表」匯入或儲存課程。');
 
+  // Restored follow-up filters are not trusted merely because the TypeScript type matches.
+  // A damaged clock/duration must not crash the formatter or imply the student is free.
+  if (!query || !['today', 'tomorrow', 'day-after-tomorrow'].includes(query.day) ||
+      !Number.isSafeInteger(query.minMinutes) || query.minMinutes < 0 || query.minMinutes > 1440 ||
+      (query.part !== undefined && query.part !== 'morning' && query.part !== 'afternoon' && query.part !== 'evening') ||
+      (query.fromMinute !== undefined && (!Number.isSafeInteger(query.fromMinute) ||
+        query.fromMinute < 0 || query.fromMinute >= 1440)) ||
+      (query.untilMinute !== undefined && (!Number.isSafeInteger(query.untilMinute) ||
+        query.untilMinute <= 0 || query.untilMinute > 1440))) {
+    return reply('空堂查詢條件無法核對，請重新指定日期與時間，或開啟「我的課表」確認。');
+  }
   const now = Date.parse(context.checkedAt);
   if (!Array.isArray(timetable.classGaps) || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
@@ -261,6 +272,9 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   // during the afternoon really means 15:30–18:00).
   const startMinute = Math.max((bounds?.start ?? 0) * 60, query.fromMinute ?? 0);
   const endMinute = Math.min((bounds?.end ?? 24) * 60, query.untilMinute ?? 1440);
+  if (startMinute >= endMinute) {
+    return reply('空堂查詢條件的時間範圍無效，請重新指定開始與結束時間。');
+  }
   const from = Math.max(now, midnight + startMinute * MINUTE);
   const until = midnight + endMinute * MINUTE;
   const time = (minute: number) => minute === 1440 ? '24:00' : clock.format(midnight + minute * MINUTE);

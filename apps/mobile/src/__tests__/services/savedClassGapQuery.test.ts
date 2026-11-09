@@ -310,6 +310,35 @@ describe('saved class gap answer', () => {
     expect(answer({ minMinutes: 121 })).toContain('沒有至少 121 分鐘');
   });
 
+  test('rejects corrupted restored clock filters without crashing or inventing free time', () => {
+    const malformed = [
+      { ...today, day: 'yesterday' },
+      { ...today, part: '__proto__' },
+      { ...today, minMinutes: Number.NaN },
+      { ...today, minMinutes: -30 },
+      { ...today, minMinutes: 1441 },
+      { ...today, fromMinute: Number.NaN },
+      { ...today, fromMinute: -1 },
+      { ...today, fromMinute: 1440 },
+      { ...today, untilMinute: Number.POSITIVE_INFINITY },
+      { ...today, untilMinute: 0 },
+      { ...today, untilMinute: 1441 },
+      { ...today, fromMinute: 960, untilMinute: 930 },
+      { ...today, part: 'afternoon', fromMinute: 1140 },
+    ];
+    for (const restored of malformed) {
+      const result = answerSavedClassGapQuery(restored as SavedClassGapQuery, context);
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('查詢條件');
+      expect(result.content).not.toContain('沒有課間空堂');
+      expect(result.content).not.toContain('有 2 段');
+    }
+    // Valid parser output and exact-day bounds remain usable.
+    expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery({ ...today, fromMinute: 0, untilMinute: 1440 }, context).content)
+      .toContain('14:00–15:00（60 分鐘）');
+  });
+
   test('distinguishes a known empty result from missing, unreadable or incomplete evidence', () => {
     const answer = (timetable: Partial<OnDeviceSchoolContext['timetable']>, checkedAt = context.checkedAt) =>
       answerSavedClassGapQuery(today, { ...context, checkedAt, timetable: { ...context.timetable, ...timetable } }).content;
