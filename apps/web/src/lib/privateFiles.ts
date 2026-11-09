@@ -8,7 +8,7 @@ import {
 } from '@campus/shared/src/privateFileAccess';
 import { FunctionsUnconfiguredError } from './functionsUrl';
 import { getAuth } from './firebase';
-import { isR2FileStorageEnabled, privateFileApiPath } from './fileStorageBackend';
+import { isSupabaseFileStorageEnabled, privateFileApiPath } from './fileStorageBackend';
 
 export { privateStoryPath, privateGroupAssignmentPath, privateAssignmentPath, privateGroupCoverPath, privateGroupPostPath };
 
@@ -19,12 +19,13 @@ export type PrivateFileTicket = {
   headers: Record<string, string>;
   expiresAt: string;
   maxBytes: number;
+  requiresFinalize: boolean;
 };
 
 export function privateFilesEnabled(
   raw: string | undefined = process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND,
 ): boolean {
-  return isR2FileStorageEnabled(raw);
+  return isSupabaseFileStorageEnabled(raw);
 }
 
 function unavailable(statusCode?: number): never {
@@ -37,11 +38,11 @@ async function idToken(): Promise<string> {
   return user.getIdToken();
 }
 
-async function issueTicket(
-  action: 'upload' | 'download',
+async function requestPrivateFile(
+  action: 'upload' | 'download' | 'finalize',
   path: string,
   extra: Record<string, unknown> = {},
-): Promise<PrivateFileTicket> {
+): Promise<Record<string, unknown>> {
   if (!privateFilesEnabled()) unavailable();
   const token = await idToken();
   const response = await fetch(privateFileApiPath(), {
@@ -53,21 +54,22 @@ async function issueTicket(
     body: JSON.stringify({ action, path, ...extra }),
     cache: 'no-store',
   });
-  const payload = (await response.json().catch(() => ({}))) as {
-    error?: unknown;
-    path?: unknown;
-    url?: unknown;
-    method?: unknown;
-    headers?: unknown;
-    expiresAt?: unknown;
-    maxBytes?: unknown;
-  };
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (response.status === 503) unavailable(503);
   if (!response.ok) {
     if (response.status === 429) throw Object.assign(new Error(PRIVATE_FILE_UPLOAD_RATE_MESSAGE), { statusCode: 429, source: 'api' });
     const message = typeof payload.error === 'string' ? payload.error : 'File request failed';
     throw Object.assign(new Error(message), { statusCode: response.status, source: 'api' });
   }
+  return payload;
+}
+
+async function issueTicket(
+  action: 'upload' | 'download',
+  path: string,
+  extra: Record<string, unknown> = {},
+): Promise<PrivateFileTicket> {
+  const payload = await requestPrivateFile(action, path, extra);
   if (
     typeof payload.path !== 'string' ||
     typeof payload.url !== 'string' ||
@@ -85,6 +87,7 @@ async function issueTicket(
     headers: payload.headers as Record<string, string>,
     expiresAt: payload.expiresAt,
     maxBytes: Number(payload.maxBytes) || 0,
+    requiresFinalize: payload.requiresFinalize === true,
   };
 }
 
@@ -110,6 +113,12 @@ export async function uploadPrivateFile(input: {
   });
   if (response.status === 412) throw new Error('File already exists or changed');
   if (!response.ok) throw Object.assign(new Error(response.status === 429 ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : 'File request failed'), { statusCode: response.status, source: 'object' });
+  if (ticket.requiresFinalize) {
+    const finalized = await requestPrivateFile('finalize', ticket.path);
+    if (finalized.finalized !== true || finalized.path !== ticket.path) {
+      throw new Error('File request failed');
+    }
+  }
   return { path: ticket.path };
 }
 

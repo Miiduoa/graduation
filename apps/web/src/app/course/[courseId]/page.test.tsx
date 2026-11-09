@@ -434,8 +434,8 @@ it('offers scoped course counts and accessible shortcuts without inventing a wor
   expect(within(navigation).getByRole('link', { name: '作業與評量' }).getAttribute('href')).toBe('#assignments');
 });
 
-it('uploads R2 assignment attachments and submits their paths without requiring text', async () => {
-  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+it('uploads Supabase assignment attachments and submits their paths without requiring text', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const privateFiles = await import('@/lib/privateFiles');
   const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
   try {
@@ -448,19 +448,19 @@ it('uploads R2 assignment attachments and submits their paths without requiring 
   } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
 });
 
-it('preserves successful attachments after 429 and retries only remaining files', async () => {
-  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+it.each([429, 413])('preserves finalized attachments after upload failure %s and retries only remaining files', async (statusCode) => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const privateFiles = await import('@/lib/privateFiles');
   const upload = vi.spyOn(privateFiles, 'uploadPrivateFile')
     .mockResolvedValueOnce({ path: 'ignored' })
-    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockRejectedValueOnce(Object.assign(new Error('Upload or finalization failed'), { statusCode }))
     .mockResolvedValue({ path: 'ignored' });
   try {
     await mount();
     const region = within(screen.getByRole('region', { name: '作業 A' }));
     fireEvent.change(region.getByLabelText('作業附件'), { target: { files: ['one', 'two', 'three'].map(name => new File(['answer'], `${name}.pdf`, { type: 'application/pdf' })) } });
     submit('A');
-    await region.findByText('上傳太頻繁，請稍後再試');
+    await region.findByText(statusCode === 429 ? '上傳太頻繁，請稍後再試' : '未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
     expect(upload).toHaveBeenCalledTimes(2);
     expect(submitCourseText).not.toHaveBeenCalled();
     submit('A');
@@ -472,7 +472,7 @@ it('preserves successful attachments after 429 and retries only remaining files'
 });
 
 it('rejects selection of more than six attachments', async () => {
-  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   try {
     await mount();
     const region = within(screen.getByRole('region', { name: '作業 A' }));

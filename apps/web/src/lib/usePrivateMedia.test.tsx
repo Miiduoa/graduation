@@ -31,3 +31,13 @@ it('shows a placeholder for unavailable private media', async () => {
   await waitFor(() => expect(state.resolve).toHaveBeenCalled());
   expect(screen.getByText('佔位')).toBeTruthy();
 });
+
+it.each(['groups/g/cover.png', 'groups/g/cover.12345678-1234-1234-1234-123456789abc.png'])('downloads cover paths as blobs (%s)', async (path) => {
+  state.resolve.mockResolvedValue(new Blob(['image']));
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cover');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const view = render(<Media value={path} />);
+  await waitFor(() => expect(screen.getByText('blob:cover')).toBeTruthy());
+  expect(state.resolve).toHaveBeenCalledWith(path);
+  view.unmount();
+});

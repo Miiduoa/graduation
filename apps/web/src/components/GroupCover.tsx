@@ -47,9 +47,9 @@ export function GroupCover({
                 const extension = file.type.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
                 const nextPath = privateGroupCoverPath(groupId, extension);
                 if (!nextPath) throw new Error('封面路徑無效');
-                await uploadPrivateFile({ path: nextPath, body: file, contentType: file.type });
-                await updateDoc(doc(getDb(), 'groups', groupId), { coverUrl: nextPath });
-                setSaved(nextPath);
+                const uploaded = await uploadPrivateFile({ path: nextPath, body: file, contentType: file.type });
+                await updateDoc(doc(getDb(), 'groups', groupId), { coverUrl: uploaded.path });
+                setSaved(uploaded.path);
                 setRevision((value) => value + 1);
                 setNotice('已更新群組封面');
               } catch {

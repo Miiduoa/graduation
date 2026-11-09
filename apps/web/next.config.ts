@@ -18,6 +18,20 @@ const libraryFormOrigins = [...new Set(Object.values(officialLibraryDirectory)
   .filter((url) => url.protocol === 'https:' && !url.username && !url.password)
   .map((url) => url.origin))];
 
+// 私人媒體先下載為 Blob；只有 fetch 需要儲存服務來源。
+const privateStorageOrigin = (() => {
+  for (const raw of [process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL]) {
+    if (!raw?.trim()) continue;
+    try {
+      const url = new URL(raw.trim());
+      if (url.protocol === 'https:' && !url.username && !url.password) return url.origin;
+    } catch {
+      // 缺少有效建置期 URL 時採用 Supabase 專案網域。
+    }
+  }
+  return 'https://*.supabase.co';
+})();
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -31,8 +45,8 @@ const contentSecurityPolicy = [
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
   // api.nuni.tw is the existing school-discovery host used by /auth/account.
-  "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://*.r2.cloudflarestorage.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
-    emulatorConnectSrc,
+  "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
+    ' ' + privateStorageOrigin + emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [

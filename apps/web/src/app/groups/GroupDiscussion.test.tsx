@@ -88,7 +88,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(privateFilesEnabled).mockImplementation(() => process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND === 'r2');
+  vi.mocked(privateFilesEnabled).mockImplementation(() => process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND === 'supabase');
   account.user = { uid: 'alice', displayName: 'Alice' };
   account.loading = false;
   sessionStorage.clear();
@@ -361,14 +361,14 @@ it('keeps the visible draft and does not dispatch when the publication record ca
   }
 });
 
-it('shows attachment input only when R2 is enabled and stores uploaded paths', async () => {
+it('shows attachment input only when Supabase is enabled and stores uploaded paths', async () => {
   const privateFiles = await import('@/lib/privateFiles');
   const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
   const view = await act(async () => renderPage());
   await screen.findByText('週三外拍');
   expect(screen.queryByLabelText('附加圖片或文件')).toBeNull();
   view.unmount();
-  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   try {
     await act(async () => {
       renderPage();
@@ -444,23 +444,29 @@ it('discards upload progress when starting a new draft', async () => {
   expect(vi.mocked(uploadPrivateFile).mock.calls[1][0].path).not.toBe(path);
 });
 
-it('retries a lost PUT response with a new path and retains confirmed attachments', async () => {
+it.each(['upload response', 'finalization'])('retries failed %s with a new path and retains confirmed attachments', async (failure) => {
   const actual = await vi.importActual<typeof import('@/lib/privateFiles')>('@/lib/privateFiles');
   vi.mocked(uploadPrivateFile).mockImplementation(actual.uploadPrivateFile);
-  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const stored = new Set<string>();
   const puts: string[] = [];
   const network = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (init?.method === 'POST') {
-      const { path } = JSON.parse(String(init.body));
-      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000 }) } as Response;
+      const { path, action } = JSON.parse(String(init.body));
+      if (action === 'finalize') {
+        if (failure === 'finalization' && puts.length === 2) {
+          return { ok: false, status: 413, json: async () => ({ error: 'File is too large' }) } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({ path, finalized: true }) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000, requiresFinalize: true }) } as Response;
     }
     const path = String(url);
     puts.push(path);
     expect(init?.headers).toEqual({ 'If-None-Match': '*' });
     if (stored.has(path)) return { ok: false, status: 412 } as Response;
     stored.add(path);
-    if (puts.length === 2) throw new TypeError('Response lost');
+    if (failure === 'upload response' && puts.length === 2) throw new TypeError('Response lost');
     return { ok: true, status: 200 } as Response;
   });
   vi.stubGlobal('fetch', network);
