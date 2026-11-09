@@ -204,12 +204,14 @@ it('does not combine calendar writes and food-order review into one batch confir
   expect(confirm).toHaveLength(2);
   // Food cannot advance while a preceding calendar item is not read back.
   expect((confirm[1] as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/先核對前面的個人行程是否已成功建立/)).toBeTruthy();
   fireEvent.click(confirm[0]);
   expect(onConfirm).toHaveBeenLastCalledWith([calendar]);
   expect(onConfirm).toHaveBeenCalledTimes(1);
   rerender(<AssistantCardStack cards={[calendar, foodCard]}
     states={{ [calendar.mutationId]: verifiedState(calendar) }} pending={false}
     onConfirm={onConfirm} onCancel={vi.fn()} />);
+  expect(screen.queryByText(/先核對前面的個人行程是否已成功建立/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '確認' }));
   expect(onConfirm).toHaveBeenLastCalledWith([foodCard]);
   expect(onConfirm).toHaveBeenCalledTimes(2);
@@ -223,6 +225,19 @@ it('does not combine calendar writes and food-order review into one batch confir
     onConfirm={onConfirm} onCancel={vi.fn()} />);
   expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
   expect(screen.getAllByRole('button', { name: '確認' })).toHaveLength(2);
+});
+
+it('holds a later mixed action when the prior calendar operation has an uncertain receipt', () => {
+  const calendar = eventCard('m1', '準備英文');
+  const onConfirm = vi.fn();
+  render(<AssistantCardStack cards={[calendar, foodCard]} pending={false}
+    states={{ m1: { status: 'unknown', message: '行程結果尚未讀回' } }}
+    onConfirm={onConfirm} onCancel={vi.fn()} />);
+  expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+  const food = screen.getByRole('button', { name: '確認' }) as HTMLButtonElement;
+  expect(food.disabled).toBe(true);
+  expect(screen.getByText(/先核對前面的個人行程是否已成功建立/)).toBeTruthy();
+  expect(onConfirm).not.toHaveBeenCalled();
 });
 
 it('refuses to render a confirmation button for an unknown model tool', () => {
