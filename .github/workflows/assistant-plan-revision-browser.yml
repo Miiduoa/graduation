@@ -13,6 +13,7 @@ on:
       - 'apps/web/src/lib/assistantCalendarExecution*'
       - 'apps/web/src/lib/assistantPlanProtection*'
       - 'apps/web/src/lib/assistantPlanRevisionDraft*'
+      - 'apps/web/src/lib/assistantPrecisePlanDraft*'
       - 'apps/web/src/lib/assistantExecutionJournal*'
       - 'apps/web/src/lib/personalImports*'
       - 'apps/web/src/app/globals.css'
@@ -65,6 +66,10 @@ jobs:
           pnpm --filter web exec vitest run \
             src/lib/nuni/assistantV2/protectedPlanServiceFlow.test.ts \
             src/lib/nuni/assistantV2/directPlanRevision.test.ts \
+            src/lib/assistantPrecisePlanDraft.test.ts \
+            src/features/nuni/assistant/usePrecisePlanDraft.test.tsx \
+            src/features/nuni/assistant/AssistantPrecisePlanDraftRecovery.test.tsx \
+            src/features/nuni/assistant/AssistantPrecisePlanRevision.test.tsx \
             src/lib/nuni/assistantV2/protectedPlanRunner.test.ts \
             src/lib/nuni/assistantV2/protectedPlan.test.ts \
             src/lib/nuni/assistantV2/planRevision.test.ts \

@@ -22,3 +22,5 @@
 .ranges dt { color: var(--muted); }
 .ranges dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 @media (max-width: 480px) { .fields { grid-template-columns: minmax(0, 1fr); } .editor, .comparison { padding: 12px; } .actions > button { flex: 1 1 auto; } }
+
+.draftInfo { display: grid; gap: 8px; min-width: 0; }

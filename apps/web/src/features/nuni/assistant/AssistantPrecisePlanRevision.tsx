@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPlanProtection, type PlanProtectionEvent } from '@/lib/assistantPlanProtection';
+import type { PrecisePlanDraftContent } from '@/lib/assistantPrecisePlanDraft';
 import { hasUnresolvedAssistantAction } from './planRevision';
 import {
   buildPrecisePlanRevision, getPrecisePlanRevisionTargets, precisePlanTimeRange, samePrecisePlanEvent,
@@ -10,11 +11,22 @@ import {
 import type { V2ActionStates, V2Turn } from './types';
 import styles from './AssistantPrecisePlanRevision.module.css';
 
+export type PreciseRevisionDraftBridge = {
+  status?: string;
+  pendingRecovery?: boolean;
+  recovery?: { id: string; match: 'exact' | 'fresh' | 'mismatch' | 'ambiguous' };
+  onChange: (content: PrecisePlanDraftContent) => void;
+  onReplace: (content: PrecisePlanDraftContent) => { ok: boolean; message?: string };
+  onClear: () => { ok: boolean; message?: string };
+  onApply: () => { ok: boolean; message?: string; content?: PrecisePlanDraftContent };
+};
+
 type Props = {
   turn: V2Turn;
   states: V2ActionStates;
   pending: boolean;
   enabled: boolean;
+  draft?: PreciseRevisionDraftBridge;
   onPreview: (change: PrecisePlanRevisionChange) => Promise<{ ok: boolean; message: string }>;
 };
 type TimeFields = { date: string; endDate: string; startTime: string; endTime: string };
@@ -24,7 +36,7 @@ const initialFields = (target: PrecisePlanRevisionTarget): TimeFields => ({
   startTime: target.event.startTime, endTime: target.event.endTime,
 });
 
-function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: Props & { targets: PrecisePlanRevisionTarget[] }) {
+function PreciseEditor({ turn, states, pending, enabled, onPreview, targets, draft }: Props & { targets: PrecisePlanRevisionTarget[] }) {
   const id = useId();
   const panel = useRef<HTMLElement>(null), entry = useRef<HTMLButtonElement>(null);
   const select = useRef<HTMLSelectElement>(null), endTime = useRef<HTMLInputElement>(null);
@@ -34,6 +46,8 @@ function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: P
   const [selected, setSelected] = useState(targets[0].mutationId);
   const [drafts, setDrafts] = useState<Record<string, TimeFields>>({});
   const [notice, setNotice] = useState<Notice>(null);
+  const [draftNotice, setDraftNotice] = useState<Notice>(null);
+  const [lastEditedIndex, setLastEditedIndex] = useState(targets[0].index);
   const target = targets.find(value => value.mutationId === selected)!;
   const fields = drafts[selected] ?? initialFields(target);
   const pristine = turn.reply.cards.every(card => states[card.mutationId] === undefined);
@@ -42,6 +56,8 @@ function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: P
   const unresolved = hasUnresolvedAssistantAction(states);
   const available = enabled && !unresolved && (pristine || retryable);
   const waiting = pending || submitting;
+  const editedCount = Object.keys(drafts).length;
+  const matchingRecovery = draft?.recovery?.match === 'exact' || draft?.recovery?.match === 'fresh';
   useLayoutEffect(() => {
     mounted.current = true;
     return () => {
@@ -51,9 +67,74 @@ function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: P
   }, []);
   useEffect(() => { if (open) select.current?.focus(); }, [open]);
 
+  function content(nextDrafts = drafts, selectedIndex = lastEditedIndex): PrecisePlanDraftContent {
+    return { selectedIndex, edits: targets.flatMap(value => nextDrafts[value.mutationId]
+      ? [{ index: value.index, ...nextDrafts[value.mutationId] }] : []) };
+  }
   function changeField(field: keyof TimeFields, value: string) {
-    setDrafts(previous => ({ ...previous, [selected]: { ...(previous[selected] ?? initialFields(target)), [field]: value } }));
+    if (waiting || busy.current || complete) return;
+    const next = { ...drafts, [selected]: { ...fields, [field]: value } };
+    const original = initialFields(target);
+    if ((Object.keys(original) as (keyof TimeFields)[]).every(key => next[selected][key] === original[key])) delete next[selected];
+    setDrafts(next);
+    setLastEditedIndex(target.index);
     setNotice(null);
+    setDraftNotice(null);
+    // Save raw editing content only on actual field changes, never on reads or selection.
+    if (draft && available) {
+      try { draft.onChange(content(next, target.index)); }
+      catch { setDraftNotice({ error: true, text: '時間欄位尚未確認暫存，目前輸入仍保留；請勿重新載入此頁。' }); }
+    }
+  }
+  function clearDraft() {
+    if (!draft || waiting || busy.current) return;
+    try {
+      const result = draft.onClear();
+      if (!result.ok) {
+        setDraftNotice({ error: true, text: result.message || '時間草稿尚未確認清除，目前時間欄位仍保留。' });
+        return;
+      }
+      setDrafts({});
+      setSelected(targets[0].mutationId);
+      setLastEditedIndex(targets[0].index);
+      setNotice(null);
+      setDraftNotice({ error: false, text: result.message || '時間草稿已清除，欄位回到原提議；文字草稿與確認卡未變更。' });
+      select.current?.focus();
+    } catch { setDraftNotice({ error: true, text: '時間草稿尚未確認清除，目前時間欄位仍保留。' }); }
+  }
+  function replaceDraft() {
+    if (!draft || !available || waiting || busy.current || !editedCount) return;
+    try {
+      const result = draft.onReplace(content());
+      setDraftNotice({ error: !result.ok, text: result.message || (result.ok
+        ? '已改存目前時間欄位，先前時間草稿已取代；文字草稿未變更。'
+        : '目前時間欄位尚未確認儲存，先前草稿與目前輸入仍需保留。') });
+    } catch { setDraftNotice({ error: true, text: '目前時間欄位尚未確認儲存，請保留此頁。' }); }
+  }
+  function applyDraft() {
+    if (!draft?.recovery || !matchingRecovery || !available || waiting || busy.current) return;
+    try {
+      const result = draft.onApply();
+      if (!result.ok || !result.content) {
+        setDraftNotice({ error: true, text: result.message || '時間草稿尚未套用，目前欄位仍保留。' });
+        return;
+      }
+      const restored = result.content, selectedTarget = targets.find(value => value.index === restored.selectedIndex);
+      const next: Record<string, TimeFields> = {};
+      if (!selectedTarget || !Array.isArray(restored.edits)) throw new Error();
+      for (const edit of restored.edits) {
+        const match = targets.find(value => value.index === edit.index);
+        if (!match || next[match.mutationId] ||
+          [edit.date, edit.endDate, edit.startTime, edit.endTime].some(value => typeof value !== 'string')) throw new Error();
+        next[match.mutationId] = { date: edit.date, endDate: edit.endDate, startTime: edit.startTime, endTime: edit.endTime };
+      }
+      setDrafts(next);
+      setSelected(selectedTarget.mutationId);
+      setLastEditedIndex(restored.selectedIndex);
+      setNotice(null);
+      setDraftNotice({ error: false, text: result.message || '時間草稿已帶入，尚未預覽或送出；請核對選取項目與時間。' });
+      select.current?.focus();
+    } catch { setDraftNotice({ error: true, text: '時間草稿無法完整核對，目前時間欄位仍保留。' }); }
   }
   function close() {
     setOpen(false);
@@ -122,6 +203,30 @@ function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: P
       {!unresolved && !available && open && <p role="status" className={styles.notice}>目前不能預覽這份時間調整，請依原確認卡與登入狀態核對。</p>}
       {open && <form id={id + '-form'} className={styles.editor} aria-label="精確調整行程時間"
         aria-busy={submitting || undefined} noValidate onSubmit={event => { event.preventDefault(); void preview(); }}>
+        {draft && <div className={styles.draftInfo}>
+          <p className={styles.hint}>本分頁會分開暫存時間草稿與文字草稿，30 分鐘內可恢復。只有編輯時間欄位或明確改存時才更新暫存期限。</p>
+          {draft.status && draft.status !== draftNotice?.text && <p className={styles.notice} role="status">{draft.status}</p>}
+          {draft.recovery && <>
+            <p className={styles.hint}>{draft.recovery.match === 'exact'
+              ? '已核對為同一份來源，可手動帶回時間欄位。'
+              : draft.recovery.match === 'fresh'
+                ? '目前提議的完整內容與順序逐欄相同，且可唯一對應；可手動帶回時間欄位。'
+                : draft.recovery.match === 'ambiguous'
+                  ? '新提議含有完全相同的行程，無法唯一對應時間草稿；請核對草稿並重新選擇、填寫要調整的項目。'
+                  : '目前提議的內容或順序已變更，不能直接套用時間草稿；請核對草稿並重新選擇、填寫要調整的項目。'}</p>
+            {matchingRecovery && <div className={styles.actions}>
+              <button type="button" className={styles.secondary} disabled={!available || waiting} onClick={applyDraft}>
+                {editedCount ? '以恢復草稿取代目前時間欄位' : '套用已恢復的時間草稿'}
+              </button>
+              {editedCount > 0 && <button type="button" className={styles.secondary} disabled={waiting}
+                onClick={() => setDraftNotice({ error: false, text: '已保留目前時間欄位，沒有套用恢復草稿；先前草稿仍保留。' })}>保留目前時間欄位</button>}
+            </div>}
+          </>}
+          {draft.pendingRecovery && editedCount > 0 && <>
+            <p className={styles.hint}>本分頁另有時間草稿。改存目前時間欄位會取代先前時間草稿，不影響文字草稿。</p>
+            <button type="button" className={styles.secondary} disabled={!available || waiting} onClick={replaceDraft}>改存目前時間欄位</button>
+          </>}
+        </div>}
         <label htmlFor={id + '-target'}>要調整的行程</label>
         <select ref={select} id={id + '-target'} value={selected} disabled={waiting}
           aria-describedby={id + '-original ' + id + '-scope'}
@@ -130,6 +235,7 @@ function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: P
         </select>
         <p id={id + '-original'} className={styles.original}>原提議：{target.label}</p>
         <p id={id + '-scope'} className={styles.hint}>只調整選取項目的時間，名稱與全天設定不變，其餘行程逐欄保持原樣。</p>
+        {editedCount > 1 && <p className={styles.notice}>目前有 {editedCount} 項時間欄位尚未送出；這次只預覽選取項目，其餘已編輯時間不會套用。送出操作前會清除這份原提議的暫存草稿；若要調整其他項目，請在新提議重新填寫。</p>}
         <p id={id + '-zone'} className={styles.hint}>所有日期與時間皆為台灣時間（UTC+8）。跨日請填寫實際結束日期，開始與結束日期最多相隔 31 天。</p>
         <div className={styles.fields}>
           <div className={styles.field}>
@@ -159,7 +265,9 @@ function PreciseEditor({ turn, states, pending, enabled, onPreview, targets }: P
             {submitting ? '正在預覽時間調整…' : '預覽時間調整'}
           </button>
           <button type="button" className={styles.secondary} disabled={waiting} onClick={close}>收起時間調整</button>
+          {draft && <button type="button" className={styles.secondary} disabled={waiting} onClick={clearDraft}>清除時間草稿</button>}
         </div>
+        {draftNotice && <p className={styles.notice} role={draftNotice.error ? 'alert' : 'status'}>{draftNotice.text}</p>}
         {notice && <p className={styles.notice} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
       </form>}
     </>}

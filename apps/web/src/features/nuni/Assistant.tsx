@@ -12,6 +12,9 @@ import { AssistantPrecisePlanRevision, AssistantPrecisePlanComparison } from './
 import { buildPrecisePlanRevision, type PrecisePlanRevisionChange } from './assistant/precisePlanRevision';
 import { AssistantPlanDraftRecovery } from './assistant/AssistantPlanDraftRecovery';
 import { usePlanRevisionDraft } from './assistant/usePlanRevisionDraft';
+import { usePrecisePlanDraft } from './assistant/usePrecisePlanDraft';
+import { AssistantPrecisePlanDraftRecovery } from './assistant/AssistantPrecisePlanDraftRecovery';
+import { precisePlanDraftSourceMatch } from '@/lib/assistantPrecisePlanDraft';
 import { revisionDraftContentMatches, revisionDraftSource } from '@/lib/assistantPlanRevisionDraft';
 import { AssistantPlanComparison } from './assistant/AssistantPlanComparison';
 import { createPlanProtection, validatePlanProtection, type PlanProtection } from '@/lib/assistantPlanProtection';
@@ -292,13 +295,25 @@ function V2Conversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const drafts = usePlanRevisionDraft({ accountId, schoolId, context }, active);
+  const timeDrafts = usePrecisePlanDraft({ accountId, schoolId, context }, active);
   function sourceForTurn(turn: V2Turn) {
     if (turn.reply.cards.some(card => card.schoolId !== schoolId)) return null;
     try { return revisionDraftSource(turn.reply.cards); } catch { return null; }
   }
   function clearTurnDraft(turn: V2Turn): { ok: boolean; message?: string } {
     const source = sourceForTurn(turn);
-    return source ? drafts.clearSource(source.key, true) : { ok: true };
+    if (!source) return { ok: true };
+    // Both are unfinished inputs for this exact source, never execution authority.
+    // Clear before dispatch and stop if either storage result cannot be verified.
+    const textResult = drafts.clearSource(source.key, true);
+    if (!textResult.ok) return textResult;
+    return timeDrafts.clearSource(source.key, true);
+  }
+  function canSaveTimeDraft(turn: V2Turn) {
+    return active() && !busy.current && journalReadyRef.current &&
+      turns.includes(turn) && !hasUnresolvedAssistantAction(actionStates.current) &&
+      isUnattemptedCalendarPlan(turn, actionStates.current) &&
+      !revisionTurns.current.has(turn) && !preciseRevisionTurns.current.has(turn);
   }
   async function send(action: string, input: object) {
     const signal = controller.current!.signal;
@@ -711,6 +726,9 @@ function V2Conversation({
     <AssistantPlanDraftRecovery draft={drafts.draft} restored={drafts.restored} status={drafts.status}
       blocked={!journalReady || pending || hasUnresolvedAssistantAction(states)}
       onRestore={drafts.restore} onDiscard={drafts.discard} onChange={drafts.changeRecovered} />
+    <AssistantPrecisePlanDraftRecovery draft={timeDrafts.draft} restored={timeDrafts.restored} status={timeDrafts.status}
+      blocked={!journalReady || pending || hasUnresolvedAssistantAction(states)}
+      onRestore={timeDrafts.restore} onDiscard={timeDrafts.discard} />
     <AssistantThread
       schoolId={schoolId}
       ready={ready}
@@ -737,7 +755,28 @@ function V2Conversation({
         const source = sourceForTurn(turn);
         return <>
           <AssistantPrecisePlanRevision turn={turn} states={states} pending={pending}
-            enabled={journalReady} onPreview={change => reviseTime(turn, change)} />
+            enabled={journalReady} onPreview={change => reviseTime(turn, change)}
+            draft={source ? {
+              status: timeDrafts.editorStatuses[source.key],
+              pendingRecovery: !!timeDrafts.draft,
+              recovery: timeDrafts.restored && timeDrafts.draft ? {
+                id: timeDrafts.draft.id, match: precisePlanDraftSourceMatch(timeDrafts.draft, source),
+              } : undefined,
+              onChange: content => {
+                if (canSaveTimeDraft(turn)) timeDrafts.saveEditor(source, content);
+              },
+              onReplace: content => {
+                if (!canSaveTimeDraft(turn))
+                  return { ok: false, message: '目前提議或原操作仍待核對，尚未取代時間草稿。' };
+                return timeDrafts.replaceEditor(source, content);
+              },
+              onClear: () => timeDrafts.clearSource(source.key),
+              onApply: () => {
+                if (!canSaveTimeDraft(turn))
+                  return { ok: false, message: '請先取得有效且未執行的提議，並核對原操作後再套用時間草稿。' };
+                return timeDrafts.apply(source);
+              },
+            } : undefined} />
           <AssistantPlanRevision turn={turn} states={states} pending={pending}
           enabled={ready && consent} onPreview={(instruction, indices) => revisePlan(turn, instruction, indices)}
           draft={source ? {
