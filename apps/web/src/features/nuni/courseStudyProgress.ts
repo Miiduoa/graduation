@@ -185,8 +185,32 @@ function readData(value: unknown, version: ProgressVersion, expectedScope?: Cour
   return { scope, source, position: { sectionIndex, passageIndex, mode: position.mode as StudyMode }, passages };
 }
 
+/**
+ * Counts UTF-8 bytes without allocating an encoded copy of an up-to-8 MiB
+ * backup. A lone UTF-16 surrogate becomes U+FFFD (three bytes), matching
+ * TextEncoder; a valid surrogate pair becomes four bytes.
+ */
+export function exceedsStudyBackupByteLimit(value: string, limit = COURSE_STUDY_PROGRESS_LIMITS.bytes): boolean {
+  if (value.length > limit) return true;
+  let byteCount = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) byteCount += 1;
+    else if (code <= 0x7ff) byteCount += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        byteCount += 4;
+        index += 1;
+      } else byteCount += 3;
+    } else byteCount += 3;
+    if (byteCount > limit) return true;
+  }
+  return false;
+}
+
 function checkBytes(value: string) {
-  if (value.length > COURSE_STUDY_PROGRESS_LIMITS.bytes || new TextEncoder().encode(value).byteLength > COURSE_STUDY_PROGRESS_LIMITS.bytes)
+  if (exceedsStudyBackupByteLimit(value))
     invalid('閱讀進度檔上限為 8 MiB，請改用較小份的進度，或先下載文字筆記保留內容。');
 }
 

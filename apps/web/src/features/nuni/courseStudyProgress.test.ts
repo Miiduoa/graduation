@@ -5,6 +5,7 @@ import { appendStudyLesson, emptyStudyPassage, studyLessonHistory, type StudyMod
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
   courseStudyProgressFilename,
+  exceedsStudyBackupByteLimit,
   parseCourseStudyProgress,
   serializeCourseStudyProgress,
   type CourseStudyProgressData,
@@ -349,6 +350,27 @@ describe('lesson and draft validation', () => {
 });
 
 describe('size and filenames', () => {
+  it('matches TextEncoder byte lengths for Chinese, emoji and isolated UTF-16 surrogates', () => {
+    for (const input of [
+      '', 'ASCII data', '資料庫', 'é', '€', '😀', '甲😀乙', '\u0000', '\ufeff',
+      '\ud800', '\udc00', 'A\ud800B', '\ud800\ud800\udc00', '\ud83d\ude00\udc00',
+    ]) {
+      const actual = new TextEncoder().encode(input).byteLength;
+      for (const limit of new Set([0, 1, 2, 3, 4, actual - 1, actual, actual + 1].filter((value) => value >= 0))) {
+        expect(exceedsStudyBackupByteLimit(input, limit)).toBe(actual > limit);
+      }
+    }
+  });
+
+  it('accepts the exact 8 MiB boundary without allocating an 8 MiB encoded array', () => {
+    const limit = COURSE_STUDY_PROGRESS_LIMITS.bytes;
+    expect(exceedsStudyBackupByteLimit('a'.repeat(limit))).toBe(false);
+    expect(exceedsStudyBackupByteLimit('a'.repeat(limit + 1))).toBe(true);
+    expect(exceedsStudyBackupByteLimit('中'.repeat(Math.floor(limit / 3)))).toBe(false);
+    expect(exceedsStudyBackupByteLimit('中'.repeat(Math.floor(limit / 3) + 1))).toBe(true);
+    expect(exceedsStudyBackupByteLimit('😀'.repeat(limit / 4))).toBe(false);
+    expect(exceedsStudyBackupByteLimit('😀'.repeat(limit / 4) + 'x')).toBe(true);
+  });
   it('checks UTF-8 bytes, rather than only JavaScript string length, before parsing', () => {
     const tooLarge = '字'.repeat(Math.floor(COURSE_STUDY_PROGRESS_LIMITS.bytes / 3) + 1);
     expect(tooLarge.length).toBeLessThan(COURSE_STUDY_PROGRESS_LIMITS.bytes);

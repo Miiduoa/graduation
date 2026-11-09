@@ -2,6 +2,7 @@ import { splitStudySection, type StudyMode } from '@/lib/studyTutor';
 import { STUDY_SESSION_LIMITS } from './courseStudySession';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
+  exceedsStudyBackupByteLimit,
   parseCourseStudyProgress,
   serializeCourseStudyProgress,
   type CourseStudyProgressData,
@@ -45,8 +46,7 @@ function integer(value: unknown, maximum: number): number {
 }
 
 function bytes(raw: string): void {
-  if (raw.length > COURSE_STUDY_PROGRESS_LIMITS.bytes ||
-    new TextEncoder().encode(raw).byteLength > COURSE_STUDY_PROGRESS_LIMITS.bytes) {
+  if (exceedsStudyBackupByteLimit(raw)) {
     invalid('練習進度檔超過 8 MiB，請分批保存或先下載文字練習紀錄。');
   }
 }
@@ -153,7 +153,7 @@ export function isStudyPracticeCheckpoint(raw: string): boolean {
   // UTF-16 length alone undercounts multi-byte Chinese text and emoji.
   // Reject oversized UTF-8 input BEFORE probing with JSON.parse; full scope
   // and document validation still belongs to the selected backup parser.
-  if (typeof raw !== 'string' || raw.length > COURSE_STUDY_PROGRESS_LIMITS.bytes) return false;
+  if (typeof raw !== 'string') return false;
   try {
     bytes(raw);
     const parsed: unknown = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
