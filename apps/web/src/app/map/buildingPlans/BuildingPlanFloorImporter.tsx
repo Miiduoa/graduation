@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, type BuildingPlan, type PlanFloor } from './buildingPlan';
-import { appendBuildingPlanFloor, type BuildingPlanFloorPlacement } from './buildingPlanFloors';
+import { MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, type BuildingPlan, type PlanFloor, type PlanPoint } from './buildingPlan';
+import { appendBuildingPlanFloor, suggestBuildingPlanFloorAlignment, type BuildingPlanFloorPlacement } from './buildingPlanFloors';
 import styles from './BuildingPlanFloorImporter.module.css';
 
 type Props = {
@@ -12,6 +12,10 @@ type Props = {
   onStagingChange?: (staging: boolean) => void;
 };
 type Prepared = { base: BuildingPlan; plan: BuildingPlan; addedFloorId: string };
+
+function cornerOptions(points: PlanPoint[]) {
+  return points.map(([x, y], index) => <option key={index} value={index}>角點 {index + 1}（{x}, {y}）</option>);
+}
 
 function AlignmentDrawing({ reference, candidate }: { reference: PlanFloor; candidate: PlanFloor }) {
   const points = [...reference.outline, ...candidate.outline];
@@ -49,6 +53,10 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
   const [offsetY, setOffsetY] = useState('0');
   const [rotation, setRotation] = useState<BuildingPlanFloorPlacement['rotationDegrees']>(0);
   const [referenceId, setReferenceId] = useState(plan.floors[0].id);
+  const [referenceA, setReferenceA] = useState(0);
+  const [referenceB, setReferenceB] = useState(1);
+  const [incomingA, setIncomingA] = useState(0);
+  const [incomingB, setIncomingB] = useState(1);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -100,6 +108,8 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
       setOffsetX('0');
       setOffsetY('0');
       setRotation(0);
+      setReferenceA(0); setReferenceB(1);
+      setIncomingA(0); setIncomingB(1);
       setPrepared(null);
       accepted = true;
       setNotice('圖面已讀取，請設定樓層位置。尚未加入目前建築。');
@@ -111,6 +121,23 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
   }
 
   function invalidatePreview() { focusPrepared.current = false; setPrepared(null); setError(''); setNotice(''); }
+
+  function calculateAlignment() {
+    if (blocked || reading || !sourceFloor) return;
+    invalidatePreview();
+    const alignment = suggestBuildingPlanFloorAlignment({
+      referenceA: reference.outline[referenceA],
+      referenceB: reference.outline[referenceB],
+      incomingA: sourceFloor.outline[incomingA],
+      incomingB: sourceFloor.outline[incomingB],
+    });
+    if (!alignment.ok) { setError(alignment.message); return; }
+    // Keep sub-millimetre precision in the editable fields, without auto-scaling.
+    setOffsetX(String(Number(alignment.offsetX.toFixed(5))));
+    setOffsetY(String(Number(alignment.offsetY.toFixed(5))));
+    setRotation(alignment.rotationDegrees);
+    setNotice(`已帶入 ${alignment.rotationDegrees}° 旋轉與位移；第二對角點誤差 ${alignment.errorMetres.toFixed(2)} 公尺。請預覽核對後再加入樓層。`);
+  }
 
   function prepareFloor() {
     if (blocked || reading || !incoming) return;
@@ -158,7 +185,8 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
           <div className={styles.field}><label htmlFor={`${fileId}-floor`}>加入哪一層</label><select id={`${fileId}-floor`} value={sourceFloorId} onChange={event => {
             const floor = incoming.floors.find(item => item.id === event.target.value);
             if (!floor) return;
-            setSourceFloorId(floor.id); setLabel(floor.label); invalidatePreview();
+            setSourceFloorId(floor.id); setLabel(floor.label);
+            setIncomingA(0); setIncomingB(1); invalidatePreview();
           }}>{incoming.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}</select></div>
           <p className={styles.hint}>此層來源：{source?.url
             ? <a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>
@@ -171,10 +199,37 @@ export default function BuildingPlanFloorImporter({ plan, disabled = false, onCh
             <div className={styles.field}><label htmlFor={`${fileId}-rotation`}>圖面旋轉</label><select id={`${fileId}-rotation`} value={rotation} onChange={event => { setRotation(Number(event.target.value) as BuildingPlanFloorPlacement['rotationDegrees']); invalidatePreview(); }}>
               <option value="0">不旋轉</option><option value="90">順時針 90°</option><option value="180">旋轉 180°</option><option value="270">順時針 270°</option>
             </select></div>
-            <div className={styles.field}><label htmlFor={`${fileId}-reference`}>位置參考樓層</label><select id={`${fileId}-reference`} value={reference.id} onChange={event => setReferenceId(event.target.value)}>
+            <div className={styles.field}><label htmlFor={`${fileId}-reference`}>位置參考樓層</label><select id={`${fileId}-reference`} value={reference.id} onChange={event => {
+              setReferenceId(event.target.value); setReferenceA(0); setReferenceB(1); invalidatePreview();
+            }}>
               {plan.floors.map(floor => <option key={floor.id} value={floor.id}>{floor.label}</option>)}
             </select></div>
           </div>
+          <details className={styles.importer}>
+            <summary>依兩組角點對位（選用）</summary>
+            <div className={styles.content}>
+              <p className={styles.hint}>請選同一個實際位置，在參考樓層與來源圖面各標示 A、B 兩個角點；兩點要有足夠距離。只計算 90° 倍數的旋轉與位移，不自動縮放、也不推測北向。</p>
+              <div className={styles.grid}>
+                <div className={styles.field}>
+                  <label htmlFor={`${fileId}-reference-a`}>參考樓層對位點 A</label>
+                  <select id={`${fileId}-reference-a`} value={referenceA} onChange={event => { setReferenceA(Number(event.target.value)); invalidatePreview(); }}>{cornerOptions(reference.outline)}</select>
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor={`${fileId}-reference-b`}>參考樓層對位點 B</label>
+                  <select id={`${fileId}-reference-b`} value={referenceB} onChange={event => { setReferenceB(Number(event.target.value)); invalidatePreview(); }}>{cornerOptions(reference.outline)}</select>
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor={`${fileId}-incoming-a`}>來源圖面對位點 A</label>
+                  <select id={`${fileId}-incoming-a`} value={incomingA} onChange={event => { setIncomingA(Number(event.target.value)); invalidatePreview(); }}>{cornerOptions(sourceFloor?.outline ?? [])}</select>
+                </div>
+                <div className={styles.field}>
+                  <label htmlFor={`${fileId}-incoming-b`}>來源圖面對位點 B</label>
+                  <select id={`${fileId}-incoming-b`} value={incomingB} onChange={event => { setIncomingB(Number(event.target.value)); invalidatePreview(); }}>{cornerOptions(sourceFloor?.outline ?? [])}</select>
+                </div>
+              </div>
+              <button type="button" onClick={calculateAlignment}>依兩組對位點計算位置</button>
+            </div>
+          </details>
           <p className={styles.hint}>樓底標高沿用目前建築的高度基準。平面位置先繞來源原點旋轉，再平移；正值向右、向下。來源樓高為 {sourceFloor?.height} 公尺，組合不縮放圖面。</p>
           <button type="button" onClick={prepareFloor}>預覽樓層位置</button>
           {prepared && candidate && <div ref={previewRegion} className={styles.prepared} tabIndex={-1} aria-label="待加入樓層確認">

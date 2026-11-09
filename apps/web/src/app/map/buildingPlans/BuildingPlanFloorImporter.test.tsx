@@ -56,6 +56,43 @@ describe('joining completed floor files', () => {
     expect(document.activeElement).toBe(screen.getByText('加入樓層圖面'));
   });
 
+  it('computes a quarter turn from two manually matched corner pairs, without adding the floor automatically', async () => {
+    const { onChange, plan } = setup();
+    const upper = floorPlan('2F');
+    upper.floors[0].outline = [[0, 0], [14, 0], [14, 22], [0, 22]];
+    upper.floors[0].rooms = [];
+    upper.floors[0].walls = [];
+    const before = JSON.stringify(plan);
+    await candidate(upper);
+    fireEvent.click(screen.getByText('依兩組角點對位（選用）'));
+    fireEvent.change(screen.getByLabelText('參考樓層對位點 B'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('來源圖面對位點 B'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '依兩組對位點計算位置' }));
+    expect((screen.getByLabelText('圖面旋轉') as HTMLSelectElement).value).toBe('90');
+    expect((screen.getByLabelText('水平位移（公尺）') as HTMLInputElement).value).toBe('0');
+    expect((screen.getByLabelText('垂直位移（公尺）') as HTMLInputElement).value).toBe('0');
+    expect(screen.getByText(/第二對角點誤差 0.00 公尺/)).toBeTruthy();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(JSON.stringify(plan)).toBe(before);
+    preview();
+    expect(screen.getByText('待加入樓層：2F').parentElement?.getAttribute('points')).toBe('0,0 0,14 -22,14 -22,0');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps manual offsets after rejected alignment and invalidates earlier placement approval', async () => {
+    const { onChange } = setup();
+    await candidate();
+    fireEvent.change(screen.getByLabelText('水平位移（公尺）'), { target: { value: '6' } });
+    preview();
+    fireEvent.click(screen.getByText('依兩組角點對位（選用）'));
+    fireEvent.change(screen.getByLabelText('來源圖面對位點 B'), { target: { value: '2' } });
+    expect(screen.queryByRole('button', { name: '加入這個樓層' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '依兩組對位點計算位置' }));
+    expect(screen.getByRole('alert').textContent).toContain('距離不一致');
+    expect((screen.getByLabelText('水平位移（公尺）') as HTMLInputElement).value).toBe('6');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('invalidates reviewed positions when any placement field changes', async () => {
     const { onChange } = setup();
     await candidate(); preview();

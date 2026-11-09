@@ -9,6 +9,7 @@ import {
 } from './buildingPlan';
 import {
   appendBuildingPlanFloor,
+  suggestBuildingPlanFloorAlignment,
   removeBuildingPlanFloor,
   updateBuildingPlanFloor,
   type BuildingPlanFloorPlacement,
@@ -391,5 +392,67 @@ describe('removing floors', () => {
     expectRejected(removeBuildingPlanFloor(plan, { ...scope, buildingId: 'another' }, 'traced-1'), /不屬於目前學校/);
     plan.floors[1].height = 0;
     expectRejected(removeBuildingPlanFloor(plan, scope, 'second'), /樓高/);
+  });
+});
+
+describe('two-point floor alignment suggestions', () => {
+  it.each([
+    [0, [9, 6]],
+    [90, [5, 10]],
+    [180, [1, 6]],
+    [270, [5, 2]],
+  ] as const)('finds an exact %s-degree quarter-turn using corresponding corners', (rotationDegrees, b) => {
+    const sourceA: PlanPoint = [10, 20], sourceB: PlanPoint = [14, 20];
+    const a: PlanPoint = [5, 6];
+    const snapshots = JSON.stringify([sourceA, sourceB, a, b]);
+    const result = suggestBuildingPlanFloorAlignment({
+      referenceA: a, referenceB: [...b], incomingA: sourceA, incomingB: sourceB,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.rotationDegrees).toBe(rotationDegrees);
+    expect(result.errorMetres).toBe(0);
+    expect(JSON.stringify([sourceA, sourceB, a, b])).toBe(snapshots);
+  });
+
+  it('honours the first anchor exactly instead of silently stretching incoming geometry', () => {
+    const result = suggestBuildingPlanFloorAlignment({
+      referenceA: [5, 7], referenceB: [17, 7],
+      incomingA: [2, 3], incomingB: [2, -9],
+    });
+    expect(result).toEqual({ ok: true, rotationDegrees: 90, offsetX: 8, offsetY: 5, errorMetres: 0 });
+  });
+
+  it('allows a small rounding mismatch but keeps the first anchor fixed', () => {
+    const result = suggestBuildingPlanFloorAlignment({
+      referenceA: [0, 0], referenceB: [10.15, 0.1],
+      incomingA: [0, 0], incomingB: [10, 0],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.rotationDegrees).toBe(0);
+    expect(result.offsetX).toBe(0);
+    expect(result.offsetY).toBe(0);
+    expect(result.errorMetres).toBeCloseTo(Math.hypot(0.15, 0.1));
+  });
+
+  it.each([
+    ['different scales', [0, 0], [12, 0], [0, 0], [10, 0], /距離不一致/],
+    ['non-quarter-turn rotation', [0, 0], [7.07106781, 7.07106781], [0, 0], [10, 0], /90°/],
+    ['same reference anchor', [0, 0], [0, 0], [0, 0], [10, 0], /0.5 公尺/],
+    ['same source anchor', [0, 0], [10, 0], [0, 0], [0, 0], /0.5 公尺/],
+    ['invalid anchor', [0, 0], [10, 0], [0, NaN], [10, 0], /有效/],
+  ] as const)('rejects %s instead of creating an unreliable transform', (_, referenceA, referenceB, incomingA, incomingB, message) => {
+    const result = suggestBuildingPlanFloorAlignment({
+      referenceA: [...referenceA], referenceB: [...referenceB],
+      incomingA: [...incomingA], incomingB: [...incomingB],
+    });
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(message) });
+  });
+
+  it('rejects an omitted anchor rather than defaulting to another corner', () => {
+    expect(suggestBuildingPlanFloorAlignment({
+      referenceA: [0, 0], referenceB: [10, 0], incomingA: undefined, incomingB: [10, 0],
+    })).toEqual({ ok: false, message: expect.stringMatching(/有效/) });
   });
 });

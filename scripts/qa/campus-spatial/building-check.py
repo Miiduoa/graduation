@@ -610,6 +610,29 @@ async def building_floor_assembly_mobile(page, _requests, _resources):
         assert await download_plan(page) == original
         assert await page.locator(CANVAS).evaluate('(canvas, previous) => canvas === previous', original_canvas)
 
+        # Use a separate calibrated outline that has the opposite orientation,
+        # and verify the optional two-anchor helper before manual placement.
+        alignable = json.loads(json.dumps(incoming))
+        alignable['floors'][0]['outline'] = [[0, 0], [8, 0], [8, 12], [0, 12]]
+        alignable['floors'][0]['rooms'] = []
+        alignable['floors'][0]['walls'] = []
+        await floor_file.set_input_files({
+            'name': 'fictional-rotated-2f.json', 'mimeType': 'application/json',
+            'buffer': json.dumps(alignable).encode()})
+        helper = await expand_details(page, '依兩組角點對位（選用）')
+        await helper.get_by_label('參考樓層對位點 B', exact=True).select_option('3')
+        await helper.get_by_label('來源圖面對位點 B', exact=True).select_option('1')
+        await helper.get_by_role('button', name='依兩組對位點計算位置', exact=True).click()
+        await expect(importer.get_by_label('圖面旋轉', exact=True)).to_have_value('90')
+        await expect(importer.get_by_label('水平位移（公尺）', exact=True)).to_have_value('0')
+        await expect(importer.get_by_label('垂直位移（公尺）', exact=True)).to_have_value('0')
+        assert await download_plan(page) == original
+        await helper.get_by_label('參考樓層對位點 B', exact=True).select_option('1')
+        await helper.get_by_role('button', name='依兩組對位點計算位置', exact=True).click()
+        await expect(importer.get_by_role('alert')).to_contain_text('距離不一致')
+        await expect(importer.get_by_label('圖面旋轉', exact=True)).to_have_value('90')
+        assert await download_plan(page) == original
+
         await floor_file.set_input_files({
             'name': 'fictional-2f.json', 'mimeType': 'application/json', 'buffer': json.dumps(incoming).encode()})
         await expect(importer.get_by_label('加入哪一層', exact=True)).to_have_value('traced-floor')

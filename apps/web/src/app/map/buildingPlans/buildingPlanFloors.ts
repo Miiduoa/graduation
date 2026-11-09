@@ -56,16 +56,70 @@ function floorSource(plan: BuildingPlan, floor: PlanFloor): PlanSource {
   return floor.source ?? plan.source ?? { label: `${plan.name}（原檔未提供來源）` };
 }
 
-/** A quarter turn around the file's own (0, 0), then an explicit translation. */
-function placedPoint([x, y]: PlanPoint, placement: BuildingPlanFloorPlacement): PlanPoint {
-  let turned: PlanPoint;
-  switch (placement.rotationDegrees) {
-    case 90: turned = [-y, x]; break;
-    case 180: turned = [-x, -y]; break;
-    case 270: turned = [y, -x]; break;
-    default: turned = [x, y];
+/** The diagram uses downward-positive Y, so a 90° turn is clockwise on screen. */
+function turnedPoint([x, y]: PlanPoint, degrees: BuildingPlanFloorPlacement['rotationDegrees']): PlanPoint {
+  switch (degrees) {
+    case 90: return [-y, x];
+    case 180: return [-x, -y];
+    case 270: return [y, -x];
+    default: return [x, y];
   }
-  return [turned[0] + placement.offsetX, turned[1] + placement.offsetY];
+}
+
+/** A quarter turn around the file's own (0, 0), then an explicit translation. */
+function placedPoint(point: PlanPoint, placement: BuildingPlanFloorPlacement): PlanPoint {
+  const [x, y] = turnedPoint(point, placement.rotationDegrees);
+  return [x + placement.offsetX, y + placement.offsetY];
+}
+
+export type BuildingPlanFloorAlignmentAnchors = {
+  referenceA: PlanPoint | undefined;
+  referenceB: PlanPoint | undefined;
+  incomingA: PlanPoint | undefined;
+  incomingB: PlanPoint | undefined;
+};
+export type BuildingPlanFloorAlignmentResult =
+  | { ok: true; rotationDegrees: BuildingPlanFloorPlacement['rotationDegrees']; offsetX: number; offsetY: number; errorMetres: number }
+  | { ok: false; message: string };
+
+const ALIGNMENT_TOLERANCE_METRES = 0.25;
+const ALIGNMENT_MIN_DISTANCE_METRES = 0.5;
+
+/**
+ * Match two manually identified pairs of outline corners without guessing scale.
+ * Anchor A is exact; B checks whether the quarter-turn is geometrically credible.
+ */
+export function suggestBuildingPlanFloorAlignment(anchors: BuildingPlanFloorAlignmentAnchors): BuildingPlanFloorAlignmentResult {
+  const points = [anchors.referenceA, anchors.referenceB, anchors.incomingA, anchors.incomingB];
+  if (!points.every(point => point && point.length === 2 && point.every(Number.isFinite))) {
+    return { ok: false, message: '請在兩份圖面各選兩個有效的對應角點。' };
+  }
+  const { referenceA, referenceB, incomingA, incomingB } = anchors as {
+    referenceA: PlanPoint; referenceB: PlanPoint; incomingA: PlanPoint; incomingB: PlanPoint;
+  };
+  const referenceDistance = Math.hypot(referenceB[0] - referenceA[0], referenceB[1] - referenceA[1]);
+  const incomingDistance = Math.hypot(incomingB[0] - incomingA[0], incomingB[1] - incomingA[1]);
+  if (Math.min(referenceDistance, incomingDistance) < ALIGNMENT_MIN_DISTANCE_METRES) {
+    return { ok: false, message: '每份圖面的 A、B 對位點至少要相距 0.5 公尺，請選不同且較遠的角點。' };
+  }
+  if (Math.abs(referenceDistance - incomingDistance) > ALIGNMENT_TOLERANCE_METRES) {
+    return { ok: false, message: '兩組對位點距離不一致（超過 0.25 公尺），請核對比例與對應位置；系統不會自動縮放圖面。' };
+  }
+  const turns = [0, 90, 180, 270] as const;
+  const options = turns.map(rotationDegrees => {
+    const a = turnedPoint(incomingA, rotationDegrees);
+    const b = turnedPoint(incomingB, rotationDegrees);
+    const offsetX = referenceA[0] - a[0];
+    const offsetY = referenceA[1] - a[1];
+    const errorMetres = Math.hypot(b[0] + offsetX - referenceB[0], b[1] + offsetY - referenceB[1]);
+    return { rotationDegrees, offsetX, offsetY, errorMetres };
+  });
+  options.sort((a, b) => a.errorMetres - b.errorMetres);
+  const best = options[0];
+  if (best.errorMetres > ALIGNMENT_TOLERANCE_METRES) {
+    return { ok: false, message: '兩組對位點無法以 90° 的倍數旋轉對齊（誤差超過 0.25 公尺）。請確認角點或改用手動位移與旋轉。' };
+  }
+  return { ok: true, ...best };
 }
 
 /** Add one chosen floor without assuming equal image origins, scales or storey heights. */
