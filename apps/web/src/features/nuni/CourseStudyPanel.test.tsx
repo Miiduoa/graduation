@@ -1095,6 +1095,35 @@ it('copies the current reading note and ignores a delayed clipboard denial after
   }
 });
 
+it('clears the earlier manual JSON fallback after a new explicit progress download', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const create = vi.fn().mockReturnValue('blob:study-progress');
+  const revoke = vi.fn();
+  const OriginalURL = URL;
+  vi.stubGlobal('URL', class extends OriginalURL { static createObjectURL = create; static revokeObjectURL = revoke; });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '待保留的本機筆記' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(parseCourseStudyProgress(manual.value, scope).passages['0:0'].note).toBe('待保留的本機筆記');
+
+    fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/已交給瀏覽器下載閱讀進度/)).toBeTruthy();
+    expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(inputValue(noteLabel)).toBe('待保留的本機筆記');
+  } finally {
+    click.mockRestore();
+    vi.unstubAllGlobals();
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('copies a restorable reading-progress JSON with selectable fallback when download or clipboard is blocked', () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });

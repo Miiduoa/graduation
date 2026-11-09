@@ -370,9 +370,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   }
 
   function downloadFile(contents: () => Blob, filename: string, label: string) {
-    copyRequest.current += 1;
-    setDownloadStatus('');
-    setDownloadError('');
+    // A new download supersedes any earlier selectable clipboard fallback.
+    // Keep old private JSON/notes out of view instead of showing a stale copy.
+    invalidateCopyFeedback();
     let url: string | null = null;
     const link = document.createElement('a');
     try {
