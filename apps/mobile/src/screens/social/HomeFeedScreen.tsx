@@ -1109,7 +1109,7 @@ function HomeFeedContent() {
             return (
               <Pressable
                 style={styles.card}
-                onPress={() => nav?.navigate?.('PostDetail' as never, { postId: item.id })}
+                onPress={() => nav?.navigate?.('PostDetail' as never, { postId: item.id, schoolId: item.schoolId })}
               >
                 <View style={styles.cardTop}>
                   {item.anonymous ? (

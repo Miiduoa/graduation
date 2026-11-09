@@ -36,7 +36,21 @@ function engagementLine(p: CampusPostDoc) {
   return { likes, cc };
 }
 
+// Keep every board's posts, subscription and metadata in its own account/campus scope.
+// An earlier campus read must not restore private cards after the student switches schools.
 export function BoardDetailScreen(props: any) {
+  const { school } = useSchool();
+  const { user } = useAuth();
+  const boardId = props?.route?.params?.boardId as string | undefined;
+  return (
+    <ScopedBoardDetailScreen
+      key={JSON.stringify([user?.uid ?? null, school?.id ?? null, boardId ?? null])}
+      {...props}
+    />
+  );
+}
+
+function ScopedBoardDetailScreen(props: any) {
   const styles = useThemeStyleSheet(createStyles);
   const injected = useCampusSocialStackNav();
   const fb = useNavigation<any>();
@@ -58,7 +72,7 @@ export function BoardDetailScreen(props: any) {
       return;
     }
     const rows = await fetchRecentCampusPosts(school.id, boardId, 45);
-    setPosts(rankFeedPosts(rows, 50));
+    setPosts(rankFeedPosts(rows.filter((row) => row.schoolId === school.id && row.boardId === boardId), 50));
   }, [school?.id, boardId, auth.user?.uid]);
 
   const loadMetaAndSub = useCallback(async () => {
@@ -188,7 +202,7 @@ export function BoardDetailScreen(props: any) {
             return (
             <Pressable
               style={styles.card}
-              onPress={() => nav?.navigate?.('PostDetail' as never, { postId: item.id })}
+              onPress={() => nav?.navigate?.('PostDetail' as never, { postId: item.id, schoolId: item.schoolId })}
             >
               <Text style={styles.badge}>{item.anonymous ? item.aliasSnapshot ?? '匿名' : '實名'}</Text>
               <Text style={styles.title}>{item.title}</Text>
