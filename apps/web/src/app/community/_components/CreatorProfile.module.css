@@ -200,3 +200,47 @@
 .cardSuccess { color: var(--muted); }
 .cardStatus { padding: 12px 0; font-size: 13px; color: var(--muted); }
 .cardRetry { margin-left: 12px; cursor: pointer; color: var(--brand); background: transparent; border: 0; text-decoration: underline; }
+
+/* Pinned content stays inside the creator's page and never changes campus feed ranking. */
+.pinnedBlock {
+  margin-top: 14px;
+  padding: 10px 14px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.pinHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pinHeading strong { color: var(--text); font-size: 13px; }
+.pinActions { display: flex; justify-content: flex-end; margin: -6px 0 10px; }
+.pinButton {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+.pinButton:hover:not(:disabled) { background: var(--panel); }
+.pinButton:disabled { opacity: 0.55; cursor: wait; }
+.pinNotice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
