@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import { storage } from '../services/storage';
 import * as DocumentPicker from 'expo-document-picker';
@@ -11,7 +12,7 @@ import {
 import { PrivateImage } from '../ui/PrivateImage';
 import { PrivateAttachment } from '../ui/PrivateAttachment';
 import { ClubSummary, clubSummaryEnabled } from './ClubSummary';
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -273,6 +274,14 @@ export function GroupDetailScreen(props: any) {
   const [composeKind, setComposeKind] = useState<PostKind>('question');
   const [postFiles, setPostFiles] = useState<DocumentPicker.DocumentPickerAsset[]>([]);
   const [fileBusy, setFileBusy] = useState(false);
+  const [attachmentsLocked, setAttachmentsLocked] = useState(false);
+  const uploadDraft = useRef<{ postId: string; completed: Map<DocumentPicker.DocumentPickerAsset, string> } | null>(null);
+  const posting = useRef(false);
+  useEffect(() => {
+    uploadDraft.current = null;
+    setAttachmentsLocked(false);
+    setPostFiles([]);
+  }, [groupId, auth.user?.uid, school.id]);
   const [coverRevision, setCoverRevision] = useState(0);
   const [coverPath, setCoverPath] = useState<string | null>(null);
   const [title, setTitle] = useState('');
@@ -536,6 +545,7 @@ export function GroupDetailScreen(props: any) {
   };
 
   const onCreatePost = async () => {
+    if (posting.current) return;
     setErr(null);
     if (!auth.user) {
       setErr('請先到『我的』登入後再發文');
@@ -555,12 +565,23 @@ export function GroupDetailScreen(props: any) {
     }
 
     try {
-      if (fileBusy) return;
+      posting.current = true;
       setFileBusy(true);
-      const postRef = doc(collection(db, 'groups', groupId, 'posts'));
+      const progress = uploadDraft.current ?? {
+        postId: doc(collection(db, 'groups', groupId, 'posts')).id,
+        completed: new Map<DocumentPicker.DocumentPickerAsset, string>(),
+      };
+      uploadDraft.current = progress;
+      setAttachmentsLocked(true);
+      const postRef = doc(db, 'groups', groupId, 'posts', progress.postId);
       const attachments: string[] = [];
       if (isR2FileStorageEnabled()) {
         for (const [index, file] of postFiles.entries()) {
+          const completed = progress.completed.get(file);
+          if (completed) {
+            attachments.push(completed);
+            continue;
+          }
           const path = privateGroupPostPath(
             groupId,
             postRef.id,
@@ -569,6 +590,7 @@ export function GroupDetailScreen(props: any) {
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
           await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });
+          progress.completed.set(file, path);
           attachments.push(path);
         }
       }
@@ -588,14 +610,17 @@ export function GroupDetailScreen(props: any) {
       });
 
       // 如果是問題，助理回覆由伺服器在提問建立後產生，這邊不用再寫
+      uploadDraft.current = null;
+      setAttachmentsLocked(false);
       setPostFiles([]);
       setTitle('');
       setBody('');
       setTopic('課程討論');
       reloadPosts();
     } catch (e: any) {
-      setErr(e?.message ?? '發文失敗');
+      setErr(e?.statusCode === 429 ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : e?.message ?? '發文失敗');
     } finally {
+      posting.current = false;
       setFileBusy(false);
     }
   };
@@ -839,7 +864,7 @@ export function GroupDetailScreen(props: any) {
           {isR2FileStorageEnabled() && (
             <Button
               text={`附加圖片或文件（${postFiles.length}）`}
-              disabled={fileBusy}
+              disabled={fileBusy || attachmentsLocked}
               onPress={async () => {
                 try {
                   const picked = await DocumentPicker.getDocumentAsync({
@@ -853,7 +878,13 @@ export function GroupDetailScreen(props: any) {
                     multiple: true,
                     copyToCacheDirectory: true,
                   });
-                  if (!picked.canceled) setPostFiles(picked.assets);
+                  if (!picked.canceled) {
+                    if (picked.assets.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                      setErr(`單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`);
+                      return;
+                    }
+                    setPostFiles(picked.assets);
+                  }
                 } catch {
                   Alert.alert('無法選取附件');
                 }
@@ -957,6 +988,19 @@ export function GroupDetailScreen(props: any) {
               kind="primary"
               disabled={!auth.user || fileBusy}
               onPress={onCreatePost}
+            />
+            <Button
+              text="放棄草稿"
+              disabled={fileBusy}
+              onPress={() => {
+                uploadDraft.current = null;
+                setAttachmentsLocked(false);
+                setPostFiles([]);
+                setTitle('');
+                setBody('');
+                setTopic('課程討論');
+                setErr(null);
+              }}
             />
             <Button
               text="重新整理"

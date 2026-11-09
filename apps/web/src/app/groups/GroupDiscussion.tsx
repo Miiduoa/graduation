@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
 import { GroupCover } from '@/components/GroupCover';
 import { privateFilesEnabled, privateGroupPostPath, uploadPrivateFile } from '@/lib/privateFiles';
 import { PrivateAttachment } from '@/components/PrivateAttachment';
@@ -114,6 +115,9 @@ function DiscussionBoard({
   const initialForm = initial?.intent ?? initial?.draft;
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [files, setFiles] = useState<File[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [attachmentsLocked, setAttachmentsLocked] = useState(false);
+  const uploadDraft = useRef<{ postId: string; completed: Map<File, string> } | null>(null);
   const [title, setTitle] = useState(initialForm?.title ?? '');
   const [body, setBody] = useState(initialForm?.body ?? '');
   const [kind, setKind] = useState<'post' | 'question'>(initialForm?.kind ?? 'post');
@@ -224,6 +228,9 @@ function DiscussionBoard({
   }, [title, body, kind, draftKey, phase, lockedIntent]);
 
   function beginNewPublication() {
+    uploadDraft.current = null;
+    setAttachmentsLocked(false);
+    if (fileInput.current) fileInput.current.value = '';
     setLockedIntent(null);
     setPhase('idle');
     setFiles([]);
@@ -242,7 +249,7 @@ function DiscussionBoard({
 
     // 已有鎖定意圖：只能用該意圖重試，絕不可因衝突自動換 ID。
     let intent: PublicationIntent = lockedIntent ?? {
-      postId: createPublicationIntentId(),
+      postId: uploadDraft.current?.postId ?? createPublicationIntentId(),
       title: title.trim(),
       body: body.trim(),
       kind,
@@ -252,8 +259,16 @@ function DiscussionBoard({
     if (!lockedIntent && files.length && privateFilesEnabled()) {
       setPending(true);
       try {
+        const progress = uploadDraft.current ?? { postId: intent.postId, completed: new Map<File, string>() };
+        uploadDraft.current = progress;
+        setAttachmentsLocked(true);
         const attachments: string[] = [];
         for (const [index, file] of files.entries()) {
+          const completed = progress.completed.get(file);
+          if (completed) {
+            attachments.push(completed);
+            continue;
+          }
           const path = privateGroupPostPath(
             groupId,
             intent.postId,
@@ -265,11 +280,14 @@ function DiscussionBoard({
             body: file,
             contentType: file.type || 'application/octet-stream',
           });
+          progress.completed.set(file, path);
           attachments.push(path);
         }
         intent = { ...intent, attachments };
-      } catch {
-        setNotice({ text: '附件上傳失敗，請確認檔案格式與連線後重試。', error: true });
+      } catch (failure) {
+        if (!current()) return;
+        const limited = (failure as { statusCode?: number })?.statusCode === 429;
+        setNotice({ text: limited ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : '附件上傳失敗，請確認檔案格式與連線後重試。', error: true });
         setPending(false);
         return;
       }
@@ -313,6 +331,9 @@ function DiscussionBoard({
       );
       setLockedIntent(null);
       setPhase('idle');
+      uploadDraft.current = null;
+      setAttachmentsLocked(false);
+      if (fileInput.current) fileInput.current.value = '';
       setFiles([]);
       setTitle('');
       setBody('');
@@ -496,11 +517,20 @@ function DiscussionBoard({
           <label>
             附加圖片或文件
             <input
+              ref={fileInput}
               type="file"
               multiple
-              disabled={pending || intentLocked}
+              disabled={pending || intentLocked || attachmentsLocked}
               accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-              onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+              onChange={(event) => {
+                const selected = Array.from(event.target.files ?? []);
+                if (selected.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                  event.target.value = '';
+                  setNotice({ text: `單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`, error: true });
+                  return;
+                }
+                setFiles(selected);
+              }}
             />
           </label>
         )}
@@ -512,7 +542,7 @@ function DiscussionBoard({
           >
             {pending ? '正在確認…' : intentLocked ? '重試確認' : '發布'}
           </button>
-          {intentLocked ? (
+          {draftSaved || files.length ? (
             <button className="btn" type="button" disabled={pending} onClick={beginNewPublication}>
               開始新貼文
             </button>

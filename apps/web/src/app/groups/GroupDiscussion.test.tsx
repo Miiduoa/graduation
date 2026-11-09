@@ -1,3 +1,4 @@
+import { privateFilesEnabled, uploadPrivateFile } from '@/lib/privateFiles';
 import { Suspense } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -7,6 +8,12 @@ import {
   loadGroupDiscussionPage,
   type GroupDiscussionPost,
 } from './groupDiscussionService';
+
+vi.mock('@/lib/privateFiles', async () => ({
+  ...await vi.importActual<typeof import('@/lib/privateFiles')>('@/lib/privateFiles'),
+  privateFilesEnabled: vi.fn(() => false),
+  uploadPrivateFile: vi.fn(),
+}));
 
 const account = vi.hoisted(() => ({
   user: { uid: 'alice', displayName: 'Alice' } as {
@@ -77,6 +84,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(privateFilesEnabled).mockImplementation(() => process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND === 'r2');
   account.user = { uid: 'alice', displayName: 'Alice' };
   account.loading = false;
   sessionStorage.clear();
@@ -381,4 +389,53 @@ it('shows attachment input only when R2 is enabled and stores uploaded paths', a
     delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND;
     upload.mockRestore();
   }
+});
+
+it('limits attachments and resumes a throttled draft without uploading completed files again', async () => {
+  vi.mocked(privateFilesEnabled).mockReturnValue(true);
+  vi.mocked(uploadPrivateFile)
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  await act(async () => { renderPage(); });
+  await screen.findByText('週三外拍');
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+  fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+  const files = Array.from({ length: 7 }, (_, i) => new File(['x'], `${i}.txt`, { type: 'text/plain' }));
+  const picker = screen.getByLabelText('附加圖片或文件');
+  fireEvent.change(picker, { target: { files } });
+  expect(screen.getByRole('alert').textContent).toContain('最多選取 6');
+  fireEvent.change(picker, { target: { files: files.slice(0, 3) } });
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('上傳太頻繁，請稍後再試');
+  expect(uploadPrivateFile).toHaveBeenCalledTimes(2);
+  expect(createGroupDiscussionPost).not.toHaveBeenCalled();
+  const firstPath = vi.mocked(uploadPrivateFile).mock.calls[0][0].path;
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('已發布貼文。');
+  expect(uploadPrivateFile).toHaveBeenCalledTimes(4);
+  expect(vi.mocked(uploadPrivateFile).mock.calls[2][0].path).toBe(vi.mocked(uploadPrivateFile).mock.calls[1][0].path);
+  expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments?.[0]).toBe(firstPath);
+  expect((picker as HTMLInputElement).disabled).toBe(false);
+});
+
+it('discards upload progress when starting a new draft', async () => {
+  vi.mocked(privateFilesEnabled).mockReturnValue(true);
+  vi.mocked(uploadPrivateFile).mockRejectedValue(Object.assign(new Error('limited'), { statusCode: 429 }));
+  await act(async () => { renderPage(); });
+  await screen.findByText('週三外拍');
+  const fill = () => {
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+    fireEvent.change(screen.getByLabelText('附加圖片或文件'), { target: { files: [new File(['x'], 'a.txt')] } });
+  };
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('上傳太頻繁，請稍後再試');
+  const path = vi.mocked(uploadPrivateFile).mock.calls[0][0].path;
+  fireEvent.click(screen.getByRole('button', { name: '開始新貼文' }));
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await waitFor(() => expect(uploadPrivateFile).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(uploadPrivateFile).mock.calls[1][0].path).not.toBe(path);
 });

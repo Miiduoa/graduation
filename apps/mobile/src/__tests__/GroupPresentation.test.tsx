@@ -44,6 +44,8 @@ const mockComment = {
   generatedBy: 'server',
 };
 
+jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
+
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'school-a' } }) }));
 jest.mock('../firebase', () => ({
@@ -59,6 +61,7 @@ jest.mock('../services/memberDirectory', () => ({
   fetchSchoolDirectoryProfiles: jest.fn(async () => []),
 }));
 jest.mock('firebase/firestore', () => {
+  let nextId = 0;
   const snapshot = (rows: Array<{ id: string }>) => ({
     docs: rows.map((row) => ({ id: row.id, data: () => row })),
     empty: rows.length === 0,
@@ -66,7 +69,7 @@ jest.mock('firebase/firestore', () => {
   });
   return {
     collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
-    doc: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
+    doc: (_db: unknown, ...path: string[]) => ({ path: path.join('/'), id: path.at(-1) ?? `draft-${++nextId}` }),
     query: (ref: unknown) => ref,
     where: jest.fn(),
     orderBy: jest.fn(),
@@ -239,5 +242,58 @@ test('R2 lets managers replace a group cover and saves only its path', async () 
     expect(require('firebase/firestore').updateDoc).toHaveBeenCalledWith(expect.anything(), { coverUrl: 'groups/course-actual/cover.png' });
   } finally {
     view.unmount(); delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND; global.fetch = previousFetch; upload.mockRestore(); mockMemberRole = 'member';
+  }
+});
+
+test('post attachments enforce the limit and retain progress until success or discard', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const files = require('../services/privateFiles');
+  const upload = jest.spyOn(files, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  const picker = require('expo-document-picker').getDocumentAsync;
+  const assets = Array.from({ length: 7 }, (_, i) => ({ uri: `file:///${i}`, name: `${i}.txt`, mimeType: 'text/plain' }));
+  picker.mockResolvedValueOnce({ canceled: false, assets })
+    .mockResolvedValue({ canceled: false, assets: assets.slice(0, 3) });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({ blob: async () => new Blob(['text'], { type: 'text/plain' }) })) as unknown as typeof fetch;
+  const setDoc = require('firebase/firestore').setDoc;
+  setDoc.mockClear();
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} />);
+  try {
+    const attach = await view.findByText('附加圖片或文件（0）');
+    await act(async () => fireEvent.press(attach));
+    expect(view.getByText('單次最多選取 6 個附件')).toBeTruthy();
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '附件貼文');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '附件內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(view.getByText('上傳太頻繁，請稍後再試')).toBeTruthy();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(setDoc).not.toHaveBeenCalled();
+    const firstPath = upload.mock.calls[0][0].path;
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls[2][0].path).toBe(upload.mock.calls[1][0].path);
+    expect(setDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ attachments: expect.arrayContaining([firstPath]) }));
+    expect(view.getByText('附加圖片或文件（0）')).toBeTruthy();
+    upload.mockRejectedValue(Object.assign(new Error('limited'), { statusCode: 429 }));
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '另一篇');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    const discarded = upload.mock.calls[4][0].path;
+    fireEvent.press(view.getByText('放棄草稿'));
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '新草稿');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(upload.mock.calls[5][0].path).not.toBe(discarded);
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
   }
 });
