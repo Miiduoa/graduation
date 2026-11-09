@@ -89,7 +89,7 @@ const count = (calls: Call[], action: string) => calls.filter(call => call.actio
 const instruction = '只把第二項程式練習改到 21:00–22:00，第一項英文閱讀保持原樣';
 async function askForPlan() {
   const question = await screen.findByLabelText('問題') as HTMLTextAreaElement;
-  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('checkbox', { name: /同意在本次對話/ }));
   fireEvent.change(question, { target: { value: '幫我排兩項讀書安排' } });
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   await screen.findByRole('button', { name: '修改時間或條件' });
@@ -285,7 +285,7 @@ it('does not ask for a new preview if model consent is withdrawn while revocatio
   const editor = openEditor();
   submitRevision();
   await waitFor(() => expect(count(calls, 'cancel')).toHaveLength(1));
-  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('checkbox', { name: /同意在本次對話/ }));
   await act(async () => cancellation.resolve(json(checkFor(original))));
   await screen.findByText('已撤銷未執行提議');
   expect(editor.value).toBe(instruction);

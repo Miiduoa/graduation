@@ -1,6 +1,7 @@
 import { withOperationSignal } from './operation';
 import { randomUUID } from 'node:crypto';
 import type { NextRequest } from 'next/server';
+import { createPlanProtection, validatePlanProtection, type PlanProtection } from '@/lib/assistantPlanProtection';
 import {
   boundedJson,
   jsonResponse,
@@ -9,7 +10,7 @@ import {
   requireSession,
   sessionContext,
 } from '../server';
-import { cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
+import { beginProposal, cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
@@ -23,6 +24,11 @@ let minute = 0,
   dailyRequests = 0,
   dailyTokens = 0;
 const provider = createProviderModel();
+const PLAN_PROTECTION_MESSAGES: Record<string, string> = {
+  INVALID_PLAN_PROTECTION: '保留項目設定無效，請重新選擇要保留的原提議內容。',
+  PLAN_ALREADY_PRESERVED: '已選擇保留全部項目，不需要重新預覽；原提議沒有變更。',
+  PLAN_PROTECTION_MISMATCH: '新提議未完整保留指定項目，這次預覽已停止。請調整修改條件後重新預覽。',
+};
 function quota(now: number, amount: number) {
   if (Math.floor(now / 60000) !== minute) {
     minute = Math.floor(now / 60000);
@@ -83,7 +89,7 @@ export async function handleV2(request: NextRequest, action: string) {
     const raw = object(
       await boundedJson(request, 16384),
       action === 'ask'
-        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken']
+        ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection']
         : ['schoolId', 'conversationId', 'token', 'args'],
     );
     const schoolId = id(raw.schoolId),
@@ -108,7 +114,19 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId,
       schoolId,
     };
+    let protection: PlanProtection | undefined;
     if (action === 'ask') {
+      if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret);
+      if (raw.planProtection !== undefined) {
+        try {
+          const input = object(raw.planProtection, ['originalEvents', 'protectedIndices']);
+          protection = createPlanProtection(input.originalEvents, input.protectedIndices);
+        } catch {
+          throw new V2Error(422, 'INVALID_PLAN_PROTECTION');
+        }
+        if (protection.protectedIndices.length === protection.originalEvents.length)
+          throw new V2Error(422, 'PLAN_ALREADY_PRESERVED');
+      }
       // Missing credentials can only bootstrap a fresh server-generated binding.
       // They can never issue a replacement for a client-selected old binding.
       if (raw.routeToken === undefined) {
@@ -119,7 +137,6 @@ export async function handleV2(request: NextRequest, action: string) {
         return jsonResponse({ bootstrap: true, conversationId: fresh.conversationId, routeToken: issueRoute(fresh, secret) });
       }
     }
-    if (action === 'ask') routeOwner(raw.routeToken, binding, secret);
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
     if (action === 'cancel')
       return jsonResponse(
@@ -200,6 +217,16 @@ export async function handleV2(request: NextRequest, action: string) {
           }
         },
       });
+      if (protection && protection.protectedIndices.length > 0 &&
+        (!Array.isArray(result.cards) || result.cards.some(card => card.tool !== 'propose_personal_event') ||
+        !validatePlanProtection(protection, result.cards.map(card => card.args)).ok)) {
+        // Retire the entire rejected candidate before returning any response.
+        // Its signed arguments are never repaired or released to the caller.
+        beginProposal(binding, Date.now());
+        log({ event: 'assistant.failed', version: 2, stage, requestId, status: 422,
+          errorClass: 'PLAN_PROTECTION_MISMATCH', durationMs: Date.now() - started, simulation: false });
+        throw new V2Error(422, 'PLAN_PROTECTION_MISMATCH');
+      }
       return jsonResponse({
         ...result,
         ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
@@ -225,7 +252,9 @@ export async function handleV2(request: NextRequest, action: string) {
     const response = jsonResponse(
       {
         error: code,
-        ...(code === 'EVENT_START_PASSED'
+        ...(PLAN_PROTECTION_MESSAGES[code]
+          ? { message: PLAN_PROTECTION_MESSAGES[code] }
+          : code === 'EVENT_START_PASSED'
           ? { message: '這個時段已經開始，請重新安排時間。' }
           : PROVIDER_USER_MESSAGES[code] ? { message: providerUserMessage(code) } : {}),
       },

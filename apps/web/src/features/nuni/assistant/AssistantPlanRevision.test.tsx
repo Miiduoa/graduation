@@ -34,7 +34,7 @@ it('shows the exact original ordered times, focuses the editor, and never previe
   expect(onPreview).not.toHaveBeenCalled();
   submit();
   await screen.findByRole('status');
-  expect(onPreview).toHaveBeenCalledExactlyOnceWith('第一項改成明晚 20:00');
+  expect(onPreview).toHaveBeenCalledExactlyOnceWith('第一項改成明晚 20:00', []);
   expect(screen.queryByRole('button', { name: '重新預覽' })).toBeNull();
 });
 
@@ -128,4 +128,166 @@ it('drops a late result after changing proposals instead of overwriting the next
   expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('新修改');
   expect((screen.getByRole('button', { name: '重新預覽' }) as HTMLButtonElement).disabled).toBe(false);
   view.unmount();
+});
+
+it('distinguishes same-name items by ordinal and exact time and submits only the explicit selection', async () => {
+  const onPreview = vi.fn(async () => ({ ok: false, message: '保留條件已收到。' }));
+  render(<AssistantPlanRevision {...base} turn={turn([
+    event(), event('second', { startTime: '22:00', endTime: '23:00' }),
+  ])} onPreview={onPreview} />);
+  open();
+  const first = screen.getByRole('checkbox', { name: '保留原樣 第 1 項 離散數學讀書 2026-11-10 · 20:00–21:00（台灣時間）' }) as HTMLInputElement;
+  const second = screen.getByRole('checkbox', { name: '保留原樣 第 2 項 離散數學讀書 2026-11-10 · 22:00–23:00（台灣時間）' }) as HTMLInputElement;
+  expect(first.type).toBe('checkbox');
+  expect(first.checked).toBe(false);
+  expect(second.checked).toBe(false);
+  second.focus();
+  expect(document.activeElement).toBe(second);
+  fireEvent.click(second);
+  expect(first.checked).toBe(false);
+  expect(second.checked).toBe(true);
+  enter('第一項改到明晚，勾選的第二項保持原樣');
+  submit();
+  await screen.findByText('保留條件已收到。');
+  expect(onPreview).toHaveBeenCalledExactlyOnceWith('第一項改到明晚，勾選的第二項保持原樣', [1]);
+});
+
+it('retains the checked items and condition across collapse, rejection and retry, while freezing pending controls', async () => {
+  const pending = deferred<{ ok: boolean; message: string }>();
+  const onPreview = vi.fn().mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce({ ok: true, message: '新提議已保留勾選的項目。' });
+  render(<AssistantPlanRevision {...base} turn={turn([
+    event(), event('second', { title: '程式練習' }),
+  ])} onPreview={onPreview} />);
+  open(); enter('第二項改成明晚');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  fireEvent.click(screen.getByRole('button', { name: '收起修改' }));
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '修改時間或條件' }));
+  open();
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('第二項改成明晚');
+  submit(); submit();
+  for (const checkbox of screen.getAllByRole('checkbox')) expect((checkbox as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '收起修改' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(onPreview).toHaveBeenCalledExactlyOnceWith('第二項改成明晚', [0]);
+  await act(async () => { pending.resolve({ ok: false, message: '新提議未保留勾選項目，沒有加入確認卡。' }); });
+  expect(screen.getByRole('alert').textContent).toContain('沒有加入確認卡');
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('第二項改成明晚');
+  submit();
+  await screen.findByText('新提議已保留勾選的項目。');
+  expect(onPreview).toHaveBeenNthCalledWith(2, '第二項改成明晚', [0]);
+});
+
+it('treats all-protected as a local no-op even with no instruction or a direct form submit', () => {
+  const onPreview = vi.fn();
+  render(<AssistantPlanRevision {...base} turn={turn([
+    event(), event('second', { title: '程式練習' }),
+  ])} onPreview={onPreview} />);
+  open();
+  for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('');
+  expect((screen.getByRole('button', { name: '重新預覽' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('原提議保持不變');
+  submit(); submit();
+  expect(onPreview).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).toBeNull();
+  const back = screen.getByRole('button', { name: '回到原提議' }) as HTMLButtonElement;
+  expect(back.type).toBe('button');
+  back.focus();
+  expect(document.activeElement).toBe(back);
+  fireEvent.click(back);
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '修改時間或條件' }));
+  expect(screen.queryByRole('form', { name: '修改安排再預覽' })).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('原提議保持不變');
+  open();
+  expect(screen.getAllByRole('checkbox').every(checkbox => (checkbox as HTMLInputElement).checked)).toBe(true);
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }));
+  enter('第二項改成明晚');
+  expect((screen.getByRole('button', { name: '重新預覽' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(onPreview).not.toHaveBeenCalled();
+});
+
+it('never claims all-protected selections restore original cards already revoked during a failed revision', async () => {
+  const onPreview = vi.fn(async () => ({ ok: false, message: '原卡已撤銷，新提議未完成。' }));
+  const original = turn([event(), event('second', { title: '程式練習' })]);
+  const view = render(<AssistantPlanRevision {...base} turn={original} onPreview={onPreview} />);
+  open(); enter(); submit();
+  await screen.findByRole('alert');
+  view.rerender(<AssistantPlanRevision {...base} turn={original}
+    states={{ first: { status: 'cancelled' }, second: { status: 'cancelled' } }} onPreview={onPreview} />);
+  for (const checkbox of screen.getAllByRole('checkbox')) fireEvent.click(checkbox);
+  expect(screen.getByRole('status').textContent).toContain('已有項目撤銷，不能恢復原確認卡');
+  expect(screen.queryByText(/原提議保持不變/)).toBeNull();
+  submit();
+  expect(onPreview).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '回到原提議' }));
+  expect(screen.getByRole('status').textContent).toContain('不能恢復原確認卡');
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '修改時間或條件' }));
+});
+
+it('rejects a partially selected exact-duplicate group without expanding the selection or contacting the owner', async () => {
+  const onPreview = vi.fn(async () => ({ ok: false, message: '已收到整組保留條件。' }));
+  render(<AssistantPlanRevision {...base} turn={turn([
+    event(), event('identical'), event('third', { title: '不同的第三項' }),
+  ])} onPreview={onPreview} />);
+  open(); enter('只修改第三項');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  submit();
+  expect(screen.getByRole('alert').textContent).toContain('完全相同的行程需一起標記保留');
+  expect(onPreview).not.toHaveBeenCalled();
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 3 項 / }) as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }));
+  submit();
+  await screen.findByText('已收到整組保留條件。');
+  expect(onPreview).toHaveBeenCalledExactlyOnceWith('只修改第三項', [0, 1]);
+});
+
+it('keeps protection choices blocked from preview while an original cancellation result remains unknown', async () => {
+  const onPreview = vi.fn(async () => ({ ok: false, message: '撤銷結果仍待核對。' }));
+  const original = turn([event(), event('second', { title: '程式練習' })]);
+  const view = render(<AssistantPlanRevision {...base} turn={original} onPreview={onPreview} />);
+  open(); enter('只改第二項');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  submit();
+  await screen.findByRole('alert');
+  view.rerender(<AssistantPlanRevision {...base} turn={original}
+    states={{ first: { status: 'cancelled' }, second: { status: 'unknown', message: '待核對' } }} onPreview={onPreview} />);
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByText(/請先使用原確認卡的核對流程/)).toBeTruthy();
+  submit();
+  expect(onPreview).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '收起修改' }));
+  expect(document.activeElement).toBe(screen.getByRole('region', { name: '修改行程提議' }));
+});
+
+it('clears old protection choices on a new proposal and ignores its predecessor\'s late result', async () => {
+  const pending = deferred<{ ok: boolean; message: string }>();
+  const onPreview = vi.fn(() => pending.promise);
+  const original = turn([event(), event('second', { title: '程式練習' })]);
+  const view = render(<AssistantPlanRevision {...base} turn={original} onPreview={onPreview} />);
+  open(); enter('舊修改');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  submit();
+  view.rerender(<AssistantPlanRevision {...base} turn={turn([
+    event('next-first', { title: '新的第一項' }), event('next-second', { title: '新的第二項' }),
+  ])} onPreview={onPreview} />);
+  open();
+  expect(screen.getAllByRole('checkbox').every(checkbox => !(checkbox as HTMLInputElement).checked)).toBe(true);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }));
+  enter('新修改');
+  await act(async () => { pending.resolve({ ok: true, message: '舊結果不應顯示' }); });
+  expect(screen.queryByText('舊結果不應顯示')).toBeNull();
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('新修改');
+  view.unmount();
+  render(<AssistantPlanRevision {...base} turn={original} onPreview={onPreview} />);
+  open();
+  expect(screen.getAllByRole('checkbox').every(checkbox => !(checkbox as HTMLInputElement).checked)).toBe(true);
 });

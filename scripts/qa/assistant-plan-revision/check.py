@@ -9,6 +9,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import subprocess
 import threading
 import traceback
@@ -48,6 +49,8 @@ async def no_writes(page):
     state = await snapshot(page)
     assert state['writes'] == [], state
     assert 'confirm' not in actions(state), state
+    local_key = f"campus.personal-imports.v1:platform%3A{state['account']}:{state['school']}"
+    assert await page.evaluate('key => localStorage.getItem(key)', local_key) is None, state
 
 
 async def idle(page):
@@ -56,8 +59,9 @@ async def idle(page):
 
 async def start_plan(page, events=None):
     events = ORIGINAL if events is None else events
-    await expect(page.get_by_role('checkbox')).to_be_enabled()
-    await page.get_by_role('checkbox').check()
+    consent = page.get_by_role('checkbox', name=re.compile('同意在本次對話'))
+    await expect(consent).to_be_enabled()
+    await consent.check()
     question = page.get_by_role('textbox', name='問題', exact=True)
     await question.fill('請幫我安排兩段讀書時間')
     await question.press('Enter')
@@ -490,11 +494,291 @@ async def double_case(page):
     return {'mode': 'native double click with controlled delayed first cancellation; exactly one chain'}
 
 
+def protection_checkbox(page, index):
+    return page.get_by_role('form', name='修改安排再預覽', exact=True).get_by_role(
+        'checkbox', name=re.compile(rf'^保留原樣\s+第\s+{index + 1}\s+項(?:\s|$)'))
+
+
+async def select_protection(page, events, indices, keyboard=False):
+    for index, event in enumerate(events):
+        checkbox = protection_checkbox(page, index)
+        await expect(checkbox).to_have_accessible_name(re.compile(
+            re.escape(event['title']) + r'.*' + event['date'] + r'.*' + event['startTime'] + r'.*' + event['endTime']))
+    if keyboard:
+        # Native Space toggles the first checkbox; Tab visits the next checkbox and textarea.
+        assert indices == [0] and len(events) == 2
+        await protection_checkbox(page, 0).focus()
+        await page.keyboard.press('Space')
+        await expect(protection_checkbox(page, 0)).to_be_checked()
+        await page.keyboard.press('Tab')
+        await expect(protection_checkbox(page, 1)).to_be_focused()
+        await page.keyboard.press('Tab')
+        await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_be_focused()
+    else:
+        for index in indices:
+            await protection_checkbox(page, index).check()
+    for index in range(len(events)):
+        await expect(protection_checkbox(page, index)).to_be_checked(checked=index in indices)
+
+
+async def protected_preview(page, before, after, indices, instruction, expected_actions):
+    await expect(card_list(page)).to_have_count(len(before) + len(after))
+    await idle(page)
+    for index in range(len(before)):
+        old = card_list(page).nth(index)
+        await expect(old).to_contain_text('已撤銷未執行提議')
+        await expect(old.get_by_role('button', name='確認', exact=True)).to_have_count(0)
+    for index, event in enumerate(after):
+        card = card_list(page).nth(len(before) + index)
+        await expect(card.get_by_role('heading', name=event['title'], exact=True)).to_be_visible()
+        await expect(card).to_contain_text(event['startTime'] + '–' + event['endTime'])
+        button = card.get_by_role('button', name='確認', exact=True)
+        if index == 0:
+            await expect(button).to_be_enabled()
+        else:
+            await expect(button).to_be_disabled()
+    await expect(comparison(page)).to_be_visible()
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == expected_actions, state
+    asks = [row for row in state['requests'] if row['action'] == 'ask']
+    body = asks[-1]['body']
+    assert body['planProtection'] == {'originalEvents': before, 'protectedIndices': indices}, body
+    assert body['history'] == [] and body['consent'] is True, body
+    assert instruction in body['question'], body
+    payload = body['question'].split('原安排：', 1)[1].split('\n修改條件：', 1)[0]
+    assert json.loads(payload) == before, payload
+    assert 'token' not in body['question'] and 'mutationId' not in body['question'], body
+    for row in state['requests']:
+        if row['action'] == 'cancel':
+            assert row['body']['token'] not in body['question'], body
+    assert state['revoked'] == [f'qa-original-{index + 1}' for index in range(len(before))], state
+    fresh = state['previews'][-1]['cards']
+    previous_ids = {card['mutationId'] for preview in state['previews'][:-1] for card in preview['cards']}
+    previous_tokens = {card['token'] for preview in state['previews'][:-1] for card in preview['cards']}
+    assert len({card['mutationId'] for card in fresh}) == len(after), fresh
+    assert all(card['mutationId'] not in previous_ids and card['token'] not in previous_tokens for card in fresh), state
+    assert [card['args'] for card in fresh] == after, fresh
+    return state
+
+
+async def confirm_protected_preview(page, before, after, request_prefix):
+    for index in range(len(after)):
+        card = card_list(page).nth(len(before) + index)
+        await card.get_by_role('button', name='確認', exact=True).click()
+        await expect(card.get_by_label('行程執行回執', exact=True)).to_contain_text('已核對並加入個人行事曆')
+        assert len((await snapshot(page))['writes']) == index + 1
+    state = await snapshot(page)
+    assert actions(state) == request_prefix + ['confirm'] * len(after), state
+    assert len({write['mutationId'] for write in state['writes']}) == len(after), state
+    for write, event in zip(state['writes'], after):
+        assert write['mutationId'].startswith('qa-revised-2-'), write
+        assert {key: write['record'][key] for key in event} == event, write
+    local = await page.evaluate("JSON.parse(localStorage.getItem('campus.personal-imports.v1:platform%3Aqa-agent:fixture-campus-a'))")
+    assert local['records'] == state['records'] and local['sync']['enabled'] is False, local
+    journal = await page.evaluate("sessionStorage.getItem('campus.assistant-execution.v1:platform%3Aqa-agent:fixture-campus-a:'+'a'.repeat(43))")
+    assert journal is None, journal
+
+
+async def protected_good_case(page, name):
+    before = [dict(event) for event in ORIGINAL]
+    indices, instruction = [0], CHANGE
+    after = [dict(before[0]), {**before[1], 'startTime': '21:00', 'endTime': '21:30'}]
+    if name == 'multiple-reordered':
+        before.append({**before[1], 'title': '測試整理筆記', 'startTime': '22:00', 'endTime': '22:30'})
+        indices = [0, 2]
+        after = [dict(before[2]), after[1], dict(before[0])]
+        instruction = '第一及第三筆保留原樣，第二筆改到21:00至21:30，新版順序為第三、第二、第一筆'
+    await page.evaluate('value => window.__agentQA.configurePlan(value)', {'originalEvents': before, 'revisedEvents': after})
+    await start_plan(page, before)
+    await open_revision(page, keyboard=True, instruction=instruction)
+    await select_protection(page, before, indices, keyboard=len(before) == 2)
+    await no_overflow(page)
+    await page.screenshot(path=str(OUT / f'protected-{name}-selection-viewport.png'), full_page=False)
+    if len(before) == 2:
+        await page.keyboard.press('Tab')
+        await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_focused()
+        await page.keyboard.press('Enter')
+    else:
+        await page.get_by_role('button', name='重新預覽', exact=True).click()
+    prefix = ['ask'] + ['cancel'] * len(before) + ['ask']
+    await protected_preview(page, before, after, indices, instruction, prefix)
+    readability = await comparison_readability(page, f'protected-{name}-comparison')
+    await capture(page, f'protected-{name}-zero-writes')
+    await confirm_protected_preview(page, before, after, prefix)
+    await capture(page, f'protected-{name}-confirmed')
+    return {'mode': 'native protection selection and manual confirmations against fixed fake API',
+            'protectedIndices': indices, 'fixtureOriginal': before, 'fixtureRevised': after, 'readability': readability}
+
+
+async def protected_all_case(page):
+    await start_plan(page)
+    await open_revision(page, keyboard=True)
+    await protection_checkbox(page, 0).focus()
+    await page.keyboard.press('Space')
+    await page.keyboard.press('Tab')
+    await expect(protection_checkbox(page, 1)).to_be_focused()
+    await page.keyboard.press('Space')
+    for index in range(2):
+        await expect(protection_checkbox(page, index)).to_be_checked()
+    await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+    await expect(page.get_by_text('全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。', exact=True)).to_be_visible()
+    await page.keyboard.press('Tab')
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_be_focused()
+    await page.keyboard.press('Tab')
+    await expect(page.get_by_role('button', name='回到原提議', exact=True)).to_be_focused()
+    await page.keyboard.press('Enter')
+    await expect(page.get_by_role('form', name='修改安排再預覽', exact=True)).to_have_count(0)
+    await expect(page.get_by_role('button', name='修改時間或條件', exact=True)).to_be_focused()
+    await expect(card_list(page).nth(0).get_by_role('button', name='確認', exact=True)).to_be_enabled()
+    await expect(card_list(page).nth(1).get_by_role('button', name='確認', exact=True)).to_be_disabled()
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask'] and state['revoked'] == [], state
+    await expect(comparison(page)).to_have_count(0)
+    await no_overflow(page)
+    await capture(page, 'protected-all-original-cards-retained')
+    return {'mode': 'native Tab/Space selects every item; disabled preview and Enter returns to original cards',
+            'extraAsk': 0, 'cancel': 0, 'writes': 0}
+
+
+async def protected_bad_case(page, fault):
+    # Deliberately bypass the real server guard with valid fake card metadata.
+    # This verifies client defense only; real server 422/retirement has separate tests.
+    before = [dict(event) for event in ORIGINAL]
+    good = [dict(before[0]), {**before[1], 'startTime': '21:00', 'endTime': '21:30'}]
+    if fault == 'missing':
+        bad = [dict(good[1])]
+    elif fault == 'changed-time':
+        bad = [{**before[0], 'startTime': '19:15', 'endTime': '19:45'}, dict(good[1])]
+    elif fault == 'duplicate':
+        bad = [dict(before[0]), dict(before[0]), dict(good[1])]
+    else:
+        assert fault == 'same-name-ambiguous', fault
+        for event in before + good:
+            event['title'] = '測試讀書'
+        bad = [dict(event) for event in good]
+        good = [dict(before[1]), dict(before[0])]  # Exact same-name events may be reordered.
+    await page.evaluate('value => window.__agentQA.configurePlan(value)', {'originalEvents': before, 'revisedEvents': bad})
+    await start_plan(page, before)
+    await open_revision(page, instruction=CHANGE)
+    await select_protection(page, before, [0])
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    await expect(page.get_by_role('alert').first).to_contain_text('新預覽不符合保留條件')
+    await idle(page)
+    await expect(card_list(page)).to_have_count(2)
+    for index in range(2):
+        await expect(card_list(page).nth(index)).to_contain_text('已撤銷未執行提議')
+        await expect(card_list(page).nth(index).get_by_role('button', name='確認', exact=True)).to_have_count(0)
+    await expect(comparison(page)).to_have_count(0)
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value(CHANGE)
+    await expect(protection_checkbox(page, 0)).to_be_checked()
+    await expect(protection_checkbox(page, 1)).not_to_be_checked()
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask', 'cancel', 'cancel', 'ask'], state
+    assert state['requests'][-1]['outcome'] == '200', 'This case must exercise the client, not a fake server 422'
+    await capture(page, f'controlled-protection-{fault}-rejected')
+    await page.evaluate('events => window.__agentQA.configurePlan({revisedEvents:events})', good)
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    state = await protected_preview(page, before, good, [0], CHANGE, ['ask', 'cancel', 'cancel', 'ask', 'ask'])
+    for row in state['requests']:
+        if row['action'] == 'ask' and 'planProtection' in row['body']:
+            assert row['body']['planProtection'] == {'originalEvents': before, 'protectedIndices': [0]}, row
+    await no_overflow(page)
+    await capture(page, f'controlled-protection-{fault}-fresh-retry')
+    return {'mode': 'controlled bad API response bypasses server protection; client rejects whole candidate and keeps selections',
+            'fault': fault, 'fixtureRejected': bad, 'fixtureRetry': good, 'protectedIndices': [0], 'writes': 0}
+
+
+async def protected_partial_duplicate_case(page):
+    before = [dict(ORIGINAL[0]), dict(ORIGINAL[0]), dict(ORIGINAL[1])]
+    await page.evaluate('events => window.__agentQA.configurePlan({originalEvents:events})', before)
+    await start_plan(page, before)
+    instruction = '只修改第三項，保留第一項'
+    await open_revision(page, instruction=instruction)
+    await select_protection(page, before, [0])
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    await expect(page.get_by_role('alert')).to_contain_text('完全相同的行程需一起標記保留')
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value(instruction)
+    await expect(protection_checkbox(page, 0)).to_be_checked()
+    await expect(card_list(page)).to_have_count(3)
+    await expect(card_list(page).nth(0).get_by_role('button', name='確認', exact=True)).to_be_enabled()
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask'] and state['revoked'] == [], state
+    await expect(comparison(page)).to_have_count(0)
+    await capture(page, 'protected-partial-exact-duplicate-preflight')
+    return {'mode': 'partial selection of exact duplicate group rejected before any cancellation or new ask', 'writes': 0}
+
+
+async def protected_unknown_case(page):
+    await start_plan(page)
+    await open_revision(page)
+    await select_protection(page, ORIGINAL, [0])
+    await page.evaluate('window.__agentQA.configure({unknownCancellation:true})')
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    await expect(card_list(page).nth(0).get_by_role('button', name='重新核對結果', exact=True)).to_be_enabled()
+    await idle(page)
+    assert actions(await snapshot(page)) == ['ask', 'cancel', 'reconcile']
+    await expect(protection_checkbox(page, 0)).to_be_checked()
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value(CHANGE)
+    await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+    await no_writes(page)
+    await capture(page, 'protected-unknown-cancel-paused')
+    await page.evaluate('window.__agentQA.configure({unknownCancellation:false})')
+    await card_list(page).nth(0).get_by_role('button', name='重新核對結果', exact=True).click()
+    await expect(card_list(page).nth(0)).to_contain_text('已撤銷未執行提議')
+    assert actions(await snapshot(page)) == ['ask', 'cancel', 'reconcile', 'reconcile']
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    after = [dict(ORIGINAL[0]), {**ORIGINAL[1], 'startTime': '21:00', 'endTime': '21:30'}]
+    await protected_preview(page, ORIGINAL, after, [0], CHANGE, ['ask', 'cancel', 'reconcile', 'reconcile', 'cancel', 'ask'])
+    await capture(page, 'protected-unknown-cancel-recovered')
+    return {'mode': 'controlled cancellation loss; protected choices survive explicit reconcile and resume', 'writes': 0}
+
+
+async def protected_late_scope_case(page, scope):
+    await start_plan(page)
+    await open_revision(page)
+    await select_protection(page, ORIGINAL, [0])
+    await page.evaluate('window.__agentQA.configure({holdAsk:true})')
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    await page.wait_for_function('window.__agentQA.snapshot().waiting')
+    if scope == 'account':
+        await page.get_by_role('combobox', name='QA 帳號', exact=True).select_option('qa-agent-b')
+    else:
+        assert scope == 'school', scope
+        await page.get_by_role('combobox', name='QA 校園', exact=True).select_option('fixture-campus-b')
+    await expect(card_list(page)).to_have_count(0)
+    await page.evaluate('window.__agentQA.release()')
+    await page.wait_for_function("window.__agentQA.requests.filter(row=>row.action==='ask').every(row=>row.outcome)")
+    await idle(page)
+    await expect(card_list(page)).to_have_count(0)
+    await expect(comparison(page)).to_have_count(0)
+    await expect(page.get_by_role('form', name='修改安排再預覽', exact=True)).to_have_count(0)
+    await expect(page.get_by_role('checkbox', name=re.compile('保留原樣'))).to_have_count(0)
+    await expect(page.get_by_role('checkbox', name=re.compile('同意在本次對話'))).not_to_be_checked()
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask', 'cancel', 'cancel', 'ask'], state
+    assert state['account'] == ('qa-agent-b' if scope == 'account' else 'qa-agent'), state
+    assert state['school'] == ('fixture-campus-b' if scope == 'school' else 'fixture-campus-a'), state
+    bound = [row for row in state['requests'] if row['action'] == 'ask'][-1]
+    assert bound['account'] == 'qa-agent' and bound['body']['schoolId'] == 'fixture-campus-a', bound
+    assert bound['body']['planProtection'] == {'originalEvents': ORIGINAL, 'protectedIndices': [0]}, bound
+    for account in ['qa-agent', 'qa-agent-b']:
+        for school in ['fixture-campus-a', 'fixture-campus-b']:
+            assert await page.evaluate('key => localStorage.getItem(key)', f'campus.personal-imports.v1:platform%3A{account}:{school}') is None
+    await capture(page, f'controlled-protected-late-{scope}')
+    return {'mode': 'controlled delayed protected preview ignores AbortSignal; stale scope response must remain invisible',
+            'scopeSwitch': scope, 'writes': 0}
+
+
 def build_evidence():
     meta = json.loads((OUT / 'bundle-meta.json').read_text())
     paths = [name for name in meta['inputs'] if not name.startswith(('fixture:', '<')) and 'node_modules/' not in name]
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
-    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts']:
+    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts']:
         assert any(name.endswith('/' + required) for name in hashes), f'Real implementation missing: {required}'
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
@@ -525,6 +809,18 @@ async def main():
                              for name, width in [('cross-day-rename', 1440), ('cross-day-rename-320', 320),
                                                  ('reordered', 1440), ('added', 1440), ('removed', 1440),
                                                  ('same-name-ambiguous', 1440), ('unchanged', 1440)])
+                cases.extend([
+                    ('protected-single-1440', 1440, lambda p: protected_good_case(p, 'single-1440')),
+                    ('protected-single-320', 320, lambda p: protected_good_case(p, 'single-320')),
+                    ('protected-multiple-reordered', 1440, lambda p: protected_good_case(p, 'multiple-reordered')),
+                    ('protected-all-320', 320, protected_all_case),
+                    ('protected-partial-exact-duplicates', 1440, protected_partial_duplicate_case),
+                    ('protected-unknown-cancel', 1440, protected_unknown_case),
+                    ('controlled-protected-late-school', 1440, lambda p: protected_late_scope_case(p, 'school')),
+                    ('controlled-protected-late-account', 1440, lambda p: protected_late_scope_case(p, 'account')),
+                ])
+                cases.extend((f'controlled-protected-{fault}', 1440, lambda p, value=fault: protected_bad_case(p, value))
+                             for fault in ['missing', 'changed-time', 'duplicate', 'same-name-ambiguous'])
                 for name, width, run in cases:
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
                                                         reduced_motion='reduce', locale='zh-TW', timezone_id='Asia/Taipei', service_workers='block')

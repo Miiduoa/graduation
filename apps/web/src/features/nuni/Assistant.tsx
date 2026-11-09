@@ -9,6 +9,7 @@ import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import { AssistantPlanRevision } from './assistant/AssistantPlanRevision';
 import { AssistantPlanComparison } from './assistant/AssistantPlanComparison';
+import { createPlanProtection, validatePlanProtection, type PlanProtection } from '@/lib/assistantPlanProtection';
 import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan, type PlanRevisionEvent } from './assistant/planRevision';
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
@@ -225,6 +226,7 @@ function V2Conversation({
   const routeToken = useRef<string | undefined>(undefined);
   const revisionConsent = useRef(false);
   const revisionTurns = useRef(new Set<V2Turn>());
+  const rejectedProposalIds = useRef(new Set<string>());
   const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[] }>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
@@ -458,7 +460,7 @@ function V2Conversation({
       if (!controller.current?.signal.aborted) setPending(false);
     }
   }
-  async function revisePlan(turn: V2Turn, instruction: string): Promise<{ ok: boolean; message: string }> {
+  async function revisePlan(turn: V2Turn, instruction: string, protectedIndices: readonly number[] = []): Promise<{ ok: boolean; message: string }> {
     if (busy.current || !active() || !ready || !revisionConsent.current)
       return { ok: false, message: '請先等目前操作完成，並同意模型處理後再重新預覽。' };
     const continuing = revisionTurns.current.has(turn) && turn.reply.cards.every(card =>
@@ -469,9 +471,15 @@ function V2Conversation({
       return { ok: false, message: '原提議尚未完成核對，請先核對原操作結果；這次沒有產生新安排。' };
     let current: string;
     let before: PlanRevisionEvent[];
+    let protection: PlanProtection | undefined;
     try {
       before = getPlanRevisionEvents(turn);
-      current = buildPlanRevisionQuestion(turn, instruction);
+      protection = protectedIndices.length ? createPlanProtection(turn.reply.cards.map(card => card.args), protectedIndices) : undefined;
+      if (protection && protection.protectedIndices.length === protection.originalEvents.length)
+        return { ok: false, message: isUnattemptedCalendarPlan(turn, actionStates.current)
+          ? '已選擇全部保留原樣，不需要重新預覽；原確認卡保持原狀。'
+          : '已選擇全部保留原樣，但原提議已撤銷，不能恢復舊確認卡；這次沒有送出新的要求。' };
+      current = buildPlanRevisionQuestion(turn, instruction, protectedIndices);
     }
     catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : '請核對修改條件後再試。' }; }
 
@@ -492,7 +500,7 @@ function V2Conversation({
     try {
       // The selected visible plan is sufficient context. Other conversations,
       // identifiers and execution tokens do not enter this revision request.
-      const input = { question: current, history: [], consent: true };
+      const input = { question: current, history: [], consent: true, ...(protection ? { planProtection: protection } : {}) };
       let reply = await send('ask', { ...input, routeToken: routeToken.current });
       if (reply.bootstrap) {
         if (!active() || !revisionConsent.current)
@@ -506,12 +514,19 @@ function V2Conversation({
       if (!Array.isArray(reply.cards) || reply.cards.length === 0)
         return { ok: false, message: '尚未取得新預覽，舊提議已撤銷。請補充明確日期、時段或其他條件後再試。'
           + (typeof reply.answer === 'string' ? ' ' + reply.answer.slice(0, 400) : '') };
-      const previousIds = new Set(turns.flatMap(value => value.reply.cards.map(card => card.mutationId)));
+      const previousIds = new Set([...rejectedProposalIds.current, ...turns.flatMap(value => value.reply.cards.map(card => card.mutationId))]);
       if (new Set(reply.cards.map((card: V2Card) => card.mutationId)).size !== reply.cards.length ||
         reply.cards.some((card: V2Card) => card.tool !== 'propose_personal_event' || card.schoolId !== schoolId ||
         typeof card.mutationId !== 'string' || !card.mutationId || previousIds.has(card.mutationId) ||
         typeof card.token !== 'string' || !card.token))
         return { ok: false, message: '尚未取得新的純行程預覽。舊提議已撤銷，其他服務請另外提出並分開確認。' };
+      if (protection) {
+        const preservation = validatePlanProtection(protection, reply.cards.map((card: V2Card) => card.args));
+        if (!preservation.ok) {
+          for (const card of reply.cards) rejectedProposalIds.current.add(card.mutationId);
+          return { ok: false, message: '新預覽不符合保留條件，沒有提供新的可確認提議。' + preservation.message + ' 修改條件與保留選擇已保留，請調整後再試。' };
+        }
+      }
       const after = getPlanRevisionEvents({ question: current, reply });
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       for (const card of turns.flatMap(value => value.reply.cards)) {
@@ -611,7 +626,7 @@ function V2Conversation({
         return comparison ? <AssistantPlanComparison {...comparison} /> : null;
       }}
       renderPlanRevision={turn => <AssistantPlanRevision turn={turn} states={states} pending={pending}
-        enabled={ready && consent} onPreview={instruction => revisePlan(turn, instruction)} />}
+        enabled={ready && consent} onPreview={(instruction, indices) => revisePlan(turn, instruction, indices)} />}
     />
   );
 }

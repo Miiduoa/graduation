@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { exclusiveAllDayEnd } from '@campus/shared/src/imports/eventCalendar';
 import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan, type PlanRevisionEvent } from './planRevision';
 import type { V2ActionStates, V2Turn } from './types';
 import styles from './AssistantPlanRevision.module.css';
@@ -10,11 +11,14 @@ type Props = {
   states: V2ActionStates;
   pending: boolean;
   enabled: boolean;
-  onPreview: (instruction: string) => Promise<{ ok: boolean; message: string }>;
+  onPreview: (instruction: string, protectedIndices: readonly number[]) => Promise<{ ok: boolean; message: string }>;
 };
 
 function eventTime(event: PlanRevisionEvent): string {
-  if (event.allDay) return event.date + ' · 全天' + (event.endDate ? `（至 ${event.endDate}，不含結束日）` : '');
+  if (event.allDay) {
+    const endDate = exclusiveAllDayEnd(event.date, event.endDate);
+    return event.date + ' · 全天' + (endDate ? `（至 ${endDate}，不含結束日）` : '');
+  }
   return event.endDate && event.endDate !== event.date
     ? `${event.date} ${event.startTime} – ${event.endDate} ${event.endTime}（台灣時間）`
     : `${event.date} · ${event.startTime}–${event.endTime}（台灣時間）`;
@@ -22,12 +26,14 @@ function eventTime(event: PlanRevisionEvent): string {
 
 function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
+  const panel = useRef<HTMLElement>(null);
   const entry = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const mounted = useRef(false);
   const busy = useRef(false);
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
+  const [protectedIndices, setProtectedIndices] = useState<number[]>([]);
   const [started, setStarted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [complete, setComplete] = useState(false);
@@ -44,12 +50,27 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
   const unresolved = hasUnresolvedAssistantAction(states);
   const available = (pristine || retryable) && !unresolved && enabled;
   const waiting = pending || submitting;
+  const allProtected = protectedIndices.length === events.length;
+  const hasRevoked = turn.reply.cards.some(card => states[card.mutationId]?.status === 'cancelled');
+  const allProtectedMessage = hasRevoked
+    ? '全部項目已勾選保留原樣，這次不會重新預覽。舊提議已有項目撤銷，不能恢復原確認卡。'
+    : pristine
+      ? '全部項目已勾選保留原樣，不需重新預覽；原提議保持不變。'
+      : '全部項目已勾選保留原樣，這次不會重新預覽；請依原確認卡顯示的結果核對。';
+
+  function closeEditor() {
+    setOpen(false);
+    if (entry.current && !entry.current.disabled) entry.current.focus();
+    else panel.current?.focus();
+  }
 
   async function preview() {
-    if (!available || waiting || busy.current || complete) return;
-    try { buildPlanRevisionQuestion(turn, instruction); }
+    // All-protected is a local no-op, including a direct form submit without text.
+    if (allProtected || !available || waiting || busy.current || complete) return;
+    const selection = [...protectedIndices];
+    try { buildPlanRevisionQuestion(turn, instruction, selection); }
     catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : '請先確認修改條件，再重新預覽。');
+      setMessage(cause instanceof Error ? cause.message : '請先確認修改條件與保留項目，再重新預覽。');
       field.current?.focus();
       return;
     }
@@ -58,12 +79,12 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
     setSubmitting(true);
     setMessage('');
     try {
-      const result = await onPreview(instruction.trim());
+      const result = await onPreview(instruction.trim(), selection);
       if (!mounted.current) return;
-      setMessage(result.message || (result.ok ? '修改後的提議已備妥，請核對新的確認卡。' : '重新預覽尚未完成，修改條件已保留。'));
+      setMessage(result.message || (result.ok ? '修改後的提議已備妥，請核對新的確認卡。' : '重新預覽尚未完成，修改條件與保留項目已保留。'));
       if (result.ok) setComplete(true);
     } catch (cause) {
-      if (mounted.current) setMessage(cause instanceof Error ? cause.message : '重新預覽尚未完成，修改條件已保留。');
+      if (mounted.current) setMessage(cause instanceof Error ? cause.message : '重新預覽尚未完成，修改條件與保留項目已保留。');
     } finally {
       busy.current = false;
       if (mounted.current) setSubmitting(false);
@@ -71,22 +92,40 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
   }
 
   if (!open && !started && !pristine) return null;
-  return <section className={styles.panel} aria-label="修改行程提議">
+  return <section ref={panel} tabIndex={-1} className={styles.panel} aria-label="修改行程提議">
     {complete ? <p role="status" className={styles.notice}>{message}</p> : <>
       <button ref={entry} type="button" className={styles.secondary}
         aria-expanded={open} aria-controls={id + '-editor'} disabled={!available || waiting}
         onClick={() => setOpen(value => !value)}>修改時間或條件</button>
       {unresolved && <p className={styles.notice} role="status">有原操作仍待核對，請先使用原確認卡的核對流程；目前不會重新規劃。</p>}
       {!unresolved && !available && open && <p className={styles.notice} role="status">目前不能重新預覽這份安排，請先核對原確認卡與助理狀態。</p>}
+      {allProtected && <p role="status" className={styles.notice}>{allProtectedMessage}</p>}
       {open && <form id={id + '-editor'} className={styles.editor} aria-label="修改安排再預覽"
         aria-busy={submitting || undefined} onSubmit={event => { event.preventDefault(); void preview(); }}>
-        <p className={styles.heading}>原提議內容</p>
-        <ol className={styles.events} aria-label="原提議行程">
-          {events.map((event, index) => <li key={index}>
-            <strong>{event.title}</strong><span>{eventTime(event)}</span>
-          </li>)}
-        </ol>
-        <p id={id + '-notice'} className={styles.hint}>重新預覽會先撤銷整份未執行提議，再依修改條件產生新卡；未要求修改的行程會一併保留。新卡仍需你確認，才會寫入行事曆。</p>
+        <fieldset className={styles.protectedEvents}>
+          <legend className={styles.heading}>原提議內容</legend>
+          <p id={id + '-protection'} className={styles.hint}>勾選的項目會保留名稱、開始／結束日期、全天設定及開始／結束時間。若無法可靠核對，就不會加入新的確認卡。</p>
+          <ol className={styles.events} aria-label="原提議行程">
+            {events.map((event, index) => <li key={index}>
+              <strong id={`${id}-title-${index}`}>{event.title}</strong>
+              <span id={`${id}-when-${index}`}>{eventTime(event)}</span>
+              <label className={styles.protection} htmlFor={`${id}-protect-${index}`}>
+                <input id={`${id}-protect-${index}`} type="checkbox" checked={protectedIndices.includes(index)} disabled={waiting}
+                  aria-labelledby={`${id}-protect-label-${index} ${id}-ordinal-${index} ${id}-title-${index} ${id}-when-${index}`}
+                  aria-describedby={id + '-protection'}
+                  onChange={event => {
+                    const checked = event.target.checked;
+                    setProtectedIndices(previous => checked ? [...previous, index].sort((left, right) => left - right)
+                      : previous.filter(value => value !== index));
+                    setMessage('');
+                  }} />
+                <span id={`${id}-protect-label-${index}`}>保留原樣</span>
+                <span id={`${id}-ordinal-${index}`} className={styles.visuallyHidden}>第 {index + 1} 項</span>
+              </label>
+            </li>)}
+          </ol>
+        </fieldset>
+        <p id={id + '-notice'} className={styles.hint}>保留原樣只保留提議內容。重新預覽會先撤銷整份未執行提議，再依修改條件產生新卡；新卡仍需你確認，才會寫入行事曆。</p>
         <label htmlFor={id + '-instruction'}>修改條件</label>
         <textarea ref={field} id={id + '-instruction'} value={instruction} maxLength={300} rows={3}
           disabled={waiting} aria-describedby={id + '-notice ' + id + '-count'}
@@ -94,11 +133,12 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
           onChange={event => { setInstruction(event.target.value); setMessage(''); }} />
         <p id={id + '-count'} className={styles.hint}>{instruction.length}/300 字</p>
         <div className={styles.actions}>
-          <button type="submit" className={styles.primary} disabled={!available || waiting || !instruction.trim()}>
+          <button type="submit" className={styles.primary} disabled={allProtected || !available || waiting || !instruction.trim()}>
             {submitting ? '正在重新預覽…' : '重新預覽'}
           </button>
-          <button type="button" className={styles.secondary} disabled={waiting}
-            onClick={() => { setOpen(false); entry.current?.focus(); }}>收起修改</button>
+          <button type="button" className={styles.secondary} disabled={waiting} onClick={closeEditor}>
+            {allProtected ? '回到原提議' : '收起修改'}
+          </button>
         </div>
         {message && <p className={styles.notice} role="alert">{message}</p>}
       </form>}
