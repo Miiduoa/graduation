@@ -164,12 +164,17 @@ async def geometry_against_composer(target, dock_element):
     return await target.evaluate('''(node, dock) => {
       const box = element => {const r=element.getBoundingClientRect();
         return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
+      const style=getComputedStyle(node), visual=window.visualViewport;
       return {target:box(node),dock:box(dock),viewport:{width:innerWidth,height:innerHeight},
-        dockPosition:getComputedStyle(dock).position};
+        dockPosition:getComputedStyle(dock).position,scroll:{x:scrollX,y:scrollY},
+        computedMargins:{marginBlockStart:style.marginBlockStart,marginBlockEnd:style.marginBlockEnd,
+          scrollMarginBlockStart:style.scrollMarginBlockStart,scrollMarginBlockEnd:style.scrollMarginBlockEnd},
+        visualViewport:visual?{width:visual.width,height:visual.height,offsetLeft:visual.offsetLeft,
+          offsetTop:visual.offsetTop,pageLeft:visual.pageLeft,pageTop:visual.pageTop,scale:visual.scale}:null};
     }''', dock_element)
 
 
-async def focused_action_readability(page, button, name):
+async def focused_action_readability(page, button, name, before_tab=None):
     # Observe native Tab scrolling only. Do not repair visibility with scrollIntoView/focus.
     await expect(button).to_be_focused()
     await page.evaluate('''() => new Promise(resolve => {
@@ -180,6 +185,13 @@ async def focused_action_readability(page, button, name):
     evidence = await geometry_against_composer(button, await dock.element_handle())
     evidence['focused'] = await button.evaluate('node => document.activeElement === node')
     evidence['action'] = await button.inner_text()
+    if before_tab is not None:
+        evidence['beforeTab'] = before_tab
+        previous, previous_dock, previous_viewport = before_tab['target'], before_tab['dock'], before_tab['viewport']
+        evidence['noScrollExpected'] = (previous['width'] > 0 and previous['height'] > 0
+            and previous['top'] >= 12 and previous['bottom'] + 12 <= min(previous_dock['top'], previous_viewport['height'])
+            and previous['left'] >= 0 and previous['right'] <= previous_viewport['width'])
+        evidence['scrollDelta'] = {axis: evidence['scroll'][axis] - before_tab['scroll'][axis] for axis in ['x', 'y']}
     evidence['viewportScreenshot'] = f'{name}-viewport.png'
     (OUT / f'{name}.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
     await page.screenshot(path=str(OUT / evidence['viewportScreenshot']), full_page=False)
@@ -188,6 +200,9 @@ async def focused_action_readability(page, button, name):
             and target['top'] >= 0 and target['bottom'] <= min(dock_box['top'], viewport['height'])
             and target['left'] >= 0 and target['right'] <= viewport['width']), (
                 f'Native Tab leaves the focused action obscured: {evidence}')
+    if evidence.get('noScrollExpected'):
+        assert all(abs(delta) <= 1 for delta in evidence['scrollDelta'].values()), (
+            f'Tab scrolled an action that already had 12px clearance: {evidence}')
     return evidence
 
 
@@ -623,9 +638,11 @@ async def protected_good_case(page, name):
     await page.screenshot(path=str(OUT / f'protected-{name}-selection-viewport.png'), full_page=False)
     focused_action = None
     if len(before) == 2:
-        await page.keyboard.press('Tab')
         button = page.get_by_role('button', name='重新預覽', exact=True)
-        focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus')
+        dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+        before_tab = await geometry_against_composer(button, await dock.element_handle())
+        await page.keyboard.press('Tab')
+        focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus', before_tab)
         await page.keyboard.press('Enter')
     else:
         await page.get_by_role('button', name='重新預覽', exact=True).click()

@@ -294,9 +294,9 @@ it('clears old protection choices on a new proposal and ignores its predecessor\
 });
 
 
-// jsdom does not perform layout. These explicit geometry/computed-style fixtures
-// model a 720px viewport, a 150px dock, 72px bottom clearance and 12px focus gap.
-function focusVisibilityFixture(top: number) {
+// jsdom verifies the native scroll request and focus lifecycle only. Browser QA
+// verifies actual movement and CSS margins against the dock at each viewport.
+function focusScrollFixture() {
   let frameId = 0;
   const frames = new Map<number, FrameRequestCallback>();
   const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
@@ -304,7 +304,6 @@ function focusVisibilityFixture(top: number) {
     return frameId;
   });
   const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id); });
-  vi.stubGlobal('visualViewport', { offsetTop: 0, height: 720 });
   const view = render(<>
     <AssistantPlanRevision {...base} turn={turn()} onPreview={vi.fn()} />
     <button type="button">表單外的控制項</button>
@@ -313,16 +312,6 @@ function focusVisibilityFixture(top: number) {
   const button = screen.getByRole('button', { name: '重新預覽' });
   const scroll = vi.fn();
   Object.defineProperty(button, 'scrollIntoView', { configurable: true, value: scroll });
-  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, top, 88, 44));
-  const computedStyle = window.getComputedStyle.bind(window);
-  vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
-    const style = computedStyle(element, pseudo);
-    if (element === button) {
-      style.scrollMarginBlockStart = '12px';
-      style.scrollMarginBlockEnd = '234px';
-    }
-    return style;
-  });
   const flush = () => act(() => {
     const callbacks = [...frames.values()];
     frames.clear();
@@ -331,8 +320,8 @@ function focusVisibilityFixture(top: number) {
   return { view, button, scroll, request, cancel, frames, flush };
 }
 
-it('reveals a partly dock-obscured focused control using the resolved margin and an instant nearest scroll', () => {
-  const { button, scroll, flush } = focusVisibilityFixture(485.94);
+it('requests a native instant nearest scroll after the control receives focus', () => {
+  const { button, scroll, flush } = focusScrollFixture();
   act(() => button.focus());
   expect(document.activeElement).toBe(button);
   expect(scroll).not.toHaveBeenCalled();
@@ -340,20 +329,21 @@ it('reveals a partly dock-obscured focused control using the resolved margin and
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
 });
 
-it('does not scroll an already visible focused control or schedule focus scrolling for ordinary state changes', () => {
-  const { button, scroll, request, flush } = focusVisibilityFixture(430);
+it('does not schedule another scroll request for typing or checkbox state changes', () => {
+  const { button, scroll, request, flush } = focusScrollFixture();
   act(() => button.focus());
   flush();
-  expect(scroll).not.toHaveBeenCalled();
+  expect(scroll).toHaveBeenCalledOnce();
   request.mockClear();
+  scroll.mockClear();
   enter('更新條件而不重新聚焦');
   fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
   expect(request).not.toHaveBeenCalled();
   expect(scroll).not.toHaveBeenCalled();
 });
 
-it('does not scroll a formerly obscured control after focus has moved outside the revision form', () => {
-  const { button, scroll, flush } = focusVisibilityFixture(485.94);
+it('does not request scrolling after focus has moved outside the revision form', () => {
+  const { button, scroll, flush } = focusScrollFixture();
   act(() => button.focus());
   act(() => screen.getByRole('button', { name: '表單外的控制項' }).focus());
   flush();
@@ -361,7 +351,7 @@ it('does not scroll a formerly obscured control after focus has moved outside th
 });
 
 it('cancels a pending focus frame on unmount and ignores a late callback from the old proposal', () => {
-  const { view, button, scroll, cancel, frames } = focusVisibilityFixture(485.94);
+  const { view, button, scroll, cancel, frames } = focusScrollFixture();
   act(() => button.focus());
   const [id, lateCallback] = [...frames.entries()][0];
   view.unmount();
