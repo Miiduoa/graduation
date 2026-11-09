@@ -916,7 +916,7 @@ function AssistantConversation({
             ref={composerInput}
             accessibilityLabel="詢問校園助理"
             value={draft} maxLength={1600} multiline editable={!studyBusy && !calendarBusy} onChangeText={editDraft}
-            placeholder={platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
+            placeholder={busy ? '可以先寫下一句，完成後再送出…' : platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
             placeholderTextColor={aiTokens.muted}
             style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
               borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
