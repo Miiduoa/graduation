@@ -183,7 +183,7 @@ export async function runPersonalImportAi(
           signal,
         });
         if (signal.aborted) throw cancelled();
-        if (cloud.ok) {
+        if (cloud.ok === true) {
           const vision = parsePersonalImportAiResponse(cloud.output, '', options, 'image');
           vision.issues.push({
             code: 'import-provider', severity: 'warning',
@@ -192,7 +192,7 @@ export async function runPersonalImportAi(
           request.onPartial?.({ ...vision, sourceText: '' });
           return { ...vision, sourceText: '' };
         }
-        provider = '雲端圖片辨識未完成：' + cloud.message + ' 已切換本機 OCR，後續的雲端服務只處理辨識文字。';
+        provider = '雲端圖片辨識未完成：' + (cloud.ok === false ? cloud.message : '請重試') + ' 已切換本機 OCR，後續的雲端服務只處理辨識文字。';
       } catch (error) {
         if (signal.aborted) throw cancelled();
         provider = '雲端看圖未完成：' + (error instanceof Error ? error.message : '請重試') +

@@ -1009,7 +1009,7 @@ function ImportWorkspace({
             signal: abort.current.signal,
           });
           if (!current(run)) return;
-          if (cloud.ok) {
+          if (cloud.ok === true) {
             const screenshot = { type: 'screenshot' as const, name: asset.fileName || '截圖' };
             const result = parsePersonalImportAiResponse(cloud.output, '', {
               kind: 'timetable', schoolId, academicYear, semester, source: screenshot, periodProfile: profile,
@@ -1034,7 +1034,7 @@ function ImportWorkspace({
             setNotice('雲端已直接辨識 ' + result.rows.length + ' 堂課。請核對星期、節次、教室，再確認新增。');
             return;
           }
-          cloudFailure = '雲端看圖未完成：' + cloud.message + ' 現在改用本機 OCR；本次結果不算雲端看圖成功。';
+          cloudFailure = '雲端看圖未完成：' + (cloud.ok === false ? cloud.message : '請重試') + ' 現在改用本機 OCR；本次結果不算雲端看圖成功。';
         } catch (error) {
           if (!current(run)) return;
           cloudFailure = '雲端看圖失敗：' + (error instanceof Error ? error.message : '無法完成') + '，改用本機 OCR。';
@@ -1652,7 +1652,7 @@ function ImportWorkspace({
                   />
                 ) : (
                   <Button
-                    text={hasScreenshotText ? '用 AI 整理這張截圖' : cloudImageConsent && session ? '用雲端 AI 直接看課表' : '以本機 OCR 讀取課表'}
+                    text={hasScreenshotText ? '用 AI 整理這張截圖' : cloudImageConsent && session ? '用雲端 AI 直接看課表' : '用 AI 辨識課表截圖'}
                     kind="primary"
                     disabled={
                       busy || saving || aiState.status === 'busy' ||
