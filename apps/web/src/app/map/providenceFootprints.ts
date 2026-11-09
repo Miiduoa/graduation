@@ -226,7 +226,8 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
     if (!place || item.name !== place.name || item.sourceUrl !== place.sourceUrl) continue;
     if (typeof item.heightMeters !== 'number' || !Number.isFinite(item.heightMeters) ||
       item.heightMeters < 2.5 || item.heightMeters > 100 ||
-      (item.heightBasis !== 'illustrative' && item.heightBasis !== 'osm-tag')) continue;
+      (item.heightBasis !== 'illustrative' && item.heightBasis !== 'osm-tag') ||
+      (item.heightBasis === 'illustrative' && item.heightMeters !== ILLUSTRATIVE_HEIGHT)) continue;
     if (!Array.isArray(item.outline) || item.outline.length < 3 || item.outline.length > MAX_VERTICES) continue;
     const geometry = item.outline.map((pair: unknown) =>
       Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number'
