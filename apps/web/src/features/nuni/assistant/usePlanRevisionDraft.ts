@@ -178,7 +178,7 @@ export function usePlanRevisionDraft(scope: RevisionDraftScope, active: () => bo
       ? '已套用修改文字與經逐欄核對的保留選項，尚未送出；請再檢查目前提議。'
       : '已帶入修改文字；目前提議與草稿來源不同，請重新選擇保留項目。';
     editorStatus(source.key, message);
-    setStatus(message);
+    setStatus('');
     return { ok: true, message, content };
   }
 

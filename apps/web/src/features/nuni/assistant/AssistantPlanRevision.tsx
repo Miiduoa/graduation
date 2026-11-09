@@ -178,7 +178,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
         aria-busy={submitting || undefined} onSubmit={event => { event.preventDefault(); void preview(); }}>
         {draft && <div className={styles.draftInfo}>
           <p className={styles.hint}>本分頁只暫存最近一份修訂草稿，30 分鐘內可恢復。</p>
-          {draft.status && <p className={styles.notice} role="status">{draft.status}</p>}
+          {draft.status && draft.status !== draftNotice?.text && <p className={styles.notice} role="status">{draft.status}</p>}
           {draft.recovery && <>
             <p className={styles.hint}>{draft.recovery.sameContent
               ? '目前提議內容逐欄相同，可帶回保留選項。'

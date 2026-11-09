@@ -502,3 +502,24 @@ it('blocks apply while pending or awaiting reconciliation but allows local clear
   expect(draft.onClear).toHaveBeenCalledOnce();
   expect(onPreview).not.toHaveBeenCalled();
 });
+
+
+it.each([
+  { label: '套用已恢復的草稿', ok: true },
+  { label: '清除修改內容', ok: true },
+  { label: '套用已恢復的草稿', ok: false },
+  { label: '清除修改內容', ok: false },
+])('announces $label result only once when owner status repeats the same message (ok=$ok)', ({ label, ok }) => {
+  const message = ok ? '修改草稿已更新。' : '草稿操作失敗，內容仍保留。';
+  const draft = {
+    ...draftBridge(), status: message,
+    onApply: vi.fn(() => ({ ok, message, content: { instruction: '恢復的條件', protectedIndices: [] } })),
+    onClear: vi.fn(() => ({ ok, message })),
+  };
+  render(<AssistantPlanRevision {...base} turn={turn()} draft={draft} onPreview={vi.fn()} />);
+  open(); enter('目前修改');
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  expect(screen.getAllByText(message)).toHaveLength(1);
+  expect(screen.getByRole(ok ? 'status' : 'alert').textContent).toBe(message);
+  expect(screen.queryByRole(ok ? 'alert' : 'status')).toBeNull();
+});
