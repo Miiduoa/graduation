@@ -294,3 +294,17 @@ it('reports cross-service progress without treating a handoff as a finished orde
   expect(screen.getByLabelText('跨功能任務進度').textContent).toContain('待核對或有衝突 1 項');
   expect(screen.getByLabelText('跨功能任務進度').textContent).toContain('其他 1 項尚未確認完成');
 });
+
+it('does not show an irrelevant zero-calendar count for multiple service-only actions', () => {
+  const page: V2Card = {
+    tool: 'propose_open_page', token: 'service-entry', mutationId: 'service-entry',
+    schoolId: 'pu', destination: '/map?schoolId=pu', args: { page: 'map' },
+  };
+  render(<AssistantCardStack cards={[foodCard, page]} states={{}} pending={false}
+    onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  const status = screen.getByLabelText('跨功能任務進度');
+  expect(status.textContent).not.toContain('0/0');
+  expect(status.textContent).toContain('服務入口已備妥 0 項');
+  expect(status.textContent).toContain('其他 2 項尚未確認完成');
+  expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+});
