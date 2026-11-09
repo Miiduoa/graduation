@@ -213,7 +213,7 @@ test('the actual community entry opens history and routes a result without repla
   const timeline = view.getByText('原動態保留');
   fireEvent.press(view.getByLabelText('找舊貼文')); enter(view); await view.findByText('二手書 one');
   fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
-  await waitFor(() => expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'one' }));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'one', schoolId: 'pu' }));
   expect(view.getByText('原動態保留')).toBe(timeline);
   expect(view.queryByLabelText('記得的標題開頭')).toBeNull();
 });

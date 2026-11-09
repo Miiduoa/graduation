@@ -206,3 +206,35 @@ test('a server rejection of replies still revokes the whole post instead of show
   expect(view.queryByText('舊學期的二手書')).toBeNull();
   expect(view.queryByLabelText('重試留言')).toBeNull();
 });
+
+
+test('a historical route refuses the same post ID when current campus differs from the searched campus', async () => {
+  mockSchoolId = 'other';
+  read.mockResolvedValueOnce(row('other', '其他學校同 ID 的文章'));
+  const goBack = jest.fn();
+  const route = { params: { postId: 'old-1', schoolId: 'pu' } };
+  const navigation = { goBack, setOptions: jest.fn() };
+  const view = render(<PostDetailScreen route={route} navigation={navigation} />);
+  expect(view.getByText('搜尋文章的學校已切換，請返回校園社群重新搜尋。')).toBeTruthy();
+  expect(read).not.toHaveBeenCalled();
+  expect(view.queryByText('其他學校同 ID 的文章')).toBeNull();
+  fireEvent.press(view.getByLabelText('返回校園社群'));
+  expect(goBack).toHaveBeenCalledTimes(1);
+});
+
+test('switching schools after historical detail rendered hides the old post and blocks a new-school same-ID read', async () => {
+  read.mockResolvedValueOnce(row('pu', '靜宜學生的文章'))
+    .mockResolvedValueOnce(row('other', '別校同 ID 的文章'));
+  const route = { params: { postId: 'old-1', schoolId: 'pu' } };
+  const navigation = { goBack: jest.fn(), setOptions: jest.fn() };
+  const view = render(<PostDetailScreen route={route} navigation={navigation} />);
+  await view.findByText('靜宜學生的文章');
+  expect(read).toHaveBeenCalledTimes(1);
+  mockSchoolId = 'other';
+  view.rerender(<PostDetailScreen route={route} navigation={navigation} />);
+  expect(view.getByText('搜尋文章的學校已切換，請返回校園社群重新搜尋。')).toBeTruthy();
+  expect(view.queryByText('靜宜學生的文章')).toBeNull();
+  await act(async () => { await Promise.resolve(); });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(view.queryByText('別校同 ID 的文章')).toBeNull();
+});
