@@ -41,6 +41,7 @@ describe('public Providence building geometry route', () => {
     expect(JSON.stringify(body)).not.toContain('editor-name');
     expect(body.buildings[0]).not.toHaveProperty('uid');
     expect(body.stale).toBe(false);
+    expect(body.osmBaseAt).toBeNull(); // Legacy Overpass responses omit replication metadata.
     expect(mockedFetch).toHaveBeenCalledTimes(1);
     const called = new URL(mockedFetch.mock.calls[0][0]);
     expect(called.hostname).toBe('overpass-api.de');
@@ -138,6 +139,7 @@ describe('public Providence building geometry route', () => {
     expect(response.status).toBe(200);
     const snapshot = await response.json();
     expect(snapshot.stale).toBe(false);
+    expect(snapshot.osmBaseAt).toBe(baseTime);
     expect(snapshot.buildings).toHaveLength(1);
     expect(snapshot.buildings[0].osmEditedAt).toBe('2026-10-15T08:09:10Z');
     expect(upstream).toHaveBeenCalledTimes(1);
