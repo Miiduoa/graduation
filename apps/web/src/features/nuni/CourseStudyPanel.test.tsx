@@ -67,6 +67,36 @@ it('navigates repeated exact model quotes without rerunning AI or altering the s
 });
 
 
+it('brings the selected repeated source quote into view without losing keyboard focus or scrolling on note edits', async () => {
+  const repeated = { ...material, body: '主鍵在第一段。外鍵可以參照主鍵。最後一段再提主鍵。' };
+  mocks.run.mockResolvedValueOnce({ ...explanation, sourceQuote: '主鍵' });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={repeated} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+
+  const mark = document.querySelector('mark') as HTMLElement;
+  const scroll = vi.fn();
+  mark.scrollIntoView = scroll;
+  const next = screen.getByRole('button', { name: '下一處相同引句' });
+  next.focus();
+  fireEvent.click(next);
+  await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'nearest' }));
+  expect(document.activeElement).toBe(next);
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 2 處。')).toBeTruthy();
+
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '這處引句仍要保留在畫面上。' } });
+  expect(scroll).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 2 處。')).toBeTruthy();
+  expect(mark.textContent).toBe('主鍵');
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(next);
+  await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
+  expect(document.activeElement).toBe(next);
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 3 處。')).toBeTruthy();
+});
+
 it('scopes a repeated citation position to its lesson and reading mode', async () => {
   const repeated = { ...material, body: '主鍵在第一段。外鍵可以參照主鍵。最後一段再提主鍵。' };
   mocks.run.mockResolvedValueOnce({ ...explanation, sourceQuote: '主鍵' })

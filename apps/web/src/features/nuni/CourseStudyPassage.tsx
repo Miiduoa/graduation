@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import {
   prepareStudyTutorHistory,
@@ -56,7 +56,17 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const displayedQuote = activeStep?.sourceQuote ?? result?.sourceQuote;
   const evidenceKey = JSON.stringify([mode, selected?.id ?? null, activeStepIndex, displayedQuote ?? null]);
   const evidenceOccurrence = evidencePosition?.key === evidenceKey ? evidencePosition.occurrence : 0;
-  const evidence = displayedQuote ? locateStudyEvidence(passage.text, displayedQuote, evidenceOccurrence) : null;
+  // A student typing notes should not re-scan the passage or move the citation.
+  const evidence = useMemo(() => displayedQuote
+    ? locateStudyEvidence(passage.text, displayedQuote, evidenceOccurrence) : null,
+  [passage.text, displayedQuote, evidenceOccurrence]);
+
+  // Keep the source quote in view when browsing repeated occurrences, without
+  // stealing keyboard focus from Previous/Next or forcing motion animation.
+  useEffect(() => {
+    if (!evidence || evidencePosition?.key !== evidenceKey) return;
+    evidenceMark.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [evidence, evidenceKey, evidencePosition]);
 
   useEffect(() => {
     setAvailability(getStudyTutorAvailability());
