@@ -64,7 +64,7 @@ it('shows event time and keeps sequential confirm/cancel actions', () => {
   );
   expect(screen.getByText('寫作業：樹與圖作業')).toBeTruthy();
   expect(screen.getAllByText(/20:00–21:00/).length).toBe(2);
-  expect(screen.getByText('依序全部確認')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '依序確認 2 筆個人行程' })).toBeTruthy();
   const confirms = screen.getAllByText('確認');
   expect((confirms[1] as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(confirms[0]);
@@ -164,9 +164,9 @@ it('keeps pending batch confirm disabled without hiding the label', () => {
       onCancel={vi.fn()}
     />,
   );
-  const batch = screen.getByRole('button', { name: '依序全部確認' }) as HTMLButtonElement;
+  const batch = screen.getByRole('button', { name: '依序確認 2 筆個人行程' }) as HTMLButtonElement;
   expect(batch.disabled).toBe(true);
-  expect(batch.textContent).toBe('依序全部確認');
+  expect(batch.textContent).toBe('依序確認 2 筆個人行程');
 });
 
 it('offers read-only recovery for uncertain results and blocks the dependent batch', () => {
@@ -190,4 +190,59 @@ it('keeps service handoff distinct from verified calendar completion', () => {
   expect(screen.getByText('請到點餐頁完成確認與付款。')).toBeTruthy();
   expect(screen.queryByText('已送出訂單')).toBeNull();
   expect(screen.queryByLabelText('行程執行回執')).toBeNull();
+});
+
+it('does not combine calendar writes and food-order review into one batch confirmation', () => {
+  const onConfirm = vi.fn();
+  const calendar = eventCard('m1', '讀書：程式設計');
+  const { rerender } = render(<AssistantCardStack
+    cards={[calendar, foodCard]} states={{}} pending={false}
+    onConfirm={onConfirm} onCancel={vi.fn()} />);
+  expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+  expect(screen.getByText(/點餐也不會和行程一起批次確認/)).toBeTruthy();
+  const confirm = screen.getAllByRole('button', { name: '確認' });
+  expect(confirm).toHaveLength(2);
+  fireEvent.click(confirm[0]);
+  expect(onConfirm).toHaveBeenLastCalledWith([calendar]);
+  fireEvent.click(confirm[1]);
+  expect(onConfirm).toHaveBeenLastCalledWith([foodCard]);
+  expect(onConfirm).toHaveBeenCalledTimes(2);
+
+  const page: V2Card = {
+    tool: 'propose_open_page', token: 'page-token', mutationId: 'page-1',
+    schoolId: 'pu', destination: '/map?schoolId=pu', args: { page: 'map' },
+  };
+  rerender(<AssistantCardStack
+    cards={[calendar, page]} states={{}} pending={false}
+    onConfirm={onConfirm} onCancel={vi.fn()} />);
+  expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '確認' })).toHaveLength(2);
+});
+
+it('refuses to render a confirmation button for an unknown model tool', () => {
+  const onConfirm = vi.fn();
+  const unsupported: V2Card = {
+    tool: 'unrecognized_write', token: 'unused', mutationId: 'm2', schoolId: 'pu',
+    destination: '不應信任', args: { href: 'https://outside.example' },
+  };
+  const valid = eventCard('m1', '讀書準備');
+  render(<AssistantCardStack cards={[valid, unsupported]}
+    states={{}} pending={false} onConfirm={onConfirm} onCancel={vi.fn()} />);
+  expect(screen.getByLabelText('無法確認的任務')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '確認' })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: '確認' }));
+  expect(onConfirm).toHaveBeenCalledWith([valid]);
+  expect(screen.queryByRole('link', { name: /outside/ })).toBeNull();
+});
+
+it('warns that order-mode confirmation may submit an order and does not expose a page shortcut', () => {
+  const order = { ...foodCard, args: { ...foodCard.args, mode: 'order' } };
+  render(<AssistantCardStack cards={[order]} states={{}} pending={false}
+    onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByText(/確認可能直接送出訂單/)).toBeTruthy();
+  expect(screen.getByText('合計 80 元')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '前往點餐頁' })).toBeNull();
+  expect(screen.getByRole('button', { name: '確認' })).toBeTruthy();
+  expect(screen.queryByText('已送出訂單')).toBeNull();
 });
