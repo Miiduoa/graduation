@@ -42,14 +42,47 @@ async function isOrphan(db: Firestore, tx: FirebaseFirestore.Transaction, path: 
 }
 // Unfiltered collection-group scans use the built-in document-name index, not
 // collection-group field indexes. Never infer absence from a truncated result.
-export const REFERENCE_SCAN_LIMIT = 500;
+export const REFERENCE_SCAN_LIMIT = 200;
 
-function timestampMillis(value: unknown): number {
-  if (typeof value === 'number') return value;
-  if (value instanceof Date) return value.getTime();
-  if (value && typeof (value as { toMillis?: unknown }).toMillis === 'function')
-    return (value as { toMillis: () => number }).toMillis();
-  return typeof value === 'string' ? Date.parse(value) : NaN;
+const BUDGET_EXHAUSTED = new Error('Cleanup read budget exhausted');
+// 48 scheduled runs/day * 300 = 14,400 reads/day, including discovery,
+// empty queries (one read minimum), settlement and transaction retries.
+// Each signing cleanup adds at most 50 reads: total <= 14,400 + 50 * requests/day.
+// Signing traffic is unbounded, so this is not a site-wide daily quota.
+export const SCHEDULED_CLEANUP_READ_BUDGET = 300;
+export const SIGNING_CLEANUP_READ_BUDGET = 50;
+export const CLEANUP_CANDIDATE_LIMIT = 5;
+
+class CleanupReadBudget {
+  constructor(public remaining: number) {}
+  spend(count: number) {
+    if (count > this.remaining) throw BUDGET_EXHAUSTED;
+    this.remaining -= count;
+  }
+  async query(query: FirebaseFirestore.Query, maximum: number, tx?: FirebaseFirestore.Transaction) {
+    const limit = Math.min(maximum, this.remaining);
+    if (limit < 1) throw BUDGET_EXHAUSTED;
+    this.spend(limit);
+    const result = tx ? await tx.get(query.limit(limit)) : await query.limit(limit).get();
+    this.remaining += limit - Math.max(1, result.size);
+    return { result, limit };
+  }
+  transaction(tx: FirebaseFirestore.Transaction): FirebaseFirestore.Transaction {
+    return new Proxy(tx, {
+      get: (target, key) => {
+        if (key === 'get') return (ref: FirebaseFirestore.DocumentReference | FirebaseFirestore.Query) => {
+          if (!('limit' in ref)) this.spend(1);
+          return target.get(ref as FirebaseFirestore.DocumentReference);
+        };
+        if (key === 'getAll') return (...refs: FirebaseFirestore.DocumentReference[]) => {
+          this.spend(refs.length);
+          return target.getAll(...refs);
+        };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  }
 }
 
 function attachmentReferences(value: unknown, path: string): boolean {
@@ -60,30 +93,28 @@ function attachmentReferences(value: unknown, path: string): boolean {
 }
 
 async function hasReferences(
-  db: Firestore, tx: FirebaseFirestore.Transaction, path: string, now: number,
+  db: Firestore, tx: FirebaseFirestore.Transaction, path: string, budget: CleanupReadBudget,
 ): Promise<boolean> {
   try {
-    const queries = [
-      db.collectionGroup('posts'), db.collectionGroup('submissions'),
-      db.collection('campusStories'), db.collection('groups'),
-    ];
-    for (const [index, query] of queries.entries()) {
-      const result = await tx.get(query.limit(REFERENCE_SCAN_LIMIT + 1));
-      if (result.size > REFERENCE_SCAN_LIMIT) return true;
-      for (const doc of result.docs) {
-        const row = doc.data();
-        if (index < 2 && attachmentReferences(row.attachments, path)) return true;
-        if (index === 2 && row.mediaUrl === path) {
-          const expiry = timestampMillis(row.expiresAt);
-          // An unknown expiry cannot establish that the reference is inactive.
-          if (!Number.isFinite(expiry) || expiry > now) return true;
-        }
-        if (index === 3 && row.coverUrl === path) return true;
-      }
+    // Equality queries need only built-in single-field indexes. Any match is
+    // retained, including expired stories, since limit(1) cannot prove all expired.
+    for (const query of [
+      db.collection('campusStories').where('mediaUrl', '==', path),
+      db.collection('groups').where('coverUrl', '==', path),
+    ]) {
+      const { result } = await budget.query(query, 1, tx);
+      if (!result.empty) return true;
+    }
+    for (const query of [db.collectionGroup('posts'), db.collectionGroup('submissions')]) {
+      const { result, limit } = await budget.query(query, REFERENCE_SCAN_LIMIT + 1, tx);
+      // A budget-truncated scan cannot establish absence either.
+      if (result.size > REFERENCE_SCAN_LIMIT || result.size === limit) return true;
+      if (result.docs.some((doc) => attachmentReferences(doc.data().attachments, path))) return true;
     }
     return false;
-  } catch {
-    // Includes missing indexes, unavailable queries and malformed timestamps.
+  } catch (error) {
+    if (error === BUDGET_EXHAUSTED) throw error;
+    // Includes missing indexes and unavailable queries.
     return true;
   }
 }
@@ -103,8 +134,9 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
     if (!row || row.path !== path || (uid && row.uid !== uid)) fail(404, '找不到檔案');
     return row!;
   }
-  async function settle(path: string, uid: string, bytes: number | null, now = Date.now()) {
-    return db.runTransaction(async (tx) => {
+  async function settle(path: string, uid: string, bytes: number | null, now = Date.now(), budget?: CleanupReadBudget) {
+    return db.runTransaction(async (rawTx) => {
+      const tx = budget ? budget.transaction(rawTx) : rawTx;
       const ref = uploads.doc(uploadId(path));
       const user = quota.doc(userId(uid));
       const [record, globalSnap, userSnap] = await tx.getAll(ref, global, user);
@@ -231,84 +263,99 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
       });
     },
     finalize: settle,
-    async cleanup(now: number, limit = 20, uid?: string) {
-      const maximum = Math.min(50, Math.max(1, limit));
+    async cleanup(now: number, limit = CLEANUP_CANDIDATE_LIMIT, uid?: string) {
+      const maximum = Math.min(CLEANUP_CANDIDATE_LIMIT, Math.max(1, limit));
+      const budget = new CleanupReadBudget(uid ? SIGNING_CLEANUP_READ_BUDGET : SCHEDULED_CLEANUP_READ_BUDGET);
       const cursor = db.collection('privateFileCleanup').doc('cursor');
+      budget.spend(1);
       const cursorId = (await cursor.get()).data()?.lastId;
+      if (uid) budget.spend(1);
       const own = uid ? (await quota.doc(userId(uid)).get()).data()?.pendingPaths || [] : [];
+      budget.spend(Math.min(own.length, MAX_PENDING_UPLOADS));
       const ownRows = await Promise.all((own as string[]).slice(0, MAX_PENDING_UPLOADS)
         .map((path) => uploads.doc(uploadId(path)).get()));
-      const pending = await uploads.where('expiresAt', '<=', now).orderBy('expiresAt').limit(maximum).get();
-      const deleting = await uploads.where('status', '==', 'deleting').limit(maximum).get();
+      const pending = (await budget.query(uploads.where('expiresAt', '<=', now).orderBy('expiresAt'), maximum)).result;
+      const deleting = (await budget.query(uploads.where('status', '==', 'deleting'), maximum)).result;
       // Single-field indexes only. Persist the scan position so live references
       // cannot starve later finalized rows; wrap after reaching the end.
       let scan = uploads.where('status', 'in', ['finalized', 'claimed', 'released']).orderBy('__name__');
       if (typeof cursorId === 'string') scan = scan.startAfter(cursorId);
-      let finalized = await scan.limit(maximum).get();
+      let finalized = (await budget.query(scan, maximum)).result;
       if (finalized.empty && cursorId)
-        finalized = await uploads.where('status', 'in', ['finalized', 'claimed', 'released']).orderBy('__name__').limit(maximum).get();
+        finalized = (await budget.query(uploads.where('status', 'in', ['finalized', 'claimed', 'released']).orderBy('__name__'), maximum)).result;
       let cleaned = 0;
       const candidates = new Map([...ownRows, ...pending.docs, ...deleting.docs, ...finalized.docs].map((snap) => [snap.id, snap]));
       let lastScanned: string | null = null;
       for (const snap of [...candidates.values()].slice(0, maximum)) {
-        const row = snap.data();
-        if (!row) continue;
-        if (['finalized', 'claimed', 'released'].includes(row.status)) lastScanned = snap.id;
-        const claimed = await db.runTransaction(async (tx) => {
-          const current = (await tx.get(snap.ref)).data();
-          if (!current || current.path !== row.path) return false;
-          if (['finalized', 'claimed', 'released', 'deleting'].includes(current.status)) {
-            // Recheck on every transaction retry, including interrupted removals.
-            if (current.status !== row.status || current.claimedAt !== row.claimedAt ||
-              current.finalizedAt !== row.finalizedAt || current.releasedAt !== row.releasedAt ||
-              await hasReferences(db, tx, current.path, now)) return false;
-          }
-          if (current.status === 'deleting') return true;
-          if (current.status === 'released') {
-            const scope = parsePrivateFilePath(current.path);
-            if (scope?.kind !== 'group-cover' || !Number.isFinite(current.releasedAt) ||
-              current.releasedAt + ORPHAN_GRACE_MS > now) return false;
-            const group = await tx.get(db.collection('groups').doc(scope.groupId!));
-            if (group.data()?.coverUrl === current.path) return false;
-            tx.update(snap.ref, { status: 'deleting' });
-          } else if (['finalized', 'claimed'].includes(current.status)) {
-            // A claim after the scan always wins, including on transaction retry.
-            if (current.status !== row.status || current.claimedAt !== row.claimedAt) return false;
-            if (current.status === 'finalized') {
-              if (current.finalizedAt == null) {
-                tx.update(snap.ref, { finalizedAt: now });
-                return false;
-              }
-              if (!Number.isFinite(current.finalizedAt) || current.finalizedAt + SUBMISSION_GRACE_MS >= now)
-                return false;
-            } else {
-              const scope = parsePrivateFilePath(current.path);
-              if (!scope || !Number.isFinite(current.claimedAt)) return false;
-              // Give every claimed container a full day to finish publication.
-              if (current.claimedAt + SUBMISSION_GRACE_MS >= now ||
-                !await isOrphan(db, tx, current.path, now)) return false;
+        if (budget.remaining < 1) break;
+        try {
+          const row = snap.data();
+          if (!row) continue;
+
+          const claimed = await db.runTransaction(async (rawTx) => {
+            const tx = budget.transaction(rawTx);
+            const current = (await tx.get(snap.ref)).data();
+            if (!current || current.path !== row.path) return false;
+            if (['finalized', 'claimed', 'released', 'deleting'].includes(current.status)) {
+              // Recheck on every transaction retry, including interrupted removals.
+              if (current.status !== row.status || current.claimedAt !== row.claimedAt ||
+                current.finalizedAt !== row.finalizedAt || current.releasedAt !== row.releasedAt ||
+                await hasReferences(db, tx, current.path, budget)) return false;
             }
-            tx.update(snap.ref, { status: 'deleting' });
-          } else {
-            if (!['pending', 'cleaning'].includes(current.status) || current.expiresAt > now) return false;
-            tx.update(snap.ref, { status: 'cleaning' });
-          }
-          return true;
-        });
-        if (!claimed) continue;
-        await storage.remove(row.path);
-        if (['finalized', 'claimed', 'released', 'deleting'].includes(row.status)) {
-          await db.runTransaction(async (tx) => {
-            const user = quota.doc(userId(row.uid));
-            const [record, globalSnap, userSnap] = await tx.getAll(snap.ref, global, user);
-            const current = record.data();
-            if (current?.status !== 'deleting') return;
-            for (const [ref, value] of [[global, globalSnap.data()], [user, userSnap.data()]] as const)
-              tx.set(ref, { ...value, finalizedBytes: (value?.finalizedBytes || 0) - current.actualBytes });
-            tx.update(snap.ref, { status: 'deleted', deletedAt: now });
+            if (current.status === 'deleting') return true;
+            if (current.status === 'released') {
+              const scope = parsePrivateFilePath(current.path);
+              if (scope?.kind !== 'group-cover' || !Number.isFinite(current.releasedAt) ||
+                current.releasedAt + ORPHAN_GRACE_MS > now) return false;
+              const group = await tx.get(db.collection('groups').doc(scope.groupId!));
+              if (group.data()?.coverUrl === current.path) return false;
+              tx.update(snap.ref, { status: 'deleting' });
+            } else if (['finalized', 'claimed'].includes(current.status)) {
+              // A claim after the scan always wins, including on transaction retry.
+              if (current.status !== row.status || current.claimedAt !== row.claimedAt) return false;
+              if (current.status === 'finalized') {
+                if (current.finalizedAt == null) {
+                  tx.update(snap.ref, { finalizedAt: now });
+                  return false;
+                }
+                if (!Number.isFinite(current.finalizedAt) || current.finalizedAt + SUBMISSION_GRACE_MS >= now)
+                  return false;
+              } else {
+                const scope = parsePrivateFilePath(current.path);
+                if (!scope || !Number.isFinite(current.claimedAt)) return false;
+                // Give every claimed container a full day to finish publication.
+                if (current.claimedAt + SUBMISSION_GRACE_MS >= now ||
+                  !await isOrphan(db, tx, current.path, now)) return false;
+              }
+              tx.update(snap.ref, { status: 'deleting' });
+            } else {
+              if (!['pending', 'cleaning'].includes(current.status) || current.expiresAt > now) return false;
+              tx.update(snap.ref, { status: 'cleaning' });
+            }
+            return true;
           });
-        } else await settle(row.path, row.uid, null);
-        cleaned++;
+          if (budget.remaining === 0) break;
+          if (['finalized', 'claimed', 'released'].includes(row.status)) lastScanned = snap.id;
+          if (!claimed) continue;
+          // Keep deleting/cleaning state retryable if settlement runs out of budget.
+          await storage.remove(row.path);
+          if (['finalized', 'claimed', 'released', 'deleting'].includes(row.status)) {
+            await db.runTransaction(async (rawTx) => {
+              const tx = budget.transaction(rawTx);
+              const user = quota.doc(userId(row.uid));
+              const [record, globalSnap, userSnap] = await tx.getAll(snap.ref, global, user);
+              const current = record.data();
+              if (current?.status !== 'deleting') return;
+              for (const [ref, value] of [[global, globalSnap.data()], [user, userSnap.data()]] as const)
+                tx.set(ref, { ...value, finalizedBytes: (value?.finalizedBytes || 0) - current.actualBytes });
+              tx.update(snap.ref, { status: 'deleted', deletedAt: now });
+            });
+          } else await settle(row.path, row.uid, null, now, budget);
+          cleaned++;
+        } catch (error) {
+          if (error === BUDGET_EXHAUSTED) break;
+          throw error;
+        }
       }
       if (lastScanned) await cursor.set({ lastId: lastScanned });
       else if (finalized.empty) await cursor.set({ lastId: null });
@@ -322,7 +369,7 @@ export async function cleanupExpiredPrivateFileUploads(
   db: Firestore,
   storage: FileStorage,
   now = Date.now(),
-  limit = 20,
+  limit = CLEANUP_CANDIDATE_LIMIT,
 ) {
   return createPrivateFileUploads(db, storage).cleanup(now, limit);
 }

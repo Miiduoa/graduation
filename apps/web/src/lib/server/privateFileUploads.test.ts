@@ -239,7 +239,9 @@ it('releases 31 replaced covers, respects publication grace and current cover, a
   expect((await uploads.read(paths[0])).releasedAt).toBe(now + 2);
   expect(await uploads.cleanup(now + 2 * 3600_000, 50)).toBe(0);
   expect(storage.remove).not.toHaveBeenCalled();
-  expect(await uploads.cleanup(now + 2 * 3600_000 + 2, 50)).toBe(30);
+  let cleaned = 0;
+  for (let batch = 0; batch < 8; batch++) cleaned += await uploads.cleanup(now + 2 * 3600_000 + 2, 50);
+  expect(cleaned).toBe(30);
   expect(storage.remove).not.toHaveBeenCalledWith(paths[0]);
   docs.set('groups/course', { coverUrl: paths[31] });
   expect(await uploads.cleanup(now + 2 * 3600_000 + 3, 50)).toBe(1);
@@ -281,7 +283,7 @@ it.each(['finalized', 'claimed', 'released', 'deleting'])('protects every refere
   }
 });
 
-it.each(['posts', 'submissions', 'campusStories', 'groups'])('retains objects when the %s scan cannot finish', async (collection) => {
+it.each(['posts', 'submissions'])('retains objects when the %s scan cannot finish', async (collection) => {
   const { uploads, docs, storage } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
@@ -333,10 +335,86 @@ it.each([undefined, 'invalid', now + 10 * day, new Date(now + 10 * day)])('retai
   expect(storage.remove).not.toHaveBeenCalled();
 });
 
-it('ignores expired story references', async () => {
+it('retains expired story matches because a limited query cannot prove all matches expired', async () => {
   const { uploads, docs } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
   docs.set('campusStories/other', { mediaUrl: scope(0).path, expiresAt: now });
-  expect(await uploads.cleanup(now + 2 * day)).toBe(1);
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+});
+
+
+it.each([undefined, 'alice'])('stops shared reads and leaves unprocessed candidates when the budget runs out (%s)', async (uid) => {
+  const { uploads, docs, db, storage } = setup();
+  for (let i = 0; i < 5; i++) {
+    await uploads.reserve(scope(i), 'alice', now);
+    await uploads.finalize(scope(i).path, 'alice', 8, now + 1);
+  }
+  // The first scan fits the scheduled budget, but its second array scan does not.
+  for (let i = 0; i < 190; i++) {
+    docs.set(`posts/p${i}`, {});
+    docs.set(`submissions/s${i}`, {});
+  }
+  const original = db.runTransaction.bind(db);
+  let transactions = 0;
+  let reads = 0;
+  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => {
+    transactions++;
+    return original((tx) => callback({
+      ...tx,
+      get: async (query: Parameters<typeof tx.get>[0]) => {
+        const result = await tx.get(query);
+        reads += 'size' in result ? Math.max(1, result.size) : 1;
+        return result;
+      },
+    }));
+  });
+  expect(await uploads.cleanup(now + 2 * day, 5, uid)).toBe(0);
+  expect(transactions).toBe(1);
+  expect(reads).toBeLessThanOrEqual(uid ? 50 : 300);
+  expect(storage.remove).not.toHaveBeenCalled();
+  expect(docs.has('privateFileCleanup/cursor')).toBe(false);
+  for (const [key, row] of docs) {
+    if (key.startsWith('privateFileUploads/')) expect(row.status).toBe('finalized');
+  }
+  for (const key of [...docs.keys()]) {
+    if (key.startsWith('posts/') || key.startsWith('submissions/')) docs.delete(key);
+  }
+  expect(await uploads.cleanup(now + 2 * day, 5, uid)).toBeGreaterThan(0);
+});
+
+it.each([['campusStories', 'mediaUrl'], ['groups', 'coverUrl']])('uses a one-result equality lookup for %s and retains matches', async (collection, field) => {
+  const { uploads, docs, db, storage } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  for (let i = 0; i < 501; i++) docs.set(`${collection}/unrelated${i}`, {});
+  docs.set(`${collection}/matching`, { [field]: scope(0).path });
+  const original = db.runTransaction.bind(db);
+  const lookups: unknown[] = [];
+  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => original((tx) => callback({
+    ...tx,
+    get: async (query: { path: string; filters?: unknown[]; maximum?: number }) => {
+      if (query.path === collection && query.filters) {
+        lookups.push(query.filters);
+        expect(query.maximum).toBe(1);
+      }
+      return tx.get(query);
+    },
+  })));
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(lookups).toEqual([[{ field, op: '==', value: scope(0).path }]]);
+  expect(storage.remove).not.toHaveBeenCalled();
+});
+
+it('performs zero reference reads when no candidates exist', async () => {
+  const { uploads, db, storage } = setup();
+  const transactions = vi.spyOn(db, 'runTransaction');
+  const scans = vi.spyOn(db, 'collectionGroup');
+  const collections = vi.spyOn(db, 'collection');
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(transactions).not.toHaveBeenCalled();
+  expect(scans).not.toHaveBeenCalled();
+  expect(collections.mock.calls.flat()).not.toContain('campusStories');
+  expect(collections.mock.calls.flat()).not.toContain('groups');
+  expect(storage.remove).not.toHaveBeenCalled();
 });

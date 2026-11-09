@@ -13,7 +13,7 @@ export function startPrivateFileCleanupScheduler(
     const admin = await getFirebaseAdmin();
     const storage = getFileStorage();
     if (!admin || !storage) throw new Error('Cleanup unavailable');
-    await cleanupExpiredPrivateFileUploads(admin.db, storage, Date.now(), 50);
+    await cleanupExpiredPrivateFileUploads(admin.db, storage, Date.now(), 5);
   },
 ) {
   if (started || env.NEXT_RUNTIME !== 'nodejs' || !readFileStorageConfig(env)) return false;
