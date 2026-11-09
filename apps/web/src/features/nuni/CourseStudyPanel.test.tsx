@@ -50,7 +50,7 @@ it('navigates repeated exact model quotes without rerunning AI or altering the s
   fireEvent.change(note, { target: { value: '我想核對第二次提到的主鍵' } });
   fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
   await screen.findByRole('region', { name: '本段 AI 講解' });
-  const beforeMark = () => document.querySelector('mark')?.previousSibling?.textContent;
+  const beforeMark = () => document.querySelector('mark')?.previousSibling?.textContent ?? '';
   expect(beforeMark()).toBe('');
   expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 1 處。')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '下一處相同引句' }));
