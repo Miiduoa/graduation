@@ -105,7 +105,7 @@ function OwnPosts({ uid, schoolId, schoolName, displayName, bio }: {
       </View>
       <View style={styles.actions}>
         <Pressable accessibilityRole="button" style={styles.primary}
-          onPress={() => { rootNavigateNested('Today', 'PostCompose'); }}>
+          onPress={() => { rootNavigateNested('Today', 'PostCompose', { profileCompose: true }); }}>
           <Text style={styles.primaryText}>發表貼文</Text>
         </Pressable>
         <Pressable accessibilityRole="button" style={styles.secondary}
