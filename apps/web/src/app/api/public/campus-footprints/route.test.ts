@@ -69,6 +69,24 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not cache contradictory demolished building metadata as a campus volume', async () => {
+    const contradictory = JSON.stringify({
+      elements: [{
+        type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', 'demolished:building': 'yes' },
+      }],
+    });
+    const mockedFetch = vi.fn().mockResolvedValue(new Response(contradictory, { status: 200 }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('reads a real streamed Overpass response and sends an identifiable service header', async () => {
     const mockedFetch = vi.fn().mockResolvedValue(new Response(osmPayload, {
       status: 200, headers: { 'Content-Type': 'application/json' },
