@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { GroupCover } from './GroupCover';
-const state = vi.hoisted(() => ({ upload: vi.fn(), write: vi.fn() }));
+const state = vi.hoisted(() => ({ upload: vi.fn(), claim: vi.fn(), write: vi.fn() }));
 vi.mock('@/lib/firebase', () => ({ getDb: () => ({}) }));
 vi.mock('firebase/firestore', () => ({
   doc: (...args: unknown[]) => args,
@@ -10,6 +10,7 @@ vi.mock('firebase/firestore', () => ({
 vi.mock('@/lib/privateFiles', async () => ({
   ...(await vi.importActual('@/lib/privateFiles')),
   uploadPrivateFile: state.upload,
+  claimPrivateFile: state.claim,
 }));
 vi.mock('./PrivateImage', () => ({
   PrivateImage: ({ src }: { src: string }) => <span>{src}</span>,
@@ -34,6 +35,7 @@ it('only offers Supabase cover upload to managers and persists its object path',
   await waitFor(() =>
     expect(state.write).toHaveBeenCalledWith(expect.anything(), { coverUrl: 'groups/g/cover.12345678-1234-1234-1234-123456789abc.png' }),
   );
+  expect(state.claim).toHaveBeenCalledWith('groups/g/cover.12345678-1234-1234-1234-123456789abc.png', 'groups/g');
   expect(state.upload).toHaveBeenCalledWith(
     expect.objectContaining({ path: 'groups/g/cover.png' }),
   );
