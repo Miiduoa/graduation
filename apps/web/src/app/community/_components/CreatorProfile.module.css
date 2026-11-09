@@ -157,3 +157,46 @@
 @media (prefers-reduced-motion: reduce) {
   .primaryAction, .secondaryAction { transition: none; }
 }
+
+/* Creator information is separate from private school account details. */
+.creatorCard {
+  margin-top: 20px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.creatorHeadline { font-size: 15px; line-height: 1.5; font-weight: 650; margin: 0 0 7px; }
+.creatorBio { margin: 0; font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+.creatorLink {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--brand);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.creatorCard .cardActions { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cardHint, .cardPrivacy { margin: 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.cardForm { display: grid; gap: 16px; max-width: 540px; }
+.cardField { display: grid; gap: 6px; min-width: 0; }
+.cardField label { font-weight: 650; font-size: 13px; }
+.cardField input, .cardField textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.cardField textarea { resize: vertical; }
+.cardField small { font-size: 11px; color: var(--muted); justify-self: end; }
+.cardError, .cardSuccess { font-size: 13px; line-height: 1.6; margin: 0; }
+.cardError { color: var(--danger); }
+.cardSuccess { color: var(--muted); }
+.cardStatus { padding: 12px 0; font-size: 13px; color: var(--muted); }
+.cardRetry { margin-left: 12px; cursor: pointer; color: var(--brand); background: transparent; border: 0; text-decoration: underline; }
