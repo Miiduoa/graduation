@@ -92,5 +92,6 @@ test('revoked membership blocks reads and writes of an existing creator card', a
   });
   await assertFails(doc(alice).get({ source: 'server' }));
   await assertFails(doc(alice).set(card({ bio: 'edited after revocation' })));
-  await assertFails(doc(alice).delete());
+  // Losing school eligibility must not trap previously shared personal text forever.
+  await assertSucceeds(doc(alice).delete());
 });
