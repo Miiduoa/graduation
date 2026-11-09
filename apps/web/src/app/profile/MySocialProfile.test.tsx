@@ -48,7 +48,7 @@ it('shows an actual creator timeline, routes to author post and filters loaded p
     '/community/post/signed-1?schoolId=school-a',
   );
   expect(screen.getByRole('link', { name: '發表貼文' }).getAttribute('href')).toBe(
-    '/community/post/new?schoolId=school-a',
+    '/community/post/new?schoolId=school-a&source=profile',
   );
   fireEvent.click(screen.getByRole('button', { name: '圖文作品' }));
   expect(screen.queryByText('社團活動紀錄')).toBeNull();
