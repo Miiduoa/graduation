@@ -1,6 +1,8 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
-import { RefreshControl } from 'react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { RefreshControl, Text } from 'react-native';
 import { PostDetailScreen } from '../screens/social/PostDetailScreen';
 import { getCampusPostById } from '../services/feed';
 import { listCampusReplies } from '../services/threads';
@@ -237,4 +239,45 @@ test('switching schools after historical detail rendered hides the old post and 
   await act(async () => { await Promise.resolve(); });
   expect(read).toHaveBeenCalledTimes(1);
   expect(view.queryByText('別校同 ID 的文章')).toBeNull();
+});
+
+const ActualSocialStack = createNativeStackNavigator<any, undefined>();
+function ActualCommunityDestination() {
+  return <Text>回到校園社群列表</Text>;
+}
+async function coldOpenedPost(params: { postId: string; schoolId: string }) {
+  const nav = createNavigationContainerRef<any>();
+  const view = render(
+    <NavigationContainer ref={nav}>
+      <ActualSocialStack.Navigator id={undefined} initialRouteName="PostDetail">
+        <ActualSocialStack.Screen name="PostDetail" component={PostDetailScreen} initialParams={params} />
+        <ActualSocialStack.Screen name="CampusSocialScreen" component={ActualCommunityDestination} />
+      </ActualSocialStack.Navigator>
+    </NavigationContainer>,
+  );
+  await waitFor(() => expect(nav.isReady()).toBe(true));
+  return { ...view, nav };
+}
+
+test('an external cold-start link to a deleted post returns to Community via the actual native stack', async () => {
+  read.mockResolvedValueOnce(null);
+  const view = await coldOpenedPost({ postId: 'old-1', schoolId: 'pu' });
+  await view.findByText('找不到貼文，可能已被刪除。');
+  expect(view.nav.canGoBack()).toBe(false);
+  fireEvent.press(view.getByLabelText('返回校園社群'));
+  expect(await view.findByText('回到校園社群列表')).toBeTruthy();
+  expect(view.nav.getCurrentRoute()?.name).toBe('CampusSocialScreen');
+  expect(view.nav.canGoBack()).toBe(false);
+});
+
+test('an external cold-start link to another campus never reads the same ID and can return to Community', async () => {
+  mockSchoolId = 'other';
+  const view = await coldOpenedPost({ postId: 'old-1', schoolId: 'pu' });
+  expect(view.getByText('搜尋文章的學校已切換，請返回校園社群重新搜尋。')).toBeTruthy();
+  expect(read).not.toHaveBeenCalled();
+  expect(view.nav.canGoBack()).toBe(false);
+  fireEvent.press(view.getByLabelText('返回校園社群'));
+  expect(await view.findByText('回到校園社群列表')).toBeTruthy();
+  expect(view.nav.getCurrentRoute()?.name).toBe('CampusSocialScreen');
+  expect(view.nav.canGoBack()).toBe(false);
 });
