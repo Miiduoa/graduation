@@ -58,12 +58,16 @@ describe('public Providence building geometry route', () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
     try {
-      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, { status: 200 }));
+      // Each real fetch has a new single-use response body; reusing one mock Response
+      // makes the second refresh fail with "Body is unusable" and masks cache behavior.
+      const upstream = vi.fn().mockImplementation(async () =>
+        new Response(osmPayload, { status: 200 }));
       vi.stubGlobal('fetch', upstream);
       const { GET } = await import('./route');
       const initial = await GET();
       expect(initial.status).toBe(200);
       expect(initial.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=3600');
+      const initialFetchedAt = (await initial.json()).fetchedAt;
 
       // A hit ten seconds before expiry cannot extend the CDN TTL by an hour.
       clock.mockReturnValue(start + 24 * 60 * 60 * 1000 - 10_000);
@@ -78,7 +82,9 @@ describe('public Providence building geometry route', () => {
       const refreshed = await GET();
       expect(refreshed.status).toBe(200);
       expect(refreshed.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=3600');
-      expect((await refreshed.json()).stale).toBe(false);
+      const updatedSnapshot = await refreshed.json();
+      expect(updatedSnapshot.stale).toBe(false);
+      expect(updatedSnapshot.fetchedAt).not.toBe(initialFetchedAt);
       expect(upstream).toHaveBeenCalledTimes(2);
     } finally {
       clock.mockRestore();
