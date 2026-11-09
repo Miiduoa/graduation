@@ -16,6 +16,8 @@ import {
 import type { CampusSpatialScene } from './campusSpatialScene';
 import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
+import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
+import { parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
 import styles from './CampusSpatialExplorer.module.css';
 
@@ -50,13 +52,14 @@ function subscribeAppearance(notify: () => void) {
   };
 }
 
-function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, onSelect }: {
+function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, onSelect, footprints }: {
   model: ReturnType<typeof buildCampusSpatialModel>;
   selectedId: string | null;
   overhead: boolean;
   camera: CampusSpatialCamera;
   onCameraChange: (camera: CampusSpatialCamera) => void;
   onSelect: (id: string) => void;
+  footprints: readonly ProvidenceFootprint[];
 }) {
   const appearance = useSyncExternalStore(subscribeAppearance, readAppearance, () => 'reduced:light');
   const [host, setHost] = useState<HTMLDivElement | null>(null);
@@ -99,7 +102,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
     // Neither Three.js nor a graphics context is requested before the dialog opens.
     void import('./campusSpatialScene').then(({ createCampusSpatialScene }) => {
       if (!active) return;
-      scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail });
+      scene = createCampusSpatialScene(host, model, { onSelect, onCameraChange, onError: fail, footprints });
       if (!active) {
         scene.dispose();
         scene = null;
@@ -128,7 +131,7 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       scene?.dispose();
       runtime.current = null;
     };
-  }, [host, model, onSelect, onCameraChange, attempt]);
+  }, [host, model, onSelect, onCameraChange, attempt, footprints]);
 
   return (
     <>
@@ -188,6 +191,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [overview, setOverview] = useState(!selected);
   const [overhead, setOverhead] = useState(false);
   const [buildingPlanOpen, setBuildingPlanOpen] = useState(false);
+  const [footprints, setFootprints] = useState<ProvidenceFootprint[]>([]);
+  const [footprintStatus, setFootprintStatus] = useState<'loading' | 'ready' | 'unavailable'>(
+    school === 'pu' ? 'loading' : 'unavailable',
+  );
+  const [footprintDate, setFootprintDate] = useState<string | null>(null);
+  const [footprintStale, setFootprintStale] = useState(false);
   const [camera, setCamera] = useState<CampusSpatialCamera>({ bearing: DEFAULT_SPATIAL_BEARING, zoom: 1 });
   const changeCamera = useCallback((next: CampusSpatialCamera) => setCamera(normalizeSpatialCamera(next)), []);
   const selectedPoint = model.points.find((point) => point.id === (selection ?? selected?.id));
@@ -202,6 +211,33 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }, []);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
+
+  useEffect(() => {
+    if (school !== 'pu' || model.unavailableReason) return;
+    let active = true;
+    const controller = new AbortController();
+    void fetch('/api/public/campus-footprints', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('footprint source unavailable');
+        return response.json() as Promise<unknown>;
+      })
+      .then((response) => {
+        if (!active) return;
+        const buildings = parseProvidenceFootprintResponse(response);
+        if (!buildings.length) throw new Error('No usable campus building outlines');
+        const payload = response as { fetchedAt?: unknown; stale?: unknown };
+        setFootprints(buildings);
+        setFootprintDate(typeof payload.fetchedAt === 'string' ? payload.fetchedAt.slice(0, 10) : null);
+        setFootprintStale(payload.stale === true);
+        setFootprintStatus('ready');
+      })
+      .catch(() => {
+        if (!active) return;
+        setFootprints([]);
+        setFootprintStatus('unavailable');
+      });
+    return () => { active = false; controller.abort(); };
+  }, [school, model.unavailableReason]);
 
   // Replace the spatial modal so there is only one focus trap and graphics context.
   // The key prevents a late local-file read from crossing a school/building boundary.
@@ -240,6 +276,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
               camera={camera}
               onCameraChange={changeCamera}
               onSelect={selectPlace}
+              footprints={footprints}
             />
             <div className={styles.viewTools} role="group" aria-label="導覽視角">
               <button className="btn" type="button" aria-pressed={showOverview} onClick={() => {
@@ -254,6 +291,21 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
               <span>{model.points.length} 個地點 · 沿用目前地圖範圍</span>
             </div>
             <p className={styles.note}>選擇地點或拖動導覽進度，讓視角跟著移動。步行路線請使用導航。</p>
+            {school === 'pu' && (
+              <div className={styles.footprintInfo} role="status">
+                {footprintStatus === 'loading' && '正在讀取靜宜建築輪廓；地點標記仍可操作。'}
+                {footprintStatus === 'unavailable' && '公開建築輪廓目前無法取得，保留地點標記與導航，不顯示臆測建築。'}
+                {footprintStatus === 'ready' && (
+                  <>
+                    <strong>{footprints.length} 棟公開建築輪廓</strong>
+                    <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
+                    {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
+                  </>
+                )}
+                <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap 貢獻者</a>
+                <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">靜宜官方校園圖與實境導覽</a>
+              </div>
+            )}
             {model.excludedCount > 0 && <p className={styles.note} role="status">部分地點資料無法用於空間圖。</p>}
           </div>
             <div className={styles.details}>
@@ -291,6 +343,16 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {place.description && <p>{place.description}</p>}
                 {(place.building || place.floor) && <p>{[place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>}
                 {Boolean(place.facilities?.length) && <p>設施：{place.facilities!.join('、')}</p>}
+                {school === 'pu' && place.id === 'pu-zhugu' && (
+                  <div className={styles.officialFloors}>
+                    <strong>主顧樓 · 校方公開樓層資訊</strong>
+                    <p>4 樓：資訊管理學系、資訊傳播工程學系。5 樓：資訊工程學系。6 樓：資訊學院。</p>
+                    <a href={PROVIDENCE_CAMPUS_SOURCE.officialCampusTourUrl} target="_blank" rel="noopener noreferrer">
+                      查看官方建築資料
+                    </a>
+                    <small>此處是樓層資訊，不代表教室入口或室內行走路線已驗證。</small>
+                  </div>
+                )}
                 {isProvidencePendingVerification(school, place) && (
                   <p className={styles.pending} role="status">此地點僅有單一資料來源，位置待再次確認。</p>
                 )}
