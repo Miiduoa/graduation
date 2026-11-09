@@ -86,16 +86,19 @@ function ScopedPostDetailScreen(props: any) {
 
   const [post, setPost] = useState<CampusPostDoc | null>(null);
   const [replies, setReplies] = useState<CampusReply[]>([]);
+  const [replyStatus, setReplyStatus] = useState<'idle' | 'loading' | 'unavailable'>('idle');
   const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
   const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [readIssue, setReadIssue] = useState<'denied' | 'unavailable' | null>(null);
   const readRevision = React.useRef(0);
+  const replyReadRevision = React.useRef(0);
+  const reloadRevision = React.useRef(0);
   const mounted = React.useRef(true);
   React.useLayoutEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; readRevision.current += 1; };
+    return () => { mounted.current = false; readRevision.current += 1; replyReadRevision.current += 1; };
   }, []);
   const [replyText, setReplyText] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(true);
@@ -146,8 +149,10 @@ function ScopedPostDetailScreen(props: any) {
   };
 
   const clearPrivatePost = useCallback(() => {
+    replyReadRevision.current += 1;
     setPost(null);
     setReplies([]);
+    setReplyStatus('idle');
     setNameByUid({});
     setAvatarByUid({});
     setBookmarkState(null);
@@ -214,12 +219,42 @@ function ScopedPostDetailScreen(props: any) {
   }, [postId, school?.id, auth.user?.uid, clearPrivatePost]);
 
   const loadReplies = useCallback(async (revision = readRevision.current) => {
+    const attempt = ++replyReadRevision.current;
     if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
-      if (mounted.current && revision === readRevision.current) setReplies([]);
+      if (mounted.current && revision === readRevision.current) {
+        setReplies([]);
+        setReplyStatus('idle');
+      }
       return;
     }
-    const rows = await listCampusReplies(school.id, postId);
-    if (mounted.current && revision === readRevision.current) setReplies(rows);
+    setReplyStatus('loading');
+    // A stalled reply list must not block reading an already authorized post.
+    // The SDK call may settle later; only this attempt may deliver its result.
+    let replyTimer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const rows = await Promise.race([
+        listCampusReplies(school.id, postId),
+        new Promise<never>((_, reject) => {
+          replyTimer = setTimeout(() => reject(
+            Object.assign(new Error('post-replies-timeout'), { code: 'unavailable' }),
+          ), 15_000);
+        }),
+      ]);
+      if (!mounted.current || revision !== readRevision.current || attempt !== replyReadRevision.current) return;
+      setReplies(rows);
+      setReplyStatus('idle');
+    } catch (cause) {
+      if (!mounted.current || revision !== readRevision.current || attempt !== replyReadRevision.current) return;
+      if (isPermissionError(cause)) {
+        // A reply permission failure can indicate revoked campus access.
+        // Do not leave previously visible post or replies on screen.
+        handleReadError(cause);
+      } else {
+        setReplyStatus('unavailable');
+      }
+    } finally {
+      if (replyTimer !== null) clearTimeout(replyTimer);
+    }
   }, [postId, school?.id, auth.user?.uid]);
 
   const hydrateProfiles = useCallback(async () => {
@@ -246,14 +281,14 @@ function ScopedPostDetailScreen(props: any) {
   }, [school?.id, post, replies]);
 
   const reload = useCallback(async () => {
+    const attempt = ++reloadRevision.current;
+    replyReadRevision.current += 1;
+    setReplyStatus('idle');
     const found = await loadPost();
-    if (!found || !mounted.current) return;
-    const revision = readRevision.current;
-    try {
-      await loadReplies(revision);
-    } catch (cause) {
-      if (mounted.current && revision === readRevision.current) handleReadError(cause);
-    }
+    if (!found || !mounted.current || attempt !== reloadRevision.current) return;
+    // Release the article spinner/refresh immediately. Replies independently
+    // report loading and provide their own retry without re-reading the post.
+    void loadReplies(readRevision.current);
   }, [loadPost, loadReplies]);
 
   React.useEffect(() => {
@@ -315,7 +350,8 @@ function ScopedPostDetailScreen(props: any) {
       });
       setReplyText('');
       setReplyParentId(null);
-      await Promise.all([loadReplies(), loadPost()]);
+      const refreshed = await loadPost();
+      if (refreshed) void loadReplies(readRevision.current);
     } catch (e: any) {
       Alert.alert('送出失敗', e?.message ?? String(e));
     } finally {
@@ -448,7 +484,8 @@ function ScopedPostDetailScreen(props: any) {
           if (!school?.id || !postId) return;
           try {
             await softDeleteCampusReply(school.id, postId, r.id);
-            await Promise.all([loadReplies(), loadPost()]);
+            const refreshed = await loadPost();
+      if (refreshed) void loadReplies(readRevision.current);
           } catch (e: any) {
             Alert.alert('刪除失敗', e?.message ?? String(e));
           }
@@ -634,10 +671,30 @@ function ScopedPostDetailScreen(props: any) {
             )}
 
             <Text style={styles.commentHeader}>討論串 · {threadedReplies.length}</Text>
+            {replyStatus === 'loading' && (
+              <View style={{ paddingHorizontal: theme.layout.screenPadding, marginTop: 8, gap: 8 }}>
+                <ActivityIndicator accessibilityLabel="正在載入留言" color={theme.colors.accent} />
+                <Text accessibilityLiveRegion="polite" style={{ color: theme.colors.textSecondary }}>正在載入留言…</Text>
+              </View>
+            )}
+            {replyStatus === 'unavailable' && (
+              <View style={{ paddingHorizontal: theme.layout.screenPadding, marginTop: 8, gap: 8 }}>
+                <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary }}>
+                  留言暫時無法載入，貼文仍可閱讀。
+                </Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="重試留言"
+                  style={{ minHeight: 44, justifyContent: 'center' }}
+                  onPress={() => { void loadReplies(readRevision.current); }}>
+                  <Text style={{ color: theme.colors.accent }}>重試留言</Text>
+                </Pressable>
+              </View>
+            )}
             {threadedReplies.length === 0 ? (
-              <Text style={{ color: theme.colors.textSecondary, paddingHorizontal: theme.layout.screenPadding, marginTop: theme.space.sm }}>
-                尚無留言，當第一人吧。
-              </Text>
+              replyStatus === 'idle' ? (
+                <Text style={{ color: theme.colors.textSecondary, paddingHorizontal: theme.layout.screenPadding, marginTop: theme.space.sm }}>
+                  尚無留言，當第一人吧。
+                </Text>
+              ) : null
             ) : (
               threadedReplies.map((item) => {
                 const isMyReply = !item.anonymous && item.authorUid === auth.user?.uid;
