@@ -1,0 +1,41 @@
+# 靜宜校園 3D：公開建築輪廓實作與驗收
+
+## 目前入口
+
+靜宜地圖 `/map?schoolId=pu` →「空間導覽」。開啟視窗後，Web 端才初始化 Three.js，並嘗試讀取同站 `/api/public/campus-footprints` 的輪廓快照。取得建築輪廓時，依經緯度換算成公尺後立體擠出；資料讀取失敗時仍提供原本的地點標記、列表與步行導航，不用任何假建築補滿畫面。
+
+請勿把此版本描述為「靜宜數位孿生」、「真實 3D 建築」或「可室內導航」。目前是**以已知外輪廓繪出的建築量體示意**，不包含立面、屋頂、地勢、入口、高精度高度、樓板或無障礙通道。
+
+## 來源與資料邊界
+
+1. 校舍名稱、編號、用途及主顧樓樓層以[靜宜大學官方校園地圖實境導覽](https://www.pu.edu.tw/p/404-1000-1131.php?Lang=zh-tw)核對。官方另有[校史沙鹿校區地圖](https://archives.pu.edu.tw/p/412-1121-4218.php)，僅供核對，不重製照片、校方圖像及 720° 環景。
+2. 建築座標及 OSM way ID 沿用專案共用 `packages/shared/src/providenceCampus.ts` 已記載來源的資料。此功能只請求其中 `cross-checked` 且來源為 OpenStreetMap way 的地點，不把公車站、停車場或單點建物硬擠成立體建築。
+3. 伺服器向固定的 [OpenStreetMap Overpass](https://overpass-api.de/) 服務查詢指定 way ID，並檢查來源、閉合輪廓、座標是否在靜宜附近、合理面積、重複 way 與形狀自交。限制最多 128 筆來源圖徵、每棟最多 160 個頂點；避免把外站任意資料顯示成靜宜的校舍。
+4. 若 OSM `height` tag 是可解析的公尺數值，僅用於示意高度；缺少高度的建築以 12 公尺的**視覺示意值**繪製，絕不宣稱為量測結果。`building:levels` 不用公式直接猜高度。
+5. 立體化來源需顯示 **© OpenStreetMap 貢獻者** 與[授權資訊](https://www.openstreetmap.org/copyright)。OSM 原始資料遵循 ODbL；如未來將修改後的建築資料對外散布，需再檢查相應署名與資料庫授權義務。正式產品應確認快照更新、API 使用政策與容量。
+
+## 可靠性
+
+- 服務端有 24 小時記憶體快照、同時請求共用、上游失敗後 10 分鐘冷卻，避免使用者每次開 3D 都直接對 Overpass 發出大量請求。跨多台伺服器的冷卻不會共享；若流量成長，應改成受控的離線定期快照，而不是大量查公開 Overpass。
+- 已有快照但更新失敗時會回傳來源時間與 `stale`，前端標明「暫用舊快照」。首次無快照且連線失敗時只顯示原地點標記。
+- Three.js 僅在開啟空間視窗時載入；對話框關閉、場景失去可見性或 WebGL 失敗時沿用原本的資源釋放、焦點、鍵盤、低動態與備援流程。
+- 前端對回傳資料再次檢查學校 ID、建築 ID、來源網址、名稱、範圍及數值，阻止跨校或惡意輪廓混入。
+
+## 需驗收，不可直接說已超越競品
+
+- [ ] 真實線上 Overpass 回傳：確認已核對的靜宜建築輪廓數量，逐棟對照 OSM 原始 way 與校方位置，保留失敗樣本。
+- [ ] 建築外觀：若要宣稱「像真」，需逐棟取得合法的建築立面參考、自製貼圖和模型，人工目視校正；目前僅外輪廓。
+- [ ] 樓層／室內動線：與已合併的 #533、待審的 #543 的圖面格式接續，但不得把未校正的手動圖面當成公開室內導航。
+- [ ] 裝置測試：iOS Safari、Android Chrome，320／390／1280px、200% 字級、弱網路、WebGL context loss、鍵盤與螢幕閱讀器。
+- [ ] 同校同任務與 Google 地圖、Apple 地圖、校方環景、UniTable 做可重複的操作比較，記錄成功率、錯誤目的地、步數、中位耗時、裝置效能與證據。詳見 [campus-spatial-benchmark.md](./campus-spatial-benchmark.md)。
+- [ ] 以上完成且靜宜實際有明確優勢後，再逐校新增**各校自己的**地圖邊界、POI 校核與建築輪廓，不以靜宜資料冒充他校。其他學校的選校／一般地圖功能不受此功能阻擋。
+
+## 測試
+
+```sh
+pnpm --filter web exec vitest run src/app/map/providenceFootprints.test.ts src/app/map/CampusSpatialExplorer.test.tsx src/app/map/campusSpatialScene.test.ts
+pnpm --filter web exec tsc --noEmit
+pnpm --filter web build
+```
+
+不需新的付費套件或 API key；但公開 OSM 資料服務仍有可用性與合理使用限制。
