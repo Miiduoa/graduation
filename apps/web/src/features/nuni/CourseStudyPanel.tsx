@@ -66,7 +66,7 @@ function initialMaterial(material?: Material): { source: StudySource | null; err
 }
 
 export function CourseStudyPanel(props: Props) {
-  return <StudySessionPanel key={`${props.scope.platformAccountId}:${props.scope.workspaceId}`} {...props} />;
+  return <StudySessionPanel key={JSON.stringify([props.scope.platformAccountId, props.scope.workspaceId])} {...props} />;
 }
 
 function decodeStudyBackup(text: string, scope: CourseStudyProgressScope) {

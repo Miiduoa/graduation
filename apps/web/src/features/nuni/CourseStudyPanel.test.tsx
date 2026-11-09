@@ -21,6 +21,32 @@ const explanation: TutorExplanation = {
 };
 beforeEach(() => { mocks.read.mockReset(); mocks.run.mockReset(); mocks.available = true; mocks.run.mockResolvedValue(explanation); });
 
+
+it('isolates study notes when two different account/course scopes share an ambiguous colon-joined key', () => {
+  // These scopes have the same old key, "student:course:one".
+  const firstScope = { platformAccountId: 'student:course', workspaceId: 'one' };
+  const secondScope = { platformAccountId: 'student', workspaceId: 'course:one' };
+  const secondMaterial = {
+    id: 'course-two-material', title: '另一門課的教材', body: '這門課在介紹外鍵與資料表關聯。',
+  };
+  const onClose = vi.fn();
+  const { rerender } = render(<CourseStudyPanel scope={firstScope} courseTitle="第一門課"
+    material={material} onClose={onClose} />);
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '第一個帳號的私人筆記' } });
+  fireEvent.click(screen.getByRole('button', { name: '加入待複習' }));
+  expect(screen.getByRole('region', { name: '待複習段落' })).toBeTruthy();
+
+  rerender(<CourseStudyPanel scope={secondScope} courseTitle="第二門課"
+    material={secondMaterial} onClose={onClose} />);
+  expect(screen.getByText(secondMaterial.body)).toBeTruthy();
+  expect(screen.queryByText(material.body)).toBeNull();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  expect(screen.queryByRole('region', { name: '待複習段落' })).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
 it('shows the authorized material without downloading or generating until requested', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   expect(screen.getByText(material.body)).toBeTruthy();
