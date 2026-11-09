@@ -69,6 +69,7 @@ jobs:
             src/lib/nuni/assistantV2/selectPlanRevision.test.ts \
             src/features/nuni/assistant/planSelection.test.ts \
             src/features/nuni/assistant/AssistantPlanSelection.test.tsx \
+            src/features/nuni/assistant/AssistantCards.test.tsx \
             src/lib/assistantPrecisePlanDraft.test.ts \
             src/features/nuni/assistant/usePrecisePlanDraft.test.tsx \
             src/features/nuni/assistant/AssistantPrecisePlanDraftRecovery.test.tsx \

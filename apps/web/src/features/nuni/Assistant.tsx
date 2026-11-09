@@ -450,6 +450,14 @@ function V2Conversation({
   }
   async function execute(cards: V2Card[]) {
     if (busy.current) return;
+    // Selection previews promise a separate decision for every retained item.
+    // Keep this guard even when a caller bypasses the presentation controls.
+    if (cards.length > 1 && cards.some(card => turns.some(turn =>
+      turn.reply.cards.some(item => item.mutationId === card.mutationId) &&
+      planComparisons.current.get(turn)?.retainedIndices !== undefined))) {
+      if (active()) setError('請逐張核對並確認保留項目；這次沒有送出任何行程。');
+      return;
+    }
     busy.current = true;
     setPending(true);
     setError('');
@@ -789,6 +797,7 @@ function V2Conversation({
       error={error}
       onAsk={() => void ask()}
       onConfirm={(cards) => void execute(cards)}
+      allowBatchConfirmation={turn => planComparisons.current.get(turn)?.retainedIndices === undefined}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
       renderPlanComparison={turn => {

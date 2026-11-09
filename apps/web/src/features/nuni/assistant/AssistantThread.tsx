@@ -27,6 +27,7 @@ export function AssistantThread({
   onReconcile,
   renderPlanRevision,
   renderPlanComparison,
+  allowBatchConfirmation,
 }: {
   schoolId: string;
   ready: boolean;
@@ -45,6 +46,7 @@ export function AssistantThread({
   onReconcile?: (card: V2Card) => void;
   renderPlanRevision?: (turn: V2Turn) => ReactNode;
   renderPlanComparison?: (turn: V2Turn) => ReactNode;
+  allowBatchConfirmation?: (turn: V2Turn) => boolean;
 }) {
   const shell = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -141,6 +143,7 @@ export function AssistantThread({
             {renderPlanComparison?.(turn)}
             <AssistantCardStack
               cards={turn.reply.cards}
+              allowBatchConfirmation={allowBatchConfirmation?.(turn) ?? true}
               states={states}
               pending={pending}
               onConfirm={onConfirm}

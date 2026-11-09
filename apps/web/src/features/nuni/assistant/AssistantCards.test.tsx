@@ -191,3 +191,21 @@ it('keeps service handoff distinct from verified calendar completion', () => {
   expect(screen.queryByText('已送出訂單')).toBeNull();
   expect(screen.queryByLabelText('行程執行回執')).toBeNull();
 });
+
+
+it('offers only separate ordered confirmations when the owner requires individual decisions', () => {
+  const cards = [eventCard('selected-first', '保留項目一'), eventCard('selected-second', '保留項目二')];
+  const onConfirm = vi.fn(), onCancel = vi.fn();
+  const view = render(<AssistantCardStack cards={cards} states={{}} pending={false}
+    allowBatchConfirmation={false} onConfirm={onConfirm} onCancel={onCancel} />);
+  expect(screen.queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  const buttons = screen.getAllByRole('button', { name: '確認' });
+  expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(buttons[0]);
+  expect(onConfirm).toHaveBeenCalledExactlyOnceWith([cards[0]]);
+  view.rerender(<AssistantCardStack cards={cards} states={{ [cards[0].mutationId]: verifiedState(cards[0]) }}
+    pending={false} allowBatchConfirmation={false} onConfirm={onConfirm} onCancel={onCancel} />);
+  expect(screen.queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '確認' }));
+  expect(onConfirm.mock.calls).toEqual([[[cards[0]]], [[cards[1]]]]);
+});

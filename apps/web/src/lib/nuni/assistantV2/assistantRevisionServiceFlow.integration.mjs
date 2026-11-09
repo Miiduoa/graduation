@@ -880,6 +880,7 @@ it('retains the first and third same-name proposals with three edit clicks, no m
   planEvents = threeSameNameEvents();
   const { entry } = await initialPlan();
   const baseline = database.snapshot(), clicks = [];
+  expect(ui().getByRole('button', { name: '依序全部確認' })).toBeTruthy(); // Ordinary source plans retain their existing batch flow.
   const click = (control, description) => { clicks.push(description); testing.fireEvent.click(control); };
   click(ui().getByRole('button', { name: '選擇要建立的行程' }), 'open selection');
   const form = ui().getByRole('form', { name: '選擇待建立行程' });
@@ -900,6 +901,7 @@ it('retains the first and third same-name proposals with three edit clicks, no m
   assertNoAdditionalModel();
   await testing.act(async () => { held.release(); await Promise.resolve(); });
   await testing.waitFor(() => expect(uiCards()).toHaveLength(5));
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull(); // Retained replacement cards require separate confirmation.
   const replacement = count('revise')[0], retained = [planEvents[0], planEvents[2]];
   expect(replacement.status).toBe(200);
   expect(replacement.body.keepMutationIds).toEqual([entry.response.cards[0].mutationId, entry.response.cards[2].mutationId]);
