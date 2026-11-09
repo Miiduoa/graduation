@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import styles from './settings.module.css';
 
@@ -56,7 +56,7 @@ export function PlatformServiceControls() {
   const owner = session?.platformAccountId ?? '';
   const scope = owner && context ? owner + ':' + context : '';
   const activeScope = useRef(scope);
-  activeScope.current = scope;
+  useLayoutEffect(() => { activeScope.current = scope; }, [scope]);
   const lock = useRef(false);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<ReadState>({ scope: '', status: 'loading', values: none });
