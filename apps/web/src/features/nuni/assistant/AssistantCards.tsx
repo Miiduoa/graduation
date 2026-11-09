@@ -183,6 +183,9 @@ export function AssistantCard({
         <PageBody card={card} />
       )}
       {state && <Status value={state} card={card} pending={pending} onReconcile={onReconcile} />}
+      {canConfirmAction(state) && !priorCalendarActionsVerified(cards, index, states) && (
+        <p className={styles.hint}>先核對前面的個人行程是否已成功建立，再確認這一步；結果不明時不會自動繼續。</p>
+      )}
       {canConfirmAction(state) && (
         <div className={styles.actions}>
           <button
