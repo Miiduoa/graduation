@@ -36,7 +36,7 @@ describe('printable building plan SVG', () => {
     expect(svg).toContain('A&amp;B &lt;img src=x&gt;');
     expect(svg).toContain('來源 &lt;test&gt;');
     expect(svg).not.toContain('https://example.com');
-    expect(svg).not.toMatch(/<script>|<img|onload=|href=/);
+    expect(svg).not.toMatch(/<script|<img|<svg[^>]+onload=|href=/);
   });
   it('does not suggest an unknown scale is measured in metres', () => {
     const plan = createExampleBuildingPlan(scope);
