@@ -159,6 +159,38 @@ async def basic_comparison(page):
     assert await snapshot(page) == ledger, 'Reading the comparison caused an API call or write'
 
 
+async def geometry_against_composer(target, dock_element):
+    # Read target and the entire composer dock in one layout snapshot.
+    return await target.evaluate('''(node, dock) => {
+      const box = element => {const r=element.getBoundingClientRect();
+        return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
+      return {target:box(node),dock:box(dock),viewport:{width:innerWidth,height:innerHeight},
+        dockPosition:getComputedStyle(dock).position};
+    }''', dock_element)
+
+
+async def focused_action_readability(page, button, name):
+    # Observe native Tab scrolling only. Do not repair visibility with scrollIntoView/focus.
+    await expect(button).to_be_focused()
+    await page.evaluate('''() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    })''')
+    dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+    await expect(dock).to_be_visible()
+    evidence = await geometry_against_composer(button, await dock.element_handle())
+    evidence['focused'] = await button.evaluate('node => document.activeElement === node')
+    evidence['action'] = await button.inner_text()
+    evidence['viewportScreenshot'] = f'{name}-viewport.png'
+    (OUT / f'{name}.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+    await page.screenshot(path=str(OUT / evidence['viewportScreenshot']), full_page=False)
+    target, dock_box, viewport = evidence['target'], evidence['dock'], evidence['viewport']
+    assert (evidence['focused'] and target['width'] > 0 and target['height'] > 0
+            and target['top'] >= 0 and target['bottom'] <= min(dock_box['top'], viewport['height'])
+            and target['left'] >= 0 and target['right'] <= viewport['width']), (
+                f'Native Tab leaves the focused action obscured: {evidence}')
+    return evidence
+
+
 async def comparison_readability(page, name):
     """Read the actual scrollable UI; never hide the sticky composer for evidence."""
     panel = comparison(page)
@@ -179,13 +211,7 @@ async def comparison_readability(page, name):
         })''', block)
 
     async def geometry(target):
-        # Read target and the entire composer dock in one layout snapshot.
-        return await target.evaluate('''(node, dock) => {
-          const box = element => {const r=element.getBoundingClientRect();
-            return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
-          return {target:box(node),dock:box(dock),viewport:{width:innerWidth,height:innerHeight},
-            dockPosition:getComputedStyle(dock).position};
-        }''', dock_element)
+        return await geometry_against_composer(target, dock_element)
 
     def readable(value):
         target, dock_box, viewport = value['target'], value['dock'], value['viewport']
@@ -595,9 +621,11 @@ async def protected_good_case(page, name):
     await select_protection(page, before, indices, keyboard=len(before) == 2)
     await no_overflow(page)
     await page.screenshot(path=str(OUT / f'protected-{name}-selection-viewport.png'), full_page=False)
+    focused_action = None
     if len(before) == 2:
         await page.keyboard.press('Tab')
-        await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_focused()
+        button = page.get_by_role('button', name='重新預覽', exact=True)
+        focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus')
         await page.keyboard.press('Enter')
     else:
         await page.get_by_role('button', name='重新預覽', exact=True).click()
@@ -608,7 +636,8 @@ async def protected_good_case(page, name):
     await confirm_protected_preview(page, before, after, prefix)
     await capture(page, f'protected-{name}-confirmed')
     return {'mode': 'native protection selection and manual confirmations against fixed fake API',
-            'protectedIndices': indices, 'fixtureOriginal': before, 'fixtureRevised': after, 'readability': readability}
+            'protectedIndices': indices, 'fixtureOriginal': before, 'fixtureRevised': after,
+            'readability': readability, 'focusedPreview': focused_action}
 
 
 async def protected_all_case(page):
@@ -626,7 +655,8 @@ async def protected_all_case(page):
     await page.keyboard.press('Tab')
     await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_be_focused()
     await page.keyboard.press('Tab')
-    await expect(page.get_by_role('button', name='回到原提議', exact=True)).to_be_focused()
+    focused_return = await focused_action_readability(
+        page, page.get_by_role('button', name='回到原提議', exact=True), 'protected-all-320-return-focus')
     await page.keyboard.press('Enter')
     await expect(page.get_by_role('form', name='修改安排再預覽', exact=True)).to_have_count(0)
     await expect(page.get_by_role('button', name='修改時間或條件', exact=True)).to_be_focused()
@@ -639,7 +669,7 @@ async def protected_all_case(page):
     await no_overflow(page)
     await capture(page, 'protected-all-original-cards-retained')
     return {'mode': 'native Tab/Space selects every item; disabled preview and Enter returns to original cards',
-            'extraAsk': 0, 'cancel': 0, 'writes': 0}
+            'extraAsk': 0, 'cancel': 0, 'writes': 0, 'focusedReturn': focused_return}
 
 
 async def protected_bad_case(page, fault):
