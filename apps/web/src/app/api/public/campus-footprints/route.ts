@@ -73,7 +73,14 @@ async function readOsm(): Promise<Snapshot> {
   });
   if (!response.ok) throw new Error('OSM service unavailable');
   const raw = await readBoundedResponse(response);
-  const buildings = parseProvidenceOsmFootprints(JSON.parse(raw) as unknown);
+  const payload = JSON.parse(raw) as unknown;
+  // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
+  // on timeout or memory exhaustion. Never promote that partial result to a
+  // fresh 24-hour snapshot or replace a previously verified fallback.
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'remark' in payload) {
+    throw new Error('Overpass returned an incomplete result');
+  }
+  const buildings = parseProvidenceOsmFootprints(payload);
   if (!buildings.length) throw new Error('No verified building outlines in response');
   const now = Date.now();
   return {
