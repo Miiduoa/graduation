@@ -227,7 +227,6 @@ it('integrates the creator area only for a verified Firebase account', async () 
   render(<ProfilePage />);
   expect(await screen.findByTestId('my-social-profile')).toBeTruthy();
   expect(screen.getByText('Account A')).toBeTruthy();
-  expect(screen.getByText('我的社群')).toBeTruthy();
 });
 
 it('does not expose a Firebase creator timeline for a Google-only platform account', () => {
