@@ -218,6 +218,8 @@ function V2Conversation({
   const actionStates = useRef<V2ActionStates>({});
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const askRequest = useRef<AbortController | null>(null);
   const [error, setError] = useState('');
   const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
@@ -270,8 +272,9 @@ function V2Conversation({
     // This component is keyed by the authenticated session, account and school.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  async function send(action: string, input: object) {
-    const signal = controller.current!.signal;
+  async function send(action: string, input: object, askSignal?: AbortSignal) {
+    const scopeSignal = controller.current!.signal;
+    const signal = askSignal ?? scopeSignal;
     return withAssistantRequestDeadline(signal, action === 'ask' ? 65000 : 15000, async (requestSignal) => {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
@@ -293,7 +296,7 @@ function V2Conversation({
               ? '已達查詢預算，請稍後再試。'
               : '查詢未完成，請稍後再試。',
       );
-    if (signal.aborted) throw new Error('已取消');
+    if (signal.aborted || scopeSignal.aborted) throw new Error('已取消');
     return result;
     });
   }
@@ -326,6 +329,13 @@ function V2Conversation({
     }
     if (!consent || !ready) return;
     busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
     setPending(true);
     setError('');
     // Free the composer immediately so the next thought can be typed during a slow response.
@@ -337,11 +347,11 @@ function V2Conversation({
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
       ]);
-      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
       if (reply.bootstrap) {
         conversation.current = reply.conversationId;
         routeToken.current = reply.routeToken;
-        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       if (reply.cards.length) {
@@ -354,12 +364,18 @@ function V2Conversation({
       setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
       if (!controller.current?.signal.aborted) {
-        setError(e instanceof Error ? e.message : '查詢失敗');
+        setError(pendingAsk.signal.aborted ? '已停止這次回答。原問題已保留，沒有執行任何確認操作。'
+          : e instanceof Error ? e.message : '查詢失敗');
         setRecoverableQuestion(current);
       }
     } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
       busy.current = false;
-      if (!controller.current?.signal.aborted) setPending(false);
+      if (!scopeSignal.aborted) {
+        setAsking(false);
+        setPending(false);
+      }
     }
   }
   async function applyCalendarResult(card: V2Card, raw: unknown): Promise<boolean> {
@@ -535,6 +551,8 @@ function V2Conversation({
       turns={turns}
       states={states}
       pending={pending}
+      asking={asking}
+      onStopAsk={() => askRequest.current?.abort()}
       error={error}
       recoverableQuestion={recoverableQuestion}
       onRecoverQuestion={recoverQuestion}
