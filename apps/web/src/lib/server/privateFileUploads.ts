@@ -36,9 +36,56 @@ async function isOrphan(db: Firestore, tx: FirebaseFirestore.Transaction, path: 
       : typeof value?.toMillis === 'function' ? value.toMillis() : Date.parse(value);
     return Number.isFinite(expiry) && expiry + ORPHAN_GRACE_MS < now;
   }
-  // Cleanup relies on writers restricting paths to their own container namespace.
+  // Container eligibility is separate from the global reference check below.
   return scope.kind === 'group-post' &&
     (row.deleted === true || row.isDeleted === true || row.deletedAt != null || row.status === 'deleted');
+}
+// Unfiltered collection-group scans use the built-in document-name index, not
+// collection-group field indexes. Never infer absence from a truncated result.
+export const REFERENCE_SCAN_LIMIT = 500;
+
+function timestampMillis(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof (value as { toMillis?: unknown }).toMillis === 'function')
+    return (value as { toMillis: () => number }).toMillis();
+  return typeof value === 'string' ? Date.parse(value) : NaN;
+}
+
+function attachmentReferences(value: unknown, path: string): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((item: unknown) => item === path ||
+    (item !== null && typeof item === 'object' &&
+      ((item as { url?: unknown }).url === path || (item as { path?: unknown }).path === path)));
+}
+
+async function hasReferences(
+  db: Firestore, tx: FirebaseFirestore.Transaction, path: string, now: number,
+): Promise<boolean> {
+  try {
+    const queries = [
+      db.collectionGroup('posts'), db.collectionGroup('submissions'),
+      db.collection('campusStories'), db.collection('groups'),
+    ];
+    for (const [index, query] of queries.entries()) {
+      const result = await tx.get(query.limit(REFERENCE_SCAN_LIMIT + 1));
+      if (result.size > REFERENCE_SCAN_LIMIT) return true;
+      for (const doc of result.docs) {
+        const row = doc.data();
+        if (index < 2 && attachmentReferences(row.attachments, path)) return true;
+        if (index === 2 && row.mediaUrl === path) {
+          const expiry = timestampMillis(row.expiresAt);
+          // An unknown expiry cannot establish that the reference is inactive.
+          if (!Number.isFinite(expiry) || expiry > now) return true;
+        }
+        if (index === 3 && row.coverUrl === path) return true;
+      }
+    }
+    return false;
+  } catch {
+    // Includes missing indexes, unavailable queries and malformed timestamps.
+    return true;
+  }
 }
 const fail = (statusCode: number, message: string): never => {
   throw Object.assign(new Error(message), { statusCode });
@@ -210,6 +257,12 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
         const claimed = await db.runTransaction(async (tx) => {
           const current = (await tx.get(snap.ref)).data();
           if (!current || current.path !== row.path) return false;
+          if (['finalized', 'claimed', 'released', 'deleting'].includes(current.status)) {
+            // Recheck on every transaction retry, including interrupted removals.
+            if (current.status !== row.status || current.claimedAt !== row.claimedAt ||
+              current.finalizedAt !== row.finalizedAt || current.releasedAt !== row.releasedAt ||
+              await hasReferences(db, tx, current.path, now)) return false;
+          }
           if (current.status === 'deleting') return true;
           if (current.status === 'released') {
             const scope = parsePrivateFilePath(current.path);

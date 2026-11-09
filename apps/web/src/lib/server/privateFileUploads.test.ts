@@ -10,6 +10,7 @@ import {
   UPLOAD_RESERVED_BYTES,
   UPLOAD_URL_TTL_MS,
   uploadId,
+  REFERENCE_SCAN_LIMIT,
 } from './privateFileUploads';
 
 function setup() {
@@ -107,6 +108,8 @@ it.each(cases)('retains claimed files while container exists regardless of refer
   expect(await uploads.cleanup(now + 2 * day)).toBe(0);
   expect(storage.remove).not.toHaveBeenCalled();
   docs.delete(ref);
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  docs.delete('groups/course/posts/other');
   expect(await uploads.cleanup(now + 2 * day)).toBe(1);
   expect((await uploads.read(path)).status).toBe('deleted');
   expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
@@ -245,4 +248,95 @@ it('releases 31 replaced covers, respects publication grace and current cover, a
     if (key.startsWith('privateFileQuota/')) expect(value.finalizedBytes).toBe(bytes);
   }
   await expect(uploads.reserve(scope(99), 'alice', now + day)).resolves.toBeUndefined();
+});
+
+
+const referenceCases = [
+  ['groups/course/posts/other', (path: string) => ({ attachments: [path] })],
+  ['groups/elsewhere/posts/other', (path: string) => ({ attachments: [path] })],
+  ['assignments/other/submissions/bob', (path: string) => ({ attachments: [{ url: path, name: 'file.pdf' }] })],
+  ['groups/elsewhere/assignments/other/submissions/bob', (path: string) => ({ attachments: [path] })],
+  ['campusStories/other', (path: string) => ({ mediaUrl: path, expiresAt: now + 10 * day })],
+  ['groups/elsewhere', (path: string) => ({ coverUrl: path })],
+] as const;
+
+it.each(['finalized', 'claimed', 'released', 'deleting'])('protects every reference for %s objects and settles zero-reference objects once', async (status) => {
+  for (const [ref, data] of referenceCases) {
+    const { uploads, docs, storage } = setup();
+    const path = status === 'released' ? 'groups/course/cover.jpg' : scope(0).path;
+    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+    await uploads.finalize(path, 'alice', 8, now + 1);
+    Object.assign(docs.get(`privateFileUploads/${uploadId(path)}`)!, {
+      status, claimedAt: now + 2, releasedAt: now + 2,
+    });
+    docs.set(ref, data(path));
+    expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+    expect(storage.remove).not.toHaveBeenCalled();
+    expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
+    docs.delete(ref);
+    expect(await uploads.cleanup(now + 2 * day)).toBe(1);
+    expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+    expect(storage.remove).toHaveBeenCalledTimes(1);
+    expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
+  }
+});
+
+it.each(['posts', 'submissions', 'campusStories', 'groups'])('retains objects when the %s scan cannot finish', async (collection) => {
+  const { uploads, docs, storage } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  for (let i = 0; i <= REFERENCE_SCAN_LIMIT; i++) docs.set(`${collection}/doc${i}`, {});
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+  docs.delete(`${collection}/doc0`);
+  expect(await uploads.cleanup(now + 2 * day)).toBe(1);
+});
+
+it.each(['posts', 'submissions', 'campusStories', 'groups'])('retains objects when the %s reference query fails', async (collection) => {
+  const { uploads, db, storage } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  const original = db.runTransaction.bind(db);
+  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => original((tx) => callback({
+    ...tx,
+    get: async (query: { path: string; filters?: unknown[] }) => {
+      if (query.path === collection && Array.isArray(query.filters)) throw new Error('query unavailable');
+      return tx.get(query);
+    },
+  })));
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+});
+
+it.each(['status', 'releasedAt'])('abandons released cover deletion when %s changes after scan', async (field) => {
+  const { uploads, db, docs, storage } = setup();
+  const path = 'groups/course/cover.jpg';
+  await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+  await uploads.finalize(path, 'alice', 8, now + 1);
+  const row = docs.get(`privateFileUploads/${uploadId(path)}`)!;
+  Object.assign(row, { status: 'released', releasedAt: now + 2 });
+  const original = db.runTransaction.bind(db);
+  vi.spyOn(db, 'runTransaction').mockImplementationOnce((...args) => {
+    row[field] = field === 'status' ? 'claimed' : now + 3;
+    return original(...args);
+  });
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+});
+
+it.each([undefined, 'invalid', now + 10 * day, new Date(now + 10 * day)])('retains story references with live or uncertain expiry %s', async (expiresAt) => {
+  const { uploads, docs, storage } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  docs.set('campusStories/other', { mediaUrl: scope(0).path, expiresAt });
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+});
+
+it('ignores expired story references', async () => {
+  const { uploads, docs } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  docs.set('campusStories/other', { mediaUrl: scope(0).path, expiresAt: now });
+  expect(await uploads.cleanup(now + 2 * day)).toBe(1);
 });
