@@ -807,6 +807,37 @@ it('keeps a pasted but unconfirmed progress backup until the learner accepts a d
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+it('cancels stale source replacement approval when an unconfirmed backup is edited or rejected', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '仍在整理的私人筆記' } });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const progress = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  const source = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(progress, { target: { value: '{"draft":"first"}' } });
+  fireEvent.change(source, { target: { value: '尚未確認的新教材' } });
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+
+  // The previous approval must not dispose of a newer backup draft.
+  fireEvent.change(progress, { target: { value: '{"draft":"second"}' } });
+  expect(screen.queryByRole('button', { name: '確認改讀新教材' })).toBeNull();
+  expect(progress.value).toBe('{"draft":"second"}');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('仍在整理的私人筆記');
+
+  fireEvent.click(screen.getByRole('button', { name: '開始讀這份內容' }));
+  expect(screen.getByRole('button', { name: '確認改讀新教材' })).toBeTruthy();
+  // A rejected oversize paste is still an attempted backup edit, so it
+  // must invalidate approval while preserving the last accepted backup.
+  fireEvent.change(progress, { target: { value: 'x'.repeat(COURSE_STUDY_PROGRESS_LIMITS.bytes + 1) } });
+  expect(screen.queryByRole('button', { name: '確認改讀新教材' })).toBeNull();
+  expect(progress.value).toBe('{"draft":"second"}');
+  expect(screen.getByRole('alert').textContent).toContain('超過 8 MiB');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(inputValue(noteLabel)).toBe('仍在整理的私人筆記');
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('protects a pasted progress draft when importing the first local file', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
   fireEvent.click(screen.getByText('接著上次的進度'));

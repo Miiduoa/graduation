@@ -586,6 +586,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   // Reject oversized clipboard content before storing it in React state.
   // Keep the previous paste intact, so a failed attempt cannot erase a backup.
   function updatePastedProgress(value: string) {
+    // An earlier source-replacement confirmation cannot authorize discarding
+    // a backup that the student has since edited (even if the edit is rejected).
+    setPendingSource(null);
     setRestorePreview(null);
     if (value.length > COURSE_STUDY_PROGRESS_LIMITS.bytes ||
       new Blob([value]).size > COURSE_STUDY_PROGRESS_LIMITS.bytes) {
