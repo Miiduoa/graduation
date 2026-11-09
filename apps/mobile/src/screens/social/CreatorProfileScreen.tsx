@@ -17,6 +17,7 @@ import {
   type CreatorCursor, type CreatorIdentity,
 } from '../../services/creatorProfile';
 import type { CampusPostDoc } from '../../services/feed';
+import { CreatorCardPanel } from './CreatorCardPanel';
 
 type ProfileTab = 'posts' | 'media' | 'saved';
 type ReadState<T> =
@@ -240,6 +241,7 @@ function ScopedCreatorProfile({
                 <Action label="重試名片" onPress={() => setRefreshRevision((n) => n + 1)} />
               </View>
             )}
+            <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
             <View style={styles.actions}>
               {own ? (
                 <>
