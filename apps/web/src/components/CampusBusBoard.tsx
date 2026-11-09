@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   CAMPUS_NEXT, CAMPUS_NEXT_ROUTES, CAMPUS_SEGMENTS, campusApproachModel,
-  campusDirectionEnded, campusLaneDisplay, campusLiveUnavailable, campusRowKey,
+  campusDirectionEnded, campusEtaView, campusLaneDisplay, campusLiveUnavailable, campusRowKey,
   campusSegmentRows, campusSegmentWaitLine, campusUpdatedLabel, hasCampusNext,
   pickCampusApproachRow, queryTransit,
   type CampusSegmentKey, type TransitResult,
@@ -56,6 +56,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
   const [revision, setRevision] = useState(0);
   const [clock, setClock] = useState(() => Date.now());
   const [offline, setOffline] = useState(false);
+  const [needsFreshData, setNeedsFreshData] = useState(false);
   const [laneOpen, setLaneOpen] = useState(false);
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const inFlight = useRef(false);
@@ -66,7 +67,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function refresh() {
       if (!active || inFlight.current || document.visibilityState === 'hidden' || !navigator.onLine) {
-        if (active && !navigator.onLine) { setOffline(true); setBusy(false); }
+        if (active && !navigator.onLine) { setOffline(true); setNeedsFreshData(true); setBusy(false); }
         return;
       }
       const current = new AbortController();
@@ -80,23 +81,32 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         if (!active || current.signal.aborted) return;
         if (next.status === 'ready') {
           setResult(next);
+          setNeedsFreshData(false);
         } else {
-          setResult((current) => current?.status === 'ready' ? current : next);
+          setResult((previous) => previous?.status === 'ready' ? previous : next);
+          setNeedsFreshData(true);
           delay = 60_000;
         }
         setClock(Date.now());
       } catch {
         if (active && controller === current) {
-          setResult((current) => current?.status === 'ready' ? current : { status: 'unavailable', reason: 'network' });
+          setResult((previous) => previous?.status === 'ready' ? previous : { status: 'unavailable', reason: 'network' });
+          setNeedsFreshData(true);
           delay = 60_000;
         }
       } finally {
         clearTimeout(timeout);
-        if (controller === current) controller = null;
-        inFlight.current = false;
-        if (active) {
-          setBusy(false);
-          if (document.visibilityState === 'visible' && navigator.onLine) timer = setTimeout(() => void refresh(), delay);
+        if (controller === current) {
+          controller = null;
+          inFlight.current = false;
+          if (active) {
+            if (current.signal.aborted) {
+              setNeedsFreshData(true);
+              delay = 60_000;
+            }
+            setBusy(false);
+            if (document.visibilityState === 'visible' && navigator.onLine) timer = setTimeout(() => void refresh(), delay);
+          }
         }
       }
     }
@@ -104,7 +114,23 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
       clearTimeout(timer);
       setOffline(!navigator.onLine);
       setClock(Date.now());
-      if (document.visibilityState === 'visible' && navigator.onLine) void refresh();
+      if (!navigator.onLine) {
+        setNeedsFreshData(true);
+        controller?.abort();
+        controller = null;
+        inFlight.current = false;
+        setBusy(false);
+        return;
+      }
+      if (document.visibilityState === 'visible') {
+        setNeedsFreshData(true);
+        if (controller) {
+          controller.abort();
+          controller = null;
+          inFlight.current = false;
+        }
+        void refresh();
+      }
     };
     const clockTimer = setInterval(() => setClock(Date.now()), 15_000);
     void refresh();
@@ -133,6 +159,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
   const approach = campusApproachModel(approachRow, clock, routeStops);
   const allEnded = campusDirectionEnded(rows, clock);
   const liveUnavailable = campusLiveUnavailable(rows, clock, result?.status === 'ready' && result.stale === true);
+  const unverified = offline || needsFreshData;
   const fetchedAt = result?.status === 'ready' ? result.fetchedAt : '';
   const stamp = fetchedAt ? campusUpdatedLabel(fetchedAt, clock, liveUnavailable) : busy ? '' : '';
   const missing = result?.status === 'unavailable';
@@ -162,8 +189,9 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         </button>
       </header>
       {offline ? <p className={css.boardStamp} role="status">目前離線，恢復網路後會重新查詢。</p> : null}
-      {!offline && stamp ? <p className={css.boardStamp}>{stamp}</p> : null}
-      {allEnded ? <p className={css.boardEndedHint}>這個方向今天的班次都結束了</p> : null}
+      {!offline && needsFreshData ? <p className={css.boardStamp} role="status">{busy ? '正在重新確認班次，暫不顯示到站預估。' : '目前無法確認最新班次，請稍後重試。'}</p> : null}
+      {!unverified && stamp ? <p className={css.boardStamp}>{stamp}</p> : null}
+      {allEnded && !unverified ? <p className={css.boardEndedHint}>這個方向今天的班次都結束了</p> : null}
       <div className={css.segmentWrap} data-campus-segments="true" data-sticky-cover="true">
         <div className={css.segmentBar} role="tablist" aria-label="站牌方向">
           {CAMPUS_SEGMENTS.map((item) => (
@@ -185,7 +213,7 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         </div>
       </div>
       <p className={css.waitLine}>{waitLine}</p>
-      {approach && !missing && !showSkeleton ? (
+      {approach && !unverified && !liveUnavailable && !missing && !showSkeleton ? (
         <CampusApproachTrack
           key={approachRow ? campusRowKey(approachRow) : undefined}
           model={approach}
@@ -197,6 +225,10 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
           <p>暫時讀不到資料，請稍後再試</p>
           <button type="button" className={css.retry} disabled={busy} onClick={retry}>再試一次</button>
         </div>
+      ) : offline && !result ? (
+        <div className={css.boardError} role="status">
+          <p>離線時無法取得班次，連線後會自動重新查詢。</p>
+        </div>
       ) : showSkeleton ? (
         <SkeletonList />
       ) : (
@@ -206,7 +238,8 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               <CampusArrivalRow
                 row={row}
                 now={clock}
-                animateUpdates={!offline && !liveUnavailable}
+                unverified={unverified || (liveUnavailable && ['live', 'soon'].includes(campusEtaView(row.arrival, clock).kind))}
+                animateUpdates={!unverified && !liveUnavailable}
                 active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
                 onSelect={() => setFocusedKey(campusRowKey(row))}
               />
@@ -221,7 +254,8 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
               <CampusArrivalRow
                 row={row}
                 now={clock}
-                animateUpdates={!offline && !liveUnavailable}
+                unverified={unverified || (liveUnavailable && ['live', 'soon'].includes(campusEtaView(row.arrival, clock).kind))}
+                animateUpdates={!unverified && !liveUnavailable}
                 active={approachRow ? campusRowKey(row) === campusRowKey(approachRow) : false}
                 onSelect={() => setFocusedKey(campusRowKey(row))}
               />
