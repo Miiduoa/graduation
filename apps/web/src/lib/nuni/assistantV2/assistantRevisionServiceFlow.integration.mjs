@@ -34,7 +34,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 let dom, testing, React, Assistant, handleV2, verifyCard, database, server, fixtures;
-let secret, now, serial = 0, identitySerial = 0, fault;
+let secret, now, serial = 0, identitySerial = 0, fault, planEvents;
 const identitiesByContext = new Map(), identitiesByHandle = new Map();
 const requests = [], deniedFetches = [];
 const serverImportWithoutWindow = typeof window === 'undefined';
@@ -73,7 +73,7 @@ async function initialPlan() {
   await testing.waitFor(() => expect(uiCards()).toHaveLength(2));
   const entry = requests.find(request => request.action === 'ask' && Array.isArray(request.response.cards));
   expect(entry.status).toBe(200);
-  expect(entry.response.cards.map(card => card.args)).toEqual(proposed);
+  expect(entry.response.cards.map(card => card.args)).toEqual(planEvents);
   assertRealCards(entry);
   return { view, composer, entry };
 }
@@ -85,6 +85,44 @@ function openRevision() {
   return editor;
 }
 const submitRevision = () => testing.fireEvent.submit(ui().getByRole('form', { name: '修改安排再預覽' }));
+
+function setExactTime(form, values) {
+  for (const [field, value] of Object.entries(values)) {
+    const label = { date: '開始日期', endDate: '結束日期', startTime: '開始時間', endTime: '結束時間' }[field];
+    testing.fireEvent.change(testing.within(form).getByLabelText(label), { target: { value } });
+  }
+}
+function openExactTime(entry, index = 1, values = { startTime: '21:00', endTime: '22:00' }) {
+  testing.fireEvent.click(ui().getByRole('button', { name: '精確調整時間' }));
+  const form = ui().getByRole('form', { name: '精確調整行程時間' });
+  testing.fireEvent.change(testing.within(form).getByLabelText('要調整的行程'), {
+    target: { value: entry.response.cards[index].mutationId },
+  });
+  setExactTime(form, values);
+  return form;
+}
+const submitExactTime = form => testing.fireEvent.submit(form);
+function assertNoAdditionalModel() {
+  expect(count('ask')).toHaveLength(2); // Route bootstrap plus the one original model request.
+  expect(fixture.provider).toHaveBeenCalledTimes(2);
+  expect(deniedFetches).toEqual([]);
+}
+async function assertOriginalCannotExecute(entry) {
+  const identity = identitiesByContext.get(entry.context);
+  for (const card of entry.response.cards) {
+    // Explicit server security probe, separate from user confirmation requests.
+    // Real handler/actions must reject the original authorization after revision.
+    const response = await handleV2(new NextRequest('http://localhost:3000/api/nuni/assistant/confirm', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000',
+        cookie: identity.cookie, 'X-Campus-Session': entry.context },
+      body: JSON.stringify({ schoolId: entry.body.schoolId, conversationId: entry.body.conversationId,
+        token: card.token, args: card.args }),
+    }), 'confirm');
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'CONFIRMATION_REVOKED' });
+  }
+  expect(database.writes).toHaveLength(0);
+}
 
 beforeAll(async () => {
   expect(typeof window).toBe('undefined');
@@ -120,7 +158,7 @@ beforeAll(async () => {
   // Keep Node Request/Response, AbortSignal.any/timeout and crypto for real server work.
   expect(typeof AbortSignal.any).toBe('function');
   vi.stubGlobal('fetch', async (url, init = {}) => {
-    if (typeof url !== 'string' || !/^\/api\/nuni\/assistant\/(capability|ask|confirm|cancel|reconcile)$/.test(url)) {
+    if (typeof url !== 'string' || !/^\/api\/nuni\/assistant\/(capability|ask|revise|confirm|cancel|reconcile)$/.test(url)) {
       deniedFetches.push(String(url));
       throw new Error('External fetch forbidden by in-process integration test');
     }
@@ -144,8 +182,9 @@ beforeAll(async () => {
       expect(entry.response.status).toBe('revoked');
       throw new TypeError('Synthetic lost response after real revocation');
     }
-    if (action === 'ask' && body.planProtection && fault.holdRevision) {
-      fault.holdRevision = false;
+    if ((action === 'ask' && body.planProtection && fault.holdRevision) || (action === 'revise' && fault.holdPrecise)) {
+      if (action === 'revise') fault.holdPrecise = false;
+      else fault.holdRevision = false;
       await new Promise(resolve => { fault.held = { entry, release: resolve }; });
     }
     return response;
@@ -170,7 +209,8 @@ beforeEach(() => {
     },
   } });
   identitiesByContext.clear(); identitiesByHandle.clear();
-  fault = { dropNextCancel: false, failLedger: false, holdRevision: false, held: null };
+  fault = { dropNextCancel: false, failLedger: false, holdRevision: false, holdPrecise: false, held: null };
+  planEvents = structuredClone(proposed);
   fixture.school = 'fixture-school';
   useIdentity(registerIdentity('inprocess-fixture-account-' + serial));
   database = fixtures.fixtureAdapter();
@@ -192,7 +232,7 @@ beforeEach(() => {
     const revision = input.messages[0].content.includes('這次只重新預覽原行程');
     if (!hasResults) expect(input.tools?.some(tool => tool.function.name === 'propose_personal_event')).toBe(true);
     return {
-      message: !hasResults ? { role: 'assistant', content: '', tool_calls: (revision ? revised : proposed).map((event, index) => ({
+      message: !hasResults ? { role: 'assistant', content: '', tool_calls: (revision ? revised : planEvents).map((event, index) => ({
         id: 'fixture-tool-' + index, type: 'function', function: { name: 'propose_personal_event', arguments: JSON.stringify(event) },
       })) } : { role: 'assistant', content: revision ? '合成修訂已供預覽，尚未寫入。' : '合成模型回覆：兩項行程僅供預覽，請核對確認卡。' },
       usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
@@ -309,4 +349,183 @@ it.each(['account', 'school'])('discards a real held revision response after a %
   expect(count('confirm')).toHaveLength(0);
   expect(database.writes).toHaveLength(0);
   expect(deniedFetches).toEqual([]);
+});
+
+
+it('previews one exact time change without another model call and confirms only fresh signed cards once', async () => {
+  const { entry } = await initialPlan();
+  const form = openExactTime(entry);
+  const ledgerBefore = database.snapshot();
+  fault.holdPrecise = true;
+  submitExactTime(form); submitExactTime(form);
+  await testing.waitFor(() => expect(fault.held).not.toBeNull());
+  const held = fault.held;
+  submitExactTime(form); submitExactTime(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(count('revise')).toHaveLength(1);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+  await testing.act(async () => { held.release(); await Promise.resolve(); });
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  const replacement = count('revise')[0];
+  expect(replacement.status).toBe(200);
+  expect(replacement.body.originalCards).toEqual(entry.response.cards.map(({ token, args }) => ({ token, args })));
+  expect(replacement.body.change).toEqual({ mutationId: entry.response.cards[1].mutationId,
+    date: proposed[1].date, endDate: proposed[1].date, startTime: '21:00', endTime: '22:00' });
+  expect(typeof replacement.body.routeToken).toBe('string');
+  expect(replacement.response.cards.map(card => card.args)).toEqual(revised);
+  assertRealCards(replacement);
+  expect(replacement.response.cards.every(card => !entry.response.cards.some(original => original.mutationId === card.mutationId || original.token === card.token))).toBe(true);
+  await assertOriginalCannotExecute(entry);
+  expect(database.snapshot()).toEqual(ledgerBefore);
+  for (let index = 0; index < 2; index++) {
+    testing.fireEvent.click(testing.within(uiCards()[index + 2]).getByRole('button', { name: '確認' }));
+    await testing.waitFor(() => expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(index + 1));
+    expect(database.writes).toHaveLength(index + 1);
+    expect(count('confirm')[index]).toMatchObject({ status: 200,
+      body: { token: replacement.response.cards[index].token, args: replacement.response.cards[index].args },
+      response: { status: 'verified', mutationId: replacement.response.cards[index].mutationId } });
+  }
+  expect(count('confirm')).toHaveLength(2);
+  expect(database.writes.map(write => write.mutationId)).toEqual(replacement.response.cards.map(card => card.mutationId));
+  assertNoAdditionalModel();
+});
+
+it('keeps exact inputs after a full-plan conflict and retries without cancelling the original cards twice', async () => {
+  const { entry } = await initialPlan();
+  const form = openExactTime(entry, 1, { startTime: '18:30', endTime: '19:30' });
+  const ledgerBefore = database.snapshot();
+  submitExactTime(form);
+  await testing.waitFor(() => expect(count('revise')).toHaveLength(1));
+  expect(count('revise')[0].status).toBe(409);
+  expect(count('revise')[0].response).toMatchObject({ error: 'EVENT_CONFLICT' });
+  expect(count('revise')[0].response.cards).toBeUndefined();
+  expect(database.snapshot()).toEqual(ledgerBefore);
+  await testing.waitFor(() => expect(testing.within(form).getByRole('button', { name: '預覽時間調整' }).disabled).toBe(false));
+  expect(testing.within(form).getByLabelText('開始時間').value).toBe('18:30');
+  expect(testing.within(form).getByLabelText('結束時間').value).toBe('19:30');
+  expect(uiCards()).toHaveLength(2);
+  expect(count('cancel')).toHaveLength(2);
+  expect(count('confirm')).toHaveLength(0);
+  await assertOriginalCannotExecute(entry);
+  setExactTime(form, { startTime: '21:00', endTime: '22:00' });
+  submitExactTime(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  expect(count('revise')).toHaveLength(2);
+  expect(count('revise')[1].status).toBe(200);
+  expect(count('revise')[1].response.cards.map(card => card.args)).toEqual(revised);
+  assertRealCards(count('revise')[1]);
+  expect(database.snapshot()).toEqual(ledgerBefore);
+  expect(count('cancel')).toHaveLength(2);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('rejects unchanged or invalid exact time input without dispatch and preserves it when collapsed', async () => {
+  const { entry } = await initialPlan();
+  let form = openExactTime(entry, 1, {});
+  const before = requests.length;
+  submitExactTime(form);
+  expect(testing.within(form).getByRole('status').textContent).toContain('時間沒有變更');
+  expect(requests).toHaveLength(before);
+  setExactTime(form, { startTime: '22:00', endTime: '21:00' });
+  submitExactTime(form);
+  expect(testing.within(form).getByRole('alert').textContent).toContain('結束時間必須晚於開始時間');
+  expect(document.activeElement).toBe(testing.within(form).getByLabelText('結束時間'));
+  expect(requests).toHaveLength(before);
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '收起時間調整' }));
+  expect(ui().queryByRole('form', { name: '精確調整行程時間' })).toBeNull();
+  testing.fireEvent.click(ui().getByRole('button', { name: '精確調整時間' }));
+  form = ui().getByRole('form', { name: '精確調整行程時間' });
+  expect(testing.within(form).getByLabelText('要調整的行程').value).toBe(entry.response.cards[1].mutationId);
+  expect(testing.within(form).getByLabelText('開始時間').value).toBe('22:00');
+  expect(testing.within(form).getByLabelText('結束時間').value).toBe('21:00');
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(requests).toHaveLength(before);
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  expect(ui().getAllByRole('button', { name: '確認' })).toHaveLength(2);
+  assertNoAdditionalModel();
+});
+
+it('changes the selected same-name event across midnight using its signed identity and retains the other event exactly', async () => {
+  planEvents = proposed.map(event => ({ ...event, title: '同名合成讀書安排' }));
+  const { entry } = await initialPlan();
+  const form = openExactTime(entry, 1, { date: '2026-11-04', endDate: '2026-11-05', startTime: '23:00', endTime: '01:00' });
+  submitExactTime(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  const replacement = count('revise')[0];
+  expect(replacement.status).toBe(200);
+  expect(replacement.body.change.mutationId).toBe(entry.response.cards[1].mutationId);
+  expect(replacement.response.cards.map(card => card.args)).toEqual([
+    planEvents[0], { ...planEvents[1], endDate: '2026-11-05', startTime: '23:00', endTime: '01:00' },
+  ]);
+  assertRealCards(replacement);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('does not dispatch exact revision while a lost cancellation remains unknown, then resumes after reconciliation', async () => {
+  const { entry } = await initialPlan();
+  const form = openExactTime(entry);
+  fault.dropNextCancel = true;
+  submitExactTime(form);
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await ui().findByRole('button', { name: '重新核對結果' });
+  expect(count('cancel')[0].response.status).toBe('revoked');
+  expect(count('reconcile')[0].status).toBe(503);
+  expect(testing.within(form).getByRole('button', { name: '預覽時間調整' }).disabled).toBe(true);
+  submitExactTime(form); submitExactTime(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(count('revise')).toHaveLength(0);
+  expect(count('cancel')).toHaveLength(1);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+  fault.failLedger = false;
+  testing.fireEvent.click(ui().getByRole('button', { name: '重新核對結果' }));
+  await ui().findByText('已撤銷未執行提議');
+  submitExactTime(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  expect(count('revise')).toHaveLength(1);
+  expect(count('revise')[0].response.cards.map(card => card.args)).toEqual(revised);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it.each(['account', 'school'])('discards a held exact revision after a %s switch without applying its original scope to the new UI', async target => {
+  const { view, entry } = await initialPlan();
+  const originalContext = fixture.context, originalAccount = fixture.account, originalSchool = fixture.school;
+  const form = openExactTime(entry);
+  fault.holdPrecise = true;
+  submitExactTime(form);
+  await testing.waitFor(() => expect(fault.held).not.toBeNull());
+  const held = fault.held;
+  expect(held.entry.status).toBe(200);
+  expect(held.entry.response.cards.map(card => card.args)).toEqual(revised);
+  assertRealCards(held.entry);
+  expect(held.entry.context).toBe(originalContext);
+  expect(held.entry.account).toBe(originalAccount);
+  expect(held.entry.body.schoolId).toBe(originalSchool);
+  if (target === 'account') useIdentity(registerIdentity('inprocess-exact-other-account-' + serial));
+  else fixture.school = 'other-fixture-school';
+  view.rerender(React.createElement(Assistant));
+  await ui().findByLabelText('問題');
+  expect(held.entry.signal.aborted).toBe(true);
+  await testing.act(async () => { held.release(); await Promise.resolve(); });
+  expect(ui().queryByRole('article', { name: '行程確認卡' })).toBeNull();
+  expect(ui().queryByRole('form', { name: '精確調整行程時間' })).toBeNull();
+  expect(ui().getByRole('checkbox', { name: /^同意在本次對話/ }).checked).toBe(false);
+  expect(held.entry.context).toBe(originalContext);
+  expect(held.entry.account).toBe(originalAccount);
+  expect(held.entry.body.schoolId).toBe(originalSchool);
+  expect(count('revise')).toHaveLength(1);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
 });

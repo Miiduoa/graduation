@@ -24,6 +24,7 @@ import {
   type Adapter,
   type Binding,
   type Card,
+  type EventArgs,
   type Ledger,
   type Obj,
   type Task,
@@ -656,6 +657,28 @@ export function freeTime(ledger: Ledger, args: Obj, notBefore = -Infinity) {
   append(cursor, end);
   return { slots, source: 'personal-imports', coverage: '僅已同步資料，未同步裝置資料不包含在內' };
 }
+/** Shared interval policy for model proposals and exact form-based revisions. */
+export function validateEventProposal(
+  ledger: Ledger, raw: unknown, priorEvents: readonly EventArgs[], now: number, requireFuture: boolean,
+): EventArgs {
+  const event = eventArgs(raw), [start, end] = eventInterval(event);
+  if (requireFuture && (event.allDay ? end <= now : start < now))
+    return fail('EVENT_START_PASSED', 409);
+  const classes = schedule(ledger, event.date, event.endDate || event.date);
+  if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
+  if (
+    classes.classes.some(row => row.start < end && start < row.end) ||
+    priorEvents.some(previous => {
+      const [a, b] = eventInterval(previous);
+      return a < end && start < b;
+    }) ||
+    calendar(ledger, addDays(event.date, -31), event.endDate || event.date).some(row => {
+      const [a, b] = eventInterval(eventArgs(row));
+      return a < end && start < b;
+    })
+  ) return fail('EVENT_CONFLICT', 409);
+  return event;
+}
 export function createTools(
   adapter: Adapter,
   binding: Binding,
@@ -780,27 +803,9 @@ export function createTools(
       };
     if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title))
       raw = { ...raw, title: studyTitle(raw.title) };
-    const l = await getLedger(),
-      e = eventArgs(raw),
-      [start, end] = eventInterval(e);
-    if (scheduleIntent(question) && (e.allDay ? end <= now : start < now))
-      return fail('EVENT_START_PASSED', 409);
-    const classes = schedule(l, e.date, e.endDate || e.date);
-    if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
-    if (
-      classes.classes.some((c) => c.start < end && start < c.end) ||
-      cards.some((c) => {
-        if (c.tool !== 'propose_personal_event') return false;
-        const [a, b] = eventInterval(eventArgs(c.args));
-        return a < end && start < b;
-      }) ||
-      calendar(l, addDays(e.date, -31), e.endDate || e.date).some((c) => {
-        const [a, b] = eventInterval(eventArgs(c));
-        return a < end && start < b;
-      })
-    )
-      return fail('EVENT_CONFLICT', 409);
+    const l = await getLedger();
     const priorEvents = cards.filter((card) => card.tool === 'propose_personal_event');
+    validateEventProposal(l, raw, priorEvents.map(card => eventArgs(card.args)), now, scheduleIntent(question));
     const card = signCard(
       binding,
       'propose_personal_event',

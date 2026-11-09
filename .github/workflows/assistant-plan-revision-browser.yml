@@ -64,6 +64,7 @@ jobs:
           node scripts/build-functions-shared.cjs
           pnpm --filter web exec vitest run \
             src/lib/nuni/assistantV2/protectedPlanServiceFlow.test.ts \
+            src/lib/nuni/assistantV2/directPlanRevision.test.ts \
             src/lib/nuni/assistantV2/protectedPlanRunner.test.ts \
             src/lib/nuni/assistantV2/protectedPlan.test.ts \
             src/lib/nuni/assistantV2/planRevision.test.ts \

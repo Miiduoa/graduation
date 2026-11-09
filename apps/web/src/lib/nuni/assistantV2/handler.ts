@@ -12,6 +12,7 @@ import {
 } from '../server';
 import { beginProposal, cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
+import { directPlanRevision } from './directPlanRevision';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
 import { run, safeCode } from './runner';
@@ -25,6 +26,11 @@ let minute = 0,
   dailyTokens = 0;
 const provider = createProviderModel();
 const PLAN_PROTECTION_MESSAGES: Record<string, string> = {
+  INVALID_PLAN_REVISION: '原提議或修改欄位不完整，請重新開啟完整行程提議後再試。',
+  PLAN_REVISION_UNCHANGED: '日期與時間沒有變更，這次沒有產生新提議。',
+  PLAN_REVISION_UNRESOLVED: '原提議尚未全部核對為未執行並撤銷，不能產生新的行程提議。',
+  EVENT_CONFLICT: '修改後的時段與其他行程重疊，請調整日期或時間後再試。',
+  SCHEDULE_INCOMPLETE: '目前課表資料不完整，無法可靠核對時段，這次沒有產生新提議。',
   INVALID_PLAN_PROTECTION: '保留項目設定無效，請重新選擇要保留的原提議內容。',
   PLAN_ALREADY_PRESERVED: '已選擇保留全部項目，不需要重新預覽；原提議沒有變更。',
   PLAN_PROTECTION_MISMATCH: '新提議未完整保留指定項目，這次預覽已停止。請調整修改條件後重新預覽。',
@@ -56,7 +62,7 @@ function quota(now: number, amount: number) {
 }
 export async function handleV2(request: NextRequest, action: string) {
   const requestId = randomUUID();
-  const stage = ['capability', 'ask', 'confirm', 'cancel', 'reconcile'].includes(action) ? action : 'unknown';
+  const stage = ['capability', 'ask', 'revise', 'confirm', 'cancel', 'reconcile'].includes(action) ? action : 'unknown';
   const started = Date.now();
   let logged = false;
   const log = (r: Obj) => {
@@ -70,7 +76,7 @@ export async function handleV2(request: NextRequest, action: string) {
       process.env.CAMPUS_ASSISTANT_V2_ENABLED !== 'true'
     )
       throw new V2Error(404, 'NOT_FOUND');
-    if (!['capability', 'ask', 'confirm', 'cancel', 'reconcile'].includes(action))
+    if (!['capability', 'ask', 'revise', 'confirm', 'cancel', 'reconcile'].includes(action))
       throw new V2Error(404, 'NOT_FOUND');
     if (request.method !== (action === 'capability' ? 'GET' : 'POST'))
       throw new V2Error(405, 'METHOD_NOT_ALLOWED');
@@ -92,15 +98,17 @@ export async function handleV2(request: NextRequest, action: string) {
       await boundedJson(request, 16384),
       action === 'ask'
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection']
-        : ['schoolId', 'conversationId', 'token', 'args'],
+        : action === 'revise'
+          ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change']
+          : ['schoolId', 'conversationId', 'token', 'args'],
     );
     const schoolId = id(raw.schoolId),
       conversationId = id(raw.conversationId);
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const target = action === 'reconcile' ? undefined : action === 'ask'
-      ? raw.routeToken === undefined ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
+    const target = action === 'reconcile' ? undefined : action === 'ask' || action === 'revise'
+      ? raw.routeToken === undefined && action === 'ask' ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
       if (request.headers.has('fly-replay-failed')) throw new V2Error(409, 'CONFIRMATION_REVOKED');
@@ -116,6 +124,7 @@ export async function handleV2(request: NextRequest, action: string) {
       conversationId,
       schoolId,
     };
+    if (action === 'revise') routeOwner(raw.routeToken, binding, secret);
     let protection: PlanProtection | undefined;
     if (action === 'ask') {
       if (raw.routeToken !== undefined) routeOwner(raw.routeToken, binding, secret);
@@ -174,9 +183,10 @@ export async function handleV2(request: NextRequest, action: string) {
           12000,
         ),
       );
-    if (raw.consent !== true) throw new V2Error(422, 'CONSENT_REQUIRED');
-    const question = text(raw.question, 1000),
-      memory = history(raw.history);
+    if (action === 'revise' && !writes) throw new V2Error(403, 'ASSISTANT_WRITE_UNAVAILABLE');
+    if (action === 'ask' && raw.consent !== true) throw new V2Error(422, 'CONSENT_REQUIRED');
+    const question = action === 'ask' ? text(raw.question, 1000) : '',
+      memory = action === 'ask' ? history(raw.history) : [];
     const key = hash(principal.platformAccountId),
       sessionKey = hash(session.sessionHandle);
     const now = Date.now();
@@ -190,6 +200,15 @@ export async function handleV2(request: NextRequest, action: string) {
     hits.set(key, [...recent, now]);
     active.add(sessionKey);
     try {
+      if (action === 'revise') {
+        const result = await bounded(child => withOperationSignal(child, () =>
+          directPlanRevision(binding, raw.originalCards, raw.change, secret, source.adapter),
+        ), signal, 12000);
+        return jsonResponse({
+          ...result,
+          ...(process.env.FLY_MACHINE_ID ? { issuer: machineId(process.env.FLY_MACHINE_ID) } : {}),
+        });
+      }
       const result = await run({
         question,
         history: memory,

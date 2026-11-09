@@ -8,6 +8,8 @@ import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import { AssistantPlanRevision } from './assistant/AssistantPlanRevision';
+import { AssistantPrecisePlanRevision, AssistantPrecisePlanComparison } from './assistant/AssistantPrecisePlanRevision';
+import { buildPrecisePlanRevision, type PrecisePlanRevisionChange } from './assistant/precisePlanRevision';
 import { AssistantPlanDraftRecovery } from './assistant/AssistantPlanDraftRecovery';
 import { usePlanRevisionDraft } from './assistant/usePlanRevisionDraft';
 import { revisionDraftContentMatches, revisionDraftSource } from '@/lib/assistantPlanRevisionDraft';
@@ -231,8 +233,9 @@ function V2Conversation({
   const routeToken = useRef<string | undefined>(undefined);
   const revisionConsent = useRef(false);
   const revisionTurns = useRef(new Set<V2Turn>());
+  const preciseRevisionTurns = useRef(new Set<V2Turn>());
   const rejectedProposalIds = useRef(new Set<string>());
-  const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[] }>());
+  const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[]; preciseIndex?: number }>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
   const journalScope = { ...localScope, context };
@@ -573,6 +576,77 @@ function V2Conversation({
       if (active()) setPending(false);
     }
   }
+  async function reviseTime(turn: V2Turn, change: PrecisePlanRevisionChange): Promise<{ ok: boolean; message: string }> {
+    if (busy.current || !active() || !journalReadyRef.current)
+      return { ok: false, message: '請先等目前操作與原結果核對完成，再調整時間。' };
+    const continuing = preciseRevisionTurns.current.has(turn) && turn.reply.cards.every(card =>
+      actionStates.current[card.mutationId] === undefined || actionStates.current[card.mutationId]?.status === 'cancelled');
+    if (!turns.includes(turn) || turn.reply.cards.some(card => card.schoolId !== schoolId) ||
+      hasUnresolvedAssistantAction(actionStates.current) ||
+      (!isUnattemptedCalendarPlan(turn, actionStates.current) && !continuing))
+      return { ok: false, message: '原提議尚未完成核對，這次不會建立新預覽；已寫入的行程不能由此修改。' };
+    let edit: ReturnType<typeof buildPrecisePlanRevision>;
+    try { edit = buildPrecisePlanRevision(turn, change); }
+    catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : '請核對日期與起訖時間。' }; }
+    if (!edit.changed)
+      return { ok: false, message: '日期與時間沒有變更，這次不會重新預覽；請查看原確認卡的狀態。' };
+    if (!routeToken.current)
+      return { ok: false, message: '原提議來源已失效，請重新取得有效的行程預覽。' };
+    const input = {
+      routeToken: routeToken.current,
+      originalCards: turn.reply.cards.map(card => ({ token: card.token, args: card.args })),
+      change,
+    };
+    // Reject oversized complete sources before revoking anything; never truncate a plan.
+    const bytes = new TextEncoder().encode(JSON.stringify({ schoolId, conversationId: conversation.current, ...input })).byteLength;
+    if (bytes > 16384)
+      return { ok: false, message: '這份提議超過可完整核對的大小，原確認卡未變更。請重新取得較少項目的預覽後再調整。' };
+    const cleared = clearTurnDraft(turn);
+    if (!cleared.ok) return { ok: false, message: cleared.message || '原草稿尚未確認清除，這次尚未送出。' };
+    preciseRevisionTurns.current.add(turn);
+    if (turn.reply.cards.some(card => actionStates.current[card.mutationId] === undefined))
+      await cancel(turn, 0);
+    if (!active()) return { ok: false, message: '已離開原對話，沒有加入新預覽。' };
+    if (!turn.reply.cards.every(card => actionStates.current[card.mutationId]?.status === 'cancelled'))
+      return { ok: false, message: '原提議尚未全部確認撤銷。請先核對原操作結果，再調整時間。' };
+    busy.current = true;
+    setPending(true);
+    setError('');
+    try {
+      // This dedicated request has no model question, history or provider call.
+      let reply = await send('revise', input);
+      if (!active()) return { ok: false, message: '對話已變更，這次回覆沒有加入新預覽。' };
+      const previousIds = new Set([...rejectedProposalIds.current, ...turns.flatMap(value => value.reply.cards.map(card => card.mutationId))]);
+      if (!Array.isArray(reply.cards) || reply.cards.length !== edit.after.length ||
+        new Set(reply.cards.map((card: V2Card) => card.mutationId)).size !== reply.cards.length ||
+        reply.cards.some((card: V2Card) => card.tool !== 'propose_personal_event' || card.schoolId !== schoolId ||
+          typeof card.mutationId !== 'string' || !card.mutationId || previousIds.has(card.mutationId) ||
+          typeof card.token !== 'string' || !card.token))
+        return { ok: false, message: '新預覽無法完整核對，沒有提供新的確認卡。修改欄位已保留。' };
+      const after = createPlanProtection(reply.cards.map((card: V2Card) => card.args), []).originalEvents;
+      const exact = (events: PlanRevisionEvent[]) => JSON.stringify(events.map(event =>
+        Object.entries(event).sort(([left], [right]) => left.localeCompare(right))));
+      if (exact(after) !== exact(edit.after)) {
+        for (const card of reply.cards) rejectedProposalIds.current.add(card.mutationId);
+        return { ok: false, message: '新預覽與指定的時間或其他原項目不一致，沒有提供可確認的安排。' };
+      }
+      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      for (const card of turns.flatMap(value => value.reply.cards)) {
+        if (canConfirmAction(actionStates.current[card.mutationId])) setAction(card, { status: 'superseded' });
+      }
+      const revisedTurn = { question: '精確調整時間：' + edit.label, reply };
+      planComparisons.current.set(revisedTurn, { before: edit.before, after, preciseIndex: edit.index });
+      setTurns(previous => [...previous, revisedTurn]);
+      preciseRevisionTurns.current.delete(turn);
+      return { ok: true, message: '時間調整已供預覽，沒有呼叫模型或寫入行程。請核對後逐張確認。' };
+    } catch (cause) {
+      return { ok: false, message: '尚未取得時間調整預覽；原提議已撤銷，修改欄位已保留。'
+        + (cause instanceof Error ? ' ' + cause.message : '請核對後再試。') };
+    } finally {
+      busy.current = false;
+      if (active()) setPending(false);
+    }
+  }
   async function reconcile(card: V2Card) {
     if (busy.current || card.tool !== 'propose_personal_event' || card.schoolId !== schoolId) return;
     busy.current = true;
@@ -655,11 +729,16 @@ function V2Conversation({
       onReconcile={(card) => void reconcile(card)}
       renderPlanComparison={turn => {
         const comparison = planComparisons.current.get(turn);
-        return comparison ? <AssistantPlanComparison {...comparison} /> : null;
+        return comparison ? comparison.preciseIndex !== undefined
+          ? <AssistantPrecisePlanComparison before={comparison.before} after={comparison.after} index={comparison.preciseIndex} />
+          : <AssistantPlanComparison {...comparison} /> : null;
       }}
       renderPlanRevision={turn => {
         const source = sourceForTurn(turn);
-        return <AssistantPlanRevision turn={turn} states={states} pending={pending}
+        return <>
+          <AssistantPrecisePlanRevision turn={turn} states={states} pending={pending}
+            enabled={journalReady} onPreview={change => reviseTime(turn, change)} />
+          <AssistantPlanRevision turn={turn} states={states} pending={pending}
           enabled={ready && consent} onPreview={(instruction, indices) => revisePlan(turn, instruction, indices)}
           draft={source ? {
             status: drafts.editorStatuses[source.key],
@@ -678,7 +757,8 @@ function V2Conversation({
                 return { ok: false, message: '目前提議或舊操作尚未完成核對，請先核對後再套用草稿。' };
               return drafts.apply(source);
             },
-          } : undefined} />;
+          } : undefined} />
+        </>;
       }}
     />
     </>
