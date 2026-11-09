@@ -66,15 +66,10 @@ function restampEligibility({ membership, memberSnap, userSnap }) {
   return { ok: true };
 }
 
-function candidateSchoolIds(profile) {
+function trustedProfileSchoolIds(profile) {
   const ids = [];
   for (const value of [profile?.schoolId, profile?.primarySchoolId]) {
     if (typeof value === 'string' && value && !ids.includes(value)) ids.push(value);
-  }
-  if (Array.isArray(profile?.schoolIds)) {
-    for (const value of profile.schoolIds) {
-      if (typeof value === 'string' && value && !ids.includes(value)) ids.push(value);
-    }
   }
   return ids;
 }
@@ -88,6 +83,26 @@ function schoolMemberSchoolId(path, uid) {
   return null;
 }
 
+function listCatalogSchoolIds() {
+  const { SCHOOLS } = require('./campusAnnouncements/catalog');
+  return (SCHOOLS || []).map((entry) => entry.schoolId).filter((id) => typeof id === 'string' && id);
+}
+
+function listKnownSchoolIds(knownSchoolIds) {
+  if (Array.isArray(knownSchoolIds)) {
+    return [...new Set(knownSchoolIds.filter((id) => typeof id === 'string' && id))];
+  }
+  return listCatalogSchoolIds();
+}
+
+function lookupSchoolIds(profile, knownSchoolIds) {
+  const ids = [];
+  for (const value of [...listKnownSchoolIds(knownSchoolIds), ...trustedProfileSchoolIds(profile)]) {
+    if (!ids.includes(value)) ids.push(value);
+  }
+  return ids;
+}
+
 function profileMatchesUniqueSchool(profile, schoolId) {
   return (
     typeof profile?.bindingGeneration === 'string' &&
@@ -97,32 +112,35 @@ function profileMatchesUniqueSchool(profile, schoolId) {
   );
 }
 
-async function loadExistingSchoolMemberships(db, uid, profile) {
+function restampHaltKind(profile) {
+  const kind = profile?.campusStoryBindingHaltKind;
+  return kind === 'none' || kind === 'multiple' ? kind : null;
+}
+
+function haltFields(kind, FieldValue) {
+  return {
+    campusStoryBindingHaltKind: kind,
+    campusStoryBindingHaltAt: FieldValue.serverTimestamp(),
+  };
+}
+
+function clearHaltFields(FieldValue) {
+  return {
+    campusStoryBindingHaltKind: FieldValue.delete(),
+    campusStoryBindingHaltAt: FieldValue.delete(),
+  };
+}
+
+async function loadExistingSchoolMemberships(db, uid, profile, knownSchoolIds) {
   if (!uid) return [];
-  const ids = candidateSchoolIds(profile);
-  if (ids.length > 0) {
-    const memberships = [];
-    for (const schoolId of ids) {
-      const memberSnap = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
-      if (!memberSnap.exists) continue;
-      memberships.push({
-        schoolId,
-        exists: true,
-        membership: memberSnap.data() || {},
-      });
-    }
-    if (memberships.length > 0) return memberships;
-  }
-  if (typeof db.collectionGroup !== 'function') return [];
-  const group = await db.collectionGroup('members').get();
   const memberships = [];
-  for (const doc of group.docs || []) {
-    const schoolId = schoolMemberSchoolId(doc.ref?.path || doc.path, uid);
-    if (!schoolId || !doc.exists) continue;
+  for (const schoolId of lookupSchoolIds(profile, knownSchoolIds)) {
+    const memberSnap = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
+    if (!memberSnap.exists) continue;
     memberships.push({
       schoolId,
       exists: true,
-      membership: doc.data() || {},
+      membership: memberSnap.data() || {},
     });
   }
   return memberships;
@@ -134,14 +152,17 @@ async function stampExistingCampusStoryMemberships({
   FieldValue,
   randomUUID,
   loadMemberships,
+  knownSchoolIds,
 }) {
   const userRef = db.collection('users').doc(uid);
   const preview = await userRef.get();
   if (!preview.exists) return { stamped: [], skipped: ['missing-profile'] };
   const previewProfile = preview.data() || {};
   if (isClosedAccount(previewProfile)) return { stamped: [], skipped: ['closed-profile'] };
+  const haltKind = restampHaltKind(previewProfile);
+  if (haltKind) return { stamped: [], skipped: [`halt:${haltKind}`] };
 
-  const previewIds = candidateSchoolIds(previewProfile);
+  const previewIds = trustedProfileSchoolIds(previewProfile);
   if (previewIds.length === 1) {
     const schoolId = previewIds[0];
     const memberPreview = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
@@ -156,7 +177,9 @@ async function stampExistingCampusStoryMemberships({
     }
   }
 
-  const memberships = await (loadMemberships || loadExistingSchoolMemberships)(db, uid, previewProfile);
+  const memberships = await (loadMemberships
+    ? loadMemberships(db, uid, previewProfile, knownSchoolIds)
+    : loadExistingSchoolMemberships(db, uid, previewProfile, knownSchoolIds));
   const existing = memberships.filter((item) => item.exists);
   return db.runTransaction(async (tx) => {
     const userSnap = await tx.get(userRef);
@@ -168,10 +191,8 @@ async function stampExistingCampusStoryMemberships({
     if (!userSnap.exists) return { stamped: [], skipped: ['missing-profile'] };
     const profile = userSnap.data() || {};
     if (isClosedAccount(profile)) return { stamped: [], skipped: ['closed-profile'] };
-    const bindingGeneration = nextBindingGeneration(profile, randomUUID);
-    const stamped = [];
     const skipped = [];
-    const eligibleSchools = [];
+    const eligible = [];
     for (const { schoolId, ref, snap } of memberItems) {
       const eligibility = restampEligibility({
         membership: snap.exists ? snap.data() || {} : null,
@@ -182,26 +203,35 @@ async function stampExistingCampusStoryMemberships({
         skipped.push(`${schoolId}:${eligibility.reason}`);
         continue;
       }
-      eligibleSchools.push(schoolId);
-      const data = snap.data() || {};
-      if (membershipBoundToSchool(data, schoolId) && data.profileBoundGeneration === bindingGeneration) {
-        skipped.push(`${schoolId}:already-bound`);
-        continue;
-      }
+      eligible.push({ schoolId, ref, snap });
+    }
+    if (eligible.length > 1) {
+      tx.set(userRef, haltFields('multiple', FieldValue), { merge: true });
+      return {
+        stamped: [],
+        skipped: [...skipped, ...eligible.map((item) => `${item.schoolId}:multiple-schools`)],
+      };
+    }
+    if (eligible.length === 0) {
+      tx.set(userRef, haltFields('none', FieldValue), { merge: true });
+      return { stamped: [], skipped: skipped.length ? skipped : ['none'] };
+    }
+    const { schoolId, ref, snap } = eligible[0];
+    const bindingGeneration = nextBindingGeneration(profile, randomUUID);
+    const data = snap.data() || {};
+    const stamped = [];
+    const userPatch = { ...clearHaltFields(FieldValue) };
+    if (membershipBoundToSchool(data, schoolId) && data.profileBoundGeneration === bindingGeneration) {
+      skipped.push(`${schoolId}:already-bound`);
+    } else {
       tx.update(ref, campusStoryStampFields(schoolId, bindingGeneration));
       stamped.push(schoolId);
-    }
-    const userPatch = {};
-    if (stamped.length > 0) {
       userPatch.bindingGeneration = bindingGeneration;
       userPatch.lastLoginAt = FieldValue.serverTimestamp();
     }
-    if (eligibleSchools.length === 1) {
-      const schoolId = eligibleSchools[0];
-      if (profile.schoolId !== schoolId) userPatch.schoolId = schoolId;
-      if (profile.primarySchoolId !== schoolId) userPatch.primarySchoolId = schoolId;
-    }
-    if (Object.keys(userPatch).length > 0) tx.set(userRef, userPatch, { merge: true });
+    if (profile.schoolId !== schoolId) userPatch.schoolId = schoolId;
+    if (profile.primarySchoolId !== schoolId) userPatch.primarySchoolId = schoolId;
+    tx.set(userRef, userPatch, { merge: true });
     return { stamped, skipped, bindingGeneration };
   });
 }
@@ -212,6 +242,7 @@ function createEnsureCampusStoryBindingHandler({
   randomUUID,
   HttpsError,
   loadMemberships,
+  knownSchoolIds,
 }) {
   // Firebase Auth callable only. Production Google login is nuni google-consumer
   // OAuth that stores sessionHandle; it never mints a Firebase customToken or uid.
@@ -226,6 +257,7 @@ function createEnsureCampusStoryBindingHandler({
       FieldValue,
       randomUUID,
       loadMemberships,
+      knownSchoolIds,
     }).then((result) => ({ success: true, stamped: result.stamped }));
   };
 }
@@ -452,7 +484,10 @@ module.exports = {
   nextBindingGeneration,
   campusStoryStampFields,
   restampEligibility,
-  candidateSchoolIds,
+  trustedProfileSchoolIds,
+  candidateSchoolIds: trustedProfileSchoolIds,
+  listKnownSchoolIds,
+  lookupSchoolIds,
   schoolMemberSchoolId,
   loadExistingSchoolMemberships,
   stampExistingCampusStoryMemberships,

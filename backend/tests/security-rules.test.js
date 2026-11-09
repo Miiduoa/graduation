@@ -3251,6 +3251,8 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
       ['pollute-binding-generation', { bindingGeneration: 'gen-forged' }],
       ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
+      ['pollute-school-ids', { schoolIds: ['pu'] }],
+      ['pollute-binding-halt', { campusStoryBindingHaltKind: 'none' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
@@ -3315,6 +3317,9 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
     await assertFails(alice.update({ bindingGeneration: 'gen-forged' }));
     await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
+    await assertFails(alice.update({ schoolIds: ['other'] }));
+    await assertFails(alice.update({ campusStoryBindingHaltKind: 'none' }));
+    await assertFails(alice.update({ campusStoryBindingHaltAt: '2026-01-01T00:00:00.000Z' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
     await assertFails(bob.update({ postLoginRoles: ['admin', 'teacher'] }));
@@ -4443,6 +4448,8 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
       ['pollute-binding-generation', { bindingGeneration: 'gen-forged' }],
       ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
+      ['pollute-school-ids', { schoolIds: ['pu'] }],
+      ['pollute-binding-halt', { campusStoryBindingHaltKind: 'none' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
@@ -4505,6 +4512,9 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
     await assertFails(alice.update({ bindingGeneration: 'gen-forged' }));
     await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
+    await assertFails(alice.update({ schoolIds: ['other'] }));
+    await assertFails(alice.update({ campusStoryBindingHaltKind: 'none' }));
+    await assertFails(alice.update({ campusStoryBindingHaltAt: '2026-01-01T00:00:00.000Z' }));
 
     // Change existing authority fields.
     await assertFails(bob.update({ primaryRole: 'admin' }));

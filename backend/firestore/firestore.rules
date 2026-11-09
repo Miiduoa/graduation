@@ -1183,6 +1183,9 @@ service cloud.firestore {
           'profileBoundSchoolId',
           'bindingGeneration',
           'lastLoginAt',
+          'schoolIds',
+          'campusStoryBindingHaltAt',
+          'campusStoryBindingHaltKind',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress'
         ]);
@@ -1203,6 +1206,9 @@ service cloud.firestore {
           'profileBoundSchoolId',
           'bindingGeneration',
           'lastLoginAt',
+          'schoolIds',
+          'campusStoryBindingHaltAt',
+          'campusStoryBindingHaltKind',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress',
           'createdAt'
