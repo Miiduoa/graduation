@@ -212,6 +212,74 @@ describe('public Providence building geometry route', () => {
     vi.restoreAllMocks();
   });
 
+  it('obeys a one-hour Overpass 429 Retry-After rather than retrying after ten minutes', async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response('rate limited', {
+          status: 429, headers: { 'Retry-After': '3600' },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(503);
+      expect(first.headers.get('Cache-Control')).toBe('no-store');
+      expect(first.headers.get('Retry-After')).toBe('3600');
+
+      clock.mockReturnValue(start + 11 * 60 * 1000);
+      const cooling = await GET();
+      expect(cooling.status).toBe(503);
+      expect(cooling.headers.get('Retry-After')).toBe('2940');
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      clock.mockReturnValue(start + 60 * 60 * 1000 + 1000);
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('keeps a dated stale OSM snapshot during an HTTP-date Retry-After from an overloaded endpoint', async () => {
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const day = 24 * 60 * 60 * 1000;
+    const refreshAt = start + day + 60 * 60 * 1000;
+    const retryAfter = new Date(refreshAt + 90 * 60 * 1000).toUTCString();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+        .mockResolvedValueOnce(new Response('overloaded', {
+          status: 503, headers: { 'Retry-After': retryAfter },
+        }))
+        .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const initial = await (await GET()).json();
+      clock.mockReturnValue(refreshAt);
+      const stale = await GET();
+      expect(stale.status).toBe(200);
+      expect(stale.headers.get('Cache-Control')).toBe('private, no-store');
+      expect((await stale.json()).fetchedAt).toBe(initial.fetchedAt);
+
+      clock.mockReturnValue(refreshAt + 60 * 60 * 1000);
+      const stillStale = await (await GET()).json();
+      expect(stillStale.stale).toBe(true);
+      expect(stillStale.fetchedAt).toBe(initial.fetchedAt);
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      clock.mockReturnValue(refreshAt + 91 * 60 * 1000);
+      const recovered = await GET();
+      expect(recovered.status).toBe(200);
+      expect((await recovered.json()).stale).toBe(false);
+      expect(upstream).toHaveBeenCalledTimes(3);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('returns a dated stale snapshot if the upstream later goes away', async () => {
     const firstFetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, headers: { get: () => null }, text: async () => osmPayload })
