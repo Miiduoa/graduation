@@ -233,7 +233,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       })
       .catch(() => {
         if (!active) return;
-        setFootprints([]);
+        // Keep the existing marker-only canvas; do not recreate the GPU context on failure.
         setFootprintStatus('unavailable');
       });
     return () => { active = false; controller.abort(); };
