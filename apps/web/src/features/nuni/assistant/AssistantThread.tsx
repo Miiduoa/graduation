@@ -19,6 +19,8 @@ export function AssistantThread({
   turns,
   states,
   pending,
+  asking,
+  onStopAsk,
   error,
   recoverableQuestion,
   onRecoverQuestion,
@@ -37,6 +39,8 @@ export function AssistantThread({
   turns: V2Turn[];
   states: V2ActionStates;
   pending: boolean;
+  asking: boolean;
+  onStopAsk: () => void;
   error: string;
   recoverableQuestion: string;
   onRecoverQuestion: () => void;
@@ -167,7 +171,12 @@ export function AssistantThread({
               <span aria-hidden="true" />
               <span aria-hidden="true" />
               <span aria-hidden="true" />
-              <span className={styles.muted}>正在整理回覆</span>
+              <span className={styles.muted}>{asking ? '正在整理回覆' : '正在核對操作結果'}</span>
+              {asking ? (
+                <button type="button" className={styles.stopReply} onClick={onStopAsk}>
+                  停止這次回答
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
