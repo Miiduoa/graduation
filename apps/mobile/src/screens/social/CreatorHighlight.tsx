@@ -94,7 +94,7 @@ export function CreatorHighlight({
   if (state.status === 'error') {
     return (
       <View style={styles.wrapper}>
-        <Text accessibilityRole="alert" style={styles.note}>精選作品暫時無法確認。</Text>
+        <Text accessibilityRole="alert" style={styles.note}>{feedback || '精選作品暫時無法確認。'}</Text>
         <Pressable accessibilityRole="button" style={styles.button}
           onPress={() => setRevision((n) => n + 1)}>
           <Text style={styles.buttonText}>重新讀取</Text>
