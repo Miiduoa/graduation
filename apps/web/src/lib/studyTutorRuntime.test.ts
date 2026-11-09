@@ -279,6 +279,55 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
+    const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
+    const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };
+    const pending = runStudyTutor({
+      passage: source, mode: 'understand', signal: new AbortController().signal,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify({ ...lesson(), sourceQuote: longQuote }) });
+    await expect(pending).rejects.toThrow('引句超過 60 字');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+
+    const retry = runStudyTutor({
+      passage: source, mode: 'understand', signal: new AbortController().signal,
+    });
+    const valid = { ...lesson(), sourceQuote: '主鍵用來唯一識別一筆紀錄。' };
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(valid) });
+    await expect(retry).resolves.toEqual(valid);
+  });
+
+  it('rejects an overlong exact step citation even when the main citation is short', async () => {
+    const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
+    const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };
+    const pending = runStudyTutor({
+      passage: source, mode: 'exam', signal: new AbortController().signal,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify({
+      ...lesson(),
+      steps: [
+        { title: '核對主鍵', explanation: '對照主鍵定義。', sourceQuote: '主鍵用來唯一識別一筆紀錄。' },
+        { title: '核對全文', explanation: '這段引文過長。', sourceQuote: longQuote },
+      ],
+    }) });
+    await expect(pending).rejects.toThrow('引句超過 60 字');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('counts generated quote length by Unicode code point, not UTF-16 units', async () => {
+    const quote = '😀'.repeat(59) + '甲';
+    const source = { ...passage(), text: quote };
+    const pending = runStudyTutor({
+      passage: source, mode: 'practice', signal: new AbortController().signal,
+    });
+    const valid = { ...lesson(), sourceQuote: quote };
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(valid) });
+    await expect(pending).resolves.toEqual(valid);
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects an ungrounded lesson and validates against the request snapshot', async () => {
     const source = passage();
     const pending = runStudyTutor({ passage: source, mode: 'understand', signal: new AbortController().signal });
