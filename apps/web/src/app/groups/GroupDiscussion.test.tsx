@@ -383,7 +383,8 @@ it('shows attachment input only when Supabase is enabled and stores uploaded pat
     await waitFor(() => expect(createGroupDiscussionPost).toHaveBeenCalled());
     expect(upload).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: expect.stringMatching(/^groups\/g1\/posts\/[^/]+\/0-[a-z0-9]+-[a-z0-9]+-note.pdf$/),
+        path: expect.stringMatching(/^groups\/g1\/posts\/[^/]+\/0-[a-z0-9]+-[a-z0-9]+\.pdf$/),
+        originalFilename: 'note.pdf',
       }),
     );
     expect(vi.mocked(createGroupDiscussionPost).mock.calls[0]?.[3].attachments).toEqual([

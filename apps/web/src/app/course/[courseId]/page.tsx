@@ -1,4 +1,5 @@
 'use client';
+import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -95,12 +96,13 @@ function Assignment({
             courseId,
             assignment.id,
             uid,
-            `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+            safePrivateFileName(`${batch}-${index}-${Math.random().toString(36).slice(2)}`, file.name),
           );
           if (!path) throw new Error('附件路徑無效');
           await uploadPrivateFile({
             path,
             body: file,
+            originalFilename: file.name,
             contentType: file.type || 'application/octet-stream',
           });
           uploadedFiles.current.push(path);
@@ -217,7 +219,7 @@ function Assignment({
                 type="file"
                 multiple
                 disabled={busy}
-                accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                accept={[...PRIVATE_IMAGE_TYPES, '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'].join(',')}
                 onChange={(event) => {
                   const selected = Array.from(event.target.files ?? []);
                   if (selected.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {

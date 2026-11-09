@@ -102,16 +102,18 @@ function utf8ByteLength(value: string): number {
 }
 
 export function validPrivateFileSegment(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= 255 &&
-    value !== '.' &&
-    value !== '..' &&
-    // Reject control characters before constructing document and object paths.
-    // eslint-disable-next-line no-control-regex
-    !/[\\/\u0000-\u001f\u007f]/.test(value)
-  );
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+export function validPrivateFileName(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value) && !value.includes('..');
+}
+
+/** Original names belong in display metadata, never in object keys. */
+export function safePrivateFileName(prefix: string, originalName: string): string {
+  const extension = originalName.match(/\.([A-Za-z0-9]{1,16})$/)?.[1] || '';
+  const stem = prefix.replace(/[^A-Za-z0-9_-]/g, '_').replace(/^[^A-Za-z0-9]+/, '') || 'file';
+  return stem.slice(0, 128 - (extension ? extension.length + 1 : 0)) + (extension ? `.${extension}` : '');
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -131,12 +133,15 @@ function accountBlocked(data: Record<string, unknown>): boolean {
   );
 }
 
+export const PRIVATE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']);
+export const PRIVATE_VIDEO_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
+
 export function isPrivateFileImage(contentType: string): boolean {
-  return new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']).has(contentType);
+  return PRIVATE_IMAGE_TYPES.has(contentType);
 }
 
 export function isPrivateFileVideo(contentType: string): boolean {
-  return /^video\/[\w.+-]+$/.test(contentType);
+  return PRIVATE_VIDEO_TYPES.has(contentType);
 }
 
 export function privateFileMaxBytes(kind: PrivateFileKind, contentType?: string): number {
@@ -150,7 +155,7 @@ export function privateFileMaxBytes(kind: PrivateFileKind, contentType?: string)
 }
 
 export function isAllowedPrivateFileContentType(kind: PrivateFileKind, contentType: string): boolean {
-  if (kind === 'assignment') return (contentType !== 'image/svg+xml' && /^image\/[\w.+-]+$/.test(contentType)) || PRIVATE_DOCUMENT_TYPES.has(contentType);
+  if (kind === 'assignment') return isPrivateFileImage(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
   if (kind === 'group-cover') return isPrivateFileImage(contentType);
   if (kind === 'story') return isPrivateFileImage(contentType) || isPrivateFileVideo(contentType);
   return isPrivateFileImage(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
@@ -160,7 +165,7 @@ export function isAllowedPrivateFileContentType(kind: PrivateFileKind, contentTy
 export function parsePrivateFilePath(value: unknown): PrivateFileScope | null {
   if (typeof value !== 'string' || utf8ByteLength(value) > 1024) return null;
   const parts = value.split('/');
-  if (!parts.every(validPrivateFileSegment)) return null;
+  if (!parts.slice(0, -1).every(validPrivateFileSegment) || !validPrivateFileName(parts.at(-1))) return null;
   const common = { path: value, filename: parts[parts.length - 1] };
   if (parts[0] === 'groups' && parts.length === 3) {
     return {
@@ -221,7 +226,7 @@ export function privateGroupCoverPath(groupId: string, extension: string): strin
 }
 
 export function privateGroupPostPath(groupId: string, postId: string, filename: string): string | null {
-  if (![groupId, postId, filename].every(validPrivateFileSegment)) return null;
+  if (![groupId, postId].every(validPrivateFileSegment) || !validPrivateFileName(filename)) return null;
   return `groups/${groupId}/posts/${postId}/${filename}`;
 }
 
@@ -230,17 +235,17 @@ export function privateAssignmentPath(
   userId: string,
   filename: string,
 ): string | null {
-  if (![assignmentId, userId, filename].every(validPrivateFileSegment)) return null;
+  if (![assignmentId, userId].every(validPrivateFileSegment) || !validPrivateFileName(filename)) return null;
   return `assignments/${assignmentId}/submissions/${userId}/${filename}`;
 }
 
 export function privateGroupAssignmentPath(groupId: string, assignmentId: string, userId: string, filename: string): string | null {
-  if (![groupId, assignmentId, userId, filename].every(validPrivateFileSegment)) return null;
+  if (![groupId, assignmentId, userId].every(validPrivateFileSegment) || !validPrivateFileName(filename)) return null;
   return `groups/${groupId}/assignments/${assignmentId}/submissions/${userId}/${filename}`;
 }
 
 export function privateStoryPath(schoolId: string, storyId: string, filename: string): string | null {
-  if (![schoolId, storyId, filename].every(validPrivateFileSegment)) return null;
+  if (![schoolId, storyId].every(validPrivateFileSegment) || !validPrivateFileName(filename)) return null;
   return `schools/${schoolId}/stories/${storyId}/${filename}`;
 }
 

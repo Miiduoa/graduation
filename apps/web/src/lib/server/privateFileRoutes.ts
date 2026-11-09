@@ -164,14 +164,17 @@ async function issueUpload(
     scope.filename = scope.path.split('/').at(-1)!;
   }
 
-  const metadata = scope.kind === 'story' ? { 'owner-uid': uid } : undefined;
+  const metadata: Record<string, string> = scope.kind === 'story' ? { 'owner-uid': uid } : {};
+  if (typeof body.originalFilename === 'string' && body.originalFilename.length <= 255) {
+    metadata.originalFilename = body.originalFilename;
+  }
   return {
     maxBytes,
     signed: await runtime.storage.presignPut({
       key: scope.path,
       contentType,
       contentLength: byteSize,
-      metadata,
+      metadata: Object.keys(metadata).length ? metadata : undefined,
       now: runtime.now ? new Date(runtime.now()) : undefined,
     }),
   };

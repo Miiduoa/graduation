@@ -1,3 +1,4 @@
+import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import * as DocumentPicker from 'expo-document-picker';
@@ -288,10 +289,10 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
           if (index < uploadedFiles.current.length) continue;
-          const path = privateGroupAssignmentPath(courseId, hwId, uid, `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+          const path = privateGroupAssignmentPath(courseId, hwId, uid, safePrivateFileName(`${batch}-${index}-${Math.random().toString(36).slice(2)}`, file.name));
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
-          await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });
+          await uploadPrivateFile({ path, body: blob, originalFilename: file.name, contentType: file.mimeType || blob.type });
           uploadedFiles.current.push({ id: path, name: file.name, url: path, type: file.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size });
         }
       }
@@ -577,7 +578,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                 </View>
                 {isSupabaseFileStorageEnabled() && <Pressable disabled={blocked || submitting} onPress={async () => {
                   try {
-                    const picked = await DocumentPicker.getDocumentAsync({ type: ['image/*', 'application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], multiple: true, copyToCacheDirectory: true });
+                    const picked = await DocumentPicker.getDocumentAsync({ type: [...PRIVATE_IMAGE_TYPES, 'application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], multiple: true, copyToCacheDirectory: true });
                     if (!picked.canceled && isCurrent()) {
                       if (picked.assets.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
                         Alert.alert(`單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`);

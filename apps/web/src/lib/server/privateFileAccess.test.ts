@@ -119,3 +119,38 @@ it.each(['group-cover', 'group-post', 'story'] as const)('restricts %s image MIM
   for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(true);
   for (const mime of ['image/svg+xml', 'image/bmp', 'text/html']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(false);
 });
+
+it.each([
+  '%2e%2e', '%2E%2E', '%252e%252e', '..%2f', '?x', '#x', '\\', '．．',
+  'a b', 'a\t', 'a\n', 'a\u007f', '中文', '.', '..', 'a..b', 'a'.repeat(129),
+])('rejects unsafe path component %j', (segment) => {
+  expect(parsePrivateFilePath(`groups/g/posts/${segment}/cover.png`)).toBeNull();
+  expect(parsePrivateFilePath(`groups/g/posts/p/${segment}`)).toBeNull();
+});
+
+it('bounds and sanitizes generated names while preserving extensions', async () => {
+  const { safePrivateFileName, validPrivateFileName } = await import('@campus/shared/src/privateFileAccess');
+  for (const name of ['1-中文..報告.pdf', `1-${'a'.repeat(200)}.png`, '1-?x#\\.webp']) {
+    const safe = safePrivateFileName('1-random', name);
+    expect(validPrivateFileName(safe)).toBe(true);
+    expect(safe.startsWith('1-random.')).toBe(true);
+    expect(safe.split('.').at(-1)).toBe(name.split('.').at(-1));
+  }
+});
+
+it('matches the bucket migration MIME whitelist exactly', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { PRIVATE_IMAGE_TYPES, PRIVATE_VIDEO_TYPES, PRIVATE_DOCUMENT_TYPES } = await import('@campus/shared/src/privateFileAccess');
+  const sql = readFileSync(new URL('../../../../../supabase/migrations/20261109170000_create_private_files_bucket.sql', import.meta.url), 'utf8');
+  const array = sql.match(/array\[([\s\S]*?)\]/)![1];
+  const types = [...array.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  expect(types.sort()).toEqual([...PRIVATE_IMAGE_TYPES, ...PRIVATE_VIDEO_TYPES, ...PRIVATE_DOCUMENT_TYPES].sort());
+  for (const kind of ['assignment', 'group-post', 'group-cover', 'story'] as const) {
+    for (const mime of PRIVATE_IMAGE_TYPES) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(true);
+    for (const mime of ['image/avif', 'image/svg+xml', 'image/bmp', 'video/ogg', 'video/avi']) {
+      expect(isAllowedPrivateFileContentType(kind, mime)).toBe(false);
+    }
+    for (const mime of PRIVATE_VIDEO_TYPES) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(kind === 'story');
+    for (const mime of PRIVATE_DOCUMENT_TYPES) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(kind === 'assignment' || kind === 'group-post');
+  }
+});

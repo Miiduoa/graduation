@@ -443,8 +443,8 @@ it('uploads Supabase assignment attachments and submits their paths without requ
     const region = within(screen.getByRole('region', { name: '作業 A' }));
     fireEvent.change(region.getByLabelText('作業附件'), { target: { files: [new File(['answer'], 'answer.pdf', { type: 'application/pdf' })] } });
     submit('A');
-    await waitFor(() => expect(submitCourseText).toHaveBeenCalledWith('course', 'A', 'alice', '', [expect.stringMatching(/^groups\/course\/assignments\/A\/submissions\/alice\/.+answer.pdf$/)]));
-    expect(upload).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'application/pdf' }));
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalledWith('course', 'A', 'alice', '', [expect.stringMatching(/^groups\/course\/assignments\/A\/submissions\/alice\/[A-Za-z0-9_-]+\.pdf$/)]));
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'application/pdf', originalFilename: 'answer.pdf' }));
   } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
 });
 

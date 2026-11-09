@@ -1,3 +1,4 @@
+import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 /* eslint-disable */
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
@@ -585,11 +586,11 @@ export function GroupDetailScreen(props: any) {
           const path = privateGroupPostPath(
             groupId,
             postRef.id,
-            `${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180)}`,
+            safePrivateFileName(`${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, file.name),
           );
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
-          await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });
+          await uploadPrivateFile({ path, body: blob, originalFilename: file.name, contentType: file.mimeType || blob.type });
           progress.completed.set(file, path);
           attachments.push(path);
         }

@@ -1,4 +1,5 @@
 'use client';
+import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
@@ -272,12 +273,13 @@ function DiscussionBoard({
           const path = privateGroupPostPath(
             groupId,
             intent.postId,
-            `${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180)}`,
+            safePrivateFileName(`${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, file.name),
           );
           if (!path) throw new Error('附件路徑無效');
           await uploadPrivateFile({
             path,
             body: file,
+            originalFilename: file.name,
             contentType: file.type || 'application/octet-stream',
           });
           progress.completed.set(file, path);

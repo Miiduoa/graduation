@@ -95,6 +95,7 @@ export async function uploadPrivateFile(input: {
   path: string;
   body: Blob | ArrayBuffer | Uint8Array;
   contentType: string;
+  originalFilename?: string;
 }): Promise<{ path: string }> {
   const byteSize =
     input.body instanceof Blob
@@ -105,6 +106,7 @@ export async function uploadPrivateFile(input: {
   const ticket = await issueTicket('upload', input.path, {
     contentType: input.contentType,
     byteSize,
+    ...(input.originalFilename ? { originalFilename: input.originalFilename } : {}),
   });
   const response = await fetch(ticket.url, {
     method: ticket.method,

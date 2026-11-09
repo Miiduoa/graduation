@@ -553,7 +553,8 @@ test('Supabase enables attachment selection and stores the object path in the ex
     await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
     expect(upload).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\/.+answer.pdf$/),
+        path: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\/[A-Za-z0-9_-]+\.pdf$/),
+        originalFilename: 'answer.pdf',
       }),
     );
     expect(mockSource.submitAssignment).toHaveBeenCalledWith(
@@ -611,7 +612,7 @@ test('Supabase preserves upload progress after 429 and only retries unfinished f
     expect(Alert.alert).toHaveBeenCalledWith('繳交尚未確認', '上傳太頻繁，請稍後再試');
     await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
     expect(upload).toHaveBeenCalledTimes(4);
-    expect(upload.mock.calls.map(([input]) => input.path.split('-').pop())).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(upload.mock.calls.map(([input]) => input.originalFilename)).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
     expect(mockSource.submitAssignment.mock.calls[0][0].attachments).toHaveLength(3);
   } finally {
     view.unmount();
