@@ -90,7 +90,17 @@
 .footprintInfo strong { color: var(--text); font-weight: 650; }
 .footprintInfo span { flex: 1 1 100%; }
 .footprintInfo small { color: var(--muted); font-size: 0.75rem; }
-.footprintInfo a, .officialFloors a { color: var(--brand); text-underline-offset: 3px; }
+.footprintInfo a, .officialFloors a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  color: var(--brand);
+  text-underline-offset: 3px;
+}
 .officialFloors {
   display: grid;
   gap: 6px;
