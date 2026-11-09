@@ -237,3 +237,30 @@ it('removes public data and draft after the server rejects the session', async (
     '/classroom/login?returnUrl=%2Fsocial%3Fcampus%3Dschool-a',
   );
 });
+
+it('removes the public feed and unsent text when the server denies social access', async () => {
+  render(<SocialWorkspace />);
+  await screen.findByText(post.text);
+  fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '未發表的草稿內容' } });
+  mocks.request.mockRejectedValue(new NuniError(403, 'PLATFORM_SERVICE_DISABLED'));
+  fireEvent.click(screen.getByRole('button', { name: '更新動態' }));
+  await screen.findByRole('heading', { name: '已關閉公開社群' });
+  expect(screen.queryByText(post.text)).toBeNull();
+  expect(screen.queryByDisplayValue('未發表的草稿內容')).toBeNull();
+  expect(screen.getByRole('link', { name: '管理平台權限' }).getAttribute('href')).toBe('/settings?section=platform');
+});
+
+it('updates the mounted social workspace on a social change from another tab, not an unrelated AI change', async () => {
+  const view = render(<SocialWorkspace />);
+  await screen.findByText(post.text);
+  fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '這次編輯中的草稿' } });
+  act(() => window.dispatchEvent(new StorageEvent('storage', {
+    key: 'nuni.platform.service-access-changed', newValue: 'cloudAi:another-tab',
+  })));
+  expect(screen.getByDisplayValue('這次編輯中的草稿')).toBeTruthy();
+  act(() => window.dispatchEvent(new StorageEvent('storage', {
+    key: 'nuni.platform.service-access-changed', newValue: 'social:another-tab',
+  })));
+  expect(screen.queryByDisplayValue('這次編輯中的草稿')).toBeNull();
+  view.unmount();
+});

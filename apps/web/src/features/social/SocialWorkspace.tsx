@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolSelector } from '@/components/SchoolSelector';
 import { useSelectedSchool } from '@/components/SelectedSchoolProvider';
 import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
 import { useNuniSession } from '@/features/nuni/Session';
+import { isPlatformAccessChange } from '@/features/nuni/platformAccessEvents';
 import { NuniError, nuniRecord } from '@campus/shared/src/nuni';
 import {
   parseBlocks,
@@ -24,7 +25,7 @@ import {
 import { useSocialMutation, useSocialResource } from './hooks';
 import styles from './Social.module.css';
 
-type Client = { context: string; enabled: boolean; onExpired: () => void };
+type Client = { context: string; enabled: boolean; onExpired: () => void; onRestricted: () => void };
 const reportState = { open: '待處理', hidden: '已隱藏貼文', dismissed: '已結案，未隱藏貼文' };
 function date(value: string) {
   return new Date(value).toLocaleString('zh-TW', {
@@ -47,6 +48,16 @@ export function SocialWorkspace() {
   const auth = useNuniSession();
   const params = useSearchParams();
   const schools = useSelectedSchool();
+  const [accessRevision, setAccessRevision] = useState(0);
+  useEffect(() => {
+    const handleChange = (event: StorageEvent) => {
+      if (isPlatformAccessChange(event.key, event.newValue, 'social')) {
+        setAccessRevision((version) => version + 1);
+      }
+    };
+    window.addEventListener('storage', handleChange);
+    return () => window.removeEventListener('storage', handleChange);
+  }, []);
   const campus = params.get('campus') ?? schools.selectedSchoolId;
   const browseQuery = new URLSearchParams();
   if (campus && (campus === 'all' || /^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$/.test(campus)))
@@ -58,7 +69,7 @@ export function SocialWorkspace() {
     <SiteShell title="跨校公開交流" subtitle="從一個想法、一個問題，開始和不同校園的人交流。">
       {auth.session ? (
         <Workspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
+          key={`${auth.session.platformAccountId}:${auth.session.context}:${accessRevision}`}
           context={auth.session.context}
           suspended={auth.loading || auth.pendingLogout}
           loginHref={loginHref}
@@ -94,12 +105,14 @@ function Workspace({
   loginHref: string;
 }) {
   const [expired, setExpired] = useState(false);
+  const [restricted, setRestricted] = useState(false);
   const onExpired = useCallback(() => setExpired(true), []);
-  const client = { context, enabled: !suspended && !expired, onExpired };
+  const onRestricted = useCallback(() => setRestricted(true), []);
+  const client = { context, enabled: !suspended && !expired && !restricted, onExpired, onRestricted };
   const [tab, setTab] = useState<'feed' | 'safety'>('feed');
   const [revision, setRevision] = useState(0);
   const schools = useSelectedSchool();
-  const boards = useSocialResource('boards', context, parseBoards, client.enabled, onExpired);
+  const boards = useSocialResource('boards', context, parseBoards, client.enabled, onExpired, onRestricted);
   const visibleBoards =
     boards.value?.filter(
       (board) => !schools.selectedSchoolId || board.tenantId === schools.selectedSchoolId,
@@ -112,6 +125,16 @@ function Workspace({
         <Link className={styles.link} href={loginHref}>
           回到登入頁
         </Link>
+      </section>
+    );
+  if (restricted)
+    return (
+      <section className={styles.panel} role="status">
+        <h2>已關閉公開社群</h2>
+        <p>這次 Google 登入已停用社群讀取與發表。如需繼續交流，請在平台權限重新開啟。</p>
+        <div className={styles.actions}>
+          <Link className={styles.link} href="/settings?section=platform">管理平台權限</Link>
+        </div>
       </section>
     );
   const filter = schools.selectedSchoolId
@@ -200,7 +223,7 @@ function Composer({
   const [boardKey, setBoardKey] = useState(''),
     [text, setText] = useState(''),
     [success, setSuccess] = useState('');
-  const mutation = useSocialMutation(client.context, client.enabled, client.onExpired);
+  const mutation = useSocialMutation(client.context, client.enabled, client.onExpired, client.onRestricted);
   const selected = boards.find(
     (board) => `${board.tenantId}/${board.id}` === boardKey && board.canPost,
   );
@@ -311,6 +334,7 @@ function Feed({
     parseFeed,
     client.enabled,
     client.onExpired,
+    client.onRestricted,
   );
   const items = [...earlier, ...(resource.value?.items ?? [])];
   return (
@@ -362,7 +386,7 @@ function Post({
     [reason, setReason] = useState('harassment'),
     [detail, setDetail] = useState(''),
     [reported, setReported] = useState(false);
-  const mutation = useSocialMutation(client.context, client.enabled, client.onExpired);
+  const mutation = useSocialMutation(client.context, client.enabled, client.onExpired, client.onRestricted);
   return (
     <article
       className={`${styles.panel} ${styles.post}`}
@@ -487,6 +511,7 @@ function Safety(client: Client) {
     parseBlocks,
     client.enabled,
     client.onExpired,
+    client.onRestricted,
   );
   const reports = useSocialResource(
     'reports',
@@ -494,8 +519,9 @@ function Safety(client: Client) {
     parseReports,
     client.enabled,
     client.onExpired,
+    client.onRestricted,
   );
-  const mutation = useSocialMutation(client.context, client.enabled, client.onExpired);
+  const mutation = useSocialMutation(client.context, client.enabled, client.onExpired, client.onRestricted);
   return (
     <div className={styles.layout}>
       <section className={styles.panel}>

@@ -151,6 +151,9 @@ export async function socialRequest(
   }
   return response.json() as Promise<unknown>;
 }
+export function socialRestricted(error: unknown) {
+  return error instanceof NuniError && error.status === 403 && error.code === 'PLATFORM_SERVICE_DISABLED';
+}
 export function sessionLost(error: unknown) {
   return error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED');
 }
@@ -166,6 +169,8 @@ export function socialError(error: unknown) {
       error.code === 'SOCIAL_PARTICIPATION_SUSPENDED'
     )
       return '目前帳號暫時無法發表，請查看原社群的帳號狀態。';
+    if (socialRestricted(error))
+      return '這次登入已關閉公開社群，可到「設定 → 平台權限」重新開啟。';
     if (error.status === 403) return '目前帳號沒有這項操作的權限。';
     if (error.status === 404) return '這則公開內容已無法使用，請更新動態。';
     if (error.status === 409) return '資料已變更，請更新內容後重試。';
