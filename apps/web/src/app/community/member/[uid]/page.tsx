@@ -1,5 +1,7 @@
 'use client';
 
+import { Suspense } from 'react';
+
 import { useParams, useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
@@ -7,7 +9,7 @@ import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext
 import { CommunityAccess } from '../../_components/CommunityAccess';
 import { CreatorProfile } from '../../_components/CreatorProfile';
 
-export default function MemberCreatorPage() {
+function MemberCreatorPageContent() {
   const params = useParams<{ uid: string }>();
   const memberUid = params?.uid;
   const requestedSchoolId = useSearchParams()?.get('schoolId');
@@ -25,5 +27,13 @@ export default function MemberCreatorPage() {
         </CommunityAccess>
       )}
     </SiteShell>
+  );
+}
+
+export default function MemberCreatorPage() {
+  return (
+    <Suspense fallback={<SiteShell title="校園個人頁"><SchoolScopePlaceholder /></SiteShell>}>
+      <MemberCreatorPageContent />
+    </Suspense>
   );
 }
