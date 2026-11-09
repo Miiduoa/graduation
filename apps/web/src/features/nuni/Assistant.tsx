@@ -496,7 +496,7 @@ function V2Conversation({
     let protection: PlanProtection | undefined;
     try {
       before = getPlanRevisionEvents(turn);
-      protection = protectedIndices.length ? createPlanProtection(turn.reply.cards.map(card => card.args), protectedIndices) : undefined;
+      protection = createPlanProtection(turn.reply.cards.map(card => card.args), protectedIndices);
       if (protection && protection.protectedIndices.length === protection.originalEvents.length)
         return { ok: false, message: isUnattemptedCalendarPlan(turn, actionStates.current)
           ? '已選擇全部保留原樣，不需要重新預覽；原確認卡保持原狀。'
@@ -525,7 +525,8 @@ function V2Conversation({
     try {
       // The selected visible plan is sufficient context. Other conversations,
       // identifiers and execution tokens do not enter this revision request.
-      const input = { question: current, history: [], consent: true, ...(protection ? { planProtection: protection } : {}) };
+      // Even without locked items, identify this as a revision of the reviewed plan.
+      const input = { question: current, history: [], consent: true, planProtection: protection };
       let reply = await send('ask', { ...input, routeToken: routeToken.current });
       if (reply.bootstrap) {
         if (!active() || !revisionConsent.current)

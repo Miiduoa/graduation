@@ -664,6 +664,7 @@ export function createTools(
   writes: boolean,
   reorder = false,
   question = '',
+  exactEventArguments = false,
 ) {
   const cache = new Map<string, Promise<unknown>>();
   let ledger: Promise<Ledger> | undefined;
@@ -777,7 +778,7 @@ export function createTools(
         unavailable: 'WRITES_DISABLED',
         href: pageHref({ page: 'calendar' }, binding.schoolId),
       };
-    if (typeof raw.title === 'string' && /^寫/.test(raw.title))
+    if (!exactEventArguments && typeof raw.title === 'string' && /^寫/.test(raw.title))
       raw = { ...raw, title: studyTitle(raw.title) };
     const l = await getLedger(),
       e = eventArgs(raw),
@@ -1302,7 +1303,7 @@ export function createTools(
     withSignal: withOperationSignal,
     async call(name: string, raw: unknown) {
       const cleaned = { ...object(raw) };
-      if (name === 'propose_personal_event') {
+      if (!exactEventArguments && name === 'propose_personal_event') {
         const spoken = parseSpokenClock(question);
         if (spoken) {
           const window = studyWindow(question);

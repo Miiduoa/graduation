@@ -197,3 +197,21 @@ it('keeps protected asks behind origin, session and route-owner authentication',
   expect(runCall).not.toHaveBeenCalled();
   expect(fixture.writes).toHaveLength(0);
 });
+
+
+it('retires a handler revision candidate if its runner throws after signing internal cards', async () => {
+  const old = signEvents([first, second]);
+  let internal: Card[] = [];
+  runCall.mockImplementation(async (input: RunInput) => {
+    internal = signEvents([first], input.binding);
+    throw new Error('Controlled runner failure after signing');
+  });
+  const response = await handleV2(request('ask', askPayload()), 'ask');
+  expect(response.status).toBe(503);
+  expect(await response.json()).not.toHaveProperty('cards');
+  expect(internal).toHaveLength(1);
+  for (const card of [...old, ...internal])
+    await expect(confirm(binding, rawCard(card), FIXTURE_SECRET, FIXTURE_NOW, fixture.adapter, true))
+      .rejects.toMatchObject({ code: 'CONFIRMATION_REVOKED' });
+  expect(fixture.writes).toHaveLength(0);
+});

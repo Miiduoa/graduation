@@ -138,6 +138,9 @@ it('revokes both original cards serially before one new preview, preserving the 
   expect(count(calls, 'cancel').map(call => call.body.token)).toEqual(originals.map(card => card.token));
   const revision = count(calls, 'ask')[1].body;
   expect(revision.history).toEqual([]);
+  expect(revision.planProtection).toEqual({
+    originalEvents: originals.map(card => card.args), protectedIndices: [],
+  });
   expect(revision.question).toContain(instruction);
   const serialized = String(revision.question).split('原安排：')[1].split('\n修改條件：')[0];
   expect(JSON.parse(serialized)).toEqual(originals.map(card => card.args));
@@ -160,6 +163,77 @@ it('revokes both original cards serially before one new preview, preserving the 
   fireEvent.click(within(cards[2]).getByRole('button', { name: '確認' }));
   await screen.findByText('已核對並加入個人行事曆');
   expect(count(calls, 'confirm').map(call => call.body.token)).toEqual([revised[0].token]);
+});
+
+// Fixed 422 responses exercise the real UI recovery path, not model conflict detection.
+it.each([
+  { label: 'no locked items', indices: [] as number[] },
+  { label: 'one locked item', indices: [0] },
+])('keeps an EVENT_CONFLICT revision editable with $label and writes only after a fresh manual confirmation', async ({ indices }) => {
+  const originals = originalCards(), revised = revisedCards();
+  const conflictInstruction = '只把第二項程式練習改到 19:30–20:30，第一項英文閱讀保持原樣';
+  const otherQuestion = '其他問題草稿：等一下再問報告進度';
+  const conflictMessage = '修訂後的行程有時間衝突，這次沒有提供新的確認卡。請調整時間後再預覽。';
+  let asks = 0;
+  const calls = fixture(({ action, body }) => {
+    if (action === 'ask') {
+      ++asks;
+      if (asks === 1) return json(reply(originals));
+      if (asks === 2) return new Response(JSON.stringify({ error: 'EVENT_CONFLICT', message: conflictMessage }), {
+        status: 422, headers: { 'Content-Type': 'application/json' },
+      });
+      if (asks === 3) return json(reply(revised));
+    }
+    if (action === 'cancel') return json(checkFor(originals.find(card => card.token === body.token)!));
+    if (action === 'confirm') return json(receiptFor(revised.find(card => card.token === body.token)!));
+    throw new Error('Unexpected action: ' + action);
+  });
+  render(<Assistant />);
+  const composer = await askForPlan();
+  fireEvent.change(composer, { target: { value: otherQuestion } });
+  const editor = openEditor();
+  fireEvent.change(editor, { target: { value: conflictInstruction } });
+  const protection = (index: number) => screen.getByRole('checkbox', {
+    name: new RegExp('^保留原樣 第 ' + (index + 1) + ' 項 '),
+  }) as HTMLInputElement;
+  for (const index of indices) fireEvent.click(protection(index));
+  submitRevision();
+
+  expect((await screen.findByRole('alert')).textContent).toContain(conflictMessage);
+  expect(calls.map(call => call.action)).toEqual(['ask', 'cancel', 'cancel', 'ask']);
+  expect(editor.value).toBe(conflictInstruction);
+  expect(composer.value).toBe(otherQuestion);
+  expect([protection(0).checked, protection(1).checked]).toEqual([indices.includes(0), false]);
+  expect(screen.getAllByText('已撤銷未執行提議')).toHaveLength(2);
+  expect(screen.getAllByRole('article', { name: '行程確認卡' })).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
+  expect(count(calls, 'confirm')).toHaveLength(0);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+  const expectedProtection = { originalEvents: originals.map(card => card.args), protectedIndices: indices };
+  expect.soft(count(calls, 'ask')[1].body.planProtection).toEqual(expectedProtection);
+  expect(count(calls, 'ask')[1].body.question).toContain(conflictInstruction);
+
+  fireEvent.change(editor, { target: { value: instruction } });
+  submitRevision();
+  await waitFor(() => expect(screen.getAllByRole('article', { name: '行程確認卡' })).toHaveLength(4));
+  expect(calls.map(call => call.action)).toEqual(['ask', 'cancel', 'cancel', 'ask', 'ask']);
+  expect(count(calls, 'cancel').map(call => call.body.token)).toEqual(originals.map(card => card.token));
+  expect.soft(count(calls, 'ask')[2].body.planProtection).toEqual(expectedProtection);
+  expect(count(calls, 'ask')[2].body.question).toContain(instruction);
+  expect(composer.value).toBe(otherQuestion);
+  expect(count(calls, 'confirm')).toHaveLength(0);
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toEqual([]);
+  const nextCards = screen.getAllByRole('article', { name: '行程確認卡' });
+  expect(within(nextCards[0]).queryByRole('button', { name: '確認' })).toBeNull();
+  expect(within(nextCards[1]).queryByRole('button', { name: '確認' })).toBeNull();
+  expect(revised.every(card => !originals.some(original => original.mutationId === card.mutationId))).toBe(true);
+
+  fireEvent.click(within(nextCards[2]).getByRole('button', { name: '確認' }));
+  await screen.findByText('已核對並加入個人行事曆');
+  expect(count(calls, 'confirm')).toHaveLength(1);
+  expect(count(calls, 'confirm')[0].body).toMatchObject({ token: revised[0].token, args: revised[0].args });
+  expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' }).map(event => event.id)).toEqual([revised[0].mutationId]);
+  expect(within(nextCards[3]).getByRole('button', { name: '確認' })).toBeTruthy();
 });
 
 it.each(['error', 'empty', 'mixed', 'reused', 'duplicate'] as const)('preserves revision conditions after an %s response and retries without cancelling the original cards twice', async outcome => {

@@ -28,6 +28,8 @@ const PLAN_PROTECTION_MESSAGES: Record<string, string> = {
   INVALID_PLAN_PROTECTION: '保留項目設定無效，請重新選擇要保留的原提議內容。',
   PLAN_ALREADY_PRESERVED: '已選擇保留全部項目，不需要重新預覽；原提議沒有變更。',
   PLAN_PROTECTION_MISMATCH: '新提議未完整保留指定項目，這次預覽已停止。請調整修改條件後重新預覽。',
+  PLAN_REVISION_TIME_CONFLICT: '修改後的時段有重疊，這次沒有提供可確認的安排。請調整修改條件後重新預覽；不會自動移動時間或省略行程。',
+  PLAN_REVISION_INCOMPLETE: '有行程無法完成預覽，這次沒有提供可確認的安排。請核對日期、時間與修改條件後重新預覽。',
 };
 function quota(now: number, amount: number) {
   if (Math.floor(now / 60000) !== minute) {
@@ -196,6 +198,7 @@ export async function handleV2(request: NextRequest, action: string) {
         secret,
         writes,
         signal,
+        planRevision: protection !== undefined,
         log,
         model: async (input) => {
           const amount =
@@ -216,16 +219,32 @@ export async function handleV2(request: NextRequest, action: string) {
             throw error;
           }
         },
+      }).catch(error => {
+        // A failed revision may already have issued internal cards.
+        if (protection) beginProposal(binding, Date.now());
+        throw error;
       });
-      if (protection && protection.protectedIndices.length > 0 &&
-        (!Array.isArray(result.cards) || result.cards.some(card => card.tool !== 'propose_personal_event') ||
+      // A partial ordinary answer can be useful; a partial replacement would
+      // silently drop intent. Reuse the tool's checked failure, never infer
+      // conflicts from model prose or recompute a competing schedule policy.
+      if (protection && (result.stopReason || result.steps.some(step => step.status === 'error'))) {
+        const code = result.steps.some(step => step.status === 'error' && step.summary === 'EVENT_CONFLICT')
+          ? 'PLAN_REVISION_TIME_CONFLICT' : 'PLAN_REVISION_INCOMPLETE';
+        beginProposal(binding, Date.now());
+        log({ event: 'assistant.failed', version: 2, stage, requestId, status: 422,
+          errorClass: code, durationMs: Date.now() - started, simulation: false });
+        throw new V2Error(422, code);
+      }
+      if (protection &&
+        (!Array.isArray(result.cards) || result.cards.length === 0 || result.cards.some(card => card.tool !== 'propose_personal_event') ||
         !validatePlanProtection(protection, result.cards.map(card => card.args)).ok)) {
         // Retire the entire rejected candidate before returning any response.
         // Its signed arguments are never repaired or released to the caller.
+        const code = protection.protectedIndices.length ? 'PLAN_PROTECTION_MISMATCH' : 'PLAN_REVISION_INCOMPLETE';
         beginProposal(binding, Date.now());
         log({ event: 'assistant.failed', version: 2, stage, requestId, status: 422,
-          errorClass: 'PLAN_PROTECTION_MISMATCH', durationMs: Date.now() - started, simulation: false });
-        throw new V2Error(422, 'PLAN_PROTECTION_MISMATCH');
+          errorClass: code, durationMs: Date.now() - started, simulation: false });
+        throw new V2Error(422, code);
       }
       return jsonResponse({
         ...result,
