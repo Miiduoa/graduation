@@ -475,6 +475,40 @@ it('keeps verified items when a batch stops, then resumes only after the uncerta
   expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(3);
 });
 
+it('restores the confirmation status after a read-only recovery before the next card', async () => {
+  const first = calendarCard('calendar-event-1', '英文讀書');
+  const second = calendarCard('calendar-event-2', '程式練習', '21:00');
+  const requests: string[] = [];
+  let finishSecond: ((result: Response) => void) | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    const body = JSON.parse(String(init?.body));
+    if (url.endsWith('confirm')) {
+      requests.push('confirm:' + body.token);
+      if (body.token === first.token) throw new TypeError('first receipt lost');
+      return new Promise<Response>((resolve) => { finishSecond = resolve; });
+    }
+    if (url.endsWith('reconcile')) {
+      requests.push('reconcile:' + body.token);
+      return json(receiptFor(first, true));
+    }
+    return json({ answer: '兩項讀書安排', steps: [], cards: [first, second] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByRole('button', { name: '依序全部確認' }));
+  await waitFor(() => expect(finishSecond).toBeDefined());
+  expect(requests).toEqual([
+    'confirm:' + first.token,
+    'reconcile:' + first.token,
+    'confirm:' + second.token,
+  ]);
+  expect(screen.getByRole('status').textContent).toContain('正在確認操作結果');
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  finishSecond!(json(receiptFor(second)));
+  await waitFor(() => expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 2/2 項'));
+});
+
 it('cancellation reads an already committed row as verified instead of claiming it was removed', async () => {
   const card = calendarCard();
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {

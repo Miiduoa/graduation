@@ -41,6 +41,13 @@ it('shows a typing status instead of a blank wait', () => {
   expect(screen.getByRole('status').textContent).toMatch(/正在整理回覆/);
 });
 
+it('preserves the legacy status when no explicit pending label is supplied', () => {
+  const { rerender } = render(<AssistantThread {...base} pending asking />);
+  expect(screen.getByRole('status').textContent).toContain('正在整理回覆');
+  rerender(<AssistantThread {...base} pending asking={false} />);
+  expect(screen.getByRole('status').textContent).toContain('正在核對操作結果');
+});
+
 it('reports confirmation, reconciliation and cancellation as distinct pending actions', () => {
   const { rerender } = render(<AssistantThread {...base} pending pendingLabel="正在確認操作結果" />);
   expect(screen.getByRole('status').textContent).toContain('正在確認操作結果');

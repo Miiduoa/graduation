@@ -455,6 +455,8 @@ function V2Conversation({
             break;
           }
         }
+        // A previous card may have required a read-only reconcile; restore the write-stage label.
+        setPendingAction('confirm');
         setAction(card, { status: 'executing' });
         try {
           const result = await sendCard('confirm', card);
@@ -522,6 +524,7 @@ function V2Conversation({
             break;
           }
         }
+        setPendingAction('cancel');
         try {
           const result = await sendCard('cancel', current);
           if (current.tool === 'propose_personal_event') {

@@ -19,7 +19,7 @@ export function AssistantThread({
   turns,
   states,
   pending,
-  pendingLabel = '正在整理回覆',
+  pendingLabel,
   asking,
   onStopAsk,
   error,
@@ -173,7 +173,7 @@ export function AssistantThread({
               <span aria-hidden="true" />
               <span aria-hidden="true" />
               <span aria-hidden="true" />
-              <span className={styles.muted}>{pendingLabel}</span>
+              <span className={styles.muted}>{pendingLabel ?? (asking ? '正在整理回覆' : '正在核對操作結果')}</span>
               {asking ? (
                 <button type="button" className={styles.stopReply} onClick={onStopAsk}>
                   停止這次回答
