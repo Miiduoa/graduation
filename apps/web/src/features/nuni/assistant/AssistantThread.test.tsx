@@ -17,6 +17,8 @@ const base = {
   turns: [],
   states: {},
   pending: false,
+  asking: false,
+  onStopAsk: vi.fn(),
   error: '',
   recoverableQuestion: '',
   onRecoverQuestion: vi.fn(),
@@ -35,7 +37,7 @@ it('shows empty state, suggestion chips and a labelled composer', () => {
 });
 
 it('shows a typing status instead of a blank wait', () => {
-  render(<AssistantThread {...base} pending consent onConsent={vi.fn()} />);
+  render(<AssistantThread {...base} pending asking consent onConsent={vi.fn()} />);
   expect(screen.getByRole('status').textContent).toMatch(/正在整理回覆/);
 });
 
@@ -139,4 +141,15 @@ it('explains that a follow-up can be typed while the prior answer is pending', (
   render(<AssistantThread {...base} consent pending question="我先寫下一句" />);
   expect(screen.getByText('正在處理上一個問題，可以先輸入下一句。')).toBeTruthy();
   expect((screen.getByLabelText('問題') as HTMLTextAreaElement).value).toBe('我先寫下一句');
+});
+
+it('lets users stop only a pending read, never a write confirmation or recovery', () => {
+  const onStopAsk = vi.fn();
+  const view = render(<AssistantThread {...base} consent pending asking onStopAsk={onStopAsk} />);
+  fireEvent.click(screen.getByRole('button', { name: '停止這次回答' }));
+  expect(onStopAsk).toHaveBeenCalledTimes(1);
+  view.rerender(<AssistantThread {...base} consent pending asking={false} onStopAsk={onStopAsk} />);
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('正在核對操作結果');
+  expect(onStopAsk).toHaveBeenCalledTimes(1);
 });
