@@ -177,8 +177,19 @@ function ScopedPostDetailScreen(props: any) {
       if (mounted.current) clearPrivatePost();
       return false;
     }
+    // Bound the UI wait on a server-only post read. This does not cancel the
+    // Firebase SDK request: Promise.race prevents any late result from being
+    // delivered after the timeout. A retry always starts a fresh server read.
+    let readTimer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const row = await getCampusPostById(school.id, postId);
+      const row = await Promise.race([
+        getCampusPostById(school.id, postId),
+        new Promise<never>((_, reject) => {
+          readTimer = setTimeout(() => reject(
+            Object.assign(new Error('post-detail-read-timeout'), { code: 'unavailable' }),
+          ), 15_000);
+        }),
+      ]);
       if (!mounted.current || revision !== readRevision.current) return false;
       if (row && row.schoolId !== school.id) {
         clearPrivatePost();
@@ -197,6 +208,8 @@ function ScopedPostDetailScreen(props: any) {
       if (!mounted.current || revision !== readRevision.current) return false;
       handleReadError(cause);
       return false;
+    } finally {
+      if (readTimer !== null) clearTimeout(readTimer);
     }
   }, [postId, school?.id, auth.user?.uid, clearPrivatePost]);
 
