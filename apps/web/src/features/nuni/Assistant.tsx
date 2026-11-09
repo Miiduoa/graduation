@@ -197,6 +197,13 @@ function Conversation({ context, schoolId, accountId, cloudEnabled }: { context:
     </section>
   );
 }
+const ASSISTANT_PENDING_STATUS = {
+  ask: '正在整理回覆',
+  confirm: '正在確認操作結果',
+  reconcile: '正在核對執行結果',
+  cancel: '正在確認撤銷結果',
+} as const;
+
 function V2Conversation({
   context,
   schoolId,
@@ -218,6 +225,7 @@ function V2Conversation({
   const actionStates = useRef<V2ActionStates>({});
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<keyof typeof ASSISTANT_PENDING_STATUS>('ask');
   const [asking, setAsking] = useState(false);
   const askRequest = useRef<AbortController | null>(null);
   const [error, setError] = useState('');
@@ -246,6 +254,7 @@ function V2Conversation({
         setTurns(cards.map((card) => ({ question: '核對先前送出的行程',
           reply: { answer: '已保留原確認內容，這次先查核執行結果。', steps: [], cards: [card] } })));
         busy.current = true;
+        setPendingAction('reconcile');
         setPending(true);
         // Deferring also lets a Strict Mode cleanup cancel its first mount's recovery.
         void Promise.resolve().then(async () => {
@@ -336,6 +345,7 @@ function V2Conversation({
     if (scopeSignal.aborted) pendingAsk.abort();
     else scopeSignal.addEventListener('abort', abortForScope, { once: true });
     setAsking(true);
+    setPendingAction('ask');
     setPending(true);
     setError('');
     // Free the composer immediately so the next thought can be typed during a slow response.
@@ -410,6 +420,7 @@ function V2Conversation({
     if (previous?.status === 'verified')
       setAction(card, { ...previous, verificationWarning: '正在重新核對；以下保留上次核對結果。' });
     else setAction(card, { status: 'checking' });
+    setPendingAction('reconcile');
     try {
       return await applyCalendarResult(card, await sendCard('reconcile', card));
     } catch {
@@ -424,6 +435,7 @@ function V2Conversation({
   async function execute(cards: V2Card[]) {
     if (busy.current) return;
     busy.current = true;
+    setPendingAction('confirm');
     setPending(true);
     setError('');
     try {
@@ -477,6 +489,7 @@ function V2Conversation({
   async function reconcile(card: V2Card) {
     if (busy.current || card.tool !== 'propose_personal_event' || card.schoolId !== schoolId) return;
     busy.current = true;
+    setPendingAction('reconcile');
     setPending(true);
     setError('');
     try {
@@ -489,6 +502,7 @@ function V2Conversation({
   async function cancel(turn: V2Turn, cardIndex: number) {
     if (busy.current) return;
     busy.current = true;
+    setPendingAction('cancel');
     setPending(true);
     setError('');
     try {
@@ -551,6 +565,7 @@ function V2Conversation({
       turns={turns}
       states={states}
       pending={pending}
+      pendingLabel={ASSISTANT_PENDING_STATUS[pendingAction]}
       asking={asking}
       onStopAsk={() => askRequest.current?.abort()}
       error={error}

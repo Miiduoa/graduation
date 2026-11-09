@@ -104,6 +104,12 @@
   min-width: 0;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .turn {
+    animation: assistantTurnAppear var(--motion-fast, 160ms) var(--ease-out, ease-out) both;
+  }
+}
+
 .row {
   display: flex;
   min-width: 0;
@@ -759,6 +765,17 @@
 .composer:focus-within a:focus-visible,
 .composer:focus-within button:focus-visible {
   outline-offset: 5px;
+}
+
+@keyframes assistantTurnAppear {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes assistantTyping {

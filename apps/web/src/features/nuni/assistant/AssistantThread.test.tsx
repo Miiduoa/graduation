@@ -41,6 +41,16 @@ it('shows a typing status instead of a blank wait', () => {
   expect(screen.getByRole('status').textContent).toMatch(/正在整理回覆/);
 });
 
+it('reports confirmation, reconciliation and cancellation as distinct pending actions', () => {
+  const { rerender } = render(<AssistantThread {...base} pending pendingLabel="正在確認操作結果" />);
+  expect(screen.getByRole('status').textContent).toContain('正在確認操作結果');
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  rerender(<AssistantThread {...base} pending pendingLabel="正在核對執行結果" />);
+  expect(screen.getByRole('status').textContent).toContain('正在核對執行結果');
+  rerender(<AssistantThread {...base} pending pendingLabel="正在確認撤銷結果" />);
+  expect(screen.getByRole('status').textContent).toContain('正在確認撤銷結果');
+});
+
 it('surfaces a friendly error region', () => {
   render(<AssistantThread {...base} error="查詢未完成，請稍後再試。" />);
   expect(screen.getByRole('alert').textContent).toBe('查詢未完成，請稍後再試。');
