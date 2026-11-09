@@ -514,7 +514,7 @@ function V2Conversation({
       }
       setTurns(previous => [...previous, { question: '修改原先安排：' + instruction.trim(), reply }]);
       revisionTurns.current.delete(turn);
-      return { ok: true, message: '新預覽已列在下方。請重新核對並確認；尚未建立任何新行程。' };
+      return { ok: true, message: '這次重新預覽沒有寫入行程。請核對下方新卡，再決定是否確認。' };
     } catch (cause) {
       return { ok: false, message: '尚未取得新預覽，舊提議已撤銷，修改條件已保留。'
         + (cause instanceof Error ? ' ' + cause.message : '請稍後重試。') };
