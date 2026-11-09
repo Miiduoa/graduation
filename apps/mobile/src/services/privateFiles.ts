@@ -1,3 +1,4 @@
+import { PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
 import {
   privateStoryPath,
   privateAssignmentPath,
@@ -78,6 +79,7 @@ async function issueTicket(
   };
   if (response.status === 503) unavailable(503);
   if (!response.ok) {
+    if (response.status === 429) throw Object.assign(new Error(PRIVATE_FILE_UPLOAD_RATE_MESSAGE), { statusCode: 429, source: 'api' });
     const message = typeof payload.error === 'string' ? payload.error : 'File request failed';
     throw Object.assign(new Error(message), { statusCode: response.status, source: 'api' });
   }
@@ -122,7 +124,7 @@ export async function uploadPrivateFile(input: {
     body: input.body as BodyInit,
   });
   if (response.status === 412) throw new Error('File already exists or changed');
-  if (!response.ok) throw new Error('File request failed');
+  if (!response.ok) throw Object.assign(new Error(response.status === 429 ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : 'File request failed'), { statusCode: response.status, source: 'object' });
   return { path: ticket.path };
 }
 

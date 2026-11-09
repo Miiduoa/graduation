@@ -1,8 +1,9 @@
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
 import { HttpsError } from './httpsError';
 
 export const PRIVATE_FILE_RATE_LIMIT = {
   maxKeys: 4096,
-  uploadsPerMinute: 6,
+  uploadsPerMinute: PRIVATE_FILE_UPLOADS_PER_MINUTE,
   requestsPerMinute: 20,
   minuteMs: 60_000,
   hourMs: 3_600_000,

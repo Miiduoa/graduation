@@ -1,3 +1,4 @@
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import * as DocumentPicker from 'expo-document-picker';
 import { isR2FileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
@@ -281,20 +282,21 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
     const request = ++generation.current;
     const current = () => isCurrent() && request === generation.current;
     setSubmitting(true);
+    let submissionStarted = false;
     try {
-      if (isR2FileStorageEnabled() && files.length && !uploadedFiles.current.length) {
-        const pending: Attachment[] = [];
+      if (isR2FileStorageEnabled() && files.length) {
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
+          if (index < uploadedFiles.current.length) continue;
           const path = privateGroupAssignmentPath(courseId, hwId, uid, `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
           await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });
-          pending.push({ id: path, name: file.name, url: path, type: file.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size });
+          uploadedFiles.current.push({ id: path, name: file.name, url: path, type: file.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size });
         }
-        uploadedFiles.current = pending;
       }
       if (!current()) return;
+      submissionStarted = true;
       const receipt = await ds.submitAssignment({
         assignmentId: hwId,
         userId: uid,
@@ -322,7 +324,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       ]);
     } catch (e) {
       if (current()) {
-        setReceiptUnconfirmed(true);
+        setReceiptUnconfirmed(submissionStarted);
         Alert.alert('繳交尚未確認', String((e as Error)?.message ?? e));
       }
     } finally {
@@ -576,7 +578,13 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                 {isR2FileStorageEnabled() && <Pressable disabled={blocked || submitting} onPress={async () => {
                   try {
                     const picked = await DocumentPicker.getDocumentAsync({ type: ['image/*', 'application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], multiple: true, copyToCacheDirectory: true });
-                    if (!picked.canceled && isCurrent()) { setFiles(picked.assets); uploadedFiles.current = []; }
+                    if (!picked.canceled && isCurrent()) {
+                      if (picked.assets.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                        Alert.alert(`單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`);
+                        return;
+                      }
+                      setFiles(picked.assets); uploadedFiles.current = [];
+                    }
                   } catch { Alert.alert('無法選取附件'); }
                 }}><Text>作業附件（{files.length}）</Text></Pressable>}
                 <Pressable

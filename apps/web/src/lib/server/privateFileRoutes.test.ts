@@ -13,7 +13,7 @@ import { dispatchPrivateFileRequest, type PrivateFileRuntime } from './privateFi
 
 const COVER = 'groups/course/cover.jpg';
 const POST = 'groups/course/posts/one/notes.pdf';
-const ANSWER = 'assignments/work/submissions/alice/answer.pdf';
+const ANSWER = 'groups/course/assignments/work/submissions/alice/answer.pdf';
 const STORY = 'schools/pu/stories/story-1/image';
 const BUCKET = 'test-bucket';
 
@@ -128,6 +128,7 @@ function seedStore() {
     ['groups/course', { schoolId: 'pu' }],
       ['groups/course/posts/one', { authorId: 'alice' }],
     ['assignments/work', { groupId: 'course' }],
+    ['groups/course/assignments/work', { status: 'published' }],
     ...['alice', 'bob', 'teacher'].flatMap((uid) => [
       [`users/${uid}`, { displayName: uid }] as [string, Record<string, unknown>],
       [
@@ -380,4 +381,13 @@ it('rejects inactive school membership even with a stale group mirror', async ()
     (await invoke(runtime, { action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4 }))
       .status,
   ).toBe(403);
+});
+
+it.each(['upload', 'download'])('rejects legacy assignment %s paths at the gateway', async (action) => {
+  const result = await invoke(runtime, { action, path: 'assignments/work/submissions/alice/answer.pdf', contentType: 'application/pdf', byteSize: 8 });
+  expect(result).toEqual({ status: 403, body: { error: '不支援舊版作業附件路徑' } });
+});
+
+it.each(['image/svg+xml', 'text/html', 'application/xhtml+xml', 'application/javascript', 'text/javascript'])('rejects executable assignment MIME %s', async (contentType) => {
+  expect((await invoke(runtime, { action: 'upload', path: ANSWER, contentType, byteSize: 8 })).status).toBe(400);
 });

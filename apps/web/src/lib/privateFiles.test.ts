@@ -69,3 +69,11 @@ it('uploads through a presigned ticket when R2 is enabled', async () => {
   ).resolves.toEqual({ path: 'assignments/work/submissions/alice/answer.pdf' });
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+
+it('surfaces 429 with a Chinese message without automatic retries', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'Too many uploads' }), { status: 429 }));
+  vi.stubGlobal('fetch', fetchMock);
+  await expect(uploadPrivateFile({ path: 'groups/course/assignments/work/submissions/alice/answer.pdf', body: new Uint8Array([1]), contentType: 'application/pdf' })).rejects.toMatchObject({ statusCode: 429, message: '上傳太頻繁，請稍後再試' });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

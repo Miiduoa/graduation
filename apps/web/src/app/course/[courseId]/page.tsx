@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
 import { privateFilesEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '@/lib/privateFiles';
 import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { SiteShell } from '@/components/SiteShell';
@@ -86,10 +87,10 @@ function Assignment({
     setBusy(true);
     setError('');
     try {
-      if (privateFilesEnabled() && files.length && !uploadedFiles.current.length) {
-        const paths: string[] = [];
+      if (privateFilesEnabled() && files.length) {
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
+          if (index < uploadedFiles.current.length) continue;
           const path = privateGroupAssignmentPath(
             courseId,
             assignment.id,
@@ -102,9 +103,8 @@ function Assignment({
             body: file,
             contentType: file.type || 'application/octet-stream',
           });
-          paths.push(path);
+          uploadedFiles.current.push(path);
         }
-        uploadedFiles.current = paths;
       }
       if (!active.current) return;
       if (uploadedFiles.current.length)
@@ -115,9 +115,9 @@ function Assignment({
       setSavedText(answer);
       setSavedAttachments(uploadedFiles.current);
       onSaved();
-    } catch {
+    } catch (error) {
       if (!active.current) return;
-      setError('未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
+      setError((error as { statusCode?: number })?.statusCode === 429 ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : '未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
     } finally {
       busyRef.current = false;
       if (active.current) setBusy(false);
@@ -219,7 +219,14 @@ function Assignment({
                 disabled={busy}
                 accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
                 onChange={(event) => {
-                  setFiles(Array.from(event.target.files ?? []));
+                  const selected = Array.from(event.target.files ?? []);
+                  if (selected.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                    setError(`單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`);
+                    event.target.value = '';
+                    return;
+                  }
+                  setError('');
+                  setFiles(selected);
                   uploadedFiles.current = [];
                 }}
               />

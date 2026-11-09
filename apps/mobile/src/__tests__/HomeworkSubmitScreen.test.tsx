@@ -573,3 +573,90 @@ test('R2 enables attachment selection and stores the object path in the existing
     upload.mockRestore();
   }
 });
+
+test('R2 preserves upload progress after 429 and only retries unfinished files', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: ['one', 'two', 'three'].map(name => ({ uri: `file:///${name}`, name: `${name}.pdf`, mimeType: 'application/pdf' })),
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('上傳太頻繁，請稍後再試'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByText('作業附件（0）')));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(mockSource.submitAssignment).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith('繳交尚未確認', '上傳太頻繁，請稍後再試');
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.map(([input]) => input.path.split('-').pop())).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(mockSource.submitAssignment.mock.calls[0][0].attachments).toHaveLength(3);
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+test('R2 rejects selecting more than six attachments', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: Array.from({ length: 7 }, () => ({ uri: 'file:///answer', name: 'answer.pdf', mimeType: 'application/pdf' })),
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByText('作業附件（0）')));
+    expect(Alert.alert).toHaveBeenCalledWith('單次最多選取 6 個附件');
+    expect(view.getByText('作業附件（0）')).toBeTruthy();
+    expect(upload).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});

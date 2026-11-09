@@ -447,3 +447,37 @@ it('uploads R2 assignment attachments and submits their paths without requiring 
     expect(upload).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'application/pdf' }));
   } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
 });
+
+it('preserves successful attachments after 429 and retries only remaining files', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: ['one', 'two', 'three'].map(name => new File(['answer'], `${name}.pdf`, { type: 'application/pdf' })) } });
+    submit('A');
+    await region.findByText('上傳太頻繁，請稍後再試');
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(submitCourseText).not.toHaveBeenCalled();
+    submit('A');
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalled());
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.map(([input]) => input.body instanceof File ? input.body.name : '')).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(vi.mocked(submitCourseText).mock.calls[0][4]).toHaveLength(3);
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
+});
+
+it('rejects selection of more than six attachments', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: Array.from({ length: 7 }, () => new File(['x'], 'answer.pdf')) } });
+    expect(region.getByText('單次最多選取 6 個附件')).toBeTruthy();
+    expect((region.getByRole('button', { name: '繳交作業' }) as HTMLButtonElement).disabled).toBe(true);
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; }
+});

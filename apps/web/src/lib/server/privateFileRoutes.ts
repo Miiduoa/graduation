@@ -130,6 +130,9 @@ function parseScope(path: unknown): PrivateFileScope {
   if (!scope || (scope.kind === 'group-cover' && !isCoverFilenameAllowed(scope.filename))) {
     throw new HttpsError('invalid-argument', 'Invalid private file path');
   }
+  if (scope.kind === 'assignment' && !scope.groupId) {
+    throw new HttpsError('permission-denied', '不支援舊版作業附件路徑');
+  }
   return scope;
 }
 

@@ -150,7 +150,7 @@ export function privateFileMaxBytes(kind: PrivateFileKind, contentType?: string)
 }
 
 export function isAllowedPrivateFileContentType(kind: PrivateFileKind, contentType: string): boolean {
-  if (kind === 'assignment') return /^image\/[\w.+-]+$/.test(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
+  if (kind === 'assignment') return (contentType !== 'image/svg+xml' && /^image\/[\w.+-]+$/.test(contentType)) || PRIVATE_DOCUMENT_TYPES.has(contentType);
   if (kind === 'group-cover') return isPrivateFileImage(contentType);
   if (kind === 'story') return isPrivateFileImage(contentType) || isPrivateFileVideo(contentType);
   return isPrivateFileImage(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
