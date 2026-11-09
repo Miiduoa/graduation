@@ -266,7 +266,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       }
     }
 
-    void ensureCampusStoryBinding();
+    void ensureCampusStoryBinding(); // Firebase Auth profile only; nuni Google has no uid.
     const userRole = (data.role as UserRole) ?? 'student';
     const roleGroup = getRoleGroup(userRole);
     const postLoginRolesRaw = data.postLoginRoles as unknown;

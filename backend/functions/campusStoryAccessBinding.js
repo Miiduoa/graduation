@@ -66,17 +66,63 @@ function restampEligibility({ membership, memberSnap, userSnap }) {
   return { ok: true };
 }
 
-async function loadExistingSchoolMemberships(db, uid) {
+function candidateSchoolIds(profile) {
+  const ids = [];
+  for (const value of [profile?.schoolId, profile?.primarySchoolId]) {
+    if (typeof value === 'string' && value && !ids.includes(value)) ids.push(value);
+  }
+  if (Array.isArray(profile?.schoolIds)) {
+    for (const value of profile.schoolIds) {
+      if (typeof value === 'string' && value && !ids.includes(value)) ids.push(value);
+    }
+  }
+  return ids;
+}
+
+function schoolMemberSchoolId(path, uid) {
+  if (typeof path !== 'string' || !uid) return null;
+  const parts = path.split('/');
+  if (parts.length === 4 && parts[0] === 'schools' && parts[2] === 'members' && parts[3] === uid) {
+    return parts[1];
+  }
+  return null;
+}
+
+function profileMatchesUniqueSchool(profile, schoolId) {
+  return (
+    typeof profile?.bindingGeneration === 'string' &&
+    Boolean(profile.bindingGeneration) &&
+    profile.schoolId === schoolId &&
+    profile.primarySchoolId === schoolId
+  );
+}
+
+async function loadExistingSchoolMemberships(db, uid, profile) {
   if (!uid) return [];
-  const schoolsSnap = await db.collection('schools').get();
+  const ids = candidateSchoolIds(profile);
+  if (ids.length > 0) {
+    const memberships = [];
+    for (const schoolId of ids) {
+      const memberSnap = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
+      if (!memberSnap.exists) continue;
+      memberships.push({
+        schoolId,
+        exists: true,
+        membership: memberSnap.data() || {},
+      });
+    }
+    if (memberships.length > 0) return memberships;
+  }
+  if (typeof db.collectionGroup !== 'function') return [];
+  const group = await db.collectionGroup('members').get();
   const memberships = [];
-  for (const schoolDoc of schoolsSnap.docs) {
-    const memberSnap = await db.collection('schools').doc(schoolDoc.id).collection('members').doc(uid).get();
-    if (!memberSnap.exists) continue;
+  for (const doc of group.docs || []) {
+    const schoolId = schoolMemberSchoolId(doc.ref?.path || doc.path, uid);
+    if (!schoolId || !doc.exists) continue;
     memberships.push({
-      schoolId: schoolDoc.id,
+      schoolId,
       exists: true,
-      membership: memberSnap.data() || {},
+      membership: doc.data() || {},
     });
   }
   return memberships;
@@ -89,10 +135,30 @@ async function stampExistingCampusStoryMemberships({
   randomUUID,
   loadMemberships,
 }) {
-  const memberships = await (loadMemberships || loadExistingSchoolMemberships)(db, uid);
+  const userRef = db.collection('users').doc(uid);
+  const preview = await userRef.get();
+  if (!preview.exists) return { stamped: [], skipped: ['missing-profile'] };
+  const previewProfile = preview.data() || {};
+  if (isClosedAccount(previewProfile)) return { stamped: [], skipped: ['closed-profile'] };
+
+  const previewIds = candidateSchoolIds(previewProfile);
+  if (previewIds.length === 1) {
+    const schoolId = previewIds[0];
+    const memberPreview = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
+    const membership = memberPreview.exists ? memberPreview.data() || {} : null;
+    if (
+      memberPreview.exists &&
+      membershipBoundToSchool(membership, schoolId) &&
+      membership.profileBoundGeneration === previewProfile.bindingGeneration &&
+      profileMatchesUniqueSchool(previewProfile, schoolId)
+    ) {
+      return { stamped: [], skipped: [`${schoolId}:already-bound`], bindingGeneration: previewProfile.bindingGeneration };
+    }
+  }
+
+  const memberships = await (loadMemberships || loadExistingSchoolMemberships)(db, uid, previewProfile);
   const existing = memberships.filter((item) => item.exists);
   return db.runTransaction(async (tx) => {
-    const userRef = db.collection('users').doc(uid);
     const userSnap = await tx.get(userRef);
     const memberItems = [];
     for (const item of existing) {
@@ -105,6 +171,7 @@ async function stampExistingCampusStoryMemberships({
     const bindingGeneration = nextBindingGeneration(profile, randomUUID);
     const stamped = [];
     const skipped = [];
+    const eligibleSchools = [];
     for (const { schoolId, ref, snap } of memberItems) {
       const eligibility = restampEligibility({
         membership: snap.exists ? snap.data() || {} : null,
@@ -115,6 +182,7 @@ async function stampExistingCampusStoryMemberships({
         skipped.push(`${schoolId}:${eligibility.reason}`);
         continue;
       }
+      eligibleSchools.push(schoolId);
       const data = snap.data() || {};
       if (membershipBoundToSchool(data, schoolId) && data.profileBoundGeneration === bindingGeneration) {
         skipped.push(`${schoolId}:already-bound`);
@@ -123,9 +191,17 @@ async function stampExistingCampusStoryMemberships({
       tx.update(ref, campusStoryStampFields(schoolId, bindingGeneration));
       stamped.push(schoolId);
     }
+    const userPatch = {};
     if (stamped.length > 0) {
-      tx.set(userRef, { bindingGeneration, lastLoginAt: FieldValue.serverTimestamp() }, { merge: true });
+      userPatch.bindingGeneration = bindingGeneration;
+      userPatch.lastLoginAt = FieldValue.serverTimestamp();
     }
+    if (eligibleSchools.length === 1) {
+      const schoolId = eligibleSchools[0];
+      if (profile.schoolId !== schoolId) userPatch.schoolId = schoolId;
+      if (profile.primarySchoolId !== schoolId) userPatch.primarySchoolId = schoolId;
+    }
+    if (Object.keys(userPatch).length > 0) tx.set(userRef, userPatch, { merge: true });
     return { stamped, skipped, bindingGeneration };
   });
 }
@@ -137,6 +213,10 @@ function createEnsureCampusStoryBindingHandler({
   HttpsError,
   loadMemberships,
 }) {
+  // Firebase Auth callable only. Production Google login is nuni google-consumer
+  // OAuth that stores sessionHandle; it never mints a Firebase customToken or uid.
+  // Campus stories read Firestore campusStories and Storage schools/{id}/stories
+  // through useAuth(), so platform Google users cannot use that media path.
   return async (request) => {
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
@@ -372,6 +452,8 @@ module.exports = {
   nextBindingGeneration,
   campusStoryStampFields,
   restampEligibility,
+  candidateSchoolIds,
+  schoolMemberSchoolId,
   loadExistingSchoolMemberships,
   stampExistingCampusStoryMemberships,
   createEnsureCampusStoryBindingHandler,

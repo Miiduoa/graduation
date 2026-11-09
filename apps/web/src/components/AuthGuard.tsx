@@ -120,6 +120,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           );
         }
         setState({ user, loading: false, error: null });
+        // Firebase Auth only. Platform Google login never fires this callback.
         if (user) void ensureCampusStoryBinding();
       },
       (error) => {
