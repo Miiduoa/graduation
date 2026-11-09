@@ -66,6 +66,39 @@ it('navigates repeated exact model quotes without rerunning AI or altering the s
   expect(mocks.run).toHaveBeenCalledTimes(1);
 });
 
+
+it('scopes a repeated citation position to its lesson and reading mode', async () => {
+  const repeated = { ...material, body: '主鍵在第一段。外鍵可以參照主鍵。最後一段再提主鍵。' };
+  mocks.run.mockResolvedValueOnce({ ...explanation, sourceQuote: '主鍵' })
+    .mockResolvedValueOnce({ ...explanation, sourceQuote: '外鍵可以參照主鍵。' });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={repeated} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '兩種讀法都要保留，不能誤報缺少引句。' } });
+
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await waitFor(() => expect(document.querySelector('mark')?.textContent).toBe('外鍵可以參照主鍵。'));
+
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'understand' } });
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 1 處。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '上一處相同引句' }));
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 3 處。')).toBeTruthy();
+
+  // The exam quote appears once. The old index 2 must not be reused to show a false missing-citation error.
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'exam' } });
+  expect(document.querySelector('mark')?.textContent).toBe('外鍵可以參照主鍵。');
+  expect(screen.queryByText('目前無法在原文定位這句引用，請重新講解。')).toBeNull();
+  expect(screen.queryByRole('button', { name: '下一處相同引句' })).toBeNull();
+
+  fireEvent.change(screen.getByLabelText('這次怎麼讀'), { target: { value: 'understand' } });
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 1 處。')).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('兩種讀法都要保留，不能誤報缺少引句。');
+  expect(mocks.run).toHaveBeenCalledTimes(2);
+});
+
 it('keeps reading available when the browser cannot run a model', () => {
   mocks.available = false;
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);

@@ -37,7 +37,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
-  const [evidenceOccurrence, setEvidenceOccurrence] = useState(0);
+  // A citation position belongs to its mode, lesson and teaching step. Reusing
+  // an index for another quote can incorrectly report that an exact quote is absent.
+  const [evidencePosition, setEvidencePosition] = useState<{ key: string; occurrence: number } | null>(null);
   const current = useRef<AbortController | null>(null);
   const passageHeading = useRef<HTMLHeadingElement>(null);
   const evidenceMark = useRef<HTMLElement>(null);
@@ -52,6 +54,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
   const displayedQuote = activeStep?.sourceQuote ?? result?.sourceQuote;
+  const evidenceKey = JSON.stringify([mode, selected?.id ?? null, activeStepIndex, displayedQuote ?? null]);
+  const evidenceOccurrence = evidencePosition?.key === evidenceKey ? evidencePosition.occurrence : 0;
   const evidence = displayedQuote ? locateStudyEvidence(passage.text, displayedQuote, evidenceOccurrence) : null;
 
   useEffect(() => {
@@ -117,7 +121,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       });
       if (current.current !== controller || controller.signal.aborted) return;
       setStepSelection(null);
-      setEvidenceOccurrence(0);
+      setEvidencePosition(null);
       onChange((previous) => appendStudyLesson(previous, mode, { question, response: explanation }, history ? selected?.id ?? null : null));
       const retained = history?.turns.length ?? 0;
       const scope = withHistory && retained < turns.length
@@ -174,7 +178,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
             <select id={lessonId} value={selected?.id ?? ''} disabled={busy} onChange={(event) => {
               const selectedLessonId = Number(event.target.value);
               setStepSelection(null);
-              setEvidenceOccurrence(0);
+              setEvidencePosition(null);
               onChange((previous) => updateStudyMode(previous, mode, (state) => ({ ...state, selectedLessonId })));
               setError('');
               setTiming(null);
@@ -231,11 +235,13 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
                 </p>
                 <div className={styles.actions}>
                   <button type="button" className={styles.button}
-                    onClick={() => setEvidenceOccurrence((index) => (index + evidence.occurrences - 1) % evidence.occurrences)}>
+                    onClick={() => setEvidencePosition({ key: evidenceKey,
+                      occurrence: (evidenceOccurrence + evidence.occurrences - 1) % evidence.occurrences })}>
                     上一處相同引句
                   </button>
                   <button type="button" className={styles.button}
-                    onClick={() => setEvidenceOccurrence((index) => (index + 1) % evidence.occurrences)}>
+                    onClick={() => setEvidencePosition({ key: evidenceKey,
+                      occurrence: (evidenceOccurrence + 1) % evidence.occurrences })}>
                     下一處相同引句
                   </button>
                 </div>
@@ -246,7 +252,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
               <p className={styles.evidenceStepHeading}>02 · AI 解讀</p>
               <p className={styles.explanationText}>{result.explanation}</p>
               {result.steps && <CourseStudySteps steps={result.steps} activeIndex={activeStepIndex}
-                onSelect={(index) => { setEvidenceOccurrence(0); setStepSelection({ lessonId: selected.id, index }); }}
+                onSelect={(index) => { setEvidencePosition(null); setStepSelection({ lessonId: selected.id, index }); }}
                 onLocate={() => evidenceMark.current?.focus()} evidenceAvailable={!!evidence} />}
               <p className={styles.note}>找到引句只代表原文相符，不代表這段解釋一定正確。</p>
             </section>
