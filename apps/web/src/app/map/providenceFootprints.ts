@@ -167,6 +167,15 @@ function isStandingBuilding(value: unknown): boolean {
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
   if (!kind || NON_BUILDING_VOLUMES.has(kind)) return false;
+  // A raised building part cannot be drawn as a ground-to-roof extrusion.
+  // We do not yet have verified floor/base elevations for elevated OSM ways.
+  // Unknown units or ambiguous offset values must not become a fictitious wall.
+  const zeroOffset = (value: unknown) => typeof value === 'string' &&
+    /^0+(?:\\.0+)?(?:\\s*m)?$/i.test(value.trim());
+  for (const key of ['min_height', 'building:min_level']) {
+    const offset = tags?.[key];
+    if (offset !== undefined && !zeroOffset(offset)) return false;
+  }
   return !LIFECYCLE_BUILDING_TAGS.some((tag) => {
     const status = tags?.[tag];
     return typeof status === 'string' && status.trim() !== '' &&
