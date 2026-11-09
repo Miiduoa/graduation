@@ -6,6 +6,7 @@ import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, 
 import { importBuildingPlanProject } from './buildingPlanProject';
 import type { BuildingPlanView, BuildingPlanScene } from './buildingPlanScene';
 import BuildingPlanTracer from './BuildingPlanTracer';
+import BuildingPlanPngExport from './BuildingPlanPngExport';
 import { exportBuildingPlanSvg } from './buildingPlanSvg';
 import { getBuildingPlanSvgFilename } from './buildingPlanSvgFilename';
 import styles from './BuildingPlanPreview.module.css';
@@ -330,6 +331,7 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             }}>下載平面圖 SVG</button>
             {traceSession && <button type="button" onClick={startTracing}>返回圖面編輯</button>}
           </div>
+          <BuildingPlanPngExport plan={plan} floorId={view.floorId} />
           <p className={styles.hint}>JSON 保存模型資料；SVG 匯出目前選擇的樓層（選「全部樓層」則全部匯出），可列印與放入簡報，但不含底圖圖片，且不代表正式校方圖資。{traceSession && '要保存可續編的版本，請返回圖面編輯並下載編輯檔。'}</p>
         </div>
         <div className={styles.toolbar}>

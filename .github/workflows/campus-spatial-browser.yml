@@ -64,6 +64,7 @@ jobs:
           python scripts/qa/campus-spatial/check.py
           python scripts/qa/campus-spatial/building-check.py
           python scripts/qa/campus-spatial/svg-download-check.py
+          python scripts/qa/campus-spatial/png-download-check.py
       - name: Upload screenshots and results
         if: always()
         uses: actions/upload-artifact@v7
