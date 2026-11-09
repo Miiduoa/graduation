@@ -76,7 +76,7 @@ export async function uploadStoryImage(input: {
   const error = storyImageError(input.file);
   if (error) throw new Error(error);
   if (privateFilesEnabled()) {
-    const path = privateStoryPath(input.schoolId, input.storyId, `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}.jpg`);
+    const path = privateStoryPath(input.schoolId, input.storyId, `image-${Date.now().toString(36)}-${crypto.randomUUID().replace(/-/g, '')}.jpg`);
     if (!path) throw new Error('限動路徑無效');
     await uploadPrivateFile({ path, body: input.file, contentType: input.file.type });
     return { url: path, path, contentType: input.file.type };

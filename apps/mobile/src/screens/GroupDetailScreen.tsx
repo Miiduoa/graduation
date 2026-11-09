@@ -1,3 +1,4 @@
+import { privateFileNonce } from '../services/privateFileNonce';
 import { claimPrivateFile } from '../services/privateFiles';
 import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 /* eslint-disable */
@@ -595,7 +596,7 @@ export function GroupDetailScreen(props: any) {
           const path = privateGroupPostPath(
             groupId,
             postRef.id,
-            safePrivateFileName(`${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, file.name),
+            safePrivateFileName(`${index}-${Date.now().toString(36)}-${privateFileNonce()}`, file.name),
           );
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();

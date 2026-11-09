@@ -1,3 +1,4 @@
+import { privateFileNonce } from './privateFileNonce';
 import { isSupabaseFileStorageEnabled, privateStoryPath, uploadPrivateFile } from './privateFiles';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getStorageInstance } from '../firebase';
@@ -42,7 +43,7 @@ export async function uploadStoryImage(
   if (!mime?.startsWith('image/') || !blob.size) throw new Error('請選擇一張可讀取的照片。');
   if (blob.size >= STORY_IMAGE_LIMIT) throw new Error('照片須小於 10 MB。');
   if (isSupabaseFileStorageEnabled()) {
-    const path = privateStoryPath(schoolId, storyId, `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}.jpg`);
+    const path = privateStoryPath(schoolId, storyId, `image-${Date.now().toString(36)}-${privateFileNonce()}.jpg`);
     if (!path) throw new Error('限動路徑無效');
     await uploadPrivateFile({ path, body: blob, contentType: mime });
     return path;

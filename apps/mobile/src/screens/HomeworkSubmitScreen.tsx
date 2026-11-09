@@ -1,3 +1,4 @@
+import { privateFileNonce } from '../services/privateFileNonce';
 import { PRIVATE_IMAGE_TYPES, safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
@@ -296,7 +297,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
               delete uploadedFiles.current[index];
             }
           }
-          const path = privateGroupAssignmentPath(courseId, hwId, uid, safePrivateFileName(`${batch}-${index}-${Math.random().toString(36).slice(2)}`, file.name));
+          const path = privateGroupAssignmentPath(courseId, hwId, uid, safePrivateFileName(`${batch}-${index}-${privateFileNonce()}`, file.name));
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
           await uploadPrivateFile({ path, body: blob, originalFilename: file.name, contentType: file.mimeType || blob.type });

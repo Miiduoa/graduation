@@ -103,7 +103,7 @@ function Assignment({
             courseId,
             assignment.id,
             uid,
-            safePrivateFileName(`${batch}-${index}-${Math.random().toString(36).slice(2)}`, file.name),
+            safePrivateFileName(`${batch}-${index}-${crypto.randomUUID().replace(/-/g, '')}`, file.name),
           );
           if (!path) throw new Error('附件路徑無效');
           await uploadPrivateFile({

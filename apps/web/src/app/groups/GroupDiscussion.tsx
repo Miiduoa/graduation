@@ -282,7 +282,7 @@ function DiscussionBoard({
           const path = privateGroupPostPath(
             groupId,
             intent.postId,
-            safePrivateFileName(`${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, file.name),
+            safePrivateFileName(`${index}-${Date.now().toString(36)}-${crypto.randomUUID().replace(/-/g, '')}`, file.name),
           );
           if (!path) throw new Error('附件路徑無效');
           await uploadPrivateFile({
