@@ -16,6 +16,24 @@ const firestoreRules = fs.readFileSync(
   'utf8',
 );
 const storageRules = fs.readFileSync(path.resolve(__dirname, '../storage/storage.rules'), 'utf8');
+const {
+  uniqueStoryStorageFirestoreDocs,
+} = require('../functions/campusStoryAccessBinding');
+
+test('campus story storage rules read at most two Firestore documents', () => {
+  const docs = uniqueStoryStorageFirestoreDocs(storageRules);
+  assert.deepEqual(docs, [
+    'campusStories/$(storyId)',
+    'schools/$(schoolId)/members/$(request.auth.uid)',
+  ]);
+  assert.equal(docs.length <= 2, true);
+  assert.equal(storageRules.includes('users/$(request.auth.uid)'), true);
+  const storyMatch = storageRules.match(
+    /match \/schools\/\{schoolId\}\/stories\/\{storyId\}\/\{fileName\} \{([\s\S]*?)\n    match \//,
+  );
+  assert.equal(storyMatch[1].includes('users/$(request.auth.uid)'), false);
+  assert.equal(storyMatch[1].includes('hasCanonicalActiveAccount'), false);
+});
 
 let testEnv;
 
@@ -2045,7 +2063,7 @@ describe('storage security rules', () => {
       await db.doc('users/bob').delete();
       await db.doc(bobView.path).delete();
     });
-    await assertFails(bobMedia.getMetadata());
+    await assertSucceeds(bobMedia.getMetadata());
     await assertFails(bob.doc(story.path).get());
     await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
@@ -2053,6 +2071,10 @@ describe('storage security rules', () => {
     await assertFails(bob.doc('campusStories/rebuilt-publish').set({
       ...payload, authorUid: 'bob',
     }));
+    await assertFails(bob.doc('schools/pu/members/bob').set({
+      status: 'active', profileBoundSchoolId: 'pu',
+    }));
+    await assertFails(bob.doc('schools/pu/members/bob').update({ profileBoundSchoolId: 'other' }));
 
     await assertFails(bob.doc('users/bob').set({
       ...studentProfile, schoolId: 'pu', primarySchoolId: 'pu', status: 'active',
@@ -2060,6 +2082,7 @@ describe('storage security rules', () => {
     await assertSucceeds(bob.doc('users/bob').set(studentProfile));
     await assertFails(bob.doc('users/bob').set({ ...studentProfile, schoolId: 'pu' }));
     await assertFails(bob.doc('users/bob').update({ schoolId: 'pu', primarySchoolId: 'pu', status: 'active' }));
+    await assertFails(bob.doc('users/bob').update({ profileBoundSchoolId: 'pu' }));
     await assertFails(bob.doc(story.path).get());
     await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
@@ -2067,6 +2090,13 @@ describe('storage security rules', () => {
     await assertFails(bob.doc('campusStories/rebuilt-publish').set({
       ...payload, authorUid: 'bob',
     }));
+    await assertSucceeds(bobMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/bob').set({
+        ...campusBoundMembership('pu'),
+        status: 'inactive',
+      });
+    });
     await assertFails(bobMedia.getMetadata());
 
     await seedFirestore(async (db) => db.doc('users/alice').delete());
@@ -2126,6 +2156,10 @@ describe('storage security rules', () => {
     await assertFails(erin.doc('campusStories/legacy-stub').set({
       ...payload, authorUid: 'erin',
     }));
+    await assertFails(erin.doc('schools/pu/members/erin').set({
+      status: 'active', profileBoundSchoolId: 'pu',
+    }));
+    await assertFails(erin.doc('schools/pu/members/erin').update({ profileBoundSchoolId: 'pu' }));
 
     await seedFirestore(async (db) => {
       await db.doc('users/dana').set({
@@ -3118,6 +3152,7 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-status', { status: 'active' }],
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
       ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
@@ -3180,6 +3215,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ status: 'active' }));
     await assertFails(alice.update({ schoolId: 'other' }));
     await assertFails(alice.update({ primarySchoolId: 'other' }));
+    await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
     await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
@@ -4304,6 +4340,7 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-status', { status: 'active' }],
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
       ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
@@ -4364,6 +4401,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ role: 'admin' }));
     await assertFails(alice.update({ schoolId: 'other' }));
     await assertFails(alice.update({ primarySchoolId: 'other' }));
+    await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
     await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
 
     // Change existing authority fields.

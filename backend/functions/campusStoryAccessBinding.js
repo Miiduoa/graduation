@@ -16,6 +16,63 @@ function membershipBoundToSchool(membership, schoolId) {
   return membership?.status === 'active' && membership?.profileBoundSchoolId === schoolId;
 }
 
+function toMillis(value) {
+  if (value == null) return null;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (typeof value._seconds === 'number') {
+    return value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1e6);
+  }
+  if (typeof value.seconds === 'number') {
+    return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6);
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasSchoolLoginEvidence(membership, profile) {
+  if (!membership?.lastLoginAt || !profile?.lastLoginAt) return false;
+  const created = toMillis(profile.createdAt);
+  const joined = toMillis(membership.joinedAt) ?? toMillis(membership.lastLoginAt);
+  if (created == null || joined == null) return false;
+  return created <= joined;
+}
+
+function evidenceSnapshot(profile, membership) {
+  return {
+    schoolId: profile?.schoolId ?? null,
+    primarySchoolId: profile?.primarySchoolId ?? null,
+    createdAtMs: toMillis(profile?.createdAt),
+    lastLoginAtMs: toMillis(profile?.lastLoginAt),
+    memberLastLoginAtMs: toMillis(membership?.lastLoginAt),
+    joinedAtMs: toMillis(membership?.joinedAt),
+    status: membership?.status ?? null,
+  };
+}
+
+function sameLoginEvidence(profile, membership, expected) {
+  if (!expected) return false;
+  const live = evidenceSnapshot(profile, membership);
+  return (
+    live.createdAtMs === expected.createdAtMs &&
+    live.lastLoginAtMs === expected.lastLoginAtMs &&
+    live.memberLastLoginAtMs === expected.memberLastLoginAtMs &&
+    live.joinedAtMs === expected.joinedAtMs &&
+    live.status === expected.status
+  );
+}
+
+function sameEvidence(profile, membership, expected) {
+  if (!expected) return false;
+  const live = evidenceSnapshot(profile, membership);
+  return (
+    live.schoolId === expected.schoolId &&
+    live.primarySchoolId === expected.primarySchoolId &&
+    sameLoginEvidence(profile, membership, expected)
+  );
+}
+
 function classifyCampusStoryBinding({ schoolId, uid, membership, profile, profileExists }) {
   const base = { schoolId, uid, membership, profile, profileExists };
   if (membership?.status !== 'active') {
@@ -30,13 +87,18 @@ function classifyCampusStoryBinding({ schoolId, uid, membership, profile, profil
   if (isClosedAccount(profile)) {
     return { ...base, kind: 'closed-profile' };
   }
+  const loginEvidence = hasSchoolLoginEvidence(membership, profile);
   if (profileBoundToSchool(profile, schoolId)) {
+    if (membershipBoundToSchool(membership, schoolId)) {
+      return { ...base, kind: 'already-bound' };
+    }
     return {
       ...base,
-      kind: membershipBoundToSchool(membership, schoolId)
-        ? 'already-bound'
-        : 'stamp-membership-binding',
+      kind: loginEvidence ? 'stamp-membership-binding' : 'weak-evidence',
     };
+  }
+  if (!loginEvidence) {
+    return { ...base, kind: 'weak-evidence' };
   }
   return { ...base, kind: 'bind-candidate' };
 }
@@ -50,6 +112,7 @@ function bindingWrite(schoolId, profile) {
 
 function planCampusStoryAccessBinding(rows) {
   const classified = rows.map((row) => classifyCampusStoryBinding(row));
+  const schoolIds = [...new Set(rows.map((row) => row.schoolId))];
   const activeSchoolsByUid = new Map();
   for (const item of classified) {
     if (item.kind === 'inactive-membership' || item.kind === 'insufficient-evidence') continue;
@@ -58,16 +121,18 @@ function planCampusStoryAccessBinding(rows) {
     activeSchoolsByUid.set(item.uid, schools);
   }
   return classified.map((item) => {
-    if (
-      item.kind !== 'bind-candidate' &&
-      item.kind !== 'stamp-membership-binding'
-    ) {
-      return item;
+    const withMeta = {
+      ...item,
+      schoolIds,
+      evidence: evidenceSnapshot(item.profile, item.membership),
+    };
+    if (item.kind !== 'bind-candidate' && item.kind !== 'stamp-membership-binding') {
+      return withMeta;
     }
     if ((activeSchoolsByUid.get(item.uid) || new Set()).size > 1) {
-      return { ...item, kind: 'multi-school-unbound' };
+      return { ...withMeta, kind: 'multi-school-unbound' };
     }
-    return item;
+    return withMeta;
   });
 }
 
@@ -116,6 +181,8 @@ function buildCampusStoryAccessBackup(plan, { inactivateOrphans = false } = {}) 
         path: `users/${item.uid}`,
         memberPath: `schools/${item.schoolId}/members/${item.uid}`,
         schoolId: item.schoolId,
+        schoolIds: item.schoolIds || [item.schoolId],
+        evidence: item.evidence,
         before: {
           schoolId: item.profile?.schoolId ?? null,
           primarySchoolId: item.profile?.primarySchoolId ?? null,
@@ -125,6 +192,9 @@ function buildCampusStoryAccessBackup(plan, { inactivateOrphans = false } = {}) 
       backup.push({
         op: 'stamp-membership-binding',
         path: `schools/${item.schoolId}/members/${item.uid}`,
+        schoolId: item.schoolId,
+        schoolIds: item.schoolIds || [item.schoolId],
+        evidence: item.evidence,
         before: { profileBoundSchoolId: item.membership?.profileBoundSchoolId ?? null },
         after: { profileBoundSchoolId: item.schoolId },
       });
@@ -134,6 +204,9 @@ function buildCampusStoryAccessBackup(plan, { inactivateOrphans = false } = {}) 
       backup.push({
         op: 'stamp-membership-binding',
         path: `schools/${item.schoolId}/members/${item.uid}`,
+        schoolId: item.schoolId,
+        schoolIds: item.schoolIds || [item.schoolId],
+        evidence: item.evidence,
         before: { profileBoundSchoolId: item.membership?.profileBoundSchoolId ?? null },
         after: { profileBoundSchoolId: item.schoolId },
       });
@@ -176,17 +249,39 @@ function schoolAndUidFromMemberPath(path) {
   return { schoolId: parts[1], uid: parts[3] };
 }
 
+function otherMemberRefs(db, item, uid) {
+  return (item.schoolIds || [])
+    .filter((id) => id !== item.schoolId)
+    .map((id) => db.collection('schools').doc(id).collection('members').doc(uid));
+}
+
+function hasExtraActiveSchool(otherSnaps) {
+  return otherSnaps.some((snap) => snap.exists && snap.data()?.status === 'active');
+}
+
 async function applyBackupEntry(db, item) {
   return db.runTransaction(async (tx) => {
     if (item.op === 'bind-profile') {
       const userRef = docFromPath(db, item.path);
       const memberRef = docFromPath(db, item.memberPath);
-      const [userSnap, memberSnap] = await tx.getAll(userRef, memberRef);
+      const uid = item.path.split('/')[1];
+      const extraRefs = otherMemberRefs(db, item, uid);
+      const [userSnap, memberSnap, ...otherSnaps] = await tx.getAll(userRef, memberRef, ...extraRefs);
       if (!userSnap.exists) return { applied: false, reason: 'missing-profile', path: item.path };
       const profile = userSnap.data() || {};
       if (isClosedAccount(profile)) return { applied: false, reason: 'closed-profile', path: item.path };
       if (!memberSnap.exists || memberSnap.data()?.status !== 'active') {
         return { applied: false, reason: 'insufficient-evidence', path: item.path };
+      }
+      const membership = memberSnap.data() || {};
+      if (!hasSchoolLoginEvidence(membership, profile)) {
+        return { applied: false, reason: 'insufficient-evidence', path: item.path };
+      }
+      if (!sameEvidence(profile, membership, item.evidence)) {
+        return { applied: false, reason: 'profile-changed', path: item.path };
+      }
+      if (hasExtraActiveSchool(otherSnaps)) {
+        return { applied: false, reason: 'multi-school', path: item.path };
       }
       tx.update(userRef, item.after);
       return { applied: true, kind: item.op, path: item.path, schoolId: item.schoolId };
@@ -195,7 +290,8 @@ async function applyBackupEntry(db, item) {
       const { schoolId, uid } = schoolAndUidFromMemberPath(item.path);
       const memberRef = docFromPath(db, item.path);
       const userRef = db.collection('users').doc(uid);
-      const [userSnap, memberSnap] = await tx.getAll(userRef, memberRef);
+      const extraRefs = otherMemberRefs(db, { ...item, schoolId }, uid);
+      const [userSnap, memberSnap, ...otherSnaps] = await tx.getAll(userRef, memberRef, ...extraRefs);
       if (!userSnap.exists || isClosedAccount(userSnap.data() || {})) {
         return { applied: false, reason: 'missing-profile', path: item.path };
       }
@@ -205,13 +301,30 @@ async function applyBackupEntry(db, item) {
       if (!memberSnap.exists || memberSnap.data()?.status !== 'active') {
         return { applied: false, reason: 'insufficient-evidence', path: item.path };
       }
+      const profile = userSnap.data() || {};
+      const membership = memberSnap.data() || {};
+      if (!hasSchoolLoginEvidence(membership, profile)) {
+        return { applied: false, reason: 'insufficient-evidence', path: item.path };
+      }
+      if (!sameLoginEvidence(profile, membership, item.evidence)) {
+        return { applied: false, reason: 'profile-changed', path: item.path };
+      }
+      if (hasExtraActiveSchool(otherSnaps)) {
+        return { applied: false, reason: 'multi-school', path: item.path };
+      }
       tx.update(memberRef, item.after);
       return { applied: true, kind: item.op, path: item.path };
     }
     if (item.op === 'inactivate-orphan') {
       const memberRef = docFromPath(db, item.path);
-      const memberSnap = await tx.get(memberRef);
+      const { uid } = schoolAndUidFromMemberPath(item.path);
+      const userRef = db.collection('users').doc(uid);
+      const [userSnap, memberSnap] = await tx.getAll(userRef, memberRef);
+      if (userSnap.exists) return { applied: false, reason: 'profile-exists', path: item.path };
       if (!memberSnap.exists) return { applied: false, reason: 'missing-membership', path: item.path };
+      if (memberSnap.data()?.status !== 'active') {
+        return { applied: false, reason: 'already-inactive', path: item.path };
+      }
       tx.update(memberRef, item.after);
       return { applied: true, kind: item.op, path: item.path };
     }
@@ -243,60 +356,119 @@ async function reverseCampusStoryAccessBinding({
   const restored = [];
   const skipped = [];
   for (const item of [...entries].reverse()) {
-    const ref = docFromPath(db, item.path);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      skipped.push({ path: item.path, reason: 'missing' });
-      continue;
+    const result = await db.runTransaction(async (tx) => {
+      const ref = docFromPath(db, item.path);
+      const snap = await tx.get(ref);
+      if (!snap.exists) {
+        return { applied: false, reason: 'missing', path: item.path };
+      }
+      const current = snap.data() || {};
+      const next = restoreFields(current, item.before, item.after, FieldValue);
+      if (Object.keys(next).length === 0) {
+        return { applied: false, reason: 'current-mismatch', path: item.path };
+      }
+      if (apply) tx.update(ref, next);
+      return { applied: apply, path: item.path, fields: Object.keys(next), op: item.op };
+    });
+    if (result.fields) {
+      restored.push({ path: result.path, fields: result.fields, op: result.op });
+    } else {
+      skipped.push({ path: result.path, reason: result.reason });
     }
-    const current = snap.data() || {};
-    const next = restoreFields(current, item.before, item.after, FieldValue);
-    if (Object.keys(next).length === 0) {
-      skipped.push({ path: item.path, reason: 'current-mismatch' });
-      continue;
-    }
-    restored.push({ path: item.path, fields: Object.keys(next) });
-    if (apply) await ref.update(next);
   }
   return { restored, skipped, apply };
 }
 
-async function clearProfileSchoolBindingForRevokedMembership({ db, FieldValue, schoolId, uid, membership }) {
-  const active = membership?.status === 'active';
-  if (active) return { action: 'leave-profile' };
-  const userRef = db.collection('users').doc(uid);
-  const snap = await userRef.get();
-  if (!snap.exists) return { action: 'missing-profile' };
-  const profile = snap.data() || {};
-  const update = {};
-  if (profile.schoolId === schoolId) update.schoolId = FieldValue.delete();
-  if (profile.primarySchoolId === schoolId) update.primarySchoolId = FieldValue.delete();
-  if (Object.keys(update).length === 0) return { action: 'no-matching-binding' };
-  await userRef.update(update);
-  return { action: 'cleared-binding', fields: Object.keys(update) };
+async function clearProfileSchoolBindingForRevokedMembership({ db, FieldValue, schoolId, uid }) {
+  return db.runTransaction(async (tx) => {
+    const memberRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
+    const userRef = db.collection('users').doc(uid);
+    const [memberSnap, userSnap] = await tx.getAll(memberRef, userRef);
+    if (memberSnap.exists && memberSnap.data()?.status === 'active') {
+      return { action: 'leave-profile' };
+    }
+    if (!userSnap.exists) return { action: 'missing-profile' };
+    const profile = userSnap.data() || {};
+    const update = {};
+    if (profile.schoolId === schoolId) update.schoolId = FieldValue.delete();
+    if (profile.primarySchoolId === schoolId) update.primarySchoolId = FieldValue.delete();
+    if (Object.keys(update).length === 0) return { action: 'no-matching-binding' };
+    tx.update(userRef, update);
+    return { action: 'cleared-binding', fields: Object.keys(update) };
+  });
 }
 
 async function inactivateLeftoverSchoolMemberships({ db, uid, loadMemberships }) {
-  const profileSnap = await db.collection('users').doc(uid).get();
-  if (profileSnap.exists) return [];
   const memberships = await loadMemberships(uid);
-  const changed = [];
-  for (const item of memberships) {
-    if (!item.exists) continue;
-    if (item.membership?.status !== 'active') continue;
-    const again = await db.collection('users').doc(uid).get();
-    if (again.exists) return changed;
-    await db.collection('schools').doc(item.schoolId).collection('members').doc(uid).set(
-      { status: 'inactive' },
-      { merge: true },
-    );
-    changed.push(item.schoolId);
+  return db.runTransaction(async (tx) => {
+    const userRef = db.collection('users').doc(uid);
+    const memberRefs = [];
+    for (const item of memberships) {
+      if (!item.exists) continue;
+      memberRefs.push({
+        schoolId: item.schoolId,
+        ref: db.collection('schools').doc(item.schoolId).collection('members').doc(uid),
+      });
+    }
+    const userSnap = await tx.get(userRef);
+    const memberSnaps = [];
+    for (const item of memberRefs) {
+      memberSnaps.push({ schoolId: item.schoolId, ref: item.ref, snap: await tx.get(item.ref) });
+    }
+    if (userSnap.exists) return [];
+    const changed = [];
+    for (const { schoolId, ref, snap } of memberSnaps) {
+      if (!snap.exists) continue;
+      if (snap.data()?.status !== 'active') continue;
+      tx.set(ref, { status: 'inactive' }, { merge: true });
+      changed.push(schoolId);
+    }
+    return changed;
+  });
+}
+
+function uniqueStoryStorageFirestoreDocs(source) {
+  const match = source.match(
+    /match \/schools\/\{schoolId\}\/stories\/\{storyId\}\/\{fileName\} \{([\s\S]*?)\n    match \//,
+  );
+  if (!match) throw new Error('campus story storage match not found');
+  const block = match[1].replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const prefix = '/databases/(default)/documents/';
+  const paths = [];
+  let index = 0;
+  while (index < block.length) {
+    const getAt = block.indexOf('firestore.get(', index);
+    const existsAt = block.indexOf('firestore.exists(', index);
+    const start = [getAt, existsAt].filter((value) => value >= 0).sort((a, b) => a - b)[0];
+    if (start == null) break;
+    const pathStart = block.indexOf(prefix, start);
+    if (pathStart < 0 || pathStart > start + 80) {
+      index = start + 1;
+      continue;
+    }
+    let cursor = pathStart + prefix.length;
+    let depth = 1;
+    let path = '';
+    while (cursor < block.length && depth > 0) {
+      const character = block[cursor];
+      if (character === '(') depth += 1;
+      else if (character === ')') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+      path += character;
+      cursor += 1;
+    }
+    paths.push(path);
+    index = cursor;
   }
-  return changed;
+  return [...new Set(paths)].sort();
 }
 
 module.exports = {
   isClosedAccount,
+  toMillis,
+  hasSchoolLoginEvidence,
   classifyCampusStoryBinding,
   planCampusStoryAccessBinding,
   loadCampusMembershipRows,
@@ -306,4 +478,5 @@ module.exports = {
   reverseCampusStoryAccessBinding,
   clearProfileSchoolBindingForRevokedMembership,
   inactivateLeftoverSchoolMemberships,
+  uniqueStoryStorageFirestoreDocs,
 };

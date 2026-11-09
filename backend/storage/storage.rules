@@ -226,16 +226,14 @@ service firebase.storage {
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
       function storyAccountBoundToSchool() {
-        // Profile schoolId closes leftover rebuilt accounts. Membership
-        // status is read so revocation is visible immediately. Published
-        // media also reads campusStories for expiry. Repeated gets of the
-        // same document are cached.
-        return hasCanonicalActiveAccount()
-          && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active'
-          && (
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
-            || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId
-          );
+        // Production Storage allows two unique Firestore documents per
+        // request. This match reads members/{uid} and campusStories only.
+        // profileBoundSchoolId is server-stamped (login, triggers, backfill);
+        // clients cannot write school members.
+        let member = firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data;
+        return isAuthenticated()
+          && member.status == 'active'
+          && member.get('profileBoundSchoolId', '') == schoolId;
       }
       function isPublishedStory() {
         let story = firestore.get(/databases/(default)/documents/campusStories/$(storyId)).data;

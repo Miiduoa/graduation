@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   classifyCampusStoryBinding,
   planCampusStoryAccessBinding,
@@ -9,10 +11,24 @@ const {
   loadCampusMembershipRows,
   clearProfileSchoolBindingForRevokedMembership,
   inactivateLeftoverSchoolMemberships,
+  hasSchoolLoginEvidence,
+  uniqueStoryStorageFirestoreDocs,
 } = require('./campusStoryAccessBinding');
 
 const FieldValue = {
   delete: () => ({ _delete: true }),
+};
+
+const loginMembership = {
+  status: 'active',
+  lastLoginAt: '2026-01-10T00:00:00.000Z',
+  joinedAt: '2026-01-01T00:00:00.000Z',
+};
+const loginProfile = {
+  status: 'active',
+  displayName: 'Dana',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  lastLoginAt: '2026-01-10T00:00:00.000Z',
 };
 
 function fakeDb(seed = {}) {
@@ -79,23 +95,46 @@ function fakeDb(seed = {}) {
   };
 }
 
-test('only a single active membership is bind evidence; extra fields are ignored', () => {
+test('story storage match reads at most two Firestore documents', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../storage/storage.rules'), 'utf8');
+  const docs = uniqueStoryStorageFirestoreDocs(source);
+  expect(docs).toEqual([
+    'campusStories/$(storyId)',
+    'schools/$(schoolId)/members/$(request.auth.uid)',
+  ]);
+  const storyMatch = source.match(
+    /match \/schools\/\{schoolId\}\/stories\/\{storyId\}\/\{fileName\} \{([\s\S]*?)\n    match \//,
+  );
+  expect(storyMatch[1]).not.toContain('users/$(request.auth.uid)');
+  expect(storyMatch[1]).not.toContain('hasCanonicalActiveAccount');
+});
+
+test('only school-login evidence is bind evidence; rebuilt stubs are skipped', () => {
   expect(
     classifyCampusStoryBinding({
       schoolId: 'pu',
       uid: 'bob',
-      membership: { status: 'active' },
+      membership: { status: 'active', lastLoginAt: '2026-01-10T00:00:00.000Z', joinedAt: '2025-01-01T00:00:00.000Z' },
       profileExists: true,
-      profile: { displayName: 'Rebuilt', role: 'student', bio: 'I belong here' },
+      profile: { displayName: 'Rebuilt', role: 'student', bio: 'I belong here', createdAt: '2026-11-09T00:00:00.000Z' },
     }).kind,
-  ).toBe('bind-candidate');
+  ).toBe('weak-evidence');
+  expect(
+    classifyCampusStoryBinding({
+      schoolId: 'pu',
+      uid: 'forged',
+      membership: loginMembership,
+      profileExists: true,
+      profile: { displayName: 'Forged', role: 'student', createdAt: '2020-01-01T00:00:00.000Z' },
+    }).kind,
+  ).toBe('weak-evidence');
   expect(
     classifyCampusStoryBinding({
       schoolId: 'pu',
       uid: 'dana',
-      membership: { status: 'active' },
+      membership: loginMembership,
       profileExists: true,
-      profile: { status: 'active', displayName: 'Dana' },
+      profile: loginProfile,
     }).kind,
   ).toBe('bind-candidate');
   expect(
@@ -107,30 +146,42 @@ test('only a single active membership is bind evidence; extra fields are ignored
       profile: { status: 'active', bio: 'legacy' },
     }).kind,
   ).toBe('insufficient-evidence');
+  expect(
+    hasSchoolLoginEvidence(
+      { status: 'active', lastLoginAt: '2026-01-10', joinedAt: '2026-01-01' },
+      { createdAt: '2026-02-01', lastLoginAt: '2026-01-10' },
+    ),
+  ).toBe(false);
 });
 
 test('dry-run plans bindings without writing; apply re-reads and reverse restores matching values', async () => {
   const db = fakeDb({
     'schools/pu': { name: 'PU' },
-    'schools/pu/members/dana': { status: 'active' },
-    'schools/pu/members/bob': { status: 'active' },
+    'schools/pu/members/dana': { ...loginMembership },
+    'schools/pu/members/bob': {
+      status: 'active',
+      lastLoginAt: '2026-01-10T00:00:00.000Z',
+      joinedAt: '2025-01-01T00:00:00.000Z',
+    },
     'schools/pu/members/ghost': { status: 'active' },
-    'users/dana': { status: 'active', displayName: 'Dana' },
-    'users/bob': { displayName: 'Rebuilt', role: 'student' },
+    'users/dana': { ...loginProfile },
+    'users/bob': { displayName: 'Rebuilt', role: 'student', createdAt: '2026-11-09T00:00:00.000Z' },
   });
   const plan = planCampusStoryAccessBinding(await loadCampusMembershipRows(db));
   expect(summarizeBindingPlan(plan)).toEqual({
-    'bind-candidate': 2,
+    'bind-candidate': 1,
+    'weak-evidence': 1,
     'orphan-membership': 1,
   });
   const dry = await applyCampusStoryAccessBinding({ db, plan, apply: false });
-  expect(db.docs.get('users/dana')).toEqual({ status: 'active', displayName: 'Dana' });
+  expect(db.docs.get('users/dana')).toEqual(loginProfile);
   expect(dry.applied).toHaveLength(0);
 
   const written = await applyCampusStoryAccessBinding({ db, plan, apply: true });
   expect(db.docs.get('users/dana')).toMatchObject({ schoolId: 'pu', primarySchoolId: 'pu' });
-  expect(db.docs.get('users/bob')).toMatchObject({ schoolId: 'pu', primarySchoolId: 'pu' });
+  expect(db.docs.get('users/bob').schoolId).toBeUndefined();
   expect(db.docs.get('schools/pu/members/dana').profileBoundSchoolId).toBe('pu');
+  expect(db.docs.get('schools/pu/members/bob').profileBoundSchoolId).toBeUndefined();
 
   await reverseCampusStoryAccessBinding({
     db,
@@ -144,11 +195,24 @@ test('dry-run plans bindings without writing; apply re-reads and reverse restore
   expect(db.docs.get('schools/pu/members/dana').profileBoundSchoolId).toBeUndefined();
 });
 
+test('apply skips when the profile changes inside the transaction window', async () => {
+  const db = fakeDb({
+    'schools/pu': { name: 'PU' },
+    'schools/pu/members/dana': { ...loginMembership },
+    'users/dana': { ...loginProfile },
+  });
+  const plan = planCampusStoryAccessBinding(await loadCampusMembershipRows(db));
+  db.docs.set('users/dana', { ...loginProfile, lastLoginAt: '2026-06-01T00:00:00.000Z' });
+  const written = await applyCampusStoryAccessBinding({ db, plan, apply: true });
+  expect(written.applied).toHaveLength(0);
+  expect(db.docs.get('users/dana').schoolId).toBeUndefined();
+});
+
 test('deleted profiles are not recreated by merge during apply', async () => {
   const db = fakeDb({
     'schools/pu': { name: 'PU' },
-    'schools/pu/members/ghost': { status: 'active' },
-    'users/ghost': { status: 'active', displayName: 'Ghost' },
+    'schools/pu/members/ghost': { ...loginMembership },
+    'users/ghost': { ...loginProfile, displayName: 'Ghost' },
   });
   const plan = planCampusStoryAccessBinding(await loadCampusMembershipRows(db));
   db.docs.delete('users/ghost');
@@ -180,7 +244,7 @@ test('orphan inactivation is opt-in and reversible', async () => {
   expect(db.docs.get('schools/pu/members/ghost').status).toBe('active');
 });
 
-test('reverse skips values that no longer match what the script wrote', async () => {
+test('reverse compares current values inside a transaction and skips mismatches', async () => {
   const db = fakeDb({
     'users/dana': { status: 'active', schoolId: 'other', primarySchoolId: 'pu' },
   });
@@ -201,13 +265,14 @@ test('reverse skips values that no longer match what the script wrote', async ()
     },
     apply: true,
   });
-  expect(result.restored).toEqual([{ path: 'users/dana', fields: ['primarySchoolId'] }]);
+  expect(result.restored).toEqual([{ path: 'users/dana', fields: ['primarySchoolId'], op: 'bind-profile' }]);
   expect(db.docs.get('users/dana')).toEqual({ status: 'active', schoolId: 'other' });
 });
 
-test('revoked membership clears matching school binding and leaves other schools', async () => {
+test('revoked membership clears matching school binding unless the live membership is active again', async () => {
   const db = fakeDb({
     'users/alice': { status: 'active', schoolId: 'pu', primarySchoolId: 'other' },
+    'schools/pu/members/alice': { status: 'inactive' },
   });
   const cleared = await clearProfileSchoolBindingForRevokedMembership({
     db,
@@ -218,15 +283,19 @@ test('revoked membership clears matching school binding and leaves other schools
   });
   expect(cleared).toEqual({ action: 'cleared-binding', fields: ['schoolId'] });
   expect(db.docs.get('users/alice')).toEqual({ status: 'active', primarySchoolId: 'other' });
+
+  db.docs.set('schools/other/members/alice', { status: 'active', profileBoundSchoolId: 'other' });
   const leave = await clearProfileSchoolBindingForRevokedMembership({
     db,
     FieldValue,
     schoolId: 'other',
     uid: 'alice',
-    membership: { status: 'active' },
+    membership: { status: 'inactive' },
   });
   expect(leave).toEqual({ action: 'leave-profile' });
   expect(db.docs.get('users/alice').primarySchoolId).toBe('other');
+
+  db.docs.delete('schools/other/members/alice');
   const deleted = await clearProfileSchoolBindingForRevokedMembership({
     db,
     FieldValue,
@@ -238,12 +307,12 @@ test('revoked membership clears matching school binding and leaves other schools
   expect(db.docs.get('users/alice')).toEqual({ status: 'active' });
 });
 
-test('binding CLI writes the backup before the database and reverse dry-run does not write', async () => {
+test('binding CLI writes the backup before the database and reverse apply writes an applied log', async () => {
   const { runCli } = require('../../scripts/bind-campus-story-profile-schools.cjs');
   const db = fakeDb({
     'schools/pu': { name: 'PU' },
-    'schools/pu/members/dana': { status: 'active' },
-    'users/dana': { status: 'active', displayName: 'Dana' },
+    'schools/pu/members/dana': { ...loginMembership },
+    'users/dana': { ...loginProfile },
   });
   const files = new Map();
   const dry = await runCli(['--project', 'demo-campus-security'], { db, FieldValue });
@@ -279,21 +348,64 @@ test('binding CLI writes the backup before the database and reverse dry-run does
   expect(reverseDry.mode).toBe('reverse-dry-run');
   expect(db.docs.get('users/dana').schoolId).toBe('changed');
   await expect(
+    runCli(
+      [
+        '--project',
+        'demo-campus-security',
+        '--reverse',
+        '--apply',
+        '--backup-file',
+        'backup.json',
+      ],
+      {
+        db,
+        FieldValue,
+        readFile: (file) => files.get(file),
+      },
+    ),
+  ).rejects.toThrow(/applied-file/);
+  await expect(
     runCli(['--project', 'other-campus-project', '--reverse', '--backup-file', 'backup.json'], {
       db,
       FieldValue,
       readFile: (file) => files.get(file),
     }),
   ).rejects.toThrow(/project/);
+
+  const reverseApply = await runCli(
+    [
+      '--project',
+      'demo-campus-security',
+      '--reverse',
+      '--apply',
+      '--backup-file',
+      'backup.json',
+      '--applied-file',
+      'applied.json',
+    ],
+    {
+      db,
+      FieldValue,
+      readFile: (file) => files.get(file),
+      writeFile: (file, data) => {
+        files.set(file, data);
+      },
+    },
+  );
+  expect(reverseApply.mode).toBe('reverse');
+  expect(reverseApply.appliedFile).toBe('applied.json');
+  expect(files.get('applied.json').restored.some((row) => row.path === 'users/dana')).toBe(true);
+  expect(db.docs.get('users/dana').schoolId).toBe('changed');
+  expect(db.docs.get('users/dana').primarySchoolId).toBeUndefined();
 });
 
 test('unbound profiles with more than one active school are left for review', async () => {
   const db = fakeDb({
     'schools/other': { name: 'Other' },
     'schools/pu': { name: 'PU' },
-    'schools/other/members/dana': { status: 'active' },
-    'schools/pu/members/dana': { status: 'active' },
-    'users/dana': { status: 'active', displayName: 'Dana', bio: 'two schools' },
+    'schools/other/members/dana': { ...loginMembership },
+    'schools/pu/members/dana': { ...loginMembership },
+    'users/dana': { ...loginProfile, bio: 'two schools' },
   });
   const plan = planCampusStoryAccessBinding(await loadCampusMembershipRows(db));
   expect(summarizeBindingPlan(plan)).toEqual({ 'multi-school-unbound': 2 });
@@ -302,7 +414,7 @@ test('unbound profiles with more than one active school are left for review', as
   expect(db.docs.get('users/dana').schoolId).toBeUndefined();
 });
 
-test('missing canonical profiles inactivate leftover school memberships only if still missing', async () => {
+test('missing canonical profiles inactivate leftover school memberships in one transaction', async () => {
   const db = fakeDb({
     'schools/pu/members/bob': { status: 'active' },
     'schools/other/members/bob': { status: 'inactive' },

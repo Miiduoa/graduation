@@ -432,6 +432,8 @@ service cloud.firestore {
 
       match /members/{uid} {
         allow read: if isSelf(uid) || hasRole(schoolId, 'admin') || requesterHasAnyServiceRole(schoolId);
+        // Admin SDK only. Clients cannot write status, profileBoundSchoolId,
+        // lastLoginAt, joinedAt, or any other membership field.
         allow write: if false;
       }
 
@@ -1178,6 +1180,7 @@ service cloud.firestore {
           'status',
           'schoolId',
           'primarySchoolId',
+          'profileBoundSchoolId',
           'lastLoginAt',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress'
@@ -1196,6 +1199,7 @@ service cloud.firestore {
           'balance',
           'schoolId',
           'primarySchoolId',
+          'profileBoundSchoolId',
           'lastLoginAt',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress',

@@ -373,10 +373,11 @@ Storage `schools/{schoolId}/stories/` 已使用校籍文件與 `campusStories` �
 
 根治不放寬規則、也不讓客戶端自填校籍：
 
-- Storage 限動在讀取時同時檢查 canonical profile 的 `schoolId`／`primarySchoolId`、校籍 `status == 'active'`，以及 `campusStories` 的發布／到期條件。校籍一轉 inactive，媒體立即拒絕，不依賴觸發器先清掉 profile 校別。沒有綁定校別的文件（含刪帳後自建 student profile）不能讀寫限動媒體。
-- 校籍撤銷或刪除時，觸發器仍會清除對應的 profile 校別欄位。profile 文件刪除時，觸發器先重新讀取 profile，確認目前仍不存在，才把仍為 `active` 的殘留校籍標為 `inactive`。
-- 回填只接受「目前單一學校且 status 為 active 的校籍」作為證據。多校、缺 status、無 profile、已關閉帳號只列出筆數，不依 bio 或其他 profile 欄位判斷。`--apply` 先完整寫入並 fsync 備份檔，再用 transaction／update 寫入；profile 已刪除則跳過，不會 merge 重建。`--reverse` 預設 dry-run，核對 backup 的 project id，且只還原仍等於本腳本寫入值的欄位。
-- 校務登入在同一交易寫入 `members.profileBoundSchoolId`，供回填與後續核對。沒有新的 Firestore schema migration。
-- `users` create／update 禁止客戶端寫入 `lastLoginAt`。
+- Storage 限動每次請求只讀兩份 Firestore 文件：`schools/{schoolId}/members/{uid}`（`status == 'active'` 且伺服器蓋章的 `profileBoundSchoolId` 等於路徑學校）以及 `campusStories/{storyId}`。不讀 `users/{uid}`。profile 校別一致性由後端（校務登入交易、觸發器、回填）維護到 `profileBoundSchoolId`；校籍 `allow write: if false`，客戶端無法寫這個欄位。
+- 刪 profile 後若殘留仍為 active 且已蓋章的校籍，媒體在規則上仍可讀，直到刪 profile 觸發器在同一 transaction 內重讀 profile 仍不存在後將校籍標為 inactive。客戶端不能自己蓋章，因此刪帳後自建 student profile 無法恢復媒體讀取。
+- 校籍撤銷或刪除時，觸發器在同一 transaction 內重讀校籍；若當下已是 active（例如剛登入），不清 profile 校別。
+- 回填只綁有強證據的帳：單一 active 校籍、校籍與 profile 都有校務登入的 `lastLoginAt`、且 profile `createdAt` 不大於校籍 `joinedAt`（缺 `joinedAt` 時用校籍 `lastLoginAt`）。刪帳後自建 stub、缺登入紀錄、多校、已關閉帳號只列出筆數。transaction 內重驗證據未變且仍是單一校籍。`--apply` 先 fsync 備份再寫入。`--reverse` 預設 dry-run；`--reverse --apply` 在 transaction 內比對現值，並寫出實際套用紀錄檔。
+- 校務登入在同一交易寫入 `members.profileBoundSchoolId`。沒有新的 Firestore schema migration。
+- `users` create／update 禁止客戶端寫入 `schoolId`、`primarySchoolId`、`profileBoundSchoolId`、`lastLoginAt`。
 
-舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。發布順序：先部署 Functions（登入標記、撤權清校別、刪 profile 重讀後停用殘留校籍），再 dry-run／受控回填，最後才發布 Storage 規則。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。
+舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。發布順序：先部署 Functions（登入標記、撤權與刪 profile 都在同一 transaction 重讀後寫入），再 dry-run／受控回填，最後才發布 Storage 規則。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。

@@ -16,8 +16,8 @@ const USAGE = [
   'node scripts/bind-campus-story-profile-schools.cjs --project PROJECT_ID',
   '預設 dry-run，只輸出分類統計，不寫入。',
   '正式寫入需 --apply --backup-file FILE。會先完整寫入並 fsync 備份，再寫資料庫。',
-  '還原預設也是 dry-run：--reverse --backup-file FILE；加上 --apply 才會寫回。',
-  '只依目前單一學校的 active 校籍綁定；多校或證據不足只列出。',
+  '還原預設也是 dry-run：--reverse --backup-file FILE；加上 --apply --applied-file FILE 才會寫回，並記錄實際套用欄位。',
+  '只綁有校務登入紀錄、單一 active 校籍、且 profile 建立時間不晚於校籍的帳號；其餘只列出筆數。',
   '殘留且沒有 canonical profile 的校籍預設只列出；加上 --inactivate-orphans 才會標為 inactive。',
 ].join('\n');
 
@@ -30,6 +30,7 @@ function parseCli(argv) {
       reverse: { type: 'boolean', default: false },
       'inactivate-orphans': { type: 'boolean', default: false },
       'backup-file': { type: 'string' },
+      'applied-file': { type: 'string' },
       help: { type: 'boolean', default: false },
     },
     strict: true,
@@ -42,12 +43,16 @@ function parseCli(argv) {
   if ((values.apply || values.reverse) && typeof values['backup-file'] !== 'string') {
     throw new Error('Writing or reversing requires --backup-file');
   }
+  if (values.reverse && values.apply && typeof values['applied-file'] !== 'string') {
+    throw new Error('Reverse apply requires --applied-file');
+  }
   return {
     projectId: values.project,
     apply: values.apply,
     reverse: values.reverse,
     inactivateOrphans: values['inactivate-orphans'],
     backupFile: values['backup-file'],
+    appliedFile: values['applied-file'],
   };
 }
 
@@ -97,11 +102,20 @@ async function runCli(argv, deps = {}) {
       apply: options.apply,
       projectId: options.projectId,
     });
+    if (options.apply) {
+      writeFile(options.appliedFile, {
+        projectId: options.projectId,
+        createdAt: new Date().toISOString(),
+        restored: result.restored,
+        skipped: result.skipped,
+      });
+    }
     return {
       projectId: options.projectId,
       mode: options.apply ? 'reverse' : 'reverse-dry-run',
       restored: result.restored.length,
       skipped: result.skipped.length,
+      appliedFile: options.apply ? options.appliedFile : undefined,
     };
   }
 
