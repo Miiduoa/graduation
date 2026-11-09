@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
+import { rewriteLegacyShopsPath } from '../app/legacyShopsPath';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RefreshControl, Text } from 'react-native';
 import { PostDetailScreen } from '../screens/social/PostDetailScreen';
@@ -280,4 +281,28 @@ test('an external cold-start link to another campus never reads the same ID and 
   expect(await view.findByText('回到校園社群列表')).toBeTruthy();
   expect(view.nav.getCurrentRoute()?.name).toBe('CampusSocialScreen');
   expect(view.nav.canGoBack()).toBe(false);
+});
+
+
+test('a canonical shared HTTPS post path becomes the native PostDetail route with its original campus', () => {
+  const path = rewriteLegacyShopsPath('community/post/old-1?schoolId=pu&utm_source=share');
+  expect(path).toBe('post/old-1?schoolId=pu');
+  const state = getStateFromPath(path, {
+    screens: { Today: { screens: { PostDetail: 'post/:postId', CampusSocialScreen: 'community' } } },
+  });
+  expect(state?.routes[0]?.state?.routes[0]).toMatchObject({
+    name: 'PostDetail',
+    params: { postId: 'old-1', schoolId: 'pu' },
+  });
+});
+
+test('a shared post path without a single valid school is not reinterpreted as current-campus content', () => {
+  for (const path of [
+    'community/post/old-1',
+    'community/post/old-1?schoolId=pu&schoolId=other',
+    'community/post/old-1?schoolId=',
+    'community/post/%2Fsecret?schoolId=pu',
+  ]) {
+    expect(rewriteLegacyShopsPath(path)).toBe(path);
+  }
 });
