@@ -152,12 +152,26 @@ const NON_BUILDING_VOLUMES = new Set([
   'no', 'maybe', 'proposed', 'planned', 'construction', 'demolished', 'destroyed',
   'ruins', 'roof', 'bridge',
 ]);
+// A way can retain building=yes while carrying a lifecycle tag for a removed,
+// abandoned or unfinished building. Treat contradictory tags as needing review:
+// this is a map volume, not proof of a standing, accessible campus building.
+const LIFECYCLE_BUILDING_TAGS = [
+  'abandoned:building', 'disused:building', 'demolished:building',
+  'destroyed:building', 'removed:building', 'razed:building',
+  'construction:building', 'proposed:building', 'planned:building',
+] as const;
 
 function isStandingBuilding(value: unknown): boolean {
-  const classification = object(value)?.building;
+  const tags = object(value);
+  const classification = tags?.building;
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
-  return kind.length > 0 && !NON_BUILDING_VOLUMES.has(kind);
+  if (!kind || NON_BUILDING_VOLUMES.has(kind)) return false;
+  return !LIFECYCLE_BUILDING_TAGS.some((tag) => {
+    const status = tags?.[tag];
+    return typeof status === 'string' && status.trim() !== '' &&
+      !['no', 'false', '0'].includes(status.trim().toLowerCase());
+  });
 }
 
 /** Only copy audited OSM way revision fields, never editor names or account IDs.
