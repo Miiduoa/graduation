@@ -193,7 +193,7 @@ export function AssistantCard({
           <p className={styles.hint}>{prerequisiteHint}</p>
           {canRecheckPrerequisite && (
             <button type="button" className={styles.secondary} disabled={pending}
-              onClick={() => onReconcile(prerequisite)}>
+              onClick={() => { if (prerequisite) onReconcile?.(prerequisite); }}>
               重新核對前一步行程
             </button>
           )}
