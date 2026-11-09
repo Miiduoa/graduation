@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   deleteDoc,
@@ -50,6 +51,7 @@ export async function publishStory(storyId: string, payload: {
   poiName?: string | null;
   expiresAtMs: number;
 }): Promise<string> {
+  if (payload.mediaUrl) assertPrivateFileNamespace(payload.mediaUrl, `schools/${payload.schoolId}/stories/${storyId}`);
   const ref = doc(storiesCollection(), storyId);
   const content = {
     schoolId: payload.schoolId,

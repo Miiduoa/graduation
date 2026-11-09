@@ -1,3 +1,5 @@
+import { Video, ResizeMode } from 'expo-av';
+import { usePrivateMedia } from '../../services/usePrivateMedia';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Animated,
@@ -148,8 +150,9 @@ function StorySlide({
   const [playing, setPlaying] = useState(false);
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
-  const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && failedImage === story.id;
+  const mediaUrl = usePrivateMedia(story.mediaUrl);
+  const hasImage = (story.kind === 'image' || story.kind === 'video') && !!story.mediaUrl;
+  const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
   const ready = !hasImage || loadedImage === story.id || imageFailed;
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
@@ -255,10 +258,21 @@ function StorySlide({
           style={[styles.canvas, !hasImage && { backgroundColor: story.bgColor || '#243b35' }]}
           {...swipe.panHandlers}
         >
-          {hasImage && !imageFailed ? (
+          {story.kind === 'video' && mediaUrl && !imageFailed ? (
+            <Video
+              key={story.id}
+              source={{ uri: mediaUrl }}
+              style={styles.photo}
+              resizeMode={ResizeMode.CONTAIN}
+              useNativeControls
+              shouldPlay
+              onLoad={() => setLoadedImage(story.id)}
+              onError={() => setFailedImage(story.id)}
+            />
+          ) : hasImage && !imageFailed ? (
             <Image
               key={story.id}
-              source={{ uri: story.mediaUrl! }}
+              source={{ uri: mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"
