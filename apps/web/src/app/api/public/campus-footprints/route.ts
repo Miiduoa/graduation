@@ -18,6 +18,31 @@ const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 // Respect its Retry-After while bounding malformed or extreme upstream values.
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+// Overpass exposes its database replication time separately from each way's edit
+// time. A freshly fetched HTTP response can still contain days-old map state.
+const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
+
+function verifyOverpassReplicationTime(payload: unknown, now: number): void {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+  const metadata = (payload as Record<string, unknown>).osm3s;
+  // Older/mock-compatible replies without replication metadata still follow the
+  // existing whitelist/geometry rules. Validate the timestamp whenever supplied.
+  if (metadata === undefined) return;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('Invalid Overpass replication metadata');
+  }
+  const timestamp = (metadata as Record<string, unknown>).timestamp_osm_base;
+  if (timestamp === undefined) return;
+  if (typeof timestamp !== 'string' ||
+      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/.test(timestamp)) {
+    throw new Error('Invalid Overpass replication timestamp');
+  }
+  const baseMs = Date.parse(timestamp);
+  if (!Number.isFinite(baseMs) || new Date(baseMs).toISOString().replace('.000Z', 'Z') !== timestamp ||
+      baseMs > now + 5 * 60 * 1000 || now - baseMs > MAX_OVERPASS_REPLICATION_LAG_MS) {
+    throw new Error('Overpass replication timestamp is not recent');
+  }
+}
 
 class OverpassRateLimitError extends Error {
   constructor(readonly cooldownMs: number) {
@@ -117,6 +142,7 @@ async function readOsm(): Promise<Snapshot> {
   }
   const raw = await readBoundedResponse(response);
   const payload = JSON.parse(raw) as unknown;
+  verifyOverpassReplicationTime(payload, Date.now());
   // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
   // on timeout or memory exhaustion. Never promote that partial result to a
   // fresh 24-hour snapshot or replace a previously verified fallback.
