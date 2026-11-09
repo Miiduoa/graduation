@@ -183,6 +183,9 @@ export function updateStudyPracticeRound(
         !response.attempt.trim() || !response.answerVisible) return round;
       return advance(withResponse(round, { ...response, outcome: action.outcome }));
     case 'skip':
+      // Revisiting an already assessed or skipped card must not silently overwrite
+      // the learner's earlier decision. Editing their attempt resets that outcome.
+      if (response.outcome !== null) return round;
       return advance(withResponse(round, { ...response, answerVisible: false, outcome: 'skipped' }));
     default:
       return round;

@@ -228,6 +228,26 @@ describe('finite independent practice rounds', () => {
     expect(attempted.responses[attempted.cards[0].id].answerVisible).toBe(true);
   });
 
+  it('does not replace an existing self-rating or prior skip when revisiting a card', () => {
+    const initial = round(3);
+    const assessed = updateStudyPracticeRound(decide(initial, 'understood', '第一題答案'), { type: 'go', index: 0 });
+    expect(updateStudyPracticeRound(assessed, { type: 'skip' })).toBe(assessed);
+    expect(assessed.responses[assessed.cards[0].id].outcome).toBe('understood');
+    // The learner may deliberately reassess after revealing the same answer.
+    const reassessed = updateStudyPracticeRound(assessed, { type: 'decide', outcome: 'again' });
+    expect(reassessed.responses[reassessed.cards[0].id].outcome).toBe('again');
+    const revisited = updateStudyPracticeRound(reassessed, { type: 'go', index: 0 });
+    expect(updateStudyPracticeRound(revisited, { type: 'skip' })).toBe(revisited);
+    // A real edit resets the rating and permits an explicit skip.
+    const edited = updateStudyPracticeRound(revisited, { type: 'attempt', value: '重寫後的答案' });
+    expect(edited.responses[edited.cards[0].id].outcome).toBeNull();
+    const skipped = updateStudyPracticeRound(edited, { type: 'skip' });
+    expect(skipped.responses[skipped.cards[0].id].outcome).toBe('skipped');
+    expect(skipped.index).toBe(1);
+    const back = updateStudyPracticeRound(skipped, { type: 'go', index: 0 });
+    expect(updateStudyPracticeRound(back, { type: 'skip' })).toBe(back);
+  });
+
   it('finishes at the last decision or skip and ignores further answer actions until explicit navigation', () => {
     let completed = round(3);
     completed = decide(completed, 'understood');

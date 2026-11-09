@@ -226,6 +226,23 @@ it('keeps a learner self-rating when concealing an already read answer but clear
   expect(model.run).not.toHaveBeenCalled();
 });
 
+it('disables skip on an already assessed or skipped card and preserves explicit ratings', () => {
+  render(<Controller />);
+  decide('understood');
+  selectQuestion(1);
+  expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(true);
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，自評理解' })).toBeTruthy();
+  writeAnswer('重寫以便重新評估');
+  expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(false);
+  skip();
+  selectQuestion(1);
+  expect(screen.getByRole('button', { name: '略過這題' }).hasAttribute('disabled')).toBe(true);
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，略過' })).toBeTruthy();
+  expect(model.run).not.toHaveBeenCalled();
+});
+
 it('only reveals the source on request and marks the exact first quotation', () => {
   const sourceText = `前文，${cards[0].sourceQuote}。後文又說${cards[0].sourceQuote}。`;
   render(<Controller deck={[{ ...cards[0], sourceText }]} />);
