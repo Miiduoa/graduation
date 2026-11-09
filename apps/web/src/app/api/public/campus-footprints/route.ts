@@ -34,7 +34,7 @@ function verifyOverpassReplicationTime(payload: unknown, now: number): void {
   const timestamp = (metadata as Record<string, unknown>).timestamp_osm_base;
   if (timestamp === undefined) return;
   if (typeof timestamp !== 'string' ||
-      !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$/.test(timestamp)) {
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(timestamp)) {
     throw new Error('Invalid Overpass replication timestamp');
   }
   const baseMs = Date.parse(timestamp);
