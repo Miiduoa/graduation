@@ -64,6 +64,7 @@ export function findCatalogTimetableOverlaps(
       if (normalize(next.courseCode) !== '' &&
         normalize(saved.courseCode) === normalize(next.courseCode) &&
         normalize(saved.className) === normalize(next.className) &&
+        normalize(saved.title) === normalize(next.title) &&
         normalize(saved.teacher) === normalize(next.teacher) &&
         normalize(saved.location) === normalize(next.location) &&
         savedStart === start && savedEnd === end) continue;

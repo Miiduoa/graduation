@@ -249,6 +249,8 @@ test('overlap check respects school, term, distinct weekdays, adjacent periods a
   // hide the stale personal entry as an exact duplicate.
   expect(find(current.rows, existing.map((row) => ({ ...row, teacher: '更新教師' })))).toHaveLength(2);
   expect(find(current.rows, existing.map((row) => ({ ...row, location: '新教室' })))).toHaveLength(2);
+  expect(find(current.rows, existing.map((row) => ({ ...row, title: '更新課名' })))).toHaveLength(2);
+  expect(find(current.rows, existing.map((row) => ({ ...row, title: '　分析化學專題　' })))).toHaveLength(0);
   expect(find(current.rows, existing.map((row) => ({ ...row, courseCode: '' })))).toHaveLength(2);
   expect(find(current.rows, existing.map((row) => ({ ...row, academicYear: '114' })))).toHaveLength(0);
   expect(find(current.rows, existing.map((row) => ({ ...row, schoolId: 'ncnu' })))).toHaveLength(0);
