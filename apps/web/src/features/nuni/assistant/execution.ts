@@ -53,14 +53,23 @@ export function priorCalendarActionsVerified(
   );
 }
 
-/** Explain the first unresolved calendar dependency without turning an unknown result into permission to retry. */
+/** Reconcile the original unresolved action, never a newly generated replacement. */
+export function firstUnverifiedCalendarAction(
+  cards: V2Card[],
+  index: number,
+  states: V2ActionStates,
+): V2Card | undefined {
+  return cards.slice(0, index).find((card) =>
+    card.tool === 'propose_personal_event' && states[card.mutationId]?.status !== 'verified');
+}
+
+/** Explain the first unresolved calendar dependency without treating it as permission to retry. */
 export function priorCalendarActionHint(
   cards: V2Card[],
   index: number,
   states: V2ActionStates,
 ): string | null {
-  const previous = cards.slice(0, index).find((card) =>
-    card.tool === 'propose_personal_event' && states[card.mutationId]?.status !== 'verified');
+  const previous = firstUnverifiedCalendarAction(cards, index, states);
   if (!previous) return null;
   const state = states[previous.mutationId];
   if (state?.status === 'cancelled' || state?.status === 'superseded')
