@@ -136,3 +136,31 @@ it('never animates a live arrival from a server-declared stale snapshot', async 
   expect(screen.queryByTestId('campus-eta-minutes')).toBeNull();
   expect(screen.queryByTestId('campus-approach')).toBeNull();
 });
+
+it('ignores the former in-flight request after disconnecting and reconnecting', async () => {
+  let completeOld!: (value: TransitResult) => void;
+  let completeNew!: (value: TransitResult) => void;
+  let requests = 0;
+  vi.mocked(queryTransit).mockImplementation(() => {
+    requests += 1;
+    return new Promise<TransitResult>((resolve) => {
+      if (requests === 1) completeOld = resolve;
+      else completeNew = resolve;
+    });
+  });
+  board();
+  expect(screen.getByTestId('campus-skeleton')).toBeTruthy();
+
+  online = false;
+  await act(async () => { window.dispatchEvent(new Event('offline')); });
+  online = true;
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  expect(queryTransit).toHaveBeenCalledTimes(2);
+
+  await act(async () => { completeOld(arrivals()); });
+  expect(screen.getByText('正在重新確認班次，暫不顯示到站預估。')).toBeTruthy();
+  expect(screen.queryByTestId('campus-eta-minutes')).toBeNull();
+
+  await act(async () => { completeNew(arrivals()); });
+  expect((await screen.findByTestId('campus-eta-minutes')).textContent).toBe('3');
+});

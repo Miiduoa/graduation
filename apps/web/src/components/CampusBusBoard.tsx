@@ -98,8 +98,8 @@ export function CampusBusBoard({ schoolId, schoolName }: { schoolId: string; sch
         clearTimeout(timeout);
         if (controller === current) {
           controller = null;
-          inFlight.current = false;
           if (active) {
+            inFlight.current = false;
             if (current.signal.aborted) {
               setNeedsFreshData(true);
               delay = 60_000;
