@@ -241,6 +241,9 @@ function V2Conversation({
   const preciseRevisionTurns = useRef(new Set<V2Turn>());
   const selectionRevisionTurns = useRef(new Set<V2Turn>());
   const rejectedProposalIds = useRef(new Set<string>());
+  // A selection's per-card decision policy follows its revision descendants,
+  // independently of comparison indices or any restored draft content.
+  const individualConfirmationTurns = useRef(new WeakSet<V2Turn>());
   const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[]; preciseIndex?: number; retainedIndices?: number[] }>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
@@ -454,7 +457,7 @@ function V2Conversation({
     // Keep this guard even when a caller bypasses the presentation controls.
     if (cards.length > 1 && cards.some(card => turns.some(turn =>
       turn.reply.cards.some(item => item.mutationId === card.mutationId) &&
-      planComparisons.current.get(turn)?.retainedIndices !== undefined))) {
+      individualConfirmationTurns.current.has(turn)))) {
       if (active()) setError('請逐張核對並確認保留項目；這次沒有送出任何行程。');
       return;
     }
@@ -589,6 +592,7 @@ function V2Conversation({
           setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: '修改原先安排：' + instruction.trim(), reply };
+      if (individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
       // Comparison is local presentation data, never a replacement for signed cards.
       planComparisons.current.set(revisedTurn, { before, after });
       setTurns(previous => [...previous, revisedTurn]);
@@ -699,6 +703,7 @@ function V2Conversation({
         if (canConfirmAction(actionStates.current[card.mutationId])) setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: (selecting ? '選擇要建立的行程：' : '精確調整時間：') + edit.label, reply };
+      if (selecting || individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
       planComparisons.current.set(revisedTurn, { before: edit.before, after,
         ...(selecting ? { retainedIndices: edit.retainedIndices } : { preciseIndex: edit.preciseIndex }) });
       setTurns(previous => [...previous, revisedTurn]);
@@ -797,7 +802,7 @@ function V2Conversation({
       error={error}
       onAsk={() => void ask()}
       onConfirm={(cards) => void execute(cards)}
-      allowBatchConfirmation={turn => planComparisons.current.get(turn)?.retainedIndices === undefined}
+      allowBatchConfirmation={turn => !individualConfirmationTurns.current.has(turn)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
       renderPlanComparison={turn => {

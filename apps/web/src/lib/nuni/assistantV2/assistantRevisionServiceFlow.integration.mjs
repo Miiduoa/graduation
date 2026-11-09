@@ -34,7 +34,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 let dom, testing, React, Assistant, handleV2, verifyCard, database, server, fixtures;
-let secret, now, serial = 0, identitySerial = 0, fault, planEvents, nativeStorageRead;
+let secret, now, serial = 0, identitySerial = 0, fault, planEvents, revisionEvents, nativeStorageRead;
 const identitiesByContext = new Map(), identitiesByHandle = new Map();
 const requests = [], deniedFetches = [];
 const serverImportWithoutWindow = typeof window === 'undefined';
@@ -291,6 +291,7 @@ beforeEach(() => {
   identitiesByContext.clear(); identitiesByHandle.clear();
   fault = { dropNextCancel: false, failLedger: false, holdRevision: false, holdPrecise: false, held: null };
   planEvents = structuredClone(proposed);
+  revisionEvents = structuredClone(revised);
   fixture.school = 'fixture-school';
   useIdentity(registerIdentity('inprocess-fixture-account-' + serial));
   database = fixtures.fixtureAdapter();
@@ -312,7 +313,7 @@ beforeEach(() => {
     const revision = input.messages[0].content.includes('這次只重新預覽原行程');
     if (!hasResults) expect(input.tools?.some(tool => tool.function.name === 'propose_personal_event')).toBe(true);
     return {
-      message: !hasResults ? { role: 'assistant', content: '', tool_calls: (revision ? revised : planEvents).map((event, index) => ({
+      message: !hasResults ? { role: 'assistant', content: '', tool_calls: (revision ? revisionEvents : planEvents).map((event, index) => ({
         id: 'fixture-tool-' + index, type: 'function', function: { name: 'propose_personal_event', arguments: JSON.stringify(event) },
       })) } : { role: 'assistant', content: revision ? '合成修訂已供預覽，尚未寫入。' : '合成模型回覆：兩項行程僅供預覽，請核對確認卡。' },
       usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
@@ -1115,4 +1116,191 @@ it('does not claim whole-proposal cancellation or request an empty plan while an
   expect(database.writes).toHaveLength(0);
   expect(database.snapshot()).toEqual(baseline);
   assertNoAdditionalModel();
+});
+
+
+// Local-only joint validation: these helpers choose the current proposal's live
+// controls, while the original 29 standalone regression cases remain unchanged.
+const currentButton = name => {
+  const buttons = ui().getAllByRole('button', { name }).filter(button => !button.disabled);
+  expect(buttons.length).toBeGreaterThan(0);
+  return buttons.at(-1);
+};
+const lastForm = name => ui().getAllByRole('form', { name }).at(-1);
+const jointEvents = () => [
+  { ...proposed[0], title: '共同驗證保留甲' },
+  { ...proposed[1], title: '共同驗證排除乙' },
+  { ...proposed[1], title: '共同驗證保留丙', startTime: '22:00', endTime: '23:00' },
+];
+function currentTimeEditor(entry, index, values = {}) {
+  testing.fireEvent.click(currentButton('精確調整時間'));
+  const form = lastForm('精確調整行程時間');
+  selectExactTarget(form, entry, index);
+  setExactTime(form, values);
+  return form;
+}
+function currentFreeEditor(instruction) {
+  testing.fireEvent.click(currentButton('修改時間或條件'));
+  const form = lastForm('修改安排再預覽');
+  testing.fireEvent.change(testing.within(form).getByLabelText('修改條件'), { target: { value: instruction } });
+  testing.fireEvent.click(testing.within(form).getByRole('checkbox', { name: /^保留原樣 第 1 項/ }));
+  return form;
+}
+async function retainFirstAndLast(entry) {
+  const countBefore = uiCards().length;
+  testing.fireEvent.click(currentButton('選擇要建立的行程'));
+  const form = lastForm('選擇待建立行程');
+  testing.fireEvent.click(retainedCheckbox(form, 1));
+  submitSelection(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(countBefore + 2));
+  const result = count('revise').at(-1);
+  expect(result.body.keepMutationIds).toEqual([entry.response.cards[0].mutationId, entry.response.cards[2].mutationId]);
+  expect(result.response.cards.map(card => card.args)).toEqual([entry.response.cards[0].args, entry.response.cards[2].args]);
+  assertRealCards(result);
+  return result;
+}
+async function askAgainInSameMount(composer, events) {
+  planEvents = structuredClone(events);
+  const before = uiCards().length;
+  testing.fireEvent.change(composer, { target: { value: '重新提出固定驗證行程，只提供新的待確認卡' } });
+  testing.fireEvent.click(ui().getByRole('button', { name: '送出' }));
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(before + events.length));
+  const result = count('ask').at(-1);
+  expect(result.response.cards.map(card => card.args)).toEqual(events);
+  assertRealCards(result);
+  return result;
+}
+
+it('jointly carries only retained items through exact time and protected text revision before manual final confirmation', async () => {
+  planEvents = jointEvents();
+  const original = await initialPlan(), source = structuredClone(planEvents), baseline = database.snapshot();
+  expect(ui().getByRole('button', { name: '依序全部確認' })).toBeTruthy();
+  const selected = await retainFirstAndLast(original.entry);
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  const time = currentTimeEditor(selected, 1, { startTime: '23:00', endDate: '2026-11-05', endTime: '01:00' });
+  submitExactTime(time);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(7));
+  const timed = count('revise').at(-1);
+  expect(timed.body.change.mutationId).toBe(selected.response.cards[1].mutationId);
+  expect(timed.body.originalCards).toEqual(selected.response.cards.map(({ token, args }) => ({ token, args })));
+  const timedEvents = [source[0], { ...source[2], startTime: '23:00', endDate: '2026-11-05', endTime: '01:00' }];
+  expect(timed.response.cards.map(card => card.args)).toEqual(timedEvents);
+  expect(ui().queryByRole('button', { name: '依序全部確認' }), 'selection descendant after exact time must remain per-card only').toBeNull();
+  assertRealCards(timed);
+  expect(fixture.provider).toHaveBeenCalledTimes(2);
+  // Respect the real per-account three-request/minute limit while remaining
+  // within every source token's five-minute validity; no quota code is mocked.
+  now += 61000;
+  revisionEvents = [timedEvents[0], { ...timedEvents[1], endTime: '01:30' }];
+  const free = currentFreeEditor('第一項保持原樣，第二項保留開始時間，結束改為隔日 01:30');
+  testing.fireEvent.submit(free);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(9));
+  const final = count('ask').at(-1);
+  expect(ui().queryByRole('button', { name: '依序全部確認' }), 'selection descendant after protected text revision must remain per-card only').toBeNull();
+  expect(final.body.planProtection).toEqual({ originalEvents: timedEvents, protectedIndices: [0] });
+  expect(JSON.parse(final.body.question.split('原安排：')[1].split('\n修改條件：')[0])).toEqual(timedEvents);
+  expect(final.body.question).not.toContain(source[1].title);
+  expect(final.body.history).toEqual([]);
+  expect(final.response.cards.map(card => card.args)).toEqual(revisionEvents);
+  for (const entry of [selected, timed, final]) {
+    expect(entry.response.cards).toHaveLength(2);
+    expect(entry.response.cards.some(card => card.args.title === source[1].title)).toBe(false);
+  }
+  assertRealCards(final);
+  for (const prior of [original.entry, selected, timed]) await assertOriginalCannotExecute(prior);
+  expect(database.snapshot()).toEqual(baseline);
+  expect(count('confirm')).toHaveLength(0);
+  expect(fixture.provider).toHaveBeenCalledTimes(4);
+  for (let index = 0; index < 2; index++) {
+    testing.fireEvent.click(testing.within(uiCards()[7 + index]).getByRole('button', { name: '確認' }));
+    await testing.waitFor(() => expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(index + 1));
+    expect(database.writes).toHaveLength(index + 1);
+    expect(count('confirm')[index]).toMatchObject({ status: 200,
+      response: { status: 'verified', mutationId: final.response.cards[index].mutationId } });
+  }
+  expect(database.writes.map(write => write.mutationId)).toEqual(final.response.cards.map(card => card.mutationId));
+  expect(database.snapshot().records.some(record => record.title === source[1].title)).toBe(false);
+  expect(fixture.provider).toHaveBeenCalledTimes(4);
+  expect(deniedFetches).toEqual([]);
+  console.log('ASSISTANT_JOINT_CHAIN_OK', JSON.stringify({ fixedProvider: true, realBusinessModules: true,
+    stages: ['selection 3 to 2', 'exact cross-day time', 'protected text revision', 'two manual confirmations'],
+    priorProposalTokensRejected: 7, previewWrites: 0, finalWrites: 2, modelFixtureCalls: 4 }));
+});
+
+it('keeps a restored older three-item time source read-only after newer selection and time revisions exclude its middle item', async () => {
+  planEvents = jointEvents();
+  const original = await initialPlan(), source = structuredClone(planEvents);
+  openExactTime(original.entry, 1, { startTime: '21:00', endTime: '21:30' });
+  const oldDraft = auditTimeDraft();
+  const newer = await askAgainInSameMount(original.composer, source);
+  const selected = await retainFirstAndLast(newer);
+  now += 61000; // Keep the real limiter; all source permits remain within five minutes.
+  const time = currentTimeEditor(selected, 1, { startTime: '23:00', endTime: '23:30' });
+  submitExactTime(time);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(10));
+  const timed = count('revise').at(-1), currentEvents = [source[0], { ...source[2], startTime: '23:00', endTime: '23:30' }];
+  expect(timed.response.cards.map(card => card.args)).toEqual(currentEvents);
+  expect(storedDrafts(TIME_DRAFT_PREFIX)).toEqual([oldDraft]);
+  for (const prior of [newer, selected]) await assertOriginalCannotExecute(prior);
+  const view = await remountAssistant(original.view);
+  restoreTimeDraft();
+  planEvents = currentEvents;
+  const fresh = await initialPlan(view);
+  const form = openExactTime(fresh.entry, 0, {});
+  expect(form.textContent).toContain('目前提議的內容或順序已變更，不能直接套用時間草稿');
+  expect(testing.within(form).queryByRole('button', { name: '套用已恢復的時間草稿' })).toBeNull();
+  expect(testing.within(form).queryByRole('button', { name: '以恢復草稿取代目前時間欄位' })).toBeNull();
+  expect(uiCards()).toHaveLength(2);
+  expect(fresh.entry.response.cards.map(card => card.args)).toEqual(currentEvents);
+  expect(fresh.entry.response.cards.some(card => card.args.title === source[1].title)).toBe(false);
+  expect(storedDrafts(TIME_DRAFT_PREFIX)).toEqual([oldDraft]);
+  expect(count('revise')).toHaveLength(2);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  expect(deniedFetches).toEqual([]);
+});
+
+it('rebinds a retained-plan time draft only to fresh current cards and blocks every revision path after an unknown cancellation', async () => {
+  planEvents = jointEvents();
+  const original = await initialPlan(), source = structuredClone(planEvents);
+  const selected = await retainFirstAndLast(original.entry);
+  const savedEditor = currentTimeEditor(selected, 1, { startTime: '23:00', endTime: '23:30' });
+  expect(exactFields(savedEditor).startTime).toBe('23:00');
+  const saved = storedDrafts(TIME_DRAFT_PREFIX)[0];
+  expect(saved.value.source.events).toEqual([source[0], source[2]]);
+  await assertOriginalCannotExecute(original.entry);
+  const view = await remountAssistant(original.view);
+  restoreTimeDraft();
+  planEvents = [source[0], source[2]];
+  const fresh = await initialPlan(view);
+  const time = openExactTime(fresh.entry, 0, {});
+  const beforeApply = sentActions();
+  testing.fireEvent.click(testing.within(time).getByRole('button', { name: '套用已恢復的時間草稿' }));
+  expect(testing.within(time).getByLabelText('要調整的行程').value).toBe(fresh.entry.response.cards[1].mutationId);
+  expect(storedDrafts(TIME_DRAFT_PREFIX)[0].value.source.key).not.toBe(saved.value.source.key);
+  expect(sentActions()).toEqual(beforeApply);
+  const free = currentFreeEditor('第一項不變，第二項調至 23:00–23:30');
+  const selection = openSelection();
+  testing.fireEvent.click(retainedCheckbox(selection, 1));
+  fault.dropNextCancel = true;
+  const beforeUnknown = requests.length;
+  submitExactTime(time);
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await ui().findByRole('button', { name: '重新核對結果' });
+  await testing.waitFor(() => expect(testing.within(time).getByRole('alert').textContent).toContain('尚未全部確認撤銷'));
+  expect(requests.slice(beforeUnknown).map(request => request.action)).toEqual(['cancel', 'reconcile']);
+  expect(count('cancel').at(-1).body.token).toBe(fresh.entry.response.cards[0].token);
+  expect(count('reconcile')[0].status).toBe(503);
+  const beforeRetry = sentActions();
+  submitExactTime(time); testing.fireEvent.submit(free); submitSelection(selection);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(sentActions()).toEqual(beforeRetry);
+  expect(count('revise')).toHaveLength(1); // Only the completed pre-remount selection.
+  expect(count('confirm')).toHaveLength(0);
+  expect(uiCards()).toHaveLength(2);
+  expect(uiCards().some(card => card.textContent.includes(source[1].title))).toBe(false);
+  expect(storedDrafts()).toEqual([]);
+  expect(database.writes).toHaveLength(0);
+  expect(fixture.provider).toHaveBeenCalledTimes(4);
+  expect(deniedFetches).toEqual([]);
 });
