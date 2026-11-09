@@ -23,6 +23,10 @@ const account = vi.hoisted(() => ({
   loading: false,
 }));
 
+vi.mock('@/lib/firebase', () => ({
+  getAuth: () => ({ currentUser: { getIdToken: async () => 'test-token' } }),
+}));
+
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
 vi.mock('@/components/SiteShell', () => ({
   SiteShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
@@ -379,7 +383,7 @@ it('shows attachment input only when R2 is enabled and stores uploaded paths', a
     await waitFor(() => expect(createGroupDiscussionPost).toHaveBeenCalled());
     expect(upload).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: expect.stringMatching(/^groups\/g1\/posts\/[^/]+\/0-note.pdf$/),
+        path: expect.stringMatching(/^groups\/g1\/posts\/[^/]+\/0-[a-z0-9]+-[a-z0-9]+-note.pdf$/),
       }),
     );
     expect(vi.mocked(createGroupDiscussionPost).mock.calls[0]?.[3].attachments).toEqual([
@@ -414,7 +418,7 @@ it('limits attachments and resumes a throttled draft without uploading completed
   fireEvent.click(screen.getByRole('button', { name: '發布' }));
   await screen.findByText('已發布貼文。');
   expect(uploadPrivateFile).toHaveBeenCalledTimes(4);
-  expect(vi.mocked(uploadPrivateFile).mock.calls[2][0].path).toBe(vi.mocked(uploadPrivateFile).mock.calls[1][0].path);
+  expect(vi.mocked(uploadPrivateFile).mock.calls[2][0].path).not.toBe(vi.mocked(uploadPrivateFile).mock.calls[1][0].path);
   expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments?.[0]).toBe(firstPath);
   expect((picker as HTMLInputElement).disabled).toBe(false);
 });
@@ -438,4 +442,52 @@ it('discards upload progress when starting a new draft', async () => {
   fireEvent.click(screen.getByRole('button', { name: '發布' }));
   await waitFor(() => expect(uploadPrivateFile).toHaveBeenCalledTimes(2));
   expect(vi.mocked(uploadPrivateFile).mock.calls[1][0].path).not.toBe(path);
+});
+
+it('retries a lost PUT response with a new path and retains confirmed attachments', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/privateFiles')>('@/lib/privateFiles');
+  vi.mocked(uploadPrivateFile).mockImplementation(actual.uploadPrivateFile);
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const stored = new Set<string>();
+  const puts: string[] = [];
+  const network = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      const { path } = JSON.parse(String(init.body));
+      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000 }) } as Response;
+    }
+    const path = String(url);
+    puts.push(path);
+    expect(init?.headers).toEqual({ 'If-None-Match': '*' });
+    if (stored.has(path)) return { ok: false, status: 412 } as Response;
+    stored.add(path);
+    if (puts.length === 2) throw new TypeError('Response lost');
+    return { ok: true, status: 200 } as Response;
+  });
+  vi.stubGlobal('fetch', network);
+  const view = await act(async () => renderPage());
+  try {
+    await screen.findByText('週三外拍');
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+    fireEvent.change(screen.getByLabelText('附加圖片或文件'), { target: { files: [
+      new File(['a'], 'a.txt', { type: 'text/plain' }),
+      new File(['b'], 'b.txt', { type: 'text/plain' }),
+    ] } });
+    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    await screen.findByText('附件上傳失敗，請確認檔案格式與連線後重試。');
+    expect(createGroupDiscussionPost).not.toHaveBeenCalled();
+    expect(puts).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    await screen.findByText('已發布貼文。');
+    expect(puts).toHaveLength(3);
+    expect(puts[2]).not.toBe(puts[1]);
+    expect(puts[2].split('/').slice(0, 4)).toEqual(puts[1].split('/').slice(0, 4));
+    const { parsePrivateFilePath } = await import('@campus/shared/src/privateFileAccess');
+    puts.forEach((path) => expect(parsePrivateFilePath(path)?.kind).toBe('group-post'));
+    expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments).toEqual([puts[0], puts[2]]);
+  } finally {
+    view.unmount();
+    delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND;
+    vi.unstubAllGlobals();
+  }
 });

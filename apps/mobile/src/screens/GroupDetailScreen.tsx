@@ -585,7 +585,7 @@ export function GroupDetailScreen(props: any) {
           const path = privateGroupPostPath(
             groupId,
             postRef.id,
-            `${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+            `${index}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180)}`,
           );
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();

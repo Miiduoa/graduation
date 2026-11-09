@@ -50,6 +50,8 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'school-a' } }) }));
 jest.mock('../firebase', () => ({
   getDb: () => mockDb,
+  getAuthInstance: () => ({ currentUser: { getIdToken: async () => 'test-token' } }),
+  hasUsableFirebaseConfig: () => true,
   getFunctionsInstance: () => mockDb,
   isFirebaseMockMode: () => false,
 }));
@@ -275,7 +277,7 @@ test('post attachments enforce the limit and retain progress until success or di
     const firstPath = upload.mock.calls[0][0].path;
     await act(async () => fireEvent.press(view.getByText('送出')));
     expect(upload).toHaveBeenCalledTimes(4);
-    expect(upload.mock.calls[2][0].path).toBe(upload.mock.calls[1][0].path);
+    expect(upload.mock.calls[2][0].path).not.toBe(upload.mock.calls[1][0].path);
     expect(setDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ attachments: expect.arrayContaining([firstPath]) }));
     expect(view.getByText('附加圖片或文件（0）')).toBeTruthy();
     upload.mockRejectedValue(Object.assign(new Error('limited'), { statusCode: 429 }));
@@ -295,5 +297,53 @@ test('post attachments enforce the limit and retain progress until success or di
     delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
     global.fetch = previousFetch;
     upload.mockRestore();
+  }
+});
+
+test('post attachments recover from a lost PUT response without repeating confirmed uploads', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const picker = require('expo-document-picker').getDocumentAsync;
+  picker.mockResolvedValue({ canceled: false, assets: [
+    { uri: 'file:///a', name: 'a.txt', mimeType: 'text/plain' },
+    { uri: 'file:///b', name: 'b.txt', mimeType: 'text/plain' },
+  ] });
+  const previousFetch = global.fetch;
+  const stored = new Set<string>();
+  const puts: string[] = [];
+  global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('file:')) return { blob: async () => new Blob(['text'], { type: 'text/plain' }) };
+    if (init?.method === 'POST') {
+      const { path } = JSON.parse(String(init.body));
+      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000 }) };
+    }
+    puts.push(url);
+    expect(init?.headers).toEqual({ 'If-None-Match': '*' });
+    if (stored.has(url)) return { ok: false, status: 412 };
+    stored.add(url);
+    if (puts.length === 2) throw new TypeError('Response lost');
+    return { ok: true, status: 200 };
+  }) as unknown as typeof fetch;
+  const setDoc = require('firebase/firestore').setDoc;
+  setDoc.mockClear();
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} />);
+  try {
+    await view.findByText('附加圖片或文件（0）');
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '附件貼文');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '附件內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(puts).toHaveLength(2);
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(puts).toHaveLength(3);
+    expect(puts[2]).not.toBe(puts[1]);
+    expect(puts[2].split('/').slice(0, 4)).toEqual(puts[1].split('/').slice(0, 4));
+    const { parsePrivateFilePath } = require('@campus/shared/src/privateFileAccess');
+    puts.forEach((path) => expect(parsePrivateFilePath(path)?.kind).toBe('group-post'));
+    expect(setDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ attachments: [puts[0], puts[2]] }));
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
   }
 });
