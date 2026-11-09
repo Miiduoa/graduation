@@ -474,6 +474,9 @@ export async function confirm(
       return receipt;
     }
     if (match.conflict) return fail('CONFIRMATION_CONFLICT', 409);
+    // A dispatched write may still commit after its transport failed. An
+    // absent read is not proof of failure; only read back the original action.
+    if (state.uncertain) return fail('EXECUTION_UNKNOWN', 503);
     if (
       ledger.revision !== p.revision ||
       (p.previousEventHash &&

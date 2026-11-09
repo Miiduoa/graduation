@@ -58,6 +58,24 @@ jobs:
           python-version: '3.12'
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify in-process revision service contracts
+        run: |
+          mkdir -p artifacts/assistant-plan-revision
+          node scripts/build-functions-shared.cjs
+          pnpm --filter web exec vitest run \
+            src/lib/nuni/assistantV2/protectedPlanServiceFlow.test.ts \
+            src/lib/nuni/assistantV2/protectedPlanRunner.test.ts \
+            src/lib/nuni/assistantV2/protectedPlan.test.ts \
+            src/lib/nuni/assistantV2/planRevision.test.ts \
+            src/lib/nuni/assistantV2/calendarExecution.test.ts \
+            --maxWorkers=4 --reporter=default --reporter=json \
+            --outputFile="$GITHUB_WORKSPACE/artifacts/assistant-plan-revision/service-results.json"
+      - name: Verify Assistant to service revision gates without sockets
+        run: |
+          pnpm --filter web exec vitest run \
+            --config src/lib/nuni/assistantV2/vitest.service-flow.config.mjs \
+            --reporter=default --reporter=json \
+            --outputFile="$GITHUB_WORKSPACE/artifacts/assistant-plan-revision/client-service-results.json"
       - name: Install Chromium test tools
         run: |
           python -m pip install playwright==1.57.0
