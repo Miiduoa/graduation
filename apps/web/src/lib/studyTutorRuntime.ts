@@ -66,6 +66,15 @@ function workerError(code: unknown): Error {
     ? messages[code] : messages.invalid_response);
 }
 
+// An exact substring can be just a period or operator: matching the source is
+// necessary, but punctuation alone does not identify what the lesson explains.
+// Enforce this only for NEW worker results. Saved v1/v2 explanations continue
+// to use their original schema so old offline study backups remain readable.
+function hasSubstantiveGeneratedEvidence(explanation: TutorExplanation): boolean {
+  return [explanation.sourceQuote, ...(explanation.steps?.map((step) => step.sourceQuote) ?? [])]
+    .every((quote) => /[\p{L}\p{N}]/u.test(quote));
+}
+
 function progressMessage(message: unknown, phase: unknown): string {
   if (phase === 'generating') return '正在依本段原文準備講解與自我檢查題…';
   const download = typeof message === 'string' && message.length <= 300
@@ -194,7 +203,10 @@ export async function runStudyTutor({
         } else if (data.type === 'result') {
           try {
             if (typeof data.raw !== 'string') throw workerError('invalid_response');
-            finish(undefined, parseTutorExplanation(data.raw, source));
+            const explanation = parseTutorExplanation(data.raw, source);
+            if (!hasSubstantiveGeneratedEvidence(explanation))
+              throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
+            finish(undefined, explanation);
           } catch (error) {
             finish(error instanceof Error ? error : workerError('invalid_response'));
           }

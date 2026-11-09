@@ -240,6 +240,45 @@ describe('explicit local study generation', () => {
     expect(FakeWorker.instances).toHaveLength(0);
   });
 
+  it('rejects punctuation-only citations in newly generated lessons and still allows retry', async () => {
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    // The punctuation is literally in the source, so a substring-only check
+    // would incorrectly treat it as meaningful evidence for the whole answer.
+    worker.emit({ type: 'result', raw: JSON.stringify({ ...lesson(), sourceQuote: '。' }) });
+    await expect(pending).rejects.toThrow('引句只有標點或符號');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a punctuation-only individual step even if the main citation is meaningful', async () => {
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal,
+    });
+    lastWorker().emit({
+      type: 'result',
+      raw: JSON.stringify({
+        ...lesson(),
+        steps: [
+          { title: '核對主鍵', explanation: '先核對主鍵的用途。', sourceQuote: '主鍵用來唯一識別一筆紀錄。' },
+          { title: '核對關聯', explanation: '檢查來源是否足以支援此步。', sourceQuote: '。' },
+        ],
+      }),
+    });
+    await expect(pending).rejects.toThrow('引句只有標點或符號');
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects an ungrounded lesson and validates against the request snapshot', async () => {
     const source = passage();
     const pending = runStudyTutor({ passage: source, mode: 'understand', signal: new AbortController().signal });
