@@ -300,6 +300,38 @@ it('allows a valid 60,000-character multibyte lesson through file preflight', as
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
+it('imports a legacy Big5 TXT when explicitly selected without corrupting Traditional Chinese', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText('TXT／Markdown 文字編碼'), { target: { value: 'big5' } });
+  // Big5 for 中文主鍵; this is intentionally not valid UTF-8.
+  const bytes = Uint8Array.from([0xa4, 0xa4, 0xa4, 0xe5, 0xa5, 0x44, 0xc1, 0xe4]);
+  const file = new File([bytes], '舊版筆記.txt', { type: 'text/plain' });
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  const readUtf8 = vi.fn();
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  Object.defineProperty(file, 'text', { value: readUtf8 });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText('中文主鍵')).toBeTruthy();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(readUtf8).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('rejects malformed Big5 instead of silently losing characters or replacing existing notes', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '原來的筆記不能被亂碼覆蓋' } });
+  fireEvent.change(screen.getByLabelText('TXT／Markdown 文字編碼'), { target: { value: 'big5' } });
+  const file = new File([Uint8Array.from([0x81])], '損壞的筆記.md', { type: 'text/markdown' });
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(Uint8Array.from([0x81]).buffer) });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('無法以繁體中文 Big5 讀取'));
+  expect(note.value).toBe('原來的筆記不能被亂碼覆蓋');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
 it('invalidates a pending lesson replacement when an oversized pasted edit is rejected', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), {

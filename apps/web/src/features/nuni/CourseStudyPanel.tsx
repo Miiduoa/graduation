@@ -75,6 +75,19 @@ function decodeStudyBackup(text: string, scope: CourseStudyProgressScope) {
     : { progress: parseCourseStudyProgress(text, scope), round: null };
 }
 
+type StudyTextEncoding = 'utf-8' | 'big5';
+
+// Legacy Taiwanese course notes may use Big5. Decode only when the student
+// explicitly selects it; do not guess and silently replace invalid bytes.
+async function readStudyTextFile(file: File, encoding: StudyTextEncoding): Promise<string> {
+  if (encoding === 'utf-8') return file.text();
+  try {
+    return new TextDecoder('big5', { fatal: true }).decode(await file.arrayBuffer());
+  } catch {
+    throw new Error('無法以繁體中文 Big5 讀取此檔案；原教材與筆記仍保留。請確認檔案編碼，或轉成 UTF-8 後重試。');
+  }
+}
+
 function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [initial] = useState(() => initialMaterial(material));
   const [source, setSource] = useState<StudySource | null>(initial.source);
@@ -87,6 +100,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const revision = useRef(0);
   const [mode, setMode] = useState<StudyMode>('understand');
   const [paste, setPaste] = useState('');
+  const [textEncoding, setTextEncoding] = useState<StudyTextEncoding>('utf-8');
   const [progressPaste, setProgressPaste] = useState('');
   const [reading, setReading] = useState<'source' | 'progress' | null>(null);
   const [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null);
@@ -122,6 +136,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const progressPastePreviewButton = useRef<HTMLButtonElement>(null);
   const read = useRef<AbortController | null>(null);
   const inputId = useId();
+  const encodingId = useId();
   const progressInputId = useId();
   const progressPasteId = useId();
   const pasteId = useId();
@@ -622,13 +637,13 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     try {
       if (!/\.(pdf|txt|md)$/i.test(file.name)) throw new Error('請選擇 PDF、TXT 或 Markdown 文字檔。');
       if (!file.size || file.size > PERSONAL_IMPORT_DOCUMENT_LIMITS.bytes) throw new Error('請選擇有內容且不超過 8 MiB 的檔案。');
-      // One UTF-16 code unit needs at most three UTF-8 bytes, plus an optional BOM.
+      // At most three UTF-8 bytes (or two Big5 bytes) per UTF-16 code unit, plus an optional BOM.
       // Reject text files that cannot possibly fit before decoding them on a phone.
       if (!/\.pdf$/i.test(file.name) && file.size > STUDY_TUTOR_LIMITS.textCharacters * 3 + 3)
         throw new Error('TXT／Markdown 檔案超過 60,000 字元的可讀取範圍，尚未載入內容。請分章後重試。');
       const value = /\.pdf$/i.test(file.name)
         ? studySourceFromDocument(await readPersonalImportDocumentFile(file, controller.signal))
-        : studySourceFromText({ id: 'local-text', title: file.name, text: await file.text() });
+        : studySourceFromText({ id: 'local-text', title: file.name, text: await readStudyTextFile(file, textEncoding) });
       if (read.current !== controller || controller.signal.aborted) return;
       requestSourceReplacement(value, false);
     } catch (failure) {
@@ -766,7 +781,14 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
                 if (file) void chooseFile(file);
               }} />
           </label>
-          <p className={styles.note}>PDF 最多 20 頁、8 MiB；文字最多 60,000 字元。檔案在此裝置讀取，公式、圖表與掃描辨識結果請對照原檔。</p>
+          <label className={styles.field} htmlFor={encodingId}>TXT／Markdown 文字編碼
+            <select id={encodingId} value={textEncoding} disabled={!!reading}
+              onChange={(event) => setTextEncoding(event.target.value as StudyTextEncoding)}>
+              <option value="utf-8">UTF-8（預設）</option>
+              <option value="big5">繁體中文 Big5（舊版講義）</option>
+            </select>
+          </label>
+          <p className={styles.note}>PDF 最多 20 頁、8 MiB；文字最多 60,000 字元。舊版繁體中文文字檔若以 UTF-8 開啟出現亂碼，可選 Big5 後重新選檔；PDF 不受此選項影響。檔案在此裝置讀取，公式、圖表與掃描辨識結果請對照原檔。</p>
           <label className={styles.field} htmlFor={pasteId}>或貼上課文與筆記
             <textarea id={pasteId} rows={4} value={paste} disabled={!!reading}
               onChange={(event) => updatePastedSource(event.target.value)} placeholder="貼上想理解的段落…" />
