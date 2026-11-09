@@ -1,3 +1,4 @@
+import { privateFilesEnabled, privateStoryPath, uploadPrivateFile } from '../privateFiles';
 /**
  * 校園社群 — 圖片上傳 (Web)
  *
@@ -74,6 +75,12 @@ export async function uploadStoryImage(input: {
 }): Promise<UploadedCampusMedia> {
   const error = storyImageError(input.file);
   if (error) throw new Error(error);
+  if (privateFilesEnabled()) {
+    const path = privateStoryPath(input.schoolId, input.storyId, 'image');
+    if (!path) throw new Error('限動路徑無效');
+    await uploadPrivateFile({ path, body: input.file, contentType: input.file.type });
+    return { url: path, path, contentType: input.file.type };
+  }
   return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/image`, input.file, {
     ownerUid: input.uid,
   });

@@ -348,3 +348,37 @@ it('keeps the visible draft and does not dispatch when the publication record ca
     storage.mockRestore();
   }
 });
+
+it('shows attachment input only when R2 is enabled and stores uploaded paths', async () => {
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  const view = await act(async () => renderPage());
+  await screen.findByText('週三外拍');
+  expect(screen.queryByLabelText('附加圖片或文件')).toBeNull();
+  view.unmount();
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  try {
+    await act(async () => {
+      renderPage();
+    });
+    await screen.findByText('週三外拍');
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '新貼文' } });
+    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '內容' } });
+    fireEvent.change(screen.getByLabelText('附加圖片或文件'), {
+      target: { files: [new File(['pdf'], 'note.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    await waitFor(() => expect(createGroupDiscussionPost).toHaveBeenCalled());
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringMatching(/^groups\/g1\/posts\/[^/]+\/0-note.pdf$/),
+      }),
+    );
+    expect(vi.mocked(createGroupDiscussionPost).mock.calls[0]?.[3].attachments).toEqual([
+      expect.stringMatching(/^groups\/g1\/posts\//),
+    ]);
+  } finally {
+    delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND;
+    upload.mockRestore();
+  }
+});

@@ -1,3 +1,4 @@
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   deleteDoc,
@@ -22,6 +23,7 @@ export type GroupDiscussionPost = {
   kind: 'post' | 'question' | 'announcement';
   title: string;
   body: string;
+  attachments?: string[];
   authorId: string;
   authorName: string | null;
   schoolId: string;
@@ -37,6 +39,7 @@ export type DiscussionPage = {
 export type CreateDiscussionInput = {
   title: string;
   body: string;
+  attachments?: string[];
   kind?: 'post' | 'question' | 'announcement';
   /** 每次發布意圖的穩定 ID；重試必須重用，成功後換新意圖。 */
   postId: string;
@@ -91,12 +94,14 @@ function mapPost(
     authorName: typeof data.authorName === 'string' ? data.authorName : null,
     schoolId: typeof data.schoolId === 'string' ? data.schoolId : '',
     createdAt: data.createdAt ?? null,
+    attachments: privateAttachmentPaths(data.attachments),
   };
 }
 
 function samePublication(
   data: DocumentData,
-  input: { title: string; body: string; kind: string; uid: string; schoolId: string },
+  input: { title: string; body: string; kind: string; uid: string; schoolId: string;
+    attachments?: string[]; },
 ): boolean {
   return (
     data.authorId === input.uid &&
@@ -105,7 +110,8 @@ function samePublication(
     typeof data.title === 'string' &&
     data.title.trim() === input.title &&
     typeof data.body === 'string' &&
-    data.body.trim() === input.body
+    data.body.trim() === input.body &&
+    JSON.stringify(data.attachments ?? []) === JSON.stringify(input.attachments ?? [])
   );
 }
 
@@ -189,6 +195,7 @@ export async function createGroupDiscussionPost(
     likes: 0,
     likedBy: [] as string[],
     clientIntentId: input.postId,
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
   };
 
   const result = await runTransaction(getDb(), async (transaction) => {
@@ -206,7 +213,9 @@ export async function createGroupDiscussionPost(
     }
     if (existing.exists()) {
       const data = existing.data()!;
-      if (samePublication(data, { title, body, kind, uid, schoolId })) {
+      if (
+        samePublication(data, { title, body, kind, uid, schoolId, attachments: input.attachments })
+      ) {
         const mapped = mapPost(groupId, existing);
         if (!mapped) throw new Error('Existing post could not be confirmed');
         return { status: 'existing' as const, post: mapped };
@@ -231,6 +240,7 @@ export async function createGroupDiscussionPost(
     authorName: author,
     schoolId,
     createdAt: null,
+    attachments: input.attachments ?? [],
   };
 }
 

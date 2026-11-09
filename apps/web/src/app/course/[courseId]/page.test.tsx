@@ -433,3 +433,17 @@ it('offers scoped course counts and accessible shortcuts without inventing a wor
   expect(within(navigation).getByRole('link', { name: '教材櫃' }).getAttribute('href')).toBe('#course-materials-title');
   expect(within(navigation).getByRole('link', { name: '作業與評量' }).getAttribute('href')).toBe('#assignments');
 });
+
+it('uploads R2 assignment attachments and submits their paths without requiring text', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: [new File(['answer'], 'answer.pdf', { type: 'application/pdf' })] } });
+    submit('A');
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalledWith('course', 'A', 'alice', '', [expect.stringMatching(/^assignments\/A\/submissions\/alice\/.+answer.pdf$/)]));
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'application/pdf' }));
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
+});

@@ -2,6 +2,8 @@
 
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { privateFilesEnabled, privateAssignmentPath, uploadPrivateFile } from '@/lib/privateFiles';
+import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useOptionalSelectedSchool } from '@/components/SelectedSchoolProvider';
@@ -25,7 +27,8 @@ import { useLocationHash } from '@/lib/useLocationHash';
 import { gradeReadOwner, markPublishedGradeReadByLanding } from '@/lib/lmsStudentGrades';
 import { useClientHydrated } from '@/lib/useClientHydrated';
 import { materialBrowserStorage, useMaterialReadIds } from '@/lib/useMaterialClientState';
-import { formatTaipeiDateTime, parseTaipeiInstant, taipeiParts } from '@campus/shared/src/taipeiTime';
+import { formatTaipeiDateTime, parseTaipeiInstant,
+  taipeiParts, } from '@campus/shared/src/taipeiTime';
 import styles from '../../home.module.css';
 import courseStyles from './courseWorkspace.module.css';
 
@@ -53,6 +56,9 @@ function Assignment({
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, []);
+  const [files, setFiles] = useState<File[]>([]);
+  const uploadedFiles = useRef<string[]>([]);
+  const [savedAttachments, setSavedAttachments] = useState<string[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -80,9 +86,33 @@ function Assignment({
     setBusy(true);
     setError('');
     try {
-      await submitCourseText(courseId, assignment.id, uid, answer);
+      if (privateFilesEnabled() && files.length && !uploadedFiles.current.length) {
+        const paths: string[] = [];
+        const batch = Date.now();
+        for (const [index, file] of files.entries()) {
+          const path = privateAssignmentPath(
+            assignment.id,
+            uid,
+            `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+          );
+          if (!path) throw new Error('附件路徑無效');
+          await uploadPrivateFile({
+            path,
+            body: file,
+            contentType: file.type || 'application/octet-stream',
+          });
+          paths.push(path);
+        }
+        uploadedFiles.current = paths;
+      }
+      if (!active.current) return;
+      if (uploadedFiles.current.length)
+        await submitCourseText(courseId, assignment.id, uid, answer, uploadedFiles.current);
+      else
+        await submitCourseText(courseId, assignment.id, uid, answer);
       if (!active.current) return;
       setSavedText(answer);
+      setSavedAttachments(uploadedFiles.current);
       onSaved();
     } catch {
       if (!active.current) return;
@@ -118,10 +148,12 @@ function Assignment({
               ? ` · ${new Date(assignment.submittedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`
               : ''}
           </p>
-          {!assignment.grade ? (
-            <p>作業已收到；老師公布評分後，會顯示在這裡。</p>
-          ) : null}
+          {!assignment.grade ?
+            <p>作業已收到；老師公布評分後，會顯示在這裡。</p> : null}
           <p style={{ whiteSpace: 'pre-wrap' }}>{assignment.submittedText ?? savedText}</p>
+          {(assignment.attachments?.length ? assignment.attachments : savedAttachments).map((path) => (
+            <PrivateAttachment key={path} path={path} />
+          ))}
           {assignment.grade ? (
             <div
               aria-label="作業評分"
@@ -161,7 +193,7 @@ function Assignment({
             id={`answer-${assignment.id}`}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            required
+            required={!files.length}
             maxLength={20000}
             rows={7}
             disabled={busy}
@@ -177,8 +209,24 @@ function Assignment({
               color: 'var(--text)',
             }}
           />
+          {privateFilesEnabled() && (
+            <label>
+              作業附件
+              <input
+                type="file"
+                multiple
+                disabled={busy}
+                accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                onChange={(event) => {
+                  setFiles(Array.from(event.target.files ?? []));
+                  uploadedFiles.current = [];
+                }}
+              />
+            </label>
+          )}
           {error && <p role="alert">{error}</p>}
-          <button type="submit" className={styles.primary} disabled={busy || !text.trim()}>
+          <button type="submit" className={styles.primary} disabled={busy || (!text.trim() && !files.length)}
+          >
             {busy ? '繳交中…' : '繳交作業'}
           </button>
         </form>
@@ -230,13 +278,14 @@ export default function CoursePage({ params }: { params: Promise<{ courseId: str
 function accessDenied(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
   if (code === 'permission-denied' || code === 'unauthenticated') return true;
-  return error instanceof Error && [
+  return ( error instanceof Error && [
     'permission-denied',
     'unauthenticated',
     '找不到課程，或你尚未加入這門課。',
     '登入身分已變更，請重新開啟課程。',
     '請先登入。',
-  ].includes(error.message);
+    ].includes(error.message)
+  );
 }
 
 function weekStartTaipei(now: Date): number | null {
@@ -378,7 +427,9 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
             >
               {course.canTeach ? '管理課堂點名' : '簽到與出席紀錄'}
             </a>
-            <button type="button" className={styles.secondary} onClick={refresh} disabled={refreshing}>
+            <button type="button" className={styles.secondary} onClick={refresh}
+              disabled={refreshing}
+            >
               重新整理
             </button>
           </div>
@@ -430,9 +481,7 @@ function CourseContent({ courseId, uid }: { courseId: string; uid: string }) {
           </section>
           <section className={styles.section} aria-labelledby="course-materials-title">
             <h2 id="course-materials-title">教材櫃</h2>
-            <p className={styles.sectionNote}>
-              依單元或週次整理教材，開啟項目即可閱讀。
-            </p>
+            <p className={styles.sectionNote}>依單元或週次整理教材，開啟項目即可閱讀。</p>
             {linked?.kind === 'material' && !course.modules.some((item) => item.id === linked.id) ? (
               <p role="status" className={styles.notice}>
                 {COURSE_WORK_MISSING_MATERIAL}

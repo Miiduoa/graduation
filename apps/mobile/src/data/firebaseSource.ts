@@ -2052,7 +2052,7 @@ export const firebaseSource: DataSource = {
     const assignmentId = data.assignmentId;
     const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
     const content = data.content?.trim() ?? '';
-    if (!userId || !content || content.length > 20000) {
+    if (!userId || (!content && !data.attachments?.length) || content.length > 20000) {
       throw new Error('請輸入 1 至 20,000 字的作業內容。');
     }
     if (!groupId || !assignmentId) {
@@ -2117,6 +2117,7 @@ export const firebaseSource: DataSource = {
           groupId,
           assignmentId,
           content,
+          ...(data.attachments?.length ? { attachments: data.attachments } : {}),
           status: 'submitted',
           submittedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),

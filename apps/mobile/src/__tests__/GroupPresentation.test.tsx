@@ -1,11 +1,12 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { GroupsScreen } from '../screens/GroupsScreen';
 import { GroupDetailScreen } from '../screens/GroupDetailScreen';
 import { GroupPostScreen } from '../screens/GroupPostScreen';
 import { applyTheme, clearSchoolTheme, createDarkTheme, createLightTheme } from '../ui/theme';
 
 const mockDb = {};
+let mockMemberRole = 'member';
 const mockAuth = {
   user: { uid: 'student-a' },
   profile: { uid: 'student-a', displayName: '林同學', role: 'student' },
@@ -52,6 +53,7 @@ jest.mock('../firebase', () => ({
 }));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('../services/storage', () => ({ storage: { pickImage: jest.fn() } }));
 jest.mock('../services/ai', () => ({ chatWithCampusAssistant: jest.fn() }));
 jest.mock('../services/memberDirectory', () => ({
   fetchSchoolDirectoryProfiles: jest.fn(async () => []),
@@ -78,7 +80,7 @@ jest.mock('firebase/firestore', () => {
     }),
     getDoc: jest.fn(async ({ path }: { path: string }) => {
       const row = path.includes('/members/')
-        ? { id: 'student-a', role: 'member' }
+        ? { id: 'student-a', role: mockMemberRole }
         : path.includes('/posts/')
           ? mockPost
           : mockGroup;
@@ -96,6 +98,7 @@ jest.mock('firebase/firestore', () => {
 });
 
 beforeEach(() => {
+  mockMemberRole = 'member';
   clearSchoolTheme();
   applyTheme('light');
 });
@@ -186,5 +189,55 @@ test('非試辦社團關閉後台開關時仍保留安全社員名單入口', as
     mockGroup.type = originalType;
     if (originalFlag === undefined) delete process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED;
     else process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED = originalFlag;
+  }
+});
+
+test('R2 exposes group attachments but keeps cover uploads hidden from ordinary members', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const view = render(
+    <GroupDetailScreen
+      route={{ params: { groupId: 'course-actual' } }}
+      navigation={{ navigate: jest.fn() }}
+    />,
+  );
+  try {
+    expect(await view.findByText('附加圖片或文件（0）')).toBeTruthy();
+    expect(view.queryByText('更換群組封面')).toBeNull();
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+  }
+});
+
+test('R2 off hides group file upload entries', async () => {
+  delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+  const view = render(
+    <GroupDetailScreen
+      route={{ params: { groupId: 'course-actual' } }}
+      navigation={{ navigate: jest.fn() }}
+    />,
+  );
+  expect(await view.findByText('發布內容')).toBeTruthy();
+  expect(view.queryByText('附加圖片或文件（0）')).toBeNull();
+  expect(view.queryByText('更換群組封面')).toBeNull();
+});
+
+test('R2 lets managers replace a group cover and saves only its path', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  mockMemberRole = 'admin';
+  const files = require('../services/privateFiles');
+  const upload = jest.spyOn(files, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  const picker = require('../services/storage').storage.pickImage;
+  picker.mockResolvedValue({ uri: 'file:///cover', type: 'image/png', name: 'cover.png', size: 5 });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({ blob: async () => new Blob(['image'], { type: 'image/png' }) })) as unknown as typeof fetch;
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} navigation={{ navigate: jest.fn() }} />);
+  try {
+    const button = await view.findByText('更換群組封面');
+    await act(async () => fireEvent.press(button));
+    await waitFor(() => expect(upload).toHaveBeenCalledWith(expect.objectContaining({ path: 'groups/course-actual/cover.png' })));
+    expect(require('firebase/firestore').updateDoc).toHaveBeenCalledWith(expect.anything(), { coverUrl: 'groups/course-actual/cover.png' });
+  } finally {
+    view.unmount(); delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND; global.fetch = previousFetch; upload.mockRestore(); mockMemberRole = 'member';
   }
 });

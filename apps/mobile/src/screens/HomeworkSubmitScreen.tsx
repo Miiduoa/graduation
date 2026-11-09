@@ -1,3 +1,7 @@
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
+import * as DocumentPicker from 'expo-document-picker';
+import { isR2FileStorageEnabled, privateAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
+import { PrivateAttachment } from '../ui/PrivateAttachment';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   ActivityIndicator,
@@ -17,7 +21,7 @@ import { useSchool } from '../state/school';
 import { formatTaipeiDateTime, parseTaipeiInstant } from '@campus/shared/src/taipeiTime';
 import { getThemeVersion, subscribeToTheme, theme } from '../ui/theme';
 import { useDataSource } from '../hooks/useDataSource';
-import type { Assignment, Submission } from '../data/types';
+import type { Assignment, Submission, Attachment } from '../data/types';
 import { getDataSourceEvidence } from '../data/source';
 import {
   publishedAssignmentGrade,
@@ -124,6 +128,9 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
   const [closed, setClosed] = useState(false);
   const [unpublished, setUnpublished] = useState(false);
   const [quizLike, setQuizLike] = useState(false);
+  const [files, setFiles] = useState<DocumentPicker.DocumentPickerAsset[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const uploadedFiles = useRef<Attachment[]>([]);
   const [answer, setAnswer] = useState('');
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -180,6 +187,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       const already = receiptInstant(submission?.submittedAt);
       setGrade(already ? publishedAssignmentGrade(submission as unknown as Record<string, unknown>) : null);
       setSubmittedAt(already);
+      setAttachments(privateAttachmentPaths(submission?.attachments).map((url) => ({ id: url, name: url.split('/').pop() || '附件', url, type: 'document' })));
       const serverDraft = asText(submission?.status) === 'draft' && submission?.submittedAt == null;
       setReceiptUnconfirmed(Boolean(submission && !already && !serverDraft));
       // Keep local edits, including an intentionally empty answer, when refreshing a draft.
@@ -265,7 +273,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
       return;
     }
     const text = answer.trim();
-    if (!text || text.length > 20000) {
+    if ((!text && !files.length) || text.length > 20000) {
       Alert.alert('請先寫作業內容', '請輸入 1 至 20,000 字，再送出。');
       return;
     }
@@ -274,11 +282,25 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
     const current = () => isCurrent() && request === generation.current;
     setSubmitting(true);
     try {
+      if (isR2FileStorageEnabled() && files.length && !uploadedFiles.current.length) {
+        const pending: Attachment[] = [];
+        const batch = Date.now();
+        for (const [index, file] of files.entries()) {
+          const path = privateAssignmentPath(hwId, uid, `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+          if (!path) throw new Error('附件路徑無效');
+          const blob = await (await fetch(file.uri)).blob();
+          await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });
+          pending.push({ id: path, name: file.name, url: path, type: file.mimeType?.startsWith('image/') ? 'image' : 'document', size: blob.size });
+        }
+        uploadedFiles.current = pending;
+      }
+      if (!current()) return;
       const receipt = await ds.submitAssignment({
         assignmentId: hwId,
         userId: uid,
         groupId: courseId,
         content: text,
+        ...(uploadedFiles.current.length ? { attachments: uploadedFiles.current } : {}),
       });
       if (!current()) return;
       if (usesDemoData()) throw new Error(DEMO_SUBMISSION_MESSAGE);
@@ -288,6 +310,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
         throw new Error('伺服器尚未回傳可核對的繳交紀錄。內容已保留，請重新核對後再操作。');
       }
       setSubmittedAt(confirmedAt);
+      setAttachments(privateAttachmentPaths(receipt.attachments).map((url) => ({ id: url, name: url.split('/').pop() || '附件', url, type: 'document' })));
       setAnswer(receipt.content);
       setGrade(publishedAssignmentGrade(receipt as unknown as Record<string, unknown>));
       onAssignmentSubmitted({ uid, assignmentId: hwId });
@@ -309,7 +332,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
         if (!current()) setReceiptUnconfirmed(true);
       }
     }
-  }, [allowLate, answer, blocked, courseId, ds, dueAt, hwId, isCurrent, loading, matchesReceipt, navigation, uid]);
+  }, [allowLate, answer, files, blocked, courseId, ds, dueAt, hwId, isCurrent, loading, matchesReceipt, navigation, uid]);
 
   return (
     <KeyboardAvoidingView
@@ -399,8 +422,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
             >
               <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>繳交方式</Text>
               <Text style={{ marginTop: 6, fontSize: 13, color: theme.colors.textSecondary, lineHeight: 20 }}>
-                目前只支援文字繳交，與網站寫入同一份作業紀錄。作業檔案還沒接到上傳流程，無法從
-                App 傳檔。
+                {isR2FileStorageEnabled() ? '可繳交文字與圖片或文件附件。' : '目前只支援文字繳交，無法從 App 傳檔。檔案上傳尚未開放。'}
               </Text>
             </View>
             {quizLike ? (
@@ -431,6 +453,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                 >
                   {answer || '（無文字內容）'}
                 </Text>
+                {attachments.map((file) => <PrivateAttachment key={file.id} path={file.url} />)}
                 {grade ? (
                   <View
                     accessibilityLabel="作業評分"
@@ -550,9 +573,15 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                     }}
                   />
                 </View>
+                {isR2FileStorageEnabled() && <Pressable disabled={blocked || submitting} onPress={async () => {
+                  try {
+                    const picked = await DocumentPicker.getDocumentAsync({ type: ['image/*', 'application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], multiple: true, copyToCacheDirectory: true });
+                    if (!picked.canceled && isCurrent()) { setFiles(picked.assets); uploadedFiles.current = []; }
+                  } catch { Alert.alert('無法選取附件'); }
+                }}><Text>作業附件（{files.length}）</Text></Pressable>}
                 <Pressable
                   onPress={handleSubmit}
-                  disabled={blocked || submitting || !answer.trim()}
+                  disabled={blocked || submitting || (!answer.trim() && !files.length)}
                   accessibilityRole="button"
                   accessibilityLabel="繳交作業"
                   style={{
@@ -561,7 +590,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                     borderRadius: 12,
                     backgroundColor: theme.colors.accent,
                     alignItems: 'center',
-                    opacity: submitting || !answer.trim() ? 0.6 : 1,
+                    opacity: submitting || (!answer.trim() && !files.length) ? 0.6 : 1,
                   }}
                 >
                   {submitting ? (

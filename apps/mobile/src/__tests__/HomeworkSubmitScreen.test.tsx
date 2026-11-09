@@ -520,3 +520,56 @@ test('提醒警告不影響繳交成功，並提供管理及稍後重試入口',
   expect(mockSafeNavigate).toHaveBeenCalledWith(mockNavigate, 'CampusAssistant');
   expect(onAssignmentSubmitted).toHaveBeenCalled();
 });
+
+test('R2 enables attachment selection and stores the object path in the existing attachment shape', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///answer', name: 'answer.pdf', mimeType: 'application/pdf' }],
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByText('作業附件（0）')));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringMatching(/^assignments\/work\/submissions\/alice\/.+answer.pdf$/),
+      }),
+    );
+    expect(mockSource.submitAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: '',
+        attachments: [
+          expect.objectContaining({
+            url: expect.stringMatching(/^assignments\/work\/submissions\/alice\//),
+          }),
+        ],
+      }),
+    );
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});

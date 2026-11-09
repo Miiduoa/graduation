@@ -1,4 +1,15 @@
 /* eslint-disable */
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
+import { storage } from '../services/storage';
+import * as DocumentPicker from 'expo-document-picker';
+import {
+  isR2FileStorageEnabled,
+  privateGroupPostPath,
+  privateGroupCoverPath,
+  uploadPrivateFile,
+} from '../services/privateFiles';
+import { PrivateImage } from '../ui/PrivateImage';
+import { PrivateAttachment } from '../ui/PrivateAttachment';
 import { ClubSummary, clubSummaryEnabled } from './ClubSummary';
 import React, { useMemo, useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
@@ -44,6 +55,7 @@ type Group = {
   type: 'course' | 'club' | 'admin';
   name: string;
   joinCode: string;
+  coverUrl?: string;
   isPublished?: boolean;
   verification?: { status?: 'unverified' | 'verified_teacher' | 'verified_org' };
 };
@@ -68,6 +80,7 @@ type Post = {
   likes?: number;
   userLiked?: boolean;
   commentCount?: number;
+  attachments?: string[];
 };
 
 type Comment = {
@@ -258,6 +271,10 @@ export function GroupDetailScreen(props: any) {
 
   const [q, setQ] = useState('');
   const [composeKind, setComposeKind] = useState<PostKind>('question');
+  const [postFiles, setPostFiles] = useState<DocumentPicker.DocumentPickerAsset[]>([]);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [coverRevision, setCoverRevision] = useState(0);
+  const [coverPath, setCoverPath] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [topic, setTopic] = useState<Topic>('課程討論');
@@ -538,7 +555,25 @@ export function GroupDetailScreen(props: any) {
     }
 
     try {
-      const postRef = await addDoc(collection(db, 'groups', groupId, 'posts'), {
+      if (fileBusy) return;
+      setFileBusy(true);
+      const postRef = doc(collection(db, 'groups', groupId, 'posts'));
+      const attachments: string[] = [];
+      if (isR2FileStorageEnabled()) {
+        for (const [index, file] of postFiles.entries()) {
+          const path = privateGroupPostPath(
+            groupId,
+            postRef.id,
+            `${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+          );
+          if (!path) throw new Error('附件路徑無效');
+          const blob = await (await fetch(file.uri)).blob();
+          await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });
+          attachments.push(path);
+        }
+      }
+      await setDoc(postRef, {
+        ...(attachments.length ? { attachments } : {}),
         kind: composeKind,
         title: title.trim(),
         body: body.trim(),
@@ -553,12 +588,15 @@ export function GroupDetailScreen(props: any) {
       });
 
       // 如果是問題，助理回覆由伺服器在提問建立後產生，這邊不用再寫
+      setPostFiles([]);
       setTitle('');
       setBody('');
       setTopic('課程討論');
       reloadPosts();
     } catch (e: any) {
       setErr(e?.message ?? '發文失敗');
+    } finally {
+      setFileBusy(false);
     }
   };
 
@@ -707,6 +745,45 @@ export function GroupDetailScreen(props: any) {
           ) : null}
         </Card>
 
+        {(coverPath || group?.coverUrl) && (
+          <PrivateImage
+            key={coverRevision}
+            uri={coverPath || group!.coverUrl!}
+            style={{ width: '100%', height: 180 }}
+          />
+        )}
+        {isR2FileStorageEnabled() &&
+          ['owner', 'admin', 'instructor', 'moderator'].includes(myRole) && (
+            <Button
+              text="更換群組封面"
+              disabled={fileBusy}
+              onPress={async () => {
+                if (!groupId || fileBusy) return;
+                setFileBusy(true);
+                try {
+                  const file = await storage.pickImage({ quality: 0.85 });
+                  if (!file) return;
+                  const extension = file.type?.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+                  const path = privateGroupCoverPath(groupId, extension);
+                  if (!path) throw new Error('封面路徑無效');
+                  const blob = await (await fetch(file.uri)).blob();
+                  await uploadPrivateFile({
+                    path,
+                    body: blob,
+                    contentType: file.type || blob.type,
+                  });
+                  await updateDoc(doc(db, 'groups', groupId), { coverUrl: path });
+                  setCoverPath(path);
+                  setCoverRevision((value) => value + 1);
+                } catch {
+                  Alert.alert('封面更新失敗', '請稍後再試。');
+                } finally {
+                  setFileBusy(false);
+                }
+              }}
+            />
+          )}
+
         {canManageCourse ? (
           <Card
             title="課程管理（教師）"
@@ -759,6 +836,30 @@ export function GroupDetailScreen(props: any) {
               : '提出問題或分享資訊。課程公告由教師與管理員發布。'
           }
         >
+          {isR2FileStorageEnabled() && (
+            <Button
+              text={`附加圖片或文件（${postFiles.length}）`}
+              disabled={fileBusy}
+              onPress={async () => {
+                try {
+                  const picked = await DocumentPicker.getDocumentAsync({
+                    type: [
+                      'image/*',
+                      'application/pdf',
+                      'text/plain',
+                      'application/msword',
+                      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    ],
+                    multiple: true,
+                    copyToCacheDirectory: true,
+                  });
+                  if (!picked.canceled) setPostFiles(picked.assets);
+                } catch {
+                  Alert.alert('無法選取附件');
+                }
+              }}
+            />
+          )}
           <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
             <Button
               text={composeKind === 'question' ? '✓ 問題' : '問題'}
@@ -854,7 +955,7 @@ export function GroupDetailScreen(props: any) {
             <Button
               text={auth.user ? '送出' : '請先登入'}
               kind="primary"
-              disabled={!auth.user}
+              disabled={!auth.user || fileBusy}
               onPress={onCreatePost}
             />
             <Button
@@ -1043,6 +1144,9 @@ export function GroupDetailScreen(props: any) {
                     <Text style={{ color: theme.colors.text, lineHeight: 20 }} numberOfLines={3}>
                       {p.body}
                     </Text>
+                    {privateAttachmentPaths(p.attachments).map((path) => (
+                      <PrivateAttachment key={path} path={path} />
+                    ))}
 
                     {/* 助理回覆或最新留言 */}
                     {lastComment ? (

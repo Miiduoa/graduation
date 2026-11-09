@@ -1,11 +1,12 @@
 import {
+  privateStoryPath,
   privateAssignmentPath,
   privateGroupCoverPath,
   privateGroupPostPath,
 } from '@campus/shared/src/privateFileAccess';
 import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
 
-export { privateAssignmentPath, privateGroupCoverPath, privateGroupPostPath };
+export { privateStoryPath, privateAssignmentPath, privateGroupCoverPath, privateGroupPostPath };
 
 export class PrivateFileStorageUnconfiguredError extends Error {
   readonly code = 'unconfigured';
@@ -133,4 +134,11 @@ export async function downloadPrivateFile(path: string): Promise<Blob> {
   if (response.status === 404) throw new Error('File not found');
   if (!response.ok) throw new Error('File request failed');
   return response.blob();
+}
+
+export { isPrivateFileObjectPath } from '@campus/shared/src/privateFileMedia';
+import { resolvePrivateFileMedia } from '@campus/shared/src/privateFileMedia';
+
+export async function resolvePrivateMedia(value: string | null | undefined): Promise<string | Blob | null> {
+  return resolvePrivateFileMedia(value, isR2FileStorageEnabled(), downloadPrivateFile);
 }

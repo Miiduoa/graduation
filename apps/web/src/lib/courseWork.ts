@@ -1,3 +1,4 @@
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   doc,
@@ -17,9 +18,10 @@ export interface CourseAssignment {
   allowLateSubmission: boolean;
   closed: boolean;
   submittedText: string | null;
+  attachments?: string[];
   submittedAt: string | null;
   points: number | null;
-  grade: { score: number; feedback: string; publishedAt: string | null; revisionCount: number } | null;
+  grade: { score: number; feedback: string; publishedAt: string | null; revisionCount: number; } | null;
 }
 export interface CourseWork {
   id: string;
@@ -57,8 +59,10 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
     getDocFromServer(doc(db, 'groups', courseId, 'members', uid)),
   ]);
   assertCurrentUser(uid);
-  if (!course.exists() || course.data().type !== 'course' ||
-      !member.exists() || member.data().status !== 'active')
+  if (
+    !course.exists() || course.data().type !== 'course' ||
+      !member.exists() || member.data().status !== 'active'
+  )
     throw new Error('找不到課程，或你尚未加入這門課。');
   const canTeach = ['owner', 'instructor', 'moderator'].includes(member.data().role);
   const [snap, moduleSnap] = await Promise.all([
@@ -94,7 +98,9 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
         const assignment = entry.data();
         const submission = canTeach
           ? null
-          : await getDocFromServer(doc(db, 'groups', courseId, 'assignments', entry.id, 'submissions', uid));
+          : await getDocFromServer(
+              doc(db, 'groups', courseId, 'assignments', entry.id, 'submissions', uid),
+            );
         return {
           id: entry.id,
           type: String(assignment.type ?? 'assignment'),
@@ -106,6 +112,9 @@ export async function loadCourseWork(courseId: string, uid: string): Promise<Cou
           submittedText: submission?.exists()
             ? String(submission.data().content ?? submission.data().text ?? '')
             : null,
+          attachments: submission?.exists()
+            ? privateAttachmentPaths(submission.data().attachments)
+            : [],
           submittedAt: submission?.exists() ? iso(submission.data().submittedAt) : null,
           points: typeof assignment.points === 'number' && Number.isFinite(assignment.points)
             ? assignment.points : null,
@@ -141,9 +150,10 @@ export async function submitCourseText(
   assignmentId: string,
   uid: string,
   text: string,
+  attachments: string[] = [],
 ): Promise<void> {
   const answer = text.trim();
-  if (!uid || !answer || answer.length > 20000)
+  if (!uid || (!answer && !attachments.length) || answer.length > 20000)
     throw new Error('請輸入 1 至 20,000 字的作業內容。');
   if (!isFirebaseConfigured()) throw new Error('無法連線，請稍後重試。');
   assertCurrentUser(uid);
@@ -172,6 +182,7 @@ export async function submitCourseText(
         groupId: courseId,
         assignmentId,
         content: answer,
+        ...(attachments.length ? { attachments } : {}),
         status: 'submitted',
         submittedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
