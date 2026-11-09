@@ -478,7 +478,7 @@ service cloud.firestore {
       // An optional single featured post; never stores copied private profile content.
       // The referenced post must be an existing, signed post by the same member.
       match /creatorHighlights/{uid} {
-        allow get: if isSchoolMember(schoolId);
+        allow get: if isSelf(uid) || isSchoolMember(schoolId);
         allow list: if false;
         allow create: if isSelf(uid) && isSchoolMember(schoolId)
           && creatorHighlightValid(schoolId, uid);
@@ -486,7 +486,7 @@ service cloud.firestore {
           && resource.data.get('schoolId', '') == schoolId
           && resource.data.get('ownerUid', '') == uid
           && creatorHighlightValid(schoolId, uid);
-        allow delete: if isSelf(uid) && isSchoolMember(schoolId);
+        allow delete: if isSelf(uid);
       }
 
       match /members/{uid} {
