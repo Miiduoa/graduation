@@ -423,7 +423,8 @@ test('a stalled post-opening verification releases the panel and a late revoked 
     expect(view.queryByLabelText('正在確認貼文仍可閱讀')).toBeNull();
     fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
     await act(async () => { await Promise.resolve(); });
-    expect(view.open).toHaveBeenCalledExactlyOnceWith({ id: 'one', schoolId: 'pu' });
+    expect(view.open).toHaveBeenCalledTimes(1);
+    expect(view.open).toHaveBeenCalledWith({ id: 'one', schoolId: 'pu' });
     await act(async () => { stalled.reject({ code: 'permission-denied' }); });
     expect(view.open).toHaveBeenCalledTimes(1);
     expect(view.queryByText(/搜尋結果已清除/)).toBeNull();
