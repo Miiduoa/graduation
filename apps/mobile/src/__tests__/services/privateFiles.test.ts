@@ -137,5 +137,5 @@ test.each([200, 410])('claim checks the document namespace and exposes expiry (%
   expect(network).not.toHaveBeenCalled();
   if (status === 200) await expect(claimPrivateFile(path, 'groups/course/posts/one')).resolves.toBeUndefined();
   else await expect(claimPrivateFile(path, 'groups/course/posts/one')).rejects.toMatchObject({ statusCode: 410 });
-  expect(JSON.parse(network.mock.calls[0][1]!.body as string)).toMatchObject({ action: 'claim', path });
+  expect(JSON.parse(network.mock.calls[0][1]!.body as string)).toMatchObject({ action: 'claim', path, reference: 'groups/course/posts/one' });
 });

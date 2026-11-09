@@ -172,6 +172,6 @@ import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia'
 export async function claimPrivateFile(path: string, namespace: string): Promise<void> {
   assertPrivateFileNamespace(path, namespace);
   if (!isPrivateFileObjectPath(path)) return;
-  const result = await requestPrivateFile('claim', path);
+  const result = await requestPrivateFile('claim', path, { reference: namespace.startsWith('schools/') ? `campusStories/${namespace.split('/').at(-1)}` : namespace });
   if (result.claimed !== true || result.path !== path) throw new Error('File claim failed');
 }

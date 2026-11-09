@@ -167,7 +167,6 @@ async function issueUpload(
   }
 
   const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
-  await uploads.cleanup(runtime.now?.() ?? Date.now(), 20, uid);
   await uploads.reserve(scope, uid, runtime.now?.() ?? Date.now());
 
   const metadata: Record<string, string> = scope.kind === 'story' ? { 'owner-uid': uid } : {};
@@ -316,7 +315,7 @@ export async function dispatchPrivateFileRequest(
     if (!action) throw new HttpsError('invalid-argument', 'Invalid private file path');
     if (action === 'claim') {
       await authorizePrivateFile(resolved.db, scope, uid, 'claim');
-      await createPrivateFileUploads(resolved.db as unknown as Firestore, resolved.storage).claim(scope.path, uid, resolved.now?.() ?? Date.now());
+      await createPrivateFileUploads(resolved.db as unknown as Firestore, resolved.storage).claim(scope.path, uid, resolved.now?.() ?? Date.now(), typeof body.reference === 'string' ? body.reference : undefined);
       return jsonResponse(200, { path: scope.path, claimed: true }, cors);
     }
     if (action === 'finalize') return jsonResponse(200, await finalizeUpload(resolved, uid, scope), cors);

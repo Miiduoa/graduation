@@ -401,3 +401,24 @@ it('keeps a released cover downloadable while the group still references it', as
   expect((await invoke(runtime, { action: 'claim', path: next.body.path }, auth)).status).toBe(200);
   expect((await invoke(runtime, { action: 'download', path: old.body.path }, auth)).status).toBe(200);
 });
+
+it.each([false, true])('ticket issuance never reads cleanup state, including quota rejection (%s)', async (full) => {
+  if (full) store.docs.set('privateFileQuota/global', { reservedBytes: 900 * 1024 * 1024 });
+  const collections = vi.spyOn(store.db, 'collection');
+  const scan = vi.spyOn(store.db, 'collectionGroup');
+  const result = await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 1 });
+  expect(result.status).toBe(full ? 507 : 200);
+  expect(collections.mock.calls.flat()).not.toContain('privateFileCleanup');
+  expect(scan).not.toHaveBeenCalled();
+  expect([...store.docs.keys()].some((key) => key.startsWith('privateFileCleanup/'))).toBe(false);
+});
+
+it('records the claimed reference and rejects a different document namespace', async () => {
+  const upload = await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 1 });
+  put(upload, 'answer');
+  await invoke(runtime, { action: 'finalize', path: ANSWER });
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER, reference: 'groups/other' })).status).toBe(403);
+  const reference = 'groups/course/assignments/work/submissions/alice';
+  expect((await invoke(runtime, { action: 'claim', path: ANSWER, reference })).status).toBe(200);
+  expect([...store.docs.values()].find((row) => row.path === ANSWER)?.refs).toEqual([reference]);
+});

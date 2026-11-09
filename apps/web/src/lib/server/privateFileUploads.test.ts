@@ -10,7 +10,8 @@ import {
   UPLOAD_RESERVED_BYTES,
   UPLOAD_URL_TTL_MS,
   uploadId,
-  REFERENCE_SCAN_LIMIT,
+  ORPHAN_GRACE_MS,
+  CLEANUP_LEASE_MS,
 } from './privateFileUploads';
 
 function setup() {
@@ -62,7 +63,7 @@ it('retains invalid upload reservations until token expiry and cleans once', asy
   await expect(uploads.finalize(scope(0).path, 'alice', 8, now + 1)).rejects.toMatchObject({
     statusCode: 409,
   });
-  expect(await uploads.cleanup(now + UPLOAD_URL_TTL_MS)).toBe(1);
+  expect(await uploads.cleanup(now + UPLOAD_URL_TTL_MS + CLEANUP_LEASE_MS)).toBe(1);
   expect(await uploads.cleanup(now + UPLOAD_URL_TTL_MS)).toBe(0);
   expect(storage.remove).toHaveBeenCalledTimes(1);
   expect(docs.get('privateFileQuota/global')).toEqual({ reservedBytes: 0, finalizedBytes: 0 });
@@ -78,7 +79,7 @@ it('retries failed deletion without releasing quota or allowing finalize', async
   await expect(uploads.finalize(scope(0).path, 'alice', 8, now + 1)).rejects.toMatchObject({
     statusCode: 409,
   });
-  expect(await uploads.cleanup(now + UPLOAD_URL_TTL_MS)).toBe(1);
+  expect(await uploads.cleanup(now + UPLOAD_URL_TTL_MS + CLEANUP_LEASE_MS)).toBe(1);
 });
 
 it('does not create reservation when transaction commit fails', async () => {
@@ -98,119 +99,84 @@ const cases = [
   ['groups/course/cover.jpg', 'groups/course', { coverUrl: 'groups/course/cover.new.jpg' }],
 ] as const;
 
-it.each(cases)('retains claimed files while container exists regardless of references: %s', async (path, ref, live) => {
+it.each(cases)('uses only recorded references for %s', async (path, reference) => {
   const { uploads, docs, storage } = setup();
   await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
-  await uploads.finalize(path, 'alice', 123, now + 1);
-  await uploads.claim(path, 'alice', now + 2);
-  docs.set(ref, live);
-  docs.set('groups/course/posts/other', { attachments: [path] });
+  await uploads.finalize(path, 'alice', 8, now + 1);
+  await uploads.claim(path, 'alice', now + 2, reference);
+  const row = docs.get(`privateFileUploads/${uploadId(path)}`)!;
+  expect(row.refs).toEqual([reference]);
+  docs.set(reference, { attachments: [{ path }], expiresAt: now + 10 * day });
   expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(storage.remove).not.toHaveBeenCalled();
-  docs.delete(ref);
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  docs.delete('groups/course/posts/other');
-  expect(await uploads.cleanup(now + 2 * day)).toBe(1);
-  expect((await uploads.read(path)).status).toBe('deleted');
+  docs.set(reference, { attachments: [] });
+  expect(await uploads.cleanup(now + 2 * day + CLEANUP_LEASE_MS)).toBe(1);
+  expect(storage.remove).toHaveBeenCalledWith(path);
+  expect(await uploads.cleanup(now + 3 * day)).toBe(0);
   expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
 });
 
-it.each(cases)('keeps missing claimed containers for a full day: %s', async (path) => {
-  const { uploads } = setup();
-  await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
-  await uploads.finalize(path, 'alice', 3, now + 1);
-  await uploads.claim(path, 'alice', now + 2);
-  expect(await uploads.cleanup(now + day + 2)).toBe(0);
-  expect(await uploads.cleanup(now + day + 3)).toBe(1);
-});
-
-it('reclaims unclaimed finalized drafts only after 24 hours', async () => {
-  const { uploads } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  expect(await uploads.cleanup(now + day + 1)).toBe(0);
-  expect(await uploads.cleanup(now + day + 2)).toBe(1);
-  await expect(uploads.claim(scope(0).path, 'alice', now + day + 3)).rejects.toMatchObject({ statusCode: 410 });
-});
-
-it('refreshes claim to protect a publication retry', async () => {
-  const { uploads } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  await uploads.claim(scope(0).path, 'alice', now + 2);
-  await uploads.claim(scope(0).path, 'alice', now + day);
-  expect(await uploads.cleanup(now + day + 3)).toBe(0);
-});
-
-it.each(['pending', 'deleting', 'deleted', 'missing'])('claim rejects unavailable %s records with 410', async (status) => {
-  const { uploads, docs } = setup();
-  if (status !== 'missing') {
-    await uploads.reserve(scope(0), 'alice', now);
-    docs.get(`privateFileUploads/${uploadId(scope(0).path)}`)!.status = status;
-  }
-  await expect(uploads.claim(scope(0).path, 'alice', now)).rejects.toMatchObject({ statusCode: 410 });
-});
-
-it('abandons deletion when claimedAt changes between scan and transaction', async () => {
-  const { uploads, docs, db, storage } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  await uploads.claim(scope(0).path, 'alice', now + 2);
-  const original = db.runTransaction.bind(db);
-  vi.spyOn(db, 'runTransaction').mockImplementationOnce((...args) => {
-    docs.get(`privateFileUploads/${uploadId(scope(0).path)}`)!.claimedAt = now + 3;
-    return original(...args);
-  });
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(storage.remove).not.toHaveBeenCalled();
-});
-
-it('honors the two hour story expiry grace', async () => {
+it('reclaims expired stories even when their document retains mediaUrl', async () => {
   const { uploads, docs } = setup();
   const path = cases[0][0];
   await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
   await uploads.finalize(path, 'alice', 8, now + 1);
   await uploads.claim(path, 'alice', now + 2);
-  docs.set(cases[0][1], { expiresAt: now + 2 * day });
-  expect(await uploads.cleanup(now + 2 * day + 2 * 3600_000)).toBe(0);
-  expect(await uploads.cleanup(now + 2 * day + 2 * 3600_000 + 1)).toBe(1);
+  docs.set('campusStories/story', { mediaUrl: path, expiresAt: now + 2 * day });
+  expect(await uploads.cleanup(now + 2 * day + ORPHAN_GRACE_MS)).toBe(0);
+  expect(await uploads.cleanup(now + 2 * day + ORPHAN_GRACE_MS + CLEANUP_LEASE_MS)).toBe(1);
 });
 
-it.each([{ deleted: true }, { isDeleted: true }, { deletedAt: now }, { status: 'deleted' }])('cleans tombstoned posts after claim grace (%j)', async (tombstone) => {
+it('reclaims the last cover after failed publication without another claim', async () => {
   const { uploads, docs } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  await uploads.claim(scope(0).path, 'alice', now + 2);
-  docs.set('groups/course/posts/post', tombstone);
-  expect(await uploads.cleanup(now + day + 3)).toBe(1);
+  const path = 'groups/course/cover.jpg';
+  await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+  await uploads.finalize(path, 'alice', 8, now + 1);
+  await uploads.claim(path, 'alice', now + 2);
+  docs.set('groups/course', { coverUrl: 'old' });
+  expect(await uploads.cleanup(now + ORPHAN_GRACE_MS + 2)).toBe(0);
+  expect(await uploads.cleanup(now + ORPHAN_GRACE_MS + 2 + CLEANUP_LEASE_MS)).toBe(1);
 });
 
-it('retries deletion and quota settlement without double debit', async () => {
-  const { uploads, storage, docs, failNextCommit } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  const later = now + 2 * day;
-  vi.mocked(storage.remove).mockRejectedValueOnce(new Error('unavailable'));
-  await expect(uploads.cleanup(later)).rejects.toThrow();
-  await expect(uploads.claim(scope(0).path, 'alice', later)).rejects.toMatchObject({ statusCode: 410 });
-  vi.mocked(storage.remove).mockImplementationOnce(async () => { failNextCommit(); });
-  await expect(uploads.cleanup(later)).rejects.toThrow();
-  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
-  expect(await uploads.cleanup(later)).toBe(1);
-  expect(await uploads.cleanup(later)).toBe(0);
-  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
+it('cover claims read at most three documents regardless of history', async () => {
+  const { uploads, docs, db } = setup();
+  for (let i = 0; i < 1000; i++) docs.set(`privateFileUploads/history${i}`, { kind: 'group-cover', status: 'deleted' });
+  for (const path of ['groups/course/cover.1.jpg', 'groups/course/cover.2.jpg']) {
+    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+    await uploads.finalize(path, 'alice', 8, now + 1);
+  }
+  const original = db.runTransaction.bind(db);
+  let reads = 0;
+  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => original((tx) => callback({ ...tx,
+    get: async (ref: Parameters<typeof tx.get>[0]) => { reads++; expect((ref as { filters?: unknown }).filters).toBeUndefined(); return tx.get(ref); },
+  })));
+  await uploads.claim('groups/course/cover.1.jpg', 'alice', now + 2);
+  expect(reads).toBe(2);
+  reads = 0;
+  await uploads.claim('groups/course/cover.2.jpg', 'alice', now + 3);
+  expect(reads).toBe(3);
+  expect((await uploads.read('groups/course/cover.1.jpg')).status).toBe('released');
 });
 
-it('gives older records a fresh day without a migration', async () => {
-  const { uploads, docs } = setup();
+it('shares a 25 minute lease across independent workers', async () => {
+  const { uploads, db, storage, docs } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  delete docs.get(`privateFileUploads/${uploadId(scope(0).path)}`)!.finalizedAt;
-  expect(await uploads.cleanup(now + day)).toBe(0);
-  expect(await uploads.cleanup(now + 2 * day + 1)).toBe(1);
+  expect(await uploads.cleanup(now + 2 * day)).toBe(1);
+  const other = createPrivateFileUploads(db as unknown as Firestore, storage);
+  expect(await other.cleanup(now + 2 * day)).toBe(0);
+  expect(docs.get('privateFileCleanup/day-1970-01-03')?.reads).toBe(400);
 });
 
-it('advances the bounded scan past retained claimed containers', async () => {
+it('stops at the persistent daily budget and resumes on the next UTC day', async () => {
+  const { uploads, docs, storage } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  docs.set('privateFileCleanup/day-1970-01-03', { reads: 4800 });
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+  expect(await uploads.cleanup(now + 3 * day)).toBe(1);
+});
+
+it('continues the document-name cursor past live references and wraps', async () => {
   const { uploads, docs } = setup();
   const paths = ['groups/course/posts/live/a.pdf', 'groups/course/posts/missing/b.pdf']
     .sort((a, b) => uploadId(a).localeCompare(uploadId(b)));
@@ -219,202 +185,83 @@ it('advances the bounded scan past retained claimed containers', async () => {
     await uploads.finalize(path, 'alice', 8, now + 1);
     await uploads.claim(path, 'alice', now + 2);
   }
-  docs.set(paths[0].slice(0, paths[0].lastIndexOf('/')), { attachments: [] });
+  docs.set(paths[0].slice(0, paths[0].lastIndexOf('/')), { attachments: [{ url: paths[0] }] });
   expect(await uploads.cleanup(now + 2 * day, 1)).toBe(0);
-  expect(await uploads.cleanup(now + 2 * day, 1)).toBe(1);
+  expect(docs.get('privateFileCleanup/cursor')?.lastId).toBe(uploadId(paths[0]));
+  expect(await uploads.cleanup(now + 2 * day + CLEANUP_LEASE_MS, 1)).toBe(1);
+  expect(await uploads.cleanup(now + 2 * day + 2 * CLEANUP_LEASE_MS, 1)).toBe(0);
+  expect(docs.get('privateFileCleanup/cursor')?.lastId).toBe(uploadId(paths[0]));
 });
 
-it('releases 31 replaced covers, respects publication grace and current cover, and settles both quotas once', async () => {
-  const { uploads, docs, storage } = setup();
-  const bytes = 5 * 1024 * 1024 - 1;
-  const paths = Array.from({ length: 32 }, (_, i) => `groups/course/cover.${i}.jpg`);
-  for (const path of paths) {
-    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
-    await uploads.finalize(path, 'alice', bytes, now + 1);
-    await uploads.claim(path, 'alice', now + 2);
-  }
-  await expect(uploads.reserve(scope(98), 'alice', now)).rejects.toMatchObject({ statusCode: 429 });
-  docs.set('groups/course', { coverUrl: paths[0] });
-  await uploads.claim(paths[31], 'alice', now + 3);
-  expect((await uploads.read(paths[0])).releasedAt).toBe(now + 2);
-  expect(await uploads.cleanup(now + 2 * 3600_000, 50)).toBe(0);
-  expect(storage.remove).not.toHaveBeenCalled();
-  let cleaned = 0;
-  for (let batch = 0; batch < 8; batch++) cleaned += await uploads.cleanup(now + 2 * 3600_000 + 2, 50);
-  expect(cleaned).toBe(30);
-  expect(storage.remove).not.toHaveBeenCalledWith(paths[0]);
-  docs.set('groups/course', { coverUrl: paths[31] });
-  expect(await uploads.cleanup(now + 2 * 3600_000 + 3, 50)).toBe(1);
-  expect(await uploads.cleanup(now + 2 * 3600_000 + 4, 50)).toBe(0);
-  for (const [key, value] of docs) {
-    if (key.startsWith('privateFileQuota/')) expect(value.finalizedBytes).toBe(bytes);
-  }
-  await expect(uploads.reserve(scope(99), 'alice', now + day)).resolves.toBeUndefined();
-});
-
-
-const referenceCases = [
-  ['groups/course/posts/other', (path: string) => ({ attachments: [path] })],
-  ['groups/elsewhere/posts/other', (path: string) => ({ attachments: [path] })],
-  ['assignments/other/submissions/bob', (path: string) => ({ attachments: [{ url: path, name: 'file.pdf' }] })],
-  ['groups/elsewhere/assignments/other/submissions/bob', (path: string) => ({ attachments: [path] })],
-  ['campusStories/other', (path: string) => ({ mediaUrl: path, expiresAt: now + 10 * day })],
-  ['groups/elsewhere', (path: string) => ({ coverUrl: path })],
-] as const;
-
-it.each(['finalized', 'claimed', 'released', 'deleting'])('protects every reference for %s objects and settles zero-reference objects once', async (status) => {
-  for (const [ref, data] of referenceCases) {
-    const { uploads, docs, storage } = setup();
-    const path = status === 'released' ? 'groups/course/cover.jpg' : scope(0).path;
-    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
-    await uploads.finalize(path, 'alice', 8, now + 1);
-    Object.assign(docs.get(`privateFileUploads/${uploadId(path)}`)!, {
-      status, claimedAt: now + 2, releasedAt: now + 2,
-    });
-    docs.set(ref, data(path));
-    expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-    expect(storage.remove).not.toHaveBeenCalled();
-    expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
-    docs.delete(ref);
-    expect(await uploads.cleanup(now + 2 * day)).toBe(1);
-    expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-    expect(storage.remove).toHaveBeenCalledTimes(1);
-    expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
-  }
-});
-
-it.each(['posts', 'submissions'])('retains objects when the %s scan cannot finish', async (collection) => {
-  const { uploads, docs, storage } = setup();
+it('ignores unclaimed cross-document references without scanning the site', async () => {
+  const { uploads, docs, db } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  for (let i = 0; i <= REFERENCE_SCAN_LIMIT; i++) docs.set(`${collection}/doc${i}`, {});
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(storage.remove).not.toHaveBeenCalled();
-  docs.delete(`${collection}/doc0`);
+  for (let i = 0; i < 1000; i++) docs.set(`groups/elsewhere/posts/p${i}`, { attachments: [scope(0).path] });
+  const scan = vi.spyOn(db, 'collectionGroup');
   expect(await uploads.cleanup(now + 2 * day)).toBe(1);
+  expect(scan).not.toHaveBeenCalled();
 });
 
-it.each(['posts', 'submissions', 'campusStories', 'groups'])('retains objects when the %s reference query fails', async (collection) => {
+it('retries failed storage removal and debits quota exactly once', async () => {
+  const { uploads, storage, docs } = setup();
+  await uploads.reserve(scope(0), 'alice', now);
+  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
+  vi.mocked(storage.remove).mockRejectedValueOnce(new Error('unavailable'));
+  await expect(uploads.cleanup(now + 2 * day)).rejects.toThrow('unavailable');
+  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
+  expect(await uploads.cleanup(now + 2 * day + CLEANUP_LEASE_MS)).toBe(1);
+  expect(await uploads.cleanup(now + 3 * day)).toBe(0);
+  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
+});
+
+it('processes at most twenty candidates and resumes the remaining page', async () => {
+  const { uploads, docs } = setup();
+  for (let id = 0; id < 25; id++) {
+    await uploads.reserve(scope(id), 'alice', now);
+    await uploads.finalize(scope(id).path, 'alice', 8, now + 1);
+  }
+  expect(await uploads.cleanup(now + 2 * day, 100)).toBe(20);
+  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(40);
+  expect(await uploads.cleanup(now + 2 * day + CLEANUP_LEASE_MS, 100)).toBe(5);
+  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
+});
+
+it('does not delete when a recorded reference read fails', async () => {
   const { uploads, db, storage } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
   const original = db.runTransaction.bind(db);
-  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => original((tx) => callback({
-    ...tx,
-    get: async (query: { path: string; filters?: unknown[] }) => {
-      if (query.path === collection && Array.isArray(query.filters)) throw new Error('query unavailable');
-      return tx.get(query);
+  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => original((tx) => callback({ ...tx,
+    get: async (reference: { path: string }) => {
+      if (reference.path === 'groups/course/posts/post') throw new Error('unavailable');
+      return tx.get(reference);
     },
   })));
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  await expect(uploads.cleanup(now + 2 * day)).rejects.toThrow('unavailable');
   expect(storage.remove).not.toHaveBeenCalled();
 });
 
-it.each(['status', 'releasedAt'])('abandons released cover deletion when %s changes after scan', async (field) => {
-  const { uploads, db, docs, storage } = setup();
-  const path = 'groups/course/cover.jpg';
+it('reclaims a short-lived story two hours after expiry without waiting a day', async () => {
+  const { uploads, docs } = setup();
+  const path = cases[0][0];
   await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
   await uploads.finalize(path, 'alice', 8, now + 1);
-  const row = docs.get(`privateFileUploads/${uploadId(path)}`)!;
-  Object.assign(row, { status: 'released', releasedAt: now + 2 });
-  const original = db.runTransaction.bind(db);
-  vi.spyOn(db, 'runTransaction').mockImplementationOnce((...args) => {
-    row[field] = field === 'status' ? 'claimed' : now + 3;
-    return original(...args);
-  });
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(storage.remove).not.toHaveBeenCalled();
+  await uploads.claim(path, 'alice', now + 2);
+  docs.set('campusStories/story', { mediaUrl: path, expiresAt: now + 1000 });
+  expect(await uploads.cleanup(now + 1000 + ORPHAN_GRACE_MS + 1)).toBe(1);
 });
 
-it.each([undefined, 'invalid', now + 10 * day, new Date(now + 10 * day)])('retains story references with live or uncertain expiry %s', async (expiresAt) => {
+it('fences settlement when another worker takes over the lease', async () => {
   const { uploads, docs, storage } = setup();
   await uploads.reserve(scope(0), 'alice', now);
   await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  docs.set('campusStories/other', { mediaUrl: scope(0).path, expiresAt });
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(storage.remove).not.toHaveBeenCalled();
-});
-
-it('retains expired story matches because a limited query cannot prove all matches expired', async () => {
-  const { uploads, docs } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  docs.set('campusStories/other', { mediaUrl: scope(0).path, expiresAt: now });
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-});
-
-
-it.each([undefined, 'alice'])('stops shared reads and leaves unprocessed candidates when the budget runs out (%s)', async (uid) => {
-  const { uploads, docs, db, storage } = setup();
-  for (let i = 0; i < 5; i++) {
-    await uploads.reserve(scope(i), 'alice', now);
-    await uploads.finalize(scope(i).path, 'alice', 8, now + 1);
-  }
-  // The first scan fits the scheduled budget, but its second array scan does not.
-  for (let i = 0; i < 190; i++) {
-    docs.set(`posts/p${i}`, {});
-    docs.set(`submissions/s${i}`, {});
-  }
-  const original = db.runTransaction.bind(db);
-  let transactions = 0;
-  let reads = 0;
-  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => {
-    transactions++;
-    return original((tx) => callback({
-      ...tx,
-      get: async (query: Parameters<typeof tx.get>[0]) => {
-        const result = await tx.get(query);
-        reads += 'size' in result ? Math.max(1, result.size) : 1;
-        return result;
-      },
-    }));
+  vi.mocked(storage.remove).mockImplementationOnce(async () => {
+    docs.get('privateFileCleanup/lease')!.owner = 'replacement';
   });
-  expect(await uploads.cleanup(now + 2 * day, 5, uid)).toBe(0);
-  expect(transactions).toBe(1);
-  expect(reads).toBeLessThanOrEqual(uid ? 50 : 300);
-  expect(storage.remove).not.toHaveBeenCalled();
+  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
+  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(8);
   expect(docs.has('privateFileCleanup/cursor')).toBe(false);
-  for (const [key, row] of docs) {
-    if (key.startsWith('privateFileUploads/')) expect(row.status).toBe('finalized');
-  }
-  for (const key of [...docs.keys()]) {
-    if (key.startsWith('posts/') || key.startsWith('submissions/')) docs.delete(key);
-  }
-  expect(await uploads.cleanup(now + 2 * day, 5, uid)).toBeGreaterThan(0);
-});
-
-it.each([['campusStories', 'mediaUrl'], ['groups', 'coverUrl']])('uses a one-result equality lookup for %s and retains matches', async (collection, field) => {
-  const { uploads, docs, db, storage } = setup();
-  await uploads.reserve(scope(0), 'alice', now);
-  await uploads.finalize(scope(0).path, 'alice', 8, now + 1);
-  for (let i = 0; i < 501; i++) docs.set(`${collection}/unrelated${i}`, {});
-  docs.set(`${collection}/matching`, { [field]: scope(0).path });
-  const original = db.runTransaction.bind(db);
-  const lookups: unknown[] = [];
-  vi.spyOn(db, 'runTransaction').mockImplementation((callback) => original((tx) => callback({
-    ...tx,
-    get: async (query: { path: string; filters?: unknown[]; maximum?: number }) => {
-      if (query.path === collection && query.filters) {
-        lookups.push(query.filters);
-        expect(query.maximum).toBe(1);
-      }
-      return tx.get(query);
-    },
-  })));
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(lookups).toEqual([[{ field, op: '==', value: scope(0).path }]]);
-  expect(storage.remove).not.toHaveBeenCalled();
-});
-
-it('performs zero reference reads when no candidates exist', async () => {
-  const { uploads, db, storage } = setup();
-  const transactions = vi.spyOn(db, 'runTransaction');
-  const scans = vi.spyOn(db, 'collectionGroup');
-  const collections = vi.spyOn(db, 'collection');
-  expect(await uploads.cleanup(now + 2 * day)).toBe(0);
-  expect(transactions).not.toHaveBeenCalled();
-  expect(scans).not.toHaveBeenCalled();
-  expect(collections.mock.calls.flat()).not.toContain('campusStories');
-  expect(collections.mock.calls.flat()).not.toContain('groups');
-  expect(storage.remove).not.toHaveBeenCalled();
+  expect(await uploads.cleanup(now + 2 * day + CLEANUP_LEASE_MS)).toBe(1);
+  expect(docs.get('privateFileQuota/global')?.finalizedBytes).toBe(0);
 });
