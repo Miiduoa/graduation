@@ -204,14 +204,14 @@ it('does not combine calendar writes and food-order review into one batch confir
   expect(confirm).toHaveLength(2);
   // Food cannot advance while a preceding calendar item is not read back.
   expect((confirm[1] as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText(/先核對前面的個人行程是否已成功建立/)).toBeTruthy();
+  expect(screen.getByText(/前一筆個人行程尚未確認建立/)).toBeTruthy();
   fireEvent.click(confirm[0]);
   expect(onConfirm).toHaveBeenLastCalledWith([calendar]);
   expect(onConfirm).toHaveBeenCalledTimes(1);
   rerender(<AssistantCardStack cards={[calendar, foodCard]}
     states={{ [calendar.mutationId]: verifiedState(calendar) }} pending={false}
     onConfirm={onConfirm} onCancel={vi.fn()} />);
-  expect(screen.queryByText(/先核對前面的個人行程是否已成功建立/)).toBeNull();
+  expect(screen.queryByText(/前一筆個人行程尚未確認建立/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '確認' }));
   expect(onConfirm).toHaveBeenLastCalledWith([foodCard]);
   expect(onConfirm).toHaveBeenCalledTimes(2);
@@ -236,7 +236,7 @@ it('holds a later mixed action when the prior calendar operation has an uncertai
   expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
   const food = screen.getByRole('button', { name: '確認' }) as HTMLButtonElement;
   expect(food.disabled).toBe(true);
-  expect(screen.getByText(/先核對前面的個人行程是否已成功建立/)).toBeTruthy();
+  expect(screen.getByText(/前一筆個人行程尚未確認建立/)).toBeTruthy();
   expect(onConfirm).not.toHaveBeenCalled();
 });
 
@@ -307,4 +307,31 @@ it('does not show an irrelevant zero-calendar count for multiple service-only ac
   expect(status.textContent).toContain('服務入口已備妥 0 項');
   expect(status.textContent).toContain('其他 2 項尚未確認完成');
   expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+});
+
+it.each(['cancelled', 'superseded'] as const)(
+  'does not encourage retrying downstream cards after a %s prerequisite', (status) => {
+    const first = eventCard('calendar-aborted-plan', '報告準備');
+    render(<AssistantCardStack cards={[first, foodCard]}
+      states={{ [first.mutationId]: { status } }} pending={false}
+      onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByText(/舊計畫不能繼續，請重新規劃後續步驟/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '確認' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+  },
+);
+
+it('distinguishes an uncertain prior write from a confirmed failure and blocks automatic continuation', () => {
+  const first = eventCard('calendar-unknown-step', '程式複習');
+  const { rerender } = render(<AssistantCardStack cards={[first, foodCard]}
+    states={{ [first.mutationId]: { status: 'unknown', message: '讀回中斷' } }}
+    pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByText(/前一筆個人行程結果尚未核對/)).toBeTruthy();
+  expect(screen.getByText(/不會自動繼續或重新送出/)).toBeTruthy();
+  rerender(<AssistantCardStack cards={[first, foodCard]}
+    states={{ [first.mutationId]: { status: 'conflict', message: '來源已改變' } }}
+    pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByText(/前一筆個人行程與現有紀錄不一致/)).toBeTruthy();
+  expect(screen.getByText(/避免重複建立/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: '確認' }) as HTMLButtonElement).disabled).toBe(true);
 });
