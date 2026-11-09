@@ -48,6 +48,9 @@ it('keeps the configured Fly API in a browser bundle with no runtime public env'
   expect(client.getCloudFunctionUrl('submitLeaveRequest')).toBe('/api/fn/submitLeaveRequest');
   expect(client.getCloudFunctionUrl('listLeaveReviewQueue')).toBe('/api/fn/listLeaveReviewQueue');
   expect(client.getCloudFunctionUrl('signInPuStudentId')).toBe('/api/fn/signInPuStudentId');
+  expect(client.getCloudFunctionUrl('ensureCampusStoryBinding')).toBe(
+    '/api/fn/ensureCampusStoryBinding',
+  );
 });
 
 it('does not treat Spark Cloud Functions hostnames as configured after browser compilation', async () => {
