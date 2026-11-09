@@ -101,7 +101,7 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
         </div>
         <div className={styles.actions}>
           <Link className={styles.secondary} href="/settings?section=account">編輯資料</Link>
-          <Link className={styles.primary} href={'/community/post/new?schoolId=' + scope}>發表貼文</Link>
+          <Link className={styles.primary} href={'/community/post/new?schoolId=' + scope + '&source=profile'}>發表貼文</Link>
         </div>
       </header>
 
@@ -132,7 +132,7 @@ function TimelineContent({ uid, schoolId, schoolName, name }: {
               <p>{kind === 'media'
                 ? '有照片的貼文會集中顯示在這裡。'
                 : '從一段想法或一張照片開始。匿名貼文不會連到個人頁。'}</p>
-              <Link className={styles.secondary} href={'/community/post/new?schoolId=' + scope}>去發第一篇</Link>
+              <Link className={styles.secondary} href={'/community/post/new?schoolId=' + scope + '&source=profile'}>去發第一篇</Link>
             </div>
           ) : (
             <div className={styles.grid}>
