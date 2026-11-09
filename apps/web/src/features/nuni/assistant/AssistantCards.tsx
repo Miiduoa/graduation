@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { formatEventWhen, formatPickup, formatYuan, inAppHref, pageLabel } from './copy';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { canConfirmAction, priorCalendarActionHint, priorCalendarActionsVerified } from './execution';
+import { canConfirmAction, firstUnverifiedCalendarAction, priorCalendarActionHint, priorCalendarActionsVerified } from './execution';
 import styles from './AssistantReply.module.css';
 import type { V2ActionState, V2ActionStates, V2Card } from './types';
 
@@ -158,7 +158,11 @@ export function AssistantCard({
   onReconcile?: (card: V2Card) => void;
 }) {
   const state = states[card.mutationId];
+  const prerequisite = firstUnverifiedCalendarAction(cards, index, states);
+  const prerequisiteState = prerequisite && states[prerequisite.mutationId];
   const prerequisiteHint = priorCalendarActionHint(cards, index, states);
+  const canRecheckPrerequisite = prerequisite && onReconcile &&
+    ['unknown', 'absent', 'conflict'].includes(prerequisiteState?.status ?? '');
   if (!supportedCard(card)) {
     return <article className={styles.card} aria-label="無法確認的任務">
       <p className={styles.eyebrow}>無法確認</p>
@@ -185,7 +189,15 @@ export function AssistantCard({
       )}
       {state && <Status value={state} card={card} pending={pending} onReconcile={onReconcile} />}
       {canConfirmAction(state) && prerequisiteHint && (
-        <p className={styles.hint}>{prerequisiteHint}</p>
+        <div className={styles.prerequisiteRecovery}>
+          <p className={styles.hint}>{prerequisiteHint}</p>
+          {canRecheckPrerequisite && (
+            <button type="button" className={styles.secondary} disabled={pending}
+              onClick={() => onReconcile(prerequisite)}>
+              重新核對前一步行程
+            </button>
+          )}
+        </div>
       )}
       {canConfirmAction(state) && (
         <div className={styles.actions}>
