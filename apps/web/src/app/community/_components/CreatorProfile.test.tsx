@@ -28,6 +28,10 @@ vi.mock('@/lib/community/creatorProfile', () => ({
   readCreatorIdentity: mocks.identity,
   listCreatorPosts: mocks.posts,
 }));
+vi.mock('@/lib/community/creatorCard', () => ({
+  readCreatorCard: vi.fn(async () => null),
+  saveCreatorCard: vi.fn(),
+}));
 vi.mock('@/lib/community/bookmarks', () => ({
   loadCampusPostBookmarks: mocks.bookmarks,
 }));
