@@ -244,6 +244,17 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
 export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
   if (data?.schoolId !== 'pu' || !Array.isArray(data.buildings) || data.buildings.length > knownWays.size) return [];
+  // A trusted POI cannot have two different footprints in one API snapshot.
+  // Reject the entire inconsistent payload, even if the second record has an
+  // invalid name/shape. Never pick whichever duplicate arrived first.
+  const knownPoiIds = new Set([...knownWays.values()].map((place) => place.id));
+  const returnedPoiIds = new Set<string>();
+  for (const candidate of data.buildings) {
+    const id = object(candidate)?.poiId;
+    if (typeof id !== 'string' || !knownPoiIds.has(id)) continue;
+    if (returnedPoiIds.has(id)) return [];
+    returnedPoiIds.add(id);
+  }
   const seen = new Set<string>();
   const accepted: ProvidenceFootprint[] = [];
   for (const value of data.buildings) {
