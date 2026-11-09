@@ -66,8 +66,10 @@ export function findCatalogTimetableOverlaps(
         dayOfWeek: next.dayOfWeek,
         incomingTitle: next.title,
         existingTitle: saved.title,
-        startTime: saved.startTime || '',
-        endTime: saved.endTime || '',
+        // Show the intersection, not the existing class's entire session.
+        // All four clocks were validated as canonical HH:mm above.
+        startTime: (start > savedStart ? next.startTime : saved.startTime) || '',
+        endTime: (end < savedEnd ? next.endTime : saved.endTime) || '',
       });
       if (overlaps.length >= 10) return overlaps;
     }
