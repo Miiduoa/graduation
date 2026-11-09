@@ -170,15 +170,23 @@ function AccountReview({ schoolId, ...props }: ReviewProps & { schoolId: Props['
     scope={scope} scopeKey={scopeKey} liveScopeKey={liveScopeKey} />;
 }
 
+// The key remounts the review state on every proposal change, even when an
+// official course changes A→B→A without a new student tap. It also invalidates
+// pending focused work on the old proposal before another can be confirmed.
+function CurrentCourseProposal({ schoolId, preview, navigation }: {
+  schoolId: Props['schoolId'];
+  preview: PublicCourseTimetablePreview;
+  navigation: Props['navigation'];
+}) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <Button text="核對並加入課表" kind="primary" onPress={() => setOpen(true)} />;
+  return <AccountReview schoolId={schoolId} preview={preview} navigation={navigation}
+    onClose={() => setOpen(false)} />;
+}
+
 export function PublicCourseImportAction({ schoolId, course, navigation }: Props) {
-  const [reviewedCsv, setReviewedCsv] = useState<string | null>(null);
   const preview = useMemo(() => preparePublicCourseTimetableImport(schoolId, course), [schoolId, course]);
   if (!preview) return null;
-  // FlatList may reuse the same row when an official class changes its room,
-  // time or teacher. Never carry an open review over to that new proposal.
-  // CSV includes school, term, class identity and every proposed meeting.
-  if (reviewedCsv !== preview.csv) return <Button text="核對並加入課表" kind="primary"
-    onPress={() => setReviewedCsv(preview.csv)} />;
-  return <AccountReview schoolId={schoolId} preview={preview} navigation={navigation}
-    onClose={() => setReviewedCsv(null)} />;
+  // CSV includes school, term, class identity, instructor and every meeting.
+  return <CurrentCourseProposal key={preview.csv} schoolId={schoolId} preview={preview} navigation={navigation} />;
 }

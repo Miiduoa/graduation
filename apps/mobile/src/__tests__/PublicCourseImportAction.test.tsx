@@ -369,3 +369,18 @@ test('switching the public campus cannot reuse a review opened for another schoo
   review(view);
   expect(view.getByText(/國立暨南國際大學/)).toBeTruthy();
 });
+
+test('a refreshed offering that later returns to its prior details still requires a fresh tap', () => {
+  const view = renderAction();
+  review(view);
+  const updated: PublicCatalogCourse = {
+    ...nthu,
+    meetings: [{ time: 'M3M4', room: '新教室' }, { time: 'R5R6', room: '教室乙' }],
+  };
+  view.rerender(<PublicCourseImportAction schoolId="nthu" course={updated} navigation={navigation} />);
+  expect(view.getByText('核對並加入課表')).toBeTruthy();
+  view.rerender(<PublicCourseImportAction schoolId="nthu" course={nthu} navigation={navigation} />);
+  expect(view.getByText('核對並加入課表')).toBeTruthy();
+  expect(view.queryByText('確認加入個人課表')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
