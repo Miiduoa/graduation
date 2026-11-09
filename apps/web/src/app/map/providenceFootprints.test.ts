@@ -66,6 +66,27 @@ describe('Providence OSM building outlines', () => {
     }] })).toEqual([]);
   });
 
+  it('refuses a way moved to another campus building even if it remains in campus bounds', () => {
+    // The existing source ID does not license attaching the library's name to a distant polygon.
+    const displaced = library.map(({ lat, lon }) => ({ lat: lat + 0.0015, lon: lon + 0.0013 }));
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, displaced)],
+    })).toEqual([]);
+
+    const known = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [{
+      ...known, outline: displaced.slice(0, -1).map((p) => [p.lon, p.lat]),
+    }] })).toEqual([]);
+  });
+
+  it('tolerates a small, declared map-alignment offset without requiring a fabricated entrance', () => {
+    const nearby = library.map(({ lat, lon }) => ({ lat: lat + 0.00028, lon }));
+    const result = parseProvidenceOsmFootprints({ elements: [way(255784049, nearby)] });
+    expect(result).toHaveLength(1);
+    expect(result[0].poiId).toBe('pu-library');
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: result })).toEqual(result);
+  });
+
   it('excludes unverified parking and raw nodes, duplicate IDs and excessive payloads', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [way(255784049), way(255784049), way(295686299), { type: 'node', id: 255784049, geometry: library }],

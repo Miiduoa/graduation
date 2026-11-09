@@ -21,6 +21,7 @@ const DEG = Math.PI / 180;
 const ALLOWANCE = 0.0004;
 const MAX_WAYS = 128;
 const MAX_VERTICES = 160;
+const MAX_POI_OFFSET_METERS = 30;
 const ILLUSTRATIVE_HEIGHT = 12;
 
 const knownWays = new Map(
@@ -113,6 +114,34 @@ function safeOutline(value: unknown): Array<[number, number]> | null {
   return area >= 20 && area <= 100_000 ? points : null;
 }
 
+/** Ensure a verified OSM way still covers (or is very close to) its named POI.
+ * A moved or re-tagged way elsewhere on campus must not inherit the old POI's name.
+ * The 30 m slack covers map alignment errors; it is not a room/entrance coordinate.
+ */
+function outlineNearPoi(outline: readonly [number, number][], place: { lat: number; lng: number }): boolean {
+  const lonScale = EARTH_RADIUS * DEG * Math.cos(place.lat * DEG);
+  const latScale = EARTH_RADIUS * DEG;
+  const vertices = outline.map(([lon, lat]) => [
+    (lon - place.lng) * lonScale, (lat - place.lat) * latScale,
+  ] as const);
+  let inside = false;
+  for (let i = 0; i < vertices.length; i += 1) {
+    const [ax, ay] = vertices[i];
+    const [bx, by] = vertices[(i + 1) % vertices.length];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const position = lengthSquared > 0
+      ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared))
+      : 0;
+    const nearestX = ax + position * dx;
+    const nearestY = ay + position * dy;
+    if (nearestX * nearestX + nearestY * nearestY <= MAX_POI_OFFSET_METERS ** 2) return true;
+    if ((ay > 0) !== (by > 0) && ax + (-ay * dx) / dy > 0) inside = !inside;
+  }
+  return inside;
+}
+
 function heightFromOsmTags(value: unknown): { heightMeters: number; heightBasis: ProvidenceFootprint['heightBasis'] } {
   const tags = object(value);
   const raw = tags?.height;
@@ -136,7 +165,7 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const place = knownWays.get(element.id);
     if (!place || seen.has(element.id)) continue;
     const outline = safeOutline(element.geometry);
-    if (!outline) continue;
+    if (!outline || !outlineNearPoi(outline, place)) continue;
     seen.add(element.id);
     buildings.push({
       poiId: place.id,
@@ -173,7 +202,7 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
     if (geometry.some((entry: unknown) => entry === null)) continue;
     const closed = [...geometry, geometry[0]];
     const outline = safeOutline(closed);
-    if (!outline) continue;
+    if (!outline || !outlineNearPoi(outline, place)) continue;
     seen.add(item.poiId);
     accepted.push({
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
