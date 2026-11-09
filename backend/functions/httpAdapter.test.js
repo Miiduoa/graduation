@@ -187,6 +187,85 @@ describe('callable HTTP adapter', () => {
   });
 });
 
+
+describe('registered route ownership', () => {
+  test.each(['toString', 'constructor', 'hasOwnProperty'])(
+    'rejects inherited Object.%s as an unregistered callable',
+    async (name) => {
+      const registered = jest.fn(async () => ({ ok: true }));
+      const { server, port } = await listen(createRequestListener({
+        callables: { registered },
+        verifyIdToken: async () => ({ uid: 'student-1' }),
+      }));
+      try {
+        const response = await request(port, {
+          method: 'POST', path: `/${name}`, body: { data: {} },
+          headers: { Authorization: 'Bearer test-token' },
+        });
+        expect(response.status).toBe(404);
+        expect(response.body.error.status).toBe('NOT_FOUND');
+        expect(registered).not.toHaveBeenCalled();
+      } finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    },
+  );
+
+  test('rejects a callable inherited from a custom prototype', async () => {
+    const inherited = jest.fn(async () => ({ unexpected: true }));
+    const callables = Object.create({ inheritedCallable: inherited });
+    const { server, port } = await listen(createRequestListener({ callables }));
+    try {
+      const response = await request(port, {
+        method: 'POST', path: '/inheritedCallable', body: { data: {} },
+      });
+      expect(response.status).toBe(404);
+      expect(response.body.error.status).toBe('NOT_FOUND');
+      expect(inherited).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('rejects an HTTP handler inherited from a custom prototype', async () => {
+    const inherited = jest.fn((_req, res) => res.status(200).json({ unexpected: true }));
+    const httpFunctions = Object.create({ inheritedHttp: inherited });
+    const { server, port } = await listen(createRequestListener({
+      callables: Object.create(null), httpFunctions,
+    }));
+    try {
+      const response = await request(port, { method: 'GET', path: '/inheritedHttp' });
+      expect(response.status).toBe(404);
+      expect(response.body.error.status).toBe('NOT_FOUND');
+      expect(inherited).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('does not execute a job inherited from a schedule prototype', async () => {
+    const inherited = jest.fn(async () => {});
+    const schedules = Object.create({ inheritedJob: { handler: inherited } });
+    const { server, port } = await listen(createRequestListener({
+      schedules, cronSecret: 'synthetic-secret',
+    }));
+    try {
+      const response = await request(port, {
+        method: 'POST', path: '/internal/cron/inheritedJob',
+        headers: { Authorization: 'Bearer synthetic-secret' },
+      });
+      expect(response.status).toBe(404);
+      expect(inherited).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
 describe('prebuffered HTTP body resource bounds', () => {
   test.each(['rawBody', 'body-buffer', 'body-string', 'body-object'])(
     'rejects oversized %s before invoking a callable',

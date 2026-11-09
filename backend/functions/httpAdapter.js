@@ -342,7 +342,7 @@ function createRequestListener({
         return;
       }
       const name = url.pathname.slice('/internal/cron/'.length).replace(/\/+$/, '');
-      const job = schedules[name];
+      const job = Object.hasOwn(schedules, name) ? schedules[name] : undefined;
       if (!job || typeof job.handler !== 'function') {
         sendJson(res, 404, { error: 'Unknown schedule' });
         return;
@@ -361,8 +361,11 @@ function createRequestListener({
     }
 
     const functionName = functionNameFromUrl(url);
-    const isCallable = Boolean(callables[functionName]);
-    const isHttp = Boolean(httpFunctions[functionName]);
+    // Dispatch only explicitly registered functions, not inherited Object methods.
+    const isCallable = Object.hasOwn(callables, functionName)
+      && typeof callables[functionName] === 'function';
+    const isHttp = Object.hasOwn(httpFunctions, functionName)
+      && typeof httpFunctions[functionName] === 'function';
 
     if (isCallable) {
       applyCorsHeaders(req, res, origins);
