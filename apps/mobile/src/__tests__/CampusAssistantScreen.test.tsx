@@ -2115,3 +2115,25 @@ test('cancelling device inference restores its original question without wiping 
   expect(field.props.value).toBe('排今晚讀書時間');
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+test('reading older phone replies stays in place until the user requests the latest reply', async () => {
+  const waiting = deferred<{ content: string; hasActions: boolean }>();
+  request.mockReturnValueOnce(waiting.promise);
+  const view = render(<CampusAssistantScreen />);
+  const field = view.getByLabelText('詢問校園助理');
+  const scroll = view.getByTestId('assistant-conversation-scroll');
+  fireEvent.changeText(field, '整理這週作業');
+  act(() => fireEvent.press(view.getByText('送出問題')));
+  // Simulate the reader swiping up while the answer is still pending.
+  act(() => fireEvent.scroll(scroll, { nativeEvent: {
+    contentOffset: { y: 0 }, layoutMeasurement: { height: 400 },
+    contentSize: { height: 1200 },
+  } }));
+  expect(view.getByText('回到最新回覆')).toBeTruthy();
+  await act(async () => waiting.resolve({ content: '已整理本週作業', hasActions: false }));
+  expect(view.getByText('已整理本週作業')).toBeTruthy();
+  expect(view.getByText('回到最新回覆')).toBeTruthy();
+  fireEvent.press(view.getByText('回到最新回覆'));
+  expect(view.queryByText('回到最新回覆')).toBeNull();
+  expect(request).toHaveBeenCalledTimes(1);
+});
