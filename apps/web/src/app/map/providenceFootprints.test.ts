@@ -61,6 +61,28 @@ describe('Providence OSM building outlines', () => {
     })[0]).toMatchObject({ poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag' });
   });
 
+  it('fails closed on contradictory lifecycle tags even when building=yes remains', () => {
+    // Edits can leave a historic lifecycle tag alongside an older building=yes.
+    // Do not present ambiguous construction/demolition status as a full 3D building.
+    for (const lifecycle of [
+      'abandoned:building', 'disused:building', 'demolished:building',
+      'destroyed:building', 'removed:building', 'razed:building',
+      'construction:building', 'proposed:building', 'planned:building',
+    ]) {
+      const tags = { building: 'yes', [lifecycle]: 'yes' };
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), lifecycle).toEqual([]);
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'yes', 'demolished:building': 'house' })],
+    })).toEqual([]);
+    // Explicit negative lifecycle flags do not override a standing building.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'yes', 'demolished:building': 'no' })],
+    })).toHaveLength(1);
+  });
+
   it('rejects wrong campus, open ways, degenerate shapes and self-intersections', () => {
     const outside = library.map((p) => ({ lat: p.lat + 1, lon: p.lon }));
     const open = library.slice(0, -1);
