@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
@@ -703,7 +704,7 @@ async def sourced_building_volumes(page, _requests, _resources):
     fixture = {
         "schoolId": "pu",
         "source": "OpenStreetMap",
-        "fetchedAt": "2026-11-09T05:00:00Z",
+        "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "stale": False,
         "buildings": [{
             "poiId": "pu-library",
@@ -742,7 +743,7 @@ async def sourced_building_volumes(page, _requests, _resources):
     after = await canvas_fingerprint(page)
     assert before != after, "A source-checked building did not alter the real WebGL pixels"
     assert len(requests_seen) == 1, requests_seen
-    await expect(dialog_for(page).get_by_text("資料讀取：2026-11-09", exact=False)).to_be_visible()
+    await expect(dialog_for(page).get_by_text(f"資料讀取：{fixture['fetchedAt'][:10]}", exact=False)).to_be_visible()
     await assert_layout(page)
     await page.screenshot(path=str(OUT / "sourced-building-volume.png"))
     return {
