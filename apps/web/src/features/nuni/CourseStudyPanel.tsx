@@ -77,10 +77,26 @@ function decodeStudyBackup(text: string, scope: CourseStudyProgressScope) {
 
 type StudyTextEncoding = 'utf-8' | 'big5';
 
+// File.text() uses replacement decoding. Malformed UTF-8 could otherwise
+// silently become U+FFFD inside a lesson or a personal progress backup.
+// Recheck the original bytes only when the decoded text contains U+FFFD:
+// a genuinely authored replacement glyph is still valid UTF-8 and must work.
+async function readStudyUtf8File(file: File, purpose: '教材' | '進度備份'): Promise<string> {
+  const text = await file.text();
+  if (text.includes('\uFFFD')) {
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      throw new Error(`這份${purpose}含有無法解碼的 UTF-8 位元組，尚未載入。請確認文字編碼；原教材與筆記仍保留。`);
+    }
+  }
+  return text;
+}
+
 // Legacy Taiwanese course notes may use Big5. Decode only when the student
 // explicitly selects it; do not guess and silently replace invalid bytes.
 async function readStudyTextFile(file: File, encoding: StudyTextEncoding): Promise<string> {
-  if (encoding === 'utf-8') return file.text();
+  if (encoding === 'utf-8') return readStudyUtf8File(file, '教材');
   try {
     return new TextDecoder('big5', { fatal: true }).decode(await file.arrayBuffer());
   } catch {
@@ -539,7 +555,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
       if (!/\.json$/i.test(file.name)) throw new Error('請選擇之前儲存的 nuni 讀書白板進度檔（JSON）。');
       if (!file.size || file.size > COURSE_STUDY_PROGRESS_LIMITS.bytes)
         throw new Error('請選擇有內容且不超過 8 MiB 的閱讀進度檔。');
-      const text = await file.text();
+      const text = await readStudyUtf8File(file, '進度備份');
       if (read.current !== controller || controller.signal.aborted) return;
       const { progress, round } = decodeStudyBackup(text, scope);
       setRestorePreview({ filename: file.name, progress, round, origin: 'file' });
@@ -788,7 +804,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
               <option value="big5">繁體中文 Big5（舊版講義）</option>
             </select>
           </label>
-          <p className={styles.note}>PDF 最多 20 頁、8 MiB；文字最多 60,000 字元。舊版繁體中文文字檔若以 UTF-8 開啟出現亂碼，可選 Big5 後重新選檔；PDF 不受此選項影響。檔案在此裝置讀取，公式、圖表與掃描辨識結果請對照原檔。</p>
+          <p className={styles.note}>PDF 最多 20 頁、8 MiB；文字最多 60,000 字元。舊版繁體中文文字檔若非 UTF-8，請先選 Big5 再選檔；無效 UTF-8 會拒絕載入，不以替代字元悄悄改寫教材；PDF 不受此選項影響。檔案在此裝置讀取，公式、圖表與掃描辨識結果請對照原檔。</p>
           <label className={styles.field} htmlFor={pasteId}>或貼上課文與筆記
             <textarea id={pasteId} rows={4} value={paste} disabled={!!reading}
               onChange={(event) => updatePastedSource(event.target.value)} placeholder="貼上想理解的段落…" />

@@ -332,6 +332,53 @@ it('rejects malformed Big5 instead of silently losing characters or replacing ex
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+it('rejects malformed UTF-8 textbook bytes without replacing an existing note or lesson', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '保留原先的私有筆記' } });
+  const bytes = Uint8Array.from([0xe4, 0xb8, 0xad, 0xff, 0xe6, 0x96, 0x87]);
+  const file = new File([bytes], '損壞的講義.txt', { type: 'text/plain' });
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('中�文') });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('無法解碼的 UTF-8 位元組'));
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(note.value).toBe('保留原先的私有筆記');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+});
+
+it('does not mistake a literal valid Unicode replacement glyph for a corrupted UTF-8 file', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '這份教材本來就包含替代字元�，應保留原文。';
+  const bytes = new TextEncoder().encode(content);
+  const file = new File([bytes], '合法字元.md', { type: 'text/markdown' });
+  const readBytes = vi.fn().mockResolvedValue(bytes.buffer);
+  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(content) });
+  Object.defineProperty(file, 'arrayBuffer', { value: readBytes });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByText(content)).toBeTruthy();
+  expect(readBytes).toHaveBeenCalledOnce();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('rejects malformed UTF-8 progress bytes before offering restore, preserving private notes', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '未備份的原筆記' } });
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const bytes = Uint8Array.from([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]);
+  const file = new File([bytes], '上次進度.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('{"a":"�"}') });
+  Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(bytes.buffer) });
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('進度備份含有無法解碼的 UTF-8 位元組'));
+  expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+  expect(note.value).toBe('未備份的原筆記');
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('invalidates a pending lesson replacement when an oversized pasted edit is rejected', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), {
