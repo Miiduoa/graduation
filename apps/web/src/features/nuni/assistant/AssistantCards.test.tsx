@@ -227,17 +227,27 @@ it('does not combine calendar writes and food-order review into one batch confir
   expect(screen.getAllByRole('button', { name: '確認' })).toHaveLength(2);
 });
 
-it('holds a later mixed action when the prior calendar operation has an uncertain receipt', () => {
-  const calendar = eventCard('m1', '準備英文');
+it('holds a mixed action until its uncertain prerequisite is read back', () => {
+  const calendar = eventCard('calendar-pending-readback', '準備英文');
   const onConfirm = vi.fn();
-  render(<AssistantCardStack cards={[calendar, foodCard]} pending={false}
-    states={{ m1: { status: 'unknown', message: '行程結果尚未讀回' } }}
-    onConfirm={onConfirm} onCancel={vi.fn()} />);
+  const onReconcile = vi.fn();
+  const states = { [calendar.mutationId]: { status: 'unknown' as const, message: '行程結果尚未讀回' } };
+  const view = render(<AssistantCardStack cards={[calendar, foodCard]} pending={false}
+    states={states} onConfirm={onConfirm} onCancel={vi.fn()} onReconcile={onReconcile} />);
   expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
   const food = screen.getByRole('button', { name: '確認' }) as HTMLButtonElement;
   expect(food.disabled).toBe(true);
-  expect(screen.getByText(/前一筆個人行程尚未確認建立/)).toBeTruthy();
+  expect(screen.getByText(/前一筆個人行程結果尚未核對/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '重新核對前一步行程' }));
+  expect(onReconcile).toHaveBeenCalledExactlyOnceWith(calendar);
   expect(onConfirm).not.toHaveBeenCalled();
+
+  view.rerender(<AssistantCardStack cards={[calendar, foodCard]} pending
+    states={states} onConfirm={onConfirm} onCancel={vi.fn()} onReconcile={onReconcile} />);
+  const recheck = screen.getByRole('button', { name: '重新核對前一步行程' }) as HTMLButtonElement;
+  expect(recheck.disabled).toBe(true);
+  fireEvent.click(recheck);
+  expect(onReconcile).toHaveBeenCalledTimes(1);
 });
 
 it('refuses to render a confirmation button for an unknown model tool', () => {
