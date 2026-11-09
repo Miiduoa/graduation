@@ -388,7 +388,7 @@ function ScopedCreatorProfile({
           <View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`閱讀貼文：${item.title || '貼文'}`
+            accessibilityLabel={`閱讀貼文：${item.title || '貼文'}`}
             onPress={() => navigation?.navigate?.('PostDetail', { postId: item.id })}
             style={styles.postCard}
           >
