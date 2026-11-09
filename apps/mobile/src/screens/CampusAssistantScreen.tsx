@@ -207,6 +207,8 @@ function AssistantConversation({
   const [panel, setPanel] = useState<AssistantPanel>('chat');
   const [openedSavedPlan, setOpenedSavedPlan] = useState<{ id: string; request: number } | null>(null);
   const chatScroll = useRef<ScrollView>(null);
+  const nearLatest = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const lastRevealed = useRef(-1);
   const [deviceCheck, setDeviceCheck] = useState(0);
   const [error, setError] = useState('');
@@ -599,6 +601,8 @@ function AssistantConversation({
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || studyLock.current || calendarBusy || !current()) return;
     if (shortcut?.kind === 'selection' && shortcut.checkedAt !== validCampusSenseSnapshot(sense, { uid, schoolId })?.checkedAt) return;
     lock.current = true;
+    nearLatest.current = true;
+    setShowJumpToLatest(false);
     setActiveShortcut(shortcut ?? null);
     setBusy(true);
     setError('');
@@ -754,7 +758,15 @@ function AssistantConversation({
     if (source) safeNavigate(navigation, '公告詳情', { id: source.id, sourceKind: source.kind, schoolId });
   };
   const scrollToEntry = (event: LayoutChangeEvent) => {
+    if (!nearLatest.current) {
+      setShowJumpToLatest(true);
+      return;
+    }
     chatScroll.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - 8), animated: false });
+  };
+  const onChatScrollPosition = (atLatest: boolean) => {
+    nearLatest.current = atLatest;
+    setShowJumpToLatest(!atLatest);
   };
   const revealReply = (index: number, event: LayoutChangeEvent) => {
     if (index !== messages.length - 1 || lastRevealed.current === index || panel !== 'chat') return;
@@ -902,7 +914,8 @@ function AssistantConversation({
     <AssistantConversationLayout
       title={platformTimetable ? '課業助理' : '校園助理'}
       subtitle={schoolName + ' · ' + (platformTimetable ? 'nuni 個人課表' : mode === 'device' ? '手機本地' : '校園連線')}
-      panel={panel} onSelect={selectPanel} locked={busy || syncBusy || calendarBusy} chatScroll={chatScroll}
+      panel={panel} onSelect={selectPanel} locked={busy || syncBusy || calendarBusy}
+      chatScroll={chatScroll} onChatScrollPosition={onChatScrollPosition}
       onBack={() => {
         inFlight.current?.abort();
         navigation?.goBack?.();
@@ -910,8 +923,19 @@ function AssistantConversation({
       tools={campusTools}
       toolsLabel={platformTimetable ? '已儲存計畫' : '校園工具'}
       composer={canAsk ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
-          paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
+        <View style={{ backgroundColor: aiTokens.surface }}>
+          {showJumpToLatest ? (
+            <View style={{ alignItems: 'flex-end', paddingHorizontal: 12, paddingTop: 8 }}>
+              <AIButton label="回到最新回覆" variant="ghost" size="sm"
+                onPress={() => {
+                  nearLatest.current = true;
+                  setShowJumpToLatest(false);
+                  chatScroll.current?.scrollToEnd({ animated: true });
+                }} />
+            </View>
+          ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
+            paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
           <TextInput
             ref={composerInput}
             accessibilityLabel="詢問校園助理"
@@ -931,6 +955,7 @@ function AssistantConversation({
             <AIButton label={busy ? '正在查詢…' : error && !activeShortcut ? '重試查詢' : '送出問題'}
               size="sm" disabled={busy || syncBusy || !draft.trim()} onPress={() => void send()} />
           )}
+          </View>
         </View>
       ) : null}
     >
