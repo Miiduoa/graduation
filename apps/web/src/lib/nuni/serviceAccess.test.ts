@@ -41,7 +41,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 it('verifies the live session and persists restrictions inside the encrypted session cookie', async () => {
-  fetcher.mockResolvedValue(json({
+  fetcher.mockImplementation(async () => json({
     authenticated: true,
     platformAccountId: 'pa_11111111-1111-4111-8111-111111111111',
     isPlatformOperator: false,
