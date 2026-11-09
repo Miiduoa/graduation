@@ -68,10 +68,27 @@ export function PostDetailScreen(props: any) {
   const { user, loading } = useAuth();
   const { school } = useSchool();
   const postId = props?.route?.params?.postId as string | undefined;
+  // History results bind a document ID to the campus in which it was found.
+  // Never reinterpret the same ID under a different campus after a school switch.
+  const sourceSchoolId = props?.route?.params?.schoolId as string | undefined;
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: 'center', padding: 20 }}>
         <Text style={{ color: theme.colors.textSecondary }}>正在確認登入狀態…</Text>
+      </View>
+    );
+  }
+  if (sourceSchoolId && sourceSchoolId !== school?.id) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 20 }}>
+        <Text accessibilityRole="alert" style={{ color: theme.colors.textSecondary, textAlign: 'center' }}>
+          搜尋文章的學校已切換，請返回校園社群重新搜尋。
+        </Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="返回校園社群"
+          onPress={() => props?.navigation?.goBack?.()}
+          style={{ minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 }}>
+          <Text style={{ color: theme.colors.accent }}>返回校園社群</Text>
+        </Pressable>
       </View>
     );
   }

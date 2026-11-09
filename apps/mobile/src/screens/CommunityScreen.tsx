@@ -128,7 +128,7 @@ export function CommunityScreen(props: Record<string, unknown>) {
       <CampusSocialNavProvider navigation={stackNav}>
         <View style={{ flex: 1 }}>
           {activeTab === 'feed' && (
-            <TitleHistoryLauncher onOpenPost={({ id }) => stackNav?.navigate?.('PostDetail', { postId: id })} />
+            <TitleHistoryLauncher onOpenPost={({ id, schoolId }) => stackNav?.navigate?.('PostDetail', { postId: id, schoolId })} />
           )}
           {activeTab === 'feed' && <HomeFeedScreen />}
           {activeTab === 'boards' && <BoardsScreen />}
