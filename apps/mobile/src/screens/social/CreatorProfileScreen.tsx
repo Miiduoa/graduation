@@ -27,6 +27,12 @@ type ReadState<T> =
   | { status: 'ready'; value: T };
 type PostsPage = { rows: CampusPostDoc[]; cursor: CreatorCursor; hasMore: boolean };
 type FollowState = 'loading' | 'following' | 'not-following' | 'pending' | 'error';
+type CreatorListItem = {
+  key: string;
+  post: CampusPostDoc;
+  mediaUrl?: string;
+  mediaIndex?: number;
+};
 
 type Props = {
   navigation?: { navigate?: (screen: string, params?: Record<string, unknown>) => void };
@@ -202,8 +208,14 @@ function ScopedCreatorProfile({
     ? identity.value.displayName : own ? ownName : '校園成員';
   const avatarUrl = identity.status === 'ready' ? identity.value?.avatarUrl : null;
   const postRows = posts.status === 'ready' ? posts.value.rows : [];
-  const rows = tab === 'saved' ? saved.status === 'ready' ? saved.value : []
-    : tab === 'media' ? postRows.filter((post) => mediaUrls(post).length > 0) : postRows;
+  const visiblePosts = tab === 'saved'
+    ? saved.status === 'ready' ? saved.value : []
+    : postRows;
+  const rows: CreatorListItem[] = tab === 'media'
+    ? postRows.flatMap((post) => mediaUrls(post).map((url, mediaIndex) => ({
+        key: `media:${post.id}:${mediaIndex}`, post, mediaUrl: url, mediaIndex,
+      })))
+    : visiblePosts.map((post) => ({ key: `post:${post.id}`, post }));
   const reading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading';
   const failed = tab === 'saved' ? saved.status === 'error' : posts.status === 'error';
 
@@ -218,7 +230,7 @@ function ScopedCreatorProfile({
       style={styles.root}
       contentContainerStyle={styles.listContent}
       data={reading || failed ? [] : rows}
-      keyExtractor={(item) => item.id}
+      keyExtractor={(entry) => entry.key}
       numColumns={tab === 'media' ? 3 : 1}
       refreshControl={<RefreshControl refreshing={reading} onRefresh={retry} />}
       ListHeaderComponent={
@@ -296,12 +308,13 @@ function ScopedCreatorProfile({
           {tab === 'saved' && <Text style={styles.savedNote}>私人收藏 · 最多顯示最近 40 筆</Text>}
         </>
       }
-      renderItem={({ item }) => {
-        const first = mediaUrls(item)[0];
+      renderItem={({ item: tile }) => {
+        const item = tile.post;
+        const first = tile.mediaUrl ?? mediaUrls(item)[0];
         if (tab === 'media') return (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`查看媒體貼文：${item.title || '貼文'}`}
+            accessibilityLabel={`查看媒體貼文：${item.title || '貼文'}${mediaUrls(item).length > 1 ? `（第 ${(tile.mediaIndex ?? 0) + 1} 張）` : ''}`}
             onPress={() => navigation?.navigate?.('PostDetail', { postId: item.id })}
             style={styles.mediaTile}
           >
@@ -464,7 +477,7 @@ const createStyles = () => StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.surface2,
   },
   mediaTile: {
-    flex: 1, aspectRatio: 1, margin: 2, backgroundColor: theme.colors.surface2,
+    flex: 1, maxWidth: '32%', aspectRatio: 1, margin: 2, backgroundColor: theme.colors.surface2,
     justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
   },
   mediaImage: { width: '100%', height: '100%', resizeMode: 'cover' },

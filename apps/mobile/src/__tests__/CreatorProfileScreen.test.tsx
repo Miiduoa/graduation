@@ -27,6 +27,10 @@ jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
   readCreatorIdentity: jest.fn(),
 }));
+jest.mock('../services/creatorCard', () => ({
+  readCreatorCard: jest.fn(async () => null),
+  saveCreatorCard: jest.fn(),
+}));
 jest.mock('../services/campusPostBookmarks', () => ({
   loadCampusPostBookmarks: jest.fn(),
 }));
@@ -77,6 +81,22 @@ test('owner manages posts, media, saved posts and publishing without private-acc
   fireEvent.press(screen.getByLabelText('我的收藏'));
   expect(await screen.findByText('私人收藏的貼文')).toBeTruthy();
   expect(loadCampusPostBookmarks).toHaveBeenCalledWith('alice', 'pu', 40);
+});
+
+test('the media grid represents every photo of a single creator post', async () => {
+  jest.mocked(listCreatorPosts).mockResolvedValueOnce(page([{
+    ...myPost,
+    mediaUrls: ['https://example.test/first.png', 'https://example.test/second.png'],
+  }]));
+  const view = render(
+    <CreatorProfileScreen route={{ params: { memberUid: 'alice' } }} navigation={{ navigate }} />,
+  );
+  await view.findByText('我的校園貼文');
+  fireEvent.press(view.getByLabelText('相片與影片'));
+  expect(view.getByLabelText('查看媒體貼文：我的校園貼文（第 1 張）')).toBeTruthy();
+  expect(view.getByLabelText('查看媒體貼文：我的校園貼文（第 2 張）')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('查看媒體貼文：我的校園貼文（第 2 張）'));
+  expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'post-1' });
 });
 
 test('another member can be followed but never sees personal saved posts', async () => {
