@@ -319,7 +319,11 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
   if (!buildings.length) return null;
   return {
     buildings, fetchedAt: data.fetchedAt,
-    stale: data.stale || ageMs >= day,
+    // A response can be cached upstream even after its Overpass replication
+    // timestamp passes the server's 48-hour freshness deadline. Do not trust
+    // stale=false from an intermediary when the device can verify the age.
+    stale: data.stale || ageMs >= day || (typeof osmBaseAt === 'string' &&
+      now - Date.parse(osmBaseAt) >= 48 * 60 * 60 * 1000),
     osmBaseAt: typeof osmBaseAt === 'string' ? osmBaseAt : null,
   };
 }
