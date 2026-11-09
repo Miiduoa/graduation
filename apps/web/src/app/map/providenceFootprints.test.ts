@@ -153,6 +153,31 @@ describe('Providence OSM building outlines', () => {
     })).toHaveLength(1);
   });
 
+  it('rejects duplicate verified POIs in an API snapshot instead of selecting the first building', () => {
+    const footprint = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
+    const conflicting = { ...footprint, heightMeters: 90, heightBasis: 'osm-tag' as const };
+    const invalid = { ...footprint, name: '錯誤建築名稱' };
+    const fetchedAt = new Date().toISOString();
+    for (const buildings of [
+      [footprint, conflicting],
+      [conflicting, footprint],
+      [footprint, invalid],
+      [invalid, footprint],
+    ]) {
+      // Invalid duplicates must not silently be ignored after a valid record,
+      // nor promoted ahead of it merely because JSON ordering changed.
+      expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings })).toEqual([]);
+      expect(parseProvidenceFootprintSnapshot({
+        schoolId: 'pu', source: 'OpenStreetMap', fetchedAt, stale: false, buildings,
+      })).toBeNull();
+    }
+    // Unverified foreign POIs are never rendered and cannot suppress trusted ways.
+    const foreign = { ...footprint, poiId: 'pu-parking-p1', name: '未核對停車場' };
+    expect(parseProvidenceFootprintResponse({
+      schoolId: 'pu', buildings: [footprint, foreign, foreign],
+    })).toEqual([footprint]);
+  });
+
   it('retains a valid way revision but never copies OSM editor account information', () => {
     const wayWithRevision = { ...way(255784049), version: 7,
       timestamp: '2026-10-15T08:09:10Z', user: 'private-editor', uid: 1234, changeset: 9876 };
