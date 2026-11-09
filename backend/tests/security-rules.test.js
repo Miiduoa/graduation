@@ -1981,6 +1981,11 @@ describe('storage security rules', () => {
       .where('expiresAt', '>', now + 120_000)
       .orderBy('expiresAt', 'desc').limit(80).get());
     assert.deepEqual(active.docs.map((row) => row.id), ['active-list-proof']);
+    // Web fallback omits the expiry sort when that composite index is missing,
+    // but still has to prove every returned row is unexpired.
+    const fallback = await assertSucceeds(stories.where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000).limit(80).get());
+    assert.deepEqual(fallback.docs.map((row) => row.id), ['active-list-proof']);
     await assertFails(bob.collection('campusStories')
       .where('schoolId', '==', 'pu')
       .where('expiresAt', '>', now + 120_000).get());
