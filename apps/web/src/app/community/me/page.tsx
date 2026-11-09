@@ -1,5 +1,7 @@
 'use client';
 
+import { Suspense } from 'react';
+
 import { useAuth } from '@/components/AuthGuard';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
@@ -20,7 +22,7 @@ function MyCreatorContent({
   return <CreatorProfile schoolId={schoolId} schoolName={schoolName} memberUid={user.uid} />;
 }
 
-export default function MyCreatorPage() {
+function MyCreatorPageContent() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   const requestedSchoolId = useSearchParams()?.get('schoolId');
   const mismatch = ready && requestedSchoolId && requestedSchoolId !== schoolId;
@@ -34,5 +36,13 @@ export default function MyCreatorPage() {
         </CommunityAccess>
       ) : <SchoolScopePlaceholder />}
     </SiteShell>
+  );
+}
+
+export default function MyCreatorPage() {
+  return (
+    <Suspense fallback={<SiteShell title="我的社群頁"><SchoolScopePlaceholder /></SiteShell>}>
+      <MyCreatorPageContent />
+    </Suspense>
   );
 }
