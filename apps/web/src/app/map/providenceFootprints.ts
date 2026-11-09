@@ -206,6 +206,16 @@ function heightFromOsmTags(value: unknown): { heightMeters: number; heightBasis:
 export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprint[] {
   const data = object(value);
   if (!Array.isArray(data?.elements) || data.elements.length > MAX_WAYS) return [];
+  // A single OSM way cannot have two simultaneous outlines in one Overpass reply.
+  // Failing closed avoids a forged/partial first entry winning merely by order,
+  // even when its duplicate is missing tags or has invalid geometry.
+  const returnedKnownIds = new Set<number>();
+  for (const candidate of data.elements) {
+    const item = object(candidate);
+    if (item?.type !== 'way' || typeof item.id !== 'number' || !knownWays.has(item.id)) continue;
+    if (returnedKnownIds.has(item.id)) return [];
+    returnedKnownIds.add(item.id);
+  }
   const seen = new Set<number>();
   const buildings: ProvidenceFootprint[] = [];
   for (const value of data.elements) {

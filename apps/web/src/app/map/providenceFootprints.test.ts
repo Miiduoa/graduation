@@ -130,12 +130,27 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: result })).toEqual(result);
   });
 
-  it('excludes unverified parking and raw nodes, duplicate IDs and excessive payloads', () => {
+  it('excludes unverified parking and raw nodes, and oversized payloads', () => {
     expect(parseProvidenceOsmFootprints({
-      elements: [way(255784049), way(255784049), way(295686299), { type: 'node', id: 255784049, geometry: library }],
+      elements: [way(255784049), way(295686299), { type: 'node', id: 255784049, geometry: library }],
     })).toHaveLength(1);
     expect(parseProvidenceOsmFootprints({ elements: Array.from({ length: 129 }, () => way(255784049)) })).toEqual([]);
     expect(parseProvidenceOsmFootprints({ elements: [{ ...way(255784049), geometry: Array(200).fill(library[0]) }] })).toEqual([]);
+  });
+
+  it('rejects repeated trusted OSM way IDs rather than trusting the first outline', () => {
+    const first = way(255784049, library, { building: 'yes', height: '12' });
+    const conflicting = way(255784049, library, { building: 'yes', height: '90' });
+    expect(parseProvidenceOsmFootprints({ elements: [first, conflicting] })).toEqual([]);
+    expect(parseProvidenceOsmFootprints({ elements: [conflicting, first] })).toEqual([]);
+    // A duplicate without valid geometry or tags is still an inconsistent way response.
+    expect(parseProvidenceOsmFootprints({
+      elements: [first, { ...conflicting, tags: {}, geometry: null }],
+    })).toEqual([]);
+    // Unknown, unverified ways must not interfere with a separately trusted building.
+    expect(parseProvidenceOsmFootprints({
+      elements: [first, way(295686299), way(295686299)],
+    })).toHaveLength(1);
   });
 
   it('retains a valid way revision but never copies OSM editor account information', () => {

@@ -99,6 +99,22 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch.mock.calls[0][1].headers['User-Agent']).toContain('nuni.tw');
   });
 
+  it('does not cache an HTTP 200 response containing duplicate whitelisted OSM way IDs', async () => {
+    const original = JSON.parse(osmPayload).elements[0];
+    const duplicate = { ...original, tags: { building: 'yes', height: '90' } };
+    const payload = JSON.stringify({ elements: [original, duplicate] });
+    const mockedFetch = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    // A malformed duplicate cannot become a cached 24-hour campus volume.
+    expect((await GET()).status).toBe(503);
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a partial Overpass JSON result even when the service returns HTTP 200', async () => {
     // Overpass can return 200 + elements + remark on query timeout/memory exhaustion.
     // The partial collection must never become a successful 24-hour cache entry.
