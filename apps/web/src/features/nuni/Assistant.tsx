@@ -8,6 +8,9 @@ import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
 import { AssistantPlanRevision } from './assistant/AssistantPlanRevision';
+import { AssistantPlanDraftRecovery } from './assistant/AssistantPlanDraftRecovery';
+import { usePlanRevisionDraft } from './assistant/usePlanRevisionDraft';
+import { revisionDraftContentMatches, revisionDraftSource } from '@/lib/assistantPlanRevisionDraft';
 import { AssistantPlanComparison } from './assistant/AssistantPlanComparison';
 import { createPlanProtection, validatePlanProtection, type PlanProtection } from '@/lib/assistantPlanProtection';
 import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan, type PlanRevisionEvent } from './assistant/planRevision';
@@ -220,6 +223,8 @@ function V2Conversation({
   const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<V2ActionStates>({});
   const actionStates = useRef<V2ActionStates>({});
+  const journalReadyRef = useRef(false);
+  const [journalReady, setJournalReady] = useState(false);
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
@@ -240,6 +245,7 @@ function V2Conversation({
   useEffect(() => {
     const lifetime = new AbortController();
     controller.current = lifetime;
+    journalReadyRef.current = false;
     try {
       const entries = readAssistantExecutionJournal(journalScope);
       if (entries.length) {
@@ -266,9 +272,14 @@ function V2Conversation({
             if (!lifetime.signal.aborted) {
               busy.current = false;
               setPending(false);
+              journalReadyRef.current = true;
+              setJournalReady(true);
             }
           }
         });
+      } else {
+        journalReadyRef.current = true;
+        setJournalReady(true);
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : '先前操作紀錄暫時讀不到，請保留目前頁面再試。');
@@ -277,6 +288,15 @@ function V2Conversation({
     // This component is keyed by the authenticated session, account and school.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const drafts = usePlanRevisionDraft({ accountId, schoolId, context }, active);
+  function sourceForTurn(turn: V2Turn) {
+    if (turn.reply.cards.some(card => card.schoolId !== schoolId)) return null;
+    try { return revisionDraftSource(turn.reply.cards); } catch { return null; }
+  }
+  function clearTurnDraft(turn: V2Turn): { ok: boolean; message?: string } {
+    const source = sourceForTurn(turn);
+    return source ? drafts.clearSource(source.key, true) : { ok: true };
+  }
   async function send(action: string, input: object) {
     const signal = controller.current!.signal;
     return withAssistantRequestDeadline(signal, action === 'ask' ? 65000 : 15000, async (requestSignal) => {
@@ -421,6 +441,8 @@ function V2Conversation({
           !canConfirmAction(actionStates.current[card.mutationId]) ||
           !priorCalendarActionsVerified(turn.reply.cards, index, actionStates.current)) break;
         if (card.tool === 'propose_personal_event') {
+          const cleared = clearTurnDraft(turn);
+          if (!cleared.ok) { setError(cleared.message || '草稿尚未確認清除，這次操作尚未送出。'); break; }
           try {
             await assertAssistantCalendarLocalReady(card.args, localScope, active);
             rememberCalendar(card);
@@ -482,6 +504,9 @@ function V2Conversation({
       current = buildPlanRevisionQuestion(turn, instruction, protectedIndices);
     }
     catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : '請核對修改條件後再試。' }; }
+
+    const cleared = clearTurnDraft(turn);
+    if (!cleared.ok) return { ok: false, message: cleared.message || '草稿尚未確認清除，這次操作尚未送出。' };
 
     // Keep the original signed cards intact. A failed cancellation is never
     // permission to create another operation with the same intended outcome.
@@ -575,6 +600,8 @@ function V2Conversation({
         if (!active() || current.schoolId !== schoolId) break;
         if (state?.status === 'unknown' || state?.status === 'checking' || state?.status === 'executing') break;
         if (current.tool === 'propose_personal_event') {
+          const cleared = clearTurnDraft(turn);
+          if (!cleared.ok) { setError(cleared.message || '草稿尚未確認清除，這次操作尚未送出。'); break; }
           try { rememberCalendar(current); }
           catch (error) {
             setAction(current, { status: 'blocked', message: error instanceof Error ? error.message : '操作紀錄尚未保存，這次沒有送出撤銷。' });
@@ -605,6 +632,10 @@ function V2Conversation({
     }
   }
   return (
+    <>
+    <AssistantPlanDraftRecovery draft={drafts.draft} restored={drafts.restored} status={drafts.status}
+      blocked={!journalReady || pending || hasUnresolvedAssistantAction(states)}
+      onRestore={drafts.restore} onDiscard={drafts.discard} onChange={drafts.changeRecovered} />
     <AssistantThread
       schoolId={schoolId}
       ready={ready}
@@ -625,9 +656,31 @@ function V2Conversation({
         const comparison = planComparisons.current.get(turn);
         return comparison ? <AssistantPlanComparison {...comparison} /> : null;
       }}
-      renderPlanRevision={turn => <AssistantPlanRevision turn={turn} states={states} pending={pending}
-        enabled={ready && consent} onPreview={(instruction, indices) => revisePlan(turn, instruction, indices)} />}
+      renderPlanRevision={turn => {
+        const source = sourceForTurn(turn);
+        return <AssistantPlanRevision turn={turn} states={states} pending={pending}
+          enabled={ready && consent} onPreview={(instruction, indices) => revisePlan(turn, instruction, indices)}
+          draft={source ? {
+            status: drafts.editorStatuses[source.key],
+            recovery: drafts.restored && drafts.draft ? {
+              id: drafts.draft.id, sameContent: revisionDraftContentMatches(drafts.draft, source),
+            } : undefined,
+            onChange: (instruction, indices) => {
+              if (active() && isUnattemptedCalendarPlan(turn, actionStates.current) && !revisionTurns.current.has(turn))
+                drafts.saveEditor(source, { instruction, protectedIndices: [...indices] });
+            },
+            onClear: () => drafts.clearSource(source.key),
+            onApply: () => {
+              if (!active() || busy.current || !journalReadyRef.current || !ready || !revisionConsent.current ||
+                hasUnresolvedAssistantAction(actionStates.current) || !turns.includes(turn) ||
+                !isUnattemptedCalendarPlan(turn, actionStates.current) || revisionTurns.current.has(turn))
+                return { ok: false, message: '目前提議或舊操作尚未完成核對，請先核對後再套用草稿。' };
+              return drafts.apply(source);
+            },
+          } : undefined} />;
+      }}
     />
+    </>
   );
 }
 function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {

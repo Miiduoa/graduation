@@ -6,11 +6,20 @@ import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistan
 import type { V2ActionStates, V2Turn } from './types';
 import styles from './AssistantPlanRevision.module.css';
 
+export type RevisionDraftBridge = {
+  status?: string;
+  recovery?: { id: string; sameContent: boolean };
+  onChange: (instruction: string, protectedIndices: readonly number[]) => void;
+  onClear: () => { ok: boolean; message?: string };
+  onApply: () => { ok: boolean; message?: string; content?: { instruction: string; protectedIndices: number[] } };
+};
+
 type Props = {
   turn: V2Turn;
   states: V2ActionStates;
   pending: boolean;
   enabled: boolean;
+  draft?: RevisionDraftBridge;
   onPreview: (instruction: string, protectedIndices: readonly number[]) => Promise<{ ok: boolean; message: string }>;
 };
 
@@ -24,7 +33,7 @@ function eventTime(event: PlanRevisionEvent): string {
     : `${event.date} · ${event.startTime}–${event.endTime}（台灣時間）`;
 }
 
-function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Props & { events: PlanRevisionEvent[] }) {
+function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
   const panel = useRef<HTMLElement>(null);
   const entry = useRef<HTMLButtonElement>(null);
@@ -39,6 +48,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
   const [submitting, setSubmitting] = useState(false);
   const [complete, setComplete] = useState(false);
   const [message, setMessage] = useState('');
+  const [draftNotice, setDraftNotice] = useState<{ text: string; error: boolean } | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -91,6 +101,42 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
     else panel.current?.focus();
   }
 
+  function clearDraft() {
+    if (!draft || waiting || busy.current) return;
+    try {
+      const result = draft.onClear();
+      if (!result.ok) {
+        setDraftNotice({ text: result.message || '修改內容尚未清除，原內容仍保留。', error: true });
+        return;
+      }
+      setInstruction('');
+      setProtectedIndices([]);
+      setMessage('');
+      setDraftNotice({ text: result.message || '修改內容已清除，原確認卡未變更。', error: false });
+      field.current?.focus();
+    } catch (cause) {
+      setDraftNotice({ text: cause instanceof Error ? cause.message : '修改內容尚未清除，原內容仍保留。', error: true });
+    }
+  }
+
+  function applyDraft() {
+    if (!draft?.recovery || !available || waiting || busy.current) return;
+    try {
+      const result = draft.onApply();
+      if (!result.ok || !result.content) {
+        setDraftNotice({ text: result.message || '草稿尚未套用，請核對目前提議後再試。', error: true });
+        return;
+      }
+      setInstruction(result.content.instruction);
+      setProtectedIndices([...result.content.protectedIndices]);
+      setMessage('');
+      setDraftNotice({ text: result.message || '草稿已帶入，請核對後再重新預覽。', error: false });
+      field.current?.focus();
+    } catch (cause) {
+      setDraftNotice({ text: cause instanceof Error ? cause.message : '草稿尚未套用，原修改內容仍保留。', error: true });
+    }
+  }
+
   async function preview() {
     // All-protected is a local no-op, including a direct form submit without text.
     if (allProtected || !available || waiting || busy.current || complete) return;
@@ -130,6 +176,16 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
       {allProtected && <p role="status" className={styles.notice}>{allProtectedMessage}</p>}
       {open && <form id={id + '-editor'} className={styles.editor} aria-label="修改安排再預覽"
         aria-busy={submitting || undefined} onSubmit={event => { event.preventDefault(); void preview(); }}>
+        {draft && <div className={styles.draftInfo}>
+          <p className={styles.hint}>本分頁只暫存最近一份修訂草稿，30 分鐘內可恢復。</p>
+          {draft.status && <p className={styles.notice} role="status">{draft.status}</p>}
+          {draft.recovery && <>
+            <p className={styles.hint}>{draft.recovery.sameContent
+              ? '目前提議內容逐欄相同，可帶回保留選項。'
+              : '只帶入文字，保留項目須重新選擇。'}</p>
+            <button type="button" className={styles.secondary} disabled={!available || waiting} onClick={applyDraft}>套用已恢復的草稿</button>
+          </>}
+        </div>}
         <fieldset className={styles.protectedEvents}>
           <legend className={styles.heading}>原提議內容</legend>
           <p id={id + '-protection'} className={styles.hint}>勾選的項目會保留名稱、開始／結束日期、全天設定及開始／結束時間。若無法可靠核對，就不會加入新的確認卡。</p>
@@ -143,9 +199,12 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
                   aria-describedby={id + '-protection'}
                   onChange={event => {
                     const checked = event.target.checked;
-                    setProtectedIndices(previous => checked ? [...previous, index].sort((left, right) => left - right)
-                      : previous.filter(value => value !== index));
+                    const selection = checked ? [...protectedIndices, index].sort((left, right) => left - right)
+                      : protectedIndices.filter(value => value !== index);
+                    setProtectedIndices(selection);
                     setMessage('');
+                    setDraftNotice(null);
+                    draft?.onChange(instruction, selection);
                   }} />
                 <span id={`${id}-protect-label-${index}`}>保留原樣</span>
                 <span id={`${id}-ordinal-${index}`} className={styles.visuallyHidden}>第 {index + 1} 項</span>
@@ -158,7 +217,13 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
         <textarea ref={field} id={id + '-instruction'} value={instruction} maxLength={300} rows={3}
           disabled={waiting} aria-describedby={id + '-notice ' + id + '-count'}
           placeholder="例如：第一項改成明晚 20:00，其他安排保持原樣"
-          onChange={event => { setInstruction(event.target.value); setMessage(''); }} />
+          onChange={event => {
+            const value = event.target.value;
+            setInstruction(value);
+            setMessage('');
+            setDraftNotice(null);
+            draft?.onChange(value, protectedIndices);
+          }} />
         <p id={id + '-count'} className={styles.hint}>{instruction.length}/300 字</p>
         <div className={styles.actions}>
           <button type="submit" className={styles.primary} disabled={allProtected || !available || waiting || !instruction.trim()}>
@@ -167,7 +232,9 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
           <button type="button" className={styles.secondary} disabled={waiting} onClick={closeEditor}>
             {allProtected ? '回到原提議' : '收起修改'}
           </button>
+          {draft && <button type="button" className={styles.secondary} disabled={waiting} onClick={clearDraft}>清除修改內容</button>}
         </div>
+        {draftNotice && <p className={styles.notice} role={draftNotice.error ? 'alert' : 'status'}>{draftNotice.text}</p>}
         {message && <p className={styles.notice} role="alert">{message}</p>}
       </form>}
     </>}

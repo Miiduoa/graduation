@@ -73,3 +73,5 @@
   scroll-margin-block-start: 12px;
   scroll-margin-block-end: calc(var(--assistant-dock-height, 88px) + var(--assistant-dock-clearance, 0px) + 12px);
 }
+
+.draftInfo { display: grid; justify-items: start; gap: 8px; min-width: 0; }

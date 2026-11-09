@@ -886,11 +886,352 @@ async def protected_late_scope_case(page, scope):
             'scopeSwitch': scope, 'writes': 0}
 
 
+DRAFT_PREFIX = 'campus.assistant-plan-draft.v1:'
+
+
+def draft_offer(page):
+    return page.get_by_role('region', name='未送出的修訂草稿', exact=True)
+
+
+async def inspect_drafts(page):
+    return await page.evaluate('window.__agentQA.inspectDrafts()')
+
+
+async def audit_draft(page, events=ORIGINAL, instruction=CHANGE, indices=None):
+    indices = [0] if indices is None else indices
+    rows = await inspect_drafts(page)
+    assert len(rows) == 1, rows
+    row, value = rows[0], json.loads(rows[0]['value'])
+    assert re.fullmatch(re.escape(DRAFT_PREFIX) + r'[a-f0-9]{64}', row['key']), row
+    assert set(value) == {'version', 'id', 'scopeKey', 'source', 'instruction', 'protectedIndices', 'savedAt'}, value
+    assert row['key'] == DRAFT_PREFIX + value['scopeKey'], value
+    assert set(value['source']) == {'key', 'events'} and re.fullmatch(r'[a-f0-9]{64}', value['source']['key']), value
+    assert value['source']['events'] == events and value['instruction'] == instruction and value['protectedIndices'] == indices, value
+    for event in value['source']['events']:
+        assert set(event) <= {'title', 'date', 'endDate', 'allDay', 'startTime', 'endTime'}, event
+    for forbidden in ['token', 'mutationId', 'context', 'conversationId', 'consent', 'turn', 'accountId', 'schoolId']:
+        assert f'"{forbidden}"' not in row['value'], row
+    assert 'fixture-token-' not in row['value'] and 'a' * 43 not in row['value'], row
+    return {'key': row['key'], 'payload': value, 'containsExecutionAuthorization': False}
+
+
+async def seed_reload_draft(page):
+    state = await snapshot(page)
+    assert state['persistentBackend'] is True and state['pageEpoch'] == 1, state
+    await start_plan(page)
+    await open_revision(page, keyboard=True)
+    await select_protection(page, ORIGINAL, [0], keyboard=True)
+    value = await audit_draft(page)
+    await no_writes(page)
+    return value
+
+
+async def true_reload(page, name, expected_extra=None):
+    expected_extra = [] if expected_extra is None else expected_extra
+    before = await snapshot(page)
+    before_drafts = await inspect_drafts(page)
+    await page.reload(wait_until='networkidle')
+    await page.wait_for_function('epoch => window.__agentQA.pageEpoch > epoch', arg=before['pageEpoch'])
+    await expect(page.get_by_role('checkbox', name=re.compile('同意在本次對話'))).to_be_enabled()
+    expected = actions(before) + expected_extra
+    await page.wait_for_function("expected => JSON.stringify(window.__agentQA.snapshot().requests.filter(r=>r.action!=='capability').map(r=>r.action))===JSON.stringify(expected)", arg=expected)
+    await idle(page)
+    after = await snapshot(page)
+    assert actions(after) == expected, after
+    assert after['pageEpoch'] == before['pageEpoch'] + 1, after
+    evidence = {'navigation': 'actual page.reload()', 'before': before, 'after': after,
+                'productDraftsBefore': before_drafts, 'productDraftsAfter': await inspect_drafts(page)}
+    (OUT / f'{name}-reload.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+    return evidence
+
+
+async def restore_draft(page, instruction=CHANGE):
+    panel = draft_offer(page)
+    await expect(panel).to_be_visible()
+    # Before explicit recovery the saved instruction and event snapshot are absent from DOM.
+    await expect(panel.get_by_role('textbox')).to_have_count(0)
+    await expect(panel.get_by_role('list', name='草稿的原提議內容', exact=True)).to_have_count(0)
+    assert instruction not in await panel.inner_text()
+    for event in ORIGINAL:
+        assert event['title'] not in await panel.inner_text()
+    before = await snapshot(page)
+    await panel.get_by_role('button', name='恢復修訂草稿', exact=True).focus()
+    await page.keyboard.press('Enter')
+    field = panel.get_by_role('textbox', name='已恢復的修改條件', exact=True)
+    await expect(field).to_have_value(instruction)
+    await expect(field).to_be_focused()
+    await expect(page.get_by_role('checkbox', name=re.compile('同意在本次對話'))).not_to_be_checked()
+    assert (await snapshot(page))['requests'] == before['requests'], 'Explicit content recovery sent an API request'
+    return field
+
+
+async def open_empty_revision(page):
+    await page.get_by_role('button', name='修改時間或條件', exact=True).first.click()
+    field = page.get_by_role('textbox', name='修改條件', exact=True)
+    await expect(field).to_be_focused()
+    await expect(field).to_have_value('')
+    return field
+
+
+async def apply_restored_draft(page, expected_indices, instruction=CHANGE):
+    before = await snapshot(page)
+    await open_empty_revision(page)
+    await page.get_by_role('button', name='套用已恢復的草稿', exact=True).focus()
+    await page.keyboard.press('Enter')
+    field = page.get_by_role('textbox', name='修改條件', exact=True)
+    await expect(field).to_have_value(instruction)
+    await expect(field).to_be_focused()
+    for index in range(2):
+        await expect(protection_checkbox(page, index)).to_be_checked(checked=index in expected_indices)
+    assert (await snapshot(page))['requests'] == before['requests'], 'Applying recovered content sent an API request'
+
+
+async def draft_happy_case(page):
+    original_audit = await seed_reload_draft(page)
+    first = await snapshot(page)
+    first_ids = {card['mutationId'] for card in first['previews'][-1]['cards']}
+    reload_evidence = await true_reload(page, 'draft-happy-320')
+    await expect(card_list(page)).to_have_count(0)
+    await restore_draft(page)
+    await no_overflow(page)
+    await page.screenshot(path=str(OUT / 'draft-happy-320-restored-viewport.png'), full_page=False)
+    await start_plan(page)  # The user explicitly grants consent and asks for fresh cards.
+    fresh = (await snapshot(page))['previews'][-1]['cards']
+    assert not first_ids.intersection(card['mutationId'] for card in fresh), fresh
+    await apply_restored_draft(page, [0])
+    applied_audit = await audit_draft(page)
+    assert applied_audit['payload']['source']['key'] != original_audit['payload']['source']['key'], applied_audit
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    await expect(card_list(page)).to_have_count(4)
+    await completed_revision_preview(page)
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask', 'ask', 'cancel', 'cancel', 'ask'], state
+    assert set(state['revoked']) == {card['mutationId'] for card in fresh}, state
+    assert await inspect_drafts(page) == [], 'A submitted revision must not return as an unsent draft'
+    revised = state['previews'][-1]['cards']
+    assert not {card['mutationId'] for card in fresh}.intersection(card['mutationId'] for card in revised), state
+    assert state['requests'][-1]['body']['planProtection'] == {'originalEvents': ORIGINAL, 'protectedIndices': [0]}, state
+    readability = await comparison_readability(page, 'draft-happy-320-comparison')
+    for index in range(2):
+        card = card_list(page).nth(2 + index)
+        await card.get_by_role('button', name='確認', exact=True).click()
+        await expect(card.get_by_label('行程執行回執', exact=True)).to_contain_text('已核對並加入個人行事曆')
+        assert len((await snapshot(page))['writes']) == index + 1
+    state = await snapshot(page)
+    assert actions(state) == ['ask', 'ask', 'cancel', 'cancel', 'ask', 'confirm', 'confirm'], state
+    assert [write['mutationId'] for write in state['writes']] == [card['mutationId'] for card in revised], state
+    assert [write['record']['startTime'] for write in state['writes']] == ['19:00', '21:00'], state
+    local = await page.evaluate("JSON.parse(localStorage.getItem('campus.personal-imports.v1:platform%3Aqa-agent:fixture-campus-a'))")
+    assert local['records'] == state['records'] and local['sync']['enabled'] is False, local
+    await no_overflow(page)
+    await capture(page, 'draft-happy-320-confirmed')
+    return {'mode': 'true reload with fixed persistent QA backend; explicit restore/apply/preview/manual confirmation',
+            'originalDraft': original_audit, 'appliedDraft': applied_audit, 'reload': reload_evidence, 'readability': readability}
+
+
+async def draft_changed_source_case(page):
+    audit = await seed_reload_draft(page)
+    await true_reload(page, 'draft-changed-source')
+    await restore_draft(page)
+    changed = [dict(ORIGINAL[0]), {**ORIGINAL[1], 'startTime': '22:00', 'endTime': '22:30'}]
+    await page.evaluate('events => window.__agentQA.configurePlan({originalEvents:events})', changed)
+    await start_plan(page, changed)
+    await apply_restored_draft(page, [])
+    await expect(page.get_by_text('已帶入修改文字；目前提議與草稿來源不同，請重新選擇保留項目。', exact=True).first).to_be_visible()
+    after = await audit_draft(page, changed, indices=[])
+    await no_writes(page)
+    assert actions(await snapshot(page)) == ['ask', 'ask']
+    await capture(page, 'draft-changed-source-text-only')
+    return {'mode': 'same event names with changed schedule restore text only; preservation choices require reselection', 'before': audit, 'after': after}
+
+
+async def draft_clear_case(page, operation):
+    await seed_reload_draft(page)
+    if operation == 'clear':
+        before = await inspect_drafts(page)
+        await page.get_by_role('button', name='收起修改', exact=True).click()
+        assert await inspect_drafts(page) == before, 'Collapsing the editor lost its unfinished draft'
+        await page.get_by_role('button', name='修改時間或條件', exact=True).click()
+        await page.get_by_role('button', name='清除修改內容', exact=True).click()
+        await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value('')
+        await expect(protection_checkbox(page, 0)).not_to_be_checked()
+        await expect(card_list(page).nth(0).get_by_role('button', name='確認', exact=True)).to_be_enabled()
+    else:
+        assert operation == 'discard'
+        await true_reload(page, 'draft-before-discard')
+        await draft_offer(page).get_by_role('button', name='捨棄修訂草稿', exact=True).click()
+    assert await inspect_drafts(page) == []
+    await true_reload(page, f'draft-after-{operation}')
+    await expect(draft_offer(page)).to_have_count(0)
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask'] and state['revoked'] == [], state
+    return {'mode': f'explicit {operation}; actual reload does not offer a removed draft', 'writes': 0}
+
+
+async def draft_quota_case(page):
+    stored = await seed_reload_draft(page)
+    await true_reload(page, 'draft-before-quota')
+    recovered = await restore_draft(page)
+    await page.evaluate('window.__agentQA.configure({draftSetDenied:true})')
+    changed = CHANGE + '，保留這段尚未寫入的文字'
+    await recovered.fill(changed)
+    await expect(recovered).to_have_value(changed)
+    await expect(draft_offer(page).get_by_role('status')).to_contain_text('尚未確認儲存')
+    assert (await audit_draft(page)) == stored, 'Quota failure replaced the last durable draft'
+    await start_plan(page)
+    await open_empty_revision(page)
+    await page.get_by_role('button', name='套用已恢復的草稿', exact=True).click()
+    await expect(page.get_by_role('alert')).to_contain_text('尚未確認儲存')
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value('')
+    await expect(recovered).to_have_value(changed)
+    await expect(page.get_by_role('button', name='重新預覽', exact=True)).to_be_disabled()
+    await no_writes(page)
+    assert actions(await snapshot(page)) == ['ask', 'ask']
+    await capture(page, 'controlled-draft-quota-memory-retained')
+    await page.evaluate('window.__agentQA.configure({draftSetDenied:false})')
+    await page.get_by_role('button', name='套用已恢復的草稿', exact=True).click()
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value(changed)
+    saved = await audit_draft(page, instruction=changed)
+    return {'mode': 'draft-prefix-only controlled quota failure retains memory and blocks applying unsaved recovery', 'durableBefore': stored, 'durableAfterRetry': saved}
+
+
+async def draft_remove_failure_case(page):
+    saved = await seed_reload_draft(page)
+    await page.evaluate('window.__agentQA.configure({draftRemoveDenied:true})')
+    await page.get_by_role('button', name='清除修改內容', exact=True).click()
+    await expect(page.get_by_role('alert')).to_contain_text('尚未確認清除')
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value(CHANGE)
+    await expect(protection_checkbox(page, 0)).to_be_checked()
+    await page.get_by_role('button', name='重新預覽', exact=True).click()
+    await expect(page.get_by_role('alert').first).to_contain_text('尚未確認清除')
+    await no_writes(page)
+    state = await snapshot(page)
+    assert actions(state) == ['ask'] and state['revoked'] == [], state
+    assert await audit_draft(page) == saved
+    await capture(page, 'controlled-draft-remove-blocks-send')
+    await page.evaluate('window.__agentQA.configure({draftRemoveDenied:false})')
+    await page.get_by_role('button', name='清除修改內容', exact=True).click()
+    assert await inspect_drafts(page) == []
+    await true_reload(page, 'draft-remove-retry')
+    await expect(draft_offer(page)).to_have_count(0)
+    return {'mode': 'draft-prefix-only remove failure preserves draft and blocks cancellation/new preview until cleanup succeeds', 'writes': 0}
+
+
+async def draft_unreadable_case(page):
+    saved = await seed_reload_draft(page)
+    await page.evaluate('window.__agentQA.configure({draftGetDenied:true})')
+    await true_reload(page, 'draft-read-denied')
+    await expect(draft_offer(page)).to_have_count(0)
+    await expect(page.get_by_role('status').filter(has_text='無法讀取修改草稿')).to_be_visible()
+    assert CHANGE not in await page.locator('body').inner_text()
+    assert await audit_draft(page) == saved
+    await no_writes(page)
+    await page.evaluate('window.__agentQA.configure({draftGetDenied:false})')
+    await true_reload(page, 'draft-read-restored')
+    await expect(draft_offer(page)).to_be_visible()
+    return {'mode': 'draft-prefix-only read denial hides content, retains data and does not affect execution journal access', 'storedDraft': saved}
+
+
+async def draft_journal_unreadable_case(page):
+    saved = await seed_reload_draft(page)
+    await page.evaluate('window.__agentQA.configure({journalGetDenied:true})')
+    await true_reload(page, 'draft-journal-read-denied')
+    await restore_draft(page)
+    await start_plan(page)  # Read-only proposing remains a separate explicit user action.
+    await open_empty_revision(page)
+    await page.get_by_role('button', name='套用已恢復的草稿', exact=True).click()
+    await expect(page.get_by_role('alert').filter(has_text='目前提議或舊操作尚未完成核對')).to_be_visible()
+    await expect(page.get_by_role('textbox', name='修改條件', exact=True)).to_have_value('')
+    await expect(page.get_by_role('textbox', name='已恢復的修改條件', exact=True)).to_have_value(CHANGE)
+    await expect(protection_checkbox(page, 0)).not_to_be_checked()
+    assert await audit_draft(page) == saved
+    await no_writes(page)
+    assert actions(await snapshot(page)) == ['ask', 'ask']
+    await capture(page, 'controlled-journal-read-blocks-draft-apply')
+    await draft_offer(page).get_by_role('button', name='捨棄修訂草稿', exact=True).click()
+    await expect(draft_offer(page)).to_have_count(0)
+    assert await inspect_drafts(page) == []
+    assert actions(await snapshot(page)) == ['ask', 'ask']
+    return {'mode': 'independent controlled journal read denial; content recovery/discard allowed but applying to a proposal is blocked', 'writes': 0}
+
+
+async def draft_invalid_case(page, fault):
+    await seed_reload_draft(page)
+    mutation = await page.evaluate('mode => window.__agentQA.mutateDraft(mode)', fault)
+    await true_reload(page, f'draft-{fault}')
+    await expect(draft_offer(page)).to_have_count(0)
+    await expect(page.get_by_role('textbox', name='已恢復的修改條件', exact=True)).to_have_count(0)
+    assert CHANGE not in await page.locator('body').inner_text()
+    assert await inspect_drafts(page) == [], 'Expired/corrupt current draft was not removed'
+    await no_writes(page)
+    assert actions(await snapshot(page)) == ['ask']
+    return {'mode': f'controlled {fault} product-draft data is hidden and cleaned on actual reload', 'mutation': mutation}
+
+
+async def draft_scope_case(page):
+    saved = await seed_reload_draft(page)
+    await true_reload(page, 'draft-scope-initial')
+    await restore_draft(page)
+    for scope, label, other, original in [('school', 'QA 校園', 'fixture-campus-b', 'fixture-campus-a'),
+                                          ('account', 'QA 帳號', 'qa-agent-b', 'qa-agent')]:
+        await page.get_by_role('combobox', name=label, exact=True).select_option(other)
+        await expect(draft_offer(page)).to_have_count(0)
+        await expect(page.get_by_role('textbox', name='已恢復的修改條件', exact=True)).to_have_count(0)
+        assert CHANGE not in await page.locator('body').inner_text()
+        await true_reload(page, f'draft-other-{scope}')
+        await expect(draft_offer(page)).to_have_count(0)
+        await page.get_by_role('combobox', name=label, exact=True).select_option(original)
+        await expect(draft_offer(page)).to_be_visible()
+        await expect(page.get_by_role('textbox', name='已恢復的修改條件', exact=True)).to_have_count(0)
+        assert await audit_draft(page) == saved
+    await no_writes(page)
+    assert actions(await snapshot(page)) == ['ask']
+    await capture(page, 'draft-account-school-isolation')
+    return {'mode': 'real reload and school/account scope switches require fresh explicit recovery; no cross-scope content', 'draft': saved}
+
+
+async def draft_pending_case(page, action):
+    await seed_reload_draft(page)
+    if action == 'ask':
+        await page.evaluate('window.__agentQA.configure({holdAsk:true})')
+        await page.get_by_role('button', name='重新預覽', exact=True).click()
+    else:
+        assert action == 'confirm'
+        await page.evaluate('window.__agentQA.configure({holdConfirmAfterWrite:true})')
+        await card_list(page).nth(0).get_by_role('button', name='確認', exact=True).click()
+    await page.wait_for_function('window.__agentQA.snapshot().waiting')
+    assert await inspect_drafts(page) == [], 'A dispatched operation kept an unsent recovery offer'
+    before = await snapshot(page)
+    if action == 'ask':
+        assert actions(before) == ['ask', 'cancel', 'cancel', 'ask'] and before['writes'] == [], before
+    else:
+        assert actions(before) == ['ask', 'confirm'] and len(before['writes']) == 1, before
+    reload_evidence = await true_reload(page, f'draft-pending-{action}', ['reconcile'] if action == 'confirm' else [])
+    await expect(draft_offer(page)).to_have_count(0)
+    after = await snapshot(page)
+    assert len(after['writes']) == len(before['writes']), after
+    assert await inspect_drafts(page) == []
+    if action == 'confirm':
+        await expect(card_list(page)).to_have_count(1)
+        await expect(card_list(page).get_by_label('行程執行回執', exact=True)).to_contain_text('已核對並加入個人行事曆')
+        assert after['requests'][-1]['body']['token'] == [row for row in before['requests'] if row['action'] == 'confirm'][0]['body']['token'], after
+        local = await page.evaluate("JSON.parse(localStorage.getItem('campus.personal-imports.v1:platform%3Aqa-agent:fixture-campus-a'))")
+        assert local['records'] == after['records'] and len(local['records']) == 1, local
+    else:
+        await expect(card_list(page)).to_have_count(0)
+        await no_writes(page)
+    await capture(page, f'draft-pending-{action}-reloaded')
+    return {'mode': 'controlled response held across actual reload; only existing journal reconciliation may run',
+            'pendingAction': action, 'reload': reload_evidence}
+
+
 def build_evidence():
     meta = json.loads((OUT / 'bundle-meta.json').read_text())
-    paths = [name for name in meta['inputs'] if not name.startswith(('fixture:', '<')) and 'node_modules/' not in name]
+    paths = [name for name in meta['inputs'] if not name.startswith(('fixture:', '<', '(disabled):')) and 'node_modules/' not in name]
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
-    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts']:
+    for required in ['Assistant.tsx', 'AssistantCards.tsx', 'AssistantPlanRevision.tsx', 'AssistantPlanComparison.tsx', 'planComparison.ts', 'assistantExecutionJournal.ts', 'assistantCalendarExecution.ts', 'assistantPlanProtection.ts', 'assistantPlanRevisionDraft.ts', 'usePlanRevisionDraft.ts', 'AssistantPlanDraftRecovery.tsx']:
         assert any(name.endswith('/' + required) for name in hashes), f'Real implementation missing: {required}'
     return {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'sourceSha256': hashes}
 
@@ -933,6 +1274,21 @@ async def main():
                 ])
                 cases.extend((f'controlled-protected-{fault}', 1440, lambda p, value=fault: protected_bad_case(p, value))
                              for fault in ['missing', 'changed-time', 'duplicate', 'same-name-ambiguous'])
+                cases.extend([
+                    ('draft-happy-320', 320, draft_happy_case),
+                    ('draft-changed-source', 1440, draft_changed_source_case),
+                    ('draft-clear', 1440, lambda p: draft_clear_case(p, 'clear')),
+                    ('draft-discard', 1440, lambda p: draft_clear_case(p, 'discard')),
+                    ('draft-quota', 1440, draft_quota_case),
+                    ('draft-remove-failure', 1440, draft_remove_failure_case),
+                    ('draft-read-denied', 1440, draft_unreadable_case),
+                    ('draft-journal-read-denied', 1440, draft_journal_unreadable_case),
+                    ('draft-expired', 1440, lambda p: draft_invalid_case(p, 'expired')),
+                    ('draft-corrupt', 1440, lambda p: draft_invalid_case(p, 'corrupt')),
+                    ('draft-scope-isolation', 1440, draft_scope_case),
+                    ('draft-pending-ask', 1440, lambda p: draft_pending_case(p, 'ask')),
+                    ('draft-pending-confirm', 1440, lambda p: draft_pending_case(p, 'confirm')),
+                ])
                 for name, width, run in cases:
                     motion = 'no-preference' if name == 'protected-single-320' else 'reduce'
                     context = await browser.new_context(viewport={'width': width, 'height': 900 if width > 320 else 720},
@@ -950,7 +1306,7 @@ async def main():
                     await context.route('**/*', route)
                     result = {'name': name, 'viewport': width, 'motion': motion, 'status': 'failed'}
                     try:
-                        await page.goto(base + '/index.html', wait_until='networkidle')
+                        await page.goto(base + '/index.html' + ('?draft-reload=1' if name.startswith('draft-') else ''), wait_until='networkidle')
                         result.update(await run(page))
                         assert not errors, errors
                         assert not blocked, blocked

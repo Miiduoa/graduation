@@ -385,3 +385,120 @@ it('cancels a pending focus frame on unmount and ignores a late callback from th
   act(() => lateCallback(0));
   expect(scroll).not.toHaveBeenCalled();
 });
+
+function draftBridge() {
+  return {
+    status: '',
+    recovery: { id: 'recovered-draft', sameContent: true },
+    onChange: vi.fn(),
+    onClear: vi.fn(() => ({ ok: true, message: '已清除本份修改。' })),
+    onApply: vi.fn(() => ({ ok: true, content: { instruction: '第二項改到明晚', protectedIndices: [0] } })),
+  };
+}
+
+it('reports draft changes only from actual text and checkbox changes, never opening, closing or rerendering', () => {
+  const draft = draftBridge();
+  const original = turn([event(), event('second', { title: '程式練習' })]);
+  const view = render(<AssistantPlanRevision {...base} turn={original} draft={draft} onPreview={vi.fn()} />);
+  open();
+  expect(draft.onChange).not.toHaveBeenCalled();
+  enter('第二項改到明晚');
+  expect(draft.onChange).toHaveBeenLastCalledWith('第二項改到明晚', []);
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  expect(draft.onChange).toHaveBeenLastCalledWith('第二項改到明晚', [0]);
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  expect(draft.onChange).toHaveBeenLastCalledWith('第二項改到明晚', []);
+  expect(draft.onChange).toHaveBeenCalledTimes(3);
+  fireEvent.click(screen.getByRole('button', { name: '收起修改' }));
+  open();
+  view.rerender(<AssistantPlanRevision {...base} turn={original} draft={{ ...draft, status: '暫存已更新。', recovery: { id: 'new-recovery', sameContent: false } }} onPreview={vi.fn()} />);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('第二項改到明晚');
+  expect(draft.onChange).toHaveBeenCalledTimes(3);
+  expect(draft.onApply).not.toHaveBeenCalled();
+  expect(draft.onClear).not.toHaveBeenCalled();
+});
+
+it.each([true, false])('applies a restored draft only on explicit action, with same-content matching %s', sameContent => {
+  const draft = draftBridge();
+  draft.recovery.sameContent = sameContent;
+  draft.onApply.mockReturnValue({ ok: true, content: { instruction: '恢復的條件', protectedIndices: sameContent ? [0] : [] } });
+  const onPreview = vi.fn();
+  render(<AssistantPlanRevision {...base} turn={turn([event(), event('second', { title: '程式練習' })])} draft={draft} onPreview={onPreview} />);
+  open(); enter('目前輸入');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }));
+  draft.onChange.mockClear();
+  expect(screen.getByText(sameContent ? '目前提議內容逐欄相同，可帶回保留選項。' : '只帶入文字，保留項目須重新選擇。')).toBeTruthy();
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('目前輸入');
+  const apply = screen.getByRole('button', { name: '套用已恢復的草稿' }) as HTMLButtonElement;
+  expect(apply.type).toBe('button');
+  apply.focus();
+  fireEvent.click(apply);
+  expect(draft.onApply).toHaveBeenCalledOnce();
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('恢復的條件');
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(sameContent);
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }) as HTMLInputElement).checked).toBe(false);
+  expect(document.activeElement).toBe(screen.getByLabelText('修改條件'));
+  expect(screen.getByRole('status').textContent).toContain('請核對後再重新預覽');
+  expect(draft.onChange).not.toHaveBeenCalled();
+  expect(onPreview).not.toHaveBeenCalled();
+});
+
+it('keeps the current instruction and selections when applying a draft fails', () => {
+  const draft = { ...draftBridge(), onApply: vi.fn(() => ({ ok: false, message: '草稿已過期，沒有套用。' })) };
+  const onPreview = vi.fn();
+  render(<AssistantPlanRevision {...base} turn={turn([event(), event('second', { title: '程式練習' })])} draft={draft} onPreview={onPreview} />);
+  open(); enter('目前條件');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }));
+  fireEvent.click(screen.getByRole('button', { name: '套用已恢復的草稿' }));
+  expect(screen.getByRole('alert').textContent).toBe('草稿已過期，沒有套用。');
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('目前條件');
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 2 項 / }) as HTMLInputElement).checked).toBe(true);
+  expect(onPreview).not.toHaveBeenCalled();
+});
+
+it('clears only after the owner confirms removal and otherwise retains the full local draft', () => {
+  const draft = draftBridge();
+  draft.onClear.mockReturnValueOnce({ ok: false, message: '暫存無法清除，內容仍保留。' });
+  const onPreview = vi.fn();
+  render(<AssistantPlanRevision {...base} turn={turn([event(), event('second', { title: '程式練習' })])} draft={draft} onPreview={onPreview} />);
+  open(); enter('保留到清除成功');
+  fireEvent.click(screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }));
+  draft.onChange.mockClear();
+  const clear = screen.getByRole('button', { name: '清除修改內容' }) as HTMLButtonElement;
+  expect(clear.type).toBe('button');
+  fireEvent.click(clear);
+  expect(screen.getByRole('alert').textContent).toContain('內容仍保留');
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('保留到清除成功');
+  expect((screen.getByRole('checkbox', { name: /^保留原樣 第 1 項 / }) as HTMLInputElement).checked).toBe(true);
+  fireEvent.click(clear);
+  expect((screen.getByLabelText('修改條件') as HTMLTextAreaElement).value).toBe('');
+  expect(screen.getAllByRole('checkbox').every(node => !(node as HTMLInputElement).checked)).toBe(true);
+  expect(screen.getByRole('status').textContent).toBe('已清除本份修改。');
+  expect(document.activeElement).toBe(screen.getByLabelText('修改條件'));
+  expect(draft.onClear).toHaveBeenCalledTimes(2);
+  expect(draft.onChange).not.toHaveBeenCalled();
+  expect(onPreview).not.toHaveBeenCalled();
+});
+
+it('blocks apply while pending or awaiting reconciliation but allows local clearing after pending ends', () => {
+  const draft = draftBridge();
+  const original = turn();
+  const onPreview = vi.fn();
+  const view = render(<AssistantPlanRevision {...base} turn={original} draft={draft} onPreview={onPreview} />);
+  open(); enter('修改條件');
+  view.rerender(<AssistantPlanRevision {...base} turn={original} pending draft={draft} onPreview={onPreview} />);
+  const apply = screen.getByRole('button', { name: '套用已恢復的草稿' }) as HTMLButtonElement;
+  const clear = screen.getByRole('button', { name: '清除修改內容' }) as HTMLButtonElement;
+  expect(apply.disabled).toBe(true);
+  expect(clear.disabled).toBe(true);
+  fireEvent.click(apply); fireEvent.click(clear);
+  expect(draft.onApply).not.toHaveBeenCalled();
+  expect(draft.onClear).not.toHaveBeenCalled();
+  view.rerender(<AssistantPlanRevision {...base} turn={original} states={{ other: { status: 'unknown', message: '待核對' } }} draft={draft} onPreview={onPreview} />);
+  expect(apply.disabled).toBe(true);
+  expect(clear.disabled).toBe(false);
+  fireEvent.click(apply); fireEvent.click(clear);
+  expect(draft.onApply).not.toHaveBeenCalled();
+  expect(draft.onClear).toHaveBeenCalledOnce();
+  expect(onPreview).not.toHaveBeenCalled();
+});
