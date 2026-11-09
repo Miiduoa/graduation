@@ -42,6 +42,13 @@ function overpassRetryAfterMs(header: string | null, now: number): number {
 function retryAfterSeconds(): string {
   return String(Math.max(1, Math.ceil((unavailableUntil - Date.now()) / 1000)));
 }
+
+// A shared cache must not outlive the 24-hour origin snapshot. In particular,
+// a hit just before validUntil must not advertise another full hour of freshness.
+function freshCacheControl(validUntil: number): string {
+  const secondsRemaining = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
+  return `public, max-age=0, s-maxage=${Math.min(3600, secondsRemaining)}`;
+}
 const query = '[out:json][timeout:12];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
@@ -131,7 +138,7 @@ export async function GET() {
     return NextResponse.json({
       schoolId: 'pu', source: 'OpenStreetMap', fetchedAt: cache.fetchedAt,
       stale: false, buildings: cache.buildings,
-    }, { headers: { 'Cache-Control': 'public, max-age=0, s-maxage=3600' } });
+    }, { headers: { 'Cache-Control': freshCacheControl(cache.validUntil) } });
   }
   if (unavailableUntil > now) {
     if (!cache) return NextResponse.json({ error: 'Building outlines temporarily unavailable' }, {
@@ -160,6 +167,6 @@ export async function GET() {
   }, {
     // 有舊快照時保留舊輪廓並明示來源日期，不把快取說成最新。
     headers: { 'Cache-Control': cache.validUntil <= Date.now()
-      ? 'private, no-store' : 'public, max-age=0, s-maxage=3600' },
+      ? 'private, no-store' : freshCacheControl(cache.validUntil) },
   });
 }
