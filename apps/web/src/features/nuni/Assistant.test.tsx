@@ -459,7 +459,7 @@ it('keeps verified items when a batch stops, then resumes only after the uncerta
   }));
   render(<Assistant />);
   await askForPlan();
-  fireEvent.click(await screen.findByText('依序全部確認'));
+  fireEvent.click(await screen.findByRole('button', { name: '依序確認 3 筆個人行程' }));
   await screen.findByText(/尚未核對執行結果/);
   expect(confirmed).toEqual([cards[0].token, cards[1].token]);
   expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 1/3 項');
