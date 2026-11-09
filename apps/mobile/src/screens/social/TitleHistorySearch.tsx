@@ -105,6 +105,13 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const activeRequest = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
   const inFlight = useRef(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopConfirmTimer = () => {
+    if (confirmTimer.current !== null) {
+      clearTimeout(confirmTimer.current);
+      confirmTimer.current = null;
+    }
+  };
   const stopSearchTimer = () => {
     if (searchTimer.current !== null) {
       clearTimeout(searchTimer.current);
@@ -116,11 +123,12 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const live = useRef(true);
   useLayoutEffect(() => {
     live.current = true;
-    return () => { live.current = false; version.current += 1; stopSearchTimer(); };
+    return () => { live.current = false; version.current += 1; stopSearchTimer(); stopConfirmTimer(); };
   }, []);
 
   const change = (value: string) => {
     stopSearchTimer();
+    stopConfirmTimer();
     version.current += 1;
     inFlight.current = false;
     openingPost.current = false;
@@ -134,6 +142,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   };
   const close = () => {
     stopSearchTimer();
+    stopConfirmTimer();
     openingPost.current = true;
     version.current += 1;
     inFlight.current = false;
@@ -223,6 +232,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     // Cancel that delivery and release its spinner before revalidating the post.
     const interrupted = inFlight.current ? activeRequest.current : null;
     stopSearchTimer();
+    stopConfirmTimer();
     const attempt = ++version.current;
     openingPost.current = true;
     inFlight.current = false;
@@ -231,6 +241,19 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     setOpening(true);
     setError('');
     let navigated = false;
+    // A stalled server verification must not lock every card indefinitely.
+    // The SDK Promise may still settle later; the version fence rejects it.
+    confirmTimer.current = setTimeout(() => {
+      confirmTimer.current = null;
+      if (!live.current || attempt !== version.current) return;
+      version.current += 1;
+      openingPost.current = false;
+      setOpening(false);
+      if (interrupted) retry.current = interrupted;
+      setError(interrupted
+        ? '伺服器確認貼文逾時，已保留搜尋結果。可再次點擊貼文，或原地重試未完成的搜尋。'
+        : '伺服器確認貼文逾時，已保留搜尋結果。請確認連線後再次點擊貼文。');
+    }, 7_000);
     try {
       const stillReadable = await confirmCampusPostTitleOpen(schoolId, item.id);
       if (!live.current || attempt !== version.current) return;
@@ -262,6 +285,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
       }
     } finally {
       if (live.current && attempt === version.current) {
+        stopConfirmTimer();
         if (!navigated) openingPost.current = false;
         setOpening(false);
       }
