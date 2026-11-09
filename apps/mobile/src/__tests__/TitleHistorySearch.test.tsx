@@ -3,7 +3,7 @@ import { Modal } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { TitleHistoryLauncher, TitleHistorySearch } from '../screens/social/TitleHistorySearch';
 import { CommunityScreen } from '../screens/CommunityScreen';
-import { confirmCampusPostTitleOpen, searchCampusPostTitles, type TitleSearchPage, type TitleSearchPost, type TitleSearchCursor } from '../services/titleSearch';
+import { confirmCampusPostTitleOpen, resumeCampusPostTitles, searchCampusPostTitles, type TitleSearchPage, type TitleSearchPost, type TitleSearchCursor } from '../services/titleSearch';
 
 let mockUser: { uid: string } | null = { uid: 'alice' };
 let mockSchool = 'pu';
@@ -27,9 +27,11 @@ jest.mock('../screens/community/StudyBuddyPanel', () => ({ StudyBuddyPanel: () =
 jest.mock('../services/titleSearch', () => ({
   parseTitlePrefix: jest.requireActual('@campus/shared/src/communityTitleSearch').parseTitlePrefix,
   searchCampusPostTitles: jest.fn(),
+  resumeCampusPostTitles: jest.fn(),
   confirmCampusPostTitleOpen: jest.fn(),
 }));
 const search = jest.mocked(searchCampusPostTitles);
+const resume = jest.mocked(resumeCampusPostTitles);
 const confirmOpen = jest.mocked(confirmCampusPostTitleOpen);
 const row = (id: string, title = `二手書 ${id}`): TitleSearchPost => ({ id, title, schoolId: 'pu', excerpt: '舊學期的課本', anonymous: true });
 const result = (posts = [row('one')], hasMore = false): TitleSearchPage => ({
@@ -55,6 +57,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'alice' }; mockSchool = 'pu'; mockLoading = false; mockDemo = false; mockFirebaseMock = false;
   search.mockReset().mockResolvedValue(result());
+  resume.mockReset().mockResolvedValue(result());
   confirmOpen.mockReset().mockResolvedValue(true);
 });
 
@@ -340,4 +343,68 @@ test('offline post confirmation during a pending next page offers both post and 
   await view.findByText('二手書 two');
   expect(search.mock.calls[2]).toEqual(search.mock.calls[1]);
   expect(view.queryByText('二手書 late')).toBeNull();
+});
+
+
+test('a stalled first-page request releases the native search and a late denied reply cannot clear a successful retry', async () => {
+  const stalled = deferred<TitleSearchPage>();
+  search.mockReturnValueOnce(stalled.promise).mockResolvedValueOnce(result([row('fresh')]));
+  const view = panel();
+  jest.useFakeTimers();
+  try {
+    enter(view);
+    expect(view.getByLabelText('搜尋歷史標題').props.accessibilityState.busy).toBe(true);
+    act(() => { jest.advanceTimersByTime(15_000); });
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+    expect(view.getByLabelText('搜尋歷史標題').props.accessibilityState.busy).toBe(false);
+    fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('二手書 fresh')).toBeTruthy();
+    await act(async () => { stalled.reject({ code: 'permission-denied' }); });
+    expect(view.getByText('二手書 fresh')).toBeTruthy();
+    expect(view.queryByText(/搜尋結果已清除/)).toBeNull();
+    expect(search.mock.calls[1]).toEqual(['pu', '二手書', null]);
+  } finally { jest.useRealTimers(); }
+});
+
+test('a stalled native next page keeps its exact cursor and existing posts through retry', async () => {
+  const first = result([row('one')], true);
+  const stalled = deferred<TitleSearchPage>();
+  search.mockResolvedValueOnce(first).mockReturnValueOnce(stalled.promise)
+    .mockResolvedValueOnce(result([row('two')]));
+  const view = panel(); enter(view);
+  await view.findByText('二手書 one');
+  jest.useFakeTimers();
+  try {
+    fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+    act(() => { jest.advanceTimersByTime(15_000); });
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+    expect(view.getByText('二手書 one')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('二手書 two')).toBeTruthy();
+    expect(search.mock.calls[2]).toEqual(search.mock.calls[1]);
+    await act(async () => { stalled.resolve(result([row('late')])); });
+    expect(view.queryByText('二手書 late')).toBeNull();
+  } finally { jest.useRealTimers(); }
+});
+
+test('a stalled native resume retries the same anchor without showing cached search rows', async () => {
+  const stalled = deferred<TitleSearchPage>();
+  resume.mockReturnValueOnce(stalled.promise).mockResolvedValueOnce(result([row('one')]));
+  const view = render(<TitleHistorySearch schoolId="pu" initialQuery="二手書" initialPostId="one"
+    onClose={jest.fn()} onOpenPost={jest.fn()} />);
+  jest.useFakeTimers();
+  try {
+    fireEvent.press(view.getByLabelText('回到上次閱讀位置'));
+    expect(view.queryByText('二手書 one')).toBeNull();
+    act(() => { jest.advanceTimersByTime(15_000); });
+    expect(view.getByLabelText('重試歷史搜尋')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('二手書 one')).toBeTruthy();
+    expect(resume.mock.calls).toEqual([['pu', '二手書', 'one'], ['pu', '二手書', 'one']]);
+    await act(async () => { stalled.reject({ code: 'permission-denied' }); });
+    expect(view.getByText('二手書 one')).toBeTruthy();
+  } finally { jest.useRealTimers(); }
 });
