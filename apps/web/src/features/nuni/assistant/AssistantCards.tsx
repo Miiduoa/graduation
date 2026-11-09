@@ -240,7 +240,7 @@ export function AssistantCardStack({
     <div className={styles.stack}>
       {!calendarOnly && cards.length > 1 ? (
         <p className={styles.executionSummary} role="status" aria-label="跨功能任務進度">
-          個人行程已讀回核對 {verified}/{calendar.length} 項 · 服務入口已備妥 {handoff} 項
+          {calendar.length ? `個人行程已讀回核對 ${verified}/${calendar.length} 項 · ` : ''}服務入口已備妥 {handoff} 項
           {needsReview ? ` · 待核對或有衝突 ${needsReview} 項` : ''}
           {unverified ? ` · 其他 ${unverified} 項尚未確認完成` : ''}
           {stopped ? ` · 已停止 ${stopped} 項提議` : ''}。服務入口不代表訂單、付款或作業已完成。
