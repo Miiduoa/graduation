@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { browserRequest, useNuniSession } from '@/features/nuni/Session';
+import { isPlatformAccessChange, signalPlatformAccessChange } from '@/features/nuni/platformAccessEvents';
 import styles from './settings.module.css';
 
 type Access = { social: boolean; cloudAi: boolean };
@@ -57,56 +58,76 @@ export function PlatformServiceControls() {
   const scope = owner && context ? owner + ':' + context : '';
   const activeScope = useRef(scope);
   useLayoutEffect(() => { activeScope.current = scope; }, [scope]);
-  const lock = useRef(false);
+  const lock = useRef<{ scope: string; token: symbol } | null>(null);
+  const generation = useRef(0);
+  const [busyScope, setBusyScope] = useState('');
+  const busy = busyScope === scope;
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<ReadState>({ scope: '', status: 'loading', values: none });
   const [draft, setDraft] = useState<Access>(none);
-  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (isPlatformAccessChange(event.key, event.newValue)) {
+        setAttempt((current) => current + 1);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  useEffect(() => {
+    const requestGeneration = ++generation.current;
     if (!scope) return;
     let active = true;
     setState({ scope, status: 'loading', values: none });
     setMessage('');
     void browserRequest('service-access', context)
       .then((value) => {
-        if (!active || activeScope.current !== scope) return;
+        if (!active || activeScope.current !== scope || requestGeneration !== generation.current) return;
         const parsed = parseAccess(value);
         setDraft(parsed);
         setState({ scope, status: 'ready', values: parsed });
       })
       .catch(() => {
-        if (active && activeScope.current === scope)
+        if (active && activeScope.current === scope && requestGeneration === generation.current)
           setState({ scope, status: 'error', values: none });
       });
     return () => { active = false; };
   }, [scope, context, attempt]);
 
   async function save() {
-    if (lock.current || !scope || state.scope !== scope || state.status !== 'ready') return;
-    lock.current = true;
-    setBusy(true);
+    if (!scope || state.scope !== scope || state.status !== 'ready' || lock.current?.scope === scope) return;
+    const token = Symbol('platform-access-save');
+    lock.current = { scope, token };
+    setBusyScope(scope);
     setMessage('');
     const expected = { ...draft };
+    const prior = state.values;
+    const requestGeneration = generation.current;
     try {
       parseAccess(await browserRequest('service-access', context, expected));
-      if (activeScope.current !== scope) return;
+      if (activeScope.current !== scope || requestGeneration !== generation.current) return;
       const confirmed = parseAccess(await browserRequest('service-access', context));
-      if (activeScope.current !== scope) return;
+      if (activeScope.current !== scope || requestGeneration !== generation.current) return;
       if (confirmed.social !== expected.social || confirmed.cloudAi !== expected.cloudAi)
         throw new Error('UNCONFIRMED');
       setDraft(confirmed);
       setState({ scope, status: 'ready', values: confirmed });
       setMessage('已套用到目前的網頁登入');
+      if (prior.social !== confirmed.social) signalPlatformAccessChange('social');
+      if (prior.cloudAi !== confirmed.cloudAi) signalPlatformAccessChange('cloudAi');
     } catch {
-      if (activeScope.current === scope) {
+      if (activeScope.current === scope && requestGeneration === generation.current) {
         setState({ scope, status: 'error', values: none });
         setMessage('變更結果尚未確認。請重新讀取後檢查，不會自動重送。');
       }
     } finally {
-      lock.current = false;
-      if (activeScope.current === scope) setBusy(false);
+      if (lock.current?.token === token) {
+        lock.current = null;
+        setBusyScope('');
+      }
     }
   }
 
@@ -118,7 +139,7 @@ export function PlatformServiceControls() {
       </div>
       <div className={styles.notice} role="note">
         <h3>套用範圍</h3>
-        <p>只跟隨這次網頁登入，登出或換裝置不會同步；不會新增學校身分或管理員權限。手機 App、校內私訊與其他獨立服務不受這組設定控制。</p>
+        <p>只跟隨這次網頁登入，登出或換裝置不會同步；不會新增學校身分或管理員權限。手機 App、校內私訊與其他獨立服務不受這組設定控制。其他分頁變更後，這裡會重新讀取已套用設定；未儲存的切換不會保留。</p>
       </div>
       {account.loading ? (
         <p role="status">正在確認平台帳號…</p>

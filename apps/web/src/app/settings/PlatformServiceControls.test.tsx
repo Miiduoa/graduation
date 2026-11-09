@@ -98,3 +98,58 @@ it('does not show writable controls for a Google-only visitor or uncertain logou
   fireEvent.click(screen.getByRole('button', { name: '重新確認登入' }));
   expect(runtime.refresh).toHaveBeenCalledTimes(1);
 });
+
+it('reloads the latest restrictions after a different tab changes platform access', async () => {
+  let values = { social: true, cloudAi: true, scope: 'web-session' };
+  runtime.request.mockImplementation(async (_path: string, _context: string, input?: object) => {
+    if (input) values = { ...values, ...input };
+    return values;
+  });
+  render(<PlatformServiceControls />);
+  const social = await screen.findByRole('switch', { name: '公開社群' });
+  fireEvent.click(social);
+  expect(social.getAttribute('aria-checked')).toBe('false');
+  values = { ...values, social: false, cloudAi: false };
+  act(() => window.dispatchEvent(new StorageEvent('storage', {
+    key: 'nuni.platform.service-access-changed', newValue: 'cloudAi:another-tab',
+  })));
+  await waitFor(() => expect(screen.getByRole('switch', { name: '雲端 AI 助理' }).getAttribute('aria-checked')).toBe('false'));
+  expect(screen.getByRole('switch', { name: '公開社群' }).getAttribute('aria-checked')).toBe('false');
+  expect(runtime.request.mock.calls.filter((call) => call[2])).toHaveLength(0);
+});
+
+it('keeps account B editable while account A has an unfinished save', async () => {
+  let finish!: (value: unknown) => void;
+  runtime.request.mockImplementation((_path: string, ctx: string, input?: object) => (
+    ctx === 'a' && input
+      ? new Promise((resolve) => { finish = resolve; })
+      : Promise.resolve({ social: ctx === 'a', cloudAi: true, scope: 'web-session' })
+  ));
+  const view = render(<PlatformServiceControls />);
+  fireEvent.click(await screen.findByRole('switch', { name: '公開社群' }));
+  fireEvent.click(screen.getByRole('button', { name: '儲存本次登入權限' }));
+  runtime.session = { platformAccountId: 'pa_b', context: 'b' };
+  view.rerender(<PlatformServiceControls />);
+  const other = await screen.findByRole('switch', { name: '公開社群' });
+  expect(other.getAttribute('aria-checked')).toBe('false');
+  fireEvent.click(other);
+  expect((screen.getByRole('button', { name: '儲存本次登入權限' }) as HTMLButtonElement).disabled).toBe(false);
+  await act(async () => finish({ social: false, cloudAi: true, scope: 'web-session' }));
+  expect((screen.getByRole('button', { name: '儲存本次登入權限' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('does not announce a permission change on a failed server readback', async () => {
+  runtime.request.mockImplementation(async (_path: string, _ctx: string, input?: object) =>
+    ({ social: input ? false : true, cloudAi: true, scope: 'web-session' })
+  );
+  const notify = vi.spyOn(Storage.prototype, 'setItem');
+  try {
+    render(<PlatformServiceControls />);
+    fireEvent.click(await screen.findByRole('switch', { name: '公開社群' }));
+    fireEvent.click(screen.getByRole('button', { name: '儲存本次登入權限' }));
+    await screen.findByText(/變更結果尚未確認/);
+    expect(notify.mock.calls.filter(([key]) => key === 'nuni.platform.service-access-changed')).toHaveLength(0);
+  } finally {
+    notify.mockRestore();
+  }
+});
