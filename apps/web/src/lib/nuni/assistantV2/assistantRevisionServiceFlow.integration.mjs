@@ -1304,3 +1304,387 @@ it('rebinds a retained-plan time draft only to fresh current cards and blocks ev
   expect(fixture.provider).toHaveBeenCalledTimes(4);
   expect(deniedFetches).toEqual([]);
 });
+
+
+// Group shifts exercise the real client, handler, validation and signed CAS
+// chain. Only identity, model replies and the backing ledger remain fixtures.
+function currentGroupShift() {
+  testing.fireEvent.click(currentButton('整組調整時間'));
+  return lastForm('整組調整待確認時間');
+}
+const shiftedCheckbox = (form, index) => testing.within(form).getByRole('checkbox', {
+  name: new RegExp('^平移 第 ' + (index + 1) + ' 項'),
+});
+function setGroupShift(form, direction, minutes) {
+  testing.fireEvent.change(testing.within(form).getByLabelText('調整方向'), { target: { value: direction } });
+  testing.fireEvent.change(testing.within(form).getByLabelText('調整分鐘數'), { target: { value: String(minutes) } });
+}
+const submitGroupShift = form => testing.fireEvent.submit(form);
+const originalCardsOf = entry => entry.response.cards.map(({ token, args }) => ({ token, args }));
+const idsOf = entry => entry.response.cards.map(card => card.mutationId);
+
+it('group shift previews three exact rows by thirty minutes once, preserves lengths and gaps, then requires three manual confirmations', async () => {
+  planEvents = jointEvents();
+  planEvents[1].endDate = planEvents[1].date;
+  const { entry } = await initialPlan(), source = structuredClone(planEvents), ledger = database.snapshot();
+  const writeDispatch = vi.spyOn(database.adapter, 'write');
+  const previewActions = [];
+  const clickPreviewControl = (button, label) => { previewActions.push(label); testing.fireEvent.click(button); };
+  clickPreviewControl(currentButton('整組調整時間'), 'open group shift');
+  const form = lastForm('整組調整待確認時間');
+  expect(testing.within(form).getByLabelText('調整方向').value).toBe('later');
+  expect(testing.within(form).getByLabelText('調整分鐘數').value).toBe('30');
+  for (const index of [0, 1, 2]) expect(shiftedCheckbox(form, index).checked).toBe(true);
+  fault.holdPrecise = true;
+  clickPreviewControl(testing.within(form).getByRole('button', { name: '預覽整組時間' }), 'preview group time');
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(fault.held).not.toBeNull());
+  const held = fault.held;
+  submitGroupShift(form); submitGroupShift(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(count('revise')).toHaveLength(1);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  expect(held.entry.body).toMatchObject({ originalCards: originalCardsOf(entry),
+    shift: { mutationIds: idsOf(entry), offsetMinutes: 30, protectedMutationIds: [] } });
+  expect(held.entry.body.change).toBeUndefined();
+  expect(held.entry.body.keepMutationIds).toBeUndefined();
+  const expected = [
+    { ...source[0], startTime: '18:30', endTime: '19:30' },
+    { ...source[1], startTime: '20:30', endTime: '21:30' },
+    { ...source[2], startTime: '22:30', endTime: '23:30' },
+  ];
+  expect(held.entry.response.cards.map(card => card.args)).toEqual(expected);
+  assertRealCards(held.entry);
+  await testing.act(async () => { held.release(); await Promise.resolve(); });
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(idsOf(held.entry).every(id => !idsOf(entry).includes(id))).toBe(true);
+  await assertOriginalCannotExecute(entry);
+  expect(database.snapshot()).toEqual(ledger);
+  expect(writeDispatch).not.toHaveBeenCalled();
+  const previewWrites = writeDispatch.mock.calls.length;
+  assertNoAdditionalModel();
+  for (let index = 0; index < 3; index++) {
+    testing.fireEvent.click(testing.within(uiCards()[3 + index]).getByRole('button', { name: '確認' }));
+    await testing.waitFor(() => expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(index + 1));
+    expect(count('confirm')).toHaveLength(index + 1);
+    expect(database.writes).toHaveLength(index + 1);
+    expect(writeDispatch).toHaveBeenCalledTimes(index + 1);
+    expect(count('confirm')[index]).toMatchObject({ status: 200,
+      body: { token: held.entry.response.cards[index].token, args: expected[index] },
+      response: { status: 'verified', mutationId: held.entry.response.cards[index].mutationId } });
+  }
+  expect(database.writes.map(write => write.mutationId)).toEqual(idsOf(held.entry));
+  assertNoAdditionalModel();
+  const metrics = events => {
+    const intervals = events.map(event => ({
+      start: Date.parse(event.date + 'T' + event.startTime + ':00+08:00'),
+      end: Date.parse((event.endDate ?? event.date) + 'T' + event.endTime + ':00+08:00'),
+    }));
+    return {
+      durationsMinutes: intervals.map(interval => (interval.end - interval.start) / 60000),
+      gapsMinutes: intervals.slice(1).map((interval, index) => (interval.start - intervals[index].end) / 60000),
+    };
+  };
+  const beforeMetrics = metrics(source), afterMetrics = metrics(expected);
+  expect(afterMetrics).toEqual(beforeMetrics);
+  process.stdout.write('ASSISTANT_GROUP_SHIFT_OK ' + JSON.stringify({ fixedProvider: true, realBusinessModules: true,
+    defaultOffsetMinutes: 30, previewUserClicks: previewActions.length, previewActions, minuteInputEdits: 0, duplicateSubmitAttempts: 3,
+    extraModelCalls: fixture.provider.mock.calls.length - 2, before: source, after: expected,
+    beforeMetrics, afterMetrics, previewWrites, manualConfirmations: count('confirm').length,
+    finalWriteDispatches: writeDispatch.mock.calls.length, finalWrites: database.writes.length,
+    oldTokensRejected: entry.response.cards.length }) + '\n');
+});
+
+it.each([
+  { direction: 'later', offset: 90, source: [
+    { ...proposed[0], startTime: '23:30', endDate: '2026-11-05', endTime: '00:30' },
+    { ...proposed[1], date: '2026-11-05', startTime: '02:00', endTime: '03:00' },
+  ], expected: [
+    { ...proposed[0], date: '2026-11-05', startTime: '01:00', endDate: '2026-11-05', endTime: '02:00' },
+    { ...proposed[1], date: '2026-11-05', startTime: '03:30', endTime: '04:30' },
+  ] },
+  { direction: 'earlier', offset: -90, source: [
+    { ...proposed[0], date: '2026-11-05', startTime: '00:30', endTime: '01:30' },
+    { ...proposed[1], date: '2026-11-05', startTime: '03:00', endTime: '04:00' },
+  ], expected: [
+    { ...proposed[0], date: '2026-11-04', startTime: '23:00', endDate: '2026-11-05', endTime: '00:00' },
+    { ...proposed[1], date: '2026-11-05', startTime: '01:30', endTime: '02:30' },
+  ] },
+])('group shift moves $direction across midnight with exact date and optional-field semantics', async ({ direction, offset, source, expected }) => {
+  planEvents = structuredClone(source);
+  const { entry } = await initialPlan();
+  const form = currentGroupShift();
+  setGroupShift(form, direction, 90);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  const replacement = count('revise')[0];
+  expect(replacement.status).toBe(200);
+  expect(replacement.body.shift).toEqual({ mutationIds: idsOf(entry), offsetMinutes: offset, protectedMutationIds: [] });
+  expect(replacement.response.cards.map(card => card.args)).toEqual(expected);
+  assertRealCards(replacement);
+  await assertOriginalCannotExecute(entry);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('group shift carries a text-protected row into fresh cards, disables it and changes only the remaining rows', async () => {
+  planEvents = jointEvents();
+  const { entry } = await initialPlan(), source = structuredClone(planEvents);
+  revisionEvents = [source[0], source[1], { ...source[2], endTime: '23:15' }];
+  const free = currentFreeEditor('第一項保留原樣，第三項結束改為23:15，其餘不變');
+  testing.fireEvent.submit(free);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
+  const textRevision = count('ask').at(-1);
+  expect(textRevision.body.planProtection).toEqual({ originalEvents: source, protectedIndices: [0] });
+  assertRealCards(textRevision);
+  const form = currentGroupShift();
+  expect(shiftedCheckbox(form, 0).checked).toBe(false);
+  expect(shiftedCheckbox(form, 0).disabled).toBe(true);
+  const protectionDescription = document.getElementById(shiftedCheckbox(form, 0).getAttribute('aria-describedby')).textContent;
+  expect(protectionDescription).toContain('保留原樣');
+  expect(protectionDescription).toContain('不平移');
+  expect(shiftedCheckbox(form, 1).checked).toBe(true);
+  expect(shiftedCheckbox(form, 2).checked).toBe(true);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(9));
+  const shifted = count('revise')[0];
+  expect(shifted.body.originalCards).toEqual(originalCardsOf(textRevision));
+  expect(shifted.body.shift).toEqual({ mutationIds: idsOf(textRevision).slice(1), offsetMinutes: 30,
+    protectedMutationIds: [textRevision.response.cards[0].mutationId] });
+  expect(shifted.response.cards.map(card => card.args)).toEqual([
+    source[0], { ...source[1], startTime: '20:30', endTime: '21:30' },
+    { ...source[2], startTime: '22:30', endTime: '23:45' },
+  ]);
+  assertRealCards(shifted);
+  const nextShift = currentGroupShift();
+  expect(shiftedCheckbox(nextShift, 0).disabled).toBe(true);
+  expect(shiftedCheckbox(nextShift, 0).checked).toBe(false);
+  for (const old of [entry, textRevision]) await assertOriginalCannotExecute(old);
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  expect(fixture.provider).toHaveBeenCalledTimes(4);
+  expect(deniedFetches).toEqual([]);
+});
+
+it('group shift selects same-name rows by signed identity while leaving an unchecked row exact', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan(), source = structuredClone(planEvents);
+  const form = currentGroupShift();
+  testing.fireEvent.click(shiftedCheckbox(form, 1));
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
+  const shifted = count('revise')[0];
+  expect(shifted.body.shift).toEqual({ mutationIds: [entry.response.cards[0].mutationId, entry.response.cards[2].mutationId],
+    offsetMinutes: 30, protectedMutationIds: [] });
+  expect(shifted.response.cards.map(card => card.args)).toEqual([
+    { ...source[0], startTime: '18:30', endTime: '19:30' }, source[1],
+    { ...source[2], startTime: '22:30', endTime: '23:30' },
+  ]);
+  assertRealCards(shifted);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('group shift rejects the whole preview when only its second row conflicts with a new ledger record and retries without recancelling', async () => {
+  planEvents = jointEvents();
+  const { entry } = await initialPlan();
+  // A fixed external database change occurs after the original preview. It is
+  // not an Assistant confirmation and is not counted as a preview write.
+  const initialLedger = database.snapshot();
+  const externalRecord = { ...initialLedger.records.find(record => record.kind === 'events'),
+    id: 'fixture-external-group-conflict', title: '合成外部新增時段', startTime: '21:30', endTime: '21:45' };
+  await database.adapter.write({ schoolId: fixture.school, expectedRevision: initialLedger.revision,
+    mutationId: externalRecord.id, records: [...initialLedger.records, externalRecord] });
+  const changedLedger = database.snapshot(), writes = vi.spyOn(database.adapter, 'write');
+  const form = currentGroupShift();
+  setGroupShift(form, 'later', 60);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(count('revise')).toHaveLength(1));
+  expect(count('revise')[0]).toMatchObject({ status: 409, response: { error: 'EVENT_CONFLICT' } });
+  expect(count('revise')[0].response.cards).toBeUndefined();
+  expect(uiCards()).toHaveLength(3);
+  expect(writes).not.toHaveBeenCalled();
+  expect(database.snapshot()).toEqual(changedLedger);
+  await testing.waitFor(() => expect(testing.within(form).getByRole('button', { name: '預覽整組時間' }).disabled).toBe(false));
+  expect(testing.within(form).getByLabelText('調整分鐘數').value).toBe('60');
+  setGroupShift(form, 'later', 30);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
+  expect(count('revise')[1].status).toBe(200);
+  expect(count('revise')[1].body.originalCards).toEqual(originalCardsOf(entry));
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  assertRealCards(count('revise')[1]);
+  expect(writes).not.toHaveBeenCalled();
+  expect(database.snapshot()).toEqual(changedLedger);
+  expect(count('confirm')).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('group shift cannot dispatch after a lost cancellation receipt until real reconciliation proves revocation', async () => {
+  const { entry } = await initialPlan();
+  const form = currentGroupShift();
+  fault.dropNextCancel = true;
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await ui().findByRole('button', { name: '重新核對結果' });
+  expect(count('cancel')[0].response.status).toBe('revoked');
+  expect(count('reconcile')[0].status).toBe(503);
+  expect(testing.within(form).getByRole('button', { name: '預覽整組時間' }).disabled).toBe(true);
+  const before = sentActions();
+  submitGroupShift(form); submitGroupShift(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(sentActions()).toEqual(before);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  fault.failLedger = false;
+  testing.fireEvent.click(ui().getByRole('button', { name: '重新核對結果' }));
+  await ui().findByText('已撤銷未執行提議');
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  expect(count('revise')).toHaveLength(1);
+  expect(count('revise')[0].body.shift.mutationIds).toEqual(idsOf(entry));
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  assertRealCards(count('revise')[0]);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it.each(['account', 'school'])('group shift ignores a real held preview after a %s switch', async target => {
+  const { view, entry } = await initialPlan();
+  const originalContext = fixture.context, originalAccount = fixture.account, originalSchool = fixture.school;
+  const form = currentGroupShift();
+  fault.holdPrecise = true;
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(fault.held).not.toBeNull());
+  const held = fault.held;
+  expect(held.entry.status).toBe(200);
+  assertRealCards(held.entry);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  if (target === 'account') useIdentity(registerIdentity('inprocess-group-other-account-' + serial));
+  else fixture.school = 'other-fixture-school';
+  view.rerender(React.createElement(Assistant));
+  await ui().findByLabelText('問題');
+  expect(held.entry.signal.aborted).toBe(true);
+  await testing.act(async () => { held.release(); await Promise.resolve(); });
+  expect(ui().queryByRole('article', { name: '行程確認卡' })).toBeNull();
+  expect(ui().queryByRole('form', { name: '整組調整待確認時間' })).toBeNull();
+  expect(ui().getByRole('checkbox', { name: /^同意在本次對話/ }).checked).toBe(false);
+  expect(held.entry).toMatchObject({ context: originalContext, account: originalAccount,
+    body: { schoolId: originalSchool } });
+  expect(count('revise')).toHaveLength(1);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('group shift descendants keep individual confirmation through exact time and selection revisions', async () => {
+  planEvents = jointEvents();
+  const { entry } = await initialPlan();
+  submitGroupShift(currentGroupShift());
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(6));
+  const shifted = count('revise')[0];
+  assertRealCards(shifted);
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  const time = currentTimeEditor(shifted, 2, { startTime: '23:00', endTime: '23:45' });
+  submitExactTime(time);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(9));
+  const timed = count('revise')[1];
+  expect(timed.body.originalCards).toEqual(originalCardsOf(shifted));
+  expect(timed.response.cards.map(card => card.args)).toEqual([
+    shifted.response.cards[0].args, shifted.response.cards[1].args,
+    { ...shifted.response.cards[2].args, startTime: '23:00', endTime: '23:45' },
+  ]);
+  assertRealCards(timed);
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  now += 61000; // Retain the actual request limit and stay inside permit validity.
+  const selected = await retainFirstAndLast(timed);
+  expect(uiCards()).toHaveLength(11);
+  expect(ui().queryByRole('button', { name: '依序全部確認' })).toBeNull();
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  for (const previous of [entry, shifted, timed]) await assertOriginalCannotExecute(previous);
+  for (let index = 0; index < 2; index++) {
+    testing.fireEvent.click(testing.within(uiCards()[9 + index]).getByRole('button', { name: '確認' }));
+    await testing.waitFor(() => expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(index + 1));
+    expect(database.writes).toHaveLength(index + 1);
+    expect(count('confirm')).toHaveLength(index + 1);
+    expect(count('confirm')[index].body.token).toBe(selected.response.cards[index].token);
+  }
+  expect(database.writes.map(write => write.mutationId)).toEqual(idsOf(selected));
+  assertNoAdditionalModel();
+});
+
+
+it('group shift shares unsent text protection immediately without making a model request', async () => {
+  const { entry } = await initialPlan();
+  const free = currentFreeEditor('第一項保留原樣，其他項目延後半小時');
+  const form = currentGroupShift();
+  expect(shiftedCheckbox(form, 0).checked).toBe(false);
+  expect(shiftedCheckbox(form, 0).disabled).toBe(true);
+  expect(shiftedCheckbox(form, 1).checked).toBe(true);
+  expect(testing.within(free).getByRole('checkbox', { name: /^保留原樣 第 1 項/ }).checked).toBe(true);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  const shifted = count('revise')[0];
+  expect(shifted.body.shift).toEqual({ mutationIds: [entry.response.cards[1].mutationId], offsetMinutes: 30,
+    protectedMutationIds: [entry.response.cards[0].mutationId] });
+  expect(shifted.response.cards.map(card => card.args)).toEqual([
+    proposed[0], { ...proposed[1], startTime: '20:30', endTime: '21:30' },
+  ]);
+  assertRealCards(shifted);
+  await assertOriginalCannotExecute(entry);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+
+it('group shift releases a protected row after conflict without selecting it or dispatching, then retries the same offset explicitly', async () => {
+  planEvents = [proposed[0], { ...proposed[1], startTime: '17:00', endTime: '18:00' }];
+  const { entry } = await initialPlan(), source = structuredClone(planEvents);
+  currentFreeEditor('第一項保留原樣，第二項延後半小時');
+  const form = currentGroupShift();
+  expect(shiftedCheckbox(form, 0).disabled).toBe(true);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(count('revise')).toHaveLength(1));
+  expect(count('revise')[0]).toMatchObject({ status: 409, response: { error: 'EVENT_CONFLICT' } });
+  expect(count('revise')[0].body.shift).toEqual({ mutationIds: [entry.response.cards[1].mutationId],
+    offsetMinutes: 30, protectedMutationIds: [entry.response.cards[0].mutationId] });
+  expect(count('revise')[0].response.cards).toBeUndefined();
+  expect(uiCards()).toHaveLength(2);
+  expect(count('cancel')).toHaveLength(2);
+  expect(database.writes).toHaveLength(0);
+  await testing.waitFor(() => expect(testing.within(form).getByRole('button', { name: '預覽整組時間' }).disabled).toBe(false));
+  const beforeRelease = sentActions();
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '解除第 1 項的保留' }));
+  expect(shiftedCheckbox(form, 0).disabled).toBe(false);
+  expect(shiftedCheckbox(form, 0).checked).toBe(false);
+  expect(shiftedCheckbox(form, 1).checked).toBe(true);
+  expect(testing.within(form).getByLabelText('調整分鐘數').value).toBe('30');
+  expect(sentActions()).toEqual(beforeRelease);
+  testing.fireEvent.click(shiftedCheckbox(form, 0));
+  expect(sentActions()).toEqual(beforeRelease);
+  submitGroupShift(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(4));
+  const replacement = count('revise')[1];
+  expect(replacement.status).toBe(200);
+  expect(replacement.body.originalCards).toEqual(originalCardsOf(entry));
+  expect(replacement.body.shift).toEqual({ mutationIds: idsOf(entry), offsetMinutes: 30, protectedMutationIds: [] });
+  expect(replacement.response.cards.map(card => card.args)).toEqual([
+    { ...source[0], startTime: '18:30', endTime: '19:30' },
+    { ...source[1], startTime: '17:30', endTime: '18:30' },
+  ]);
+  assertRealCards(replacement);
+  await assertOriginalCannotExecute(entry);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});

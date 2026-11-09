@@ -12,6 +12,8 @@ import { AssistantPrecisePlanRevision, AssistantPrecisePlanComparison } from './
 import { buildPrecisePlanRevision, type PrecisePlanRevisionChange } from './assistant/precisePlanRevision';
 import { AssistantPlanSelection, AssistantPlanSelectionComparison } from './assistant/AssistantPlanSelection';
 import { buildPlanSelection } from './assistant/planSelection';
+import { AssistantPlanShift, AssistantPlanShiftComparison } from './assistant/AssistantPlanShift';
+import { buildShiftPlanRevision, type PlanShiftChange } from './assistant/shiftPlanRevision';
 import { AssistantPlanDraftRecovery } from './assistant/AssistantPlanDraftRecovery';
 import { usePlanRevisionDraft } from './assistant/usePlanRevisionDraft';
 import { usePrecisePlanDraft } from './assistant/usePrecisePlanDraft';
@@ -240,11 +242,14 @@ function V2Conversation({
   const revisionTurns = useRef(new Set<V2Turn>());
   const preciseRevisionTurns = useRef(new Set<V2Turn>());
   const selectionRevisionTurns = useRef(new Set<V2Turn>());
+  const shiftRevisionTurns = useRef(new Set<V2Turn>());
+  const protectedSelections = useRef(new WeakMap<V2Turn, number[]>());
+  const [, refreshProtectedSelections] = useState(0);
   const rejectedProposalIds = useRef(new Set<string>());
-  // A selection's per-card decision policy follows its revision descendants,
+  // Selection and group-shift per-card policies follow their revision descendants,
   // independently of comparison indices or any restored draft content.
   const individualConfirmationTurns = useRef(new WeakSet<V2Turn>());
-  const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[]; preciseIndex?: number; retainedIndices?: number[] }>());
+  const planComparisons = useRef(new WeakMap<V2Turn, { before: PlanRevisionEvent[]; after: PlanRevisionEvent[]; preciseIndex?: number; retainedIndices?: number[]; shiftedIndices?: number[]; offsetMinutes?: number }>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
   const journalScope = { ...localScope, context };
@@ -319,7 +324,21 @@ function V2Conversation({
     return active() && !busy.current && journalReadyRef.current &&
       turns.includes(turn) && !hasUnresolvedAssistantAction(actionStates.current) &&
       isUnattemptedCalendarPlan(turn, actionStates.current) &&
-      !revisionTurns.current.has(turn) && !preciseRevisionTurns.current.has(turn) && !selectionRevisionTurns.current.has(turn);
+      !revisionTurns.current.has(turn) && !preciseRevisionTurns.current.has(turn) && !selectionRevisionTurns.current.has(turn) && !shiftRevisionTurns.current.has(turn);
+  }
+  function changeProtectedSelection(turn: V2Turn, indices: readonly number[]) {
+    if (!active() || busy.current || !turns.includes(turn) || hasUnresolvedAssistantAction(actionStates.current)) return;
+    const registered = [revisionTurns, preciseRevisionTurns, selectionRevisionTurns, shiftRevisionTurns]
+      .some(attempts => attempts.current.has(turn));
+    const retrying = registered && turn.reply.cards.every(card =>
+      actionStates.current[card.mutationId] === undefined || actionStates.current[card.mutationId]?.status === 'cancelled');
+    if ((!isUnattemptedCalendarPlan(turn, actionStates.current) && !retrying) ||
+      new Set(indices).size !== indices.length ||
+      indices.some(index => !Number.isInteger(index) || index < 0 || index >= turn.reply.cards.length)) return;
+    // This changes only the current editing constraint. It never restores old
+    // signatures, changes a signed card or sends an operation.
+    protectedSelections.current.set(turn, [...indices]);
+    refreshProtectedSelections(value => value + 1);
   }
   async function send(action: string, input: object) {
     const signal = controller.current!.signal;
@@ -592,6 +611,13 @@ function V2Conversation({
           setAction(card, { status: 'superseded' });
       }
       const revisedTurn = { question: '修改原先安排：' + instruction.trim(), reply };
+      const protectedEvents = protection.protectedIndices.map(index => protection.originalEvents[index]);
+      const sameEvent = (left: PlanRevisionEvent, right: PlanRevisionEvent) =>
+        ['title', 'date', 'endDate', 'allDay', 'startTime', 'endTime'].every(field =>
+          Object.hasOwn(left, field) === Object.hasOwn(right, field) &&
+          left[field as keyof PlanRevisionEvent] === right[field as keyof PlanRevisionEvent]);
+      protectedSelections.current.set(revisedTurn, after.flatMap((event, index) =>
+        protectedEvents.some(locked => sameEvent(event, locked)) ? [index] : []));
       if (individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
       // Comparison is local presentation data, never a replacement for signed cards.
       planComparisons.current.set(revisedTurn, { before, after });
@@ -612,12 +638,16 @@ function V2Conversation({
   async function reviseSelection(turn: V2Turn, keepMutationIds: string[]) {
     return reviseDirectPlan(turn, { kind: 'selection', keepMutationIds });
   }
+  async function reviseShift(turn: V2Turn, change: PlanShiftChange) {
+    return reviseDirectPlan(turn, { kind: 'shift', change });
+  }
   async function reviseDirectPlan(turn: V2Turn, request:
     | { kind: 'time'; change: PrecisePlanRevisionChange }
-    | { kind: 'selection'; keepMutationIds: string[] },
+    | { kind: 'selection'; keepMutationIds: string[] }
+    | { kind: 'shift'; change: PlanShiftChange },
   ): Promise<{ ok: boolean; message: string }> {
-    const selecting = request.kind === 'selection';
-    const attempts = selecting ? selectionRevisionTurns.current : preciseRevisionTurns.current;
+    const selecting = request.kind === 'selection', shifting = request.kind === 'shift';
+    const attempts = selecting ? selectionRevisionTurns.current : shifting ? shiftRevisionTurns.current : preciseRevisionTurns.current;
     if (busy.current || !active() || !journalReadyRef.current)
       return { ok: false, message: selecting
         ? '請先等目前操作與原結果核對完成，再選擇要建立的行程。'
@@ -629,11 +659,14 @@ function V2Conversation({
       (!isUnattemptedCalendarPlan(turn, actionStates.current) && !continuing))
       return { ok: false, message: '原提議尚未完成核對，這次不會建立新預覽；已寫入的行程不能由此修改。' };
     let edit: { before: PlanRevisionEvent[]; after: PlanRevisionEvent[]; changed: boolean;
-      label: string; preciseIndex?: number; retainedIndices?: number[] };
+      label: string; preciseIndex?: number; retainedIndices?: number[]; shiftedIndices?: number[]; offsetMinutes?: number };
     try {
       if (request.kind === 'time') {
         const time = buildPrecisePlanRevision(turn, request.change);
         edit = { ...time, preciseIndex: time.index };
+      } else if (request.kind === 'shift') {
+        const shift = buildShiftPlanRevision(turn, request.change, protectedSelections.current.get(turn) ?? []);
+        edit = { ...shift, shiftedIndices: shift.selectedIndices };
       } else {
         const selected = buildPlanSelection(turn, request.keepMutationIds);
         edit = { ...selected, retainedIndices: selected.keptIndices,
@@ -653,6 +686,9 @@ function V2Conversation({
       routeToken: routeToken.current,
       originalCards: turn.reply.cards.map(card => ({ token: card.token, args: card.args })),
       ...(request.kind === 'time' ? { change: request.change }
+        : request.kind === 'shift' ? { shift: { mutationIds: edit.shiftedIndices!.map(index => turn.reply.cards[index].mutationId),
+          offsetMinutes: request.change.offsetMinutes,
+          protectedMutationIds: (protectedSelections.current.get(turn) ?? []).map(index => turn.reply.cards[index].mutationId) } }
         : { keepMutationIds: edit.retainedIndices!.map(index => turn.reply.cards[index].mutationId) }),
     };
     // No source is truncated or modified. The empty selection only cancels;
@@ -678,7 +714,7 @@ function V2Conversation({
     setPending(true);
     setError('');
     try {
-      // Both deterministic revisions use the same signed-source route. Neither
+      // Deterministic revisions use the same signed-source route. None
       // includes a model question/history or reuses any original signed card.
       let reply = await send('revise', input);
       if (!active()) return { ok: false, message: '對話已變更，這次回覆沒有加入新預覽。' };
@@ -702,18 +738,26 @@ function V2Conversation({
       for (const card of turns.flatMap(value => value.reply.cards)) {
         if (canConfirmAction(actionStates.current[card.mutationId])) setAction(card, { status: 'superseded' });
       }
-      const revisedTurn = { question: (selecting ? '選擇要建立的行程：' : '精確調整時間：') + edit.label, reply };
-      if (selecting || individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
+      const revisedTurn = { question: (selecting ? '選擇要建立的行程：' : shifting ? '整組調整時間：' : '精確調整時間：') + edit.label, reply };
+      if (selecting || shifting || individualConfirmationTurns.current.has(turn)) individualConfirmationTurns.current.add(revisedTurn);
+      const sourceLocks = protectedSelections.current.get(turn) ?? [];
+      protectedSelections.current.set(revisedTurn, selecting
+        ? edit.retainedIndices!.flatMap((sourceIndex, index) => sourceLocks.includes(sourceIndex) ? [index] : [])
+        : [...sourceLocks]);
       planComparisons.current.set(revisedTurn, { before: edit.before, after,
-        ...(selecting ? { retainedIndices: edit.retainedIndices } : { preciseIndex: edit.preciseIndex }) });
+        ...(selecting ? { retainedIndices: edit.retainedIndices }
+          : shifting ? { shiftedIndices: edit.shiftedIndices, offsetMinutes: edit.offsetMinutes }
+          : { preciseIndex: edit.preciseIndex }) });
       setTurns(previous => [...previous, revisedTurn]);
       attempts.delete(turn);
       return { ok: true, message: selecting
         ? '已依原順序重新預覽保留項目，內容保持原樣；沒有呼叫模型或寫入行程。請核對後逐張確認。'
+        : shifting ? '整組時間調整已供預覽，沒有呼叫模型或寫入行程。請核對前後差異後逐張確認。'
         : '時間調整已供預覽，沒有呼叫模型或寫入行程。請核對後逐張確認。' };
     } catch (cause) {
       return { ok: false, message: (selecting
         ? '尚未取得所選行程的預覽；原提議已撤銷，保留選擇仍在此頁。'
+        : shifting ? '整組時間預覽未完成，沒有提供部分新卡；原提議已撤銷，選取範圍與分鐘數仍保留。'
         : '尚未取得時間調整預覽；原提議已撤銷，修改欄位已保留。')
         + (cause instanceof Error ? ' ' + cause.message : '請核對後再試。') };
     } finally {
@@ -807,7 +851,9 @@ function V2Conversation({
       onReconcile={(card) => void reconcile(card)}
       renderPlanComparison={turn => {
         const comparison = planComparisons.current.get(turn);
-        return comparison ? comparison.retainedIndices !== undefined
+        return comparison ? comparison.shiftedIndices !== undefined
+          ? <AssistantPlanShiftComparison before={comparison.before} after={comparison.after} selectedIndices={comparison.shiftedIndices} offsetMinutes={comparison.offsetMinutes!} />
+          : comparison.retainedIndices !== undefined
           ? <AssistantPlanSelectionComparison before={comparison.before} retainedIndices={comparison.retainedIndices} />
           : comparison.preciseIndex !== undefined
           ? <AssistantPrecisePlanComparison before={comparison.before} after={comparison.after} index={comparison.preciseIndex} />
@@ -818,6 +864,10 @@ function V2Conversation({
         return <>
           <AssistantPlanSelection turn={turn} states={states} pending={pending}
             enabled={journalReady} onPreview={ids => reviseSelection(turn, ids)} />
+          <AssistantPlanShift turn={turn} states={states} pending={pending} enabled={journalReady}
+            protectedIndices={protectedSelections.current.get(turn) ?? []} onPreview={change => reviseShift(turn, change)}
+            onReleaseProtection={index => changeProtectedSelection(turn,
+              (protectedSelections.current.get(turn) ?? []).filter(value => value !== index))} />
           <AssistantPrecisePlanRevision turn={turn} states={states} pending={pending}
             enabled={journalReady} onPreview={change => reviseTime(turn, change)}
             draft={source ? {
@@ -842,6 +892,8 @@ function V2Conversation({
               },
             } : undefined} />
           <AssistantPlanRevision turn={turn} states={states} pending={pending}
+          protectedSelection={protectedSelections.current.get(turn) ?? []}
+          onProtectedSelectionChange={indices => changeProtectedSelection(turn, indices)}
           enabled={ready && consent} onPreview={(instruction, indices) => revisePlan(turn, instruction, indices)}
           draft={source ? {
             status: drafts.editorStatuses[source.key],
@@ -850,7 +902,7 @@ function V2Conversation({
             } : undefined,
             onChange: (instruction, indices) => {
               if (active() && isUnattemptedCalendarPlan(turn, actionStates.current) && !revisionTurns.current.has(turn) &&
-                !preciseRevisionTurns.current.has(turn) && !selectionRevisionTurns.current.has(turn))
+                !preciseRevisionTurns.current.has(turn) && !selectionRevisionTurns.current.has(turn) && !shiftRevisionTurns.current.has(turn))
                 drafts.saveEditor(source, { instruction, protectedIndices: [...indices] });
             },
             onClear: () => drafts.clearSource(source.key),
@@ -858,7 +910,7 @@ function V2Conversation({
               if (!active() || busy.current || !journalReadyRef.current || !ready || !revisionConsent.current ||
                 hasUnresolvedAssistantAction(actionStates.current) || !turns.includes(turn) ||
                 !isUnattemptedCalendarPlan(turn, actionStates.current) || revisionTurns.current.has(turn) ||
-                preciseRevisionTurns.current.has(turn) || selectionRevisionTurns.current.has(turn))
+                preciseRevisionTurns.current.has(turn) || selectionRevisionTurns.current.has(turn) || shiftRevisionTurns.current.has(turn))
                 return { ok: false, message: '目前提議或舊操作尚未完成核對，請先核對後再套用草稿。' };
               return drafts.apply(source);
             },

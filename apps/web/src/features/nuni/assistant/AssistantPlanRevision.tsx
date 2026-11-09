@@ -20,6 +20,8 @@ type Props = {
   pending: boolean;
   enabled: boolean;
   draft?: RevisionDraftBridge;
+  protectedSelection?: readonly number[];
+  onProtectedSelectionChange?: (indices: number[]) => void;
   onPreview: (instruction: string, protectedIndices: readonly number[]) => Promise<{ ok: boolean; message: string }>;
 };
 
@@ -33,7 +35,7 @@ function eventTime(event: PlanRevisionEvent): string {
     : `${event.date} · ${event.startTime}–${event.endTime}（台灣時間）`;
 }
 
-function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft }: Props & { events: PlanRevisionEvent[] }) {
+function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft, protectedSelection, onProtectedSelectionChange }: Props & { events: PlanRevisionEvent[] }) {
   const id = useId();
   const panel = useRef<HTMLElement>(null);
   const entry = useRef<HTMLButtonElement>(null);
@@ -43,7 +45,12 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
   const busy = useRef(false);
   const [open, setOpen] = useState(false);
   const [instruction, setInstruction] = useState('');
-  const [protectedIndices, setProtectedIndices] = useState<number[]>([]);
+  const [localProtectedIndices, setLocalProtectedIndices] = useState<number[]>([]);
+  const protectedIndices = protectedSelection ?? localProtectedIndices;
+  function setProtectedIndices(indices: number[]) {
+    setLocalProtectedIndices(indices);
+    onProtectedSelectionChange?.(indices);
+  }
   const [started, setStarted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [complete, setComplete] = useState(false);
@@ -188,7 +195,7 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events, draft
         </div>}
         <fieldset className={styles.protectedEvents}>
           <legend className={styles.heading}>原提議內容</legend>
-          <p id={id + '-protection'} className={styles.hint}>勾選的項目會保留名稱、開始／結束日期、全天設定及開始／結束時間。若無法可靠核對，就不會加入新的確認卡。</p>
+          <p id={id + '-protection'} className={styles.hint}>勾選的項目會保留名稱、開始／結束日期、全天設定及開始／結束時間。整組調時會排除勾選項目；若要移動，請先取消保留勾選。若無法可靠核對，就不會加入新的確認卡。</p>
           <ol className={styles.events} aria-label="原提議行程">
             {events.map((event, index) => <li key={index}>
               <strong id={`${id}-title-${index}`}>{event.title}</strong>

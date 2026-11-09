@@ -12,6 +12,7 @@ on:
       - 'apps/web/src/features/nuni/assistant/**'
       - 'apps/web/src/lib/assistantCalendarExecution*'
       - 'apps/web/src/lib/assistantPlanProtection*'
+      - 'apps/web/src/lib/assistantPlanShift*'
       - 'apps/web/src/lib/assistantPlanRevisionDraft*'
       - 'apps/web/src/lib/assistantPrecisePlanDraft*'
       - 'apps/web/src/lib/assistantExecutionJournal*'
@@ -67,6 +68,10 @@ jobs:
             src/lib/nuni/assistantV2/protectedPlanServiceFlow.test.ts \
             src/lib/nuni/assistantV2/directPlanRevision.test.ts \
             src/lib/nuni/assistantV2/selectPlanRevision.test.ts \
+            src/lib/nuni/assistantV2/shiftPlanRevision.test.ts \
+            src/lib/assistantPlanShift.test.ts \
+            src/features/nuni/assistant/shiftPlanRevision.test.ts \
+            src/features/nuni/assistant/AssistantPlanShift.test.tsx \
             src/features/nuni/assistant/planSelection.test.ts \
             src/features/nuni/assistant/AssistantPlanSelection.test.tsx \
             src/features/nuni/assistant/AssistantCards.test.tsx \

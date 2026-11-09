@@ -12,7 +12,7 @@ import {
 } from '../server';
 import { beginProposal, cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
-import { directPlanRevision, selectPlanRevision } from './directPlanRevision';
+import { directPlanRevision, selectPlanRevision, shiftPlanRevision } from './directPlanRevision';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
 import { run, safeCode } from './runner';
@@ -26,6 +26,7 @@ let minute = 0,
   dailyTokens = 0;
 const provider = createProviderModel();
 const PLAN_PROTECTION_MESSAGES: Record<string, string> = {
+  INVALID_PLAN_SHIFT: '平移設定無效，請核對分鐘數、所選行程與保留項目後再試。',
   INVALID_PLAN_SELECTION: '保留項目設定無效，請只選擇原提議中的部分行程後再試。',
   INVALID_PLAN_REVISION: '原提議或修改欄位不完整，請重新開啟完整行程提議後再試。',
   PLAN_REVISION_UNCHANGED: '日期與時間沒有變更，這次沒有產生新提議。',
@@ -100,7 +101,7 @@ export async function handleV2(request: NextRequest, action: string) {
       action === 'ask'
         ? ['schoolId', 'conversationId', 'question', 'history', 'consent', 'preferredInstance', 'routeToken', 'planProtection']
         : action === 'revise'
-          ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds']
+          ? ['schoolId', 'conversationId', 'routeToken', 'originalCards', 'change', 'keepMutationIds', 'shift']
           : ['schoolId', 'conversationId', 'token', 'args'],
     );
     const schoolId = id(raw.schoolId),
@@ -202,12 +203,15 @@ export async function handleV2(request: NextRequest, action: string) {
     active.add(sessionKey);
     try {
       if (action === 'revise') {
-        const selecting = Object.hasOwn(raw, 'keepMutationIds');
-        if (selecting === Object.hasOwn(raw, 'change')) throw new V2Error(422, 'INVALID_PLAN_SELECTION');
+        const selecting = Object.hasOwn(raw, 'keepMutationIds'), shifting = Object.hasOwn(raw, 'shift');
+        if (['keepMutationIds', 'change', 'shift'].filter(key => Object.hasOwn(raw, key)).length !== 1)
+          throw new V2Error(422, shifting ? 'INVALID_PLAN_SHIFT' : 'INVALID_PLAN_SELECTION');
         const result = await bounded(child => withOperationSignal(child, () =>
-          selecting
-            ? selectPlanRevision(binding, raw.originalCards, raw.keepMutationIds, secret, source.adapter)
-            : directPlanRevision(binding, raw.originalCards, raw.change, secret, source.adapter),
+          shifting
+            ? shiftPlanRevision(binding, raw.originalCards, raw.shift, secret, source.adapter)
+            : selecting
+              ? selectPlanRevision(binding, raw.originalCards, raw.keepMutationIds, secret, source.adapter)
+              : directPlanRevision(binding, raw.originalCards, raw.change, secret, source.adapter),
         ), signal, 12000);
         return jsonResponse({
           ...result,

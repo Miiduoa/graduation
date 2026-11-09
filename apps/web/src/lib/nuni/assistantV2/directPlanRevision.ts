@@ -1,3 +1,4 @@
+import { buildPlanShift } from '@/lib/assistantPlanShift';
 import { beginProposal, calendarLedger, signCard, verifyRevokedCalendarPlan } from './actions';
 import { canonical, eventArgs, fail, id, object, type Adapter, type Binding, type Card, type EventArgs } from './contracts';
 import { operationSignal } from './operation';
@@ -47,6 +48,32 @@ export async function selectPlanRevision(
   const candidates = source.filter(card => keep.has(card.mutationId)).map(card => eventArgs(card.args));
   return issueReplacement(binding, originalCards, source, candidates, secret, adapter,
     '已依原順序保留選取的行程，內容保持原樣。請逐筆核對新卡；確認前不會寫入行程。');
+}
+
+/** Translate selected signed identities without changing source order or any fixed event. */
+export async function shiftPlanRevision(
+  binding: Binding, originalCards: unknown, rawShift: unknown, secret: string, adapter: Adapter,
+) {
+  operationSignal()?.throwIfAborted();
+  const source = verifyRevokedCalendarPlan(binding, originalCards, secret, Date.now());
+  let candidates: EventArgs[];
+  try {
+    const shift = object(rawShift, ['mutationIds', 'offsetMinutes', 'protectedMutationIds']);
+    const positions = new Map(source.map((card, index) => [card.mutationId, index]));
+    const mappedIndices = (raw: unknown) => {
+      if (!Array.isArray(raw) || raw.length > 16) throw new Error();
+      const seen = new Set<string>();
+      return raw.map(mutationId => {
+        if (typeof mutationId !== 'string' || !positions.has(mutationId) || seen.has(mutationId)) throw new Error();
+        seen.add(mutationId);
+        return positions.get(mutationId)!;
+      });
+    };
+    candidates = buildPlanShift(source.map(card => eventArgs(card.args)), mappedIndices(shift.mutationIds),
+      shift.offsetMinutes, mappedIndices(shift.protectedMutationIds)).after;
+  } catch { return fail('INVALID_PLAN_SHIFT'); }
+  return issueReplacement(binding, originalCards, source, candidates, secret, adapter,
+    '已依指定分鐘數平移所選行程，其他項目保持原樣。請逐筆核對新卡；確認前不會寫入行程。');
 }
 
 async function issueReplacement(
