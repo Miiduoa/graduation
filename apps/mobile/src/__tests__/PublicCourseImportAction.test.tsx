@@ -230,7 +230,7 @@ test('warns about same-term overlapping imported classes before writing, requiri
   confirm(view);
   await view.findByText('仍要加入（保留兩門課）');
   expect(view.getByText(/本裝置已匯入課表發現 1 個重疊時段/)).toBeTruthy();
-  expect(view.getByText(/分析化學專題 與 既有課程/)).toBeTruthy();
+  expect(view.getByText(/分析化學專題 與 既有課程（重疊 10:10–12:00）/)).toBeTruthy();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   fireEvent.press(view.getByText('仍要加入（保留兩門課）'));
   await view.findByText('已加入 2 個上課時段。');
@@ -251,9 +251,20 @@ test('overlap check respects school, term, distinct weekdays, adjacent periods a
   expect(find(current.rows, existing.map((row) => ({
     ...row, courseCode: 'ANOTHER', startTime: '12:00', endTime: '13:00',
   })))).toHaveLength(0);
-  expect(find(current.rows, existing.map((row) => ({
-    ...row, courseCode: 'ANOTHER', startTime: '10:30', endTime: '11:30',
-  })))).toHaveLength(1);
+  const withClock = (startTime: string, endTime: string) => find(current.rows,
+    existing.map((row) => ({ ...row, courseCode: 'ANOTHER', startTime, endTime })));
+  expect(withClock('10:30', '11:30')).toEqual([
+    expect.objectContaining({ dayOfWeek: 1, startTime: '10:30', endTime: '11:30' }),
+  ]);
+  expect(withClock('09:00', '10:40')).toEqual([
+    expect.objectContaining({ dayOfWeek: 1, startTime: '10:10', endTime: '10:40' }),
+  ]);
+  expect(withClock('11:30', '13:10')).toEqual([
+    expect.objectContaining({ dayOfWeek: 1, startTime: '11:30', endTime: '12:00' }),
+  ]);
+  expect(withClock('09:00', '13:10')).toEqual([
+    expect.objectContaining({ dayOfWeek: 1, startTime: '10:10', endTime: '12:00' }),
+  ]);
 });
 
 test('an intervening timetable update invalidates an acknowledged overlap before commit', async () => {
