@@ -142,6 +142,21 @@ function outlineNearPoi(outline: readonly [number, number][], place: { lat: numb
   return inside;
 }
 
+/** Whitelisted IDs can be edited in OSM. A former building or roof-only way must
+ * not be rendered as an occupied, full-height campus building. Unclear tags fail closed.
+ */
+const NON_BUILDING_VOLUMES = new Set([
+  'no', 'maybe', 'proposed', 'planned', 'construction', 'demolished', 'destroyed',
+  'ruins', 'roof', 'bridge',
+]);
+
+function isStandingBuilding(value: unknown): boolean {
+  const classification = object(value)?.building;
+  if (typeof classification !== 'string') return false;
+  const kind = classification.trim().toLowerCase();
+  return kind.length > 0 && !NON_BUILDING_VOLUMES.has(kind);
+}
+
 function heightFromOsmTags(value: unknown): { heightMeters: number; heightBasis: ProvidenceFootprint['heightBasis'] } {
   const tags = object(value);
   const raw = tags?.height;
@@ -163,7 +178,7 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
     const element = object(value);
     if (element?.type !== 'way' || typeof element.id !== 'number' || !Number.isSafeInteger(element.id)) continue;
     const place = knownWays.get(element.id);
-    if (!place || seen.has(element.id)) continue;
+    if (!place || seen.has(element.id) || !isStandingBuilding(element.tags)) continue;
     const outline = safeOutline(element.geometry);
     if (!outline || !outlineNearPoi(outline, place)) continue;
     seen.add(element.id);

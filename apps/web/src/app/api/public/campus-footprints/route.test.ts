@@ -8,7 +8,7 @@ const libraryOutline = [
   { lat: 24.22624, lon: 120.58131 },
 ];
 const osmPayload = JSON.stringify({
-  elements: [{ type: 'way', id: 255784049, geometry: libraryOutline }],
+  elements: [{ type: 'way', id: 255784049, geometry: libraryOutline, tags: { building: 'yes' } }],
 });
 
 beforeEach(() => {
@@ -45,6 +45,21 @@ describe('public Providence building geometry route', () => {
     expect(query).not.toContain('295686299'); // 未交叉確認的停車場
     const second = await GET();
     expect(second.status).toBe(200);
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cache or serve a former building whose OSM way no longer has a building tag', async () => {
+    const invalidPayload = JSON.stringify({
+      elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { landuse: 'grass', 'demolished:building': 'yes' } }],
+    });
+    const mockedFetch = vi.fn().mockResolvedValue(new Response(invalidPayload, { status: 200 }));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toMatch(/temporarily unavailable/);
+    expect((await GET()).status).toBe(503);
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 

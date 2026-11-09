@@ -11,8 +11,9 @@
 1. 校舍名稱、編號、用途及主顧樓樓層以[靜宜大學官方校園地圖實境導覽](https://www.pu.edu.tw/p/404-1000-1131.php?Lang=zh-tw)核對。官方另有[校史沙鹿校區地圖](https://archives.pu.edu.tw/p/412-1121-4218.php)，僅供核對，不重製照片、校方圖像及 720° 環景。
 2. 建築座標及 OSM way ID 沿用專案共用 `packages/shared/src/providenceCampus.ts` 已記載來源的資料。此功能只請求其中 `cross-checked` 且來源為 OpenStreetMap way 的地點，不把公車站、停車場或單點建物硬擠成立體建築。
 3. 伺服器向固定的 [OpenStreetMap Overpass](https://overpass-api.de/) 服務查詢指定 way ID，並檢查來源、閉合輪廓、座標是否在靜宜附近、合理面積、重複 way、形狀自交、非相鄰邊界相接與重疊。輪廓必須涵蓋對應的校舍 POI，或其邊界距離該 POI 不超過 30 公尺；避免 OSM way 遷移後仍冠上原校舍名稱。這是資料漂移容差，**不代表入口位置已驗證**。限制最多 128 筆來源圖徵、每棟最多 160 個頂點；避免把外站任意資料顯示成靜宜的校舍。
-4. 若 OSM `height` tag 是可解析的公尺數值，僅用於示意高度；缺少高度的建築以 12 公尺的**視覺示意值**繪製，絕不宣稱為量測結果。`building:levels` 不用公式直接猜高度。
-5. 立體化來源需顯示 **© OpenStreetMap 貢獻者** 與[授權資訊](https://www.openstreetmap.org/copyright)。OSM 原始資料遵循 ODbL；如未來將修改後的建築資料對外散布，需再檢查相應署名與資料庫授權義務。正式產品應確認快照更新、API 使用政策與容量。
+4. 即使 way ID 已在白名單內，也要確認 Overpass 回傳仍具有有效的 `building=*` 標籤；已移除建物標籤或標成 `building=no`、`construction`、`proposed`、`roof`、`ruins` 等不呈現完整建築量體，無來源時保留地點標記而不補造建築。此判斷只表示 OSM 圖徵可用於外框示意，**不證明建物目前開放或可進入**。
+5. 若 OSM `height` tag 是可解析的公尺數值，僅用於示意高度；缺少高度的建築以 12 公尺的**視覺示意值**繪製，絕不宣稱為量測結果。`building:levels` 不用公式直接猜高度。
+6. 立體化來源需顯示 **© OpenStreetMap 貢獻者** 與[授權資訊](https://www.openstreetmap.org/copyright)。OSM 原始資料遵循 ODbL；如未來將修改後的建築資料對外散布，需再檢查相應署名與資料庫授權義務。正式產品應確認快照更新、API 使用政策與容量。
 
 ## 可靠性
 

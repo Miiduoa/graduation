@@ -18,7 +18,7 @@ const way = (id: number, geometry: unknown = library, tags: unknown = { building
 describe('Providence OSM building outlines', () => {
   it('loads only vetted building ways, labels heights honestly and preserves the source URL', () => {
     const result = parseProvidenceOsmFootprints({
-      elements: [way(255784049, library, { height: '18 m' }), way(9999999)],
+      elements: [way(255784049, library, { building: 'yes', height: '18 m' }), way(9999999)],
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -32,12 +32,32 @@ describe('Providence OSM building outlines', () => {
 
   it('does not infer a true height from building:levels or an unknown unit', () => {
     const levelsOnly = parseProvidenceOsmFootprints({
-      elements: [way(255784049, library, { 'building:levels': '8', height: '50 ft' })],
+      elements: [way(255784049, library, { building: 'yes', 'building:levels': '8', height: '50 ft' })],
     });
     expect(levelsOnly[0]).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
     expect(parseProvidenceOsmFootprints({
-      elements: [way(255784049, library, { height: '9999' })],
+      elements: [way(255784049, library, { building: 'yes', height: '9999' })],
     })[0].heightBasis).toBe('illustrative');
+  });
+
+  it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
+    expect(parseProvidenceOsmFootprints({
+      elements: [{ ...way(255784049), tags: undefined }],
+    })).toEqual([]);
+    for (const tags of [
+      null, {}, { height: '18' }, { building: 'no' },
+      { building: 'construction' }, { building: 'proposed' },
+      { building: 'demolished' }, { building: 'roof' }, { building: 'ruins' },
+      { building: 'maybe' }, { building: '   ' }, { building: 1 },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, tags)],
+      }), JSON.stringify(tags)).toEqual([]);
+    }
+    // Do not restrict OSM to one building type; an existing school building is valid.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'school', height: '18' })],
+    })[0]).toMatchObject({ poiId: 'pu-library', heightMeters: 18, heightBasis: 'osm-tag' });
   });
 
   it('rejects wrong campus, open ways, degenerate shapes and self-intersections', () => {
