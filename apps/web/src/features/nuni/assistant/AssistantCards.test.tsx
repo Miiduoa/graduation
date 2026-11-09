@@ -202,9 +202,15 @@ it('does not combine calendar writes and food-order review into one batch confir
   expect(screen.getByText(/點餐也不會和行程一起批次確認/)).toBeTruthy();
   const confirm = screen.getAllByRole('button', { name: '確認' });
   expect(confirm).toHaveLength(2);
+  // Food cannot advance while a preceding calendar item is not read back.
+  expect((confirm[1] as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(confirm[0]);
   expect(onConfirm).toHaveBeenLastCalledWith([calendar]);
-  fireEvent.click(confirm[1]);
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+  rerender(<AssistantCardStack cards={[calendar, foodCard]}
+    states={{ [calendar.mutationId]: verifiedState(calendar) }} pending={false}
+    onConfirm={onConfirm} onCancel={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '確認' }));
   expect(onConfirm).toHaveBeenLastCalledWith([foodCard]);
   expect(onConfirm).toHaveBeenCalledTimes(2);
 
