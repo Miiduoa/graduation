@@ -138,6 +138,18 @@ describe('Providence OSM building outlines', () => {
     ] })).toEqual([base]);
   });
 
+  it('rejects inflated illustrative heights from the API instead of drawing fictitious towers', () => {
+    const footprint = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
+    expect(footprint).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [
+      { ...footprint, heightMeters: 99, heightBasis: 'illustrative' },
+    ] })).toEqual([]);
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [
+      { ...footprint, heightMeters: 2.5, heightBasis: 'illustrative' },
+    ] })).toEqual([]);
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [footprint] })).toEqual([footprint]);
+  });
+
   it('accepts a server payload only for Providence with matching source, name and geometry', () => {
     const footprint = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
     expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [footprint] })).toEqual([footprint]);
