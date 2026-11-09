@@ -1181,6 +1181,7 @@ service cloud.firestore {
           'schoolId',
           'primarySchoolId',
           'profileBoundSchoolId',
+          'bindingGeneration',
           'lastLoginAt',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress'
@@ -1200,6 +1201,7 @@ service cloud.firestore {
           'schoolId',
           'primarySchoolId',
           'profileBoundSchoolId',
+          'bindingGeneration',
           'lastLoginAt',
           'notificationDeliveryDisabled',
           'accountDeletionInProgress',

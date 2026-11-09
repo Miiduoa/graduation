@@ -29,7 +29,7 @@ test('campus story storage rules read at most two Firestore documents', () => {
   assert.equal(docs.length <= 2, true);
   assert.equal(storageRules.includes('users/$(request.auth.uid)'), true);
   const storyMatch = storageRules.match(
-    /match \/schools\/\{schoolId\}\/stories\/\{storyId\}\/\{fileName\} \{([\s\S]*?)\n    match \//,
+    /match \/schools\/\{schoolId\}\/stories\/\{storyId\}\/\{fileName\} \{([\s\S]*?)\n {4}match \//,
   );
   assert.equal(storyMatch[1].includes('users/$(request.auth.uid)'), false);
   assert.equal(storyMatch[1].includes('hasCanonicalActiveAccount'), false);
@@ -3153,6 +3153,7 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
       ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
+      ['pollute-binding-generation', { bindingGeneration: 'gen-forged' }],
       ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
@@ -3216,6 +3217,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ schoolId: 'other' }));
     await assertFails(alice.update({ primarySchoolId: 'other' }));
     await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
+    await assertFails(alice.update({ bindingGeneration: 'gen-forged' }));
     await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
@@ -4341,6 +4343,7 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
       ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
+      ['pollute-binding-generation', { bindingGeneration: 'gen-forged' }],
       ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
@@ -4402,6 +4405,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ schoolId: 'other' }));
     await assertFails(alice.update({ primarySchoolId: 'other' }));
     await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
+    await assertFails(alice.update({ bindingGeneration: 'gen-forged' }));
     await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
 
     // Change existing authority fields.

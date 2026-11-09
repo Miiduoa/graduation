@@ -1,5 +1,7 @@
 'use strict';
 
+const { isClosedAccount } = require('./campusStoryAccessBinding');
+
 function createUserProfileChangedHandler({
   syncAuthClaims,
   syncDirectoryEntriesForUser,
@@ -9,11 +11,15 @@ function createUserProfileChangedHandler({
   return async function onUserProfileChanged(event) {
     const uid = event.params.uid;
     const afterData = event.data.after?.data();
+    const created = event.data.before?.exists !== true;
+    const shouldRevokeBinding =
+      !afterData || isClosedAccount(afterData) || created;
+
+    if (shouldRevokeBinding && typeof inactivateLeftoverSchoolMemberships === 'function') {
+      await inactivateLeftoverSchoolMemberships(uid);
+    }
 
     if (!afterData) {
-      if (typeof inactivateLeftoverSchoolMemberships === 'function') {
-        await inactivateLeftoverSchoolMemberships(uid);
-      }
       await syncDirectoryEntriesForUser(uid, null);
       return;
     }

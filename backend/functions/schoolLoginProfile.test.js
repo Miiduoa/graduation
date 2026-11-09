@@ -55,6 +55,8 @@ test.each(['admin', 'editor', 'teacher', 'staff', 'principal'])(
       status: 'active',
       profileBoundSchoolId: 'pu',
     });
+    expect(records.get(memberPath).profileBoundGeneration).toBe(records.get('users/alice').bindingGeneration);
+    expect(typeof records.get('users/alice').bindingGeneration).toBe('string');
     expect(records.get('users/alice').primaryRole).not.toBe('admin');
     expect(records.get('users/alice').role).not.toBe('admin');
   },
@@ -98,7 +100,13 @@ test.each(['inactive', 'suspended', 'revoked'])(
   },
 );
 
-test.each([{ status: 'deleted' }, { accountDeletionInProgress: true }])(
+test.each([
+  { status: 'deleted' },
+  { status: 'disabled' },
+  { status: 'suspended' },
+  { status: 'inactive' },
+  { accountDeletionInProgress: true },
+])(
   'reauthentication cannot reopen an unavailable account %j',
   async (profile) => {
     records.set('users/alice', profile);

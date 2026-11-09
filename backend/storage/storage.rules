@@ -228,8 +228,9 @@ service firebase.storage {
       function storyAccountBoundToSchool() {
         // Production Storage allows two unique Firestore documents per
         // request. This match reads members/{uid} and campusStories only.
-        // profileBoundSchoolId is server-stamped (login, triggers, backfill);
-        // clients cannot write school members.
+        // profileBoundSchoolId is server-stamped on school login.
+        // Clients cannot write school members. Triggers clear the stamp
+        // when the profile is deleted or closed.
         let member = firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data;
         return isAuthenticated()
           && member.status == 'active'

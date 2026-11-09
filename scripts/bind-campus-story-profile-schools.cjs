@@ -8,17 +8,14 @@ const {
   loadCampusMembershipRows,
   planCampusStoryAccessBinding,
   summarizeBindingPlan,
-  applyCampusStoryAccessBinding,
   reverseCampusStoryAccessBinding,
 } = require('../backend/functions/campusStoryAccessBinding');
 
 const USAGE = [
   'node scripts/bind-campus-story-profile-schools.cjs --project PROJECT_ID',
-  '預設 dry-run，只輸出分類統計，不寫入。',
-  '正式寫入需 --apply --backup-file FILE。會先完整寫入並 fsync 備份，再寫資料庫。',
-  '還原預設也是 dry-run：--reverse --backup-file FILE；加上 --apply --applied-file FILE 才會寫回，並記錄實際套用欄位。',
-  '只綁有校務登入紀錄、單一 active 校籍、且 profile 建立時間不晚於校籍的帳號；其餘只列出筆數。',
-  '殘留且沒有 canonical profile 的校籍預設只列出；加上 --inactivate-orphans 才會標為 inactive。',
+  '只輸出分類統計，不寫入。歷史帳在下次伺服器端校務登入交易時蓋章。',
+  '沒有 --apply。先前備份若要還原：--reverse --backup-file FILE；加上 --apply --applied-file FILE 才會寫回。',
+  '還原在交易內比對現值，且不會撤掉之後合法再登入寫入的蓋章世代。',
 ].join('\n');
 
 function parseCli(argv) {
@@ -40,8 +37,11 @@ function parseCli(argv) {
   if (typeof values.project !== 'string' || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(values.project)) {
     throw new Error('An explicit project ID is required');
   }
-  if ((values.apply || values.reverse) && typeof values['backup-file'] !== 'string') {
-    throw new Error('Writing or reversing requires --backup-file');
+  if (values.apply && !values.reverse) {
+    throw new Error('Binding apply is disabled; historical accounts stamp on next school login');
+  }
+  if (values.reverse && typeof values['backup-file'] !== 'string') {
+    throw new Error('Reversing requires --backup-file');
   }
   if (values.reverse && values.apply && typeof values['applied-file'] !== 'string') {
     throw new Error('Reverse apply requires --applied-file');
@@ -50,7 +50,6 @@ function parseCli(argv) {
     projectId: values.project,
     apply: values.apply,
     reverse: values.reverse,
-    inactivateOrphans: values['inactivate-orphans'],
     backupFile: values['backup-file'],
     appliedFile: values['applied-file'],
   };
@@ -121,32 +120,12 @@ async function runCli(argv, deps = {}) {
 
   const rows = await loadCampusMembershipRows(db);
   const plan = planCampusStoryAccessBinding(rows);
-  const counts = summarizeBindingPlan(plan);
-  const prepared = await applyCampusStoryAccessBinding({
-    db,
-    plan,
-    apply: false,
-    inactivateOrphans: options.inactivateOrphans,
-  });
-  if (options.apply) {
-    writeFile(options.backupFile, {
-      projectId: options.projectId,
-      createdAt: new Date().toISOString(),
-      entries: prepared.backup,
-    });
-  }
-  const result = await applyCampusStoryAccessBinding({
-    db,
-    plan,
-    apply: options.apply,
-    inactivateOrphans: options.inactivateOrphans,
-  });
   return {
     projectId: options.projectId,
-    mode: options.apply ? 'apply' : 'dry-run',
-    counts,
-    applied: result.applied.length,
-    planned: prepared.backup.length,
+    mode: 'dry-run',
+    counts: summarizeBindingPlan(plan),
+    applied: 0,
+    planned: 0,
   };
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getSchoolLoginConfig } from './schoolLoginConfig';
 
@@ -98,9 +99,16 @@ export async function writeSchoolLoginProfile({
     }
 
     const account = userDoc.exists ? userDoc.data() : {};
-    if (account.accountDeletionInProgress === true || account.status === 'deleted') {
+    if (
+      account.accountDeletionInProgress === true ||
+      ['deleted', 'disabled', 'suspended', 'inactive'].includes(String(account.status || ''))
+    ) {
       throw new Error('account-deletion');
     }
+    const bindingGeneration =
+      typeof account.bindingGeneration === 'string' && account.bindingGeneration
+        ? account.bindingGeneration
+        : randomUUID();
     const membership = memberDoc.exists ? memberDoc.data() : null;
     if (membership?.status && membership.status !== 'active') {
       throw new Error('membership-disabled');
@@ -120,6 +128,7 @@ export async function writeSchoolLoginProfile({
         schoolId: membershipSchoolId,
         primarySchoolId: membershipSchoolId,
         lastLoginAt: FieldValue.serverTimestamp(),
+        bindingGeneration,
         ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },
@@ -132,6 +141,7 @@ export async function writeSchoolLoginProfile({
         role: resolved.memberRole,
         lastLoginAt: FieldValue.serverTimestamp(),
         profileBoundSchoolId: membershipSchoolId,
+        profileBoundGeneration: bindingGeneration,
         ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },

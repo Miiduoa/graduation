@@ -2556,6 +2556,7 @@ exports.onUserProfileChanged = onDocumentWritten(
       inactivateLeftoverSchoolMemberships({
         db,
         uid,
+        FieldValue,
         loadMemberships: (memberUid) => directorySync.loadSchoolMembershipDocs(db, memberUid),
       }),
   }),
