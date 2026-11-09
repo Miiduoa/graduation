@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import {
+  authorizePrivateFile,
+  isAllowedPrivateFileContentType,
+  privateGroupAssignmentPath,
   parsePrivateFilePath,
   parsePrivateGroupFilePath,
   privateAssignmentPath,
@@ -41,4 +44,78 @@ it('builds canonical object paths', () => {
   expect(privateAssignmentPath('work', 'alice', 'answer.pdf')).toBe(ANSWER);
   expect(privateStoryPath('pu', 'story-1', 'image')).toBe(STORY);
   expect(privateGroupCoverPath('course', '../x')).toBeNull();
+});
+
+import { createMemoryGroupStore } from './memoryGroupStore';
+
+function fileStore(extra: [string, Record<string, unknown>][] = []) {
+  return createMemoryGroupStore([
+    ['users/alice', {}], ['users/bob', {}], ['users/teacher', {}],
+    ['groups/course', { schoolId: 'pu' }],
+    ['groups/course/assignments/work', { published: true }],
+    ...['alice', 'bob', 'teacher'].flatMap((uid): [string, Record<string, unknown>][] => [
+      [`groups/course/members/${uid}`, { status: 'active', role: uid === 'teacher' ? 'instructor' : 'member' }],
+      [`schools/pu/members/${uid}`, { status: 'active' }],
+    ]), ...extra,
+  ]);
+}
+const GROUP_ANSWER = 'groups/course/assignments/work/submissions/alice/answer.pdf';
+function authorize(store: ReturnType<typeof fileStore>, path = GROUP_ANSWER, uid = 'alice', writing = true) {
+  return authorizePrivateFile(store.db, parsePrivateFilePath(path)!, uid, writing);
+}
+it('uses the canonical group assignment without a global mirror', async () => {
+  expect(privateGroupAssignmentPath('course', 'work', 'alice', 'answer.pdf')).toBe(GROUP_ANSWER);
+  await expect(authorize(fileStore())).resolves.toBeUndefined();
+});
+it.each(['left', 'inactive', 'missing'])('rejects group membership %s', async (status) => {
+  const store = fileStore([['groups/course/members/alice', { status }]]);
+  await expect(authorize(store)).rejects.toMatchObject({ statusCode: 403 });
+});
+it('rejects a nonmember and another user uploading to the owner path', async () => {
+  await expect(authorize(fileStore(), GROUP_ANSWER, 'stranger')).rejects.toMatchObject({ statusCode: 403 });
+  const nonmember = fileStore();
+  nonmember.docs.delete('groups/course/members/alice');
+  await expect(authorize(nonmember)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(nonmember, GROUP_ANSWER, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(fileStore(), GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
+});
+it('rejects missing canonical assignments even with a global mirror', async () => {
+  const store = fileStore([['assignments/missing', { groupId: 'course' }]]);
+  await expect(authorize(store, GROUP_ANSWER.replace('/work/', '/missing/'))).rejects.toMatchObject({ statusCode: 403 });
+});
+it.each([
+  { published: false }, { status: 'draft' }, { status: 'closed' },
+  { dueAt: '2020-01-01T00:00:00Z' }, { dueAt: 'invalid' }, { dueAt: Date.now() + 1000000 },
+])('mirrors acceptsStudentSubmission for %j', async (assignment) => {
+  await expect(authorize(fileStore([['groups/course/assignments/work', assignment]]))).rejects.toMatchObject({ statusCode: 403 });
+});
+it('allows late submissions only when explicitly enabled and refuses already submitted edits', async () => {
+  await expect(authorize(fileStore([['groups/course/assignments/work', { dueAt: '2020-01-01', allowLateSubmission: true }]]))).resolves.toBeUndefined();
+  await expect(authorize(fileStore([['groups/course/assignments/work/submissions/alice', { userId: 'alice', submittedAt: '2020-01-01' }]]))).rejects.toMatchObject({ statusCode: 403 });
+});
+it('allows managers and owners to read, but refuses another student', async () => {
+  const store = fileStore();
+  store.docs.delete('groups/course/members/bob');
+  await expect(authorize(store, GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/members/bob', { status: 'active', role: 'member' });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+});
+it('requires an existing live post for downloads and author ownership for existing uploads', async () => {
+  const store = fileStore();
+  await expect(authorize(store, POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, POST)).resolves.toBeUndefined();
+  const existing = fileStore([['groups/course/posts/one', { authorId: 'alice' }]]);
+  await expect(authorize(existing, POST, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(existing, POST, 'teacher', true)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(existing, POST, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(existing, POST, 'bob', false)).resolves.toBeUndefined();
+});
+it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {
+  await expect(authorize(fileStore([['groups/course/posts/one', { authorId: 'alice', ...tombstone }]]), POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
+});
+it.each(['group-cover', 'group-post', 'story'] as const)('restricts %s image MIME types', (kind) => {
+  for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(true);
+  for (const mime of ['image/svg+xml', 'image/bmp', 'text/html']) expect(isAllowedPrivateFileContentType(kind, mime)).toBe(false);
 });

@@ -32,13 +32,13 @@ it('keeps legacy URLs and returns a placeholder without network when disabled', 
 it('renews once after a failed download, then gives up gently', async () => {
   const download = jest
     .fn()
-    .mockRejectedValueOnce(new Error('expired'))
+    .mockRejectedValueOnce(Object.assign(new Error('expired'), { statusCode: 403, source: 'object' }))
     .mockResolvedValueOnce('downloaded');
   expect(await resolvePrivateFileMedia('schools/pu/stories/s/image', true, download)).toBe(
     'downloaded',
   );
   expect(download).toHaveBeenCalledTimes(2);
-  download.mockReset().mockRejectedValue(new Error('offline'));
+  download.mockReset().mockRejectedValue(new TypeError('offline'));
   expect(await resolvePrivateFileMedia('schools/pu/stories/s/image', true, download)).toBeNull();
   expect(download).toHaveBeenCalledTimes(2);
 });
@@ -55,4 +55,15 @@ it('downloads successful media only once and accepts both attachment shapes', as
       { url: 'javascript:alert(1)' },
     ]),
   ).toEqual(['groups/g/posts/p/a.pdf', 'https://example.com/a']);
+});
+
+it.each([401, 403, 404, 429])('does not renew API rejection %s', async (statusCode) => {
+  const download = jest.fn().mockRejectedValue(Object.assign(new Error('denied'), { statusCode, source: 'api' }));
+  expect(await resolvePrivateFileMedia('schools/pu/stories/s/image', true, download)).toBeNull();
+  expect(download).toHaveBeenCalledTimes(1);
+});
+it('renews a server failure once', async () => {
+  const download = jest.fn().mockRejectedValue(Object.assign(new Error('temporary'), { statusCode: 503, source: 'api' }));
+  expect(await resolvePrivateFileMedia('schools/pu/stories/s/image', true, download)).toBeNull();
+  expect(download).toHaveBeenCalledTimes(2);
 });

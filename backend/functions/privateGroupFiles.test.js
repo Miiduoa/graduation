@@ -44,6 +44,7 @@ describe('private group file HTTP handler', () => {
   beforeEach(() => {
     store = transactionStore([
       ['groups/course', { schoolId: 'pu' }],
+      ['groups/course/posts/one', { authorId: 'alice' }],
       ['assignments/work', { groupId: 'course' }],
       ...['alice', 'bob', 'teacher'].flatMap((uid) => [
         [`users/${uid}`, { displayName: uid }],
@@ -229,6 +230,7 @@ describe('private group file HTTP handler', () => {
   });
 
   test.each([[POST, 0], [COVER, '9007199254740993']])('actual GCS SDK sends the generation precondition for %s', async (path, expected) => {
+    if (path === POST) store.docs.set('groups/course/posts/one', { authorId: 'teacher' });
     const storage = new CloudStorage({ projectId: 'demo-private-files', apiEndpoint: 'http://127.0.0.1:1' });
     storage.request = jest.fn((options, callback) => {
       if (options.method !== 'POST') {

@@ -22,7 +22,7 @@ it('writes the object path into the existing URL result in R2 mode', async () =>
   state.enabled = true;
   const file = new File(['image'], 'photo.png', { type: 'image/png' });
   const result = await uploadStoryImage({ schoolId: 'pu', storyId: 's', uid: 'alice', file });
-  expect(result.url).toBe('schools/pu/stories/s/image');
+  expect(result.url).toMatch(/^schools\/pu\/stories\/s\/image-[a-z0-9-]+\.jpg$/);
   expect(state.upload).toHaveBeenCalledWith({
     path: result.url,
     body: file,
@@ -39,4 +39,13 @@ it('preserves the legacy uploader with R2 off', async () => {
   });
   expect(result.url).toBe('https://legacy/image');
   expect(state.upload).not.toHaveBeenCalled();
+});
+
+it('uses a new key after an upload acknowledgement is lost', async () => {
+  state.enabled = true;
+  state.upload.mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce({});
+  const input = { schoolId: 'pu', storyId: 's', uid: 'alice', file: new File(['image'], 'photo.png', { type: 'image/png' }) };
+  await expect(uploadStoryImage(input)).rejects.toThrow('network');
+  await uploadStoryImage(input);
+  expect(state.upload.mock.calls[0][0].path).not.toBe(state.upload.mock.calls[1][0].path);
 });

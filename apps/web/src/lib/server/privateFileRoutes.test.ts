@@ -126,6 +126,7 @@ function startMemoryS3() {
 function seedStore() {
   return createMemoryGroupStore([
     ['groups/course', { schoolId: 'pu' }],
+      ['groups/course/posts/one', { authorId: 'alice' }],
     ['assignments/work', { groupId: 'course' }],
     ...['alice', 'bob', 'teacher'].flatMap((uid) => [
       [`users/${uid}`, { displayName: uid }] as [string, Record<string, unknown>],

@@ -38,3 +38,12 @@ it('issues a 60-second path-style PUT URL bound to content type and length', () 
   expect(signed.headers['if-none-match']).toBe('*');
   expect(signed.expiresAt).toBe('2026-11-09T00:01:00.000Z');
 });
+
+it('signs response MIME and attachment disposition into GET query parameters', () => {
+  const input = { method: 'GET' as const, key: 'groups/g/posts/p/a.pdf', expiresSeconds: 60, now: new Date('2026-11-09T00:00:00Z') };
+  const signed = presignS3Request(config, { ...input, responseContentType: 'application/pdf', responseContentDisposition: 'attachment' });
+  const url = new URL(signed.url);
+  expect(url.searchParams.get('response-content-type')).toBe('application/pdf');
+  expect(url.searchParams.get('response-content-disposition')).toBe('attachment');
+  expect(url.searchParams.get('X-Amz-Signature')).not.toBe(new URL(presignS3Request(config, input).url).searchParams.get('X-Amz-Signature'));
+});

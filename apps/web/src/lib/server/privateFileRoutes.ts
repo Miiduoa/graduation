@@ -217,6 +217,8 @@ async function issueDownload(
     maxBytes,
     signed: runtime.storage.presignGet({
       key: scope.path,
+      contentType: isAllowedPrivateFileContentType(scope.kind, object.contentType || '') ? object.contentType : 'application/octet-stream',
+      attachment: scope.kind === 'assignment' || scope.kind === 'group-post' || !isAllowedPrivateFileContentType(scope.kind, object.contentType || ''),
       now: runtime.now ? new Date(runtime.now()) : undefined,
     }),
   };

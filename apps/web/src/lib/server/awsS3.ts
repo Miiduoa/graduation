@@ -20,6 +20,8 @@ export type PresignInput = {
   key: string;
   expiresSeconds: number;
   headers?: Record<string, string>;
+  responseContentType?: string;
+  responseContentDisposition?: string;
   now?: Date;
 };
 
@@ -124,6 +126,8 @@ export function presignS3Request(config: S3Config, input: PresignInput): Presign
     'X-Amz-Expires': String(expiresSeconds),
     'X-Amz-SignedHeaders': signed,
   };
+  if (input.responseContentType) query['response-content-type'] = input.responseContentType;
+  if (input.responseContentDisposition) query['response-content-disposition'] = input.responseContentDisposition;
   const canonicalRequest = [
     input.method,
     canonicalUri,

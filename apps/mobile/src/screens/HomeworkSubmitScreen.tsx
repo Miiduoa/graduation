@@ -1,6 +1,6 @@
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import * as DocumentPicker from 'expo-document-picker';
-import { isR2FileStorageEnabled, privateAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
+import { isR2FileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
 import { PrivateAttachment } from '../ui/PrivateAttachment';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -286,7 +286,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
         const pending: Attachment[] = [];
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
-          const path = privateAssignmentPath(hwId, uid, `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+          const path = privateGroupAssignmentPath(courseId, hwId, uid, `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
           if (!path) throw new Error('附件路徑無效');
           const blob = await (await fetch(file.uri)).blob();
           await uploadPrivateFile({ path, body: blob, contentType: file.mimeType || blob.type });

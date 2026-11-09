@@ -17,7 +17,7 @@ export type FileStorage = {
     metadata?: Record<string, string>;
     now?: Date;
   }) => PresignedRequest;
-  presignGet: (input: { key: string; now?: Date }) => PresignedRequest;
+  presignGet: (input: { key: string; contentType?: string; attachment?: boolean; now?: Date }) => PresignedRequest;
   head: (key: string) => Promise<S3ObjectInfo | null>;
 };
 
@@ -49,9 +49,11 @@ export function createR2FileStorage(
         now,
       });
     },
-    presignGet({ key, now }) {
+    presignGet({ key, contentType, attachment, now }) {
       return presignS3Request(s3, {
         method: 'GET',
+        responseContentType: contentType || 'application/octet-stream',
+        responseContentDisposition: attachment ? 'attachment' : 'inline',
         key,
         expiresSeconds: ttl,
         now,

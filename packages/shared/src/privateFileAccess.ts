@@ -132,7 +132,7 @@ function accountBlocked(data: Record<string, unknown>): boolean {
 }
 
 export function isPrivateFileImage(contentType: string): boolean {
-  return /^image\/[\w.+-]+$/.test(contentType);
+  return new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']).has(contentType);
 }
 
 export function isPrivateFileVideo(contentType: string): boolean {
@@ -150,6 +150,7 @@ export function privateFileMaxBytes(kind: PrivateFileKind, contentType?: string)
 }
 
 export function isAllowedPrivateFileContentType(kind: PrivateFileKind, contentType: string): boolean {
+  if (kind === 'assignment') return /^image\/[\w.+-]+$/.test(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
   if (kind === 'group-cover') return isPrivateFileImage(contentType);
   if (kind === 'story') return isPrivateFileImage(contentType) || isPrivateFileVideo(contentType);
   return isPrivateFileImage(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
@@ -177,6 +178,9 @@ export function parsePrivateFilePath(value: unknown): PrivateFileScope | null {
       postId: parts[3],
       maxBytes: PRIVATE_FILE_MAX_BYTES['group-post'],
     };
+  }
+  if (parts[0] === 'groups' && parts[2] === 'assignments' && parts[4] === 'submissions' && parts.length === 7) {
+    return { ...common, kind: 'assignment', groupId: parts[1], assignmentId: parts[3], userId: parts[5], maxBytes: PRIVATE_FILE_MAX_BYTES.assignment };
   }
   if (parts[0] === 'assignments' && parts[2] === 'submissions' && parts.length === 5) {
     return {
@@ -228,6 +232,11 @@ export function privateAssignmentPath(
 ): string | null {
   if (![assignmentId, userId, filename].every(validPrivateFileSegment)) return null;
   return `assignments/${assignmentId}/submissions/${userId}/${filename}`;
+}
+
+export function privateGroupAssignmentPath(groupId: string, assignmentId: string, userId: string, filename: string): string | null {
+  if (![groupId, assignmentId, userId, filename].every(validPrivateFileSegment)) return null;
+  return `groups/${groupId}/assignments/${assignmentId}/submissions/${userId}/${filename}`;
 }
 
 export function privateStoryPath(schoolId: string, storyId: string, filename: string): string | null {
@@ -331,7 +340,7 @@ export async function authorizePrivateFile(
       }
 
       let groupId = scope.groupId;
-      if (scope.kind === 'assignment') {
+      if (scope.kind === 'assignment' && !scope.groupId) {
         const assignment = await tx.get(db.collection('assignments').doc(scope.assignmentId || ''));
         groupId = asRecord(assignment.data()).groupId as string | undefined;
         if (!assignment.exists || !validPrivateFileSegment(groupId)) deny();
@@ -360,9 +369,49 @@ export async function authorizePrivateFile(
       );
       if (!schoolMember.exists || asRecord(schoolMember.data()).status !== 'active') deny();
       const manager = PRIVATE_FILE_MANAGER_ROLES.has(String(asRecord(member.data()).role || ''));
+      if (scope.kind === 'group-post') {
+        const post = await tx.get(groupRef.collection('posts').doc(scope.postId || ''));
+        const data = asRecord(post.data());
+        // Group posts are hard-deleted; also reject tombstones if present.
+        if ((!writing && !post.exists) || data.deletedAt != null || data.deleted === true || data.isDeleted === true || data.status === 'deleted') deny();
+        if (writing && post.exists && data.authorId !== uid) deny();
+      }
+      if (scope.kind === 'assignment' && scope.groupId) {
+        const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
+        const [assignment, submission] = await tx.getAll(
+          assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
+        );
+        if (!assignment.exists) deny();
+        const data = asRecord(assignment.data());
+        const previous = asRecord(submission.data());
+        // submissionOwnerId uses map.get defaults only for absent fields.
+        const owner = 'userId' in previous ? previous.userId : 'uid' in previous ? previous.uid : 'studentId' in previous ? previous.studentId : scope.userId;
+        if (writing) {
+          // validStudentSubmission: isActiveGroupMember is checked above; path fixes
+          // submissionId/userId/groupId/assignmentId. Payload shape, content, status
+          // and request.time are enforced when the submission document is written.
+          if (scope.userId !== uid) deny();
+          // acceptsStudentSubmission: publication, status, deadline and late policy.
+          const dueValue = data.dueAt;
+          const validDueString = typeof dueValue !== 'string' || (
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+            Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+            new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+          );
+          const due = dueValue == null || typeof dueValue === 'number' || !validDueString ? null : storyExpiresAtMs(dueValue);
+          if (data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+            (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due))) deny();
+          // Submission update: isSubmissionOwner and submittedAt must still be null.
+          if (submission.exists && (owner !== uid || previous.submittedAt != null)) deny();
+        } else {
+          // Submission read: own document or canReadSubmissionDoc/canManageGroup.
+          // Assigned peer reviewers are deliberately excluded from file access.
+          if (scope.userId !== uid && !manager && (!submission.exists || owner !== uid)) deny();
+        }
+      }
       if (
         (writing && scope.kind === 'group-cover' && !manager) ||
-        (scope.kind === 'assignment' && scope.userId !== uid && (writing || !manager))
+        (scope.kind === 'assignment' && !scope.groupId && scope.userId !== uid && (writing || !manager))
       ) {
         deny();
       }

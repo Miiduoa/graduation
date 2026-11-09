@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { privateFilesEnabled, privateAssignmentPath, uploadPrivateFile } from '@/lib/privateFiles';
+import { privateFilesEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '@/lib/privateFiles';
 import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
@@ -90,7 +90,8 @@ function Assignment({
         const paths: string[] = [];
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
-          const path = privateAssignmentPath(
+          const path = privateGroupAssignmentPath(
+            courseId,
             assignment.id,
             uid,
             `${batch}-${index}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,

@@ -16,7 +16,12 @@ export async function resolvePrivateFileMedia<T>(
   if (!enabled) return null;
   try {
     return await download(value);
-  } catch {
+  } catch (error) {
+    const failure = error as { statusCode?: number; source?: string };
+    const status = failure?.statusCode;
+    const transient = error instanceof TypeError || (status !== undefined && status >= 500 && status <= 599) ||
+      (failure?.source === 'object' && status === 403);
+    if (!transient) return null;
     try {
       return await download(value);
     } catch {

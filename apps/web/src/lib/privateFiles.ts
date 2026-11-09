@@ -1,6 +1,7 @@
 import {
   privateStoryPath,
   privateAssignmentPath,
+  privateGroupAssignmentPath,
   privateGroupCoverPath,
   privateGroupPostPath,
 } from '@campus/shared/src/privateFileAccess';
@@ -8,7 +9,7 @@ import { FunctionsUnconfiguredError } from './functionsUrl';
 import { getAuth } from './firebase';
 import { isR2FileStorageEnabled, privateFileApiPath } from './fileStorageBackend';
 
-export { privateStoryPath, privateAssignmentPath, privateGroupCoverPath, privateGroupPostPath };
+export { privateStoryPath, privateGroupAssignmentPath, privateAssignmentPath, privateGroupCoverPath, privateGroupPostPath };
 
 export type PrivateFileTicket = {
   path: string;
@@ -25,8 +26,8 @@ export function privateFilesEnabled(
   return isR2FileStorageEnabled(raw);
 }
 
-function unavailable(): never {
-  throw new FunctionsUnconfiguredError('私人檔案儲存尚未啟用');
+function unavailable(statusCode?: number): never {
+  throw Object.assign(new FunctionsUnconfiguredError('私人檔案儲存尚未啟用'), { statusCode, source: 'api' });
 }
 
 async function idToken(): Promise<string> {
@@ -60,10 +61,10 @@ async function issueTicket(
     expiresAt?: unknown;
     maxBytes?: unknown;
   };
-  if (response.status === 503) unavailable();
+  if (response.status === 503) unavailable(503);
   if (!response.ok) {
     const message = typeof payload.error === 'string' ? payload.error : 'File request failed';
-    throw Object.assign(new Error(message), { statusCode: response.status });
+    throw Object.assign(new Error(message), { statusCode: response.status, source: 'api' });
   }
   if (
     typeof payload.path !== 'string' ||
@@ -117,8 +118,7 @@ export async function downloadPrivateFile(path: string): Promise<Blob> {
     headers: ticket.headers,
     cache: 'no-store',
   });
-  if (response.status === 404) throw new Error('File not found');
-  if (!response.ok) throw new Error('File request failed');
+  if (!response.ok) throw Object.assign(new Error('File request failed'), { statusCode: response.status, source: 'object' });
   return response.blob();
 }
 

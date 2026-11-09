@@ -553,7 +553,7 @@ test('R2 enables attachment selection and stores the object path in the existing
     await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
     expect(upload).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: expect.stringMatching(/^assignments\/work\/submissions\/alice\/.+answer.pdf$/),
+        path: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\/.+answer.pdf$/),
       }),
     );
     expect(mockSource.submitAssignment).toHaveBeenCalledWith(
@@ -561,7 +561,7 @@ test('R2 enables attachment selection and stores the object path in the existing
         content: '',
         attachments: [
           expect.objectContaining({
-            url: expect.stringMatching(/^assignments\/work\/submissions\/alice\//),
+            url: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\//),
           }),
         ],
       }),

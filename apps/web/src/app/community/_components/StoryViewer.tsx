@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { usePrivateMedia } from '@/lib/usePrivateMedia';
 import { openModalSession } from '@/components/ui/modalSession';
@@ -27,7 +27,8 @@ export function StoryViewer({
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
   const story = viewer.group.stories[viewer.index]!;
-  const mediaUrl = usePrivateMedia(story.mediaUrl);
+  const onMediaFailure = useCallback(() => setFailedId(story.id), [story.id]);
+  const mediaUrl = usePrivateMedia(story.mediaUrl, onMediaFailure);
   const photo = (story.kind === 'image' || story.kind === 'video') && !!story.mediaUrl;
   const running = auto && !hidden && (!photo || loadedId === story.id || failedId === story.id);
   const onNext = useRef(viewer.next);
