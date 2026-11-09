@@ -309,7 +309,7 @@ export async function authorizePrivateFile(
   db: PrivateFileDb,
   scope: PrivateFileScope,
   uid: string,
-  writing: boolean,
+  writing: boolean | 'claim',
 ): Promise<void> {
   await db.runTransaction(
     async (tx) => {
@@ -339,7 +339,10 @@ export async function authorizePrivateFile(
         }
         if (writing) {
           const story = await tx.get(db.collection('campusStories').doc(scope.storyId || ''));
-          if (story.exists) deny();
+          if (story.exists && !(writing === 'claim' &&
+            asRecord(story.data()).authorUid === uid &&
+            asRecord(story.data()).schoolId === scope.schoolId &&
+            asRecord(story.data()).mediaUrl === scope.path)) deny();
         }
         return;
       }

@@ -104,3 +104,25 @@ test('expired claimed media is cleared and uploaded again before retrying public
     expect(publishStory).toHaveBeenCalledWith('s1', expect.objectContaining({ mediaUrl: 'schools/pu/stories/s1/new.jpg' }));
   } finally { view.unmount(); claim.mockRestore(); }
 });
+
+test('confirms an already published private story after a lost response and accepts the image size boundary', async () => {
+  const files = require('../services/privateFiles');
+  const claim = jest.spyOn(files, 'claimPrivateFile').mockResolvedValue(undefined);
+  jest.mocked(storage.pickImage).mockResolvedValue({ uri: 'file:///test', type: 'image/png', name: 'campus.png', size: 10485760 });
+  jest.mocked(uploadStoryImage).mockResolvedValue('schools/pu/stories/s1/image.jpg');
+  jest.mocked(publishStory).mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce('s1');
+  const goBack = jest.fn();
+  const view = render(<StoryComposeScreen navigation={{ goBack }} />);
+  try {
+    await act(async () => fireEvent.press(view.getByText('選擇圖片')));
+    await act(async () => fireEvent.press(view.getByText('發布限時動態')));
+    expect(goBack).not.toHaveBeenCalled();
+    await act(async () => fireEvent.press(view.getByText('發布限時動態')));
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(claim).toHaveBeenLastCalledWith('schools/pu/stories/s1/image.jpg', 'schools/pu/stories/s1');
+    expect(publishStory).toHaveBeenCalledTimes(2);
+    expect(jest.mocked(publishStory).mock.calls[1]).toEqual(['s1', { ...jest.mocked(publishStory).mock.calls[0][1], expiresAtMs: expect.any(Number) }]);
+    expect(uploadStoryImage).toHaveBeenCalledTimes(1);
+    expect(goBack).toHaveBeenCalledTimes(1);
+  } finally { view.unmount(); claim.mockRestore(); }
+});

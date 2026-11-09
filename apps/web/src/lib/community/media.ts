@@ -1,3 +1,4 @@
+import { PRIVATE_FILE_MAX_BYTES } from '@campus/shared/src/privateFileAccess';
 import { privateFilesEnabled, privateStoryPath, uploadPrivateFile } from '../privateFiles';
 /**
  * 校園社群 — 圖片上傳 (Web)
@@ -63,7 +64,7 @@ async function uploadMediaFile(
 
 export function storyImageError(file: File): string | null {
   if (!file.type.startsWith('image/') || !file.size) return '請選擇一張可讀取的圖片。';
-  if (file.size >= 10 * 1024 * 1024) return '照片須小於 10 MB，請換一張較小的照片。';
+  if (file.size > PRIVATE_FILE_MAX_BYTES['story-image']) return '照片大小不得超過 10 MB，請換一張較小的照片。';
   return null;
 }
 

@@ -100,6 +100,22 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
         if (!row || row.path !== path || !['finalized', 'claimed'].includes(row.status))
           fail(410, '檔案已失效，請重新上傳');
         if (row!.uid !== uid) fail(403, 'File access denied');
+        const scope = parsePrivateFilePath(path);
+        if (scope?.kind === 'story') {
+          const story = await tx.get(db.collection('campusStories').doc(scope.storyId!));
+          const data = story.data();
+          if (story.exists && (row!.status !== 'claimed' || data?.authorUid !== uid ||
+            data?.schoolId !== scope.schoolId || data?.mediaUrl !== path)) fail(403, 'File access denied');
+        }
+        if (scope?.kind === 'group-cover' && row!.status !== 'claimed') {
+          const covers = await tx.get(uploads.where('kind', '==', 'group-cover'));
+          for (const previous of covers.docs) {
+            const data = previous.data();
+            if (data.path !== path && data.status === 'claimed' &&
+              parsePrivateFilePath(data.path)?.groupId === scope.groupId)
+              tx.update(previous.ref, { status: 'released', releasedAt: now });
+          }
+        }
         tx.update(ref, { status: 'claimed', claimedAt: now });
       });
     },
@@ -179,23 +195,30 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
       const deleting = await uploads.where('status', '==', 'deleting').limit(maximum).get();
       // Single-field indexes only. Persist the scan position so live references
       // cannot starve later finalized rows; wrap after reaching the end.
-      let scan = uploads.where('status', 'in', ['finalized', 'claimed']).orderBy('__name__');
+      let scan = uploads.where('status', 'in', ['finalized', 'claimed', 'released']).orderBy('__name__');
       if (typeof cursorId === 'string') scan = scan.startAfter(cursorId);
       let finalized = await scan.limit(maximum).get();
       if (finalized.empty && cursorId)
-        finalized = await uploads.where('status', 'in', ['finalized', 'claimed']).orderBy('__name__').limit(maximum).get();
+        finalized = await uploads.where('status', 'in', ['finalized', 'claimed', 'released']).orderBy('__name__').limit(maximum).get();
       let cleaned = 0;
       const candidates = new Map([...ownRows, ...pending.docs, ...deleting.docs, ...finalized.docs].map((snap) => [snap.id, snap]));
       let lastScanned: string | null = null;
       for (const snap of [...candidates.values()].slice(0, maximum)) {
         const row = snap.data();
         if (!row) continue;
-        if (['finalized', 'claimed'].includes(row.status)) lastScanned = snap.id;
+        if (['finalized', 'claimed', 'released'].includes(row.status)) lastScanned = snap.id;
         const claimed = await db.runTransaction(async (tx) => {
           const current = (await tx.get(snap.ref)).data();
           if (!current || current.path !== row.path) return false;
           if (current.status === 'deleting') return true;
-          if (['finalized', 'claimed'].includes(current.status)) {
+          if (current.status === 'released') {
+            const scope = parsePrivateFilePath(current.path);
+            if (scope?.kind !== 'group-cover' || !Number.isFinite(current.releasedAt) ||
+              current.releasedAt + ORPHAN_GRACE_MS > now) return false;
+            const group = await tx.get(db.collection('groups').doc(scope.groupId!));
+            if (group.data()?.coverUrl === current.path) return false;
+            tx.update(snap.ref, { status: 'deleting' });
+          } else if (['finalized', 'claimed'].includes(current.status)) {
             // A claim after the scan always wins, including on transaction retry.
             if (current.status !== row.status || current.claimedAt !== row.claimedAt) return false;
             if (current.status === 'finalized') {
@@ -221,7 +244,7 @@ export function createPrivateFileUploads(db: Firestore, storage: FileStorage) {
         });
         if (!claimed) continue;
         await storage.remove(row.path);
-        if (['finalized', 'claimed', 'deleting'].includes(row.status)) {
+        if (['finalized', 'claimed', 'released', 'deleting'].includes(row.status)) {
           await db.runTransaction(async (tx) => {
             const user = quota.doc(userId(row.uid));
             const [record, globalSnap, userSnap] = await tx.getAll(snap.ref, global, user);

@@ -220,3 +220,29 @@ it('advances the bounded scan past retained claimed containers', async () => {
   expect(await uploads.cleanup(now + 2 * day, 1)).toBe(0);
   expect(await uploads.cleanup(now + 2 * day, 1)).toBe(1);
 });
+
+it('releases 31 replaced covers, respects publication grace and current cover, and settles both quotas once', async () => {
+  const { uploads, docs, storage } = setup();
+  const bytes = 5 * 1024 * 1024 - 1;
+  const paths = Array.from({ length: 32 }, (_, i) => `groups/course/cover.${i}.jpg`);
+  for (const path of paths) {
+    await uploads.reserve(parsePrivateFilePath(path)!, 'alice', now);
+    await uploads.finalize(path, 'alice', bytes, now + 1);
+    await uploads.claim(path, 'alice', now + 2);
+  }
+  await expect(uploads.reserve(scope(98), 'alice', now)).rejects.toMatchObject({ statusCode: 429 });
+  docs.set('groups/course', { coverUrl: paths[0] });
+  await uploads.claim(paths[31], 'alice', now + 3);
+  expect((await uploads.read(paths[0])).releasedAt).toBe(now + 2);
+  expect(await uploads.cleanup(now + 2 * 3600_000, 50)).toBe(0);
+  expect(storage.remove).not.toHaveBeenCalled();
+  expect(await uploads.cleanup(now + 2 * 3600_000 + 2, 50)).toBe(30);
+  expect(storage.remove).not.toHaveBeenCalledWith(paths[0]);
+  docs.set('groups/course', { coverUrl: paths[31] });
+  expect(await uploads.cleanup(now + 2 * 3600_000 + 3, 50)).toBe(1);
+  expect(await uploads.cleanup(now + 2 * 3600_000 + 4, 50)).toBe(0);
+  for (const [key, value] of docs) {
+    if (key.startsWith('privateFileQuota/')) expect(value.finalizedBytes).toBe(bytes);
+  }
+  await expect(uploads.reserve(scope(99), 'alice', now + day)).resolves.toBeUndefined();
+});

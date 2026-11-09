@@ -154,7 +154,7 @@ async function issueUpload(
   }
   const maxBytes = privateFileMaxBytes(scope.kind, contentType);
   const byteSize = Number(body.byteSize);
-  if (!Number.isInteger(byteSize) || byteSize <= 0 || byteSize >= maxBytes) {
+  if (!Number.isInteger(byteSize) || byteSize <= 0 || byteSize > maxBytes) {
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
   }
   checkPrivateFileUploadRate(uid);
@@ -194,7 +194,7 @@ async function issueDownload(
   await authorizePrivateFile(runtime.db, scope, uid, false);
   const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
   const record = await uploads.read(scope.path);
-  if (!['finalized', 'claimed'].includes(record.status)) throw Object.assign(new Error('找不到檔案'), { statusCode: 404 });
+  if (!['finalized', 'claimed', 'released'].includes(record.status)) throw Object.assign(new Error('找不到檔案'), { statusCode: 404 });
   const object = await runtime.storage.head(scope.path);
   if (!object) {
     throw Object.assign(new Error('File not found'), { statusCode: 404 });
@@ -206,7 +206,7 @@ async function issueDownload(
   if (
     !Number.isSafeInteger(object.contentLength) ||
     object.contentLength <= 0 ||
-    object.contentLength >= maxBytes
+    object.contentLength > maxBytes
   ) {
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
   }
@@ -253,7 +253,7 @@ async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: P
   }
   const maxBytes = privateFileMaxBytes(scope.kind, object.contentType);
   const validType = isAllowedPrivateFileContentType(scope.kind, object.contentType);
-  if (!validType || !Number.isSafeInteger(object.contentLength) || object.contentLength <= 0 || object.contentLength >= maxBytes) {
+  if (!validType || !Number.isSafeInteger(object.contentLength) || object.contentLength <= 0 || object.contentLength > maxBytes) {
     if (await uploads.invalidate(scope.path, uid)) await runtime.storage.remove(scope.path);
     if (!validType) throw new HttpsError('invalid-argument', 'Unsupported file type or filename');
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
@@ -315,7 +315,7 @@ export async function dispatchPrivateFileRequest(
     const action = body.action === 'upload' || body.action === 'download' || body.action === 'finalize' || body.action === 'claim' ? body.action : '';
     if (!action) throw new HttpsError('invalid-argument', 'Invalid private file path');
     if (action === 'claim') {
-      await authorizePrivateFile(resolved.db, scope, uid, true);
+      await authorizePrivateFile(resolved.db, scope, uid, 'claim');
       await createPrivateFileUploads(resolved.db as unknown as Firestore, resolved.storage).claim(scope.path, uid, resolved.now?.() ?? Date.now());
       return jsonResponse(200, { path: scope.path, claimed: true }, cors);
     }

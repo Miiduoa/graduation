@@ -258,7 +258,7 @@ it('rejects unsupported types and oversize uploads', async () => {
       action: 'upload',
       path: COVER,
       contentType: 'image/jpeg',
-      byteSize: 5 * 1024 * 1024,
+      byteSize: 5 * 1024 * 1024 + 1,
     }, { uid: 'teacher' }),
   ).toEqual({ status: 413, body: { error: 'File is too large' } });
   expect(
@@ -287,7 +287,7 @@ it.each(['image/svg+xml', 'text/html', 'application/xhtml+xml', 'application/jav
 
 it.each([
   ['text/html', 8, 400],
-  ['application/pdf', 25 * 1024 * 1024, 413],
+  ['application/pdf', 25 * 1024 * 1024 + 1, 413],
   ['application/pdf', 0, 413],
 ])('deletes invalid finalized objects (%s, %i)', async (contentType, length, status) => {
   await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 8 });
@@ -354,4 +354,50 @@ it('claims finalized uploads, refreshes timestamps, permits download and recheck
   expect((await invoke(runtime, { action: 'claim', path: ANSWER }, { uid: 'bob' })).status).toBe(403);
   record.status = 'deleting';
   expect((await invoke(runtime, { action: 'claim', path: ANSWER })).status).toBe(410);
+});
+
+it.each([
+  [COVER, 'image/jpeg', 5, 'teacher'],
+  [POST, 'application/pdf', 20, 'alice'],
+  [ANSWER, 'application/pdf', 25, 'alice'],
+  [STORY, 'image/jpeg', 10, 'stamped'],
+  [STORY, 'video/mp4', 45, 'stamped'],
+])('accepts the inclusive ticket, finalize and download boundary for %s (%s)', async (path, contentType, mib, uid) => {
+  const byteSize = Number(mib) * 1024 * 1024;
+  const auth = { uid: String(uid) };
+  expect((await invoke(runtime, { action: 'upload', path, contentType, byteSize: byteSize + 1 }, auth)).status).toBe(413);
+  const ticket = await invoke(runtime, { action: 'upload', path, contentType, byteSize }, auth);
+  expect(ticket.status).toBe(200);
+  put(ticket, 'x');
+  memoryStorage.objects.get(String(ticket.body.path))!.body = Buffer.alloc(byteSize);
+  expect((await invoke(runtime, { action: 'finalize', path: ticket.body.path }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: ticket.body.path }, auth)).status).toBe(200);
+});
+
+it('confirms only the original claimed story object after publication while uploads stay forbidden', async () => {
+  const auth = { uid: 'stamped' };
+  const ticket = await invoke(runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 4 }, auth);
+  put(ticket, 'jpeg');
+  expect((await invoke(runtime, { action: 'finalize', path: STORY }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'claim', path: STORY }, auth)).status).toBe(200);
+  store.docs.set('campusStories/story-1', { schoolId: 'pu', authorUid: 'stamped', mediaUrl: STORY });
+  expect((await invoke(runtime, { action: 'claim', path: STORY }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 4 }, auth)).status).toBe(403);
+  expect((await invoke(runtime, { action: 'claim', path: STORY }, { uid: 'bob' })).status).toBe(403);
+  store.docs.set('campusStories/story-1', { schoolId: 'pu', authorUid: 'stamped', mediaUrl: STORY.replace('story-1', 'other') });
+  expect((await invoke(runtime, { action: 'claim', path: STORY }, auth)).status).toBe(403);
+});
+
+it('keeps a released cover downloadable while the group still references it', async () => {
+  const auth = { uid: 'teacher' };
+  const old = await invoke(runtime, { action: 'upload', path: COVER, contentType: 'image/jpeg', byteSize: 4 }, auth);
+  put(old, 'jpeg');
+  await invoke(runtime, { action: 'finalize', path: old.body.path }, auth);
+  await invoke(runtime, { action: 'claim', path: old.body.path }, auth);
+  store.docs.get('groups/course')!.coverUrl = old.body.path;
+  const next = await invoke(runtime, { action: 'upload', path: COVER, contentType: 'image/jpeg', byteSize: 4 }, auth);
+  put(next, 'jpeg');
+  await invoke(runtime, { action: 'finalize', path: next.body.path }, auth);
+  expect((await invoke(runtime, { action: 'claim', path: next.body.path }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: old.body.path }, auth)).status).toBe(200);
 });
