@@ -503,7 +503,8 @@ it('restores the confirmation status after a read-only recovery before the next 
     'reconcile:' + first.token,
     'confirm:' + second.token,
   ]);
-  expect(screen.getByRole('status').textContent).toContain('正在確認操作結果');
+  // Calendar cards expose a separate live progress status; inspect the assistant status specifically.
+  expect(screen.getByText('正在確認操作結果').closest('[role="status"]')).toBeTruthy();
   expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
   finishSecond!(json(receiptFor(second)));
   await waitFor(() => expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 2/2 項'));
