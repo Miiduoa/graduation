@@ -53,6 +53,25 @@ export function priorCalendarActionsVerified(
   );
 }
 
+/** Explain the first unresolved calendar dependency without turning an unknown result into permission to retry. */
+export function priorCalendarActionHint(
+  cards: V2Card[],
+  index: number,
+  states: V2ActionStates,
+): string | null {
+  const previous = cards.slice(0, index).find((card) =>
+    card.tool === 'propose_personal_event' && states[card.mutationId]?.status !== 'verified');
+  if (!previous) return null;
+  const state = states[previous.mutationId];
+  if (state?.status === 'cancelled' || state?.status === 'superseded')
+    return '前一筆個人行程已停止或被新提議取代。舊計畫不能繼續，請重新規劃後續步驟。';
+  if (state?.status === 'conflict')
+    return '前一筆個人行程與現有紀錄不一致。請先核對個人行事曆，再重新規劃後續步驟，避免重複建立。';
+  if (state?.status === 'unknown' || state?.status === 'checking' || state?.status === 'executing')
+    return '前一筆個人行程結果尚未核對，請先讀回原結果。這一步不會自動繼續或重新送出。';
+  return '前一筆個人行程尚未確認建立。請先完成並讀回前一筆，無法建立時須重新規劃後續步驟。';
+}
+
 /** Only observed results enter memory. Tokens, row IDs and source text stay in the UI. */
 export function assistantAnswerWithExecution(turn: V2Turn, states: V2ActionStates): string {
   const calendar = turn.reply.cards.filter((card) => card.tool === 'propose_personal_event');
