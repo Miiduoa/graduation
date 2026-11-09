@@ -139,9 +139,9 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       }} />
     </> : <>
       {outcome.status === 'conflict' && <>
-        <Text accessibilityRole="alert" style={body}>本裝置已匯入課表發現 {outcome.overlaps.length} 個重疊時段。請先核對；兩門課都保留可能衝堂，並不代表校方正式選課。</Text>
+        <Text accessibilityRole="alert" style={body}>本裝置已匯入課表發現 {outcome.overlaps.length} 個重疊時段{outcome.overlaps.length >= 10 ? '（最多顯示前 10 個）' : ''}。請先核對；兩門課都保留可能衝堂，並不代表校方正式選課。</Text>
         {outcome.overlaps.map((overlap, index) => <Text key={index} style={body}>
-          星期{'一二三四五六日'[overlap.dayOfWeek - 1]} · {overlap.incomingTitle} 與 {overlap.existingTitle}（原有 {overlap.startTime}–{overlap.endTime}）
+          星期{'一二三四五六日'[overlap.dayOfWeek - 1]} · {overlap.incomingTitle} 與 {overlap.existingTitle}（重疊 {overlap.startTime}–{overlap.endTime}）
         </Text>)}
       </>}
       {outcome.status === 'error' ? <Text accessibilityRole="alert" style={body}>
