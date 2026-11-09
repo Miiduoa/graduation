@@ -7,6 +7,7 @@ import { importBuildingPlanProject } from './buildingPlanProject';
 import type { BuildingPlanView, BuildingPlanScene } from './buildingPlanScene';
 import BuildingPlanTracer from './BuildingPlanTracer';
 import { exportBuildingPlanSvg } from './buildingPlanSvg';
+import { getBuildingPlanSvgFilename } from './buildingPlanSvgFilename';
 import styles from './BuildingPlanPreview.module.css';
 
 type Props = { schoolId: string; buildingId: string; buildingName: string; onClose: () => void };
@@ -320,7 +321,7 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
               const url = URL.createObjectURL(blob);
               const anchor = document.createElement('a');
               anchor.href = url;
-              anchor.download = 'building-plan-preview.svg';
+              anchor.download = getBuildingPlanSvgFilename(plan.name, selectedFloor?.label ?? null);
               document.body.append(anchor);
               try { anchor.click(); } finally {
                 anchor.remove();

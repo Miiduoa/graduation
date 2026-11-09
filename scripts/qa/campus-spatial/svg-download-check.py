@@ -80,7 +80,7 @@ async def workflow(page, _requests, _resources):
       };
     }""")
 
-    async def download(stage, required, excluded=(), keyboard=False):
+    async def download(stage, expected_filename, required, excluded=(), keyboard=False):
         button = building.preview(page).get_by_role("button", name="下載平面圖 SVG", exact=True)
         async with page.expect_download() as pending:
             if keyboard:
@@ -90,7 +90,8 @@ async def workflow(page, _requests, _resources):
                 await button.click()
         result = await pending.value
         assert await result.failure() is None
-        assert result.suggested_filename.endswith(".svg"), result.suggested_filename
+        assert result.suggested_filename == expected_filename, (stage, result.suggested_filename)
+        assert len(result.suggested_filename.encode("utf-8")) <= 150
         target = OUT / f"{prefix}-{stage}.svg"
         await result.save_as(target)
         data = target.read_bytes()
@@ -117,11 +118,13 @@ async def workflow(page, _requests, _resources):
     floors = building.preview(page).get_by_role("combobox", name="樓層", exact=True)
     await expect(floors).to_have_value("")
     await building.no_overflow(page)
-    await download("all", [TITLE, *FLOORS, *ROOMS], keyboard=width > 1000)
+    all_name = "平面圖-虛構圖面・中文下載驗證-全部樓層.svg"
+    one_name = "平面圖-虛構圖面・中文下載驗證-單層-二樓・研究區.svg"
+    await download("all", all_name, [TITLE, *FLOORS, *ROOMS], keyboard=width > 1000)
     await floors.select_option(label=FLOORS[1])
     await expect(floors).to_have_value("研究層")
-    one = await download("one", [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]])
-    assert await download("repeat", [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]]) == one
+    one = await download("one", one_name, [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]])
+    assert await download("repeat", one_name, [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]]) == one
     await floors.scroll_into_view_if_needed()
     await page.screenshot(path=str(OUT / f"{prefix}-selected.png"))
 
@@ -131,7 +134,7 @@ async def workflow(page, _requests, _resources):
     await expect(building.preview(page).get_by_role("button", name="下載平面圖 SVG", exact=True)).to_have_count(0)
     await building.preview(page).get_by_role("button", name="取消描圖", exact=True).click()
     await expect(floors).to_have_value("研究層")
-    assert await download("after-cancel", [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]]) == one
+    assert await download("after-cancel", one_name, [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]]) == one
 
     # A rejected replacement must not silently replace the visible plan or export.
     await open_importer(page)
@@ -140,7 +143,7 @@ async def workflow(page, _requests, _resources):
     })
     await expect(building.preview(page).get_by_role("alert")).to_be_visible()
     await expect(floors).to_have_value("研究層")
-    assert await download("after-rejected-import", [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]]) == one
+    assert await download("after-rejected-import", one_name, [TITLE, FLOORS[1], ROOMS[1]], [FLOORS[0], ROOMS[0]]) == one
 
     replacement = copy.deepcopy(plan)
     replacement["name"] = "另一份虛構圖面"
@@ -149,17 +152,35 @@ async def workflow(page, _requests, _resources):
     replacement["floors"][0]["rooms"][0].update({"id": "新房間", "name": "設備間丙"})
     await upload(page, replacement)
     await expect(floors).to_have_value("")
-    await download("replacement", [replacement["name"], "屋頂層・測試", "設備間丙"], [TITLE, *FLOORS, *ROOMS])
+    await download("replacement", "平面圖-另一份虛構圖面-全部樓層.svg", [replacement["name"], "屋頂層・測試", "設備間丙"], [TITLE, *FLOORS, *ROOMS])
     await open_importer(page)
     await building.preview(page).get_by_role("button", name="清除圖面", exact=True).click()
     await expect(building.preview(page)).to_contain_text("尚未載入圖面")
     await expect(building.preview(page).get_by_role("button", name="下載平面圖 SVG", exact=True)).to_have_count(0)
     await building.preview(page).get_by_role("button", name="載入示意範例", exact=True).click()
     await expect(floors).to_have_value("")
-    await download("reloaded-example", ["1F", "2F", "範例教室 101", "範例教室 201"], [TITLE, "屋頂層・測試"])
+    await download("reloaded-example", "平面圖-兩層教學空間・示意-全部樓層.svg", ["1F", "2F", "範例教室 101", "範例教室 201"], [TITLE, "屋頂層・測試"])
     await building.no_overflow(page)
+
+    # Valid imported display names exercise native filenames without changing SVG text.
+    # Truly empty names are rejected by the parser and are covered by helper unit tests.
+    for stage, title, floor, expected_filename in [
+        ("special-name", "圖面/甲:乙?", "B1\\機房*", "平面圖-圖面 甲 乙-單層-B1 機房.svg"),
+        ("fallback-name", "<>:/\\|?*", "<>:/\\|?*", "平面圖-未命名圖面-單層-未命名樓層.svg"),
+        ("long-name", "校" * 100, "層" * 100, "平面圖-" + "校" * 26 + "-單層-" + "層" * 16 + ".svg"),
+    ]:
+        named = copy.deepcopy(replacement)
+        named["name"] = title
+        named["floors"][0]["label"] = floor
+        named["source"] = {
+            "label": "虛構來源標記，不應出現在檔名",
+            "url": "https://example.invalid/fictional-source?private=fixture-only",
+        }
+        await upload(page, named)
+        await floors.select_option(value="新樓層")
+        await download(stage, expected_filename, [title, floor, "設備間丙"])
     await building.preview(page).get_by_role("button", name="關閉視窗", exact=True).click()
-    await page.wait_for_function("""() => window.__svgUrls.created.length === 7 &&
+    await page.wait_for_function("""() => window.__svgUrls.created.length === 10 &&
       window.__svgUrls.created.every(url => window.__svgUrls.revoked.includes(url))""")
     urls = await page.evaluate("({created: window.__svgUrls.created.length, revoked: window.__svgUrls.revoked.length})")
 

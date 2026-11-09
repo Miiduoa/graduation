@@ -323,7 +323,10 @@ it('does not construct graphics if the user closes before the lazy import resolv
 it('downloads a self-contained SVG for all or just the selected floor', async () => {
   const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:floor-print');
   const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  const filenames: string[] = [];
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    filenames.push(this.download);
+  });
   render(<BuildingPlanPreview {...props} />);
   loadExample();
 
@@ -346,7 +349,14 @@ it('downloads a self-contained SVG for all or just the selected floor', async ()
   const oneFloor = await read(createUrl.mock.calls[1][0] as Blob);
   expect(oneFloor).toContain('範例教室 201');
   expect(oneFloor).not.toContain('範例教室 101');
-  expect(click).toHaveBeenCalledTimes(2);
+  fireEvent.click(download);
+  expect(await read(createUrl.mock.calls[2][0] as Blob)).toBe(oneFloor);
+  expect(filenames).toEqual([
+    '平面圖-兩層教學空間・示意-全部樓層.svg',
+    '平面圖-兩層教學空間・示意-單層-2F.svg',
+    '平面圖-兩層教學空間・示意-單層-2F.svg',
+  ]);
+  expect(click).toHaveBeenCalledTimes(3);
   await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith('blob:floor-print'), { timeout: 2_000 });
 });
 
