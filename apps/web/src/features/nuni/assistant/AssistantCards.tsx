@@ -230,11 +230,24 @@ export function AssistantCardStack({
   const verified = calendar.filter((card) => states[card.mutationId]?.status === 'verified').length;
   const uncertain = calendar.filter((card) => ['unknown', 'executing', 'checking'].includes(states[card.mutationId]?.status)).length;
   const retired = calendar.filter((card) => ['cancelled', 'superseded'].includes(states[card.mutationId]?.status)).length;
+  const handoff = cards.filter((card) => states[card.mutationId]?.status === 'handoff').length;
+  const needsReview = cards.filter((card) =>
+    ['unknown', 'executing', 'checking', 'conflict'].includes(states[card.mutationId]?.status)).length;
+  const stopped = cards.filter((card) =>
+    ['cancelled', 'superseded'].includes(states[card.mutationId]?.status)).length;
+  const unverified = Math.max(0, cards.length - verified - handoff - needsReview - stopped);
   return (
     <div className={styles.stack}>
-      {calendar.length > 0 && <p className={styles.executionSummary} role="status" aria-label="行程執行進度">
+      {!calendarOnly && cards.length > 1 ? (
+        <p className={styles.executionSummary} role="status" aria-label="跨功能任務進度">
+          個人行程已讀回核對 {verified}/{calendar.length} 項 · 服務入口已備妥 {handoff} 項
+          {needsReview ? ` · 待核對或有衝突 ${needsReview} 項` : ''}
+          {unverified ? ` · 其他 ${unverified} 項尚未確認完成` : ''}
+          {stopped ? ` · 已停止 ${stopped} 項提議` : ''}。服務入口不代表訂單、付款或作業已完成。
+        </p>
+      ) : calendar.length > 0 ? <p className={styles.executionSummary} role="status" aria-label="行程執行進度">
         已核對 {verified}/{calendar.length} 項{uncertain ? ` · 待核對 ${uncertain} 項` : ''}{calendar.length - verified - uncertain - retired ? ` · 尚未完成 ${calendar.length - verified - uncertain - retired} 項` : ''}{retired ? ` · 已停止 ${retired} 項提議` : ''}
-      </p>}
+      </p> : null}
       {calendarOnly && open.length > 1 ? (
         <button type="button" className={styles.batch} disabled={pending || !priorCalendarActionsVerified(cards, cards.indexOf(open[0]), states)} onClick={() => onConfirm(open)}>
           依序確認 {open.length} 筆個人行程
