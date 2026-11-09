@@ -4,6 +4,7 @@ import {
   Color,
   CylinderGeometry,
   DirectionalLight,
+  ExtrudeGeometry,
   HemisphereLight,
   InstancedMesh,
   LineBasicMaterial,
@@ -15,12 +16,14 @@ import {
   PlaneGeometry,
   RingGeometry,
   Scene,
+  Shape,
   SphereGeometry,
   Vector3,
   WebGLRenderer,
   type Material,
 } from 'three';
 import type { CampusSpatialModel, CampusSpatialPoint } from './campusSpatialModel';
+import type { ProvidenceFootprint } from './providenceFootprints';
 import {
   normalizeSpatialCamera,
   spatialCameraDirection,
@@ -48,6 +51,7 @@ type Options = {
   onSelect: (id: string) => void;
   onError: () => void;
   onCameraChange?: (camera: CampusSpatialCamera) => void;
+  footprints?: readonly ProvidenceFootprint[];
 };
 type Pose = { position: Vector3; target: Vector3 };
 type Transition = { from: Pose; to: Pose; start: number };
@@ -114,6 +118,7 @@ export function createCampusSpatialScene(
   const geometries: BufferGeometry[] = [];
   const materials: Material[] = [];
   const instances: InstancedMesh[] = [];
+  const buildingMaterials: Array<{ id: string; material: MeshStandardMaterial }> = [];
   const labels: Label[] = [];
   const listeners: Array<() => void> = [];
   let renderer: WebGLRenderer | null = null;
@@ -139,6 +144,7 @@ export function createCampusSpatialScene(
   let ringMaterial: MeshStandardMaterial | null = null;
   const pinRadius = Math.max(3, Math.min(9, model.radius * 0.018));
   const pinHeight = pinRadius * 3.3;
+  const tallestBuilding = Math.max(0, ...(options.footprints ?? []).map((item) => item.heightMeters));
   const groundWidth = Math.max(180, model.extent.width + pinRadius * 12);
   const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12);
 
@@ -293,7 +299,7 @@ export function createCampusSpatialScene(
     // Fit the whole volume, including marker tops, rather than only its 2D width.
     for (const x of [-halfWidth, halfWidth]) {
       for (const z of [-halfDepth, halfDepth]) {
-        for (const y of [0, pinHeight + pinRadius]) {
+        for (const y of [0, Math.max(pinHeight + pinRadius, tallestBuilding)]) {
           const corner = new Vector3(x, y, z);
           const nearOffset = corner.dot(direction);
           distance = Math.max(distance,
@@ -357,6 +363,10 @@ export function createCampusSpatialScene(
     stemMaterial?.color.set(palette.stem);
     gridMaterial?.color.set(palette.grid);
     ringMaterial?.color.set(palette.accent);
+    for (const item of buildingMaterials) {
+      item.material.color.set(item.id === view.selectedId ? palette.accent :
+        view.dark ? '#53645f' : '#abbab2');
+    }
     const neutral = new Color(palette.pin);
     const accent = new Color(palette.accent);
     for (let index = 0; index < model.points.length; index += 1) {
@@ -509,6 +519,35 @@ export function createCampusSpatialScene(
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.1;
     scene.add(ground);
+
+    // Only published OSM way outlines that passed the Providence source whitelist are extruded.
+    // The shape is geographic; without a recorded OSM height the 12 m volume is illustrative.
+    const anchor = model.points[0];
+    const longitudeScale = 6_371_008.8 * Math.PI / 180 *
+      Math.cos(anchor.location.lat * Math.PI / 180);
+    const latitudeScale = 6_371_008.8 * Math.PI / 180;
+    for (const footprint of options.footprints ?? []) {
+      if (!pointsById.has(footprint.poiId)) continue;
+      const shape = new Shape();
+      footprint.outline.forEach(([longitude, latitude], index) => {
+        const x = anchor.x + (longitude - anchor.location.lng) * longitudeScale;
+        const z = anchor.z - (latitude - anchor.location.lat) * latitudeScale;
+        if (index === 0) shape.moveTo(x, -z);
+        else shape.lineTo(x, -z);
+      });
+      shape.closePath();
+      const material = ownMaterial(new MeshStandardMaterial({
+        color: '#abbab2', roughness: 0.93, metalness: 0,
+      }));
+      const geometry = ownGeometry(new ExtrudeGeometry(shape, {
+        depth: footprint.heightMeters, bevelEnabled: false, steps: 1, curveSegments: 1,
+      }));
+      const building = new Mesh(geometry, material);
+      building.rotation.x = -Math.PI / 2;
+      building.position.y = 0.2;
+      scene.add(building);
+      buildingMaterials.push({ id: footprint.poiId, material });
+    }
 
     const gridPoints: Vector3[] = [];
     const step = 10 ** Math.floor(Math.log10(Math.max(groundWidth, groundDepth) / 6));
