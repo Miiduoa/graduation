@@ -17,7 +17,7 @@ import type { CampusSpatialScene } from './campusSpatialScene';
 import { walkingDirectionsUrl, type MapLocation } from './mapService';
 import { isProvidencePendingVerification, providencePlaceSourceUrl } from './providenceCampus';
 import { PROVIDENCE_CAMPUS_SOURCE } from '@campus/shared/src/providenceCampus';
-import { parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
+import { parseProvidenceFootprintSnapshot, type ProvidenceFootprint } from './providenceFootprints';
 import BuildingPlanPreview from './buildingPlans/BuildingPlanPreview';
 import styles from './CampusSpatialExplorer.module.css';
 
@@ -225,12 +225,11 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       })
       .then((response) => {
         if (!active) return;
-        const buildings = parseProvidenceFootprintResponse(response);
-        if (!buildings.length) throw new Error('No usable campus building outlines');
-        const payload = response as { fetchedAt?: unknown; stale?: unknown };
-        setFootprints(buildings);
-        setFootprintDate(typeof payload.fetchedAt === 'string' ? payload.fetchedAt.slice(0, 10) : null);
-        setFootprintStale(payload.stale === true);
+        const snapshot = parseProvidenceFootprintSnapshot(response);
+        if (!snapshot) throw new Error('No recent, source-checked building outlines');
+        setFootprints(snapshot.buildings);
+        setFootprintDate(snapshot.fetchedAt.slice(0, 10));
+        setFootprintStale(snapshot.stale);
         setFootprintStatus('ready');
       })
       .catch(() => {

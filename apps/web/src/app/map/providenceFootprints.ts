@@ -245,3 +245,29 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
   }
   return accepted;
 }
+
+/** Verify that API geometry still has a trustworthy source and recent fetch date.
+ * Client clocks may differ by a few minutes, but a forged/far-future timestamp,
+ * stale CDN response, or unrelated API payload must not be portrayed as current OSM.
+ */
+export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now()): {
+  buildings: ProvidenceFootprint[]; fetchedAt: string; stale: boolean;
+} | null {
+  const data = object(value);
+  if (!data || data.schoolId !== 'pu' || data.source !== 'OpenStreetMap' ||
+      typeof data.fetchedAt !== 'string' || typeof data.stale !== 'boolean' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(data.fetchedAt) ||
+      !Number.isFinite(now)) return null;
+  const fetchedAtMs = Date.parse(data.fetchedAt);
+  if (!Number.isFinite(fetchedAtMs) || new Date(fetchedAtMs).toISOString() !== data.fetchedAt) return null;
+  const ageMs = now - fetchedAtMs;
+  const day = 24 * 60 * 60 * 1000;
+  // Match the server's seven-day expiry; do not let clock skew invent fresh data.
+  if (ageMs >= 7 * day || ageMs < -5 * 60 * 1000) return null;
+  const buildings = parseProvidenceFootprintResponse(data);
+  if (!buildings.length) return null;
+  return {
+    buildings, fetchedAt: data.fetchedAt,
+    stale: data.stale || ageMs >= day,
+  };
+}

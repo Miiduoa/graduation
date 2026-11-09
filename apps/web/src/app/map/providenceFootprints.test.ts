@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseProvidenceOsmFootprints,
   parseProvidenceFootprintResponse,
+  parseProvidenceFootprintSnapshot,
   PROVIDENCE_OSM_BUILDING_WAY_IDS,
 } from './providenceFootprints';
 
@@ -161,5 +162,58 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [
       { ...footprint, outline: [[120, 24], [121, 24], [121, 25]] },
     ] })).toEqual([]);
+  });
+});
+
+describe('Providence footprint API snapshot freshness', () => {
+  const footprint = parseProvidenceOsmFootprints({
+    elements: [way(255784049)],
+  })[0];
+  const now = Date.parse('2026-11-09T10:00:00.000Z');
+  const response = {
+    schoolId: 'pu', source: 'OpenStreetMap',
+    fetchedAt: '2026-11-09T09:00:00.000Z', stale: false,
+    buildings: [footprint],
+  };
+
+  it('accepts a dated, source-identified snapshot without changing valid geometry', () => {
+    expect(parseProvidenceFootprintSnapshot(response, now)).toEqual({
+      buildings: [footprint], fetchedAt: response.fetchedAt, stale: false,
+    });
+  });
+
+  it('does not call a 25-hour-old snapshot fresh even if a stale cache says otherwise', () => {
+    const fetchedAt = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+    expect(parseProvidenceFootprintSnapshot({ ...response, fetchedAt }, now)).toEqual({
+      buildings: [footprint], fetchedAt, stale: true,
+    });
+  });
+
+  it('rejects snapshots older than seven days or with future dates beyond clock skew', () => {
+    for (const fetchedAt of [
+      new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      new Date(now - 8 * 24 * 60 * 60 * 1000).toISOString(),
+      new Date(now + 6 * 60 * 1000).toISOString(),
+      '9999-99-99T99:99:99.999Z',
+      '2026-11-09',
+    ]) {
+      expect(parseProvidenceFootprintSnapshot({ ...response, fetchedAt }, now)).toBeNull();
+    }
+    expect(parseProvidenceFootprintSnapshot({
+      ...response, fetchedAt: new Date(now + 4 * 60 * 1000).toISOString(),
+    }, now)?.buildings).toEqual([footprint]);
+  });
+
+  it('rejects missing or spoofed source and invalid stale status instead of claiming OSM verification', () => {
+    for (const input of [
+      { ...response, source: 'unknown' },
+      { ...response, source: undefined },
+      { ...response, stale: 'false' },
+      { ...response, stale: undefined },
+      { ...response, schoolId: 'other-school' },
+      { ...response, buildings: [] },
+    ]) {
+      expect(parseProvidenceFootprintSnapshot(input, now)).toBeNull();
+    }
   });
 });

@@ -346,7 +346,7 @@ it('adds source-checked Providence building shapes without changing navigation o
   });
   await act(async () => {
     resolveFetch?.({ ok: true, json: async () => ({
-      schoolId: 'pu', buildings, fetchedAt: '2026-11-09T02:00:00.000Z', stale: false,
+      schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt: new Date().toISOString(), stale: false,
     }) });
   });
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
@@ -367,4 +367,32 @@ it('keeps the spatial map usable when Providence building geometry is unavailabl
   expect(within(dialog).getByRole('button', { name: '在平面地圖查看' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
+});
+
+it('rejects an expired OSM API snapshot while keeping the known place and walking directions', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const outline = [
+    { lat: 24.22624, lon: 120.58131 },
+    { lat: 24.22624, lon: 120.58143 },
+    { lat: 24.22634, lon: 120.58143 },
+    { lat: 24.22634, lon: 120.58131 },
+    { lat: 24.22624, lon: 120.58131 },
+  ];
+  const buildings = parseProvidenceOsmFootprints({
+    elements: [{ type: 'way', id: 255784049, geometry: outline, tags: { building: 'yes' } }],
+  });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+      stale: false,
+    }),
+  }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
