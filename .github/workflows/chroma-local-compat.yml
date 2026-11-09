@@ -38,6 +38,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Checkout the immutable pre-hardening application for legacy seed and rollback
+        uses: actions/checkout@v4
+        with:
+          ref: 1bca9d770e996106c4a495442d16bba9d413f455
+          path: .chroma-legacy-checkout
+          persist-credentials: false
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
         with:
@@ -50,7 +56,10 @@ jobs:
             'langchain-text-splitters==1.1.3' 'python-dotenv>=1.2.2'
           .chroma-legacy-venv/bin/python -m pip check
       - name: Seed a legacy persistent store with known embeddings
-        run: .chroma-legacy-venv/bin/python tests/chroma_migration_smoke.py seed "./.chroma-upgrade-fixture"
+        run: >-
+          .chroma-legacy-venv/bin/python
+          "$GITHUB_WORKSPACE/.chroma-legacy-checkout/backend/ai-server/tests/chroma_migration_smoke.py"
+          seed "$PWD/.chroma-upgrade-fixture"
       - name: Snapshot the closed legacy fixture before migration
         id: snapshot
         run: |
@@ -118,7 +127,9 @@ jobs:
           print(f'Rollback copy verified: {len(expected)} files')
           PY
           .chroma-legacy-venv/bin/python -m pip check
-          .chroma-legacy-venv/bin/python tests/chroma_migration_smoke.py rollback "./.chroma-rollback-fixture"
+          .chroma-legacy-venv/bin/python \
+            "$GITHUB_WORKSPACE/.chroma-legacy-checkout/backend/ai-server/tests/chroma_migration_smoke.py" \
+            rollback "$PWD/.chroma-rollback-fixture"
       - name: Scope notice
         run: |
           echo '::notice::Tests isolated x86_64 migration and snapshot restoration with the old runtime, not an in-place database downgrade. Apple Silicon MLX/ONNX, real local stores and operational backups still need separate validation.'

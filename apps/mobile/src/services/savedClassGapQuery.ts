@@ -189,7 +189,25 @@ export function savedClassGapQuery(question: string): SavedClassGapQuery | null 
   return applyFilters(filters);
 }
 
+// A follow-up may restore its filters from a previous app session. Validate before
+// using an inherited period in the clock parser or reading its time boundaries.
+function isValidSavedGapFilters(query: SavedClassGapQuery | null | undefined): query is SavedClassGapQuery {
+  if (!query || typeof query !== 'object' ||
+      !['today', 'tomorrow', 'day-after-tomorrow'].includes(query.day) ||
+      !Number.isSafeInteger(query.minMinutes) || query.minMinutes < 0 || query.minMinutes > 1440 ||
+      (query.part !== undefined && query.part !== 'morning' && query.part !== 'afternoon' && query.part !== 'evening') ||
+      (query.fromMinute !== undefined && (!Number.isSafeInteger(query.fromMinute) ||
+        query.fromMinute < 0 || query.fromMinute >= 1440)) ||
+      (query.untilMinute !== undefined && (!Number.isSafeInteger(query.untilMinute) ||
+        query.untilMinute <= 0 || query.untilMinute > 1440))) return false;
+  const bounds = query.part ? partBounds[query.part] : undefined;
+  const start = Math.max((bounds?.start ?? 0) * 60, query.fromMinute ?? 0);
+  const end = Math.min((bounds?.end ?? 24) * 60, query.untilMinute ?? 1440);
+  return start < end;
+}
+
 export function savedClassGapFollowUp(question: string, previous: SavedClassGapQuery): SavedClassGapQuery | null {
+  if (!isValidSavedGapFilters(previous)) return null;
   const filters = readQuestion(question, previous.part);
   if (!filters || (!filters.day && !filters.part && !filters.allDay && !filters.hasClock && filters.minMinutes === undefined)) return null;
   if (filters.rest) {
@@ -244,13 +262,7 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
 
   // Restored follow-up filters are not trusted merely because the TypeScript type matches.
   // A damaged clock/duration must not crash the formatter or imply the student is free.
-  if (!query || !['today', 'tomorrow', 'day-after-tomorrow'].includes(query.day) ||
-      !Number.isSafeInteger(query.minMinutes) || query.minMinutes < 0 || query.minMinutes > 1440 ||
-      (query.part !== undefined && query.part !== 'morning' && query.part !== 'afternoon' && query.part !== 'evening') ||
-      (query.fromMinute !== undefined && (!Number.isSafeInteger(query.fromMinute) ||
-        query.fromMinute < 0 || query.fromMinute >= 1440)) ||
-      (query.untilMinute !== undefined && (!Number.isSafeInteger(query.untilMinute) ||
-        query.untilMinute <= 0 || query.untilMinute > 1440))) {
+  if (!isValidSavedGapFilters(query)) {
     return reply('空堂查詢條件無法核對，請重新指定日期與時間，或開啟「我的課表」確認。');
   }
   const now = Date.parse(context.checkedAt);

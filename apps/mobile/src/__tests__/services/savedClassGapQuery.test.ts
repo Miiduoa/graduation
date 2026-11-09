@@ -74,6 +74,29 @@ describe('class gap questions', () => {
     }
   });
 
+  test('does not reuse corrupt restored filters in a follow-up', () => {
+    const invalidPrevious: unknown[] = [
+      null, undefined,
+      { ...today, day: 'last-week' },
+      { ...today, part: '__proto__' },
+      { ...today, minMinutes: Number.NaN },
+      { ...today, minMinutes: -1 },
+      { ...today, minMinutes: Number.POSITIVE_INFINITY },
+      { ...today, fromMinute: Number.NaN },
+      { ...today, fromMinute: 1440 },
+      { ...today, untilMinute: 1441 },
+      { ...today, fromMinute: 960, untilMinute: 930 },
+      { ...today, part: 'afternoon', fromMinute: 1140 },
+      { ...today, part: 'morning', untilMinute: 780, fromMinute: 750 },
+    ];
+    for (const restored of invalidPrevious) {
+      expect(savedClassGapFollowUp('那至少一小時呢', restored as SavedClassGapQuery)).toBeNull();
+      expect(savedClassGapFollowUp('改成三點半之後', restored as SavedClassGapQuery)).toBeNull();
+    }
+    // A normal saved turn still carries forward day and duration as intended.
+    expect(savedClassGapFollowUp('那至少一小時呢', today)).toEqual({ ...today, minMinutes: 60 });
+  });
+
   test('keeps the other conditions while a student changes the date, length and clock window', () => {
     const initial = savedClassGapQuery('今天下午有45分鐘的空堂嗎')!;
     expect(initial).toEqual({ ...today, part: 'afternoon', minMinutes: 45 });

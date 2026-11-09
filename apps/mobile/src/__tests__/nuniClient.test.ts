@@ -134,7 +134,14 @@ it('parses the actual session-create contract without requiring current-session 
     expiresInSeconds: 3600,
     created: true,
   };
-  expect(parseNuniLoginSession(value).platformAccountId).toBe(value.platformAccountId);
+  expect(parseNuniLoginSession(value)).toEqual({
+    platformAccountId: value.platformAccountId,
+    isPlatformOperator: false,
+    sessionHandle: handle,
+    expiresInSeconds: 3600,
+  });
+  expect(parseNuniLoginSession(value)).not.toHaveProperty('customToken');
+  expect(parseNuniLoginSession(value)).not.toHaveProperty('firebaseUid');
   expect(() => parseNuniLoginSession({ ...value, sessionHandle: 'invalid' })).toThrow(
     'INVALID_RESPONSE',
   );

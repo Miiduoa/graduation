@@ -277,7 +277,7 @@ it('creates a share from submitted courses when the cloud timetable is missing',
   expect(res.status).toBe(200);
   const token = ((await res.json()) as { result: { token: string } }).result.token;
   const share = store.docs.get(`timetableShares/${token}`);
-  expect(share).toMatchObject({ schoolId: 'pu', name: '本機' });
+  expect(share).toMatchObject({ schoolId: 'pu', name: '本機', publicSchemaVersion: 1 });
   expect(share?.ownerUid).toBeUndefined();
   expect(JSON.stringify(share)).not.toContain('alice@example.com');
   expect(JSON.stringify(share)).not.toContain('王');
