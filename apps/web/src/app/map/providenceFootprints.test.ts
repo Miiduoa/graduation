@@ -83,6 +83,34 @@ describe('Providence OSM building outlines', () => {
     })).toHaveLength(1);
   });
 
+  it('does not invent ground-level walls for elevated OSM building parts', () => {
+    // Height is top elevation, not proof that the building begins at ground.
+    // Until we model a verified base elevation, an elevated footprint is not
+    // a trustworthy full ground-to-roof solid.
+    for (const offsetTags of [
+      { min_height: '5' },
+      { min_height: '10 m' },
+      { min_height: 'unknown' },
+      { 'building:min_level': '2' },
+      { 'building:min_level': 'bad data' },
+    ]) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', height: '18 m', ...offsetTags })],
+      });
+      expect(buildings, JSON.stringify(offsetTags)).toEqual([]);
+    }
+    // Explicit zero offsets still allow an ordinary ground-standing volume.
+    for (const offsetTags of [
+      { min_height: '0' },
+      { min_height: '0 m' },
+      { min_height: '0.0 m', 'building:min_level': '0' },
+    ]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', height: '18 m', ...offsetTags })],
+      }), JSON.stringify(offsetTags)).toHaveLength(1);
+    }
+  });
+
   it('rejects wrong campus, open ways, degenerate shapes and self-intersections', () => {
     const outside = library.map((p) => ({ lat: p.lat + 1, lon: p.lon }));
     const open = library.slice(0, -1);
