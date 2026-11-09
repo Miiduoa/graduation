@@ -23,6 +23,169 @@ function stampMatchesLiveProfile(membership, profile) {
   return Boolean(stampGen) && stampGen === liveGen;
 }
 
+/** Server writers that create or activate Firestore school members. nuni-api does not. */
+const TRUSTED_CAMPUS_STORY_MEMBER_CREATE_PATHS = [
+  'writeSchoolLoginProfile.functions',
+  'writeSchoolLoginProfile.web',
+  'provisionUniversalDevAccount',
+  'seedDemoUsers',
+];
+
+function nextBindingGeneration(account, createId) {
+  return typeof account?.bindingGeneration === 'string' && account.bindingGeneration
+    ? account.bindingGeneration
+    : createId();
+}
+
+function campusStoryStampFields(schoolId, bindingGeneration) {
+  return {
+    profileBoundSchoolId: schoolId,
+    profileBoundGeneration: bindingGeneration,
+  };
+}
+
+function snapshotMillis(value) {
+  if (value == null) return null;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.getTime();
+  return null;
+}
+
+function restampEligibility({ membership, memberSnap, userSnap }) {
+  if (!userSnap?.exists || !memberSnap?.exists) return { ok: false, reason: 'missing' };
+  const profile = userSnap.data() || {};
+  const data = membership || memberSnap.data() || {};
+  if (isClosedAccount(profile)) return { ok: false, reason: 'closed-profile' };
+  if (data.status !== 'active') return { ok: false, reason: 'inactive-membership' };
+  const userCreated = snapshotMillis(userSnap.createTime);
+  const memberCreated = snapshotMillis(memberSnap.createTime);
+  if (userCreated == null || memberCreated == null) return { ok: false, reason: 'missing-create-time' };
+  if (userCreated > memberCreated) return { ok: false, reason: 'rebuilt-profile' };
+  return { ok: true };
+}
+
+async function loadExistingSchoolMemberships(db, uid) {
+  if (!uid) return [];
+  const schoolsSnap = await db.collection('schools').get();
+  const memberships = [];
+  for (const schoolDoc of schoolsSnap.docs) {
+    const memberSnap = await db.collection('schools').doc(schoolDoc.id).collection('members').doc(uid).get();
+    if (!memberSnap.exists) continue;
+    memberships.push({
+      schoolId: schoolDoc.id,
+      exists: true,
+      membership: memberSnap.data() || {},
+    });
+  }
+  return memberships;
+}
+
+async function stampExistingCampusStoryMemberships({
+  db,
+  uid,
+  FieldValue,
+  randomUUID,
+  loadMemberships,
+}) {
+  const memberships = await (loadMemberships || loadExistingSchoolMemberships)(db, uid);
+  const existing = memberships.filter((item) => item.exists);
+  return db.runTransaction(async (tx) => {
+    const userRef = db.collection('users').doc(uid);
+    const userSnap = await tx.get(userRef);
+    const memberItems = [];
+    for (const item of existing) {
+      const ref = db.collection('schools').doc(item.schoolId).collection('members').doc(uid);
+      memberItems.push({ schoolId: item.schoolId, ref, snap: await tx.get(ref) });
+    }
+    if (!userSnap.exists) return { stamped: [], skipped: ['missing-profile'] };
+    const profile = userSnap.data() || {};
+    if (isClosedAccount(profile)) return { stamped: [], skipped: ['closed-profile'] };
+    const bindingGeneration = nextBindingGeneration(profile, randomUUID);
+    const stamped = [];
+    const skipped = [];
+    for (const { schoolId, ref, snap } of memberItems) {
+      const eligibility = restampEligibility({
+        membership: snap.exists ? snap.data() || {} : null,
+        memberSnap: snap,
+        userSnap,
+      });
+      if (!eligibility.ok) {
+        skipped.push(`${schoolId}:${eligibility.reason}`);
+        continue;
+      }
+      const data = snap.data() || {};
+      if (membershipBoundToSchool(data, schoolId) && data.profileBoundGeneration === bindingGeneration) {
+        skipped.push(`${schoolId}:already-bound`);
+        continue;
+      }
+      tx.update(ref, campusStoryStampFields(schoolId, bindingGeneration));
+      stamped.push(schoolId);
+    }
+    if (stamped.length > 0) {
+      tx.set(userRef, { bindingGeneration, lastLoginAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    return { stamped, skipped, bindingGeneration };
+  });
+}
+
+function createEnsureCampusStoryBindingHandler({
+  db,
+  FieldValue,
+  randomUUID,
+  HttpsError,
+  loadMemberships,
+}) {
+  return async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
+    return stampExistingCampusStoryMemberships({
+      db,
+      uid,
+      FieldValue,
+      randomUUID,
+      loadMemberships,
+    }).then((result) => ({ success: true, stamped: result.stamped }));
+  };
+}
+
+function leftoverActiveMembershipKind(row) {
+  const classified = classifyCampusStoryBinding(row);
+  if (classified.kind === 'orphan-membership' || classified.kind === 'closed-profile') {
+    return classified.kind;
+  }
+  return null;
+}
+
+function planOrphanSchoolMembershipCleanup(rows) {
+  return rows
+    .map((row) => {
+      const kind = leftoverActiveMembershipKind(row);
+      return kind ? { ...row, kind } : null;
+    })
+    .filter(Boolean);
+}
+
+async function inactivateOrphanSchoolMemberships({ db, FieldValue, entries }) {
+  const changed = [];
+  for (const entry of entries) {
+    const path = await db.runTransaction(async (tx) => {
+      const memberRef = db.collection('schools').doc(entry.schoolId).collection('members').doc(entry.uid);
+      const userRef = db.collection('users').doc(entry.uid);
+      const [memberSnap, userSnap] = await tx.getAll(memberRef, userRef);
+      if (!memberSnap.exists) return null;
+      const membership = memberSnap.data() || {};
+      if (membership.status !== 'active') return null;
+      if (userSnap.exists && !isClosedAccount(userSnap.data() || {})) return null;
+      tx.update(memberRef, storyStampClearUpdate(FieldValue));
+      return memberRef.path;
+    });
+    if (path) changed.push(path);
+  }
+  return changed;
+}
+
 function classifyCampusStoryBinding({ schoolId, uid, membership, profile, profileExists }) {
   const base = { schoolId, uid, membership, profile, profileExists };
   if (membership?.status !== 'active') {
@@ -205,6 +368,16 @@ function uniqueStoryStorageFirestoreDocs(source) {
 module.exports = {
   isClosedAccount,
   stampMatchesLiveProfile,
+  TRUSTED_CAMPUS_STORY_MEMBER_CREATE_PATHS,
+  nextBindingGeneration,
+  campusStoryStampFields,
+  restampEligibility,
+  loadExistingSchoolMemberships,
+  stampExistingCampusStoryMemberships,
+  createEnsureCampusStoryBindingHandler,
+  leftoverActiveMembershipKind,
+  planOrphanSchoolMembershipCleanup,
+  inactivateOrphanSchoolMemberships,
   classifyCampusStoryBinding,
   planCampusStoryAccessBinding,
   loadCampusMembershipRows,

@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 import { readLoginReturnParam, sanitizeInternalPath } from '@/lib/navigation';
 import { clearOwnedPuCampusSessions } from '@/lib/clearOwnedPuCampusSessions';
+import { ensureCampusStoryBinding } from '@/lib/campusStoryBinding';
 
 interface AuthState {
   user: User | null;
@@ -119,6 +120,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           );
         }
         setState({ user, loading: false, error: null });
+        if (user) void ensureCampusStoryBinding();
       },
       (error) => {
         console.error('Auth state change error:', error);

@@ -145,6 +145,10 @@ const {
 const {
   clearProfileSchoolBindingForRevokedMembership,
   inactivateLeftoverSchoolMemberships,
+  isClosedAccount,
+  nextBindingGeneration,
+  campusStoryStampFields,
+  createEnsureCampusStoryBindingHandler,
 } = require('./campusStoryAccessBinding');
 const {
   createAssignmentPublishedNotifyHandler,
@@ -641,36 +645,49 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
 
   const uid = userRecord.uid;
   const userRef = db.collection('users').doc(uid);
-  const userDoc = await userRef.get();
   const memberRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-  const memberDoc = await memberRef.get();
+  let profileExisted = false;
 
-  await userRef.set(
-    {
-      email: account.email,
-      displayName: account.displayName,
-      role: account.role,
-      schoolId,
-      primarySchoolId: schoolId,
-      lastLoginAt: FieldValue.serverTimestamp(),
-      devUniversalAccount: true,
-      devUniversalScope: 'all-schools',
-      schoolIds: FieldValue.arrayUnion(schoolId),
-      ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
-
-  await memberRef.set(
-    {
-      status: 'active',
-      role: toSchoolMemberRole(account.role),
-      devUniversalAccount: true,
-      updatedAt: FieldValue.serverTimestamp(),
-      ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
+  await db.runTransaction(async (tx) => {
+    const [userDoc, memberDoc] = await tx.getAll(userRef, memberRef);
+    profileExisted = userDoc.exists;
+    const accountData = userDoc.exists ? userDoc.data() || {} : {};
+    if (isClosedAccount(accountData)) {
+      throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+        reason: 'account-deletion',
+      });
+    }
+    const bindingGeneration = nextBindingGeneration(accountData, () => nodeCrypto.randomUUID());
+    tx.set(
+      userRef,
+      {
+        email: account.email,
+        displayName: account.displayName,
+        role: account.role,
+        schoolId,
+        primarySchoolId: schoolId,
+        lastLoginAt: FieldValue.serverTimestamp(),
+        bindingGeneration,
+        devUniversalAccount: true,
+        devUniversalScope: 'all-schools',
+        schoolIds: FieldValue.arrayUnion(schoolId),
+        ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+    tx.set(
+      memberRef,
+      {
+        status: 'active',
+        role: toSchoolMemberRole(account.role),
+        devUniversalAccount: true,
+        updatedAt: FieldValue.serverTimestamp(),
+        ...campusStoryStampFields(schoolId, bindingGeneration),
+        ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+  });
 
   await syncAuthClaims(uid, {
     role: account.role,
@@ -686,7 +703,7 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
   return {
     uid,
     customToken,
-    isNewUser: createdAuthUser || !userDoc.exists,
+    isNewUser: createdAuthUser || !profileExisted,
     role: account.role,
     displayName: account.displayName,
     email: account.email,
@@ -2542,6 +2559,16 @@ exports.finalizePostLogin = onCall(
     memory: '512MiB',
   },
   async (request) => runFinalizePostLogin(request),
+);
+
+exports.ensureCampusStoryBinding = onCall(
+  { region: REGION },
+  createEnsureCampusStoryBindingHandler({
+    db,
+    FieldValue,
+    randomUUID: () => nodeCrypto.randomUUID(),
+    HttpsError,
+  }),
 );
 
 exports.onUserProfileChanged = onDocumentWritten(

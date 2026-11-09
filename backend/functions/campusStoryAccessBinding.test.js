@@ -11,21 +11,46 @@ const {
   clearProfileSchoolBindingForRevokedMembership,
   revokeCampusStoryMembershipBinding,
   uniqueStoryStorageFirestoreDocs,
+  TRUSTED_CAMPUS_STORY_MEMBER_CREATE_PATHS,
+  restampEligibility,
+  stampExistingCampusStoryMemberships,
+  createEnsureCampusStoryBindingHandler,
+  planOrphanSchoolMembershipCleanup,
+  inactivateOrphanSchoolMemberships,
 } = require('./campusStoryAccessBinding');
 
 const FieldValue = {
   delete: () => ({ _delete: true }),
+  serverTimestamp: () => ({ _serverTimestamp: true }),
 };
 
-function fakeDb(seed = {}) {
+class FakeHttpsError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function fakeDb(seed = {}, options = {}) {
   const docs = new Map(Object.entries(seed));
   const writes = [];
+  let clock = 1;
+  const createTimes = new Map(
+    Object.entries(options.createTimes || {}).map(([path, value]) => [path, value]),
+  );
 
   function snapshotFor(docPath) {
+    const createTimeMs = createTimes.get(docPath);
     return {
       id: docPath.split('/').at(-1),
       exists: docs.has(docPath),
       data: () => docs.get(docPath),
+      createTime:
+        createTimeMs == null
+          ? undefined
+          : {
+              toMillis: () => createTimeMs,
+            },
     };
   }
 
@@ -42,6 +67,7 @@ function fakeDb(seed = {}) {
           },
           async set(data, options) {
             writes.push(docPath);
+            if (!docs.has(docPath) && !createTimes.has(docPath)) createTimes.set(docPath, clock++);
             docs.set(docPath, options?.merge ? { ...docs.get(docPath), ...data } : { ...data });
           },
           async update(data) {
@@ -315,4 +341,127 @@ test('profile delete or closed status clears leftover stamps in one transaction'
   expect(closed).toEqual(['pu']);
   expect(db.docs.get('schools/pu/members/suspended').profileBoundSchoolId).toBeUndefined();
   expect(db.docs.get('schools/pu/members/live').profileBoundSchoolId).toBe('pu');
+});
+
+test('trusted create paths do not include client schoolId or nuni-api', () => {
+  expect(TRUSTED_CAMPUS_STORY_MEMBER_CREATE_PATHS).toEqual([
+    'writeSchoolLoginProfile.functions',
+    'writeSchoolLoginProfile.web',
+    'provisionUniversalDevAccount',
+    'seedDemoUsers',
+  ]);
+});
+
+test('google login restamp requires an authenticated uid', async () => {
+  const handler = createEnsureCampusStoryBindingHandler({
+    db: fakeDb(),
+    FieldValue,
+    randomUUID: () => 'gen-google',
+    HttpsError: FakeHttpsError,
+  });
+  await expect(handler({ auth: null, data: { schoolId: 'pu' } })).rejects.toMatchObject({
+    code: 'unauthenticated',
+  });
+});
+
+test('google login restamp stamps a live student and ignores client schoolId or email', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'schools/pu/members/alice': { status: 'active', role: 'member' },
+      'users/alice': { status: 'active', displayName: 'Alice' },
+    },
+    {
+      createTimes: {
+        'users/alice': 100,
+        'schools/pu/members/alice': 200,
+      },
+    },
+  );
+  const handler = createEnsureCampusStoryBindingHandler({
+    db,
+    FieldValue,
+    randomUUID: () => 'gen-google',
+    HttpsError: FakeHttpsError,
+  });
+  const result = await handler({
+    auth: { uid: 'alice', token: { email: 'alice@gmail.com' } },
+    data: { schoolId: 'attacker-school', email: 'alice@gmail.com' },
+  });
+  expect(result).toEqual({ success: true, stamped: ['pu'] });
+  expect(db.docs.get('schools/pu/members/alice')).toMatchObject({
+    status: 'active',
+    profileBoundSchoolId: 'pu',
+    profileBoundGeneration: 'gen-google',
+  });
+  expect(db.docs.get('users/alice').bindingGeneration).toBe('gen-google');
+  expect(db.docs.get('schools/attacker-school/members/alice')).toBeUndefined();
+  expect(
+    restampEligibility({
+      membership: { status: 'active' },
+      memberSnap: {
+        exists: true,
+        data: () => ({ status: 'active' }),
+        createTime: { toMillis: () => 200 },
+      },
+      userSnap: {
+        exists: true,
+        data: () => ({ status: 'active' }),
+        createTime: { toMillis: () => 100 },
+      },
+    }).ok,
+  ).toBe(true);
+});
+
+test('google login restamp skips a rebuilt profile newer than leftover membership', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'schools/pu/members/bob': { status: 'active', role: 'member' },
+      'users/bob': { displayName: 'Rebuilt', role: 'student' },
+    },
+    {
+      createTimes: {
+        'users/bob': 400,
+        'schools/pu/members/bob': 100,
+      },
+    },
+  );
+  const result = await stampExistingCampusStoryMemberships({
+    db,
+    uid: 'bob',
+    FieldValue,
+    randomUUID: () => 'gen-rebuilt',
+  });
+  expect(result.stamped).toEqual([]);
+  expect(result.skipped).toEqual(['pu:rebuilt-profile']);
+  expect(db.docs.get('schools/pu/members/bob')).toEqual({ status: 'active', role: 'member' });
+  expect(db.docs.get('users/bob').bindingGeneration).toBeUndefined();
+});
+
+test('orphan membership cleanup is dry-run counts unless apply re-verifies in a transaction', async () => {
+  const db = fakeDb({
+    'schools/pu': { name: 'PU' },
+    'schools/pu/members/ghost': { status: 'active', role: 'member' },
+    'schools/pu/members/closed': { status: 'active', role: 'member' },
+    'schools/pu/members/live': { status: 'active', role: 'member' },
+    'users/closed': { status: 'deleted' },
+    'users/live': { status: 'active' },
+  });
+  const { runCli, parseCli } = require('../../scripts/inactivate-orphan-school-memberships.cjs');
+  const dry = await runCli(['--project', 'demo-campus-security'], { db, FieldValue });
+  expect(dry.mode).toBe('dry-run');
+  expect(dry.counts).toEqual({ 'orphan-membership': 1, 'closed-profile': 1 });
+  expect(db.docs.get('schools/pu/members/ghost').status).toBe('active');
+  expect(() => parseCli(['--project', 'demo-campus-security', '--apply'])).toThrow();
+
+  const applied = await inactivateOrphanSchoolMemberships({
+    db,
+    FieldValue,
+    entries: planOrphanSchoolMembershipCleanup(await loadCampusMembershipRows(db)),
+  });
+  expect(applied.sort()).toEqual(['schools/pu/members/closed', 'schools/pu/members/ghost']);
+  expect(db.docs.get('schools/pu/members/ghost')).toEqual({ role: 'member', status: 'inactive' });
+  expect(db.docs.get('schools/pu/members/closed')).toEqual({ role: 'member', status: 'inactive' });
+  expect(db.docs.get('schools/pu/members/live')).toEqual({ status: 'active', role: 'member' });
 });

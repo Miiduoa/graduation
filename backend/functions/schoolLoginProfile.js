@@ -1,6 +1,11 @@
 const { randomUUID } = require('node:crypto');
 const { FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
+const {
+  isClosedAccount,
+  nextBindingGeneration,
+  campusStoryStampFields,
+} = require('./campusStoryAccessBinding');
 
 const displayRoles = new Set([
   'student',
@@ -35,18 +40,12 @@ function createSchoolLoginProfileWriter({ db }) {
     return db.runTransaction(async (tx) => {
       const [userDoc, memberDoc] = await tx.getAll(userRef, memberRef);
       const account = userDoc.exists ? userDoc.data() : {};
-      if (
-        account.accountDeletionInProgress === true ||
-        ['deleted', 'disabled', 'suspended', 'inactive'].includes(account.status)
-      ) {
+      if (isClosedAccount(account)) {
         throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
           reason: 'account-deletion',
         });
       }
-      const bindingGeneration =
-        typeof account.bindingGeneration === 'string' && account.bindingGeneration
-          ? account.bindingGeneration
-          : randomUUID();
+      const bindingGeneration = nextBindingGeneration(account, randomUUID);
       const membership = memberDoc.exists ? memberDoc.data() : null;
       if (membership?.status && membership.status !== 'active') {
         throw new HttpsError('permission-denied', '這間學校的成員資格已停用，請聯絡校方。');
@@ -73,8 +72,7 @@ function createSchoolLoginProfileWriter({ db }) {
           status: 'active',
           role: resolved.memberRole,
           lastLoginAt: FieldValue.serverTimestamp(),
-          profileBoundSchoolId: schoolId,
-          profileBoundGeneration: bindingGeneration,
+          ...campusStoryStampFields(schoolId, bindingGeneration),
           ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
         },
         { merge: true },

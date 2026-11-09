@@ -2205,6 +2205,47 @@ describe('storage security rules', () => {
     await assertSucceeds(dana.doc('campusStories/legacy-bind').delete());
   });
 
+  test('google restamp restores story media; rebuilt leftover membership stays unreadable', async () => {
+    const now = Date.now();
+    const payload = {
+      schoolId: 'pu', authorUid: 'google-stu', kind: 'text', text: 'google story',
+      expiresAt: now + 3_600_000, viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc('users/google-stu').set({
+        status: 'active', displayName: 'Google', schoolId: 'pu', primarySchoolId: 'pu',
+        bindingGeneration: 'gen-google',
+      });
+      await db.doc('schools/pu/members/google-stu').set({
+        status: 'active', role: 'member',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-google',
+      });
+      await db.doc('users/rebuilt-stu').set({ displayName: 'Rebuilt', role: 'student' });
+      await db.doc('schools/pu/members/rebuilt-stu').set({ status: 'active', role: 'member' });
+    });
+    const googleCtx = testEnv.authenticatedContext('google-stu');
+    const rebuiltCtx = testEnv.authenticatedContext('rebuilt-stu');
+    const googleMedia = googleCtx.storage().ref('schools/pu/stories/google-bind/image');
+    const rebuiltMedia = rebuiltCtx.storage().ref('schools/pu/stories/rebuilt-bind/image');
+
+    await assertSucceeds(googleMedia.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'google-stu' },
+    }));
+    const mediaUrl = await assertSucceeds(googleMedia.getDownloadURL());
+    await assertSucceeds(googleCtx.firestore().doc('campusStories/google-bind').set({
+      ...payload, kind: 'image', mediaUrl,
+    }));
+    await assertSucceeds(googleMedia.getMetadata());
+    await assertFails(rebuiltMedia.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'rebuilt-stu' },
+    }));
+    await assertFails(rebuiltMedia.getMetadata());
+    await assertFails(rebuiltCtx.firestore().doc('campusStories/rebuilt-bind').set({
+      ...payload, authorUid: 'rebuilt-stu',
+    }));
+  });
+
   for (const objectPath of [
     'conversations/orphan/messages/one/private.pdf',
     'conversations/orphan/media/one/private.pdf',
