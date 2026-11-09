@@ -269,6 +269,37 @@ it('rejects oversized pasted lessons before storing them without erasing an earl
   expect(screen.getByRole('button', { name: '開始讀這份內容' }).hasAttribute('disabled')).toBe(false);
 });
 
+it('rejects a definitely oversized UTF-8 lesson file before decoding, retaining the current note', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '原教材尚未備份的筆記' } });
+  // 60,002 three-byte characters exceed the largest UTF-8 representation of 60,000 UTF-16 units.
+  const text = '字'.repeat(60_002);
+  const file = new File([text], '大份講義.md', { type: 'text/markdown' });
+  const read = vi.fn().mockResolvedValue(text);
+  Object.defineProperty(file, 'text', { value: read });
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('尚未載入內容'));
+  expect(read).not.toHaveBeenCalled();
+  expect(note.value).toBe('原教材尚未備份的筆記');
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('allows a valid 60,000-character multibyte lesson through file preflight', async () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const content = '中'.repeat(60_000);
+  const file = new File([content], '中文講義.txt', { type: 'text/plain' });
+  const read = vi.fn().mockResolvedValue(content);
+  Object.defineProperty(file, 'text', { value: read });
+  expect(file.size).toBe(180_000);
+  fireEvent.change(screen.getByLabelText('選擇講義'), { target: { files: [file] } });
+  await waitFor(() => expect(read).toHaveBeenCalledOnce());
+  expect(await screen.findByText('中'.repeat(1_600))).toBeTruthy();
+  expect(screen.getByRole('button', { name: '下一段' }).hasAttribute('disabled')).toBe(false);
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
 it('invalidates a pending lesson replacement when an oversized pasted edit is rejected', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), {

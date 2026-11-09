@@ -622,6 +622,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     try {
       if (!/\.(pdf|txt|md)$/i.test(file.name)) throw new Error('請選擇 PDF、TXT 或 Markdown 文字檔。');
       if (!file.size || file.size > PERSONAL_IMPORT_DOCUMENT_LIMITS.bytes) throw new Error('請選擇有內容且不超過 8 MiB 的檔案。');
+      // One UTF-16 code unit needs at most three UTF-8 bytes, plus an optional BOM.
+      // Reject text files that cannot possibly fit before decoding them on a phone.
+      if (!/\.pdf$/i.test(file.name) && file.size > STUDY_TUTOR_LIMITS.textCharacters * 3 + 3)
+        throw new Error('TXT／Markdown 檔案超過 60,000 字元的可讀取範圍，尚未載入內容。請分章後重試。');
       const value = /\.pdf$/i.test(file.name)
         ? studySourceFromDocument(await readPersonalImportDocumentFile(file, controller.signal))
         : studySourceFromText({ id: 'local-text', title: file.name, text: await file.text() });
