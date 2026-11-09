@@ -1364,7 +1364,7 @@ function AssistantConversation({
             : activeShortcut?.kind === 'plan-study' ? '正在核對計畫中的作業…'
             : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : queryingGaps ? '正在查手機課表的空堂…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
-              {pendingQuestion}
+              {activeShortcut?.question ?? pendingQuestion}
             </Text>
             {syncBusy ? (
               <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.textSecondary, lineHeight: 21 }}>
