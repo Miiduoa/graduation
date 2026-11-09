@@ -293,55 +293,59 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   };
   return (
     <KeyboardAvoidingView style={styles.panel} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.panel, { paddingTop: insets.top, paddingBottom: insets.bottom }]} accessibilityViewIsModal>
+      <View style={[styles.panel, { paddingTop: insets.top }]} accessibilityViewIsModal>
         <View style={styles.header}>
           <Text accessibilityRole="header" style={styles.title}>找舊貼文</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="關閉歷史搜尋" onPress={close} style={styles.button}>
             <Text style={styles.actionText}>關閉</Text>
           </Pressable>
         </View>
-        <View style={styles.controls}>
-          <Text style={styles.muted}>搜尋本校歷史文章的標題開頭，英文區分大小寫；不搜尋內文。</Text>
-          {resumeHint && <Text accessibilityLiveRegion="polite" style={styles.message}>已保留上次的搜尋文字；請重新搜尋以確認最新結果與校籍權限。</Text>}
-          <Text style={styles.label}>記得的標題開頭</Text>
-          <TextInput ref={input} value={text} onChangeText={change} style={styles.input}
-            accessibilityLabel="記得的標題開頭" placeholder="例如：二手書" placeholderTextColor={theme.colors.textSecondary}
-            autoCapitalize="none" autoCorrect={false} returnKeyType="search"
-            onSubmitEditing={() => { void request(null, false); }} />
-          <View style={styles.actions}>
-            <Pressable accessibilityRole="button" accessibilityLabel="搜尋歷史標題"
-              accessibilityState={{ disabled: busy || opening, busy: busy || opening }} disabled={busy || opening}
-              onPress={() => { void request(null, false); }} style={[styles.button, styles.primary]}>
-              <Text style={styles.primaryText}>{busy ? '搜尋中…' : '搜尋'}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="清除歷史搜尋"
-              onPress={() => { change(''); input.current?.focus(); }} style={styles.button}>
-              <Text style={styles.actionText}>清除</Text>
-            </Pressable>
+        {/* Keep the close action fixed, but scroll input, retry, announcements
+            and results together when Dynamic Type or the keyboard shrinks the view. */}
+        <FlatList style={styles.scroll} data={posts} keyExtractor={(post) => post.id} keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.results, { paddingBottom: 16 + insets.bottom }]} initialNumToRender={10}
+          ListHeaderComponent={(
+          <View style={styles.controls}>
+            <Text style={styles.muted}>搜尋本校歷史文章的標題開頭，英文區分大小寫；不搜尋內文。</Text>
+            {resumeHint && <Text accessibilityLiveRegion="polite" style={styles.message}>已保留上次的搜尋文字；請重新搜尋以確認最新結果與校籍權限。</Text>}
+            <Text style={styles.label}>記得的標題開頭</Text>
+            <TextInput ref={input} value={text} onChangeText={change} style={styles.input}
+              accessibilityLabel="記得的標題開頭" placeholder="例如：二手書" placeholderTextColor={theme.colors.textSecondary}
+              autoCapitalize="none" autoCorrect={false} returnKeyType="search"
+              onSubmitEditing={() => { void request(null, false); }} />
+            <View style={styles.actions}>
+              <Pressable accessibilityRole="button" accessibilityLabel="搜尋歷史標題"
+                accessibilityState={{ disabled: busy || opening, busy: busy || opening }} disabled={busy || opening}
+                onPress={() => { void request(null, false); }} style={[styles.button, styles.primary]}>
+                <Text style={styles.primaryText}>{busy ? '搜尋中…' : '搜尋'}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="清除歷史搜尋"
+                onPress={() => { change(''); input.current?.focus(); }} style={styles.button}>
+                <Text style={styles.actionText}>清除</Text>
+              </Pressable>
+            </View>
+            {resumePostId && (
+              <Pressable accessibilityRole="button" accessibilityLabel="回到上次閱讀位置"
+                accessibilityHint="重新確認權限，從上次開啟的貼文接續，不還原舊結果"
+                accessibilityState={{ disabled: busy || opening, busy }} disabled={busy || opening}
+                style={styles.button} onPress={() => { void request(null, false, resumePostId); }}>
+                <Text style={styles.actionText}>回到上次閱讀位置</Text>
+              </Pressable>
+            )}
+            {busy && <ActivityIndicator accessibilityLabel="正在讀取歷史標題" color={theme.colors.accent} />}
+            {opening && <ActivityIndicator accessibilityLabel="正在確認貼文仍可閱讀" color={theme.colors.accent} />}
+            {!!error && <Text accessibilityRole="alert" style={styles.message}>{error}</Text>}
+            {!!error && retry.current && !busy && (
+              <Pressable accessibilityRole="button" accessibilityLabel="重試歷史搜尋" style={styles.button}
+                onPress={() => { const previous = retry.current; if (previous) void request(previous.cursor, previous.append, previous.fromPostId); }}>
+                <Text style={styles.actionText}>原地重試</Text>
+              </Pressable>
+            )}
+            <Text accessibilityLiveRegion="polite" style={styles.message}>
+              {notice ? `${notice} 目前顯示 ${posts.length} 篇。` : '輸入標題後按搜尋，不必先載入動態牆。'}
+            </Text>
           </View>
-          {resumePostId && (
-            <Pressable accessibilityRole="button" accessibilityLabel="回到上次閱讀位置"
-              accessibilityHint="重新確認權限，從上次開啟的貼文接續，不還原舊結果"
-              accessibilityState={{ disabled: busy || opening, busy }} disabled={busy || opening}
-              style={styles.button} onPress={() => { void request(null, false, resumePostId); }}>
-              <Text style={styles.actionText}>回到上次閱讀位置</Text>
-            </Pressable>
           )}
-          {busy && <ActivityIndicator accessibilityLabel="正在讀取歷史標題" color={theme.colors.accent} />}
-          {opening && <ActivityIndicator accessibilityLabel="正在確認貼文仍可閱讀" color={theme.colors.accent} />}
-          {!!error && <Text accessibilityRole="alert" style={styles.message}>{error}</Text>}
-          {!!error && retry.current && !busy && (
-            <Pressable accessibilityRole="button" accessibilityLabel="重試歷史搜尋" style={styles.button}
-              onPress={() => { const previous = retry.current; if (previous) void request(previous.cursor, previous.append, previous.fromPostId); }}>
-              <Text style={styles.actionText}>原地重試</Text>
-            </Pressable>
-          )}
-          <Text accessibilityLiveRegion="polite" style={styles.message}>
-            {notice ? `${notice} 目前顯示 ${posts.length} 篇。` : '輸入標題後按搜尋，不必先載入動態牆。'}
-          </Text>
-        </View>
-        <FlatList data={posts} keyExtractor={(post) => post.id} keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.results} initialNumToRender={10}
           renderItem={({ item }) => (
             <Pressable accessibilityRole="button" accessibilityLabel={`開啟貼文：${item.title}`}
               accessibilityState={{ busy: opening, disabled: opening }}
@@ -367,11 +371,12 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
 
 const createStyles = () => StyleSheet.create({
   panel: { flex: 1, backgroundColor: theme.colors.bg },
+  scroll: { flex: 1 },
   entry: { paddingHorizontal: 14, paddingBottom: 8 },
   entryButton: { minHeight: 44, padding: 10, borderRadius: 12, backgroundColor: theme.colors.surface },
   header: { padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   title: { flex: 1, fontSize: 22, fontWeight: '700', color: theme.colors.text },
-  controls: { paddingHorizontal: 16, gap: 8 },
+  controls: { gap: 8, paddingBottom: 8 },
   label: { color: theme.colors.text, fontSize: 16, fontWeight: '600' },
   input: { minHeight: 48, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, color: theme.colors.text, fontSize: 16 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
