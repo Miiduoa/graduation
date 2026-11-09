@@ -89,7 +89,8 @@ import {
   type PersonalImportLedger,
 } from '../services/personalImports';
 import { sharePersonalImportBackup } from '../services/personalImportBackupSharing';
-import { personalImportDocumentAiSource } from '@campus/shared/src/imports/aiRecognition';
+import { personalImportDocumentAiSource, parsePersonalImportAiResponse } from '@campus/shared/src/imports/aiRecognition';
+import { requestPersonalImportCloudImage } from '@campus/shared/src/imports/aiCloudImage';
 import {
   getMobileImportAiAvailability,
   MOBILE_IMPORT_AI_MAX_CHARACTERS,
@@ -340,6 +341,7 @@ function ImportWorkspace({
   } | null>(null);
   const [aiReviewed, setAiReviewed] = useState(false);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
+  const [cloudImageConsent, setCloudImageConsent] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<'all' | 'attention'>('all');
   const [attentionSnapshot, setAttentionSnapshot] = useState<Set<string>>(() => new Set());
   const [sourceImage, setSourceImage] = useState<{
@@ -994,8 +996,52 @@ function ImportWorkspace({
       const base64 = await readImageBase64(asset.uri);
       if (!current(run)) return;
       abort.current = new AbortController();
+      let cloudFailure = '';
+      if (mode === 'ai' && cloudImageConsent && session?.context) {
+        setNotice('雲端視覺模型正在直接辨識原圖，尚未修改課表，可隨時取消。');
+        try {
+          const cloud = await requestPersonalImportCloudImage({
+            base64, mime: mime as 'image/png' | 'image/jpeg',
+            kind: 'timetable', academicYear, semester,
+            explicitConsent: true,
+            endpoint: 'https://nuni.tw/api/personal-import/recognize-image',
+            headers: { Authorization: 'Platform ' + session.context },
+            signal: abort.current.signal,
+          });
+          if (!current(run)) return;
+          if (cloud.ok) {
+            const screenshot = { type: 'screenshot' as const, name: asset.fileName || '截圖' };
+            const result = parsePersonalImportAiResponse(cloud.output, '', {
+              kind: 'timetable', schoolId, academicYear, semester, source: screenshot, periodProfile: profile,
+            }, 'image');
+            if (!result.rows.length) throw new Error('未讀到可核對的課程');
+            setText('');
+            setSource(screenshot);
+            setSourceImage({ uri: asset.uri, width: asset.width, height: asset.height });
+            setImageViewerOpen(false);
+            clearDocumentSource();
+            setDocumentPrep(null);
+            setBackupPreview(null);
+            setRows(result.rows);
+            setSelected(new Set(result.rows.map((row) => row.id)));
+            setAiReviewed(false);
+            setAiRetry(null);
+            setExpanded(result.rows[0]?.id ?? null);
+            setIssues([...result.issues, {
+              code: 'import-provider', severity: 'warning',
+              message: '這次由雲端視覺模型直接辨識原圖，請逐堂對照確認。',
+            }]);
+            setNotice('雲端已直接辨識 ' + result.rows.length + ' 堂課。請核對星期、節次、教室，再確認新增。');
+            return;
+          }
+          cloudFailure = '雲端看圖未完成：' + cloud.message + ' 現在改用本機 OCR；本次結果不算雲端看圖成功。';
+        } catch (error) {
+          if (!current(run)) return;
+          cloudFailure = '雲端看圖失敗：' + (error instanceof Error ? error.message : '無法完成') + '，改用本機 OCR。';
+        }
+      }
       if (!ocr.current) throw new Error('辨識程式尚未就緒，請改貼文字。');
-      setNotice('正在讀取截圖，可隨時取消。');
+      setNotice(cloudFailure || '正在本機讀取截圖，可隨時取消。');
       const readGrid = mode === 'ai' && mime === 'image/png' && asset.width <= 4096 &&
         asset.height <= 4096 && asset.width * asset.height <= 4_000_000;
       const result = await ocr.current.recognize(base64, mime, abort.current.signal, readGrid);
@@ -1568,12 +1614,33 @@ function ImportWorkspace({
               <>
                 <Text style={{ color: theme.colors.muted, lineHeight: 21 }}>
                   {session
-                    ? '原圖留在手機。辨識文字會先遮蔽可辨識的姓名、學號與證號，再交給雲端 AI。'
-                    : '在手機讀取原圖，使用本機模型或一般規則整理。'}
+                    ? cloudImageConsent
+                      ? '已選雲端看圖：圖片將直接送至 Cloudflare 視覺模型；請先裁掉姓名、學號等個資。'
+                      : '目前由手機 OCR 讀取圖片，再遮罩辨識文字交給雲端 AI；原圖不會上傳。'
+                    : '未登入時由手機 OCR 或本機模型處理，不會上傳原圖。'}
                   {rows.some((row) => !row.academicYear || !row.semester)
                     ? '請在下方補上這批課程的學年度與學期。'
                     : '整理後可逐堂核對星期、節次和教室。'}
                 </Text>
+                {!rows.length && (
+                  <Pressable
+                    accessibilityRole="checkbox"
+                    accessibilityLabel="同意將原始課表截圖交給雲端視覺模型"
+                    accessibilityState={{ checked: cloudImageConsent, disabled: !session }}
+                    disabled={!session || busy || saving}
+                    onPress={() => setCloudImageConsent((value) => !value)}
+                    style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 }}
+                  >
+                    <Text style={{ color: theme.colors.text, fontSize: 18 }}>
+                      {cloudImageConsent ? '☑' : '☐'}
+                    </Text>
+                    <Text style={{ flex: 1, color: theme.colors.muted, lineHeight: 20 }}>
+                      {session
+                        ? '同意傳送原始截圖至雲端直接辨識（圖片上的個資無法預先可靠遮罩）'
+                        : '登入 nuni 後可啟用雲端圖片辨識'}
+                    </Text>
+                  </Pressable>
+                )}
                 {rows.length || gridNeedsPlacement ? (
                   <Button
                     text={rows.length ? `前往核對 ${rows.length} 堂課` : '開啟週課表補課'}
@@ -1585,7 +1652,7 @@ function ImportWorkspace({
                   />
                 ) : (
                   <Button
-                    text={hasScreenshotText ? '用 AI 整理這張截圖' : '用 AI 辨識課表截圖'}
+                    text={hasScreenshotText ? '用 AI 整理這張截圖' : cloudImageConsent && session ? '用雲端 AI 直接看課表' : '以本機 OCR 讀取課表'}
                     kind="primary"
                     disabled={
                       busy || saving || aiState.status === 'busy' ||

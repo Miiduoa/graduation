@@ -74,7 +74,7 @@ export async function reservePersonalImportCloudQuota(db: QuotaStore, principal:
   });
 }
 
-function outputSchema() {
+export function outputSchema() {
   const strings = ['title', 'academicYear', 'semester', 'courseCode', 'teacher', 'className', 'location', 'periodLabel', 'startTime', 'endTime', 'grade', 'date', 'endDate'];
   return {
     type: 'object', additionalProperties: false, required: ['complete', 'rows'],
@@ -94,7 +94,7 @@ function outputSchema() {
   };
 }
 
-function modelOutput(value: unknown): string | null {
+export function modelOutput(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
   const envelope = value as Record<string, unknown>;
   if (envelope.success === false || !envelope.result || typeof envelope.result !== 'object') return null;
