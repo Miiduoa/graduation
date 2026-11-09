@@ -54,6 +54,37 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('limits shared-cache freshness to the remaining lifetime of the 24-hour OSM snapshot', async () => {
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const upstream = vi.fn().mockResolvedValue(new Response(osmPayload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const initial = await GET();
+      expect(initial.status).toBe(200);
+      expect(initial.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=3600');
+
+      // A hit ten seconds before expiry cannot extend the CDN TTL by an hour.
+      clock.mockReturnValue(start + 24 * 60 * 60 * 1000 - 10_000);
+      const nearExpiry = await GET();
+      expect(nearExpiry.status).toBe(200);
+      expect(nearExpiry.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=10');
+      expect((await nearExpiry.json()).stale).toBe(false);
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      // Once expired the origin must query again rather than hand out a fresh label.
+      clock.mockReturnValue(start + 24 * 60 * 60 * 1000 + 1_000);
+      const refreshed = await GET();
+      expect(refreshed.status).toBe(200);
+      expect(refreshed.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=3600');
+      expect((await refreshed.json()).stale).toBe(false);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not cache or serve a former building whose OSM way no longer has a building tag', async () => {
     const invalidPayload = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
