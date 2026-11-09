@@ -291,7 +291,7 @@ function ScopedCreatorProfile({
   const pinnedPost = pin.status === 'ready' ? pin.value.post : null;
   const shownPosts = tab === 'posts' && pinnedPost
     ? activePosts.filter((post) => post.id !== pinnedPost.id) : activePosts;
-  const feedLoading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading';
+  const feedLoading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading' || (tab === 'posts' && pin.status === 'loading');
   const feedError = tab === 'saved' ? saved.status === 'error' : posts.status === 'error';
 
   const tabs: { key: ProfileTab; label: string }[] = [
