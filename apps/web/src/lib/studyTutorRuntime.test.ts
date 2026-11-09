@@ -6,7 +6,7 @@ import {
   STUDY_TUTOR_GENERATION_TIMEOUT_MS,
   STUDY_TUTOR_TIMEOUT_MS,
 } from './studyTutorRuntime';
-import type { StudyPassage, StudyTutorHistory, TutorExplanation } from './studyTutor';
+import { parseTutorExplanation, type StudyPassage, type StudyTutorHistory, type TutorExplanation } from './studyTutor';
 
 const availability = vi.hoisted(() => vi.fn());
 vi.mock('./personalImportAiLocal', () => ({ getPersonalImportAiAvailability: availability }));
@@ -39,6 +39,10 @@ const lesson = (): TutorExplanation => ({
   title: '主鍵', explanation: '主鍵用來區分每一筆紀錄。',
   sourceQuote: '主鍵用來唯一識別一筆紀錄。',
   question: '主鍵用來識別什麼？', answer: '每一筆紀錄。',
+  steps: [
+    { title: '看主鍵', explanation: '辨識唯一的紀錄。', sourceQuote: '主鍵用來唯一識別一筆紀錄。' },
+    { title: '看外鍵', explanation: '連接不同資料表。', sourceQuote: '外鍵連接資料表。' },
+  ],
 });
 const history = (): StudyTutorHistory => ({
   passageId: passage().id, sourceText: passage().text, mode: 'understand',
@@ -279,6 +283,31 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it('requires 2–4 grounded steps for NEW lessons without breaking older saved replies', async () => {
+    // Backward compatibility is a separate contract: old v1/v2 replies had
+    // no steps, so restoring them must not be tightened by this worker rule.
+    const legacy = { ...lesson(), steps: undefined };
+    const parsed = parseTutorExplanation(JSON.stringify(legacy), passage());
+    expect(parsed.steps).toBeUndefined();
+
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(legacy) });
+    await expect(pending).rejects.toThrow('缺少分步步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
     const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
     const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };
@@ -318,7 +347,7 @@ describe('explicit local study generation', () => {
 
   it('counts generated quote length by Unicode code point, not UTF-16 units', async () => {
     const quote = '😀'.repeat(59) + '甲';
-    const source = { ...passage(), text: quote };
+    const source = { ...passage(), text: quote + passage().text };
     const pending = runStudyTutor({
       passage: source, mode: 'practice', signal: new AbortController().signal,
     });

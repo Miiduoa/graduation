@@ -213,6 +213,10 @@ export async function runStudyTutor({
           try {
             if (typeof data.raw !== 'string') throw workerError('invalid_response');
             const explanation = parseTutorExplanation(data.raw, source);
+            // Saved older lessons may omit steps, but every NEW local lesson
+            // promises a usable 2–4-step explanation, not just a generic summary.
+            if (!explanation.steps)
+              throw new Error('這次講解缺少分步步驟，無法完成逐步學習。請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
