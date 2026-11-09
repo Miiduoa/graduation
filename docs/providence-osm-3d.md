@@ -36,7 +36,7 @@
 ## 測試
 
 ```sh
-pnpm --filter web exec vitest run src/app/map/providenceFootprints.test.ts src/app/map/CampusSpatialExplorer.test.tsx src/app/map/campusSpatialScene.test.ts
+pnpm --filter web exec vitest run src/app/map/providenceFootprints.test.ts src/app/map/CampusSpatialExplorer.test.tsx src/app/map/campusSpatialScene.test.ts src/app/api/public/campus-footprints/route.test.ts
 pnpm --filter web exec tsc --noEmit
 pnpm --filter web build
 ```
