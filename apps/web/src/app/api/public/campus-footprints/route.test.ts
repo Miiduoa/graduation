@@ -145,6 +145,53 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('expires fresh cache when Overpass replication becomes 48 hours old, not 24 hours after fetch', async () => {
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      // The database is already 47h30m behind when the HTTP fetch succeeds.
+      // A 24-hour cache would incorrectly claim that 71h-old geometry is fresh.
+      const baseTime = new Date(start - (47 * 60 + 30) * 60_000)
+        .toISOString().replace('.000Z', 'Z');
+      const payload = JSON.stringify({
+        osm3s: { timestamp_osm_base: baseTime },
+        ...JSON.parse(osmPayload),
+      });
+      const upstream = vi.fn().mockImplementation(async () => new Response(payload, { status: 200 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      expect(first.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=1800');
+      const firstBody = await first.json();
+      expect(firstBody.stale).toBe(false);
+      expect(firstBody.osmBaseAt).toBe(baseTime);
+
+      clock.mockReturnValue(start + 20 * 60_000);
+      const stillFresh = await GET();
+      expect(stillFresh.headers.get('Cache-Control')).toBe('public, max-age=0, s-maxage=600');
+      expect((await stillFresh.json()).stale).toBe(false);
+      expect(upstream).toHaveBeenCalledTimes(1);
+
+      // A new request after the 48h deadline must revalidate upstream. If
+      // replication is still delayed, preserve the dated outline as stale.
+      clock.mockReturnValue(start + 30 * 60_000 + 1_000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      const fallbackBody = await fallback.json();
+      expect(fallbackBody.stale).toBe(true);
+      expect(fallbackBody.fetchedAt).toBe(firstBody.fetchedAt);
+      expect(fallbackBody.osmBaseAt).toBe(baseTime);
+      expect(upstream).toHaveBeenCalledTimes(2);
+      // The failed refresh must activate the existing cooldown.
+      await GET();
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not promote a days-old Overpass database state into a new fresh snapshot', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 3 * 24 * 60 * 60 * 1000)
       .toISOString().replace('.000Z', 'Z');
