@@ -22,17 +22,17 @@ const MAX_RESPONSE_BYTES = 500_000;
 // time. A freshly fetched HTTP response can still contain days-old map state.
 const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
 
-function verifyOverpassReplicationTime(payload: unknown, now: number): void {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+function verifyOverpassReplicationTime(payload: unknown, now: number): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const metadata = (payload as Record<string, unknown>).osm3s;
   // Older/mock-compatible replies without replication metadata still follow the
   // existing whitelist/geometry rules. Validate the timestamp whenever supplied.
-  if (metadata === undefined) return;
+  if (metadata === undefined) return null;
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     throw new Error('Invalid Overpass replication metadata');
   }
   const timestamp = (metadata as Record<string, unknown>).timestamp_osm_base;
-  if (timestamp === undefined) return;
+  if (timestamp === undefined) return null;
   if (typeof timestamp !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(timestamp)) {
     throw new Error('Invalid Overpass replication timestamp');
@@ -42,6 +42,7 @@ function verifyOverpassReplicationTime(payload: unknown, now: number): void {
       baseMs > now + 5 * 60 * 1000 || now - baseMs > MAX_OVERPASS_REPLICATION_LAG_MS) {
     throw new Error('Overpass replication timestamp is not recent');
   }
+  return timestamp;
 }
 
 class OverpassRateLimitError extends Error {
@@ -77,7 +78,7 @@ function freshCacheControl(validUntil: number): string {
 const query = '[out:json][timeout:12];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
-type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; validUntil: number; discardAfter: number };
+type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; osmBaseAt: string | null; validUntil: number; discardAfter: number };
 let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
@@ -142,7 +143,7 @@ async function readOsm(): Promise<Snapshot> {
   }
   const raw = await readBoundedResponse(response);
   const payload = JSON.parse(raw) as unknown;
-  verifyOverpassReplicationTime(payload, Date.now());
+  const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
   // on timeout or memory exhaustion. Never promote that partial result to a
   // fresh 24-hour snapshot or replace a previously verified fallback.
@@ -153,7 +154,7 @@ async function readOsm(): Promise<Snapshot> {
   if (!buildings.length) throw new Error('No verified building outlines in response');
   const now = Date.now();
   return {
-    buildings, fetchedAt: new Date(now).toISOString(),
+    buildings, fetchedAt: new Date(now).toISOString(), osmBaseAt,
     validUntil: now + REFRESH_MS, discardAfter: now + MAX_SNAPSHOT_AGE_MS,
   };
 }
@@ -162,7 +163,7 @@ export async function GET() {
   const now = Date.now();
   if (cache && cache.validUntil > now) {
     return NextResponse.json({
-      schoolId: 'pu', source: 'OpenStreetMap', fetchedAt: cache.fetchedAt,
+      schoolId: 'pu', source: 'OpenStreetMap', fetchedAt: cache.fetchedAt, osmBaseAt: cache.osmBaseAt,
       stale: false, buildings: cache.buildings,
     }, { headers: { 'Cache-Control': freshCacheControl(cache.validUntil) } });
   }
@@ -188,7 +189,7 @@ export async function GET() {
     status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': retryAfterSeconds() },
   });
   return NextResponse.json({
-    schoolId: 'pu', source: 'OpenStreetMap', fetchedAt: cache.fetchedAt,
+    schoolId: 'pu', source: 'OpenStreetMap', fetchedAt: cache.fetchedAt, osmBaseAt: cache.osmBaseAt,
     stale: cache.validUntil <= Date.now(), buildings: cache.buildings,
   }, {
     // 有舊快照時保留舊輪廓並明示來源日期，不把快取說成最新。
