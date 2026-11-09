@@ -269,6 +269,14 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (!Array.isArray(timetable.classGaps) || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
   }
+  // A future or malformed saved-at timestamp cannot support a current availability
+  // claim. Allow a small device-clock skew, while keeping null as explicitly unknown.
+  if (timetable.updatedAt != null) {
+    const savedAt = typeof timetable.updatedAt === 'string' ? Date.parse(timetable.updatedAt) : NaN;
+    if (!Number.isFinite(savedAt) || savedAt > now + 5 * MINUTE) {
+      return reply('這份手機課表的儲存時間資料不足或晚於查詢時間，無法核對空堂。請開啟「我的課表」確認來源與時間。');
+    }
+  }
   // A damaged local snapshot cannot be treated as proof that a student has no free period.
   if (timetable.classGaps.some((gap) => !gap || typeof gap !== 'object' ||
     !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) ||

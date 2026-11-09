@@ -270,6 +270,29 @@ describe('saved class gap answer', () => {
     }).content).toContain('沒有課間空堂');
   });
 
+  test('rejects invalid or future-dated save provenance without inventing free time', () => {
+    const invalidSavedAt: unknown[] = ['', 'unparseable', '2099-01-01T00:00:00+08:00', 12345];
+    for (const updatedAt of invalidSavedAt) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context,
+        timetable: { ...context.timetable, updatedAt: updatedAt as string },
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('無法核對空堂');
+      expect(answer.content).not.toContain('有 2 段');
+      expect(answer.content).not.toContain('沒有課間空堂');
+    }
+    // Five minutes of clock skew does not invalidate a recently saved snapshot.
+    const nearFuture = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: '2026-11-06T10:04:00+08:00' },
+    });
+    expect(nearFuture.content).toContain('有 2 段');
+    // Null remains a known limitation, not a forged timestamp.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: null },
+    }).content).toContain('儲存時間不詳');
+  });
+
   test('malformed saved gap containers and entries fail closed instead of crashing or claiming no free time', () => {
     const malformed: unknown[] = [
       null, undefined, 12, 'invalid', [], {},
