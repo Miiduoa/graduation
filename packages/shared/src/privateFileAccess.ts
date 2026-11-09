@@ -1,0 +1,372 @@
+/** Private file path parser and canonical authorization for #517 / #557. */
+
+export const PRIVATE_FILE_MANAGER_ROLES = new Set([
+  'owner',
+  'admin',
+  'instructor',
+  'moderator',
+]);
+
+export const PRIVATE_DOCUMENT_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'application/msword',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+
+export const PRIVATE_FILE_MAX_BYTES = {
+  'group-cover': 5 * 1024 * 1024,
+  'group-post': 20 * 1024 * 1024,
+  assignment: 50 * 1024 * 1024,
+  'story-image': 10 * 1024 * 1024,
+  'story-video': 100 * 1024 * 1024,
+} as const;
+
+export const GROUP_COVER_FILENAME = /^cover\.[A-Za-z0-9]+$/;
+
+const CLOSED_ACCOUNT_STATUSES = new Set(['deleted', 'disabled', 'suspended', 'inactive']);
+
+export type PrivateFileKind = 'group-cover' | 'group-post' | 'assignment' | 'story';
+
+export type PrivateFileScope = {
+  path: string;
+  filename: string;
+  kind: PrivateFileKind;
+  maxBytes: number;
+  groupId?: string;
+  postId?: string;
+  assignmentId?: string;
+  userId?: string;
+  schoolId?: string;
+  storyId?: string;
+};
+
+export class PrivateFileAccessError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = 'PrivateFileAccessError';
+    this.statusCode = statusCode;
+  }
+}
+
+export type PrivateFileDocSnap = {
+  exists: boolean;
+  data: () => Record<string, unknown> | undefined;
+};
+
+export type PrivateFileDocRef = {
+  path?: string;
+  collection: (name: string) => PrivateFileCollectionRef;
+};
+
+export type PrivateFileCollectionRef = {
+  doc: (id: string) => PrivateFileDocRef;
+};
+
+export type PrivateFileTransaction = {
+  get: (ref: PrivateFileDocRef) => Promise<PrivateFileDocSnap>;
+  getAll: (...refs: PrivateFileDocRef[]) => Promise<PrivateFileDocSnap[]>;
+};
+
+export type PrivateFileDb = {
+  collection: (name: string) => PrivateFileCollectionRef;
+  runTransaction: <T>(
+    fn: (tx: PrivateFileTransaction) => Promise<T>,
+    options?: { readOnly: boolean },
+  ) => Promise<T>;
+};
+
+export type StoryObjectInfo = {
+  ownerUid?: string;
+  contentType?: string;
+};
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+export function validPrivateFileSegment(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 255 &&
+    value !== '.' &&
+    value !== '..' &&
+    // Reject control characters before constructing document and object paths.
+    // eslint-disable-next-line no-control-regex
+    !/[\\/\u0000-\u001f\u007f]/.test(value)
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function deny(): never {
+  throw new PrivateFileAccessError(403, 'File access denied');
+}
+
+function accountBlocked(data: Record<string, unknown>): boolean {
+  return (
+    data.accountDeletionInProgress === true ||
+    CLOSED_ACCOUNT_STATUSES.has(String(data.status || ''))
+  );
+}
+
+export function isPrivateFileImage(contentType: string): boolean {
+  return /^image\/[\w.+-]+$/.test(contentType);
+}
+
+export function isPrivateFileVideo(contentType: string): boolean {
+  return /^video\/[\w.+-]+$/.test(contentType);
+}
+
+export function privateFileMaxBytes(kind: PrivateFileKind, contentType?: string): number {
+  if (kind === 'story') {
+    if (contentType && isPrivateFileVideo(contentType)) return PRIVATE_FILE_MAX_BYTES['story-video'];
+    return PRIVATE_FILE_MAX_BYTES['story-image'];
+  }
+  if (kind === 'group-cover') return PRIVATE_FILE_MAX_BYTES['group-cover'];
+  if (kind === 'group-post') return PRIVATE_FILE_MAX_BYTES['group-post'];
+  return PRIVATE_FILE_MAX_BYTES.assignment;
+}
+
+export function isAllowedPrivateFileContentType(kind: PrivateFileKind, contentType: string): boolean {
+  if (kind === 'group-cover') return isPrivateFileImage(contentType);
+  if (kind === 'story') return isPrivateFileImage(contentType) || isPrivateFileVideo(contentType);
+  return isPrivateFileImage(contentType) || PRIVATE_DOCUMENT_TYPES.has(contentType);
+}
+
+/** Returns a private namespace scope, or null for any other path. */
+export function parsePrivateFilePath(value: unknown): PrivateFileScope | null {
+  if (typeof value !== 'string' || utf8ByteLength(value) > 1024) return null;
+  const parts = value.split('/');
+  if (!parts.every(validPrivateFileSegment)) return null;
+  const common = { path: value, filename: parts[parts.length - 1] };
+  if (parts[0] === 'groups' && parts.length === 3) {
+    return {
+      ...common,
+      kind: 'group-cover',
+      groupId: parts[1],
+      maxBytes: PRIVATE_FILE_MAX_BYTES['group-cover'],
+    };
+  }
+  if (parts[0] === 'groups' && parts[2] === 'posts' && parts.length === 5) {
+    return {
+      ...common,
+      kind: 'group-post',
+      groupId: parts[1],
+      postId: parts[3],
+      maxBytes: PRIVATE_FILE_MAX_BYTES['group-post'],
+    };
+  }
+  if (parts[0] === 'assignments' && parts[2] === 'submissions' && parts.length === 5) {
+    return {
+      ...common,
+      kind: 'assignment',
+      assignmentId: parts[1],
+      userId: parts[3],
+      maxBytes: PRIVATE_FILE_MAX_BYTES.assignment,
+    };
+  }
+  if (parts[0] === 'schools' && parts[2] === 'stories' && parts.length === 5) {
+    return {
+      ...common,
+      kind: 'story',
+      schoolId: parts[1],
+      storyId: parts[3],
+      maxBytes: PRIVATE_FILE_MAX_BYTES['story-video'],
+    };
+  }
+  return null;
+}
+
+/** Legacy privateGroupFile namespaces only (covers, post attachments, assignment files). */
+export function parsePrivateGroupFilePath(value: unknown): PrivateFileScope | null {
+  const scope = parsePrivateFilePath(value);
+  if (!scope || scope.kind === 'story') return null;
+  return scope;
+}
+
+export function isCoverFilenameAllowed(filename: string): boolean {
+  return GROUP_COVER_FILENAME.test(filename);
+}
+
+export function privateGroupCoverPath(groupId: string, extension: string): string | null {
+  const filename = `cover.${extension}`;
+  if (!validPrivateFileSegment(groupId) || !isCoverFilenameAllowed(filename)) return null;
+  return `groups/${groupId}/${filename}`;
+}
+
+export function privateGroupPostPath(groupId: string, postId: string, filename: string): string | null {
+  if (![groupId, postId, filename].every(validPrivateFileSegment)) return null;
+  return `groups/${groupId}/posts/${postId}/${filename}`;
+}
+
+export function privateAssignmentPath(
+  assignmentId: string,
+  userId: string,
+  filename: string,
+): string | null {
+  if (![assignmentId, userId, filename].every(validPrivateFileSegment)) return null;
+  return `assignments/${assignmentId}/submissions/${userId}/${filename}`;
+}
+
+export function privateStoryPath(schoolId: string, storyId: string, filename: string): string | null {
+  if (![schoolId, storyId, filename].every(validPrivateFileSegment)) return null;
+  return `schools/${schoolId}/stories/${storyId}/${filename}`;
+}
+
+function storyExpiresAtMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value === 'object') {
+    const record = value as { toMillis?: unknown; toDate?: unknown };
+    if (typeof record.toMillis === 'function') {
+      const ms = (record.toMillis as () => unknown)();
+      return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+    }
+    if (typeof record.toDate === 'function') {
+      const date = (record.toDate as () => unknown)();
+      return date instanceof Date ? date.getTime() : null;
+    }
+  }
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+export function assertStoryMediaRead(input: {
+  schoolId: string;
+  uid: string;
+  story: Record<string, unknown> | null;
+  object: StoryObjectInfo;
+  nowMs?: number;
+}): void {
+  const ownerUid = typeof input.object.ownerUid === 'string' ? input.object.ownerUid : '';
+  const contentType = String(input.object.contentType || '').split(';')[0].trim().toLowerCase();
+  if (!input.story) {
+    if (ownerUid !== input.uid) deny();
+    return;
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  const expiresAt = storyExpiresAtMs(input.story.expiresAt);
+  const mediaUrl = input.story.mediaUrl;
+  const kind = input.story.kind;
+  if (
+    input.story.schoolId !== input.schoolId ||
+    input.story.authorUid !== ownerUid ||
+    typeof mediaUrl !== 'string' ||
+    mediaUrl.length === 0 ||
+    expiresAt === null ||
+    expiresAt <= nowMs ||
+    !((kind === 'image' && isPrivateFileImage(contentType)) ||
+      (kind === 'video' && isPrivateFileVideo(contentType)))
+  ) {
+    deny();
+  }
+}
+
+/**
+ * Live canonical account, school and group membership. Story paths also require
+ * the #557 campus-story binding stamp (profileBoundSchoolId + generation).
+ */
+export async function authorizePrivateFile(
+  db: PrivateFileDb,
+  scope: PrivateFileScope,
+  uid: string,
+  writing: boolean,
+): Promise<void> {
+  await db.runTransaction(
+    async (tx) => {
+      if (scope.kind === 'story') {
+        const schoolId = scope.schoolId;
+        if (!validPrivateFileSegment(schoolId)) deny();
+        const [account, schoolMember] = await tx.getAll(
+          db.collection('users').doc(uid),
+          db.collection('schools').doc(schoolId).collection('members').doc(uid),
+        );
+        const accountData = asRecord(account.data());
+        if (
+          !account.exists ||
+          accountBlocked(accountData) ||
+          !schoolMember.exists ||
+          asRecord(schoolMember.data()).status !== 'active'
+        ) {
+          deny();
+        }
+        const memberData = asRecord(schoolMember.data());
+        if (
+          memberData.profileBoundSchoolId !== schoolId ||
+          typeof memberData.profileBoundGeneration !== 'string' ||
+          memberData.profileBoundGeneration.length === 0
+        ) {
+          deny();
+        }
+        if (writing) {
+          const story = await tx.get(db.collection('campusStories').doc(scope.storyId || ''));
+          if (story.exists) deny();
+        }
+        return;
+      }
+
+      let groupId = scope.groupId;
+      if (scope.kind === 'assignment') {
+        const assignment = await tx.get(db.collection('assignments').doc(scope.assignmentId || ''));
+        groupId = asRecord(assignment.data()).groupId as string | undefined;
+        if (!assignment.exists || !validPrivateFileSegment(groupId)) deny();
+      }
+      if (!validPrivateFileSegment(groupId)) deny();
+      const groupRef = db.collection('groups').doc(groupId);
+      const [account, group, member] = await tx.getAll(
+        db.collection('users').doc(uid),
+        groupRef,
+        groupRef.collection('members').doc(uid),
+      );
+      const accountData = asRecord(account.data());
+      const schoolId = asRecord(group.data()).schoolId;
+      if (
+        !account.exists ||
+        accountBlocked(accountData) ||
+        !group.exists ||
+        !validPrivateFileSegment(schoolId) ||
+        !member.exists ||
+        asRecord(member.data()).status !== 'active'
+      ) {
+        deny();
+      }
+      const schoolMember = await tx.get(
+        db.collection('schools').doc(schoolId as string).collection('members').doc(uid),
+      );
+      if (!schoolMember.exists || asRecord(schoolMember.data()).status !== 'active') deny();
+      const manager = PRIVATE_FILE_MANAGER_ROLES.has(String(asRecord(member.data()).role || ''));
+      if (
+        (writing && scope.kind === 'group-cover' && !manager) ||
+        (scope.kind === 'assignment' && scope.userId !== uid && (writing || !manager))
+      ) {
+        deny();
+      }
+    },
+    { readOnly: true },
+  );
+}

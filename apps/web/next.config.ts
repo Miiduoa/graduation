@@ -30,7 +30,7 @@ const contentSecurityPolicy = [
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
   "worker-src 'self' blob:",
   // api.nuni.tw is the existing school-discovery host used by /auth/account.
-  "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
+  "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://*.r2.cloudflarestorage.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
     emulatorConnectSrc,
 ].join('; ');
 

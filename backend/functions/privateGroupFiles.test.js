@@ -355,6 +355,7 @@ describe('private group file namespace parser', () => {
     ['groups/course/posts/one/../file.pdf', null], ['groups/course/cover.jpg/', null],
     ['groups/course/cover\n.jpg', null], ['groups/course/cover\\.jpg', null],
     ['assignments/work/submissions/alice', null], ['avatars/alice.jpg', null],
+    ['schools/pu/stories/story-1/image', null],
     [null, null], [['groups/course/cover.jpg'], null],
   ])('limits path %j to scope %s', (path, kind) => {
     expect(parsePrivateGroupFilePath(path)?.kind || null).toBe(kind);
