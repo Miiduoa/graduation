@@ -179,7 +179,7 @@ it('offers read-only recovery for uncertain results and blocks the dependent bat
   expect(onReconcile).toHaveBeenCalledWith(cards[0]);
   expect(screen.getAllByRole('button', { name: '確認' })).toHaveLength(2);
   expect(screen.getAllByRole('button', { name: '確認' }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
-  expect((screen.getByRole('button', { name: '依序全部確認' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '依序確認 2 筆個人行程' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByLabelText('行程執行進度').textContent).toContain('待核對 1 項');
 });
 
