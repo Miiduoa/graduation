@@ -149,6 +149,8 @@ const {
   nextBindingGeneration,
   campusStoryStampFields,
   createEnsureCampusStoryBindingHandler,
+  clearHaltFields,
+  clearCampusStoryBindingHalt,
 } = require('./campusStoryAccessBinding');
 const {
   createAssignmentPublishedNotifyHandler,
@@ -671,6 +673,7 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
         devUniversalAccount: true,
         devUniversalScope: 'all-schools',
         schoolIds: FieldValue.arrayUnion(schoolId),
+        ...clearHaltFields(FieldValue),
         ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
       },
       { merge: true },
@@ -2596,14 +2599,16 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
   },
   createSchoolMembershipChangedHandler({
     syncSchoolDirectoryEntry,
-    syncProfileSchoolBinding: ({ schoolId, uid, membership }) =>
-      clearProfileSchoolBindingForRevokedMembership({
+    syncProfileSchoolBinding: async ({ schoolId, uid, membership }) => {
+      await clearCampusStoryBindingHalt({ db, FieldValue, uid });
+      return clearProfileSchoolBindingForRevokedMembership({
         db,
         FieldValue,
         schoolId,
         uid,
         membership,
-      }),
+      });
+    },
   }),
 );
 

@@ -186,7 +186,12 @@ function createDeleteUserAccountHandler({
       uid,
       FieldValue,
       memberRefs: schoolMemberRefs,
-      userUpdate: { accountDeletionInProgress: true, notificationDeliveryDisabled: true },
+      userUpdate: {
+        accountDeletionInProgress: true,
+        notificationDeliveryDisabled: true,
+        campusStoryBindingHaltKind: FieldValue.delete(),
+        campusStoryBindingHaltAt: FieldValue.delete(),
+      },
     });
 
     // Remove school authority first so ordinary membership-checked writes stop.

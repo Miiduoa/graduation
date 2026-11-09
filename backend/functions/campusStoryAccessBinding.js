@@ -66,10 +66,17 @@ function restampEligibility({ membership, memberSnap, userSnap }) {
   return { ok: true };
 }
 
+const RESTAMP_COOLDOWN_MS = 5 * 60 * 1000;
+
 function trustedProfileSchoolIds(profile) {
   const ids = [];
   for (const value of [profile?.schoolId, profile?.primarySchoolId]) {
     if (typeof value === 'string' && value && !ids.includes(value)) ids.push(value);
+  }
+  if (Array.isArray(profile?.schoolIds)) {
+    for (const value of profile.schoolIds) {
+      if (typeof value === 'string' && value && !ids.includes(value)) ids.push(value);
+    }
   }
   return ids;
 }
@@ -103,20 +110,6 @@ function lookupSchoolIds(profile, knownSchoolIds) {
   return ids;
 }
 
-function profileMatchesUniqueSchool(profile, schoolId) {
-  return (
-    typeof profile?.bindingGeneration === 'string' &&
-    Boolean(profile.bindingGeneration) &&
-    profile.schoolId === schoolId &&
-    profile.primarySchoolId === schoolId
-  );
-}
-
-function restampHaltKind(profile) {
-  const kind = profile?.campusStoryBindingHaltKind;
-  return kind === 'none' || kind === 'multiple' ? kind : null;
-}
-
 function haltFields(kind, FieldValue) {
   return {
     campusStoryBindingHaltKind: kind,
@@ -131,10 +124,41 @@ function clearHaltFields(FieldValue) {
   };
 }
 
+function storyMediaStampClearUpdate(FieldValue) {
+  return {
+    profileBoundSchoolId: FieldValue.delete(),
+    profileBoundGeneration: FieldValue.delete(),
+  };
+}
+
+function cooldownActive(profile, nowMs) {
+  const at = snapshotMillis(profile?.campusStoryBindingHaltAt);
+  if (at == null) return false;
+  return nowMs - at < RESTAMP_COOLDOWN_MS;
+}
+
+function memberHasStoryStamp(data) {
+  return data?.profileBoundSchoolId != null || data?.profileBoundGeneration != null;
+}
+
+async function loadUserScopedSchoolIds(db, uid) {
+  if (!uid || typeof db.collection !== 'function') return [];
+  try {
+    const snap = await db.collection('users').doc(uid).collection('schools').get();
+    return (snap.docs || []).map((doc) => doc.id).filter((id) => typeof id === 'string' && id);
+  } catch {
+    return [];
+  }
+}
+
 async function loadExistingSchoolMemberships(db, uid, profile, knownSchoolIds) {
   if (!uid) return [];
+  const ids = lookupSchoolIds(profile, knownSchoolIds);
+  for (const schoolId of await loadUserScopedSchoolIds(db, uid)) {
+    if (!ids.includes(schoolId)) ids.push(schoolId);
+  }
   const memberships = [];
-  for (const schoolId of lookupSchoolIds(profile, knownSchoolIds)) {
+  for (const schoolId of ids) {
     const memberSnap = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
     if (!memberSnap.exists) continue;
     memberships.push({
@@ -146,6 +170,24 @@ async function loadExistingSchoolMemberships(db, uid, profile, knownSchoolIds) {
   return memberships;
 }
 
+async function clearCampusStoryBindingHalt({ db, FieldValue, uid }) {
+  if (!uid) return;
+  await db.collection('users').doc(uid).set(clearHaltFields(FieldValue), { merge: true });
+}
+
+function clearFoundStoryStamps(tx, memberItems, FieldValue, exceptSchoolId) {
+  const cleared = [];
+  for (const { schoolId, ref, snap } of memberItems) {
+    if (exceptSchoolId && schoolId === exceptSchoolId) continue;
+    if (!snap.exists) continue;
+    const data = snap.data() || {};
+    if (!memberHasStoryStamp(data)) continue;
+    tx.update(ref, storyMediaStampClearUpdate(FieldValue));
+    cleared.push(schoolId);
+  }
+  return cleared;
+}
+
 async function stampExistingCampusStoryMemberships({
   db,
   uid,
@@ -153,28 +195,16 @@ async function stampExistingCampusStoryMemberships({
   randomUUID,
   loadMemberships,
   knownSchoolIds,
+  nowMs,
 }) {
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now();
   const userRef = db.collection('users').doc(uid);
   const preview = await userRef.get();
   if (!preview.exists) return { stamped: [], skipped: ['missing-profile'] };
   const previewProfile = preview.data() || {};
   if (isClosedAccount(previewProfile)) return { stamped: [], skipped: ['closed-profile'] };
-  const haltKind = restampHaltKind(previewProfile);
-  if (haltKind) return { stamped: [], skipped: [`halt:${haltKind}`] };
-
-  const previewIds = trustedProfileSchoolIds(previewProfile);
-  if (previewIds.length === 1) {
-    const schoolId = previewIds[0];
-    const memberPreview = await db.collection('schools').doc(schoolId).collection('members').doc(uid).get();
-    const membership = memberPreview.exists ? memberPreview.data() || {} : null;
-    if (
-      memberPreview.exists &&
-      membershipBoundToSchool(membership, schoolId) &&
-      membership.profileBoundGeneration === previewProfile.bindingGeneration &&
-      profileMatchesUniqueSchool(previewProfile, schoolId)
-    ) {
-      return { stamped: [], skipped: [`${schoolId}:already-bound`], bindingGeneration: previewProfile.bindingGeneration };
-    }
+  if (cooldownActive(previewProfile, now)) {
+    return { stamped: [], skipped: ['cooldown'] };
   }
 
   const memberships = await (loadMemberships
@@ -193,34 +223,43 @@ async function stampExistingCampusStoryMemberships({
     if (isClosedAccount(profile)) return { stamped: [], skipped: ['closed-profile'] };
     const skipped = [];
     const eligible = [];
-    for (const { schoolId, ref, snap } of memberItems) {
+    for (const item of memberItems) {
       const eligibility = restampEligibility({
-        membership: snap.exists ? snap.data() || {} : null,
-        memberSnap: snap,
+        membership: item.snap.exists ? item.snap.data() || {} : null,
+        memberSnap: item.snap,
         userSnap,
       });
       if (!eligibility.ok) {
-        skipped.push(`${schoolId}:${eligibility.reason}`);
+        skipped.push(`${item.schoolId}:${eligibility.reason}`);
         continue;
       }
-      eligible.push({ schoolId, ref, snap });
+      eligible.push(item);
     }
-    if (eligible.length > 1) {
-      tx.set(userRef, haltFields('multiple', FieldValue), { merge: true });
+    if (eligible.length !== 1) {
+      const cleared = clearFoundStoryStamps(tx, memberItems, FieldValue);
+      const kind = eligible.length > 1 ? 'multiple' : 'none';
+      const userPatch = {
+        ...haltFields(kind, FieldValue),
+      };
+      if (profile.schoolId) userPatch.schoolId = FieldValue.delete();
+      if (profile.primarySchoolId) userPatch.primarySchoolId = FieldValue.delete();
+      tx.set(userRef, userPatch, { merge: true });
       return {
         stamped: [],
-        skipped: [...skipped, ...eligible.map((item) => `${item.schoolId}:multiple-schools`)],
+        skipped: [
+          ...skipped,
+          ...(eligible.length > 1
+            ? eligible.map((item) => `${item.schoolId}:multiple-schools`)
+            : skipped.length ? [] : ['none']),
+        ],
+        cleared,
       };
-    }
-    if (eligible.length === 0) {
-      tx.set(userRef, haltFields('none', FieldValue), { merge: true });
-      return { stamped: [], skipped: skipped.length ? skipped : ['none'] };
     }
     const { schoolId, ref, snap } = eligible[0];
     const bindingGeneration = nextBindingGeneration(profile, randomUUID);
     const data = snap.data() || {};
     const stamped = [];
-    const userPatch = { ...clearHaltFields(FieldValue) };
+    const userPatch = { ...haltFields('unique', FieldValue) };
     if (membershipBoundToSchool(data, schoolId) && data.profileBoundGeneration === bindingGeneration) {
       skipped.push(`${schoolId}:already-bound`);
     } else {
@@ -231,8 +270,12 @@ async function stampExistingCampusStoryMemberships({
     }
     if (profile.schoolId !== schoolId) userPatch.schoolId = schoolId;
     if (profile.primarySchoolId !== schoolId) userPatch.primarySchoolId = schoolId;
+    if (typeof FieldValue.arrayUnion === 'function') {
+      userPatch.schoolIds = FieldValue.arrayUnion(schoolId);
+    }
+    const cleared = clearFoundStoryStamps(tx, memberItems, FieldValue, schoolId);
     tx.set(userRef, userPatch, { merge: true });
-    return { stamped, skipped, bindingGeneration };
+    return { stamped, skipped, cleared, bindingGeneration };
   });
 }
 
@@ -392,12 +435,18 @@ async function clearProfileSchoolBindingForRevokedMembership({ db, FieldValue, s
     }
     if (!userSnap.exists) return { action: 'missing-profile' };
     const profile = userSnap.data() || {};
-    const update = {};
-    if (profile.schoolId === schoolId) update.schoolId = FieldValue.delete();
-    if (profile.primarySchoolId === schoolId) update.primarySchoolId = FieldValue.delete();
-    if (Object.keys(update).length === 0) return { action: 'no-matching-binding' };
+    const update = { ...clearHaltFields(FieldValue) };
+    const fields = [];
+    if (profile.schoolId === schoolId) {
+      update.schoolId = FieldValue.delete();
+      fields.push('schoolId');
+    }
+    if (profile.primarySchoolId === schoolId) {
+      update.primarySchoolId = FieldValue.delete();
+      fields.push('primarySchoolId');
+    }
     tx.update(userRef, update);
-    return { action: 'cleared-binding', fields: Object.keys(update) };
+    return fields.length ? { action: 'cleared-binding', fields } : { action: 'cleared-halt' };
   });
 }
 
@@ -484,6 +533,7 @@ module.exports = {
   nextBindingGeneration,
   campusStoryStampFields,
   restampEligibility,
+  RESTAMP_COOLDOWN_MS,
   trustedProfileSchoolIds,
   candidateSchoolIds: trustedProfileSchoolIds,
   listKnownSchoolIds,
@@ -491,6 +541,9 @@ module.exports = {
   schoolMemberSchoolId,
   loadExistingSchoolMemberships,
   stampExistingCampusStoryMemberships,
+  clearHaltFields,
+  clearCampusStoryBindingHalt,
+  storyMediaStampClearUpdate,
   createEnsureCampusStoryBindingHandler,
   leftoverActiveMembershipKind,
   planOrphanSchoolMembershipCleanup,

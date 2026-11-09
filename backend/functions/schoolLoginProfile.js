@@ -5,6 +5,9 @@ const {
   isClosedAccount,
   nextBindingGeneration,
   campusStoryStampFields,
+  loadExistingSchoolMemberships,
+  clearHaltFields,
+  storyMediaStampClearUpdate,
 } = require('./campusStoryAccessBinding');
 
 const displayRoles = new Set([
@@ -37,8 +40,17 @@ function createSchoolLoginProfileWriter({ db }) {
   return async ({ uid, schoolId, profile, membershipFields = {}, ssoLinkRef = null }) => {
     const userRef = db.collection('users').doc(uid);
     const memberRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
+    const preview = await userRef.get();
+    const extras = await loadExistingSchoolMemberships(db, uid, {
+      ...(preview.exists ? preview.data() || {} : {}),
+      schoolId,
+      primarySchoolId: schoolId,
+    });
+    const extraRefs = extras
+      .filter((item) => item.schoolId !== schoolId)
+      .map((item) => db.collection('schools').doc(item.schoolId).collection('members').doc(uid));
     return db.runTransaction(async (tx) => {
-      const [userDoc, memberDoc] = await tx.getAll(userRef, memberRef);
+      const [userDoc, memberDoc, ...extraSnaps] = await tx.getAll(userRef, memberRef, ...extraRefs);
       const account = userDoc.exists ? userDoc.data() : {};
       if (isClosedAccount(account)) {
         throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
@@ -61,6 +73,8 @@ function createSchoolLoginProfileWriter({ db }) {
           primarySchoolId: schoolId,
           lastLoginAt: FieldValue.serverTimestamp(),
           bindingGeneration,
+          schoolIds: FieldValue.arrayUnion(schoolId),
+          ...clearHaltFields(FieldValue),
           ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
         },
         { merge: true },
@@ -77,6 +91,13 @@ function createSchoolLoginProfileWriter({ db }) {
         },
         { merge: true },
       );
+      extraRefs.forEach((ref, index) => {
+        const snap = extraSnaps[index];
+        if (!snap?.exists) return;
+        const data = snap.data() || {};
+        if (data.profileBoundSchoolId == null && data.profileBoundGeneration == null) return;
+        tx.update(ref, storyMediaStampClearUpdate(FieldValue));
+      });
       if (ssoLinkRef) tx.set(ssoLinkRef, { role: resolved.role }, { merge: true });
       return resolved;
     });

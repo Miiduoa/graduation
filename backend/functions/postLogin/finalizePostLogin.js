@@ -16,6 +16,7 @@ const {
   nextBindingGeneration,
   campusStoryStampFields,
   restampEligibility,
+  clearHaltFields,
 } = require('../campusStoryAccessBinding');
 
 const MAX_MEMBER_COURSES = 10;
@@ -271,6 +272,7 @@ async function runFinalizePostLogin(request) {
     orgRoles: resolved.orgRoles,
     lastPostLoginResolvedAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
+    ...clearHaltFields(FieldValue),
   };
   let memberUpdate = null;
   if (memberSchoolId && memSnap?.exists && memberSchoolId === schoolId) {

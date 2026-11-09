@@ -18,6 +18,8 @@ const {
   schoolMemberSchoolId,
   stampExistingCampusStoryMemberships,
   createEnsureCampusStoryBindingHandler,
+  RESTAMP_COOLDOWN_MS,
+  clearCampusStoryBindingHalt,
   planOrphanSchoolMembershipCleanup,
   inactivateOrphanSchoolMemberships,
 } = require('./campusStoryAccessBinding');
@@ -25,6 +27,7 @@ const {
 const FieldValue = {
   delete: () => ({ _delete: true }),
   serverTimestamp: () => ({ _serverTimestamp: true }),
+  arrayUnion: (...values) => ({ _arrayUnion: values }),
 };
 
 class FakeHttpsError extends Error {
@@ -80,7 +83,14 @@ function fakeDb(seed = {}, options = {}) {
               const current = { ...(docs.get(docPath) || {}) };
               for (const [key, value] of Object.entries(data)) {
                 if (value && value._delete) delete current[key];
-                else current[key] = value;
+                else if (value && value._serverTimestamp) current[key] = Date.now();
+                else if (value && value._arrayUnion) {
+                  const next = Array.isArray(current[key]) ? [...current[key]] : [];
+                  for (const item of value._arrayUnion) {
+                    if (!next.includes(item)) next.push(item);
+                  }
+                  current[key] = next;
+                } else current[key] = value;
               }
               docs.set(docPath, current);
             } else {
@@ -93,6 +103,7 @@ function fakeDb(seed = {}, options = {}) {
             const current = { ...docs.get(docPath) };
             for (const [key, value] of Object.entries(data)) {
               if (value && value._delete) delete current[key];
+              else if (value && value._serverTimestamp) current[key] = Date.now();
               else current[key] = value;
             }
             docs.set(docPath, current);
@@ -434,8 +445,9 @@ test('google login restamp stamps a live student and ignores client schoolId or 
     schoolId: 'pu',
     primarySchoolId: 'pu',
     bindingGeneration: 'gen-google',
+    schoolIds: ['pu'],
+    campusStoryBindingHaltKind: 'unique',
   });
-  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBeUndefined();
   expect(db.docs.get('schools/attacker-school/members/alice')).toBeUndefined();
   expect(db.queries).toContain('get:schools/pu/members/alice');
   expect(db.queries).not.toContain('collectionGroup:members');
@@ -488,39 +500,42 @@ test('google login restamp skips a rebuilt profile newer than leftover membershi
   expect(db.docs.get('users/bob').campusStoryBindingHaltKind).toBe('none');
 });
 
-test('school member paths and lookup ignore client schoolIds', () => {
+test('school member lookup uses server schoolIds and never collectionGroup-scans members', () => {
   expect(schoolMemberSchoolId('schools/pu/members/alice', 'alice')).toBe('pu');
   expect(schoolMemberSchoolId('schools/pu/members/alice', 'bob')).toBeNull();
-  expect(candidateSchoolIds({ schoolId: 'pu', primarySchoolId: 'pu', schoolIds: ['forged'] })).toEqual([
+  expect(candidateSchoolIds({ schoolId: 'pu', primarySchoolId: 'pu', schoolIds: ['ext'] })).toEqual([
     'pu',
+    'ext',
   ]);
-  expect(lookupSchoolIds({ schoolIds: ['forged', 'pu'] }, ['ncku'])).toEqual(['ncku']);
+  expect(lookupSchoolIds({ schoolIds: ['ext'] }, ['ncku'])).toEqual(['ncku', 'ext']);
   const source = fs.readFileSync(path.resolve(__dirname, './campusStoryAccessBinding.js'), 'utf8');
-  const loadFn = source.slice(
-    source.indexOf('async function loadExistingSchoolMemberships'),
-    source.indexOf('async function stampExistingCampusStoryMemberships'),
-  );
-  expect(loadFn).not.toMatch(/collectionGroup\s*\(/);
-  expect(loadFn).not.toMatch(/schoolIds/);
   expect(source).not.toMatch(/collectionGroup\s*\(\s*['"]members['"]\s*\)/);
 });
 
-test('google login restamp returns immediately when already bound to the unique school', async () => {
-  const db = fakeDb({
-    'schools/pu': { name: 'PU' },
-    'schools/pu/members/alice': {
-      status: 'active',
-      role: 'member',
-      profileBoundSchoolId: 'pu',
-      profileBoundGeneration: 'gen-live',
+test('google login restamp recomputes every known school even when already bound', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'schools/pu/members/alice': {
+        status: 'active',
+        role: 'member',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-live',
+      },
+      'users/alice': {
+        status: 'active',
+        schoolId: 'pu',
+        primarySchoolId: 'pu',
+        bindingGeneration: 'gen-live',
+      },
     },
-    'users/alice': {
-      status: 'active',
-      schoolId: 'pu',
-      primarySchoolId: 'pu',
-      bindingGeneration: 'gen-live',
+    {
+      createTimes: {
+        'users/alice': 100,
+        'schools/pu/members/alice': 200,
+      },
     },
-  });
+  );
   const result = await stampExistingCampusStoryMemberships({
     db,
     uid: 'alice',
@@ -528,16 +543,13 @@ test('google login restamp returns immediately when already bound to the unique 
     randomUUID: () => 'gen-next',
     knownSchoolIds: ['pu', 'ncku'],
   });
-  expect(result).toEqual({
-    stamped: [],
-    skipped: ['pu:already-bound'],
-    bindingGeneration: 'gen-live',
-  });
+  expect(result.stamped).toEqual([]);
+  expect(result.skipped).toEqual(['pu:already-bound']);
+  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBe('unique');
   expect(db.queries).toContain('get:schools/pu/members/alice');
-  expect(db.queries).not.toContain('get:schools/ncku/members/alice');
+  expect(db.queries).toContain('get:schools/ncku/members/alice');
   expect(db.queries).not.toContain('collectionGroup:members');
   expect(db.queries).not.toContain('list:schools');
-  expect(db.writes).toEqual([]);
 });
 
 test('google login restamp looks up known schools instead of listing schools', async () => {
@@ -566,6 +578,8 @@ test('google login restamp looks up known schools instead of listing schools', a
     schoolId: 'pu',
     primarySchoolId: 'pu',
     bindingGeneration: 'gen-candidate',
+    schoolIds: ['pu'],
+    campusStoryBindingHaltKind: 'unique',
   });
   expect(db.queries).toContain('get:schools/pu/members/alice');
   expect(db.queries).not.toContain('collectionGroup:members');
@@ -603,8 +617,9 @@ test('google login restamp fills missing schoolId for a unique eligible membersh
     schoolId: 'pu',
     primarySchoolId: 'pu',
     bindingGeneration: 'gen-live',
+    schoolIds: ['pu'],
+    campusStoryBindingHaltKind: 'unique',
   });
-  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBeUndefined();
   expect(db.docs.get('schools/pu/members/alice').profileBoundGeneration).toBe('gen-live');
   expect(db.queries).toContain('get:schools/pu/members/alice');
   expect(db.queries).not.toContain('collectionGroup:members');
@@ -645,15 +660,152 @@ test('google login restamp does not stamp or write canonical when two eligible m
   expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBe('multiple');
 });
 
-test('google login restamp ignores incomplete or forged schoolIds and does not full-scan', async () => {
+test('google login restamp finds catalog-external schools recorded on the profile', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'schools/ext': { name: 'External' },
+      'schools/pu/members/alice': {
+        status: 'active',
+        role: 'member',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-live',
+      },
+      'schools/ext/members/alice': {
+        status: 'active',
+        role: 'member',
+        profileBoundSchoolId: 'ext',
+        profileBoundGeneration: 'gen-live',
+      },
+      'users/alice': {
+        status: 'active',
+        schoolId: 'pu',
+        primarySchoolId: 'pu',
+        bindingGeneration: 'gen-live',
+        schoolIds: ['ext'],
+      },
+    },
+    {
+      createTimes: {
+        'users/alice': 100,
+        'schools/pu/members/alice': 200,
+        'schools/ext/members/alice': 200,
+      },
+    },
+  );
+  const result = await stampExistingCampusStoryMemberships({
+    db,
+    uid: 'alice',
+    FieldValue,
+    randomUUID: () => 'gen-ext',
+    knownSchoolIds: ['pu'],
+  });
+  expect(result.stamped).toEqual([]);
+  expect(result.cleared.sort()).toEqual(['ext', 'pu']);
+  expect(db.docs.get('schools/pu/members/alice').profileBoundSchoolId).toBeUndefined();
+  expect(db.docs.get('schools/ext/members/alice').profileBoundSchoolId).toBeUndefined();
+  expect(db.docs.get('users/alice').schoolId).toBeUndefined();
+  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBe('multiple');
+  expect(db.queries).toContain('get:schools/ext/members/alice');
+  expect(db.queries).not.toContain('collectionGroup:members');
+});
+
+test('google login restamp includes user-scoped school records outside catalog', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'schools/ext': { name: 'External' },
+      'schools/pu/members/alice': {
+        status: 'active',
+        role: 'member',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-live',
+      },
+      'schools/ext/members/alice': {
+        status: 'active',
+        role: 'member',
+        profileBoundSchoolId: 'ext',
+        profileBoundGeneration: 'gen-live',
+      },
+      'users/alice': {
+        status: 'active',
+        schoolId: 'pu',
+        primarySchoolId: 'pu',
+        bindingGeneration: 'gen-live',
+      },
+      'users/alice/schools/ext': { schoolId: 'ext' },
+    },
+    {
+      createTimes: {
+        'users/alice': 100,
+        'schools/pu/members/alice': 200,
+        'schools/ext/members/alice': 200,
+      },
+    },
+  );
+  const result = await stampExistingCampusStoryMemberships({
+    db,
+    uid: 'alice',
+    FieldValue,
+    randomUUID: () => 'gen-scoped',
+    knownSchoolIds: ['pu'],
+  });
+  expect(result.stamped).toEqual([]);
+  expect(result.cleared.sort()).toEqual(['ext', 'pu']);
+  expect(db.queries).toContain('list:users/alice/schools');
+  expect(db.queries).toContain('get:schools/ext/members/alice');
+});
+
+test('google login restamp consecutive calls without membership use a short cooldown', async () => {
+  expect(RESTAMP_COOLDOWN_MS).toBe(5 * 60 * 1000);
+  const db = fakeDb({
+    'schools/pu': { name: 'PU' },
+    'schools/ncku': { name: 'NCKU' },
+    'users/alice': { status: 'active' },
+  });
+  const first = await stampExistingCampusStoryMemberships({
+    db,
+    uid: 'alice',
+    FieldValue,
+    randomUUID: () => 'gen-miss',
+    knownSchoolIds: ['pu', 'ncku'],
+  });
+  expect(first.stamped).toEqual([]);
+  expect(first.skipped).toEqual(['none']);
+  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBe('none');
+  expect(db.queries).toContain('get:schools/pu/members/alice');
+  const afterFirst = db.queries.length;
+  const second = await stampExistingCampusStoryMemberships({
+    db,
+    uid: 'alice',
+    FieldValue,
+    randomUUID: () => 'gen-miss-2',
+    knownSchoolIds: ['pu', 'ncku'],
+    nowMs: Date.now() + 60_000,
+  });
+  expect(second).toEqual({ stamped: [], skipped: ['cooldown'] });
+  expect(db.queries.slice(afterFirst)).toEqual(['get:users/alice']);
+  expect(db.queries).not.toContain('list:schools');
+});
+
+test('google login restamp clears stamps when a unique school gains a second membership', async () => {
   const db = fakeDb(
     {
       'schools/pu': { name: 'PU' },
       'schools/ncku': { name: 'NCKU' },
-      'schools/forged': { name: 'Forged' },
-      'schools/pu/members/alice': { status: 'active', role: 'member' },
+      'schools/pu/members/alice': {
+        status: 'active',
+        role: 'member',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-live',
+      },
       'schools/ncku/members/alice': { status: 'active', role: 'member' },
-      'users/alice': { status: 'active', schoolIds: ['pu', 'forged'] },
+      'users/alice': {
+        status: 'active',
+        schoolId: 'pu',
+        primarySchoolId: 'pu',
+        bindingGeneration: 'gen-live',
+      },
     },
     {
       createTimes: {
@@ -667,47 +819,83 @@ test('google login restamp ignores incomplete or forged schoolIds and does not f
     db,
     uid: 'alice',
     FieldValue,
-    randomUUID: () => 'gen-partial',
+    randomUUID: () => 'gen-split',
     knownSchoolIds: ['pu', 'ncku'],
   });
   expect(result.stamped).toEqual([]);
+  expect(result.cleared).toEqual(['pu']);
+  expect(db.docs.get('schools/pu/members/alice').profileBoundSchoolId).toBeUndefined();
   expect(db.docs.get('users/alice').schoolId).toBeUndefined();
-  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBe('multiple');
-  expect(db.queries).not.toContain('get:schools/forged/members/alice');
-  expect(db.queries).not.toContain('collectionGroup:members');
-  expect(db.queries).not.toContain('list:schools');
+  expect(db.docs.get('users/alice').primarySchoolId).toBeUndefined();
 });
 
-test('google login restamp consecutive calls without membership skip the known-school lookup', async () => {
-  const db = fakeDb({
-    'schools/pu': { name: 'PU' },
-    'schools/ncku': { name: 'NCKU' },
-    'users/alice': { status: 'active', schoolIds: ['forged'] },
-  });
-  const first = await stampExistingCampusStoryMemberships({
+test('google login restamp restores a unique school after a second membership is removed', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'schools/ncku': { name: 'NCKU' },
+      'schools/pu/members/alice': { status: 'active', role: 'member' },
+      'schools/ncku/members/alice': { status: 'inactive', role: 'member' },
+      'users/alice': {
+        status: 'active',
+        campusStoryBindingHaltKind: 'multiple',
+        campusStoryBindingHaltAt: 1_000,
+      },
+    },
+    {
+      createTimes: {
+        'users/alice': 100,
+        'schools/pu/members/alice': 200,
+        'schools/ncku/members/alice': 200,
+      },
+    },
+  );
+  await clearCampusStoryBindingHalt({ db, FieldValue, uid: 'alice' });
+  const result = await stampExistingCampusStoryMemberships({
     db,
     uid: 'alice',
     FieldValue,
-    randomUUID: () => 'gen-miss',
+    randomUUID: () => 'gen-restore',
     knownSchoolIds: ['pu', 'ncku'],
   });
-  expect(first).toEqual({ stamped: [], skipped: ['none'] });
-  expect(db.docs.get('users/alice').campusStoryBindingHaltKind).toBe('none');
-  expect(db.queries).toContain('get:schools/pu/members/alice');
-  expect(db.queries).toContain('get:schools/ncku/members/alice');
-  expect(db.queries).not.toContain('get:schools/forged/members/alice');
-  const afterFirst = db.queries.length;
-  const second = await stampExistingCampusStoryMemberships({
+  expect(result.stamped).toEqual(['pu']);
+  expect(db.docs.get('users/alice')).toMatchObject({
+    schoolId: 'pu',
+    primarySchoolId: 'pu',
+    bindingGeneration: 'gen-restore',
+  });
+  expect(db.docs.get('schools/pu/members/alice').profileBoundSchoolId).toBe('pu');
+});
+
+test('google login restamp can bind after a none halt once membership is created', async () => {
+  const db = fakeDb(
+    {
+      'schools/pu': { name: 'PU' },
+      'users/alice': {
+        status: 'active',
+        campusStoryBindingHaltKind: 'none',
+        campusStoryBindingHaltAt: 1_000,
+      },
+    },
+    {
+      createTimes: {
+        'users/alice': 100,
+        'schools/pu/members/alice': 200,
+      },
+    },
+  );
+  await clearCampusStoryBindingHalt({ db, FieldValue, uid: 'alice' });
+  db.docs.set('schools/pu/members/alice', { status: 'active', role: 'member' });
+  const result = await stampExistingCampusStoryMemberships({
     db,
     uid: 'alice',
     FieldValue,
-    randomUUID: () => 'gen-miss-2',
-    knownSchoolIds: ['pu', 'ncku'],
+    randomUUID: () => 'gen-join',
+    knownSchoolIds: ['pu'],
   });
-  expect(second).toEqual({ stamped: [], skipped: ['halt:none'] });
-  expect(db.queries.slice(afterFirst)).toEqual(['get:users/alice']);
-  expect(db.queries.slice(afterFirst)).not.toContain('collectionGroup:members');
-  expect(db.queries).not.toContain('list:schools');
+  expect(result.stamped).toEqual(['pu']);
+  expect(db.docs.get('users/alice').schoolId).toBe('pu');
+  expect(db.docs.get('schools/pu/members/alice').profileBoundGeneration).toBe('gen-join');
 });
 
 test('orphan membership cleanup is dry-run counts unless apply re-verifies in a transaction', async () => {
