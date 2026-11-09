@@ -30,7 +30,7 @@ export function PrivateAttachment({ path }: { path: string }) {
   }
   return (
     <span>
-      {/\.(png|jpe?g|webp|gif|avif)$/i.test(path) && <PrivateImage src={path} width={360} height={240} alt="貼文附件圖片" style={{ objectFit: 'contain', maxWidth: '100%' }} />} 
+      {/\.(png|jpe?g|webp|gif|avif)$/i.test(path) && <PrivateImage src={path} width={360} height={240} alt="貼文附件圖片" style={{ objectFit: 'contain', maxWidth: '100%' }} />}
       <button type="button" disabled={busy} onClick={() => void open()}>
         {busy ? '下載中…' : path.split('/').pop()}
       </button>
