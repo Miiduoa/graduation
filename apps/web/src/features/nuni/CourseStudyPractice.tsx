@@ -6,6 +6,7 @@ import { STUDY_SESSION_LIMITS } from './courseStudySession';
 import {
   getStudyPracticeSummary,
   nextUnreviewedStudyPracticeIndex,
+  previousUnreviewedStudyPracticeIndex,
   type StudyPracticeAction,
   type StudyPracticeCard,
   type StudyPracticeResponse,
@@ -49,6 +50,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
   const response = card ? round.responses[card.id] : undefined;
   const summary = getStudyPracticeSummary(round);
   const nextUnreviewedIndex = round.finished ? null : nextUnreviewedStudyPracticeIndex(round);
+  const previousUnreviewedIndex = round.finished ? null : previousUnreviewedStudyPracticeIndex(round);
   const canRevealAnswer = !!response?.attempt.trim();
   const answerVisible = !!response?.answerVisible && canRevealAnswer;
   // A position belongs to this exact question within this practice round, not
@@ -172,12 +174,14 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
             onClick={() => onAction({ type: 'go', index: round.index - 1 })}>上一題</button>
           <button type="button" className={styles.button} disabled={round.index >= round.cards.length - 1}
             onClick={() => onAction({ type: 'go', index: round.index + 1 })}>下一題</button>
+          <button type="button" className={styles.button} disabled={previousUnreviewedIndex === null}
+            onClick={() => { if (previousUnreviewedIndex !== null) onAction({ type: 'go', index: previousUnreviewedIndex }); }}>上一題未自評</button>
           <button type="button" className={styles.button} disabled={nextUnreviewedIndex === null}
             onClick={() => { if (nextUnreviewedIndex !== null) onAction({ type: 'go', index: nextUnreviewedIndex }); }}>下一題未自評</button>
           <button type="button" className={styles.button} onClick={() => onReadSource(card)}>回白板看這段</button>
           <button type="button" className={styles.button} onClick={() => onAction({ type: 'skip' })}>略過這題</button>
         </nav>
-        <p className={styles.note}>上一題／下一題只移動閱讀位置；「下一題未自評」會循環尋找其他尚未自評的題目（包含已寫草稿的題目），不會自動評分。只有按「略過這題」才會標記略過。</p>
+        <p className={styles.note}>上一題／下一題只移動閱讀位置；「上一題未自評／下一題未自評」會依方向循環尋找其他尚未自評的題目（包含已寫草稿的題目），不會自動評分。只有按「略過這題」才會標記略過。</p>
       </section> : <p className={styles.note}>請回到閱讀，選擇有講解記錄的待複習段落再開始。</p>}
 
       <nav className={styles.overview} aria-label="本輪題目">

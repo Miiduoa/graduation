@@ -169,11 +169,32 @@ it('jumps to the next not-yet-self-assessed card, wrapping without marking a dra
   expect(screen.queryByRole('region', { name: '本輪練習摘要' })).toBeNull();
 });
 
+it('moves backward between unanswered questions and preserves draft, focus and answer concealment', () => {
+  const handlers = callbacks();
+  render(<Controller handlers={handlers} />);
+  writeAnswer('第一題還沒有自評');
+  selectQuestion(3);
+  const previous = screen.getByRole('button', { name: '上一題未自評' });
+  previous.focus();
+  fireEvent.click(previous);
+  expect(handlers.onAction).toHaveBeenCalledWith({ type: 'go', index: 1 });
+  expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '第 2 題' }));
+  fireEvent.click(screen.getByRole('button', { name: '上一題未自評' }));
+  expect(screen.getByRole('heading', { name: '第 1 題' })).toBeTruthy();
+  expect(answerInput().value).toBe('第一題還沒有自評');
+  fireEvent.click(screen.getByRole('button', { name: '上一題未自評' }));
+  expect(screen.getByRole('heading', { name: '第 3 題' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  expect(model.run).not.toHaveBeenCalled();
+});
+
 it('disables next-unreviewed navigation when the current question is the only one left', () => {
   render(<Controller deck={cards.slice(0, 2)} />);
   decide('understood');
   expect(screen.getByRole('heading', { name: '第 2 題' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '下一題未自評' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('button', { name: '上一題未自評' }).hasAttribute('disabled')).toBe(true);
 });
 
 it('keeps a revealed answer and self-assessment when navigating without modifying them', () => {

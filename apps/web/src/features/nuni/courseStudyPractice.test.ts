@@ -8,6 +8,7 @@ import {
   courseStudyPracticeFilename,
   getStudyPracticeSummary,
   nextUnreviewedStudyPracticeIndex,
+  previousUnreviewedStudyPracticeIndex,
   startStudyPracticeRound,
   updateStudyPracticeRound,
   type StudyPracticeAction,
@@ -319,6 +320,33 @@ describe('finite independent practice rounds', () => {
 });
 
 describe('unreviewed question navigation', () => {
+  it('navigates backward over skipped cards and wraps without mutating draft or assessment', () => {
+    let current = round(4);
+    current = updateStudyPracticeRound(current, { type: 'attempt', value: '第一題原本的草稿' });
+    current = updateStudyPracticeRound(current, { type: 'go', index: 1 });
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    const before = JSON.stringify(current);
+    expect(previousUnreviewedStudyPracticeIndex(current)).toBe(0);
+    expect(JSON.stringify(current)).toBe(before);
+    current = updateStudyPracticeRound(current, { type: 'go', index: 0 });
+    expect(previousUnreviewedStudyPracticeIndex(current)).toBe(3);
+    expect(current.responses[current.cards[0].id].attempt).toBe('第一題原本的草稿');
+    expect(current.responses[current.cards[1].id].outcome).toBe('skipped');
+    expect(current.responses[current.cards[2].id].outcome).toBe('skipped');
+  });
+
+  it('limits reverse unreviewed navigation to the pending retry deck and stops on a single card', () => {
+    let current = decide(round(3), 'understood');
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    current = updateStudyPracticeRound(current, { type: 'skip' });
+    const retry = updateStudyPracticeRound(current, { type: 'restart', scope: 'pending' });
+    expect(retry.cards).toHaveLength(2);
+    expect(previousUnreviewedStudyPracticeIndex(retry)).toBe(1);
+    expect(previousUnreviewedStudyPracticeIndex(updateStudyPracticeRound(retry, { type: 'go', index: 1 }))).toBe(0);
+    expect(previousUnreviewedStudyPracticeIndex(round(1))).toBeNull();
+  });
+
   it('wraps to an earlier unanswered question without mutating drafts, assessments or source order', () => {
     let current = decide(round(3), 'understood');
     current = updateStudyPracticeRound(current, { type: 'go', index: 2 });
