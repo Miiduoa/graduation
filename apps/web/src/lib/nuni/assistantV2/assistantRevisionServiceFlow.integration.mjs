@@ -103,6 +103,20 @@ function openExactTime(entry, index = 1, values = { startTime: '21:00', endTime:
 }
 const submitExactTime = form => testing.fireEvent.submit(form);
 
+function threeSameNameEvents() {
+  return [
+    { ...proposed[0], title: '同名合成待建行程' },
+    { ...proposed[1], title: '同名合成待建行程' },
+    { ...proposed[1], title: '同名合成待建行程', startTime: '22:00', endTime: '23:00' },
+  ];
+}
+function openSelection() {
+  testing.fireEvent.click(ui().getByRole('button', { name: '選擇要建立的行程' }));
+  return ui().getByRole('form', { name: '選擇待建立行程' });
+}
+const retainedCheckbox = (form, index) => testing.within(form).getByRole('checkbox', { name: new RegExp('^保留 第 ' + (index + 1) + ' 項') });
+const submitSelection = form => testing.fireEvent.submit(form);
+
 const TIME_DRAFT_PREFIX = 'campus.assistant-time-draft.v1:';
 const FREE_DRAFT_PREFIX = 'campus.assistant-plan-draft.v1:';
 function storedDrafts(prefix) {
@@ -859,4 +873,244 @@ it('offers an explicit draft replacement when a later proposal is edited in the 
   expect(count('confirm')).toHaveLength(0);
   expect(database.writes).toHaveLength(0);
   expect(deniedFetches).toEqual([]);
+});
+
+
+it('retains the first and third same-name proposals with three edit clicks, no model request and two separate confirmations', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan();
+  const baseline = database.snapshot(), clicks = [];
+  const click = (control, description) => { clicks.push(description); testing.fireEvent.click(control); };
+  click(ui().getByRole('button', { name: '選擇要建立的行程' }), 'open selection');
+  const form = ui().getByRole('form', { name: '選擇待建立行程' });
+  expect([0, 1, 2].map(index => retainedCheckbox(form, index).checked)).toEqual([true, true, true]);
+  click(retainedCheckbox(form, 1), 'exclude original item 2');
+  fault.holdPrecise = true; // Hold only the shared revise transport after the real handler returns.
+  click(testing.within(form).getByRole('button', { name: '預覽所選行程' }), 'preview retained items');
+  submitSelection(form); // Controlled duplicate submit, not an additional benchmark user step.
+  await testing.waitFor(() => expect(fault.held).not.toBeNull());
+  const held = fault.held;
+  submitSelection(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(count('revise')).toHaveLength(1);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(database.snapshot()).toEqual(baseline);
+  expect(database.writes).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  assertNoAdditionalModel();
+  await testing.act(async () => { held.release(); await Promise.resolve(); });
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(5));
+  const replacement = count('revise')[0], retained = [planEvents[0], planEvents[2]];
+  expect(replacement.status).toBe(200);
+  expect(replacement.body.keepMutationIds).toEqual([entry.response.cards[0].mutationId, entry.response.cards[2].mutationId]);
+  expect(replacement.body).not.toHaveProperty('change');
+  expect(replacement.body.originalCards).toEqual(entry.response.cards.map(({ token, args }) => ({ token, args })));
+  expect(replacement.response.cards.map(card => card.args)).toEqual(retained);
+  expect(new Set(replacement.response.cards.map(card => card.mutationId)).size).toBe(2);
+  expect(replacement.response.cards.every(card => entry.response.cards.every(old => old.mutationId !== card.mutationId && old.token !== card.token))).toBe(true);
+  assertRealCards(replacement);
+  const summary = ui().getByRole('region', { name: '行程選擇摘要' });
+  expect(testing.within(testing.within(summary).getByRole('list', { name: '保留的原提議行程' })).getAllByRole('listitem')).toHaveLength(2);
+  expect(testing.within(testing.within(summary).getByRole('list', { name: '排除的原提議行程' })).getAllByRole('listitem')).toHaveLength(1);
+  await assertOriginalCannotExecute(entry);
+  expect(database.snapshot()).toEqual(baseline);
+  expect(clicks).toEqual(['open selection', 'exclude original item 2', 'preview retained items']);
+  for (let index = 0; index < 2; index++) {
+    click(testing.within(uiCards()[index + 3]).getByRole('button', { name: '確認' }), 'confirm retained item ' + (index + 1));
+    await testing.waitFor(() => expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(index + 1));
+    expect(database.writes).toHaveLength(index + 1);
+    expect(count('confirm')[index]).toMatchObject({ status: 200,
+      body: { token: replacement.response.cards[index].token, args: retained[index] },
+      response: { status: 'verified', mutationId: replacement.response.cards[index].mutationId } });
+  }
+  expect(database.writes.map(write => write.mutationId)).toEqual(replacement.response.cards.map(card => card.mutationId));
+  expect(count('confirm')).toHaveLength(2);
+  assertNoAdditionalModel();
+  console.log('ASSISTANT_SUBSET_FLOW_OK', JSON.stringify({ environment: 'Node/JSDOM in-process, not browser timing',
+    startingProposalItems: 3, retainedOriginalIndices: [0, 2], editClicks: clicks.slice(0, 3),
+    confirmationClicks: clicks.slice(3), controlledDuplicateSubmits: 2, previewWrites: 0,
+    confirmedWrites: database.writes.length, providerFixtureCalls: fixture.provider.mock.calls.length }));
+});
+
+it('keeps selection choices when closed and leaves all-selected proposals untouched', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan();
+  let form = openSelection();
+  const before = sentActions();
+  submitSelection(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(sentActions()).toEqual(before);
+  testing.fireEvent.click(retainedCheckbox(form, 1));
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '收起行程選擇' }));
+  expect(ui().queryByRole('form', { name: '選擇待建立行程' })).toBeNull();
+  form = openSelection();
+  expect([0, 1, 2].map(index => retainedCheckbox(form, index).checked)).toEqual([true, false, true]);
+  testing.fireEvent.click(retainedCheckbox(form, 1));
+  submitSelection(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(sentActions()).toEqual(before);
+  expect(count('cancel')).toHaveLength(0);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertRealCards(entry);
+  assertNoAdditionalModel();
+});
+
+it('requires explicit acknowledgement before cancelling an entirely excluded proposal and never requests replacements', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan();
+  const form = openSelection(), before = sentActions();
+  for (const index of [0, 1, 2]) testing.fireEvent.click(retainedCheckbox(form, index));
+  const acknowledgement = testing.within(form).getByRole('checkbox', { name: '我確認不建立任何項目，並撤銷整份待確認提議' });
+  expect(acknowledgement.checked).toBe(false);
+  submitSelection(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(sentActions()).toEqual(before);
+  expect(count('cancel')).toHaveLength(0);
+  testing.fireEvent.click(acknowledgement);
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '撤銷整份待確認提議' }));
+  submitSelection(form);
+  await testing.waitFor(() => expect(ui().getAllByText('已撤銷未執行提議')).toHaveLength(3));
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(uiCards()).toHaveLength(3);
+  expect(database.writes).toHaveLength(0);
+  await assertOriginalCannotExecute(entry);
+  assertNoAdditionalModel();
+});
+
+it('withholds retained replacement cards while partial cancellation is unknown and resumes only after reconciliation', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan();
+  const form = openSelection();
+  testing.fireEvent.click(retainedCheckbox(form, 1));
+  fault.dropNextCancel = true;
+  submitSelection(form);
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await ui().findByRole('button', { name: '重新核對結果' });
+  expect(count('cancel')[0].response.status).toBe('revoked');
+  expect(count('reconcile')[0].status).toBe(503);
+  submitSelection(form); submitSelection(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(count('cancel')).toHaveLength(1);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(uiCards()).toHaveLength(3);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+  fault.failLedger = false;
+  testing.fireEvent.click(ui().getByRole('button', { name: '重新核對結果' }));
+  await ui().findByText('已撤銷未執行提議');
+  submitSelection(form);
+  await testing.waitFor(() => expect(uiCards()).toHaveLength(5));
+  expect(count('revise')).toHaveLength(1);
+  expect(count('revise')[0].body.keepMutationIds).toEqual([entry.response.cards[0].mutationId, entry.response.cards[2].mutationId]);
+  expect(count('revise')[0].response.cards.map(card => card.args)).toEqual([planEvents[0], planEvents[2]]);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it.each(['account', 'school'])('ignores retained cards from a held selection response after a %s switch', async target => {
+  planEvents = threeSameNameEvents();
+  const { view, entry } = await initialPlan();
+  const originalContext = fixture.context, originalAccount = fixture.account, originalSchool = fixture.school;
+  const form = openSelection();
+  testing.fireEvent.click(retainedCheckbox(form, 1));
+  fault.holdPrecise = true;
+  submitSelection(form);
+  await testing.waitFor(() => expect(fault.held).not.toBeNull());
+  const held = fault.held;
+  expect(held.entry.status).toBe(200);
+  expect(held.entry.body.keepMutationIds).toEqual([entry.response.cards[0].mutationId, entry.response.cards[2].mutationId]);
+  expect(held.entry.response.cards.map(card => card.args)).toEqual([planEvents[0], planEvents[2]]);
+  assertRealCards(held.entry);
+  if (target === 'account') useIdentity(registerIdentity('inprocess-subset-other-account-' + serial));
+  else fixture.school = 'other-fixture-school';
+  view.rerender(React.createElement(Assistant));
+  await ui().findByLabelText('問題');
+  expect(held.entry.signal.aborted).toBe(true);
+  await testing.act(async () => { held.release(); await Promise.resolve(); });
+  expect(ui().queryByRole('article', { name: '行程確認卡' })).toBeNull();
+  expect(ui().queryByRole('region', { name: '行程選擇摘要' })).toBeNull();
+  expect(ui().queryByRole('form', { name: '選擇待建立行程' })).toBeNull();
+  expect(ui().getByRole('checkbox', { name: /^同意在本次對話/ }).checked).toBe(false);
+  expect(held.entry.context).toBe(originalContext);
+  expect(held.entry.account).toBe(originalAccount);
+  expect(held.entry.body.schoolId).toBe(originalSchool);
+  expect(count('revise')).toHaveLength(1);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  assertNoAdditionalModel();
+});
+
+it('does not claim whole-proposal cancellation when the real cancel receipt reveals an event already written elsewhere in the synthetic fixture', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan();
+  const first = entry.response.cards[0], identity = identitiesByContext.get(entry.context);
+  // Authorized fixed-fixture boundary: another synthetic client confirms through
+  // the real handler, leaving this Assistant's UI stale. No real account is used.
+  const external = await handleV2(new NextRequest('http://localhost:3000/api/nuni/assistant/confirm', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000',
+      cookie: identity.cookie, 'X-Campus-Session': entry.context },
+    body: JSON.stringify({ schoolId: entry.body.schoolId, conversationId: entry.body.conversationId,
+      token: first.token, args: first.args }),
+  }), 'confirm');
+  expect(external.status).toBe(200);
+  expect(await external.json()).toMatchObject({ status: 'verified', mutationId: first.mutationId });
+  expect(database.writes).toHaveLength(1);
+  const committed = database.snapshot();
+  expect(committed.records.some(record => record.id === first.mutationId)).toBe(true);
+  expect(ui().queryByText('已核對並加入個人行事曆')).toBeNull();
+  const form = openSelection();
+  for (const index of [0, 1, 2]) testing.fireEvent.click(retainedCheckbox(form, index));
+  testing.fireEvent.click(testing.within(form).getByRole('checkbox', { name: '我確認不建立任何項目，並撤銷整份待確認提議' }));
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '撤銷整份待確認提議' }));
+  await testing.waitFor(() => expect(testing.within(form).getByRole('alert').textContent).toContain('尚未全部確認撤銷'));
+  expect(ui().getAllByText('已核對並加入個人行事曆')).toHaveLength(1);
+  expect(ui().getAllByText('已撤銷未執行提議')).toHaveLength(2);
+  expect(count('cancel').map(request => request.response.status)).toEqual(['verified', 'revoked', 'revoked']);
+  expect(count('cancel').map(request => request.body.token)).toEqual(entry.response.cards.map(card => card.token));
+  expect(testing.within(form).getByRole('alert').textContent).toContain('不會刪除已存在的行程');
+  expect(ui().queryByText(/^整份待確認提議已確認撤銷/)).toBeNull();
+  expect(ui().queryByRole('region', { name: '行程選擇摘要' })).toBeNull();
+  expect(uiCards()).toHaveLength(3);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0); // The only confirmation was the explicit external fixture call above.
+  expect(database.writes).toHaveLength(1);
+  expect(database.writes[0].mutationId).toBe(first.mutationId);
+  expect(database.snapshot()).toEqual(committed);
+  assertNoAdditionalModel();
+});
+
+it('does not claim whole-proposal cancellation or request an empty plan while an all-excluded result remains unknown', async () => {
+  planEvents = threeSameNameEvents();
+  const { entry } = await initialPlan();
+  const baseline = database.snapshot(), form = openSelection();
+  for (const index of [0, 1, 2]) testing.fireEvent.click(retainedCheckbox(form, index));
+  testing.fireEvent.click(testing.within(form).getByRole('checkbox', { name: '我確認不建立任何項目，並撤銷整份待確認提議' }));
+  fault.dropNextCancel = true;
+  testing.fireEvent.click(testing.within(form).getByRole('button', { name: '撤銷整份待確認提議' }));
+  await testing.waitFor(() => expect(count('reconcile')).toHaveLength(1));
+  await testing.waitFor(() => expect(testing.within(form).getByRole('alert').textContent).toContain('尚未全部確認撤銷'));
+  expect(count('cancel')).toHaveLength(1);
+  expect(count('cancel')[0]).toMatchObject({ body: { token: entry.response.cards[0].token }, response: { status: 'revoked' } });
+  expect(count('reconcile')[0].status).toBe(503);
+  expect(ui().getByRole('button', { name: '重新核對結果' })).toBeTruthy();
+  expect(ui().queryByText(/^整份待確認提議已確認撤銷/)).toBeNull();
+  expect(ui().queryByText('已撤銷未執行提議')).toBeNull();
+  expect(ui().queryByRole('region', { name: '行程選擇摘要' })).toBeNull();
+  expect(uiCards()).toHaveLength(3);
+  const beforeRetry = sentActions();
+  submitSelection(form); submitSelection(form);
+  await testing.act(async () => { await Promise.resolve(); });
+  expect(sentActions()).toEqual(beforeRetry);
+  expect(count('cancel')).toHaveLength(1);
+  expect(count('revise')).toHaveLength(0);
+  expect(count('confirm')).toHaveLength(0);
+  expect(database.writes).toHaveLength(0);
+  expect(database.snapshot()).toEqual(baseline);
+  assertNoAdditionalModel();
 });

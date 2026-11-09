@@ -66,6 +66,9 @@ jobs:
           pnpm --filter web exec vitest run \
             src/lib/nuni/assistantV2/protectedPlanServiceFlow.test.ts \
             src/lib/nuni/assistantV2/directPlanRevision.test.ts \
+            src/lib/nuni/assistantV2/selectPlanRevision.test.ts \
+            src/features/nuni/assistant/planSelection.test.ts \
+            src/features/nuni/assistant/AssistantPlanSelection.test.tsx \
             src/lib/assistantPrecisePlanDraft.test.ts \
             src/features/nuni/assistant/usePrecisePlanDraft.test.tsx \
             src/features/nuni/assistant/AssistantPrecisePlanDraftRecovery.test.tsx \
