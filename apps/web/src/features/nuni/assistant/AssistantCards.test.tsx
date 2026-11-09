@@ -239,7 +239,8 @@ it('holds a mixed action until its uncertain prerequisite is read back', () => {
   expect(food.disabled).toBe(true);
   expect(screen.getByText(/前一筆個人行程結果尚未核對/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '重新核對前一步行程' }));
-  expect(onReconcile).toHaveBeenCalledExactlyOnceWith(calendar);
+  expect(onReconcile).toHaveBeenCalledTimes(1);
+  expect(onReconcile).toHaveBeenCalledWith(calendar);
   expect(onConfirm).not.toHaveBeenCalled();
 
   view.rerender(<AssistantCardStack cards={[calendar, foodCard]} pending
