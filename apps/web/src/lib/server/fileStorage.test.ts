@@ -106,3 +106,11 @@ it('stores original display names separately from the object key', async () => {
   expect(JSON.parse(Buffer.from(signed.headers['x-metadata'], 'base64').toString('utf8'))).toEqual({ originalFilename: '原始 檔名..pdf' });
   expect(new URL(signed.url).pathname).toBe('/storage/v1/object/upload/sign/private/random.pdf');
 });
+
+it('treats an already absent object as a successful deletion', async () => {
+  const storage = createSupabaseFileStorage(config, async () => new Response(
+    JSON.stringify({ statusCode: '404', error: 'not_found', message: 'Object not found' }),
+    { status: 404, headers: { 'content-type': 'application/json' } },
+  ));
+  await expect(storage.remove('groups/g/posts/post/file.pdf')).resolves.toBeUndefined();
+});

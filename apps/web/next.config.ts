@@ -19,6 +19,8 @@ const libraryFormOrigins = [...new Set(Object.values(officialLibraryDirectory)
   .map((url) => url.origin))];
 
 // 私人媒體先下載為 Blob；只有 fetch 需要儲存服務來源。
+// 正式映像建置時沒有 Supabase 設定，CSP 又在建置時固定，故以正式專案 origin（非機密）為預設。
+const DEFAULT_PRIVATE_STORAGE_ORIGIN = 'https://hrrmkrayvrgnwcroyttp.supabase.co';
 const privateStorageOrigin = (() => {
   for (const raw of [process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL]) {
     if (!raw?.trim()) continue;
@@ -26,10 +28,10 @@ const privateStorageOrigin = (() => {
       const url = new URL(raw.trim());
       if (url.protocol === 'https:' && !url.username && !url.password) return url.origin;
     } catch {
-      // 缺少有效建置期 URL 時採用 Supabase 專案網域。
+      // 無效設定不擴大來源。
     }
   }
-  return 'https://*.supabase.co';
+  return DEFAULT_PRIVATE_STORAGE_ORIGIN;
 })();
 
 const contentSecurityPolicy = [

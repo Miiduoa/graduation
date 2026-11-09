@@ -106,7 +106,7 @@ export function createSupabaseFileStorage(config: FileStorageConfig, fetchImpl: 
     },
     async remove(key) {
       const { error } = await bucketForKey(key).remove([key]);
-      if (error) throw failed();
+      if (error && !('statusCode' in error && String(error.statusCode) === '404')) throw failed();
     },
   };
 }
