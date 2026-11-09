@@ -14,7 +14,34 @@ const REFRESH_MS = 24 * 60 * 60 * 1000;
 // A failed upstream must not leave a removed/renamed building visible forever.
 const MAX_SNAPSHOT_AGE_MS = 7 * REFRESH_MS;
 const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
+// A public Overpass instance may ask clients to pause longer after rate limiting.
+// Respect its Retry-After while bounding malformed or extreme upstream values.
+const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+
+class OverpassRateLimitError extends Error {
+  constructor(readonly cooldownMs: number) {
+    super('OSM service asked to retry later');
+  }
+}
+
+function overpassRetryAfterMs(header: string | null, now: number): number {
+  if (!header) return ERROR_COOLDOWN_MS;
+  const value = header.trim();
+  let requestedMs: number;
+  if (/^\d+$/.test(value)) {
+    requestedMs = Number(value) * 1000;
+  } else {
+    const dateMs = Date.parse(value);
+    requestedMs = Number.isFinite(dateMs) ? dateMs - now : NaN;
+  }
+  if (!Number.isFinite(requestedMs) || requestedMs <= 0) return ERROR_COOLDOWN_MS;
+  return Math.max(ERROR_COOLDOWN_MS, Math.min(MAX_RETRY_AFTER_MS, requestedMs));
+}
+
+function retryAfterSeconds(): string {
+  return String(Math.max(1, Math.ceil((unavailableUntil - Date.now()) / 1000)));
+}
 const query = '[out:json][timeout:12];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
@@ -71,7 +98,16 @@ async function readOsm(): Promise<Snapshot> {
       'User-Agent': 'nuni-campus-spatial/1.0 (https://nuni.tw)',
     },
   });
-  if (!response.ok) throw new Error('OSM service unavailable');
+  if (!response.ok) {
+    // 429 and 503 can contain a server-provided cooldown. Do not retry against
+    // the public endpoint every ten minutes when it explicitly requests longer.
+    if (response.status === 429 || response.status === 503) {
+      throw new OverpassRateLimitError(overpassRetryAfterMs(
+        response.headers.get('retry-after'), Date.now(),
+      ));
+    }
+    throw new Error('OSM service unavailable');
+  }
   const raw = await readBoundedResponse(response);
   const payload = JSON.parse(raw) as unknown;
   // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
@@ -99,15 +135,16 @@ export async function GET() {
   }
   if (unavailableUntil > now) {
     if (!cache) return NextResponse.json({ error: 'Building outlines temporarily unavailable' }, {
-      status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '600' },
+      status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': retryAfterSeconds() },
     });
   } else {
     try {
       if (!pending) pending = readOsm().finally(() => { pending = null; });
       cache = await pending;
       unavailableUntil = 0;
-    } catch {
-      unavailableUntil = Date.now() + ERROR_COOLDOWN_MS;
+    } catch (error) {
+      unavailableUntil = Date.now() + (error instanceof OverpassRateLimitError
+        ? error.cooldownMs : ERROR_COOLDOWN_MS);
     }
   }
   // Stale is an outage fallback, not an unlimited-lived source of campus geometry.
@@ -115,7 +152,7 @@ export async function GET() {
   if (!cache || cache.discardAfter <= Date.now()) return NextResponse.json({
     error: 'Building outlines temporarily unavailable',
   }, {
-    status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '600' },
+    status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': retryAfterSeconds() },
   });
   return NextResponse.json({
     schoolId: 'pu', source: 'OpenStreetMap', fetchedAt: cache.fetchedAt,
