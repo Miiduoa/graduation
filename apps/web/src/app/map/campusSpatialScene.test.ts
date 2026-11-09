@@ -755,7 +755,7 @@ it('extrudes OSM footprints in geographically aligned meters only for known spat
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const campus = buildCampusSpatialModel([library]);
   const outlines = parseProvidenceOsmFootprints({ elements: [{
-    type: 'way', id: 255784049,
+    type: 'way', id: 255784049, tags: { building: 'yes' },
     geometry: [
       { lat: 24.22624, lon: 120.58131 },
       { lat: 24.22624, lon: 120.58143 },

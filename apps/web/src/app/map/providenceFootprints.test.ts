@@ -115,6 +115,29 @@ describe('Providence OSM building outlines', () => {
     expect(parseProvidenceOsmFootprints({ elements: [{ ...way(255784049), geometry: Array(200).fill(library[0]) }] })).toEqual([]);
   });
 
+  it('retains a valid way revision but never copies OSM editor account information', () => {
+    const wayWithRevision = { ...way(255784049), version: 7,
+      timestamp: '2026-10-15T08:09:10Z', user: 'private-editor', uid: 1234, changeset: 9876 };
+    const parsed = parseProvidenceOsmFootprints({ elements: [wayWithRevision] });
+    expect(parsed[0]).toMatchObject({
+      poiId: 'pu-library', osmVersion: 7, osmEditedAt: '2026-10-15T08:09:10Z',
+    });
+    expect(JSON.stringify(parsed)).not.toContain('private-editor');
+    expect(JSON.stringify(parsed)).not.toContain('1234');
+    expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: parsed })).toEqual(parsed);
+  });
+
+  it('drops forged revision metadata without dropping valid building geometry', () => {
+    const base = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
+    const malformed = parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [
+      { ...base, osmVersion: -3, osmEditedAt: '2026-02-30T00:00:00Z' },
+    ] });
+    expect(malformed).toEqual([base]);
+    expect(parseProvidenceOsmFootprints({ elements: [
+      { ...way(255784049), version: 2, timestamp: 'invalid' },
+    ] })).toEqual([base]);
+  });
+
   it('accepts a server payload only for Providence with matching source, name and geometry', () => {
     const footprint = parseProvidenceOsmFootprints({ elements: [way(255784049)] })[0];
     expect(parseProvidenceFootprintResponse({ schoolId: 'pu', buildings: [footprint] })).toEqual([footprint]);

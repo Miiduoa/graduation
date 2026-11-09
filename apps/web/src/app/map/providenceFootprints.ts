@@ -14,6 +14,9 @@ export type ProvidenceFootprint = {
   outline: Array<[number, number]>; // GeoJSON 順序：[經度、緯度]
   heightMeters: number;
   heightBasis: 'osm-tag' | 'illustrative';
+  /** Optional OSM way revision; not a site-survey or geometry-freshness guarantee. */
+  osmVersion?: number;
+  osmEditedAt?: string;
 };
 
 const EARTH_RADIUS = 6_371_008.8;
@@ -157,6 +160,19 @@ function isStandingBuilding(value: unknown): boolean {
   return kind.length > 0 && !NON_BUILDING_VOLUMES.has(kind);
 }
 
+/** Only copy audited OSM way revision fields, never editor names or account IDs.
+ * Node positions may change without updating the parent way's revision.
+ */
+function osmWayRevision(value: Record<string, unknown>): Pick<ProvidenceFootprint, 'osmVersion' | 'osmEditedAt'> {
+  const version = value.version;
+  const timestamp = value.timestamp;
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1 ||
+      typeof timestamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(timestamp)) return {};
+  const time = Date.parse(timestamp);
+  if (!Number.isFinite(time) || new Date(time).toISOString().replace('.000Z', 'Z') !== timestamp) return {};
+  return { osmVersion: version, osmEditedAt: timestamp };
+}
+
 function heightFromOsmTags(value: unknown): { heightMeters: number; heightBasis: ProvidenceFootprint['heightBasis'] } {
   const tags = object(value);
   const raw = tags?.height;
@@ -188,6 +204,7 @@ export function parseProvidenceOsmFootprints(value: unknown): ProvidenceFootprin
       sourceUrl: place.sourceUrl,
       outline,
       ...heightFromOsmTags(element.tags),
+      ...osmWayRevision(element),
     });
   }
   // 與共用靜宜地點名錄保持同順序，而非依伺服器回傳順序。
@@ -222,6 +239,7 @@ export function parseProvidenceFootprintResponse(value: unknown): ProvidenceFoot
     accepted.push({
       poiId: place.id, name: place.name, sourceUrl: place.sourceUrl, outline,
       heightMeters: item.heightMeters, heightBasis: item.heightBasis,
+      ...osmWayRevision({ version: item.osmVersion, timestamp: item.osmEditedAt }),
     });
   }
   return accepted;

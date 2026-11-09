@@ -211,6 +211,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }, []);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
+  const sourceFootprint = place && footprintStatus === 'ready'
+    ? footprints.find((footprint) => footprint.poiId === place.id) : null;
 
   useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) return;
@@ -343,6 +345,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {place.description && <p>{place.description}</p>}
                 {(place.building || place.floor) && <p>{[place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>}
                 {Boolean(place.facilities?.length) && <p>設施：{place.facilities!.join('、')}</p>}
+                {sourceFootprint?.osmVersion && sourceFootprint.osmEditedAt && (
+                  <p className={styles.note}>
+                    OSM way 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
+                    此日期不代表現場查證，節點座標可能另有更新。
+                  </p>
+                )}
                 {school === 'pu' && place.id === 'pu-zhugu' && (
                   <div className={styles.officialFloors}>
                     <strong>主顧樓 · 校方公開樓層資訊</strong>

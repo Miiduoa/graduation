@@ -8,7 +8,8 @@ const libraryOutline = [
   { lat: 24.22624, lon: 120.58131 },
 ];
 const osmPayload = JSON.stringify({
-  elements: [{ type: 'way', id: 255784049, geometry: libraryOutline, tags: { building: 'yes' } }],
+  elements: [{ type: 'way', id: 255784049, geometry: libraryOutline, tags: { building: 'yes' },
+    version: 7, timestamp: '2026-10-15T08:09:10Z', user: 'editor-name', uid: 22 }],
 });
 
 beforeEach(() => {
@@ -34,7 +35,11 @@ describe('public Providence building geometry route', () => {
     const body = await first.json();
     expect(body.schoolId).toBe('pu');
     expect(body.buildings).toHaveLength(1);
-    expect(body.buildings[0].poiId).toBe('pu-library');
+    expect(body.buildings[0]).toMatchObject({
+      poiId: 'pu-library', osmVersion: 7, osmEditedAt: '2026-10-15T08:09:10Z',
+    });
+    expect(JSON.stringify(body)).not.toContain('editor-name');
+    expect(body.buildings[0]).not.toHaveProperty('uid');
     expect(body.stale).toBe(false);
     expect(mockedFetch).toHaveBeenCalledTimes(1);
     const called = new URL(mockedFetch.mock.calls[0][0]);
@@ -42,6 +47,7 @@ describe('public Providence building geometry route', () => {
     const query = called.searchParams.get('data')!;
     expect(query).toContain('way(id:');
     expect(query).toContain('255784049');
+    expect(query).toContain('out meta geom;');
     expect(query).not.toContain('295686299'); // 未交叉確認的停車場
     const second = await GET();
     expect(second.status).toBe(200);

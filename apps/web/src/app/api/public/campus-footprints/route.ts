@@ -14,7 +14,7 @@ const REFRESH_MS = 24 * 60 * 60 * 1000;
 const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
 const query = '[out:json][timeout:12];way(id:' +
-  PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out geom;';
+  PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
 type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; validUntil: number };
 let cache: Snapshot | null = null;

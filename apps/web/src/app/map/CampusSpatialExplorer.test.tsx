@@ -341,7 +341,8 @@ it('adds source-checked Providence building shapes without changing navigation o
     { lat: 24.22624, lon: 120.58131 },
   ];
   const buildings = parseProvidenceOsmFootprints({
-    elements: [{ type: 'way', id: 255784049, geometry: outline }],
+    elements: [{ type: 'way', id: 255784049, geometry: outline,
+      tags: { building: 'yes' }, version: 7, timestamp: '2026-10-15T08:09:10Z' }],
   });
   await act(async () => {
     resolveFetch?.({ ok: true, json: async () => ({
@@ -352,6 +353,7 @@ it('adds source-checked Providence building shapes without changing navigation o
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
   expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
   expect(within(dialog).getByText(/2026-11-09/)).toBeTruthy();
+  expect(within(dialog).getByText(/OSM way 版本 v7.*2026-10-15/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
