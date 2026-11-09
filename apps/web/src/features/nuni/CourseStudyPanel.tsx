@@ -543,7 +543,9 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     // Even a rejected edit invalidates an earlier source replacement preview.
     setPendingSource(null);
     if (value.length > STUDY_TUTOR_LIMITS.textCharacters) {
-      setError('貼上的教材超過 60,000 字元；原本貼上的草稿仍保留。請分成較短的章節再試。');
+      setError(paste.length > 0
+        ? '貼上的教材超過 60,000 字元；未採用新文字。輸入框仍保留先前的草稿，按「開始讀這份內容」會讀取原草稿。請分章後重試。'
+        : '貼上的教材超過 60,000 字元；內容未加入白板。請分成較短的章節後重試。');
       return;
     }
     setPaste(value);

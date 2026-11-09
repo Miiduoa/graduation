@@ -371,13 +371,29 @@ it('renders source and generated text without executing HTML or treating URLs as
   await waitFor(() => expect(mocks.run).toHaveBeenCalledTimes(1));
 });
 
-it('keeps an oversized paste intact and asks for a smaller section instead of silently truncating it', () => {
+it('rejects an oversized first paste instead of storing 60,001 characters in React state', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
-  const text = '字'.repeat(60001);
-  fireEvent.change(screen.getByLabelText('或貼上課文與筆記'), { target: { value: text } });
-  expect((screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement).value).toBe(text);
+  const input = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  fireEvent.change(input, { target: { value: '字'.repeat(60001) } });
+  expect(input.value).toBe('');
   expect(screen.getByRole('button', { name: '開始讀這份內容' }).hasAttribute('disabled')).toBe(true);
-  expect(screen.getByText(/內容尚未加入白板/)).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('未加入白板');
+  expect(screen.getByText('0 / 60,000 字元')).toBeTruthy();
+});
+
+it('keeps the earlier valid draft after rejecting a longer paste and explains which draft would open', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" onClose={vi.fn()} />);
+  const input = screen.getByLabelText('或貼上課文與筆記') as HTMLTextAreaElement;
+  const earlierDraft = '資料庫第一章：主鍵不能重複。';
+  fireEvent.change(input, { target: { value: earlierDraft } });
+  expect(input.value).toBe(earlierDraft);
+  fireEvent.change(input, { target: { value: '字'.repeat(60001) } });
+  expect(input.value).toBe(earlierDraft);
+  expect(screen.getByRole('alert').textContent).toContain('會讀取原草稿');
+  const start = screen.getByRole('button', { name: '開始讀這份內容' });
+  expect(start.hasAttribute('disabled')).toBe(false);
+  fireEvent.click(start);
+  expect(screen.getByText(earlierDraft)).toBeTruthy();
 });
 
 const questionLabel = '卡在哪裡？也可以直接開始講解';
