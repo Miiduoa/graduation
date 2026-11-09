@@ -333,6 +333,29 @@ describe('saved class gap answer', () => {
     expect(answer({ minMinutes: 121 })).toContain('沒有至少 121 分鐘');
   });
 
+  test('rejects fabricated day-long gaps instead of turning them into an all-day free period', () => {
+    // Two classes on the requested day cannot create a whole-day or multi-day class gap.
+    // Corrupt persisted data must not become a plausible 10:01–24:00 opening when clipped.
+    const impossible = [
+      { startAt: instant('08:00'), endAt: instant('08:00', '2026-11-07') },
+      { startAt: instant('09:00', '2026-11-05'), endAt: instant('15:00', '2026-11-07') },
+    ];
+    for (const bad of impossible) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, classGaps: [bad] },
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('資料不足');
+      expect(answer.content).not.toContain('沒有課間空堂');
+      expect(answer.content).not.toContain('有 1 段');
+      expect(answer.content).not.toContain('24:00');
+    }
+    const valid = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [gap('14:00', '15:00')] },
+    });
+    expect(valid.content).toContain('14:00–15:00（60 分鐘）');
+  });
+
   test('rejects corrupted restored clock filters without crashing or inventing free time', () => {
     const malformed = [
       { ...today, day: 'yesterday' },
