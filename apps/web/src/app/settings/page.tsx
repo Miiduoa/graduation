@@ -59,6 +59,7 @@ import {
   type StoredWebPreferences,
   type ThemePreference,
 } from '@/lib/webPreferences';
+import { PlatformServiceControls } from './PlatformServiceControls';
 import styles from './settings.module.css';
 import {
   currentSettingsSection,
@@ -90,6 +91,7 @@ const SECTIONS: { id: Section; label: string; description: string }[] = [
   { id: 'account', label: '帳號', description: '個人資料與登入' },
   { id: 'notifications', label: '通知', description: '接收類型與勿擾時段' },
   { id: 'assistant', label: '助理權限', description: '助理可執行的寫入動作' },
+  { id: 'platform', label: '平台權限', description: 'Google 帳號的服務使用範圍' },
   { id: 'appearance', label: '外觀', description: '色彩、字級與閱讀方式' },
   { id: 'privacy', label: '隱私', description: '個人資料與存取範圍' },
 ];
@@ -1259,6 +1261,7 @@ function SettingsContent({
     general: renderGeneral,
     notifications: renderNotifications,
     assistant: renderAssistant,
+    platform: () => <PlatformServiceControls />,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,

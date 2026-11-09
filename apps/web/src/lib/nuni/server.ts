@@ -17,7 +17,37 @@ export const SESSION_COOKIE =
 export const LOGIN_COOKIE =
   process.env.NODE_ENV === 'production' ? '__Host-campus-one-login' : 'campus-one-login';
 export const HANDLE = /^ps_[A-Za-z0-9_-]{43}$/;
-export type PlatformSession = { sessionHandle: string; expiresAt: number; pendingLogout?: true };
+export type PlatformServiceAccess = { social: boolean; cloudAi: boolean };
+export type PlatformSession = {
+  sessionHandle: string;
+  expiresAt: number;
+  pendingLogout?: true;
+  restrictedServices?: { social?: true; cloudAi?: true };
+};
+
+export function platformServiceAccess(session: PlatformSession): PlatformServiceAccess {
+  return {
+    social: session.restrictedServices?.social !== true,
+    cloudAi: session.restrictedServices?.cloudAi !== true,
+  };
+}
+
+export function requirePlatformService(session: PlatformSession, service: keyof PlatformServiceAccess): void {
+  if (!platformServiceAccess(session)[service]) throw new NuniError(403, 'PLATFORM_SERVICE_DISABLED');
+}
+
+export function withPlatformServiceAccess(
+  session: PlatformSession,
+  requested: PlatformServiceAccess,
+): PlatformSession {
+  return {
+    ...session,
+    restrictedServices: {
+      ...(requested.social ? {} : { social: true as const }),
+      ...(requested.cloudAi ? {} : { cloudAi: true as const }),
+    },
+  };
+}
 
 export function nuniEnabled() {
   // The legacy flag remains an API compatibility gate; it never selects the application shell.
@@ -130,10 +160,24 @@ export function readSession(request: NextRequest): PlatformSession | null {
     (value.pendingLogout !== undefined && value.pendingLogout !== true)
   )
     return null;
+  const restrictions = value.restrictedServices;
+  if (
+    restrictions !== undefined &&
+    (restrictions === null ||
+      typeof restrictions !== 'object' ||
+      Array.isArray(restrictions) ||
+      Object.entries(restrictions).some(
+        ([service, disabled]) => !['social', 'cloudAi'].includes(service) || disabled !== true,
+      ))
+  )
+    return null;
   return {
     sessionHandle: value.sessionHandle,
     expiresAt: value.expiresAt,
     ...(value.pendingLogout === true ? { pendingLogout: true } : {}),
+    ...(restrictions === undefined
+      ? {}
+      : { restrictedServices: restrictions as PlatformSession['restrictedServices'] }),
   };
 }
 

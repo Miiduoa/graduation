@@ -10,6 +10,7 @@ import {
   jsonResponse,
   nuniEnabled,
   platformRequest,
+  requirePlatformService,
   readSession,
   requireSameOrigin,
   requireSession,
@@ -214,6 +215,7 @@ export async function handlePlatformSocial(request: NextRequest, segments: strin
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
     if (request.method === 'POST') requireSameOrigin(request);
     const session = requireSession(request);
+    requirePlatformService(session, 'social');
     if (request.method === 'GET') {
       if (!['boards', 'feed', 'blocks', 'reports'].includes(path))
         throw new NuniError(404, 'NOT_FOUND');
