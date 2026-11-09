@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { formatEventWhen, formatPickup, formatYuan, inAppHref, pageLabel } from './copy';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { canConfirmAction, priorCalendarActionsVerified } from './execution';
+import { canConfirmAction, priorCalendarActionHint, priorCalendarActionsVerified } from './execution';
 import styles from './AssistantReply.module.css';
 import type { V2ActionState, V2ActionStates, V2Card } from './types';
 
@@ -158,6 +158,7 @@ export function AssistantCard({
   onReconcile?: (card: V2Card) => void;
 }) {
   const state = states[card.mutationId];
+  const prerequisiteHint = priorCalendarActionHint(cards, index, states);
   if (!supportedCard(card)) {
     return <article className={styles.card} aria-label="無法確認的任務">
       <p className={styles.eyebrow}>無法確認</p>
@@ -183,8 +184,8 @@ export function AssistantCard({
         <PageBody card={card} />
       )}
       {state && <Status value={state} card={card} pending={pending} onReconcile={onReconcile} />}
-      {canConfirmAction(state) && !priorCalendarActionsVerified(cards, index, states) && (
-        <p className={styles.hint}>先核對前面的個人行程是否已成功建立，再確認這一步；結果不明時不會自動繼續。</p>
+      {canConfirmAction(state) && prerequisiteHint && (
+        <p className={styles.hint}>{prerequisiteHint}</p>
       )}
       {canConfirmAction(state) && (
         <div className={styles.actions}>
