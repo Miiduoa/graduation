@@ -210,6 +210,47 @@ async def focused_action_readability(page, button, name, before_tab=None):
     return evidence
 
 
+async def completed_revision_preview(page):
+    # Pending=false does not imply the original revision editor has finished closing.
+    await expect(page.get_by_role('form', name='修改安排再預覽', exact=True)).to_have_count(0, timeout=5000)
+    original = page.get_by_role('region', name='修改行程提議', exact=True).first
+    await expect(original.get_by_role('status')).to_contain_text('這次重新預覽沒有寫入行程', timeout=5000)
+
+
+async def settled_comparison_geometry(panel):
+    # Read only: observe completion of native smooth scrolling and layout changes.
+    # The independent timer also bounds waiting if animation frames stop arriving.
+    return await panel.evaluate('''node => new Promise(resolve => {
+      const timeoutMs=5000, requiredStableFrames=8, requiredStableMs=100;
+      const sample=()=>{const r=node.getBoundingClientRect(), scrolling=document.scrollingElement;
+        return {connected:node.isConnected,scrollX,scrollY,scrollHeight:scrolling?.scrollHeight ?? 0,
+          comparison:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height}};};
+      const started=performance.now(), first=sample();
+      let last=first, lastKey=JSON.stringify(first), frames=0, changedFrames=0;
+      let stableFrames=0, stableSince=started, finished=false, frame=0;
+      const finish=(settled,reason)=>{
+        if(finished)return;
+        finished=true;clearTimeout(timer);cancelAnimationFrame(frame);
+        const ended=performance.now();
+        resolve({settled,reason,timeoutMs,requiredStableFrames,requiredStableMs,
+          waitMs:ended-started,frames,changedFrames,stableFrames,stableMs:ended-stableSince,first,last});
+      };
+      const timer=setTimeout(()=>finish(false,'timeout'),timeoutMs);
+      const tick=now=>{
+        last=sample();frames+=1;
+        const key=JSON.stringify(last);
+        if(key===lastKey)stableFrames+=1;
+        else{stableFrames=0;stableSince=now;changedFrames+=1;lastKey=key;}
+        if(!last.connected){finish(false,'comparison detached');return;}
+        if(stableFrames>=requiredStableFrames && now-stableSince>=requiredStableMs){
+          finish(true,'native scroll and layout stable');return;
+        }
+        frame=requestAnimationFrame(tick);
+      };
+      frame=requestAnimationFrame(tick);
+    })''')
+
+
 async def comparison_readability(page, name):
     """Read the actual scrollable UI; never hide the sticky composer for evidence."""
     panel = comparison(page)
@@ -238,6 +279,10 @@ async def comparison_readability(page, name):
                 and target['bottom'] < min(dock_box['top'], viewport['height'])
                 and target['left'] >= 0 and target['right'] <= viewport['width'])
 
+    await completed_revision_preview(page)
+    evidence['settling'] = await settled_comparison_geometry(panel)
+    save()
+    assert evidence['settling']['settled'], f'Native comparison layout did not settle: {evidence["settling"]}'
     await scroll(panel, 'start')
     evidence['panelAtStart'] = await geometry(panel)
     evidence['headingAtStart'] = await geometry(panel.get_by_role('heading', name='這次提議改了什麼', exact=True))
@@ -569,6 +614,7 @@ async def select_protection(page, events, indices, keyboard=False):
 async def protected_preview(page, before, after, indices, instruction, expected_actions):
     await expect(card_list(page)).to_have_count(len(before) + len(after))
     await idle(page)
+    await completed_revision_preview(page)
     for index in range(len(before)):
         old = card_list(page).nth(index)
         await expect(old).to_contain_text('已撤銷未執行提議')
