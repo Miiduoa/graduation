@@ -82,6 +82,22 @@ service cloud.firestore {
         && (!('orderingUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.orderingUrl));
     }
 
+    function creatorCardValid(schoolId, uid) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'updatedAt'])
+        && data.keys().hasOnly(['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'updatedAt'])
+        && data.schoolId == schoolId
+        && data.ownerUid == uid
+        && data.headline is string
+        && data.headline.size() <= 64
+        && data.bio is string
+        && data.bio.size() <= 220
+        && data.linkUrl is string
+        && data.linkUrl.size() <= 512
+        && (data.linkUrl == '' || isHttpsStorefrontUrl(data.linkUrl))
+        && data.updatedAt == request.time;
+    }
+
     function isActiveGroupMember(groupId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
@@ -435,6 +451,20 @@ service cloud.firestore {
       match /directory/{uid} {
         allow read: if isSchoolMember(schoolId);
         allow write: if false;
+      }
+
+      // Creator cards contain only explicitly published social fields.
+      // Private account and directory fields are never copied into this document.
+      match /creatorProfiles/{uid} {
+        allow get: if isSchoolMember(schoolId);
+        allow list: if false;
+        allow create: if isSelf(uid) && isSchoolMember(schoolId)
+          && creatorCardValid(schoolId, uid);
+        allow update: if isSelf(uid) && isSchoolMember(schoolId)
+          && resource.data.get('schoolId', '') == schoolId
+          && resource.data.get('ownerUid', '') == uid
+          && creatorCardValid(schoolId, uid);
+        allow delete: if isSelf(uid) && isSchoolMember(schoolId);
       }
 
       match /members/{uid} {
