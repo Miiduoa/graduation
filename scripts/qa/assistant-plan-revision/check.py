@@ -155,6 +155,85 @@ async def basic_comparison(page):
     assert await snapshot(page) == ledger, 'Reading the comparison caused an API call or write'
 
 
+async def comparison_readability(page, name):
+    """Read the actual scrollable UI; never hide the sticky composer for evidence."""
+    panel = comparison(page)
+    dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
+    await expect(dock).to_be_visible()
+    dock_element = await dock.element_handle()
+    ledger = await snapshot(page)
+    evidence = {'viewportScreenshots': [], 'fields': []}
+    evidence_path = OUT / f'{name}-readability.json'
+
+    def save():
+        evidence_path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    async def scroll(target, block):
+        await target.evaluate('''(node, block) => new Promise(resolve => {
+          node.scrollIntoView({block, inline:'nearest', behavior:'instant'});
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        })''', block)
+
+    async def geometry(target):
+        # Read target and the entire composer dock in one layout snapshot.
+        return await target.evaluate('''(node, dock) => {
+          const box = element => {const r=element.getBoundingClientRect();
+            return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
+          return {target:box(node),dock:box(dock),viewport:{width:innerWidth,height:innerHeight},
+            dockPosition:getComputedStyle(dock).position};
+        }''', dock_element)
+
+    def readable(value):
+        target, dock_box, viewport = value['target'], value['dock'], value['viewport']
+        return (target['width'] > 0 and target['height'] > 0 and target['top'] >= 0
+                and target['bottom'] < min(dock_box['top'], viewport['height'])
+                and target['left'] >= 0 and target['right'] <= viewport['width'])
+
+    await scroll(panel, 'start')
+    evidence['panelAtStart'] = await geometry(panel)
+    evidence['headingAtStart'] = await geometry(panel.get_by_role('heading', name='這次提議改了什麼', exact=True))
+    save()
+    assert readable(evidence['headingAtStart']), evidence
+    start_image = f'{name}-viewport-start.png'
+    await page.screenshot(path=str(OUT / start_image), full_page=False)
+    evidence['viewportScreenshots'].append(start_image)
+    element_image = OUT / f'{name}.png'
+    if readable(evidence['panelAtStart']):
+        # Only an already unobscured element may be captured; no screenshot-only styling.
+        await panel.screenshot(path=str(element_image))
+        evidence['panelAfterElementScreenshot'] = await geometry(panel)
+        save()
+        assert readable(evidence['panelAfterElementScreenshot']), evidence
+        evidence['elementScreenshot'] = element_image.name
+    else:
+        # Avoid retaining a stale, previously obscured element shot on local reruns.
+        element_image.unlink(missing_ok=True)
+        evidence['elementScreenshot'] = None
+        evidence['elementScreenshotNote'] = 'Panel does not fit above the composer; use real start/end viewport evidence.'
+    save()
+
+    terms = panel.locator('dt')
+    for index in range(await terms.count()):
+        term = terms.nth(index)
+        field = term.locator('..')  # The actual grid row includes dt and both old/new dd values.
+        await scroll(field, 'center')
+        value = await geometry(field)
+        value.update({'label': await term.inner_text(), 'text': await field.inner_text()})
+        value['readable'] = readable(value)
+        evidence['fields'].append(value)
+        save()
+        assert value['readable'], f'Comparison field is obscured after native scrolling: {value}'
+    if evidence['fields']:
+        end_image = f'{name}-viewport-end.png'
+        await page.screenshot(path=str(OUT / end_image), full_page=False)
+        evidence['viewportScreenshots'].append(end_image)
+        evidence['panelAtLastField'] = await geometry(panel)
+    evidence['ledgerUnchangedWhileScrolling'] = await snapshot(page) == ledger
+    save()
+    assert evidence['ledgerUnchangedWhileScrolling'], 'Scrolling the comparison caused an API call or write'
+    return evidence
+
+
 async def comparison_case(page, name):
     # Independent fixed scenarios: no production comparison helper is used as an oracle.
     before = [dict(event) for event in ORIGINAL]
@@ -264,13 +343,14 @@ async def comparison_case(page, name):
     overflow = await no_overflow(page)
     panel_size = await panel.evaluate('node => ({client:node.clientWidth,scroll:node.scrollWidth})')
     assert panel_size['scroll'] <= panel_size['client'] + 1, panel_size
-    await panel.screenshot(path=str(OUT / f'comparison-{name}-summary.png'))
+    readability = await comparison_readability(page, f'comparison-{name}-summary')
     await capture(page, f'comparison-{name}-zero-writes')
     assert await snapshot(page) == ledger, 'Comparison rendering or reading caused another API call or write'
     assert await page.evaluate("localStorage.getItem('campus.personal-imports.v1:platform%3Aqa-agent:fixture-campus-a')") is None
     return {'mode': 'native UI with configured fixed comparison data; no model or backend',
             'fixtureOriginal': before, 'fixtureRevised': after, 'summaryText': await panel.inner_text(),
-            'overflow': overflow, 'panelSize': panel_size, 'ledgerUnchangedWhileReading': True}
+            'overflow': overflow, 'panelSize': panel_size, 'ledgerUnchangedWhileReading': True,
+            'readability': readability}
 
 
 async def capture(page, name):
@@ -295,7 +375,7 @@ async def native_case(page, width):
     await assert_preview(page)
     assert actions(await snapshot(page)) == ['ask', 'cancel', 'cancel', 'ask']
     await no_overflow(page)
-    await comparison(page).screenshot(path=str(OUT / f'native-{width}-comparison.png'))
+    readability = await comparison_readability(page, f'native-{width}-comparison')
     await capture(page, f'native-{width}-preview-zero-writes')
     first = card_list(page).nth(2)
     second = card_list(page).nth(3)
@@ -322,7 +402,8 @@ async def native_case(page, width):
     assert journal is None, journal
     await no_overflow(page)
     await capture(page, f'native-{width}-confirmed')
-    return {'mode': 'native UI with fixed fake API', 'keyboard': 'Enter opens editor; focus moves to textarea; Tab/Enter submits', 'overflow': overflow}
+    return {'mode': 'native UI with fixed fake API', 'keyboard': 'Enter opens editor; focus moves to textarea; Tab/Enter submits',
+            'overflow': overflow, 'readability': readability}
 
 
 async def ask_error_case(page, fault):
