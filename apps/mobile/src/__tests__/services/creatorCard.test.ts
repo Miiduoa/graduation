@@ -43,7 +43,7 @@ test('write is confirmed with a fresh server read and cannot smuggle private fie
   })).resolves.toEqual({ headline: '讀書和攝影', bio: '校園生活', linkUrl: 'https://example.org/me' });
   expect(setDoc).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
     ...card, updatedAt: 'SERVER_TIME',
-  });
+  }, { merge: true });
 });
 
 test('a stale read or unsafe URL never reports success', async () => {
