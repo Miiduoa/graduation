@@ -1554,7 +1554,7 @@ it('validates pasted and previewed progress UTF-8 limits without allocating a Bl
     // the learner's current material, without a duplicate encoded allocation.
     fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
     expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
-    expect(screen.getByRole('alert').textContent).toContain('無法讀取這個進度檔');
+    expect(screen.getByRole('alert').textContent).toContain('這不是讀書白板的閱讀進度檔');
     expect(screen.getByText(material.body)).toBeTruthy();
     expect(blobSpy).not.toHaveBeenCalled();
   } finally {
