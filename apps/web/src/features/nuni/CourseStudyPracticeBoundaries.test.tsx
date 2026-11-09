@@ -117,7 +117,13 @@ function expectRetainedRound() {
   fireEvent.click(screen.getByRole('button', { name: '上一題' }));
   expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
   expect(screen.queryByText(explanations[0].answer)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
+  // This card has already been skipped. The skip control must not overwrite
+  // its saved outcome or act as navigation when returning from a file read.
+  const skip = screen.getByRole('button', { name: '略過這題' }) as HTMLButtonElement;
+  expect(skip.disabled).toBe(true);
+  fireEvent.click(skip);
+  expect((screen.getByLabelText(attemptLabel) as HTMLTextAreaElement).value).toBe(firstAttempt);
+  fireEvent.click(screen.getByRole('button', { name: '下一題' }));
   expectSecondQuestion();
   expect(mocks.run).not.toHaveBeenCalled();
 }
