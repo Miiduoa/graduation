@@ -818,19 +818,30 @@ function SettingsContent({
   }
 
   function renderAssistant() {
+    const googlePlatformReady = !!nuni.session && !nuni.loading && !nuni.pendingLogout && !nuni.error;
     const updateAssistantPermission = (key: AssistantWritePermissionKey, value: boolean) => {
       setAssistantWritePrefs((prev) => ({ ...prev, [key]: value }));
     };
     return (
       <div className={styles.stack}>
         <SectionHeading title="助理權限">
-          控制助理可以代你執行哪些寫入動作。預設全部關閉；開啟後仍需每次確認才會生效。涵蓋需確認的服務寫入、助理餐廳草稿下單，以及拆待辦／設提醒等個人待辦佇列。
+          平台雲端 AI 與校內助理採不同帳號及資料權限。校內助理的寫入動作預設關閉，開啟後仍需每次確認。
         </SectionHeading>
-        {assistantEnabled && nuni.session && <p role="note">nuni 校園助理目前僅提供公開資訊，尚未支援代辦寫入；下方設定不會開啟 nuni 助理寫入功能。</p>}
-        {!user && (
+        {assistantEnabled && googlePlatformReady && (
+          <p role="note">Google 平台 AI 的服務開關在「平台權限」。下方寫入動作屬於學校帳號，不會授予平台 AI 校籍、課表或私人訊息權限。</p>
+        )}
+        {!user && googlePlatformReady ? (
           <div className={styles.notice}>
-            <h3>登入後設定助理權限</h3>
-            <p>權限會跟著帳號保留，網頁與手機共用同一份設定。</p>
+            <h3>Google 平台帳號已登入</h3>
+            <p>可管理這次網頁登入的雲端 AI 使用設定。校內助理寫入需另外確認學校帳號，兩種權限不會自動合併。</p>
+            <button type="button" className="btn primary" onClick={() => openSection('platform')}>
+              管理平台 AI 權限
+            </button>
+          </div>
+        ) : !user && (
+          <div className={styles.notice}>
+            <h3>登入後設定校內助理權限</h3>
+            <p>校內助理寫入需有效學校帳號；平台 AI 可在 Google 登入後另行管理。</p>
             <Link href={`/login${schoolSearch}`} className="btn primary">
               前往登入
             </Link>
@@ -850,7 +861,7 @@ function SettingsContent({
         </div>
         <section aria-labelledby="assistant-write-permissions">
           <h3 className={styles.groupHeading} id="assistant-write-permissions">
-            寫入動作
+            校內助理寫入動作
           </h3>
           <div className={styles.group}>
             {ASSISTANT_WRITE_PERMISSION_DEFINITIONS.map((row) => (
