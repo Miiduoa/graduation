@@ -13,6 +13,7 @@ import {
   type CreatorIdentity,
 } from '@/lib/community/creatorProfile';
 import styles from './CreatorProfile.module.css';
+import { CreatorCardPanel } from './CreatorCardPanel';
 
 type ProfileTab = 'posts' | 'media' | 'saved';
 type LoadState<T> =
@@ -285,6 +286,7 @@ function ScopedCreatorProfile({
             <button type="button" onClick={() => setRefresh((n) => n + 1)}>重試</button>
           </div>
         )}
+        <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
         <div className={styles.actions}>
           {own ? (
             <>
