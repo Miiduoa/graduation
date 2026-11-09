@@ -14,6 +14,14 @@ begin
     return;
   end if;
 
+  -- 後續三份已登錄時不可單獨回滾基線（會拿掉 095011 的批改防護）；改用整批回滾。
+  if exists (
+    select 1 from supabase_migrations.schema_migrations
+    where version in ('20261106095011', '20261106123311', '20261106131129')
+  ) then
+    raise exception 'later submission migrations are recorded; use the batch rollback instead';
+  end if;
+
   if exists (
     select 1 from pg_catalog.pg_trigger
     where tgrelid = 'public.submissions'::regclass
