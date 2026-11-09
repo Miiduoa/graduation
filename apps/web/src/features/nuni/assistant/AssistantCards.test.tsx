@@ -267,3 +267,30 @@ it('warns that order-mode confirmation may submit an order and does not expose a
   expect(screen.getByRole('button', { name: '確認' })).toBeTruthy();
   expect(screen.queryByText('已送出訂單')).toBeNull();
 });
+
+it('reports cross-service progress without treating a handoff as a finished order', () => {
+  const calendar = eventCard('calendar-mixed-1', '資料庫複習');
+  const page: V2Card = {
+    tool: 'propose_open_page', token: 'page-mixed-1', mutationId: 'page-mixed-1',
+    schoolId: 'pu', destination: '/map?schoolId=pu', args: { page: 'map' },
+  };
+  const { rerender } = render(<AssistantCardStack
+    cards={[calendar, foodCard, page]}
+    states={{ [calendar.mutationId]: verifiedState(calendar),
+      [foodCard.mutationId]: { status: 'handoff', href: '/food?tenant=fixture-realm', message: '點餐頁已備妥' } }}
+    pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  const status = screen.getByLabelText('跨功能任務進度');
+  expect(status.textContent).toContain('個人行程已讀回核對 1/1 項');
+  expect(status.textContent).toContain('服務入口已備妥 1 項');
+  expect(status.textContent).toContain('其他 1 項尚未確認完成');
+  expect(status.textContent).toContain('服務入口不代表訂單、付款或作業已完成');
+  expect(screen.queryByText('已完成 3/3 項')).toBeNull();
+  expect(screen.queryByRole('button', { name: /依序確認/ })).toBeNull();
+
+  rerender(<AssistantCardStack cards={[calendar, foodCard, page]}
+    states={{ [calendar.mutationId]: { status: 'unknown', message: '回執尚未核對' },
+      [foodCard.mutationId]: { status: 'handoff', href: '/food?tenant=fixture-realm', message: '入口已備妥' } }}
+    pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByLabelText('跨功能任務進度').textContent).toContain('待核對或有衝突 1 項');
+  expect(screen.getByLabelText('跨功能任務進度').textContent).toContain('其他 1 項尚未確認完成');
+});
