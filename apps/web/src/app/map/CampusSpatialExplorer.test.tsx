@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
 import type { MapLocation } from './mapService';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
+import { parseProvidenceOsmFootprints } from './providenceFootprints';
 import { DEFAULT_SPATIAL_BEARING, MAX_SPATIAL_ZOOM, MIN_SPATIAL_ZOOM } from './campusSpatialCamera';
 
 const scene = vi.hoisted(() => ({
@@ -321,4 +322,47 @@ it('drops a building preview when its selected campus location is withdrawn', as
   expect(screen.queryByRole('dialog', { name: '平面圖建模預覽' })).toBeNull();
   expect(screen.getByRole('dialog', { name: '校園空間導覽' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '平面圖建模預覽' })).toBeNull();
+});
+
+it('adds source-checked Providence building shapes without changing navigation or hiding source dates', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  let resolveFetch: ((value: unknown) => void) | undefined;
+  const fetchMock = vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; }));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(fetchMock).toHaveBeenCalledWith('/api/public/campus-footprints', expect.objectContaining({ signal: expect.anything() }));
+  expect(within(dialog).getByText(/正在讀取靜宜建築輪廓/)).toBeTruthy();
+  const outline = [
+    { lat: 24.22624, lon: 120.58131 },
+    { lat: 24.22624, lon: 120.58143 },
+    { lat: 24.22634, lon: 120.58143 },
+    { lat: 24.22634, lon: 120.58131 },
+    { lat: 24.22624, lon: 120.58131 },
+  ];
+  const buildings = parseProvidenceOsmFootprints({
+    elements: [{ type: 'way', id: 255784049, geometry: outline }],
+  });
+  await act(async () => {
+    resolveFetch?.({ ok: true, json: async () => ({
+      schoolId: 'pu', buildings, fetchedAt: '2026-11-09T02:00:00.000Z', stale: false,
+    }) });
+  });
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings);
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/2026-11-09/)).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
+it('keeps the spatial map usable when Providence building geometry is unavailable', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: '在平面地圖查看' })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
