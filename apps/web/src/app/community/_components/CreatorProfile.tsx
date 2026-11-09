@@ -12,6 +12,7 @@ import {
   type CreatorCursor,
   type CreatorIdentity,
 } from '@/lib/community/creatorProfile';
+import { readCreatorPin, saveCreatorPin, type CreatorPin } from '@/lib/community/creatorPin';
 import styles from './CreatorProfile.module.css';
 import { CreatorCardPanel } from './CreatorCardPanel';
 
@@ -22,6 +23,7 @@ type LoadState<T> =
   | { status: 'ready'; value: T };
 type PostsPage = { rows: CampusPostDoc[]; cursor: CreatorCursor; hasMore: boolean };
 type FollowState = 'loading' | 'following' | 'not-following' | 'pending' | 'error';
+type PinState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: CreatorPin };
 
 type CreatorProfileProps = {
   schoolId: string;
@@ -109,10 +111,15 @@ function ScopedCreatorProfile({
   const [moreError, setMoreError] = useState('');
   const [shareStatus, setShareStatus] = useState('');
   const [followError, setFollowError] = useState('');
+  const [pin, setPin] = useState<PinState>({ status: 'loading' });
+  const [pinRevision, setPinRevision] = useState(0);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinFeedback, setPinFeedback] = useState('');
   const active = useRef(true);
   const postVersion = useRef(0);
   const moreFlight = useRef(false);
   const followFlight = useRef(false);
+  const pinFlight = useRef(false);
 
   useEffect(() => {
     active.current = true;
@@ -223,6 +230,34 @@ function ScopedCreatorProfile({
     }
   }, [own, followState, schoolId, viewerUid, memberUid]);
 
+  useEffect(() => {
+    let live = true;
+    setPin({ status: 'loading' });
+    setPinFeedback('');
+    void readCreatorPin(schoolId, memberUid).then((value) => {
+      if (live) setPin({ status: 'ready', value });
+    }).catch(() => { if (live) setPin({ status: 'error' }); });
+    return () => { live = false; };
+  }, [schoolId, memberUid, pinRevision]);
+
+  const changePin = useCallback(async (postId: string) => {
+    if (!own || pin.status !== 'ready' || pinFlight.current) return;
+    pinFlight.current = true;
+    setPinBusy(true);
+    setPinFeedback('');
+    try {
+      const confirmed = await saveCreatorPin(schoolId, viewerUid, postId);
+      if (!active.current) return;
+      setPin({ status: 'ready', value: confirmed });
+      setPinFeedback(postId ? '這篇貼文已置頂到你的個人頁。' : '已取消個人頁置頂。');
+    } catch {
+      if (active.current) setPinFeedback('尚未確認置頂變更，請檢查連線和貼文狀態後重試。');
+    } finally {
+      pinFlight.current = false;
+      if (active.current) setPinBusy(false);
+    }
+  }, [own, pin.status, schoolId, viewerUid]);
+
   const shareProfile = useCallback(async () => {
     const url = new URL(
       `/community/member/${encodeURIComponent(memberUid)}?schoolId=${encodeURIComponent(schoolId)}`,
@@ -253,6 +288,9 @@ function ScopedCreatorProfile({
   const activePosts = tab === 'saved'
     ? saved.status === 'ready' ? saved.value : []
     : tab === 'media' ? mediaPosts : loadedPosts;
+  const pinnedPost = pin.status === 'ready' ? pin.value.post : null;
+  const shownPosts = tab === 'posts' && pinnedPost
+    ? activePosts.filter((post) => post.id !== pinnedPost.id) : activePosts;
   const feedLoading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading';
   const feedError = tab === 'saved' ? saved.status === 'error' : posts.status === 'error';
 
@@ -344,6 +382,27 @@ function ScopedCreatorProfile({
           ))}
         </div>
         <div id="creator-content-panel" role="tabpanel" aria-labelledby={`creator-tab-${tab}`}>
+          {tab === 'posts' && pin.status === 'error' && (
+            <div className={styles.pinNotice} role="alert">
+              <span>置頂內容暫時無法讀取。</span>
+              <button type="button" className={styles.pinButton} onClick={() => setPinRevision((n) => n + 1)}>重新讀取置頂</button>
+            </div>
+          )}
+          {tab === 'posts' && pinnedPost && (
+            <section className={styles.pinnedBlock} aria-label="置頂貼文">
+              <div className={styles.pinHeading}>
+                <strong>置頂貼文</strong>
+                {own && <button
+                  type="button"
+                  className={styles.pinButton}
+                  disabled={pinBusy}
+                  onClick={() => void changePin('')}
+                >取消置頂</button>}
+              </div>
+              <PostCard post={pinnedPost} schoolId={schoolId} />
+            </section>
+          )}
+          {pinFeedback && tab === 'posts' && <p role="status" className={styles.pinNotice}>{pinFeedback}</p>}
           {feedLoading ? (
             <p role="status" className={styles.message}>正在讀取內容…</p>
           ) : feedError ? (
@@ -353,7 +412,7 @@ function ScopedCreatorProfile({
                 tab === 'saved' ? setSavedRefresh((n) => n + 1) : setRefresh((n) => n + 1)
               }>重新讀取</button>
             </div>
-          ) : activePosts.length === 0 ? (
+          ) : shownPosts.length === 0 && !pinnedPost ? (
             <div className={styles.message}>
               <p>
                 {tab === 'media'
@@ -370,7 +429,7 @@ function ScopedCreatorProfile({
             </div>
           ) : tab === 'media' ? (
             <div className={styles.mediaGrid}>
-              {activePosts.flatMap((post) => safeMedia(post).map((url, index) => (
+              {shownPosts.flatMap((post) => safeMedia(post).map((url, index) => (
                 <Link
                   key={`${post.id}-${index}`}
                   href={`/community/post/${encodeURIComponent(post.id)}?schoolId=${encodeURIComponent(schoolId)}`}
@@ -384,7 +443,21 @@ function ScopedCreatorProfile({
           ) : (
             <div className={styles.postList}>
               {tab === 'saved' && <p className={styles.privateNote}>私人收藏 · 最多顯示最近 40 筆，僅自己可見</p>}
-              {activePosts.map((post) => <PostCard key={post.id} post={post} schoolId={schoolId} />)}
+              {shownPosts.map((post) => (
+                <div key={post.id}>
+                  <PostCard post={post} schoolId={schoolId} />
+                  {own && tab === 'posts' && (
+                    <div className={styles.pinActions}>
+                      <button
+                        type="button"
+                        className={styles.pinButton}
+                        disabled={pinBusy || pin.status !== 'ready'}
+                        onClick={() => void changePin(post.id)}
+                      >置頂到個人頁</button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           {tab !== 'saved' && posts.status === 'ready' && posts.value.hasMore && (
