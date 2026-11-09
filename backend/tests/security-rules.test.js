@@ -25,6 +25,10 @@ async function seedFirestore(writeFn) {
   });
 }
 
+function campusBoundProfile(schoolId) {
+  return { status: 'active', schoolId, primarySchoolId: schoolId };
+}
+
 function uploadString(ref, value, contentType) {
   return ref.putString(value, 'raw', { contentType });
 }
@@ -1785,8 +1789,8 @@ describe('storage security rules', () => {
       await db.doc('schools/pu/members/bob').set({ status: 'active' });
     });
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
     });
     const path = 'schools/pu/stories/story-1/image';
     const alice = testEnv.authenticatedContext('alice');
@@ -1821,8 +1825,8 @@ describe('storage security rules', () => {
       await db.doc('schools/other/members/alice').set({ status: 'active' });
     });
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
     });
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
@@ -1841,10 +1845,15 @@ describe('storage security rules', () => {
       }));
       const mediaUrl = await assertSucceeds(file.getDownloadURL());
       const author = story.authorUid === 'bob' ? bob : alice;
-      await assertSucceeds(author.firestore().doc(`campusStories/${id}`).set({
+      const storyDoc = {
         schoolId: 'pu', authorUid: 'alice', kind: 'image', mediaUrl,
         expiresAt: Date.now() + 86_400_000, ...story,
-      }));
+      };
+      if (story.schoolId === 'other') {
+        await seedFirestore(async (db) => db.doc(`campusStories/${id}`).set(storyDoc));
+      } else {
+        await assertSucceeds(author.firestore().doc(`campusStories/${id}`).set(storyDoc));
+      }
       await assertFails(bob.storage().ref(path).getMetadata());
     }
   });
@@ -1855,8 +1864,8 @@ describe('storage security rules', () => {
       await db.doc('schools/other/members/bob').set({ status: 'active' });
     });
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('other'));
     });
     const alice = testEnv.authenticatedContext('alice').firestore();
     const bob = testEnv.authenticatedContext('bob').firestore();
@@ -1885,8 +1894,8 @@ describe('storage security rules', () => {
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
     });
     const media = alice.storage().ref('schools/pu/stories/expiring/photo.jpg');
     await assertSucceeds(media.putString('draft photo', 'raw', {
@@ -1936,8 +1945,8 @@ describe('storage security rules', () => {
       });
     });
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('users/bob').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('other'));
     });
     const alice = testEnv.authenticatedContext('alice').firestore();
     const bob = testEnv.authenticatedContext('bob').firestore();
@@ -1963,7 +1972,7 @@ describe('storage security rules', () => {
     const viewCollection = 'campusStories/private-views/storyViews';
     await seedFirestore(async (db) => {
       for (const uid of ['alice', 'bob', 'charlie']) {
-        await db.doc(`users/${uid}`).set({ status: 'active' });
+        await db.doc(`users/${uid}`).set(campusBoundProfile('pu'));
         await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
       }
       await db.doc('campusStories/private-views').set({
@@ -1991,52 +2000,88 @@ describe('storage security rules', () => {
       schoolId: 'pu', authorUid: 'alice', kind: 'text', text: 'synthetic story',
       expiresAt: now + 3_600_000, viewCount: 0,
     };
+    const studentProfile = { displayName: 'Rebuilt', role: 'student' };
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
-      await db.doc('users/bob').set({ status: 'active' });
-      await db.doc('users/charlie').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
+      await db.doc('users/charlie').set(campusBoundProfile('other'));
       await db.doc('schools/pu/members/alice').set({ status: 'active' });
       await db.doc('schools/pu/members/bob').set({ status: 'active' });
       await db.doc('schools/other/members/charlie').set({ status: 'active' });
     });
     // Keep the same issued auth contexts across every change of permission.
-    const alice = testEnv.authenticatedContext('alice').firestore();
-    const bob = testEnv.authenticatedContext('bob').firestore();
-    const charlie = testEnv.authenticatedContext('charlie').firestore();
+    const aliceCtx = testEnv.authenticatedContext('alice');
+    const bobCtx = testEnv.authenticatedContext('bob');
+    const charlieCtx = testEnv.authenticatedContext('charlie');
+    const alice = aliceCtx.firestore();
+    const bob = bobCtx.firestore();
+    const charlie = charlieCtx.firestore();
     const story = alice.doc('campusStories/revocation-check');
     const bobView = bob.doc('campusStories/revocation-check/storyViews/bob');
+    const mediaPath = 'schools/pu/stories/revocation-check/image';
+    const aliceMedia = aliceCtx.storage().ref(mediaPath);
+    const bobMedia = bobCtx.storage().ref(mediaPath);
+    const activeStoryQuery = (db) => db.collection('campusStories')
+      .where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000);
 
-    await assertSucceeds(story.set(payload));
+    await assertSucceeds(aliceMedia.putString('draft photo', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'alice' },
+    }));
+    const mediaUrl = await assertSucceeds(aliceMedia.getDownloadURL());
+    await assertSucceeds(story.set({ ...payload, kind: 'image', mediaUrl }));
     await assertSucceeds(bob.doc(story.path).get());
+    await assertSucceeds(bobMedia.getMetadata());
     await assertSucceeds(bobView.set({ viewerUid: 'bob', viewedAt: now }));
     await assertFails(charlie.doc(story.path).get());
     await assertFails(charlie.doc(story.path).delete());
+    await assertFails(charlieCtx.storage().ref(mediaPath).getMetadata());
 
     await seedFirestore(async (db) => {
       await db.doc('users/bob').delete();
       await db.doc(bobView.path).delete();
     });
     await assertFails(bob.doc(story.path).get());
-    await assertFails(bob.collection('campusStories')
-      .where('schoolId', '==', 'pu')
-      .where('expiresAt', '>', now + 120_000).get());
+    await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
     await assertFails(bobView.get());
+    await assertFails(bob.doc('campusStories/rebuilt-publish').set({
+      ...payload, authorUid: 'bob',
+    }));
 
-    await seedFirestore(async (db) => db.doc('users/bob').set({ status: 'active' }));
-    await assertSucceeds(bob.doc(story.path).get());
-    await assertSucceeds(bobView.set({ viewerUid: 'bob', viewedAt: now }));
+    await assertFails(bob.doc('users/bob').set({
+      ...studentProfile, schoolId: 'pu', primarySchoolId: 'pu', status: 'active',
+    }));
+    await assertSucceeds(bob.doc('users/bob').set(studentProfile));
+    await assertFails(bob.doc('users/bob').set({ ...studentProfile, schoolId: 'pu' }));
+    await assertFails(bob.doc('users/bob').update({ schoolId: 'pu', primarySchoolId: 'pu', status: 'active' }));
+    await assertFails(bob.doc(story.path).get());
+    await assertFails(activeStoryQuery(bob).get());
+    await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
+    await assertFails(bobView.get());
+    await assertFails(bob.doc('campusStories/rebuilt-publish').set({
+      ...payload, authorUid: 'bob',
+    }));
+    await assertSucceeds(bobMedia.getMetadata());
 
     await seedFirestore(async (db) => db.doc('users/alice').delete());
     await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
     await assertFails(story.get());
     await assertFails(story.delete());
+    await assertFails(aliceMedia.putString('replacement', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'alice' },
+    }));
+    await assertSucceeds(alice.doc('users/alice').set(studentProfile));
+    await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
+    await assertFails(story.get());
+    await assertFails(story.delete());
     await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ status: 'active' });
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
       await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
     });
     await assertFails(alice.doc('campusStories/revoked-school').set(payload));
     await assertFails(story.delete());
+    await assertFails(aliceMedia.getMetadata());
     await seedFirestore(async (db) =>
       db.doc('schools/pu/members/alice').set({ status: 'active' }));
     await assertSucceeds(story.delete());
@@ -3009,6 +3054,11 @@ describe('P1 authorization: users role authority fields', () => {
         },
       ],
       ['pollute-role', { role: 'admin' }],
+      ['pollute-status', { status: 'active' }],
+      ['pollute-school', { schoolId: 'pu' }],
+      ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-deletion-flag', { accountDeletionInProgress: true }],
+      ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
     for (const [uid, extra] of pollutedCreates) {
       const db = testEnv.authenticatedContext(uid).firestore();
@@ -4186,6 +4236,11 @@ describe('P1 authorization: users role authority fields', () => {
         },
       ],
       ['pollute-role', { role: 'admin' }],
+      ['pollute-status', { status: 'active' }],
+      ['pollute-school', { schoolId: 'pu' }],
+      ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-deletion-flag', { accountDeletionInProgress: true }],
+      ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
     for (const [uid, extra] of pollutedCreates) {
       const db = testEnv.authenticatedContext(uid).firestore();

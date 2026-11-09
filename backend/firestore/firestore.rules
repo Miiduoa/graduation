@@ -19,10 +19,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
     }
 
-    // A leftover school membership must not authorize a deleted canonical account.
+    // Story access requires a server-bound campus profile. A leftover
+    // school membership must not authorize a deleted account, and a
+    // client-rebuilt student profile cannot stamp schoolId / primarySchoolId.
     function isCanonicalStoryMember(schoolId) {
       return isSchoolMember(schoolId)
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('primarySchoolId', '') == schoolId
+        );
     }
 
     function hasAnyServiceRole(schoolId, uid) {
@@ -1168,7 +1174,12 @@ service cloud.firestore {
           'postLoginRoles',
           'teachingRoles',
           'orgRoles',
-          'lastPostLoginResolvedAt'
+          'lastPostLoginResolvedAt',
+          'status',
+          'schoolId',
+          'primarySchoolId',
+          'notificationDeliveryDisabled',
+          'accountDeletionInProgress'
         ]);
       // Update: denylist authority/security keys via affectedKeys so insert/change/remove
       // are all blocked even when the existing doc lacks those optional fields.

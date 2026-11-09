@@ -351,3 +351,18 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 新增隔離 Firebase emulator 回歸以**同一批已核發測試身分**驗證正常故事建立及同校閱讀、跨校拒絕、canonical user 刪除後讀取／列表／觀看收據與新發布、作者刪除拒絕；補回 active profile 後正常存取恢復；校籍轉 inactive 後不得發布或刪除，重啟後才能正常刪除。既有合法 story fixture 補建 active canonical user，沒有移除既有非授權斷言。**是否通過必須以新精確 head 的 Rules CI 判斷，不能沿用上一版綠燈。**
 
 發布相容性：歷史上只有校籍 member、沒有 `users/{uid}` 的合法舊帳號，限動讀寫將 fail-closed；發布前須由受控帳號流程盤點並補齊有依據的 active canonical profile。Storage stories 媒體的跨服務兩份文件查詢限制仍未解決，舊 bearer URLs、真 GCS staging、Supabase signed URL、限動索引／手機版本／Rules 分階段上線、minimatch 雙鎖檔及指定 App 核可均仍待獨立處理。沒有正式資料、金鑰、migration、token 清理或 main 合併。
+
+## 2026-11-09：限動自建 profile 不得接上殘留校籍
+
+獨立複核發現前一版 `isCanonicalStoryMember` 只要求 `users/{uid}` 存在。`isSignedIn()` 在 profile 缺失時仍為 true，而 `users` create 仍允許本人建立 student 文件。因此同一有效 ID token 可在 canonical 文件被刪除後自建 profile，再憑殘留 `schools/{schoolId}/members/{uid}` active 記錄恢復限動 get／list／create／作者刪除與觀看收據。這是 Firestore SDK 路徑，不是已簽發下載 URL 撤銷。
+
+本輪只在限動授權與 `users` create 收斂，沒有放寬其他規則：
+
+- `isCanonicalStoryMember` 除了 canonical 文件與 active 校籍，還要求該 profile 的 `schoolId` 或 `primarySchoolId` 與限動學校一致。這兩個欄位只由伺服器登入／補齊流程寫入。
+- 客戶端建立 student profile 仍允許（一般註冊），但 create 不可再帶 `status`、`schoolId`、`primarySchoolId`、`notificationDeliveryDisabled`、`accountDeletionInProgress`。既有 update 拒絕名單未放寬。
+- 合法校務登入寫入的 profile 含 `schoolId`／`primarySchoolId`，同一認證 context 下的正常發布、同校讀取、作者刪除與觀看紀錄維持可通過。
+- 同一認證 context 下刪除 canonical 文件後，殘留校籍不得讀寫限動；接著客戶端重建 student profile、或嘗試自行寫入校別／status，限動讀寫與作者刪除仍拒絕。伺服器再寫入綁定校別的 profile 且校籍 inactive 時仍拒絕；校籍恢復 active 後作者才能刪除。
+
+Storage `schools/{schoolId}/stories/` 已使用校籍文件與 `campusStories` 兩份查詢，同一請求無法再讀 canonical profile。回歸因此保留「刪帳並自建 profile 後，殘留校籍仍可讀已發布媒體」的現況，並拒絕已發布後覆寫與校籍 inactive 後的媒體讀取。這不是放寬，也不能當作已簽發 bearer URL 失效。
+
+新增／調整案例以 Firebase emulator 實際執行結果為準，不得沿用上一版 CI 綠燈。發布前除既有 legacy 無 profile 帳號外，還需盤點只有校籍、profile 未帶 `schoolId`／`primarySchoolId` 的帳號，否則限動 Firestore 會 fail-closed。未合併 main、部署、執行 migration、操作正式資料或 token。

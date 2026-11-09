@@ -226,6 +226,9 @@ service firebase.storage {
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
       function activeStoryMember() {
+        // Membership plus the campusStories document already use the two
+        // Firestore lookups Storage rules allow, so this path cannot also
+        // require a canonical user profile on the same request.
         return isAuthenticated()
           && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
       }
