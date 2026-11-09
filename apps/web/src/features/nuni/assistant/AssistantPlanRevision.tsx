@@ -69,9 +69,19 @@ function PlanRevision({ turn, states, pending, enabled, onPreview, events }: Pro
     focusFrame.current = window.requestAnimationFrame(() => {
       focusFrame.current = null;
       if (!mounted.current || document.activeElement !== target || !panel.current?.contains(target)) return;
-      // Native nearest scrolling resolves the CSS margins, including calc() and
-      // safe-area values, and keeps a control already within them in place.
-      target.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      const style = window.getComputedStyle(target);
+      const topMargin = Number.parseFloat(style.scrollMarginBlockStart) || 0;
+      const bottomMargin = Number.parseFloat(style.scrollMarginBlockEnd) || 0;
+      const viewport = window.visualViewport;
+      const top = viewport?.offsetTop ?? 0;
+      const bottom = top + (viewport?.height ?? window.innerHeight);
+      const bounds = target.getBoundingClientRect();
+      // Explicit alignment reveals controls hidden by the sticky dock even when
+      // they are still inside the layout viewport and nearest would not move.
+      if (bounds.bottom > bottom - bottomMargin)
+        target.scrollIntoView?.({ block: 'end', inline: 'nearest', behavior: 'instant' });
+      else if (bounds.top < top + topMargin)
+        target.scrollIntoView?.({ block: 'start', inline: 'nearest', behavior: 'instant' });
     });
   }
 

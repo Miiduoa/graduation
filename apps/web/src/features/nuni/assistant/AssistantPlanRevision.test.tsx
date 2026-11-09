@@ -294,9 +294,9 @@ it('clears old protection choices on a new proposal and ignores its predecessor\
 });
 
 
-// jsdom verifies the native scroll request and focus lifecycle only. Browser QA
-// verifies actual movement and CSS margins against the dock at each viewport.
-function focusScrollFixture() {
+// Explicit jsdom geometry uses the measured 720px viewport and computed margins:
+// 150px dock + 72px bottom clearance + 12px focus gap. Browser QA checks movement.
+function focusScrollFixture(top = 526.94) {
   let frameId = 0;
   const frames = new Map<number, FrameRequestCallback>();
   const request = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
@@ -304,6 +304,7 @@ function focusScrollFixture() {
     return frameId;
   });
   const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id); });
+  vi.stubGlobal('visualViewport', { offsetTop: 0, height: 720 });
   const view = render(<>
     <AssistantPlanRevision {...base} turn={turn()} onPreview={vi.fn()} />
     <button type="button">表單外的控制項</button>
@@ -312,6 +313,16 @@ function focusScrollFixture() {
   const button = screen.getByRole('button', { name: '重新預覽' });
   const scroll = vi.fn();
   Object.defineProperty(button, 'scrollIntoView', { configurable: true, value: scroll });
+  vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(29, top, 88, 44));
+  const computedStyle = window.getComputedStyle.bind(window);
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+    const style = computedStyle(element, pseudo);
+    if (element === button) {
+      style.scrollMarginBlockStart = '12px';
+      style.scrollMarginBlockEnd = '234px';
+    }
+    return style;
+  });
   const flush = () => act(() => {
     const callbacks = [...frames.values()];
     frames.clear();
@@ -320,13 +331,27 @@ function focusScrollFixture() {
   return { view, button, scroll, request, cancel, frames, flush };
 }
 
-it('requests a native instant nearest scroll after the control receives focus', () => {
+it('aligns the bottom of a focused control hidden by the dock even inside the layout viewport', () => {
   const { button, scroll, flush } = focusScrollFixture();
   act(() => button.focus());
   expect(document.activeElement).toBe(button);
   expect(scroll).not.toHaveBeenCalled();
   flush();
-  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'end', inline: 'nearest', behavior: 'instant' });
+});
+
+it('aligns the top of a focused control above the visible area', () => {
+  const { button, scroll, flush } = focusScrollFixture(8);
+  act(() => button.focus());
+  flush();
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'start', inline: 'nearest', behavior: 'instant' });
+});
+
+it('does not scroll a focused control fully inside the usable area including its bottom boundary', () => {
+  const { button, scroll, flush } = focusScrollFixture(442);
+  act(() => button.focus());
+  flush();
+  expect(scroll).not.toHaveBeenCalled();
 });
 
 it('does not schedule another scroll request for typing or checkbox state changes', () => {

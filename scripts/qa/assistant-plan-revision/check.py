@@ -164,9 +164,10 @@ async def geometry_against_composer(target, dock_element):
     return await target.evaluate('''(node, dock) => {
       const box = element => {const r=element.getBoundingClientRect();
         return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height};};
-      const style=getComputedStyle(node), visual=window.visualViewport;
+      const style=getComputedStyle(node), visual=window.visualViewport, scrolling=document.scrollingElement;
       return {target:box(node),dock:box(dock),viewport:{width:innerWidth,height:innerHeight},
         dockPosition:getComputedStyle(dock).position,scroll:{x:scrollX,y:scrollY},
+        documentScrollingElement:scrolling?{scrollHeight:scrolling.scrollHeight,clientHeight:scrolling.clientHeight,scrollTop:scrolling.scrollTop}:null,
         computedMargins:{marginBlockStart:style.marginBlockStart,marginBlockEnd:style.marginBlockEnd,
           scrollMarginBlockStart:style.scrollMarginBlockStart,scrollMarginBlockEnd:style.scrollMarginBlockEnd},
         visualViewport:visual?{width:visual.width,height:visual.height,offsetLeft:visual.offsetLeft,
@@ -185,6 +186,9 @@ async def focused_action_readability(page, button, name, before_tab=None):
     evidence = await geometry_against_composer(button, await dock.element_handle())
     evidence['focused'] = await button.evaluate('node => document.activeElement === node')
     evidence['action'] = await button.inner_text()
+    probe = await button.evaluate("node => ({installed:!!node.__qaScrollRequests,requests:node.__qaScrollRequests || []})")
+    evidence['scrollRequests'] = probe['requests']
+    evidence['scrollProbe'] = 'Single-element observer delegates the original native scrollIntoView' if probe['installed'] else None
     if before_tab is not None:
         evidence['beforeTab'] = before_tab
         previous, previous_dock, previous_viewport = before_tab['target'], before_tab['dock'], before_tab['viewport']
@@ -641,6 +645,21 @@ async def protected_good_case(page, name):
         button = page.get_by_role('button', name='重新預覽', exact=True)
         dock = page.get_by_role('form', name='傳送問題', exact=True).locator('..')
         before_tab = await geometry_against_composer(button, await dock.element_handle())
+        # Observe only this button instance; every product call delegates unchanged to native.
+        await button.evaluate('''node => {
+          const original=node.scrollIntoView, requests=[];
+          const sample=target=>{const r=target.getBoundingClientRect(), scrolling=document.scrollingElement;
+            return {button:{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height},
+              scroll:{x:scrollX,y:scrollY},documentScrollingElement:scrolling?{
+                scrollHeight:scrolling.scrollHeight,clientHeight:scrolling.clientHeight,scrollTop:scrolling.scrollTop}:null};};
+          node.__qaScrollRequests=requests;
+          node.scrollIntoView=function(options){
+            const request={options:options ?? null,before:sample(this)};
+            requests.push(request);
+            try {return original.call(this,options);}
+            finally {request.after=sample(this);}
+          };
+        }''')
         await page.keyboard.press('Tab')
         focused_action = await focused_action_readability(page, button, f'protected-{name}-preview-focus', before_tab)
         await page.keyboard.press('Enter')
