@@ -27,6 +27,27 @@ test('Web release does not migrate databases, deploy Firebase, enable ordering, 
   assert.equal(files.dockerfile.includes('entry.js'), false);
 });
 
+for (const name of ['Dockerfile', 'Dockerfile.nuni']) {
+  test(`${name} passes the optional file storage backend into compilation with an empty default`, () => {
+    const dockerfile = read(`deploy/web/${name}`);
+    const buildStart = dockerfile.indexOf('FROM base AS build');
+    const buildEnd = dockerfile.indexOf('FROM base AS runtime');
+    assert.ok(buildStart >= 0 && buildEnd > buildStart, 'build and runtime must remain separate');
+    const build = dockerfile.slice(buildStart, buildEnd);
+    const compileAt = build.indexOf('RUN pnpm --filter web build');
+    assert.ok(compileAt >= 0, 'the production build must remain enabled');
+    const beforeCompile = build.slice(0, compileAt);
+    assert.match(beforeCompile, /^ARG NEXT_PUBLIC_FILE_STORAGE_BACKEND=$/m);
+    assert.match(beforeCompile, /^ENV NEXT_PUBLIC_FILE_STORAGE_BACKEND=\$NEXT_PUBLIC_FILE_STORAGE_BACKEND$/m);
+  });
+}
+
+test('production Web forwards the optional public file storage backend build arg', () => {
+  const workflow = read('.github/workflows/web-release.yml');
+  assert.match(workflow, /^      NEXT_PUBLIC_FILE_STORAGE_BACKEND: \$\{\{ vars\.NEXT_PUBLIC_FILE_STORAGE_BACKEND \}\}$/m);
+  assert.match(workflow, /^            --build-arg NEXT_PUBLIC_FILE_STORAGE_BACKEND \\$/m);
+});
+
 test('functions package keeps index.js as the upload entry', () => {
   const pkg = JSON.parse(read('backend/functions/package.json'));
   assert.equal(pkg.main, 'index.js');
