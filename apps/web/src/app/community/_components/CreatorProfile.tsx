@@ -412,7 +412,7 @@ function ScopedCreatorProfile({
                 tab === 'saved' ? setSavedRefresh((n) => n + 1) : setRefresh((n) => n + 1)
               }>重新讀取</button>
             </div>
-          ) : shownPosts.length === 0 && !pinnedPost ? (
+          ) : shownPosts.length === 0 && !(tab === 'posts' && pinnedPost) ? (
             <div className={styles.message}>
               <p>
                 {tab === 'media'
