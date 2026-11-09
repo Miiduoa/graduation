@@ -192,6 +192,10 @@ function AssistantConversation({
     }>
   >([]);
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
+  const draftRef = useRef(draft);
+  const composerInput = useRef<TextInput>(null);
+  const [pendingQuestion, setPendingQuestion] = useState('');
+  const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const [mode, setMode] = useState<CampusAssistantMode>('device');
   const [deviceStatus, setDeviceStatus] = useState<OnDeviceAssistantReadiness | null>(null);
   const [sense, setSense] = useState<CampusSenseSnapshot | null>(null);
@@ -226,7 +230,7 @@ function AssistantConversation({
     ? activeShortcut.choice.reminder : undefined;
   const queryingGaps = activeShortcut?.kind === 'gap';
   const updatingReminder = reminderChoice === 'confirm' || reminderChoice === 'remove';
-  const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(draft, hasClass)));
+  const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(busy ? pendingQuestion : draft, hasClass)));
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
   const latestSense = useRef(currentSense);
@@ -344,10 +348,25 @@ function AssistantConversation({
     return () => { active = false; };
   }, [deviceCheck, platformTimetable]);
   const editDraft = (text: string) => {
-    if (lock.current || studyLock.current || calendarBusy) return;
+    if (studyLock.current || calendarBusy) return;
+    // Asking only locks sending, not composing the next question.
+    draftRef.current = text;
     setDraft(text);
-    setError('');
+    if (!lock.current) {
+      setError('');
+      setActiveShortcut(null);
+    }
+  };
+  const recoverQuestion = () => {
+    if (!recoverableQuestion || !current() || lock.current || syncLock.current ||
+        studyLock.current || calendarBusy) return;
+    const previousDraft = draftRef.current;
+    draftRef.current = recoverableQuestion;
+    setDraft(recoverableQuestion);
+    setRecoverableQuestion(previousDraft.trim() ? previousDraft : '');
     setActiveShortcut(null);
+    setError('');
+    composerInput.current?.focus();
   };
   const changeMode = (next: CampusAssistantMode) => {
     if (lock.current || syncLock.current || studyLock.current || calendarBusy || next === mode) return;
@@ -583,6 +602,15 @@ function AssistantConversation({
     setActiveShortcut(shortcut ?? null);
     setBusy(true);
     setError('');
+    setPendingQuestion(question);
+    // A read-only question can be in flight while the next draft is written.
+    // Keep shortcuts independent: they must never consume an existing free-form draft.
+    if (!shortcut) {
+      draftRef.current = '';
+      setDraft('');
+      setRecoverableQuestion((previous) => previous === question ? '' : previous);
+    }
+    let answered = false;
     const controller = new AbortController();
     inFlight.current = controller;
     const duringRead = platformTimetable ? new Map<string, string>() : null;
@@ -670,7 +698,7 @@ function AssistantConversation({
             proposals: reply.proposals,
           },
         ]);
-        if (!shortcut) setDraft('');
+        answered = true;
         setActiveShortcut(null);
       }
     } catch (failure) {
@@ -703,7 +731,18 @@ function AssistantConversation({
       changesDuringRead.current = null;
       if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
-      if (current()) setBusy(false);
+      if (current()) {
+        if (!answered && !shortcut) {
+          // Errors, cancellations and scope-validation failures all preserve the original question.
+          if (draftRef.current.trim()) setRecoverableQuestion(question);
+          else {
+            draftRef.current = question;
+            setDraft(question);
+          }
+        }
+        setPendingQuestion('');
+        setBusy(false);
+      }
     }
   };
   const openAnnouncement = (item: CampusSenseSnapshot['announcements']['items'][number], checkedAt: string) => {
@@ -874,8 +913,9 @@ function AssistantConversation({
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
           paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
           <TextInput
+            ref={composerInput}
             accessibilityLabel="詢問校園助理"
-            value={draft} maxLength={1600} multiline editable={!busy && !calendarBusy} onChangeText={editDraft}
+            value={draft} maxLength={1600} multiline editable={!studyBusy && !calendarBusy} onChangeText={editDraft}
             placeholder={platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
             placeholderTextColor={aiTokens.muted}
             style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
@@ -1299,7 +1339,7 @@ function AssistantConversation({
             : activeShortcut?.kind === 'plan-study' ? '正在核對計畫中的作業…'
             : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : queryingGaps ? '正在查手機課表的空堂…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
-              {activeShortcut?.question ?? draft.trim()}
+              {pendingQuestion}
             </Text>
             {syncBusy ? (
               <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.textSecondary, lineHeight: 21 }}>
@@ -1334,6 +1374,17 @@ function AssistantConversation({
           <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
             只是開啟頁面，提交或付款仍要自行確認。
           </Text>
+        </View>
+      ) : null}
+      {recoverableQuestion && recoverableQuestion !== draft && !busy ? (
+        <View style={{ marginHorizontal: 16, padding: 12, borderWidth: 1,
+          borderColor: aiTokens.border, borderRadius: 14, backgroundColor: aiTokens.panel, gap: 8 }}>
+          <Text accessibilityRole="text" style={{ color: aiTokens.textSecondary, fontSize: 13 }}>
+            另一個問題也已保留，切換時不會覆蓋目前草稿。
+          </Text>
+          <Text selectable style={{ color: aiTokens.text, lineHeight: 21 }}>{recoverableQuestion}</Text>
+          <AIButton label="切換到保留的問題" variant="ghost" size="sm"
+            onPress={recoverQuestion} disabled={busy || syncBusy || calendarBusy || studyBusy} />
         </View>
       ) : null}
       {error ? (
