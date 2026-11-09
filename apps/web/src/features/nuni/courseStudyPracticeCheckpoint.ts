@@ -83,7 +83,9 @@ function readRound(value: unknown, progress: CourseStudyProgressData): StudyPrac
       ![null, 'again', 'understood', 'skipped'].includes(response.outcome as string | null)) invalid();
     const outcome = response.outcome as StudyPracticeResponse['outcome'];
     if ((response.answerVisible && !response.attempt.trim()) ||
-      ((outcome === 'again' || outcome === 'understood') && (!response.answerVisible || !response.attempt.trim())) ||
+      // A learner may hide a once-read reference answer after self-assessing.
+      // Preserve the rating in the v1 checkpoint without disclosing the answer.
+      ((outcome === 'again' || outcome === 'understood') && !response.attempt.trim()) ||
       (outcome === 'skipped' && response.answerVisible)) invalid('練習的試答、揭答與自評狀態不一致，無法還原。');
     responses[card.id] = {
       attempt: response.attempt as string,

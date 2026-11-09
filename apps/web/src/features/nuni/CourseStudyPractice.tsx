@@ -154,7 +154,7 @@ export function CourseStudyPractice({ round, onAction, onExit, onReadSource, onD
             onChange={(event) => onAction({ type: 'attempt', value: event.target.value })}
             placeholder="先憑記憶回答，不確定的地方也可以寫下來。" />
         </label>
-        <p id={attemptHelpId} className={styles.note}>先寫下自己的回答，再對照參考回答；修改回答後會收起參考內容。</p>
+        <p id={attemptHelpId} className={styles.note}>先寫下自己的回答，再對照參考回答；修改回答會清除原自評，單純收起參考回答不會。</p>
         <button type="button" className={styles.button} disabled={!canRevealAnswer} aria-expanded={answerVisible} aria-controls={answerId}
           onClick={() => onAction({ type: 'toggle_answer' })}>{answerVisible ? '收起參考回答' : '對照參考回答'}</button>
         {answerVisible && <section id={answerId} className={styles.answer} aria-label="本題參考回答">

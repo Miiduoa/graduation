@@ -183,14 +183,14 @@ describe('finite independent practice rounds', () => {
     expect(JSON.stringify(initial)).toBe(before);
   });
 
-  it('invalidates prior self-assessment when the attempt changes or the learner hides the answer', () => {
+  it('invalidates self-assessment on an edited attempt but preserves it when hiding a reference answer', () => {
     const assessed = updateStudyPracticeRound(decide(round(), 'understood', '原試答'), { type: 'go', index: 0 });
     const id = assessed.cards[0].id;
     const edited = updateStudyPracticeRound(assessed, { type: 'attempt', value: '新的完整試答' });
     expect(edited.responses[id]).toMatchObject({ attempt: '新的完整試答', answerVisible: false, outcome: null });
     const hidden = updateStudyPracticeRound(assessed, { type: 'toggle_answer' });
-    expect(hidden.responses[id]).toMatchObject({ attempt: '原試答', answerVisible: false, outcome: null });
-    expect(getStudyPracticeSummary(hidden).pending).toBe(3);
+    expect(hidden.responses[id]).toMatchObject({ attempt: '原試答', answerVisible: false, outcome: 'understood' });
+    expect(getStudyPracticeSummary(hidden)).toMatchObject({ understood: 1, pending: 2 });
     expect(updateStudyPracticeRound(assessed, { type: 'attempt', value: '原試答' })).toBe(assessed);
     expect(assessed.responses[id]).toMatchObject({ answerVisible: true, outcome: 'understood' });
   });
@@ -457,6 +457,7 @@ describe('practice note disclosure and filenames', () => {
     const edited = updateStudyPracticeRound(assessed, { type: 'attempt', value: '修正試答' });
     expect(buildCourseStudyPracticeNotes('課程', '講義', assessed)).toContain('參考答案秘密 1');
     expect(buildCourseStudyPracticeNotes('課程', '講義', hidden)).not.toContain('參考答案秘密');
+    expect(buildCourseStudyPracticeNotes('課程', '講義', hidden)).toContain('本人自評：我已理解');
     expect(buildCourseStudyPracticeNotes('課程', '講義', edited)).not.toContain('參考答案秘密');
   });
 

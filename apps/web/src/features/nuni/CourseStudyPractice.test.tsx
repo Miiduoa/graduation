@@ -211,6 +211,21 @@ it('keeps a revealed answer and self-assessment when navigating without modifyin
   expect(screen.getByRole('group', { name: '本題自評' })).toBeTruthy();
 });
 
+it('keeps a learner self-rating when concealing an already read answer but clears it on answer edits', () => {
+  render(<Controller />);
+  decide('understood');
+  selectQuestion(1);
+  fireEvent.click(screen.getByRole('button', { name: '收起參考回答' }));
+  expect(screen.queryByRole('region', { name: '本題參考回答' })).toBeNull();
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，自評理解' })).toBeTruthy();
+  // Editing the attempt is different from choosing to conceal the answer.
+  writeAnswer('重新作答的內容');
+  expect(within(screen.getByRole('navigation', { name: '本輪題目' }))
+    .getByRole('button', { name: '第 1 題：第 2 頁 · 第 1 段，未完成' })).toBeTruthy();
+  expect(model.run).not.toHaveBeenCalled();
+});
+
 it('only reveals the source on request and marks the exact first quotation', () => {
   const sourceText = `前文，${cards[0].sourceQuote}。後文又說${cards[0].sourceQuote}。`;
   render(<Controller deck={[{ ...cards[0], sourceText }]} />);

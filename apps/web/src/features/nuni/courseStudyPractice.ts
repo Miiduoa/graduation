@@ -173,11 +173,9 @@ export function updateStudyPracticeRound(
       return withResponse(round, { ...response, attempt: action.value, answerVisible: false, outcome: null });
     case 'toggle_answer':
       if (!response.attempt.trim()) return round;
-      return withResponse(round, {
-        ...response,
-        answerVisible: !response.answerVisible,
-        outcome: response.answerVisible ? null : response.outcome,
-      });
+      // Hiding a reference answer is a disclosure choice, not a new self-rating.
+      // Only changing the attempt or explicitly reassessing should clear/replace it.
+      return withResponse(round, { ...response, answerVisible: !response.answerVisible });
     case 'toggle_hint':
       return withResponse(round, { ...response, hintVisible: !response.hintVisible });
     case 'decide':

@@ -75,6 +75,24 @@ describe('versioned independent review checkpoint', () => {
     expect(JSON.parse(raw).progress.version).toBe(2);
   });
 
+  it('restores an explicit self-assessment after the learner hides the reference answer', () => {
+    const saved = checkpoint();
+    saved.round = updateStudyPracticeRound(saved.round, { type: 'go', index: 0 });
+    saved.round = updateStudyPracticeRound(saved.round, { type: 'toggle_answer' });
+    const firstId = saved.round.cards[0].id;
+    expect(saved.round.responses[firstId]).toMatchObject({
+      attempt: '第一題的試答', outcome: 'again', answerVisible: false,
+    });
+    const raw = serializeStudyPracticeCheckpoint(saved);
+    const restored = parseStudyPracticeCheckpoint(raw, scope);
+    expect(restored.round.responses[firstId]).toMatchObject({
+      attempt: '第一題的試答', outcome: 'again', answerVisible: false,
+    });
+    // Editing a hidden, previously assessed answer must still invalidate its rating.
+    const edited = updateStudyPracticeRound(restored.round, { type: 'attempt', value: '修正後的試答' });
+    expect(edited.responses[firstId]).toMatchObject({ outcome: null, answerVisible: false });
+  });
+
   it('retains an ordered pending subset and never borrows an unrelated lesson', () => {
     const saved = checkpoint();
     const fullIds = saved.round.cards.map((card) => card.id);
