@@ -1535,6 +1535,33 @@ it('shows observed local AI phase timings without suggesting a verified benchmar
   expect(screen.getByText(/不能據此認定冷啟、暖啟或回答正確/)).toBeTruthy();
 });
 
+it('validates pasted and previewed progress UTF-8 limits without allocating a Blob on mobile', () => {
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByText('接著上次的進度'));
+  const paste = screen.getByLabelText('貼上已備份的進度 JSON') as HTMLTextAreaElement;
+  const blobSpy = vi.spyOn(globalThis, 'Blob');
+  try {
+    fireEvent.change(paste, { target: { value: '{"unfinished":"backup draft"}' } });
+    expect(paste.value).toBe('{"unfinished":"backup draft"}');
+    // Fewer than 8 MiB UTF-16 code units, but over 8 MiB of UTF-8 bytes.
+    const oversizedChinese = '中'.repeat(Math.ceil(COURSE_STUDY_PROGRESS_LIMITS.bytes / 3) + 1);
+    expect(oversizedChinese.length).toBeLessThan(COURSE_STUDY_PROGRESS_LIMITS.bytes);
+    fireEvent.change(paste, { target: { value: oversizedChinese } });
+    expect(paste.value).toBe('{"unfinished":"backup draft"}');
+    expect(screen.getByRole('alert').textContent).toContain('超過 8 MiB');
+
+    // A second check at preview time still rejects malformed JSON and keeps
+    // the learner's current material, without a duplicate encoded allocation.
+    fireEvent.click(screen.getByRole('button', { name: '預覽貼上的進度' }));
+    expect(screen.queryByRole('region', { name: '閱讀進度預覽' })).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('無法讀取這個進度檔');
+    expect(screen.getByText(material.body)).toBeTruthy();
+    expect(blobSpy).not.toHaveBeenCalled();
+  } finally {
+    blobSpy.mockRestore();
+  }
+});
+
 it('rejects oversized pasted JSON before retaining it in state, without losing an earlier backup or the course', () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   fireEvent.click(screen.getByText('接著上次的進度'));

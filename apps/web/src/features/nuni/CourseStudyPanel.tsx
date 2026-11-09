@@ -35,6 +35,7 @@ import {
 import { buildCourseStudyNotes, courseStudyNotesFilename } from './courseStudyNotes';
 import {
   COURSE_STUDY_PROGRESS_LIMITS,
+  exceedsStudyBackupByteLimit,
   courseStudyProgressFilename,
   parseCourseStudyProgress,
   serializeCourseStudyProgress,
@@ -590,8 +591,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     // a backup that the student has since edited (even if the edit is rejected).
     setPendingSource(null);
     setRestorePreview(null);
-    if (value.length > COURSE_STUDY_PROGRESS_LIMITS.bytes ||
-      new Blob([value]).size > COURSE_STUDY_PROGRESS_LIMITS.bytes) {
+    if (exceedsStudyBackupByteLimit(value)) {
       setError('貼上的進度 JSON 超過 8 MiB；原本貼上的文字仍保留。請使用較小份的備份。');
       return;
     }
@@ -608,7 +608,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     setPendingSource(null);
     setError('');
     try {
-      if (new Blob([progressPaste]).size > COURSE_STUDY_PROGRESS_LIMITS.bytes)
+      if (exceedsStudyBackupByteLimit(progressPaste))
         throw new Error('貼上的閱讀進度超過 8 MiB，請改用較小份的完整 JSON 備份。');
       const { progress, round } = decodeStudyBackup(progressPaste, scope);
       setRestorePreview({ filename: '貼上的進度 JSON', progress, round, origin: 'paste' });
