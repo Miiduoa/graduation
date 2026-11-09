@@ -40,8 +40,9 @@ const row = (schoolId = 'pu', title = '舊學期的二手書') => ({
 const error = (code: string) => Object.assign(new Error(code), { code });
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 function screen() {
   const goBack = jest.fn();
@@ -118,4 +119,46 @@ test('auth revalidation immediately hides already displayed school detail', asyn
     navigation={{ goBack: view.goBack, setOptions: jest.fn() }} />);
   expect(view.queryByText('舊學期的二手書')).toBeNull();
   expect(view.getByText('正在確認登入狀態…')).toBeTruthy();
+});
+
+
+test('a stalled first detail server read releases loading at 15 seconds and an old reply cannot replace retry', async () => {
+  const stalled = deferred<ReturnType<typeof row> | null>();
+  read.mockReturnValueOnce(stalled.promise).mockResolvedValueOnce(row('pu', '重新確認成功的二手書'));
+  jest.useFakeTimers();
+  try {
+    const view = screen();
+    expect(view.queryByLabelText('重新載入貼文詳情')).toBeNull();
+    await act(async () => { jest.advanceTimersByTime(15_000); await Promise.resolve(); });
+    expect(view.getByText('目前無法連線確認貼文，請重試。')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重新載入貼文詳情'));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(view.getByText('重新確認成功的二手書')).toBeTruthy();
+    await act(async () => { stalled.resolve(null); });
+    expect(view.getByText('重新確認成功的二手書')).toBeTruthy();
+    expect(view.queryByText('找不到貼文，可能已被刪除。')).toBeNull();
+    expect(read).toHaveBeenCalledTimes(2);
+  } finally { jest.useRealTimers(); }
+});
+
+test('a stalled detail refresh can finish with retry and ignores late permission rejection', async () => {
+  const stalled = deferred<ReturnType<typeof row> | null>();
+  read.mockResolvedValueOnce(row()).mockReturnValueOnce(stalled.promise)
+    .mockResolvedValueOnce(row('pu', '刷新後的新內容'));
+  const view = screen();
+  await view.findByText('舊學期的二手書');
+  jest.useFakeTimers();
+  try {
+    // Do not await the stalled refresh: a student needs an independent recovery path.
+    void view.UNSAFE_getByType(RefreshControl).props.onRefresh();
+    await act(async () => { jest.advanceTimersByTime(15_000); await Promise.resolve(); });
+    expect(view.getByText('暫時無法確認貼文最新狀態，仍顯示先前讀取的內容。')).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重新載入貼文詳情'));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(view.getByText('刷新後的新內容')).toBeTruthy();
+    await act(async () => { stalled.reject(error('permission-denied')); });
+    expect(view.getByText('刷新後的新內容')).toBeTruthy();
+    expect(view.queryByText('校籍或貼文權限已變更，無法查看這篇貼文。')).toBeNull();
+    expect(read).toHaveBeenCalledTimes(3);
+  } finally { jest.useRealTimers(); }
 });
