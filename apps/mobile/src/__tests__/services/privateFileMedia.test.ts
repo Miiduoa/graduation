@@ -7,6 +7,7 @@ import {
 it.each([
   'schools/pu/stories/s/image',
   'groups/g/cover.png',
+  'groups/g/cover.12345678-1234-1234-1234-123456789abc.png',
   'groups/g/posts/p/a.pdf',
   'assignments/a/submissions/u/a.pdf',
 ])('recognizes %s', (path) => {

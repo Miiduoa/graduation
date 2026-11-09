@@ -197,8 +197,8 @@ test('非試辦社團關閉後台開關時仍保留安全社員名單入口', as
   }
 });
 
-test('R2 exposes group attachments but keeps cover uploads hidden from ordinary members', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+test('Supabase exposes group attachments but keeps cover uploads hidden from ordinary members', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const view = render(
     <GroupDetailScreen
       route={{ params: { groupId: 'course-actual' } }}
@@ -214,7 +214,7 @@ test('R2 exposes group attachments but keeps cover uploads hidden from ordinary 
   }
 });
 
-test('R2 off hides group file upload entries', async () => {
+test('Supabase off hides group file upload entries', async () => {
   delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
   const view = render(
     <GroupDetailScreen
@@ -227,11 +227,14 @@ test('R2 off hides group file upload entries', async () => {
   expect(view.queryByText('更換群組封面')).toBeNull();
 });
 
-test('R2 lets managers replace a group cover and saves only its path', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+test.each([true, false])('Supabase saves the returned cover path only after successful finalization (%s)', async (success) => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   mockMemberRole = 'admin';
   const files = require('../services/privateFiles');
-  const upload = jest.spyOn(files, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  const upload = jest.spyOn(files, 'uploadPrivateFile').mockResolvedValue({ path: 'groups/course-actual/cover.12345678-1234-1234-1234-123456789abc.png' });
+  if (!success) upload.mockRejectedValue(new Error('File finalization failed'));
+  const updateDoc = require('firebase/firestore').updateDoc;
+  updateDoc.mockClear();
   const picker = require('../services/storage').storage.pickImage;
   picker.mockResolvedValue({ uri: 'file:///cover', type: 'image/png', name: 'cover.png', size: 5 });
   const previousFetch = global.fetch;
@@ -241,14 +244,15 @@ test('R2 lets managers replace a group cover and saves only its path', async () 
     const button = await view.findByText('更換群組封面');
     await act(async () => fireEvent.press(button));
     await waitFor(() => expect(upload).toHaveBeenCalledWith(expect.objectContaining({ path: 'groups/course-actual/cover.png' })));
-    expect(require('firebase/firestore').updateDoc).toHaveBeenCalledWith(expect.anything(), { coverUrl: 'groups/course-actual/cover.png' });
+    if (success) expect(updateDoc).toHaveBeenCalledWith(expect.anything(), { coverUrl: 'groups/course-actual/cover.12345678-1234-1234-1234-123456789abc.png' });
+    else expect(updateDoc).not.toHaveBeenCalled();
   } finally {
     view.unmount(); delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND; global.fetch = previousFetch; upload.mockRestore(); mockMemberRole = 'member';
   }
 });
 
 test('post attachments enforce the limit and retain progress until success or discard', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const files = require('../services/privateFiles');
   const upload = jest.spyOn(files, 'uploadPrivateFile')
     .mockResolvedValueOnce({ path: 'ignored' })
@@ -300,8 +304,8 @@ test('post attachments enforce the limit and retain progress until success or di
   }
 });
 
-test('post attachments recover from a lost PUT response without repeating confirmed uploads', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+test.each(['upload', 'finalize'])('post attachments recover from %s failure without repeating confirmed uploads', async (failure) => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const picker = require('expo-document-picker').getDocumentAsync;
   picker.mockResolvedValue({ canceled: false, assets: [
     { uri: 'file:///a', name: 'a.txt', mimeType: 'text/plain' },
@@ -313,14 +317,16 @@ test('post attachments recover from a lost PUT response without repeating confir
   global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith('file:')) return { blob: async () => new Blob(['text'], { type: 'text/plain' }) };
     if (init?.method === 'POST') {
-      const { path } = JSON.parse(String(init.body));
-      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000 }) };
+      const { action, path } = JSON.parse(String(init.body));
+      if (action === 'finalize' && failure === 'finalize' && puts.length === 2) return { ok: false, status: 413, json: async () => ({ error: 'File is too large' }) };
+      if (action === 'finalize') return { ok: true, status: 200, json: async () => ({ path, finalized: true }) };
+      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000, requiresFinalize: true }) };
     }
     puts.push(url);
     expect(init?.headers).toEqual({ 'If-None-Match': '*' });
     if (stored.has(url)) return { ok: false, status: 412 };
     stored.add(url);
-    if (puts.length === 2) throw new TypeError('Response lost');
+    if (failure === 'upload' && puts.length === 2) throw new TypeError('Response lost');
     return { ok: true, status: 200 };
   }) as unknown as typeof fetch;
   const setDoc = require('firebase/firestore').setDoc;

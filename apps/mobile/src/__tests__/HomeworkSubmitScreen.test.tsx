@@ -521,8 +521,8 @@ test('提醒警告不影響繳交成功，並提供管理及稍後重試入口',
   expect(onAssignmentSubmitted).toHaveBeenCalled();
 });
 
-test('R2 enables attachment selection and stores the object path in the existing attachment shape', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+test('Supabase enables attachment selection and stores the object path in the existing attachment shape', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const picker = require('expo-document-picker');
   jest
     .spyOn(picker, 'getDocumentAsync')
@@ -574,8 +574,8 @@ test('R2 enables attachment selection and stores the object path in the existing
   }
 });
 
-test('R2 preserves upload progress after 429 and only retries unfinished files', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+test('Supabase preserves upload progress after 429 and only retries unfinished files', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const picker = require('expo-document-picker');
   jest
     .spyOn(picker, 'getDocumentAsync')
@@ -621,8 +621,8 @@ test('R2 preserves upload progress after 429 and only retries unfinished files',
   }
 });
 
-test('R2 rejects selecting more than six attachments', async () => {
-  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'r2';
+test('Supabase rejects selecting more than six attachments', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
   const picker = require('expo-document-picker');
   jest
     .spyOn(picker, 'getDocumentAsync')

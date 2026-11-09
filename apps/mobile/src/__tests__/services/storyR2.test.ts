@@ -2,7 +2,7 @@ const mockUpload = jest.fn();
 const mockLegacy = jest.fn();
 let mockEnabled = false;
 jest.mock('../../services/privateFiles', () => ({
-  isR2FileStorageEnabled: () => mockEnabled,
+  isSupabaseFileStorageEnabled: () => mockEnabled,
   privateStoryPath: jest.requireActual('@campus/shared/src/privateFileAccess').privateStoryPath,
   uploadPrivateFile: (...args: unknown[]) => mockUpload(...args),
 }));
@@ -20,7 +20,7 @@ beforeEach(() => {
     blob: async () => new Blob(['image'], { type: 'image/png' }),
   })) as unknown as typeof fetch;
 });
-test('R2 stores a path and never writes Firebase Storage', async () => {
+test('Supabase stores a path and never writes Firebase Storage', async () => {
   mockEnabled = true;
   expect(await uploadStoryImage('pu', 's', 'alice', 'file:///image', 'image/png')).toMatch(/^schools\/pu\/stories\/s\/image-[a-z0-9-]+\.jpg$/);
   expect(mockUpload).toHaveBeenCalledWith(
@@ -28,7 +28,7 @@ test('R2 stores a path and never writes Firebase Storage', async () => {
   );
   expect(mockLegacy).not.toHaveBeenCalled();
 });
-test('R2 off preserves the legacy uploader', async () => {
+test('Supabase off preserves the legacy uploader', async () => {
   expect(await uploadStoryImage('pu', 's', 'alice', 'file:///image', 'image/png')).toBe(
     'https://legacy/image',
   );
@@ -41,4 +41,11 @@ it('uses a new key after an upload acknowledgement is lost', async () => {
   await expect(uploadStoryImage('pu', 's', 'alice', 'file:///image', 'image/png')).rejects.toThrow('network');
   await uploadStoryImage('pu', 's', 'alice', 'file:///image', 'image/png');
   expect(mockUpload.mock.calls[0][0].path).not.toBe(mockUpload.mock.calls[1][0].path);
+});
+
+test('does not publish a story path when finalization fails', async () => {
+  mockEnabled = true;
+  mockUpload.mockRejectedValueOnce(new Error('File finalization failed'));
+  await expect(uploadStoryImage('pu', 's', 'alice', 'file:///image', 'image/png')).rejects.toThrow('File finalization failed');
+  expect(mockLegacy).not.toHaveBeenCalled();
 });

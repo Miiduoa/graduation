@@ -4,7 +4,7 @@ import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import { storage } from '../services/storage';
 import * as DocumentPicker from 'expo-document-picker';
 import {
-  isR2FileStorageEnabled,
+  isSupabaseFileStorageEnabled,
   privateGroupPostPath,
   privateGroupCoverPath,
   uploadPrivateFile,
@@ -575,7 +575,7 @@ export function GroupDetailScreen(props: any) {
       setAttachmentsLocked(true);
       const postRef = doc(db, 'groups', groupId, 'posts', progress.postId);
       const attachments: string[] = [];
-      if (isR2FileStorageEnabled()) {
+      if (isSupabaseFileStorageEnabled()) {
         for (const [index, file] of postFiles.entries()) {
           const completed = progress.completed.get(file);
           if (completed) {
@@ -777,7 +777,7 @@ export function GroupDetailScreen(props: any) {
             style={{ width: '100%', height: 180 }}
           />
         )}
-        {isR2FileStorageEnabled() &&
+        {isSupabaseFileStorageEnabled() &&
           ['owner', 'admin', 'instructor', 'moderator'].includes(myRole) && (
             <Button
               text="更換群組封面"
@@ -792,13 +792,13 @@ export function GroupDetailScreen(props: any) {
                   const path = privateGroupCoverPath(groupId, extension);
                   if (!path) throw new Error('封面路徑無效');
                   const blob = await (await fetch(file.uri)).blob();
-                  await uploadPrivateFile({
+                  const uploaded = await uploadPrivateFile({
                     path,
                     body: blob,
                     contentType: file.type || blob.type,
                   });
-                  await updateDoc(doc(db, 'groups', groupId), { coverUrl: path });
-                  setCoverPath(path);
+                  await updateDoc(doc(db, 'groups', groupId), { coverUrl: uploaded.path });
+                  setCoverPath(uploaded.path);
                   setCoverRevision((value) => value + 1);
                 } catch {
                   Alert.alert('封面更新失敗', '請稍後再試。');
@@ -861,7 +861,7 @@ export function GroupDetailScreen(props: any) {
               : '提出問題或分享資訊。課程公告由教師與管理員發布。'
           }
         >
-          {isR2FileStorageEnabled() && (
+          {isSupabaseFileStorageEnabled() && (
             <Button
               text={`附加圖片或文件（${postFiles.length}）`}
               disabled={fileBusy || attachmentsLocked}

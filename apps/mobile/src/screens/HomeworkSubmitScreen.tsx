@@ -1,7 +1,7 @@
 import { PRIVATE_FILE_UPLOADS_PER_MINUTE } from '@campus/shared/src/privateFileUploads';
 import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import * as DocumentPicker from 'expo-document-picker';
-import { isR2FileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
+import { isSupabaseFileStorageEnabled, privateGroupAssignmentPath, uploadPrivateFile } from '../services/privateFiles';
 import { PrivateAttachment } from '../ui/PrivateAttachment';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
@@ -284,7 +284,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
     setSubmitting(true);
     let submissionStarted = false;
     try {
-      if (isR2FileStorageEnabled() && files.length) {
+      if (isSupabaseFileStorageEnabled() && files.length) {
         const batch = Date.now();
         for (const [index, file] of files.entries()) {
           if (index < uploadedFiles.current.length) continue;
@@ -424,7 +424,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
             >
               <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>繳交方式</Text>
               <Text style={{ marginTop: 6, fontSize: 13, color: theme.colors.textSecondary, lineHeight: 20 }}>
-                {isR2FileStorageEnabled() ? '可繳交文字與圖片或文件附件。' : '目前只支援文字繳交，無法從 App 傳檔。檔案上傳尚未開放。'}
+                {isSupabaseFileStorageEnabled() ? '可繳交文字與圖片或文件附件。' : '目前只支援文字繳交，無法從 App 傳檔。檔案上傳尚未開放。'}
               </Text>
             </View>
             {quizLike ? (
@@ -575,7 +575,7 @@ function HomeworkSubmitContent({ route, uid, scopeKey, activeScope }: RouteProps
                     }}
                   />
                 </View>
-                {isR2FileStorageEnabled() && <Pressable disabled={blocked || submitting} onPress={async () => {
+                {isSupabaseFileStorageEnabled() && <Pressable disabled={blocked || submitting} onPress={async () => {
                   try {
                     const picked = await DocumentPicker.getDocumentAsync({ type: ['image/*', 'application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], multiple: true, copyToCacheDirectory: true });
                     if (!picked.canceled && isCurrent()) {
