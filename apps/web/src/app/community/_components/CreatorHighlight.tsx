@@ -94,7 +94,7 @@ export function CreatorHighlight({
   if (state.status === 'error') {
     return (
       <section className={styles.panel} role="alert" aria-label="精選作品">
-        <p>精選作品暫時無法確認。</p>
+        <p>{feedback || '精選作品暫時無法確認。'}</p>
         <button type="button" className={styles.secondary} onClick={() => setRevision((n) => n + 1)}>
           重新讀取
         </button>
