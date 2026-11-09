@@ -16,6 +16,24 @@ const firestoreRules = fs.readFileSync(
   'utf8',
 );
 const storageRules = fs.readFileSync(path.resolve(__dirname, '../storage/storage.rules'), 'utf8');
+const {
+  uniqueStoryStorageFirestoreDocs,
+} = require('../functions/campusStoryAccessBinding');
+
+test('campus story storage rules read at most two Firestore documents', () => {
+  const docs = uniqueStoryStorageFirestoreDocs(storageRules);
+  assert.deepEqual(docs, [
+    'campusStories/$(storyId)',
+    'schools/$(schoolId)/members/$(request.auth.uid)',
+  ]);
+  assert.equal(docs.length <= 2, true);
+  assert.equal(storageRules.includes('users/$(request.auth.uid)'), true);
+  const storyMatch = storageRules.match(
+    /match \/schools\/\{schoolId\}\/stories\/\{storyId\}\/\{fileName\} \{([\s\S]*?)\n {4}match \//,
+  );
+  assert.equal(storyMatch[1].includes('users/$(request.auth.uid)'), false);
+  assert.equal(storyMatch[1].includes('hasCanonicalActiveAccount'), false);
+});
 
 let testEnv;
 
@@ -27,6 +45,10 @@ async function seedFirestore(writeFn) {
 
 function campusBoundProfile(schoolId) {
   return { status: 'active', schoolId, primarySchoolId: schoolId };
+}
+
+function campusBoundMembership(schoolId) {
+  return { status: 'active', profileBoundSchoolId: schoolId, profileBoundGeneration: 'gen-login' };
 }
 
 function uploadString(ref, value, contentType) {
@@ -1785,8 +1807,8 @@ describe('storage security rules', () => {
 
   test('only a story draft owner can replace its photo before publication', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
     });
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -1820,9 +1842,9 @@ describe('storage security rules', () => {
 
   test('other members can read only the published story author’s matching media', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-      await db.doc('schools/other/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/alice').set(campusBoundMembership('other'));
     });
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -1860,8 +1882,8 @@ describe('storage security rules', () => {
 
   test('story creation rejects forged counters and oversized or unexpected fields', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/other/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/bob').set(campusBoundMembership('other'));
     });
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
@@ -1888,8 +1910,8 @@ describe('storage security rules', () => {
 
   test('story expiry prevents overlong publication and closes published media reads', async () => {
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
     });
     const alice = testEnv.authenticatedContext('alice');
     const bob = testEnv.authenticatedContext('bob');
@@ -1933,8 +1955,8 @@ describe('storage security rules', () => {
   test('story lists cannot include expired metadata or cross-school rows', async () => {
     const now = Date.now();
     await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/other/members/bob').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/bob').set(campusBoundMembership('other'));
       await db.doc('campusStories/active-list-proof').set({
         schoolId: 'pu', authorUid: 'alice', kind: 'text',
         expiresAt: now + 3_600_000, createdAt: now,
@@ -1973,7 +1995,7 @@ describe('storage security rules', () => {
     await seedFirestore(async (db) => {
       for (const uid of ['alice', 'bob', 'charlie']) {
         await db.doc(`users/${uid}`).set(campusBoundProfile('pu'));
-        await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
+        await db.doc(`schools/pu/members/${uid}`).set(campusBoundMembership('pu'));
       }
       await db.doc('campusStories/private-views').set({
         schoolId: 'pu', authorUid: 'alice', kind: 'text',
@@ -2005,9 +2027,9 @@ describe('storage security rules', () => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
       await db.doc('users/bob').set(campusBoundProfile('pu'));
       await db.doc('users/charlie').set(campusBoundProfile('other'));
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-      await db.doc('schools/other/members/charlie').set({ status: 'active' });
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
+      await db.doc('schools/other/members/charlie').set(campusBoundMembership('other'));
     });
     // Keep the same issued auth contexts across every change of permission.
     const aliceCtx = testEnv.authenticatedContext('alice');
@@ -2036,11 +2058,26 @@ describe('storage security rules', () => {
     await assertFails(charlie.doc(story.path).get());
     await assertFails(charlie.doc(story.path).delete());
     await assertFails(charlieCtx.storage().ref(mediaPath).getMetadata());
+    await assertFails(bob.doc('users/bob').delete());
+    await assertSucceeds(bobMedia.getMetadata());
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ status: 'suspended' });
+      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
+    });
+    await assertFails(bobMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/bob').set(campusBoundMembership('pu'));
+    });
+    await assertSucceeds(bobMedia.getMetadata());
 
     await seedFirestore(async (db) => {
       await db.doc('users/bob').delete();
+      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
       await db.doc(bobView.path).delete();
     });
+    await assertFails(bobMedia.getMetadata());
     await assertFails(bob.doc(story.path).get());
     await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
@@ -2048,6 +2085,10 @@ describe('storage security rules', () => {
     await assertFails(bob.doc('campusStories/rebuilt-publish').set({
       ...payload, authorUid: 'bob',
     }));
+    await assertFails(bob.doc('schools/pu/members/bob').set({
+      status: 'active', profileBoundSchoolId: 'pu',
+    }));
+    await assertFails(bob.doc('schools/pu/members/bob').update({ profileBoundSchoolId: 'other' }));
 
     await assertFails(bob.doc('users/bob').set({
       ...studentProfile, schoolId: 'pu', primarySchoolId: 'pu', status: 'active',
@@ -2055,6 +2096,7 @@ describe('storage security rules', () => {
     await assertSucceeds(bob.doc('users/bob').set(studentProfile));
     await assertFails(bob.doc('users/bob').set({ ...studentProfile, schoolId: 'pu' }));
     await assertFails(bob.doc('users/bob').update({ schoolId: 'pu', primarySchoolId: 'pu', status: 'active' }));
+    await assertFails(bob.doc('users/bob').update({ profileBoundSchoolId: 'pu' }));
     await assertFails(bob.doc(story.path).get());
     await assertFails(activeStoryQuery(bob).get());
     await assertFails(bobView.set({ viewerUid: 'bob', viewedAt: now }));
@@ -2062,9 +2104,15 @@ describe('storage security rules', () => {
     await assertFails(bob.doc('campusStories/rebuilt-publish').set({
       ...payload, authorUid: 'bob',
     }));
-    await assertSucceeds(bobMedia.getMetadata());
+    await assertFails(bobMedia.getMetadata());
 
-    await seedFirestore(async (db) => db.doc('users/alice').delete());
+    await assertFails(alice.doc('users/alice').delete());
+    await assertSucceeds(aliceMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').delete();
+      await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
+    });
+    await assertFails(aliceMedia.getMetadata());
     await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
     await assertFails(story.get());
     await assertFails(story.delete());
@@ -2075,16 +2123,159 @@ describe('storage security rules', () => {
     await assertFails(alice.doc('campusStories/orphan-publish').set(payload));
     await assertFails(story.get());
     await assertFails(story.delete());
+    await assertFails(aliceMedia.getMetadata());
     await seedFirestore(async (db) => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
-      await db.doc('schools/pu/members/alice').set({ status: 'inactive' });
+    });
+    await assertFails(story.get());
+    await assertFails(aliceMedia.getMetadata());
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/alice').set({
+        ...campusBoundMembership('pu'),
+        status: 'inactive',
+      });
     });
     await assertFails(alice.doc('campusStories/revoked-school').set(payload));
     await assertFails(story.delete());
     await assertFails(aliceMedia.getMetadata());
-    await seedFirestore(async (db) =>
-      db.doc('schools/pu/members/alice').set({ status: 'active' }));
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set(campusBoundProfile('pu'));
+      await db.doc('schools/pu/members/alice').set(campusBoundMembership('pu'));
+    });
     await assertSucceeds(story.delete());
+  });
+
+  test('legacy school members regain stories after server binding, not after client rebuild', async () => {
+    const now = Date.now();
+    const payload = {
+      schoolId: 'pu', authorUid: 'dana', kind: 'text', text: 'legacy story',
+      expiresAt: now + 3_600_000, viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc('users/dana').set({ status: 'active', displayName: 'Dana' });
+      await db.doc('schools/pu/members/dana').set({ status: 'active', role: 'member' });
+      await db.doc('users/erin').set({ displayName: 'Erin', role: 'student' });
+      await db.doc('schools/pu/members/erin').set({ status: 'active', role: 'member' });
+    });
+    const danaCtx = testEnv.authenticatedContext('dana');
+    const erinCtx = testEnv.authenticatedContext('erin');
+    const dana = danaCtx.firestore();
+    const erin = erinCtx.firestore();
+    const media = danaCtx.storage().ref('schools/pu/stories/legacy-bind/image');
+
+    await assertFails(dana.doc('campusStories/legacy-bind').set(payload));
+    await assertFails(media.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'dana' },
+    }));
+    await assertFails(erin.doc('campusStories/legacy-stub').set({
+      ...payload, authorUid: 'erin',
+    }));
+    await assertFails(erin.doc('schools/pu/members/erin').set({
+      status: 'active', profileBoundSchoolId: 'pu',
+    }));
+    await assertFails(erin.doc('schools/pu/members/erin').update({ profileBoundSchoolId: 'pu' }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/dana').set({
+        status: 'active', displayName: 'Dana', schoolId: 'pu', primarySchoolId: 'pu',
+      });
+      await db.doc('schools/pu/members/dana').set({
+        status: 'active', role: 'member', profileBoundSchoolId: 'pu',
+      });
+    });
+    await assertFails(media.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'dana' },
+    }));
+    await seedFirestore(async (db) => {
+      await db.doc('schools/pu/members/dana').set({
+        status: 'active', role: 'member', profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-login',
+      });
+    });
+    await assertSucceeds(media.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'dana' },
+    }));
+    const mediaUrl = await assertSucceeds(media.getDownloadURL());
+    await assertSucceeds(dana.doc('campusStories/legacy-bind').set({
+      ...payload, kind: 'image', mediaUrl,
+    }));
+    await assertSucceeds(dana.doc('campusStories/legacy-bind').get());
+    await assertSucceeds(danaCtx.storage().ref(media.fullPath).getMetadata());
+    await assertFails(erinCtx.storage().ref(media.fullPath).getMetadata());
+    await assertSucceeds(dana.doc('campusStories/legacy-bind').delete());
+  });
+
+  test('google restamp restores story media; rebuilt leftover membership stays unreadable', async () => {
+    const now = Date.now();
+    const payload = {
+      schoolId: 'pu', authorUid: 'google-stu', kind: 'text', text: 'google story',
+      expiresAt: now + 3_600_000, viewCount: 0,
+    };
+    await seedFirestore(async (db) => {
+      await db.doc('users/google-stu').set({
+        status: 'active', displayName: 'Google',
+      });
+      await db.doc('schools/pu/members/google-stu').set({
+        status: 'active', role: 'member',
+      });
+      await db.doc('campusStories/google-list').set({
+        schoolId: 'pu', authorUid: 'peer', kind: 'text', text: 'peer story',
+        expiresAt: now + 3_600_000, viewCount: 0,
+      });
+      await db.doc('users/rebuilt-stu').set({ displayName: 'Rebuilt', role: 'student' });
+      await db.doc('schools/pu/members/rebuilt-stu').set({ status: 'active', role: 'member' });
+    });
+    const googleCtx = testEnv.authenticatedContext('google-stu');
+    const rebuiltCtx = testEnv.authenticatedContext('rebuilt-stu');
+    const googleStories = googleCtx.firestore().collection('campusStories');
+    const googleMedia = googleCtx.storage().ref('schools/pu/stories/google-bind/image');
+    const rebuiltMedia = rebuiltCtx.storage().ref('schools/pu/stories/rebuilt-bind/image');
+
+    await assertFails(googleStories
+      .where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000)
+      .orderBy('expiresAt', 'desc').limit(80).get());
+    await assertFails(googleCtx.firestore().doc('campusStories/google-bind').set(payload));
+    await assertFails(googleMedia.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'google-stu' },
+    }));
+
+    await seedFirestore(async (db) => {
+      await db.doc('users/google-stu').set({
+        status: 'active', displayName: 'Google', schoolId: 'pu', primarySchoolId: 'pu',
+        bindingGeneration: 'gen-google',
+      });
+      await db.doc('schools/pu/members/google-stu').set({
+        status: 'active', role: 'member',
+        profileBoundSchoolId: 'pu',
+        profileBoundGeneration: 'gen-google',
+      });
+    });
+
+    const listed = await assertSucceeds(googleStories
+      .where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000)
+      .orderBy('expiresAt', 'desc').limit(80).get());
+    assert.ok(listed.docs.some((row) => row.id === 'google-list'));
+    await assertSucceeds(googleMedia.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'google-stu' },
+    }));
+    const mediaUrl = await assertSucceeds(googleMedia.getDownloadURL());
+    await assertSucceeds(googleCtx.firestore().doc('campusStories/google-bind').set({
+      ...payload, kind: 'image', mediaUrl,
+    }));
+    await assertSucceeds(googleMedia.getMetadata());
+    await assertFails(rebuiltMedia.putString('draft', 'raw', {
+      contentType: 'image/jpeg', customMetadata: { ownerUid: 'rebuilt-stu' },
+    }));
+    await assertFails(rebuiltMedia.getMetadata());
+    await assertFails(rebuiltCtx.firestore().doc('campusStories/rebuilt-bind').set({
+      ...payload, authorUid: 'rebuilt-stu',
+    }));
+    await assertFails(rebuiltCtx.firestore().collection('campusStories')
+      .where('schoolId', '==', 'pu')
+      .where('expiresAt', '>', now + 120_000)
+      .orderBy('expiresAt', 'desc').limit(80).get());
   });
 
   for (const objectPath of [
@@ -3057,6 +3248,11 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-status', { status: 'active' }],
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
+      ['pollute-binding-generation', { bindingGeneration: 'gen-forged' }],
+      ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
+      ['pollute-school-ids', { schoolIds: ['pu'] }],
+      ['pollute-binding-halt', { campusStoryBindingHaltKind: 'none' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
@@ -3116,6 +3312,14 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(alice.update({ role: 'admin' }));
     await assertFails(alice.update({ status: 'active' }));
+    await assertFails(alice.update({ schoolId: 'other' }));
+    await assertFails(alice.update({ primarySchoolId: 'other' }));
+    await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
+    await assertFails(alice.update({ bindingGeneration: 'gen-forged' }));
+    await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
+    await assertFails(alice.update({ schoolIds: ['other'] }));
+    await assertFails(alice.update({ campusStoryBindingHaltKind: 'none' }));
+    await assertFails(alice.update({ campusStoryBindingHaltAt: '2026-01-01T00:00:00.000Z' }));
 
     await assertFails(bob.update({ primaryRole: 'admin' }));
     await assertFails(bob.update({ postLoginRoles: ['admin', 'teacher'] }));
@@ -3136,6 +3340,8 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ accountDeletionInProgress: deleteField() }));
     await assertFails(alice.update({ notificationDeliveryDisabled: true }));
     await assertFails(alice.update({ accountDeletionInProgress: true }));
+    await assertFails(alice.delete());
+    await assertFails(bob.delete());
 
     await assertSucceeds(bob.update({ displayName: 'Bob Updated' }));
   });
@@ -4239,6 +4445,11 @@ describe('P1 authorization: users role authority fields', () => {
       ['pollute-status', { status: 'active' }],
       ['pollute-school', { schoolId: 'pu' }],
       ['pollute-primary-school', { primarySchoolId: 'pu' }],
+      ['pollute-bound-school', { profileBoundSchoolId: 'pu' }],
+      ['pollute-binding-generation', { bindingGeneration: 'gen-forged' }],
+      ['pollute-last-login', { lastLoginAt: '2026-01-01T00:00:00.000Z' }],
+      ['pollute-school-ids', { schoolIds: ['pu'] }],
+      ['pollute-binding-halt', { campusStoryBindingHaltKind: 'none' }],
       ['pollute-deletion-flag', { accountDeletionInProgress: true }],
       ['pollute-notify-flag', { notificationDeliveryDisabled: true }],
     ];
@@ -4296,6 +4507,14 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(alice.update({ orgRoles: ['schoolAdmin'] }));
     await assertFails(alice.update({ lastPostLoginResolvedAt: '2099-01-01T00:00:00.000Z' }));
     await assertFails(alice.update({ role: 'admin' }));
+    await assertFails(alice.update({ schoolId: 'other' }));
+    await assertFails(alice.update({ primarySchoolId: 'other' }));
+    await assertFails(alice.update({ profileBoundSchoolId: 'pu' }));
+    await assertFails(alice.update({ bindingGeneration: 'gen-forged' }));
+    await assertFails(alice.update({ lastLoginAt: '2026-01-01T00:00:00.000Z' }));
+    await assertFails(alice.update({ schoolIds: ['other'] }));
+    await assertFails(alice.update({ campusStoryBindingHaltKind: 'none' }));
+    await assertFails(alice.update({ campusStoryBindingHaltAt: '2026-01-01T00:00:00.000Z' }));
 
     // Change existing authority fields.
     await assertFails(bob.update({ primaryRole: 'admin' }));
@@ -4313,6 +4532,7 @@ describe('P1 authorization: users role authority fields', () => {
     await assertFails(bob.update({ lastPostLoginResolvedAt: deleteField() }));
 
     // Legitimate edit still ok when protected optional fields already exist.
+    await assertFails(bob.delete());
     await assertSucceeds(bob.update({ displayName: 'Bob Updated' }));
   });
 });
