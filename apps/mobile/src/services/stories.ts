@@ -83,13 +83,9 @@ export async function listActiveStoriesForSchool(
   options: { throwOnError?: boolean } = {},
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
   try {
-    // Firestore rules cannot filter query results: the server must be able to
-    // prove every returned story is still active. A two-minute lead covers
-    // request latency and prevents almost-expired stories from failing the query.
-    const expiresAfter = now + 120_000;
-    const snap = await getDocs(
+    // Preserve near-expiry stories with only a small request-latency buffer.
+    const read = (expiresAfter: number) => getDocs(
       query(
         storiesCollection(db),
         where('schoolId', '==', schoolId),
@@ -98,6 +94,10 @@ export async function listActiveStoriesForSchool(
         limit(lim),
       ),
     );
+    const snap = await read(Date.now() + 3_000).catch((error: unknown) => {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+      return read(Date.now() + 15_000);
+    });
     return snap.docs
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
       .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
