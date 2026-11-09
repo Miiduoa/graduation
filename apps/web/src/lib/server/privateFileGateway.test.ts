@@ -4,6 +4,7 @@ import { createMemoryGroupStore } from './memoryGroupStore';
 import { dispatchPrivateFileRequest, type PrivateFileRuntime } from './privateFileRoutes';
 import { resetPrivateFileRateLimitForTests } from './privateFileRateLimit';
 
+vi.mock('server-only', () => ({}));
 beforeEach(resetPrivateFileRateLimitForTests);
 
 function setup() {
@@ -44,7 +45,12 @@ it.each(['upload', 'download'])('rejects legacy %s before storage access', async
 
 it.each(['upload', 'download'])('allows group assignment %s', async action => {
   const { runtime } = setup();
-  expect((await invoke(runtime, action, 'groups/course/assignments/work/submissions/alice/answer.pdf')).status).toBe(200);
+  const path = 'groups/course/assignments/work/submissions/alice/answer.pdf';
+  if (action === 'download') {
+    expect((await invoke(runtime, 'upload', path)).status).toBe(200);
+    expect((await invoke(runtime, 'finalize', path)).status).toBe(200);
+  }
+  expect((await invoke(runtime, action, path)).status).toBe(200);
 });
 
 it.each(['image/svg+xml', 'text/html', 'application/xhtml+xml', 'application/javascript', 'text/javascript'])('rejects executable MIME %s', async contentType => {

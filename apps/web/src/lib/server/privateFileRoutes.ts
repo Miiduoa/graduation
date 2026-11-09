@@ -1,3 +1,5 @@
+import type { Firestore } from 'firebase-admin/firestore';
+import { createPrivateFileUploads } from './privateFileUploads';
 import { randomUUID } from 'node:crypto';
 import {
   assertStoryMediaRead,
@@ -117,7 +119,7 @@ function mapError(error: unknown): { status: number; body: { error: string } } {
     return { status: error.httpErrorCode.status, body: { error: error.message } };
   }
   const statusCode = Number((error as { statusCode?: unknown })?.statusCode);
-  if ([400, 401, 403, 404, 405, 409, 413, 429].includes(statusCode)) {
+  if ([400, 401, 403, 404, 405, 409, 413, 429, 507].includes(statusCode)) {
     return {
       status: statusCode,
       body: { error: error instanceof Error ? error.message : 'File request failed' },
@@ -164,20 +166,24 @@ async function issueUpload(
     scope.filename = scope.path.split('/').at(-1)!;
   }
 
+  const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
+  await uploads.cleanup(runtime.now?.() ?? Date.now(), 20, uid);
+  await uploads.reserve(scope, uid, runtime.now?.() ?? Date.now());
+
   const metadata: Record<string, string> = scope.kind === 'story' ? { 'owner-uid': uid } : {};
   if (typeof body.originalFilename === 'string' && body.originalFilename.length <= 255) {
     metadata.originalFilename = body.originalFilename;
   }
-  return {
-    maxBytes,
-    signed: await runtime.storage.presignPut({
-      key: scope.path,
-      contentType,
-      contentLength: byteSize,
-      metadata: Object.keys(metadata).length ? metadata : undefined,
-      now: runtime.now ? new Date(runtime.now()) : undefined,
-    }),
-  };
+  const signed = await runtime.storage.presignPut({
+    key: scope.path,
+    contentType,
+    contentLength: byteSize,
+    metadata: Object.keys(metadata).length ? metadata : undefined,
+    now: runtime.now ? new Date(runtime.now()) : undefined,
+  });
+  // Account for time spent obtaining the URL before starting its expiry clock.
+  await uploads.confirmTicket(scope.path, uid, runtime.now?.() ?? Date.now());
+  return { maxBytes, signed };
 }
 
 async function issueDownload(
@@ -186,6 +192,9 @@ async function issueDownload(
   scope: PrivateFileScope,
 ) {
   await authorizePrivateFile(runtime.db, scope, uid, false);
+  const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
+  const record = await uploads.read(scope.path);
+  if (record.status !== 'finalized') throw Object.assign(new Error('找不到檔案'), { statusCode: 404 });
   const object = await runtime.storage.head(scope.path);
   if (!object) {
     throw Object.assign(new Error('File not found'), { statusCode: 404 });
@@ -230,6 +239,12 @@ async function issueDownload(
 
 async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: PrivateFileScope) {
   await authorizePrivateFile(runtime.db, scope, uid, true);
+  const uploads = createPrivateFileUploads(runtime.db as unknown as Firestore, runtime.storage);
+  const record = await uploads.read(scope.path, uid);
+  if (record.status === 'finalized') return { path: scope.path, finalized: true, maxBytes: scope.maxBytes };
+  if (record.status !== 'pending' || record.invalid || record.expiresAt <= (runtime.now?.() ?? Date.now())) {
+    throw Object.assign(new Error('上傳已過期或無效，請重新上傳'), { statusCode: 409 });
+  }
   const object = await runtime.storage.head(scope.path);
   if (!object) throw Object.assign(new Error('File not found'), { statusCode: 404 });
   // Never let a different story uploader delete or finalize this owner's object.
@@ -239,10 +254,11 @@ async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: P
   const maxBytes = privateFileMaxBytes(scope.kind, object.contentType);
   const validType = isAllowedPrivateFileContentType(scope.kind, object.contentType);
   if (!validType || !Number.isSafeInteger(object.contentLength) || object.contentLength <= 0 || object.contentLength >= maxBytes) {
-    await runtime.storage.remove(scope.path);
+    if (await uploads.invalidate(scope.path, uid)) await runtime.storage.remove(scope.path);
     if (!validType) throw new HttpsError('invalid-argument', 'Unsupported file type or filename');
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
   }
+  await uploads.finalize(scope.path, uid, object.contentLength, runtime.now?.() ?? Date.now());
   return { path: scope.path, finalized: true, maxBytes };
 }
 

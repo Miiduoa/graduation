@@ -1,6 +1,8 @@
 // @vitest-environment node
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { OPTIONS, POST } from './route';
+
+vi.mock('server-only', () => ({}));
 
 it('only exposes POST and OPTIONS through the Next.js route', () => {
   expect(typeof POST).toBe('function');

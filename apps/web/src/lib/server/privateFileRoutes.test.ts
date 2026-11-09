@@ -290,8 +290,9 @@ it.each([
   ['application/pdf', 25 * 1024 * 1024, 413],
   ['application/pdf', 0, 413],
 ])('deletes invalid finalized objects (%s, %i)', async (contentType, length, status) => {
+  await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 8 });
   memoryStorage.objects.set(ANSWER, { body: Buffer.alloc(Number(length)), contentType: String(contentType), etag: '', metadata: {} });
-  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(status);
+  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(404);
   expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(status);
   expect(memoryStorage.objects.has(ANSWER)).toBe(false);
 });
@@ -311,15 +312,29 @@ it.each(['../notes.pdf', 'groups/course/posts/one/../notes.pdf', 'groups/course/
 });
 
 it('rejects forged story ownership metadata', async () => {
+  await invoke(runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 8 }, { uid: 'stamped' });
   memoryStorage.objects.set(STORY, { body: Buffer.from('photo'), contentType: 'image/jpeg', etag: '', metadata: { 'owner-uid': 'stamped', 'owner-proof': 'forged' } });
   for (const action of ['download', 'finalize']) {
-    expect((await invoke(runtime, { action, path: STORY }, { uid: 'stamped' })).status).toBe(403);
+    expect((await invoke(runtime, { action, path: STORY }, { uid: 'stamped' })).status).toBe(action === 'download' ? 404 : 403);
   }
 });
 
 it('reissues downloads only after fresh authorization and metadata checks', async () => {
+  await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 8 });
   memoryStorage.objects.set(ANSWER, { body: Buffer.from('pdf'), contentType: 'application/pdf', etag: '', metadata: {} });
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(200);
   expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(200);
   memoryStorage.objects.get(ANSWER)!.contentType = 'text/html';
   expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(400);
+});
+
+it('requires finalize before download and ignores self reported size for quota', async () => {
+  const upload = await invoke(runtime, { action: 'upload', path: ANSWER, contentType: 'application/pdf', byteSize: 1 });
+  expect(upload.status).toBe(200);
+  put(upload, 'larger than reported');
+  expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(404);
+  expect(store.docs.get('privateFileQuota/global')?.reservedBytes).toBe(45 * 1024 * 1024);
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(200);
+  expect(store.docs.get('privateFileQuota/global')).toEqual({ reservedBytes: 0, finalizedBytes: 20 });
 });
