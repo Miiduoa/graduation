@@ -42,6 +42,30 @@ it('shows the authorized material without downloading or generating until reques
   expect(screen.getByText(/不會自動評分/)).toBeTruthy();
 });
 
+it('navigates repeated exact model quotes without rerunning AI or altering the student note', async () => {
+  const repeated = { ...material, body: '主鍵在第一段。外鍵可以參照主鍵。最後一段再提主鍵。' };
+  mocks.run.mockResolvedValueOnce({ ...explanation, sourceQuote: '主鍵' });
+  render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={repeated} onClose={vi.fn()} />);
+  const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+  fireEvent.change(note, { target: { value: '我想核對第二次提到的主鍵' } });
+  fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+  await screen.findByRole('region', { name: '本段 AI 講解' });
+  const beforeMark = () => document.querySelector('mark')?.previousSibling?.textContent;
+  expect(beforeMark()).toBe('');
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 1 處。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一處相同引句' }));
+  expect(beforeMark()).toBe('主鍵在第一段。外鍵可以參照');
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 2 處。')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '上一處相同引句' }));
+  expect(beforeMark()).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: '上一處相同引句' }));
+  expect(beforeMark()).toBe('主鍵在第一段。外鍵可以參照主鍵。最後一段再提');
+  expect(screen.getByText('相同引句在本段出現 3 處，目前標示第 3 處。')).toBeTruthy();
+  expect(document.querySelector('blockquote')?.textContent).toBe(repeated.body);
+  expect(note.value).toBe('我想核對第二次提到的主鍵');
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+});
+
 it('keeps reading available when the browser cannot run a model', () => {
   mocks.available = false;
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);

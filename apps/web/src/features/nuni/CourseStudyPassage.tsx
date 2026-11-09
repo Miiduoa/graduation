@@ -37,6 +37,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
   const [stepSelection, setStepSelection] = useState<{ lessonId: number; index: number } | null>(null);
+  const [evidenceOccurrence, setEvidenceOccurrence] = useState(0);
   const current = useRef<AbortController | null>(null);
   const passageHeading = useRef<HTMLHeadingElement>(null);
   const evidenceMark = useRef<HTMLElement>(null);
@@ -51,7 +52,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
   const displayedQuote = activeStep?.sourceQuote ?? result?.sourceQuote;
-  const evidence = displayedQuote ? locateStudyEvidence(passage.text, displayedQuote) : null;
+  const evidence = displayedQuote ? locateStudyEvidence(passage.text, displayedQuote, evidenceOccurrence) : null;
 
   useEffect(() => {
     setAvailability(getStudyTutorAvailability());
@@ -116,6 +117,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       });
       if (current.current !== controller || controller.signal.aborted) return;
       setStepSelection(null);
+      setEvidenceOccurrence(0);
       onChange((previous) => appendStudyLesson(previous, mode, { question, response: explanation }, history ? selected?.id ?? null : null));
       const retained = history?.turns.length ?? 0;
       const scope = withHistory && retained < turns.length
@@ -172,6 +174,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
             <select id={lessonId} value={selected?.id ?? ''} disabled={busy} onChange={(event) => {
               const selectedLessonId = Number(event.target.value);
               setStepSelection(null);
+              setEvidenceOccurrence(0);
               onChange((previous) => updateStudyMode(previous, mode, (state) => ({ ...state, selectedLessonId })));
               setError('');
               setTiming(null);
@@ -222,16 +225,28 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
               <blockquote className={styles.evidenceQuote}>{displayedQuote}</blockquote>
               <button type="button" className={styles.button} disabled={!evidence}
                 onClick={() => evidenceMark.current?.focus()}>定位原文引句</button>
-              {evidence && evidence.occurrences > 1 && <p className={styles.note}>
-                相同引句在本段出現 {evidence.occurrences} 處，目前標示第一處。
-              </p>}
+              {evidence && evidence.occurrences > 1 && <>
+                <p className={styles.note} role="status" aria-live="polite">
+                  相同引句在本段出現 {evidence.occurrences} 處，目前標示第 {evidenceOccurrence + 1} 處。
+                </p>
+                <div className={styles.actions}>
+                  <button type="button" className={styles.button}
+                    onClick={() => setEvidenceOccurrence((index) => (index + evidence.occurrences - 1) % evidence.occurrences)}>
+                    上一處相同引句
+                  </button>
+                  <button type="button" className={styles.button}
+                    onClick={() => setEvidenceOccurrence((index) => (index + 1) % evidence.occurrences)}>
+                    下一處相同引句
+                  </button>
+                </div>
+              </>}
               {!evidence && <p className={styles.error}>目前無法在原文定位這句引用，請重新講解。</p>}
             </section>
             <section className={styles.evidenceStep} aria-label="第二步：理解講解">
               <p className={styles.evidenceStepHeading}>02 · AI 解讀</p>
               <p className={styles.explanationText}>{result.explanation}</p>
               {result.steps && <CourseStudySteps steps={result.steps} activeIndex={activeStepIndex}
-                onSelect={(index) => setStepSelection({ lessonId: selected.id, index })}
+                onSelect={(index) => { setEvidenceOccurrence(0); setStepSelection({ lessonId: selected.id, index }); }}
                 onLocate={() => evidenceMark.current?.focus()} evidenceAvailable={!!evidence} />}
               <p className={styles.note}>找到引句只代表原文相符，不代表這段解釋一定正確。</p>
             </section>

@@ -9,19 +9,24 @@ export type StudyEvidenceLocation = {
   occurrences: number;
 };
 
-export function locateStudyEvidence(source: string, quote: string): StudyEvidenceLocation | null {
+export function locateStudyEvidence(source: string, quote: string, occurrence = 0): StudyEvidenceLocation | null {
   if (!source || !quote.trim()) return null;
-  const first = source.indexOf(quote);
-  if (first === -1) return null;
+  if (!Number.isSafeInteger(occurrence) || occurrence < 0) return null;
+  let selected = -1;
   let occurrences = 0;
-  for (let from = first, match = first; match !== -1; match = source.indexOf(quote, from)) {
+  // Count full, non-overlapping, exact-text matches. Never normalize student material.
+  for (let from = 0; from < source.length;) {
+    const match = source.indexOf(quote, from);
+    if (match === -1) break;
+    if (occurrences === occurrence) selected = match;
     occurrences += 1;
     from = match + quote.length;
   }
+  if (selected === -1) return null;
   return {
-    before: source.slice(0, first),
+    before: source.slice(0, selected),
     quote,
-    after: source.slice(first + quote.length),
+    after: source.slice(selected + quote.length),
     occurrences,
   };
 }

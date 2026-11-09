@@ -34,4 +34,19 @@ describe('exact source-to-lesson evidence', () => {
       before: '', quote: '甲乙', after: '甲乙甲', occurrences: 2,
     });
   });
+  it('navigates all exact repeated quotations including Unicode and CRLF, rejecting out-of-range indices', () => {
+    const original = '😀甲乙甲乙\r\n甲乙';
+    expect(locateStudyEvidence(original, '甲乙', 1)).toEqual({
+      before: '😀甲乙', quote: '甲乙', after: '\r\n甲乙', occurrences: 3,
+    });
+    expect(locateStudyEvidence(original, '甲乙', 2)).toEqual({
+      before: '😀甲乙甲乙\r\n', quote: '甲乙', after: '', occurrences: 3,
+    });
+    expect(locateStudyEvidence(original, '甲乙', 3)).toBeNull();
+    expect(locateStudyEvidence(original, '甲乙', -1)).toBeNull();
+    expect(locateStudyEvidence(original, '甲乙', 1.5)).toBeNull();
+    expect(locateStudyEvidence('aaaa', 'aa', 1)).toEqual({
+      before: 'aa', quote: 'aa', after: '', occurrences: 2,
+    });
+  });
 });
