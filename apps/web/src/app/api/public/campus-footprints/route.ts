@@ -11,12 +11,14 @@ export const dynamic = 'force-dynamic';
 // 只向固定的公開 OSM 查已校核的 way ID；沒有使用者控制的 URL／Overpass 查詢。
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 const REFRESH_MS = 24 * 60 * 60 * 1000;
+// A failed upstream must not leave a removed/renamed building visible forever.
+const MAX_SNAPSHOT_AGE_MS = 7 * REFRESH_MS;
 const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
 const query = '[out:json][timeout:12];way(id:' +
   PROVIDENCE_OSM_BUILDING_WAY_IDS.join(',') + ');out meta geom;';
 
-type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; validUntil: number };
+type Snapshot = { buildings: ProvidenceFootprint[]; fetchedAt: string; validUntil: number; discardAfter: number };
 let cache: Snapshot | null = null;
 let pending: Promise<Snapshot> | null = null;
 let unavailableUntil = 0;
@@ -74,7 +76,10 @@ async function readOsm(): Promise<Snapshot> {
   const buildings = parseProvidenceOsmFootprints(JSON.parse(raw) as unknown);
   if (!buildings.length) throw new Error('No verified building outlines in response');
   const now = Date.now();
-  return { buildings, fetchedAt: new Date(now).toISOString(), validUntil: now + REFRESH_MS };
+  return {
+    buildings, fetchedAt: new Date(now).toISOString(),
+    validUntil: now + REFRESH_MS, discardAfter: now + MAX_SNAPSHOT_AGE_MS,
+  };
 }
 
 export async function GET() {
@@ -98,7 +103,11 @@ export async function GET() {
       unavailableUntil = Date.now() + ERROR_COOLDOWN_MS;
     }
   }
-  if (!cache) return NextResponse.json({ error: 'Building outlines temporarily unavailable' }, {
+  // Stale is an outage fallback, not an unlimited-lived source of campus geometry.
+  // Expired geometry must fall back to the existing POI/map experience instead.
+  if (!cache || cache.discardAfter <= Date.now()) return NextResponse.json({
+    error: 'Building outlines temporarily unavailable',
+  }, {
     status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '600' },
   });
   return NextResponse.json({

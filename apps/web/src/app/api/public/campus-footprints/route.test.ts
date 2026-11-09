@@ -113,6 +113,32 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('stops serving unverified stale building geometry after seven days of upstream failure', async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const mockedFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(osmPayload, { status: 200 }))
+      .mockRejectedValue(new Error('upstream still down'));
+    vi.stubGlobal('fetch', mockedFetch);
+    const { GET } = await import('./route');
+    const start = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(start);
+    expect((await GET()).status).toBe(200);
+
+    vi.spyOn(Date, 'now').mockReturnValue(start + 2 * day);
+    const stale = await GET();
+    expect(stale.status).toBe(200);
+    expect((await stale.json()).stale).toBe(true);
+
+    vi.spyOn(Date, 'now').mockReturnValue(start + 8 * day);
+    const expired = await GET();
+    expect(expired.status).toBe(503);
+    expect(expired.headers.get('Cache-Control')).toBe('no-store');
+    expect((await expired.json()).error).toMatch(/temporarily unavailable/);
+    // We still attempt a controlled upstream refresh instead of extending old data.
+    expect(mockedFetch).toHaveBeenCalledTimes(3);
+    vi.restoreAllMocks();
+  });
+
   it('returns a dated stale snapshot if the upstream later goes away', async () => {
     const firstFetch = vi.fn()
       .mockResolvedValueOnce({ ok: true, headers: { get: () => null }, text: async () => osmPayload })
