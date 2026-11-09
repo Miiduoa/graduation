@@ -34,7 +34,7 @@ test('owner can select and pin a real signed campus post, then remove it', async
   fireEvent.press(view.getByLabelText('選擇精選作品：我的社團成果'));
   fireEvent.press(view.getByText('設為精選'));
   await waitFor(() => expect(featureCreatorPost).toHaveBeenCalledWith('pu', 'alice', 'work1'));
-  expect(view.getByText('我的社團成果')).toBeTruthy();
+  expect(view.getByLabelText('閱讀精選作品：我的社團成果')).toBeTruthy();
   fireEvent.press(view.getByText('取消精選'));
   await waitFor(() => expect(removeCreatorHighlight).toHaveBeenCalledWith('pu', 'alice'));
 });
