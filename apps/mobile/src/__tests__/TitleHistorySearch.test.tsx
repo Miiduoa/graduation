@@ -408,3 +408,52 @@ test('a stalled native resume retries the same anchor without showing cached sea
     expect(view.getByText('二手書 one')).toBeTruthy();
   } finally { jest.useRealTimers(); }
 });
+
+test('a stalled post-opening verification releases the panel and a late revoked reply cannot erase a successful retry', async () => {
+  const stalled = deferred<boolean>();
+  confirmOpen.mockReturnValueOnce(stalled.promise).mockResolvedValueOnce(true);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  jest.useFakeTimers();
+  try {
+    fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+    expect(view.getByLabelText('正在確認貼文仍可閱讀')).toBeTruthy();
+    act(() => { jest.advanceTimersByTime(7_000); });
+    expect(view.getByText(/確認貼文逾時/)).toBeTruthy();
+    expect(view.getByText('二手書 one')).toBeTruthy();
+    expect(view.queryByLabelText('正在確認貼文仍可閱讀')).toBeNull();
+    fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.open).toHaveBeenCalledExactlyOnceWith({ id: 'one', schoolId: 'pu' });
+    await act(async () => { stalled.reject({ code: 'permission-denied' }); });
+    expect(view.open).toHaveBeenCalledTimes(1);
+    expect(view.queryByText(/搜尋結果已清除/)).toBeNull();
+    expect(confirmOpen).toHaveBeenCalledTimes(2);
+  } finally { jest.useRealTimers(); }
+});
+
+test('a stalled post verification during interrupted pagination keeps the cursor retry usable', async () => {
+  const first = result([row('one')], true);
+  const unfinishedPage = deferred<TitleSearchPage>();
+  const unfinishedOpen = deferred<boolean>();
+  search.mockResolvedValueOnce(first).mockReturnValueOnce(unfinishedPage.promise)
+    .mockResolvedValueOnce(result([row('two')]));
+  confirmOpen.mockReturnValueOnce(unfinishedOpen.promise);
+  const view = panel(); enter(view); await view.findByText('二手書 one');
+  jest.useFakeTimers();
+  try {
+    fireEvent.press(view.getByLabelText('載入更多歷史貼文'));
+    fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+    act(() => { jest.advanceTimersByTime(7_000); });
+    expect(view.getByText(/確認貼文逾時/)).toBeTruthy();
+    fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.getByText('二手書 two')).toBeTruthy();
+    expect(search.mock.calls[2]).toEqual(search.mock.calls[1]);
+    await act(async () => {
+      unfinishedPage.resolve(result([row('stale')]));
+      unfinishedOpen.resolve(true);
+    });
+    expect(view.open).not.toHaveBeenCalled();
+    expect(view.queryByText('二手書 stale')).toBeNull();
+  } finally { jest.useRealTimers(); }
+});
