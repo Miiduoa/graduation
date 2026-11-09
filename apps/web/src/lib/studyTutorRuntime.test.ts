@@ -308,6 +308,36 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it('rejects cosmetic re-titling of the same step while retaining old saved lessons', async () => {
+    const duplicated = {
+      ...lesson(),
+      steps: [
+        lesson().steps![0],
+        { ...lesson().steps![0], title: '換個名稱，但內容與引句相同' },
+      ],
+    };
+    // The original parser still accepts old offline backups and validates
+    // the cited source; only a NEW worker response must have distinct steps.
+    expect(parseTutorExplanation(JSON.stringify(duplicated), passage()).steps).toHaveLength(2);
+
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(duplicated) });
+    await expect(pending).rejects.toThrow('重複相同的教學步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
     const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
     const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };

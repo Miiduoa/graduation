@@ -84,6 +84,19 @@ function hasBoundedGeneratedEvidence(explanation: TutorExplanation): boolean {
   return generatedEvidenceQuotes(explanation).every((quote) => Array.from(quote).length <= 60);
 }
 
+// Distinct step titles do not make repeated instructional content into two
+// learning steps. This applies only to NEW worker results, not saved lessons.
+function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
+  if (!explanation.steps) return false;
+  const seen = new Set<string>();
+  for (const step of explanation.steps) {
+    const content = JSON.stringify([step.explanation.trim(), step.sourceQuote, step.formula ?? null]);
+    if (seen.has(content)) return false;
+    seen.add(content);
+  }
+  return true;
+}
+
 function progressMessage(message: unknown, phase: unknown): string {
   if (phase === 'generating') return '正在依本段原文準備講解與自我檢查題…';
   const download = typeof message === 'string' && message.length <= 300
@@ -217,6 +230,8 @@ export async function runStudyTutor({
             // promises a usable 2–4-step explanation, not just a generic summary.
             if (!explanation.steps)
               throw new Error('這次講解缺少分步步驟，無法完成逐步學習。請重新講解。');
+            if (!hasDistinctGeneratedSteps(explanation))
+              throw new Error('這次講解重複相同的教學步驟，請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
