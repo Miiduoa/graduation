@@ -271,7 +271,8 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   }
   // A damaged local snapshot cannot be treated as proof that a student has no free period.
   if (timetable.classGaps.some((gap) => !gap || typeof gap !== 'object' ||
-    !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) || gap.startAt >= gap.endAt)) {
+    !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) ||
+    gap.startAt >= gap.endAt || gap.endAt - gap.startAt >= DAY)) {
     return reply('這份手機課表的空堂時間資料不足，無法核對。請開啟「我的課表」重新確認上課時間。');
   }
   const offset = savedClassGapDayOffset(query.day);
