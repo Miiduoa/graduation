@@ -2,11 +2,27 @@ import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
 import { rewriteLegacyShopsPath, socialPostHttpsPrefixes } from '../app/legacyShopsPath';
+import { preAuthLinking } from '../app/preAuthLinking';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RefreshControl, Text } from 'react-native';
 import { PostDetailScreen } from '../screens/social/PostDetailScreen';
 import { getCampusPostById } from '../services/feed';
 import { listCampusReplies } from '../services/threads';
+
+let mockIncomingInitialURL: string | null = null;
+let mockPublicLinkListener: ((event: { url: string }) => void) | null = null;
+jest.mock('expo-linking', () => ({
+  createURL: () => 'campus://',
+  getInitialURL: jest.fn(async () => mockIncomingInitialURL),
+  addEventListener: jest.fn((_type: string, handler: (event: { url: string }) => void) => {
+    mockPublicLinkListener = handler;
+    return { remove: jest.fn() };
+  }),
+}));
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: { expoConfig: { extra: { release: { deepLinkHost: 'nuni.tw' } } } },
+}));
 
 let mockUser: { uid: string } | null = { uid: 'alice' };
 let mockSchoolId = 'pu';
@@ -321,4 +337,52 @@ test('canonical share parser does not change normal native post paths or unrelat
   expect(rewriteLegacyShopsPath('post/old-1?schoolId=pu')).toBe('post/old-1?schoolId=pu');
   expect(rewriteLegacyShopsPath('community/poster/old-1?schoolId=pu')).toBe('community/poster/old-1?schoolId=pu');
   expect(rewriteLegacyShopsPath('community/post/old-1?schoolId=pu#fragment')).toBe('community/post/old-1?schoolId=pu#fragment');
+});
+
+
+test('a signed-out cold HTTPS post share waits for school login instead of being dropped', async () => {
+  const incoming = 'https://nuni.tw/community/post/old-1?schoolId=pu&utm_source=share';
+  mockIncomingInitialURL = incoming;
+  const publicInitial = await preAuthLinking.getInitialURL?.();
+  expect(publicInitial).toBeNull();
+  const { takePendingSharedPostLink } = require('../app/pendingSharedPostLink');
+  expect(takePendingSharedPostLink()).toBe('https://nuni.tw/community/post/old-1?schoolId=pu');
+  expect(takePendingSharedPostLink()).toBeNull();
+  mockIncomingInitialURL = null;
+});
+
+test('a signed-out warm post share is retained once without opening a private screen in public navigation', () => {
+  const delivered = jest.fn();
+  const subscription = preAuthLinking.subscribe?.(delivered);
+  mockPublicLinkListener?.({ url: 'https://nuni.tw/community/post/old-2?schoolId=pu&utm_campaign=mobile' });
+  expect(delivered).not.toHaveBeenCalled();
+  const { takePendingSharedPostLink } = require('../app/pendingSharedPostLink');
+  expect(takePendingSharedPostLink()).toBe('https://nuni.tw/community/post/old-2?schoolId=pu');
+  expect(takePendingSharedPostLink()).toBeNull();
+  subscription?.();
+});
+
+test('public entry rejects untrusted, ambiguous and expired shared posts while preserving normal public links', () => {
+  const { stagePendingSharedPostLink, takePendingSharedPostLink, clearPendingSharedPostLink } =
+    require('../app/pendingSharedPostLink');
+  clearPendingSharedPostLink();
+  expect(stagePendingSharedPostLink('https://nuni.tw/community/post/old-3?schoolId=pu', 'nuni.tw', 1000)).toBe(true);
+  expect(takePendingSharedPostLink(1000 + 10 * 60 * 1000 + 1)).toBeNull();
+  for (const url of [
+    'https://nuni.tw.evil.test/community/post/old-3?schoolId=pu',
+    'http://nuni.tw/community/post/old-3?schoolId=pu',
+    'https://nuni.tw/community/post/old-3',
+    'https://nuni.tw/community/post/old-3?schoolId=pu&schoolId=other',
+    'https://nuni.tw/community/post/%2Fsecret?schoolId=pu',
+    'https://nuni.tw/community/post/old-3?schoolId=pu#fragment',
+  ]) {
+    expect(stagePendingSharedPostLink(url, 'nuni.tw', 2000)).toBe(false);
+  }
+  expect(takePendingSharedPostLink(2001)).toBeNull();
+  mockPublicLinkListener = null;
+  const delivered = jest.fn();
+  const subscription = preAuthLinking.subscribe?.(delivered);
+  mockPublicLinkListener?.({ url: 'campus://library' });
+  expect(delivered).toHaveBeenCalledWith('campus://library');
+  subscription?.();
 });
