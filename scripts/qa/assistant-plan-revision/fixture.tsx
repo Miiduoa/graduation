@@ -1,0 +1,119 @@
+import { createRoot } from 'react-dom/client';
+import { Assistant } from '../../../apps/web/src/features/nuni/Assistant';
+import '../../../apps/web/src/app/globals.css';
+
+// This is an isolated browser fixture, never a backend/model or a real account.
+// Real Assistant, cards, journal, receipt parser and local mirroring remain bundled.
+const DATE = '2026-11-12';
+const INSTANT = '2026-11-09T12:00:00.000Z';
+const original = [
+  { title: '測試微積分複習', date: DATE, allDay: false, startTime: '19:00', endTime: '19:30' },
+  { title: '測試英文閱讀', date: DATE, allDay: false, startTime: '20:00', endTime: '20:30' },
+];
+type Card = { tool: string; args: typeof original[number]; token: string; mutationId: string; schoolId: string; destination: string };
+type RequestRow = { sequence: number; action: string; body: Record<string, any>; outcome?: string };
+const cards = new Map<string, Card>();
+const revoked = new Set<string>();
+const records = new Map<string, Record<string, unknown>>();
+const requests: RequestRow[] = [];
+const writes: { mutationId: string; record: Record<string, unknown> }[] = [];
+let askCount = 0;
+let release: (() => void) | undefined;
+const faults = { revisionAsk: 'none', unknownCancellation: false, holdAsk: false, holdCancel: false };
+const qa = {
+  school: 'fixture-campus-a',
+  requests, writes,
+  snapshot: () => ({ school: qa.school, requests, writes, revoked: [...revoked], records: [...records.values()], waiting: !!release }),
+  configure: (value: Partial<typeof faults>) => Object.assign(faults, value),
+  release: () => { const resume = release; release = undefined; resume?.(); },
+  switchSchool: (school: string) => {
+    if (!['fixture-campus-a', 'fixture-campus-b'].includes(school)) throw new Error('Unknown fixture school');
+    qa.school = school;
+    window.dispatchEvent(new Event('qa-school'));
+  },
+};
+(window as any).__agentQA = qa;
+async function hold() { await new Promise<void>((resolve) => { release = resolve; }); }
+function response(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+}
+function scope(card: Card) {
+  return { version: 1, operation: 'calendar.create', schoolId: card.schoolId, mutationId: card.mutationId, storage: 'synced' };
+}
+function revokedResult(card: Card) {
+  return { ...scope(card), status: 'revoked', checkedAt: INSTANT, revision: writes.length,
+    authorizationValid: false, retryable: false, alreadyRevoked: true };
+}
+function verifiedResult(card: Card, replay: boolean) {
+  return { ...scope(card), status: 'verified', verifiedAt: INSTANT, revision: writes.length, replay, record: records.get(card.mutationId) };
+}
+function preview(schoolId: string, revised: boolean) {
+  const next = original.map((event, index) => {
+    const mutationId = `qa-${revised ? `revised-${askCount}` : 'original'}-${index + 1}`;
+    const card: Card = { tool: 'propose_personal_event', schoolId, mutationId,
+      token: `fixture-token-${mutationId}`, destination: '/calendar',
+      args: revised && index === 1 ? { ...event, startTime: '21:00', endTime: '21:30' } : { ...event } };
+    cards.set(card.token, card);
+    return card;
+  });
+  return { answer: revised ? '已重新預覽兩筆測試安排；請逐筆確認。' : '這是兩筆尚未寫入的測試安排。',
+    steps: [], cards: next, simulation: true };
+}
+window.fetch = async (input, init) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, location.href);
+  const match = /^\/api\/nuni\/assistant\/(capability|ask|cancel|reconcile|confirm)$/.exec(url.pathname);
+  if (url.origin !== location.origin || !match) throw new Error(`Fixture rejects network: ${url.origin}${url.pathname}`);
+  const action = match[1];
+  const body = init?.body ? JSON.parse(String(init.body)) : {};
+  const row: RequestRow = { sequence: requests.length + 1, action, body };
+  requests.push(row);
+  const finish = (value: unknown, status = 200) => { row.outcome = String(status); return response(value, status); };
+  if (action === 'capability') return finish({ version: 2, enabled: true, ready: true, fallback: false });
+  if (!['fixture-campus-a', 'fixture-campus-b'].includes(body.schoolId)) return finish({ message: 'Invalid fixture school' }, 400);
+  if (action === 'ask') {
+    askCount += 1;
+    const revised = askCount > 1;
+    if (revised && faults.holdAsk) { faults.holdAsk = false; await hold(); }
+    if (revised && faults.revisionAsk !== 'none') {
+      const fault = faults.revisionAsk;
+      faults.revisionAsk = 'none';
+      return fault === 'empty' ? finish({ answer: '受控空預覽', steps: [], cards: [] }) : finish({ message: '受控重新預覽失敗' }, 503);
+    }
+    return finish(preview(body.schoolId, revised));
+  }
+  const card = cards.get(body.token);
+  if (!card || card.schoolId !== body.schoolId || JSON.stringify(card.args) !== JSON.stringify(body.args))
+    return finish({ message: 'Fixture card mismatch' }, 409);
+  if (action === 'cancel') {
+    if (faults.holdCancel) { faults.holdCancel = false; await hold(); }
+    if (records.has(card.mutationId)) return finish(verifiedResult(card, true));
+    revoked.add(card.mutationId);
+    if (faults.unknownCancellation) { row.outcome = 'controlled-network-error'; throw new TypeError('Controlled lost cancellation response'); }
+    return finish(revokedResult(card));
+  }
+  if (action === 'reconcile') {
+    if (faults.unknownCancellation) { row.outcome = 'controlled-network-error'; throw new TypeError('Controlled unavailable reconciliation'); }
+    if (records.has(card.mutationId)) return finish(verifiedResult(card, true));
+    if (revoked.has(card.mutationId)) return finish(revokedResult(card));
+    return finish({ ...scope(card), status: 'absent', checkedAt: INSTANT, revision: writes.length, authorizationValid: true, retryable: true });
+  }
+  if (revoked.has(card.mutationId)) return finish({ message: 'This fixture proposal was revoked' }, 409);
+  const replay = records.has(card.mutationId);
+  if (!replay) {
+    const record = { ...card.args, id: card.mutationId, kind: 'events', schoolId: card.schoolId,
+      academicYear: '', semester: '', batchId: card.mutationId, importedAt: INSTANT,
+      source: { type: 'paste', line: 1, rawText: '' } };
+    records.set(card.mutationId, record);
+    writes.push({ mutationId: card.mutationId, record });
+  }
+  return finish(verifiedResult(card, replay));
+};
+createRoot(document.getElementById('root')!).render(<>
+  <aside className="fixture-banner" aria-label="瀏覽器驗證 fixture">
+    <p>固定假帳號、假校園與假 API；真實助理元件。沒有連線模型、校務系統或正式行事曆。</p>
+    <label>QA 校園 <select defaultValue={qa.school} onChange={(event) => qa.switchSchool(event.target.value)}>
+      <option value="fixture-campus-a">測試校園 A</option><option value="fixture-campus-b">測試校園 B</option>
+    </select></label>
+  </aside>
+  <Assistant />
+</>);

@@ -1,0 +1,61 @@
+.panel {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-width: 0;
+  width: min(100%, 520px);
+  color: var(--text);
+}
+.editor {
+  display: grid;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.panel p { margin: 0; overflow-wrap: anywhere; }
+.heading, .editor label { font-size: 14px; font-weight: 650; }
+.events { display: grid; gap: 10px; margin: 0; padding-left: 1.5em; min-width: 0; }
+.events li { min-width: 0; overflow-wrap: anywhere; padding-left: 2px; line-height: 1.6; }
+.events strong, .events span { display: block; }
+.events strong { font-size: 14px; }
+.events span { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.hint, .notice { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.notice { padding: 10px 12px; border-radius: 12px; background: var(--panel); }
+.editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 96px;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.primary, .secondary {
+  box-sizing: border-box;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 8px 16px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.primary { border: 0; background: var(--brand); color: var(--on-brand); }
+.secondary { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); }
+.panel button:disabled, .panel textarea:disabled { cursor: default; opacity: .5; }
+.panel button:focus-visible, .panel textarea:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+@media (max-width: 600px) { .editor { padding: 12px; } }

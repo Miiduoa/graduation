@@ -7,6 +7,8 @@ import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import { useNuniSession } from './Session';
 import type { AssistantIntent } from '@/lib/nuni/assistantContracts';
 import { AssistantThread } from './assistant/AssistantThread';
+import { AssistantPlanRevision } from './assistant/AssistantPlanRevision';
+import { buildPlanRevisionQuestion, getPlanRevisionEvents, hasUnresolvedAssistantAction, isUnattemptedCalendarPlan } from './assistant/planRevision';
 import type { V2ActionState, V2ActionStates, V2Card, V2Turn } from './assistant/types';
 import { assistantAnswerWithExecution, calendarExpectation, canConfirmAction, priorCalendarActionsVerified, withAssistantRequestDeadline } from './assistant/execution';
 import { inAppHref } from './assistant/copy';
@@ -220,6 +222,8 @@ function V2Conversation({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
+  const revisionConsent = useRef(false);
+  const revisionTurns = useRef(new Set<V2Turn>());
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
   const journalScope = { ...localScope, context };
@@ -452,6 +456,73 @@ function V2Conversation({
       if (!controller.current?.signal.aborted) setPending(false);
     }
   }
+  async function revisePlan(turn: V2Turn, instruction: string): Promise<{ ok: boolean; message: string }> {
+    if (busy.current || !active() || !ready || !revisionConsent.current)
+      return { ok: false, message: '請先等目前操作完成，並同意模型處理後再重新預覽。' };
+    const continuing = revisionTurns.current.has(turn) && turn.reply.cards.every(card =>
+      actionStates.current[card.mutationId] === undefined || actionStates.current[card.mutationId]?.status === 'cancelled');
+    if (!turns.includes(turn) || turn.reply.cards.some(card => card.schoolId !== schoolId) ||
+      hasUnresolvedAssistantAction(actionStates.current) ||
+      (!isUnattemptedCalendarPlan(turn, actionStates.current) && !continuing))
+      return { ok: false, message: '原提議尚未完成核對，請先核對原操作結果；這次沒有產生新安排。' };
+    let current: string;
+    try { current = buildPlanRevisionQuestion(turn, instruction); }
+    catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : '請核對修改條件後再試。' }; }
+
+    // Keep the original signed cards intact. A failed cancellation is never
+    // permission to create another operation with the same intended outcome.
+    revisionTurns.current.add(turn);
+    if (turn.reply.cards.some(card => actionStates.current[card.mutationId] === undefined))
+      await cancel(turn, 0);
+    if (!active()) return { ok: false, message: '已離開原對話，沒有加入新預覽。' };
+    if (!turn.reply.cards.every(card => actionStates.current[card.mutationId]?.status === 'cancelled'))
+      return { ok: false, message: '原提議尚未全部撤銷。請先重新核對原操作結果，已儲存的行程不會被重新建立。' };
+    if (!revisionConsent.current)
+      return { ok: false, message: '舊提議已撤銷；模型同意已關閉，這次沒有送出新的預覽要求。' };
+
+    busy.current = true;
+    setPending(true);
+    setError('');
+    try {
+      // The selected visible plan is sufficient context. Other conversations,
+      // identifiers and execution tokens do not enter this revision request.
+      const input = { question: current, history: [], consent: true };
+      let reply = await send('ask', { ...input, routeToken: routeToken.current });
+      if (reply.bootstrap) {
+        if (!active() || !revisionConsent.current)
+          return { ok: false, message: '模型同意已關閉或對話已變更，沒有繼續產生新預覽。' };
+        conversation.current = reply.conversationId;
+        routeToken.current = reply.routeToken;
+        reply = await send('ask', { ...input, routeToken: routeToken.current });
+      }
+      if (!active() || !revisionConsent.current)
+        return { ok: false, message: '模型同意已關閉或對話已變更，這次回覆沒有加入新預覽。' };
+      if (!Array.isArray(reply.cards) || reply.cards.length === 0)
+        return { ok: false, message: '尚未取得新預覽，舊提議已撤銷。請補充明確日期、時段或其他條件後再試。'
+          + (typeof reply.answer === 'string' ? ' ' + reply.answer.slice(0, 400) : '') };
+      const previousIds = new Set(turns.flatMap(value => value.reply.cards.map(card => card.mutationId)));
+      if (new Set(reply.cards.map((card: V2Card) => card.mutationId)).size !== reply.cards.length ||
+        reply.cards.some((card: V2Card) => card.tool !== 'propose_personal_event' || card.schoolId !== schoolId ||
+        typeof card.mutationId !== 'string' || !card.mutationId || previousIds.has(card.mutationId) ||
+        typeof card.token !== 'string' || !card.token))
+        return { ok: false, message: '尚未取得新的純行程預覽。舊提議已撤銷，其他服務請另外提出並分開確認。' };
+      getPlanRevisionEvents({ question: current, reply });
+      reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
+      for (const card of turns.flatMap(value => value.reply.cards)) {
+        if (canConfirmAction(actionStates.current[card.mutationId]))
+          setAction(card, { status: 'superseded' });
+      }
+      setTurns(previous => [...previous, { question: '修改原先安排：' + instruction.trim(), reply }]);
+      revisionTurns.current.delete(turn);
+      return { ok: true, message: '新預覽已列在下方。請重新核對並確認；尚未建立任何新行程。' };
+    } catch (cause) {
+      return { ok: false, message: '尚未取得新預覽，舊提議已撤銷，修改條件已保留。'
+        + (cause instanceof Error ? ' ' + cause.message : '請稍後重試。') };
+    } finally {
+      busy.current = false;
+      if (active()) setPending(false);
+    }
+  }
   async function reconcile(card: V2Card) {
     if (busy.current || card.tool !== 'propose_personal_event' || card.schoolId !== schoolId) return;
     busy.current = true;
@@ -515,7 +586,7 @@ function V2Conversation({
       ready={ready}
       fallback={fallback}
       consent={consent}
-      onConsent={setConsent}
+      onConsent={value => { revisionConsent.current = value; setConsent(value); }}
       question={question}
       onQuestion={setQuestion}
       turns={turns}
@@ -526,6 +597,8 @@ function V2Conversation({
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
+      renderPlanRevision={turn => <AssistantPlanRevision turn={turn} states={states} pending={pending}
+        enabled={ready && consent} onPreview={instruction => revisePlan(turn, instruction)} />}
     />
   );
 }

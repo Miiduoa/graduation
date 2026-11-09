@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -24,6 +25,7 @@ export function AssistantThread({
   onConfirm,
   onCancel,
   onReconcile,
+  renderPlanRevision,
 }: {
   schoolId: string;
   ready: boolean;
@@ -40,6 +42,7 @@ export function AssistantThread({
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
+  renderPlanRevision?: (turn: V2Turn) => ReactNode;
 }) {
   const shell = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
@@ -141,6 +144,7 @@ export function AssistantThread({
               onCancel={(index) => onCancel(turn, index)}
               onReconcile={onReconcile}
             />
+            {renderPlanRevision?.(turn)}
           </article>
         ))}
         {pending ? (
