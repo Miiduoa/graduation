@@ -2137,3 +2137,24 @@ test('reading older phone replies stays in place until the user requests the lat
   expect(view.queryByText('回到最新回覆')).toBeNull();
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+test('a running study brief still names its original task while the next draft is being written', async () => {
+  const syncing = deferred<Awaited<ReturnType<typeof refreshCampusSenseSnapshot>>>();
+  jest.mocked(refreshCampusSenseSnapshot).mockReturnValueOnce(syncing.promise);
+  const view = render(<CampusAssistantScreen />);
+  openCampusTools(view);
+  fireEvent.press(view.getByText('今日重點'));
+  const field = view.getByLabelText('詢問校園助理');
+  fireEvent.changeText(field, '幫我查週末活動');
+  expect(field.props.value).toBe('幫我查週末活動');
+  expect(view.getByText('今天要先處理什麼？')).toBeTruthy();
+  fireEvent.press(view.getByText('取消這次同步'));
+  await act(async () => syncing.resolve({
+    userId: 'A', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'unavailable', count: null },
+    assignments: { status: 'available', count: 0, items: [] },
+    announcements: { status: 'available', items: [] },
+  }));
+  expect(field.props.value).toBe('幫我查週末活動');
+  expect(request).not.toHaveBeenCalled();
+});
