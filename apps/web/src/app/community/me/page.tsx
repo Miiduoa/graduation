@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/components/AuthGuard';
+import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -21,9 +22,13 @@ function MyCreatorContent({
 
 export default function MyCreatorPage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
+  const requestedSchoolId = useSearchParams()?.get('schoolId');
+  const mismatch = ready && requestedSchoolId && requestedSchoolId !== schoolId;
   return (
     <SiteShell title="我的社群頁" subtitle="分享日常，整理你公開發表的內容。" schoolName={ready ? schoolName : undefined}>
-      {ready ? (
+      {ready && mismatch ? (
+        <p role="alert">這個社群頁的校園連結與目前選擇的學校不同，請先切換學校。</p>
+      ) : ready ? (
         <CommunityAccess>
           <MyCreatorContent key={schoolId} schoolId={schoolId} schoolName={schoolName} />
         </CommunityAccess>
