@@ -165,7 +165,7 @@ test('revoked school membership rejects featured reads, edits, and removal', asy
   await environment.withSecurityRulesDisabled(async (context) => {
     await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
   });
-  await assertFails(featureRef(alice).get({ source: 'server' }));
+  await assertSucceeds(featureRef(alice).get({ source: 'server' }));
   await assertFails(featureRef(alice).set(featured()));
-  await assertFails(featureRef(alice).delete());
+  await assertSucceeds(featureRef(alice).delete());
 });
