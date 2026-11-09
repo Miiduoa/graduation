@@ -153,9 +153,17 @@ async function readOsm(): Promise<Snapshot> {
   const buildings = parseProvidenceOsmFootprints(payload);
   if (!buildings.length) throw new Error('No verified building outlines in response');
   const now = Date.now();
+  // The 48-hour replication-age check must remain true for the *entire* time
+  // this snapshot is presented as fresh, not only when Overpass was fetched.
+  // Otherwise a 47-hour-old OSM database could be marked fresh for another
+  // 24 hours. Older Overpass replies without metadata keep the normal TTL.
+  const replicationDeadline = osmBaseAt === null
+    ? Number.POSITIVE_INFINITY : Date.parse(osmBaseAt) + MAX_OVERPASS_REPLICATION_LAG_MS;
+  const validUntil = Math.min(now + REFRESH_MS, replicationDeadline);
+  if (validUntil <= now) throw new Error('Overpass replication expired while reading');
   return {
     buildings, fetchedAt: new Date(now).toISOString(), osmBaseAt,
-    validUntil: now + REFRESH_MS, discardAfter: now + MAX_SNAPSHOT_AGE_MS,
+    validUntil, discardAfter: now + MAX_SNAPSHOT_AGE_MS,
   };
 }
 
