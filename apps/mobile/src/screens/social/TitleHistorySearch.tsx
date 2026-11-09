@@ -104,15 +104,23 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
   const activeRequest = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
   const inFlight = useRef(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopSearchTimer = () => {
+    if (searchTimer.current !== null) {
+      clearTimeout(searchTimer.current);
+      searchTimer.current = null;
+    }
+  };
   const openingPost = useRef(false);
   const version = useRef(0);
   const live = useRef(true);
   useLayoutEffect(() => {
     live.current = true;
-    return () => { live.current = false; version.current += 1; };
+    return () => { live.current = false; version.current += 1; stopSearchTimer(); };
   }, []);
 
   const change = (value: string) => {
+    stopSearchTimer();
     version.current += 1;
     inFlight.current = false;
     openingPost.current = false;
@@ -125,6 +133,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     setText(value); setPosts([]); setHasMore(false); setBusy(false); setError(''); setNotice('');
   };
   const close = () => {
+    stopSearchTimer();
     openingPost.current = true;
     version.current += 1;
     inFlight.current = false;
@@ -147,6 +156,19 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     retry.current = null;
     setBusy(true); setError(''); setNotice('');
     Keyboard.dismiss();
+    // Stop waiting for a server-only SDK read without treating its unresolved
+    // Promise as a cancellation. A later result/rejection is version-isolated.
+    stopSearchTimer();
+    searchTimer.current = setTimeout(() => {
+      searchTimer.current = null;
+      if (!live.current || attempt !== version.current) return;
+      version.current += 1;
+      inFlight.current = false;
+      activeRequest.current = null;
+      retry.current = { cursor: boundary, append, ...(fromPostId ? { fromPostId } : {}) };
+      setBusy(false);
+      setError('伺服器回應時間較長，已停止等待。先前結果已保留，可原地重試。');
+    }, 15_000);
     try {
       const page = fromPostId
         ? await resumeCampusPostTitles(schoolId, prefix, fromPostId)
@@ -188,6 +210,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
       }
     } finally {
       if (live.current && attempt === version.current) {
+        stopSearchTimer();
         activeRequest.current = null;
         inFlight.current = false;
         setBusy(false);
@@ -199,6 +222,7 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
     // A student can select an already loaded card while the next page is pending.
     // Cancel that delivery and release its spinner before revalidating the post.
     const interrupted = inFlight.current ? activeRequest.current : null;
+    stopSearchTimer();
     const attempt = ++version.current;
     openingPost.current = true;
     inFlight.current = false;
