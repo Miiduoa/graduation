@@ -160,10 +160,11 @@ export async function runStudyTutor({
         }
         const data = value as Record<string, unknown>;
         if (data.id !== id) {
-          // An old numeric request may finish late. Ignore it, but fail fast
-          // if the worker omitted or corrupted its request identifier.
-          // A request id must be a positive safe integer, never zero or negative.
-          if (typeof data.id !== 'number' || !Number.isSafeInteger(data.id) || data.id <= 0)
+          // Older numeric requests can finish late. An id from the future
+          // cannot belong to this dedicated worker, so fail fast instead of
+          // leaving the learner waiting for the preparation timeout.
+          if (typeof data.id !== 'number' || !Number.isSafeInteger(data.id) ||
+            data.id <= 0 || data.id > id)
             finish(workerError('invalid_response'));
           return;
         }

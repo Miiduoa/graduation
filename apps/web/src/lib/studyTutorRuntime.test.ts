@@ -348,13 +348,44 @@ describe('explicit local study generation', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 
-  it('ignores another request id without exposing its progress or explanation', async () => {
-    const progress = vi.fn();
-    const pending = runStudyTutor({ passage: passage(), mode: 'exam', signal: new AbortController().signal, onProgress: progress });
+  it('rejects an impossible future request id immediately and permits retry', async () => {
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
     const worker = lastWorker();
+    worker.emit({ id: worker.request!.id + 1, type: 'progress', phase: 'generating', message: '私人內容' });
+    await expect(pending).rejects.toThrow('無法對照原文');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: 'failed', generationMs: null,
+    }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
+  it('ignores an earlier completed request id without exposing stale progress', async () => {
+    const earlier = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    const previousWorker = lastWorker();
+    const earlierId = previousWorker.request!.id;
+    previousWorker.emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(earlier).resolves.toEqual(lesson());
+
+    const progress = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'exam', signal: new AbortController().signal, onProgress: progress,
+    });
+    const worker = lastWorker();
+    expect(earlierId).toBeLessThan(worker.request!.id);
     progress.mockClear();
-    worker.emit({ id: worker.request!.id + 1, type: 'progress', message: '私人內容' });
-    worker.emit({ id: worker.request!.id + 1, type: 'result', raw: JSON.stringify(lesson()) });
+    worker.emit({ id: earlierId, type: 'progress', message: '私人內容' });
+    worker.emit({ id: earlierId, type: 'result', raw: JSON.stringify(lesson()) });
     expect(progress).not.toHaveBeenCalled();
     expect(worker.terminate).not.toHaveBeenCalled();
     worker.emit({ type: 'result', raw: JSON.stringify(lesson()) });
