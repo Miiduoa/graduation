@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal } from 'react-native';
+import { FlatList, Modal, StyleSheet } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { TitleHistoryLauncher, TitleHistorySearch } from '../screens/social/TitleHistorySearch';
 import { CommunityScreen } from '../screens/CommunityScreen';
@@ -10,12 +10,13 @@ let mockSchool = 'pu';
 let mockLoading = false;
 let mockDemo = false;
 let mockFirebaseMock = false;
+let mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
 jest.mock('../state/auth', () => ({ useAuth: () => ({ user: mockUser, loading: mockLoading }) }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: mockSchool } }) }));
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => mockFirebaseMock }));
 jest.mock('../services/demoSession', () => ({ isDemoUid: () => mockDemo }));
 jest.mock('../ui/useThemeStyleSheet', () => ({ useThemeStyleSheet: (factory: () => unknown) => factory() }));
-jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => mockInsets }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../screens/social/HomeFeedScreen', () => ({ HomeFeedScreen: () => {
   const React = require('react'); const { Text } = require('react-native');
@@ -56,6 +57,7 @@ function enter(view: ReturnType<typeof render>, text = '二手書') {
 beforeEach(() => {
   jest.clearAllMocks();
   mockUser = { uid: 'alice' }; mockSchool = 'pu'; mockLoading = false; mockDemo = false; mockFirebaseMock = false;
+  mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
   search.mockReset().mockResolvedValue(result());
   resume.mockReset().mockResolvedValue(result());
   confirmOpen.mockReset().mockResolvedValue(true);
@@ -457,4 +459,23 @@ test('a stalled post verification during interrupted pagination keeps the cursor
     expect(view.open).not.toHaveBeenCalled();
     expect(view.queryByText('二手書 stale')).toBeNull();
   } finally { jest.useRealTimers(); }
+});
+
+
+test('keeps native history input, retry and results in one scroll surface above the bottom safe area', async () => {
+  // Regression for short viewports / larger system text: fixed search controls
+  // previously left the separate result list with no usable viewport.
+  mockInsets = { top: 47, bottom: 34, left: 0, right: 0 };
+  search.mockRejectedValueOnce({ code: 'unavailable' }).mockResolvedValueOnce(result());
+  const view = panel();
+  const list = view.UNSAFE_getByType(FlatList);
+  expect(list.props.ListHeaderComponent).toBeTruthy();
+  expect(StyleSheet.flatten(list.props.style)).toMatchObject({ flex: 1 });
+  expect(StyleSheet.flatten(list.props.contentContainerStyle)?.paddingBottom).toBe(50);
+
+  enter(view);
+  await view.findByLabelText('重試歷史搜尋');
+  fireEvent.press(view.getByLabelText('重試歷史搜尋'));
+  await view.findByText('二手書 one');
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
 });
