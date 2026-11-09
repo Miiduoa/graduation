@@ -4,6 +4,7 @@ import { CreatorProfileScreen } from '../screens/social/CreatorProfileScreen';
 import { listCreatorPosts, readCreatorIdentity } from '../services/creatorProfile';
 import { loadCampusPostBookmarks } from '../services/campusPostBookmarks';
 import { followUser, listFollowingIds, unfollowUser } from '../services/follows';
+import { readCreatorPin, saveCreatorPin } from '../services/creatorPin';
 
 const mockAuth = {
   user: { uid: 'alice', displayName: 'Alice' } as { uid: string; displayName: string } | null,
@@ -23,6 +24,10 @@ jest.mock('../firebase', () => ({ isFirebaseMockMode: () => mockFirebase }));
 jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
   readCreatorIdentity: jest.fn(),
+}));
+jest.mock('../services/creatorPin', () => ({
+  readCreatorPin: jest.fn(),
+  saveCreatorPin: jest.fn(),
 }));
 jest.mock('../services/creatorCard', () => ({
   readCreatorCard: jest.fn(async () => null),
@@ -62,6 +67,8 @@ beforeEach(() => {
   jest.mocked(listFollowingIds).mockResolvedValue([]);
   jest.mocked(followUser).mockResolvedValue(undefined);
   jest.mocked(unfollowUser).mockResolvedValue(undefined);
+  jest.mocked(readCreatorPin).mockResolvedValue({ postId: null, post: null });
+  jest.mocked(saveCreatorPin).mockResolvedValue({ postId: null, post: null });
 });
 
 test('owner manages posts, media, saved posts and publishing without private-account data', async () => {
