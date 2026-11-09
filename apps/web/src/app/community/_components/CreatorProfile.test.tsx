@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   following: vi.fn(),
   follow: vi.fn(),
   unfollow: vi.fn(),
+  pinRead: vi.fn(),
+  pinSave: vi.fn(),
 }));
 
 vi.mock('@/components/AuthGuard', () => ({
@@ -27,6 +29,10 @@ vi.mock('next/link', () => ({
 vi.mock('@/lib/community/creatorProfile', () => ({
   readCreatorIdentity: mocks.identity,
   listCreatorPosts: mocks.posts,
+}));
+vi.mock('@/lib/community/creatorPin', () => ({
+  readCreatorPin: mocks.pinRead,
+  saveCreatorPin: mocks.pinSave,
 }));
 vi.mock('@/lib/community/creatorCard', () => ({
   readCreatorCard: vi.fn(async () => null),
@@ -68,6 +74,8 @@ beforeEach(() => {
   mocks.following.mockResolvedValue([]);
   mocks.follow.mockResolvedValue(undefined);
   mocks.unfollow.mockResolvedValue(undefined);
+  mocks.pinRead.mockResolvedValue({ postId: null, post: null });
+  mocks.pinSave.mockResolvedValue({ postId: null, post: null });
 });
 
 it('lets the owner publish and browse their public posts, media and private saved posts', async () => {
