@@ -54,6 +54,8 @@ for (const name of ['Dockerfile', 'Dockerfile.nuni']) {
 const schoolReaderSources = [
   'backend/functions/puScraper.js',
   'backend/functions/tronClassScraper.js',
+  'backend/functions/campusStoryAccessBinding.js',
+  'backend/functions/campusAnnouncements/catalog.js',
   'backend/functions/lib/puGradeDocument.js',
   'backend/functions/lib/puCreditSummary.js',
   'backend/functions/lib/puCourseTime.js',
@@ -61,7 +63,12 @@ const schoolReaderSources = [
   'backend/functions/lib/puSessionStore.js',
   'backend/functions/lib/puCampusTransport.js',
 ];
-const schoolReaderDirectories = ['backend/', 'backend/functions/', 'backend/functions/lib/'];
+const schoolReaderDirectories = [
+  'backend/',
+  'backend/functions/',
+  'backend/functions/campusAnnouncements/',
+  'backend/functions/lib/',
+];
 
 for (const recipe of ['Dockerfile', 'Dockerfile.nuni']) {
   test(`school-reader packaging: ${recipe} supplies only the required backend sources before building`, () => {
