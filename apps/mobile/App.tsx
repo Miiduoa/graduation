@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
+import Constants from 'expo-constants';
 import { BlurView } from 'expo-blur';
 import { StatusBar } from 'expo-status-bar';
 
@@ -106,7 +107,7 @@ import type { InboxTask } from './src/data/types';
 import { navigateToCourseScreen } from './src/utils/courseNavigation';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
-import { rewriteLegacyShopsPath } from './src/app/legacyShopsPath';
+import { rewriteLegacyShopsPath, socialPostHttpsPrefixes } from './src/app/legacyShopsPath';
 import { resolveDeprecatedRouteRedirect } from './src/app/deprecatedRouteRedirect';
 import { tabsWithMessages } from './src/app/tabsWithMessages';
 
@@ -137,7 +138,11 @@ function assignmentTaskFromDeepLink(parsed: {
 }
 
 const linkingBase: LinkingOptions<RootTabParamList> = {
-  prefixes: [Linking.createURL('/'), 'campus://'],
+  prefixes: [
+    Linking.createURL('/'),
+    'campus://',
+    ...socialPostHttpsPrefixes(Constants.expoConfig?.extra?.release?.deepLinkHost),
+  ],
   config: {
     screens: {
       Today: {

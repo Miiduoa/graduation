@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { NavigationContainer, createNavigationContainerRef, getStateFromPath } from '@react-navigation/native';
-import { rewriteLegacyShopsPath } from '../app/legacyShopsPath';
+import { rewriteLegacyShopsPath, socialPostHttpsPrefixes } from '../app/legacyShopsPath';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { RefreshControl, Text } from 'react-native';
 import { PostDetailScreen } from '../screens/social/PostDetailScreen';
@@ -305,4 +305,20 @@ test('a shared post path without a single valid school is not reinterpreted as c
   ]) {
     expect(rewriteLegacyShopsPath(path)).toBe(path);
   }
+});
+
+
+test('only the release-configured HTTPS app-link host is eligible for native shared-post routing', () => {
+  expect(socialPostHttpsPrefixes('nuni.tw')).toEqual(['https://nuni.tw']);
+  expect(socialPostHttpsPrefixes('NUNI.TW')).toEqual(['https://nuni.tw']);
+  expect(socialPostHttpsPrefixes(null)).toEqual([]);
+  expect(socialPostHttpsPrefixes('https://nuni.tw')).toEqual([]);
+  expect(socialPostHttpsPrefixes('nuni.tw.evil.test/path')).toEqual([]);
+  expect(socialPostHttpsPrefixes('nuni.tw:443')).toEqual([]);
+});
+
+test('canonical share parser does not change normal native post paths or unrelated URLs', () => {
+  expect(rewriteLegacyShopsPath('post/old-1?schoolId=pu')).toBe('post/old-1?schoolId=pu');
+  expect(rewriteLegacyShopsPath('community/poster/old-1?schoolId=pu')).toBe('community/poster/old-1?schoolId=pu');
+  expect(rewriteLegacyShopsPath('community/post/old-1?schoolId=pu#fragment')).toBe('community/post/old-1?schoolId=pu#fragment');
 });
