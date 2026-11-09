@@ -245,6 +245,11 @@ test('overlap check respects school, term, distinct weekdays, adjacent periods a
   const find = require('../services/publicCourseTimetableImport').findCatalogTimetableOverlaps as
     (rows: typeof current.rows, records: typeof existing) => unknown[];
   expect(find(current.rows, existing)).toHaveLength(0);
+  // A new official room or instructor for the same course and clock must not
+  // hide the stale personal entry as an exact duplicate.
+  expect(find(current.rows, existing.map((row) => ({ ...row, teacher: '更新教師' })))).toHaveLength(2);
+  expect(find(current.rows, existing.map((row) => ({ ...row, location: '新教室' })))).toHaveLength(2);
+  expect(find(current.rows, existing.map((row) => ({ ...row, courseCode: '' })))).toHaveLength(2);
   expect(find(current.rows, existing.map((row) => ({ ...row, academicYear: '114' })))).toHaveLength(0);
   expect(find(current.rows, existing.map((row) => ({ ...row, schoolId: 'ncnu' })))).toHaveLength(0);
   expect(find(current.rows, existing.map((row) => ({ ...row, dayOfWeek: 2 })))).toHaveLength(0);
