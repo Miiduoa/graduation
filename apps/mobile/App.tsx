@@ -153,6 +153,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           PostCompose: 'post/new',
           StoryCompose: 'story/new',
           PostDetail: 'post/:postId',
+          CreatorProfile: 'community/member/:memberUid',
           SmartCalendarScreen: 'calendar',
           CampusGame: 'home/campus-game',
         },
