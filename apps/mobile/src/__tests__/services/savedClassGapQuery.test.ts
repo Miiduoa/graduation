@@ -188,6 +188,36 @@ const context: OnDeviceSchoolContext = {
 };
 
 describe('saved class gap answer', () => {
+  test('never answers from a missing snapshot or an unrecognized timetable source', () => {
+    const invalidTimetables: unknown[] = [
+      null, undefined, [], 'invalid',
+      { ...context.timetable, source: 'unknown' },
+      { ...context.timetable, source: null },
+      { ...context.timetable, source: undefined },
+    ];
+    for (const timetable of invalidTimetables) {
+      const result = answerSavedClassGapQuery(today, {
+        ...context, timetable: timetable as OnDeviceSchoolContext['timetable'],
+      });
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toMatch(/資料不足|來源無法核對/);
+      expect(result.content).not.toContain('有 2 段');
+      expect(result.content).not.toContain('沒有課間空堂');
+    }
+    for (const invalidContext of [null, undefined]) {
+      const result = answerSavedClassGapQuery(today, invalidContext as unknown as OnDeviceSchoolContext);
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('資料不足');
+    }
+    expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, source: 'unreadable' },
+    }).content).toContain('讀不到');
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, source: 'not-available' },
+    }).content).toContain('還沒有');
+  });
+
   test('lists upcoming available minutes in local time, in chronological order, with provenance', () => {
     const reply = answerSavedClassGapQuery(today, context);
     expect(reply).toMatchObject({ tool: 'saved-timetable', route: '/timetable' });
