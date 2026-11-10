@@ -93,7 +93,7 @@ let unavailableUntil = 0;
 // Overpass can omit Content-Length or serve compressed responses. Stop reading at the
 // decoded byte limit; checking .text().length afterwards would still buffer an
 // unbounded upstream response in the Node process.
-async function readBoundedResponse(response: Response): Promise<string> {
+async function readBoundedResponse(response: Response, signal: AbortSignal): Promise<string> {
   // RFC Content-Length consists solely of decimal digits. Number() also
   // accepts blank, hex, exponent and fractional representations that are not
   // valid HTTP lengths. Missing is fine: the streaming byte cap still applies.
@@ -116,6 +116,13 @@ async function readBoundedResponse(response: Response): Promise<string> {
     return raw;
   }
   const reader = response.body.getReader();
+  // A fetch may deliver headers and then stop sending data. Aborting fetch is
+  // not guaranteed to cancel an already-exposed body reader (or a proxy mock).
+  // Cancel the reader directly when the server-side deadline expires. Never
+  // await cancellation: a broken stream may never acknowledge it.
+  const cancelOnAbort = () => { void reader.cancel().catch(() => {}); };
+  if (signal.aborted) cancelOnAbort();
+  else signal.addEventListener('abort', cancelOnAbort, { once: true });
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const segments: string[] = [];
   let size = 0;
@@ -123,6 +130,9 @@ async function readBoundedResponse(response: Response): Promise<string> {
   try {
     while (true) {
       const { done, value } = await reader.read();
+      // Cancellation can make a read finish normally. Never promote that
+      // truncated stream into an apparently complete Overpass snapshot.
+      if (signal.aborted) throw new Error('OSM response aborted');
       if (done) { completed = true; break; }
       size += value.byteLength;
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
@@ -131,7 +141,8 @@ async function readBoundedResponse(response: Response): Promise<string> {
     segments.push(decoder.decode());
     return segments.join('');
   } finally {
-    if (!completed) {
+    signal.removeEventListener('abort', cancelOnAbort);
+    if (!completed && !signal.aborted) {
       // Cancellation is best-effort. A broken proxy/stream can accept a cancel
       // request but never settle its promise; waiting here turns an already
       // rejected oversized payload into a 12-second server timeout.
@@ -177,7 +188,7 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     }
     throw new Error('OSM service unavailable');
   }
-  const raw = await readBoundedResponse(response);
+  const raw = await readBoundedResponse(response, signal);
   const payload = JSON.parse(raw) as unknown;
   const osmBaseAt = verifyOverpassReplicationTime(payload, Date.now());
   // Overpass may return HTTP 200 with partial elements plus a top-level "remark"
