@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto');
 const { FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 function unavailable() {
   return new HttpsError('permission-denied', '目前無法回覆這則限時動態。');
@@ -19,7 +20,7 @@ function validId(value) {
 
 function availableProfile(snapshot) {
   const profile = snapshot.data();
-  return profile && profile.status !== 'deleted' && profile.accountDeletionInProgress !== true;
+  return Boolean(profile) && !isAccountUnavailable(profile);
 }
 
 function createReplyToCampusStory({ db }) {

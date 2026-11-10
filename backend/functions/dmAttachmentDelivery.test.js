@@ -79,6 +79,9 @@ test('server authorization checks conversation, current school profile, and acti
 test.each([
   ['transferred despite active old-school membership', 'users/alice', { schoolId: 'other' }],
   ['deleted profile', 'users/alice', { schoolId: 'pu', status: 'deleted' }],
+  ['disabled profile', 'users/alice', { schoolId: 'pu', status: 'disabled' }],
+  ['suspended profile', 'users/alice', { schoolId: 'pu', status: 'suspended' }],
+  ['inactive profile', 'users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['account deletion', 'users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['inactive membership', 'schools/pu/members/alice', { status: 'inactive' }],
   ['missing membership', 'schools/pu/members/alice', null],

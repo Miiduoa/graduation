@@ -77,6 +77,9 @@ test.each([
   // A legacy active school membership must not override the author's current school.
   ['users/bob', { schoolId: 'other' }],
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
+  ['users/alice', { schoolId: 'pu', status: 'disabled' }],
+  ['users/bob', { schoolId: 'pu', status: 'suspended' }],
+  ['users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['users/bob', { accountDeletionInProgress: true }],
   ['schools/pu/members/alice', {}],
   ['schools/pu/members/bob', { status: 'inactive' }],

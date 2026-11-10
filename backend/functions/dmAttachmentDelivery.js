@@ -1,5 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const { HttpsError } = require('firebase-functions/v2/https');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 // Cloud Storage Rules allow at most two different Firestore documents per request.
 // Do NOT reproduce the conversation + profile + membership gate in Storage Rules:
@@ -48,8 +49,7 @@ async function authorize(db, uid, conversationId) {
   ]);
   const profile = profileSnapshot.data();
   if (!profileSnapshot.exists || !memberSnapshot.exists ||
-      profile?.schoolId !== schoolId || profile?.status === 'deleted' ||
-      profile?.accountDeletionInProgress === true ||
+      profile?.schoolId !== schoolId || isAccountUnavailable(profile) ||
       memberSnapshot.data()?.status !== 'active') {
     throw forbidden();
   }

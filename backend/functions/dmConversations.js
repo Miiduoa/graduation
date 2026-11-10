@@ -1,6 +1,7 @@
 const { FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { segment } = require('./dmAttachmentDelivery');
+const { isAccountUnavailable } = require('./accountLifecycle');
 
 const denied = () => new HttpsError('permission-denied', '目前無法存取這段私訊。');
 const invalid = () => new HttpsError('invalid-argument', '請確認私訊對象與訊息資料。');
@@ -80,8 +81,7 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       ![a, b].every(
         (snap) =>
           snap.data()?.schoolId === schoolId &&
-          snap.data().status !== 'deleted' &&
-          snap.data().accountDeletionInProgress !== true,
+          !isAccountUnavailable(snap.data()),
       ) ||
       ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
       blocked.some((snap) => snap.exists)
