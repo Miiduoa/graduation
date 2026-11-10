@@ -137,6 +137,15 @@
   color: var(--on-brand);
 }
 
+.classActions {
+  display: flex;
+  align-self: stretch;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .fade {
   transition: opacity 150ms ease;
 }
@@ -233,6 +242,45 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.classRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.classRow + .classRow {
+  border-top: 0.5px solid var(--border);
+}
+
+.classRow + .classRow .row {
+  border-top: 0;
+}
+
+.classroomLink {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  min-height: 44px;
+  max-width: 100%;
+  margin-right: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  text-underline-offset: 4px;
+}
+
+@media (max-width: 26rem) {
+  .classRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .classroomLink {
+    margin-bottom: 4px;
+  }
 }
 
 .rowTitle {

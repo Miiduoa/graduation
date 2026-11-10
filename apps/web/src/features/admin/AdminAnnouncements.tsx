@@ -20,13 +20,13 @@ export function AdminAnnouncements({ schoolId }: { schoolId: string | null }) {
         <div className={styles.sectionIntro}>
           <h2 id="admin-announcements-heading">校園公告發佈</h2>
           <p className={styles.muted}>
-            校管與內容編輯可在網頁列出、建立與編輯本校公告，欄位與手機校管台一致，並呼叫既有
-            upsertSchoolAnnouncement。請使用學校帳號開啟下方頁面完成發佈。
+            請使用這所學校已授權的管理員或內容編輯帳號，查看、建立與編輯公告。
+            開啟後會確認校方身分與公告權限。
           </p>
         </div>
         <p className={styles.muted}>
           {schoolId
-            ? `目前工作台已選學校代號：${schoolId}。開啟後會帶入此校。`
+            ? '開啟後會帶入目前選取的學校，並重新確認你在該校的權限。'
             : '尚未在工作台選校時，請在公告頁先選擇學校。'}
         </p>
         <div className={styles.actions}>

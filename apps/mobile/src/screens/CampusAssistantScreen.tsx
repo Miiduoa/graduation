@@ -13,6 +13,7 @@ import { createNuniCourseworkStudyBatchChecks, prepareNuniCourseworkStudyBatch }
 import { NuniPlanStudyBatchPicker } from './NuniPlanStudyBatchPicker';
 import { classCourseworkQuestion, type CourseworkChoice, type CourseworkRequests } from '../features/nuniCourseworkFollowUp';
 import { SavedClassReplyCard, savedClassReplyTitle } from './SavedClassReplyCard';
+import { ClassGapReplyCard } from './ClassGapReplyCard';
 import { resumeOpenedCoursework } from '../features/nuniCourseworkSnapshot';
 import { subscribeNuniAssignmentChanges } from '../services/nuniAssignmentChanges';
 import type { PlatformTimetableAccess } from '../services/assistantTimetableSource';
@@ -70,6 +71,7 @@ const NEXT_CLASS = '下一堂課是什麼？';
 const CLASS_ROOM = '在哪間教室？';
 const CLASS_END = '幾點下課？';
 const CLASS_WORK = '這堂課有什麼作業？';
+const TODAY_GAPS = '今天有哪些空堂？';
 const TODAY_ANNOUNCEMENTS = '今天發布了哪些校園公告？';
 const TODAY_BRIEF = '今天要先處理什麼？';
 const WEEK_BRIEF = '依手機課表與授權作業安排接下來七天的學習計畫';
@@ -158,6 +160,7 @@ type AssistantShortcut =
   | { kind: 'services'; question: string }
   | { kind: 'coursework'; question: string; choice?: CourseworkChoice }
   | { kind: 'class'; question: typeof CURRENT_CLASS | typeof NEXT_CLASS | typeof CLASS_ROOM | typeof CLASS_END }
+  | { kind: 'gap'; question: string }
   | { kind: 'selection'; question: string; checkedAt: string };
 
 function AssistantConversation({
@@ -193,6 +196,10 @@ function AssistantConversation({
     }>
   >([]);
   const [draft, setDraft] = useState(initialPrompt.slice(0, 1600));
+  const draftRef = useRef(draft);
+  const composerInput = useRef<TextInput>(null);
+  const [pendingQuestion, setPendingQuestion] = useState('');
+  const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const [mode, setMode] = useState<CampusAssistantMode>('device');
   const [deviceStatus, setDeviceStatus] = useState<OnDeviceAssistantReadiness | null>(null);
   const [sense, setSense] = useState<CampusSenseSnapshot | null>(null);
@@ -204,6 +211,8 @@ function AssistantConversation({
   const [panel, setPanel] = useState<AssistantPanel>('chat');
   const [openedSavedPlan, setOpenedSavedPlan] = useState<{ id: string; request: number } | null>(null);
   const chatScroll = useRef<ScrollView>(null);
+  const nearLatest = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const lastRevealed = useRef(-1);
   const [deviceCheck, setDeviceCheck] = useState(0);
   const [error, setError] = useState('');
@@ -225,8 +234,9 @@ function AssistantConversation({
   const hasClass = !!(lastReply?.savedClassRead ?? lastReply?.courseworkRead?.anchor)?.classes.length;
   const reminderChoice = activeShortcut?.kind === 'coursework' && activeShortcut.choice && 'reminder' in activeShortcut.choice
     ? activeShortcut.choice.reminder : undefined;
+  const queryingGaps = activeShortcut?.kind === 'gap';
   const updatingReminder = reminderChoice === 'confirm' || reminderChoice === 'remove';
-  const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(draft, hasClass)));
+  const queryingWork = !!platformTimetable && (activeShortcut?.kind === 'coursework' || (!activeShortcut && !!classCourseworkQuestion(busy ? pendingQuestion : draft, hasClass)));
   const quickActions = platformTimetable ? [] : getMobileQuickActions(draft);
   const currentSense = validCampusSenseSnapshot(sense, { uid, schoolId });
   const latestSense = useRef(currentSense);
@@ -350,10 +360,25 @@ function AssistantConversation({
     return () => { active = false; };
   }, [deviceCheck, platformTimetable]);
   const editDraft = (text: string) => {
-    if (lock.current || studyLock.current || calendarBusy) return;
+    if (studyLock.current || calendarBusy) return;
+    // Asking only locks sending, not composing the next question.
+    draftRef.current = text;
     setDraft(text);
-    setError('');
+    if (!lock.current) {
+      setError('');
+      setActiveShortcut(null);
+    }
+  };
+  const recoverQuestion = () => {
+    if (!recoverableQuestion || !current() || lock.current || syncLock.current ||
+        studyLock.current || calendarBusy) return;
+    const previousDraft = draftRef.current;
+    draftRef.current = recoverableQuestion;
+    setDraft(recoverableQuestion);
+    setRecoverableQuestion(previousDraft.trim() ? previousDraft : '');
     setActiveShortcut(null);
+    setError('');
+    composerInput.current?.focus();
   };
   const changeMode = (next: CampusAssistantMode) => {
     if (lock.current || syncLock.current || studyLock.current || calendarBusy || next === mode) return;
@@ -498,6 +523,7 @@ function AssistantConversation({
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
+            classGapRead: reply.classGapRead,
             announcementRead: reply.announcementRead,
           },
         ]);
@@ -634,9 +660,20 @@ function AssistantConversation({
     if ((!uid && mode === 'campus') || !question || lock.current || syncLock.current || studyLock.current || calendarBusy || !current()) return;
     if (shortcut?.kind === 'selection' && shortcut.checkedAt !== validCampusSenseSnapshot(sense, { uid, schoolId })?.checkedAt) return;
     lock.current = true;
+    nearLatest.current = true;
+    setShowJumpToLatest(false);
     setActiveShortcut(shortcut ?? null);
     setBusy(true);
     setError('');
+    setPendingQuestion(question);
+    // A read-only question can be in flight while the next draft is written.
+    // Keep shortcuts independent: they must never consume an existing free-form draft.
+    if (!shortcut) {
+      draftRef.current = '';
+      setDraft('');
+      setRecoverableQuestion((previous) => previous === question ? '' : previous);
+    }
+    let answered = false;
     const controller = new AbortController();
     inFlight.current = controller;
     const duringRead = platformTimetable ? new Map<string, string>() : null;
@@ -662,8 +699,8 @@ function AssistantConversation({
           ? { sessionId: campusSessionId.current }
           : {}),
       });
-      const anchor = reply.savedClassRead ?? reply.courseworkRead?.anchor;
-      if (platformTimetable && anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
+      const anchor = reply.classGapRead ?? (platformTimetable ? reply.savedClassRead ?? reply.courseworkRead?.anchor : undefined);
+      if (anchor && (anchor.owner !== timetableOwner || anchor.schoolId !== schoolId)) {
         if (current()) setError('無法核對這筆課表，請再查一次。');
         return;
       }
@@ -680,7 +717,7 @@ function AssistantConversation({
         return;
       }
       if (controller.signal.aborted && current()) {
-        setError(platformTimetable ? '已取消查詢。' : '已停止本機回答。');
+        setError(shortcut?.kind === 'gap' ? '已取消空堂查詢。' : platformTimetable ? '已取消查詢。' : '已停止本機回答。');
         return;
       }
       if (current()) {
@@ -717,18 +754,21 @@ function AssistantConversation({
             localReads: reply.localReads,
             assignmentRead: reply.assignmentRead,
             savedClassRead: reply.savedClassRead,
+            classGapRead: reply.classGapRead,
             courseworkRead: read && changed ? { ...read, changedAssignmentId: changed } : read,
             courseworkStudy: reply.courseworkStudy,
             announcementRead: reply.announcementRead,
             proposals: reply.proposals,
           },
         ]);
-        if (!shortcut) setDraft('');
+        answered = true;
         setActiveShortcut(null);
       }
     } catch (failure) {
       if (current()) {
-        if (platformTimetable) {
+        if (shortcut?.kind === 'gap') {
+          setError(controller.signal.aborted ? '已取消空堂查詢。' : '暫時無法讀取手機課表，請再試一次。');
+        } else if (platformTimetable) {
           setError(controller.signal.aborted ? '已取消查詢。' : '暫時無法取得這次查詢，可以再試一次。');
         } else if (failure instanceof OnDeviceAssistantError) {
           if (failure.code === 'model-required') {
@@ -754,7 +794,18 @@ function AssistantConversation({
       changesDuringRead.current = null;
       if (inFlight.current === controller) inFlight.current = null;
       lock.current = false;
-      if (current()) setBusy(false);
+      if (current()) {
+        if (!answered && !shortcut) {
+          // Errors, cancellations and scope-validation failures all preserve the original question.
+          if (draftRef.current.trim()) setRecoverableQuestion(question);
+          else {
+            draftRef.current = question;
+            setDraft(question);
+          }
+        }
+        setPendingQuestion('');
+        setBusy(false);
+      }
     }
   };
   const openAnnouncement = (item: CampusSenseSnapshot['announcements']['items'][number], checkedAt: string) => {
@@ -766,7 +817,15 @@ function AssistantConversation({
     if (source) safeNavigate(navigation, '公告詳情', { id: source.id, sourceKind: source.kind, schoolId });
   };
   const scrollToEntry = (event: LayoutChangeEvent) => {
+    if (!nearLatest.current) {
+      setShowJumpToLatest(true);
+      return;
+    }
     chatScroll.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - 8), animated: false });
+  };
+  const onChatScrollPosition = (atLatest: boolean) => {
+    nearLatest.current = atLatest;
+    setShowJumpToLatest(!atLatest);
   };
   const revealReply = (index: number, event: LayoutChangeEvent) => {
     if (index !== messages.length - 1 || lastRevealed.current === index || panel !== 'chat') return;
@@ -914,7 +973,8 @@ function AssistantConversation({
     <AssistantConversationLayout
       title={platformTimetable ? '課業助理' : '校園助理'}
       subtitle={schoolName + ' · ' + (platformTimetable ? 'nuni 個人課表' : mode === 'device' ? '手機本地' : '校園連線')}
-      panel={panel} onSelect={selectPanel} locked={busy || syncBusy || calendarBusy} chatScroll={chatScroll}
+      panel={panel} onSelect={selectPanel} locked={busy || syncBusy || calendarBusy}
+      chatScroll={chatScroll} onChatScrollPosition={onChatScrollPosition}
       onBack={() => {
         inFlight.current?.abort();
         navigation?.goBack?.();
@@ -922,12 +982,24 @@ function AssistantConversation({
       tools={campusTools}
       toolsLabel={platformTimetable ? '已儲存計畫' : '校園工具'}
       composer={canAsk ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
-          paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
+        <View style={{ backgroundColor: aiTokens.surface }}>
+          {showJumpToLatest ? (
+            <View style={{ alignItems: 'flex-end', paddingHorizontal: 12, paddingTop: 8 }}>
+              <AIButton label="回到最新回覆" variant="ghost" size="sm"
+                onPress={() => {
+                  nearLatest.current = true;
+                  setShowJumpToLatest(false);
+                  chatScroll.current?.scrollToEnd({ animated: true });
+                }} />
+            </View>
+          ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12,
+            paddingVertical: 8, borderTopWidth: 1, borderColor: aiTokens.border }}>
           <TextInput
+            ref={composerInput}
             accessibilityLabel="詢問校園助理"
-            value={draft} maxLength={1600} multiline editable={!busy && !calendarBusy} onChangeText={editDraft}
-            placeholder={platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
+            value={draft} maxLength={1600} multiline editable={!studyBusy && !calendarBusy} onChangeText={editDraft}
+            placeholder={busy ? '可以先寫下一句，完成後再送出…' : platformTimetable ? '問課表、作業或安排這週…' : mode === 'device' ? '問課表、作業…' : '查校園資訊…'}
             placeholderTextColor={aiTokens.muted}
             style={{ flex: 1, minWidth: 0, minHeight: 44, maxHeight: 96, borderWidth: 1,
               borderRadius: 12, borderColor: aiTokens.border, color: aiTokens.text,
@@ -937,12 +1009,13 @@ function AssistantConversation({
             <AIButton label={syncBusy ? '取消這次同步' : platformTimetable && activeShortcut?.kind === 'brief' ? '取消這次規劃'
               : activeShortcut?.kind === 'plan-study-batch' ? '取消整體準備安排'
               : activeShortcut?.kind === 'plan-study' ? '取消準備時間查詢'
-              : queryingWork ? '取消作業查詢' : '停止本機回答'} variant="ghost" size="sm"
+              : queryingWork ? '取消作業查詢' : queryingGaps ? '取消空堂查詢' : '停止本機回答'} variant="ghost" size="sm"
               onPress={() => inFlight.current?.abort()} />
           ) : (
             <AIButton label={busy ? '正在查詢…' : error && !activeShortcut ? '重試查詢' : '送出問題'}
               size="sm" disabled={busy || syncBusy || !draft.trim()} onPress={() => void send()} />
           )}
+          </View>
         </View>
       ) : null}
     >
@@ -989,6 +1062,8 @@ function AssistantConversation({
                   <AIButton key={question} label={question === CURRENT_CLASS ? '現在有課嗎？' : '查下一堂課'}
                     variant={order === 0 ? 'primary' : 'ghost'} onPress={() => void send({ kind: 'class', question })} />
                 ))}
+                {!!schoolId && <AIButton label="查今日空堂" variant="ghost" disabled={syncBusy}
+                  onPress={() => void send({ kind: 'gap', question: TODAY_GAPS })} />}
                 {uid ? <>
                   <AIButton label="整理今日重點" variant="ghost" onPress={() => void briefPlan(TODAY_BRIEF)} />
                   <AIButton label="規劃未來七天" variant="ghost" onPress={() => void briefPlan(WEEK_BRIEF)} />
@@ -1044,6 +1119,14 @@ function AssistantConversation({
           backgroundColor: aiTokens.aiSoft }}>
           <Text style={{ color: aiTokens.textSecondary, fontSize: 12 }}>你的問題</Text>
           <Text selectable style={{ color: aiTokens.text, fontSize: 16, lineHeight: 24 }}>{message.content}</Text>
+        </View>
+      ) : message.classGapRead ? (
+        <View key={index} onLayout={(event) => revealReply(index, event)}>
+          <ClassGapReplyCard query={message.classGapRead} content={message.content}
+            latest={index === messages.length - 1} busy={busy || syncBusy || calendarBusy}
+            onAsk={(question) => void send({ kind: 'gap', question })}
+            onOpenTimetable={navigation?.navigate
+              ? () => { if (current()) safeNavigate(navigation, 'PersonalTimetable'); } : undefined} />
         </View>
       ) : (
         <View key={index} onLayout={(event) => revealReply(index, event)}>
@@ -1347,9 +1430,9 @@ function AssistantConversation({
           <AICard title={updatingReminder ? '正在處理作業提醒…' : platformTimetable && activeShortcut?.kind === 'brief' ? '正在整理學習計畫…'
             : activeShortcut?.kind === 'plan-study-batch' ? '正在核對作業並安排整體準備時間…'
             : activeShortcut?.kind === 'plan-study' ? '正在核對計畫中的作業…'
-            : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
+            : queryingWork ? '正在核對課程與作業…' : syncBusy ? '正在同步校園資料…' : queryingGaps ? '正在查手機課表的空堂…' : mode === 'device' ? '手機正在整理回答…' : '正在查詢校園資料…'}>
             <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, lineHeight: 22 }}>
-              {activeShortcut?.question ?? draft.trim()}
+              {activeShortcut?.question ?? pendingQuestion}
             </Text>
             {syncBusy ? (
               <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.textSecondary, lineHeight: 21 }}>
@@ -1384,6 +1467,17 @@ function AssistantConversation({
           <Text style={{ color: aiTokens.muted, fontSize: 12 }}>
             只是開啟頁面，提交或付款仍要自行確認。
           </Text>
+        </View>
+      ) : null}
+      {recoverableQuestion && recoverableQuestion !== draft && !busy ? (
+        <View style={{ marginHorizontal: 16, padding: 12, borderWidth: 1,
+          borderColor: aiTokens.border, borderRadius: 14, backgroundColor: aiTokens.panel, gap: 8 }}>
+          <Text accessibilityRole="text" style={{ color: aiTokens.textSecondary, fontSize: 13 }}>
+            另一個問題也已保留，切換時不會覆蓋目前草稿。
+          </Text>
+          <Text selectable style={{ color: aiTokens.text, lineHeight: 21 }}>{recoverableQuestion}</Text>
+          <AIButton label="切換到保留的問題" variant="ghost" size="sm"
+            onPress={recoverQuestion} disabled={busy || syncBusy || calendarBusy || studyBusy} />
         </View>
       ) : null}
       {error ? (

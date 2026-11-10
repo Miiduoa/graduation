@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollView } from 'react-native';
 import { fireEventAsync, renderAsync } from '@testing-library/react-native';
 import type { useNuniSession } from '../state/nuniSession';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
@@ -51,6 +52,12 @@ beforeEach(() => {
 function landing() {
   return renderAsync(<LoginLandingScreen />);
 }
+
+it('lets the school picker handle the first result tap while its keyboard is open', async () => {
+  const view = await landing();
+  // Modal touches still pass through the landing ScrollView's responder capture.
+  expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
+});
 
 it('places the import and account actions before the long public-service list', async () => {
   const view = await landing();

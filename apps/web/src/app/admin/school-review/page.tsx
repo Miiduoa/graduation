@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { SchoolReview } from '@/features/platform/SchoolReview';
+import { AdminWorkspace } from '@/features/admin/AdminWorkspace';
 
 export const metadata: Metadata = {
   title: '接入審核',
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function SchoolReviewPage() {
-  return <SchoolReview />;
+  return <AdminWorkspace />;
 }
