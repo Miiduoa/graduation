@@ -272,8 +272,19 @@ function parseZonedInstant(value: unknown): number {
 }
 
 export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnDeviceSchoolContext) {
-  const { timetable } = context;
   const reply = (content: string) => ({ tool: 'saved-timetable' as const, route: '/timetable' as const, content });
+  // Restored device snapshots can be damaged despite their compile-time shape.
+  // Never treat a missing timetable or an unknown provenance as saved evidence.
+  if (!context || typeof context !== 'object' ||
+      !context.timetable || typeof context.timetable !== 'object' ||
+      Array.isArray(context.timetable)) {
+    return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」重新確認。');
+  }
+  const { timetable } = context;
+  if (timetable.source !== 'saved-device-copy' &&
+      timetable.source !== 'unreadable' && timetable.source !== 'not-available') {
+    return reply('這份手機課表的來源無法核對。請開啟「我的課表」重新確認。');
+  }
   if (timetable.source === 'unreadable') return reply('這台手機暫時讀不到已存的課表。請開啟「我的課表」重新讀取。');
   if (timetable.source === 'not-available') return reply('這台手機還沒有這個帳號的個人課表。請先在「我的課表」匯入或儲存課程。');
 
