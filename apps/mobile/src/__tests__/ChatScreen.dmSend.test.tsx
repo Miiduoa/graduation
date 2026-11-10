@@ -579,7 +579,7 @@ test('offline cache preserves loaded messages, a photo draft, and verified acces
   }));
   expect(view.getByText('離線仍可閱讀')).toBeTruthy();
   expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
-  expect(view.getByLabelText('加入照片')).toBeTruthy();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
   expect(view.getByDisplayValue('保留文字草稿')).toBeTruthy();
   expect(mockSnapshotHandlers.get(messagesPath)).toBe(listener);
 

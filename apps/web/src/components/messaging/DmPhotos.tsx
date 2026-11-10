@@ -169,11 +169,12 @@ export function DmPhotoComposer({
       ) : (
         <div className={styles.photoDraft}>
           {/* Persistent image optimizers must never receive a private or local preview. */}
+          {/* Only the selected File's blob object URL may become a preview source. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             key={draft.messageId}
             className={styles.photoThumb}
-            src={draft.url}
+            src={draft.url.startsWith('blob:') ? draft.url : undefined}
             alt="待傳送照片預覽"
             onLoad={() => setDraft((current) => current && { ...current, previewReady: true })}
             onError={() => {

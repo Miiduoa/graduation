@@ -789,6 +789,31 @@ it('previews and removes a local photo without disturbing a text draft or sendin
   expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe('文字草稿');
 });
 
+it.each([
+  'javascript:alert(1)',
+  'data:image/svg+xml,<svg onload="alert(1)"/>',
+  'https://example.test/photo.jpg',
+  '<img src=x onerror="alert(1)">',
+  'photo.jpg',
+])('never assigns a non-blob preview URL to img src: %s', async (url) => {
+  const create = vi.spyOn(URL, 'createObjectURL').mockReturnValueOnce(url);
+  const release = vi.spyOn(URL, 'revokeObjectURL');
+  try {
+    render(<Chat />);
+    await screen.findByText('伺服器的訊息');
+    selectPhoto(false);
+    expect(create).toHaveBeenCalledWith(expect.any(File));
+    expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBeNull();
+    expect((screen.getByRole('button', { name: '讀取照片中…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(uploadDmPhoto).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
+    expect(release).toHaveBeenCalledWith(url);
+  } finally {
+    create.mockRestore();
+    release.mockRestore();
+  }
+});
+
 it('requires confirmation, suppresses duplicate clicks and retries a lost receipt without uploading again', async () => {
   vi.mocked(newPrivateMessageId).mockReturnValue(photoId);
   const path = 'conversations/previous/photos/hash/photo.jpg';
