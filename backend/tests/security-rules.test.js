@@ -1239,21 +1239,26 @@ describe('firestore security rules', () => {
       await db.doc(path).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
     });
     const alice = testEnv.authenticatedContext('alice').firestore();
+    const rootMessage = { conversationId: 'dm_pu_alice_bob', senderId: 'alice', text: 'hello' };
     await assertSucceeds(alice.doc(path + '/messages/ok').set(message));
+    await assertSucceeds(alice.doc('messages/root-ok').set(rootMessage));
     for (const status of ['deleted', 'disabled', 'suspended', 'inactive']) {
       await seedFirestore(async (db) => {
         await db.doc('users/bob').set({ schoolId: 'pu', status });
       });
       await assertFails(alice.doc(path + `/messages/blocked-${status}`).set({ ...message, content: status }));
+      await assertFails(alice.doc(`messages/root-blocked-${status}`).set({ ...rootMessage, text: status }));
     }
     await seedFirestore(async (db) => {
       await db.doc('users/bob').set({ schoolId: 'pu', accountDeletionInProgress: true });
     });
     await assertFails(alice.doc(path + '/messages/blocked-deleting').set({ ...message, content: 'deleting' }));
+    await assertFails(alice.doc('messages/root-blocked-deleting').set({ ...rootMessage, text: 'deleting' }));
     await seedFirestore(async (db) => {
       await db.doc('users/bob').set({ schoolId: 'pu' });
     });
     await assertSucceeds(alice.doc(path + '/messages/restored').set({ ...message, content: 'restored' }));
+    await assertSucceeds(alice.doc('messages/root-restored').set({ ...rootMessage, text: 'restored' }));
   });
 
   test('transferring school revokes DM reads, sends and edits even if old membership stays active', async () => {

@@ -2035,7 +2035,8 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.senderId == request.auth.uid
         && isConversationMember(request.resource.data.conversationId)
-        && isDirectMessageUnblocked(request.resource.data.conversationId);
+        && isDirectMessageUnblocked(request.resource.data.conversationId)
+        && isDirectMessagePeerAvailable(request.resource.data.conversationId);
       allow update: if isConversationMember(resource.data.conversationId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy', 'updatedAt'])
         && request.auth.uid in request.resource.data.readBy;
