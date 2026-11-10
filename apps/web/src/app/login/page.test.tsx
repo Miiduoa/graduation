@@ -115,8 +115,8 @@ it('keeps unavailable school-login wording even when student-id option reports a
   state.user = null;
   state.studentId = true;
   const { container } = render(<LoginPage />);
-  expect(screen.getByRole('heading', { name: '校務資料，需要另外連線' })).toBeTruthy();
-  expect(container.textContent).toContain('學號直接登入尚未開放');
+  expect(screen.getByRole('heading', { name: '需要校務資料時再連線' })).toBeTruthy();
+  expect(container.textContent).toContain('學號直接登入目前尚未開放');
   expect(container.textContent).not.toContain('可連線');
   expect(container.textContent).not.toContain('使用學號連線');
   expect(container.textContent).not.toContain('提供學號直接連線');
