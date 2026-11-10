@@ -216,7 +216,10 @@ function heightFromOsmTags(value: unknown): { heightMeters: number; heightBasis:
   const tags = object(value);
   const raw = tags?.height;
   // 接受純公尺數值，不將英尺、樓層數或其他自由文字誤作公尺。
-  if (typeof raw === 'string' && /^\d{1,3}(?:\.\d{1,2})?(?:\s*m)?$/.test(raw.trim())) {
+  // Keep tagged metric precision: three or more decimal places are still an
+  // explicit OSM height, not a reason to replace it with an invented 12 m block.
+  // Reject feet, comma decimals, signs, ranges and any unbounded precision.
+  if (typeof raw === 'string' && /^\d{1,3}(?:\.\d{1,6})?(?:\s*m)?$/.test(raw.trim())) {
     const height = Number(raw.trim().replace(/\s*m$/, ''));
     if (height >= 2.5 && height <= 100) return { heightMeters: height, heightBasis: 'osm-tag' };
   }
