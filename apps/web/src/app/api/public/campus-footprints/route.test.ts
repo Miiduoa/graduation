@@ -151,10 +151,29 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('does not invent a 12m building when Overpass explicitly reports an invalid height', async () => {
-    const invalid = JSON.stringify({
+  it('accepts documented OSM feet heights as sourced values rather than a 12m illustration', async () => {
+    const feetPayload = JSON.stringify({
       elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
         tags: { building: 'yes', height: '50 ft' } }],
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(feetPayload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.buildings).toHaveLength(1);
+    expect(body.buildings[0]).toMatchObject({ poiId: 'pu-library', heightBasis: 'osm-tag' });
+    expect(body.buildings[0].heightMeters).toBeCloseTo(15.24, 6);
+    // A valid feet-tagged building is cached under the normal successful snapshot.
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not invent a 12m building when Overpass explicitly reports an unsupported height unit', async () => {
+    const invalid = JSON.stringify({
+      elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', height: '50 yd' } }],
     });
     const upstream = vi.fn().mockResolvedValue(new Response(invalid, { status: 200 }));
     vi.stubGlobal('fetch', upstream);
