@@ -18,7 +18,8 @@ function anonymizePath(name) {
 /**
  * Review or revoke one old Firebase bearer token, without deleting its GCS object.
  * The precondition protects any concurrent update to GCS object metadata.
- * The caller must ensure the SDK Storage Rules deny direct reads/writes first.
+ * Manual deployment decision only; never invoked by delivery, CI or merging.
+ * Legacy SDK access remains supported and may issue new download tokens.
  * No token values or signed URLs are returned.
  */
 async function migrateDmToken(file, { execute = false } = {}) {

@@ -127,3 +127,13 @@ test('CLI defaults to dry-run and requires exact bucket confirmation to mutate',
   expect(args(['--bucket', 'campus.appspot.com', '--page-token', 'page2']).pageToken).toBe('page2');
   expect(args(['--bucket', 'campus.appspot.com', '--execute', '--confirm-bucket', 'campus.appspot.com']).execute).toBe(true);
 });
+
+test('bucket confirmation alone still leaves the migration read-only', async () => {
+  const options = args(['--bucket', 'campus.appspot.com', '--confirm-bucket', 'campus.appspot.com']);
+  const { file, current } = fileWithToken();
+  const before = JSON.parse(JSON.stringify(current()));
+  await expect(migrateDmToken(file, options)).resolves.toMatchObject({ status: 'would-revoke' });
+  expect(options.execute).toBe(false);
+  expect(file.setMetadata).not.toHaveBeenCalled();
+  expect(current()).toEqual(before);
+});

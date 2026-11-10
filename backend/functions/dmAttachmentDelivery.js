@@ -70,34 +70,6 @@ function attachmentPath(conversationId, folder, mediaId, fileName) {
   return `conversations/${conversationId}/${folder}/${mediaId}/${fileName}`;
 }
 
-// Firebase's older getDownloadURL tokens are long-lived bearer credentials.
-// A GCS V4 GET can expose an object's custom metadata in its response headers;
-// remove legacy tokens before issuing any new signed read capability.
-// This is opportunistic per-object migration, NOT a full-bucket revocation.
-function hasLegacyDownloadToken(metadata) {
-  const custom = metadata?.metadata;
-  return custom != null && Object.hasOwn(custom, 'firebaseStorageDownloadTokens') &&
-    custom.firebaseStorageDownloadTokens != null;
-}
-
-async function stripLegacyDownloadToken(file, metadata) {
-  if (!hasLegacyDownloadToken(metadata)) return;
-  const metageneration = Number(metadata.metageneration);
-  if (!Number.isSafeInteger(metageneration) || metageneration < 1) {
-    throw new HttpsError('failed-precondition', '附件舊網址狀態無法確認。');
-  }
-  // Concurrency-safe: never overwrite a concurrent metadata change.
-  await file.setMetadata(
-    { metadata: { firebaseStorageDownloadTokens: null } },
-    { ifMetagenerationMatch: metageneration },
-  );
-  const [verified] = await file.getMetadata();
-  // Fail closed if Storage rejected the deletion or the token reappeared.
-  if (hasLegacyDownloadToken(verified) || verified.generation !== metadata.generation) {
-    throw new HttpsError('failed-precondition', '附件舊網址撤銷尚未確認。');
-  }
-}
-
 function createDmAttachmentDelivery({ db, getBucket, now = Date.now, newId = randomUUID }) {
   return async (request) => {
     const uid = request.auth?.uid;
@@ -156,7 +128,7 @@ function createDmAttachmentDelivery({ db, getBucket, now = Date.now, newId = ran
     // objects are checked on delivery as well as on upload.
     const limit = uploadLimit(metadata.contentType);
     if (!limit || Number(metadata.size) < 1 || Number(metadata.size) > limit) throw forbidden();
-    await stripLegacyDownloadToken(file, metadata);
+    // Preserve legacy download tokens: revocation is a separate manual migration.
     const expires = now() + MINUTE_MS;
     const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires });
     // Never return firebaseStorageDownloadTokens or getDownloadURL() here.

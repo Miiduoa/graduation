@@ -106,25 +106,13 @@ service firebase.storage {
         );
     }
 
-    // A stale membership in a previous school does not grant access to DM attachments.
-    function isCurrentSchoolMemberStorage(schoolId) {
-      return schoolId is string
-        && schoolId.size() > 0
-        && isSchoolMemberStorage(schoolId)
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
-    }
-
     function conversationMember(conversationId) {
       // Conversation memberIds may survive account deletion; require a live canonical profile.
       // Storage rules can access only two unique Firestore documents per request.
       return isActiveAccount()
         && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
         && firestore.exists(/databases/(default)/documents/conversations/$(conversationId))
-        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds
-        && isCurrentSchoolMemberStorage(
-          firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.get('schoolId', '')
-        );
+        && request.auth.uid in firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.memberIds;
     }
 
     function canManageEventAsset(eventId) {
@@ -223,12 +211,8 @@ service firebase.storage {
     }
 
     match /conversations/{conversationId}/messages/{messageId}/{fileName} {
-      // Direct SDK reads/writes require three distinct Firestore documents and
-      // exceed the production Storage Rules cap of TWO. Even an active member
-      // must use dmAttachmentDelivery (server-side authorization per request).
-      // Denying SDK metadata access also prevents issuing NEW Firebase tokens.
-      // Pre-existing download URLs remain valid until separately revoked.
-      allow read, write: if false;
+      allow read: if conversationMember(conversationId);
+      allow create: if resource == null && conversationMember(conversationId) && isAllowedUpload() && maxSize(20);
     }
 
     match /bugreports/{reportId}/{fileName} {
@@ -301,9 +285,8 @@ service firebase.storage {
     }
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {
-      // GCS V4 POST and one-minute signed GET are issued only by the
-      // authenticated dmAttachmentDelivery callable, not Storage SDK rules.
-      allow read, write: if false;
+      allow read: if conversationMember(conversationId);
+      allow create: if resource == null && conversationMember(conversationId) && campusMediaOk();
     }
 
     match /{allPaths=**} {
