@@ -144,14 +144,11 @@ it('switches local narration between the AI explanation and exact textbook witho
     await screen.findByRole('region', { name: '本段 AI 講解' });
     const target = screen.getByRole('combobox', { name: '朗讀內容' }) as HTMLSelectElement;
     expect(target.value).toBe('explanation');
-    // A freshly mounted reader can briefly lack a populated voice list on
-    // mobile browsers. Exercise the student's explicit local-voice retry instead
-    // of clicking a disabled button and indexing a missing speech mock call.
+    // AI completion can render the new reader before its mount effect has
+    // detected installed voices. Wait for the supported local voice to make the
+    // button operable; the manual-retry path has separate component coverage.
     const startLocalNarration = async (label: string, expectedCalls: number) => {
       const play = screen.getByRole('button', { name: label }) as HTMLButtonElement;
-      if (play.disabled) {
-        fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }));
-      }
       await waitFor(() => expect(play.disabled).toBe(false));
       fireEvent.click(play);
       await waitFor(() => expect(spoken).toHaveBeenCalledTimes(expectedCalls));
