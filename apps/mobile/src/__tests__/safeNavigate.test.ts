@@ -58,6 +58,7 @@ describe('resolveTabForRoute', () => {
   test('我的 tab 的 route', () => {
     expect(resolveTabForRoute('Achievements')).toBe('我的');
     expect(resolveTabForRoute('Settings')).toBe('我的');
+    expect(resolveTabForRoute('StudentCard')).toBe('我的');
   });
 
   test('未知 route → null', () => {

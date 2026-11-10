@@ -16,6 +16,7 @@ let mockAccountId = accountId;
 let mockSchool = 'pu';
 let mockContext = sessionContext;
 let mockAssignment: NuniAssignment;
+let mockExtraAssignments: NuniAssignment[] = [];
 let mockQuizzes: NuniQuiz[] = [];
 const mockRequest = jest.fn();
 const mockBff = jest.fn();
@@ -152,7 +153,7 @@ beforeEach(async () => {
   jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout',
     'setInterval', 'clearInterval', 'performance', 'queueMicrotask'] });
   jest.setSystemTime(new Date('2026-11-09T07:00:00+08:00'));
-  mockAccountId = accountId; mockSchool = 'pu'; mockContext = sessionContext; mockQuizzes = [];
+  mockAccountId = accountId; mockSchool = 'pu'; mockContext = sessionContext; mockQuizzes = []; mockExtraAssignments = [];
   mockAssignment = {
     id: assignmentId, workspaceId, title: '期末資料模型', createdAt: '2026-11-04T05:00:00Z',
     closedAt: null, dueAt: '2026-11-11T23:59:00+08:00', instructions: '不應送進模型的作業全文',
@@ -173,7 +174,7 @@ beforeEach(async () => {
     throw new Error(`Unexpected course request: ${path}`);
   });
   mockBff.mockReset().mockImplementation(async (path: string) => {
-    if (path === `class-workspaces/${workspaceId}/assignments`) return { assignments: [mockAssignment] };
+    if (path === `class-workspaces/${workspaceId}/assignments`) return { assignments: [mockAssignment, ...mockExtraAssignments] };
     throw new Error(`Unexpected coursework request: ${path}`);
   });
 });
@@ -324,4 +325,159 @@ test('a live quiz retains its source-opening action without being treated as an 
   expect(view.queryByRole('button', { name: '安排「資料庫小考」的準備時間' })).toBeNull();
   expect(ledgerWrites()).toHaveLength(0);
   expectNoModels();
+});
+
+function addSecondAssignment() {
+  mockExtraAssignments = [{ ...mockAssignment, id: `cwa_${uuid(2)}`, title: '資料正規化',
+    dueAt: '2026-11-12T23:59:00+08:00' }];
+}
+
+async function selectStudyBatch(view: ReturnType<typeof render>) {
+  await planned(view);
+  expect(view.getAllByRole('checkbox', { name: /^選取作業：/u })).toHaveLength(2);
+  fireEvent.press(view.getByRole('checkbox', { name: '選取作業：期末資料模型（資料庫）' }));
+  expect(view.getByRole('button', { name: '預覽 1 份作業的準備安排' })).toBeDisabled();
+  fireEvent.press(view.getByRole('checkbox', { name: '選取作業：資料正規化（資料庫）' }));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '預覽 2 份作業的準備安排' })));
+  return view.findByRole('button', { name: '確認加入 2 筆行程' });
+}
+
+test('one live-plan confirmation schedules two real source-bound study events and restores their exact receipts', async () => {
+  addSecondAssignment();
+  const nav = navigation();
+  const view = render(<CampusAssistantScreen route={route} navigation={nav} />);
+  const confirm = await selectStudyBatch(view);
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(0);
+  expect(view.getByText('1. 準備：期末資料模型')).toBeTruthy();
+  expect(view.getByText('2. 準備：資料正規化')).toBeTruthy();
+  await act(async () => { fireEvent.press(confirm); fireEvent.press(confirm); });
+  await view.findByText('已逐筆保存並核對 2 筆準備行程。');
+  expect(ledgerWrites()).toHaveLength(2);
+  const ledger = await loadPersonalImports(scope);
+  expect(ledger.records).toEqual(expect.arrayContaining([
+    expect.objectContaining({ title: '準備：期末資料模型', date: '2026-11-09', startTime: '10:10', endTime: '10:40' }),
+    expect.objectContaining({ title: '準備：資料正規化', date: '2026-11-09', startTime: '10:50', endTime: '11:20' }),
+  ]));
+  const journal = await readAssistantCalendarJournal(scope, () => true);
+  expect(journal).toHaveLength(2);
+  expect(journal[0].proposal.origin).toMatchObject({ kind: 'batch-step', batchId: expect.any(String), stepId: expect.any(String) });
+  expect(journal[1].proposal.origin?.batchId).toBe(journal[0].proposal.origin?.batchId);
+  expect(journal[1].proposal.origin?.stepId).not.toBe(journal[0].proposal.origin?.stepId);
+  for (const event of ledger.records) {
+    fireEvent.press(view.getByRole('button', { name: `查看行程：${event.title}` }));
+    expect(nav.navigate).toHaveBeenLastCalledWith('PersonalCalendar', { eventId: event.id });
+  }
+  view.unmount();
+  const reopened = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  await reopened.findByText('已逐筆保存並核對 2 筆準備行程。');
+  expect(ledgerWrites()).toHaveLength(2);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(2);
+  expectNoModels();
+});
+
+test('the batch preflight rereads every selected source before the first write', async () => {
+  addSecondAssignment();
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  const confirm = await selectStudyBatch(view);
+  mockExtraAssignments[0] = { ...mockExtraAssignments[0], state: 'closed', closedAt: new Date().toISOString() };
+  await act(async () => fireEvent.press(confirm));
+  await waitFor(() => expect(view.queryByText('正在依序處理，完成一筆才會進入下一筆…')).toBeNull());
+  expect(view.queryByText('已逐筆保存並核對 2 筆準備行程。')).toBeNull();
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(0);
+  expectNoModels();
+});
+
+test('a source change after the first readback preserves its result and stops the next step', async () => {
+  addSecondAssignment();
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  const confirm = await selectStudyBatch(view);
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    await originalSet(key, value);
+    if (key === personalImportStorageKey(scope)) {
+      mockExtraAssignments[0] = { ...mockExtraAssignments[0], dueAt: '2026-11-10T23:59:00+08:00' };
+    }
+  });
+  await act(async () => fireEvent.press(confirm));
+  await waitFor(() => expect(view.queryByText('正在依序處理，完成一筆才會進入下一筆…')).toBeNull());
+  expect(view.getByText('已核對 1／2 筆行程')).toBeTruthy();
+  expect(view.getByText('尚未開始')).toBeTruthy();
+  expect(ledgerWrites()).toHaveLength(1);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(1);
+  view.unmount();
+  const reopened = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  await reopened.findByText('已核對 1／2 筆行程');
+  expect(ledgerWrites()).toHaveLength(1);
+  const resume = await reopened.findByRole('button', { name: '確認接續剩餘 1 筆行程' });
+  await act(async () => fireEvent.press(resume));
+  expect(ledgerWrites()).toHaveLength(1);
+  expect((await loadPersonalImports(scope)).records).toHaveLength(1);
+});
+
+test('a stopped batch resumes the unstarted source step after restart without recreating its first event', async () => {
+  addSecondAssignment();
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  const confirm = await selectStudyBatch(view);
+  const held = deferred<void>();
+  jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+    await originalSet(key, value);
+    if (key === personalImportStorageKey(scope) && ledgerWrites().length === 1) await held.promise;
+  });
+  act(() => fireEvent.press(confirm));
+  await waitFor(() => expect(ledgerWrites()).toHaveLength(1));
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '停止後續行程' })));
+  await act(async () => held.resolve());
+  await waitFor(() => expect(view.queryByRole('button', { name: '停止後續行程' })).toBeNull());
+  const firstId = (await loadPersonalImports(scope)).records[0].id;
+  view.unmount();
+  const reopened = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  const resume = await reopened.findByRole('button', { name: '確認接續剩餘 1 筆行程' });
+  expect(ledgerWrites()).toHaveLength(1);
+  await act(async () => fireEvent.press(resume));
+  await reopened.findByText('已逐筆保存並核對 2 筆準備行程。');
+  expect(ledgerWrites()).toHaveLength(2);
+  const ledger = await loadPersonalImports(scope);
+  expect(ledger.records).toHaveLength(2);
+  expect(ledger.records.filter((row) => row.id === firstId)).toHaveLength(1);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(2);
+});
+
+test('cancelling the complete preview lookup keeps the composer draft and never creates a task', async () => {
+  addSecondAssignment();
+  const view = render(<CampusAssistantScreen route={route} navigation={navigation()} />);
+  await planned(view);
+  fireEvent.changeText(view.getByLabelText('詢問校園助理'), '我稍後還要查公車');
+  fireEvent.press(view.getByRole('checkbox', { name: '選取作業：期末資料模型（資料庫）' }));
+  fireEvent.press(view.getByRole('checkbox', { name: '選取作業：資料正規化（資料庫）' }));
+  const held = deferred<{ assignments: NuniAssignment[] }>();
+  mockBff.mockImplementationOnce(() => held.promise);
+  act(() => fireEvent.press(view.getByRole('button', { name: '預覽 2 份作業的準備安排' })));
+  await view.findByText('正在核對作業並安排整體準備時間…');
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '取消整體準備安排' })));
+  await view.findByText('已停止這次整體準備安排，尚未建立行程。');
+  await act(async () => held.resolve({ assignments: [mockAssignment, ...mockExtraAssignments] }));
+  expect(view.getByLabelText('詢問校園助理')).toHaveProp('value', '我稍後還要查公車');
+  expect(view.queryByRole('button', { name: '確認加入 2 筆行程' })).toBeNull();
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(0);
+});
+
+test('leaving during batch source preflight stops execution even when the reader resolves after returning', async () => {
+  addSecondAssignment();
+  const nav = navigation();
+  const view = render(<CampusAssistantScreen route={route} navigation={nav} />);
+  const confirm = await selectStudyBatch(view);
+  const held = deferred<{ assignments: NuniAssignment[] }>();
+  const reads = mockBff.mock.calls.length;
+  mockBff.mockImplementationOnce(() => held.promise);
+  act(() => fireEvent.press(confirm));
+  await waitFor(() => expect(mockBff.mock.calls.length).toBeGreaterThan(reads));
+  await act(async () => { nav.emit('blur'); nav.emit('focus'); });
+  await waitFor(() => expect(view.queryByRole('button', { name: '停止後續行程' })).toBeNull());
+  await act(async () => held.resolve({ assignments: [mockAssignment, ...mockExtraAssignments] }));
+  expect(ledgerWrites()).toHaveLength(0);
+  expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(0);
+  expect(view.getByText('已核對 0／2 筆行程')).toBeTruthy();
+  expect(view.queryByText('已逐筆保存並核對 2 筆準備行程。')).toBeNull();
 });

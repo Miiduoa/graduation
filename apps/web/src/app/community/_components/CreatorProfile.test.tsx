@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   following: vi.fn(),
   follow: vi.fn(),
   unfollow: vi.fn(),
+  pinRead: vi.fn(),
+  pinSave: vi.fn(),
 }));
 
 vi.mock('./CreatorHighlight', () => ({
@@ -30,6 +32,10 @@ vi.mock('next/link', () => ({
 vi.mock('@/lib/community/creatorProfile', () => ({
   readCreatorIdentity: mocks.identity,
   listCreatorPosts: mocks.posts,
+}));
+vi.mock('@/lib/community/creatorPin', () => ({
+  readCreatorPin: mocks.pinRead,
+  saveCreatorPin: mocks.pinSave,
 }));
 vi.mock('@/lib/community/creatorCard', () => ({
   readCreatorCard: vi.fn(async () => null),
@@ -71,6 +77,8 @@ beforeEach(() => {
   mocks.following.mockResolvedValue([]);
   mocks.follow.mockResolvedValue(undefined);
   mocks.unfollow.mockResolvedValue(undefined);
+  mocks.pinRead.mockResolvedValue({ postId: null, post: null });
+  mocks.pinSave.mockResolvedValue({ postId: null, post: null });
 });
 
 it('lets the owner publish and browse their public posts, media and private saved posts', async () => {
@@ -169,4 +177,52 @@ it('does not read personal or school data while auth is unresolved', () => {
   expect(screen.getByRole('status').textContent).toBe('正在確認登入狀態…');
   expect(mocks.identity).not.toHaveBeenCalled();
   expect(mocks.posts).not.toHaveBeenCalled();
+});
+
+
+it('pins one owned post above the recent feed, then unpins without changing posts', async () => {
+  mocks.pinSave
+    .mockResolvedValueOnce({ postId: myPost.id, post: myPost })
+    .mockResolvedValueOnce({ postId: null, post: null });
+  render(<CreatorProfile {...school} memberUid="alice" />);
+  await screen.findByText('週末校園散步');
+  fireEvent.click(await screen.findByRole('button', { name: '置頂到個人頁' }));
+  await screen.findByRole('region', { name: '置頂貼文' });
+  expect(mocks.pinSave).toHaveBeenCalledWith('pu', 'alice', myPost.id);
+  expect(screen.queryByRole('button', { name: '置頂到個人頁' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '取消置頂' }));
+  await waitFor(() => expect(mocks.pinSave).toHaveBeenCalledWith('pu', 'alice', ''));
+  await screen.findByRole('button', { name: '置頂到個人頁' });
+  expect(screen.queryByRole('region', { name: '置頂貼文' })).toBeNull();
+});
+
+it('only renders a verified pin to a visitor without offering author controls', async () => {
+  mocks.identity.mockResolvedValue({ displayName: 'Bob', avatarUrl: null });
+  mocks.posts.mockResolvedValue(page([]));
+  mocks.pinRead.mockResolvedValue({ postId: theirPost.id, post: theirPost });
+  render(<CreatorProfile {...school} memberUid="bob" />);
+  expect(await screen.findByRole('region', { name: '置頂貼文' })).toBeTruthy();
+  expect(screen.getByText('社團分享')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '取消置頂' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '置頂到個人頁' })).toBeNull();
+  expect(mocks.pinSave).not.toHaveBeenCalled();
+});
+
+it('retries a failed pin lookup rather than presenting a false unpinned state', async () => {
+  mocks.pinRead
+    .mockRejectedValueOnce(new Error('permission-denied'))
+    .mockResolvedValueOnce({ postId: null, post: null });
+  render(<CreatorProfile {...school} memberUid="alice" />);
+  fireEvent.click(await screen.findByRole('button', { name: '重新讀取置頂' }));
+  await screen.findByRole('button', { name: '置頂到個人頁' });
+  expect(mocks.pinRead).toHaveBeenCalledTimes(2);
+});
+
+it('does not show a fake pin after a failed write', async () => {
+  mocks.pinSave.mockRejectedValueOnce(new Error('offline'));
+  render(<CreatorProfile {...school} memberUid="alice" />);
+  fireEvent.click(await screen.findByRole('button', { name: '置頂到個人頁' }));
+  await screen.findByText(/尚未確認置頂變更/);
+  expect(screen.queryByRole('region', { name: '置頂貼文' })).toBeNull();
+  expect(screen.getByRole('button', { name: '置頂到個人頁' })).toBeTruthy();
 });

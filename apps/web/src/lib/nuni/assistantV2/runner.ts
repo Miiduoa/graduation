@@ -38,6 +38,7 @@ import {
   createTools,
   schemas,
   selectTools,
+  toolSelectionNotice,
   scheduleIntent,
   studyPlanSelect,
   personalSlotSelect,
@@ -181,6 +182,7 @@ export type RunInput = {
 export async function run(input: RunInput) {
   const started = Date.now(),
     now = input.now ?? started;
+  const selectedNames = selectTools(input.question, input.adapter.simulation);
   const campusPrelude = campusInfoPrelude(input.question);
   const signal = AbortSignal.any([
     input.signal,
@@ -205,6 +207,11 @@ export async function run(input: RunInput) {
     : scheduledDate === '前天' ? addDays(taipeiDate(now), -2)
     : scheduledDate || relativeDate;
   const steps: Step[] = [];
+  const withSelectionNotice = (answer: string) => {
+    const completedNames = steps.filter((step) => step.status !== 'error').map((step) => step.name);
+    const notice = toolSelectionNotice(input.question, input.adapter.simulation, completedNames);
+    return notice ? answer + '\n' + notice : answer;
+  };
   const evidence: { tool: string; result: unknown }[] = [];
   const failedResults: { tool: string; result: unknown }[] = [];
   let modelCalls = 0,
@@ -268,7 +275,7 @@ export async function run(input: RunInput) {
         }
       }
     }
-    const names = selectTools(input.question, input.adapter.simulation);
+    const names = [...selectedNames];
     // Avoid spending every task's bounded retry budget on unrelated domains.
     const serviceGuidance = names.includes('list_campus_services') ? '服務入口先查 list_campus_services。' : '';
     const academicGuidance = names.includes('get_imported_academics')
@@ -689,7 +696,7 @@ export async function run(input: RunInput) {
     log('assistant.completed');
     return {
       version: 2,
-      answer: finalAnswer,
+      answer: withSelectionNotice(finalAnswer),
       steps,
       cards: tools.cards,
       modelCalls,
@@ -703,7 +710,7 @@ export async function run(input: RunInput) {
     if (evidence.length && (e as { status?: number }).status !== 401 && !input.signal.aborted)
       return {
         version: 2,
-        answer: partialAnswer(evidence, tools.cards, input.question, now),
+        answer: withSelectionNotice(partialAnswer(evidence, tools.cards, input.question, now)),
         steps,
         cards: tools.cards,
         modelCalls,

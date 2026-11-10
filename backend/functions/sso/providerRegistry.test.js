@@ -4,6 +4,8 @@ const {
   __test,
 } = require('./providerRegistry');
 
+const { execFileSync } = require('node:child_process');
+
 const ORIGINAL_ENV = process.env;
 
 function makeUnsignedJwt(payload) {
@@ -54,6 +56,11 @@ describe('SSO provider registry security', () => {
     });
   });
 
+  test('derives card claims only from a school-signed student number', () => {
+    // Exercise the ESM verifier under the same Node loader as Functions.
+    execFileSync(process.execPath, [require.resolve('./oidcStudentCard.check.cjs')]);
+  });
+
   test('keeps local OIDC development fallback but still checks aud, iss, exp, and nonce', async () => {
     process.env.APP_ENV = 'development';
     const now = Math.floor(Date.now() / 1000);
@@ -67,6 +74,7 @@ describe('SSO provider registry security', () => {
       __test.verifyOidcIdToken({
         idToken: makeUnsignedJwt({
           sub: 'student-1',
+          student_id: 'S00123',
           aud: 'client-1',
           iss: 'https://idp.example',
           exp: now + 60,
@@ -75,7 +83,7 @@ describe('SSO provider registry security', () => {
         ssoConfig,
         expectedNonce: 'nonce-1',
       }),
-    ).resolves.toMatchObject({ sub: 'student-1' });
+    ).resolves.toMatchObject({ payload: { sub: 'student-1' }, campusCardStudentId: undefined });
 
     await expect(
       __test.verifyOidcIdToken({

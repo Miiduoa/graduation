@@ -17,6 +17,7 @@ import {
   type CreatorCursor, type CreatorIdentity,
 } from '../../services/creatorProfile';
 import type { CampusPostDoc } from '../../services/feed';
+import { readCreatorPin, saveCreatorPin, type CreatorPin } from '../../services/creatorPin';
 import { CreatorCardPanel } from './CreatorCardPanel';
 import { CreatorHighlight } from './CreatorHighlight';
 
@@ -27,6 +28,7 @@ type ReadState<T> =
   | { status: 'ready'; value: T };
 type PostsPage = { rows: CampusPostDoc[]; cursor: CreatorCursor; hasMore: boolean };
 type FollowState = 'loading' | 'following' | 'not-following' | 'pending' | 'error';
+type PinState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: CreatorPin };
 type CreatorListItem = {
   key: string;
   post: CampusPostDoc;
@@ -101,10 +103,15 @@ function ScopedCreatorProfile({
   const [moreBusy, setMoreBusy] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [followError, setFollowError] = useState('');
+  const [pin, setPin] = useState<PinState>({ status: 'loading' });
+  const [pinRevision, setPinRevision] = useState(0);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinFeedback, setPinFeedback] = useState('');
   const mounted = useRef(false);
   const version = useRef(0);
   const moreFlight = useRef(false);
   const followFlight = useRef(false);
+  const pinFlight = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -199,6 +206,36 @@ function ScopedCreatorProfile({
     } finally { followFlight.current = false; }
   }, [own, followState, schoolId, viewerUid, memberUid]);
 
+  useEffect(() => {
+    let live = true;
+    setPin({ status: 'loading' });
+    setPinFeedback('');
+    void readCreatorPin(schoolId, memberUid).then((result) => {
+      if (live) setPin({ status: 'ready', value: result });
+    }).catch(() => {
+      if (live) setPin({ status: 'error' });
+    });
+    return () => { live = false; };
+  }, [schoolId, memberUid, pinRevision]);
+
+  const changePin = useCallback(async (postId: string) => {
+    if (!own || pin.status !== 'ready' || pinFlight.current) return;
+    pinFlight.current = true;
+    setPinBusy(true);
+    setPinFeedback('');
+    try {
+      const confirmed = await saveCreatorPin(schoolId, viewerUid, postId);
+      if (!mounted.current) return;
+      setPin({ status: 'ready', value: confirmed });
+      setPinFeedback(postId ? '已置頂到個人頁。' : '已取消置頂。');
+    } catch {
+      if (mounted.current) setPinFeedback('尚未確認置頂變更，請檢查連線和貼文狀態後重試。');
+    } finally {
+      pinFlight.current = false;
+      if (mounted.current) setPinBusy(false);
+    }
+  }, [own, pin.status, schoolId, viewerUid]);
+
   const onShare = () => {
     const url = `https://nuni.tw/community/member/${encodeURIComponent(memberUid)}?schoolId=${encodeURIComponent(schoolId)}`;
     void Share.share({ message: `校園個人頁（需具備所屬校園權限）\n${url}`, url })
@@ -208,15 +245,17 @@ function ScopedCreatorProfile({
     ? identity.value.displayName : own ? ownName : '校園成員';
   const avatarUrl = identity.status === 'ready' ? identity.value?.avatarUrl : null;
   const postRows = posts.status === 'ready' ? posts.value.rows : [];
+  const pinnedPost = pin.status === 'ready' ? pin.value.post : null;
   const visiblePosts = tab === 'saved'
     ? saved.status === 'ready' ? saved.value : []
-    : postRows;
+    : tab === 'posts' && pinnedPost
+      ? postRows.filter((post) => post.id !== pinnedPost.id) : postRows;
   const rows: CreatorListItem[] = tab === 'media'
     ? postRows.flatMap((post) => mediaUrls(post).map((url, mediaIndex) => ({
         key: `media:${post.id}:${mediaIndex}`, post, mediaUrl: url, mediaIndex,
       })))
     : visiblePosts.map((post) => ({ key: `post:${post.id}`, post }));
-  const reading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading';
+  const reading = tab === 'saved' ? saved.status === 'loading' : posts.status === 'loading' || (tab === 'posts' && pin.status === 'loading');
   const failed = tab === 'saved' ? saved.status === 'error' : posts.status === 'error';
 
   const retry = () => tab === 'saved'
@@ -305,6 +344,32 @@ function ScopedCreatorProfile({
               </Pressable>
             ))}
           </View>
+          {tab === 'posts' && pin.status === 'error' && (
+            <View style={styles.pinNotice}>
+              <Text accessibilityRole="alert" style={styles.noteText}>置頂內容暫時無法讀取。</Text>
+              <Action label="重新讀取置頂" onPress={() => setPinRevision((n) => n + 1)} />
+            </View>
+          )}
+          {tab === 'posts' && pinnedPost && (
+            <View style={styles.pinnedBlock}>
+              <View style={styles.pinnedHeading}>
+                <Text style={styles.pinnedTitle}>置頂貼文</Text>
+                {own && <Action label="取消置頂" disabled={pinBusy}
+                  onPress={() => void changePin('')} />}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`閱讀置頂貼文：${pinnedPost.title || '貼文'}`}
+                onPress={() => navigation?.navigate?.('PostDetail', { postId: pinnedPost.id })}
+                style={styles.pinnedContent}
+              >
+                <Text style={styles.postTitle} numberOfLines={2}>{pinnedPost.title || '未命名貼文'}</Text>
+                <Text style={styles.postExcerpt} numberOfLines={3}>{pinnedPost.content}</Text>
+              </Pressable>
+            </View>
+          )}
+          {tab === 'posts' && !!pinFeedback &&
+            <Text accessibilityRole="alert" style={styles.pinFeedback}>{pinFeedback}</Text>}
           {tab === 'saved' && <Text style={styles.savedNote}>私人收藏 · 最多顯示最近 40 筆</Text>}
         </>
       }
@@ -324,6 +389,7 @@ function ScopedCreatorProfile({
           </Pressable>
         );
         return (
+          <View>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`閱讀貼文：${item.title || '貼文'}`}
@@ -345,10 +411,18 @@ function ScopedCreatorProfile({
               </View>
             )}
           </Pressable>
+          {own && tab === 'posts' && (
+            <View style={styles.postPinAction}>
+              <Action label="置頂到個人頁"
+                disabled={pinBusy || pin.status !== 'ready'}
+                onPress={() => void changePin(item.id)} />
+            </View>
+          )}
+          </View>
         );
       }}
       ListEmptyComponent={
-        reading
+        tab === 'posts' && pinnedPost && !reading && !failed ? null : reading
           ? <View style={styles.status}><ActivityIndicator color={theme.colors.accent} /><Text style={styles.emptyText}>正在讀取內容…</Text></View>
           : failed ? (
             <View style={styles.status}>
@@ -482,5 +556,23 @@ const createStyles = () => StyleSheet.create({
   },
   mediaImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   videoLabel: { color: theme.colors.textSecondary, fontSize: 12 },
+  pinnedBlock: {
+    marginTop: 12, paddingHorizontal: 14, paddingTop: 9,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border,
+    borderRadius: 12, backgroundColor: theme.colors.surface,
+  },
+  pinnedHeading: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    minHeight: 42, gap: 12,
+  },
+  pinnedTitle: { color: theme.colors.text, fontSize: 13, fontWeight: '700' },
+  pinnedContent: {
+    minHeight: 68, paddingVertical: 12, justifyContent: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border,
+  },
+  pinNotice: { padding: 12, gap: 9, alignItems: 'flex-start' },
+  noteText: { color: theme.colors.textSecondary, fontSize: 13 },
+  pinFeedback: { color: theme.colors.textSecondary, fontSize: 12, paddingVertical: 10 },
+  postPinAction: { alignItems: 'flex-end', paddingBottom: 10 },
   more: { paddingVertical: 22, alignItems: 'center', gap: 8 },
 });

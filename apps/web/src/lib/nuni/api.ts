@@ -4,6 +4,7 @@ import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourse
 import { NextRequest, NextResponse } from 'next/server';
 import { handleFood, isFoodResource } from './food';
 import { handlePersonalImportSync } from './personalImportSync';
+import { handleLostFound } from './lostFound';
 import {
   createNuniClasses,
   NuniError,
@@ -34,6 +35,8 @@ import {
   nuniEnabled,
   platformRequest,
   publicOrigin,
+  platformServiceAccess,
+  withPlatformServiceAccess,
   readPlatformAuthorization,
   readSession,
   requireSameOrigin,
@@ -139,6 +142,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       throw new NuniError(404, 'NOT_FOUND');
     }
     if (segments[0] === 'assistant') return await handleAssistant(request, segments);
+    if (segments[0] === 'lost-found') return await handleLostFound(request, segments);
     const method = request.method;
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');
@@ -233,6 +237,30 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       }
       const response = jsonResponse({ authenticated: false });
       setCookie(response, SESSION_COOKIE, null);
+      return response;
+    }
+    if (path === 'service-access') {
+      if (method !== 'GET' && method !== 'POST') throw new NuniError(405, 'METHOD_NOT_ALLOWED');
+      const session = requireSession(request);
+      // The encrypted cookie cannot override revoked upstream sessions.
+      parseNuniPrincipal(await platformRequest('sessions/current', session));
+      if (method === 'GET')
+        return jsonResponse({ ...platformServiceAccess(session), scope: 'web-session' });
+      const input = nuniRecord(await boundedJson(request, 1024));
+      onlyKeys(input, ['social', 'cloudAi']);
+      if (
+        Object.keys(input).length !== 2 ||
+        typeof input.social !== 'boolean' ||
+        typeof input.cloudAi !== 'boolean'
+      )
+        throw new NuniError(422, 'INVALID_INPUT');
+      if (!input.social || !input.cloudAi) throw new NuniError(422, 'PLATFORM_SERVICE_ALWAYS_ENABLED');
+      const updated = withPlatformServiceAccess(session, {
+        social: input.social,
+        cloudAi: input.cloudAi,
+      });
+      const response = jsonResponse({ ...platformServiceAccess(updated), scope: 'web-session' });
+      setCookie(response, SESSION_COOKIE, updated, session.expiresAt);
       return response;
     }
     if (path === 'memberships') {

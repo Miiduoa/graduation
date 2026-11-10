@@ -9,6 +9,7 @@
  *  - 「我在這裡」打卡會在 chip 上顯示 ACTIVE 標記
  *  - 同點位列表顯示頭像 / 姓名（從 directory 取）
  */
+import { PrivateImage } from '../../ui/PrivateImage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -350,15 +351,26 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
             {storyGroups.map((g) => {
               const latest = g.stories[g.stories.length - 1] ?? g.stories[0];
               const isImage = latest?.kind === 'image' && latest.mediaUrl;
+              const isVideo = latest?.kind === 'video' && !!latest.mediaUrl;
+              const author = g.isMine ? '我' : nameByUid[g.authorUid] || '同學';
               return (
                 <Pressable
                   key={g.authorUid}
                   style={styles.storyCard}
                   onPress={() => openGroup(g)}
                   accessibilityRole="button"
+                  accessibilityLabel={`查看 ${author} 的限時動態${isVideo ? '，最新一則是影片' : ''}`}
                 >
                   {isImage ? (
-                    <Image source={{ uri: latest!.mediaUrl as string }} style={styles.storyCardImg} />
+                    <PrivateImage uri={latest!.mediaUrl as string} style={styles.storyCardImg} />
+                  ) : isVideo ? (
+                    <View style={[styles.storyCardText, styles.videoCover]}>
+                      <View style={styles.videoBadge}>
+                        <Ionicons name="play" size={12} color="#f3faf6" />
+                        <Text style={styles.videoLabel}>影片</Text>
+                      </View>
+                      {!!latest?.text && <Text numberOfLines={3} style={styles.storyCardTxt}>{latest.text}</Text>}
+                    </View>
                   ) : (
                     <View
                       style={[
@@ -503,6 +515,9 @@ const createStyles = () => StyleSheet.create({
     padding: 14,
     justifyContent: 'center',
   },
+  videoCover: { alignItems: 'flex-start', gap: 12, backgroundColor: '#243b33' },
+  videoBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#90afa1', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4 },
+  videoLabel: { fontSize: 12, fontWeight: '600', color: '#f3faf6' },
   storyCardTxt: { color: '#fff', fontSize: 14, lineHeight: 20, fontWeight: '600' },
   storyCardFooter: {
     flexDirection: 'row',

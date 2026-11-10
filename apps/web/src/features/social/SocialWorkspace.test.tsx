@@ -237,3 +237,30 @@ it('removes public data and draft after the server rejects the session', async (
     '/classroom/login?returnUrl=%2Fsocial%3Fcampus%3Dschool-a',
   );
 });
+
+it('does not shut down the workspace on an obsolete service error', async () => {
+  render(<SocialWorkspace />);
+  await screen.findByText(post.text);
+  fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '保留草稿' } });
+  mocks.request.mockRejectedValue(new NuniError(403, 'PLATFORM_SERVICE_DISABLED'));
+  fireEvent.click(screen.getByRole('button', { name: '更新動態' }));
+  await screen.findByText('目前帳號沒有這項操作的權限。');
+  expect(screen.getByDisplayValue('保留草稿')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '公開發表' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '已關閉公開社群' })).toBeNull();
+});
+
+it('preserves the workspace and draft when another tab sends legacy service changes', async () => {
+  const view = render(<SocialWorkspace />);
+  await screen.findByText(post.text);
+  fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '這次編輯中的草稿' } });
+  act(() => window.dispatchEvent(new StorageEvent('storage', {
+    key: 'nuni.platform.service-access-changed', newValue: 'cloudAi:another-tab',
+  })));
+  expect(screen.getByDisplayValue('這次編輯中的草稿')).toBeTruthy();
+  act(() => window.dispatchEvent(new StorageEvent('storage', {
+    key: 'nuni.platform.service-access-changed', newValue: 'social:another-tab',
+  })));
+  expect(screen.getByDisplayValue('這次編輯中的草稿')).toBeTruthy();
+  view.unmount();
+});

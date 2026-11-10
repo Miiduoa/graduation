@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocFromServer, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
-import { uploadStoryImage } from '../../services/mediaUpload';
+import { uploadStoryImage, uploadStoryVideo } from '../../services/mediaUpload';
 import { markStoryViewed, publishStory, reserveStoryId } from '../../services/stories';
 
 jest.mock('firebase/firestore', () => ({
@@ -56,7 +56,7 @@ test('uploads to the matching school and reserved document, keeping the image ty
 test.each([
   ['video/mp4', 42],
   ['image/png', 0],
-  ['image/jpeg', 10 * 1024 * 1024],
+  ['image/jpeg', 10 * 1024 * 1024 + 1],
 ] as const)('rejects an invalid photo (%s, %i bytes) before uploading', async (type, size) => {
   localPhoto(type, size);
   await expect(
@@ -65,10 +65,17 @@ test.each([
   expect(uploadBytes).not.toHaveBeenCalled();
 });
 
+test('opening your own story does not access viewer receipts', async () => {
+  await markStoryViewed({ id: 'story', schoolId: 'pu', authorUid: 'alice' }, 'alice');
+  expect(doc).not.toHaveBeenCalled();
+  expect(getDoc).not.toHaveBeenCalled();
+  expect(setDoc).not.toHaveBeenCalled();
+});
+
 test('records a view without trying to modify the read-only story document', async () => {
   jest.mocked(getDoc).mockResolvedValue({ exists: () => false } as never);
-  await markStoryViewed('story', 'alice');
-  expect(doc).toHaveBeenCalledWith({}, 'campusStories', 'story', 'storyViews', 'alice');
+  await markStoryViewed({ id: 'story', schoolId: 'pu', authorUid: 'bob' }, 'alice');
+  expect(doc).toHaveBeenCalledWith({}, 'campusStories', 'story', 'schools', 'pu', 'authors', 'bob', 'views', 'alice');
   expect(setDoc).toHaveBeenCalledTimes(1);
   expect(updateDoc).not.toHaveBeenCalled();
 });
@@ -106,4 +113,34 @@ test('recovers a committed create after a lost response only for the same active
       .mockResolvedValue({ data: () => ({ ...persisted, ...changed }) } as never);
     await expect(publishStory('reserved', draft)).rejects.toBe(denied);
   }
+});
+
+test('publishes a checked MP4 at the reserved video object with the signed-in owner', async () => {
+  localPhoto('video/mp4', 9500);
+  await uploadStoryVideo('tw-pu', 'reserved', 'alice', 'file:///clip.mp4', 30_000);
+  expect(ref).toHaveBeenCalledWith({}, 'schools/tw-pu/stories/reserved/video');
+  expect(uploadBytes).toHaveBeenCalledWith('storage-ref', expect.anything(), {
+    contentType: 'video/mp4',
+    customMetadata: { ownerUid: 'alice' },
+  });
+});
+
+test.each([
+  ['video/mp4', 42, 30_001],
+  ['video/mp4', 42, NaN],
+  ['video/mp4', 100 * 1024 * 1024, 30_000],
+  ['video/quicktime', 900, 7000],
+  ['video/mp4', 0, 7000],
+] as const)('rejects invalid clip %s/%i/%i before upload', async (mime, bytes, duration) => {
+  localPhoto(mime, bytes);
+  await expect(
+    uploadStoryVideo('pu', 'reserved', 'alice', 'file:///clip', duration),
+  ).rejects.toThrow();
+  expect(uploadBytes).not.toHaveBeenCalled();
+});
+
+test('uploads an image exactly at the shared size limit', async () => {
+  localPhoto('image/jpeg', 10 * 1024 * 1024);
+  await expect(uploadStoryImage('pu', 'reserved', 'alice', 'file:///local', 'image/jpeg')).resolves.toBe('https://example.com/photo');
+  expect(uploadBytes).toHaveBeenCalledTimes(1);
 });

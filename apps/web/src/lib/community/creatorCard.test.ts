@@ -48,7 +48,7 @@ it('saves a normalized card and only returns success after server readback', asy
   expect(saved.headline).toBe('校園攝影');
   expect(mocks.write).toHaveBeenCalledWith('schools/pu/creatorProfiles/alice', {
     ...valid, updatedAt: 'SERVER_TIME',
-  });
+  }, { merge: true });
   expect(mocks.read).toHaveBeenCalledTimes(1);
 });
 
