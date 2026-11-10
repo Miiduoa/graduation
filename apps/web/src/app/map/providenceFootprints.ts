@@ -188,9 +188,10 @@ function isStandingBuilding(value: unknown): boolean {
     const status = tags?.[tag];
     // OSM lifecycle flags are usually strings. A present but unrecognized
     // value must not silently certify a standing campus building.
-    return status !== undefined && status !== null &&
-      (typeof status !== 'string' || (status.trim() !== '' &&
-        !['no', 'false', '0'].includes(status.trim().toLowerCase())));
+    // A present lifecycle marker with an empty/null value is ambiguous, not
+    // an explicit "no". Fail closed rather than drawing an intact building.
+    return status !== undefined &&
+      (typeof status !== 'string' || !['no', 'false', '0'].includes(status.trim().toLowerCase()));
   });
 }
 
