@@ -72,6 +72,9 @@ beforeEach(async () => {
     await db
       .doc(`${school}/cafeterias/cafe`)
       .set({ name: '學生餐廳', orderingEnabled: false, pilotStatus: 'inactive' });
+    // Assigned external merchants still need an active canonical account.
+    // This does not create school membership or school governance rights.
+    await db.doc('users/merchant').set({ status: 'active' });
     await db
       .doc(`${school}/cafeterias/cafe/operators/merchant`)
       .set({ status: 'active', role: 'owner' });

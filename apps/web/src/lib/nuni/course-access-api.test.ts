@@ -9,10 +9,20 @@ const fetcher = vi.fn();
 const session = { sessionHandle: `ps_${'a'.repeat(43)}`, expiresAt: Date.now() + 3600_000 };
 const course = { id: directoryId, workspaceId, version: 1, verification: 'administrator-reviewed', schoolId: 'pu', academicYear: '115', semester: '1', title: '資料庫', courseCode: 'CS301', teacher: '經核對老師', className: '三甲' };
 const receipt = { status: 'reviewed', workspaceId, memberRole: 'student', membershipActive: true, course };
-function invoke(options: { origin?: string; cookie?: boolean } = {}) {
+function invoke(options: { origin?: string; cookie?: boolean; context?: string; pendingLogout?: boolean } = {}) {
   return handleNuni(new NextRequest('https://nuni.tw/api/nuni/course-access/workspace-course', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: options.origin ?? 'https://nuni.tw',
-      'X-Campus-Session': sessionContext(session), ...(options.cookie === false ? {} : { Cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, session)}` }) },
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: options.origin ?? 'https://nuni.tw',
+      'X-Campus-Session': options.context ?? sessionContext(session),
+      ...(options.cookie === false ? {} : {
+        Cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, {
+          ...session,
+          ...(options.pendingLogout ? { pendingLogout: true } : {}),
+        })}`,
+      }),
+    },
     body: JSON.stringify({ workspaceId, schoolId: 'pu' }),
   }), ['course-access', 'workspace-course']);
 }
@@ -40,4 +50,28 @@ it('preserves unreviewed status without trusting returned teacher metadata', asy
 it('requires the same origin and authenticated session', async () => {
   reply(receipt); expect((await invoke({ origin: 'https://other.example' })).status).toBe(403);
   expect((await invoke({ cookie: false })).status).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it.each([
+  { options: { context: 'stale-session-context' }, status: 409 },
+  { options: { pendingLogout: true }, status: 401 },
+])('rejects stale or pending-logout sessions before course access with $status', async ({ options, status }) => {
+  expect((await invoke(options)).status).toBe(status);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it.each([401, 403, 404])('preserves the upstream course membership denial %i', async status => {
+  fetcher.mockResolvedValue(Response.json({ error: { code: 'COURSE_NOT_FOUND' } }, { status }));
+  const response = await invoke();
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual({ error: 'COURSE_NOT_FOUND' });
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher).toHaveBeenCalledWith(
+    'https://api.nuni.tw/v1/auth/platform/course-access/workspace-course',
+    expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ Authorization: `Platform ${session.sessionHandle}` }),
+      body: JSON.stringify({ workspaceId, schoolId: 'pu' }),
+    }),
+  );
 });

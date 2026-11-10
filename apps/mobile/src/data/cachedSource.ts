@@ -631,19 +631,22 @@ export function createCachedSource(
   }) as DataSource;
 }
 
-export async function clearAllCache(): Promise<void> {
+export async function clearAllCache(assertCurrent?: () => void): Promise<void> {
+  assertCurrent?.();
   try {
     pendingRequests.clear();
     backgroundUpdateLocks.clear();
     cacheVersionMap.clear();
 
     const keys = await AsyncStorage.getAllKeys();
+    assertCurrent?.();
     const cacheKeys = keys.filter((k) => k.startsWith(CACHE_PREFIX));
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
     }
     console.log(`[cache] clearAllCache: removed ${cacheKeys.length} entries, cleared ${pendingRequests.size} pending requests`);
   } catch (e) {
+    assertCurrent?.();
     console.warn('[cache] Failed to clear cache:', e);
   }
 }

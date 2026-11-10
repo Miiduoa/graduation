@@ -4,8 +4,9 @@ import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
 import { fetchSchoolDirectory } from '../services/schoolDirectory';
 
 const mockSetSelection = jest.fn();
+let mockSchool = { id: 'puli', name: '埔里學院' };
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: 'puli', name: '埔里學院' }, setSelection: mockSetSelection }),
+  useSchool: () => ({ school: mockSchool, setSelection: mockSetSelection }),
 }));
 jest.mock('../services/schoolDirectory', () => ({ fetchSchoolDirectory: jest.fn() }));
 
@@ -19,6 +20,7 @@ const directory = [
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockSchool = { id: 'puli', name: '埔里學院' };
   jest.mocked(fetchSchoolDirectory).mockResolvedValue(directory);
 });
 
@@ -44,4 +46,16 @@ test('搜尋正規化代號、中文名與簡稱，完全相符優先且不自�
   fireEvent.press(view.getByLabelText('選擇靜宜大學'));
   expect(mockSetSelection).toHaveBeenCalledWith(expect.objectContaining({ schoolId: 'pu' }));
   expect(directory[1].integrationStatus?.enabled).toBe(false);
+});
+
+test('first-time picker does not preselect a campus; tapping a search match is an explicit choice', async () => {
+  mockSchool = { id: '', name: '尚未選校' };
+  const view = render(<SchoolBrowsingControl />);
+  fireEvent.press(view.getByRole('button', { name: '選擇我的學校' }));
+  await view.findByText('5 所學校 · 點選後切換公開資訊');
+  expect(view.queryByText('目前選擇')).toBeNull();
+  fireEvent.changeText(view.getByTestId('school-picker-search'), '台大');
+  expect(mockSetSelection).not.toHaveBeenCalled();
+  fireEvent.press(view.getByTestId('school-picker-option-ntu'));
+  expect(mockSetSelection).toHaveBeenCalledWith(expect.objectContaining({ schoolId: 'ntu', code: 'NTU' }));
 });

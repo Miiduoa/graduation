@@ -112,6 +112,15 @@ const ITEMS: LifeService[] = [
     keywords: '取餐 餐點 進度 點餐 order pickup',
   },
   {
+    href: '/social',
+    title: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板。',
+    action: '看公開話題',
+    icon: 'community',
+    group: 'community',
+    keywords: 'Google 公開 跨校 社群 貼文 看板 討論 social community',
+  },
+  {
     href: '/community',
     title: '校園交流',
     text: '使用學校帳號查看校內話題。',

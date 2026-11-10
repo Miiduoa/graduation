@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi, type Mock } from 'vitest';
 import {
   emptyPersonalEventDraft,
@@ -40,6 +40,7 @@ const context = vi.hoisted(() => {
   return {
     owner: 'platform:one',
     schoolId: 'pu',
+    search: '',
     loading: false,
     user: null as { uid: string } | null,
     nuni: null as {
@@ -56,6 +57,10 @@ const context = vi.hoisted(() => {
     >,
   };
 });
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(context.search),
+}));
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
@@ -102,6 +107,7 @@ beforeEach(() => {
   localStorage.clear();
   context.owner = 'platform:one';
   context.schoolId = 'pu';
+  context.search = '';
   context.loading = false;
   context.user = null;
   context.nuni = null;
@@ -583,4 +589,115 @@ it('月格切月、選日期、編輯及回今天沿用同一份資料', async (
     emptyPersonalEventDraft().date.slice(0, 7),
   );
   view.unmount();
+});
+
+function focusEvent(id = 'verified-event', patch: Partial<PersonalImportRecord> = {}): PersonalImportRecord {
+  return {
+    id, batchId: id, kind: 'events', schoolId: 'pu', academicYear: '', semester: '',
+    title: '已核對的複習安排', date: '2027-03-14', allDay: false, startTime: '15:00', endTime: '16:00',
+    importedAt: '2026-11-07T10:00:00.000Z', source: { type: 'paste', name: '助理確認', line: 1, rawText: '' },
+    ...patch,
+  };
+}
+
+function seedFocusedEvents(rows: PersonalImportRecord[], owner = context.owner, schoolId = context.schoolId) {
+  localStorage.setItem(personalImportsStorageKey({ owner, schoolId }), JSON.stringify({ version: 1, records: rows }));
+}
+
+it('does not describe an acknowledged server event as device-only when device sync is disabled', async () => {
+  const record = focusEvent();
+  localStorage.setItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }), JSON.stringify({
+    version: 1, records: [record],
+    sync: { enabled: false, base: null, acknowledged: [{ record, revision: 1 }] },
+  }));
+  render(<PersonalCalendar />);
+  await screen.findByText(/裝置同步尚未開啟/);
+  expect(screen.getByText(/先前已存入帳號的資料仍以帳號紀錄為準/)).toBeTruthy();
+  expect(screen.queryByText(/目前只存在這台裝置，換裝置或清除資料就會不見/)).toBeNull();
+});
+
+it('locates only a stored event by ID, selects its actual date and month, and focuses its list row without opening an edit form', async () => {
+  const target = focusEvent();
+  seedFocusedEvents([target, focusEvent('other-day', { title: '另一日', date: '2027-03-15' })]);
+  context.search = 'eventId=verified-event&date=1999-01-01&title=URL%E5%81%87%E8%B3%87%E6%96%99';
+  const before = localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }));
+  render(<PersonalCalendar />);
+  expect(await screen.findByText('已定位到「已核對的複習安排」。')).toBeTruthy();
+  await waitFor(() => expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-03'));
+  expect(screen.getByText('2027-03-14 的行程')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '列表' }).getAttribute('aria-pressed')).toBe('true');
+  const row = screen.getByRole('heading', { name: target.title }).closest('li');
+  expect(row?.getAttribute('aria-current')).toBe('true');
+  expect(document.activeElement).toBe(row);
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  expect(screen.queryByText('URL假資料')).toBeNull();
+  expect(screen.queryByRole('heading', { name: '另一日' })).toBeNull();
+  expect(localStorage.getItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }))).toBe(before);
+});
+
+it.each([
+  ['another owner', 'platform:two', 'pu'],
+  ['another school', 'platform:one', 'ntu'],
+])('does not locate an event belonging to %s even when URL fields request that scope', async (_label, owner, schoolId) => {
+  seedFocusedEvents([focusEvent(undefined, { schoolId })], owner, schoolId);
+  context.search = 'eventId=verified-event&owner=platform%3Atwo&date=2027-03-14&title=%E4%B8%8D%E5%8F%AF%E4%BF%A1';
+  render(<PersonalCalendar />);
+  expect(await screen.findByText(/目前帳號與校園的個人行事曆找不到這筆行程/)).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '已核對的複習安排' })).toBeNull();
+  expect(screen.queryByLabelText('標題')).toBeNull();
+});
+
+it('can locate an event that arrives after the initial read, without navigating back after the user changes months', async () => {
+  context.search = 'eventId=verified-event';
+  render(<PersonalCalendar />);
+  await screen.findByText(/找不到這筆行程/);
+  await act(async () => {
+    seedFocusedEvents([focusEvent()]);
+    window.dispatchEvent(new Event('campus-personal-imports-change'));
+  });
+  expect(await screen.findByText('2027-03-14 的行程')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '下一月' }));
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-04');
+  await act(async () => { window.dispatchEvent(new Event('campus-personal-imports-change')); });
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-04');
+});
+
+it('discards the previously located row on identity switch and only resolves the same ID in the new owner ledger', async () => {
+  seedFocusedEvents([focusEvent()]);
+  context.search = 'eventId=verified-event';
+  const view = render(<PersonalCalendar />);
+  await screen.findByText('已定位到「已核對的複習安排」。');
+  context.owner = 'platform:two';
+  view.rerender(<PersonalCalendar />);
+  await screen.findByText(/目前帳號與校園的個人行事曆找不到這筆行程/);
+  expect(screen.queryByRole('heading', { name: '已核對的複習安排' })).toBeNull();
+  expect(screen.queryByLabelText('標題')).toBeNull();
+});
+
+it('does not expose a non-event record through eventId or call a failed ledger read an absent event', async () => {
+  const grade = focusEvent(undefined, { kind: 'grades', title: '私人成績', academicYear: '115', semester: '1', grade: 'A', credits: 3 });
+  seedFocusedEvents([grade]);
+  context.search = 'eventId=verified-event';
+  const view = render(<PersonalCalendar />);
+  await screen.findByText(/找不到這筆行程/);
+  expect(screen.queryByText('私人成績')).toBeNull();
+  view.unmount();
+  localStorage.setItem(personalImportsStorageKey({ owner: context.owner, schoolId: context.schoolId }), '{damaged');
+  render(<PersonalCalendar />);
+  await screen.findByText(/原始資料仍保留/);
+  expect(screen.queryByText(/找不到這筆行程/)).toBeNull();
+});
+
+it('responds to a new eventId without changing either event or entering edit mode', async () => {
+  seedFocusedEvents([focusEvent(), focusEvent('next-event', { title: '下一個安排', date: '2027-05-02' })]);
+  context.search = 'eventId=verified-event';
+  const view = render(<PersonalCalendar />);
+  await screen.findByText('2027-03-14 的行程');
+  context.search = 'eventId=next-event';
+  view.rerender(<PersonalCalendar />);
+  await screen.findByText('2027-05-02 的行程');
+  expect((screen.getByLabelText('查看月份') as HTMLInputElement).value).toBe('2027-05');
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: '下一個安排' }).closest('li'));
+  expect(screen.queryByLabelText('標題')).toBeNull();
+  expect(readPersonalImports({ owner: context.owner, schoolId: context.schoolId })).toHaveLength(2);
 });

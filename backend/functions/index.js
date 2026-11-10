@@ -14,6 +14,7 @@ const { readSecretValue } = require('./secretParams');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
+const { getStorage } = require('firebase-admin/storage');
 const https = require('https');
 const nodeCrypto = require('crypto');
 const {
@@ -47,6 +48,7 @@ const { canonicalizePuStudentId, createPuTronClassRefresher } = require('./puTro
 const { createCalendarSubscriptionHandler } = require('./calendarSubscription');
 const { createExportUserDataHandler } = require('./userDataExport');
 const { createDeleteUserAccountHandler } = require('./accountDeletion');
+const { createPrivateGroupFileHandler } = require('./privateGroupFiles');
 const directorySync = require('./directorySync');
 const { getAuth: getAdminAuth } = require('firebase-admin/auth');
 const {
@@ -140,6 +142,16 @@ const {
   createGroupQuestionAssistantReplyTrigger,
   createGradePublishedNotificationHandler,
 } = require('./firestoreTriggerHandlers');
+const {
+  clearProfileSchoolBindingForRevokedMembership,
+  inactivateLeftoverSchoolMemberships,
+  isClosedAccount,
+  nextBindingGeneration,
+  campusStoryStampFields,
+  createEnsureCampusStoryBindingHandler,
+  clearHaltFields,
+  clearCampusStoryBindingHalt,
+} = require('./campusStoryAccessBinding');
 const {
   createAssignmentPublishedNotifyHandler,
   createSubmissionNotifyHandler,
@@ -635,36 +647,50 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
 
   const uid = userRecord.uid;
   const userRef = db.collection('users').doc(uid);
-  const userDoc = await userRef.get();
   const memberRef = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-  const memberDoc = await memberRef.get();
+  let profileExisted = false;
 
-  await userRef.set(
-    {
-      email: account.email,
-      displayName: account.displayName,
-      role: account.role,
-      schoolId,
-      primarySchoolId: schoolId,
-      lastLoginAt: FieldValue.serverTimestamp(),
-      devUniversalAccount: true,
-      devUniversalScope: 'all-schools',
-      schoolIds: FieldValue.arrayUnion(schoolId),
-      ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
-
-  await memberRef.set(
-    {
-      status: 'active',
-      role: toSchoolMemberRole(account.role),
-      devUniversalAccount: true,
-      updatedAt: FieldValue.serverTimestamp(),
-      ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
-    },
-    { merge: true },
-  );
+  await db.runTransaction(async (tx) => {
+    const [userDoc, memberDoc] = await tx.getAll(userRef, memberRef);
+    profileExisted = userDoc.exists;
+    const accountData = userDoc.exists ? userDoc.data() || {} : {};
+    if (isClosedAccount(accountData)) {
+      throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
+        reason: 'account-deletion',
+      });
+    }
+    const bindingGeneration = nextBindingGeneration(accountData, () => nodeCrypto.randomUUID());
+    tx.set(
+      userRef,
+      {
+        email: account.email,
+        displayName: account.displayName,
+        role: account.role,
+        schoolId,
+        primarySchoolId: schoolId,
+        lastLoginAt: FieldValue.serverTimestamp(),
+        bindingGeneration,
+        devUniversalAccount: true,
+        devUniversalScope: 'all-schools',
+        schoolIds: FieldValue.arrayUnion(schoolId),
+        ...clearHaltFields(FieldValue),
+        ...(userDoc.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+    tx.set(
+      memberRef,
+      {
+        status: 'active',
+        role: toSchoolMemberRole(account.role),
+        devUniversalAccount: true,
+        updatedAt: FieldValue.serverTimestamp(),
+        ...campusStoryStampFields(schoolId, bindingGeneration),
+        ...(memberDoc.exists ? {} : { joinedAt: FieldValue.serverTimestamp() }),
+      },
+      { merge: true },
+    );
+  });
 
   await syncAuthClaims(uid, {
     role: account.role,
@@ -680,7 +706,7 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
   return {
     uid,
     customToken,
-    isNewUser: createdAuthUser || !userDoc.exists,
+    isNewUser: createdAuthUser || !profileExisted,
     role: account.role,
     displayName: account.displayName,
     email: account.email,
@@ -2543,6 +2569,16 @@ exports.finalizePostLogin = onCall(
   async (request) => runFinalizePostLogin(request),
 );
 
+exports.ensureCampusStoryBinding = onCall(
+  { region: REGION },
+  createEnsureCampusStoryBindingHandler({
+    db,
+    FieldValue,
+    randomUUID: () => nodeCrypto.randomUUID(),
+    HttpsError,
+  }),
+);
+
 exports.onUserProfileChanged = onDocumentWritten(
   {
     region: REGION,
@@ -2551,6 +2587,13 @@ exports.onUserProfileChanged = onDocumentWritten(
   createUserProfileChangedHandler({
     syncAuthClaims,
     syncDirectoryEntriesForUser,
+    inactivateLeftoverSchoolMemberships: (uid) =>
+      inactivateLeftoverSchoolMemberships({
+        db,
+        uid,
+        FieldValue,
+        loadMemberships: (memberUid) => directorySync.loadSchoolMembershipDocs(db, memberUid),
+      }),
   }),
 );
 
@@ -2561,6 +2604,16 @@ exports.onSchoolMembershipChanged = onDocumentWritten(
   },
   createSchoolMembershipChangedHandler({
     syncSchoolDirectoryEntry,
+    syncProfileSchoolBinding: async ({ schoolId, uid, membership }) => {
+      await clearCampusStoryBindingHalt({ db, FieldValue, uid });
+      return clearProfileSchoolBindingForRevokedMembership({
+        db,
+        FieldValue,
+        schoolId,
+        uid,
+        membership,
+      });
+    },
   }),
 );
 
@@ -2784,6 +2837,14 @@ exports.revokeTimetableShare = onCall({ region: REGION }, createRevokeTimetableS
 exports.getTimetableShare = onRequest(
   { region: REGION, cors: true },
   createGetTimetableShareHandler({ db }),
+);
+exports.privateGroupFile = onRequest(
+  { region: REGION, cors: getCorsOrigins(), timeoutSeconds: 120 },
+  createPrivateGroupFileHandler({
+    db,
+    bucket: () => getStorage().bucket(),
+    verifyIdToken: (token, checkRevoked) => getAdminAuth().verifyIdToken(token, checkRevoked),
+  }),
 );
 const eventRegistrationHandlers = createEventRegistrationHandlers({ db });
 exports.getEventRegistrations = onCall({ region: REGION }, eventRegistrationHandlers.getEventRegistrations);
@@ -3706,8 +3767,10 @@ exports.updateRepairStatus = onCall(
       await sendPushToUser(
         repairData.userId,
         {
-          title: status === 'assigned' ? '🔧 報修已受理' : '✅ 報修已完成',
-          body: status === 'assigned' ? '您的報修已派員處理' : '您的報修已完成，請確認',
+          title: status === 'assigned' ? '報修備忘狀態已更新' : '報修備忘已更新',
+          body: status === 'assigned'
+            ? '此應用沒有送到學校。這只是備忘狀態變更，不是校方回覆。'
+            : '此應用沒有送到學校。實際是否修好請向校方確認。',
         },
         {
           type: 'repair',
@@ -5053,56 +5116,11 @@ const liveSessionHandlers = createLiveSessionHandlers({
 exports.startLiveSession = onCall({ region: REGION }, liveSessionHandlers.startLiveSession);
 exports.endLiveSession = onCall({ region: REGION }, liveSessionHandlers.endLiveSession);
 
-exports.submitPollResponse = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId, pollId, optionIdx } = request.data;
-  if (!groupId || !sessionId || !pollId || optionIdx === undefined) {
-    throw new HttpsError('invalid-argument', 'Missing required fields');
-  }
-
-  const pollRef = db
-    .collection('groups')
-    .doc(groupId)
-    .collection('liveSessions')
-    .doc(sessionId)
-    .collection('polls')
-    .doc(pollId);
-
-  await pollRef.update({ [`responses.${uid}`]: optionIdx });
-  return { success: true };
-});
-
 exports.joinLiveSession = onCall({ region: REGION }, liveSessionHandlers.joinLiveSession);
 exports.correctAttendanceRecord = onCall({ region: REGION }, liveSessionHandlers.correctAttendanceRecord);
 
-exports.submitReaction = onCall({ region: REGION }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Must be logged in');
-
-  const { groupId, sessionId, reaction } = request.data;
-  if (!groupId || !sessionId || !['understood', 'partial', 'confused'].includes(reaction)) {
-    throw new HttpsError('invalid-argument', 'Invalid reaction');
-  }
-
-  const sessionRef = db.collection('groups').doc(groupId).collection('liveSessions').doc(sessionId);
-  const userReactionRef = sessionRef.collection('userReactions').doc(uid);
-
-  const existing = await userReactionRef.get();
-  const updates = { [`reactions.${reaction}`]: FieldValue.increment(1) };
-
-  if (existing.exists && existing.data()?.reaction) {
-    updates[`reactions.${existing.data().reaction}`] = FieldValue.increment(-1);
-  }
-
-  await Promise.all([
-    sessionRef.update(updates),
-    userReactionRef.set({ reaction, updatedAt: FieldValue.serverTimestamp() }),
-  ]);
-
-  return { success: true };
-});
+exports.submitPollResponse = onCall({ region: REGION }, liveSessionHandlers.submitPollResponse);
+exports.submitReaction = onCall({ region: REGION }, liveSessionHandlers.submitReaction);
 
 // =====================================================
 // AI 每日簡報 (generateDailyBrief) - 每日 07:30

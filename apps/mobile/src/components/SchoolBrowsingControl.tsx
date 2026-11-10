@@ -72,7 +72,8 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
         ) : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`目前瀏覽${school.name}，選擇其他學校`}
+          testID="school-picker-open"
+          accessibilityLabel={school.id ? `目前瀏覽${school.name}，選擇其他學校` : '選擇我的學校'}
           onPress={() => {
             setQuery('');
             setDirectory(null);
@@ -86,8 +87,8 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
             pressed && s.pressed,
           ]}
         >
-          <Text style={[s.schoolName, compact && s.compactSchoolName]}>{school.name}</Text>
-          <Text style={s.changeSchool}>{compact ? '切換' : '選擇其他學校'}</Text>
+          <Text style={[s.schoolName, compact && s.compactSchoolName]}>{school.id ? school.name : '選擇我的學校'}</Text>
+          <Text style={s.changeSchool}>{school.id ? (compact ? '切換' : '選擇其他學校') : '搜尋學校'}</Text>
         </Pressable>
         {!compact ? (
           <Text style={s.browsingNote}>
@@ -124,6 +125,7 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
             </Text>
             <View style={[s.searchBox, searchFocused && s.searchFocused]}>
               <TextInput
+                testID="school-picker-search"
                 ref={searchInput}
                 accessibilityLabel="搜尋學校"
                 placeholder="搜尋學校名稱或代碼"
@@ -196,6 +198,7 @@ export function SchoolBrowsingControl({ compact = false }: { compact?: boolean }
                   renderItem={({ item: entry }) => (
                     <Pressable
                       accessibilityRole="button"
+                      testID={`school-picker-option-${entry.id}`}
                       accessibilityLabel={`選擇${entry.name}`}
                       accessibilityState={{ selected: entry.id === school.id }}
                       onPress={() => {

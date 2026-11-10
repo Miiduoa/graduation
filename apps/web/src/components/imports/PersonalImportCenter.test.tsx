@@ -1305,6 +1305,43 @@ it('repairs screenshot text against the decoded preview when AI returns no rows'
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
 });
 
+it('focuses recovered screenshot text after enabling the editor when a frame precedes the commit', async () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  let finish!: (result: Awaited<ReturnType<typeof runPersonalImportAi>>) => void;
+  vi.mocked(runPersonalImportAi).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<PersonalImportCenter />);
+  chooseAiScreenshot();
+  await waitFor(() => expect(runPersonalImportAi).toHaveBeenCalledOnce());
+  const editor = screen.getByLabelText('原始文字');
+  expect(editor.matches(':disabled')).toBe(true);
+
+  await act(async () => {
+    finish({ rows: [], issues: [], sourceText: '需要校對的截圖文字' });
+    await Promise.resolve();
+    // A frame may run before React commits the result and enables this fieldset.
+    expect(editor.matches(':disabled')).toBe(true);
+    frames.splice(0).forEach((callback) => callback(performance.now()));
+  });
+
+  expect(editor.matches(':disabled')).toBe(false);
+  expect(document.activeElement).toBe(editor);
+  expect(screen.getByDisplayValue('需要校對的截圖文字')).toBe(editor);
+  expect(readPersonalImports(context)).toHaveLength(0);
+  const otherField = screen.getByLabelText('這份資料的學年度');
+  otherField.focus();
+  fireEvent.change(otherField, { target: { value: '116' } });
+  expect(document.activeElement).toBe(otherField);
+});
+
 it('keeps unparsed text when another screenshot produces no rows', async () => {
   vi.mocked(runPersonalImportAi).mockResolvedValue({
     rows: [],

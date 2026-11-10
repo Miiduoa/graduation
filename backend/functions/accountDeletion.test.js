@@ -1,4 +1,18 @@
+const { FieldValue } = require('firebase-admin/firestore');
 const { createDeleteUserAccountHandler, RETAINED_CATEGORIES } = require('./accountDeletion');
+
+function isDeleteSentinel(value) {
+  return Boolean(value && typeof value.isEqual === 'function' && value.isEqual(FieldValue.delete()));
+}
+
+function applyWrite(current, data, replace) {
+  const next = replace ? {} : { ...(current || {}) };
+  for (const [key, value] of Object.entries(data)) {
+    if (isDeleteSentinel(value)) delete next[key];
+    else next[key] = value;
+  }
+  return next;
+}
 
 const NOW = Date.parse('2030-01-01T12:00:00Z');
 const request = (data = {}, uid = 'alice', authTime = NOW / 1000) => ({
@@ -41,7 +55,7 @@ function store(seed = []) {
       },
       set: async (data, options) => {
         check('set', path);
-        docs.set(path, options?.merge ? { ...docs.get(path), ...data } : data);
+        docs.set(path, applyWrite(docs.get(path), data, !options?.merge));
       },
       delete: async () => {
         check('delete', path);
@@ -126,12 +140,14 @@ function store(seed = []) {
         get: async (q) => results(q, base),
         delete: (reference) => writes.push(['delete', reference]),
         update: (reference, data) => writes.push(['update', reference, data]),
+        set: (reference, data, options) => writes.push(['set', reference, data, options]),
       };
       const result = await callback(transaction);
       check('commit', writes[0]?.[1].path || 'empty');
-      for (const [kind, reference, data] of writes) {
+      for (const [kind, reference, data, options] of writes) {
         if (kind === 'delete') docs.delete(reference.path);
-        else docs.set(reference.path, { ...docs.get(reference.path), ...data });
+        else if (kind === 'set') docs.set(reference.path, applyWrite(docs.get(reference.path), data, !options?.merge));
+        else docs.set(reference.path, applyWrite(docs.get(reference.path), data, false));
       }
       return result;
     },
@@ -435,6 +451,21 @@ test.each([
     expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
   },
 );
+
+test('school membership stamps are cleared in the same commit that marks deletion in progress', async () => {
+  const state = store([
+    ['users/alice', { email: 'private@example.com' }],
+    [
+      'schools/pu/members/alice',
+      { status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1' },
+    ],
+  ]);
+  state.fail('recursiveDelete', 'schools/pu/members/alice');
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect(state.docs.get('users/alice').accountDeletionInProgress).toBe(true);
+  expect(state.docs.get('schools/pu/members/alice')).toEqual({ status: 'inactive' });
+});
 
 test('Auth deletion errors stay failures and only missing Auth is idempotent success', async () => {
   const state = store([['users/alice', { email: 'private@example.com' }]]);

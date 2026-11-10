@@ -3,6 +3,7 @@
 import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { lostFoundFormFields } from '@campus/shared/src/lostFoundFields';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
@@ -312,15 +313,7 @@ function LostFoundPostContent({
         form: '尚有未確認的刊登結果。請先重試同一則內容，或確認列表後再修改。',
       });
       setStatusMessage('未知結果必須先對帳，不能直接改成另一則刊登。');
-      setFields({
-        type: currentPending.fields.type,
-        title: currentPending.fields.title,
-        description: currentPending.fields.description,
-        category: currentPending.fields.category,
-        location: currentPending.fields.location,
-        date: currentPending.fields.date,
-        contactInfo: currentPending.fields.contactInfo ?? '',
-      });
+      setFields(lostFoundFormFields(currentPending.fields));
       return;
     }
     setFields(next);
@@ -488,15 +481,7 @@ function LostFoundPostContent({
             setDocumentId(memoryDocumentId);
             setPending(intent);
             if (intent.fields) {
-              setFields({
-                type: intent.fields.type,
-                title: intent.fields.title,
-                description: intent.fields.description,
-                category: intent.fields.category,
-                location: intent.fields.location,
-                date: intent.fields.date,
-                contactInfo: intent.fields.contactInfo ?? '',
-              });
+              setFields(lostFoundFormFields(intent.fields));
             } else {
               setFields(memoryFields);
             }

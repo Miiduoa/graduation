@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Alert,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -18,6 +19,8 @@ import {
   DORM_INSPECTION_ITEMS,
   DORM_MILESTONE_LIMIT,
   DORM_PARCEL_LIMIT,
+  DORM_REPAIR_COPY,
+  DORM_REPAIR_REFERENCE_LIMIT,
   DORM_REPAIR_SHORTCUTS,
   DORM_REPAIR_CATEGORIES,
   DORM_REPAIR_STATUSES,
@@ -38,13 +41,14 @@ import {
   type DormRepairStatus,
   type DormWorkspace,
 } from '@campus/shared/src/dormitory';
+import { resolveDormRepairRoute } from '@campus/shared/src/dormRepairRoutes';
 import { resolveSchoolPublicServices } from '@campus/shared/src/schoolPublicServices';
 import { resolveDormitoryPublicGuide } from '@campus/shared/src/dormitoryGuide';
 import { AIDetailScreen, AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import { getThemeVersion, subscribeToTheme } from '../ui/theme';
 import { useSchool } from '../state/school';
-import { useAuth } from '../state/auth';
-import { useOptionalNuniSession } from '../state/nuniSession';
+import { useDormitoryOwner } from '../hooks/useDormLaundryReminder';
+import { laundryNotificationAllowed, refreshDormLaundryReminder } from '../services/dormLaundryReminder';
 import { parseDormRepairDictation } from '@campus/shared/src/dormRepairDictation';
 
 type ViewName = 'home' | 'guide' | 'repairs' | 'parcels' | 'dates' | 'checklist' | 'laundry';
@@ -62,6 +66,7 @@ const REPAIR_INITIAL = {
   title: '',
   location: '',
   description: '',
+  reference: '',
   category: 'other' as DormRepairCategory,
 };
 
@@ -111,16 +116,10 @@ function Field({
 
 export function DormitoryScreen({ navigation }: { navigation?: { goBack?: () => void } }) {
   const { school } = useSchool();
-  const { user, loading } = useAuth();
-  const nuni = useOptionalNuniSession();
-  if (loading || nuni?.loading || nuni?.pendingLogout) {
+  const owner = useDormitoryOwner();
+  if (!owner) {
     return <AIDetailScreen title="宿舍" onBack={() => navigation?.goBack?.()}><AICard><Body>正在確認使用者…</Body></AICard></AIDetailScreen>;
   }
-  const owner = user?.uid
-    ? 'firebase:' + user.uid
-    : nuni?.session
-      ? 'platform:' + nuni.session.platformAccountId
-      : 'guest';
   const key = dormStorageKey(owner, school.id);
   return (
     <DormitoryBody
@@ -167,6 +166,8 @@ function DormitoryBody({
   const [pendingParcelId, setPendingParcelId] = useState<string | null>(null);
   const [parcelFilter, setParcelFilter] = useState<'all' | 'waiting' | 'collected'>('waiting');
   const [duration, setDuration] = useState(45);
+  const [updatingLaundry, setUpdatingLaundry] = useState(false);
+  const laundryBusy = useRef(false);
   const [clock, setClock] = useState(() => Date.now());
   const activeRef = useRef(true);
   const rawRef = useRef<string | null>(null);
@@ -210,7 +211,7 @@ function DormitoryBody({
     return () => clearInterval(timer);
   }, []);
 
-  async function save(next: DormWorkspace): Promise<boolean> {
+  async function save(next: DormWorkspace | ((latest: DormWorkspace) => DormWorkspace)): Promise<boolean> {
     if (busy.current || !activeRef.current || loading || failure) return false;
     busy.current = true;
     try {
@@ -221,11 +222,14 @@ function DormitoryBody({
         setNotice('另一個操作已修改紀錄。為避免覆蓋，請重新開啟此頁後再編輯。');
         return false;
       }
-      const raw = JSON.stringify(normalizeDormWorkspace(next));
+      const workspace = normalizeDormWorkspace(typeof next === 'function'
+        ? next(normalizeDormWorkspace(currentRaw && JSON.parse(currentRaw)))
+        : next);
+      const raw = JSON.stringify(workspace);
       await writeDormitoryWorkspaceStorage(storageKey, raw);
       if (!activeRef.current) return false;
       rawRef.current = raw;
-      setData(normalizeDormWorkspace(next));
+      setData(workspace);
       setNotice('已儲存在此裝置');
       setConflict(false);
       return true;
@@ -237,15 +241,59 @@ function DormitoryBody({
     }
   }
 
+  useEffect(() => {
+    if (view !== 'laundry' || loading || failure || Platform.OS === 'web') return;
+    let active = true;
+    void refreshDormLaundryReminder(storageKey).then((state) => {
+      if (active && state === 'denied') {
+        setNotice('手機通知未啟用。請確認系統通知設定，再重新開啟到時提醒。');
+      }
+    }).catch(() => {
+      if (active) setNotice('暫時無法確認手機提醒，請稍後重試。');
+    });
+    return () => { active = false; };
+  }, [view, loading, failure, storageKey]);
+
+  async function updateLaundry(endAt: number | null, remind: boolean, ask = false) {
+    if (laundryBusy.current || conflict) return;
+    laundryBusy.current = true;
+    setUpdatingLaundry(true);
+    try {
+      const allowed = remind && (!ask || await laundryNotificationAllowed(true).catch(() => false));
+      if (!activeRef.current) return;
+      const saved = await save((latest) => ({ ...latest, laundryEndAt: endAt, laundryReminder: allowed }));
+      // Storage can finish writing after the screen closes. Reconcile the persisted timer even then.
+      const state = await refreshDormLaundryReminder(storageKey);
+      if (!saved || !activeRef.current || (state === undefined && Platform.OS !== 'web')) return;
+      setClock(Date.now());
+      if (!endAt) setNotice('已清除洗衣計時。');
+      else if (remind && (!allowed || state !== 'scheduled')) {
+        setNotice('計時已儲存。手機通知未啟用，可在系統設定開啟通知後重試。');
+      } else {
+        setNotice(allowed ? '已在這支手機排定到時提醒。' : '計時已儲存。');
+      }
+    } catch {
+      if (activeRef.current) setNotice(remind
+        ? '手機尚未確認到時提醒。請重新開啟洗衣計時再試一次。'
+        : '手機尚未確認已取消提醒，舊通知可能仍會出現。請重新開啟洗衣計時再試一次。');
+    } finally {
+      laundryBusy.current = false;
+      if (activeRef.current) setUpdatingLaundry(false);
+    }
+  }
+
   function editRepair(row?: DormRepair, shortcut?: { title: string; category: DormRepairCategory }) {
     setIssueNarration('');
     setRepair(row
-      ? { title: row.title, category: row.category, description: row.description, location: row.location }
+      ? {
+        title: row.title, category: row.category, description: row.description,
+        location: row.location, reference: row.reference ?? '',
+      }
       : {
         ...REPAIR_INITIAL,
         title: shortcut?.title ?? '',
         category: shortcut?.category ?? 'other',
-        location: data.room ? '寢室 ' + data.room : '',
+        location: [data.building, data.room && '寢室 ' + data.room].filter(Boolean).join(' '),
       });
     setEditingId(row?.id ?? null);
     setPendingId(null);
@@ -277,6 +325,7 @@ function DormitoryBody({
       updatedAt: Date.now(),
     };
     if (await save({ ...data, repairs: [row, ...data.repairs.filter((r) => r.id !== id)] })) {
+      if (filter !== 'all' && filter !== row.status) setFilter('all');
       setEditor(false);
       setEditingId(null);
       setPendingId(null);
@@ -399,6 +448,20 @@ function DormitoryBody({
     }
   }
 
+  function renderRepairHandoff(category: DormRepairCategory, location: string, followUp = false) {
+    const route = resolveDormRepairRoute(schoolId, category, location);
+    if (!route) return <Body muted>{DORM_REPAIR_COPY.missingRoute}</Body>;
+    const trackingUrl = followUp ? route.trackingUrl : undefined;
+    return (
+      <View style={{ gap: 8, marginTop: 12 }} accessibilityLabel={DORM_REPAIR_COPY.officialChannelTitle}>
+        <Body muted>{route.detail}</Body>
+        {route.url !== trackingUrl && <AIButton label={route.label} onPress={() => void openPublicLink(route.url)} />}
+        {trackingUrl && <AIButton variant="ghost" label={route.trackingLabel ?? DORM_REPAIR_COPY.officialTrackingFallback}
+          onPress={() => void openPublicLink(trackingUrl)} />}
+      </View>
+    );
+  }
+
   const progress = dormChecklistProgress(data);
   const inspectionProgress = dormInspectionProgress(data);
   const remaining = data.laundryEndAt ? Math.max(0, Math.ceil((data.laundryEndAt - clock) / 60000)) : 0;
@@ -423,7 +486,7 @@ function DormitoryBody({
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 16 }}>
             {([
               { id: 'parcels' as const, count: String(pendingParcels.length), label: '待領包裹' },
-              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: '待追蹤問題' },
+              { id: 'repairs' as const, count: String(data.repairs.filter((r) => r.status !== 'resolved').length), label: DORM_REPAIR_COPY.openIssues },
               { id: 'dates' as const, count: String(milestones.filter((entry) => !entry.completed).length), label: '待辦日期' },
               { id: 'checklist' as const, count: progress.completed + '/' + progress.total, label: '準備進度' },
             ]).map((item) => (
@@ -558,7 +621,8 @@ function DormitoryBody({
         {!loading && !failure && view === 'repairs' && (
           <>
             <AICard title="設備問題">
-              <Body muted>這是個人問題清單，不會傳給校方。「已通報」是自行註記，非校方已受理。</Body>
+              <Body muted>{DORM_REPAIR_COPY.intro}</Body>
+              {!editor && !data.repairs.length && renderRepairHandoff('other', data.building)}
               <View style={{ marginTop: 14 }}><AIButton label="＋ 記錄問題" onPress={() => editRepair()} /></View>
               {!editor && <View style={{ marginTop: 16, gap: 10 }}>
                 <Body muted>常見狀況，點一下就能先填好：</Body>
@@ -637,8 +701,11 @@ function DormitoryBody({
                   </View>
                   <Field label="位置" value={repair.location} maxLength={100} placeholder="例如：浴室洗手台" onChangeText={(text) => setRepair({ ...repair, location: text })} />
                   <Field label="詳細狀況" value={repair.description} maxLength={1200} multiline placeholder="詳細描述問題，方便向服務台通報" onChangeText={(text) => setRepair({ ...repair, description: text })} />
+                  <Field label={DORM_REPAIR_COPY.referenceLabel} value={repair.reference} maxLength={DORM_REPAIR_REFERENCE_LIMIT}
+                    placeholder={DORM_REPAIR_COPY.referencePlaceholder} onChangeText={(reference) => setRepair({ ...repair, reference })} />
+                  {renderRepairHandoff(repair.category, repair.location, !!repair.reference.trim())}
                   <View style={{ ...flexRow, marginTop: 16 }}>
-                    <AIButton label="儲存紀錄" disabled={conflict} onPress={() => void saveRepair()} />
+                    <AIButton label={DORM_REPAIR_COPY.saveMemo} disabled={conflict} onPress={() => void saveRepair()} />
                     <AIButton label="取消" variant="ghost" onPress={() => { setEditor(false); setEditingId(null); setPendingId(null); }} />
                   </View>
                 </View>
@@ -658,6 +725,8 @@ function DormitoryBody({
                 <Body muted>{DORM_REPAIR_STATUSES[item.status]}</Body>
                 {!!item.location && <Body>位置：{item.location}</Body>}
                 {!!item.description && <Body>{item.description}</Body>}
+                {!!item.reference && <Text selectable style={{ color: aiTokens.text, lineHeight: 23 }}>{DORM_REPAIR_COPY.referenceDisplay}：{item.reference}</Text>}
+                {(!editor || item.id !== editingId) && renderRepairHandoff(item.category, item.location, item.status !== 'draft' || !!item.reference)}
                 <View style={{ ...flexRow, marginTop: 12 }}>
                   <AIButton variant="ghost" label="編輯" onPress={() => editRepair(item)} />
                   <AIButton variant="ghost" label="分享通報文字" onPress={() => void shareRepair(item)} />
@@ -887,26 +956,36 @@ function DormitoryBody({
 
         {!loading && !failure && view === 'laundry' && (
           <AICard title="個人洗衣計時">
-            <Body muted>這是依自己設定的倒數計時，不是機台連線或即時空機查詢。</Body>
+            <Body muted>依機台顯示的剩餘時間設定倒數。</Body>
             <View style={{ alignItems: 'center', gap: 8, marginTop: 24, marginBottom: 22, padding: 22, borderRadius: 18, backgroundColor: aiTokens.panel }}>
               <Text style={{ fontSize: 29, fontWeight: '700', color: aiTokens.text }}>
                 {data.laundryEndAt ? remaining ? remaining + ' 分鐘' : '預估已完成' : '尚未開始'}
               </Text>
               <Body muted>{data.laundryEndAt ? '預估結束：' + new Date(data.laundryEndAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '可依洗衣機標示選擇時間'}</Body>
             </View>
-            <Body>預估運轉時間</Body>
-            <View style={{ ...flexRow, marginTop: 12 }}>
-              {[30, 45, 60, 90].map((n) => (
-                <Pressable key={n} accessibilityRole="radio" accessibilityState={{ checked: duration === n }}
-                  onPress={() => setDuration(n)} style={{ minHeight: 44, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 22, borderWidth: 1, borderColor: n === duration ? aiTokens.text : aiTokens.border }}>
-                  <Text style={{ color: aiTokens.text }}>{n} 分鐘</Text>
-                </Pressable>
-              ))}
-            </View>
+            {Platform.OS !== 'web' && <Body muted>可選擇到時收到手機通知。切換帳號或校園後，只會提醒目前使用的洗衣計時。</Body>}
+            {(!data.laundryEndAt || !remaining) && <>
+              <Body>預估運轉時間</Body>
+              <View style={{ ...flexRow, marginTop: 12 }}>
+                {[30, 45, 60, 90].map((n) => (
+                  <Pressable key={n} accessibilityRole="radio" accessibilityState={{ checked: duration === n }}
+                    onPress={() => setDuration(n)} style={{ minHeight: 44, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 22, borderWidth: 1, borderColor: n === duration ? aiTokens.text : aiTokens.border }}>
+                    <Text style={{ color: aiTokens.text }}>{n} 分鐘</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>}
             <View style={{ ...flexRow, marginTop: 20 }}>
-              <AIButton label="開始計時" disabled={conflict} onPress={() => { void save({ ...data, laundryEndAt: Date.now() + duration * 60000 }); setClock(Date.now()); }} />
-              {!!data.laundryEndAt && remaining > 0 && <AIButton variant="ghost" label="延長 10 分鐘" disabled={conflict} onPress={() => void save({ ...data, laundryEndAt: data.laundryEndAt! + 10 * 60000 })} />}
-              {!!data.laundryEndAt && <AIButton variant="ghost" label="清除計時" disabled={conflict} onPress={() => void save({ ...data, laundryEndAt: null })} />}
+              {(!data.laundryEndAt || !remaining) && <>
+                <AIButton label="開始計時" disabled={conflict || updatingLaundry} onPress={() => void updateLaundry(Date.now() + duration * 60000, false)} />
+                {Platform.OS !== 'web' && <AIButton label="開始計時並提醒" variant="ghost" disabled={conflict || updatingLaundry} onPress={() => void updateLaundry(Date.now() + duration * 60000, true, true)} />}
+              </>}
+              {!!data.laundryEndAt && remaining > 0 && <>
+                <AIButton variant="ghost" label="延長 10 分鐘" disabled={conflict || updatingLaundry} onPress={() => void updateLaundry(data.laundryEndAt! + 10 * 60000, data.laundryReminder)} />
+                {Platform.OS !== 'web' && <AIButton variant="ghost" label={data.laundryReminder ? '關閉到時提醒' : '開啟到時提醒'} disabled={conflict || updatingLaundry}
+                  onPress={() => void updateLaundry(data.laundryEndAt, !data.laundryReminder, !data.laundryReminder)} />}
+              </>}
+              {!!data.laundryEndAt && <AIButton variant="ghost" label="清除計時" disabled={conflict || updatingLaundry} onPress={() => void updateLaundry(null, false)} />}
             </View>
           </AICard>
         )}

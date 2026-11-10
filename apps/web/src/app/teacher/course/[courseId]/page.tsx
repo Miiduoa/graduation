@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { use } from 'react';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { SiteShell } from '@/components/SiteShell';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { useTeacherCourse } from '@/lib/useTeacherCourse';
 import { TeacherAssignments } from '@/components/teaching/TeacherAssignments';
 import styles from '../../../home.module.css';
@@ -16,9 +17,9 @@ export default function TeacherCoursePage(props: {
 }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolId, schoolSearch: q } = resolveSchoolPageContext(searchParams);
+  const { ready, schoolId, schoolSearch: q } = useBrowsingSchoolPageContext(searchParams);
   const { state, refresh, authLoading, signedIn } = useTeacherCourse(
-    schoolId,
+    ready ? schoolId : '',
     courseId,
     'workspace',
   );
@@ -31,7 +32,9 @@ export default function TeacherCoursePage(props: {
       title={workspace?.course.name ?? '課程工作台'}
       subtitle="查看課程教材、作業與成績，接續課堂點名。"
     >
-      {authLoading ? (
+      {!ready ? (
+        <SchoolScopePlaceholder />
+      ) : authLoading ? (
         <p role="status">確認登入狀態…</p>
       ) : !signedIn ? (
         <SchoolAccountRequired
@@ -53,9 +56,9 @@ export default function TeacherCoursePage(props: {
             <Link className={styles.primary} href={`${studentPath}${q}`}>
               開啟課程內容
             </Link>
-            <Link className={styles.secondary} href={`${path}/attendance${q}`}>
+            <a className={styles.secondary} href={`${path}/attendance${q}`}>
               課堂點名
-            </Link>
+            </a>
             <Link className={styles.secondary} href={`${path}/gradebook${q}`}>
               查看成績簿
             </Link>

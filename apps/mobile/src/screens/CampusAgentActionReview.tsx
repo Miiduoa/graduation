@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Text, View } from 'react-native';
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import {
   confirmCampusAgentWrite,
@@ -90,7 +91,8 @@ export function CampusAgentActionReview({
     }
   }
 
-  const reference = receipt?.requestId || receipt?.repairId ||
+  const isRepair = proposal.toolName === 'createDormRepairRequest';
+  const reference = isRepair ? undefined : receipt?.requestId || receipt?.repairId ||
     receipt?.reservationId || receipt?.loanId;
   const success = receipt?.success === true;
   return (
@@ -105,11 +107,11 @@ export function CampusAgentActionReview({
     }}>
       <Text style={{ color: aiTokens.muted, fontSize: 12, fontWeight: '700' }}>
         {success
-          ? '伺服器已確認完成'
+          ? (isRepair ? DORM_REPAIR_COPY.assistantWriteSuccess : '伺服器已確認完成')
           : permissionDenied
             ? '設定已關閉此寫入動作'
             : attempted
-              ? '已送出確認，請核對結果'
+              ? (isRepair ? DORM_REPAIR_COPY.assistantWritePending : '已送出確認，請核對結果')
               : '需要本人確認 · 尚未執行'}
       </Text>
       <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>
@@ -136,7 +138,7 @@ export function CampusAgentActionReview({
           ) : success ? (
             <View style={{ gap: 6 }}>
               <Text accessibilityRole="alert" style={{ color: aiTokens.text, fontWeight: '700' }}>
-                伺服器已確認執行成功
+                {isRepair ? DORM_REPAIR_COPY.assistantWriteSuccess : '伺服器已確認執行成功'}
               </Text>
               {reference ? (
                 <Text selectable style={{ color: aiTokens.muted }}>
@@ -144,7 +146,9 @@ export function CampusAgentActionReview({
                 </Text>
               ) : null}
               <Text style={{ color: aiTokens.muted, lineHeight: 20, fontSize: 12 }}>
-                請到對應服務頁面核對完整紀錄。
+                {isRepair
+                  ? DORM_REPAIR_COPY.assistantSavedMemo
+                  : '請到對應服務頁面核對完整紀錄。'}
               </Text>
             </View>
           ) : permissionDenied ? (
@@ -162,7 +166,9 @@ export function CampusAgentActionReview({
                 {uncertain ? '執行狀態尚未確認' : receipt?.success === false ? '伺服器未確認操作成功' : '正在等待執行結果…'}
               </Text>
               <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
-                為避免重複送出，請先到對應服務頁面查核。這份草稿不會再次自動執行。
+                {isRepair
+                  ? DORM_REPAIR_COPY.assistantWriteUncertain
+                  : '為避免重複送出，請先到對應服務頁面查核。這份草稿不會再次自動執行。'}
               </Text>
             </View>
           )}

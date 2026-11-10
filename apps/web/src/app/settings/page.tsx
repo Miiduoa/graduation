@@ -38,7 +38,7 @@ import { useAssistantEnabled } from '@/components/AssistantEnabledProvider';
 import { useNuniSession } from '@/features/nuni/Session';
 import { useToast } from '@/components/ui';
 import { useSignInOptions } from '@/lib/signInOptions';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
   getAuth,
   getDb,
@@ -189,7 +189,7 @@ export default function SettingsPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; section?: string }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = useBrowsingSchoolPageContext(searchParams);
   const { user, loading } = useAuth();
   if (loading)
     return (

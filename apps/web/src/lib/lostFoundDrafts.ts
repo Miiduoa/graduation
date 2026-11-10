@@ -1,7 +1,13 @@
 import {
-  todayTaipeiCalendarDate,
+  isLostFoundWriteFields,
+  lostFoundFormFields,
+  newLostFoundFields,
+  pickLostFoundFields,
   type LostFoundWriteFields,
-} from './lostFound';
+} from '@campus/shared/src/lostFoundFields';
+import { todayTaipeiCalendarDate } from './lostFound';
+
+export { sameLostFoundFormFields as fieldsEqual } from '@campus/shared/src/lostFoundFields';
 
 const DRAFT_PREFIX = 'campus-one:lost-found-draft:v1:';
 const PENDING_PREFIX = 'campus-one:lost-found-pending:v1:';
@@ -84,20 +90,6 @@ function createIdsStorageKey(uid: string, schoolId: string) {
   return `${CREATE_IDS_PREFIX}${encodeURIComponent(uid)}:${encodeURIComponent(schoolId)}`;
 }
 
-function isWriteFields(value: unknown): value is LostFoundWriteFields {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
-  return (
-    (row.type === 'lost' || row.type === 'found') &&
-    typeof row.title === 'string' &&
-    typeof row.description === 'string' &&
-    typeof row.category === 'string' &&
-    typeof row.location === 'string' &&
-    typeof row.date === 'string' &&
-    (row.contactInfo === undefined || typeof row.contactInfo === 'string')
-  );
-}
-
 function parseDraft(raw: string, scope: LostFoundDraftScope): LostFoundFormDraft {
   let parsed: unknown;
   try {
@@ -111,7 +103,7 @@ function parseDraft(raw: string, scope: LostFoundDraftScope): LostFoundFormDraft
     row.version !== 1 ||
     typeof row.documentId !== 'string' ||
     !row.documentId ||
-    !isWriteFields(row) ||
+    !isLostFoundWriteFields(row) ||
     (row.expectedUpdatedAt !== undefined &&
       row.expectedUpdatedAt !== null &&
       typeof row.expectedUpdatedAt !== 'string')
@@ -127,13 +119,7 @@ function parseDraft(raw: string, scope: LostFoundDraftScope): LostFoundFormDraft
   return {
     version: 1,
     documentId: row.documentId,
-    type: row.type,
-    title: row.title,
-    description: row.description,
-    category: row.category,
-    location: row.location,
-    date: row.date,
-    contactInfo: row.contactInfo,
+    ...pickLostFoundFields(row),
     expectedUpdatedAt: row.expectedUpdatedAt,
   };
 }
@@ -152,7 +138,7 @@ function parsePending(raw: string): LostFoundPendingIntent {
     !['create', 'edit', 'resolve'].includes(row.action) ||
     typeof row.documentId !== 'string' ||
     !row.documentId ||
-    (row.fields !== undefined && !isWriteFields(row.fields)) ||
+    (row.fields !== undefined && !isLostFoundWriteFields(row.fields)) ||
     (row.expectedUpdatedAt !== undefined &&
       row.expectedUpdatedAt !== null &&
       typeof row.expectedUpdatedAt !== 'string')
@@ -164,29 +150,7 @@ function parsePending(raw: string): LostFoundPendingIntent {
     action: row.action,
     documentId: row.documentId,
     expectedUpdatedAt: row.expectedUpdatedAt,
-    fields: row.fields
-      ? {
-          type: row.fields.type,
-          title: row.fields.title,
-          description: row.fields.description,
-          category: row.fields.category,
-          location: row.fields.location,
-          date: row.fields.date,
-          contactInfo: row.fields.contactInfo,
-        }
-      : undefined,
-  };
-}
-
-function fieldsFromSource(source: LostFoundWriteFields): LostFoundWriteFields {
-  return {
-    type: source.type,
-    title: source.title,
-    description: source.description,
-    category: source.category,
-    location: source.location,
-    date: source.date,
-    contactInfo: source.contactInfo ?? '',
+    fields: row.fields ? pickLostFoundFields(row.fields) : undefined,
   };
 }
 
@@ -198,13 +162,7 @@ export function saveLostFoundDraft(scope: LostFoundDraftScope, draft: LostFoundF
     uid: scope.uid,
     schoolId: scope.schoolId,
     documentId: draft.documentId,
-    type: draft.type,
-    title: draft.title,
-    description: draft.description,
-    category: draft.category,
-    location: draft.location,
-    date: draft.date,
-    contactInfo: draft.contactInfo,
+    ...pickLostFoundFields(draft),
     expectedUpdatedAt: draft.expectedUpdatedAt,
   };
   try {
@@ -255,17 +213,7 @@ export function saveLostFoundPending(
     action: intent.action,
     documentId: intent.documentId,
     expectedUpdatedAt: intent.expectedUpdatedAt,
-    fields: intent.fields
-      ? {
-          type: intent.fields.type,
-          title: intent.fields.title,
-          description: intent.fields.description,
-          category: intent.fields.category,
-          location: intent.fields.location,
-          date: intent.fields.date,
-          contactInfo: intent.fields.contactInfo,
-        }
-      : undefined,
+    fields: intent.fields ? pickLostFoundFields(intent.fields) : undefined,
   };
   try {
     const encoded = JSON.stringify(record);
@@ -372,12 +320,7 @@ function collectCreateDocumentIds(uid: string, schoolId: string): string[] {
   return [...ids].filter((id) => id && !id.includes('/'));
 }
 
-/**
- * Recover ALL scoped create drafts/pending intents for uid+school,
- * independent of any single "latest draft" pointer.
- * Corrupt / pending unresolved creates are listed first.
- * Unreadable records keep their document id and raw storage keys.
- */
+// Scan the local keys too: a draft may have been saved before its index entry.
 export function listRecoverableCreateSessions(
   uid: string,
   schoolId: string,
@@ -387,57 +330,35 @@ export function listRecoverableCreateSessions(
     const scope: LostFoundDraftScope = { uid, schoolId, mode: 'create', itemKey: documentId };
     let pending: LostFoundPendingIntent | null = null;
     let draft: LostFoundFormDraft | null = null;
-    let pendingCorrupt = false;
-    let draftCorrupt = false;
-    let corruptionMessage = '';
+    let readError: string | undefined;
 
     try {
       pending = loadLostFoundPending(scope);
     } catch (error) {
-      pendingCorrupt = true;
-      corruptionMessage =
-        error instanceof LostFoundStorageError
-          ? error.message
-          : '待確認操作資料已損毀；請先查詢此則刊登狀態。';
+      readError = error instanceof LostFoundStorageError
+        ? error.message
+        : '待確認操作資料已損毀；請先查詢此則刊登狀態。';
     }
 
     try {
       draft = loadLostFoundDraft(scope);
     } catch (error) {
-      draftCorrupt = true;
-      if (!corruptionMessage) {
-        corruptionMessage =
-          error instanceof LostFoundStorageError
-            ? error.message
-            : '草稿資料已損毀；請先查詢此則刊登狀態。';
+      if (!readError) {
+        readError = error instanceof LostFoundStorageError
+          ? error.message
+          : '草稿資料已損毀；請先查詢此則刊登狀態。';
       }
     }
 
-    // Readable pending still drives recovery even if the sibling draft blob is damaged.
-    if (pending && !pendingCorrupt) {
-      sessions.push({
-        documentId,
-        pending,
-        draft: draftCorrupt ? null : draft,
-        fields: pending.fields
-          ? fieldsFromSource(pending.fields)
-          : draft && !draftCorrupt
-            ? fieldsFromSource(draft)
-            : emptyLostFoundFields(),
-      });
-      continue;
-    }
-
-    if (pendingCorrupt || draftCorrupt) {
+    // A readable pending write can still be retried if its draft is damaged.
+    if (!pending && readError !== undefined) {
       sessions.push({
         documentId,
         pending: null,
         draft: null,
         fields: emptyLostFoundFields(),
         corrupt: true,
-        corruptionMessage:
-          corruptionMessage ||
-          '本機待確認或草稿資料已損毀，尚未對帳前請勿另開新刊登。',
+        corruptionMessage: readError || '本機待確認或草稿資料已損毀，尚未對帳前請勿另開新刊登。',
       });
       continue;
     }
@@ -448,7 +369,7 @@ export function listRecoverableCreateSessions(
       documentId,
       pending,
       draft,
-      fields: source ? fieldsFromSource(source) : emptyLostFoundFields(),
+      fields: source ? lostFoundFormFields(source) : emptyLostFoundFields(),
     });
   }
   return sessions.sort((a, b) => {
@@ -470,25 +391,5 @@ export function clearDamagedCreateLocalMetadata(scope: LostFoundDraftScope): voi
 }
 
 export function emptyLostFoundFields(): LostFoundWriteFields {
-  return {
-    type: 'lost',
-    title: '',
-    description: '',
-    category: 'other',
-    location: '',
-    date: todayTaipeiCalendarDate(),
-    contactInfo: '',
-  };
-}
-
-export function fieldsEqual(a: LostFoundWriteFields, b: LostFoundWriteFields): boolean {
-  return (
-    a.type === b.type &&
-    a.title === b.title &&
-    a.description === b.description &&
-    a.category === b.category &&
-    a.location === b.location &&
-    a.date === b.date &&
-    (a.contactInfo ?? '') === (b.contactInfo ?? '')
-  );
+  return newLostFoundFields(todayTaipeiCalendarDate());
 }

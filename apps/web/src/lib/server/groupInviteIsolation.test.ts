@@ -20,6 +20,7 @@ it('does not import the Functions index, trigger runners, or custom-claims helpe
     'src/lib/server/signInPuStudentId.ts',
     'src/lib/server/schoolStudentIdLoginEnabled.ts',
     'src/lib/server/firebaseCustomToken.ts',
+    'src/lib/server/campusStoryBindingHandler.ts',
   ];
   const joined = files.map((file) => readFileSync(join(root, file), 'utf8')).join('\n');
   expect(joined).not.toMatch(/backend\/functions\/index/);
@@ -54,6 +55,17 @@ it('keeps createGroup off the HTTP allowlist', () => {
   expect(hosted).toMatch(/reviewLeaveRequest/);
   expect(hosted).toMatch(/listLeaveReviewQueue/);
   expect(hosted).toMatch(/signInPuStudentId/);
+  expect(hosted).toMatch(/ensureCampusStoryBinding/);
+  expect(hosted).not.toMatch(/privateGroupFile/);
+});
+
+it('reuses the Functions campus story binding helper instead of a forked copy', () => {
+  const handler = readFileSync(join(root, 'src/lib/server/campusStoryBindingHandler.ts'), 'utf8');
+  const dispatch = readFileSync(join(root, 'src/lib/server/fnDispatch.ts'), 'utf8');
+  expect(handler).toMatch(/backend\/functions\/campusStoryAccessBinding\.js/);
+  expect(handler).toMatch(/createEnsureCampusStoryBindingHandler/);
+  expect(handler).not.toMatch(/stampExistingCampusStoryMemberships/);
+  expect(dispatch).toMatch(/createCampusStoryBindingHandler/);
 });
 
 it('stubs firebase-admin on the webpack browser bundle', () => {

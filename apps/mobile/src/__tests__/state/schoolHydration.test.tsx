@@ -7,7 +7,7 @@ import { SchoolProvider, useSchool } from '../../state/school';
 jest.mock('../../data/cachedSource', () => ({ clearCacheExceptSchool: jest.fn(async () => {}) }));
 jest.mock('../../data/hybridSource', () => ({ setHybridSourceSchoolContext: jest.fn() }));
 jest.mock('../../ui/theme', () => ({
-  registerSchoolTheme: jest.fn(),
+  registerSchoolTheme: jest.fn(), clearSchoolTheme: jest.fn(),
   applySchoolTheme: jest.fn(),
 }));
 
@@ -20,9 +20,10 @@ function deferred<T>() {
 }
 
 function CampusPicker() {
-  const { school, setSelection } = useSchool();
+  const { school, schoolId, selectionReady, setSelection } = useSchool();
   return (
     <View>
+      <Text testID="scope">{selectionReady ? schoolId ?? 'no-selection' : 'loading'}</Text>
       <Text testID="selected-campus">{school.id}</Text>
       <Pressable onPress={() => setSelection({ code: 'NTHU', schoolId: 'nthu' })}>
         <Text>選擇清華大學</Text>
@@ -75,4 +76,45 @@ test('saved campus still restores normally when the user has not switched', asyn
   await AsyncStorage.setItem(key, JSON.stringify({ code: 'NTHU', schoolId: 'nthu' }));
   const view = render(<SchoolProvider><CampusPicker /></SchoolProvider>);
   await waitFor(() => expect(view.getByTestId('selected-campus').props.children).toBe('nthu'));
+});
+
+test('fresh installs have no campus data scope until an explicit choice and do not persist a default', async () => {
+  const hybrid = require('../../data/hybridSource');
+  const view = render(<SchoolProvider><CampusPicker /></SchoolProvider>);
+  await view.findByText('no-selection');
+  expect(hybrid.setHybridSourceSchoolContext).toHaveBeenCalledWith(null);
+  expect(hybrid.setHybridSourceSchoolContext).not.toHaveBeenCalledWith('pu');
+  expect(await AsyncStorage.getItem(key)).toBeNull();
+  fireEvent.press(view.getByText('選擇清華大學'));
+  await waitFor(() => expect(view.getByTestId('scope').props.children).toBe('nthu'));
+  expect(JSON.parse((await AsyncStorage.getItem(key))!).schoolId).toBe('nthu');
+});
+test.each([
+  [{ code: 'PU', schoolId: 'pu' }, 'pu'],
+  [{ code: 'NTHU' }, 'nthu'],
+  [{ code: 'TCU' }, 'no-selection'],
+  [{ schoolId: 57 }, 'no-selection'],
+])('restores only identifiable stored choices (%j)', async (record, expected) => {
+  await AsyncStorage.setItem(key, JSON.stringify(record));
+  const view = render(<SchoolProvider><CampusPicker /></SchoolProvider>);
+  await waitFor(() => expect(view.getByTestId('scope').props.children).toBe(expected));
+});
+
+test('the hybrid source changes before child passive reads and clears on unmount', async () => {
+  const hybrid = require('../../data/hybridSource').setHybridSourceSchoolContext;
+  const scopes: Array<string | null> = [];
+  function Reader() {
+    const { schoolId, selectionReady } = useSchool();
+    React.useEffect(() => {
+      if (selectionReady) scopes.push(hybrid.mock.lastCall[0]);
+    }, [schoolId, selectionReady]);
+    return <CampusPicker />;
+  }
+  const view = render(<SchoolProvider><Reader /></SchoolProvider>);
+  await view.findByText('no-selection');
+  fireEvent.press(view.getByText('選擇清華大學'));
+  fireEvent.press(view.getByText('選擇成功大學'));
+  expect(scopes).toEqual([null, 'nthu', 'ncku']);
+  view.unmount();
+  expect(hybrid).toHaveBeenLastCalledWith(null);
 });
