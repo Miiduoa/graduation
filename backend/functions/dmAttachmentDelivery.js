@@ -41,17 +41,23 @@ async function authorize(db, uid, conversationId) {
     throw forbidden();
   }
   const schoolId = thread.schoolId;
-  // These reads are deliberately in Admin SDK, NOT Storage Rules. All three
-  // must be authoritative on EACH request, including after school transfers.
-  const [profileSnapshot, memberSnapshot] = await Promise.all([
+  const peerUid = thread.memberIds.find((id) => id !== uid);
+  // These reads are deliberately in Admin SDK, NOT Storage Rules. Caller and
+  // peer profile plus membership must be authoritative on EACH request,
+  // including after school transfers or the other account being disabled.
+  const [profileSnapshot, memberSnapshot, peerProfile, peerMember] = await Promise.all([
     db.collection('users').doc(uid).get(),
     db.collection('schools').doc(schoolId).collection('members').doc(uid).get(),
+    db.collection('users').doc(peerUid).get(),
+    db.collection('schools').doc(schoolId).collection('members').doc(peerUid).get(),
   ]);
-  const profile = profileSnapshot.data();
-  if (!profileSnapshot.exists || !memberSnapshot.exists ||
-      profile?.schoolId !== schoolId || isAccountUnavailable(profile) ||
-      memberSnapshot.data()?.status !== 'active') {
-    throw forbidden();
+  for (const [profileSnap, memberSnap] of [[profileSnapshot, memberSnapshot], [peerProfile, peerMember]]) {
+    const profile = profileSnap.data();
+    if (!profileSnap.exists || !memberSnap.exists ||
+        profile?.schoolId !== schoolId || isAccountUnavailable(profile) ||
+        memberSnap.data()?.status !== 'active') {
+      throw forbidden();
+    }
   }
   return schoolId;
 }

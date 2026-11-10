@@ -62,7 +62,9 @@ test('server authorization checks conversation, current school profile, and acti
   const result = await call();
   expect(result).toEqual({ url: expect.stringContaining('X-Goog-Expires'), expiresAt: new Date(1234567000000 + MINUTE_MS).toISOString() });
   expect(reads).toEqual([
-    'conversations/private', 'users/alice', 'schools/pu/members/alice',
+    'conversations/private',
+    'users/alice', 'schools/pu/members/alice',
+    'users/bob', 'schools/pu/members/bob',
   ]);
   expect(bucket.file).toHaveBeenCalledWith('conversations/private/media/one/file.pdf');
   expect(file.setMetadata).toHaveBeenCalledWith(
@@ -82,6 +84,11 @@ test.each([
   ['disabled profile', 'users/alice', { schoolId: 'pu', status: 'disabled' }],
   ['suspended profile', 'users/alice', { schoolId: 'pu', status: 'suspended' }],
   ['inactive profile', 'users/alice', { schoolId: 'pu', status: 'inactive' }],
+  ['peer deleted profile', 'users/bob', { schoolId: 'pu', status: 'deleted' }],
+  ['peer disabled profile', 'users/bob', { schoolId: 'pu', status: 'disabled' }],
+  ['peer suspended profile', 'users/bob', { schoolId: 'pu', status: 'suspended' }],
+  ['peer inactive profile', 'users/bob', { schoolId: 'pu', status: 'inactive' }],
+  ['peer account deletion', 'users/bob', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['account deletion', 'users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['inactive membership', 'schools/pu/members/alice', { status: 'inactive' }],
   ['missing membership', 'schools/pu/members/alice', null],
