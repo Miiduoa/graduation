@@ -420,6 +420,51 @@ describe('public Providence building geometry route', () => {
     expect(text).not.toHaveBeenCalled();
   });
 
+  it('ends a never-settling upstream fetch after 12 seconds even if it ignores abort', async () => {
+    vi.useFakeTimers();
+    const upstream = vi.fn()
+      // Simulate a proxy ignoring AbortSignal entirely; this promise never settles.
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementationOnce(async () => new Response(osmPayload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const pending = GET();
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    const unavailable = await pending;
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get('Cache-Control')).toBe('no-store');
+    expect((await unavailable.json()).error).toMatch(/temporarily unavailable/);
+    expect(upstream.mock.calls[0][1].signal.aborted).toBe(true);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+
+    // Expired shared pending work must not block a later healthy refresh.
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1);
+    const recovered = await GET();
+    expect(recovered.status).toBe(200);
+    expect((await recovered.json()).buildings).toHaveLength(1);
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it('ends an unresponsive streamed response body after the server deadline', async () => {
+    vi.useFakeTimers();
+    // Headers arrive, but reading the body never completes and the mock ignores abort.
+    const stalled = new ReadableStream<Uint8Array>({
+      start() { /* An unresponsive server sends no bytes and never closes. */ },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stalled, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(upstream.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the fallback explicit and rate limits repeated upstream failures', async () => {
     const mockedFetch = vi.fn().mockRejectedValue(new Error('timeout'));
     vi.stubGlobal('fetch', mockedFetch);
