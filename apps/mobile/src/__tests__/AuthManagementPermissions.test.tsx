@@ -3,18 +3,31 @@ import { act, render, waitFor } from '@testing-library/react-native';
 import type { User } from 'firebase/auth';
 import { getDoc, getDocs, type CollectionReference } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getPostLoginContext } from '../data/postLoginDataRouter';
+import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+import { getAnyCachedAnnouncements, getAnyCachedCourses, getAnyCachedTCCourses } from '../services/puDataCache';
+import type { PUSession } from '../services/puDirectScraper';
+import type { PostLoginContext } from '../data/postLoginTypes';
 import { AuthProvider, useAuth } from '../state/auth';
 import { SchoolProvider, useSchool } from '../state/school';
+import { executeSmartAction } from '../services/aiSmartActions';
 import { loadMockAuthSession } from '../services/mockAuth';
+import { getVerifiedSchoolAiScope, isVerifiedSchoolAiScopeCurrent, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
 
+let mockPUSession: PUSession | null;
+let mockSchoolGeneration = 0;
 let mockAuthCallback: ((user: User | null) => Promise<void>) | null = null;
 let mockHasFirebaseConfig = true;
+let mockTokenCallback: (user: User | null, error: Error | null) => void;
 const mockFirebaseAuth: { currentUser: User | null } = { currentUser: null };
 jest.mock('../firebase', () => ({
   getAuthInstance: () => mockFirebaseAuth,
   getDb: () => ({}),
   hasUsableFirebaseConfig: () => mockHasFirebaseConfig,
-  subscribeToTokenRefresh: () => () => undefined,
+  subscribeToTokenRefresh: (callback: typeof mockTokenCallback) => {
+    mockTokenCallback = callback;
+    return () => undefined;
+  },
 }));
 jest.mock('firebase/auth', () => ({
   onAuthStateChanged: (_auth: unknown, callback: typeof mockAuthCallback) => {
@@ -34,14 +47,14 @@ jest.mock('firebase/firestore', () => ({
   getDocs: jest.fn(),
 }));
 jest.mock('../data/postLoginDataRouter', () => ({
-  buildPostLoginContext: jest.fn(async () => null),
+  getPostLoginContext: jest.fn(async () => null), buildPostLoginContext: jest.fn(async () => null),
 }));
 jest.mock('../data/cachedSource', () => ({
   clearAllCache: jest.fn(),
   clearCacheExceptSchool: jest.fn(async () => undefined),
 }));
 jest.mock('../data/hybridSource', () => ({ setHybridSourceSchoolContext: jest.fn() }));
-jest.mock('../ui/theme', () => ({ registerSchoolTheme: jest.fn(), applySchoolTheme: jest.fn() }));
+jest.mock('../ui/theme', () => ({ registerSchoolTheme: jest.fn(), applySchoolTheme: jest.fn(), clearSchoolTheme: jest.fn() }));
 jest.mock('../services/offline', () => ({
   clearAllOfflineData: jest.fn(),
   getOfflineQueue: async () => [],
@@ -62,8 +75,19 @@ jest.mock('../services/puDataCache', () => ({
   getAnyCachedCourses: jest.fn(async () => null),
   getAnyCachedTCCourses: jest.fn(async () => null),
 }));
-jest.mock('../services/postLoginContextHolder', () => ({ setInMemoryPostLoginContext: jest.fn() }));
-jest.mock('../services/studentIdAuth', () => ({ clearPUSession: jest.fn() }));
+jest.mock('../services/postLoginContextHolder', () => ({ getInMemoryPostLoginContext: jest.fn(() => null), setInMemoryPostLoginContext: jest.fn() }));
+jest.mock('../services/supabaseLmsCache', () => ({
+  getAnyCachedTCActivities: jest.fn(async () => null),
+  getAnyCachedTCTodos: jest.fn(async () => null),
+  getAnyCachedTCCourses: jest.fn(async () => null),
+}));
+jest.mock('../services/studentIdAuth', () => ({
+  clearPUSession: jest.fn(() => { mockPUSession = null; mockSchoolGeneration += 1; }),
+  captureSchoolSessionAssertion: (identity: { uid: string; schoolId: string }) =>
+    jest.requireActual('../services/schoolSessionAssertion').createSchoolSessionAssertion(
+      identity, () => mockPUSession, () => mockSchoolGeneration,
+    ),
+}));
 jest.mock('../services/clearOwnedPuCampusSessions', () => ({
   clearOwnedPuCampusSessions: jest.fn().mockResolvedValue(undefined),
 }));
@@ -100,9 +124,9 @@ function collectionSnapshot(path: string) {
   return { empty: docs.length === 0, docs };
 }
 
-function mountProvider() {
+function mountProvider(initialSchoolId: string | null = 'pu') {
   return render(
-    <SchoolProvider initial={{ schoolId: 'pu' }}>
+    <SchoolProvider initial={{ schoolId: initialSchoolId }}>
       <SchoolProbe />
       <AuthProvider>
         <Probe />
@@ -121,6 +145,15 @@ async function signIn(uid = 'u1') {
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  revokeVerifiedSchoolAiScope();
+  mockPUSession = {
+    loggedIn: true, studentName: '同學', backendOwnerUid: 'u1', schoolId: 'pu',
+    localMock: false, expiresAt: Date.now() + 60_000,
+  };
+  let held: PostLoginContext | null = null;
+  jest.mocked(getPostLoginContext).mockReset().mockResolvedValue(null);
+  jest.mocked(getInMemoryPostLoginContext).mockImplementation(() => held);
+  jest.mocked(setInMemoryPostLoginContext).mockImplementation((ctx) => { held = ctx; });
   await AsyncStorage.clear();
   mockAuthCallback = null;
   mockHasFirebaseConfig = true;
@@ -495,4 +528,133 @@ test('a standalone AuthProvider has no implicit selected-school management scope
     schoolMembershipSchoolId: 'pu',
   });
   expect(auth).toMatchObject({ isAdmin: false, isEditor: false });
+});
+
+const taggedContext = (uid: string, schoolId = 'pu') =>
+  ({ uid, schoolId, origin: 'verified-school-login' } as PostLoginContext);
+
+test.each([[null, 'pu'], ['nthu', 'pu'], ['nthu', 'nthu'], ['pu', 'nthu']])(
+  'selection %s and account school %s cannot read or relabel the PU cache', async (selected, accountSchool) => {
+    records.set('users/u1', { role: 'student', primarySchoolId: accountSchool });
+    mountProvider(selected);
+    await signIn();
+    expect(getPostLoginContext).not.toHaveBeenCalled();
+    expect(getAnyCachedCourses).not.toHaveBeenCalled();
+    expect(getAnyCachedTCCourses).not.toHaveBeenCalled();
+    expect(getAnyCachedAnnouncements).not.toHaveBeenCalled();
+  },
+);
+
+test('only verified PU login contexts for the active Firebase owner are restored; leaving the scope clears memory', async () => {
+  const ctx = taggedContext('u1');
+  jest.mocked(getPostLoginContext).mockResolvedValue(ctx);
+  const view = mountProvider();
+  await signIn();
+  expect(getInMemoryPostLoginContext()).toBe(ctx);
+  const identity = { userId: 'u1', schoolId: 'pu' };
+  const scope = getVerifiedSchoolAiScope(identity)!;
+  expect(scope?.context).toBe(ctx);
+  expect(await executeSmartAction('query_assignments', identity)).toMatchObject({ success: true });
+  expect(getAnyCachedCourses).not.toHaveBeenCalled();
+  await act(async () => school.setSelection({ schoolId: 'nthu' }));
+  expect(getInMemoryPostLoginContext()).toBeNull();
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
+  expect(await executeSmartAction('query_assignments', identity)).toMatchObject({ success: false, title: '學校資料尚未就緒' });
+  view.unmount();
+});
+
+test.each([taggedContext('old-account'), taggedContext('u1', 'nthu'), taggedContext('u1', 'tw-pu'), { uid: 'u1', schoolId: 'pu' }])(
+  'unauthorized or pre-migration cached payloads do not become active context', async (ctx) => {
+    jest.mocked(getPostLoginContext).mockResolvedValue(ctx as PostLoginContext);
+    mountProvider();
+    await signIn();
+    expect(getPostLoginContext).toHaveBeenCalled();
+    expect(getInMemoryPostLoginContext()).toBeNull();
+    expect(getVerifiedSchoolAiScope({ userId: 'u1', schoolId: 'pu' })).toBeNull();
+  },
+);
+
+test.each(['campus', 'account', 'unmount'])('a read completing after a change to %s never publishes', async (change) => {
+  let resolve!: (ctx: PostLoginContext) => void;
+  jest.mocked(getPostLoginContext).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  const view = mountProvider();
+  await signIn();
+  if (change === 'campus') {
+    await act(async () => school.setSelection({ schoolId: 'nthu' }));
+    await act(async () => school.setSelection({ schoolId: 'pu' }));
+  } else if (change === 'account') {
+    await signIn('u2');
+  } else {
+    view.unmount();
+  }
+  await act(async () => resolve(taggedContext('u1')));
+  expect(getInMemoryPostLoginContext()).toBeNull();
+});
+
+test('an expired restored login cannot bind AI scope', async () => {
+  let resolve!: (ctx: PostLoginContext) => void;
+  jest.mocked(getPostLoginContext).mockImplementation(() => new Promise((done) => { resolve = done; }));
+  mountProvider();
+  await signIn();
+  await act(async () => mockTokenCallback(mockFirebaseAuth.currentUser, new Error('TOKEN_REFRESH_EXHAUSTED')));
+  await act(async () => resolve(taggedContext('u1')));
+  expect(auth.tokenExpired).toBe(true);
+  expect(getInMemoryPostLoginContext()).toBeNull();
+  expect(getVerifiedSchoolAiScope({ userId: 'u1', schoolId: 'pu' })).toBeNull();
+});
+
+test.each(['signout', 'account', 'expired'])(
+  'a restored AI scope becomes unusable after %s', async (change) => {
+    jest.mocked(getPostLoginContext).mockResolvedValue(taggedContext('u1'));
+    mountProvider();
+    await signIn();
+    const identity = { userId: 'u1', schoolId: 'pu' };
+    const scope = getVerifiedSchoolAiScope(identity)!;
+    expect(scope).not.toBeNull();
+    if (change === 'account') {
+      await signIn('u2');
+    } else if (change === 'expired') {
+      await act(async () => mockTokenCallback(mockFirebaseAuth.currentUser, new Error('TOKEN_REFRESH_EXHAUSTED')));
+    } else {
+      mockFirebaseAuth.currentUser = null;
+      await act(async () => mockAuthCallback!(null));
+    }
+    expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+    expect(isVerifiedSchoolAiScopeCurrent(scope)).toBe(false);
+  },
+);
+
+
+test.each([
+  ['no session', null],
+  ['localMock', { localMock: true }],
+  ['expired', { expiresAt: 0 }],
+  ['expires now', { expiresAt: Date.now() }],
+  ['unknown expiry', { expiresAt: undefined }],
+  ['different uid', { backendOwnerUid: 'u2' }],
+  ['missing verified owner', { backendOwnerUid: undefined }],
+  ['different school', { schoolId: 'nthu' }],
+  ['school alias mismatch', { schoolId: 'tw-pu' }],
+] as const)('restoration with %s cannot bind AI scope or expose campus caches', async (_label, patch) => {
+  mockPUSession = patch === null ? null : { ...mockPUSession!, ...patch };
+  jest.mocked(getPostLoginContext).mockResolvedValue(taggedContext('u1'));
+  mountProvider();
+  await signIn();
+  expect(getInMemoryPostLoginContext()).toBeNull();
+  const identity = { userId: 'u1', schoolId: 'pu' };
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  expect(await executeSmartAction('query_assignments', identity)).toMatchObject({ success: false });
+  expect(getAnyCachedCourses).not.toHaveBeenCalled();
+});
+
+test('a valid restored session expires during use and loses AI access', async () => {
+  jest.mocked(getPostLoginContext).mockResolvedValue(taggedContext('u1'));
+  mountProvider();
+  await signIn();
+  const identity = { userId: 'u1', schoolId: 'pu' };
+  expect(getVerifiedSchoolAiScope(identity)).not.toBeNull();
+  mockPUSession!.expiresAt = Date.now() - 1;
+  expect(getVerifiedSchoolAiScope(identity)).toBeNull();
+  expect(await executeSmartAction('query_assignments', identity)).toMatchObject({ success: false });
 });

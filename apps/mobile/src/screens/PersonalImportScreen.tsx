@@ -374,7 +374,7 @@ function ImportWorkspace({
     null,
   );
   const alive = useRef(true);
-  const focused = useRef(true);
+  const focused = useRef(false);
   const generation = useRef(0);
   const savingRef = useRef(false);
   const sharingRef = useRef(false);
@@ -473,7 +473,7 @@ function ImportWorkspace({
     issues,
     backupPreview,
   ]);
-  const active = () => alive.current && focused.current && availableRef.current;
+  const active = useCallback(() => alive.current && focused.current && availableRef.current, []);
   const current = (run: number) => active() && generation.current === run;
   const clearDocumentSource = () => {
     documentSource.current = null;
@@ -597,21 +597,22 @@ function ImportWorkspace({
   ]);
 
   const load = useCallback(async () => {
+    if (!active()) return;
     const run = ++ledgerGeneration.current;
+    const isCurrentRead = () => active() && ledgerGeneration.current === run;
     try {
       const next = await loadPersonalImports({ owner, schoolId });
-      if (alive.current && ledgerGeneration.current === run) {
+      if (isCurrentRead()) {
         setLedger(next);
         setLoadError('');
       }
     } catch {
-      if (alive.current) setLoadError('讀不到這台裝置的匯入紀錄，請重試。現有資料沒有變更。');
+      if (isCurrentRead()) setLoadError('讀不到這台裝置的匯入紀錄，請重試。現有資料沒有變更。');
     }
-  }, [owner, schoolId]);
+  }, [active, owner, schoolId]);
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
-      void load();
       return () => {
         focused.current = false;
         generation.current += 1;
@@ -621,7 +622,14 @@ function ImportWorkspace({
         setBusy(false);
         setAiRunning(false);
       };
-    }, [load]),
+    }, []),
+  );
+  useFocusEffect(
+    useCallback(() => {
+      if (!available) return;
+      void load();
+      return () => { ledgerGeneration.current += 1; };
+    }, [available, load]),
   );
   const loadLinks = useCallback(async () => {
     const linkRun = ++linkGeneration.current;
@@ -656,9 +664,6 @@ function ImportWorkspace({
   useEffect(() => {
     void loadLinks();
   }, [loadLinks]);
-  useEffect(() => {
-    if (available) void load();
-  }, [available, load]);
 
   const rowIssues = useMemo(
     () =>

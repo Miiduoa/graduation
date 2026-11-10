@@ -1,0 +1,83 @@
+.panel {
+  box-sizing: border-box;
+  width: min(100% - 24px, 420px);
+  max-height: min(85dvh, 620px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #48574f;
+  border-radius: 18px;
+  background: #17211c;
+  color: #f8faf8;
+  color-scheme: dark;
+}
+.panel::backdrop {
+  background: rgb(4 10 7 / 72%);
+}
+.heading {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #3e4b43;
+  background: #17211c;
+}
+.heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.panel p {
+  margin: 6px 0;
+  color: #d6e4da;
+  line-height: 1.5;
+}
+.panel button {
+  min-height: 44px;
+  padding: 6px 16px;
+  border: 1px solid #738477;
+  border-radius: 24px;
+  background: #223129;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.heading button {
+  flex: none;
+  width: 44px;
+  padding: 0;
+  font-size: 24px;
+}
+.panel button:focus-visible {
+  outline: 3px solid #b8e6cb;
+  outline-offset: 2px;
+}
+.body {
+  padding: 12px 16px 18px;
+}
+.body ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.body li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  overflow-wrap: anywhere;
+}
+.avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #d6ebdd;
+  color: #294031;
+  font-weight: 700;
+}

@@ -3,14 +3,15 @@ import { schoolFromSelection } from '../../state/school';
 test('school selection follows the requested school instead of staying on Providence', () => {
   expect(schoolFromSelection({ schoolId: 'nthu' }).id).toBe('nthu');
   expect(schoolFromSelection({ schoolId: 'pu' }).id).toBe('pu');
-  expect(schoolFromSelection({}).id).toBe('pu');
+  expect(schoolFromSelection({})).toEqual({ id: '', code: '', name: '尚未選校' });
 });
 
 test('changing only the school code does not keep Providence or silently choose a demo university', () => {
   expect(schoolFromSelection({ code: 'NTHU', schoolId: null }).id).toBe('nthu');
   expect(schoolFromSelection({ code: 'NTU' }).id).toBe('ntu');
-  expect(schoolFromSelection({ code: 'NOT_A_SCHOOL' }).id).toBe('pu');
-  expect(schoolFromSelection({ code: 'TCU' }).id).toBe('pu');
+  expect(schoolFromSelection({ code: 'NOT_A_SCHOOL' }).id).toBe('');
+  expect(schoolFromSelection({ code: 'TCU' }).id).toBe('');
+  expect(schoolFromSelection({ schoolId: 'invalid/id', code: 'PU' }).id).toBe('');
 });
 
 test('a new directory tenant does not silently inherit another university identity', () => {
@@ -46,4 +47,10 @@ test('National Chung Hsing University is selectable as an official browsing camp
   const school = schoolFromSelection({ schoolId: 'tw-nchu' });
   expect(school).toMatchObject({ id: 'tw-nchu', code: 'NCHU', name: '國立中興大學' });
   expect(school.name).not.toContain('示範');
+});
+
+test('reserved scopes stay unselected and a stored MOE school ID restores its official name', () => {
+  expect(schoolFromSelection({ schoolId: 'all', code: 'PU' }).id).toBe('');
+  expect(schoolFromSelection({ schoolId: 'unknown' }).id).toBe('');
+  expect(schoolFromSelection({ schoolId: 'nkust' })).toMatchObject({ id: 'nkust', name: '國立高雄科技大學' });
 });

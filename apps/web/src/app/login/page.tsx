@@ -202,19 +202,24 @@ function LoginForm({
       }
     >
       {!schoolTask && <AccountRoleLinks showSchool />}
-      {schoolTask && (
-        <section className={styles.connectionIntro} aria-label="校務連線方式">
-          <div>
-            <p className={styles.connectionKicker}>校園資料，一次整理</p>
-            <h2>用匯入與 Google 帳號，整理自己的課表</h2>
-            <p>尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。</p>
-          </div>
-          <div className={styles.connectionFacts}>
-            <span>尚未開放學號直接登入</span>
-            <span>可自行匯入課表、成績與活動</span>
-          </div>
-        </section>
-      )}
+      <section
+        className={styles.connectionIntro}
+        aria-label={schoolTask ? '校務連線方式' : '開始使用平台'}
+      >
+        <div>
+          <p className={styles.connectionKicker}>{schoolTask ? '校園資料，一次整理' : '從日常需要的事開始'}</p>
+          <h2>{schoolTask ? '用匯入與 Google 帳號，整理自己的課表' : '一個 Google 帳號，就能開始'}</h2>
+          <p>
+            {schoolTask
+              ? '尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。'
+              : '整理課表與行程、參與公開交流，或接續已加入課班的教材與作業。需要校方提供的個人資料時，再另外連線學校帳號。'}
+          </p>
+        </div>
+        <div className={styles.connectionFacts}>
+          <span>{schoolTask ? '尚未開放學號直接登入' : '不需要學號或學校信箱'}</span>
+          <span>可自行匯入課表、成績與活動</span>
+        </div>
+      </section>
       <div className={styles.loginLayout}>
         {!hideGoogle && (
           <NuniSignIn
@@ -229,14 +234,20 @@ function LoginForm({
             }}
           />
         )}
-        <section className={styles.loginHelp} aria-label="學校帳號登入">
-          <div className={styles.methodHeading}>
-            <div>
-              <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
-              <h2>學校帳號</h2>
+        <details
+          className={`${styles.loginHelp} ${styles.schoolConnection}`}
+          aria-label="學校帳號登入"
+          open={schoolTask}
+        >
+          <summary>
+            <div className={styles.methodHeading}>
+              <div>
+                <span className={styles.methodEyebrow}>學校帳號 · 本人授權</span>
+                <h2>需要校務資料時再連線</h2>
+              </div>
+              <span className={styles.methodStatus}>依服務開放</span>
             </div>
-            <span className={styles.methodStatus}>{schoolAvailable ? '尚未開放' : '依校園提供'}</span>
-          </div>
+          </summary>
           {(selection?.schools?.length ?? 0) > 0 && (
             <label className={styles.schoolPicker} htmlFor="login-school">
               <span>選擇學校</span>
@@ -360,7 +371,7 @@ function LoginForm({
           <Link href="/" className={styles.backLink}>
             ← 返回首頁
           </Link>
-        </section>
+        </details>
       </div>
       <section className={styles.guestAccess} aria-labelledby="guest-access-title">
         <div>

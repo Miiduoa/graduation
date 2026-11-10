@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
 import { lostFoundSource } from './lostFoundSource';
@@ -2052,7 +2053,9 @@ export const firebaseSource: DataSource = {
     const assignmentId = data.assignmentId;
     const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
     const content = data.content?.trim() ?? '';
-    if (!userId || !content || content.length > 20000) {
+    for (const attachment of data.attachments ?? [])
+      assertPrivateFileNamespace(attachment.url, `groups/${groupId}/assignments/${assignmentId}/submissions/${userId}`);
+    if (!userId || (!content && !data.attachments?.length) || content.length > 20000) {
       throw new Error('請輸入 1 至 20,000 字的作業內容。');
     }
     if (!groupId || !assignmentId) {
@@ -2117,6 +2120,7 @@ export const firebaseSource: DataSource = {
           groupId,
           assignmentId,
           content,
+          ...(data.attachments?.length ? { attachments: data.attachments } : {}),
           status: 'submitted',
           submittedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -2963,7 +2967,7 @@ export const firebaseSource: DataSource = {
   async createRepairRequest(data) {
     const resolvedSchoolId = await resolveUserSchoolId(data.userId, data.schoolId);
     if (!resolvedSchoolId) {
-      throw new Error('缺少 schoolId，無法建立報修單');
+      throw new Error('缺少 schoolId，無法存成報修備忘');
     }
 
     const submitRepairRequest = httpsCallable<
@@ -2994,12 +2998,12 @@ export const firebaseSource: DataSource = {
       throw new Error(
         payload.errorCode === 'verify_failed'
           ? '報修寫入後驗證失敗，請稍後到宿舍頁再試。'
-          : '建立報修單失敗，請改用宿舍頁面處理。',
+          : '無法存成報修備忘，請改用宿舍頁面處理。',
       );
     }
     const requestId = payload?.repairId ?? payload?.requestId;
     if (!requestId) {
-      throw new Error('建立報修單失敗');
+      throw new Error('無法存成報修備忘');
     }
 
     const row = await fetchDocumentAtPath<RepairRequest>(

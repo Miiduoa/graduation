@@ -21,6 +21,9 @@
 !backend/functions/
 !backend/functions/puScraper.js
 !backend/functions/tronClassScraper.js
+!backend/functions/campusStoryAccessBinding.js
+!backend/functions/campusAnnouncements/
+!backend/functions/campusAnnouncements/catalog.js
 !backend/functions/lib/
 !backend/functions/lib/puGradeDocument.js
 !backend/functions/lib/puCreditSummary.js

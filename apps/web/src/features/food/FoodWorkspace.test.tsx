@@ -102,6 +102,37 @@ async function choose() {
   fireEvent.change(screen.getByLabelText('蔬菜便當 數量'), { target: { value: '1' } });
 }
 
+it.each([
+  'school=PU&schoolId=pu&campus=nthu',
+  'school=PU&schoolId=pu&campus=all',
+])('keeps the browsing hints through Google sign-in without treating them as a food tenant: %s', async (hints) => {
+  mocks.auth.session = null;
+  window.history.replaceState(null, '',
+    `/food?${hints}&role=merchant&accountId=other&token=private&returnUrl=%2Fadmin&location=legacy-shop&tenant=ignored&order=ignored`,
+  );
+  render(<FoodWorkspace campusSearch={window.location.search} />);
+  const link = await screen.findByRole('link', { name: '登入後點餐' });
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(destination.pathname).toBe('/food');
+  expect(destination.searchParams.toString()).toBe(hints);
+  expect(destination.searchParams.has('tenant')).toBe(false);
+  expect(destination.searchParams.has('order')).toBe(false);
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+
+it('retains the validated order destination alongside campus hints during sign-in', async () => {
+  mocks.auth.session = null;
+  window.history.replaceState(null, '', '/food?campus=all&tenant=untrusted&order=untrusted&role=merchant');
+  render(<FoodWorkspace initialTenant="campus-one" initialOrder="order-1" campusSearch={window.location.search} />);
+  const link = await screen.findByRole('link', { name: '登入後點餐' });
+  const destination = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(destination.pathname).toBe('/food');
+  expect([...destination.searchParams]).toEqual([
+    ['tenant', 'campus-one'], ['order', 'order-1'], ['campus', 'all'],
+  ]);
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+
 it('opens a focused menu and restores the same cart after returning to the store list', async () => {
   render(<FoodWorkspace />);
   fireEvent.click(await screen.findByRole('button', { name: '查看菜單：米飯店' }));
@@ -954,7 +985,11 @@ it('expands paper line items by default for in-progress orders and keeps finishe
   const activePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
   const activeDetails = activePaper.querySelector('details');
   expect(activeDetails?.open).toBe(true);
-  expect(within(activePaper).getByText('數量 1')).toBeTruthy();
+  expect(
+    within(activePaper).getByText(
+      (_, node) => node?.tagName === 'SPAN' && node.textContent === '數量 1',
+    ),
+  ).toBeTruthy();
   expect(within(activePaper).getByRole('heading', { name: '蔬菜便當' })).toBeTruthy();
 
   order = {
@@ -975,7 +1010,7 @@ it('expands paper line items by default for in-progress orders and keeps finishe
   const donePaper = await screen.findByRole('region', { name: '訂單紙本明細' });
   expect(donePaper.querySelector('details')?.open).toBe(false);
   expect(within(donePaper).getByText('品項明細 · 1 項')).toBeTruthy();
-  expect(within(donePaper).getByText('NT$120').closest('details')).toBeNull();
+  expect(within(donePaper).getByText('NT$120', { selector: 'dd' }).closest('details')).toBeNull();
 });
 
 it('assistant location link opens a read-only menu while online ordering is off', async () => {
@@ -1033,4 +1068,31 @@ it('validates the location before opening the ordering menu', async () => {
   await waitFor(() => expect(mocks.request.mock.calls.some(([path]) => String(path).endsWith('/menu'))).toBe(true));
   const paths = mocks.request.mock.calls.map(([path]) => String(path));
   expect(paths.findIndex((p) => p.endsWith('/locations'))).toBeLessThan(paths.findIndex((p) => p.endsWith('/menu')));
+});
+
+it('can return one page after an older order page fails and resets pagination on a new filter', async () => {
+  vi.stubEnv('NEXT_PUBLIC_ONLINE_ORDERING', 'false');
+  mocks.request.mockImplementation(async (path, context, input, _signal, query) => {
+    if (!path.endsWith('/orders')) return respond(path, context, input);
+    if (query.cursor === 'third') throw new Error('offline');
+    const second = query.cursor === 'second';
+    return {
+      orders: [{ ...orderSummary(orderFixture()), locationName: second ? '第二頁店家' : '第一頁店家' }],
+      nextCursor: second ? 'third' : 'second',
+    };
+  });
+  render(<FoodWorkspace initialTenant="campus-one" />);
+  await screen.findByText('第一頁店家');
+  fireEvent.click(button('下一頁訂單'));
+  await screen.findByText('第二頁店家');
+  fireEvent.click(button('下一頁訂單'));
+  await screen.findByRole('alert');
+  expect(screen.queryByText('第二頁店家')).toBeNull();
+  fireEvent.click(button('上一頁訂單'));
+  await screen.findByText('第二頁店家');
+  expect(screen.getByText('第 2 頁')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('訂單狀態'), { target: { value: 'ready' } });
+  await screen.findByText('第一頁店家');
+  expect(screen.queryByRole('button', { name: '上一頁訂單' })).toBeNull();
+  expect(mocks.request.mock.calls.at(-1)?.[4]).toMatchObject({ state: 'ready' });
 });

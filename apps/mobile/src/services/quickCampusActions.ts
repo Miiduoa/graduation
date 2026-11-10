@@ -56,3 +56,24 @@ export function getMobileActionsForDestinations(
 ): MobileQuickAction[] {
   return choices.map((destination) => ({ destination, ...destinations[destination] }));
 }
+
+const assistantLabels = {
+  '/map': '校園地圖',
+  '/bus': '公車',
+  '/classroom': '課程與作業',
+  '/timetable': '我的課表',
+  '/library': '圖書館',
+  '/grades': '成績',
+  '/cafeteria': '校園餐廳',
+  '/dormitory': '宿舍服務',
+  '/events': '校園活動',
+  '/announcements': '校園公告',
+  '/dms': '私訊',
+} satisfies Partial<Record<CampusQuickDestination, string>>;
+
+/** Resolve only the campus service links the on-device assistant can offer. */
+export function getMobileAssistantAction(route?: string): MobileQuickAction | null {
+  if (!route || !Object.prototype.hasOwnProperty.call(assistantLabels, route)) return null;
+  const destination = route as keyof typeof assistantLabels;
+  return { ...getMobileActionsForDestinations([destination])[0], label: assistantLabels[destination] };
+}

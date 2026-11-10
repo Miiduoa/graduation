@@ -413,7 +413,7 @@ it('opens the tapped author without losing the feed filter and clears the viewer
   fireEvent.click(avatar);
   const dialog = screen.getByRole('dialog', { name: '限時動態' });
   expect(within(dialog).getByText('圖書館集合')).toBeTruthy();
-  expect(mocks.markViewed).toHaveBeenCalledWith('story-bob', 'alice');
+  expect(mocks.markViewed).toHaveBeenCalledWith(story, 'alice');
   fireEvent.click(within(dialog).getByRole('button', { name: '關閉限時動態' }));
   expect(document.activeElement).toBe(avatar);
   expect(screen.queryByText('小華的貼文')).toBeNull();

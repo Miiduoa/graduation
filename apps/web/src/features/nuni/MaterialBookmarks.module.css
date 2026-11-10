@@ -1,0 +1,346 @@
+.entrance {
+  min-width: 0;
+  padding-top: 14px;
+  transform-origin: top center;
+  animation: none;
+  animation-delay: 0s;
+}
+
+.entrance .folder {
+  --bookmark-cover: #e4d6b7;
+  --bookmark-edge: #a29578;
+  --bookmark-paper: #fffdf5;
+  --bookmark-rule: #c5bba5;
+  --bookmark-ink: #314237;
+  --bookmark-muted: #56604f;
+  --bookmark-ribbon: #355844;
+  --text: var(--bookmark-ink);
+  --muted: var(--bookmark-muted);
+  --brand: var(--bookmark-ribbon);
+  --on-brand: #fffaf0;
+  --border-strong: #897d64;
+  --focus-ring: #694523;
+  --danger: #8c382f;
+  --danger-soft: #f0ded2;
+  --success: #36543c;
+  --success-soft: #e5ead5;
+  position: relative;
+  min-width: 0;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--bookmark-edge);
+  border-radius: 2px 10px 6px 6px;
+  color: var(--bookmark-ink);
+  color-scheme: light;
+  background-color: var(--bookmark-cover);
+  background-image: linear-gradient(90deg, rgb(75 65 40 / 12%), transparent 13px);
+  box-shadow:
+    inset 5px 0 0 rgb(255 253 238 / 28%),
+    0 3px 0 -1px var(--bookmark-cover),
+    0 4px 0 -1px var(--bookmark-edge),
+    0 12px 18px -14px rgb(35 40 30 / 45%);
+  container: material-bookmarks / inline-size;
+}
+
+.folder::before {
+  content: '';
+  position: absolute;
+  top: -14px;
+  left: 20px;
+  width: min(38%, 160px);
+  height: 14px;
+  border: 1px solid var(--bookmark-edge);
+  border-bottom: 0;
+  border-radius: 7px 10px 0 0;
+  background: var(--bookmark-cover);
+  pointer-events: none;
+}
+
+.folder .heading {
+  align-items: flex-start;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--bookmark-edge);
+}
+
+.heading h1 {
+  margin: 0;
+  font-family: 'Iowan Old Style', 'Noto Serif CJK TC', 'Songti TC', serif;
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.heading p {
+  margin: 0 0 6px;
+  font-size: 0.8125rem;
+}
+
+.folder > p {
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.returnLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  max-width: 100%;
+  color: var(--bookmark-ink);
+  font-size: 0.9375rem;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  overflow-wrap: anywhere;
+}
+
+.sheets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  gap: 28px;
+  min-width: 0;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sheets > li {
+  min-width: 0;
+}
+
+.folder .sheet,
+.folder .emptySheet {
+  position: relative;
+  min-width: 0;
+  gap: 16px;
+  padding: 0 clamp(14px, 2vw, 22px) 20px;
+  border: 1px solid var(--bookmark-rule);
+  border-radius: 2px 2px 5px 2px;
+  color: var(--bookmark-ink);
+  background: var(--bookmark-paper);
+  box-shadow:
+    0 2px 0 -1px var(--bookmark-paper),
+    0 3px 0 -1px var(--bookmark-rule),
+    0 10px 12px -12px rgb(45 47 33 / 40%);
+  transform: none;
+  transition: none;
+  transition-delay: 0s;
+}
+
+.sheet::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(225deg, var(--bookmark-cover) 48%, var(--bookmark-rule) 50%, var(--bookmark-paper) 56%);
+  pointer-events: none;
+}
+
+.folder .emptySheet {
+  margin-top: 22px;
+  padding-top: 24px;
+  border-style: dashed;
+}
+
+.folder .metadata {
+  align-items: flex-start;
+  min-width: 0;
+  gap: 14px 18px;
+  margin-bottom: 0;
+  padding-right: 4px;
+}
+
+.dateTab {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: -7px;
+  padding: 8px 12px 10px;
+  color: var(--on-brand);
+  background: var(--bookmark-ribbon);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  transform: none;
+  transition: none;
+  transition-delay: 0s;
+}
+
+.dateTab > span {
+  display: block;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.dateTab::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -7px;
+  left: 0;
+  height: 7px;
+  background: var(--bookmark-ribbon);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 0, 0 100%);
+  pointer-events: none;
+}
+
+.unitLabel {
+  min-width: 0;
+  max-width: 100%;
+  padding-top: 10px;
+  font-size: 0.875rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.folder .sheet h2,
+.folder .emptySheet h2 {
+  margin: 0;
+  color: var(--bookmark-ink);
+  font-size: 1.125rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.sheet p,
+.emptySheet p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.folder .actions {
+  align-items: stretch;
+  padding-top: 14px;
+  border-top: 1px solid var(--bookmark-rule);
+}
+
+.folder :is(button, a):focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+:global(:root[data-theme='dark']) .folder {
+  --bookmark-cover: #c8b99c;
+  --bookmark-edge: #897d64;
+  --bookmark-paper: #efe6d0;
+  --bookmark-rule: #b4a78b;
+  --bookmark-ink: #293b30;
+  --bookmark-muted: #3f4b3c;
+  --bookmark-ribbon: #304e3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :global(:root:not([data-theme='light'])) .folder {
+    --bookmark-cover: #c8b99c;
+    --bookmark-edge: #897d64;
+    --bookmark-paper: #efe6d0;
+    --bookmark-rule: #b4a78b;
+    --bookmark-ink: #293b30;
+    --bookmark-muted: #3f4b3c;
+    --bookmark-ribbon: #304e3b;
+  }
+}
+
+@container material-bookmarks (max-width: 24rem) {
+  .folder .heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .heading > button {
+    width: 100%;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .folder .actions > button {
+    flex: none;
+    width: 100%;
+  }
+}
+
+@keyframes bookmarkFolderOpen {
+  from {
+    opacity: 0.7;
+    transform: perspective(900px) rotateX(-3deg) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(900px) rotateX(0deg) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :global(:root[data-reduced-motion='false']) .entrance {
+    animation: bookmarkFolderOpen 220ms ease-out;
+  }
+
+  :global(:root[data-reduced-motion='false']) .sheet {
+    transition: transform 160ms ease-out;
+  }
+
+  :global(:root[data-reduced-motion='false']) .dateTab {
+    transition: transform 160ms ease-out;
+  }
+
+  :global(:root[data-reduced-motion='false']) .sheet:focus-within {
+    transform: translateY(-2px);
+  }
+
+  :global(:root[data-reduced-motion='false']) .sheet:focus-within .dateTab {
+    transform: translateY(-1px);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    :global(:root[data-reduced-motion='false']) .sheet:hover {
+      transform: translateY(-2px);
+    }
+
+    :global(:root[data-reduced-motion='false']) .sheet:hover .dateTab {
+      transform: translateY(-1px);
+    }
+  }
+
+  :global(:root[data-reduced-motion='false']) .sheet:has(button:not(:disabled):active) {
+    transform: translateY(1px);
+  }
+
+  :global(:root[data-reduced-motion='false']) .sheet:has(button:not(:disabled):active) .dateTab {
+    transform: translateY(0);
+  }
+}
+
+@media (forced-colors: active) {
+  .entrance .folder,
+  .folder .sheet,
+  .folder .emptySheet {
+    color: CanvasText;
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .folder::before,
+  .sheet::before,
+  .dateTab::after {
+    display: none;
+  }
+
+  .dateTab {
+    border: 1px solid CanvasText;
+    color: CanvasText;
+    background: Canvas;
+  }
+
+  .folder :is(button, a):focus-visible {
+    outline-color: Highlight;
+  }
+}

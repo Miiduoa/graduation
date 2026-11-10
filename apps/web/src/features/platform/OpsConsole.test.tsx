@@ -125,7 +125,7 @@ it('shows the operator console tabs', async () => {
   expect(screen.getByRole('tab', { name: '學校' })).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '人員' }));
   expect(await screen.findByRole('heading', { name: '學校管理授權總覽' })).toBeTruthy();
-  expect(screen.getByRole('heading', { name: '加人' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '新增校方授權' })).toBeTruthy();
 });
 
 const principal = {
@@ -388,8 +388,7 @@ it('keeps an expired proxy blocked after recovery and provides the existing next
       }),
     ),
   );
-  const form = within(input.closest('form')!);
-  const manage = await form.findByRole('button', { name: '前往學校分頁啟用代操作' });
+  const manage = await screen.findByRole('button', { name: '查看學校設定' });
   expect(input).toHaveProperty('disabled', true);
   await waitFor(() => expect(document.activeElement).toBe(input.closest('form')));
   fireEvent.click(manage);
@@ -502,7 +501,7 @@ it('starts a new add-person draft when switching schools', async () => {
     target: { value: 'school_staff' },
   });
   expect(await selectSchool('school-b')).toHaveProperty('value', '');
-  expect(screen.getByRole('combobox', { name: '角色' })).toHaveProperty('value', 'school_admin');
+  expect(screen.getByRole('combobox', { name: '角色' })).toHaveProperty('value', 'school_staff');
   expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
 
@@ -520,7 +519,7 @@ it.each([200, 403])(
     );
     render(<OpsConsole />);
     fireEvent.change(await selectSchool('school-a'), { target: { value: 'a@example.test' } });
-    fireEvent.click(screen.getByRole('button', { name: '加人' }));
+    fireEvent.click(screen.getByRole('button', { name: '新增授權' }));
     fireEvent.change(await selectSchool('school-b'), { target: { value: 'b@example.test' } });
     fireEvent.change(screen.getByRole('combobox', { name: '角色' }), {
       target: { value: 'school_staff' },
@@ -533,10 +532,10 @@ it.each([200, 403])(
       'b@example.test',
     );
     expect(screen.getByRole('combobox', { name: '角色' })).toHaveProperty('value', 'school_staff');
-    expect(screen.queryByText('已為school-a送出加人。')).toBeNull();
+    expect(screen.queryByText('已為school-a新增校方授權。')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '加人' }));
-    await screen.findByText('已為school-b送出加人。');
+    fireEvent.click(screen.getByRole('button', { name: '新增授權' }));
+    await screen.findByText('已為school-b新增校方授權。');
     const posts = fetcher.mock.calls.filter(([, options]) => options?.method === 'POST');
     expect(posts.map(([url]) => url)).toEqual([
       '/api/platform-admin/people/bind',
@@ -565,7 +564,7 @@ it.each(['context', 'platformAccountId'] as const)(
     );
     const view = render(<OpsConsole />);
     fireEvent.change(await selectSchool('school-a'), { target: { value: 'old@example.test' } });
-    fireEvent.click(screen.getByRole('button', { name: '加人' }));
+    fireEvent.click(screen.getByRole('button', { name: '新增授權' }));
     mocks.session = { ...principal, [field]: field === 'context' ? 'b'.repeat(43) : 'pa_2' };
     view.rerender(<OpsConsole />);
     expect(screen.queryByRole('textbox', { name: 'Google 登入信箱或人員代號' })).toBeNull();
@@ -577,8 +576,8 @@ it.each(['context', 'platformAccountId'] as const)(
       previous.resolve(ok({}));
     });
     expect(newAccount).toHaveProperty('value', 'new@example.test');
-    expect(screen.queryByText('已為school-a送出加人。')).toBeNull();
-    expect(screen.getByRole('button', { name: '加人' })).toHaveProperty('disabled', false);
+    expect(screen.queryByText('已為school-a新增校方授權。')).toBeNull();
+    expect(screen.getByRole('button', { name: '新增授權' })).toHaveProperty('disabled', false);
   },
 );
 
@@ -598,7 +597,7 @@ it.each(['loading', 'pendingLogout'] as const)(
     fireEvent.submit(form);
     mocks[field] = true;
     view.rerender(<OpsConsole />);
-    expect(screen.queryByRole('button', { name: '加人' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新增授權' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: 'Google 登入信箱或人員代號' })).toBeNull();
     fireEvent.submit(form);
     await act(async () => {
@@ -610,7 +609,7 @@ it.each(['loading', 'pendingLogout'] as const)(
     expect(
       await screen.findByRole('textbox', { name: 'Google 登入信箱或人員代號' }),
     ).toHaveProperty('value', '');
-    expect(screen.queryByText('已為school-a送出加人。')).toBeNull();
+    expect(screen.queryByText('已為school-a新增校方授權。')).toBeNull();
   },
 );
 
@@ -639,7 +638,7 @@ it('uses the existing people bind endpoint and accepts only its matching tenant 
   setupPeople();
   render(<OpsConsole />);
   fireEvent.change(await selectSchool('school-a'), { target: { value: 'teacher@example.test' } });
-  fireEvent.click(screen.getByRole('button', { name: '加人' }));
+  fireEvent.click(screen.getByRole('button', { name: '新增授權' }));
   await waitFor(() =>
     expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true),
   );
@@ -650,9 +649,9 @@ it('uses the existing people bind endpoint and accepts only its matching tenant 
   expect(JSON.parse(posted[1].body)).toMatchObject({
     tenantId: 'school-a',
     email: 'teacher@example.test',
-    role: 'school_admin',
+    role: 'school_staff',
   });
-  await screen.findByText('已為school-a送出加人。');
+  await screen.findByText('已為school-a新增校方授權。');
 });
 
 it('binds the first school administrator through the existing API before allowing staff roles', async () => {
@@ -661,8 +660,8 @@ it('binds the first school administrator through the existing API before allowin
   const input = await selectSchool('school-a');
   expect(screen.queryByRole('option', { name: '學校職員' })).toBeNull();
   fireEvent.change(input, { target: { value: 'first-admin@example.test' } });
-  fireEvent.click(screen.getByRole('button', { name: '加人' }));
-  await screen.findByText('已為school-a送出加人。');
+  fireEvent.click(screen.getByRole('button', { name: '新增授權' }));
+  await screen.findByText('已為school-a新增校方授權。');
   const posted = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')!;
   expect(posted[0]).toBe('/api/platform-admin/people/bind');
   expect(posted[1].method).toBe('POST');
@@ -673,6 +672,7 @@ it('binds the first school administrator through the existing API before allowin
     idempotencyKey: expect.stringMatching(/^web-people-.+/),
   });
   expect(screen.getByRole('option', { name: '學校職員' })).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: '角色' })).toHaveProperty('value', 'school_staff');
   expect(fetcher.mock.calls.some(([url]) => String(url).endsWith('/proxy'))).toBe(false);
 });
 
@@ -680,12 +680,12 @@ it('requires an explicit proxy session before adding people to an open school', 
   setupPeople({ proxyActive: false });
   render(<OpsConsole />);
   const input = await selectSchool('school-a', false);
-  expect(await screen.findByText('已開通學校須先啟用代操作，才能加人。')).toBeTruthy();
+  expect(await screen.findByText('已開通學校須先啟用代操作，才能新增授權。代操作有效 15 分鐘，異動會留下紀錄。')).toBeTruthy();
   expect(input).toHaveProperty('disabled', true);
   fireEvent.change(input, { target: { value: 'teacher@example.test' } });
   fireEvent.submit(input.closest('form')!);
   expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: '前往學校分頁啟用代操作' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看學校設定' }));
   expect(screen.getByText('學校分頁')).toBeTruthy();
   expect(new URLSearchParams(window.location.search).get('tab')).toBe('schools');
 });
@@ -716,10 +716,10 @@ it.each([{}, peopleStatus('school-b')])(
     render(<OpsConsole />);
     const input = await selectSchool('school-a');
     fireEvent.change(input, { target: { value: 'teacher@example.test' } });
-    fireEvent.click(screen.getByRole('button', { name: '加人' }));
+    fireEvent.click(screen.getByRole('button', { name: '新增授權' }));
     await screen.findByRole('alert');
     expect(input).toHaveProperty('value', 'teacher@example.test');
-    expect(screen.queryByText('已為school-a送出加人。')).toBeNull();
+    expect(screen.queryByText('已為school-a新增校方授權。')).toBeNull();
   },
 );
 
@@ -775,6 +775,32 @@ function merchantsPayload(brandName = '本帳號店家') {
   };
 }
 
+function affiliationPayload(id = 'affiliation-1', workspaceTitle = '本帳號課班') {
+  return {
+    id, workspaceId: 'workspace-' + id, workspaceTitle, tenantId: 'school-a',
+    sectionId: null, justification: '已確認課班及目標學校。', state: 'pending',
+    createdAt: '2026-10-25T00:00:00Z', decidedAt: null, decisionReason: null,
+  };
+}
+
+function merchantDecisionPayload(decision: string, reason: string) {
+  const row = merchantsPayload().applications[0];
+  return {
+    tenantId: row.tenantId, applicationId: row.applicationId,
+    businessKind: 'campus-stall', legalName: row.brandName, brandName: row.brandName,
+    businessRegistrationNumber: null, foodBusinessRegistrationNumber: null,
+    contactName: row.contactName, contactEmail: row.contactEmail, contactPhone: '0900000000',
+    locationName: row.locationName, operatingAddress: '合成校區', campusLabel: '學校A',
+    campusId: 'campus-a', serviceModes: ['pickup'],
+    state: decision === 'approve' ? 'approved' : 'rejected', version: row.version + 1,
+    businessRegistryCheck: 'not-applicable', foodRegistryCheck: 'not-applicable',
+    reasonCode: 'platform-operator-reviewed', reviewerNote: reason,
+    merchantId: decision === 'approve' ? 'merchant-a' : null,
+    locationId: decision === 'approve' ? 'location-a' : null,
+    submittedAt: row.submittedAt, updatedAt: '2026-11-06T00:00:00Z',
+  };
+}
+
 function setupExtraOperation(tab: 'merchants' | 'affiliation') {
   mocks.session = { ...principal };
   window.history.replaceState(null, '', `/admin/ops#${tab}`);
@@ -783,17 +809,17 @@ function setupExtraOperation(tab: 'merchants' | 'affiliation') {
       return ok(merchantsPayload());
     }
     if (url.endsWith('/class-workspace-affiliation-applications')) {
-      return ok({ applications: [{ id: 'affiliation-1', workspaceTitle: '本帳號課班' }] });
+      return ok({ applications: [affiliationPayload()] });
     }
     if (options?.method === 'POST') {
-      if (
-        url === `/api/platform-admin/merchants/interest/${merchantInterestId}/decision` ||
-        url ===
-          `/api/platform-admin/merchants/applications/school-a/${merchantApplicationId}/decision` ||
-        url ===
-          '/api/platform-admin/class-workspace-affiliation-applications/affiliation-1/decision'
-      )
-        return ok({});
+      const input = JSON.parse(String(options.body));
+      const state = input.decision === 'approve' ? 'approved' : 'rejected';
+      if (url === `/api/platform-admin/merchants/interest/${merchantInterestId}/decision`)
+        return ok({ ...merchantsPayload().interest[0], state, decidedAt: '2026-11-06T00:00:00Z' });
+      if (url === `/api/platform-admin/merchants/applications/school-a/${merchantApplicationId}/decision`)
+        return ok(merchantDecisionPayload(input.decision, input.reason));
+      if (url === '/api/platform-admin/class-workspace-affiliation-applications/affiliation-1/decision')
+        return ok({ ...affiliationPayload(), state, decidedAt: '2026-11-06T00:00:00Z', decisionReason: input.reason });
     }
     return ok({}, 404);
   });
@@ -1024,7 +1050,7 @@ it('restores the selected operations tab from the query and browser history', as
   setupExtraOperation('merchants');
   window.history.replaceState(null, '', '/admin/ops?tab=people');
   render(<OpsConsole />);
-  expect(await screen.findByRole('heading', { name: '加人' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '新增校方授權' })).toBeTruthy();
   window.history.replaceState(null, '', '/admin/ops?tab=merchants');
   fireEvent.popState(window);
   expect(await screen.findByRole('button', { name: '核准意向' })).toBeTruthy();
@@ -1044,7 +1070,7 @@ it.each(extraOperations)(
     await submitReview(button);
     await waitFor(() =>
       expect(replace).toHaveBeenCalledWith(
-        `/admin/login?returnUrl=${encodeURIComponent(`/admin/ops?tab=${tab}`)}`,
+        adminLoginHref(`/admin/ops#${tab}`),
       ),
     );
   },
@@ -1089,8 +1115,8 @@ it('keeps different affiliation review reasons isolated', async () => {
   fetcher.mockImplementation(async (url: string) =>
     url.endsWith('/class-workspace-affiliation-applications')
       ? ok({ applications: [
-          { id: 'affiliation-1', workspaceTitle: '課班一' },
-          { id: 'affiliation-2', workspaceTitle: '課班二' },
+          affiliationPayload('affiliation-1', '課班一'),
+          affiliationPayload('affiliation-2', '課班二'),
         ] })
       : ok({}, 404),
   );
@@ -1128,7 +1154,7 @@ it('keeps a school selected in a deep link while moving between school settings 
   });
   render(<OpsConsole />);
   expect((await screen.findByLabelText('選擇學校') as HTMLSelectElement).value).toBe('school-a');
-  expect(await screen.findByRole('heading', { name: '加人' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: '新增校方授權' })).toBeTruthy();
   fireEvent.click(screen.getByRole('tab', { name: '學校' }));
   expect(window.location.search).toBe('?tab=schools&school=school-a');
   fireEvent.click(screen.getByRole('tab', { name: '人員' }));

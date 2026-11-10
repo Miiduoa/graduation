@@ -207,3 +207,20 @@
     animation: none;
   }
 }
+.audienceButton {
+  min-height: 44px;
+  margin-bottom: 6px;
+  padding: 6px 14px;
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: 22px;
+  background: #202a26;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.receiptNotice {
+  display: block;
+  margin-bottom: 6px;
+  color: #fff;
+  font-size: 0.8rem;
+}

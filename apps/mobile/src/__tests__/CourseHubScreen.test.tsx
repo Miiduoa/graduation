@@ -65,6 +65,7 @@ test('uses real course name with scoped useful actions and no invented outcomes'
     view.queryByText(/過時的課名|CS302|13\/15|6\/7|88|A-|摘要已開啟|繳交作業|開始測驗/),
   ).toBeNull();
   expect(view.getByText('尚未發布作業。')).toBeTruthy();
+  expect(view.getByText('尚未發布教材或單元。')).toBeTruthy();
   fireEvent.press(view.getByText('測驗通知'));
   expect(safeNavigate).toHaveBeenLastCalledWith(navigation, 'QuizCenter', {
     groupId: 'course-a',
@@ -124,6 +125,43 @@ test('partial read failures stay distinct and published files open in the existi
   });
   expect(webBrowserOpenWithPuTronClassGate).not.toHaveBeenCalled();
 });
+
+test('a partial material list keeps its working links and can be reloaded', async () => {
+  const navigation = { navigate: jest.fn() };
+  const material = {
+    id: 'chapter-1', title: '第一章', description: '', url: 'https://school.test/1', order: 1,
+  };
+  const recovered = { ...material, id: 'chapter-2', title: '第二章', url: 'https://school.test/2' };
+  jest.mocked(loadCourseHub)
+    .mockResolvedValueOnce({ ...data, materials: { status: 'partial', items: [material] } })
+    .mockResolvedValueOnce({ ...data, materials: { status: 'ready', items: [material, recovered] } });
+  const view = render(<CourseHub route={route} navigation={navigation} />);
+  expect(await view.findByText('部分教材未能載入。')).toBeTruthy();
+  fireEvent.press(view.getByText('開啟教材：第一章'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'CourseMaterialViewer', {
+    url: material.url, title: '第一章', kind: 'material', courseName: data.name,
+  });
+  fireEvent.press(view.getByText('重新載入教材'));
+  expect(await view.findByText('第二章')).toBeTruthy();
+  expect(view.queryByText('部分教材未能載入。')).toBeNull();
+});
+
+test.each<[string, CourseHubData['materials'], string]>([
+  ['missing modules', { status: 'error', items: [] }, '教材讀取失敗。'],
+  ['no recovered materials', { status: 'partial', items: [] }, '部分教材未能載入。'],
+  ['a module without a loaded link', {
+    status: 'partial', items: [{ id: 'm1', title: '補充教材', description: '', url: null, order: 1 }],
+  }, '部分教材未能載入。'],
+])('%s does not appear as an empty material list', async (_case, materials, warning) => {
+  jest.mocked(loadCourseHub).mockResolvedValueOnce({ ...data, materials });
+  const view = render(<CourseHub route={route} />);
+  expect(await view.findByText(warning)).toBeTruthy();
+  expect(view.getByText('重新載入教材')).toBeTruthy();
+  expect(view.queryByText('尚未發布教材或單元。')).toBeNull();
+  expect(view.queryByText('這個單元未附教材連結。')).toBeNull();
+  expect(view.queryByText(/^開啟教材：/)).toBeNull();
+});
+
 test('TronClass route opens exactly the selected official course and never Firestore quiz', async () => {
   const view = render(<CourseHub route={{ params: { source: 'tronclass', courseId: 321 } }} />);
   await view.findByText('開啟校方課程');
