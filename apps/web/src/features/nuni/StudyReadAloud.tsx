@@ -80,11 +80,11 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
 
   return (
     <div className={styles.readAloud}>
-      <button type="button" className={styles.button} disabled={!available}
+      <button type="button" className={styles.button} disabled={!available && !speaking}
         aria-pressed={speaking} onClick={toggle}>
         {speaking ? '停止朗讀' : label}
       </button>
-      {!available && <small>裝置沒有可用的中文離線語音，仍可閱讀文字。</small>}
+      {!available && !speaking && <small>裝置沒有可用的中文離線語音，仍可閱讀文字。</small>}
       {error && <small role="status">{error}</small>}
     </div>
   );
