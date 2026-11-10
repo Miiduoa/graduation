@@ -119,6 +119,12 @@ async def check_mobile_navigation(page):
         return getComputedStyle(el).position === 'fixed'
             && Math.abs(rect.bottom - innerHeight) < 1;
     }'''), 'Mobile navigation is not docked to the viewport'
+    # Today's footer is inside a disclosure; open it as a visitor would.
+    information = page.locator('details').filter(
+        has=page.get_by_role('navigation', name='網站資訊', include_hidden=True)
+    )
+    if await information.count() and not await information.evaluate('el => el.open'):
+        await information.locator('summary').click()
     footer = page.get_by_role('navigation', name='網站資訊').get_by_role('link', name='設定')
     await footer.scroll_into_view_if_needed()
     assert await footer.evaluate('''el => {
@@ -128,8 +134,8 @@ async def check_mobile_navigation(page):
 
 
 UNSIGNED_TODAY = '登入後，這裡會列出近期要處理的課程待辦。'
-TODAY_FLOW_CLASS_TITLE = '下一堂課'
-TODAY_FLOW_WORK_TITLE = '今日／即將到期作業'
+TODAY_FLOW_CLASS_TITLE = '今日課表'
+TODAY_FLOW_WORK_TITLE = '課程待辦'
 TODAY_NOTIFY_TITLE = '未讀通知'
 TODAY_DATE = re.compile(r'^\d{1,2}月\d{1,2}日 週[日一二三四五六]$')
 OLD_ACCOUNT_COPY = [
