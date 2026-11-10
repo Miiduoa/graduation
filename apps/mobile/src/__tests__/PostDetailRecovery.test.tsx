@@ -454,3 +454,47 @@ test('private navigation retains a fresh authenticated cold share and takes stag
     clearPendingSharedPostLink();
   }
 });
+
+
+test('a later public library link supersedes a pending signed-out shared post', async () => {
+  const { clearPendingSharedPostLink, resolvePrivateInitialSharedPostURL } =
+    require('../app/pendingSharedPostLink');
+  clearPendingSharedPostLink();
+  const cold = 'https://nuni.tw/community/post/old-superseded-cold?schoolId=pu';
+  mockIncomingInitialURL = cold;
+  const forwarded = jest.fn();
+  try {
+    expect(await preAuthLinking.getInitialURL?.()).toBeNull();
+    const unsubscribe = preAuthLinking.subscribe?.(forwarded);
+    mockPublicLinkListener?.({ url: 'campus://library' });
+    expect(forwarded).toHaveBeenCalledWith('campus://library');
+    // A newer explicit public destination wins; login must not reopen the older share.
+    expect(resolvePrivateInitialSharedPostURL('campus://library', 'nuni.tw'))
+      .toBe('campus://library');
+    expect(resolvePrivateInitialSharedPostURL(cold, 'nuni.tw')).toBeNull();
+    unsubscribe?.();
+  } finally {
+    mockIncomingInitialURL = null;
+    clearPendingSharedPostLink();
+  }
+});
+
+test('a later public route cancels a warm shared post while a newer shared post still replaces it', () => {
+  const { clearPendingSharedPostLink, resolvePrivateInitialSharedPostURL } =
+    require('../app/pendingSharedPostLink');
+  clearPendingSharedPostLink();
+  const delivered = jest.fn();
+  const unsubscribe = preAuthLinking.subscribe?.(delivered);
+  try {
+    mockPublicLinkListener?.({ url: 'https://nuni.tw/community/post/warm-a?schoolId=pu' });
+    mockPublicLinkListener?.({ url: 'https://nuni.tw/community/post/warm-b?schoolId=pu' });
+    expect(delivered).not.toHaveBeenCalled();
+    mockPublicLinkListener?.({ url: 'campus://library' });
+    expect(delivered).toHaveBeenCalledWith('campus://library');
+    expect(resolvePrivateInitialSharedPostURL('campus://library', 'nuni.tw'))
+      .toBe('campus://library');
+  } finally {
+    unsubscribe?.();
+    clearPendingSharedPostLink();
+  }
+});
