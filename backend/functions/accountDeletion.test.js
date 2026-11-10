@@ -292,6 +292,41 @@ test('deletes creator profiles across schools while preserving other users and n
   expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
 });
 
+test('deletes creator highlights across schools while preserving other users and noncanonical paths', async () => {
+  const highlight = { postId: 'post-1' };
+  const other = { postId: 'post-2', uid: 'alice' };
+  const preserved = [
+    ['schools/pu/creatorHighlights/bob', other],
+    ['archives/shared/creatorHighlights/alice', highlight],
+    ['schools/pu/archives/shared/creatorHighlights/alice', highlight],
+    ['schools/pu/otherHighlights/alice', highlight],
+  ];
+  const state = store([
+    ['schools/pu/creatorHighlights/alice', highlight],
+    ['schools/other/creatorHighlights/alice', highlight],
+    ...preserved,
+  ]);
+
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has('schools/pu/creatorHighlights/alice')).toBe(false);
+  expect(state.docs.has('schools/other/creatorHighlights/alice')).toBe(false);
+  for (const [path, data] of preserved) expect(state.docs.get(path)).toEqual(data);
+  expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
+});
+
+test('creator highlight deletion failures keep Auth available for retry', async () => {
+  const path = 'schools/pu/creatorHighlights/alice';
+  const state = store([[path, { postId: 'post-1' }]]);
+  state.fail('delete', path);
+
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.docs.has(path)).toBe(true);
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has(path)).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
+});
+
 test('creator profile deletion failures keep Auth available for retry', async () => {
   const path = 'schools/pu/creatorProfiles/alice';
   const state = store([[path, { bio: 'Public biography' }]]);
