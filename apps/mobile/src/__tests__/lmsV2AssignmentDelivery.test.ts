@@ -106,7 +106,7 @@ test('only confirms delivery when the response matches the authenticated student
     { onConflict: 'assignment_id,student_id' },
   );
   const payload = upsert.mock.calls[0][0];
-  for (const wrongField of ['user_id', 'content_text', 'status', 'course_id']) {
+  for (const wrongField of ['user_id', 'content_text', 'status', 'course_id', 'submitted_at']) {
     expect(payload).not.toHaveProperty(wrongField);
   }
   expect(result.summary).toContain('伺服器已確認');

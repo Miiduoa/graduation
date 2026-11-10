@@ -26,6 +26,15 @@ describe('navigation school context helpers', () => {
     expect(sanitizeInternalPath('/course/abc?tab=modules')).toBe('/course/abc?tab=modules');
   });
 
+  it.each(['/.//outside.test', '/course/%2e%2e//outside.test'])(
+    'keeps a normalized return URL on campus after appending school context: %s',
+    (input) => {
+      const target = new URL(appendSchoolContext(input, SCHOOL_CONTEXT), 'https://campus.local');
+      expect(target.origin).toBe('https://campus.local');
+      expect(target.pathname).toBe('/');
+    },
+  );
+
   it('appends school context without dropping existing search params', () => {
     const url = new URL(
       appendSchoolContext('/login?redirect=%2Fcourse%2Fabc', SCHOOL_CONTEXT),

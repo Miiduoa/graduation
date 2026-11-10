@@ -43,6 +43,7 @@ jest.mock('../utils/safeNavigate', () => ({
 }));
 
 beforeEach(() => {
+  jest.spyOn(require('../services/privateFiles'), 'claimPrivateFile').mockResolvedValue(undefined);
   jest.clearAllMocks();
   mockUid = 'alice';
   mockSchool = 'pu';
@@ -519,4 +520,145 @@ test('提醒警告不影響繳交成功，並提供管理及稍後重試入口',
   act(() => manage?.onPress?.());
   expect(mockSafeNavigate).toHaveBeenCalledWith(mockNavigate, 'CampusAssistant');
   expect(onAssignmentSubmitted).toHaveBeenCalled();
+});
+
+test('Supabase enables attachment selection and stores the object path in the existing attachment shape', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: [{ uri: 'file:///answer', name: 'answer.pdf', mimeType: 'application/pdf' }],
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByText('作業附件（0）')));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\/[A-Za-z0-9_-]+\.pdf$/),
+        originalFilename: 'answer.pdf',
+      }),
+    );
+    expect(mockSource.submitAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: '',
+        attachments: [
+          expect.objectContaining({
+            url: expect.stringMatching(/^groups\/course\/assignments\/work\/submissions\/alice\//),
+          }),
+        ],
+      }),
+    );
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+test('Supabase preserves upload progress after 429 and only retries unfinished files', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: ['one', 'two', 'three'].map(name => ({ uri: `file:///${name}`, name: `${name}.pdf`, mimeType: 'application/pdf' })),
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('上傳太頻繁，請稍後再試'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByText('作業附件（0）')));
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(mockSource.submitAssignment).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith('繳交尚未確認', '上傳太頻繁，請稍後再試');
+    await act(async () => fireEvent.press(view.getByLabelText('繳交作業')));
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.map(([input]) => input.originalFilename)).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(mockSource.submitAssignment.mock.calls[0][0].attachments).toHaveLength(3);
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+test('Supabase rejects selecting more than six attachments', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker');
+  jest
+    .spyOn(picker, 'getDocumentAsync')
+    .mockResolvedValue({
+      canceled: false,
+      assets: Array.from({ length: 7 }, () => ({ uri: 'file:///answer', name: 'answer.pdf', mimeType: 'application/pdf' })),
+    });
+  const privateFiles = require('../services/privateFiles');
+  const upload = jest
+    .spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValue({ path: 'ignored' });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({
+    blob: async () => new Blob(['answer'], { type: 'application/pdf' }),
+  })) as unknown as typeof fetch;
+  mockSource.submitAssignment.mockImplementation(async (data) => ({
+    ...data,
+    id: 'alice',
+    status: 'submitted',
+    submittedAt: '2026-10-19T00:00:00Z',
+  }));
+  const view = render(
+    <HomeworkSubmitScreen route={{ params: { courseId: 'course', hwId: 'work' } }} />,
+  );
+  try {
+    await view.findByText('期末報告');
+    await act(async () => fireEvent.press(view.getByText('作業附件（0）')));
+    expect(Alert.alert).toHaveBeenCalledWith('單次最多選取 6 個附件');
+    expect(view.getByText('作業附件（0）')).toBeTruthy();
+    expect(upload).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
 });

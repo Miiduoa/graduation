@@ -1,7 +1,13 @@
 'use client';
+import { claimPrivateFile } from '@/lib/privateFiles';
+import { safePrivateFileName } from '@campus/shared/src/privateFileAccess';
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { PRIVATE_FILE_UPLOADS_PER_MINUTE, PRIVATE_FILE_UPLOAD_RATE_MESSAGE } from '@campus/shared/src/privateFileUploads';
+import { GroupCover } from '@/components/GroupCover';
+import { privateFilesEnabled, privateGroupPostPath, uploadPrivateFile } from '@/lib/privateFiles';
+import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -31,6 +37,7 @@ type LoadState =
 /** 送出前凍結的發布意圖；未確認成功前不可被草稿編輯覆寫。 */
 type PublicationIntent = {
   postId: string;
+  attachments?: string[];
   title: string;
   body: string;
   kind: 'post' | 'question';
@@ -109,11 +116,17 @@ function DiscussionBoard({
   const initial = readStoredCompose(draftKey);
   const initialForm = initial?.intent ?? initial?.draft;
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [files, setFiles] = useState<File[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [attachmentsLocked, setAttachmentsLocked] = useState(false);
+  const uploadDraft = useRef<{ postId: string; completed: Map<File, string> } | null>(null);
   const [title, setTitle] = useState(initialForm?.title ?? '');
   const [body, setBody] = useState(initialForm?.body ?? '');
   const [kind, setKind] = useState<'post' | 'question'>(initialForm?.kind ?? 'post');
   /** 鎖定中的發布意圖；有值時表單編輯不得覆寫其內容。 */
-  const [lockedIntent, setLockedIntent] = useState<PublicationIntent | null>(initial?.intent ?? null);
+  const [lockedIntent, setLockedIntent] = useState<PublicationIntent | null>(
+    initial?.intent ?? null,
+  );
   const [phase, setPhase] = useState<'idle' | 'uncertain' | 'conflict'>(
     initial?.phase === 'conflict' || initial?.phase === 'uncertain' ? initial.phase : 'idle',
   );
@@ -128,9 +141,8 @@ function DiscussionBoard({
   const draftSaved = Boolean(title.trim() || body.trim() || lockedIntent);
   const mounted = useRef(false);
   const generation = useRef(0);
-  const cursorRef = useRef<Awaited<
-    ReturnType<typeof loadGroupDiscussionPage>
-  >['page']['cursor']>(null);
+  const cursorRef =
+    useRef<Awaited<ReturnType<typeof loadGroupDiscussionPage>>['page']['cursor']>(null);
 
   const load = useCallback(
     (mode: 'replace' | 'append' = 'replace') => {
@@ -218,8 +230,12 @@ function DiscussionBoard({
   }, [title, body, kind, draftKey, phase, lockedIntent]);
 
   function beginNewPublication() {
+    uploadDraft.current = null;
+    setAttachmentsLocked(false);
+    if (fileInput.current) fileInput.current.value = '';
     setLockedIntent(null);
     setPhase('idle');
+    setFiles([]);
     setTitle('');
     setBody('');
     setKind('post');
@@ -234,16 +250,65 @@ function DiscussionBoard({
     const current = () => mounted.current && request === generation.current;
 
     // 已有鎖定意圖：只能用該意圖重試，絕不可因衝突自動換 ID。
-    const intent: PublicationIntent = lockedIntent ?? {
-      postId: createPublicationIntentId(),
+    let intent: PublicationIntent = lockedIntent ?? {
+      postId: uploadDraft.current?.postId ?? createPublicationIntentId(),
       title: title.trim(),
       body: body.trim(),
       kind,
     };
     if (!intent.title || !intent.body) return;
 
+    if (!lockedIntent && files.length && privateFilesEnabled()) {
+      setPending(true);
+      try {
+        const progress = uploadDraft.current ?? { postId: intent.postId, completed: new Map<File, string>() };
+        uploadDraft.current = progress;
+        setAttachmentsLocked(true);
+        const attachments: string[] = [];
+        for (const [index, file] of files.entries()) {
+          let completed = progress.completed.get(file);
+          if (completed) {
+            try { await claimPrivateFile(completed, `groups/${groupId}/posts/${intent.postId}`); }
+            catch (error) {
+              if ((error as { statusCode?: number }).statusCode !== 410) throw error;
+              progress.completed.delete(file);
+              completed = undefined;
+            }
+          }
+          if (completed) {
+            attachments.push(completed);
+            continue;
+          }
+          const path = privateGroupPostPath(
+            groupId,
+            intent.postId,
+            safePrivateFileName(`${index}-${Date.now().toString(36)}-${crypto.randomUUID().replace(/-/g, '')}`, file.name),
+          );
+          if (!path) throw new Error('附件路徑無效');
+          await uploadPrivateFile({
+            path,
+            body: file,
+            originalFilename: file.name,
+            contentType: file.type || 'application/octet-stream',
+          });
+          progress.completed.set(file, path);
+          try { await claimPrivateFile(path, `groups/${groupId}/posts/${intent.postId}`); }
+          catch (error) { if ((error as { statusCode?: number }).statusCode === 410) progress.completed.delete(file); throw error; }
+          attachments.push(path);
+        }
+        intent = { ...intent, attachments };
+      } catch (failure) {
+        if (!current()) return;
+        const limited = (failure as { statusCode?: number })?.statusCode === 429;
+        setNotice({ text: limited ? PRIVATE_FILE_UPLOAD_RATE_MESSAGE : '附件上傳失敗，請確認檔案格式與連線後重試。', error: true });
+        setPending(false);
+        return;
+      }
+      if (!current()) return;
+      setPending(false);
+    }
     if (!writeStoredCompose(draftKey, { intent, phase: 'uncertain' })) {
-      setNotice({ text: '無法保留這次的發布記錄，尚未送出貼文。請先複製內容備份，再重試。', error: true });
+      setNotice({ text: '無法保留這次的發布記錄，尚未送出貼文。請先複製內容備份，再重試。', error: true, });
       return;
     }
 
@@ -256,6 +321,22 @@ function DiscussionBoard({
     setNotice(null);
 
     try {
+      for (const path of intent.attachments ?? []) {
+        try { await claimPrivateFile(path, `groups/${groupId}/posts/${intent.postId}`); }
+        catch (error) {
+          if ((error as { statusCode?: number }).statusCode === 410) {
+            for (const [file, completed] of uploadDraft.current?.completed ?? [])
+              if (completed === path) uploadDraft.current?.completed.delete(file);
+            setLockedIntent(null);
+            setPhase('idle');
+            setAttachmentsLocked(false);
+            writeStoredCompose(draftKey, null);
+            setNotice({ text: '附件已失效，請重新選擇或重試上傳。', error: true });
+            return;
+          }
+          throw error;
+        }
+      }
       const created = await createGroupDiscussionPost(
         uid,
         schoolId,
@@ -265,6 +346,7 @@ function DiscussionBoard({
           body: intent.body,
           kind: intent.kind,
           postId: intent.postId,
+          ...(intent.attachments?.length ? { attachments: intent.attachments } : {}),
         },
         current,
         displayName,
@@ -273,11 +355,15 @@ function DiscussionBoard({
       if (!current()) return;
       setState((previous) =>
         previous.status === 'ready'
-          ? { ...previous, posts: [created, ...previous.posts.filter((row) => row.id !== created.id)] }
+          ? { ...previous, posts: [created, ...previous.posts.filter((row) => row.id !== created.id)], }
           : previous,
       );
       setLockedIntent(null);
       setPhase('idle');
+      uploadDraft.current = null;
+      setAttachmentsLocked(false);
+      if (fileInput.current) fileInput.current.value = '';
+      setFiles([]);
       setTitle('');
       setBody('');
       setKind('post');
@@ -397,16 +483,16 @@ function DiscussionBoard({
   const { group, posts, hasMore } = state;
   return (
     <div className={styles.page}>
+      <GroupCover key={group.id} groupId={group.id} coverUrl={group.coverUrl} role={group.role} />
       <div className={styles.source}>
         <div>
           <p>
             {group.name} · {group.role === 'owner' ? '擁有者' : '成員'}
           </p>
-          <p className={styles.availability}>
-            此討論僅供已取得學校資格的群組成員使用。
-          </p>
+          <p className={styles.availability}>此討論僅供已取得學校資格的群組成員使用。</p>
         </div>
-        <button className="btn" disabled={pending || loadingMore} onClick={() => void load('replace')}>
+        <button className="btn" disabled={pending || loadingMore} onClick={() => void load('replace')}
+        >
           更新討論
         </button>
       </div>
@@ -456,6 +542,27 @@ function DiscussionBoard({
             required
           />
         </label>
+        {privateFilesEnabled() && (
+          <label>
+            附加圖片或文件
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              disabled={pending || intentLocked || attachmentsLocked}
+              accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+              onChange={(event) => {
+                const selected = Array.from(event.target.files ?? []);
+                if (selected.length > PRIVATE_FILE_UPLOADS_PER_MINUTE) {
+                  event.target.value = '';
+                  setNotice({ text: `單次最多選取 ${PRIVATE_FILE_UPLOADS_PER_MINUTE} 個附件`, error: true });
+                  return;
+                }
+                setFiles(selected);
+              }}
+            />
+          </label>
+        )}
         <div className={styles.actions}>
           <button
             className="btn primary"
@@ -464,7 +571,7 @@ function DiscussionBoard({
           >
             {pending ? '正在確認…' : intentLocked ? '重試確認' : '發布'}
           </button>
-          {intentLocked ? (
+          {draftSaved || files.length ? (
             <button className="btn" type="button" disabled={pending} onClick={beginNewPublication}>
               開始新貼文
             </button>
@@ -521,7 +628,8 @@ function DiscussionBoard({
                     >
                       儲存
                     </button>
-                    <button className="btn" type="button" disabled={pending} onClick={() => setEditingId(null)}>
+                    <button className="btn" type="button" disabled={pending} onClick={() => setEditingId(null)}
+                    >
                       取消
                     </button>
                   </div>
@@ -530,6 +638,9 @@ function DiscussionBoard({
                 <>
                   <h2>{post.title}</h2>
                   <p className={styles.description}>{post.body}</p>
+                  {post.attachments?.map((path) => (
+                    <PrivateAttachment key={path} path={path} />
+                  ))}
                   {canEditPost(group.role, post.authorId, uid) && (
                     <div className={styles.actions}>
                       <button
@@ -598,9 +709,7 @@ function DiscussionBoard({
       )}
 
       {group.role === 'owner' && (
-        <p className={styles.availability}>
-          擁有者需先完成交接，才能退出群組。
-        </p>
+        <p className={styles.availability}>擁有者需先完成交接，才能退出群組。</p>
       )}
     </div>
   );
