@@ -71,6 +71,65 @@ test('the first text atomically creates the canonical pair, message and inbox pr
   );
 });
 
+test.each(
+  ['alice', 'bob', 'both'].flatMap((member) =>
+    [{}, { schoolId: '' }, { schoolId: null }].map((profile) => [member, profile]),
+  ),
+)('active legacy member %s with profile %j can prepare and send first and existing text', async (member, profile) => {
+  for (const uid of member === 'both' ? ['alice', 'bob'] : [member]) {
+    store.docs.set(`users/${uid}`, profile);
+  }
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: false });
+  expect(store.docs.has(thread)).toBe(false);
+  expect(await send()).toEqual({ conversationId, messageId });
+  expect(store.docs.get(thread)).toMatchObject({
+    type: 'dm',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
+    lastMessage: { id: messageId, type: 'text', content: '一起去社團嗎？' },
+  });
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: true });
+  const nextId = 'next-text-message-000002';
+  expect(await send({ messageId: nextId })).toEqual({ conversationId, messageId: nextId });
+  expect(store.docs.get(`${thread}/messages/${nextId}`)).toMatchObject({ type: 'text' });
+  expect(await send()).toEqual({ conversationId, messageId });
+});
+
+test.each([
+  ['users/alice', { schoolId: 'elsewhere' }],
+  ['users/bob', { schoolId: 'elsewhere' }],
+  ['users/alice', { status: 'disabled' }],
+  ['users/bob', { status: 'suspended', schoolId: '' }],
+  ['users/alice', { accountDeletionInProgress: true }],
+  ['users/bob', { status: 'deleted' }],
+  ['schools/pu/members/alice', { status: 'inactive' }],
+  ['schools/pu/members/bob', { status: 'inactive' }],
+  ['users/alice/blockedUsers/bob', {}],
+  ['users/bob/blockedUsers/alice', {}],
+  ['friendBlocks/alice_bob', {}],
+  ['friendBlocks/bob_alice', {}],
+])('legacy profiles still reject prepare and sends when access changes at %s', async (path, value) => {
+  store.docs.set('users/alice', {});
+  store.docs.set('users/bob', { schoolId: '' });
+  const original = store.docs.get(path);
+  store.docs.set(path, value);
+  await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(store.docs.has(thread)).toBe(false);
+  if (original) store.docs.set(path, original);
+  else store.docs.delete(path);
+  await send();
+  const before = store.docs.get(thread);
+  store.docs.set(path, value);
+  await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(send({ messageId: 'next-text-message-000002' })).rejects.toMatchObject({
+    code: 'permission-denied',
+  });
+  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(store.docs.get(thread)).toEqual(before);
+  expect(store.docs.has(`${thread}/messages/next-text-message-000002`)).toBe(false);
+});
+
 test('trims before applying the 4000 character limit and limits the inbox preview', async () => {
   await send({ content: `  ${'字'.repeat(4000)}  ` });
   expect(store.docs.get(`${thread}/messages/${messageId}`).content).toHaveLength(4000);

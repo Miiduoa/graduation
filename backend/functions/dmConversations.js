@@ -78,11 +78,14 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       blocks.doc(`${memberIds[1]}_${memberIds[0]}`),
     );
     if (
-      ![a, b].every(
-        (snap) =>
-          snap.data()?.schoolId === schoolId &&
-          !isAccountUnavailable(snap.data()),
-      ) ||
+      ![a, b].every((snap) => {
+        const profile = snap.data();
+        // Legacy profiles rely on active school membership; an explicit transfer still denies access.
+        return (
+          !isAccountUnavailable(profile) &&
+          (profile.schoolId == null || profile.schoolId === '' || profile.schoolId === schoolId)
+        );
+      }) ||
       ![ma, mb].every((snap) => snap.data()?.status === 'active') ||
       blocked.some((snap) => snap.exists)
     )
