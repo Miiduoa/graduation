@@ -107,6 +107,7 @@ async function readStudyTextFile(file: File, encoding: StudyTextEncoding): Promi
 
 function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   const [initial] = useState(() => initialMaterial(material));
+  const previousAuthorizedMaterial = useRef<Material | undefined>(material);
   const [source, setSource] = useState<StudySource | null>(initial.source);
   const [sectionIndex, setSectionIndex] = useState(0);
   const [passageIndex, setPassageIndex] = useState(0);
@@ -369,6 +370,28 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     replaceSource(value);
     if (clearPaste) setPaste('');
   }
+
+  // Course selection may change while this panel stays mounted under the same
+  // account/course key. Never silently keep showing a previously selected lesson.
+  // Compare actual content, not just id: the same material id may be updated.
+  useEffect(() => {
+    const previous = previousAuthorizedMaterial.current;
+    previousAuthorizedMaterial.current = material;
+    if (!material?.body.trim()) return;
+    if (previous?.id === material.id && previous?.title === material.title && previous?.body === material.body) return;
+
+    // A newly selected authorized source supersedes a pending local file read.
+    // A late file result must not overwrite the newer selection.
+    read.current?.abort();
+    read.current = null;
+    setReading(null);
+    importReturnFocus.current = null;
+    const next = initialMaterial(material);
+    if (next.source) requestSourceReplacement(next.source, false);
+    else setError(next.error);
+    // requestSourceReplacement has render-local closures; the content comparison
+    // above makes effect reruns after state updates harmless.
+  }, [material, requestSourceReplacement]);
 
   function downloadFile(contents: () => Blob, filename: string, label: string) {
     // A new download supersedes any earlier selectable clipboard fallback.

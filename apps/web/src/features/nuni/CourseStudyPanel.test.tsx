@@ -47,6 +47,54 @@ it('isolates study notes when two different account/course scopes share an ambig
   expect(onClose).not.toHaveBeenCalled();
 });
 
+it('protects unsaved notes when the parent selects a different authorized material in the same course', () => {
+  const onClose = vi.fn();
+  const revised = { ...material, body: '更新後的教材說明外鍵必須指向存在的主鍵。' };
+  const another = { id: 'material-2', title: '第二份講義', body: '第二份講義介紹交易的 ACID 特性。' };
+  const { rerender } = render(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={material} onClose={onClose} />);
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '這份主鍵筆記尚未備份。' } });
+
+  // The same id/title with changed text is still a new selected source.
+  rerender(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={revised} onClose={onClose} />);
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(screen.queryByText(revised.body)).toBeNull();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('這份主鍵筆記尚未備份。');
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+
+  // A subsequent new selection requires a fresh confirmation; acceptance resets
+  // both old text and private notes without touching other course scopes.
+  rerender(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={another} onClose={onClose} />);
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect(screen.getByText(another.body)).toBeTruthy();
+  expect(screen.queryByText(material.body)).toBeNull();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+it('updates the visible lesson immediately when a same-course material changes with no unsaved work', () => {
+  const next = { id: material.id, title: material.title, body: '主鍵與外鍵的功能不相同。' };
+  const onClose = vi.fn();
+  const { rerender } = render(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={material} onClose={onClose} />);
+  rerender(<CourseStudyPanel scope={scope} courseTitle="資料庫"
+    material={next} onClose={onClose} />);
+  expect(screen.getByText(next.body)).toBeTruthy();
+  expect(screen.queryByText(material.body)).toBeNull();
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+  expect(mocks.run).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+});
+
 it('shows the authorized material without downloading or generating until requested', async () => {
   render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
   expect(screen.getByText(material.body)).toBeTruthy();
