@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { AccountRoleLinks } from '@/components/AccountRoleLinks';
 import { SiteShell } from '@/components/SiteShell';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -87,9 +88,9 @@ function LoginForm({
     schoolTask && !options.loading && !options.error && !schoolAvailable;
   // School destinations stay school-only; Google must not appear to fulfill them.
   const hideGoogle = schoolTask;
-  const publicDestination = isPublicCampusPath(
-    new URL(destination, 'https://campus.local').pathname,
-  );
+  const taskPath = new URL(destination, 'https://campus.local').pathname;
+  const publicDestination = isPublicCampusPath(taskPath);
+  const merchantTask = !reconnect && ['/merchant', '/merchant/apply', '/merchant/workspace'].includes(taskPath);
   const directoryDestination = campusServiceHref(
     '/search',
     selection?.requestedUnavailable ? buildCampusNavigationSearch(params) : campusSearch,
@@ -175,6 +176,14 @@ function LoginForm({
       }
     }
   }
+  if (merchantTask) {
+    return (
+      <SiteShell title="店家帳號登入" subtitle="第一次使用可透過 Google 建立帳號。已申請店家請用原帳號登入。">
+        <NuniSignIn returnUrl={destination} issue={issue} />
+        <Link href="/login" className={styles.backLink}>查看其他身分入口</Link>
+      </SiteShell>
+    );
+  }
   return (
     <SiteShell
       title={
@@ -192,21 +201,22 @@ function LoginForm({
             : '不登入也能看校園資訊。需要課程、交流或店家服務時，用 Google 帳號登入。'
       }
     >
+      {!schoolTask && <AccountRoleLinks showSchool />}
       <section
         className={styles.connectionIntro}
         aria-label={schoolTask ? '校務連線方式' : '開始使用平台'}
       >
         <div>
-          <p className={styles.connectionKicker}>{schoolTask ? '連線你的學校資料' : '從日常需要的事開始'}</p>
-          <h2>{schoolTask ? '校務資料，需要另外連線' : '一個 Google 帳號，就能開始'}</h2>
+          <p className={styles.connectionKicker}>{schoolTask ? '校園資料，一次整理' : '從日常需要的事開始'}</p>
+          <h2>{schoolTask ? '用匯入與 Google 帳號，整理自己的課表' : '一個 Google 帳號，就能開始'}</h2>
           <p>
             {schoolTask
-              ? '這項服務需要學校帳號驗證。個人課表、行程與公開交流可以先使用，不必等學校連線完成。'
+              ? '尚未開放學號直接登入。你可以自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。兩種方法分開顯示，避免把「可瀏覽校園」誤認為「已取得校務權限」。'
               : '整理課表與行程、參與公開交流，或接續已加入課班的教材與作業。需要校方提供的個人資料時，再另外連線學校帳號。'}
           </p>
         </div>
         <div className={styles.connectionFacts}>
-          <span>{schoolTask ? '學校帳號依服務開放' : '不需要學號或學校信箱'}</span>
+          <span>{schoolTask ? '尚未開放學號直接登入' : '不需要學號或學校信箱'}</span>
           <span>可自行匯入課表、成績與活動</span>
         </div>
       </section>

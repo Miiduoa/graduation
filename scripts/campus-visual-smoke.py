@@ -41,6 +41,8 @@ def session_fixtures(authenticated, operator=False):
                     'context': 'a' * 43,
                 } if authenticated else {}),
             })
+        elif url.path == '/api/nuni/sign-in-options':
+            await route.fulfill(json={'google': True, 'studentId': False})
         elif url.path == '/auth/platform/providers':
             await route.fulfill(json={'kinds': ['google-consumer']})
         elif url.path.startswith('/api/transit'):
@@ -181,7 +183,9 @@ async def follow_account_return(page, target, expected_target=None):
 
 async def check_unsigned_account_entry(page):
     await expect(page.get_by_role('heading', name='登入', exact=True)).to_be_visible()
-    await expect(page.get_by_text('請用學校核發的帳號登入。', exact=True)).to_be_visible()
+    role_links = page.get_by_role('navigation', name='身分與工作入口')
+    await expect(role_links.get_by_role('link', name='第一次申請店家進駐')).to_have_attribute('href', '/merchant/apply')
+    await expect(role_links.get_by_role('link', name='查看申請或進入門市')).to_have_attribute('href', '/merchant/workspace')
     await expect(page.get_by_role('button', name='登入校園帳號')).to_be_visible()
     await expect(page.get_by_role('button', name='用 Google 繼續')).to_be_visible()
     await expect(page.get_by_role('button', name='尋找學校')).to_be_visible()
@@ -220,6 +224,23 @@ async def check_unsigned_account_entry(page):
     for copy in OLD_ACCOUNT_COPY:
         await expect(page.get_by_text(copy, exact=True)).to_have_count(0)
     await expect(page.get_by_role('article')).to_have_count(0)
+
+
+async def check_merchant_entry_links(page):
+    for entry, label, destination in [
+        ('/login', '第一次申請店家進駐', '/merchant/apply'),
+        ('/auth/account', '查看申請或進入門市', '/merchant/workspace'),
+    ]:
+        await goto_path(page, entry)
+        roles = page.get_by_role('navigation', name='身分與工作入口')
+        await roles.get_by_role('link', name=label).click()
+        await page.wait_for_url(BASE + destination)
+        google = page.get_by_role('button', name='使用 Google 帳號繼續')
+        await expect(google).to_be_visible()
+        action = urlparse(await google.evaluate('button => button.form.action'))
+        assert action.path == '/auth/platform/start'
+        assert parse_qs(action.query) == {'returnUrl': [destination]}
+        await no_overflow(page)
 
 
 async def check_account_footer_contrast(page):
@@ -643,6 +664,12 @@ async def main():
             )
             results.append('unsigned account entry keeps existing actions without demo copy')
 
+            for width in [390, 1440]:
+                await page.set_viewport_size({'width': width, 'height': 844})
+                await check_merchant_entry_links(page)
+                results.append(f'merchant registration and returning sign-in preserve their destination at {width}px')
+            await page.set_viewport_size({'width': 390, 'height': 844})
+            await goto_path(page, '/auth/account')
             await check_account_footer_contrast(page)
             await page.emulate_media(color_scheme='dark')
             await goto_path(page, '/auth/account')
