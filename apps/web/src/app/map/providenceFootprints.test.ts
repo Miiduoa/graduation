@@ -158,6 +158,36 @@ describe('Providence OSM building outlines', () => {
     })).toHaveLength(1);
   });
 
+  it('does not mistake an OSM building part for a surveyed complete school building', () => {
+    // building:part can coexist with building=yes while describing only one
+    // section of a building. Its area/height cannot become a full ground-up
+    // campus volume until the complete 3D parts model is verified.
+    for (const marker of ['yes', 'school', 'roof', '', '  ', null, true]) {
+      const buildings = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'yes', 'building:part': marker, height: '18 m',
+        })],
+      });
+      expect(buildings, `building:part=${String(marker)}`).toEqual([]);
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'part', height: '18 m' })],
+    })).toEqual([]);
+    // Explicit negative tags are not evidence of a part; do not exclude
+    // an otherwise audited whole-building way simply because of them.
+    for (const marker of ['no', 'false', '0']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'school', 'building:part': marker, height: '18 m',
+        })],
+      }), marker).toMatchObject([{ poiId: 'pu-library', heightMeters: 18 }]);
+    }
+    // A separate ordinary way is unaffected by the rejected part.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'yes' })],
+    })).toHaveLength(1);
+  });
+
   it('does not invent ground-level walls for elevated OSM building parts', () => {
     // Height is top elevation, not proof that the building begins at ground.
     // Until we model a verified base elevation, an elevated footprint is not
