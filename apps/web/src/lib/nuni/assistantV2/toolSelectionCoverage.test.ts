@@ -2,12 +2,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTools, selectTools, toolSelectionNotice } from './tools';
 import { run } from './runner';
+import type { Model } from './contracts';
 import {
   fixtureAdapter, fixtureBinding as binding, FIXTURE_NOW as now, FIXTURE_SECRET as secret,
 } from './fixtures';
 
 const compound = '查作業、教材、社團和公車';
 const domainTools = ['get_due_work', 'get_materials', 'list_clubs', 'get_transit'];
+const answerModel: Model = async () => ({
+  message: { role: 'assistant', content: '請查看結果。' },
+  usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+});
 
 describe('tool selection coverage within eight tools', () => {
   it.each([
@@ -84,8 +89,7 @@ describe('tool selection coverage within eight tools', () => {
     const f = fixtureAdapter(false);
     const result = await run({
       question, history: [], binding, adapter: f.adapter,
-      model: { complete: async () => ({ message: { role: 'assistant', content: '請查看結果。' },
-        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }) },
+      model: answerModel,
       secret, writes: false, signal: new AbortController().signal, now, log: () => {},
     });
     expect(result.answer).toContain('教材、社團、公車／交通');
@@ -107,8 +111,7 @@ describe('tool selection coverage within eight tools', () => {
     const f = fixtureAdapter(false);
     const result = await run({
       question, history: [], binding, adapter: f.adapter,
-      model: { complete: async () => ({ message: { role: 'assistant', content: '請查看結果。' },
-        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }) },
+      model: answerModel,
       secret, writes: false, signal: new AbortController().signal, now, log: () => {},
     });
     expect(selectTools(question, false)).not.toContain('get_campus_info');
@@ -122,7 +125,7 @@ describe('tool selection coverage within eight tools', () => {
     const f = fixtureAdapter(false);
     const result = await run({
       question: '幫我規劃作業，也查圖書館教材社團', history: [], binding, adapter: f.adapter,
-      model: { complete: async () => { throw Object.assign(new Error('Unavailable'), { status: 503 }); } },
+      model: async () => { throw Object.assign(new Error('Unavailable'), { status: 503 }); },
       secret, writes: false, signal: new AbortController().signal, now, log: () => {},
     });
     expect(result.steps).toContainEqual(expect.objectContaining({ name: 'get_campus_info', status: 'ok' }));
@@ -136,13 +139,13 @@ describe('tool selection coverage within eight tools', () => {
     let calls = 0;
     const result = await run({
       question: '查社團與教材', history: [], binding, adapter: f.adapter,
-      model: { complete: async () => ({
+      model: async () => ({
         message: calls++ === 0
           ? { role: 'assistant', content: '', tool_calls: [{ id: 'clubs', type: 'function',
             function: { name: 'list_clubs', arguments: JSON.stringify({ tenantId: 'fixture-realm' }) } }] }
           : { role: 'assistant', content: '請查看結果。' },
         usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-      }) },
+      }),
       secret, writes: false, signal: new AbortController().signal, now, log: () => {},
     });
     expect(result.steps).toContainEqual(expect.objectContaining({ name: 'list_clubs', status: fail ? 'error' : 'ok' }));
@@ -156,21 +159,28 @@ describe('tool selection coverage within eight tools', () => {
     const submit = vi.spyOn(f.adapter.food!, 'submit');
     const orders = vi.spyOn(f.adapter, 'orders');
     const order = vi.spyOn(f.adapter, 'order');
-    // Any quote/order HTTP request is forbidden in this local fixture test.
-    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No network in this test'));
+    const originalFetch = globalThis.fetch;
+    const orderRequests = vi.fn();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'https://fixture.invalid');
+      if (/\/(?:quotes|orders)(?:\/|$)/.test(url.pathname)) {
+        orderRequests(url.pathname);
+        throw new Error('Quote/order HTTP requests are forbidden in this test');
+      }
+      return originalFetch(input, init);
+    });
     try {
       const result = await run({
         question: '幫我點一份便當，也查作業教材社團公車', history: [], binding,
         adapter: f.adapter,
-        model: { complete: async () => ({ message: { role: 'assistant', content: '請查看結果。' },
-          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }) },
+        model: answerModel,
         secret, writes: false, signal: new AbortController().signal, now, log: () => {},
       });
       expect(result.simulation).toBe(false);
       expect(submit).toHaveBeenCalledTimes(0);
       expect(orders).toHaveBeenCalledTimes(0);
       expect(order).toHaveBeenCalledTimes(0);
-      expect(fetch).toHaveBeenCalledTimes(0);
+      expect(orderRequests).toHaveBeenCalledTimes(0);
     } finally {
       fetch.mockRestore();
     }

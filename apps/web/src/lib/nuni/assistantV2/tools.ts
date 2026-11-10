@@ -440,7 +440,13 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
   add(/教材/.test(question), '教材', 'get_materials');
   add(/社團/.test(question), '社團', 'list_clubs');
   add(/公車|交通|到站/.test(question), '公車／交通', 'get_transit');
-  add(/圖書館|怎麼走|地圖|公告|活動/.test(question), '校園資訊', 'get_campus_info');
+  // Match campusInfoPrelude's exclusions: a mention in an example, negation or
+  // historical statement does not request a campus lookup.
+  const campusQuestion = question.normalize('NFKC').trim();
+  const campusLookup = question.length <= 1000 &&
+    !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(question) &&
+    !/[「」『』“”"'`]|不要|不用|不必|無須|不需要|不想|不是要|先別|別幫|翻譯|這句話|假設|如果|昨天|前天|剛才|之前|曾經|以前/.test(campusQuestion);
+  add(campusLookup && /圖書館|怎麼走|地圖|公告|活動/.test(campusQuestion), '校園資訊', 'get_campus_info');
   add(foodOrderIntent(question) || /點餐|菜單|便當/.test(question), '點餐',
     /再點|跟上次一樣/.test(question) ? 'reorder_last_food_order' : 'get_food_menu');
   add(/吃|中午|餐廳/.test(question) && !foodOrderIntent(question), '餐廳', 'get_dining');
