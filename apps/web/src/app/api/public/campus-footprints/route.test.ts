@@ -489,6 +489,39 @@ describe('public Providence building geometry route', () => {
     expect(text).not.toHaveBeenCalled();
   });
 
+  it('rejects an oversized stream promptly even when cancellation itself never settles', async () => {
+    vi.useFakeTimers();
+    let cancelCalls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(500_001));
+      },
+      cancel() {
+        cancelCalls += 1;
+        // A misbehaving stream can ignore cancellation indefinitely. Its
+        // pending cancel promise must not delay a known oversize rejection.
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    let settledStatus: number | null = null;
+    const pending = GET().then((response) => {
+      settledStatus = response.status;
+      return response;
+    });
+    // Far less than the 12-second global deadline: failure should happen as
+    // soon as the decoded byte limit is exceeded.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(cancelCalls).toBe(1);
+    expect(settledStatus).toBe(503);
+    const rejected = await pending;
+    expect(rejected.headers.get('Cache-Control')).toBe('no-store');
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('ends a never-settling upstream fetch after 12 seconds even if it ignores abort', async () => {
     vi.useFakeTimers();
     const upstream = vi.fn()
