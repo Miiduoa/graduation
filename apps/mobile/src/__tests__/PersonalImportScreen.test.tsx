@@ -1359,7 +1359,10 @@ test('one screenshot action sends OCR text to the scoped organizer and opens a r
   );
   const view = render(<PersonalImportScreen />);
   await view.findByText('用 AI 辨識課表截圖');
-  expect(view.getByText(/原圖留在手機/)).toBeTruthy();
+  expect(view.getByText(/目前由手機 OCR 讀取圖片.*原圖不會上傳/)).toBeTruthy();
+  expect(
+    view.getByLabelText('同意將原始課表截圖交給雲端視覺模型').props.accessibilityState.checked,
+  ).toBe(false);
   fireEvent.press(view.getByText('用 AI 辨識課表截圖'));
   await view.findByText('前往核對 1 堂課');
   expect(mockRecognize).toHaveBeenCalledWith(expect.any(String), 'image/png', expect.anything(), true);
