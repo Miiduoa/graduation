@@ -151,8 +151,28 @@ export function createCampusSpatialScene(
   const pinRadius = Math.max(3, Math.min(9, model.radius * 0.018));
   const pinHeight = pinRadius * 3.3;
   const tallestBuilding = Math.max(0, ...visibleFootprints.map((item) => item.heightMeters));
-  const groundWidth = Math.max(180, model.extent.width + pinRadius * 12);
-  const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12);
+  const anchor = model.points[0];
+  const longitudeScale = 6_371_008.8 * Math.PI / 180 *
+    Math.cos(anchor.location.lat * Math.PI / 180);
+  const latitudeScale = 6_371_008.8 * Math.PI / 180;
+  // A verified footprint can extend beyond its POI. When the overview is
+  // framed using only POI bounds, long campus buildings fall outside the
+  // ground plane and get cropped, especially on narrow screens. Include
+  // actual OSM outline vertices; never invent entrances or nearby paths.
+  let footprintHalfWidth = 0;
+  let footprintHalfDepth = 0;
+  for (const footprint of visibleFootprints) {
+    for (const [longitude, latitude] of footprint.outline) {
+      footprintHalfWidth = Math.max(footprintHalfWidth,
+        Math.abs(anchor.x + (longitude - anchor.location.lng) * longitudeScale));
+      footprintHalfDepth = Math.max(footprintHalfDepth,
+        Math.abs(anchor.z - (latitude - anchor.location.lat) * latitudeScale));
+    }
+  }
+  const groundWidth = Math.max(180, model.extent.width + pinRadius * 12,
+    footprintHalfWidth * 2 + pinRadius * 12);
+  const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12,
+    footprintHalfDepth * 2 + pinRadius * 12);
 
   function ownGeometry<T extends BufferGeometry>(geometry: T): T {
     geometries.push(geometry);
@@ -557,10 +577,6 @@ export function createCampusSpatialScene(
 
     // Only published OSM way outlines that passed the Providence source whitelist are extruded.
     // The shape is geographic; without a recorded OSM height the 12 m volume is illustrative.
-    const anchor = model.points[0];
-    const longitudeScale = 6_371_008.8 * Math.PI / 180 *
-      Math.cos(anchor.location.lat * Math.PI / 180);
-    const latitudeScale = 6_371_008.8 * Math.PI / 180;
     for (const footprint of visibleFootprints) {
       const shape = new Shape();
       footprint.outline.forEach(([longitude, latitude], index) => {
