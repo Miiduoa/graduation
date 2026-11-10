@@ -1,22 +1,24 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
-  addDoc,
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
-  increment,
+  getDocsFromServer,
   limit,
   orderBy,
   query,
-  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
+  startAfter,
   where,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { buildStoryViewerPage, STORY_VIEWER_QUERY_LIMIT, storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '../firebase';
+import { fetchSchoolDirectoryProfiles } from './memberDirectory';
 
 export function storiesCollection(db = getDb()) {
   return collection(db, 'campusStories');
@@ -39,7 +41,11 @@ export type CampusStoryDoc = {
   viewCount?: number;
 };
 
-export async function publishStory(payload: {
+export function reserveStoryId(): string {
+  return doc(storiesCollection()).id;
+}
+
+export async function publishStory(storyId: string, payload: {
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
@@ -50,8 +56,9 @@ export async function publishStory(payload: {
   poiName?: string | null;
   expiresAtMs: number;
 }): Promise<string> {
-  const db = getDb();
-  const ref = await addDoc(storiesCollection(db), {
+  if (payload.mediaUrl) assertPrivateFileNamespace(payload.mediaUrl, `schools/${payload.schoolId}/stories/${storyId}`);
+  const ref = doc(storiesCollection(), storyId);
+  const content = {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
@@ -60,10 +67,18 @@ export async function publishStory(payload: {
     bgColor: payload.bgColor ?? '#000000',
     poiId: payload.poiId ?? null,
     poiName: payload.poiName ?? null,
-    createdAt: serverTimestamp(),
-    expiresAt: payload.expiresAtMs,
-    viewCount: 0,
-  });
+  };
+  try {
+    await setDoc(ref, { ...content, createdAt: serverTimestamp(), expiresAt: payload.expiresAtMs, viewCount: 0 });
+  } catch (error) {
+    // If the first create was acknowledged only by the server, retrying the
+    // reserved ID is an update, which rules deny even to the original author.
+    if ((error as { code?: string }).code !== 'permission-denied') throw error;
+    const snapshot = await getDocFromServer(ref).catch(() => null);
+    const row = snapshot?.data();
+    if (!row || typeof row.expiresAt !== 'number' || row.expiresAt <= Date.now() ||
+        !Object.entries(content).every(([key, value]) => row[key] === value)) throw error;
+  }
   return ref.id;
 }
 
@@ -73,50 +88,60 @@ export async function listActiveStoriesForSchool(
   options: { throwOnError?: boolean } = {},
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
   try {
-    const snap = await getDocs(
+    // Preserve near-expiry stories with only a small request-latency buffer.
+    const read = (expiresAfter: number) => getDocs(
       query(
         storiesCollection(db),
         where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
+        where('expiresAt', '>', expiresAfter),
+        orderBy('expiresAt', 'desc'),
         limit(lim),
       ),
     );
+    const snap = await read(Date.now() + 3_000).catch((error: unknown) => {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+      return read(Date.now() + 15_000);
+    });
     return snap.docs
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    // 缺索引 fallback：不排序
-    try {
-      const snap = await getDocs(
-        query(storiesCollection(db), where('schoolId', '==', schoolId), limit(lim)),
-      );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-        .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch (error) {
-      if (options.throwOnError) throw error;
-      return [];
-    }
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
+  } catch (error) {
+    // Never fall back to a school-only query: it exposes expired metadata.
+    if (options.throwOnError) throw error;
+    return [];
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
+type StoryScope = Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>;
+
+export async function markStoryViewed(story: StoryScope, viewerUid: string) {
+  if (story.authorUid === viewerUid) return;
   const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+  const viewRef = doc(db, ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, {
     viewerUid,
     viewedAt: serverTimestamp(),
   });
-  // 累加 viewCount（best-effort）
-  try {
-    await updateDoc(doc(db, 'campusStories', storyId), { viewCount: increment(1) });
-  } catch {
-    /* ignore */
-  }
+}
+
+export async function listStoryViewers(
+  story: StoryScope,
+  cursor: QueryDocumentSnapshot | null,
+) {
+  const db = getDb();
+  const receipts = collection(db, ...storyViewerCollectionPath(story));
+  const snapshot = await getDocsFromServer(query(
+    receipts,
+    orderBy('viewedAt', 'desc'),
+    ...(cursor ? [startAfter(cursor)] : []),
+    limit(STORY_VIEWER_QUERY_LIMIT),
+  ));
+  return buildStoryViewerPage(snapshot.docs, story.authorUid, (uids) =>
+    fetchSchoolDirectoryProfiles(story.schoolId, uids, db),
+  );
 }
 
 export async function deleteMyStory(storyId: string) {

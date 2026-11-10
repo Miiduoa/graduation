@@ -1,6 +1,6 @@
 import type { OnDeviceSchoolContext } from './onDeviceSchoolContext';
 import { validCampusSenseSnapshot, type CampusSenseSnapshot } from './campusSenseSnapshot';
-import { runOfflineCampusTool } from './offlineCampusTools';
+import { readSyncedAnnouncements, runOfflineCampusTool } from './offlineCampusTools';
 import {
   localCampusReadPrompt, localCampusReadQuery, parseLocalCampusReadPlan,
   type LocalReadMessage, type LocalCampusReadResult,
@@ -25,8 +25,13 @@ export async function resolveLocalCampusSemanticReads(input: {
   input.assertCurrent();
   if (!input.uid || !input.schoolId || input.context.schoolId !== input.schoolId) return null;
   const scope = { uid: input.uid, schoolId: input.schoolId };
+  // A saved timetable is account-private. Preserve independently authorized
+  // campus sense data, but never consult a foreign or ownerless timetable.
+  const scopedContext: OnDeviceSchoolContext = input.context.ownerUid === input.uid
+    ? input.context
+    : { ...input.context, timetable: { source: 'not-available', updatedAt: null, courses: [] } };
   const initialSense = validCampusSenseSnapshot(input.snapshot, scope);
-  if (input.context.timetable.source !== 'saved-device-copy' && !initialSense) return null;
+  if (scopedContext.timetable.source !== 'saved-device-copy' && !initialSense) return null;
   const prompt = localCampusReadPrompt(input.messages);
   if (!prompt) return null;
   const selection = await input.generate(prompt);
@@ -42,9 +47,12 @@ export async function resolveLocalCampusSemanticReads(input: {
     const now = Date.now();
     // Do not extend snapshot life by starting a long native inference.
     const sense = validCampusSenseSnapshot(input.snapshot, scope, now);
-    const context = { ...input.context, checkedAt: new Date(now).toISOString() };
+    const context = { ...scopedContext, checkedAt: new Date(now).toISOString() };
     const query = localCampusReadQuery(call);
-    const answer = runOfflineCampusTool(query.question, context, sense, input.uid);
+    // The selector chooses the source. Only the user's words can set a publication window.
+    const answer = call.tool === 'announcements' && plan.calls.length === 1
+      ? readSyncedAnnouncements(input.messages[input.messages.length - 1].content, now, sense)
+      : runOfflineCampusTool(query.question, context, sense, input.uid);
     const available = call.tool === 'timetable'
       ? context.timetable.source === 'saved-device-copy'
       : call.tool === 'assignments' ? sense?.assignments.status === 'available'

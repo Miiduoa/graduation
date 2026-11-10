@@ -117,6 +117,8 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
         disabled={busy} onPress={() => onAsk('哪個最急？')} />}
       {canAsk && (!view || (view.kind === 'priority' && shown.length > 0)) && <AIButton label="我交了嗎？" variant="ghost"
         disabled={busy} onPress={() => onAsk('我交了嗎？')} />}
+      {canAsk && !choosing && shown.length > 0 && <AIButton label="安排準備時間" variant="ghost"
+        disabled={busy} onPress={() => onAsk('安排這份作業的準備時間')} />}
       {canAsk && !choosing && shown.length > 0 && <AIButton label="提醒我交這份" variant="ghost"
         disabled={busy} onPress={() => onAsk('提醒我交這份')} />}
       {actionable && view && <AIButton label="回到這門課的作業" variant="ghost"
@@ -139,8 +141,9 @@ export function NuniCourseworkReply({ read, busy, latest, onAsk, onSelect, onOpe
       {!(outdated && choosing) && shown.slice(0, visibleCount).map((item, index) => {
         const deadline = item.dueAt ? parseTaipeiInstant(item.dueAt) : null;
         const overdue = deadline !== null && !!comparisonTime && deadline < Date.parse(comparisonTime);
-        const status = item.submittedAt ? '已繳交' : item.state === 'closed' ? '已停止收件 · 未繳交'
-          : overdue ? '已逾期 · 未繳交' : '待繳交';
+        // No receipt in the loaded platform snapshot is not evidence of confirmed non-submission.
+        const status = item.submittedAt ? '已繳交' : item.state === 'closed' ? '已停止收件 · 未見繳交紀錄'
+          : overdue ? '已逾期 · 未見繳交紀錄' : '仍在收件 · 未見繳交紀錄';
         const due = item.dueAt ? `截止 ${formatTaipeiDateTime(item.dueAt, { seconds: false })}` : '未設定截止時間';
         const title = choosing ? `第 ${index + 1} 份 · ${item.title}` : item.title;
         const disabled = busy || (!!choosing && (!latest || !!outdated));

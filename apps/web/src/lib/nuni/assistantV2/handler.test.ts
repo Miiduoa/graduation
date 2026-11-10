@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { handleNuni } from '../api';
 import { sealCookie, SESSION_COOKIE, sessionContext } from '../server';
-import { signCard, issueRoute } from './actions';
+import { signCard, issueRoute, confirm } from './actions';
+import { parseAssistantCalendarReceipt } from '@campus/shared/src/assistantExecution';
 import { createAdapter } from './adapter';
 import { bytes, type ModelInput } from './contracts';
 import { providerError } from './groq';
@@ -120,6 +121,70 @@ it('confirm rechecks authoritative session and writes only exact signed argument
   vi.stubEnv('CAMPUS_ASSISTANT_ENABLED', '');
   expect((await invoke()).status).toBe(404);
 });
+it('routes a read-only reconciliation through handleNuni after expiry or issuer loss without a model or write', async () => {
+  const f = fixtureAdapter();
+  const principal = vi.fn(async () => ({ platformAccountId: account, isPlatformOperator: false }));
+  vi.mocked(createAdapter).mockReturnValue({ adapter: f.adapter, principal, apiCalls: () => 0 });
+  const binding = { account, session: sessionContext(session), conversationId: 'verify-existing', schoolId: 'fixture-school' };
+  const issuedAt = Date.now() - 600000;
+  vi.stubEnv('FLY_MACHINE_ID', 'old-calendar-owner');
+  const card = signCard(binding, 'propose_personal_event', { title: '已確認的行程', date: '2026-11-04', allDay: true }, 1, FIXTURE_SECRET, issuedAt);
+  await confirm(binding, { token: card.token, args: card.args }, FIXTURE_SECRET, issuedAt, f.adapter, true);
+  vi.stubEnv('FLY_MACHINE_ID', 'new-calendar-owner');
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_WRITES_ENABLED', 'false');
+  const response = await handleNuni(request('reconcile', {
+    schoolId: binding.schoolId, conversationId: binding.conversationId, token: card.token, args: card.args,
+  }, { 'fly-replay-failed': 'owner unavailable' }), ['assistant', 'reconcile']);
+  expect(response.status).toBe(200);
+  expect(response.headers.has('fly-replay')).toBe(false);
+  expect(parseAssistantCalendarReceipt(await response.json(), {
+    schoolId: binding.schoolId, mutationId: card.mutationId, event: card.args, storage: 'synced',
+  })).toMatchObject({ status: 'verified', replay: true, revision: 2 });
+  expect(principal).toHaveBeenCalledOnce();
+  expect(providerCall).not.toHaveBeenCalled();
+  expect(f.writes).toHaveLength(1);
+});
+
+it('reconciliation preserves BFF method, origin, session, binding and feature gates', async () => {
+  const f = fixtureAdapter(), read = vi.spyOn(f.adapter, 'ledger');
+  const principal = vi.fn(async () => ({ platformAccountId: account, isPlatformOperator: false }));
+  vi.mocked(createAdapter).mockReturnValue({ adapter: f.adapter, principal, apiCalls: () => 0 });
+  const binding = { account, session: sessionContext(session), conversationId: 'verify-gates', schoolId: 'fixture-school' };
+  const card = signCard(binding, 'propose_personal_event', { title: '待核對', date: '2026-11-04', allDay: true }, 1, FIXTURE_SECRET, Date.now());
+  const payload = { schoolId: binding.schoolId, conversationId: binding.conversationId, token: card.token, args: card.args };
+  const invoke = (value = payload, headers: Record<string, string> = {}) => handleNuni(request('reconcile', value, headers), ['assistant', 'reconcile']);
+  expect((await handleNuni(request('reconcile'), ['assistant', 'reconcile'])).status).toBe(405);
+  expect((await invoke(payload, { Origin: 'https://example.invalid' })).status).toBe(403);
+  expect((await invoke(payload, { cookie: '' })).status).toBe(401);
+  expect((await invoke(payload, { 'X-Campus-Session': 'old-session' })).status).toBe(409);
+  expect((await invoke({ ...payload, conversationId: 'different-conversation' })).status).toBe(409);
+  expect((await invoke({ ...payload, schoolId: 'different-school' })).status).toBe(409);
+  expect(read).not.toHaveBeenCalled();
+  expect(providerCall).not.toHaveBeenCalled();
+  const response = await invoke();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ status: 'absent', authorizationValid: true, retryable: true });
+  vi.stubEnv('CAMPUS_ASSISTANT_V2_ENABLED', 'false');
+  expect((await invoke()).status).toBe(404);
+  expect(f.writes).toHaveLength(0);
+});
+
+it('returns typed idempotent cancellation and recovers that state through reconciliation', async () => {
+  const f = fixtureAdapter();
+  vi.mocked(createAdapter).mockReturnValue({ adapter: f.adapter,
+    principal: async () => ({ platformAccountId: account, isPlatformOperator: false }), apiCalls: () => 0,
+  });
+  const binding = { account, session: sessionContext(session), conversationId: 'cancel-readback', schoolId: 'fixture-school' };
+  const card = signCard(binding, 'propose_personal_event', { title: '撤銷提議', date: '2026-11-04', allDay: true }, 1, FIXTURE_SECRET, Date.now());
+  const payload = { schoolId: binding.schoolId, conversationId: binding.conversationId, token: card.token, args: card.args };
+  for (const [action, alreadyRevoked] of [['cancel', false], ['cancel', true], ['reconcile', true]] as const) {
+    const response = await handleNuni(request(action, payload), ['assistant', action]);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'revoked', alreadyRevoked, authorizationValid: false, retryable: false });
+  }
+  expect(f.writes).toHaveLength(0);
+  expect(providerCall).not.toHaveBeenCalled();
+});
 it('rejects revoked capability and logs failure without raw question/secret', async () => {
   const f = fixtureAdapter();
   vi.mocked(createAdapter).mockReturnValue({
@@ -160,6 +225,66 @@ it('rejects client system/tool memory and extra input, without invoking model', 
     ).status,
   ).toBe(422);
   expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain('QUESTION_MARKER');
+});
+
+it('does not keep local quota from a failed model follow-up so a retry is not 429', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 180000);
+  const f = fixtureAdapter();
+  const accountId = 'quota-refund-transit-account';
+  vi.mocked(createAdapter).mockReturnValue({
+    adapter: f.adapter,
+    principal: async () => ({ platformAccountId: accountId, isPlatformOperator: false }),
+    apiCalls: () => 0,
+  });
+  let failures = 0;
+  providerCall.mockImplementation(async (input: ModelInput) => {
+    const followUp = input.messages.some(
+      (m) => typeof m.content === 'string' && m.content.includes('<results'),
+    );
+    if (!followUp && input.tools?.length)
+      return {
+        message: {
+          role: 'assistant',
+          tool_calls: [
+            {
+              id: 't1',
+              type: 'function',
+              function: { name: 'get_transit', arguments: '{"action":"campus"}' },
+            },
+          ],
+        },
+        usage: { prompt_tokens: 400, completion_tokens: 40, total_tokens: 440 },
+      };
+    if (++failures <= 2) throw providerError(400, '{"error":{"code":"invalid_request_error"}}');
+    return {
+      message: { role: 'assistant', content: '請至公車頁確認。' },
+      usage: { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 },
+    };
+  });
+  const body = {
+    schoolId: 'fixture-school',
+    conversationId: 'quota-refund-transit',
+    consent: true,
+    question: '公車交通' + '測'.repeat(220),
+    history: [],
+    routeToken: issueRoute(
+      {
+        account: accountId,
+        session: sessionContext(session),
+        conversationId: 'quota-refund-transit',
+        schoolId: 'fixture-school',
+      },
+      FIXTURE_SECRET,
+    ),
+  };
+  const first = await handleNuni(request('ask', body), ['assistant', 'ask']);
+  expect(first.status).toBe(200);
+  const second = await handleNuni(request('ask', body), ['assistant', 'ask']);
+  expect(second.status).toBe(200);
+  const third = await handleNuni(request('ask', body), ['assistant', 'ask']);
+  expect(third.status).not.toBe(429);
+  expect(third.status).toBe(200);
+  clock.mockRestore();
 });
 
 it('limits each account to three questions per minute and retains current-session validation', async () => {

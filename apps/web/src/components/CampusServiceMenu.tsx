@@ -5,15 +5,22 @@ import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvi
 import Link from 'next/link';
 import { CampusIcon } from './CampusIcon';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   visibleCampusServices,
   SERVICE_CATEGORIES,
   searchCampusServices,
+  writeCampusServiceFilters,
+  countCampusSearchResults,
   secondaryCampusServices,
   type CampusService,
   type ServiceCategory,
 } from '@/lib/campusServices';
+import {
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+} from '@/lib/campusDirectorySearch';
 import { isWebOnlineOrderingEnabled, ONLINE_ORDERING_OFF_TEXT } from '@/lib/onlineOrdering';
 import styles from './CampusServiceMenu.module.css';
 import {
@@ -45,7 +52,7 @@ function ServiceMenuLink({
   id: string;
   filtering: boolean;
   secondary?: boolean;
-  onClose: () => void;
+  onClose: (href: string) => void;
 }) {
   return (
     <Link
@@ -57,7 +64,7 @@ function ServiceMenuLink({
         service.href === '/food' && !isWebOnlineOrderingEnabled() ? `${id}-food-status` : undefined
       }
       aria-current={currentService === service.href ? 'page' : undefined}
-      onClick={onClose}
+      onClick={() => onClose(href)}
     >
       <span className={styles.serviceName}>
         {service.name}
@@ -82,13 +89,47 @@ export function CampusServiceMenu() {
   const menu = useRef<HTMLDetailsElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
+  const skipToggleSideEffects = useRef(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<ServiceCategory | 'all'>('all');
   const id = useId();
+  function assignMenuOpen(open: boolean) {
+    const element = menu.current;
+    if (!element || element.open === open) return;
+    skipToggleSideEffects.current = true;
+    element.open = open;
+    if (open) {
+      // 還原打開後，瀏覽器可能延遲派發 toggle，並在把焦點移回頁面時觸發 blur。
+      setTimeout(() => {
+        skipToggleSideEffects.current = false;
+      }, 0);
+      return;
+    }
+    skipToggleSideEffects.current = false;
+  }
+  useLayoutEffect(() => {
+    const snapshot = restoreDirectorySearch('menu', pathname || '/');
+    if (!snapshot) return;
+    // Restore filters after history navigation back to this page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setQuery(snapshot.query.slice(0, 100));
+    setCategory(snapshot.category);
+    if (!snapshot.open) return;
+    const previouslyFocused = document.activeElement;
+    assignMenuOpen(true);
+    if (
+      previouslyFocused instanceof HTMLElement &&
+      previouslyFocused !== document.activeElement &&
+      previouslyFocused.isConnected
+    ) {
+      previouslyFocused.focus({ preventScroll: true });
+    }
+  }, [pathname]);
   useEffect(() => {
     function dismiss(event: PointerEvent) {
       const element = menu.current;
       if (element?.open && event.target instanceof Node && !element.contains(event.target)) {
+        forgetDirectorySearch('menu');
         element.open = false;
       }
     }
@@ -123,14 +164,31 @@ export function CampusServiceMenu() {
   const filtering = browsing ? category !== 'all' : true;
   const context = useCampusNavigationSearch(params);
   const href = (path: string) => campusServiceHref(path, context);
+  const directoryParams = new URLSearchParams(context);
+  writeCampusServiceFilters(directoryParams, query, category);
   function closeMenu() {
     if (!menu.current?.open) return;
-    menu.current.open = false;
+    assignMenuOpen(false);
     setQuery('');
     setCategory('all');
     menu.current.querySelector('summary')?.focus({ preventScroll: true });
   }
+  function dismissMenu() {
+    forgetDirectorySearch('menu');
+    closeMenu();
+  }
+  function persistAndClose(destination: string) {
+    rememberDirectorySearch('menu', {
+      path: pathname || '/',
+      destination,
+      query,
+      category,
+      open: true,
+    });
+    closeMenu();
+  }
   function resetSearch() {
+    forgetDirectorySearch('menu');
     setQuery('');
     setCategory('all');
     search.current?.focus({ preventScroll: true });
@@ -142,6 +200,7 @@ export function CampusServiceMenu() {
       className={styles.menu}
       key={pathname}
       onToggle={(event) => {
+        if (skipToggleSideEffects.current) return;
         if (!event.currentTarget.open) {
           setQuery('');
           setCategory('all');
@@ -151,10 +210,11 @@ export function CampusServiceMenu() {
         if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.currentTarget.open) {
           event.preventDefault();
           event.stopPropagation();
-          closeMenu();
+          dismissMenu();
         }
       }}
       onBlur={(event) => {
+        if (skipToggleSideEffects.current) return;
         if (
           event.relatedTarget instanceof Node &&
           !event.currentTarget.contains(event.relatedTarget)
@@ -168,6 +228,9 @@ export function CampusServiceMenu() {
         aria-controls={`${id}-services`}
         aria-keyshortcuts="Control+k Meta+k"
         aria-current={primaryNavigationSection(pathname) === 'more' ? 'page' : undefined}
+        onClick={() => {
+          if (menu.current?.open) forgetDirectorySearch('menu');
+        }}
       >
         <CampusIcon name="services" size={17} />
         <span className={styles.desktopLabel} aria-hidden="true">
@@ -184,7 +247,7 @@ export function CampusServiceMenu() {
             type="button"
             className={styles.closeButton}
             aria-label="關閉所有服務"
-            onClick={closeMenu}
+            onClick={dismissMenu}
           >
             <svg
               viewBox="0 0 24 24"
@@ -266,7 +329,7 @@ export function CampusServiceMenu() {
           {filtering && (
             <div className={styles.resultSummary}>
               <p role="status" aria-live="polite">
-                找到 {matches.length} 項服務
+                找到 {countCampusSearchResults(matches, browsing, schoolLmsEnabled)} 項服務
               </p>
               <button type="button" onClick={resetSearch}>
                 清除篩選
@@ -280,10 +343,12 @@ export function CampusServiceMenu() {
           id={`${id}-results`}
         >
           <Link
-            href={href('/search')}
+            href={campusServiceHref('/search', directoryParams.toString())}
             className={styles.menuOverview}
             aria-current={pathname === '/search' ? 'page' : undefined}
-            onClick={closeMenu}
+            onClick={() =>
+              persistAndClose(campusServiceHref('/search', directoryParams.toString()))
+            }
           >
             尋找校園服務 <span aria-hidden="true">→</span>
           </Link>
@@ -305,7 +370,7 @@ export function CampusServiceMenu() {
                         currentService={currentService}
                         id={id}
                         filtering={filtering}
-                        onClose={closeMenu}
+                        onClose={persistAndClose}
                       />
                       {children.map((child) => (
                         <ServiceMenuLink
@@ -316,7 +381,7 @@ export function CampusServiceMenu() {
                           id={id}
                           filtering={filtering}
                           secondary
-                          onClose={closeMenu}
+                          onClose={persistAndClose}
                         />
                       ))}
                     </div>

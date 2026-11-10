@@ -33,7 +33,7 @@ async function execute(ctx, rawInput) {
   }
   const d = doc.data() || {};
   if (String(d.userId || '') !== String(uid)) {
-    return { found: false, repairId: input.repairId, forbidden: true };
+    return { found: false, repairId: input.repairId };
   }
 
   return {
@@ -51,7 +51,7 @@ async function execute(ctx, rawInput) {
 
 module.exports = {
   name: 'getDormRepairStatus',
-  description: '依 repairId 讀取單一宿舍報修狀態（僅限本人建立的報修）。',
+  description: '依內部識別 repairId 讀取本人宿舍報修備忘。repairId 不是校方單號，請勿向使用者說成單號或工單。',
   inputSchema,
   execute,
 };

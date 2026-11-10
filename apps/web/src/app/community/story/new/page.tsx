@@ -1,12 +1,9 @@
 'use client';
+import { claimPrivateFile } from '@/lib/privateFiles';
 
-/**
- * 校園社群 — 發布限時動態（Web）
- *
- * 對應 mobile/StoryComposeScreen：文字 / 圖片兩種，背景色 palette，可帶入 POI。
- */
-
-import { useEffect, useRef, useState } from 'react';
+import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_SECONDS } from '@campus/shared/src/storyVideo';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CommunityAccess } from '../../_components/CommunityAccess';
@@ -14,20 +11,62 @@ import { SiteShell } from '@/components/SiteShell';
 import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
-import { findSocialPoi, verifiedSocialPoisForSchool } from '@/lib/community/pois';
-import { publishStory, type StoryKind } from '@/lib/community/firestore';
-import { uploadCampusMedia } from '@/lib/community/media';
+import { verifiedSocialPoisForSchool } from '@/lib/community/pois';
+import { createStoryId, publishStory } from '@/lib/community/firestore';
+import { storyMediaError, uploadStoryMedia } from '@/lib/community/media';
+import styles from './composer.module.css';
 
-const BG_COLORS = ['#243b35', '#3e5169', '#67513d', '#554661', '#6f4039', '#303b42'];
-const TTL_24H = 24 * 3600 * 1000;
+const BACKGROUNDS = [
+  ['深綠', '#243b35'],
+  ['灰藍', '#3e5169'],
+  ['琥珀棕', '#67513d'],
+  ['暮紫', '#554661'],
+  ['磚紅', '#6f4039'],
+  ['石墨灰', '#303b42'],
+] as const;
 const MAX_TEXT = 220;
+const TTL_24H = 24 * 3600 * 1000;
+
+function readVideoDuration(url: string): Promise<number> {
+  const video = document.createElement('video');
+  return new Promise((resolve, reject) => {
+    const unreadable = '無法播放這段影片，請改選含影像的 MP4 檔案。';
+    const timeout = window.setTimeout(() => finish(unreadable), 12_000);
+    function finish(error?: string) {
+      window.clearTimeout(timeout);
+      const duration = video.duration;
+      video.onloadeddata = null;
+      video.onerror = null;
+      video.removeAttribute('src');
+      video.load();
+      if (error) reject(new Error(error));
+      else resolve(duration);
+    }
+    video.onloadeddata = () => {
+      if (
+        !video.videoWidth ||
+        !video.videoHeight ||
+        !Number.isFinite(video.duration) ||
+        video.duration <= 0
+      )
+        finish(unreadable);
+      else if (video.duration > STORY_VIDEO_MAX_SECONDS) finish('影片最長 30 秒，請先剪短再加入。');
+      else finish();
+    };
+    video.onerror = () => finish(unreadable);
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.src = url;
+  });
+}
 
 export default function StoryComposePage() {
   const { schoolId, schoolName, ready } = useBrowsingSchoolPageContext();
   return (
     <SiteShell
       title="發布限時動態"
-      subtitle="分享此刻的校園生活，動態保留 24 小時。"
+      subtitle="與同校同學分享這一刻，動態會保留 24 小時。"
       schoolName={ready ? schoolName : undefined}
     >
       {ready ? (
@@ -43,353 +82,276 @@ export default function StoryComposePage() {
 
 function StoryComposeInner({ schoolId }: { schoolId: string }) {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
-  const searchParams = useSearchParams();
-  const requestedPoiId = searchParams?.get('poiId') ?? null;
-  const initialPoiId = verifiedSocialPoisForSchool(schoolId).some(
-    (poi) => poi.id === requestedPoiId,
-  ) ? requestedPoiId : null;
-  const initialPoi = initialPoiId ? findSocialPoi(initialPoiId) : null;
-
-  const [kind, setKind] = useState<StoryKind>('text');
+  const { user } = useAuth();
+  const requestedPoi = useSearchParams()?.get('poiId');
+  const returnHref = `/community?tab=realtime&schoolId=${encodeURIComponent(schoolId)}`;
+  const [poi, setPoi] = useState(() =>
+    verifiedSocialPoisForSchool(schoolId).find((item) => item.id === requestedPoi),
+  );
   const [body, setBody] = useState('');
-  const [bgColor, setBgColor] = useState(BG_COLORS[0]);
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [poiId, setPoiId] = useState<string | null>(initialPoiId);
-  const [poiName, setPoiName] = useState<string | null>(initialPoi?.name ?? null);
-  const [busy, setBusy] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [bgColor, setBgColor] = useState<string>(BACKGROUNDS[0][1]);
+  const [media, setMedia] = useState<{ file: File; preview: string; duration?: number } | null>(
+    null,
+  );
+  const mediaName = media?.duration ? '影片' : '照片';
+  const [checkingMedia, setCheckingMedia] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'publishing' | 'published'>('idle');
+  const [error, setError] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
+  const mounted = useRef(false);
+  const selection = useRef(0);
+  const publishing = useRef(false);
+  const storyId = useRef('');
+  const uploadedUrl = useRef('');
+  const busy = status !== 'idle';
 
   useEffect(() => {
-    if (!file) {
-      setPreview(null);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(
+    () => () => {
+      if (media) URL.revokeObjectURL(media.preview);
+    },
+    [media],
+  );
 
-  const pickImage = () => fileInputRef.current?.click();
+  async function selectMedia(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file || publishing.current) return;
+    const request = ++selection.current;
+    const invalid = storyMediaError(file);
+    setError(invalid ?? '');
+    setCheckingMedia(!invalid);
+    if (invalid) return;
 
-  const clearImage = () => {
-    setFile(null);
-    setKind('text');
-  };
-
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFile(f);
-    setKind('image');
-  };
-
-  const publish = async () => {
-    if (!user?.uid) {
-      alert('請先登入');
-      return;
-    }
-    if (kind === 'text' && !body.trim()) {
-      alert('請輸入文字');
-      return;
-    }
-    if (kind === 'image' && !file) {
-      alert('請選擇圖片');
-      return;
-    }
-    setBusy(true);
+    const preview = URL.createObjectURL(file);
     try {
-      let mediaUrl: string | null = null;
-      if (kind === 'image' && file) {
-        const res = await uploadCampusMedia({ scope: 'stories', schoolId, uid: user.uid, file });
-        mediaUrl = res.url;
+      let duration: number | undefined;
+      if (file.type === STORY_VIDEO_CONTENT_TYPE) {
+        duration = await readVideoDuration(preview);
+      } else {
+        const image = new window.Image();
+        image.src = preview;
+        await image.decode();
       }
+      if (!mounted.current || selection.current !== request) {
+        URL.revokeObjectURL(preview);
+        return;
+      }
+      storyId.current = '';
+      uploadedUrl.current = '';
+      setMedia({ file, preview, duration });
+    } catch (cause) {
+      URL.revokeObjectURL(preview);
+      if (mounted.current && selection.current === request)
+        setError(
+          file.type === STORY_VIDEO_CONTENT_TYPE && cause instanceof Error
+            ? cause.message
+            : '無法開啟這張照片，請改選其他圖片。',
+        );
+    } finally {
+      if (mounted.current && selection.current === request) setCheckingMedia(false);
+    }
+  }
+
+  function removeMedia() {
+    selection.current++;
+    storyId.current = '';
+    uploadedUrl.current = '';
+    setCheckingMedia(false);
+    setMedia(null);
+    setError('');
+  }
+
+  async function publish(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (publishing.current || checkingMedia || !user?.uid || (!body.trim() && !media)) return;
+    publishing.current = true;
+    setError('');
+    try {
+      storyId.current ||= createStoryId();
+      if (media && !uploadedUrl.current) {
+        setStatus('uploading');
+        const uploaded = await uploadStoryMedia({
+          schoolId,
+          storyId: storyId.current,
+          uid: user.uid,
+          file: media.file,
+        });
+        if (!mounted.current) return;
+        uploadedUrl.current = uploaded.url;
+      }
+      if (uploadedUrl.current) {
+        try { await claimPrivateFile(uploadedUrl.current, `schools/${schoolId}/stories/${storyId.current}`); }
+        catch (error) { if ((error as { statusCode?: number }).statusCode === 410) uploadedUrl.current = ''; throw error; }
+      }
+      setStatus('publishing');
       await publishStory({
+        storyId: storyId.current,
         schoolId,
         authorUid: user.uid,
-        kind,
+        kind: media?.duration ? 'video' : media ? 'image' : 'text',
         text: body.trim(),
-        mediaUrl,
+        mediaUrl: media ? uploadedUrl.current : null,
         bgColor,
-        poiId,
-        poiName,
+        poiId: poi?.id ?? null,
+        poiName: poi?.name ?? null,
         expiresAtMs: Date.now() + TTL_24H,
       });
-      alert('限時動態已發布，24 小時後不再顯示。');
-      router.push(`/community?tab=realtime&schoolId=${encodeURIComponent(schoolId)}`);
     } catch {
-      alert('這次未能發佈，請稍後再試。');
-    } finally {
-      setBusy(false);
+      if (mounted.current) {
+        publishing.current = false;
+        setStatus('idle');
+        setError('發布失敗，你的內容還在。請確認連線與校園帳號後再試一次。');
+      }
+      return;
     }
-  };
-
-  if (authLoading) {
-    return (
-      <div className="card" style={{ padding: 24 }}>
-        載入中…
-      </div>
-    );
-  }
-  if (!user) {
-    return (
-      <div className="card" style={{ padding: 32, textAlign: 'center' }}>
-        <p style={{ color: 'var(--muted)' }}>請先登入後再發布限時動態</p>
-        <Link href="/login" className="btn primary">
-          前往登入
-        </Link>
-      </div>
-    );
+    if (mounted.current) {
+      setStatus('published');
+      router.replace(returnHref);
+    }
   }
 
   return (
-    <div className="card" style={{ padding: 18, maxWidth: 540 }}>
-      {/* Preview */}
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
-        預覽
-      </label>
-      <div
-        style={{
-          aspectRatio: '9 / 16',
-          borderRadius: 14,
-          overflow: 'hidden',
-          background: kind === 'image' ? '#000' : bgColor,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-          padding: 24,
-          boxSizing: 'border-box',
-        }}
-      >
-        {kind === 'image' && preview && (
-          <img
-            src={preview}
-            alt=""
-            style={{
-              position: 'absolute',
-              inset: 0,
-              width: '100%',
-              height: '100%',
-              objectFit: 'contain',
-            }}
+    <form className={styles.composer} onSubmit={publish} aria-label="編輯限時動態">
+      <div className={styles.layout}>
+        <fieldset className={styles.editor} disabled={busy}>
+          <div className={styles.labelRow}>
+            <label htmlFor="story-text">{media ? `${mediaName}說明（選填）` : '文字內容'}</label>
+            <small id="story-count">
+              {body.length} / {MAX_TEXT}
+            </small>
+          </div>
+          <textarea
+            id="story-text"
+            className="input"
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            aria-describedby="story-count"
+            maxLength={MAX_TEXT}
+            rows={3}
+            placeholder={media ? '這一刻有什麼故事？' : '校園裡有什麼新鮮事？'}
           />
-        )}
-        {body.trim().length > 0 ? (
-          <span
-            style={{
-              position: 'relative',
-              color: '#fff',
-              fontSize: 22,
-              lineHeight: 1.5,
-              fontWeight: 700,
-              textAlign: 'center',
-              textShadow: kind === 'image' ? '0 1px 4px rgba(0,0,0,0.55)' : 'none',
-            }}
-          >
-            {body.trim()}
-          </span>
-        ) : (
-          <div
-            style={{
-              color: 'rgba(255,255,255,0.85)',
-              fontSize: 14,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            💡 內容會即時顯示在這裡
+          <div className={styles.photoRow}>
+            <input
+              ref={fileInput}
+              type="file"
+              accept={`image/*,${STORY_VIDEO_CONTENT_TYPE}`}
+              aria-label="限動照片或影片"
+              hidden
+              onChange={selectMedia}
+            />
+            <button className="btn" type="button" onClick={() => fileInput.current?.click()}>
+              {media ? '更換媒體' : '加入照片或影片'}
+            </button>
+            {media && (
+              <button className="btn" type="button" onClick={removeMedia}>
+                移除{mediaName}
+              </button>
+            )}
           </div>
-        )}
-        {poiName && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 16,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: 'rgba(0,0,0,0.4)',
-              color: '#fff',
-              padding: '4px 12px',
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            📍 {poiName}
-          </div>
-        )}
-      </div>
-
-      {/* Type buttons */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-        <button
-          type="button"
-          onClick={() => setKind('text')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '7px 12px',
-            borderRadius: 999,
-            border: kind === 'text' ? '1px solid var(--brand)' : '1px solid var(--border)',
-            background: kind === 'text' ? 'var(--brand)' : 'var(--surface)',
-            color: kind === 'text' ? 'var(--on-brand)' : 'var(--text)',
-            cursor: 'pointer',
-            fontSize: 13,
-            fontWeight: 700,
-          }}
-        >
-          📝 文字
-        </button>
-        <button
-          type="button"
-          onClick={pickImage}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '7px 12px',
-            borderRadius: 999,
-            border: kind === 'image' ? '1px solid var(--brand)' : '1px solid var(--border)',
-            background: kind === 'image' ? 'var(--brand)' : 'var(--surface)',
-            color: kind === 'image' ? 'var(--on-brand)' : 'var(--text)',
-            cursor: 'pointer',
-            fontSize: 13,
-            fontWeight: 700,
-          }}
-        >
-          🖼 {file ? '更換圖片' : '選擇圖片'}
-        </button>
-        {file && (
-          <button
-            type="button"
-            onClick={clearImage}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 999,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--danger, var(--danger))',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 700,
-            }}
-          >
-            🗑 清除圖片
-          </button>
-        )}
-      </div>
-      <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onFileChange} />
-
-      {kind === 'text' && (
-        <>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 13,
-              fontWeight: 700,
-              marginTop: 14,
-              marginBottom: 6,
-            }}
-          >
-            背景色
-          </label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {BG_COLORS.map((c) => {
-              const on = bgColor === c;
-              return (
+          <small className={styles.mediaHint}>MP4 影片最長 30 秒，檔案須小於 100 MB。</small>
+          {!media && (
+            <fieldset className={styles.palette}>
+              <legend>背景顏色</legend>
+              {BACKGROUNDS.map(([name, color]) => (
                 <button
-                  key={c}
+                  key={color}
                   type="button"
-                  onClick={() => setBgColor(c)}
-                  aria-label={`背景色 ${c}`}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    background: c,
-                    border: on ? '3px solid var(--brand)' : '1px solid rgba(0,0,0,0.15)',
-                    cursor: 'pointer',
-                  }}
-                />
-              );
-            })}
-          </div>
-        </>
-      )}
+                  aria-label={name}
+                  aria-pressed={bgColor === color}
+                  title={name}
+                  onClick={() => setBgColor(color)}
+                >
+                  <span style={{ backgroundColor: color }}>{bgColor === color ? '✓' : ''}</span>
+                </button>
+              ))}
+            </fieldset>
+          )}
+          {poi && (
+            <button
+              className={styles.location}
+              type="button"
+              onClick={() => setPoi(undefined)}
+              aria-label={`移除地點：${poi.name}`}
+            >
+              {poi.name} <span aria-hidden="true">×</span>
+            </button>
+          )}
+        </fieldset>
 
-      <label
-        style={{ display: 'block', fontSize: 13, fontWeight: 700, marginTop: 14, marginBottom: 6 }}
-      >
-        文字內容
-      </label>
-      <textarea
-        className="input"
-        value={body}
-        onChange={(e) => setBody(e.target.value.slice(0, MAX_TEXT))}
-        rows={4}
-        placeholder={kind === 'image' ? '為這張圖加上一句話（選填）' : '跟大家分享此刻⋯'}
-        style={{
-          width: '100%',
-          boxSizing: 'border-box',
-          resize: 'vertical',
-          fontFamily: 'inherit',
-        }}
-      />
-      <div style={{ textAlign: 'right', fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-        {body.length} / {MAX_TEXT}
-      </div>
-
-      {poiId && (
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '4px 10px',
-            background: 'var(--accent-soft)',
-            borderRadius: 999,
-            color: 'var(--brand)',
-            fontSize: 12,
-            fontWeight: 700,
-            marginTop: 8,
-          }}
-        >
-          📍 {poiName ?? poiId}
-          <button
-            type="button"
-            onClick={() => {
-              setPoiId(null);
-              setPoiName(null);
-            }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--muted)',
-              fontSize: 14,
-            }}
-            aria-label="清除位置"
+        <figure className={styles.previewPanel}>
+          <figcaption>
+            限時動態預覽{media?.duration ? ` · ${Math.ceil(media.duration)} 秒` : ''}
+          </figcaption>
+          <div
+            className={styles.preview}
+            data-video={!!media?.duration}
+            style={{ background: media ? '#101315' : bgColor }}
           >
-            ×
+            {media?.duration ? (
+              <video
+                key={media.preview}
+                src={media.preview}
+                aria-label="已選取的影片"
+                controls
+                playsInline
+                muted
+                preload="metadata"
+              />
+            ) : media ? (
+              <Image src={media.preview} alt="已選取的照片" unoptimized fill sizes="220px" />
+            ) : null}
+            {body.trim() ? (
+              <span className={media ? styles.caption : styles.storyText}>{body.trim()}</span>
+            ) : (
+              !media && <span className={styles.hint}>你的文字會顯示在這裡</span>
+            )}
+            {poi && <span className={styles.place}>{poi.name}</span>}
+          </div>
+        </figure>
+      </div>
+      <div className={styles.actions}>
+        {error && (
+          <p role="alert" className={styles.error}>
+            {error}
+          </p>
+        )}
+        <span role="status" className={styles.status}>
+          {checkingMedia
+            ? '正在讀取媒體…'
+            : status === 'uploading'
+              ? `正在上傳${mediaName}…`
+              : status === 'publishing'
+                ? '正在發布限時動態…'
+                : status === 'published'
+                  ? '限時動態已發布'
+                  : ''}
+        </span>
+        <div className={styles.actionRow}>
+          <Link
+            href={returnHref}
+            className="btn"
+            aria-disabled={busy}
+            onClick={(event) => {
+              if (busy) event.preventDefault();
+            }}
+          >
+            取消
+          </Link>
+          <button
+            className="btn primary"
+            type="submit"
+            disabled={busy || checkingMedia || (!body.trim() && !media)}
+          >
+            {busy ? (status === 'published' ? '已發布' : '發布中…') : '發布限時動態'}
           </button>
         </div>
-      )}
-
-      <div style={{ marginTop: 20, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <Link href="/community?tab=realtime" className="btn">
-          取消
-        </Link>
-        <button type="button" className="btn primary" disabled={busy} onClick={publish}>
-          {busy ? '發佈中…' : '發布限時動態'}
-        </button>
       </div>
-      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
-        限時動態會顯示在「即時」與「動態」頁面，保留 24 小時。
-      </div>
-    </div>
+    </form>
   );
 }

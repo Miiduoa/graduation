@@ -1,26 +1,11 @@
 /**
- * Supabase LMS Cache — Facade for LMS v2
- * ───────────────────────────────────────────────────────────
- * 行為:
- *   - flag OFF (預設) → 全部函數轉呼叫 puDataCache 的對應實作 (TronClass)
- *   - flag ON → 改打 Supabase,把結果塑形成與 puDataCache 同樣的型別
- *
- * 目的:讓 aiAgentTools / aiContextBuilder / 其他 30+ 個 ai*.ts 不需要改一行,
- *      就能自動把資料源從 TronClass 切到 Supabase。
- *
- * 設計約定:
- *   - 介面 (export 名稱、回傳型別) 100% 對齊 puDataCache
- *   - 任何網路失敗都回 null 而非 throw,讓 AI tool 走 graceful fallback
- *   - 預設 5 秒 timeout
- *
- * 注意:本檔目前只實作必要的 getAnyCached* read 路徑。
- *      寫入(submitAssignment / gradeSubmission / 等)在 Phase 4 另寫工具檔。
+ * 手機端的 LMS 讀取入口。校務資料與全量同步沿用 puDataCache。
+ * 支援 LMS v2 的查詢依 isLmsV2Enabled() 選擇來源，寫入請見 lmsV2WriteTools.ts。
  */
 
 import { isLmsV2Enabled } from './lmsV2FeatureFlag';
 import { getSupabaseClient } from './supabaseClient';
 import {
-  // 把 puDataCache 全部 re-export,讓任何 import 路徑都不破
   getAnyCachedCourses as puGetAnyCachedCourses,
   getAnyCachedGrades as puGetAnyCachedGrades,
   getAnyCachedAnnouncements as puGetAnyCachedAnnouncements,
@@ -41,7 +26,6 @@ import {
   syncAllData as puSyncAllData,
 } from './puDataCache';
 
-// ───── 通用 helpers ─────
 const SUPABASE_TIMEOUT_MS = 5000;
 
 async function withTimeout<T>(p: Promise<T>, ms = SUPABASE_TIMEOUT_MS): Promise<T | null> {
@@ -78,9 +62,6 @@ async function fromSupabase<T = any>(
   return (result.data ?? null) as T | null;
 }
 
-// ───── PU 直接抓取的 4 個(課表 / 成績 / 公告 / 學生資料)─────
-// 這些屬於「校務系統 (非 LMS)」,LMS v2 不取代,直接 passthrough。
-
 export async function getAnyCachedCourses(): ReturnType<typeof puGetAnyCachedCourses> {
   return puGetAnyCachedCourses();
 }
@@ -93,8 +74,6 @@ export async function getAnyCachedAnnouncements(): ReturnType<typeof puGetAnyCac
 export async function getAnyCachedStudentInfo(): ReturnType<typeof puGetAnyCachedStudentInfo> {
   return puGetAnyCachedStudentInfo();
 }
-
-// ───── TronClass 對齊欄位(LMS v2 取代區)─────
 
 /**
  * 課程清單 — 改打 Supabase courses + course_members
@@ -347,9 +326,6 @@ export async function getAnyCachedTCScoreItems(): ReturnType<typeof puGetAnyCach
   return grouped as any;
 }
 
-// 以下幾個目前先 passthrough (LMS v2 結構雖然有,但 mapping 之後再做),
-// 確保 flag ON 時也不會打死,而是退回舊路徑
-
 export async function getAnyCachedTCHomeworkActivities(): ReturnType<
   typeof puGetAnyCachedTCHomeworkActivities
 > {
@@ -432,12 +408,6 @@ export async function getAnyCachedTCCourseAnnouncements(): ReturnType<
   return puGetAnyCachedTCCourseAnnouncements();
 }
 
-/**
- * 全量同步 — 強制重新從來源拉。Flag ON 時打 Supabase + 一些補充欄位;
- * OFF 時委派回 puDataCache.syncAllData。
- */
 export async function syncAllData(...args: any[]): ReturnType<typeof puSyncAllData> {
-  // 預設先讓舊路徑跑(它會處理 PU 校務系統的拉取),
-  // 之後 v2 寫入完整時可在這層加 Supabase prefetch。
   return (puSyncAllData as any)(...args);
 }

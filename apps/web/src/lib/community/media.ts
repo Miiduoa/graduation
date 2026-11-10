@@ -1,15 +1,18 @@
+import { PRIVATE_FILE_MAX_BYTES } from '@campus/shared/src/privateFileAccess';
+import { privateFilesEnabled, privateStoryPath, uploadPrivateFile } from '../privateFiles';
 /**
  * 校園社群 — 圖片上傳 (Web)
  *
  * 與 mobile/services/campusMedia.ts 對齊：
- *  - 路徑：campus/{scope}/{schoolId}/{uid}/{ts}_{rand}.{ext}
+ *  - 限動存於 schools/{schoolId}/stories/{storyId}/{image|video}。
  *  - 走 Firebase Storage 直寫
  *  - 接受 File 物件（瀏覽器 <input type="file"> 拿到的）；mobile 是 URI string
  */
-import { getApps, initializeApp } from 'firebase/app';
+import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_BYTES } from '@campus/shared/src/storyVideo';
+import { getApps } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-export type CampusMediaScope = 'posts' | 'stories' | 'replies';
+export type CampusMediaScope = 'posts' | 'replies';
 
 export type UploadedCampusMedia = {
   url: string;
@@ -45,11 +48,52 @@ export async function uploadCampusMedia(input: {
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
   const path = `campus/${input.scope}/${input.schoolId}/${input.uid}/${ts}_${rand}.${ext}`;
-  const storage = getStorageClient();
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, input.file, { contentType: input.file.type || 'image/jpeg' });
+  return uploadMediaFile(path, input.file);
+}
+
+async function uploadMediaFile(
+  path: string,
+  file: File,
+  customMetadata?: Record<string, string>,
+): Promise<UploadedCampusMedia> {
+  const storageRef = ref(getStorageClient(), path);
+  const contentType = file.type || 'image/jpeg';
+  await uploadBytes(storageRef, file, { contentType, ...(customMetadata && { customMetadata }) });
   const url = await getDownloadURL(storageRef);
-  return { url, path, contentType: input.file.type || 'image/jpeg' };
+  return { url, path, contentType };
+}
+
+export function storyMediaError(file: File): string | null {
+  if (file.type === STORY_VIDEO_CONTENT_TYPE) {
+    if (!file.size) return '影片沒有內容，請重新選取。';
+    if (file.size >= STORY_VIDEO_MAX_BYTES) return '影片須小於 100 MB，請換一段較短的影片。';
+    return null;
+  }
+  if (!file.type.startsWith('image/')) return '請選擇照片或 MP4 影片。';
+  if (!file.size) return '請選擇一張可讀取的圖片。';
+  if (file.size > PRIVATE_FILE_MAX_BYTES['story-image']) return '照片須小於 10 MB，請換一張較小的照片。';
+  return null;
+}
+
+export async function uploadStoryMedia(input: {
+  schoolId: string;
+  storyId: string;
+  uid: string;
+  file: File;
+}): Promise<UploadedCampusMedia> {
+  const error = storyMediaError(input.file);
+  if (error) throw new Error(error);
+  const kind = input.file.type === STORY_VIDEO_CONTENT_TYPE ? 'video' : 'image';
+  if (privateFilesEnabled()) {
+    if (kind === 'video' && input.file.size > PRIVATE_FILE_MAX_BYTES['story-video']) throw new Error('影片大小不得超過 45 MB。');
+    const path = privateStoryPath(input.schoolId, input.storyId, `${kind}-${Date.now().toString(36)}-${crypto.randomUUID().replace(/-/g, '')}.${kind === 'video' ? 'mp4' : 'jpg'}`);
+    if (!path) throw new Error('限動路徑無效');
+    await uploadPrivateFile({ path, body: input.file, contentType: input.file.type });
+    return { url: path, path, contentType: input.file.type };
+  }
+  return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/${kind}`, input.file, {
+    ownerUid: input.uid,
+  });
 }
 
 export async function uploadCampusMediaBatch(input: {
@@ -62,4 +106,16 @@ export async function uploadCampusMediaBatch(input: {
     uploadCampusMedia({ scope: input.scope, schoolId: input.schoolId, uid: input.uid, file }),
   );
   return Promise.all(tasks);
+}
+
+export function storyImageError(file: File): string | null {
+  if (!file.type.startsWith('image/') || !file.size) return '請選擇一張可讀取的圖片。';
+  if (file.size > PRIVATE_FILE_MAX_BYTES['story-image']) return '照片大小不得超過 10 MB，請換一張較小的照片。';
+  return null;
+}
+
+export async function uploadStoryImage(input: Parameters<typeof uploadStoryMedia>[0]) {
+  const error = storyImageError(input.file);
+  if (error) throw new Error(error);
+  return uploadStoryMedia(input);
 }

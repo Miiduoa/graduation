@@ -188,3 +188,28 @@ it('does not forward unsupported actions, verb confusion, oversized menus or tra
   expect((await call('merchant-workspaces/school-one/%2e%2e')).status).not.toBe(200);
   expect(fetcher).not.toHaveBeenCalled();
 });
+it.each([401, 403])('preserves upstream authorization denial %i for a merchant mutation', async (status) => {
+  respond({ error: { code: 'MERCHANT_FORBIDDEN' } }, status);
+  const response = await handleNuni(
+    new NextRequest(`https://nuni.tw/api/nuni/${root}/settings`, {
+      method: 'PUT',
+      headers: {
+        Cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, session)}`,
+        'X-Campus-Session': sessionContext(session),
+        Authorization: `Platform ps_${'b'.repeat(43)}`,
+        'X-Platform-Role': 'platform-operator',
+        Origin: 'https://nuni.tw',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(settings),
+    }),
+    [...root.split('/'), 'settings'],
+  );
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual({ error: 'MERCHANT_FORBIDDEN' });
+  expect(response.headers.get('cache-control')).toContain('no-store');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const headers = new Headers(fetcher.mock.calls[0][1].headers);
+  expect(headers.get('authorization')).toBe(`Platform ${session.sessionHandle}`);
+  expect(headers.has('x-platform-role')).toBe(false);
+});

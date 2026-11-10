@@ -1,12 +1,6 @@
-export const ASSIGNMENT_PAGE_SIZE = 8;
+import { chineseOrDecimal } from './chineseOrDecimal';
 
-function chineseOrDecimal(value: string): number {
-  if (/^\d+$/.test(value)) return Number(value);
-  const digits = '零一二三四五六七八九';
-  if (value.length === 1 && digits.includes(value)) return digits.indexOf(value);
-  const tens = value.match(/^([一二三四五六七八九])?十([一二三四五六七八九])?$/u);
-  return tens ? (tens[1] ? digits.indexOf(tens[1]) : 1) * 10 + (tens[2] ? digits.indexOf(tens[2]) : 0) : NaN;
-}
+export const ASSIGNMENT_PAGE_SIZE = 8;
 
 function normalizedQuestion(question: string): string {
   return question.normalize('NFKC').replace(/\s+/g, '').replace(/[?!。！？，,、]+$/u, '');
@@ -30,13 +24,13 @@ export function pageChoice(question: string): PageChoice | null {
 }
 
 export function assignmentPageTarget(
-  move: PageChoice, offset: number, total: number,
+  move: PageChoice, offset: number, total: number, itemLabel: '作業' | '測驗' = '作業',
 ): { offset: number } | { message: string } {
   const last = Math.max(1, Math.ceil(total / ASSIGNMENT_PAGE_SIZE));
   const current = 1 + offset / ASSIGNMENT_PAGE_SIZE;
   if (move === 'previous' && current === 1) return { message: '已經是第一頁了。' };
   if (move === 'next' && current === last) {
-    return { message: '已經是最後一頁，符合條件的已同步作業共 ' + total + ' 筆。' };
+    return { message: '已經是最後一頁，符合條件的已同步' + itemLabel + '共 ' + total + ' 筆。' };
   }
   const target = move === 'next' ? current + 1 : move === 'previous' ? current - 1 : move === 'last' ? last : move;
   if (!Number.isInteger(target) || target < 1 || target > last) {

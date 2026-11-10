@@ -12,7 +12,6 @@ import {
 } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
-import { defaultBrowseSchoolId } from '@/lib/defaultBrowseSchool';
 import {
   discardActiveCampusDrafts,
   hasCampusDraftActivity,
@@ -60,7 +59,6 @@ type SelectionContext = {
 export function resolveBrowseQuerySchoolId(
   catalog: readonly BrowseSchool[],
   query: { campus?: string | null; schoolId?: string | null; school?: string | null },
-  stored: boolean,
   savedSchoolId: string | null,
 ): string | null {
   const campus = query.campus?.trim();
@@ -81,16 +79,11 @@ export function resolveBrowseQuerySchoolId(
 
     const bundled = findSchoolsByCode(code);
     if (bundled.length === 1) return bundled[0].id;
-    // Ambiguous or unknown explicit codes must not fall through to preference / Providence.
+    // Ambiguous or unknown explicit codes must not fall through to a saved preference.
     return `__unresolved__:${code}`;
   }
 
-  return defaultBrowseSchoolId(
-    catalog.map((school) => school.id),
-    null,
-    stored,
-    savedSchoolId,
-  );
+  return savedSchoolId;
 }
 
 const SelectedSchoolContext = createContext<SelectionContext | null>(null);
@@ -99,17 +92,17 @@ export function schoolPreferenceKey(ownerKey: string | null) {
   return `campus.browse-school.v1:${ownerKey === null ? 'guest' : `account:${encodeURIComponent(ownerKey)}`}`;
 }
 
-function storedSelection(value: string | null): { present: boolean; schoolId: string | null } {
-  if (!value) return { present: false, schoolId: null };
+function storedSelection(value: string | null): string | null {
+  if (!value) return null;
   try {
     const stored: unknown = JSON.parse(value);
     if (stored && typeof stored === 'object' && 'schoolId' in stored) {
-      return { present: true, schoolId: typeof stored.schoolId === 'string' ? stored.schoolId : null };
+      return typeof stored.schoolId === 'string' ? stored.schoolId : null;
     }
   } catch {
     // Invalid or old browser preferences do not establish a school selection.
   }
-  return { present: false, schoolId: null };
+  return null;
 }
 
 export function SelectedSchoolProvider({
@@ -132,14 +125,12 @@ export function SelectedSchoolProvider({
   const [preference, setPreference] = useState<{
     scope: typeof scope;
     schoolId: string | null;
-    stored: boolean;
     storageError: string | null;
   } | null>(null);
   // Hide previous identity state immediately without remounting page content or losing drafts.
   const currentPreference = preference?.scope === scope ? preference : null;
   const hydrated = currentPreference !== null;
   const savedSchoolId = currentPreference?.schoolId ?? null;
-  const stored = currentPreference?.stored ?? false;
   const storageError = currentPreference?.storageError ?? null;
 
   useLayoutEffect(() => {
@@ -152,25 +143,22 @@ export function SelectedSchoolProvider({
   useEffect(() => {
     if (!loading) {
       let schoolId: string | null = null;
-      let stored = false;
       let storageError: string | null = null;
       try {
-        const parsed = storedSelection(localStorage.getItem(storageKey));
-        schoolId = parsed.schoolId;
-        stored = parsed.present;
+        schoolId = storedSelection(localStorage.getItem(storageKey));
       } catch {
         storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
       }
       // Read this browser-only preference after hydration so server markup stays account-neutral.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPreference({ scope, schoolId, stored, storageError });
+      setPreference({ scope, schoolId, storageError });
     }
     const changed = (event: StorageEvent) => {
       if (!loading && (event.key === storageKey || event.key === null)) {
-        const parsed = storedSelection(event.newValue);
+        const schoolId = storedSelection(event.newValue);
         setPreference((current) =>
           current?.scope === scope
-            ? { ...current, schoolId: parsed.schoolId, stored: parsed.present }
+            ? { ...current, schoolId }
             : current,
         );
       }
@@ -196,7 +184,6 @@ export function SelectedSchoolProvider({
       schoolId: params?.get('schoolId'),
       school: params?.get('school'),
     },
-    stored,
     savedSchoolId,
   );
   const ready = !loading && hydrated && catalogStatus === 'ready';
@@ -229,7 +216,7 @@ export function SelectedSchoolProvider({
       storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
     }
     // Persist only once navigation has left the old campus-scoped event detail.
-    setPreference({ scope, schoolId: pending.id, stored: true, storageError });
+    setPreference({ scope, schoolId: pending.id, storageError });
   }, [identityReady, pathname, ready, requestedId, scope, storageKey, unavailable]);
 
   function canCommitSchool(id: string | null) {
@@ -249,6 +236,9 @@ export function SelectedSchoolProvider({
     if (pathname === '/map' && selectedSchool?.id !== id) {
       next.delete('route');
       next.delete('focus');
+      next.delete('query');
+      next.delete('q');
+      next.delete('room');
     }
     if (id) {
       next.set('schoolId', id);
@@ -273,7 +263,7 @@ export function SelectedSchoolProvider({
       } catch {
         storageError = '此瀏覽器無法儲存校園偏好，仍可使用網址切換校園。';
       }
-      setPreference({ scope, schoolId: id, stored: true, storageError });
+      setPreference({ scope, schoolId: id, storageError });
     }
     router.replace(`${targetPath}?${next.toString()}${fragment}`, { scroll: false });
     return true;

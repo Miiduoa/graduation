@@ -1,7 +1,8 @@
 import React from 'react';
-import { View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
 import { confirmedTimestamp } from '../services/campusStudyAgenda';
-import { AIButton } from '../ui/aiFirst';
+import { AIButton, aiTokens } from '../ui/aiFirst';
 import type { AssignmentRead } from '../services/offlineCampusTools';
 import type { CampusSenseSnapshot } from '../services/campusSenseSnapshot';
 import { campusAssignmentDisplayTitle, resolveCampusAssignmentTarget } from '../services/campusAssignmentTarget';
@@ -26,13 +27,34 @@ export function AssignmentReplyActions({ read, snapshot, context, disabled, onAs
   return (
     <View style={{ gap: 8, marginTop: 10 }}>
       {items.length > 1 && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <View style={{ gap: 6 }}>
           {items.map((item, index) => {
             const ordinal = '第 ' + (index + 1) + ' 筆';
+            const position = (page ? '本頁' : '') + ordinal;
+            const course = item.groupName || '未提供課程名稱';
+            const title = campusAssignmentDisplayTitle(item.title);
+            const due = confirmedTimestamp(item.dueAt);
+            const deadline = Number.isFinite(due)
+              ? '截止 ' + formatTaipeiDateTime(due, { seconds: false }) : '未提供截止時間';
             return (
-              <AIButton key={index} variant="ghost" disabled={disabled}
-                label={(page ? '本頁' : '') + ordinal + (read.reviewReminder ? ' · ' + (item.groupName || item.title) : '')}
-                onPress={() => onAsk(ordinal)} />
+              <TouchableOpacity
+                key={index}
+                accessibilityRole="button"
+                accessibilityLabel={`選擇${position}，${course}，${title}`}
+                accessibilityValue={{ text: deadline }}
+                accessibilityState={{ disabled }}
+                disabled={disabled}
+                onPress={() => onAsk(ordinal)}
+                style={{
+                  minHeight: 44, justifyContent: 'center', gap: 3, paddingVertical: 8, paddingHorizontal: 12,
+                  borderWidth: 1, borderRadius: aiTokens.radius.sm, borderColor: aiTokens.border,
+                  backgroundColor: aiTokens.surface, opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                <Text style={{ color: aiTokens.textSecondary, fontSize: 13 }}>{position} · {course}</Text>
+                <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '600' }}>{title}</Text>
+                <Text style={{ color: aiTokens.muted, fontSize: 13 }}>{deadline}</Text>
+              </TouchableOpacity>
             );
           })}
         </View>

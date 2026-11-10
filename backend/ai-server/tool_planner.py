@@ -141,17 +141,15 @@ _REPAIR_URGENCY_LABEL = {"low": "低", "normal": "普通", "high": "高"}
 
 
 def _format_repair_success(output: dict[str, Any]) -> str:
-    rid = output.get("repairId") or "未知"
     loc = output.get("location") or "（未填地點）"
     cat = output.get("category") or "其他"
     urg = _REPAIR_URGENCY_LABEL.get(output.get("urgency") or "normal", "普通")
     return (
-        "✅ 已幫你建立宿舍報修。\n"
+        "✅ 已幫你存成報修備忘。\n"
         f"地點：{loc}\n"
         f"類別：{cat}\n"
         f"緊急度：{urg}\n"
-        f"報修編號：{rid}\n"
-        "你可以到「我的 → 我的報修」追蹤後續進度。"
+        "請依學校規定管道送出。此應用沒有送到學校，也不會產生校方單號。"
     )
 
 
@@ -187,13 +185,12 @@ def _format_reminder_success(output: dict[str, Any]) -> str:
 def _format_list_repairs_success(output: dict[str, Any]) -> str:
     items = output.get("items") or []
     if not items:
-        return "目前查無你的宿舍報修紀錄。"
-    lines = [f"找到 {len(items)} 筆宿舍報修紀錄："]
+        return "目前查無你的宿舍報修備忘。"
+    lines = [f"找到 {len(items)} 筆宿舍報修備忘："]
     for it in items[:10]:
         loc = it.get("location") or "未知地點"
         status = it.get("status") or "pending"
-        rid = it.get("repairId") or "?"
-        lines.append(f"• {loc}（狀態：{status}，#{rid}）")
+        lines.append(f"• {loc}（狀態：{status}）")
     return "\n".join(lines)
 
 
@@ -207,7 +204,7 @@ def _format_generic_failure(
     }.get(tool_name, tool_name)
     hint = ""
     if tool_name == "createDormRepairRequest":
-        hint = "\n建議你直接到「校園 → 宿舍 → 我要報修」手動填寫。"
+        hint = "\n建議你到「校園 → 宿舍」存成報修備忘，並依學校管道送出。"
     elif tool_name == "createFoodOrder":
         hint = "\n建議你到「校園 → 餐廳」頁面挑選餐點後直接送出。"
     code = error_code or "unknown_error"

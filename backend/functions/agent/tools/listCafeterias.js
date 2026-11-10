@@ -4,6 +4,7 @@ const { z } = require('zod');
 const { getFirestore } = require('firebase-admin/firestore');
 const { hasCoordinates } = require('../../lib/assistantPois');
 const { isHttpsOrderingUrl } = require('../../lib/merchantMode');
+const { isAuthorizationFailure } = require('../authorizationFailure');
 
 const text = (value) => typeof value === 'string' ? value.trim() : '';
 const time = (value) => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(text(value)) ? text(value) : null;
@@ -67,6 +68,7 @@ async function execute(ctx, rawInput) {
 
     return { success: true, schoolId, count: cafeterias.length, cafeterias };
   } catch (e) {
+    if (isAuthorizationFailure(e)) throw e;
     return {
       success: false,
       errorCode: e?.name === 'ZodError' ? 'invalid_input' : 'read_failed',

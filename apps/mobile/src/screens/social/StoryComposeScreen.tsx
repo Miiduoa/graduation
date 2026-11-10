@@ -1,3 +1,4 @@
+import { claimPrivateFile } from '../../services/privateFiles';
 /* eslint-disable */
 /**
  * 校園社群 — 發 Story Compose
@@ -8,7 +9,7 @@
  *  - 自動帶入 POI（從 route.params.poiId / poiName，由 RealtimeSocialScreen 傳入）
  *  - 預覽卡片即時反映選色與內容
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,59 +23,117 @@ import {
   Platform,
   Image,
 } from 'react-native';
+import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_BYTES } from '@campus/shared/src/storyVideo';
+import { StoryVideoPlayer, supportsStoryVideo } from './StoryVideoPlayer';
+import { VideoExportPreset } from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../state/auth';
 import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
+import { isProvidenceSchoolId } from '../../data/schoolIds';
+import { findSocialPoi } from '../../services/campusSocialPois';
 import { isFirebaseMockMode } from '../../firebase';
-import { publishStory, type StoryKind } from '../../services/stories';
+import { publishStory, reserveStoryId } from '../../services/stories';
 import { storage } from '../../services/storage';
-import { uploadCampusMedia } from '../../services/campusMedia';
+import { uploadStoryImage, uploadStoryVideo, STORY_IMAGE_LIMIT, STORY_VIDEO_MAX_MS } from '../../services/mediaUpload';
 
 const BG_COLORS = ['#0f172a', '#7c5dfa', '#0ea5e9', '#10b981', '#f97316', '#ef4444'];
 const TTL_24H = 24 * 3600 * 1000;
 const MAX_TEXT = 220;
+type Attachment = { kind: 'image'; uri: string; mime: string } | { kind: 'video'; uri: string; durationMs: number; selection: number };
 
 export function StoryComposeScreen(props: any) {
+  const { user, loading } = useAuth();
+  const { school } = useSchool();
+  if (loading) return <ActivityIndicator />;
+  return <StoryComposer key={JSON.stringify([user?.uid, school?.id])} {...props} />;
+}
+
+function StoryComposer(props: any) {
   const styles = useThemeStyleSheet(createStyles);
   const auth = useAuth();
   const { school } = useSchool();
-  const initialPoiId = (props?.route?.params?.poiId as string | undefined) ?? null;
-  const initialPoiName = (props?.route?.params?.poiName as string | undefined) ?? null;
+  const initialPoi = isProvidenceSchoolId(school?.id) ? findSocialPoi(props?.route?.params?.poiId) : null;
+  const initialPoiId = initialPoi?.id ?? null;
+  const initialPoiName = initialPoi?.name ?? null;
 
-  const [kind, setKind] = useState<StoryKind>('text');
+  const [media, setMedia] = useState<Attachment | null>(null);
+  const [candidate, setCandidate] = useState<{ uri: string; selection: number } | null>(null);
+  const selection = useRef(0);
+  const kind = candidate ? 'video' : media?.kind ?? 'text';
+  const videoKey = candidate?.selection ?? (media?.kind === 'video' ? media.selection : undefined);
+  const videoUri = candidate?.uri ?? (media?.kind === 'video' ? media.uri : null);
   const [body, setBody] = useState('');
   const [bgColor, setBgColor] = useState(BG_COLORS[0]);
-  const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageMime, setImageMime] = useState<string | null>(null);
   const [poiId, setPoiId] = useState<string | null>(initialPoiId);
   const [poiName, setPoiName] = useState<string | null>(initialPoiName);
   const [busy, setBusy] = useState(false);
+
+  const publishing = useRef(false);
+  const active = useRef(true);
+  const draft = useRef<{ id: string; uri: string | null; url: string | null } | null>(null);
+  React.useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   useEffect(() => {
     if (initialPoiId) setPoiId(initialPoiId);
     if (initialPoiName) setPoiName(initialPoiName);
   }, [initialPoiId, initialPoiName]);
 
-  const pickImage = async () => {
+  const pick = async (type: 'image' | 'video') => {
+    if (publishing.current) return;
+    if (type === 'video' && !supportsStoryVideo) {
+      Alert.alert('影片功能需要更新', '請更新 App，再選擇影片。');
+      return;
+    }
+    const seq = ++selection.current;
+    setCandidate(null);
     try {
-      const file = await storage.pickImage({ quality: 0.85, aspect: [9, 16] });
-      if (!file) return;
-      setImageUri(file.uri);
-      setImageMime(file.type);
-      setKind('image');
+      const file = await storage.pickImage(type === 'image'
+        ? { quality: 0.85, aspect: [9, 16] }
+        : { mediaTypes: 'videos', videoExportPreset: VideoExportPreset.H264_1280x720 });
+      if (!file || !active.current || selection.current !== seq || publishing.current) return;
+      if (type === 'image') {
+        if (!file.type?.startsWith('image/') || file.size > STORY_IMAGE_LIMIT) {
+          Alert.alert('無法使用這張照片', '請選擇小於 10 MB 的圖片。');
+          return;
+        }
+        draft.current = null;
+        setMedia({ kind: 'image', uri: file.uri, mime: file.type });
+      } else if (file.type !== STORY_VIDEO_CONTENT_TYPE || file.size >= STORY_VIDEO_MAX_BYTES || (file.durationMs ?? 0) > STORY_VIDEO_MAX_MS) {
+        Alert.alert('無法使用這段影片', '請選擇 30 秒以內、小於 100 MB 的 MP4 影片。');
+      } else {
+        setCandidate({ uri: file.uri, selection: seq });
+      }
     } catch (e: any) {
-      Alert.alert('開啟相簿失敗', e?.message ?? String(e));
+      if (active.current && selection.current === seq) Alert.alert('開啟相簿失敗', e?.message ?? String(e));
     }
   };
 
-  const clearImage = () => {
-    setImageUri(null);
-    setImageMime(null);
-    setKind('text');
-  };
+  function rejectCandidate(seq: number) {
+    if (!active.current || selection.current !== seq) return;
+    selection.current++;
+    setCandidate(null);
+    Alert.alert('無法使用這段影片', '請選擇可播放、30 秒以內的 MP4 影片。');
+  }
+
+  useEffect(() => {
+    if (!candidate) return;
+    // Audio-only and damaged files may never produce a video frame.
+    const timer = setTimeout(() => rejectCandidate(candidate.selection), 15_000);
+    return () => clearTimeout(timer);
+  }, [candidate]);
+
+  function clearMedia() {
+    selection.current++;
+    draft.current = null;
+    setCandidate(null);
+    setMedia(null);
+  }
 
   const publish = async () => {
     if (isFirebaseMockMode()) {
@@ -91,68 +150,120 @@ export function StoryComposeScreen(props: any) {
       Alert.alert('請輸入文字');
       return;
     }
-    if (kind === 'image' && !imageUri) {
-      Alert.alert('請選擇圖片');
-      return;
-    }
-
+    if (candidate || publishing.current) return;
+    publishing.current = true;
     setBusy(true);
     try {
-      let mediaUrl: string | null = null;
-      if (kind === 'image' && imageUri) {
-        const result = await uploadCampusMedia({
-          scope: 'stories',
-          schoolId: sid,
-          uid,
-          uri: imageUri,
-          mime: imageMime ?? undefined,
-        });
-        mediaUrl = result.url;
+      const uri = media?.uri ?? null;
+      if (!draft.current || draft.current.uri !== uri) {
+        draft.current = { id: reserveStoryId(), uri, url: null };
       }
-
-      await publishStory({
+      const entry = draft.current;
+      if (media && !entry.url) {
+        entry.url = media.kind === 'video'
+          ? await uploadStoryVideo(sid, entry.id, uid, media.uri, media.durationMs)
+          : await uploadStoryImage(sid, entry.id, uid, media.uri, media.mime);
+      }
+      if (entry.url) {
+        try { await claimPrivateFile(entry.url, `schools/${sid}/stories/${entry.id}`); }
+        catch (error) { if ((error as { statusCode?: number }).statusCode === 410) entry.url = null; throw error; }
+      }
+      if (!active.current) return;
+      await publishStory(entry.id, {
         schoolId: sid,
         authorUid: uid,
         kind,
         text: body.trim(),
-        mediaUrl,
+        mediaUrl: entry.url,
         bgColor,
         poiId,
         poiName,
         expiresAtMs: Date.now() + TTL_24H,
       });
 
-      Alert.alert('已發佈', 'Story 將在 24 小時後自動下架。', [
-        { text: '好的', onPress: () => props?.navigation?.goBack?.() },
-      ]);
+      if (!active.current) return;
+      props?.navigation?.goBack?.();
+      Alert.alert('已發布限時動態', '同校成員可在接下來 24 小時內觀看。');
     } catch (e: any) {
-      Alert.alert('發佈失敗', e?.message ?? String(e));
-    } finally {
+      if (!active.current) return;
+      publishing.current = false;
       setBusy(false);
+      const message = e?.code === 'permission-denied' || e?.code === 'storage/unauthorized'
+        ? '目前沒有發布權限，請確認登入帳號與學校。'
+        : e?.code || !e?.message ? '請確認網路連線後再試一次，草稿已保留。' : e.message;
+      Alert.alert('發布失敗', message);
     }
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32 }}>
+      <ScrollView pointerEvents={busy ? 'none' : 'auto'} contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32 }}>
+        {/* ─── Type selector ─── */}
+        <View style={styles.kindRow}>
+          <Pressable style={[styles.kindBtn, kind === 'text' && styles.kindBtnOn]} disabled={busy} onPress={clearMedia}>
+            <Ionicons name="text-outline" size={16} color={kind === 'text' ? theme.colors.onAccent : theme.colors.textSecondary} />
+            <Text style={[styles.kindBtnTxt, kind === 'text' && { color: theme.colors.onAccent }]}>文字</Text>
+          </Pressable>
+          <Pressable style={[styles.kindBtn, kind === 'image' && styles.kindBtnOn]} disabled={busy} onPress={() => pick('image')}>
+            <Ionicons name="image-outline" size={16} color={kind === 'image' ? theme.colors.onAccent : theme.colors.textSecondary} />
+            <Text style={[styles.kindBtnTxt, kind === 'image' && { color: theme.colors.onAccent }]}>
+              {kind === 'image' ? '更換圖片' : '選擇圖片'}
+            </Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={busy} style={[styles.kindBtn, kind === 'video' && styles.kindBtnOn]} onPress={() => pick('video')}>
+            <Ionicons name="videocam-outline" size={16} color={kind === 'video' ? theme.colors.onAccent : theme.colors.textSecondary} />
+            <Text style={[styles.kindBtnTxt, kind === 'video' && { color: theme.colors.onAccent }]}>{kind === 'video' ? '更換影片' : '選擇影片'}</Text>
+          </Pressable>
+          {kind !== 'text' ? (
+            <Pressable style={styles.kindClear} disabled={busy} onPress={clearMedia}>
+              <Ionicons name="trash-outline" size={14} color={theme.colors.danger} />
+              <Text style={styles.kindClearTxt}>{kind === 'video' ? '移除影片' : '清除圖片'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Text style={styles.hintMuted} accessibilityLiveRegion="polite">
+          {candidate ? '正在確認影片長度與畫面…' : media?.kind === 'video' ? `影片長度 ${Math.ceil(media.durationMs / 1000)} 秒` : '影片支援 30 秒以內、小於 100 MB 的 MP4。'}
+        </Text>
+
         {/* ─── Preview ─── */}
         <Text style={styles.label}>預覽</Text>
-        <View style={[styles.preview, { backgroundColor: kind === 'image' ? '#000' : bgColor }]}>
-          {kind === 'image' && imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.previewImg} resizeMode="contain" />
+        <View style={[styles.preview, kind === 'video' && styles.previewClip, { backgroundColor: kind === 'text' ? bgColor : '#000' }]}>
+          {kind === 'image' && media?.kind === 'image' ? (
+            <Image source={{ uri: media.uri }} style={styles.previewImg} resizeMode="contain" />
           ) : null}
-          {body.trim().length > 0 ? (
+          {videoUri && (
+            <StoryVideoPlayer key={videoKey} source={{ uri: videoUri }}
+              style={styles.previewImg}
+              accessibilityLabel="影片預覽" useNativeControls={!candidate} isMuted
+              onReadyForDisplay={({ naturalSize, status }) => {
+                if (!candidate || !active.current || selection.current !== candidate.selection) return;
+                const durationMs = status?.isLoaded ? status.durationMillis : undefined;
+                if (!durationMs || !Number.isFinite(durationMs) || durationMs > STORY_VIDEO_MAX_MS ||
+                    durationMs <= 0 || !naturalSize.width || !naturalSize.height) {
+                  rejectCandidate(candidate.selection);
+                  return;
+                }
+                selection.current++;
+                draft.current = null;
+                setMedia({ kind: 'video', ...candidate, durationMs });
+                setCandidate(null);
+              }}
+              onError={() => { if (candidate) rejectCandidate(candidate.selection); }}
+            />
+          )}
+          {kind !== 'video' && body.trim().length > 0 ? (
             <View style={styles.previewTextWrap}>
               <Text style={styles.previewText} numberOfLines={6}>
                 {body.trim()}
               </Text>
             </View>
-          ) : (
+          ) : kind === 'text' ? (
             <View style={styles.previewPlaceholder}>
               <Ionicons name="bulb-outline" size={18} color="rgba(255,255,255,0.8)" />
               <Text style={styles.previewPlaceholderTxt}>內容會即時顯示在這裡</Text>
             </View>
-          )}
+          ) : null}
           {poiName ? (
             <View style={styles.previewPoi}>
               <Ionicons name="location" size={11} color="#fff" />
@@ -161,25 +272,7 @@ export function StoryComposeScreen(props: any) {
           ) : null}
         </View>
 
-        {/* ─── Type selector ─── */}
-        <View style={styles.kindRow}>
-          <Pressable style={[styles.kindBtn, kind === 'text' && styles.kindBtnOn]} onPress={() => setKind('text')}>
-            <Ionicons name="text-outline" size={16} color={kind === 'text' ? theme.colors.onAccent : theme.colors.textSecondary} />
-            <Text style={[styles.kindBtnTxt, kind === 'text' && { color: theme.colors.onAccent }]}>文字</Text>
-          </Pressable>
-          <Pressable style={[styles.kindBtn, kind === 'image' && styles.kindBtnOn]} onPress={pickImage}>
-            <Ionicons name="image-outline" size={16} color={kind === 'image' ? theme.colors.onAccent : theme.colors.textSecondary} />
-            <Text style={[styles.kindBtnTxt, kind === 'image' && { color: theme.colors.onAccent }]}>
-              {imageUri ? '更換圖片' : '選擇圖片'}
-            </Text>
-          </Pressable>
-          {imageUri ? (
-            <Pressable style={styles.kindClear} onPress={clearImage}>
-              <Ionicons name="trash-outline" size={14} color={theme.colors.danger} />
-              <Text style={styles.kindClearTxt}>清除圖片</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        {kind === 'video' && !!body.trim() && <Text style={styles.previewCaption}>{body.trim()}</Text>}
 
         {/* ─── BG palette（only for text）─── */}
         {kind === 'text' ? (
@@ -206,7 +299,8 @@ export function StoryComposeScreen(props: any) {
           value={body}
           onChangeText={(t) => setBody(t.slice(0, MAX_TEXT))}
           multiline
-          placeholder={kind === 'image' ? '為這張圖加上一句話（選填）' : '跟大家分享此刻⋯'}
+          editable={!busy}
+          placeholder={kind === 'video' ? '為這段影片加上一句話（選填）' : kind === 'image' ? '為這張圖加上一句話（選填）' : '跟大家分享此刻⋯'}
           placeholderTextColor={theme.colors.muted}
           style={styles.area}
         />
@@ -222,14 +316,14 @@ export function StoryComposeScreen(props: any) {
           </View>
         ) : null}
 
-        <Pressable style={[styles.btn, busy && { opacity: 0.65 }]} disabled={busy} onPress={publish}>
+        <Pressable style={[styles.btn, (busy || candidate) && { opacity: 0.65 }]} disabled={busy || !!candidate} onPress={publish}>
           {busy ? (
             <ActivityIndicator color={theme.colors.onAccent} />
           ) : (
-            <Text style={styles.btnTx}>發佈 Story</Text>
+            <Text style={styles.btnTx}>發布限時動態</Text>
           )}
         </Pressable>
-        <Text style={styles.hintMuted}>Story 24 小時後自動下架。建議：圖文皆可，會出現在「即時」分頁與動態頂端 Story Strip。</Text>
+        <Text style={styles.hintMuted}>發布後，同校成員可在動態列和「即時」觀看 24 小時。</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -248,6 +342,8 @@ const createStyles = () => StyleSheet.create({
     alignItems: 'center',
     padding: 18,
   },
+  previewClip: { aspectRatio: 4 / 3 },
+  previewCaption: { padding: 10, color: theme.colors.text, fontSize: 15, lineHeight: 22 },
   previewImg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
   previewTextWrap: { padding: 8 },
   previewText: { fontSize: 22, lineHeight: 32, fontWeight: '700', color: '#fff', textAlign: 'center' },
@@ -266,8 +362,9 @@ const createStyles = () => StyleSheet.create({
   },
   previewPoiTxt: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  kindRow: { flexDirection: 'row', gap: 8, marginTop: 12, alignItems: 'center' },
+  kindRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, alignItems: 'center' },
   kindBtn: {
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -280,7 +377,7 @@ const createStyles = () => StyleSheet.create({
   },
   kindBtnOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
   kindBtnTxt: { color: theme.colors.textSecondary, fontSize: 13, fontWeight: '700' },
-  kindClear: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' },
+  kindClear: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' },
   kindClearTxt: { color: theme.colors.danger, fontSize: 12, fontWeight: '700' },
 
   palette: { flexDirection: 'row', gap: 10 },

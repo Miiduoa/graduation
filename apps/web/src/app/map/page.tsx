@@ -21,12 +21,14 @@ export default function MapPage(props: {
     campus?: string;
     route?: string | string[];
     focus?: string | string[];
+    query?: string | string[];
   }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
   const { schoolId, schoolName, schoolSearch: q, status } = useCampusBrowseContext(searchParams);
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
+  const query = Array.isArray(searchParams?.query) ? searchParams.query[0] : searchParams?.query;
 
   return (
     <SiteShell
@@ -36,7 +38,7 @@ export default function MapPage(props: {
       compactHeading
     >
       {status === 'ready' && schoolId ? (
-        <MapClient key={schoolId} school={schoolId} schoolName={schoolName} route={route} focus={focus} />
+        <MapClient key={schoolId} school={schoolId} schoolName={schoolName} route={route} focus={focus} query={query} />
       ) : (
         <section className="card" role="status">
           <h2>{status === 'loading' ? '正在讀取校園目錄…' : status === 'error' ? '無法確認所選學校' : '先選擇一所學校'}</h2>

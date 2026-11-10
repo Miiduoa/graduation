@@ -26,6 +26,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   increment,
   limit,
@@ -40,6 +41,7 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
+import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
 // ═══════════════════════════════════════════════════════════════
@@ -470,7 +472,12 @@ function storiesCol(db: Firestore) {
   return collection(db, 'campusStories');
 }
 
+export function createStoryId(): string {
+  return doc(storiesCol(getDb())).id;
+}
+
 export async function publishStory(payload: {
+  storyId: string;
   schoolId: string;
   authorUid: string;
   kind: StoryKind;
@@ -482,7 +489,8 @@ export async function publishStory(payload: {
   expiresAtMs: number;
 }): Promise<string> {
   const db = getDb();
-  const ref = await addDoc(storiesCol(db), {
+  const ref = doc(storiesCol(db), payload.storyId);
+  const content = {
     schoolId: payload.schoolId,
     authorUid: payload.authorUid,
     kind: payload.kind,
@@ -491,10 +499,27 @@ export async function publishStory(payload: {
     bgColor: payload.bgColor ?? '#0f172a',
     poiId: payload.poiId ?? null,
     poiName: payload.poiName ?? null,
-    createdAt: serverTimestamp(),
-    expiresAt: payload.expiresAtMs,
-    viewCount: 0,
-  });
+  };
+  try {
+    await setDoc(ref, {
+      ...content,
+      createdAt: serverTimestamp(),
+      expiresAt: payload.expiresAtMs,
+      viewCount: 0,
+    });
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+    // A committed create whose acknowledgement was lost is immutable on retry.
+    const current = await getDocFromServer(ref).catch(() => null);
+    const saved = current?.data();
+    if (
+      !saved ||
+      current?.metadata.hasPendingWrites ||
+      Object.entries(content).some(([field, value]) => saved[field] !== value)
+    ) {
+      throw error;
+    }
+  }
   return ref.id;
 }
 
@@ -503,40 +528,51 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
+  // Keep near-expiry stories visible while allowing a small request-latency buffer.
+  let expiresAfter = Date.now() + 3_000;
+  let permissionRetried = false;
+  const readStories = async (sorted: boolean) => {
+    const read = () => getDocs(query(
+      storiesCol(db),
+      where('schoolId', '==', schoolId),
+      where('expiresAt', '>', expiresAfter),
+      ...(sorted ? [orderBy('expiresAt', 'desc')] : []),
+      limit(lim),
+    ));
+    try {
+      return await read();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied' || permissionRetried) {
+        throw error;
+      }
+      permissionRetried = true;
+      expiresAfter = Date.now() + 15_000;
+      return read();
+    }
+  };
+  const toActiveStories = (docs: Array<{ id: string; data: () => unknown }>) =>
+    docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
   try {
-    const snap = await getDocs(
-      query(
-        storiesCol(db),
-        where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
-        limit(lim),
-      ),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    const snap = await getDocs(
-      query(storiesCol(db), where('schoolId', '==', schoolId), limit(lim)),
-    );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
+    const snap = await readStories(true);
+    return toActiveStories(snap.docs);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'permission-denied') throw error;
+    const snap = await readStories(false);
+    return toActiveStories(snap.docs);
   }
 }
 
-export async function markStoryViewed(storyId: string, viewerUid: string) {
-  const db = getDb();
-  const viewRef = doc(db, 'campusStories', storyId, 'storyViews', viewerUid);
+export async function markStoryViewed(
+  story: Pick<CampusStoryDoc, 'id' | 'schoolId' | 'authorUid'>,
+  viewerUid: string,
+) {
+  if (story.authorUid === viewerUid) return;
+  const viewRef = doc(getDb(), ...storyViewerCollectionPath(story), viewerUid);
   const exists = await getDoc(viewRef);
   if (exists.exists()) return;
   await setDoc(viewRef, { viewerUid, viewedAt: serverTimestamp() });
-  try {
-    await updateDoc(doc(db, 'campusStories', storyId), { viewCount: increment(1) });
-  } catch {
-    /* ignore */
-  }
 }
 
 export type StoryAuthorGroup = {

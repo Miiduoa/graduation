@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { use } from 'react';
 import { SiteShell } from '@/components/SiteShell';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import home from '@/app/home.module.css';
 import styles from '@/app/servicePages.module.css';
 
@@ -15,7 +15,7 @@ export type CourseToolProps = {
 export function UnavailableCourseTool({ title, ...props }: CourseToolProps & { title: string }) {
   const { courseId } = use(props.params);
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
-  const { schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = useBrowsingSchoolPageContext(searchParams);
   return (
     <SiteShell title={title}>
       <section className={styles.stateCard} aria-labelledby="course-tool-state">

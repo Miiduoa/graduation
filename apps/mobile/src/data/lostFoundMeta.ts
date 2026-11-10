@@ -1,19 +1,11 @@
 import type { LostFoundItem } from './types';
 
+export { sameLostFoundFormFields as fieldsEqual, type LostFoundWriteFields } from '@campus/shared/src/lostFoundFields';
+
 /** Firestore Timestamp components — avoid lossy ISO for optimistic concurrency. */
 export type LostFoundRevision = {
   seconds: number;
   nanoseconds: number;
-};
-
-export type LostFoundWriteFields = {
-  type: 'lost' | 'found';
-  title: string;
-  description: string;
-  category: string;
-  location: string;
-  date: string;
-  contactInfo?: string;
 };
 
 export type LostFoundWriteOptions = {
@@ -137,16 +129,4 @@ export function readRevision(value: unknown): LostFoundRevision | null {
     }
   }
   return null;
-}
-
-export function fieldsEqual(a: LostFoundWriteFields, b: LostFoundWriteFields): boolean {
-  return (
-    a.type === b.type &&
-    a.title === b.title &&
-    a.description === b.description &&
-    a.category === b.category &&
-    a.location === b.location &&
-    a.date === b.date &&
-    (a.contactInfo ?? '') === (b.contactInfo ?? '')
-  );
 }
