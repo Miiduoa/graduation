@@ -363,13 +363,16 @@ it('adds source-checked Providence building shapes without changing navigation o
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
 
-it('falls back to the usable map if the building API stalls instead of leaving a loading spinner', async () => {
+it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores late success', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   let signal: AbortSignal | undefined;
+  let resolveFetch: ((value: { ok: true; json: () => Promise<unknown> }) => void) | undefined;
+  // Simulate a response that ignores AbortSignal entirely: abort alone must
+  // never leave the campus browser stuck on its loading message.
   vi.stubGlobal('fetch', vi.fn((_url: string, init: { signal: AbortSignal }) => {
     signal = init.signal;
-    return new Promise((_resolve, reject) => {
-      init.signal.addEventListener('abort', () => reject(new Error('building request timed out')), { once: true });
+    return new Promise<{ ok: true; json: () => Promise<unknown> }>((resolve) => {
+      resolveFetch = resolve;
     });
   }));
   const timeoutSpy = vi.spyOn(window, 'setTimeout');
@@ -385,6 +388,29 @@ it('falls back to the usable map if the building API stalls instead of leaving a
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     expect(scene.create).toHaveBeenCalledTimes(1);
     expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
+
+    // The request may finally finish after the visible timeout. A valid late
+    // snapshot must not revive the expired request or silently change the map.
+    const outline = [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ];
+    const buildings = parseProvidenceOsmFootprints({
+      elements: [{ type: 'way', id: 255784049, geometry: outline, tags: { building: 'yes' } }],
+    });
+    expect(buildings).toHaveLength(1);
+    await act(async () => {
+      resolveFetch?.({ ok: true, json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date().toISOString(), stale: false,
+      }) });
+    });
+    expect(within(dialog).getByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    expect(scene.create).toHaveBeenCalledTimes(1);
   } finally {
     timeoutSpy.mockRestore();
   }
