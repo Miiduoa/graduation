@@ -62,10 +62,21 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   function toggle() {
     if (active.current) { stop(); return; }
     if (!voice.current || !available) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.voice = voice.current;
-    utterance.lang = voice.current.lang;
-    utterance.rate = 0.95;
+    // Mobile browsers can advertise a local voice but reject utterance
+    // construction (for example when speech access is restricted). Do not
+    // leave the reader stuck or leak the browser error into the lesson.
+    let utterance: SpeechSynthesisUtterance;
+    try {
+      utterance = new SpeechSynthesisUtterance(text);
+      utterance.voice = voice.current;
+      utterance.lang = voice.current.lang;
+      utterance.rate = 0.95;
+    } catch {
+      setSpeaking(false);
+      onSpeakingChange?.(false);
+      setError('目前無法朗讀，可繼續閱讀文字。');
+      return;
+    }
     active.current = utterance;
     const finish = () => {
       if (active.current !== utterance) return false;

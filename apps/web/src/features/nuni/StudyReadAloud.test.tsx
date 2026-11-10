@@ -124,3 +124,29 @@ it('retains the local-only boundary when the voice lookup temporarily throws', (
   fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }));
   expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(false);
 });
+
+it('keeps reading available and allows retry when a mobile browser rejects utterance creation', () => {
+  const changed = vi.fn();
+  render(<StudyReadAloud text="私人教材只供裝置端朗讀" onSpeakingChange={changed} />);
+
+  // A voice can be listed as installed even when constructing an utterance
+  // throws due to browser permissions or a temporarily unavailable engine.
+  vi.stubGlobal('SpeechSynthesisUtterance', class {
+    constructor() { throw new Error('blocked speech engine details'); }
+  });
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }))).not.toThrow();
+  expect(screen.getByRole('status').textContent).toContain('目前無法朗讀');
+  expect(screen.getByRole('status').textContent).not.toContain('blocked speech engine details');
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(speak).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
+  expect(changed).toHaveBeenLastCalledWith(false);
+
+  // A subsequent user gesture must work after the browser engine recovers.
+  vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect((speak.mock.calls[0][0] as Utterance).text).toBe('私人教材只供裝置端朗讀');
+  expect(changed).toHaveBeenLastCalledWith(true);
+  expect(screen.queryByRole('status')).toBeNull();
+});
