@@ -83,6 +83,39 @@ describe('Providence OSM building outlines', () => {
     })).toHaveLength(1);
   });
 
+  it('does not present unprefixed lifecycle markers as an intact campus building', () => {
+    // OSM supports both lifecycle prefixes and direct flags. A way can retain
+    // building=yes after demolition, ruin, abandonment or reconstruction.
+    for (const key of [
+      'abandoned', 'disused', 'demolished', 'destroyed', 'removed',
+      'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
+      'ruins:building', 'ruined:building',
+    ]) {
+      for (const value of ['yes', 'house']) {
+        expect(parseProvidenceOsmFootprints({
+          elements: [way(255784049, library, { building: 'yes', [key]: value })],
+        }), `${key}=${value}`).toEqual([]);
+      }
+    }
+    // Explicit negative values do not cause an otherwise verified way to vanish.
+    for (const value of ['no', 'false', '0']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, {
+          building: 'school', abandoned: value, ruins: value, 'ruins:building': value,
+        })],
+      }), value).toHaveLength(1);
+    }
+    // Unexpected flag formats do not silently certify a complete building.
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'yes', demolished: true })],
+    })).toEqual([]);
+    for (const building of ['collapsed', 'abandoned', 'disused', 'derelict', 'ruined']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building })],
+      }), building).toEqual([]);
+    }
+  });
+
   it('does not invent ground-level walls for elevated OSM building parts', () => {
     // Height is top elevation, not proof that the building begins at ground.
     // Until we model a verified base elevation, an elevated footprint is not
