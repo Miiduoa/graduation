@@ -363,6 +363,21 @@ Firestore 的 `requesterIsCafeteriaOperator()` 過去允許 canonical `users/{ui
 - 合法校務登入寫入的 profile 含 `schoolId`／`primarySchoolId`，同一認證 context 下的正常發布、同校讀取、作者刪除與觀看紀錄維持可通過。
 - 同一認證 context 下刪除 canonical 文件後，殘留校籍不得讀寫限動；接著客戶端重建 student profile、或嘗試自行寫入校別／status，限動讀寫與作者刪除仍拒絕。伺服器再寫入綁定校別的 profile 且校籍 inactive 時仍拒絕；校籍恢復 active 後作者才能刪除。
 
-Storage `schools/{schoolId}/stories/` 已使用校籍文件與 `campusStories` 兩份查詢，同一請求無法再讀 canonical profile。回歸因此保留「刪帳並自建 profile 後，殘留校籍仍可讀已發布媒體」的現況，並拒絕已發布後覆寫與校籍 inactive 後的媒體讀取。這不是放寬，也不能當作已簽發 bearer URL 失效。
+Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。沒有非空 `profileBoundGeneration` 的舊章一律拒絕。正式刪帳／停權會在同一 transaction 清章並標 inactive，因此刪帳後媒體立即不可讀。這不能當作已簽發 bearer URL 失效。
 
 新增／調整案例以 Firebase emulator 實際執行結果為準，不得沿用上一版 CI 綠燈。發布前除既有 legacy 無 profile 帳號外，還需盤點只有校籍、profile 未帶 `schoolId`／`primarySchoolId` 的帳號，否則限動 Firestore 會 fail-closed。未合併 main、部署、執行 migration、操作正式資料或 token。
+
+## 2026-11-09：限動媒體兩查詢與歷史校別綁定
+
+#517 合入後仍有兩項發布阻擋。Storage 限動媒體同一請求只能讀兩份 Firestore 文件；先前讀校籍與 `campusStories`，因此 canonical profile 刪除後，殘留 active 校籍加上有效憑證仍可讀未過期已發布媒體。Firestore 則要求 profile 的 `schoolId`／`primarySchoolId` 與學校一致，歷史上只有校籍、profile 未帶校別欄位的帳號會 fail-closed。
+
+根治不放寬規則、也不讓客戶端自填校籍：
+
+- Storage 限動每次請求只讀兩份 Firestore 文件：`schools/{schoolId}/members/{uid}`（`status == 'active'`、伺服器蓋章的 `profileBoundSchoolId` 等於路徑學校、且 `profileBoundGeneration` 為非空字串）以及 `campusStories/{storyId}`。不讀 `users/{uid}`。沒有世代的舊章一律拒絕。蓋章只在伺服器端校務登入交易寫入。校籍 `allow write: if false`，客戶端無法寫這些欄位。
+- 正式刪帳（`deleteUserAccount`）在標上 `accountDeletionInProgress` 的同一 transaction／batch 內，把該使用者所有 school members 的 `profileBoundSchoolId`／`profileBoundGeneration` 清掉並標 `inactive`。觸發器只當備援：刪 profile、新建 profile、或帳號變成 deleted／suspended／disabled／inactive 時清掉不符現況世代的蓋章。
+- 校籍撤銷或刪除時，觸發器在同一 transaction 內重讀校籍；若當下已是 active（例如剛登入），不清 profile 校別。
+- 回填腳本只做 dry-run 統計。沒有 `--apply`、沒有 `--reverse`。正式站從未跑過回填寫入。歷史未蓋章帳在下次校務登入時蓋章（fail-closed 可接受）。
+- 校務登入拒絕已關閉帳號。沒有新的 Firestore schema migration。
+- `users` create／update 禁止客戶端寫入 `schoolId`、`primarySchoolId`、`profileBoundSchoolId`、`bindingGeneration`、`lastLoginAt`。`users` 文件 `allow delete: if false`，客戶端必須走 `deleteUserAccount`。
+
+舊 Firebase／GCS bearer URL 與 Supabase signed URL 不因規則、觸發器或回填腳本失效。發布順序：先部署 Functions（登入蓋章與世代、刪／停權清蓋章），最後才發布 Storage 規則。不必執行回填寫入。客戶端限動查詢不必改。未合併 main、部署、執行回填或清理正式 token。

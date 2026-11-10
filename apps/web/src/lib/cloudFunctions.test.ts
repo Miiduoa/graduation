@@ -18,6 +18,9 @@ it('points hosted group invite callables at this Next.js app without a functions
   expect(getCloudFunctionUrl('reviewLeaveRequest', { env })).toBe('/api/fn/reviewLeaveRequest');
   expect(getCloudFunctionUrl('listLeaveReviewQueue', { env })).toBe('/api/fn/listLeaveReviewQueue');
   expect(getCloudFunctionUrl('signInPuStudentId', { env })).toBe('/api/fn/signInPuStudentId');
+  expect(getCloudFunctionUrl('ensureCampusStoryBinding', { env })).toBe(
+    '/api/fn/ensureCampusStoryBinding',
+  );
   expect(getCloudFunctionUrl('createGroup', { env })).toBe(
     'https://asia-east1-campus-one-tw.cloudfunctions.net/createGroup',
   );

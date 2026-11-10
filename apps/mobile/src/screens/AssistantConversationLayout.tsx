@@ -23,6 +23,7 @@ type Props = {
   locked: boolean;
   onBack: () => void;
   chatScroll: React.Ref<ScrollView>;
+  onChatScrollPosition?: (atLatest: boolean) => void;
   tools: React.ReactNode;
   toolsLabel?: string;
   composer: React.ReactNode;
@@ -36,6 +37,7 @@ export function AssistantConversationLayout({
   locked,
   onBack,
   chatScroll,
+  onChatScrollPosition,
   tools,
   toolsLabel = '校園工具',
   composer,
@@ -114,7 +116,15 @@ export function AssistantConversationLayout({
       >
         <ScrollView
           ref={chatScroll}
+          testID="assistant-conversation-scroll"
           keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
+          onScroll={(event) => {
+            if (!onChatScrollPosition) return;
+            const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+            const distance = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+            onChatScrollPosition(distance <= 96);
+          }}
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 12 }}
         >

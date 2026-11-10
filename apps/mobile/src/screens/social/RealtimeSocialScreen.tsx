@@ -9,6 +9,7 @@
  *  - 「我在這裡」打卡會在 chip 上顯示 ACTIVE 標記
  *  - 同點位列表顯示頭像 / 姓名（從 directory 取）
  */
+import { PrivateImage } from '../../ui/PrivateImage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -358,7 +359,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
                   accessibilityRole="button"
                 >
                   {isImage ? (
-                    <Image source={{ uri: latest!.mediaUrl as string }} style={styles.storyCardImg} />
+                    <PrivateImage uri={latest!.mediaUrl as string} style={styles.storyCardImg} />
                   ) : (
                     <View
                       style={[
