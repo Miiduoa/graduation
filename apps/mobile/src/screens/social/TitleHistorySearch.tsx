@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal,
+  AccessibilityInfo, ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -100,6 +100,15 @@ export function TitleHistorySearch({ schoolId, onClose, onOpenPost, initialQuery
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Android's live region reads the rendered status; iOS VoiceOver needs an
+  // explicit announcement. This only speaks generic counts/errors, never a
+  // post title or content. Version-fenced requests cannot announce late data.
+  React.useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const message = error || (notice ? `${notice} 目前顯示 ${posts.length} 篇。` : '');
+    if (message) AccessibilityInfo.announceForAccessibility(message);
+  }, [error, notice, posts.length]);
+
   const cursor = useRef<TitleSearchCursor | null>(null);
   const retry = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
   const activeRequest = useRef<{ cursor: TitleSearchCursor | null; append: boolean; fromPostId?: string } | null>(null);
