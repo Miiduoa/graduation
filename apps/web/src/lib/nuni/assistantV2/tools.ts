@@ -428,6 +428,42 @@ export function studyWindow(question: string, answer = ''): { from: string; to: 
   return { from: '08:00', to: '22:00' };
 }
 export const toolNames = Object.keys(definitions);
+// One executable reader/proposal per explicitly requested domain takes precedence
+// over optional context and secondary tools when the eight-tool budget is full.
+function requestedToolDomains(question: string, simulation: boolean): [string, string][] {
+  const domains: [string, string][] = [];
+  const add = (requested: boolean, label: string, tool: string) => {
+    if (requested) domains.push([label, tool]);
+  };
+  add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
+  add(/教材/.test(question), '教材', 'get_materials');
+  add(/社團/.test(question), '社團', 'list_clubs');
+  add(/公車|交通|到站/.test(question), '公車／交通', 'get_transit');
+  add(/圖書館|怎麼走|地圖|公告|活動/.test(question), '校園資訊', 'get_campus_info');
+  add(foodOrderIntent(question) || /點餐|菜單|便當/.test(question), '點餐',
+    /再點|跟上次一樣/.test(question) ? 'reorder_last_food_order' : 'get_food_menu');
+  add(/吃|中午|餐廳/.test(question) && !foodOrderIntent(question), '餐廳', 'get_dining');
+  add(/課|有空|下午|行程/.test(question) && !studyPlanSelect(question), '課表／行程', 'get_schedule');
+  add(!studyPlanSelect(question) &&
+    (/行程|事件|今晚|今夜|明晚/.test(question) || personalSlotSelect(question)),
+    '個人事件', 'propose_personal_event');
+  add(/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question),
+    '匯入學業紀錄', 'get_imported_academics');
+  add(/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question),
+    '服務入口', 'list_campus_services');
+  add(simulation && /通知/.test(question), '通知', 'get_notifications');
+  return domains;
+}
+// Also covers the intentionally narrow study-plan and reorder return paths.
+// The runner renders this deterministic notice even if the model omits it.
+export function toolSelectionNotice(question: string, simulation: boolean, names: string[]): string {
+  const deferred = requestedToolDomains(question, simulation)
+    .filter(([, tool]) => !names.includes(tool)).map(([label]) => label);
+  return deferred.length
+    ? '本輪工具預算或專用流程限制，尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
+    : '';
+}
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
@@ -488,9 +524,12 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/再點|跟上次一樣/.test(question))
     return ['reorder_last_food_order', 'propose_food_order', 'get_food_menu', 'list_food_orders'];
   const names = [...out];
-  if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
-  if (names.length > 8 && names.includes('find_free_time'))
-    names.splice(names.indexOf('get_calendar'), 1);
+  const remove = (name: string) => {
+    const index = names.indexOf(name);
+    if (index >= 0) names.splice(index, 1);
+  };
+  if (names.length > 8) remove('propose_open_page');
+  if (names.length > 8 && names.includes('find_free_time')) remove('get_calendar');
   if (studyPlanSelect(question))
     return [
       'get_day_overview',
@@ -500,7 +539,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
-  return names.slice(0, 8);
+  if (names.length <= 8) return names;
+  const primary = requestedToolDomains(question, simulation)
+    .map(([, tool]) => tool).filter((tool) => names.includes(tool));
+  return [...new Set([...primary, ...names])].slice(0, 8);
 }
 export const schemas = (names: string[]) =>
   names.map((name) => ({
