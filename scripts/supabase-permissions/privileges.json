@@ -2471,6 +2471,14 @@
       "anon": false
     },
     {
+      "signature": "playable_material_course(uuid)",
+      "name": "playable_material_course",
+      "trigger": false,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
       "signature": "protect_profile_role()",
       "name": "protect_profile_role",
       "trigger": true,
@@ -2481,6 +2489,14 @@
     {
       "signature": "protect_quiz_answer_grading()",
       "name": "protect_quiz_answer_grading",
+      "trigger": true,
+      "authenticated": false,
+      "service_role": false,
+      "anon": false
+    },
+    {
+      "signature": "protect_submission_attachment()",
+      "name": "protect_submission_attachment",
       "trigger": true,
       "authenticated": false,
       "service_role": false,

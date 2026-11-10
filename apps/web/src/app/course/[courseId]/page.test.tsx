@@ -1,3 +1,4 @@
+import * as privateFileService from '@/lib/privateFiles';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import CoursePage from './page';
@@ -69,6 +70,7 @@ function submit(id: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.spyOn(privateFileService, 'claimPrivateFile').mockResolvedValue(undefined);
   window.localStorage.clear();
   auth.user = { uid: 'alice' };
   auth.loading = false;
@@ -432,4 +434,52 @@ it('offers scoped course counts and accessible shortcuts without inventing a wor
   expect(within(navigation).getByRole('link', { name: '本週待辦' }).getAttribute('href')).toBe('#week');
   expect(within(navigation).getByRole('link', { name: '教材櫃' }).getAttribute('href')).toBe('#course-materials-title');
   expect(within(navigation).getByRole('link', { name: '作業與評量' }).getAttribute('href')).toBe('#assignments');
+});
+
+it('uploads Supabase assignment attachments and submits their paths without requiring text', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: [new File(['answer'], 'answer.pdf', { type: 'application/pdf' })] } });
+    submit('A');
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalledWith('course', 'A', 'alice', '', [expect.stringMatching(/^groups\/course\/assignments\/A\/submissions\/alice\/[A-Za-z0-9_-]+\.pdf$/)]));
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({ contentType: 'application/pdf', originalFilename: 'answer.pdf' }));
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
+});
+
+it.each([429, 413])('preserves finalized attachments after upload failure %s and retries only remaining files', async (statusCode) => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('Upload or finalization failed'), { statusCode }))
+    .mockResolvedValue({ path: 'ignored' });
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: ['one', 'two', 'three'].map(name => new File(['answer'], `${name}.pdf`, { type: 'application/pdf' })) } });
+    submit('A');
+    await region.findByText(statusCode === 429 ? '上傳太頻繁，請稍後再試' : '未能確認繳交結果。內容已保留；請重新整理確認紀錄，或稍後重試。');
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(submitCourseText).not.toHaveBeenCalled();
+    submit('A');
+    await waitFor(() => expect(submitCourseText).toHaveBeenCalled());
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls.map(([input]) => input.body instanceof File ? input.body.name : '')).toEqual(['one.pdf', 'two.pdf', 'two.pdf', 'three.pdf']);
+    expect(vi.mocked(submitCourseText).mock.calls[0][4]).toHaveLength(3);
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; upload.mockRestore(); }
+});
+
+it('rejects selection of more than six attachments', async () => {
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  try {
+    await mount();
+    const region = within(screen.getByRole('region', { name: '作業 A' }));
+    fireEvent.change(region.getByLabelText('作業附件'), { target: { files: Array.from({ length: 7 }, () => new File(['x'], 'answer.pdf')) } });
+    expect(region.getByText('單次最多選取 6 個附件')).toBeTruthy();
+    expect((region.getByRole('button', { name: '繳交作業' }) as HTMLButtonElement).disabled).toBe(true);
+  } finally { delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND; }
 });

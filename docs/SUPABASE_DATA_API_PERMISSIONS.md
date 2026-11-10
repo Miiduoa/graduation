@@ -36,7 +36,7 @@ Supabase [官方公告](https://supabase.com/changelog/45329-breaking-change-tab
 2. `quiz_attempts`、`rubric_scores`、`course_role_capabilities`、互評回應、問卷回應、學習時間、xAPI、閱讀確認、AI 同意紀錄等改成 authenticated 只讀；寫入使用既有且已核實的 RPC。
 3. 14 個私人普通 views 設為 `security_invoker=true`。學生 dashboard／預警 view 外層也限本人或現有成績可見角色，避免同班其他學生的隱藏資料被聚合成假的零分列。公開課程目錄保留固定公開欄位與公開／未封存篩選，並加 security_barrier；anon 不因此取得 courses 權限。
 4. `reporting_course_engagement_7d` 物化資料不開放直接讀取；仍由 admin RPC 查詢或刷新。
-5. 81 個應用程式函式逐一列出 EXECUTE 權限：53 個使用者 RPC／RLS helpers 給 authenticated，8 個 worker／service 函式給 service_role，18 個 trigger 函式與 2 個內部計分 helpers 保留 owner-only。所有應用程式函式都不授予 anon；extension／Auth／Storage 函式不在此清單內。
+5. 82 個應用程式函式逐一列出 EXECUTE 權限：53 個使用者 RPC／RLS helpers 給 authenticated，8 個 worker／service 函式給 service_role，18 個 trigger 函式與 3 個內部 helpers 保留 owner-only。所有應用程式函式都不授予 anon；extension／Auth／Storage 函式不在此清單內。
 6. 六個認領／完成／標記佇列 RPC 僅給 service_role，並用 `auth.role() IS DISTINCT FROM 'service_role'` 檢查，缺 claim 時拒絕。管理員瀏覽器仍可要求與查看自己的工作，但不能直接模擬 worker 完成工作。
 7. 補上具體發現的跨帳號缺口：peer review 先驗 reviewer 與 pending 狀態；rubric 評分驗課程、target binding 與 assignments.grade capability；遲交分數只允許本人或有權批改者讀取。學生 grade-sync RPC 保留，但缺少 auth.uid 時會拒絕。
 8. 作業 grade／feedback／graded_at／graded_by 與 quiz manual_score 加 SECURITY INVOKER trigger 保護。學生可正常提交與更新內容，不能自評；有權教師及受控計分 RPC 可批改。作業與答案的歸屬鍵不可搬移，防止把合法分數帶到別筆資料。
@@ -214,7 +214,7 @@ CI workflow：[Supabase permission migrations](../.github/workflows/supabase-per
 
 ### 驗證內容與判讀
 
-- 119 個 relation 的 **2,499** 項角色／操作 ACL assertions；81 個 application function 的 **243** 項角色 EXECUTE assertions。
+- 119 個 relation 的 **2,499** 項角色／操作 ACL assertions；82 個 application function 的 **246** 項角色 EXECUTE assertions。
 - 每張表 RLS 開啟、私人 views 使用 caller RLS、新增未盤點物件會令測試失敗、匿名只可讀公開目錄。
 - 同課程兩名學生與不同課程使用者的提交、通知、分數、views、答案及私人資料隔離。
 - 教師與學生的 capability 邊界、profile 自行升權阻擋、trusted profile role 維護。

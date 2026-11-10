@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import BuildingPlanPreview from './BuildingPlanPreview';
-import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES } from './buildingPlan';
+import { createExampleBuildingPlan, MAX_BUILDING_PLAN_BYTES, parseBuildingPlan, type BuildingPlan, type PlanPoint } from './buildingPlan';
 import type { BuildingPlanProjectDraft, BuildingPlanProjectReference } from './buildingPlanProject';
 
 const scene = vi.hoisted(() => ({ create: vi.fn(), setView: vi.fn(), setActive: vi.fn(), dispose: vi.fn() }));
@@ -62,6 +62,179 @@ async function open3d() {
   fireEvent.click(screen.getByRole('button', { name: '立體' }));
   await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
 }
+
+function singleFloorPlan(label: string): BuildingPlan {
+  const drawing = createExampleBuildingPlan(scope);
+  drawing.floors = [drawing.floors[0]];
+  drawing.floors[0].label = label;
+  drawing.source = { label: `${label} 平面圖`, url: `https://example.com/${label}` };
+  return drawing;
+}
+
+async function stageFloor(drawing = singleFloorPlan('2F')) {
+  fireEvent.click(screen.getByText('加入樓層圖面'));
+  fireEvent.change(screen.getByLabelText('選擇要加入的圖面'), { target: { files: [fileWithText(JSON.stringify(drawing))] } });
+  await screen.findByText('圖面已讀取，請設定樓層位置。尚未加入目前建築。');
+  fireEvent.change(screen.getByLabelText('樓底標高（公尺）'), { target: { value: '4' } });
+  fireEvent.click(screen.getByRole('button', { name: '預覽樓層位置' }));
+}
+
+it('adds a reviewed floor to the existing scene and searches both storeys without losing base geometry', async () => {
+  const base = singleFloorPlan('1F');
+  render(<BuildingPlanPreview {...props} />);
+  upload(fileWithText(JSON.stringify(base)));
+  await screen.findByText('待核對圖面');
+  fireEvent.click(screen.getByRole('button', { name: '立體' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: '平面圖 1F 範例教室 101' }));
+  await stageFloor();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('已選取：1F · 範例教室 101')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '加入這個樓層' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  const joined = scene.create.mock.calls[1][1] as BuildingPlan;
+  expect(joined.floors).toHaveLength(2);
+  expect(joined.floors[0].outline).toEqual(base.floors[0].outline);
+  expect(joined.floors[0].rooms).toEqual(base.floors[0].rooms);
+  expect(new Set(joined.floors.flatMap(floor => floor.rooms.map(room => room.id))).size).toBe(6);
+  expect(screen.getByText('已加入 2F，目前共 2 層。')).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByText('加入樓層圖面'));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋圖面房間' }), { target: { value: '2F 101' } });
+  fireEvent.click(within(screen.getByRole('region', { name: '房間清單' })).getByRole('button', { name: '2F 範例教室 101' }));
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ floorId: joined.floors[1].id, roomId: joined.floors[1].rooms[0].id }));
+  expect(scene.create).toHaveBeenCalledTimes(2);
+});
+
+it('removing a selected storey clears only its stale selection and retains other floors', async () => {
+  render(<BuildingPlanPreview {...props} />);
+  await open3d();
+  fireEvent.click(screen.getByRole('button', { name: '平面圖 2F 範例教室 201' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '搜尋圖面房間' }), { target: { value: '201' } });
+  fireEvent.click(screen.getByText('管理樓層'));
+  const floor = within(screen.getByRole('group', { name: '2F 樓層設定' }));
+  fireEvent.click(floor.getByRole('button', { name: '移除樓層' }));
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  fireEvent.click(floor.getByRole('button', { name: '確認移除' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(2));
+  expect((scene.create.mock.calls[1][1] as BuildingPlan).floors.map(item => item.id)).toEqual(['example-1']);
+  expect((screen.getByRole('combobox', { name: '樓層' }) as HTMLSelectElement).value).toBe('');
+  expect((screen.getByRole('searchbox', { name: '搜尋圖面房間' }) as HTMLInputElement).value).toBe('');
+  expect(scene.setView).toHaveBeenLastCalledWith(expect.objectContaining({ floorId: null, roomId: null }));
+  expect(screen.getByRole('button', { name: '平面圖 1F 範例教室 101' })).toBeTruthy();
+  expect(screen.queryByText('已選取：2F · 範例教室 201')).toBeNull();
+});
+
+it('keeps original image editing available without allowing model management to discard it', async () => {
+  render(<BuildingPlanPreview {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: '從圖片建立圖面' }));
+  fireEvent.change(screen.getByLabelText('測試描圖備註'), { target: { value: '不可遺失的原始底圖描點' } });
+  fireEvent.click(screen.getByRole('button', { name: '完成測試描圖' }));
+  await waitFor(() => expect(scene.create).toHaveBeenCalledTimes(1));
+  const input = fileWithText(JSON.stringify(singleFloorPlan('2F')));
+  fireEvent.click(screen.getByText('加入樓層圖面'));
+  fireEvent.change(screen.getByLabelText('選擇要加入的圖面'), { target: { files: [input] } });
+  expect(input.text).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('管理樓層'));
+  fireEvent.click(within(screen.getByRole('group', { name: '1F 樓層設定' })).getByRole('button', { name: '編輯樓層' }));
+  expect(screen.queryByRole('button', { name: '套用樓層設定' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '返回圖面編輯' }));
+  expect((screen.getByLabelText('測試描圖備註') as HTMLInputElement).value).toBe('不可遺失的原始底圖描點');
+});
+
+it('discards a pending additional floor when the whole model is replaced', async () => {
+  render(<BuildingPlanPreview {...props} />);
+  loadExample();
+  fireEvent.click(screen.getByText('加入樓層圖面'));
+  let finish!: (value: string) => void;
+  fireEvent.change(screen.getByLabelText('選擇要加入的圖面'), {
+    target: { files: [fileWithText(new Promise<string>(resolve => { finish = resolve; }))] },
+  });
+  upload(fileWithText(planJson('新的建築圖面')));
+  await screen.findByRole('heading', { name: '新的建築圖面' });
+  await act(async () => { finish(JSON.stringify(singleFloorPlan('晚到的樓層'))); });
+  expect(screen.queryByLabelText('新增樓層名稱')).toBeNull();
+  expect(screen.queryByText('晚到的樓層')).toBeNull();
+  expect(screen.getByRole('heading', { name: '新的建築圖面' })).toBeTruthy();
+});
+
+it('keeps cancellation focus at the project input instead of an older floor review', async () => {
+  let finish!: (project: ReturnType<typeof savedProject>) => void;
+  projects.import.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<BuildingPlanPreview {...props} />);
+  upload(fileWithText(JSON.stringify(singleFloorPlan('1F'))));
+  await screen.findByText('待核對圖面');
+  await stageFloor();
+  expect(document.activeElement).toBe(screen.getByLabelText('待加入樓層確認'));
+  openProject();
+  fireEvent.click(screen.getByRole('button', { name: '取消開啟' }));
+  expect(document.activeElement).toBe(screen.getByLabelText('開啟編輯檔'));
+  await act(async () => { finish(savedProject()); });
+  expect(document.activeElement).toBe(screen.getByLabelText('開啟編輯檔'));
+  expect(screen.getByRole('button', { name: '加入這個樓層' })).toBeTruthy();
+});
+
+it('keeps floor settings and staged imports from overwriting each other before submission', async () => {
+  render(<BuildingPlanPreview {...props} />);
+  upload(fileWithText(JSON.stringify(singleFloorPlan('1F'))));
+  await screen.findByText('待核對圖面');
+  fireEvent.click(screen.getByText('管理樓層'));
+  const card = within(screen.getByRole('group', { name: '1F 樓層設定' }));
+  fireEvent.click(card.getByRole('button', { name: '編輯樓層' }));
+  const label = card.getByLabelText('樓層名稱') as HTMLInputElement;
+  fireEvent.change(label, { target: { value: '尚未套用的名稱' } });
+  const input = fileWithText(JSON.stringify(singleFloorPlan('2F')));
+  fireEvent.click(screen.getByText('加入樓層圖面'));
+  fireEvent.change(screen.getByLabelText('選擇要加入的圖面'), { target: { files: [input] } });
+  expect(input.text).not.toHaveBeenCalled();
+  expect(label.value).toBe('尚未套用的名稱');
+  fireEvent.click(card.getByRole('button', { name: '取消修改' }));
+  // The importer is already expanded; opening a file starts its separate draft.
+  fireEvent.change(screen.getByLabelText('選擇要加入的圖面'), { target: { files: [input] } });
+  await screen.findByText('圖面已讀取，請設定樓層位置。尚未加入目前建築。');
+  fireEvent.click(card.getByRole('button', { name: '編輯樓層' }));
+  expect(screen.queryByRole('button', { name: '套用樓層設定' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '取消加入樓層' }));
+  fireEvent.click(card.getByRole('button', { name: '編輯樓層' }));
+  expect(card.getByRole('button', { name: '套用樓層設定' })).toBeTruthy();
+});
+
+it('keeps a large valid model within the import byte limit when downloading and reopening it', async () => {
+  const drawing = singleFloorPlan('1F');
+  const polygon: PlanPoint[] = Array.from({ length: 64 }, (_, i) => [
+    Number((5 + 3 * Math.cos(i * Math.PI / 32)).toFixed(4)),
+    Number((5 + 3 * Math.sin(i * Math.PI / 32)).toFixed(4)),
+  ]);
+  drawing.floors[0].rooms = Array.from({ length: 80 }, (_, i) => ({ id: `room-${i}`, name: `房間 ${i}`, polygon }));
+  drawing.floors[0].walls = [];
+  drawing.floors[0].source = { label: '逐層中文來源', url: 'https://example.com/source' };
+  const original = JSON.stringify(drawing);
+  expect(new TextEncoder().encode(original).byteLength).toBeLessThan(MAX_BUILDING_PLAN_BYTES);
+  expect(new TextEncoder().encode(JSON.stringify(drawing, null, 2)).byteLength).toBeGreaterThan(MAX_BUILDING_PLAN_BYTES);
+  const checked = parseBuildingPlan(original, scope);
+  expect(checked.ok).toBe(true);
+  const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:large-plan');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  render(<BuildingPlanPreview {...props} />);
+  upload(fileWithText(original));
+  await screen.findByText('待核對圖面');
+  fireEvent.click(screen.getByRole('button', { name: '下載目前圖面' }));
+  const blob = createUrl.mock.calls[0][0] as Blob;
+  expect(blob.size).toBeLessThanOrEqual(MAX_BUILDING_PLAN_BYTES);
+  const contents = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsText(blob);
+  });
+  expect(parseBuildingPlan(contents, scope)).toEqual(checked);
+  fireEvent.click(screen.getByRole('button', { name: '清除圖面' }));
+  upload(fileWithText(contents));
+  await screen.findByText('待核對圖面');
+  expect(within(screen.getByRole('region', { name: '房間清單' })).getAllByRole('button', { name: /^1F 房間/ })).toHaveLength(80);
+  fireEvent.click(screen.getByText('管理樓層'));
+  expect(screen.getByRole('link', { name: /逐層中文來源/ })).toBeTruthy();
+});
 
 it('starts empty, labels the example as fictional and keeps graphics unloaded until requested', () => {
   render(<BuildingPlanPreview {...props} />);
@@ -184,7 +357,8 @@ it('treats imported data as pending review despite a verified field and preserve
   upload(fileWithText(planJson()));
   expect(await screen.findByText('待核對圖面')).toBeTruthy();
   expect(screen.getByText('圖面範圍：測試館（pu / test-building）')).toBeTruthy();
-  const link = screen.getByRole('link', { name: '圖面來源 ↗' });
+  const metadata = screen.getByRole('heading', { name: '匯入圖面' }).parentElement!;
+  const link = within(metadata).getByRole('link', { name: '圖面來源 ↗' });
   expect(link.getAttribute('href')).toBe('https://www.pu.edu.tw/plan');
   expect(link.getAttribute('rel')).toBe('noreferrer');
   expect(screen.queryByText(/已驗證/)).toBeNull();
@@ -318,6 +492,46 @@ it('does not construct graphics if the user closes before the lazy import resolv
   view.unmount();
   await act(async () => {});
   expect(scene.create).not.toHaveBeenCalled();
+});
+
+it('downloads a self-contained SVG for all or just the selected floor', async () => {
+  const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:floor-print');
+  const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const filenames: string[] = [];
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    filenames.push(this.download);
+  });
+  render(<BuildingPlanPreview {...props} />);
+  loadExample();
+
+  const download = screen.getByRole('button', { name: '下載平面圖 SVG' });
+  fireEvent.click(download);
+  const read = (blob: Blob) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsText(blob);
+  });
+  const all = await read(createUrl.mock.calls[0][0] as Blob);
+  expect(all).toContain('範例教室 101');
+  expect(all).toContain('範例教室 201');
+  expect(all).toContain('待核對圖面');
+  expect((createUrl.mock.calls[0][0] as Blob).type).toBe('image/svg+xml;charset=utf-8');
+
+  fireEvent.change(screen.getByRole('combobox', { name: '樓層' }), { target: { value: 'example-2' } });
+  fireEvent.click(download);
+  const oneFloor = await read(createUrl.mock.calls[1][0] as Blob);
+  expect(oneFloor).toContain('範例教室 201');
+  expect(oneFloor).not.toContain('範例教室 101');
+  fireEvent.click(download);
+  expect(await read(createUrl.mock.calls[2][0] as Blob)).toBe(oneFloor);
+  expect(filenames).toEqual([
+    '平面圖-兩層教學空間・示意-全部樓層.svg',
+    '平面圖-兩層教學空間・示意-單層-2F.svg',
+    '平面圖-兩層教學空間・示意-單層-2F.svg',
+  ]);
+  expect(click).toHaveBeenCalledTimes(3);
+  await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith('blob:floor-print'), { timeout: 2_000 });
 });
 
 it('downloads a scoped fictional template and revokes its temporary URL', async () => {

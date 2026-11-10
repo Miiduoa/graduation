@@ -7,6 +7,8 @@ import {
   restoreAssistantCalendarWorkspace, updateAssistantCalendarBatchTask,
   type AssistantCalendarBatchView,
 } from '../services/assistantCalendarBatchExecution';
+import { sameAssistantCalendarOrigin } from '../services/assistantCalendarJournal';
+import { sameAssistantCalendarBatchPlan } from '../services/assistantCalendarBatchStore';
 
 const LOAD_ERROR = '目前無法讀取先前的行程操作紀錄。請稍後重新載入；新的行程操作會在紀錄可讀取後才開放。';
 const BATCH_LOAD_ERROR = '目前無法讀取多筆行程的安排。請重新載入；未讀到的進度不能視為尚未開始。';
@@ -16,13 +18,24 @@ export function calendarTaskFromBatch(task: AssistantCalendarTask, batch: Assist
   if (task.proposal.owner !== batch.plan.owner || task.proposal.schoolId !== batch.plan.schoolId) return task;
   const match = batch.steps.find((step) => step.state === 'recorded' &&
     sameAssistantCalendarEvent(step.event, step.task.proposal.event) &&
+    sameAssistantCalendarOrigin(task.proposal.origin, step.task.proposal.origin) &&
+    (batch.plan.kind !== 'coursework-study' || (step.task.proposal.origin?.kind === 'batch-step' &&
+      step.task.proposal.origin.batchId === batch.plan.id && step.task.proposal.origin.stepId === step.id)) &&
+    (!task.proposal.origin || (sameAssistantCalendarEvent(task.proposal.event, step.task.proposal.event) &&
+      task.proposal.mutationId === step.task.proposal.mutationId)) &&
     (step.task.proposal.mutationId === task.proposal.mutationId ||
       sameAssistantCalendarEvent(step.task.proposal.event, task.proposal.event)));
   return match?.state === 'recorded' ? match.task : task;
 }
 
 export function mergeCalendarBatchEvidence(previous: AssistantCalendarBatchView, next: AssistantCalendarBatchView) {
-  if (previous.plan.id === next.plan.id) return next;
+  if (previous.plan.id === next.plan.id) {
+    if ((previous.plan.kind || next.plan.kind) && !sameAssistantCalendarBatchPlan(previous.plan, next.plan)) {
+      return { ...previous, state: 'paused' as const, stop: { reason: 'preflight' as const,
+        message: '這份作業計畫的來源或內容與原預覽不一致。請重新載入核對，這次不會接續寫入。' } };
+    }
+    return next;
+  }
   return next.steps.reduce((view, step) => step.state === 'recorded' && sameAssistantCalendarEvent(step.event, step.task.proposal.event)
     ? updateAssistantCalendarBatchTask(view, step.task) : view, previous);
 }
@@ -91,8 +104,11 @@ export function useAssistantCalendarRecovery(context: AssistantCalendarContext,
         latest.current.schoolId !== schoolId || task.proposal.owner !== owner || task.proposal.schoolId !== schoolId) return;
     setState((previous) => {
       if (previous.owner !== owner || previous.schoolId !== schoolId) return previous;
-      const tasks = previous.tasks.map((entry) => entry.proposal.mutationId === originalId ||
-        entry.proposal.mutationId === task.proposal.mutationId ? task : entry);
+      const tasks = previous.tasks.map((entry) => (entry.proposal.mutationId === originalId ||
+        entry.proposal.mutationId === task.proposal.mutationId) &&
+        sameAssistantCalendarOrigin(entry.proposal.origin, task.proposal.origin) &&
+        (!task.proposal.origin || (entry.proposal.mutationId === task.proposal.mutationId &&
+          sameAssistantCalendarEvent(entry.proposal.event, task.proposal.event))) ? task : entry);
       return { ...previous, tasks: tasks.filter((entry, index) =>
         tasks.findIndex((candidate) => candidate.proposal.mutationId === entry.proposal.mutationId) === index),
         batches: previous.batches.map((batch) => updateAssistantCalendarBatchTask(batch, task)) };
@@ -106,7 +122,8 @@ export function useAssistantCalendarRecovery(context: AssistantCalendarContext,
       if (previous.owner !== owner || previous.schoolId !== schoolId) return previous;
       const existing = previous.batches.some((entry) => [originalId, batch.plan.id].includes(entry.plan.id));
       const batches = previous.batches.map((entry) => entry.plan.id === originalId
-        ? batch : mergeCalendarBatchEvidence(entry, batch));
+        ? (entry.plan.kind || batch.plan.kind ? mergeCalendarBatchEvidence(entry, batch) : batch)
+        : mergeCalendarBatchEvidence(entry, batch));
       if (!existing) batches.push(batch);
       return { ...previous,
         tasks: previous.tasks.map((task) => calendarTaskFromBatch(task, batch)),

@@ -197,6 +197,13 @@ function Conversation({ context, schoolId, accountId, cloudEnabled }: { context:
     </section>
   );
 }
+const ASSISTANT_PENDING_STATUS = {
+  ask: '正在整理回覆',
+  confirm: '正在確認操作結果',
+  reconcile: '正在核對執行結果',
+  cancel: '正在確認撤銷結果',
+} as const;
+
 function V2Conversation({
   context,
   schoolId,
@@ -218,7 +225,11 @@ function V2Conversation({
   const actionStates = useRef<V2ActionStates>({});
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
+  const [pendingAction, setPendingAction] = useState<keyof typeof ASSISTANT_PENDING_STATUS>('ask');
+  const [asking, setAsking] = useState(false);
+  const askRequest = useRef<AbortController | null>(null);
   const [error, setError] = useState('');
+  const [recoverableQuestion, setRecoverableQuestion] = useState('');
   const routeToken = useRef<string | undefined>(undefined);
   const controller = useRef<AbortController | null>(null);
   const localScope = { owner: 'platform:' + accountId, schoolId };
@@ -243,6 +254,7 @@ function V2Conversation({
         setTurns(cards.map((card) => ({ question: '核對先前送出的行程',
           reply: { answer: '已保留原確認內容，這次先查核執行結果。', steps: [], cards: [card] } })));
         busy.current = true;
+        setPendingAction('reconcile');
         setPending(true);
         // Deferring also lets a Strict Mode cleanup cancel its first mount's recovery.
         void Promise.resolve().then(async () => {
@@ -269,8 +281,9 @@ function V2Conversation({
     // This component is keyed by the authenticated session, account and school.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  async function send(action: string, input: object) {
-    const signal = controller.current!.signal;
+  async function send(action: string, input: object, askSignal?: AbortSignal) {
+    const scopeSignal = controller.current!.signal;
+    const signal = askSignal ?? scopeSignal;
     return withAssistantRequestDeadline(signal, action === 'ask' ? 65000 : 15000, async (requestSignal) => {
     const response = await fetch('/api/nuni/assistant/' + action, {
       method: 'POST',
@@ -292,7 +305,7 @@ function V2Conversation({
               ? '已達查詢預算，請稍後再試。'
               : '查詢未完成，請稍後再試。',
       );
-    if (signal.aborted) throw new Error('已取消');
+    if (signal.aborted || scopeSignal.aborted) throw new Error('已取消');
     return result;
     });
   }
@@ -325,19 +338,30 @@ function V2Conversation({
     }
     if (!consent || !ready) return;
     busy.current = true;
+    const pendingAsk = new AbortController();
+    askRequest.current = pendingAsk;
+    const scopeSignal = controller.current!.signal;
+    const abortForScope = () => pendingAsk.abort();
+    if (scopeSignal.aborted) pendingAsk.abort();
+    else scopeSignal.addEventListener('abort', abortForScope, { once: true });
+    setAsking(true);
+    setPendingAction('ask');
     setPending(true);
     setError('');
+    // Free the composer immediately so the next thought can be typed during a slow response.
+    // The sent content remains captured in `current` and can be recovered on failure.
+    setQuestion('');
     try {
       const history = turns.filter((turn) => !turn.reply.local &&
         !turn.reply.steps.some((step) => step.name === 'get_imported_academics')).slice(-6).flatMap((t) => [
         { role: 'user', content: t.question },
         { role: 'assistant', content: assistantAnswerWithExecution(t, actionStates.current) },
       ]);
-      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+      let reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
       if (reply.bootstrap) {
         conversation.current = reply.conversationId;
         routeToken.current = reply.routeToken;
-        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current });
+        reply = await send('ask', { question: current, history, consent, routeToken: routeToken.current }, pendingAsk.signal);
       }
       reply = { ...reply, cards: reply.cards.map((card: V2Card) => ({ ...card, conversationId: conversation.current })) };
       if (reply.cards.length) {
@@ -347,13 +371,21 @@ function V2Conversation({
         }
       }
       setTurns((t) => [...t, { question: current, reply }]);
-      setQuestion('');
+      setRecoverableQuestion((previous) => previous === current ? '' : previous);
     } catch (e) {
-      if (!controller.current?.signal.aborted)
-        setError(e instanceof Error ? e.message : '查詢失敗');
+      if (!controller.current?.signal.aborted) {
+        setError(pendingAsk.signal.aborted ? '已停止這次回答。原問題已保留，沒有執行任何確認操作。'
+          : e instanceof Error ? e.message : '查詢失敗');
+        setRecoverableQuestion(current);
+      }
     } finally {
+      scopeSignal.removeEventListener('abort', abortForScope);
+      if (askRequest.current === pendingAsk) askRequest.current = null;
       busy.current = false;
-      if (!controller.current?.signal.aborted) setPending(false);
+      if (!scopeSignal.aborted) {
+        setAsking(false);
+        setPending(false);
+      }
     }
   }
   async function applyCalendarResult(card: V2Card, raw: unknown): Promise<boolean> {
@@ -388,6 +420,7 @@ function V2Conversation({
     if (previous?.status === 'verified')
       setAction(card, { ...previous, verificationWarning: '正在重新核對；以下保留上次核對結果。' });
     else setAction(card, { status: 'checking' });
+    setPendingAction('reconcile');
     try {
       return await applyCalendarResult(card, await sendCard('reconcile', card));
     } catch {
@@ -402,6 +435,7 @@ function V2Conversation({
   async function execute(cards: V2Card[]) {
     if (busy.current) return;
     busy.current = true;
+    setPendingAction('confirm');
     setPending(true);
     setError('');
     try {
@@ -421,6 +455,8 @@ function V2Conversation({
             break;
           }
         }
+        // A previous card may have required a read-only reconcile; restore the write-stage label.
+        setPendingAction('confirm');
         setAction(card, { status: 'executing' });
         try {
           const result = await sendCard('confirm', card);
@@ -455,6 +491,7 @@ function V2Conversation({
   async function reconcile(card: V2Card) {
     if (busy.current || card.tool !== 'propose_personal_event' || card.schoolId !== schoolId) return;
     busy.current = true;
+    setPendingAction('reconcile');
     setPending(true);
     setError('');
     try {
@@ -467,6 +504,7 @@ function V2Conversation({
   async function cancel(turn: V2Turn, cardIndex: number) {
     if (busy.current) return;
     busy.current = true;
+    setPendingAction('cancel');
     setPending(true);
     setError('');
     try {
@@ -486,6 +524,7 @@ function V2Conversation({
             break;
           }
         }
+        setPendingAction('cancel');
         try {
           const result = await sendCard('cancel', current);
           if (current.tool === 'propose_personal_event') {
@@ -509,6 +548,14 @@ function V2Conversation({
       if (active()) setPending(false);
     }
   }
+  function recoverQuestion() {
+    if (busy.current || !recoverableQuestion) return;
+    const previousQuestion = recoverableQuestion;
+    // Swapping preserves a follow-up already typed while the failed request was running.
+    setRecoverableQuestion(question.trim() ? question : '');
+    setQuestion(previousQuestion);
+    setError('');
+  }
   return (
     <AssistantThread
       schoolId={schoolId}
@@ -521,7 +568,12 @@ function V2Conversation({
       turns={turns}
       states={states}
       pending={pending}
+      pendingLabel={ASSISTANT_PENDING_STATUS[pendingAction]}
+      asking={asking}
+      onStopAsk={() => askRequest.current?.abort()}
       error={error}
+      recoverableQuestion={recoverableQuestion}
+      onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}

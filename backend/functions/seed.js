@@ -15,10 +15,12 @@
  * - 建立 SSO 設定範本
  */
 
+const { randomUUID } = require('node:crypto');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue, Timestamp, GeoPoint } = require('firebase-admin/firestore');
 const path = require('path');
 const fs = require('fs');
+const { campusStoryStampFields } = require('./campusStoryAccessBinding');
 
 const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
 
@@ -998,9 +1000,10 @@ async function seedDemoUsers() {
 
   for (const user of users) {
     const { schoolMember, ...userData } = user;
+    const bindingGeneration = randomUUID();
     await usersRef.doc(user.uid).set({
       ...userData,
-      ...(schoolMember === false ? {} : { schoolId: DEMO_SCHOOL_ID }),
+      ...(schoolMember === false ? {} : { schoolId: DEMO_SCHOOL_ID, bindingGeneration }),
       avatarUrl: null,
       notificationsEnabled: true,
       createdAt: FieldValue.serverTimestamp(),
@@ -1015,6 +1018,7 @@ async function seedDemoUsers() {
       status: 'active',
       role: user.role,
       joinedAt: FieldValue.serverTimestamp(),
+      ...campusStoryStampFields(DEMO_SCHOOL_ID, bindingGeneration),
     });
   }
 
