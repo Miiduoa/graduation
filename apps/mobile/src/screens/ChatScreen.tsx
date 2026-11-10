@@ -96,6 +96,7 @@ type Msg = {
   reactions?: Record<string, string[]>;
   recalledAt?: any;
   storyReplyTo?: { storyId: string; authorUid: string };
+  cacheOnly?: boolean;
   localStatus?: DmOutboundDraft['status'];
   local?: boolean;
 };
@@ -218,6 +219,8 @@ export function ChatScreen(props: any) {
     return dmId(school.id, myUid, peerParam);
   }, [conversationIdParam, myUid, peerParam, school.id]);
 
+  const readableTextScopeRef = useRef<string | null>(null);
+  const [readableTextThread, setReadableTextThread] = useState<string | null>(null);
   const [verifiedPhotoThread, setVerifiedPhotoThread] = useState<string | null>(null);
   const [focused, setFocused] = useState(() => props?.navigation?.isFocused?.() ?? true);
   useEffect(() => {
@@ -236,7 +239,8 @@ export function ChatScreen(props: any) {
   const peerPrepared = preparation?.scope === sendScope && preparation.status === 'ready';
   const canSend = displayCurrentScope && (!peerRoute || peerPrepared);
   const liveThread = !peerRoute || (peerPrepared && preparation.exists === true);
-  const messageAccessConfirmed = liveThread && verifiedPhotoThread === sendScope;
+  const messageReadAllowed = liveThread &&
+    (readableTextThread === sendScope || verifiedPhotoThread === sendScope);
   const prepareError = preparation?.scope === sendScope ? preparation.error : '';
 
   useLayoutEffect(() => {
@@ -554,7 +558,7 @@ export function ChatScreen(props: any) {
     setUserNames({});
     fetchedUids.current = new Set();
 
-    if (!convoKey || !messageAccessConfirmed || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
+    if (!convoKey || !messageReadAllowed || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
       // demo 模式已在上方處理
       setLoading(false);
       activeConversationScopeRef.current = null;
@@ -563,6 +567,7 @@ export function ChatScreen(props: any) {
 
     activeConversationScopeRef.current = sendScope;
     let listening = true;
+    let receivedServerMessages = false;
     setLoading(true);
     const ref = collection(db, 'conversations', convoKey, 'messages');
     const qy = query(ref, orderBy('createdAt', 'asc'));
@@ -573,12 +578,23 @@ export function ChatScreen(props: any) {
       (snapshot) => {
         if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
         if (snapshot.metadata.fromCache) {
-          // Offline cache is not a revocation or a delivery receipt. Keep the
-          // loaded messages and outbound drafts until the next server snapshot.
+          // Cache can restore historical text, but cannot acknowledge sends or
+          // replace already loaded rows (including with an empty cache result).
+          if (!snapshot.metadata.hasPendingWrites && readableTextScopeRef.current === sendScope && !receivedServerMessages) {
+            const cachedRows = snapshot.docs
+              .filter((entry) => !entry.metadata.hasPendingWrites)
+              .map((entry) => ({ ...(entry.data() as any), id: entry.id, cacheOnly: true }) as Msg)
+              .filter((row) => !row.type || row.type === 'text');
+            setMessages((current) => {
+              const existingIds = new Set(current.map((row) => row.id));
+              return [...current, ...cachedRows.filter((row) => !existingIds.has(row.id))];
+            });
+          }
           setLoading(false);
           return;
         }
         if (snapshot.metadata.hasPendingWrites) return;
+        receivedServerMessages = true;
         const confirmedDocs = snapshot.docs.filter((entry) => !entry.metadata.hasPendingWrites);
 
         const rows = confirmedDocs.map((d) => ({
@@ -676,16 +692,20 @@ export function ChatScreen(props: any) {
       }
       unsub();
     };
-  }, [db, convoKey, myUid, school.id, messageAccessConfirmed, sendScope]);
+  }, [db, convoKey, myUid, school.id, messageReadAllowed, sendScope]);
 
   // ── 對方打字 & 在線狀態監聽 ──
   useEffect(() => {
     // 切換對話／對方時，先清掉上一個對象的打字／在線狀態
     setVerifiedPhotoThread((current) => peerRoute && peerPrepared && current === sendScope ? current : null);
+    readableTextScopeRef.current = null;
+    setReadableTextThread(null);
     setPeerTyping(false);
     setPeerOnline(false);
     if (!convoKey || !liveThread || isFirebaseMockMode()) return;
     let listening = true;
+    let serverRejected = false;
+    let readableTextMembers: string | null = null;
     let verifiedPhotoMembers: string | null = peerRoute && peerPrepared
       ? JSON.stringify([myUid, peerParam].sort()) : null;
     const convoRef = doc(db, 'conversations', convoKey);
@@ -694,10 +714,14 @@ export function ChatScreen(props: any) {
       { includeMetadataChanges: true },
       (snap) => {
         if (!listening || scopeRef.current !== sendScope) return;
-        // Cache events cannot confirm or revoke access. Preserve the current
-        // verified session (including prepared peers) until the server responds.
-        if (snap.metadata.fromCache) return;
+        // A valid cached roster permits text reading only. Cache cannot revoke
+        // an existing session or grant photo access; pending rosters grant neither.
+        const fromCache = snap.metadata.fromCache;
+        if (fromCache && (serverRejected || !snap.exists() || snap.metadata.hasPendingWrites)) return;
         if (!snap.exists()) {
+          serverRejected = true;
+          readableTextScopeRef.current = null;
+          setReadableTextThread(null);
           verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);
           activeConversationScopeRef.current = null;
@@ -718,6 +742,10 @@ export function ChatScreen(props: any) {
           !data.memberIds.includes(myUid) ||
           (peerRoute && !data.memberIds.includes(peerParam))
         ) {
+          if (fromCache) return;
+          serverRejected = true;
+          readableTextScopeRef.current = null;
+          setReadableTextThread(null);
           verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);
           activeConversationScopeRef.current = null;
@@ -727,6 +755,13 @@ export function ChatScreen(props: any) {
           setAccessError('這不是目前帳號可存取的本校私訊。');
           return;
         }
+        if (!snap.metadata.hasPendingWrites) {
+          readableTextMembers = JSON.stringify([...data.memberIds].sort());
+          readableTextScopeRef.current = sendScope;
+          setReadableTextThread(sendScope);
+        }
+        if (fromCache) return;
+        serverRejected = false;
         const members = JSON.stringify([...data.memberIds].sort());
         if (!snap.metadata.hasPendingWrites) {
           verifiedPhotoMembers = members;
@@ -735,7 +770,11 @@ export function ChatScreen(props: any) {
         }
         // Local typing and presence writes keep the same server-confirmed photo session.
         setVerifiedPhotoThread(verifiedPhotoMembers ? sendScope : null);
-        if (!verifiedPhotoMembers) activeConversationScopeRef.current = null;
+        if (!verifiedPhotoMembers && snap.metadata.hasPendingWrites && readableTextMembers !== members) {
+          readableTextScopeRef.current = null;
+          setReadableTextThread(null);
+          activeConversationScopeRef.current = null;
+        }
         // 打字狀態
         if (data.typingUsers && peerId && data.typingUsers[peerId]) {
           const ts = data.typingUsers[peerId];
@@ -753,6 +792,9 @@ export function ChatScreen(props: any) {
       },
       (err: any) => {
         if (!listening || scopeRef.current !== sendScope) return;
+        serverRejected = true;
+        readableTextScopeRef.current = null;
+        setReadableTextThread(null);
         verifiedPhotoMembers = null;
         setVerifiedPhotoThread(null);
         activeConversationScopeRef.current = null;
@@ -1169,7 +1211,7 @@ export function ChatScreen(props: any) {
             )}
           <View style={[s.metaRow, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
             <Text style={s.timeText}>{formatTime(item.createdAt)}</Text>
-            {mine && !item.recalledAt && (
+            {mine && !item.recalledAt && !item.cacheOnly && (
               <Text
                 accessibilityLabel={
                   item.localStatus

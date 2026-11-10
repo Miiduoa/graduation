@@ -1180,11 +1180,11 @@ test.each([
   { type: 'group_chat' },
   { memberIds: ['bob', 'charlie'] },
   { schoolId: 'another' },
-])('an explicit conversation cannot subscribe to messages before its server roster is authorized (%j)', async (invalid) => {
+])('an explicit conversation cannot subscribe to messages with an invalid roster (%j)', async (invalid) => {
   const view = render(photoChat());
   expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
-  verifyPhotoChat(true);
-  verifyPhotoChat(false, true);
+  verifyPhotoChat(true, false, invalid);
+  verifyPhotoChat(false, true, invalid);
   expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
   expect(() => emitMessages([{ id: 'early', data: { senderId: 'bob', content: '過早到來的訊息' } }])).toThrow('missing messages');
   verifyPhotoChat(false, false, invalid);
@@ -1218,4 +1218,71 @@ test('the first commit for another account contains no previous messages, outbou
   expect(commits.length).toBeGreaterThan(0);
   expect(commits.every((commit) => !commit.includes('上一帳號'))).toBe(true);
   expect(view.getByPlaceholderText('輸入訊息...').props.value).toBe('');
+});
+
+test('offline re-entry restores cached text without receipts or photo authorization', async () => {
+  const view = render(photoChat());
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
+  verifyPhotoChat(true, true);
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
+  verifyPhotoChat(true);
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true);
+  jest.mocked(updateDoc).mockClear();
+  await act(async () => emitMessages([
+    { id: 'history', data: { senderId: 'bob', type: 'text', content: '離線歷史文字', readBy: [] } },
+    { id: 'mine', data: { senderId: 'alice', type: 'text', content: '我的歷史文字', readBy: ['bob'] } },
+    { id: 'pending', hasPendingWrites: true, data: { senderId: 'bob', content: '尚未確認的文字' } },
+  ], true));
+  expect(view.getByText('離線歷史文字')).toBeTruthy();
+  expect(view.getByText('我的歷史文字')).toBeTruthy();
+  expect(view.queryByText('尚未確認的文字')).toBeNull();
+  expect(view.queryByText('已送達')).toBeNull();
+  expect(view.queryByText('已讀')).toBeNull();
+  expect(updateDoc).not.toHaveBeenCalled();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  await act(async () => emitMessages([], true));
+  verifyPhotoChat(true, false, { memberIds: ['bob', 'charlie'] });
+  expect(view.getByText('離線歷史文字')).toBeTruthy();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  verifyPhotoChat(false, true);
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  verifyPhotoChat();
+  expect(view.getByText('離線歷史文字')).toBeTruthy();
+  expect(view.getByLabelText('加入照片')).toBeTruthy();
+  act(() => mockSnapshotErrors.get(`conversations/${photoConvo}`)({ code: 'permission-denied' }));
+  expect(view.queryByText('離線歷史文字')).toBeNull();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+});
+
+test('cached text on re-entry does not acknowledge a restored outbound draft', async () => {
+  writeOutboundDrafts(photoConvo, [{
+    id: 'fixed-msg-1', conversationId: photoConvo, senderId: 'alice',
+    content: '保留未確認草稿', createdAtMs: 1, status: 'unconfirmed',
+  }]);
+  const view = render(photoChat());
+  verifyPhotoChat(true);
+  await act(async () => emitMessages([{ id: 'fixed-msg-1', data: {
+    senderId: 'alice', type: 'text', content: '保留未確認草稿', readBy: ['bob'],
+  } }], true));
+  expect(readOutboundDrafts(photoConvo, 'alice')).toHaveLength(1);
+  expect(view.getByText('未確認')).toBeTruthy();
+  expect(view.getByDisplayValue('保留未確認草稿')).toBeTruthy();
+  expect(view.queryByText('已送達')).toBeNull();
+  expect(view.queryByText('已讀')).toBeNull();
+});
+
+
+test('a cached roster cannot restore text access after a server revocation', async () => {
+  const view = render(photoChat());
+  verifyPhotoChat(true);
+  await act(async () => emitMessages([{ id: 'history', data: {
+    senderId: 'bob', content: '離線私人文字', readBy: ['alice'],
+  } }], true));
+  expect(view.getByText('離線私人文字')).toBeTruthy();
+  verifyPhotoChat(false, false, { memberIds: ['bob', 'charlie'] });
+  expect(view.queryByText('離線私人文字')).toBeNull();
+  verifyPhotoChat(true);
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
+  expect(view.queryByLabelText('加入照片')).toBeNull();
 });
