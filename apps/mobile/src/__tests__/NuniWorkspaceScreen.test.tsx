@@ -554,3 +554,27 @@ test.each([
     expect(view.queryByText('登入或建立帳號')).toBeNull();
   }
 });
+
+test('keeps the merchant destination through native sign-in', async () => {
+  const screen = () => <NuniWorkspaceScreen route={{ params: { tab: 'merchant' } }} />;
+  const view = render(screen());
+  expect(view.getByText('店家進駐與門市管理')).toBeTruthy();
+  expect(mockAuth.request).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '使用 Google 繼續' })));
+  expect(mockAuth.signIn).toHaveBeenCalledTimes(1);
+  mockAuth.session = principal;
+  view.rerender(screen());
+  await view.findByText('我的店家資料');
+  expect(view.getByRole('tab', { name: '店家' }).props.accessibilityState.selected).toBe(true);
+  expect(view.queryByText('開啟網頁管理工作台')).toBeNull();
+});
+
+test.each([{}, { error: '無法確認帳號' }])('preserves merchant intent on browser fallback (%p)', async (change) => {
+  Object.assign(mockAuth, change);
+  mockCapability.mockReturnValue({ available: false });
+  const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+  const view = render(<NuniWorkspaceScreen route={{ params: { tab: 'merchant' } }} />);
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '開啟網頁版登入' })));
+  expect(open).toHaveBeenCalledWith('https://nuni.tw/merchant');
+  expect(mockAuth.signIn).not.toHaveBeenCalled();
+});

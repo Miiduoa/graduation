@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { platformFetch } from './platformFetch';
-import { accountReturnHref, workspacePath } from './constants';
+import { classroomLoginHref, workspacePath } from './constants';
 import styles from './Platform.module.css';
 import { useActiveRequest } from './useActiveRequest';
 import { CLASSROOM_ACCESS_ERROR, classroomAccessDenied } from './classroomAccess';
@@ -143,7 +143,7 @@ function WorkspaceAffiliationContent({
                   onDenied?.();
                 }
                 if (result.status === 401) {
-                  window.location.replace(accountReturnHref(workspacePath(workspaceId)));
+                  window.location.replace(classroomLoginHref(workspacePath(workspaceId)));
                   return;
                 }
                 if (classroomAccessDenied(result)) return;
