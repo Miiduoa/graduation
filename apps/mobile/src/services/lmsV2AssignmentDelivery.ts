@@ -99,7 +99,6 @@ export async function deliverAssignmentFinal(opts: AssignmentRef & {
         assignment_id: opts.assignmentId,
         student_id: userId,
         body_text: body,
-        submitted_at: new Date().toISOString(),
       }, { onConflict: 'assignment_id,student_id' })
       .select('id, assignment_id, student_id, body_text, submitted_at').single();
     if (submitError) throw submitError;

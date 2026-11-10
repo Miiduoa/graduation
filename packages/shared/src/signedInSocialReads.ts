@@ -16,7 +16,9 @@ export function sanitizeLoginReturnPath(value?: string | null, fallback = '/'): 
     return fallback;
   }
   try {
-    if (new URL(value, 'https://campus.local').origin !== 'https://campus.local') return fallback;
+    const url = new URL(value, 'https://campus.local');
+    // Callers may rebuild the destination from pathname after dot-segment normalization.
+    if (url.origin !== 'https://campus.local' || url.pathname.startsWith('//')) return fallback;
     return value;
   } catch {
     return fallback;

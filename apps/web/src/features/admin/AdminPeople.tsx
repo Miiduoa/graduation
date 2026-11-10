@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Input';
-import { parseSchools } from './api';
+import { parseSchools, type AdminSchool } from './api';
 import { useAdminResource } from './hooks';
 import {
   createPeopleParser,
@@ -21,14 +21,24 @@ export function AdminPeople({
   selectedSchool,
   onSchool,
   onManageSchool,
+  embedded = false,
+  schoolResource,
 }: {
   context: string;
   suspended: boolean;
   selectedSchool: string | null;
   onSchool: (id: string | null) => void;
   onManageSchool?: (id: string) => void;
+  embedded?: boolean;
+  schoolResource?: { value?: AdminSchool[]; loading: boolean; error?: string; reload: () => void };
 }) {
-  const schools = useAdminResource('schools', context, parseSchools, !suspended);
+  const ownSchools = useAdminResource(
+    'schools',
+    context,
+    parseSchools,
+    !suspended && !schoolResource,
+  );
+  const schools = schoolResource ?? ownSchools;
   const eligible = useMemo(
     () =>
       (schools.value ?? []).filter(
@@ -118,7 +128,7 @@ export function AdminPeople({
           )}
 
           {tenantId && people.value && !people.error && (
-            <PeopleDetail data={people.value} onManageSchool={onManageSchool} />
+            <PeopleDetail data={people.value} onManageSchool={onManageSchool} embedded={embedded} />
           )}
         </div>
       </section>
@@ -129,9 +139,11 @@ export function AdminPeople({
 function PeopleDetail({
   data,
   onManageSchool,
+  embedded,
 }: {
   data: OversightPeople;
   onManageSchool?: (tenantId: string) => void;
+  embedded: boolean;
 }) {
   return (
     <div className={styles.stack}>
@@ -148,12 +160,14 @@ function PeopleDetail({
           {onManageSchool && (
             <Button onClick={() => onManageSchool(data.tenantId)}>查看學校設定</Button>
           )}
-          <a
-            className={styles.link}
-            href={`/admin/ops?tab=people&tenantId=${encodeURIComponent(data.tenantId)}`}
-          >
-            新增或調整校方人員
-          </a>
+          {!embedded && (
+            <a
+              className={styles.link}
+              href={`/admin/ops?tab=people&tenantId=${encodeURIComponent(data.tenantId)}`}
+            >
+              新增或調整校方人員
+            </a>
+          )}
         </div>
       </div>
 
@@ -166,7 +180,9 @@ function PeopleDetail({
         </div>
       ) : (
         <p role="status" className={styles.error}>
-          這所學校目前沒有作用中的學校管理員。請到完整管理台指派後再開放日常校務操作。
+          {embedded
+            ? '這所學校尚未指定有效的管理員，請在下方新增校方授權後，再開通學校服務。'
+            : '這所學校目前沒有作用中的學校管理員。請到完整管理台指派後再開放日常校務操作。'}
         </p>
       )}
 

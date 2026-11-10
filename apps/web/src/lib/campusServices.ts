@@ -403,6 +403,16 @@ export function secondaryCampusServices(parentHref: string, schoolLmsEnabled = f
     .map(presentCampusService);
 }
 
+export function readCampusServiceFilters(params: URLSearchParams) {
+  const category = params.get('category');
+  return {
+    query: (params.get('q') ?? '').slice(0, 100),
+    category: SERVICE_CATEGORIES.some((item) => item.id === category)
+      ? (category as ServiceCategory)
+      : ('all' as const),
+  };
+}
+
 export function writeCampusServiceFilters(
   params: URLSearchParams,
   query: string,

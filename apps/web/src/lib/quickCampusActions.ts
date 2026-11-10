@@ -1,8 +1,10 @@
 import { suggestCampusDestinations, type CampusQuickDestination } from '@campus/shared/src/campusIntent';
-import { type CampusService, presentCampusService, visibleCampusServices } from './campusServices';
+import { assistantServiceHref, resolveAssistantServiceIntent, type AssistantServiceAudience, type AssistantServiceId } from '@campus/shared/src/assistantServices';
+import { CAMPUS_SERVICES, type CampusService, presentCampusService, visibleCampusServices } from './campusServices';
 
 type QuickCampusAction = Pick<CampusService, 'name' | 'text' | 'href' | 'access'> & {
-  destination: CampusQuickDestination;
+  destination: string;
+  serviceId?: AssistantServiceId;
 };
 
 export function resolveCampusActions(
@@ -17,7 +19,33 @@ export function resolveCampusActions(
   });
 }
 
-export function getQuickCampusActions(input: string, schoolLmsEnabled = false) {
+/** Show shortcuts for known services only; no submission, payment or update is executed. */
+export function getQuickCampusActions(
+  input: string,
+  schoolLmsEnabled = false,
+  audience: AssistantServiceAudience = 'school',
+): QuickCampusAction[] {
+  const intent = resolveAssistantServiceIntent(input);
+  if (intent?.kind === 'open') {
+    const href = assistantServiceHref(intent.service.id, undefined, audience);
+    if (!href) return [];
+    const directoryService = CAMPUS_SERVICES.find((item) => item.href === href);
+    if (directoryService && !visibleCampusServices(schoolLmsEnabled).some((item) => item.href === href)) return [];
+    // The directory's /orders row is school-only; generic orders keep their account-aware identity.
+    const existing = intent.service.id === 'orders'
+      ? undefined
+      : directoryService;
+    return [{
+      ...presentCampusService({
+        name: existing?.name ?? intent.service.label,
+        text: intent.service.summary,
+        href,
+        access: existing?.access ?? 'account',
+      }),
+      destination: href,
+      serviceId: intent.service.id,
+    }];
+  }
   return resolveCampusActions(suggestCampusDestinations(input), schoolLmsEnabled);
 }
 

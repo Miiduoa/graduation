@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollView } from 'react-native';
 import { fireEventAsync, renderAsync } from '@testing-library/react-native';
 import type { useNuniSession } from '../state/nuniSession';
 import LoginLandingScreen from '../screens/LoginLandingScreen';
@@ -57,15 +58,23 @@ function landing() {
   return renderAsync(<LoginLandingScreen />);
 }
 
+it('lets the school picker handle the first result tap while its keyboard is open', async () => {
+  const view = await landing();
+  // Modal touches still pass through the landing ScrollView's responder capture.
+  expect(view.UNSAFE_getByType(ScrollView).props.keyboardShouldPersistTaps).toBe('handled');
+});
+
 it('prioritizes the Google account entry before school import and public services', async () => {
   const view = await landing();
   const tree = JSON.stringify(view.toJSON());
   const importIndex = tree.indexOf('"testID":"school-import-start"');
   const accountIndex = tree.indexOf('"testID":"login-start"');
   const servicesIndex = tree.indexOf('"testID":"public-Map"');
+  expect(importIndex).toBeGreaterThanOrEqual(0);
   expect(accountIndex).toBeGreaterThanOrEqual(0);
   expect(importIndex).toBeGreaterThan(accountIndex);
   expect(servicesIndex).toBeGreaterThan(importIndex);
+  expect(servicesIndex).toBeGreaterThan(accountIndex);
   expect(view.getAllByTestId(/^public-/)).toHaveLength(10);
   expect(safeNavigate).not.toHaveBeenCalled();
 });

@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,7 +26,8 @@ import {
   subscribeToTokenRefresh,
 } from '../firebase';
 import { findSchoolById, resolveSchoolByEmail } from '@campus/shared/src/schools';
-import { buildPostLoginContext } from '../data/postLoginDataRouter';
+import { isProvidenceSchoolId } from '@campus/shared/src/schoolIds';
+import { getPostLoginContext } from '../data/postLoginDataRouter';
 import { clearAllCache } from '../data/cachedSource';
 import { clearAllOfflineData, getOfflineQueue } from '../services/offline';
 import { loadFailureCopy } from '@campus/shared/src/loadFailureCopy';
@@ -34,19 +36,14 @@ import { clearMockAuthSession, loadMockAuthSession } from '../services/mockAuth'
 import { clearUserScopedStorage } from '../services/scopedStorage';
 import { puCacheClearAll } from '../data/puDataCache';
 import { clearPUCache } from '../services/puDataCache';
-import { setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
-import type { PUAnnouncement } from '../services/puDirectScraper';
-import {
-  getAnyCachedAnnouncements,
-  getAnyCachedCourses,
-  getAnyCachedTCCourses,
-} from '../services/puDataCache';
-import { clearPUSession } from '../services/studentIdAuth';
+import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+import { bindVerifiedSchoolAiScope, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
+import { ensureCampusStoryBinding } from '../services/campusStoryBinding';
+import { captureSchoolSessionAssertion, clearPUSession } from '../services/studentIdAuth';
 import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 import {
   clearTCSession,
   purgeLegacyTCSensitiveStorage,
-  type TCCourse,
 } from '../services/tronClassClient';
 
 import type { UserRole as DataUserRole } from '../data/types';
@@ -269,6 +266,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       }
     }
 
+    void ensureCampusStoryBinding(); // Firebase Auth profile only; nuni Google has no uid.
     const userRole = (data.role as UserRole) ?? 'student';
     const roleGroup = getRoleGroup(userRole);
     const postLoginRolesRaw = data.postLoginRoles as unknown;
@@ -453,61 +451,6 @@ function toMockFirebaseUser(session: { uid: string; email: string; displayName: 
   } as User;
 }
 
-function mapPuAnnouncementsForPostLogin(
-  rows: PUAnnouncement[] | null,
-): Array<{ id: string; title: string; publishedAt: string }> | null {
-  if (!rows?.length) return null;
-  return rows.map((a) => ({
-    id: a.url?.trim() ? a.url : `pu:${a.title}`,
-    title: a.title,
-    publishedAt: a.date?.trim() ? a.date : new Date().toISOString(),
-  }));
-}
-
-/** 將 services/puDataCache 讀出的資料轉成 data/postLoginDataRouter 所需形狀。 */
-function mapCachesForBuildPostLoginContext(params: {
-  uid: string;
-  puCourseResult: Awaited<ReturnType<typeof getAnyCachedCourses>>;
-  tcCourses: TCCourse[] | null;
-  puAnnouncements: PUAnnouncement[] | null;
-}): {
-  puCourses: Parameters<typeof buildPostLoginContext>[0]['puCourses'];
-  tronCourses: Parameters<typeof buildPostLoginContext>[0]['tronCourses'];
-  puAnnouncements: Parameters<typeof buildPostLoginContext>[0]['puAnnouncements'];
-} {
-  const { uid, puCourseResult, tcCourses, puAnnouncements } = params;
-  const semesterFallback = puCourseResult?.semester ?? null;
-  const puCourses =
-    puCourseResult && puCourseResult.courses.length > 0
-      ? puCourseResult.courses.map((c) => ({
-          code: c.code,
-          name: c.name,
-          credits: c.credits,
-          teacherName: c.teacherName,
-          teacherEmail: c.teacherEmail,
-          semesterId: semesterFallback ?? undefined,
-        }))
-      : null;
-  const tronCourses =
-    tcCourses && tcCourses.length > 0
-      ? tcCourses.map((tc) => ({
-          id: String(tc.id),
-          name: tc.name,
-          courseCode: tc.course_code,
-          credits: tc.credit ?? 0,
-          semesterId: tc.semester?.code ?? 'unknown',
-          teacherName: tc.instructors?.[0]?.name,
-          isTeacher: tc.role === 'teacher',
-          teacherUserId: tc.role === 'teacher' ? uid : undefined,
-        }))
-      : null;
-  return {
-    puCourses,
-    tronCourses,
-    puAnnouncements: mapPuAnnouncementsForPostLogin(puAnnouncements),
-  };
-}
-
 export function AuthProvider(props: { children: React.ReactNode }) {
   const schoolContext = useOptionalSchool();
   const selectedSchoolId = schoolContext?.selection.schoolId ?? null;
@@ -563,45 +506,51 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     selectedSchoolId,
   ]);
 
-  const runPostLoginContext = useCallback(async (nextProfile: UserProfile | null) => {
-    try {
-      if (!nextProfile?.uid) return;
-      const schoolId = nextProfile.primarySchoolId ?? nextProfile.schoolId ?? null;
-      if (!schoolId) return;
-
-      const [puCourseResult, tcCourses, puAnnouncements] = await Promise.all([
-        getAnyCachedCourses().catch(() => null),
-        getAnyCachedTCCourses().catch(() => null),
-        getAnyCachedAnnouncements().catch(() => null),
-      ]);
-
-      const mapped = mapCachesForBuildPostLoginContext({
-        uid: nextProfile.uid,
-        puCourseResult,
-        tcCourses,
-        puAnnouncements,
-      });
-
-      const ctx = await buildPostLoginContext({
-        uid: nextProfile.uid,
-        schoolId,
-        userDoc: {
-          role: nextProfile.role,
-          email: nextProfile.email ?? null,
-          postLoginRoles: nextProfile.postLoginRoles ?? null,
-        },
-        puCourses: mapped.puCourses,
-        tronCourses: mapped.tronCourses,
-        tronMembers: null,
-        pendingAssignments: null,
-        schoolMembers: null,
-        puAnnouncements: mapped.puAnnouncements,
-      });
-      setInMemoryPostLoginContext(ctx);
-    } catch (e) {
-      console.warn('[auth] runPostLoginContext failed:', e);
+  // A Firebase profile alone does not identify the owner of raw device-wide campus caches.
+  // Only the verified school-login pipeline may produce a restorable context.
+  const profileSchoolId = profile?.primarySchoolId ?? profile?.schoolId;
+  const readySchoolId = schoolContext?.selectionReady ? selectedSchoolId : null;
+  useLayoutEffect(() => {
+    const uid = user?.uid;
+    const held = getInMemoryPostLoginContext();
+    const validProfile = uid && profile?.uid === uid && !loading && !profileLoading && !tokenExpired;
+    if (held && (!validProfile || held.uid !== uid || !isProvidenceSchoolId(readySchoolId) ||
+        !isProvidenceSchoolId(profileSchoolId) || !isProvidenceSchoolId(held.schoolId))) {
+      setInMemoryPostLoginContext(null);
     }
-  }, []);
+    if (!validProfile || !isProvidenceSchoolId(readySchoolId) || !isProvidenceSchoolId(profileSchoolId) ||
+        readySchoolId !== profileSchoolId ||
+        !hasUsableFirebaseConfig() || getAuthInstance().currentUser !== user || isSigningOutRef.current) return;
+    let active = true;
+    let restored: Awaited<ReturnType<typeof getPostLoginContext>> = null;
+    const auth = getAuthInstance();
+    // PU session 目前僅存在記憶體，冷啟動不會還原；期限未知也拒絕綁定。
+    // 下一次成功學校登入仍由 studentIdAuth 的已驗證登入流程綁定。
+    const assertSchoolSession = captureSchoolSessionAssertion({ uid, schoolId: profileSchoolId });
+    const assertRestoredSession = () => {
+      assertSchoolSession();
+      if (!active || auth.currentUser !== user || isSigningOutRef.current) {
+        throw new Error('登入狀態已變更，請重新登入。');
+      }
+    };
+    void getPostLoginContext(profileSchoolId, uid).then((ctx) => {
+      if (active && auth.currentUser === user && !isSigningOutRef.current &&
+          ctx?.origin === 'verified-school-login' && ctx.uid === uid && ctx.schoolId === profileSchoolId &&
+          isProvidenceSchoolId(ctx.schoolId) &&
+          !getInMemoryPostLoginContext()) {
+        assertRestoredSession();
+        restored = ctx;
+        setInMemoryPostLoginContext(ctx);
+        bindVerifiedSchoolAiScope(ctx, assertRestoredSession);
+      }
+    }).catch((failure) => {
+      if (active) console.warn('[auth] Could not restore the school context:', failure);
+    });
+    return () => {
+      active = false;
+      if (restored && getInMemoryPostLoginContext() === restored) setInMemoryPostLoginContext(null);
+    };
+  }, [user, profile?.uid, readySchoolId, profileSchoolId, loading, profileLoading, tokenExpired]);
 
   const refreshProfile = useCallback(async () => {
     // ── 先檢查 mock auth session（hybrid login 使用 mock auth 即使有 Firebase config）──
@@ -655,7 +604,6 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       if (requestIdRef.current === currentRequestId) {
         setProfile(p);
         setError(null);
-        runPostLoginContext(p);
       }
     } catch (e) {
       if (requestIdRef.current === currentRequestId) {
@@ -677,7 +625,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         setProfileLoading(false);
       }
     }
-  }, [runPostLoginContext]);
+  }, []);
 
   useEffect(() => {
     purgeLegacyTCSensitiveStorage().catch((e) => {
@@ -783,7 +731,6 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         const p = await loadProfile(u);
         if (!isCancelled && requestIdRef.current === currentRequestId) {
           setProfile(p);
-          runPostLoginContext(p);
         }
       } catch (e) {
         if (!isCancelled && requestIdRef.current === currentRequestId) {
@@ -819,7 +766,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       unsub();
       unsubToken();
     };
-  }, [runPostLoginContext]);
+  }, []);
 
   useEffect(() => {
     const checkPendingData = async () => {
@@ -843,12 +790,15 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       success: boolean;
       hadCleanupErrors: boolean;
     }> => {
+      const currentUserId = hasUsableFirebaseConfig()
+        ? getAuthInstance().currentUser?.uid ?? null
+        : currentUserRef.current?.uid ?? null;
+      const expectedAccountUid = expectedUid ?? currentUserId;
       const assertExpectedAccount = (allowSignedOut = false) => {
-        if (!expectedUid) return;
         const currentUid = hasUsableFirebaseConfig()
-          ? getAuthInstance().currentUser?.uid
-          : currentUserRef.current?.uid;
-        if (currentUid !== expectedUid && !(allowSignedOut && !currentUid)) {
+          ? getAuthInstance().currentUser?.uid ?? null
+          : currentUserRef.current?.uid ?? null;
+        if (currentUid !== expectedAccountUid && !(allowSignedOut && currentUid === null)) {
           throw new Error('The account changed before sign out completed');
         }
       };
@@ -860,14 +810,19 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       }
 
       isSigningOutRef.current = true;
-      const currentUserId = hasUsableFirebaseConfig()
-        ? getAuthInstance().currentUser?.uid
-        : user?.uid;
+      revokeVerifiedSchoolAiScope();
 
       // 先清理本地資料，再登出
       // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
       const cleanupErrors: Error[] = [];
       const cleanupTasks: Promise<unknown>[] = [
+        (async () => {
+          const plans = require('../services/savedCampusPlans') as typeof import('../services/savedCampusPlans');
+          return plans.beginSavedCampusPlansSignOutCleanup();
+        })().catch((e) => {
+          console.warn('[auth] Saved plan cleanup failed:', e);
+          throw e;
+        }),
         // Cancel only Campus Agent's own device notifications before Firebase
         // changes identity; this synchronously fences in-flight local writes.
         (async () => {
@@ -878,18 +833,18 @@ export function AuthProvider(props: { children: React.ReactNode }) {
           console.warn('[auth] Campus Agent local reminder cleanup failed:', e);
           throw e;
         }),
-        clearAllCache().catch((e) => {
+        clearAllCache(() => assertExpectedAccount()).catch((e) => {
           console.warn('[auth] clearAllCache failed:', e);
           throw e;
         }),
-        clearAllOfflineData().catch((e) => {
+        clearAllOfflineData(() => assertExpectedAccount()).catch((e) => {
           console.warn('[auth] clearAllOfflineData failed:', e);
           throw e;
         }),
-        clearUserScopedStorage({
-          uid: currentUserId ?? null,
-          schoolId: profile?.schoolId ?? null,
-        }).catch((e) => {
+        clearUserScopedStorage(
+          { uid: currentUserId, schoolId: profile?.schoolId ?? null },
+          () => assertExpectedAccount(),
+        ).catch((e) => {
           console.warn('[auth] Scoped storage cleanup failed:', e);
           throw e;
         }),
@@ -972,6 +927,12 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         throw e;
       } finally {
         isSigningOutRef.current = false;
+        try {
+          const plans = require('../services/savedCampusPlans') as typeof import('../services/savedCampusPlans');
+          plans.endSavedCampusPlansSignOutCleanup();
+        } catch (e) {
+          console.warn('[auth] Saved plan sign-out fence cleanup failed:', e);
+        }
         // A failed sign-out must not permanently disable reminders for a
         // still-signed-in account. An epoch bump invalidates prior tasks.
         try {
@@ -983,7 +944,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         }
       }
     },
-    [profile?.schoolId, user?.uid],
+    [profile?.schoolId],
   );
 
   const handleSignOutWithWarning = useCallback(async (): Promise<boolean> => {

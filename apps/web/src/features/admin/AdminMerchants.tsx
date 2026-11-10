@@ -7,12 +7,14 @@ import { useAdminResource } from './hooks';
 import {
   applicationStateLabel,
   interestStateLabel,
+  isMerchantApplicationReviewable,
   locationStatusLabel,
   merchantModeOrderableCopy,
   parseOversightMerchants,
   type OversightMerchantApplication,
   type OversightMerchantCatalogRow,
   type OversightMerchantInterest,
+  type OversightMerchants,
 } from './oversightApi';
 import styles from './Admin.module.css';
 
@@ -25,41 +27,70 @@ function matchesNeedle(parts: string[], needle: string) {
   return parts.join(' ').toLowerCase().includes(needle);
 }
 
-export function AdminMerchants({ context, suspended }: { context: string; suspended: boolean }) {
-  const resource = useAdminResource('merchants', context, parseOversightMerchants, !suspended);
+export function AdminMerchants({
+  context,
+  suspended,
+  data,
+  embedded = false,
+  hidePending = false,
+  onRefresh,
+  refreshDisabled = false,
+}: {
+  context: string;
+  suspended: boolean;
+  data?: OversightMerchants;
+  embedded?: boolean;
+  hidePending?: boolean;
+  onRefresh?: () => void;
+  refreshDisabled?: boolean;
+}) {
+  const resource = useAdminResource(
+    'merchants',
+    context,
+    parseOversightMerchants,
+    !suspended && !data,
+  );
+  const value = data ?? resource.value;
+  const loading = data ? false : resource.loading;
+  const error = data ? undefined : resource.error;
+  const reload = onRefresh ?? resource.reload;
   const [draft, setDraft] = useState('');
   const [filter, setFilter] = useState('');
   const needle = filter.trim().toLowerCase();
 
   const interest = useMemo(
     () =>
-      (resource.value?.interest ?? []).filter((row) =>
-        matchesNeedle(
-          [row.brandName, row.schoolName, row.state, interestStateLabel(row.state)],
-          needle,
-        ),
+      (value?.interest ?? []).filter(
+        (row) =>
+          (!hidePending || row.state !== 'submitted') &&
+          matchesNeedle(
+            [row.brandName, row.schoolName, row.state, interestStateLabel(row.state)],
+            needle,
+          ),
       ),
-    [resource.value, needle],
+    [value, needle, hidePending],
   );
   const applications = useMemo(
     () =>
-      (resource.value?.applications ?? []).filter((row) =>
-        matchesNeedle(
-          [
-            row.brandName,
-            row.tenantName,
-            row.locationName,
-            row.state,
-            applicationStateLabel(row.state).label,
-          ],
-          needle,
-        ),
+      (value?.applications ?? []).filter(
+        (row) =>
+          (!hidePending || !isMerchantApplicationReviewable(row.state)) &&
+          matchesNeedle(
+            [
+              row.brandName,
+              row.tenantName,
+              row.locationName,
+              row.state,
+              applicationStateLabel(row.state).label,
+            ],
+            needle,
+          ),
       ),
-    [resource.value, needle],
+    [value, needle, hidePending],
   );
   const catalog = useMemo(
     () =>
-      (resource.value?.catalog ?? []).filter((row) =>
+      (value?.catalog ?? []).filter((row) =>
         matchesNeedle(
           [
             row.tenantName,
@@ -73,7 +104,7 @@ export function AdminMerchants({ context, suspended }: { context: string; suspen
           needle,
         ),
       ),
-    [resource.value, needle],
+    [value, needle, hidePending],
   );
 
   return (
@@ -82,35 +113,40 @@ export function AdminMerchants({ context, suspended }: { context: string; suspen
         <div className={styles.stack}>
           <div className={styles.toolbar}>
             <div>
-              <h2 id="merchants-oversight-heading">跨校店家監督</h2>
+              <h2 id="merchants-oversight-heading">
+                {embedded ? '店家目錄與申請紀錄' : '跨校店家監督'}
+              </h2>
               <p className={styles.muted}>
-                查看各校店家、接入申請與營運狀態，從管理台進行審核與設定。
+                {embedded
+                  ? '查看店家公開與營運狀態，待審申請集中在上方處理。'
+                  : '查看各校店家、接入申請與營運狀態，從管理台進行審核與設定。'}
               </p>
             </div>
             <div className={styles.actions}>
-              <Button disabled={resource.loading} onClick={resource.reload}>
+              <Button disabled={loading || refreshDisabled} onClick={reload}>
                 重新讀取店家
               </Button>
-              <a className={styles.link} href="/admin/ops">
-                前往完整管理台審核
-              </a>
+              {!embedded && (
+                <a className={styles.link} href="/admin/ops?tab=merchants">
+                  前往完整管理台審核
+                </a>
+              )}
             </div>
           </div>
 
-          {resource.loading && <p role="status">正在讀取店家資料…</p>}
-          {resource.error && (
+          {loading && <p role="status">正在讀取店家資料…</p>}
+          {error && (
             <p role="alert" className={styles.error}>
-              {resource.error}
+              {error}
             </p>
           )}
 
-          {resource.value && !resource.error && (
+          {value && !error && (
             <>
-              <p className={styles.notice}>{resource.value.honesty}</p>
+              <p className={styles.notice}>{value.honesty}</p>
               <p className={styles.muted}>
-                目錄本次載入 {resource.value.catalog.length} 筆（最多顯示 400 筆），意向{' '}
-                {resource.value.interest.length} 筆、接入申請 {resource.value.applications.length}{' '}
-                筆。
+                目錄本次載入 {value.catalog.length} 筆（最多顯示 400 筆），意向{' '}
+                {value.interest.length} 筆、接入申請 {value.applications.length} 筆。
               </p>
               <form
                 className={styles.filterRow}
@@ -129,12 +165,21 @@ export function AdminMerchants({ context, suspended }: { context: string; suspen
                 <Button type="submit">套用篩選</Button>
               </form>
 
-              <CatalogSection rows={catalog} totalLoaded={resource.value.catalog.length} />
+              <CatalogSection rows={catalog} totalLoaded={value.catalog.length} />
               <ApplicationsSection
                 rows={applications}
-                totalLoaded={resource.value.applications.length}
+                totalLoaded={
+                  value.applications.filter(
+                    (row) => !hidePending || !isMerchantApplicationReviewable(row.state),
+                  ).length
+                }
               />
-              <InterestSection rows={interest} totalLoaded={resource.value.interest.length} />
+              <InterestSection
+                rows={interest}
+                totalLoaded={
+                  value.interest.filter((row) => !hidePending || row.state !== 'submitted').length
+                }
+              />
             </>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { claimPrivateFile } from '../../services/privateFiles';
 /* eslint-disable */
 /**
  * 校園社群 — 發 Story Compose
@@ -80,8 +81,8 @@ function StoryComposer(props: any) {
     try {
       const file = await storage.pickImage({ quality: 0.85, aspect: [9, 16] });
       if (!file || !active.current) return;
-      if (!file.type?.startsWith('image/') || file.size >= STORY_IMAGE_LIMIT) {
-        Alert.alert('無法使用這張照片', '請選擇小於 10 MB 的圖片。');
+      if (!file.type?.startsWith('image/') || file.size > STORY_IMAGE_LIMIT) {
+        Alert.alert('無法使用這張照片', '請選擇不超過 10 MB 的圖片。');
         return;
       }
       setImageUri(file.uri);
@@ -129,6 +130,10 @@ function StoryComposer(props: any) {
       const entry = draft.current;
       if (uri && !entry.url) {
         entry.url = await uploadStoryImage(sid, entry.id, uid, uri, imageMime ?? '');
+      }
+      if (entry.url) {
+        try { await claimPrivateFile(entry.url, `schools/${sid}/stories/${entry.id}`); }
+        catch (error) { if ((error as { statusCode?: number }).statusCode === 410) entry.url = null; throw error; }
       }
       if (!active.current) return;
       await publishStory(entry.id, {

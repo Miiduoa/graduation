@@ -92,6 +92,12 @@ tags:
 # The optional school/import section now follows it farther down the page.
 - scrollUntilVisible:
     element:
+      id: school-picker-open
+    direction: DOWN
+    centerElement: true
+- runFlow: ../helpers/select-nthu.yaml
+- scrollUntilVisible:
+    element:
       id: school-import-start
     direction: DOWN
     centerElement: true

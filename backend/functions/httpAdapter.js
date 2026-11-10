@@ -148,22 +148,33 @@ async function verifyCallableAuth(authorizationHeader, verifyIdToken) {
   }
 }
 
+function oversizedBodyError() {
+  const error = new Error('Request body too large');
+  error.statusCode = 413;
+  return error;
+}
+
 async function readRawBody(req, limitBytes = 10 * 1024 * 1024) {
-  if (Buffer.isBuffer(req.rawBody)) return req.rawBody;
-  if (typeof req.body === 'string') return Buffer.from(req.body);
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return Buffer.from(JSON.stringify(req.body));
+  // Some hosting adapters populate rawBody/body before reaching this listener.
+  // They must respect the same limit as the streamed IncomingMessage path.
+  let buffered = null;
+  if (Buffer.isBuffer(req.rawBody)) buffered = req.rawBody;
+  else if (Buffer.isBuffer(req.body)) buffered = req.body;
+  else if (typeof req.body === 'string') buffered = Buffer.from(req.body);
+  else if (req.body && typeof req.body === 'object') {
+    buffered = Buffer.from(JSON.stringify(req.body));
   }
+  if (buffered !== null) {
+    if (buffered.length > limitBytes) throw oversizedBodyError();
+    return buffered;
+  }
+
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
-    if (size > limitBytes) {
-      const error = new Error('Request body too large');
-      error.statusCode = 413;
-      throw error;
-    }
+    if (size > limitBytes) throw oversizedBodyError();
     chunks.push(buf);
   }
   return Buffer.concat(chunks);
@@ -331,7 +342,7 @@ function createRequestListener({
         return;
       }
       const name = url.pathname.slice('/internal/cron/'.length).replace(/\/+$/, '');
-      const job = schedules[name];
+      const job = Object.hasOwn(schedules, name) ? schedules[name] : undefined;
       if (!job || typeof job.handler !== 'function') {
         sendJson(res, 404, { error: 'Unknown schedule' });
         return;
@@ -350,8 +361,11 @@ function createRequestListener({
     }
 
     const functionName = functionNameFromUrl(url);
-    const isCallable = Boolean(callables[functionName]);
-    const isHttp = Boolean(httpFunctions[functionName]);
+    // Dispatch only explicitly registered functions, not inherited Object methods.
+    const isCallable = Object.hasOwn(callables, functionName)
+      && typeof callables[functionName] === 'function';
+    const isHttp = Object.hasOwn(httpFunctions, functionName)
+      && typeof httpFunctions[functionName] === 'function';
 
     if (isCallable) {
       applyCorsHeaders(req, res, origins);
@@ -403,6 +417,12 @@ function createRequestListener({
         return;
       }
       try {
+        if (functionName === 'privateGroupFile') {
+          // This endpoint authenticates before consuming its size- and time-bounded binary stream.
+          decorateNodeRequest(req, { rawBody: req.rawBody, body: req.body, url });
+          await httpFunctions[functionName](req, res);
+          return;
+        }
         const rawBody = await readRawBody(req);
         let body = {};
         if (rawBody.length) {
