@@ -192,6 +192,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板',
+    href: '/social',
+    access: 'platform',
+    keywords: 'Google 公開 跨校 貼文 社群 看板 social community',
+    category: 'connect',
+  },
+  {
     name: '校園交流',
     text: '閱讀與分享校園話題',
     href: '/community',
@@ -259,10 +267,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '失物招領',
-    text: '查看本校遺失與拾獲刊登',
+    text: '用 Google 帳號查看、刊登與管理失物',
     href: '/lost-found',
-    access: 'school',
-    keywords: '失物 招領 遺失 拾獲 lost found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 Google lost found',
     category: 'campus',
   },
   {

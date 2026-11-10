@@ -4,6 +4,7 @@ import { parseCourseRequest, parseCourseRequests, parseCourseWorkspace, isCourse
 import { NextRequest, NextResponse } from 'next/server';
 import { handleFood, isFoodResource } from './food';
 import { handlePersonalImportSync } from './personalImportSync';
+import { handleLostFound } from './lostFound';
 import {
   createNuniClasses,
   NuniError,
@@ -139,6 +140,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
       throw new NuniError(404, 'NOT_FOUND');
     }
     if (segments[0] === 'assistant') return await handleAssistant(request, segments);
+    if (segments[0] === 'lost-found') return await handleLostFound(request, segments);
     const method = request.method;
     if (method !== 'GET' && method !== 'POST' && method !== 'PUT')
       throw new NuniError(405, 'METHOD_NOT_ALLOWED');

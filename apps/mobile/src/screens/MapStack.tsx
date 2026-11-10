@@ -26,6 +26,7 @@ import { PrintServiceScreen } from './PrintServiceScreen';
 import { LostFoundScreen } from './LostFoundScreen';
 import { LostFoundDetailScreen } from './LostFoundDetailScreen';
 import { LostFoundPostScreen } from './LostFoundPostScreen';
+import { PlatformLostFoundScreen } from './PlatformLostFoundScreen';
 import { PaymentScreen } from './PaymentScreen';
 import StorefrontScreen from './StorefrontScreen';
 import HonestOrderScreen from './HonestOrderScreen';
@@ -172,6 +173,7 @@ export function MapStack() {
         options={{ title: '列印服務' }}
       />
       <Stack.Screen name="LostFound" component={LostFoundScreen} options={{ title: '失物招領' }} />
+      <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '平台失物招領' }} />
       <Stack.Screen
         name="LostFoundDetail"
         component={LostFoundDetailScreen}
