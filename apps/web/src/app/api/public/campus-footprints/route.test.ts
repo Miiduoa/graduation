@@ -655,6 +655,37 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it('cancels a stalled body reader on deadline without accepting a truncated JSON snapshot', async () => {
+    vi.useFakeTimers();
+    let cancelCalls = 0;
+    // This is a syntactically valid JSON chunk, but the stream never ends.
+    // Aborting a fetch is not sufficient when an intermediary ignores its signal.
+    const stalled = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(osmPayload));
+      },
+      cancel() {
+        cancelCalls += 1;
+        // A non-cooperative stream may never resolve the cancel promise.
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stalled, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const pending = GET();
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(upstream.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(cancelCalls).toBe(1);
+    // The complete-looking first chunk is not a successful snapshot.
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the fallback explicit and rate limits repeated upstream failures', async () => {
     const mockedFetch = vi.fn().mockRejectedValue(new Error('timeout'));
     vi.stubGlobal('fetch', mockedFetch);
