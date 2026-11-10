@@ -31,6 +31,7 @@ import {
   useSchoolEventMembership,
   type SchoolEventMembership,
 } from './useSchoolEventMembership';
+import { EventRegistrationTicket } from './EventRegistrationTicket';
 import styles from './events.module.css';
 
 type RegistrationView =
@@ -559,6 +560,12 @@ function AuthorizedRegistrationPanel({
   // Auth loss unmounts this keyed panel; avoid ref-backed current() during render.
   const canRegister = ledgerReady && !pendingIntent && !busy && state?.canRegister === true;
   const canCancel = ledgerReady && !pendingIntent && !busy && state?.canCancel === true;
+  const showTicket =
+    view.status === 'ready' &&
+    view.state.status === 'registered' &&
+    ledgerReady &&
+    !pendingIntent &&
+    !busy;
 
   return (
     <section className={styles.panel} aria-labelledby={titleId}>
@@ -576,6 +583,7 @@ function AuthorizedRegistrationPanel({
           </button>
         </div>
       ) : null}
+      {showTicket ? <EventRegistrationTicket event={event} /> : null}
       {state ? (
         <div className={styles.registrationMeta}>
           <p>

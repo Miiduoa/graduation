@@ -83,3 +83,59 @@ test.each(['Today', '學習', '我的'])(
     expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
   },
 );
+
+test('報修確認成功只說備忘已存好，不用通用送出句', async () => {
+  mockConfirm.mockResolvedValue({
+    success: true, toolName: 'createDormRepairRequest', repairId: 'repair-123',
+  });
+  const view = render(
+    <CampusAgentActionReview
+      proposal={{
+        toolName: 'createDormRepairRequest',
+        label: '確認存成報修備忘',
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+        agentRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      }}
+      userId="alice"
+      schoolId="pu"
+      isCurrent={() => true}
+    />,
+  );
+  await act(async () => {
+    fireEvent.press(view.getByText('檢視任務草稿'));
+  });
+  await act(async () => {
+    fireEvent.press(view.getByText('確認並執行'));
+  });
+  await waitFor(() => {
+    expect(view.getAllByText('報修備忘已存好').length).toBeGreaterThan(0);
+  });
+  expect(view.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(view.queryByText('已送出確認，請核對結果')).toBeNull();
+  expect(view.queryByText(/避免重複送出/)).toBeNull();
+  expect(view.queryByText(/repair-123/)).toBeNull();
+});
+
+test('非報修確認成功仍用通用執行成功句', async () => {
+  mockConfirm.mockResolvedValue({
+    success: true, toolName: 'reserveSeat', reservationId: 'seat-1',
+  });
+  const view = render(
+    <CampusAgentActionReview
+      proposal={proposal}
+      userId="alice"
+      schoolId="pu"
+      isCurrent={() => true}
+    />,
+  );
+  await act(async () => {
+    fireEvent.press(view.getByText('檢視任務草稿'));
+  });
+  await act(async () => {
+    fireEvent.press(view.getByText('確認並執行'));
+  });
+  await waitFor(() => {
+    expect(view.getByText('伺服器已確認執行成功')).toBeTruthy();
+  });
+  expect(view.queryByText('報修備忘已存好')).toBeNull();
+});

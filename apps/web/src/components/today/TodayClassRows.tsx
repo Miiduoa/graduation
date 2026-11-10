@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buildCampusClassroomMapHref } from '@campus/shared/src/campusClassroomLookup';
 import { useId, useState } from 'react';
 import { formatClock, TODAY_COPY, type TodayClass } from '@campus/shared/src/pickNextAction';
 import { courseWeekHref } from '@/lib/todayScreen';
@@ -9,11 +10,13 @@ export function TodayClassRows({
   primaryId,
   now,
   timetableHref,
+  timetableSchoolId,
 }: {
   classes: TodayClass[];
   primaryId?: string;
   now: Date;
   timetableHref: string;
+  timetableSchoolId?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
@@ -34,11 +37,12 @@ export function TodayClassRows({
                 ? TODAY_COPY.nextClass
                 : '';
           const courseHref = courseWeekHref(item.courseId);
+          const mapHref = buildCampusClassroomMapHref({ schoolId: timetableSchoolId, location: item.location });
           return (
-            <li key={item.id} data-testid={item.id === primaryId ? 'next-action' : undefined}>
+            <li key={item.id} className={styles.classRowWithMap} data-testid={item.id === primaryId ? 'next-action' : undefined}>
               <Link
                 href={courseHref === '/timetable' ? timetableHref : courseHref}
-                className={styles.row + ' ' + styles.classRow + (current ? ' ' + styles.current : ended ? ' ' + styles.ended : '')}
+                className={styles.row + ' ' + styles.scheduleRow + (current ? ' ' + styles.current : ended ? ' ' + styles.ended : '')}
               >
                 <span className={styles.time}>
                   <span>{formatClock(item.startAt)}</span>
@@ -56,6 +60,7 @@ export function TodayClassRows({
                   {courseHref === '/timetable' ? TODAY_COPY.viewWeek : TODAY_COPY.viewCourse}
                 </span>
               </Link>
+              {mapHref && <Link className={styles.classroomLink} href={mapHref} aria-label={`找教室：${item.location}`}>找教室</Link>}
             </li>
           );
         })}

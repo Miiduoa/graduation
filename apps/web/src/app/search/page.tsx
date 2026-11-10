@@ -2,41 +2,49 @@
 
 import { useSchoolLmsReadonlyEnabled } from '@/components/SchoolLmsReadonlyProvider';
 
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CampusSemanticResult } from '@campus/shared/src/campusSemantic';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { interpretCampusRequest } from '@/lib/campusIntentClient';
+import {
+  forgetDirectorySearch,
+  rememberDirectorySearch,
+  restoreDirectorySearch,
+} from '@/lib/campusDirectorySearch';
 import { campusServiceHref, useCampusNavigationSearch } from '@/lib/campusNavigation';
 import { useSignInOptions } from '@/lib/signInOptions';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
-import { getQuickCampusActions } from '@/lib/quickCampusActions';
+import { resolveCampusActions, getQuickCampusActions } from '@/lib/quickCampusActions';
 import styles from './search.module.css';
 import {
   serviceAccessLabel,
   SERVICE_CATEGORIES,
   searchCampusServices,
   secondaryCampusServices,
-  visibleCampusServices,
+  countCampusSearchResults,
+  writeCampusServiceFilters,
+  readCampusServiceFilters,
   type ServiceCategory,
 } from '@/lib/campusServices';
 
-function readFilters(params: URLSearchParams) {
-  const category = params.get('category');
-  return {
-    query: (params.get('q') ?? '').slice(0, 100),
-    category: SERVICE_CATEGORIES.some((item) => item.id === category)
-      ? (category as ServiceCategory)
-      : ('all' as const),
-  };
+function filtersFromUrlOrSession(params: URLSearchParams, pathname: string) {
+  const fromUrl = readCampusServiceFilters(params);
+  if (fromUrl.query || fromUrl.category !== 'all') return fromUrl;
+  const snapshot = restoreDirectorySearch('search', pathname);
+  if (!snapshot) return fromUrl;
+  return { query: snapshot.query.slice(0, 100), category: snapshot.category };
 }
 
 function ServiceDirectory() {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const params = useSearchParams();
   const { user } = useAuth();
+  const platform = useOptionalNuniSession();
+  const platformAudience = !!(platform?.session && !platform.loading && !platform.error && !platform.pendingLogout);
   const uid = user?.uid || '';
   const searchInput = useRef<HTMLInputElement>(null);
   const requestSequence = useRef(0);
@@ -45,12 +53,25 @@ function ServiceDirectory() {
   const options = useSignInOptions();
   const queryString = params.toString();
   const [{ query, category }, setFilters] = useState(() =>
-    readFilters(new URLSearchParams(queryString)),
+    readCampusServiceFilters(new URLSearchParams(queryString)),
   );
+  useLayoutEffect(() => {
+    const next = filtersFromUrlOrSession(
+      new URLSearchParams(window.location.search),
+      window.location.pathname || '/search',
+    );
+    // Restore URL or session filters after history navigation without painting an empty directory.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFilters(next);
+  }, []);
   useEffect(() => {
     // Restore the URL state on history navigation or an external link to this directory.
+    const next = filtersFromUrlOrSession(
+      new URLSearchParams(queryString),
+      window.location.pathname || '/search',
+    );
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFilters(readFilters(new URLSearchParams(queryString)));
+    setFilters(next);
   }, [queryString]);
   const term = query.trim();
   const semanticScope = JSON.stringify([uid, schoolSearch]);
@@ -64,19 +85,10 @@ function ServiceDirectory() {
   const semantic = active?.status === 'ready' ? active.result : undefined;
   const matches = searchCampusServices(query, category, schoolLmsEnabled);
   const browsing = !term;
-  const directoryCount = browsing
-    ? matches.reduce(
-        (total, service) =>
-          total + 1 + secondaryCampusServices(service.href, schoolLmsEnabled).length,
-        0,
-      )
-    : matches.length;
+  const directoryCount = countCampusSearchResults(matches, browsing, schoolLmsEnabled);
   const suggested = semantic?.status === 'understood'
-    ? semantic.destinations.flatMap((href) => {
-        const service = visibleCampusServices(schoolLmsEnabled).find((row) => row.href === href);
-        return service ? [service] : [];
-      })
-    : getQuickCampusActions(query, schoolLmsEnabled).filter(
+    ? resolveCampusActions(semantic.destinations, schoolLmsEnabled)
+    : getQuickCampusActions(query, schoolLmsEnabled, platformAudience ? 'platform' : 'school').filter(
         (action) => !matches.some((match) => match.href === action.href),
       );
 
@@ -105,16 +117,41 @@ function ServiceDirectory() {
     setAnalysis(null);
     setFilters(next);
     const url = new URL(window.location.href);
-    if (next.query) url.searchParams.set('q', next.query);
-    else url.searchParams.delete('q');
-    if (next.category !== 'all') url.searchParams.set('category', next.category);
-    else url.searchParams.delete('category');
-    // Next.js observes native history changes without a server request per keystroke.
-    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    writeCampusServiceFilters(url.searchParams, next.query, next.category);
+    try {
+      // Next.js observes native history changes without a server request per keystroke.
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    } catch {
+      // The visible filters still work when the browser denies History access.
+    }
+    if (next.query || next.category !== 'all') {
+      rememberDirectorySearch('search', {
+        path: '/search',
+        destination: '/search',
+        query: next.query,
+        category: next.category,
+        open: false,
+      });
+    } else {
+      forgetDirectorySearch('search');
+    }
   }
   function resetFilters() {
     updateFilters({ query: '', category: 'all' });
     searchInput.current?.focus();
+  }
+  function rememberLeaving(href: string) {
+    rememberDirectorySearch('search', {
+      path: '/search',
+      destination: href,
+      query,
+      category,
+      open: false,
+    });
   }
   return (
     <SiteShell
@@ -205,10 +242,11 @@ function ServiceDirectory() {
                   key={action.href}
                   href={campusServiceHref(action.href, schoolSearch)}
                   className={styles.smartAction}
+                  onClick={() => rememberLeaving(campusServiceHref(action.href, schoolSearch))}
                 >
                   <strong>{action.name}</strong>
                   <small>{action.text}</small>
-                  {semantic?.previews?.filter((preview) => preview.destination === action.href).map((preview) => (
+                  {semantic?.previews?.filter((preview) => preview.destination === action.destination).map((preview) => (
                     <span className={styles.preview} key={preview.destination}>
                       <span>{preview.source === 'campus-platform' ? 'nuni 資料' : '接通狀態'}：{preview.message}</span>
                       {preview.items.map((item, index) => (
@@ -267,6 +305,9 @@ function ServiceDirectory() {
                         <Link
                           className={styles.service}
                           href={campusServiceHref(service.href, schoolSearch)}
+                          onClick={() =>
+                            rememberLeaving(campusServiceHref(service.href, schoolSearch))
+                          }
                         >
                           <div>
                             <h3>{service.name}</h3>
@@ -282,6 +323,9 @@ function ServiceDirectory() {
                             key={child.href}
                             className={`${styles.service} ${styles.secondaryService}`}
                             href={campusServiceHref(child.href, schoolSearch)}
+                            onClick={() =>
+                              rememberLeaving(campusServiceHref(child.href, schoolSearch))
+                            }
                           >
                             <div>
                               <h3>{child.name}</h3>

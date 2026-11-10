@@ -189,7 +189,13 @@ async function classHref(owner: string, schoolId = 'ntu', title = TITLE) {
   await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(`${owner}|${schoolId}`));
   await waitFor(() => expect(screen.getByTestId('next-action').textContent).toContain(title));
   const row = screen.getByTestId('next-action');
-  const focusedLink = within(row).getByRole('link');
+  const focusedLink = within(row).getByRole('link', { name: new RegExp(title) });
+  const mapLink = within(row).getByRole('link', { name: /^找教室：/ });
+  const map = new URL(mapLink.getAttribute('href')!, 'https://fixture.invalid');
+  expect(map.pathname).toBe('/map');
+  expect(map.searchParams.get('schoolId')).toBe(schoolId);
+  expect(map.searchParams.get('query')).toBe('合成教室 301');
+  expect(mapLink.parentElement?.closest('a, button')).toBeNull();
   const scheduleLink = within(screen.getByTestId('today-classes'))
     .getByRole('link', { name: new RegExp(title) });
   expect(focusedLink).toBe(scheduleLink);

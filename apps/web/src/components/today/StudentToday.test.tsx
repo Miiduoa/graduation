@@ -61,6 +61,7 @@ function todayElement(overrides: Partial<ComponentProps<typeof StudentToday>> = 
       importHref="/import?kind=timetable&campus=pu"
       weekHref="/timetable?campus=pu"
       timetableHref="/timetable?campus=pu"
+      timetableSchoolId="pu"
       {...overrides}
     />
   );
@@ -81,7 +82,8 @@ it('shows the next class once in the timetable with a keyboard-accessible destin
   expect(screen.getAllByText('資料庫系統')).toHaveLength(1);
   const link = within(row).getByRole('link', { name: /資料庫系統.*看課程/ });
   expect(link.getAttribute('href')).toBe('/course/cs-db#week');
-  expect(within(row).getAllByRole('link')).toHaveLength(1);
+  expect(within(row).getAllByRole('link')).toHaveLength(2);
+  expect(within(row).getByRole('link', { name: /^找教室：/ })).toBeTruthy();
   link.focus();
   expect(document.activeElement).toBe(link);
   expect(screen.queryByText(/為你推薦|智慧|AI 幫你/)).toBeNull();
@@ -373,6 +375,37 @@ it('updates the current class room and destination when the class identifier sta
   expect(within(card).getByRole('link', { name: /看課程$/ }).getAttribute('href')).toBe(
     '/course/cs-new#week',
   );
+  const mapHref = within(card).getByRole('link', { name: '找教室：新教室 201' }).getAttribute('href');
+  const map = new URL(mapHref!, 'https://campus.example');
+  expect(map.searchParams.get('query')).toBe('新教室 201');
+  expect(map.searchParams.get('schoolId')).toBe('pu');
+});
+
+it('keeps classroom navigation separate from course work and uses the timetable school in the unified schedule', () => {
+  view({ timetableSchoolId: 'ncku', classes: [klass()] });
+  const links = screen.getAllByRole('link', { name: '找教室：管理大樓 M302' });
+  expect(links).toHaveLength(1);
+  for (const link of links) {
+    const url = new URL(link.getAttribute('href')!, 'https://campus.example');
+    expect(url.pathname).toBe('/map');
+    expect(url.searchParams.get('schoolId')).toBe('ncku');
+    expect(url.searchParams.get('query')).toBe('管理大樓 M302');
+    expect(link.parentElement?.closest('a, button')).toBeNull();
+    expect(link.getAttribute('tabindex')).not.toBe('-1');
+  }
+  expect(screen.getByRole('link', { name: /資料庫系統.*看課程/ }).getAttribute('href')).toBe('/course/cs-db#week');
+});
+
+it.each([undefined, null, 'personal', 'all'])('does not infer a map school from a timetable URL or account (%s)', (timetableSchoolId) => {
+  view({ timetableSchoolId, classes: [klass()] });
+  expect(screen.queryByRole('link', { name: /找教室/ })).toBeNull();
+});
+
+it('does not offer a classroom destination for a blank room or unconfirmed timetable', () => {
+  const page = view({ classes: [klass({ location: '  ' })] });
+  expect(screen.queryByRole('link', { name: /找教室/ })).toBeNull();
+  page.rerender(todayElement({ timetableStatus: 'loading', classes: [klass()] }));
+  expect(screen.queryByRole('link', { name: /找教室/ })).toBeNull();
 });
 
 it('drops the previous action immediately on sign-out and on a different account or school scope', () => {

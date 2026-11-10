@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CampusProviders } from './CampusProviders';
 import { SchoolSelector } from './SchoolSelector';
@@ -120,5 +120,13 @@ it('uses real directory state and does not transfer an account school choice to 
       <View />
     </CampusProviders>,
   );
-  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('pu'));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('all'));
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  user.uid = 'alice';
+  view.rerender(
+    <CampusProviders>
+      <View />
+    </CampusProviders>,
+  );
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('nthu'));
 });

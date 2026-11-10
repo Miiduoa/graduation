@@ -16,6 +16,7 @@ import { useNuniSession } from './Session';
 import { classroomContext, classroomCourseHref, classroomDirectoryHref } from './studyNavigation';
 import shared from './NuniApp.module.css';
 import styles from './CourseLearning.module.css';
+import objects from './MaterialBookmarks.module.css';
 
 type Resolution = Awaited<ReturnType<typeof resolveMaterialBookmark>>;
 type ResolveBookmark = (bookmark: MaterialBookmark, cancelled: () => boolean, urgent?: boolean) => Promise<Resolution>;
@@ -55,10 +56,16 @@ export function MaterialBookmarks() {
   const { session, pendingLogout } = useNuniSession();
   if (!session || pendingLogout) return null;
   return (
-    <Bookmarks
-      key={`${session.platformAccountId}:${session.context}`}
-      accountId={session.platformAccountId}
-    />
+    <div
+      key={session.platformAccountId}
+      className={objects.entrance}
+      data-testid="material-bookmark-folder"
+    >
+      <Bookmarks
+        key={`${session.platformAccountId}:${session.context}`}
+        accountId={session.platformAccountId}
+      />
+    </div>
   );
 }
 
@@ -110,8 +117,8 @@ function Bookmarks({ accountId }: { accountId: string }) {
   }, []);
 
   return (
-    <section className={shared.panel} aria-labelledby="material-bookmarks-title">
-      <div className={styles.heading}>
+    <section className={`${shared.panel} ${objects.folder}`} aria-labelledby="material-bookmarks-title">
+      <div className={`${styles.heading} ${objects.heading}`}>
         <div>
           <p className={shared.eyebrow}>教材</p>
           <h1 id="material-bookmarks-title">此裝置收藏</h1>
@@ -132,7 +139,7 @@ function Bookmarks({ accountId }: { accountId: string }) {
       <p className={shared.muted}>
         這份清單只記在此瀏覽器的目前帳號，換裝置不會同步。教材內容仍需連線讀取，清除瀏覽器資料也會清除收藏。
       </p>
-      <Link href={courseListHref}>回我的課程</Link>
+      <Link className={objects.returnLink} href={courseListHref}>回我的課程</Link>
       {bookmarks.loading && <p role="status">正在讀取此裝置收藏…</p>}
       {bookmarks.error && (
         <p role="alert" className={shared.notice}>
@@ -141,7 +148,7 @@ function Bookmarks({ accountId }: { accountId: string }) {
       )}
       {notice && <p role="status" className={shared.receipt}>{notice}</p>}
       {bookmarks.ready && !bookmarks.loading && !bookmarks.items.length && (
-        <div className={styles.bookmarkEmpty}>
+        <div className={`${styles.bookmarkEmpty} ${objects.emptySheet}`}>
           <h2>還沒有收藏的教材</h2>
           <p>在教材卡按「加入此裝置收藏」，下次就能從這裡接著看。</p>
           <Link className={`${shared.button} ${styles.bookmarkButton}`} href={courseListHref}>
@@ -150,7 +157,7 @@ function Bookmarks({ accountId }: { accountId: string }) {
         </div>
       )}
       {bookmarks.items.length > 0 && (
-        <ul className={`${shared.list} ${styles.materials}`} aria-label="收藏的教材">
+        <ul className={objects.sheets} aria-label="收藏的教材">
           {bookmarks.items.map((bookmark) => {
             const id = materialBookmarkId(bookmark);
             return (
@@ -225,12 +232,13 @@ function BookmarkEntry({
 
   return (
     <li>
-      <article className={styles.bookmarkCard} aria-label={title}>
-        <div className={styles.metadata}>
-          <time dateTime={bookmark.savedAt}>
-            收藏於 {formatTaipeiDateTime(bookmark.savedAt, { seconds: false })}
+      <article className={`${styles.bookmarkCard} ${objects.sheet}`} aria-label={title}>
+        <div className={`${styles.metadata} ${objects.metadata}`}>
+          <time className={objects.dateTab} dateTime={bookmark.savedAt}>
+            <span>收藏於 </span>
+            {formatTaipeiDateTime(bookmark.savedAt, { seconds: false })}
           </time>
-          {material?.unitTitle && <span>{material.unitTitle}</span>}
+          {material?.unitTitle && <span className={objects.unitLabel}>{material.unitTitle}</span>}
         </div>
         <h2>{title}</h2>
         {!result && <p role="status">{opening ? '正在確認權限，確認後會開啟原教材…' : '正在確認這份教材的查看權限…'}</p>}
@@ -244,7 +252,7 @@ function BookmarkEntry({
             <p className={styles.note}>教材編號：{bookmark.materialId}</p>
           </>
         )}
-        <div className={`${shared.actions} ${styles.bookmarkActions}`}>
+        <div className={`${shared.actions} ${styles.bookmarkActions} ${objects.actions}`}>
           <button
             type="button"
             className={`${shared.button} ${styles.bookmarkButton}`}

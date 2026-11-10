@@ -10,11 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import {
-  categoryLabel,
-  formatLostFoundCalendarDate,
   listLostFoundItems,
-  statusLabel,
-  typeLabel,
   type LostFoundItem,
 } from '@/lib/lostFound';
 import {
@@ -31,6 +27,7 @@ import {
 import { replaceServiceListQuery, type ServiceListSearchParams } from '@/lib/serviceListNavigation';
 import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
 import styles from '@/components/lost-found/LostFound.module.css';
 
 /** Bound DOM rows; filters still run over the complete loaded collection. */
@@ -292,26 +289,10 @@ function LostFoundPageContent({
                 </p>
                 <ul className={styles.list}>
                   {visible.map((item) => (
-                    <li key={item.id} className={styles.panel}>
-                      <div className={styles.itemMeta}>
-                        <span className={styles.badge}>{typeLabel(item.type)}</span>
-                        <span className={styles.badge}>{categoryLabel(item.category)}</span>
-                        <span className={styles.badge}>{statusLabel(item.status)}</span>
-                        {!item.canonical ? <span className={styles.badge}>舊版紀錄</span> : null}
-                      </div>
-                      <h2>
-                        <Link
-                          className={styles.link}
-                          href={`/lost-found/${encodeURIComponent(item.id)}?${listQuery}`}
-                        >
-                          {item.title}
-                        </Link>
-                      </h2>
-                      <p className={styles.muted}>
-                        {item.location}
-                        {item.date ? ` · ${formatLostFoundCalendarDate(item.date)}` : ''}
-                      </p>
-                      <p>{item.description}</p>
+                    <li key={item.id}>
+                      <LostFoundItemTag item={item} href={`/lost-found/${encodeURIComponent(item.id)}?${listQuery}`}>
+                        <p>{item.description}</p>
+                      </LostFoundItemTag>
                     </li>
                   ))}
                 </ul>

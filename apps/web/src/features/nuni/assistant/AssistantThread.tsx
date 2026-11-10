@@ -1,12 +1,14 @@
 import Link from 'next/link';
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
-import type { V2Turn } from './types';
+import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 export function AssistantThread({
   inline = false,
@@ -20,11 +22,17 @@ export function AssistantThread({
   turns,
   states,
   pending,
+  pendingLabel,
+  asking,
+  onStopAsk,
   error,
+  recoverableQuestion,
+  onRecoverQuestion,
   onAsk,
   onStop,
   onConfirm,
   onCancel,
+  onReconcile,
 }: {
   inline?: boolean;
   schoolId: string;
@@ -35,13 +43,19 @@ export function AssistantThread({
   question: string;
   onQuestion: (value: string) => void;
   turns: V2Turn[];
-  states: Record<string, string>;
+  states: V2ActionStates;
   pending: boolean;
+  pendingLabel?: string;
+  asking: boolean;
+  onStopAsk: () => void;
   error: string;
+  recoverableQuestion: string;
+  onRecoverQuestion: () => void;
   onAsk: () => void;
   onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
+  onReconcile?: (card: V2Card) => void;
 }) {
   const fieldId = useId();
   const log = useRef<HTMLDivElement>(null);
@@ -49,6 +63,8 @@ export function AssistantThread({
   const dock = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const followLatest = useRef(true);
+  const [showJump, setShowJump] = useState(false);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -64,10 +80,23 @@ export function AssistantThread({
     return () => observer.disconnect();
   }, [inline, turns.length, question, pending]);
   useEffect(() => {
+    if (inline) return;
+    // Incoming results must not steal the scroll position while someone reads older replies.
+    const trackScroll = () => {
+      if (!end.current || turns.length === 0) return;
+      const nearLatest = end.current.getBoundingClientRect().top - window.innerHeight <= 144;
+      followLatest.current = nearLatest;
+      setShowJump(!nearLatest);
+    };
+    window.addEventListener('scroll', trackScroll, { passive: true });
+    return () => window.removeEventListener('scroll', trackScroll);
+  }, [inline, turns.length]);
+  useEffect(() => {
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
+    if (!followLatest.current || (!turns.length && !pending && !error)) return;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
   }, [inline, turns, pending, error]);
@@ -85,7 +114,7 @@ export function AssistantThread({
   const consentControl = (
     <label className={styles.consent}>
       <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
-      同意在本次對話將問題、對話紀錄及必要課表、作業、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+      同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
       Groq
       {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
     </label>
@@ -141,6 +170,7 @@ export function AssistantThread({
                     <AssistantMarkdown text={turn.reply.answer} />
                   </SpokenReply>
                 ) : <AssistantMarkdown text={turn.reply.answer} />}
+                {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (
                   <details className={styles.sources}>
@@ -162,6 +192,7 @@ export function AssistantThread({
               pending={pending}
               onConfirm={onConfirm}
               onCancel={(index) => onCancel(turn, index)}
+              onReconcile={onReconcile}
             />
           </article>
         ))}
@@ -171,7 +202,12 @@ export function AssistantThread({
               <span aria-hidden="true" />
               <span aria-hidden="true" />
               <span aria-hidden="true" />
-              <span className={styles.muted}>正在整理回覆</span>
+              <span className={styles.muted}>{pendingLabel ?? (asking ? '正在整理回覆' : '正在核對操作結果')}</span>
+              {asking ? (
+                <button type="button" className={styles.stopReply} onClick={onStopAsk}>
+                  停止這次回答
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -180,9 +216,32 @@ export function AssistantThread({
             {error}
           </p>
         ) : null}
+        {recoverableQuestion ? (
+          <div className={styles.recover} role="group" aria-label="未完成的問題">
+            <p>未完成的問題已保留，切換時不會刪除現在的草稿。</p>
+            <p className={styles.recoverText}>{recoverableQuestion}</p>
+            <button type="button" disabled={pending} onClick={onRecoverQuestion}>
+              切換到這個問題
+            </button>
+          </div>
+        ) : null}
         <div ref={end} className={styles.logEnd} />
       </div>
       <div ref={dock} className={styles.composerDock}>
+        {showJump ? (
+          <button
+            type="button"
+            className={styles.jumpLatest}
+            onClick={() => {
+              followLatest.current = true;
+              setShowJump(false);
+              const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+              end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+            }}
+          >
+            回到最新回覆
+          </button>
+        ) : null}
         {turns.length > 0 && !inline ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
             {SUGGESTIONS.map((phrase) => (
@@ -197,13 +256,15 @@ export function AssistantThread({
           aria-label="傳送問題"
           onSubmit={(e) => {
             e.preventDefault();
+            followLatest.current = true;
+            setShowJump(false);
             onAsk();
           }}
         >
           <label htmlFor={fieldId}>問題</label>
           <textarea
             id={fieldId}
-            readOnly={pending}
+            aria-describedby={`${fieldId}-hint`}
             ref={field}
             value={question}
             maxLength={1000}
@@ -211,8 +272,12 @@ export function AssistantThread({
             placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
             onChange={(e) => onQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              // In Chinese/Japanese IMEs Enter selects a candidate; it is not a send gesture.
+              if (e.key === 'Enter' && !e.shiftKey &&
+                  !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
+                followLatest.current = true;
+                setShowJump(false);
                 onAsk();
               }
             }}
@@ -239,11 +304,14 @@ export function AssistantThread({
               停止回答
             </button>
           ) : (
-            <button key="send" className={styles.send} disabled={!consent || !ready || pending || !question.trim()}>
+            <button key="send" className={styles.send} disabled={pending || !question.trim() || (!canAnswerAssistantLocally(question) && (!consent || !ready))}>
               送出
             </button>
           )}
         </form>
+        <p id={`${fieldId}-hint`} className={styles.composerHint}>
+          {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
+        </p>
         {inline && ready && !turns.length && !question && !pending && (
           <div className={styles.chips} aria-label="試著問">
             {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (

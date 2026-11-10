@@ -124,7 +124,7 @@
   text-decoration: none;
 }
 
-.classRow {
+.scheduleRow {
   min-height: 86px;
 }
 
@@ -159,6 +159,45 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 4px 10px;
+}
+
+.classRowWithMap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.classRowWithMap + .classRowWithMap {
+  border-top: 0.5px solid var(--border);
+}
+
+.classRowWithMap + .classRowWithMap .row {
+  border-top: 0;
+}
+
+.classroomLink {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  min-height: 44px;
+  max-width: 100%;
+  margin-right: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--brand);
+  font-size: var(--font-body-sm-size);
+  font-weight: 600;
+  text-underline-offset: 4px;
+}
+
+@media (max-width: 26rem) {
+  .classRowWithMap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .classroomLink {
+    margin-bottom: 4px;
+  }
 }
 
 .rowTitle {

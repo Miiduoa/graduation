@@ -33,7 +33,7 @@ export default function HomePage() {
   const accountId = hydrated ? nuni.session?.platformAccountId : undefined;
   const uid = hydrated ? user?.uid : undefined;
   const school = useOptionalSelectedSchool();
-  const role = useSchoolRole(uid, school?.selectedSchoolId || 'pu');
+  const role = useSchoolRole(uid, school?.selectedSchoolId);
   const owner =
     context && accountId
       ? `nuni:${context}:${accountId}:school:${uid ?? ''}`

@@ -355,6 +355,7 @@ it('keeps the draft and ignores a late bootstrap after stopping a question and a
   fireEvent.click(screen.getByRole('button', { name: '送出' }));
   fireEvent.click(await screen.findByRole('button', { name: '停止回答' }));
   expect(firstSignal?.aborted).toBe(true);
+  fireEvent.click(await screen.findByRole('button', { name: '切換到這個問題' }));
   expect(input.value).toBe('下一堂課在哪裡？');
   expect(input.readOnly).toBe(false);
   fireEvent.change(input, { target: { value: '這週有哪些作業？' } });

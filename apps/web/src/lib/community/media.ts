@@ -1,3 +1,5 @@
+import { PRIVATE_FILE_MAX_BYTES } from '@campus/shared/src/privateFileAccess';
+import { privateFilesEnabled, privateStoryPath, uploadPrivateFile } from '../privateFiles';
 /**
  * 校園社群 — 圖片上傳 (Web)
  *
@@ -62,7 +64,7 @@ async function uploadMediaFile(
 
 export function storyImageError(file: File): string | null {
   if (!file.type.startsWith('image/') || !file.size) return '請選擇一張可讀取的圖片。';
-  if (file.size >= 10 * 1024 * 1024) return '照片須小於 10 MB，請換一張較小的照片。';
+  if (file.size > PRIVATE_FILE_MAX_BYTES['story-image']) return '照片大小不得超過 10 MB，請換一張較小的照片。';
   return null;
 }
 
@@ -74,6 +76,12 @@ export async function uploadStoryImage(input: {
 }): Promise<UploadedCampusMedia> {
   const error = storyImageError(input.file);
   if (error) throw new Error(error);
+  if (privateFilesEnabled()) {
+    const path = privateStoryPath(input.schoolId, input.storyId, `image-${Date.now().toString(36)}-${crypto.randomUUID().replace(/-/g, '')}.jpg`);
+    if (!path) throw new Error('限動路徑無效');
+    await uploadPrivateFile({ path, body: input.file, contentType: input.file.type });
+    return { url: path, path, contentType: input.file.type };
+  }
   return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/image`, input.file, {
     ownerUid: input.uid,
   });

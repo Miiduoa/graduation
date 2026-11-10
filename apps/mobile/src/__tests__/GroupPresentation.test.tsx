@@ -1,11 +1,12 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { GroupsScreen } from '../screens/GroupsScreen';
 import { GroupDetailScreen } from '../screens/GroupDetailScreen';
 import { GroupPostScreen } from '../screens/GroupPostScreen';
 import { applyTheme, clearSchoolTheme, createDarkTheme, createLightTheme } from '../ui/theme';
 
 const mockDb = {};
+let mockMemberRole = 'member';
 const mockAuth = {
   user: { uid: 'student-a' },
   profile: { uid: 'student-a', displayName: '林同學', role: 'student' },
@@ -43,20 +44,26 @@ const mockComment = {
   generatedBy: 'server',
 };
 
+jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
+
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
 jest.mock('../state/school', () => ({ useSchool: () => ({ school: { id: 'school-a' } }) }));
 jest.mock('../firebase', () => ({
   getDb: () => mockDb,
+  getAuthInstance: () => ({ currentUser: { getIdToken: async () => 'test-token' } }),
+  hasUsableFirebaseConfig: () => true,
   getFunctionsInstance: () => mockDb,
   isFirebaseMockMode: () => false,
 }));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('../services/storage', () => ({ storage: { pickImage: jest.fn() } }));
 jest.mock('../services/ai', () => ({ chatWithCampusAssistant: jest.fn() }));
 jest.mock('../services/memberDirectory', () => ({
   fetchSchoolDirectoryProfiles: jest.fn(async () => []),
 }));
 jest.mock('firebase/firestore', () => {
+  let nextId = 0;
   const snapshot = (rows: Array<{ id: string }>) => ({
     docs: rows.map((row) => ({ id: row.id, data: () => row })),
     empty: rows.length === 0,
@@ -64,7 +71,7 @@ jest.mock('firebase/firestore', () => {
   });
   return {
     collection: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
-    doc: (_db: unknown, ...path: string[]) => ({ path: path.join('/') }),
+    doc: (_db: unknown, ...path: string[]) => ({ path: path.join('/'), id: path.at(-1) ?? `draft-${++nextId}` }),
     query: (ref: unknown) => ref,
     where: jest.fn(),
     orderBy: jest.fn(),
@@ -78,7 +85,7 @@ jest.mock('firebase/firestore', () => {
     }),
     getDoc: jest.fn(async ({ path }: { path: string }) => {
       const row = path.includes('/members/')
-        ? { id: 'student-a', role: 'member' }
+        ? { id: 'student-a', role: mockMemberRole }
         : path.includes('/posts/')
           ? mockPost
           : mockGroup;
@@ -96,6 +103,8 @@ jest.mock('firebase/firestore', () => {
 });
 
 beforeEach(() => {
+  jest.spyOn(require('../services/privateFiles'), 'claimPrivateFile').mockResolvedValue(undefined);
+  mockMemberRole = 'member';
   clearSchoolTheme();
   applyTheme('light');
 });
@@ -186,5 +195,162 @@ test('非試辦社團關閉後台開關時仍保留安全社員名單入口', as
     mockGroup.type = originalType;
     if (originalFlag === undefined) delete process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED;
     else process.env.EXPO_PUBLIC_CLUB_ADMIN_ENABLED = originalFlag;
+  }
+});
+
+test('Supabase exposes group attachments but keeps cover uploads hidden from ordinary members', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const view = render(
+    <GroupDetailScreen
+      route={{ params: { groupId: 'course-actual' } }}
+      navigation={{ navigate: jest.fn() }}
+    />,
+  );
+  try {
+    expect(await view.findByText('附加圖片或文件（0）')).toBeTruthy();
+    expect(view.queryByText('更換群組封面')).toBeNull();
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+  }
+});
+
+test('Supabase off hides group file upload entries', async () => {
+  delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+  const view = render(
+    <GroupDetailScreen
+      route={{ params: { groupId: 'course-actual' } }}
+      navigation={{ navigate: jest.fn() }}
+    />,
+  );
+  expect(await view.findByText('發布內容')).toBeTruthy();
+  expect(view.queryByText('附加圖片或文件（0）')).toBeNull();
+  expect(view.queryByText('更換群組封面')).toBeNull();
+});
+
+test.each([true, false])('Supabase saves the returned cover path only after successful finalization (%s)', async (success) => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  mockMemberRole = 'admin';
+  const files = require('../services/privateFiles');
+  const upload = jest.spyOn(files, 'uploadPrivateFile').mockResolvedValue({ path: 'groups/course-actual/cover.12345678-1234-1234-1234-123456789abc.png' });
+  if (!success) upload.mockRejectedValue(new Error('File finalization failed'));
+  const updateDoc = require('firebase/firestore').updateDoc;
+  updateDoc.mockClear();
+  const picker = require('../services/storage').storage.pickImage;
+  picker.mockResolvedValue({ uri: 'file:///cover', type: 'image/png', name: 'cover.png', size: 5 });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({ blob: async () => new Blob(['image'], { type: 'image/png' }) })) as unknown as typeof fetch;
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} navigation={{ navigate: jest.fn() }} />);
+  try {
+    const button = await view.findByText('更換群組封面');
+    await act(async () => fireEvent.press(button));
+    await waitFor(() => expect(upload).toHaveBeenCalledWith(expect.objectContaining({ path: 'groups/course-actual/cover.png' })));
+    if (success) expect(updateDoc).toHaveBeenCalledWith(expect.anything(), { coverUrl: 'groups/course-actual/cover.12345678-1234-1234-1234-123456789abc.png' });
+    else expect(updateDoc).not.toHaveBeenCalled();
+  } finally {
+    view.unmount(); delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND; global.fetch = previousFetch; upload.mockRestore(); mockMemberRole = 'member';
+  }
+});
+
+test('post attachments enforce the limit and retain progress until success or discard', async () => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const files = require('../services/privateFiles');
+  const upload = jest.spyOn(files, 'uploadPrivateFile')
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  const picker = require('expo-document-picker').getDocumentAsync;
+  const assets = Array.from({ length: 7 }, (_, i) => ({ uri: `file:///${i}`, name: `${i}.txt`, mimeType: 'text/plain' }));
+  picker.mockResolvedValueOnce({ canceled: false, assets })
+    .mockResolvedValue({ canceled: false, assets: assets.slice(0, 3) });
+  const previousFetch = global.fetch;
+  global.fetch = jest.fn(async () => ({ blob: async () => new Blob(['text'], { type: 'text/plain' }) })) as unknown as typeof fetch;
+  const setDoc = require('firebase/firestore').setDoc;
+  setDoc.mockClear();
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} />);
+  try {
+    const attach = await view.findByText('附加圖片或文件（0）');
+    await act(async () => fireEvent.press(attach));
+    expect(view.getByText('單次最多選取 6 個附件')).toBeTruthy();
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '附件貼文');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '附件內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(view.getByText('上傳太頻繁，請稍後再試')).toBeTruthy();
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(setDoc).not.toHaveBeenCalled();
+    const firstPath = upload.mock.calls[0][0].path;
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(upload).toHaveBeenCalledTimes(4);
+    expect(upload.mock.calls[2][0].path).not.toBe(upload.mock.calls[1][0].path);
+    expect(setDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ attachments: expect.arrayContaining([firstPath]) }));
+    expect(view.getByText('附加圖片或文件（0）')).toBeTruthy();
+    upload.mockRejectedValue(Object.assign(new Error('limited'), { statusCode: 429 }));
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '另一篇');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    const discarded = upload.mock.calls[4][0].path;
+    fireEvent.press(view.getByText('放棄草稿'));
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '新草稿');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(upload.mock.calls[5][0].path).not.toBe(discarded);
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
+    upload.mockRestore();
+  }
+});
+
+test.each(['upload', 'finalize'])('post attachments recover from %s failure without repeating confirmed uploads', async (failure) => {
+  process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const picker = require('expo-document-picker').getDocumentAsync;
+  picker.mockResolvedValue({ canceled: false, assets: [
+    { uri: 'file:///a', name: 'a.txt', mimeType: 'text/plain' },
+    { uri: 'file:///b', name: 'b.txt', mimeType: 'text/plain' },
+  ] });
+  const previousFetch = global.fetch;
+  const stored = new Set<string>();
+  const puts: string[] = [];
+  global.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('file:')) return { blob: async () => new Blob(['text'], { type: 'text/plain' }) };
+    if (init?.method === 'POST') {
+      const { action, path } = JSON.parse(String(init.body));
+      if (action === 'finalize' && failure === 'finalize' && puts.length === 2) return { ok: false, status: 413, json: async () => ({ error: 'File is too large' }) };
+      if (action === 'finalize') return { ok: true, status: 200, json: async () => ({ path, finalized: true }) };
+      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000, requiresFinalize: true }) };
+    }
+    puts.push(url);
+    expect(init?.headers).toEqual({ 'If-None-Match': '*' });
+    if (stored.has(url)) return { ok: false, status: 412 };
+    stored.add(url);
+    if (failure === 'upload' && puts.length === 2) throw new TypeError('Response lost');
+    return { ok: true, status: 200 };
+  }) as unknown as typeof fetch;
+  const setDoc = require('firebase/firestore').setDoc;
+  setDoc.mockClear();
+  const view = render(<GroupDetailScreen route={{ params: { groupId: 'course-actual' } }} />);
+  try {
+    await view.findByText('附加圖片或文件（0）');
+    await act(async () => fireEvent.press(view.getByText('附加圖片或文件（0）')));
+    fireEvent.changeText(view.getByPlaceholderText('標題'), '附件貼文');
+    fireEvent.changeText(view.getByPlaceholderText('內容'), '附件內容');
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(puts).toHaveLength(2);
+    await act(async () => fireEvent.press(view.getByText('送出')));
+    expect(puts).toHaveLength(3);
+    expect(puts[2]).not.toBe(puts[1]);
+    expect(puts[2].split('/').slice(0, 4)).toEqual(puts[1].split('/').slice(0, 4));
+    const { parsePrivateFilePath } = require('@campus/shared/src/privateFileAccess');
+    puts.forEach((path) => expect(parsePrivateFilePath(path)?.kind).toBe('group-post'));
+    expect(setDoc).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ attachments: [puts[0], puts[2]] }));
+  } finally {
+    view.unmount();
+    delete process.env.EXPO_PUBLIC_FILE_STORAGE_BACKEND;
+    global.fetch = previousFetch;
   }
 });

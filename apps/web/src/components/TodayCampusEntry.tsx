@@ -28,7 +28,7 @@ const SchoolConversation = lazy(async () => ({
   default: (await import('@/app/ai-assistant/LegacyAssistant')).AssistantConversation,
 }));
 
-type Account = { kind: 'nuni'; context: string } | { kind: 'school'; uid: string };
+type Account = { kind: 'nuni'; context: string; accountId: string } | { kind: 'school'; uid: string; localOwner: string };
 
 function TodayConversation({ account, schoolId }: { account: Account; schoolId: string }) {
   const [text, setText] = useState('');
@@ -75,6 +75,7 @@ function TodayConversation({ account, schoolId }: { account: Account; schoolId: 
           {account.kind === 'nuni' ? (
             <NuniConversation
               context={account.context}
+              accountId={account.accountId}
               schoolId={schoolId}
               inlineDraft={draft}
               onFreeformReady={setNuniFreeform}
@@ -82,6 +83,7 @@ function TodayConversation({ account, schoolId }: { account: Account; schoolId: 
           ) : (
             <SchoolConversation
               userId={account.uid}
+              localOwner={account.localOwner}
               groupId=""
               initialDraft=""
               schoolId={schoolId}
@@ -124,9 +126,9 @@ export function TodayCampusEntry() {
   if (nuni.pendingLogout) return <p role="status">正在確認登出狀態…</p>;
   const account: Account | null =
     enabled && session && !nuni.error
-      ? { kind: 'nuni', context: session.context }
+      ? { kind: 'nuni', context: session.context, accountId: session.platformAccountId }
       : uid && !auth.error
-        ? { kind: 'school', uid }
+        ? { kind: 'school', uid, localOwner: session ? 'platform:' + session.platformAccountId : 'school:' + uid }
         : null;
   if (!account || campus.status !== 'ready' || !campus.schoolId) {
     return (

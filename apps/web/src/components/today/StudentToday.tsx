@@ -36,6 +36,8 @@ export type TimetableStatus = 'loading' | 'ready' | 'error' | 'empty' | 'unsigne
 type Props = {
   assistant?: ReactNode;
   scopeKey?: string;
+  /** The actual personal timetable scope, which can differ from the signed-in school. */
+  timetableSchoolId?: string | null;
   now: Date | null;
   updatedAt: Date | null;
   unsigned: boolean;
@@ -116,6 +118,7 @@ export function StudentToday(props: Props) {
     <TodayClassList
       key={'classes:' + (props.scopeKey ?? '')}
       classes={classes}
+      timetableSchoolId={props.timetableStatus === 'ready' ? props.timetableSchoolId : null}
       primaryId={action.type === 'class' ? action.class.id : undefined}
       status={props.timetableStatus}
       now={now}
@@ -237,6 +240,7 @@ function TodayClassList({
   onRetry,
   importHref,
   timetableHref,
+  timetableSchoolId,
 }: {
   classes: TodayClass[];
   primaryId?: string;
@@ -245,6 +249,7 @@ function TodayClassList({
   onRetry: () => void;
   importHref: string;
   timetableHref: string;
+  timetableSchoolId?: string | null;
 }) {
   return (
     <section
@@ -293,7 +298,7 @@ function TodayClassList({
       ) : classes.length === 0 ? (
         <p className={styles.empty}>今天沒有排課。</p>
       ) : (
-        <TodayClassRows classes={classes} primaryId={primaryId} now={now} timetableHref={timetableHref} />
+        <TodayClassRows classes={classes} primaryId={primaryId} now={now} timetableHref={timetableHref} timetableSchoolId={timetableSchoolId} />
       )}
     </section>
   );
@@ -436,6 +441,7 @@ export function StudentTodayPage(props: BoundProps) {
     <StudentToday
       assistant={props.assistant}
       scopeKey={records.scopeKey}
+      timetableSchoolId={schoolId}
       now={props.now}
       updatedAt={props.updatedAt}
       unsigned={props.unsigned}

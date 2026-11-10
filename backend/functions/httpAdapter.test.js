@@ -22,7 +22,7 @@ function listen(listener) {
 
 function request(port, { method, path, body, headers = {} }) {
   return new Promise((resolve, reject) => {
-    const payload = body == null ? null : Buffer.from(JSON.stringify(body));
+    const payload = body == null ? null : (Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)));
     const req = http.request(
       {
         hostname: '127.0.0.1',
@@ -184,6 +184,61 @@ describe('callable HTTP adapter', () => {
       headers: { Authorization: 'Bearer valid-token', Origin: 'https://evil.example' },
     });
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
+describe('private file HTTP transport', () => {
+  test('leaves binary upload limits and stream consumption to the authenticated handler', async () => {
+    const handler = jest.fn(async (req, res) => {
+      expect(req.rawBody).toBeUndefined();
+      expect(req.query.path).toBe('assignments/work/submissions/alice/file.pdf');
+      let bytes = 0;
+      for await (const chunk of req) bytes += chunk.length;
+      res.json({ bytes });
+    });
+    const { server, port } = await listen(createRequestListener({
+      httpFunctions: { privateGroupFile: handler },
+    }));
+    try {
+      const body = Buffer.alloc(11 * 1024 * 1024, 65);
+      const response = await request(port, {
+        method: 'POST',
+        path: '/privateGroupFile?path=assignments%2Fwork%2Fsubmissions%2Falice%2Ffile.pdf',
+        headers: { 'Content-Type': 'application/pdf' },
+        body,
+      });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ bytes: body.length });
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('permits authorization denial before an upload body arrives', async () => {
+    const handler = jest.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    const { server, port } = await listen(createRequestListener({
+      httpFunctions: { privateGroupFile: handler },
+    }));
+    let upload;
+    try {
+      const status = await new Promise((resolve, reject) => {
+        upload = http.request({
+          hostname: '127.0.0.1', port, method: 'POST', path: '/privateGroupFile',
+          headers: { 'Content-Type': 'application/pdf', 'Content-Length': 1024 },
+        }, (res) => { res.resume(); resolve(res.statusCode); });
+        upload.on('error', reject);
+        upload.setTimeout(1000, () => upload.destroy(new Error('Adapter waited for unauthorized body')));
+        upload.flushHeaders();
+      });
+      expect(status).toBe(401);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      upload?.destroy();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
 

@@ -17,18 +17,17 @@ tags:
     id: platform-workspace-start
 - takeScreenshot: guest_startup
 
-# On iPhone 15 with the embedded Release bundle (Maestro 41335644905), the
-# Google account header was present in the accessibility tree at y=859..885
-# while the viewport ended at y=874. scrollUntilVisible did not move the
-# nested landing ScrollView, leaving that header partially offscreen.
-# Swipe upward from the visible school-unavailable hint inside that same
-# ScrollView, then require the original fully visible account heading.
-# No assertion, route, login restriction, or timeout is relaxed.
-- swipe:
-    from:
-      id: school-login-hint
-    direction: UP
-    duration: 500
+# A returning guest with a school selected has a taller landing page.
+- runFlow:
+    when:
+      visible:
+        id: school-login-hint
+    commands:
+      - swipe:
+          from:
+            id: school-login-hint
+          direction: UP
+          duration: 500
 
 # Account and import actions precede the public-service directory.
 # Check the heading before scrolling to its action; they need not share a viewport.
@@ -84,6 +83,12 @@ tags:
 
 # On iOS the navigation header owns the back action.
 - runFlow: ../helpers/return-to-landing.yaml
+- scrollUntilVisible:
+    element:
+      id: school-picker-open
+    direction: UP
+    centerElement: true
+- runFlow: ../helpers/select-nthu.yaml
 - scrollUntilVisible:
     element:
       id: school-import-start

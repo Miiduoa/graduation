@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import { usePrivateMedia } from '@/lib/usePrivateMedia';
 import { openModalSession } from '@/components/ui/modalSession';
 import type { useStoryShelf } from './useStoryShelf';
 import styles from './StoryViewer.module.css';
@@ -26,7 +27,9 @@ export function StoryViewer({
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
   const story = viewer.group.stories[viewer.index]!;
-  const photo = story.kind === 'image' && !!story.mediaUrl;
+  const onMediaFailure = useCallback(() => setFailedId(story.id), [story.id]);
+  const mediaUrl = usePrivateMedia(story.mediaUrl, onMediaFailure);
+  const photo = (story.kind === 'image' || story.kind === 'video') && !!story.mediaUrl;
   const running = auto && !hidden && (!photo || loadedId === story.id || failedId === story.id);
   const onNext = useRef(viewer.next);
   useEffect(() => {
@@ -97,7 +100,9 @@ export function StoryViewer({
           </div>
           <div className={styles.byline}>
             <span className={styles.avatar} aria-hidden="true">
-              {avatar ? <Image src={avatar} alt="" unoptimized width={38} height={38} /> : author.slice(0, 1)}
+              {avatar ? ( <Image src={avatar} alt="" unoptimized width={38} height={38} />
+              ) : ( author.slice(0, 1)
+              )}
             </span>
             <div className={styles.identity} aria-live="polite">
               <strong>{author}</strong>
@@ -143,7 +148,18 @@ export function StoryViewer({
             }
           }}
         >
-          {photo && failedId !== story.id ? (
+          {story.kind === 'video' && mediaUrl && failedId !== story.id ? (
+            <video
+              key={story.id}
+              src={mediaUrl}
+              className={styles.photo}
+              controls
+              autoPlay
+              playsInline
+              onLoadedData={() => setLoadedId(story.id)}
+              onError={() => setFailedId(story.id)}
+            />
+          ) : photo && mediaUrl && failedId !== story.id ? (
             <Image
               unoptimized
               loading="eager"
@@ -151,7 +167,7 @@ export function StoryViewer({
               height={1600}
               key={story.id}
               className={styles.photo}
-              src={story.mediaUrl!}
+              src={mediaUrl!}
               alt="限時動態照片"
               onLoad={() => setLoadedId(story.id)}
               onError={() => setFailedId(story.id)}
