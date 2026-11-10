@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { safeNavigate } from '../utils/safeNavigate';
@@ -15,11 +15,28 @@ import {
   loadSchoolLoginProviderKinds,
 } from '../services/schoolLoginAvailability';
 
+const workEntries = [
+  { title: '店家進駐與門市管理', detail: '用 Google 帳號申請、查進度，或進入已授權的門市。', tab: 'merchant' },
+  { title: '教師課程', detail: '用 Google 帳號開班，或進入已授權的課程。', tab: 'courses' },
+  { title: '校方人員登入（網頁）', detail: '使用學校核發的帳號，向所屬單位確認業務權限。', path: '/auth/account?method=school' },
+  { title: '平台管理員登入（網頁）', detail: '使用已獲平台授權的管理帳號。', path: '/admin/login' },
+] as const;
+
+async function openStaffLogin(path: '/auth/account?method=school' | '/admin/login') {
+  const url = `https://nuni.tw${path}`;
+  try {
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert('無法開啟登入頁', `請使用瀏覽器開啟 ${url}`);
+  }
+}
+
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
   const auth = useNuniSession();
   const { school, selectionReady } = useSchool();
   const s = useThemeStyleSheet(createStyles);
+  const [showWorkEntries, setShowWorkEntries] = useState(false);
   const [, refreshProviders] = useState(0);
   const hasSchool = selectionReady !== false && Boolean(school.id);
   const schoolEntry = hasSchool && isSchoolLoginEntryAvailable(school.id);
@@ -55,7 +72,35 @@ export default function LoginLandingScreen() {
           >
             <Text style={s.workspaceShortcutText}>課程與作業</Text>
           </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showWorkEntries }}
+            onPress={() => setShowWorkEntries((open) => !open)}
+            style={({ pressed }) => [s.workShortcut, pressed && s.rowPressed]}
+          >
+            <Text style={s.workspaceShortcutText}>店家與教職員入口</Text>
+          </Pressable>
         </View>
+        {showWorkEntries && (
+          <View style={s.panel}>
+            <Text accessibilityRole="header" style={s.title}>選擇工作入口</Text>
+            {workEntries.map((entry) => (
+              <Pressable
+                key={entry.title}
+                accessibilityRole={'path' in entry ? 'link' : 'button'}
+                accessibilityLabel={entry.title}
+                accessibilityHint={entry.detail}
+                onPress={() => 'path' in entry
+                  ? void openStaffLogin(entry.path)
+                  : safeNavigate(navigation, 'NuniWorkspace', { tab: entry.tab })}
+                style={({ pressed }) => [s.workEntry, pressed && s.rowPressed]}
+              >
+                <Text style={s.publicTitle}>{entry.title}</Text>
+                <Text style={s.publicDetail}>{entry.detail}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
         <View style={s.intro}>
           <Text style={s.school}>{platformReady && hasSchool ? `${school.name} · 我的課表` : '課程・校園・每天的事'}</Text>
           <Text accessibilityRole="header" style={s.heading}>
@@ -264,6 +309,19 @@ const createStyles = () =>
       borderRadius: 7,
       borderWidth: 1,
       borderColor: theme.colors.border,
+    },
+    workShortcut: {
+      paddingHorizontal: 8,
+      minHeight: 44,
+      justifyContent: 'center',
+    },
+    workEntry: {
+      minHeight: 48,
+      justifyContent: 'center',
+      paddingVertical: 12,
+      marginTop: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
     },
     workspaceShortcutText: { color: theme.colors.accent, fontSize: 12, fontWeight: '600' },
     intro: { paddingTop: 24, paddingBottom: 24 },

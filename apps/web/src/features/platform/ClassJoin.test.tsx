@@ -51,17 +51,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('shows the join form for guests and sends them to account login on submit', async () => {
-  const replace = vi.fn();
-  vi.stubGlobal('location', { ...window.location, replace });
+it('asks guests to sign in before entering their invite code', async () => {
   render(<ClassJoin />);
   expect(screen.getByRole('heading', { name: '加入課班' })).toBeTruthy();
   expect(screen.getByRole('link', { name: '前往登入' }).getAttribute('href')).toBe(
-    `/auth/account?returnUrl=${encodeURIComponent(JOIN_PATH)}`,
+    `/classroom/login?returnUrl=${encodeURIComponent(JOIN_PATH)}`,
   );
-  fireEvent.change(screen.getByLabelText('邀請碼'), { target: { value: 'ABC123' } });
-  fireEvent.submit(screen.getByLabelText('邀請碼').closest('form')!);
-  expect(replace).toHaveBeenCalledWith(`/auth/account?returnUrl=${encodeURIComponent(JOIN_PATH)}`);
+  expect(screen.queryByLabelText('邀請碼')).toBeNull();
   expect(mocks.join).not.toHaveBeenCalled();
 });
 
@@ -97,7 +93,7 @@ it('sends an expired session back to account login', async () => {
   fireEvent.submit(screen.getByLabelText('邀請碼').closest('form')!);
   await waitFor(() =>
     expect(replace).toHaveBeenCalledWith(
-      `/auth/account?returnUrl=${encodeURIComponent(JOIN_PATH)}`,
+      `/classroom/login?returnUrl=${encodeURIComponent(JOIN_PATH)}`,
     ),
   );
 });

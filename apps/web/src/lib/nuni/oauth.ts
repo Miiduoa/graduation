@@ -39,6 +39,15 @@ function redirect(path: string): NextResponse {
   return response;
 }
 
+function retryLogin(returnUrl: string, issue: 'expired' | 'unavailable'): NextResponse {
+  // A merchant who cancels consent should retry from the merchant sign-in screen.
+  const path = new URL(returnUrl, publicOrigin()).pathname;
+  const entry = path === '/merchant' || path.startsWith('/merchant/') ? '/login' : '/classroom/login';
+  const query = new URLSearchParams({ issue });
+  if (returnUrl !== '/classroom') query.set('returnUrl', returnUrl);
+  return redirect(`${entry}?${query}`);
+}
+
 export async function startGoogle(request: NextRequest): Promise<NextResponse> {
   const returnUrl = platformDestination(request.nextUrl.searchParams.get('returnUrl'));
   try {
@@ -118,9 +127,7 @@ export async function startGoogle(request: NextRequest): Promise<NextResponse> {
     return response;
   } catch {
     try {
-      return redirect(
-        `/classroom/login?issue=unavailable${returnUrl === '/classroom' ? '' : `&returnUrl=${encodeURIComponent(returnUrl)}`}`,
-      );
+      return retryLogin(returnUrl, 'unavailable');
     } catch (error) {
       return errorResponse(error);
     }
@@ -201,9 +208,7 @@ export async function finishGoogle(request: NextRequest): Promise<NextResponse> 
     return response;
   } catch {
     try {
-      const response = redirect(
-        `/classroom/login?issue=expired${returnUrl === '/classroom' ? '' : `&returnUrl=${encodeURIComponent(returnUrl)}`}`,
-      );
+      const response = retryLogin(returnUrl, 'expired');
       setCookie(response, LOGIN_COOKIE, null);
       return response;
     } catch (error) {
