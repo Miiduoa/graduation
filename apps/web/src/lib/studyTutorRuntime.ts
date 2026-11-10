@@ -91,7 +91,12 @@ function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
   if (!explanation.steps) return false;
   const seen = new Set<string>();
   for (const step of explanation.steps) {
-    const content = step.explanation.normalize('NFC').replace(/\s+/gu, ' ').trim();
+    const content = step.explanation.normalize('NFC')
+      // Soft hyphen, zero-width space and word joiner are invisible in the
+      // student's explanation. Do not count them as a second teaching step.
+      // Keep ZWJ/ZWNJ: they can change real script and emoji semantics.
+      .replace(/[\u00ad\u200b\u2060\ufeff]/gu, '')
+      .replace(/\s+/gu, ' ').trim();
     if (seen.has(content)) return false;
     seen.add(content);
   }

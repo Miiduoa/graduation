@@ -371,6 +371,40 @@ describe('explicit local study generation', () => {
     await expect(retry).resolves.toEqual(lesson());
   });
 
+  it('rejects invisible Unicode changes that disguise a duplicate lesson step', async () => {
+    const original = lesson().steps![0];
+    const duplicated = {
+      ...lesson(),
+      steps: [
+        original,
+        {
+          ...lesson().steps![1],
+          title: '只加了不可見字元的第二步',
+          explanation: '辨\u200b識唯一的紀錄。',
+        },
+      ],
+    };
+    // The saved-lesson parser remains backward compatible; only freshly
+    // generated worker replies must have distinct visible teaching content.
+    const saved = parseTutorExplanation(JSON.stringify(duplicated), passage());
+    expect(saved.steps).toHaveLength(2);
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(duplicated) });
+    await expect(pending).rejects.toThrow('重複相同的教學步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
   it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
     const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
     const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };
