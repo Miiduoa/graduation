@@ -141,6 +141,10 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   const response = await fetch(url, {
     signal,
     cache: 'no-store',
+    // Do not follow redirects from the fixed public Overpass origin. A 3xx
+    // pointing at a different host (including a private network) must fail
+    // rather than turn this server-side fetch into an SSRF request.
+    redirect: 'error',
     headers: {
       Accept: 'application/json',
       // Identify this service to the public Overpass instance per its usage policy.
