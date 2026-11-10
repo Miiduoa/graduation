@@ -184,6 +184,10 @@ async function invokeHostedCallable(
     const { createLeaveRequestHandlers } = await import('./leaveRequestHandlers');
     return createLeaveRequestHandlers({ db: db as never })[name](request);
   }
+  if (name === 'ensureCampusStoryBinding') {
+    const { createCampusStoryBindingHandler } = await import('./campusStoryBindingHandler');
+    return createCampusStoryBindingHandler(db)(request);
+  }
   throw new HttpsError('not-found', `Unknown function: ${name}`);
 }
 

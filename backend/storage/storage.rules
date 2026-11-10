@@ -225,12 +225,19 @@ service firebase.storage {
     }
 
     match /schools/{schoolId}/stories/{storyId}/{fileName} {
-      function activeStoryMember() {
-        // Membership plus the campusStories document already use the two
-        // Firestore lookups Storage rules allow, so this path cannot also
-        // require a canonical user profile on the same request.
+      function storyAccountBoundToSchool() {
+        // Production Storage allows two unique Firestore documents per
+        // request. This match reads members/{uid} and campusStories only.
+        // Both profileBoundSchoolId and a non-empty profileBoundGeneration
+        // are server-stamped on school login. Clients cannot write school
+        // members. Server delete/suspend clears the stamp in the same
+        // transaction; triggers are backup only.
+        let member = firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data;
         return isAuthenticated()
-          && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
+          && member.status == 'active'
+          && member.get('profileBoundSchoolId', '') == schoolId
+          && member.get('profileBoundGeneration', '') is string
+          && member.get('profileBoundGeneration', '').size() > 0;
       }
       function isPublishedStory() {
         let story = firestore.get(/databases/(default)/documents/campusStories/$(storyId)).data;
@@ -240,9 +247,9 @@ service firebase.storage {
           // Story expiry is stored as epoch milliseconds by the mobile publisher.
           && story.expiresAt is int && story.expiresAt > request.time.toMillis()
           && ((story.kind == 'image' && resource.contentType.matches('image/.*'))
-            || (story.kind == 'video' && resource.contentType.matches('video/.*')));
+            || (story.kind == 'video' && fileName == 'video' && resource.contentType == 'video/mp4'));
       }
-      allow get: if activeStoryMember()
+      allow get: if storyAccountBoundToSchool()
         && (
           // Before publication only the author can preview a draft. Once the
           // story exists, all readers (including its author) use the published
@@ -252,11 +259,13 @@ service firebase.storage {
           || isPublishedStory()
         );
       // Draft uploads may be retried until their Firestore story is published.
-      allow create, update: if activeStoryMember()
+      allow create, update: if storyAccountBoundToSchool()
         && request.resource.metadata.ownerUid == request.auth.uid
         && (resource == null || resource.metadata.ownerUid == request.auth.uid)
         && !firestore.exists(/databases/(default)/documents/campusStories/$(storyId))
-        && (isValidImage() && maxSize(10) || isValidVideo() && maxSize(100));
+        && request.resource.size > 0
+        && ((fileName == 'image' && isValidImage() && maxSize(10))
+          || (fileName == 'video' && request.resource.contentType == 'video/mp4' && maxSize(100)));
     }
 
     match /conversations/{conversationId}/media/{uploadId}/{fileName} {

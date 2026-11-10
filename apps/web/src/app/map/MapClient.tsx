@@ -3,9 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useLocationHash } from '@/lib/useLocationHash';
 import MapCanvas from './MapCanvas';
 import CampusSpatialExplorer from './CampusSpatialExplorer';
+import {
+  clearDeviceMapFavorites,
+  deviceMapFavoritesKey,
+  readDeviceMapFavorites,
+  setDeviceMapFavorite,
+} from './deviceMapFavorites';
 import {
   loadMapFavorites,
   loadMapLocations,
@@ -45,6 +52,13 @@ type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> 
 
 export default function MapClient(props: MapProps) {
   const { user, loading, error } = useAuth();
+  const platform = useOptionalNuniSession();
+  const uid = !loading && !error ? user?.uid : undefined;
+  const platformAccountId =
+    !uid && platform?.session && !platform.loading && !platform.error && !platform.pendingLogout
+      ? platform.session.platformAccountId
+      : undefined;
+  const authLoading = !uid && !platformAccountId && (loading || Boolean(platform?.loading));
   return (
     <MapContent
       key={JSON.stringify([
@@ -52,13 +66,16 @@ export default function MapClient(props: MapProps) {
         props.route,
         props.focus,
         normalizeCampusClassroomQuery(props.query),
-        user?.uid,
-        loading,
+        uid,
+        platformAccountId,
+        platformAccountId ? platform?.session?.context : undefined,
+        authLoading,
         Boolean(error),
       ])}
       {...props}
-      uid={!loading && !error ? user?.uid : undefined}
-      authLoading={loading}
+      uid={uid}
+      platformAccountId={platformAccountId}
+      authLoading={authLoading}
     />
   );
 }
@@ -70,11 +87,14 @@ function MapContent({
   focus,
   query,
   uid,
+  platformAccountId,
   authLoading,
 }: MapProps & {
   uid?: string;
+  platformAccountId?: string;
   authLoading: boolean;
 }) {
+  const canFavorite = Boolean(uid || platformAccountId);
   const hash = useLocationHash();
   const fallbackMapUrl = buildCampusMapSearchUrl(schoolName);
   const officialMapUrl = getOfficialCampusMapUrl(school);
@@ -156,19 +176,40 @@ function MapContent({
   }, []);
 
   useEffect(() => {
-    if (!uid) return;
-    const generation = ++favoriteGeneration.current;
-    void loadMapFavorites(uid, school).then(
-      (ids) => {
-        if (mounted.current && generation === favoriteGeneration.current)
-          setFavorites({ status: 'ready', ids: new Set(ids) });
-      },
-      () => {
-        if (mounted.current && generation === favoriteGeneration.current)
-          setFavorites({ status: 'error', ids: new Set() });
-      },
-    );
-  }, [uid, school, favoriteAttempt]);
+    if (!uid && !platformAccountId) return;
+    function reload() {
+      const generation = ++favoriteGeneration.current;
+      setFavorites({ status: 'loading', ids: new Set() });
+      void Promise.resolve()
+        .then(() => uid
+          ? loadMapFavorites(uid, school)
+          : readDeviceMapFavorites(platformAccountId!, school))
+        .then(
+          (ids) => {
+            if (mounted.current && generation === favoriteGeneration.current)
+              setFavorites({ status: 'ready', ids: new Set(ids) });
+          },
+          () => {
+            if (mounted.current && generation === favoriteGeneration.current)
+              setFavorites({ status: 'error', ids: new Set() });
+          },
+        );
+    }
+    reload();
+    if (!platformAccountId) return;
+    let key: string;
+    try {
+      key = deviceMapFavoritesKey(platformAccountId, school);
+    } catch {
+      // The read above presents an invalid scope as a recoverable favorites error.
+      return;
+    }
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith(key)) reload();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [uid, platformAccountId, school, favoriteAttempt]);
 
   const categories = useMemo(
     () => ['全部', ...new Set(locations.map((location) => location.category))],
@@ -185,7 +226,7 @@ function MapContent({
       (location) =>
         (category === '全部' || location.category === category) &&
         (locationMatchesSearch(location, search) || classroomIds.has(location.id)) &&
-        (!onlyFavorites || favorites.status !== 'ready' || favorites.ids.has(location.id)) &&
+        (!onlyFavorites || (favorites.status === 'ready' && favorites.ids.has(location.id))) &&
         (!nearbyOnly || !myLocation || distanceMeters(myLocation, location) <= 1000),
     );
     if (myLocation)
@@ -205,7 +246,9 @@ function MapContent({
   if (returnFocus) returnParams.set('focus', returnFocus);
   const returnQuery = normalizeCampusClassroomQuery(search);
   if (returnQuery) returnParams.set('query', returnQuery);
-  const schoolLoginHref = `/login?reconnect=school&returnUrl=${encodeURIComponent(`/map?${returnParams}${hash}`)}`;
+  const returnUrl = encodeURIComponent(`/map?${returnParams}${hash}`);
+  const platformLoginHref = `/login?returnUrl=${returnUrl}`;
+  const schoolLoginHref = `/login?reconnect=school&returnUrl=${returnUrl}`;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
     if (!ids || ids.length !== 2 || ids[0] === ids[1]) return null;
@@ -267,18 +310,23 @@ function MapContent({
   }
 
   async function toggleFavorite(location: MapLocation) {
-    if (!uid || favorites.status !== 'ready' || writing.current) return;
+    if (!canFavorite || favorites.status !== 'ready' || writing.current) return;
     writing.current = true;
     setPending(location.id);
     setNotice('');
     const saved = !favorites.ids.has(location.id);
     try {
-      await setMapFavorite(uid, school, location, saved, () => mounted.current);
+      const deviceIds = platformAccountId
+        ? await setDeviceMapFavorite(platformAccountId, school, location.id, saved, () => mounted.current)
+        : undefined;
+      if (uid) await setMapFavorite(uid, school, location, saved, () => mounted.current);
       if (!mounted.current) return;
       setFavorites((previous) => {
-        const ids = new Set(previous.ids);
-        if (saved) ids.add(location.id);
-        else ids.delete(location.id);
+        const ids = new Set(deviceIds ?? previous.ids);
+        if (!deviceIds) {
+          if (saved) ids.add(location.id);
+          else ids.delete(location.id);
+        }
         return { status: 'ready', ids };
       });
       setNotice(saved ? `已收藏「${location.name}」` : `已取消收藏「${location.name}」`);
@@ -287,6 +335,28 @@ function MapContent({
       // A lost response is not proof that the write failed. Reload before another change.
       setFavorites({ status: 'error', ids: new Set() });
       setNotice('無法確認收藏結果，請重新讀取收藏後再試。');
+    } finally {
+      writing.current = false;
+      if (mounted.current) setPending(null);
+    }
+  }
+
+  async function clearDeviceFavorites() {
+    if (!platformAccountId || writing.current) return;
+    if (!window.confirm(`清除此 Google 帳號在這個瀏覽器的${schoolName ?? '本校'}地點收藏？`)) return;
+    writing.current = true;
+    setPending('clear');
+    setNotice('');
+    try {
+      await clearDeviceMapFavorites(platformAccountId, school, () => mounted.current);
+      if (!mounted.current) return;
+      setFavorites({ status: 'ready', ids: new Set() });
+      setOnlyFavorites(false);
+      setNotice('已清除此裝置的本校地點收藏。');
+    } catch {
+      if (!mounted.current) return;
+      setFavorites({ status: 'error', ids: new Set() });
+      setNotice('無法清除收藏，請確認瀏覽器允許儲存資料後再試。');
     } finally {
       writing.current = false;
       if (mounted.current) setPending(null);
@@ -541,7 +611,7 @@ function MapContent({
         >
           附近 1 公里
         </button>
-        {uid && (
+        {canFavorite && (
           <button
             className="btn"
             aria-pressed={onlyFavorites}
@@ -657,17 +727,31 @@ function MapContent({
           <h2>
             地點列表 <span>{filtered.length} 個</span>
           </h2>
-          {!uid && !authLoading && <Link href={schoolLoginHref}>連線學校帳號以收藏</Link>}
+          {!canFavorite && !authLoading && <Link href={platformLoginHref}>用 Google 帳號收藏</Link>}
         </div>
-        {!uid && !authLoading && (
-          <p className={styles.note}>地圖與導航不需登入；收藏尚未支援 Google 帳號。</p>
+        {!canFavorite && !authLoading && (
+          <p className={styles.note}>
+            地圖與導航不需登入；登入 Google 後可在此裝置收藏地點。
+            {' '}<Link href={schoolLoginHref}>查看學校帳號的既有收藏</Link>
+          </p>
         )}
-        {uid && favorites.status === 'loading' && (
+        {platformAccountId && (
+          <div className={styles.note}>
+            <p>Google 帳號的地點收藏保存在此裝置的瀏覽器，依帳號與學校分開；換裝置不會自動同步。</p>
+            {(favorites.ids.size > 0 || favorites.status === 'error') && (
+              <button className="btn" disabled={Boolean(pending)} onClick={() => void clearDeviceFavorites()}>
+                清除此裝置的本校收藏
+              </button>
+            )}
+          </div>
+        )}
+        {uid && <p className={styles.note}>目前使用學校帳號的雲端收藏。</p>}
+        {(authLoading || (canFavorite && favorites.status === 'loading')) && (
           <p role="status" className={styles.note}>
             正在讀取收藏…
           </p>
         )}
-        {uid && favorites.status === 'error' && (
+        {canFavorite && favorites.status === 'error' && (
           <div className={styles.notice} role="alert">
             <p>收藏狀態目前無法確認。</p>
             <button
@@ -731,7 +815,7 @@ function MapContent({
                     <span className={styles.description}>{location.description}</span>
                   )}
                 </button>
-                {uid && (
+                {canFavorite && (
                   <button
                     className={styles.favorite}
                     aria-label={`${favorites.ids.has(location.id) ? '取消收藏' : '收藏'}${location.name}`}

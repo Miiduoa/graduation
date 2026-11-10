@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ASSISTANT_CALENDAR_BATCH_MAX_BYTES, ASSISTANT_CALENDAR_BATCH_MAX_PLANS,
+  ASSISTANT_CALENDAR_COURSE_IDENTITY_MAX_LENGTH,
   AssistantCalendarBatchError, assistantCalendarBatchStorageKey, cancelAssistantCalendarBatchPlan,
-  readAssistantCalendarBatchPlans, saveAssistantCalendarBatchPlan, type AssistantCalendarBatchPlan,
+  parseAssistantCalendarBatchPlan, readAssistantCalendarBatchPlans, saveAssistantCalendarBatchPlan,
+  type AssistantCalendarBatchPlan, type AssistantCalendarBatchStepSource,
 } from '../services/assistantCalendarBatchStore';
 
 const originalGet = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
@@ -225,4 +227,141 @@ test.each(['read', 'write'] as const)('a stalled native %s is bounded and retain
   await flush();
   expect(await readAssistantCalendarBatchPlans(scope, () => true)).toHaveLength(phase === 'write' ? 1 : 0);
   if (phase === 'read') expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+describe('source-bound coursework previews', () => {
+  const uuid = (value: number) => `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`;
+  const accountId = `pa_${uuid(1)}`;
+  const sourceScope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
+  const sourceKey = assistantCalendarBatchStorageKey(sourceScope);
+  const coursework = (): AssistantCalendarBatchPlan => ({
+    ...plan(), ...sourceScope, id: 'acb_coursework_first', kind: 'coursework-study',
+    steps: plan().steps.map((step, index) => ({
+      ...step, id: `acs_coursework_first_${index + 1}`,
+      source: {
+        kind: 'nuni-assignment',
+        locator: { accountId, schoolId: 'pu', academicYear: '115', semester: '1',
+          workspaceId: `cw_${uuid(1)}`, assignmentId: `cwa_${uuid(index + 1)}` },
+        expected: { title: ` 作業 ${index + 1} `, courseName: '資料庫', dueAt: '2099-01-05T18:00:00+08:00',
+          courseIdentity: '{"title":"資料庫","academicYear":"115","semester":"1"}' },
+      },
+    })),
+  });
+  const omit = (value: object, ...fields: string[]) =>
+    Object.fromEntries(Object.entries(value).filter(([field]) => !fields.includes(field)));
+  const replaceSource = (value: AssistantCalendarBatchPlan, source: unknown) => ({
+    ...value, steps: value.steps.map((step, index) => index ? step : { ...step, source }),
+  });
+
+  test('roundtrip and cancellation preserve every immutable locator and reviewed fingerprint without persisting operation authority', async () => {
+    const original = coursework();
+    const saved = await saveAssistantCalendarBatchPlan(original, () => true);
+    const restored = (await readAssistantCalendarBatchPlans(sourceScope, () => true))[0];
+    expect(saved).toEqual(original);
+    expect(restored).toEqual(original);
+    for (const step of restored.steps) {
+      expect(Object.isFrozen(step)).toBe(true);
+      expect(Object.isFrozen(step.source)).toBe(true);
+      expect(Object.isFrozen(step.source!.locator)).toBe(true);
+      expect(Object.isFrozen(step.source!.expected)).toBe(true);
+    }
+    const cancelled = await cancelAssistantCalendarBatchPlan(saved.id, sourceScope, () => true);
+    expect(cancelled).toEqual({ ...original, cancelledAt: expect.any(String) });
+    const raw = (await originalGet(sourceKey))!;
+    expect(JSON.parse(raw)).toEqual({ version: 1, ...sourceScope, plans: [cancelled] });
+    expect(raw).not.toMatch(/mutationId|receipt|attemptedAt|authorization|sessionContext|rawText/);
+    expect(jest.mocked(AsyncStorage.setItem).mock.calls.every(([storageKey]) => storageKey === sourceKey)).toBe(true);
+  });
+
+  const invalidSources: readonly [string, (source: AssistantCalendarBatchStepSource) => unknown][] = [
+    ['missing locator', (source) => omit(source, 'locator')],
+    ['missing expected fingerprint', (source) => ({ ...source, expected: omit(source.expected, 'courseIdentity') })],
+    ['other account', (source) => ({ ...source, locator: { ...source.locator, accountId: `pa_${uuid(2)}` } })],
+    ['other school', (source) => ({ ...source, locator: { ...source.locator, schoolId: 'nthu' } })],
+    ['school alias', (source) => ({ ...source, locator: { ...source.locator, schoolId: 'providence' } })],
+    ['noncanonical year', (source) => ({ ...source, locator: { ...source.locator, academicYear: '0115' } })],
+    ['noncanonical semester', (source) => ({ ...source, locator: { ...source.locator, semester: '01' } })],
+    ['wrong workspace kind', (source) => ({ ...source, locator: { ...source.locator, workspaceId: `cwa_${uuid(1)}` } })],
+    ['wrong assignment kind', (source) => ({ ...source, locator: { ...source.locator, assignmentId: `cw_${uuid(1)}` } })],
+    ['missing due offset', (source) => ({ ...source, expected: { ...source.expected, dueAt: '2099-01-05T18:00:00' } })],
+    ['impossible due date', (source) => ({ ...source, expected: { ...source.expected, dueAt: '2099-02-30T18:00:00+08:00' } })],
+    ['overlong title', (source) => ({ ...source, expected: { ...source.expected, title: '學'.repeat(201) } })],
+    ['overlong course name', (source) => ({ ...source, expected: { ...source.expected, courseName: '課'.repeat(201) } })],
+    ['control character', (source) => ({ ...source, expected: { ...source.expected, title: '作業\u202e內容' } })],
+    ['malformed UTF-16', (source) => ({ ...source, expected: { ...source.expected, courseName: '\ud800' } })],
+    ['empty fingerprint', (source) => ({ ...source, expected: { ...source.expected, courseIdentity: ' ' } })],
+    ['padded fingerprint', (source) => ({ ...source, expected: { ...source.expected, courseIdentity: ' reviewed ' } })],
+    ['oversized fingerprint', (source) => ({ ...source, expected: { ...source.expected,
+      courseIdentity: 'x'.repeat(ASSISTANT_CALENDAR_COURSE_IDENTITY_MAX_LENGTH + 1) } })],
+    ['private read payload', (source) => ({ ...source, coursework: { rawText: 'private course content' } })],
+  ];
+  test.each(invalidSources)('%s fails closed before a plan can be persisted', (_name, change) => {
+    const original = coursework();
+    const candidate = replaceSource(original, change(original.steps[0].source!));
+    expect(() => parseAssistantCalendarBatchPlan(candidate)).toThrow(AssistantCalendarBatchError);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  test('missing sources or source mode cannot turn a damaged saved preview into a generic writable plan', async () => {
+    const original = coursework();
+    const candidates = [
+      { ...original, steps: original.steps.map((step, index) => index ? step : omit(step, 'source')) },
+      omit(original, 'kind'),
+      { ...omit(original, 'kind'), steps: original.steps.map((step) => omit(step, 'source')) },
+      { ...original, id: 'generic_plan_replacement' },
+      { ...original, steps: original.steps.map((step, index) => index ? step : { ...step, id: 'generic_step_replacement' }) },
+      { ...original, owner: scope.owner },
+      { ...plan(), steps: plan().steps.map((step, index) => ({ ...step, source: original.steps[index].source })) },
+    ];
+    for (const candidate of candidates) {
+      expect(() => parseAssistantCalendarBatchPlan(candidate)).toThrow(AssistantCalendarBatchError);
+      const raw = JSON.stringify({ version: 1, ...sourceScope, plans: [candidate] });
+      await originalSet(sourceKey, raw);
+      jest.clearAllMocks();
+      await expect(readAssistantCalendarBatchPlans(sourceScope, () => true)).rejects.toMatchObject({ code: 'batch-corrupt' });
+      await expect(saveAssistantCalendarBatchPlan(original, () => true)).rejects.toMatchObject({ code: 'batch-corrupt' });
+      expect(await originalGet(sourceKey)).toBe(raw);
+      expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+    }
+  });
+
+  test('the same assignment cannot masquerade as two sources through different step IDs or terms', () => {
+    const original = coursework();
+    const candidate = { ...original, steps: original.steps.map((step, index) => !index ? step : {
+      ...step, source: { ...step.source!, locator: { ...original.steps[0].source!.locator, semester: '2' } },
+    }) };
+    expect(() => parseAssistantCalendarBatchPlan(candidate)).toThrow(AssistantCalendarBatchError);
+    const sparse = [...original.steps];
+    delete sparse[1];
+    expect(() => parseAssistantCalendarBatchPlan({ ...original, steps: sparse })).toThrow(AssistantCalendarBatchError);
+  });
+
+  test('source getters are rejected without reading private payloads', () => {
+    const original = coursework();
+    const getter = jest.fn(() => original.steps[0].source!.expected);
+    const source = { ...original.steps[0].source! };
+    Object.defineProperty(source, 'expected', { enumerable: true, get: getter });
+    expect(() => parseAssistantCalendarBatchPlan(replaceSource(original, source))).toThrow(AssistantCalendarBatchError);
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  test('matching source data reuses one preview while equal events with another source or fingerprint cannot claim it', async () => {
+    const original = coursework();
+    await saveAssistantCalendarBatchPlan(original, () => true);
+    const copy = copyWithOtherIds(original);
+    expect(await saveAssistantCalendarBatchPlan(copy, () => true)).toEqual(original);
+    const firstSource = copy.steps[0].source!;
+    const changes = [
+      replaceSource(copy, { ...firstSource, locator: { ...firstSource.locator, assignmentId: `cwa_${uuid(99)}` } }),
+      replaceSource(copy, { ...firstSource, expected: { ...firstSource.expected, title: '重新命名的作業' } }),
+      replaceSource(copy, { ...firstSource, expected: { ...firstSource.expected, courseIdentity: '{"title":"另一門課"}' } }),
+      { ...plan(), ...sourceScope },
+    ];
+    for (const candidate of changes) {
+      const parsed = parseAssistantCalendarBatchPlan(candidate);
+      await expect(saveAssistantCalendarBatchPlan(parsed, () => true)).rejects.toMatchObject({ code: 'batch-conflict' });
+    }
+    expect(await readAssistantCalendarBatchPlans(sourceScope, () => true)).toEqual([original]);
+    expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  });
 });

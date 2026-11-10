@@ -44,8 +44,11 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
+  // These directory entries have not been added to the shared Web/native voice
+  // navigation contract. Publishing a Web service does not create a native route
+  // or authorize an authenticated action through speech.
   expect(serviceRoutes.filter(href => !shortcutSet.has(href)).sort()).toEqual([
-    '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms',
+    '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms', '/social',
   ]);
 });
 

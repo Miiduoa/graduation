@@ -207,6 +207,7 @@ const linkingBase: LinkingOptions<RootTabParamList> = {
           Health: 'health',
           PrintService: 'print',
           LostFound: 'lost-found',
+          PlatformLostFound: 'platform-lost-found/:id?',
           LostFoundDetail: 'lost-found/:id',
           LostFoundPost: 'lost-found/post',
           Payment: 'payment',

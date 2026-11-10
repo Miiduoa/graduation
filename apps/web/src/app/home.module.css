@@ -1415,4 +1415,109 @@
 
 .sourceStatus p {
   margin: 4px 0;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+}
+
+.sourceStatus .loadedStatus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+
+.todayPage {
+  --bg: #ffffff;
+  --bg-soft: #f7f7f8;
+  --surface: #ffffff;
+  --panel: #f5f6f7;
+  --text: #242629;
+  --muted: #686b70;
+  --muted-light: #75777b;
+  --border: #e7e8ea;
+  --border-strong: #bfc3c6;
+  --accent-soft: #f0f4f1;
+}
+
+.todayPage .main {
+  max-width: 1008px;
+  padding-top: 32px;
+}
+
+.siteInformation {
+  margin-top: 32px;
+  color: var(--muted);
+  font-size: var(--font-body-sm-size);
+}
+
+.siteInformation > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 44px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.siteInformation > summary::-webkit-details-marker {
+  display: none;
+}
+
+.siteInformation > summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  transform: rotate(45deg);
+  margin-bottom: 3px;
+}
+
+.siteInformation[open] > summary::after {
+  transform: rotate(225deg);
+  margin-bottom: -3px;
+}
+
+.siteInformation .footer {
+  margin-top: 0;
+  padding-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .todayPage .main {
+    padding-top: 24px;
+  }
+}
+
+:global(:root[data-theme='dark']) .todayPage {
+  --bg: #080809;
+  --bg-soft: #101012;
+  --surface: #101012;
+  --panel: #18181b;
+  --text: #ededee;
+  --muted: #a0a0a6;
+  --muted-light: #939399;
+  --border: #29292c;
+  --border-strong: #4d4d53;
+  --accent-soft: #1b2420;
+}
+
+@media (prefers-color-scheme: dark) {
+  :global(:root:not([data-theme='light'])) .todayPage {
+    --bg: #080809;
+    --bg-soft: #101012;
+    --surface: #101012;
+    --panel: #18181b;
+    --text: #ededee;
+    --muted: #a0a0a6;
+    --muted-light: #939399;
+    --border: #29292c;
+    --border-strong: #4d4d53;
+    --accent-soft: #1b2420;
+  }
 }
