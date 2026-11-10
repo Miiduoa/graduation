@@ -115,11 +115,23 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       if (finish()) setError('朗讀未能完成，可繼續閱讀文字。');
     };
     setError('');
-    setSpeaking(true);
-    onSpeakingChange?.(true);
-    try { window.speechSynthesis.speak(utterance); }
-    catch {
-      if (stop()) setError('目前無法朗讀，可繼續閱讀文字。');
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      // A synchronous start failure must not depend on cancel(): browsers can
+      // reject both calls, leaving a false "停止朗讀" state that blocks retry.
+      if (active.current === utterance) active.current = null;
+      utterance.onend = null;
+      utterance.onerror = null;
+      setSpeaking(false);
+      onSpeakingChange?.(false);
+      setError('目前無法朗讀，可繼續閱讀文字。');
+      return;
+    }
+    // Some engines can call onend synchronously; do not resurrect ended speech.
+    if (active.current === utterance) {
+      setSpeaking(true);
+      onSpeakingChange?.(true);
     }
   }
 

@@ -279,3 +279,46 @@ it('preserves the selected Chinese narration pace when a new teaching step remou
   expect((speak.mock.calls[2][0] as Utterance).voice).toBe(local);
   expect(cancel).not.toHaveBeenCalled();
 });
+
+it('allows retry after speak rejects synchronously without calling cancel', () => {
+  const changed = vi.fn();
+  render(<StudyReadAloud text="學生本機講義" onSpeakingChange={changed} />);
+  speak.mockImplementationOnce(() => { throw new Error('private speech engine diagnostic'); });
+
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }))).not.toThrow();
+  expect(screen.getByRole('status').textContent).toContain('目前無法朗讀');
+  expect(screen.getByRole('status').textContent).not.toContain('private speech engine diagnostic');
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(changed).not.toHaveBeenCalledWith(true);
+  expect(cancel).not.toHaveBeenCalled();
+  const rejected = speak.mock.calls[0][0] as Utterance;
+  expect(rejected.onend).toBeNull();
+  expect(rejected.onerror).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(2);
+  const restarted = speak.mock.calls[1][0] as Utterance;
+  expect(restarted.voice).toBe(local);
+  expect(restarted.text).toBe('學生本機講義');
+  expect(changed).toHaveBeenLastCalledWith(true);
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('does not re-enter speaking state when an engine ends immediately inside speak', () => {
+  const changed = vi.fn();
+  speak.mockImplementationOnce((utterance: Utterance) => utterance.onend?.());
+  render(<StudyReadAloud text="很短的原文" onSpeakingChange={changed} />);
+
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(changed).not.toHaveBeenCalledWith(true);
+  expect(cancel).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(2);
+  expect(changed).toHaveBeenLastCalledWith(true);
+});
