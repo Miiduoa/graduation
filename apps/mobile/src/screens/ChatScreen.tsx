@@ -582,7 +582,8 @@ export function ChatScreen(props: any) {
         if (snapshot.metadata.fromCache) {
           // Cache can restore historical text, but cannot acknowledge sends or
           // replace already loaded rows (including with an empty cache result).
-          if (!snapshot.metadata.hasPendingWrites && readableTextScopeRef.current === sendScope && !receivedServerMessages) {
+          // A pending row must not suppress other confirmed cached history.
+          if (readableTextScopeRef.current === sendScope && !receivedServerMessages) {
             const cachedRows = snapshot.docs
               .filter((entry) => !entry.metadata.hasPendingWrites)
               .map((entry) => ({ ...(entry.data() as any), id: entry.id, cacheOnly: true }) as Msg)

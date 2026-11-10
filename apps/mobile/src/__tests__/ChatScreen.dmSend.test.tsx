@@ -142,7 +142,7 @@ function emitMessages(
   )?.[1];
   if (!handler) throw new Error('missing messages snapshot handler');
   handler({
-    metadata: { fromCache, hasPendingWrites: false },
+    metadata: { fromCache, hasPendingWrites: docs.some((row) => row.hasPendingWrites) },
     docs: docs.map((row) => ({
       id: row.id,
       data: () => row.data,
@@ -984,9 +984,11 @@ test.each([false, true])('peer entry reads cached history after prepare fails wi
   await act(async () => emitMessages([
     { id: 'history', data: { senderId: 'bob', type: 'text', content: 'peer 離線歷史文字', readBy: [] } },
     { id: 'mine', data: { senderId: 'alice', type: 'text', content: 'peer 我的歷史文字', readBy: ['bob'] } },
+    { id: 'pending', hasPendingWrites: true, data: { senderId: 'alice', content: 'peer 尚未確認的文字' } },
   ], true));
   expect(view.getByText('peer 離線歷史文字')).toBeTruthy();
   expect(view.getByText('peer 我的歷史文字')).toBeTruthy();
+  expect(view.queryByText('peer 尚未確認的文字')).toBeNull();
   expect(view.queryByText('已送達')).toBeNull();
   expect(view.queryByText('已讀')).toBeNull();
   expect(updateDoc).not.toHaveBeenCalled();

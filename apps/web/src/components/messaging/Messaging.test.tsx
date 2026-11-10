@@ -14,6 +14,9 @@ import {
   watchConversationContents,
   watchAccountNotifications,
   sendPrivateMessage,
+  sendPreparedPrivateMessage,
+  watchNewPrivateConversation,
+  type PreparedPrivateConversation,
   newPrivateMessageId,
   markConversationRead,
   togglePrivateMessageReaction,
@@ -40,6 +43,8 @@ vi.mock('@/lib/privateMessages', async (original) => {
     watchConversationContents: vi.fn(),
     watchAccountNotifications: vi.fn(),
     sendPrivateMessage: vi.fn(),
+    sendPreparedPrivateMessage: vi.fn(),
+    watchNewPrivateConversation: vi.fn(),
     newPrivateMessageId: vi.fn(),
     markConversationRead: vi.fn(),
     togglePrivateMessageReaction: vi.fn(),
@@ -110,7 +115,7 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
-function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string }) {
+function Chat({ id = 'opaque_conversation_id_with_underscores', prepared }: { id?: string; prepared?: PreparedPrivateConversation }) {
   return (
     <MessagingShell title="訊息">
       {(session) => (
@@ -118,6 +123,7 @@ function Chat({ id = 'opaque_conversation_id_with_underscores' }: { id?: string 
           key={`${session.uid}:${session.schoolId}:${id}`}
           session={session}
           conversationId={id}
+          prepared={prepared}
         />
       )}
     </MessagingShell>
@@ -146,6 +152,11 @@ beforeEach(() => {
   });
   vi.mocked(newPrivateMessageId).mockReturnValue('request-id');
   vi.mocked(sendPrivateMessage).mockResolvedValue();
+  vi.mocked(sendPreparedPrivateMessage).mockResolvedValue();
+  vi.mocked(watchNewPrivateConversation).mockImplementation((_session, _prepared, receive) => {
+    receive(contents());
+    return vi.fn();
+  });
   vi.mocked(markConversationRead).mockResolvedValue();
   vi.mocked(togglePrivateMessageReaction).mockResolvedValue();
   vi.mocked(markAccountNotificationRead).mockResolvedValue();
@@ -946,5 +957,28 @@ it('closes a visible photo on pagehide and ignores old reads after hiding and re
     expect(screen.queryByRole('img')).toBeNull();
   } finally {
     visibility.mockRestore();
+  }
+});
+
+it.each([undefined, true, false])('routes UI text sends through the member flow only for established conversations (exists=%s)', async (exists) => {
+  const prepared = exists === undefined ? undefined : {
+    conversationId: 'dm_pu_alice_bob', peerUid: 'bob', peerName: null, exists,
+  };
+  // An existing thread may be returned by prepare's fallback after the peer transfers schools.
+  render(<Chat id="dm_pu_alice_bob" prepared={prepared} />);
+  await screen.findByText('伺服器的訊息');
+  fireEvent.change(screen.getByLabelText('訊息內容'), { target: { value: '繼續對話' } });
+  fireEvent.click(screen.getByRole('button', { name: '傳送訊息' }));
+  await waitFor(() => expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).value).toBe(''));
+  if (exists === false) {
+    expect(sendPreparedPrivateMessage).toHaveBeenCalledWith(
+      { uid: 'alice', schoolId: 'pu' }, prepared, 'request-id', '繼續對話', expect.any(AbortSignal),
+    );
+    expect(sendPrivateMessage).not.toHaveBeenCalled();
+  } else {
+    expect(sendPrivateMessage).toHaveBeenCalledWith(
+      { uid: 'alice', schoolId: 'pu' }, 'dm_pu_alice_bob', 'request-id', '繼續對話',
+    );
+    expect(sendPreparedPrivateMessage).not.toHaveBeenCalled();
   }
 });

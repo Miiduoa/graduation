@@ -515,7 +515,8 @@ export function PrivateConversationView({
       if (!attempt.current || attempt.current.scope !== viewScope || attempt.current.body !== body)
         attempt.current = { scope: viewScope, id: newPrivateMessageId(conversationId), body, confirmed: false };
       const submission = attempt.current;
-      await (prepared
+      // Existing member conversations remain writable after a peer transfers schools.
+      await (prepared && !established
         ? sendPreparedPrivateMessage(session, prepared, submission.id, body, controller.signal)
         : sendPrivateMessage(session, conversationId, submission.id, body)
       ).catch((error) => {
