@@ -852,3 +852,36 @@ it('frames an explicitly selected short building without zooming out for a diffe
   expect(lastCamera(withTall.renderer).position.length())
     .toBeGreaterThan(lastCamera(shortOnly.renderer).position.length());
 });
+
+
+it('fits an elongated OSM building when its selected POI is near an end', () => {
+  // Synthetic footprint, not a claimed Providence measurement. The old
+  // fixed 140-260 m framing clipped this outline on narrow viewports.
+  const point = model.points[0];
+  const footprintAt = (halfLongitude: number): ProvidenceFootprint => ({
+    poiId: point.id,
+    name: point.name,
+    sourceUrl: 'https://www.openstreetmap.org/way/255784049',
+    outline: [
+      [point.location.lng - 0.00002, point.location.lat - 0.00003],
+      [point.location.lng + halfLongitude, point.location.lat - 0.00003],
+      [point.location.lng + halfLongitude, point.location.lat + 0.00003],
+      [point.location.lng - 0.00002, point.location.lat + 0.00003],
+    ],
+    heightMeters: 12,
+    heightBasis: 'illustrative',
+  });
+  const compact = setup(model, undefined, [footprintAt(0.00004)]);
+  const elongated = setup(model, undefined, [footprintAt(0.0024)]);
+  compact.bounds.width = 320;
+  elongated.bounds.width = 320;
+  for (const resize of observers) resize.callback([], resize as unknown as ResizeObserver);
+  const selectedView = { selectedId: point.id, overhead: false, motion: false, dark: false };
+  compact.scene.setView(selectedView);
+  elongated.scene.setView(selectedView);
+  drawFrame();
+  const poi = new Vector3(point.x, 0, point.z);
+  const compactDistance = lastCamera(compact.renderer).position.distanceTo(poi);
+  const elongatedDistance = lastCamera(elongated.renderer).position.distanceTo(poi);
+  expect(elongatedDistance).toBeGreaterThan(compactDistance * 1.5);
+});
