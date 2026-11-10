@@ -828,7 +828,7 @@ function SettingsContent({
           平台雲端 AI 與校內助理採不同帳號及資料權限。校內助理的寫入動作預設關閉，開啟後仍需每次確認。
         </SectionHeading>
         {assistantEnabled && googlePlatformReady && (
-          <p role="note">Google 平台 AI 的服務開關在「平台權限」。下方寫入動作屬於學校帳號，不會授予平台 AI 校籍、課表或私人訊息權限。</p>
+          <p role="note">Google 平台 AI 會維持開啟，無法透過「平台權限」關閉。下方寫入動作屬於學校帳號，不會授予平台 AI 校籍、課表或私人訊息權限。</p>
         )}
         {!user && googlePlatformReady ? (
           <div className={styles.notice}>

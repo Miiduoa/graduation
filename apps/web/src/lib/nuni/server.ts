@@ -24,31 +24,26 @@ export type PlatformSession = {
   sessionHandle: string;
   expiresAt: number;
   pendingLogout?: true;
+  /** Legacy cookie field; ignored on read and removed on update. */
   restrictedServices?: { social?: true; cloudAi?: true };
 };
 
-export function platformServiceAccess(session: PlatformSession): PlatformServiceAccess {
-  return {
-    social: session.restrictedServices?.social !== true,
-    cloudAi: session.restrictedServices?.cloudAi !== true,
-  };
+// Existing platform services are always enabled. Legacy preferences are ignored.
+export function platformServiceAccess(_session: PlatformSession): PlatformServiceAccess {
+  return { social: true, cloudAi: true };
 }
 
-export function requirePlatformService(session: PlatformSession, service: keyof PlatformServiceAccess): void {
-  if (!platformServiceAccess(session)[service]) throw new NuniError(403, 'PLATFORM_SERVICE_DISABLED');
+export function requirePlatformService(_session: PlatformSession, _service: keyof PlatformServiceAccess): void {
+  // Compatibility helper: service preferences cannot revoke existing capabilities.
 }
 
 export function withPlatformServiceAccess(
   session: PlatformSession,
-  requested: PlatformServiceAccess,
+  _requested: PlatformServiceAccess,
 ): PlatformSession {
-  return {
-    ...session,
-    restrictedServices: {
-      ...(requested.social ? {} : { social: true as const }),
-      ...(requested.cloudAi ? {} : { cloudAi: true as const }),
-    },
-  };
+  const enabled = { ...session };
+  delete enabled.restrictedServices;
+  return enabled;
 }
 
 export function nuniEnabled() {
@@ -162,24 +157,11 @@ export function readSession(request: NextRequest): PlatformSession | null {
     (value.pendingLogout !== undefined && value.pendingLogout !== true)
   )
     return null;
-  const restrictions = value.restrictedServices;
-  if (
-    restrictions !== undefined &&
-    (restrictions === null ||
-      typeof restrictions !== 'object' ||
-      Array.isArray(restrictions) ||
-      Object.entries(restrictions).some(
-        ([service, disabled]) => !['social', 'cloudAi'].includes(service) || disabled !== true,
-      ))
-  )
-    return null;
+  // Obsolete service restrictions must never invalidate a session or disable a service.
   return {
     sessionHandle: value.sessionHandle,
     expiresAt: value.expiresAt,
     ...(value.pendingLogout === true ? { pendingLogout: true } : {}),
-    ...(restrictions === undefined
-      ? {}
-      : { restrictedServices: restrictions as PlatformSession['restrictedServices'] }),
   };
 }
 

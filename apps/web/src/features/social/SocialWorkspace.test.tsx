@@ -238,19 +238,19 @@ it('removes public data and draft after the server rejects the session', async (
   );
 });
 
-it('removes the public feed and unsent text when the server denies social access', async () => {
+it('does not shut down the workspace on an obsolete service error', async () => {
   render(<SocialWorkspace />);
   await screen.findByText(post.text);
-  fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '未發表的草稿內容' } });
+  fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '保留草稿' } });
   mocks.request.mockRejectedValue(new NuniError(403, 'PLATFORM_SERVICE_DISABLED'));
   fireEvent.click(screen.getByRole('button', { name: '更新動態' }));
-  await screen.findByRole('heading', { name: '已關閉公開社群' });
-  expect(screen.queryByText(post.text)).toBeNull();
-  expect(screen.queryByDisplayValue('未發表的草稿內容')).toBeNull();
-  expect(screen.getByRole('link', { name: '管理平台權限' }).getAttribute('href')).toBe('/settings?section=platform');
+  await screen.findByText('目前帳號沒有這項操作的權限。');
+  expect(screen.getByDisplayValue('保留草稿')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '公開發表' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '已關閉公開社群' })).toBeNull();
 });
 
-it('updates the mounted social workspace on a social change from another tab, not an unrelated AI change', async () => {
+it('preserves the workspace and draft when another tab sends legacy service changes', async () => {
   const view = render(<SocialWorkspace />);
   await screen.findByText(post.text);
   fireEvent.change(screen.getByLabelText('貼文內容'), { target: { value: '這次編輯中的草稿' } });
@@ -261,6 +261,6 @@ it('updates the mounted social workspace on a social change from another tab, no
   act(() => window.dispatchEvent(new StorageEvent('storage', {
     key: 'nuni.platform.service-access-changed', newValue: 'social:another-tab',
   })));
-  expect(screen.queryByDisplayValue('這次編輯中的草稿')).toBeNull();
+  expect(screen.getByDisplayValue('這次編輯中的草稿')).toBeTruthy();
   view.unmount();
 });

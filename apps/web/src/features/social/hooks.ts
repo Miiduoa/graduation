@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { sessionLost, socialError, socialRequest, socialRestricted } from './api';
+import { sessionLost, socialError, socialRequest } from './api';
 
 export function useSocialResource<T>(
   path: string,
@@ -9,7 +9,6 @@ export function useSocialResource<T>(
   parse: (value: unknown) => T,
   enabled: boolean,
   onExpired: () => void,
-  onRestricted?: () => void,
 ) {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<{
@@ -31,14 +30,13 @@ export function useSocialResource<T>(
       .catch((error) => {
         if (!live) return;
         if (sessionLost(error)) onExpired();
-        if (socialRestricted(error)) onRestricted?.();
         setState({ path, context, revision, error: socialError(error) });
       });
     return () => {
       live = false;
       controller.abort();
     };
-  }, [path, context, parse, revision, enabled, onExpired, onRestricted]);
+  }, [path, context, parse, revision, enabled, onExpired]);
   const current =
     enabled && state?.path === path && state.context === context && state.revision === revision
       ? state
@@ -55,7 +53,6 @@ export function useSocialMutation(
   context: string,
   enabled: boolean,
   onExpired: () => void,
-  onRestricted?: () => void,
 ) {
   const owner = useMemo(() => ({ context, keys: new Map<string, string>() }), [context]);
   const current = useRef<object | null>(null),
@@ -95,7 +92,6 @@ export function useSocialMutation(
     } catch (error) {
       if (current.current === owner && allowed.current) {
         if (sessionLost(error)) onExpired();
-        if (socialRestricted(error)) onRestricted?.();
         setFailure({ owner, message: socialError(error) });
       }
       return undefined;

@@ -254,6 +254,7 @@ export async function handleNuni(request: NextRequest, segments: string[]): Prom
         typeof input.cloudAi !== 'boolean'
       )
         throw new NuniError(422, 'INVALID_INPUT');
+      if (!input.social || !input.cloudAi) throw new NuniError(422, 'PLATFORM_SERVICE_ALWAYS_ENABLED');
       const updated = withPlatformServiceAccess(session, {
         social: input.social,
         cloudAi: input.cloudAi,

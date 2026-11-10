@@ -1,12 +1,14 @@
-# Google 平台服務權限（Web 工作階段）
+# Google 平台服務權限
 
-此變更在「設定 → 平台權限」新增兩個伺服器端強制執行的 Google 平台服務開關：
+依主人晉瑋 2026-11-10 22:41（台北）「功能不能關」指示，既有公開社群（social）與雲端 AI（cloudAi）預設且持續啟用，無法透過權限設定關閉。
 
-- 公開社群：控制 Web BFF 的 /api/social 讀取、發文及其他操作。
-- 雲端 AI：控制 Web BFF 的 /api/nuni/assistant 新查詢與寫入確認。V2 既有未結案操作的 cancel / reconcile 仍可使用，供撤銷或核對。
+- 設定頁僅說明功能維持開啟、無法關閉，不提供 switch、儲存或樂觀更新。舊跨分頁權限通知不會清除社群草稿或停用功能。
+- `platformServiceAccess` 永遠回傳兩項為 `true`；`requirePlatformService` 不會因服務偏好拒絕既有能力；`withPlatformServiceAccess` 忽略關閉值並移除舊限制。
+- 讀取有效 session cookie 時忽略所有 `restrictedServices` 殘留值，包括缺省、舊格式及無效限制欄位。既有 session 有效期、加密驗證與登出狀態檢查仍適用；不會因舊限制欄位拒絕有效登入。
+- `GET /api/nuni/service-access` 驗證登入後回傳 `{ social: true, cloudAi: true, scope: 'web-session' }`。
+- `POST /api/nuni/service-access` 保留同源、session context、upstream session 與欄位驗證。任一值為 `false` 時回 422 `PLATFORM_SERVICE_ALWAYS_ENABLED`，不寫 cookie；兩項均為 `true` 時可清除 cookie 的舊限制。缺欄位或不合法輸入回 422。
+- 社群讀寫、封鎖、檢舉與 assistant capability、ask 及 V2 操作不受舊服務偏好限制；不再產生設定造成的 403 `PLATFORM_SERVICE_DISABLED`。V2 的既有動作驗證保持適用。
 
-兩個開關在同一個平台 session 的 HttpOnly、SameSite、Secure (production) AES-GCM cookie 保存；server secret 驗證與 upstream session 再確認後才可更新。POST 要求同源、session context、精確兩個布林欄位；更新後再讀取核對，未確認不自動重送。不同登入、瀏覽器或手機端不共用此資料。這不是平台帳戶長期偏好，重新登入後會回到現有預設；亦不包含原生手機 BFF。
+Google 帳號不因此取得學校會員、老師、店家或管理員身分；校內私訊仍依學校身分授權。模型資料分享及具體寫入仍需各自確認。此次修改不開啟學號登入或下單開關，也不包含部署。
 
-**不擴張校務身分：** Google 帳號不變成 Firebase UID、學校會員、老師、店家或管理員。既有 /dms 私訊仍為學校登入，平台私訊尚未開發。關閉社群不會刪除既有公開內容，關閉 AI 不會取消已送出而未結案的工作；模型資料分享與具體寫入需另行確認。
-
-驗證需以此分支的精確 head 為準：Web TypeScript、ESLint、Vitest、CI 與 CodeQL。沒有完成真人、實機、原生 App 或正式部署驗收前不可視為全平台上線。
+相關自動化測試覆蓋關閉請求無效、舊 cookie 保持啟用、API 仍到達 upstream、設定頁無關閉控制，以及舊事件不會中斷社群操作。

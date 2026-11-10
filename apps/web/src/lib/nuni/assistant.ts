@@ -1,15 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { NuniError } from '@campus/shared/src/nuni';
-import { boundedJson, jsonResponse, requirePlatformService, requireSameOrigin, requireSession } from './server';
+import { boundedJson, jsonResponse, requireSameOrigin, requireSession } from './server';
 import { assistantInput, projectAssistant } from './assistantContracts';
 import { assistantRequest } from './assistantTransport';
 export async function handleAssistant(request: NextRequest, segments: string[]) {
   if (process.env.CAMPUS_ASSISTANT_ENABLED !== 'true') throw new NuniError(404, 'NOT_FOUND');
   const action = segments[1];
   if (process.env.CAMPUS_ASSISTANT_V2_ENABLED === 'true' && segments.length === 2) {
-    // Allow users to reconcile or withdraw outstanding changes after disabling cloud AI.
-    if (action !== 'cancel' && action !== 'reconcile')
-      requirePlatformService(requireSession(request), 'cloudAi');
     return (await import('./assistantV2/handler')).handleV2(request, action);
   }
   if (
@@ -22,7 +19,6 @@ export async function handleAssistant(request: NextRequest, segments: string[]) 
   if (request.nextUrl.search) throw new NuniError(400, 'INVALID_INPUT');
   if (request.method !== 'GET') requireSameOrigin(request);
   const session = requireSession(request);
-  requirePlatformService(session, 'cloudAi');
   if (action === 'execute' || action === 'enqueue')
     throw new NuniError(403, 'ASSISTANT_WRITE_UNAVAILABLE');
   const input =

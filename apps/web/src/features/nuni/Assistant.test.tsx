@@ -759,15 +759,14 @@ it('v2 renders markdown, assignment rows and food cards without raw paths', asyn
   expect(screen.getByText('確認')).toBeTruthy();
 });
 
-it('explains disabled Google cloud AI access without treating other forbidden responses as user settings', async () => {
+it('handles an obsolete service error as a request failure without offering a disable control', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(
     JSON.stringify({ error: 'PLATFORM_SERVICE_DISABLED' }),
     { status: 403, headers: { 'Content-Type': 'application/json' } },
   )));
   render(<Assistant />);
-  await screen.findByText('雲端 AI 已在「設定 → 平台權限」關閉。');
-  const link = screen.getByRole('link', { name: '管理平台權限' });
-  expect(link.getAttribute('href')).toBe('/settings?section=platform');
+  await screen.findByText('目前無法查詢，請重新選擇或稍後再試。');
+  expect(screen.queryByRole('link', { name: '管理平台權限' })).toBeNull();
 });
 
 it('keeps the next draft typed while a cloud answer is pending', async () => {
