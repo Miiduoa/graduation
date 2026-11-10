@@ -148,6 +148,11 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     },
   });
   if (!response.ok) {
+    // Fetch resolves as soon as headers arrive; error bodies may keep streaming
+    // indefinitely (including 406/429/503 responses from a congested proxy).
+    // We only need status/Retry-After. Release the unused body immediately,
+    // without awaiting cancellation from an uncooperative upstream.
+    if (response.body) void response.body.cancel().catch(() => {});
     // HTTP 406 may mean the public Overpass server has blocked this client.
     // Repeating the same request every ten minutes can prolong that block.
     // Pause for a full day rather than treating access denial as congestion.
