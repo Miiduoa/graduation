@@ -468,6 +468,46 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each(['500001', 'invalid'])(
+    'does not leave an oversized or malformed Content-Length body streaming (%s)',
+    async (declaredSize) => {
+      vi.useFakeTimers();
+      let cancelled = 0;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          // Even a small first chunk must not be read when the header already
+          // violates our size policy. The cancel itself may never settle.
+          controller.enqueue(new Uint8Array([123]));
+        },
+        cancel() {
+          cancelled += 1;
+          return new Promise<void>(() => {});
+        },
+      });
+      const upstream = vi.fn().mockResolvedValue(new Response(body, {
+        status: 200, headers: { 'Content-Length': declaredSize },
+      }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      let settled = false;
+      const pending = GET().then((response) => {
+        settled = true;
+        return response;
+      });
+
+      // A known header violation should not wait for the 12-second deadline
+      // or for a stalled stream-cancellation promise.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(settled).toBe(true);
+      const response = await pending;
+      expect(response.status).toBe(503);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(cancelled).toBe(1);
+      expect((await GET()).status).toBe(503);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('stops reading oversized streamed responses before buffering the whole payload', async () => {
     let wasCancelled = false;
     const body = new ReadableStream<Uint8Array>({
