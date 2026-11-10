@@ -99,7 +99,7 @@ it('keeps unsaved study notes and warns when a complete refresh no longer lists 
   expect((await screen.findByText(/先前開啟的「關聯與主鍵」目前不在已載入的教材清單/)).textContent).toContain(
     `先前開啟的「${material.title}」目前不在已載入的教材清單`,
   );
-  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(screen.getByText(/附件與外部連結的內容需另外選擇/)).toBeTruthy();
   expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
     .toBe('我還沒備份的私人筆記');
   expect(screen.queryByRole('button', { name: `陪我讀「${material.title}」` })).toBeNull();
@@ -128,7 +128,7 @@ it('does not claim a selected lecture disappeared while older material pages rem
   fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
   await screen.findByText(/教材櫃尚有較早的教材未載入/);
   expect(screen.queryByText(/目前不在已載入的教材清單/)).toBeNull();
-  expect(screen.getByText(material.body)).toBeTruthy();
+  expect(screen.getByText(/附件與外部連結的內容需另外選擇/)).toBeTruthy();
   expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
     .toBe('還沒存的複習筆記');
   fireEvent.click(screen.getByRole('button', { name: '載入較早教材' }));
