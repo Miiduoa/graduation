@@ -269,6 +269,20 @@ it('recovers when an authorized article cannot be opened by the client router', 
   expect(saved).toMatchObject({ uid: 'alice', schoolId: 'pu', query: '二手書', postId: 'old-1001' });
 });
 
+
+it('does not tell screen readers that an authorized post was unverified when only navigation failed', async () => {
+  mocks.navigate.mockImplementationOnce(() => { throw new Error('router rejected transition'); });
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  fireEvent.click(await screen.findByRole('link', { name: '二手書 old-1001' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('貼文已通過伺服器確認');
+  expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001');
+  expect(screen.getByRole('status').textContent).toContain('貼文已通過伺服器確認');
+  expect(screen.getByRole('status').textContent).not.toContain('尚未通過伺服器確認');
+});
+
+
 it('confirms at most once during two rapid clicks and navigates only after success', async () => {
   const pending = deferred<boolean>();
   mocks.confirm.mockReturnValueOnce(pending.promise);
