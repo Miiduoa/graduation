@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, Modal, StyleSheet } from 'react-native';
+import { AccessibilityInfo, FlatList, Modal, Platform, StyleSheet } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { TitleHistoryLauncher, TitleHistorySearch } from '../screens/social/TitleHistorySearch';
 import { CommunityScreen } from '../screens/CommunityScreen';
@@ -478,4 +478,43 @@ test('keeps native history input, retry and results in one scroll surface above 
   fireEvent.press(view.getByLabelText('重試歷史搜尋'));
   await view.findByText('二手書 one');
   expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+});
+
+test('iOS screen reader announces a successful historical search count without speaking a post title', async () => {
+  const previousOS = Platform.OS;
+  Platform.OS = 'ios';
+  const spoken = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+  try {
+    const view = panel();
+    enter(view);
+    await view.findByText('二手書 one');
+    await waitFor(() => expect(spoken).toHaveBeenCalledWith('已讀到本次搜尋的最後一頁。 目前顯示 1 篇。'));
+    expect(spoken).not.toHaveBeenCalledWith(expect.stringContaining('二手書 one'));
+  } finally {
+    spoken.mockRestore();
+    Platform.OS = previousOS;
+  }
+});
+
+test('iOS screen reader announces revoked history access but ignores a late outdated result', async () => {
+  const previousOS = Platform.OS;
+  Platform.OS = 'ios';
+  const spoken = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+  const outdated = deferred<TitleSearchPage>();
+  search.mockReturnValueOnce(outdated.promise).mockRejectedValueOnce({ code: 'permission-denied' });
+  try {
+    const view = panel();
+    enter(view);
+    fireEvent.changeText(view.getByLabelText('記得的標題開頭'), '二手書 ');
+    fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+    await view.findByText('校籍或存取權限已變更，搜尋結果已清除。確認校籍後可重試搜尋。');
+    await waitFor(() => expect(spoken).toHaveBeenCalledWith('校籍或存取權限已變更，搜尋結果已清除。確認校籍後可重試搜尋。'));
+    const count = spoken.mock.calls.length;
+    await act(async () => { outdated.resolve(result([row('outdated')])); });
+    expect(spoken).toHaveBeenCalledTimes(count);
+    expect(view.queryByText('二手書 outdated')).toBeNull();
+  } finally {
+    spoken.mockRestore();
+    Platform.OS = previousOS;
+  }
 });
