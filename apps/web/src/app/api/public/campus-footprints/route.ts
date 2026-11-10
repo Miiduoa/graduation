@@ -122,7 +122,12 @@ async function readBoundedResponse(response: Response): Promise<string> {
     segments.push(decoder.decode());
     return segments.join('');
   } finally {
-    if (!completed) await reader.cancel().catch(() => {});
+    if (!completed) {
+      // Cancellation is best-effort. A broken proxy/stream can accept a cancel
+      // request but never settle its promise; waiting here turns an already
+      // rejected oversized payload into a 12-second server timeout.
+      void reader.cancel().catch(() => {});
+    }
     reader.releaseLock();
   }
 }
