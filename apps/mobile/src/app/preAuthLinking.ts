@@ -1,7 +1,7 @@
 import { getStateFromPath, type LinkingOptions } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
-import { stagePendingSharedPostLink } from './pendingSharedPostLink';
+import { stagePendingSharedPostLink, stagePublicInitialSharedPostLink } from './pendingSharedPostLink';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { rewriteLegacyShopsPath } from './legacyShopsPath';
 
@@ -33,7 +33,7 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
   getStateFromPath: (path, options) => getStateFromPath(rewriteLegacyShopsPath(path), options),
   async getInitialURL() {
     const url = await Linking.getInitialURL();
-    if (url && stagePendingSharedPostLink(url, Constants.expoConfig?.extra?.release?.deepLinkHost)) {
+    if (url && stagePublicInitialSharedPostLink(url, Constants.expoConfig?.extra?.release?.deepLinkHost)) {
       return null;
     }
     return url;

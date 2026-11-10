@@ -75,7 +75,7 @@ import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScr
 import { PreAuthStack } from './src/screens/PreAuthStack';
 import { SchoolSessionBoundary, hasReadySchoolSession } from './src/app/SchoolSessionBoundary';
 import { preAuthLinking } from './src/app/preAuthLinking';
-import { takePendingSharedPostLink } from './src/app/pendingSharedPostLink';
+import { resolvePrivateInitialSharedPostURL } from './src/app/pendingSharedPostLink';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
@@ -867,7 +867,7 @@ function SchoolNavigation() {
           pendingMessagingDeepLinkRef.current = url;
           return null;
         }
-        return takePendingSharedPostLink() ?? url;
+        return resolvePrivateInitialSharedPostURL(url, Constants.expoConfig?.extra?.release?.deepLinkHost);
       },
       subscribe(listener: (url: string) => void) {
         const subscription = Linking.addEventListener('url', ({ url }) => {
