@@ -968,17 +968,17 @@ test('a peer who transferred schools can still read and message an existing memb
   expect(setDoc).not.toHaveBeenCalled();
 });
 
-test('peer entry reads cached history after prepare fails without authorizing photos or receipts', async () => {
+test.each([false, true])('peer entry reads cached history after prepare fails with pending=%s without photo authorization or receipts', async (pending) => {
   jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/unavailable' });
   jest.mocked(getDoc).mockResolvedValueOnce({
     exists: () => true,
-    metadata: { fromCache: true, hasPendingWrites: false },
+    metadata: { fromCache: true, hasPendingWrites: pending },
     data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }),
   } as any);
   const view = render(firstChat());
   await waitFor(() => expect(mockSnapshotHandlers.has(`conversations/${photoConvo}`)).toBe(true));
   expect(view.queryByLabelText('加入照片')).toBeNull();
-  verifyPhotoChat(true);
+  verifyPhotoChat(true, pending, { onlineUsers: { alice: {} }, lastReadBy: { alice: {} } });
   expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true);
   jest.mocked(updateDoc).mockClear();
   await act(async () => emitMessages([
@@ -1008,7 +1008,7 @@ test.each([false, true].flatMap(fromCache => [
   { memberIds: ['bob', 'charlie'] },
   { schoolId: 'another' },
   { type: 'group_chat' },
-  { hasPendingWrites: true },
+  { memberIds: ['alice', ''] },
 ].map(invalid => ({ ...invalid, fromCache }))))('a rejected prepare cannot open or create an unconfirmed member conversation (%j)', async (invalid) => {
   jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/permission-denied' });
   jest.mocked(getDoc).mockResolvedValueOnce({
@@ -1253,12 +1253,10 @@ test('the first commit for another account contains no previous messages, outbou
   expect(view.getByPlaceholderText('輸入訊息...').props.value).toBe('');
 });
 
-test('offline re-entry restores cached text without receipts or photo authorization', async () => {
+test.each([false, true])('offline re-entry restores cached text with pending=%s without receipts or photo authorization', async (pending) => {
   const view = render(photoChat());
   expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
-  verifyPhotoChat(true, true);
-  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
-  verifyPhotoChat(true);
+  verifyPhotoChat(true, pending, { onlineUsers: { alice: {} }, lastReadBy: { alice: {} } });
   expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true);
   jest.mocked(updateDoc).mockClear();
   await act(async () => emitMessages([
@@ -1317,5 +1315,52 @@ test('a cached roster cannot restore text access after a server revocation', asy
   expect(view.queryByText('離線私人文字')).toBeNull();
   verifyPhotoChat(true);
   expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+});
+
+test.each([
+  { memberIds: ['alice', 'charlie'] },
+  { memberIds: ['alice', ''] },
+  { memberIds: ['alice', null] },
+  { memberIds: ['alice', 'alice'] },
+])('pending cached untrusted members cannot start text reading (%j)', async (invalid) => {
+  render(photoChat());
+  verifyPhotoChat(true, true, invalid);
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+});
+
+
+test('conversation-ID entry reads pending cached text before the peer is ready', async () => {
+  jest.mocked(getDoc).mockImplementationOnce(() => new Promise(() => {}));
+  const view = render(<ChatScreen route={{ params: { conversationId: photoConvo } }} navigation={{ setOptions: jest.fn() }} />);
+  verifyPhotoChat(true, true, { onlineUsers: { alice: {} }, lastReadBy: { alice: {} } });
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true);
+  jest.mocked(updateDoc).mockClear();
+  await act(async () => emitMessages([{ id: 'history', data: {
+    senderId: 'bob', type: 'text', content: '對方尚未就緒的離線歷史文字', readBy: [],
+  } }], true));
+  expect(view.getByText('對方尚未就緒的離線歷史文字')).toBeTruthy();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  expect(view.queryByText('已送達')).toBeNull();
+  expect(view.queryByText('已讀')).toBeNull();
+  expect(updateDoc).not.toHaveBeenCalled();
+});
+
+test('conversation-ID entry reads pending cached text after resolving the valid peer', async () => {
+  jest.mocked(getDoc).mockResolvedValueOnce({
+    exists: () => true,
+    metadata: { fromCache: true, hasPendingWrites: true },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }),
+  } as any);
+  const view = render(<ChatScreen route={{ params: { conversationId: photoConvo } }} navigation={{ setOptions: jest.fn() }} />);
+  await waitFor(() => expect(mockSnapshotHandlers.has(`conversations/${photoConvo}`)).toBe(true));
+  // The lookup may update peerId and replace the roster listener.
+  await act(async () => {});
+  verifyPhotoChat(true, true, { onlineUsers: { alice: {} }, lastReadBy: { alice: {} } });
+  await act(async () => emitMessages([{ id: 'history', data: {
+    senderId: 'bob', type: 'text', content: '從對話列表重進的離線文字', readBy: [],
+  } }], true));
+  expect(view.getByText('從對話列表重進的離線文字')).toBeTruthy();
   expect(view.queryByLabelText('加入照片')).toBeNull();
 });

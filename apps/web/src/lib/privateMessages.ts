@@ -310,7 +310,18 @@ export async function preparePrivateConversation(
     { conversationId: string; peerUid: string; exists: boolean }
   >(getFunctionsInstance(), 'prepareDmConversation');
   try {
-    const { data } = await call({ viewerUid: session.uid, schoolId: session.schoolId, peerUid });
+    const { data } = await call({ viewerUid: session.uid, schoolId: session.schoolId, peerUid }).catch(async (error: unknown) => {
+      assertUser(session.uid);
+      if (signal.aborted) throw new MessagingError('stale');
+      // New-DM school eligibility does not revoke access to an existing member DM.
+      const snapshot = await getDocFromServer(doc(getDb(), 'conversations', conversationId));
+      assertUser(session.uid);
+      if (signal.aborted) throw new MessagingError('stale');
+      if (!confirmed(snapshot.metadata) || !snapshot.exists()) throw error;
+      const existing = parseConversation(conversationId, snapshot.data(), session);
+      if (existing.peerUid !== peerUid) throw new MessagingError('permission');
+      return { data: { conversationId, peerUid, exists: true } };
+    });
     assertUser(session.uid);
     if (signal.aborted) throw new MessagingError('stale');
     if (data?.conversationId !== conversationId || data.peerUid !== peerUid || typeof data.exists !== 'boolean') {

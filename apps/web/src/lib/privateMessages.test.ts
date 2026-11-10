@@ -754,6 +754,7 @@ it('rejects self, denied preparation and late results after account or route cha
   await expect(preparePrivateConversation(session, 'alice', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
   expect(runtime.call).not.toHaveBeenCalled();
   runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, null) as never);
   await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
   const controller = new AbortController();
   runtime.call.mockImplementationOnce(async () => {
@@ -766,7 +767,7 @@ it('rejects self, denied preparation and late results after account or route cha
     return { data: prepared };
   });
   await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toMatchObject({ reason: 'permission' });
-  expect(getDocFromServer).not.toHaveBeenCalled();
+  expect(getDocFromServer).toHaveBeenCalledTimes(1);
 });
 
 it('uses the same text intent for a failed first-send retry and requires its exact receipt', async () => {
@@ -862,4 +863,70 @@ it('opens a confirmed existing preparation through the strict document watcher i
     path: 'conversations/' + prepared.conversationId,
   });
   expect(onSnapshot).toHaveBeenCalledTimes(1);
+});
+
+it('opens an existing member DM after peer school eligibility fails and sends via the existing conversation', async () => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, conversation()) as never);
+  const result = await preparePrivateConversation(session, 'bob', freshSignal());
+  expect(result).toEqual({ ...prepared, exists: true });
+  const receive = vi.fn();
+  watchNewPrivateConversation(session, result, receive, vi.fn());
+  listener('conversations/' + prepared.conversationId).receive(document(prepared.conversationId, conversation()));
+  listener('conversations/' + prepared.conversationId + '/messages').receive(querySnapshot([
+    document('history', message({ conversationId: prepared.conversationId })),
+  ]));
+  expect(receive).toHaveBeenCalledWith(expect.objectContaining({ messages: expect.arrayContaining([expect.objectContaining({ content: '來源內容' })]) }));
+  tx.get.mockImplementation(async ({ path }: { path: string }) => {
+    if (path === 'users/alice') return document(path, { schoolId: 'pu' });
+    if (path === 'schools/pu/members/alice') return document(path, { status: 'active' });
+    if (path === 'conversations/' + prepared.conversationId) return document(path, conversation());
+    return document(path, null);
+  });
+  await sendPrivateMessage(session, result.conversationId, firstMessageId, '轉校後繼續聊天');
+  expect(tx.set).toHaveBeenCalled();
+  expect(runtime.call).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { row: null, meta: {} },
+  { row: conversation({ memberIds: ['alice', 'mallory'] }), meta: {} },
+  { row: conversation({ schoolId: 'other' }), meta: {} },
+  { row: conversation({ memberIds: ['alice', ''] }), meta: {} },
+  { row: conversation(), meta: { fromCache: true } },
+  { row: conversation(), meta: { hasPendingWrites: true } },
+])('rejects an absent, invalid or unconfirmed existing-DM fallback (%j)', async ({ row, meta }) => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, row, meta) as never);
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toThrow();
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it.each(['permission-denied', 'unavailable'])('does not bypass a server-denied existing conversation (%s)', async (code) => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockRejectedValueOnce({ code });
+  await expect(preparePrivateConversation(session, 'bob', freshSignal())).rejects.toThrow();
+});
+
+
+it.each(['abort', 'account'])('rejects a late existing-DM lookup after %s changes', async (change) => {
+  const controller = new AbortController();
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockImplementationOnce(async () => {
+    if (change === 'abort') controller.abort();
+    else runtime.uid = 'another-account';
+    return document(prepared.conversationId, conversation()) as never;
+  });
+  await expect(preparePrivateConversation(session, 'bob', controller.signal)).rejects.toThrow();
+  expect(runTransaction).not.toHaveBeenCalled();
+});
+
+it('keeps existing sends subject to server block and account-status denials', async () => {
+  runtime.call.mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  vi.mocked(getDocFromServer).mockResolvedValueOnce(document(prepared.conversationId, conversation()) as never);
+  const result = await preparePrivateConversation(session, 'bob', freshSignal());
+  vi.mocked(runTransaction).mockRejectedValueOnce({ code: 'permission-denied' });
+  await expect(sendPrivateMessage(session, result.conversationId, firstMessageId, '不可繞過限制'))
+    .rejects.toMatchObject({ code: 'permission-denied' });
+  expect(runtime.call).toHaveBeenCalledTimes(1);
 });

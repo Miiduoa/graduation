@@ -294,13 +294,12 @@ export function ChatScreen(props: any) {
           if (controller.signal.aborted || scopeRef.current !== sendScope) return;
           const data = snap.exists() ? snap.data() as ConvoMeta : null;
           if (
-            !snap.metadata.hasPendingWrites &&
             data?.type === 'dm' && data.schoolId === school.id &&
             Array.isArray(data.memberIds) && data.memberIds.length === 2 &&
             new Set(data.memberIds).size === 2 &&
             data.memberIds.includes(myUid) && data.memberIds.includes(peerParam)
           ) {
-            const serverConfirmed = snap.metadata.fromCache === false;
+            const serverConfirmed = snap.metadata.fromCache === false && !snap.metadata.hasPendingWrites;
             setPreparation({ scope: sendScope, status: 'ready', exists: true, serverConfirmed });
             if (serverConfirmed) setVerifiedPhotoThread(sendScope);
             return;
@@ -423,6 +422,7 @@ export function ChatScreen(props: any) {
           data.schoolId !== school.id ||
           data.type !== 'dm' ||
           mids.length !== 2 ||
+          mids.some((uid) => typeof uid !== 'string' || !uid.trim()) ||
           new Set(mids).size !== 2 ||
           !mids.includes(myUid)
         ) {
@@ -717,9 +717,10 @@ export function ChatScreen(props: any) {
       (snap) => {
         if (!listening || scopeRef.current !== sendScope) return;
         // A valid cached roster permits text reading only. Cache cannot revoke
-        // an existing session or grant photo access; pending rosters grant neither.
+        // an existing session or grant photo access. Presence/read-marker writes
+        // may be pending while the roster still matches this DM.
         const fromCache = snap.metadata.fromCache;
-        if (fromCache && (serverRejected || !snap.exists() || snap.metadata.hasPendingWrites)) return;
+        if (fromCache && (serverRejected || !snap.exists())) return;
         if (!snap.exists()) {
           serverRejected = true;
           readableTextScopeRef.current = null;
@@ -740,6 +741,7 @@ export function ChatScreen(props: any) {
           data.type !== 'dm' ||
           !Array.isArray(data.memberIds) ||
           data.memberIds.length !== 2 ||
+          data.memberIds.some((uid) => typeof uid !== 'string' || !uid.trim()) ||
           new Set(data.memberIds).size !== 2 ||
           !data.memberIds.includes(myUid) ||
           (peerRoute && !data.memberIds.includes(peerParam))
@@ -757,8 +759,13 @@ export function ChatScreen(props: any) {
           setAccessError('這不是目前帳號可存取的本校私訊。');
           return;
         }
-        if (!snap.metadata.hasPendingWrites) {
-          readableTextMembers = JSON.stringify([...data.memberIds].sort());
+        const textMembers = JSON.stringify([...data.memberIds].sort());
+        const expectedMembers = peerId ? JSON.stringify([myUid, peerId].sort()) : null;
+        const trustedMembers = readableTextMembers ?? expectedMembers;
+        if (!snap.metadata.hasPendingWrites || (
+          trustedMembers === null || textMembers === trustedMembers
+        )) {
+          readableTextMembers = textMembers;
           readableTextScopeRef.current = sendScope;
           setReadableTextThread(sendScope);
         }
