@@ -271,7 +271,11 @@ describe('saved class gap answer', () => {
   });
 
   test('rejects invalid or future-dated save provenance without inventing free time', () => {
-    const invalidSavedAt: unknown[] = ['', 'unparseable', '2099-01-01T00:00:00+08:00', 12345];
+    const invalidSavedAt: unknown[] = [
+      '', 'unparseable', '2099-01-01T00:00:00+08:00', 12345,
+      // Without a timezone, the same snapshot can mean different instants on iOS and Android.
+      '2026-11-05T15:12:00', '2026-11-05 15:12:00', 'Thu, 05 Nov 2026 15:12:00 GMT',
+    ];
     for (const updatedAt of invalidSavedAt) {
       const answer = answerSavedClassGapQuery(today, {
         ...context,
@@ -282,6 +286,10 @@ describe('saved class gap answer', () => {
       expect(answer.content).not.toContain('有 2 段');
       expect(answer.content).not.toContain('沒有課間空堂');
     }
+    // Explicit UTC or offset timestamps are portable evidence, not device-local guesses.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: '2026-11-05T23:12:00+08:00' },
+    }).content).toContain('有 2 段');
     // Five minutes of clock skew does not invalidate a recently saved snapshot.
     const nearFuture = answerSavedClassGapQuery(today, {
       ...context, timetable: { ...context.timetable, updatedAt: '2026-11-06T10:04:00+08:00' },
