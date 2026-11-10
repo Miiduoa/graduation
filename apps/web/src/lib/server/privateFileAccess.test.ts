@@ -185,6 +185,61 @@ it('does not turn a finalized but unreferenced post attachment into a group-wide
 it.each([{ deletedAt: '2026-01-01' }, { deleted: true }, { isDeleted: true }, { status: 'deleted' }])('rejects post tombstones %j', async (tombstone) => {
   await expect(authorize(fileStore([['groups/course/posts/one', { authorId: 'alice', ...tombstone }]]), POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });
 });
+it('rejects stamped school-member replay for group files after profile recreation', async () => {
+  const store = fileStore([
+    ['assignments/work', { groupId: 'course' }],
+    ['groups/course/posts/one', { authorId: 'alice', attachments: [POST] }],
+    ['users/alice', { schoolId: 'pu', bindingGeneration: 'trusted-generation' }],
+    ['schools/pu/members/alice', {
+      status: 'active',
+      profileBoundSchoolId: 'pu',
+      profileBoundGeneration: 'trusted-generation',
+    }],
+  ]);
+  const checks: [string, boolean][] = [
+    [COVER, false], [POST, false], [GROUP_ANSWER, true], [ANSWER, true],
+  ];
+  const expectAll = async (permitted: boolean) => {
+    for (const [path, writing] of checks) {
+      if (permitted) await expect(authorize(store, path, 'alice', writing)).resolves.toBeUndefined();
+      else await expect(authorize(store, path, 'alice', writing)).rejects.toMatchObject({ statusCode: 403 });
+    }
+  };
+  await expectAll(true);
+
+  // A stale active school and group membership must not authorize a new profile.
+  store.docs.delete('users/alice');
+  await expectAll(false);
+  store.docs.set('users/alice', { displayName: 'self-recreated' });
+  await expectAll(false);
+  store.docs.set('users/alice', { schoolId: 'another-school', bindingGeneration: 'trusted-generation' });
+  await expectAll(false);
+  store.docs.set('users/alice', { schoolId: 'pu', bindingGeneration: 'new-generation' });
+  await expectAll(false);
+
+  // Half-stamps fail closed instead of silently falling back to legacy access.
+  store.docs.set('users/alice', { schoolId: 'pu', bindingGeneration: 'trusted-generation' });
+  store.docs.set('schools/pu/members/alice', { status: 'active', profileBoundGeneration: 'trusted-generation' });
+  await expectAll(false);
+  store.docs.set('schools/pu/members/alice', { status: 'active', profileBoundSchoolId: 'pu' });
+  await expectAll(false);
+
+  store.docs.set('schools/pu/members/alice', {
+    status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'trusted-generation',
+  });
+  await expectAll(true);
+  store.docs.set('schools/pu/members/alice', {
+    status: 'inactive', profileBoundSchoolId: 'pu', profileBoundGeneration: 'trusted-generation',
+  });
+  await expectAll(false);
+});
+
+it('preserves legacy unstamped group-member access until migration is verified', async () => {
+  const store = fileStore();
+  await expect(authorize(store, COVER, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, GROUP_ANSWER, 'alice', true)).resolves.toBeUndefined();
+});
+
 it('rejects stale campus story stamps after profile deletion, recreation and school change', async () => {
   const store = fileStore([
     ['users/alice', { schoolId: 'pu', primarySchoolId: 'pu', bindingGeneration: 'generation-one' }],

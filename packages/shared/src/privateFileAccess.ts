@@ -389,7 +389,22 @@ export async function authorizePrivateFile(
       const schoolMember = await tx.get(
         db.collection('schools').doc(schoolId as string).collection('members').doc(uid),
       );
-      if (!schoolMember.exists || asRecord(schoolMember.data()).status !== 'active') deny();
+      const schoolMemberData = asRecord(schoolMember.data());
+      if (!schoolMember.exists || schoolMemberData.status !== 'active') deny();
+      // A trusted school-login stamp binds this membership to the current
+      // canonical profile. Do not let a deleted/recreated profile reuse it.
+      // Unstamped legacy members remain on the previous access path pending
+      // an audited, backwards-compatible rollout of mandatory stamping.
+      if (
+        ('profileBoundSchoolId' in schoolMemberData || 'profileBoundGeneration' in schoolMemberData) &&
+        (
+          schoolMemberData.profileBoundSchoolId !== schoolId ||
+          typeof schoolMemberData.profileBoundGeneration !== 'string' ||
+          schoolMemberData.profileBoundGeneration.length === 0 ||
+          schoolMemberData.profileBoundGeneration !== accountData.bindingGeneration ||
+          (accountData.schoolId !== schoolId && accountData.primarySchoolId !== schoolId)
+        )
+      ) deny();
       const manager = PRIVATE_FILE_MANAGER_ROLES.has(String(asRecord(member.data()).role || ''));
       if (scope.kind === 'group-post') {
         const post = await tx.get(groupRef.collection('posts').doc(scope.postId || ''));

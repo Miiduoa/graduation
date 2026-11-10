@@ -479,3 +479,11 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 與截至本輪最新 main `0de225b6eadcbecfd0635c8ebfe0f1249a451d82` 整合，在樹上保留 #557 與後續主線修改，PR #559 的原始 body size 修補完整保留；新提交需重新跑完整 CI，舊 head 的全部綠燈不能沿用。#517、#557 已合併但不代表正式部署或歷史 bearer URL 已撤銷。沒有碰正式資料、token、金鑰、migration、E 校園與被禁止的直接 npm/pnpm audit。仍需指定 App 5504170 對新 head 核發「審查通過」，才能由主線窗口合併。
 
+
+## 2026-11-10：群組附件的已蓋章校籍不得被重建帳號重放（PR #569，待新 head 驗收）
+
+檢查共用 `authorizePrivateFile` 發現，限動路徑已核對可信校務登入的 `profileBoundGeneration` 與目前 canonical profile，但群組封面、貼文、群組／legacy 作業附件的 HTTP／Supabase 簽發入口仍只核對 active 帳號、群組與學校成員。若校務身分已蓋章，刪除 profile 之後、伺服器尚未清除殘留 member 紀錄期間，同一有效憑證重建不帶可信綁定世代的 profile，可能重用殘留 active membership。此為再次請求檔案／網址的授權風險，與已簽發網址撤銷不同。
+
+最小相容修補：群組路徑遇到**任一可信校籍蓋章欄位**時，必須兩欄完整，並與目前 profile 的校別、綁定世代精確匹配；刪帳重建、跨校、世代更新或半蓋章一律拒絕，受控登入恢復同世代後才可恢復。對**完全無蓋章的歷史帳號**保留舊授權，避免在未盤點／未完成發布序列前使既有群組附件全面不可用；因此不能宣稱已全面解除 legacy profile 重建重放風險。必要後續：隔離盤點歷史 member、可信補章流程、分階段收緊，最後將全部群組路徑改為強制蓋章並做跨校／多校相容驗證。
+
+新增共享授權層合成回歸：正常 cover／post／新舊 assignment、刪除 profile、自建、跨校、世代不符、半蓋章、恢復及撤銷、無蓋章 legacy 相容。這批屬開發分支測試，必須以**最新精確 head** 的 Web、Functions、Rules、CodeQL 及適用工作流實際結果判斷；本輪沒有真 GCS／Supabase staging、正式資料、bucket migration、部署、token 操作或受限制的 npm/pnpm audit。指定 App 5504170 對此 head 的 APPROVED 及主線窗口整合仍是必要合併條件。
