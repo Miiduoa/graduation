@@ -15,6 +15,7 @@ import {
 import { readCreatorPin, saveCreatorPin, type CreatorPin } from '@/lib/community/creatorPin';
 import styles from './CreatorProfile.module.css';
 import { CreatorCardPanel } from './CreatorCardPanel';
+import { CreatorHighlight } from './CreatorHighlight';
 
 type ProfileTab = 'posts' | 'media' | 'saved';
 type LoadState<T> =
@@ -325,6 +326,7 @@ function ScopedCreatorProfile({
           </div>
         )}
         <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
+        <CreatorHighlight key={schoolId + ':' + memberUid} schoolId={schoolId} memberUid={memberUid} own={own} candidates={loadedPosts} />
         <div className={styles.actions}>
           {own ? (
             <>

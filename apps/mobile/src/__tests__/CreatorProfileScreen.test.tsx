@@ -21,6 +21,7 @@ jest.mock('../state/school', () => ({
   useSchool: () => ({ school: mockSchool, selectionReady: mockSelectionReady }),
 }));
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => mockFirebase }));
+jest.mock('../screens/social/CreatorHighlight', () => ({ CreatorHighlight: () => null }));
 jest.mock('../services/creatorProfile', () => ({
   listCreatorPosts: jest.fn(),
   readCreatorIdentity: jest.fn(),

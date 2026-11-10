@@ -172,3 +172,96 @@ test('a deleted pinned post does not lock the owner out of editing or clearing t
   await assertFails(doc(alice).set({ pinnedPostId: 'unrelated', updatedAt: serverTimestamp() }, { merge: true }));
   await assertSucceeds(doc(alice).set({ pinnedPostId: '', updatedAt: serverTimestamp() }, { merge: true }));
 });
+
+const featureRef = (db, schoolId = 'pu', uid = 'alice') =>
+  db.doc('schools/' + schoolId + '/creatorHighlights/' + uid);
+const featured = (postId = 'mine') => ({
+  schoolId: 'pu',
+  ownerUid: 'alice',
+  postId,
+  updatedAt: serverTimestamp(),
+});
+
+async function seedFeaturedPosts() {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    for (const [id, attrs] of [
+      ['mine', { authorUid: 'alice', anonymous: false, schoolId: 'pu' }],
+      ['other-owner', { authorUid: 'bob', anonymous: false, schoolId: 'pu' }],
+      ['anonymous', { authorUid: 'alice', anonymous: true, schoolId: 'pu' }],
+      ['wrong-school', { authorUid: 'alice', anonymous: false, schoolId: 'other' }],
+    ]) {
+      await db.doc('schools/pu/campusPosts/' + id).set({
+        ...attrs, boardId: 'student-life', title: '貼文', content: '內容',
+        createdAt: serverTimestamp(),
+      });
+    }
+  });
+}
+
+
+test('missing highlights remain readable, but stale pointers cannot reveal formerly signed posts', async () => {
+  await seedFeaturedPosts();
+  const alice = environment.authenticatedContext('alice').firestore();
+  const bob = environment.authenticatedContext('bob').firestore();
+  const empty = await assertSucceeds(featureRef(bob).get({ source: 'server' }));
+  if (empty.exists) throw Error('Unexpected creator highlight');
+  await assertSucceeds(featureRef(alice).set(featured()));
+  await assertSucceeds(featureRef(bob).get({ source: 'server' }));
+
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/mine').update({ anonymous: true });
+  });
+  // A stale pointer still exists, but only its owner may read it to unfeature.
+  await assertFails(featureRef(bob).get({ source: 'server' }));
+  await assertSucceeds(featureRef(alice).get({ source: 'server' }));
+  await assertSucceeds(featureRef(alice).delete());
+});
+
+test('creator can feature only their signed post; same-campus peers see the pointer', async () => {
+  await seedFeaturedPosts();
+  const alice = environment.authenticatedContext('alice').firestore();
+  const bob = environment.authenticatedContext('bob').firestore();
+  const guest = environment.unauthenticatedContext().firestore();
+  const other = environment.authenticatedContext('charlie').firestore();
+  await assertSucceeds(featureRef(alice).set(featured()));
+  const existing = await assertSucceeds(featureRef(bob).get({ source: 'server' }));
+  if (existing.data()?.postId !== 'mine') throw Error('Featured post not available to peer');
+  await assertFails(featureRef(guest).get({ source: 'server' }));
+  await assertFails(featureRef(other).get({ source: 'server' }));
+  await assertFails(bob.collection('schools/pu/creatorHighlights').get());
+  await assertFails(featureRef(bob).set(featured('other-owner')));
+  await assertFails(featureRef(bob).delete());
+  await assertSucceeds(featureRef(alice).delete());
+});
+
+test('featured pointers reject anonymous, foreign, forged and deleted posts', async () => {
+  await seedFeaturedPosts();
+  const alice = environment.authenticatedContext('alice').firestore();
+  for (const postId of ['other-owner', 'anonymous', 'wrong-school', 'missing']) {
+    await assertFails(featureRef(alice).set(featured(postId)));
+  }
+  await assertFails(featureRef(alice).set(featured('mine/other')));
+  await assertFails(featureRef(alice).set({ ...featured(), studentId: 'private' }));
+  await assertFails(featureRef(alice).set({ ...featured(), ownerUid: 'bob' }));
+  await assertFails(featureRef(alice).set({ ...featured(), schoolId: 'other' }));
+  await assertFails(featureRef(alice).set({ ...featured(), updatedAt: new Date('2020-01-01') }));
+  await assertSucceeds(featureRef(alice).set(featured()));
+  await assertFails(featureRef(alice).set(featured('other-owner')));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/campusPosts/mine').update({ anonymous: true });
+  });
+  await assertFails(featureRef(alice).set(featured('mine')));
+});
+
+test('revoked school membership rejects featured reads, edits, and removal', async () => {
+  await seedFeaturedPosts();
+  const alice = environment.authenticatedContext('alice').firestore();
+  await assertSucceeds(featureRef(alice).set(featured()));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await context.firestore().doc('schools/pu/members/alice').update({ status: 'inactive' });
+  });
+  await assertSucceeds(featureRef(alice).get({ source: 'server' }));
+  await assertFails(featureRef(alice).set(featured()));
+  await assertSucceeds(featureRef(alice).delete());
+});

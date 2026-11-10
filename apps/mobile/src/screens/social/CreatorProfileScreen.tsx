@@ -19,6 +19,7 @@ import {
 import type { CampusPostDoc } from '../../services/feed';
 import { readCreatorPin, saveCreatorPin, type CreatorPin } from '../../services/creatorPin';
 import { CreatorCardPanel } from './CreatorCardPanel';
+import { CreatorHighlight } from './CreatorHighlight';
 
 type ProfileTab = 'posts' | 'media' | 'saved';
 type ReadState<T> =
@@ -293,6 +294,9 @@ function ScopedCreatorProfile({
               </View>
             )}
             <CreatorCardPanel schoolId={schoolId} ownerUid={memberUid} own={own} />
+            <CreatorHighlight key={schoolId + ':' + memberUid}
+              schoolId={schoolId} memberUid={memberUid} own={own} candidates={postRows}
+              openPost={(postId) => navigation?.navigate?.('PostDetail', { postId })} />
             <View style={styles.actions}>
               {own ? (
                 <>
