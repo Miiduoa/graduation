@@ -379,6 +379,17 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 {place.description && <p>{place.description}</p>}
                 {(place.building || place.floor) && <p>{[place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>}
                 {Boolean(place.facilities?.length) && <p>設施：{place.facilities!.join('、')}</p>}
+                {school === 'pu' && footprintStatus === 'ready' && (
+                  <p className={styles.note}>
+                    {sourceFootprint ? <>
+                      建築外框：OpenStreetMap 來源，經校園地點與外框對位檢查。
+                      {' '}
+                      {sourceFootprint.heightBasis === 'osm-tag'
+                        ? `高度：${Number(sourceFootprint.heightMeters.toFixed(2))} 公尺（OSM 使用者標註，非校方實測）。`
+                        : `高度：${sourceFootprint.heightMeters} 公尺示意（無 OSM 高度標註，非實際樓高）。`}
+                    </> : '此地點沒有可用的已核對 OSM 建築外框；只顯示原有地點標記，不代表已驗證入口。'}
+                  </p>
+                )}
                 {sourceFootprint?.osmVersion && sourceFootprint.osmEditedAt && (
                   <p className={styles.note}>
                     OSM way 版本 v{sourceFootprint.osmVersion} · 圖徵最後編輯 {sourceFootprint.osmEditedAt.slice(0, 10)}。
