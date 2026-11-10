@@ -455,13 +455,20 @@ function requestedToolDomains(question: string, simulation: boolean): [string, s
   add(simulation && /通知/.test(question), '通知', 'get_notifications');
   return domains;
 }
-// Also covers the intentionally narrow study-plan and reorder return paths.
-// The runner renders this deterministic notice even if the model omits it.
-export function toolSelectionNotice(question: string, simulation: boolean, names: string[]): string {
+// Call only after execution, with successful (including cached) tool steps.
+// Selection alone does not establish coverage; preludes can cover unselected tools.
+export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[]): string {
+  const completed = new Set(completedNames);
+  // A successful day overview also reads due work and the schedule.
+  if (completed.has('get_day_overview')) {
+    completed.add('get_due_work');
+    completed.add('get_schedule');
+  }
+  if (completed.has('get_course_work')) completed.add('get_due_work');
   const deferred = requestedToolDomains(question, simulation)
-    .filter(([, tool]) => !names.includes(tool)).map(([label]) => label);
+    .filter(([, tool]) => !completed.has(tool)).map(([label]) => label);
   return deferred.length
-    ? '本輪工具預算或專用流程限制，尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
+    ? '本輪尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
     : '';
 }
 export function selectTools(question: string, simulation: boolean): string[] {

@@ -183,8 +183,6 @@ export async function run(input: RunInput) {
   const started = Date.now(),
     now = input.now ?? started;
   const selectedNames = selectTools(input.question, input.adapter.simulation);
-  const selectionNotice = toolSelectionNotice(input.question, input.adapter.simulation, selectedNames);
-  const withSelectionNotice = (answer: string) => selectionNotice ? answer + '\n' + selectionNotice : answer;
   const campusPrelude = campusInfoPrelude(input.question);
   const signal = AbortSignal.any([
     input.signal,
@@ -209,6 +207,11 @@ export async function run(input: RunInput) {
     : scheduledDate === '前天' ? addDays(taipeiDate(now), -2)
     : scheduledDate || relativeDate;
   const steps: Step[] = [];
+  const withSelectionNotice = (answer: string) => {
+    const completedNames = steps.filter((step) => step.status !== 'error').map((step) => step.name);
+    const notice = toolSelectionNotice(input.question, input.adapter.simulation, completedNames);
+    return notice ? answer + '\n' + notice : answer;
+  };
   const evidence: { tool: string; result: unknown }[] = [];
   const failedResults: { tool: string; result: unknown }[] = [];
   let modelCalls = 0,

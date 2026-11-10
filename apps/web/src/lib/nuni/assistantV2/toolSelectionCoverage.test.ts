@@ -21,7 +21,6 @@ describe('tool selection coverage within eight tools', () => {
     const names = selectTools(question, false);
     expect(names).toContain(primary);
     expect(names.length).toBeLessThanOrEqual(8);
-    expect(toolSelectionNotice(question, false, names)).toBe('');
   });
 
   it('reserves an executable tool for every domain in the compound request', () => {
@@ -29,7 +28,6 @@ describe('tool selection coverage within eight tools', () => {
     expect(names).toEqual(expect.arrayContaining(domainTools));
     expect(names).toHaveLength(8);
     expect(new Set(names).size).toBe(names.length);
-    expect(toolSelectionNotice(compound, false, names)).toBe('');
   });
 
   it('does not delete the last tool when open-page and calendar are already absent', () => {
@@ -49,13 +47,10 @@ describe('tool selection coverage within eight tools', () => {
       'get_day_overview', 'get_today_context', 'get_due_work', 'find_free_time',
       'propose_study_plan', 'get_dining',
     ]);
-    const planning = '幫我規劃今晚寫作業';
-    expect(toolSelectionNotice(planning, false, selectTools(planning, false))).toBe('');
     for (const question of ['再點一次', '跟上次一樣']) {
       expect(selectTools(question, false)).toEqual([
         'reorder_last_food_order', 'propose_food_order', 'get_food_menu', 'list_food_orders',
       ]);
-      expect(toolSelectionNotice(question, false, selectTools(question, false))).toBe('');
     }
   });
 
@@ -93,8 +88,66 @@ describe('tool selection coverage within eight tools', () => {
         usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }) },
       secret, writes: false, signal: new AbortController().signal, now, log: () => {},
     });
-    expect(result.answer).toContain(toolSelectionNotice(question, true, selectTools(question, true)));
+    expect(result.answer).toContain('教材、社團、公車／交通');
     expect(result.answer).toContain('下一輪');
+  });
+
+  it('reports selected domains until queries actually succeed', () => {
+    expect(selectTools(compound, false)).toEqual(expect.arrayContaining(domainTools));
+    expect(toolSelectionNotice(compound, false, [])).toContain('作業／測驗、教材、社團、公車／交通');
+    expect(toolSelectionNotice(compound, false, ['get_due_work', 'list_clubs']))
+      .toContain('尚未查詢：教材、公車／交通');
+    expect(toolSelectionNotice('查作業和課表', false, ['get_day_overview'])).toBe('');
+  });
+
+  it.each([
+    '幫我規劃作業，也查圖書館',
+    '幫我規劃作業，也查圖書館教材社團',
+  ])('counts successful campus preludes in the final answer: %s', async (question) => {
+    const f = fixtureAdapter(false);
+    const result = await run({
+      question, history: [], binding, adapter: f.adapter,
+      model: { complete: async () => ({ message: { role: 'assistant', content: '請查看結果。' },
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } }) },
+      secret, writes: false, signal: new AbortController().signal, now, log: () => {},
+    });
+    expect(selectTools(question, false)).not.toContain('get_campus_info');
+    expect(result.steps).toContainEqual(expect.objectContaining({ name: 'get_campus_info', status: 'ok' }));
+    expect(result.answer).not.toMatch(/尚未查詢：[^。]*校園資訊/);
+    if (question.includes('教材')) expect(result.answer).toContain('尚未查詢：教材、社團');
+    else expect(result.answer).not.toContain('尚未查詢：');
+  });
+
+  it('counts completed preludes in partial answers after a model failure', async () => {
+    const f = fixtureAdapter(false);
+    const result = await run({
+      question: '幫我規劃作業，也查圖書館教材社團', history: [], binding, adapter: f.adapter,
+      model: { complete: async () => { throw Object.assign(new Error('Unavailable'), { status: 503 }); } },
+      secret, writes: false, signal: new AbortController().signal, now, log: () => {},
+    });
+    expect(result.steps).toContainEqual(expect.objectContaining({ name: 'get_campus_info', status: 'ok' }));
+    expect(result.answer).not.toMatch(/尚未查詢：[^。]*校園資訊/);
+    expect(result.answer).toMatch(/尚未查詢：[^。]*教材、社團/);
+  });
+
+  it.each([false, true])('only counts successful model tool calls (failure: %s)', async (fail) => {
+    const f = fixtureAdapter(false);
+    if (fail) vi.spyOn(f.adapter, 'clubs').mockRejectedValue(new Error('Unavailable'));
+    let calls = 0;
+    const result = await run({
+      question: '查社團與教材', history: [], binding, adapter: f.adapter,
+      model: { complete: async () => ({
+        message: calls++ === 0
+          ? { role: 'assistant', content: '', tool_calls: [{ id: 'clubs', type: 'function',
+            function: { name: 'list_clubs', arguments: JSON.stringify({ tenantId: 'fixture-realm' }) } }] }
+          : { role: 'assistant', content: '請查看結果。' },
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      }) },
+      secret, writes: false, signal: new AbortController().signal, now, log: () => {},
+    });
+    expect(result.steps).toContainEqual(expect.objectContaining({ name: 'list_clubs', status: fail ? 'error' : 'ok' }));
+    expect(result.answer).toContain(fail ? '尚未查詢：教材、社團' : '尚未查詢：教材。');
+    if (!fail) expect(result.answer).not.toMatch(/尚未查詢：[^。]*社團/);
   });
 
   it('keeps ordering disabled without calling quote/order endpoints', async () => {
