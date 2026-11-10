@@ -493,3 +493,41 @@ it('rejects an expired OSM API snapshot while keeping the known place and walkin
   expect(within(dialog).getByRole('heading', { name: '蓋夏圖書館' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
 });
+
+
+it('withdraws filtered-out Providence volumes and counts only buildings in the current map', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const zhugu = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-zhugu')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes', height: '100 m' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+    schoolId: 'pu', source: 'OpenStreetMap', buildings,
+    fetchedAt: new Date().toISOString(), stale: false,
+  }) });
+  vi.stubGlobal('fetch', fetchMock);
+  const onSelect = vi.fn();
+  const view = render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={onSelect} />);
+  const dialog = await open();
+  await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
+  expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  const beforeFilter = scene.create.mock.calls.length;
+
+  // A same-school map filter does not unmount the spatial dialog or refetch
+  // Overpass. The previous library way is no longer part of this view.
+  view.rerender(<CampusSpatialExplorer school="pu" locations={[zhugu]} selected={zhugu} onSelect={onSelect} />);
+  await waitFor(() => expect(scene.create.mock.calls.length).toBeGreaterThan(beforeFilter));
+  expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
+  expect(within(dialog).getByText(/0 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByRole('heading', { name: zhugu.name })).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
