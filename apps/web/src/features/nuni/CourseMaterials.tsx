@@ -291,6 +291,12 @@ function Materials({
     items !== null && !nextCursor &&
     !items.some((item) => item.id === study.material?.id);
 
+  // An incomplete refresh cannot prove that the lecture was removed; help
+  // learners find the older page without replacing their unsaved board.
+  const selectedMaterialOnOlderPage = !!study?.material && !reading && !error && !moreError &&
+    items !== null && !!nextCursor &&
+    !items.some((item) => item.id === study.material?.id);
+
   useEffect(() => {
     if (!linkedMaterial || (!accessDenied && !missingLinked)) return;
     // Keep the explanation visible while removing the unavailable target from the address.
@@ -332,6 +338,11 @@ function Materials({
           }}>讀講義</button>
       </div>
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
+      {study && !accessDenied && selectedMaterialOnOlderPage && (
+        <p role="status" className={shared.notice}>
+          正在閱讀的「{study.material?.title}」尚未出現在這次載入的教材頁面。教材櫃尚有較早的教材未載入，請使用「載入較早教材」核對；白板中的筆記與練習會先保留。
+        </p>
+      )}
       {study && !accessDenied && selectedMaterialMissing && (
         <p role="status" className={shared.notice}>
           先前開啟的「{study.material?.title}」目前不在已載入的教材清單。白板仍保留先前內容與私人筆記，但不能因此判定教材仍可存取或已是最新版本；請對照課程教材並確認權限，必要時先儲存進度。

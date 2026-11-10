@@ -96,7 +96,7 @@ it('keeps unsaved study notes and warns when a complete refresh no longer lists 
     { target: { value: '我還沒備份的私人筆記' } });
 
   fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
-  expect((await screen.findByRole('status')).textContent).toContain(
+  expect((await screen.findByText(/先前開啟的「關聯與主鍵」目前不在已載入的教材清單/)).textContent).toContain(
     `先前開啟的「${material.title}」目前不在已載入的教材清單`,
   );
   expect(screen.getByText(material.body)).toBeTruthy();
@@ -112,14 +112,30 @@ it('keeps unsaved study notes and warns when a complete refresh no longer lists 
 });
 
 it('does not claim a selected lecture disappeared while older material pages remain', async () => {
-  state.request.mockResolvedValueOnce(list())
-    .mockResolvedValueOnce({ materials: [], nextCursor: 'older-page' });
+  let pages = 0;
+  // Only count material-list requests: the open study board can issue other requests.
+  state.request.mockImplementation((route: string) => {
+    if (!route.endsWith('/materials/page')) return Promise.resolve(list());
+    pages += 1;
+    if (pages === 1) return Promise.resolve(list());
+    if (pages === 2) return Promise.resolve({ materials: [], nextCursor: 'older-page' });
+    return Promise.resolve({ materials: [material], nextCursor: null });
+  });
   render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
   fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '還沒存的複習筆記' } });
   fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
-  await screen.findByRole('button', { name: '載入較早教材' });
+  await screen.findByText(/教材櫃尚有較早的教材未載入/);
   expect(screen.queryByText(/目前不在已載入的教材清單/)).toBeNull();
   expect(screen.getByText(material.body)).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('還沒存的複習筆記');
+  fireEvent.click(screen.getByRole('button', { name: '載入較早教材' }));
+  await waitFor(() => expect(screen.queryByText(/教材櫃尚有較早的教材未載入/)).toBeNull());
+  expect(pages).toBe(3);
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('還沒存的複習筆記');
 });
 
 it('asks before switching lecture cards and lets the learner retry after cancelling', async () => {
