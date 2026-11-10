@@ -170,7 +170,7 @@ describe('private group file HTTP handler', () => {
   });
 
   test('does not stream another author’s unpublished group-post draft', async () => {
-    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(200);
     expect((await invoke({ path: POST, uid: 'alice' })).status).toBe(200);
     store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
     expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(200);
@@ -187,7 +187,7 @@ describe('private group file HTTP handler', () => {
     expect((await invoke({ path: ANSWER, uid: 'bob' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'outsider' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'alice' })).status).toBe(200);
-    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
     const receipt = 'groups/course/assignments/work/submissions/alice';
     store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);

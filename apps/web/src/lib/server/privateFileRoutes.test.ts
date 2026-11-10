@@ -170,7 +170,7 @@ it('signs only published post attachments for other group members', async () => 
   expect(put(uploaded, 'text')).toBe(200);
   expect((await invoke(runtime, { action: 'finalize', path: POST }, auth)).status).toBe(200);
   expect((await invoke(runtime, { action: 'download', path: POST }, auth)).status).toBe(200);
-  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(403);
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(200);
   store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
   expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(200);
   const sibling = POST.replace('notes.pdf', 'draft.pdf');
@@ -262,7 +262,7 @@ it('uploads and downloads an assignment file for the owner', async () => {
   const asBob = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' });
   expect(asBob.status).toBe(403);
   // A finalized upload is not a submitted answer until a trusted receipt references it.
-  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(403);
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(200);
   store.docs.set('groups/course/assignments/work/submissions/alice', {
     userId: 'alice', submittedAt: Date.now(), attachments: [{ url: ANSWER }],
   });

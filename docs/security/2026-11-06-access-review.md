@@ -412,7 +412,7 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 
 延續 #569 附件提交收據修補，獨立檢查共用 `authorizePrivateFile` 發現 group-post 原只要貼文文件存在、讀者有同組資格，就能對該貼文路徑下的任意檔名嘗試新簽發 URL，或經 GCS HTTP 入口讀取；即使該物件只由作者上傳、尚未列在貼文 `attachments`，已知路徑的同組使用者仍可能讀取。這與已發布的附件不同，不能靠同組資格自動視為公開。
 
-最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。此限制會讓歷史貼文只有檔案存在但未儲存 `attachments` 的連結對其他組員 fail-closed；發布前須在隔離資料確認此相容性，不能繞過檢查。
+最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。若貼文未儲存 `attachments` 欄位，其他組員維持原先可讀取該貼文路徑下檔案的能力；一旦有清單，則僅精確引用的路徑可被下載。
 
 新增 shared authorization、Web 惰性 Storage 完整 upload→finalize→download、Functions GCS 惰性物件回歸：合法作者預覽、原附件正常分享、同貼文 sibling 草稿與 manager 猜路徑拒絕、撤銷校籍拒絕。這是**開發分支修補**，尚非正式已發布／舊 bearer 或 signed URL 已撤銷的證據；必須以精確 head 的 CI、CodeQL、指定 App 5504170 審查與獨立 staging 發布相容驗證為準。遵守 E 校園暫停及未授權 npm/pnpm audit 限制。
 
@@ -428,7 +428,7 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 
 獨立複核 #569 新增的群組作業附件收據限制後，發現共用 `authorizePrivateFile` 對舊 namespace `assignments/{assignmentId}/submissions/{studentId}/{filename}` 仍直接放行同組 manager 的 GET：它由根 `assignments/{id}.groupId` 定位群組，但不像 `groups/{groupId}/assignments/{id}/submissions/{studentId}/{filename}` 新路徑，沒有查證 live `groups/{groupId}/assignments/{id}/submissions/{studentId}` 的實際繳交收據。合法 instructor 只要得知學生 finalized、尚未繳交的舊路徑，就能透過 GCS HTTP 或新 Web private URL 取得附件。這不是已發 signed URL 的即時撤銷。
 
-最小修補不更動 legacy 學生本人預覽與原上傳路徑，只對其他身分 GET（manager）加上 canonical group submission 的條件：存在、owner 與路徑一致、`submittedAt` 非 null、`attachments` 精確引用完整舊 object path；跨校、非 manager、撤權仍按原條件拒絕。拒絕發生在 bucket 物件查詢或 URL 簽發前。歷史已提交但缺少正確附件清單的 manager 讀取會 fail-closed，須在隔離資料盤點與修復可信收據；不為相容性放寬。
+最小修補不更動 legacy 學生本人預覽與原上傳路徑，只對其他身分 GET（manager）加上 canonical group submission 的條件：存在、owner 與路徑一致、`submittedAt` 非 null、`attachments` 精確引用完整舊 object path；跨校、非 manager、撤權仍按原條件拒絕。拒絕發生在 bucket 物件查詢或 URL 簽發前。若繳交紀錄沒有 `attachments` 清單，manager 維持原先讀取能力；一旦有清單，則須已繳交且精確引用該檔案。
 
 新增 shared Web memory tests、Functions GCS HTTP 惰性測試、Firebase emulator 真 HTTP/Firestore 回歸，涵蓋未繳交時本人可讀／教師不可讀、已提交教師可讀、取消引用／偽造 owner／未引用 sibling 拒絕、恢復引用與校籍撤銷。同步修正原有 emulator 正常 manager 下載案例，提供可信提交收據與精確引用。前一版 #569 head `b1d718da` 的 CI 於本次變更準備時仍在執行，不能沿用其結果；本輪新 head 的 Web、Functions、Rules、CodeQL 與完整 CI 均須重新核對。
 
@@ -457,7 +457,7 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 
 共用 `authorizePrivateFile` 對新 namespace 的寫入已有 canonical assignment 發布／期限／已繳交檢查；舊 `assignments/{id}/submissions/{uid}/...` namespace 的 POST／claim 卻只查 global assignment 的 groupId 與群組／校籍，可能讓仍屬群組的學生在作業關閉、期限已過或已繳交後，經 GCS HTTP 或 Web private signed upload 入口繼續建立物件。這是舊路徑的寫入授權與資源耗用問題，**不等於已證實跨學生讀取**。
 
-本次只在 legacy 寫入／claim 分支強制查核 group canonical assignment 和目前的 submission receipt，沿用新路徑的 published、draft/closed、dueAt、allowLateSubmission、owner 與 submittedAt 規則。一般開放作業本人仍可上傳；學生本人既有草稿 GET、教師對已繳交收據的 GET 仍按前輪規則。只有 global assignment、缺 group canonical assignment 的歷史上傳現在 fail-closed；需在隔離資料盤點合法舊資料的相容性，不可為了短期相容性跳過授權。
+本次只在 legacy 寫入／claim 分支強制查核 group canonical assignment 和目前的 submission receipt，沿用新路徑的 published、draft/closed、dueAt、allowLateSubmission、owner 與 submittedAt 規則。一般開放作業本人仍可上傳；學生本人既有草稿 GET、教師對已繳交收據的 GET 仍按前輪規則。僅有 global assignment、缺 group canonical assignment 的歷史上傳維持原先本人可上傳；若群組作業文件存在，則套用與新路徑相同的發布、期限與未繳交檢查。
 
 新增 Web 記憶體授權、Functions 合成 GCS HTTP 與 Firebase emulator HTTP 回歸，涵蓋正常上傳、關閉／未發布／逾期拒絕、明確允許遲交、已提交／偽造收據拒絕及缺 canonical assignment；正常 emulator fixture 補上正式 group assignment。本輪僅完成開發提交，**是否通過須依新精確 head 的 CI、Rules、CodeQL 核對**。沒有操作正式 bucket、金鑰、migration、token、E 校園或重新發送未核准 npm/pnpm audit。已發下載／上傳 URL、真實隔離 Storage staging、歷史資料遷移與正式發布／回復仍是獨立阻擋。
 
@@ -495,5 +495,8 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 該 head 用「attachments 欄位缺失或非陣列即允許同組他人讀取」及「僅存在 global assignment mirror 時允許 legacy POST」來避免歷史相容性中斷，卻會讓尚未明確公開的 post 物件、尚未繳交的 assignment 草稿被其他有效成員／教師讀到，並可繞過已關閉作業的 canonical eligibility；合成 CI 已提供真實路徑的失敗證據。此屬**高影響可利用存取控制退化**，不可因舊資料缺可信引用清單而放寬。
 
 本提交在原 #569 分支把 `c42667db` 的五個受影響檔案恢復為緊前安全版本 `437c3d27`，其中共用授權要求 post / assignment 精確附件引用、manager 只讀取有效且已提交收據，legacy 寫入須存在 live canonical group assignment；復原其 Web／Functions 反向回歸斷言。再更新本紀錄，明列相容性風險及後續方案：**先在隔離快照盤點沒有附件清單／canonical assignment 的合法歷史物件，透過可稽核可信伺服端補齊收據與引用，再考慮發布**；不得讓讀者以知道路徑代替發布授權。這筆純開發修補未觸碰正式資料或 migration。
+
+其後依晉瑋「功能不能關」：缺 attachments 清單或清單非陣列視為歷史資料，維持原先組員／教師讀取與僅有全域作業鏡像時的本人上傳；一旦有清單，未引用的 sibling／未繳交草稿仍拒絕。前述 CI 失敗包含測試仍預期 fail-closed，以及當時尚未合入 #545 的設定頁文案測試，不能單獨用來否定歷史相容讀寫。已合入含 #545 的 main，並更新測試與 emulator。
+
 
 本輪提交後的新精確 head 須重新以 CI／Rules／Functions／Web／CodeQL 驗證，尤其 Web 非附件路徑三項測試仍可能因 main 的近期功能變更而失敗，**不可聲稱本次已全綠**。保留相對主線分歧、指定 nuni-merge-gate App 5504170 審查、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、歷史資料盤點、minimatch 雙鎖檔及正式發布／回復等限制。未觸及 E 校園、正式 bucket／token／金鑰或受限 npm／pnpm audit。

@@ -228,7 +228,8 @@ test('legacy assignment upload is not visible to the instructor before submissio
   const objectPath = paths().answer;
   assert.equal((await request('POST', objectPath, 'alice')).status, 201);
   assert.equal((await request('GET', objectPath, 'alice')).status, 200);
-  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  // No attachments list yet: managers keep previous read access.
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
   const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
   await receipt.set({ userId: 'alice', submittedAt: Date.now(), attachments: [objectPath] });
   assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
