@@ -1,6 +1,8 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { act, render } from '@testing-library/react-native';
+// Own cleanup ordering: RNTL's automatic afterEach can wait on fake timers
+// before this file gets a chance to flush them and restore real timers.
+import { act, cleanupAsync, render } from '@testing-library/react-native/pure';
 import { useLoadable, type Loadable } from '../screens/lmsV2/_courseV2Shell';
 
 jest.mock('../ui/theme', () => ({ theme: {} }));
@@ -30,9 +32,13 @@ beforeEach(() => {
   jest.useFakeTimers();
   snapshots = [];
 });
-afterEach(() => {
-  jest.clearAllTimers();
-  jest.useRealTimers();
+afterEach(async () => {
+  try {
+    await cleanupAsync();
+    await act(async () => { jest.runOnlyPendingTimers(); });
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 it.each([
