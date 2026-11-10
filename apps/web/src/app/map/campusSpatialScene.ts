@@ -292,8 +292,25 @@ export function createCampusSpatialScene(
     const point = view.selectedId ? pointsById.get(view.selectedId) : undefined;
     const target = new Vector3(point?.x ?? 0, 0, point?.z ?? 0);
     const aspect = width > 0 && height > 0 ? width / height : 1;
+    // A POI can be up to 30 m outside its accepted OSM outline. The old
+    // fixed 140-260 m focus span clipped long buildings when selected, most
+    // noticeably on narrow phone screens. Fit the actual source geometry
+    // relative to the POI, without inventing a building center or new bounds.
+    let footprintSpan = 0;
+    if (point) {
+      const footprint = visibleFootprints.find((item) => item.poiId === point.id);
+      if (footprint) {
+        const metersPerLatitude = 6_371_008.8 * Math.PI / 180;
+        const metersPerLongitude = metersPerLatitude * Math.cos(point.location.lat * Math.PI / 180);
+        for (const [longitude, latitude] of footprint.outline) {
+          footprintSpan = Math.max(footprintSpan,
+            2 * Math.abs((longitude - point.location.lng) * metersPerLongitude),
+            2 * Math.abs((latitude - point.location.lat) * metersPerLatitude));
+        }
+      }
+    }
     const focusSpan = point && buildingHeightById.has(point.id)
-      ? Math.max(140, Math.min(260, model.radius * 0.32))
+      ? Math.max(140, Math.min(260, model.radius * 0.32), footprintSpan + pinRadius * 4)
       : Math.max(180, Math.min(450, model.radius * 0.85));
     const offset = spatialCameraDirection(view.bearing, view.overhead);
     const direction = new Vector3(offset.x, offset.y, offset.z);
