@@ -320,6 +320,46 @@ it('does not construct graphics if the user closes before the lazy import resolv
   expect(scene.create).not.toHaveBeenCalled();
 });
 
+it('downloads a self-contained SVG for all or just the selected floor', async () => {
+  const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:floor-print');
+  const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const filenames: string[] = [];
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    filenames.push(this.download);
+  });
+  render(<BuildingPlanPreview {...props} />);
+  loadExample();
+
+  const download = screen.getByRole('button', { name: '下載平面圖 SVG' });
+  fireEvent.click(download);
+  const read = (blob: Blob) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsText(blob);
+  });
+  const all = await read(createUrl.mock.calls[0][0] as Blob);
+  expect(all).toContain('範例教室 101');
+  expect(all).toContain('範例教室 201');
+  expect(all).toContain('待核對圖面');
+  expect((createUrl.mock.calls[0][0] as Blob).type).toBe('image/svg+xml;charset=utf-8');
+
+  fireEvent.change(screen.getByRole('combobox', { name: '樓層' }), { target: { value: 'example-2' } });
+  fireEvent.click(download);
+  const oneFloor = await read(createUrl.mock.calls[1][0] as Blob);
+  expect(oneFloor).toContain('範例教室 201');
+  expect(oneFloor).not.toContain('範例教室 101');
+  fireEvent.click(download);
+  expect(await read(createUrl.mock.calls[2][0] as Blob)).toBe(oneFloor);
+  expect(filenames).toEqual([
+    '平面圖-兩層教學空間・示意-全部樓層.svg',
+    '平面圖-兩層教學空間・示意-單層-2F.svg',
+    '平面圖-兩層教學空間・示意-單層-2F.svg',
+  ]);
+  expect(click).toHaveBeenCalledTimes(3);
+  await waitFor(() => expect(revokeUrl).toHaveBeenCalledWith('blob:floor-print'), { timeout: 2_000 });
+});
+
 it('downloads a scoped fictional template and revokes its temporary URL', async () => {
   const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:plan-template');
   const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
