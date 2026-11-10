@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { checkAddedCss, checkGlobalUiFoundation, withoutCssComments } from './ui-design-gate.mjs';
+import { checkAddedCss, checkGlobalUiFoundation, checkTodayWelcomeFocusStyles, withoutCssComments } from './ui-design-gate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -62,4 +62,26 @@ test('a missing keyboard focus ring is reported', () => {
 test('comments cannot satisfy or trigger a stylesheet rule', () => {
   assert.equal(withoutCssComments('/* transition: all */\ntransition: opacity 140ms;').includes('transition: all'), false);
   assert.deepEqual(checkAddedCss('+++ b/apps/web/src/a.css\n@@ -0,0 +1 @@\n+/* transition: all 2s; */'), []);
+});
+
+test('first-use homepage focus remains visible in the real component stylesheet', () => {
+  const css = readFileSync(
+    resolve(root, 'apps/web/src/components/today/TodayWelcome.module.css'),
+    'utf8',
+  );
+  assert.deepEqual(checkTodayWelcomeFocusStyles(css), []);
+});
+
+test('the design gate rejects clipped or absent keyboard focus in first-use hero', () => {
+  const safe = [
+    '.welcome { display: grid; border-radius: 20px; }',
+    '.welcome a:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }',
+  ].join('\n');
+  assert.deepEqual(checkTodayWelcomeFocusStyles(safe), []);
+
+  const clipped = safe.replace('border-radius: 20px;', 'overflow: hidden;');
+  assert.match(checkTodayWelcomeFocusStyles(clipped)[0], /clip focus/);
+
+  const hiddenRing = safe.replace('3px solid var(--focus-ring)', 'none');
+  assert.match(checkTodayWelcomeFocusStyles(hiddenRing)[0], /keyboard focus ring/);
 });

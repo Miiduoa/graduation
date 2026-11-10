@@ -33,6 +33,23 @@ export function checkGlobalUiFoundation(source) {
   return issues;
 }
 
+
+const welcomeStyles = 'apps/web/src/components/today/TodayWelcome.module.css';
+
+export function checkTodayWelcomeFocusStyles(source) {
+  const css = withoutCssComments(source);
+  const issues = [];
+  const root = css.match(/(?:^|\})\s*\.welcome\s*\{([^}]*)\}/m);
+  if (!root || /\boverflow(?:-x|-y)?\s*:\s*(?:hidden|clip)\b/i.test(root[1])) {
+    issues.push(welcomeStyles + ': first-use hero must not clip focus outlines');
+  }
+  const focus = css.match(/\.welcome\s+a:focus-visible\s*\{([^}]*)\}/m);
+  if (!focus || !/\boutline\s*:\s*3px\s+solid\s+var\(--focus-ring\)\s*;/i.test(focus[1])) {
+    issues.push(welcomeStyles + ': first-use links must retain a keyboard focus ring');
+  }
+  return issues;
+}
+
 export function checkAddedCss(diff) {
   const issues = [];
   let file = null;
@@ -77,6 +94,8 @@ export function checkAddedCss(diff) {
 function run() {
   const css = readFileSync(resolve(root, globalStyles), 'utf8');
   const problems = checkGlobalUiFoundation(css);
+  const welcome = readFileSync(resolve(root, welcomeStyles), 'utf8');
+  problems.push(...checkTodayWelcomeFocusStyles(welcome));
   const baseIndex = process.argv.indexOf('--base');
   if (baseIndex !== -1) {
     const base = process.argv[baseIndex + 1];

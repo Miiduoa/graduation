@@ -1,7 +1,7 @@
 .welcome {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  overflow: hidden;
+  /* Do not clip a keyboard focus outline on first-use actions. */
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--surface);
@@ -111,12 +111,6 @@
   margin: 0;
   font-size: var(--font-body-size);
   font-weight: 650;
-}
-
-.shortcutHeading > span {
-  color: var(--muted);
-  font-size: calc(var(--font-body-sm-size) - 0.0625rem);
-  white-space: nowrap;
 }
 
 .shortcutGrid {

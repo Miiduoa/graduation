@@ -14,6 +14,7 @@
 - 保留現有的 :focus-visible 與 prefers-reduced-motion；這兩項不是本輪新建的功能。
 - 新增 scripts/ui-design-gate.mjs、Node 測試及 CI：阻擋後續新增 CSS 的 transition: all。
 - 未登入的「今天」首頁移除標題上方重複的裝飾性標籤，以及連結後多餘的箭頭；保留原有的匯入課表、手動建課、校園服務及登入導覽。
+- 首次使用首頁解除容器 `overflow: hidden`，避免鍵盤焦點外框被裁切；移除未逐項驗證的「免登入」宣稱。新增首頁入口／跨校連結 DOM 回歸測試，以及可在 CI 執行的焦點樣式防退步檢查。
 
 ## 自動測試（不需安裝第三方依賴）
 
@@ -21,7 +22,7 @@
 - node scripts/ui-design-gate.mjs
 - node scripts/ui-design-gate.mjs --base HEAD^1
 
-檢查器目前只驗證共用樣式基礎和新增 Web CSS 的 transition: all。通過不代表已滿足 Hallmark 全部規則，也不能取代瀏覽器實機測試。
+檢查器目前只驗證共用樣式基礎、首次使用首頁的焦點樣式，以及新增 Web CSS 的 transition: all。通過不代表已滿足 Hallmark 全部規則，也不能取代瀏覽器實機測試。
 
 ## 合併前的人工驗收（尚未完成）
 

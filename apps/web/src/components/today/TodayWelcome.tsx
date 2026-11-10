@@ -53,8 +53,7 @@ export function TodayWelcome({
       </div>
       <nav className={styles.shortcuts} aria-label="常用校園服務">
         <div className={styles.shortcutHeading}>
-          <h3>現在就能用</h3>
-          <span>免登入</span>
+          <h3>校園服務</h3>
         </div>
         <div className={styles.shortcutGrid}>
           {shortcuts.map((item) => (
