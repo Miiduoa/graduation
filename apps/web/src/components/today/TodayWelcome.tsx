@@ -31,15 +31,11 @@ export function TodayWelcome({
   return (
     <section className={styles.welcome} aria-labelledby="today-welcome-title">
       <div className={styles.intro}>
-        <span className={styles.label}>
-          <CampusIcon name="timetable" size={18} />
-          你的校園日常
-        </span>
         <h2 id="today-welcome-title">{hasTimetable ? '課表準備好了。' : '先把課表放進來。'}</h2>
         <p className={styles.description}>
           {hasTimetable
-            ? '接著看看這週的上課時間與教室。需要出門、找書或吃飯，校園服務也都在這裡。'
-            : '匯入截圖或檔案，也可以手動新增課程。把上課時間和教室整理好，今天的安排就清楚了。'}
+            ? '查看本週的上課時間與教室。'
+            : '可匯入課表截圖、檔案，或手動新增課程。'}
         </p>
         <div className={styles.actions}>
           <Link href={hasTimetable ? timetableHref : importHref} className={styles.primary}>
@@ -47,17 +43,16 @@ export function TodayWelcome({
             {hasTimetable ? '查看這週課表' : '匯入我的課表'}
           </Link>
           <Link href={hasTimetable ? importHref : timetableHref} className={styles.secondary}>
-            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'} <span aria-hidden="true">↗</span>
+            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'} <CampusIcon name="arrow" size={16} />
           </Link>
         </div>
         <p className={styles.signIn}>
-          已加入平台課程？{' '}
           <Link href={loginHref(campusServiceHref('/', campusSearch))}>登入看課程待辦</Link>
         </p>
       </div>
       <nav className={styles.shortcuts} aria-label="常用校園服務">
         <div className={styles.shortcutHeading}>
-          <h3>現在就能用</h3>
+          <h3>校園服務</h3>
           <span>免登入</span>
         </div>
         <div className={styles.shortcutGrid}>
@@ -71,9 +66,6 @@ export function TodayWelcome({
               <span>
                 <strong>{item.label}</strong>
                 <small>{item.detail}</small>
-              </span>
-              <span className={styles.arrow} aria-hidden="true">
-                ↗
               </span>
             </Link>
           ))}
