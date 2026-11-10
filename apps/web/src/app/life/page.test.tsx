@@ -89,13 +89,13 @@ it('空結果可以恢復完整目錄，Escape 也可清除輸入', () => {
   expect(screen.queryAllByRole('link')).toHaveLength(0);
   expect(screen.getByRole('status').textContent).toBe('找到 0 項服務');
   fireEvent.click(screen.getByRole('button', { name: '顯示全部服務' }));
-  expect(screen.getAllByRole('link')).toHaveLength(14);
+  expect(screen.getAllByRole('link')).toHaveLength(15);
   expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: '教室' } });
   fireEvent.keyDown(search, { key: 'Escape', isComposing: true });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   fireEvent.keyDown(search, { key: 'Escape' });
-  expect(screen.getAllByRole('link')).toHaveLength(14);
+  expect(screen.getAllByRole('link')).toHaveLength(15);
 });
 
 it('搜尋不會繞過訂單開關，餐飲入口仍可搜到，並可直達個人宿舍工作區', () => {
@@ -136,6 +136,27 @@ it('失物招領說明指向學校帳號，不承諾 Google 可完成', () => {
   expect(screen.getByText('使用學校帳號登入後，查看或刊登遺失與拾獲物品。')).toBeTruthy();
   expect(screen.queryByText(/Google 帳號登入後，查看或刊登遺失/)).toBeNull();
   expect(screen.getByRole('link', { name: /失物招領/ }).getAttribute('href')).toBe('/lost-found');
+});
+
+it('Google 公開交流可以直接被找到，保留校園且不要求學校登入', () => {
+  selectedSchool.mockReturnValue({
+    selectedSchool: { id: 'nthu' },
+    loading: false,
+    catalogStatus: 'ready',
+  });
+  render(<LifePage />);
+  fireEvent.click(screen.getByRole('button', { name: '交流與互助' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: '快速找服務' }), { target: { value: 'Google' } });
+  const link = screen.getByRole('link', { name: /跨校公開交流/ });
+  const href = new URL(link.getAttribute('href')!, 'https://campus.example');
+  expect(href.pathname).toBe('/social');
+  expect(href.searchParams.get('campus')).toBe('nthu');
+  expect(href.searchParams.get('schoolId')).toBe('nthu');
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByText('使用 Google 帳號閱讀公開貼文，參與開放看板。')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: '免登入' }));
+  expect(screen.queryByRole('link', { name: /跨校公開交流/ })).toBeNull();
 });
 
 it('學校資訊入口保留已選校園，並可被免登入搜尋找到', () => {
@@ -289,7 +310,7 @@ it('URL 校園參數不影響生活頁搜尋與分類狀態', () => {
   const search = screen.getByRole('searchbox', { name: '快速找服務' }) as HTMLInputElement;
   expect(search.value).toBe('');
   expect(screen.getByRole('button', { name: '全部' }).getAttribute('aria-pressed')).toBe('true');
-  expect(screen.getByRole('status').textContent).toBe('共 14 項服務');
+  expect(screen.getByRole('status').textContent).toBe('共 15 項服務');
   fireEvent.change(search, { target: { value: '公車' } });
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link', { name: /公車/ }).getAttribute('href')).toContain('campus=nthu');

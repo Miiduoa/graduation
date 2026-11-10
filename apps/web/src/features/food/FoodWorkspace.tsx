@@ -14,6 +14,7 @@ import { clearAllFoodPendingForAccount } from './foodPersistence';
 import { foodMoney, useFoodDraft, useFoodRead, type FoodDraftCache } from './foodState';
 import { isWebOnlineOrderingEnabled } from '@/lib/onlineOrdering';
 import { foodPageSubtitle } from '@campus/shared/src/foodPageCopy';
+import { buildCampusNavigationSearch, campusServiceHref } from '@/lib/campusNavigationLinks';
 import styles from './Food.module.css';
 
 const subscribeToHydration = () => () => {};
@@ -27,13 +28,16 @@ export function FoodWorkspace({
   initialOrder = '',
   initialLocation = '',
   initialItems = [],
+  campusSearch = '',
 }: {
   initialTenant?: string;
   initialOrder?: string;
   initialLocation?: string;
   initialItems?: PreparedFoodItem[];
+  campusSearch?: string;
 }) {
   const auth = useNuniSession();
+  const browseSearch = buildCampusNavigationSearch(new URLSearchParams(campusSearch));
   // Delayed Suspense on /food must hydrate against the server's account-checking markup.
   const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrated, serverHydrated);
   const [cleanupError, setCleanupError] = useState('');
@@ -92,11 +96,12 @@ export function FoodWorkspace({
           />
         ) : (
           <NuniSignIn
-            returnUrl={
+            returnUrl={campusServiceHref(
               initialTenant && initialOrder
                 ? `/food?tenant=${encodeURIComponent(initialTenant)}&order=${encodeURIComponent(initialOrder)}`
-                : '/food'
-            }
+                : '/food',
+              browseSearch,
+            )}
           />
         )}
       </div>
