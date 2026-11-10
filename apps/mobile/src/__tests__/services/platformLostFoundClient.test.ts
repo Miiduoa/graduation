@@ -61,6 +61,10 @@ async function setup() {
     credential,
     clearCredential: jest.fn(async () => undefined),
     invalidateLocalDrafts: jest.fn(),
+    savedPlansCleanup: {
+      begin: jest.fn(async () => undefined),
+      end: jest.fn(),
+    },
     now: () => 1000,
     logoutFence: {
       read: async () => false,
