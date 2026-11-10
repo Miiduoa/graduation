@@ -55,6 +55,32 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses Overpass redirects instead of following a Location to another host or private network', async () => {
+    const upstream = vi.fn().mockResolvedValue(new Response('moved', {
+      status: 302,
+      headers: { Location: 'http://127.0.0.1:3000/internal' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect((await response.json()).error).toMatch(/temporarily unavailable/);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    // Native fetch follows HTTP redirects by default. This explicit option
+    // stops the follow *before* any redirected network request is made.
+    expect(upstream.mock.calls[0][1]).toMatchObject({
+      redirect: 'error',
+      cache: 'no-store',
+    });
+    expect(new URL(upstream.mock.calls[0][0]).hostname).toBe('overpass-api.de');
+    // A rejected redirect cannot poison the snapshot or trigger repeated
+    // requests while the existing error cooldown remains active.
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('limits shared-cache freshness to the remaining lifetime of the 24-hour OSM snapshot', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
