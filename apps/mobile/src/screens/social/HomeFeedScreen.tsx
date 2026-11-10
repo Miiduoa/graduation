@@ -214,8 +214,8 @@ function HomeFeedContent() {
       setStories(storyRows);
     } catch (cause) {
       if (loadVersion.current !== version) return;
-      setStories([]);
       if (isAccessDenied(cause)) {
+        setStories([]);
         setAccessDenied(true);
         setPosts([]);
         setBoards([]);

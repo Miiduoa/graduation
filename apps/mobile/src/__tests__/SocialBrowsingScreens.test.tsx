@@ -704,19 +704,21 @@ test('opens stories without navigating away, shows photo captions and steps betw
   expect(markStoryViewed).not.toHaveBeenCalledWith('foreign', expect.anything());
 });
 
-test('an unsuccessful school refresh removes the old story from the viewer and feed', async () => {
-  const story = { id: 's1', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
-    text: '校園讀書會', expiresAt: Date.now() + 60000 };
-  jest.mocked(listActiveStoriesForSchool).mockResolvedValueOnce([story]);
-  jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
-  const view = render(<HomeFeedScreen />);
-  fireEvent.press(await view.findByLabelText('查看 小柏 的限時動態'));
-  expect(view.getByText('校園讀書會')).toBeTruthy();
-  jest.mocked(listActiveStoriesForSchool).mockRejectedValueOnce(Object.assign(new Error('offline'), { code: 'unavailable' }));
-  await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
-  expect(view.queryByText('校園讀書會')).toBeNull();
-  expect(view.queryByLabelText('查看 小柏 的限時動態')).toBeNull();
-});
+test.each(['unavailable', 'permission-denied', 'firestore/permission-denied'])(
+  'a %s school refresh preserves stories only for connection failures', async (code) => {
+    const story = { id: 's1', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
+      text: '校園讀書會', expiresAt: Date.now() + 60000 };
+    jest.mocked(listActiveStoriesForSchool).mockResolvedValueOnce([story]);
+    jest.mocked(fetchSchoolDirectoryProfiles).mockResolvedValue([{ uid: 'bob', displayName: '小柏' }]);
+    const view = render(<HomeFeedScreen />);
+    fireEvent.press(await view.findByLabelText('查看 小柏 的限時動態'));
+    expect(view.getByText('校園讀書會')).toBeTruthy();
+    jest.mocked(listActiveStoriesForSchool).mockRejectedValueOnce(Object.assign(new Error('refresh failed'), { code }));
+    await act(async () => view.UNSAFE_getByType(RefreshControl).props.onRefresh());
+    expect(!!view.queryByText('校園讀書會')).toBe(code === 'unavailable');
+    expect(!!view.queryByLabelText('查看 小柏 的限時動態')).toBe(code === 'unavailable');
+  },
+);
 
 test('a late allowed read cannot restore the realtime grid after access is denied', async () => {
   const story = { id: 's1', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,

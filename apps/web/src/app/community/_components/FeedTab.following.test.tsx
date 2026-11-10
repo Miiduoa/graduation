@@ -393,7 +393,7 @@ it('uses the default for corrupt preferences and still switches feed without wri
   }
 });
 
-it('opens the tapped author without losing the feed filter and clears the viewer on account changes', async () => {
+function mockDialogMethods() {
   // jsdom has no native dialog methods; Chromium covers top-layer focus behavior.
   const proto = HTMLDialogElement.prototype;
   for (const name of ['showModal', 'close'] as const) {
@@ -404,6 +404,10 @@ it('opens the tapped author without losing the feed filter and clears the viewer
       else Reflect.deleteProperty(proto, name);
     });
   }
+}
+
+it('opens the tapped author without losing the feed filter and clears the viewer on account changes', async () => {
+  mockDialogMethods();
   const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', expiresAt: Date.now() + 60_000, kind: 'text', text: '圖書館集合' };
   mocks.groupStories.mockReturnValue([{ authorUid: 'bob', latestAt: Date.now(), stories: [story] }]);
   const { rerender } = render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
@@ -439,4 +443,27 @@ it('hides a previously loaded story while retrying a rejected server read', asyn
   expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
   await act(async () => pending.resolve([]));
   expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull();
+});
+
+it('keeps loaded text stories and the open viewer after a network refresh failure', async () => {
+  mockDialogMethods();
+  const story = { id: 'story-bob', schoolId: 'pu', authorUid: 'bob', expiresAt: Date.now() + 60_000, kind: 'text', text: '圖書館集合' };
+  mocks.fetchStories.mockResolvedValueOnce([story]);
+  mocks.groupStories.mockImplementation((rows) => rows.length ? [{ authorUid: 'bob', latestAt: Date.now(), stories: rows }] : []);
+  render(<FeedTab schoolId="pu" schoolSearch="?schoolId=pu" />);
+  fireEvent.click(await screen.findByRole('button', { name: /Bob的限時動態/ }));
+  const dialog = screen.getByRole('dialog', { name: '限時動態' });
+  expect(within(dialog).getByText('圖書館集合')).toBeTruthy();
+  const pending = deferred<unknown[]>();
+  mocks.fetchStories.mockReturnValueOnce(pending.promise);
+  fireEvent.click(screen.getByRole('button', { name: '重新整理' }));
+  expect(screen.getByRole('dialog', { name: '限時動態' })).toBe(dialog);
+  await act(async () => pending.reject(Object.assign(new Error('offline'), { code: 'unavailable' })));
+  await screen.findByRole('button', { name: '重新讀取' });
+  expect(screen.getByRole('button', { name: /Bob的限時動態/ })).toBeTruthy();
+  expect(within(screen.getByRole('dialog', { name: '限時動態' })).getByText('圖書館集合')).toBeTruthy();
+  mocks.fetchStories.mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  fireEvent.click(screen.getByRole('button', { name: '重新讀取' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /Bob的限時動態/ })).toBeNull());
+  expect(screen.queryByRole('dialog')).toBeNull();
 });
