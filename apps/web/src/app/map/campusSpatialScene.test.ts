@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, Scene, Vector3 } from 'three';
+import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, PlaneGeometry, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
 import { parseProvidenceOsmFootprints, type ProvidenceFootprint } from './providenceFootprints';
@@ -884,4 +884,49 @@ it('fits an elongated OSM building when its selected POI is near an end', () => 
   const compactDistance = lastCamera(compact.renderer).position.distanceTo(poi);
   const elongatedDistance = lastCamera(elongated.renderer).position.distanceTo(poi);
   expect(elongatedDistance).toBeGreaterThan(compactDistance * 1.5);
+});
+
+it('fits a long accepted OSM footprint in the campus overview and ground plane', () => {
+  // Synthetic outline deliberately extends well past its POI; it is NOT a
+  // measured Providence building. The overview previously used only POIs
+  // to size the ground and camera, clipping long source-checked footprints.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const point = campus.points[0];
+  const longOutline: ProvidenceFootprint = {
+    poiId: point.id,
+    name: point.name,
+    sourceUrl: library.sourceUrl,
+    outline: [
+      [point.location.lng - 0.00002, point.location.lat - 0.00003],
+      [point.location.lng + 0.0024, point.location.lat - 0.00003],
+      [point.location.lng + 0.0024, point.location.lat + 0.00003],
+      [point.location.lng - 0.00002, point.location.lat + 0.00003],
+    ],
+    heightMeters: 12,
+    heightBasis: 'illustrative',
+  };
+  const without = setup(campus);
+  const withLongOutline = setup(campus, undefined, [longOutline]);
+  without.bounds.width = 320;
+  withLongOutline.bounds.width = 320;
+  for (const observer of observers) observer.callback([], observer as unknown as ResizeObserver);
+  drawFrame();
+
+  const groundWidth = (renderer: (typeof webgl.renderers)[number]) => {
+    const graph = renderer.render.mock.calls.at(-1)?.[0] as Scene;
+    let width = 0;
+    graph.traverse((object) => {
+      if (object instanceof Mesh && object.geometry instanceof PlaneGeometry) {
+        width = Math.max(width, object.geometry.parameters.width);
+      }
+    });
+    return width;
+  };
+  // Include both ends of the footprint without inventing a new POI, ground
+  // polygon, or a building dimension for any actual Providence campus block.
+  expect(groundWidth(withLongOutline.renderer))
+    .toBeGreaterThan(groundWidth(without.renderer) + 250);
+  expect(lastCamera(withLongOutline.renderer).position.length())
+    .toBeGreaterThan(lastCamera(without.renderer).position.length() * 1.5);
 });
