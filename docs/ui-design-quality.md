@@ -13,6 +13,7 @@
 - 公告分類選取邊框使用既有 --brand 變數，不再硬編碼紫色。
 - 保留現有的 :focus-visible 與 prefers-reduced-motion；這兩項不是本輪新建的功能。
 - 新增 scripts/ui-design-gate.mjs、Node 測試及 CI：阻擋後續新增 CSS 的 transition: all。
+- 未登入的「今天」首頁移除標題上方重複的裝飾性標籤，以及連結後多餘的箭頭；保留原有的匯入課表、手動建課、校園服務及登入導覽。
 
 ## 自動測試（不需安裝第三方依賴）
 

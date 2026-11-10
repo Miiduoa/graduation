@@ -31,10 +31,6 @@ export function TodayWelcome({
   return (
     <section className={styles.welcome} aria-labelledby="today-welcome-title">
       <div className={styles.intro}>
-        <span className={styles.label}>
-          <CampusIcon name="timetable" size={18} />
-          你的校園日常
-        </span>
         <h2 id="today-welcome-title">{hasTimetable ? '課表準備好了。' : '先把課表放進來。'}</h2>
         <p className={styles.description}>
           {hasTimetable
@@ -47,7 +43,7 @@ export function TodayWelcome({
             {hasTimetable ? '查看這週課表' : '匯入我的課表'}
           </Link>
           <Link href={hasTimetable ? importHref : timetableHref} className={styles.secondary}>
-            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'} <span aria-hidden="true">↗</span>
+            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'}
           </Link>
         </div>
         <p className={styles.signIn}>
@@ -71,9 +67,6 @@ export function TodayWelcome({
               <span>
                 <strong>{item.label}</strong>
                 <small>{item.detail}</small>
-              </span>
-              <span className={styles.arrow} aria-hidden="true">
-                ↗
               </span>
             </Link>
           ))}
