@@ -1,14 +1,19 @@
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { SpokenReply } from '@/components/SpokenReply';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
+import draftStyles from './AssistantDraft.module.css';
+import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 export function AssistantThread({
+  inline = false,
   schoolId,
   ready,
   fallback,
@@ -26,10 +31,12 @@ export function AssistantThread({
   recoverableQuestion,
   onRecoverQuestion,
   onAsk,
+  onStop,
   onConfirm,
   onCancel,
   onReconcile,
 }: {
+  inline?: boolean;
   schoolId: string;
   ready: boolean;
   fallback: boolean;
@@ -47,23 +54,24 @@ export function AssistantThread({
   recoverableQuestion: string;
   onRecoverQuestion: () => void;
   onAsk: () => void;
+  onStop?: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
   onReconcile?: (card: V2Card) => void;
 }) {
+  const fieldId = useId();
+  const log = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLElement>(null);
   const dock = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
   const [showJump, setShowJump] = useState(false);
-  // Suggestion chips may replace the composer, but never destroy a hand-written draft.
-  const [savedDraft, setSavedDraft] = useState<string | null>(null);
-  const lastSuggestion = useRef<string | null>(null);
+  const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
-    if (!root || !node) return;
+    if (inline || !root || !node) return;
     const apply = () => {
       const height = Math.ceil(node.getBoundingClientRect().height);
       if (height > 0) root.style.setProperty('--assistant-dock-height', `${height}px`);
@@ -73,8 +81,9 @@ export function AssistantThread({
     const observer = new ResizeObserver(apply);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [turns.length, question, pending]);
+  }, [inline, turns.length, question, pending, draft]);
   useEffect(() => {
+    if (inline) return;
     // Incoming results must not steal the scroll position while someone reads older replies.
     const trackScroll = () => {
       if (!end.current || turns.length === 0) return;
@@ -84,12 +93,16 @@ export function AssistantThread({
     };
     window.addEventListener('scroll', trackScroll, { passive: true });
     return () => window.removeEventListener('scroll', trackScroll);
-  }, [turns.length]);
+  }, [inline, turns.length]);
   useEffect(() => {
+    if (inline) {
+      if (log.current) log.current.scrollTop = log.current.scrollHeight;
+      return;
+    }
     if (!followLatest.current || (!turns.length && !pending && !error)) return;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
-  }, [turns, pending, error]);
+  }, [inline, turns, pending, error]);
   useEffect(() => {
     const node = field.current;
     if (!node) return;
@@ -97,52 +110,61 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
-  const canSubmit = !pending && !!question.trim() &&
+  const canSubmit = !pending && !onStop && !!question.trim() &&
     (canAnswerAssistantLocally(question) || (consent && ready));
   function submitQuestion() {
-    // Enter and the button share the same permissions and busy-state guard.
+    // Rejected keyboard/form submits must not resume automatic scrolling.
     if (!canSubmit) return;
-    setSavedDraft(null);
-    lastSuggestion.current = null;
+    followLatest.current = true;
+    setShowJump(false);
+    setDraft(sendComposerDraft(draft, question));
     onAsk();
   }
   function applyChip(phrase: string) {
-    if (question.trim() && question !== phrase && lastSuggestion.current !== question) {
-      setSavedDraft(question);
-    }
-    lastSuggestion.current = phrase;
-    onQuestion(phrase);
+    const next = chooseComposerSuggestion(draft, question, phrase);
+    setDraft(next.draft);
+    if (next.question !== question) onQuestion(next.question);
     field.current?.focus();
   }
   function restoreDraft() {
-    if (savedDraft === null) return;
-    const previous = savedDraft;
-    setSavedDraft(null);
-    lastSuggestion.current = null;
-    onQuestion(previous);
+    const next = restoreComposerDraft(draft, question);
+    setDraft(next.draft);
+    if (next.question !== question) onQuestion(next.question);
     field.current?.focus();
   }
+  const consentControl = (
+    <label className={styles.consent}>
+      <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
+      同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
+      Groq
+      {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
+    </label>
+  );
   return (
-    <section ref={shell} className={styles.shell} aria-label="情境助理 v2">
-      <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。開啟服務與本機成績查詢可直接使用。</p>
-      <nav className={styles.services} aria-label="校園服務入口">
-        <Link href={'/map' + schoolQuery}>校園地圖</Link>
-        <Link href={'/bus' + schoolQuery}>公車資訊</Link>
-        <Link href={'/cafeteria' + schoolQuery}>餐廳資訊</Link>
-      </nav>
+    <section ref={shell} className={inline ? styles.inlineShell : styles.shell} aria-label="情境助理 v2">
+      {!inline && (
+        <>
+          <p className={styles.intro}>課表與事件僅包含已同步資料；建立個人事件不會發送推播提醒。</p>
+          <nav className={styles.services} aria-label="校園服務入口">
+            <Link href={'/map' + schoolQuery}>校園地圖</Link>
+            <Link href={'/bus' + schoolQuery}>公車資訊</Link>
+            <Link href={'/cafeteria' + schoolQuery}>餐廳資訊</Link>
+          </nav>
+        </>
+      )}
       {!ready ? (
         <p className={styles.notice} role="status">
           模型目前無法使用。
         </p>
       ) : null}
-      <label className={styles.consent}>
-        <input type="checkbox" checked={consent} onChange={(e) => onConsent(e.target.checked)} />
-        同意在本次對話將問題、對話紀錄及必要課表、作業、匯入紀錄摘要（成績欄位會遮罩）、個人事件、訂單取餐資訊、餐點偏好與社團貼文摘要傳送
-        Groq
-        {fallback ? '；若主要模型無法連線，可能改送到 Cloudflare Workers AI' : ''}
-      </label>
-      <div className={styles.log} role="log" aria-busy={pending || undefined}>
-        {turns.length === 0 && !pending ? (
+      {inline && turns.length > 0 && consent ? (
+        <details className={styles.consentSettings}>
+          <summary>本次對話的資料使用設定</summary>
+          {consentControl}
+        </details>
+      ) : consentControl}
+      <div ref={log} className={styles.log} role="log" aria-busy={pending || undefined}>
+        {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
             <h2>今天想問什麼？</h2>
             <p>可以問作業截止、下一堂課、校園餐廳或幫你排一段讀書時間。回覆會整理成卡片，需你確認後才會寫入。</p>
@@ -156,7 +178,7 @@ export function AssistantThread({
           </div>
         ) : null}
         {turns.map((turn, i) => (
-          <article className={`${styles.turn} ${i === turns.length - 1 ? styles.turnEnter : ''}`} key={i}>
+          <article className={styles.turn} style={i === turns.length - 1 ? undefined : { animation: 'none' }} key={i}>
             <div className={`${styles.row} ${styles.rowUser}`}>
               <div className={`${styles.bubble} ${styles.bubbleUser}`}>
                 <p>{turn.question}</p>
@@ -164,7 +186,11 @@ export function AssistantThread({
             </div>
             <div className={`${styles.row} ${styles.rowAssistant}`}>
               <div className={`${styles.bubble} ${styles.bubbleAssistant}`}>
-                <AssistantMarkdown text={turn.reply.answer} />
+                {inline ? (
+                  <SpokenReply text={turn.reply.answer} disabled={pending}>
+                    <AssistantMarkdown text={turn.reply.answer} />
+                  </SpokenReply>
+                ) : <AssistantMarkdown text={turn.reply.answer} />}
                 {turn.reply.local && <AssistantServiceLinks serviceIds={turn.reply.local.serviceIds} schoolId={schoolId} audience="platform" />}
                 {turn.reply.simulation ? <p className={styles.sim}>模擬資料</p> : null}
                 {turn.reply.steps.length ? (
@@ -237,7 +263,7 @@ export function AssistantThread({
             回到最新回覆
           </button>
         ) : null}
-        {turns.length > 0 ? (
+        {turns.length > 0 && !inline ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
             {SUGGESTIONS.map((phrase) => (
               <button key={phrase} type="button" className={styles.chip} onClick={() => applyChip(phrase)}>
@@ -246,34 +272,32 @@ export function AssistantThread({
             ))}
           </div>
         ) : null}
-        {savedDraft !== null ? (
-          <div className={styles.draftRestore} role="group" aria-label="已保留的輸入內容">
-            <span>原本輸入已保留</span>
-            <button type="button" onClick={restoreDraft}>還原原本輸入</button>
+        {draft.saved !== null ? (
+          <div className={draftStyles.restore} role="group" aria-label="已保留的輸入內容">
+            <span>另有一份草稿已保留</span>
+            <button type="button" onClick={restoreDraft}>切換保留草稿</button>
           </div>
         ) : null}
+        {draft.notice ? <p className={draftStyles.notice} role="status">{draft.notice}</p> : null}
         <form
           className={styles.composer}
           aria-label="傳送問題"
           onSubmit={(e) => {
             e.preventDefault();
-            followLatest.current = true;
-            setShowJump(false);
             submitQuestion();
           }}
         >
-          <label htmlFor="assistant-question">問題</label>
+          <label htmlFor={fieldId}>問題</label>
           <textarea
-            id="assistant-question"
-            aria-describedby="assistant-composer-hint"
+            id={fieldId}
+            aria-describedby={`${fieldId}-hint`}
             ref={field}
             value={question}
             maxLength={1000}
             rows={1}
-            placeholder="輸入問題"
+            placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
             onChange={(e) => {
-              // Manual edits make subsequent chip taps save the newly edited draft.
-              lastSuggestion.current = null;
+              setDraft(editComposerDraft(draft));
               onQuestion(e.target.value);
             }}
             onKeyDown={(e) => {
@@ -281,19 +305,50 @@ export function AssistantThread({
               if (e.key === 'Enter' && !e.shiftKey &&
                   !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
-                followLatest.current = true;
-                setShowJump(false);
                 submitQuestion();
               }
             }}
           />
-          <button className={styles.send} disabled={!canSubmit}>
-            送出
-          </button>
+          {inline && (
+            <VoiceDictationButton
+              disabled={pending || !ready}
+              onTranscript={(text) => {
+                setDraft(editComposerDraft(draft));
+                onQuestion([question.trim(), text.trim()].filter(Boolean).join(' ').slice(0, 1000));
+                field.current?.focus();
+              }}
+            />
+          )}
+          {onStop ? (
+            <button
+              key="stop"
+              type="button"
+              className={styles.send}
+              onClick={() => {
+                onStop();
+                field.current?.focus();
+              }}
+            >
+              停止回答
+            </button>
+          ) : (
+            <button key="send" className={styles.send} disabled={!canSubmit}>
+              送出
+            </button>
+          )}
         </form>
-        <p id="assistant-composer-hint" className={styles.composerHint}>
+        <p id={`${fieldId}-hint`} className={styles.composerHint}>
           {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
         </p>
+        {inline && ready && !turns.length && !question && !pending && (
+          <div className={styles.chips} aria-label="試著問">
+            {['下一堂課在哪裡？', '這週有哪些作業要交？'].map((phrase) => (
+              <button type="button" key={phrase} className={styles.chip} onClick={() => applyChip(phrase)}>
+                {phrase}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

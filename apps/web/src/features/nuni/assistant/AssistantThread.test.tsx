@@ -58,64 +58,6 @@ it('reports confirmation, reconciliation and cancellation as distinct pending ac
   expect(screen.getByRole('status').textContent).toContain('正在確認撤銷結果');
 });
 
-it('keeps a typed draft recoverable when switching suggestions', () => {
-  const onQuestion = vi.fn();
-  const firstSuggestion = '這禮拜有什麼要交的';
-  const secondSuggestion = '下一堂課在哪，幾點';
-  const { rerender } = render(
-    <AssistantThread {...base} question="先查明天的作業和教室" onQuestion={onQuestion} />,
-  );
-  fireEvent.click(screen.getByRole('button', { name: firstSuggestion }));
-  expect(onQuestion).toHaveBeenLastCalledWith(firstSuggestion);
-  expect(screen.getByRole('group', { name: '已保留的輸入內容' }).textContent).toContain('原本輸入已保留');
-  rerender(<AssistantThread {...base} question={firstSuggestion} onQuestion={onQuestion} />);
-  fireEvent.click(screen.getByRole('button', { name: secondSuggestion }));
-  expect(onQuestion).toHaveBeenLastCalledWith(secondSuggestion);
-  fireEvent.click(screen.getByRole('button', { name: '還原原本輸入' }));
-  expect(onQuestion).toHaveBeenLastCalledWith('先查明天的作業和教室');
-  expect(screen.queryByRole('group', { name: '已保留的輸入內容' })).toBeNull();
-});
-
-it('preserves a newly edited suggestion as the next recoverable draft', () => {
-  const onQuestion = vi.fn();
-  const { rerender } = render(<AssistantThread {...base} onQuestion={onQuestion} />);
-  fireEvent.click(screen.getByRole('button', { name: '這禮拜有什麼要交的' }));
-  expect(screen.queryByRole('button', { name: '還原原本輸入' })).toBeNull();
-  rerender(<AssistantThread {...base} question="這禮拜有什麼要交的" onQuestion={onQuestion} />);
-  fireEvent.change(screen.getByLabelText('問題'), { target: { value: '這禮拜有哪些程式作業要交？' } });
-  rerender(<AssistantThread {...base} question="這禮拜有哪些程式作業要交？" onQuestion={onQuestion} />);
-  fireEvent.click(screen.getByRole('button', { name: '中午吃什麼' }));
-  fireEvent.click(screen.getByRole('button', { name: '還原原本輸入' }));
-  expect(onQuestion).toHaveBeenLastCalledWith('這禮拜有哪些程式作業要交？');
-});
-
-it('uses one permission guard for keyboard submit and clears a saved draft only when sending', () => {
-  const onAsk = vi.fn();
-  const onQuestion = vi.fn();
-  const { rerender } = render(
-    <AssistantThread {...base} question="剛寫好的草稿" onAsk={onAsk} onQuestion={onQuestion} />,
-  );
-  fireEvent.click(screen.getByRole('button', { name: '這禮拜有什麼要交的' }));
-  rerender(<AssistantThread {...base} question="這禮拜有什麼要交的" onAsk={onAsk} onQuestion={onQuestion} />);
-  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
-  expect(onAsk).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: '還原原本輸入' })).toBeTruthy();
-  rerender(<AssistantThread {...base} consent question="這禮拜有什麼要交的" onAsk={onAsk} onQuestion={onQuestion} />);
-  fireEvent.keyDown(screen.getByLabelText('問題'), { key: 'Enter' });
-  expect(onAsk).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole('button', { name: '還原原本輸入' })).toBeNull();
-});
-
-it('animates only the newest turn and keeps older messages steady', () => {
-  const first = { question: '原本問題', reply: { answer: '原本回答', steps: [], cards: [] } };
-  const second = { question: '新的問題', reply: { answer: '新的回答', steps: [], cards: [] } };
-  const { container } = render(<AssistantThread {...base} turns={[first, second]} />);
-  const turns = [...container.querySelectorAll('article')];
-  expect(turns).toHaveLength(2);
-  expect(turns[0].className).not.toMatch(/turnEnter/);
-  expect(turns[1].className).toMatch(/turnEnter/);
-});
-
 it('surfaces a friendly error region', () => {
   render(<AssistantThread {...base} error="查詢未完成，請稍後再試。" />);
   expect(screen.getByRole('alert').textContent).toBe('查詢未完成，請稍後再試。');

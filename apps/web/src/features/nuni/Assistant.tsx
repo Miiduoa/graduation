@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
@@ -24,7 +24,15 @@ type Step = {
   answer?: string;
   simulation: boolean;
 };
-function Conversation({ context, schoolId, accountId, cloudEnabled }: { context: string; schoolId: string; accountId: string; cloudEnabled: boolean }) {
+type InlineDraft = { text: string; setText: Dispatch<SetStateAction<string>> };
+export function Conversation({ context, schoolId, accountId, cloudEnabled = true, inlineDraft, onFreeformReady }: {
+  context: string;
+  schoolId: string;
+  accountId: string;
+  cloudEnabled?: boolean;
+  inlineDraft?: InlineDraft;
+  onFreeformReady?: (ready: boolean) => void;
+}) {
   const [v2, setV2] = useState(false);
   const [ready, setReady] = useState(false);
   const [providerReady, setProviderReady] = useState(false);
@@ -70,6 +78,7 @@ function Conversation({ context, schoolId, accountId, cloudEnabled }: { context:
       .then((value) => {
         if (active) {
           setV2(value.version === 2);
+          onFreeformReady?.(value.version === 2 && value.enabled === true && value.ready === true);
           setReady(value.enabled === true);
           setProviderReady(value.ready === true);
           setFallback(value.fallback === true);
@@ -118,7 +127,7 @@ function Conversation({ context, schoolId, accountId, cloudEnabled }: { context:
   }
   if (v2 || capabilityUnavailable) return <>
     {capabilityUnavailable && <p role="status">{error || '雲端助理尚未啟用。'}</p>}
-    <V2Conversation context={context} schoolId={schoolId} accountId={accountId} ready={providerReady} fallback={fallback} />
+    <V2Conversation context={context} schoolId={schoolId} accountId={accountId} inlineDraft={inlineDraft} ready={ready && providerReady} fallback={fallback} />
   </>;
   return (
     <section aria-label="公開校園助理">
@@ -209,17 +218,21 @@ function V2Conversation({
   schoolId,
   ready,
   fallback,
+  inlineDraft,
   accountId,
 }: {
   context: string;
   schoolId: string;
   ready: boolean;
   fallback: boolean;
+  inlineDraft?: InlineDraft;
   accountId: string;
 }) {
   const conversation = useRef(crypto.randomUUID());
   const [consent, setConsent] = useState(false);
-  const [question, setQuestion] = useState('');
+  const [localQuestion, setLocalQuestion] = useState('');
+  const question = inlineDraft?.text ?? localQuestion;
+  const setQuestion = inlineDraft?.setText ?? setLocalQuestion;
   const [turns, setTurns] = useState<V2Turn[]>([]);
   const [states, setStates] = useState<V2ActionStates>({});
   const actionStates = useRef<V2ActionStates>({});
@@ -558,6 +571,7 @@ function V2Conversation({
   }
   return (
     <AssistantThread
+      inline={!!inlineDraft}
       schoolId={schoolId}
       ready={ready}
       fallback={fallback}
@@ -575,6 +589,7 @@ function V2Conversation({
       recoverableQuestion={recoverableQuestion}
       onRecoverQuestion={recoverQuestion}
       onAsk={() => void ask()}
+      onStop={inlineDraft && asking ? () => askRequest.current?.abort() : undefined}
       onConfirm={(cards) => void execute(cards)}
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
