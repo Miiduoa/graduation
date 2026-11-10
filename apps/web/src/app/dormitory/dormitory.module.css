@@ -364,6 +364,19 @@
   overflow-wrap: anywhere;
 }
 
+.handoff {
+  margin: 16px 0;
+  padding-inline-start: 14px;
+  border-inline-start: 3px solid var(--border-strong);
+}
+
+.handoff p {
+  margin: 4px 0 8px;
+  font-size: 14px;
+}
+
+.handoff a { margin-top: 0; }
+
 .empty {
   padding: 34px 20px;
   text-align: center;

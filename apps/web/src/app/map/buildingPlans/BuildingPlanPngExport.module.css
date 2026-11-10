@@ -1,0 +1,11 @@
+.export { display: grid; gap: 8px; min-width: 0; margin-top: 8px; padding: 12px; border: 1px solid var(--plan-border); border-radius: 10px; }
+.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; min-width: 0; }
+.controls label { display: grid; gap: 4px; min-width: 0; font-size: 0.8125rem; }
+.controls select { width: 100%; box-sizing: border-box; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.hint { font-size: 0.8125rem; color: var(--plan-muted); overflow-wrap: anywhere; }
+.error { padding: 10px; border: 1px solid #bf6856; border-radius: 8px; color: var(--plan-text); background: color-mix(in srgb, #df6750 12%, var(--plan-panel)); }
+@media (max-width: 640px) {
+  .controls, .controls label, .actions, .actions button { width: 100%; }
+  .actions button { min-height: 44px; }
+}

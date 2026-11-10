@@ -18,12 +18,14 @@ import {
 export default function LoginLandingScreen() {
   const navigation = useNavigation();
   const auth = useNuniSession();
-  const { school } = useSchool();
+  const { school, selectionReady } = useSchool();
   const s = useThemeStyleSheet(createStyles);
   const [, refreshProviders] = useState(0);
-  const schoolEntry = isSchoolLoginEntryAvailable(school.id);
+  const hasSchool = selectionReady !== false && Boolean(school.id);
+  const schoolEntry = hasSchool && isSchoolLoginEntryAvailable(school.id);
   const platformReady = !!auth.session && !auth.loading && !auth.error && !auth.pendingLogout;
   useEffect(() => {
+    if (!hasSchool) return;
     let active = true;
     void loadSchoolLoginProviderKinds().then(() => {
       if (active) refreshProviders((revision) => revision + 1);
@@ -31,10 +33,10 @@ export default function LoginLandingScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [hasSchool]);
   return (
     <SafeAreaView testID="login-landing" style={s.page}>
-      <ScrollView contentContainerStyle={s.content}>
+      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         <View style={s.brandRow}>
           <View
             style={s.brandMark}
@@ -55,13 +57,13 @@ export default function LoginLandingScreen() {
           </Pressable>
         </View>
         <View style={s.intro}>
-          <Text style={s.school}>{platformReady ? `${school.name} · 我的課表` : '課程・校園・每天的事'}</Text>
+          <Text style={s.school}>{platformReady && hasSchool ? `${school.name} · 我的課表` : '課程・校園・每天的事'}</Text>
           <Text accessibilityRole="header" style={s.heading}>
-            {platformReady ? '下一堂課在哪裡？' : '把自己的校園資料，整理在一起'}
+            {platformReady && hasSchool ? '下一堂課在哪裡？' : '把自己的校園資料，整理在一起'}
           </Text>
           <Text style={s.body}>
-            {platformReady ? '用這台手機儲存的課表，查現在或下一堂課的時間和教室。'
-              : '選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。'}
+            {platformReady && hasSchool ? '用這台手機儲存的課表，查現在或下一堂課的時間和教室。'
+              : '使用 Google 帳號即可加入平台課程、繳交作業與查看自己的訂單，不必先綁定學校。選擇學校後，可另外匯入自己的課表、成績與活動；校園地圖、公車與公開資訊不必登入。'}
           </Text>
           {platformReady && (
             <Pressable
@@ -73,45 +75,12 @@ export default function LoginLandingScreen() {
             </Pressable>
           )}
         </View>
-        <SchoolBrowsingControl />
-        <View style={s.schoolPanel}>
-          <Text accessibilityRole="header" style={s.title}>
-            {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}
-          </Text>
-          <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
-            {schoolEntry
-              ? '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。'
-              : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
-          </Text>
-          {schoolEntry ? (
-            <Pressable
-              testID="school-login-start"
-              accessibilityRole="button"
-              style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
-              onPress={() => safeNavigate(navigation, 'SSOLogin')}
-            >
-              <Text style={s.schoolButtonText}>學號登入（尚未開放）</Text>
-            </Pressable>
-          ) : null}
-          <SchoolPortalImportEntry
-            onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
-          />
-          <Pressable
-            testID="school-import-start"
-            accessibilityRole="button"
-            accessibilityLabel="匯入課表、成績或活動"
-            style={({ pressed }) => [s.importButton, pressed && s.rowPressed]}
-            onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
-          >
-            <Text style={s.importButtonText}>匯入課表、成績或活動 →</Text>
-          </Pressable>
-          <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
-        </View>
         <View style={s.panel}>
           <Text accessibilityRole="header" style={s.title}>
             Google 帳號
           </Text>
-          <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
+          <Text style={s.body}>和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。</Text>
+          <Text style={s.importHelp}>校方私人資料、已驗證學生服務與店家管理，仍依各服務的資格與授權開放。</Text>
           {auth.pendingLogout || auth.error ? (
             <Text accessibilityRole="alert" style={s.body}>
               {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
@@ -136,71 +105,124 @@ export default function LoginLandingScreen() {
             </Text>
           </Pressable>
         </View>
-        <View style={s.publicPanel}>
-          <View style={s.sectionHeading}>
-            <Text accessibilityRole="header" style={s.title}>
-              先找需要的資訊
-            </Text>
-            <Text style={s.sectionCaption}>公開資訊</Text>
-          </View>
-          {(
-            [
-              ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
-              ['Library', '圖書館', `搜尋${school.name}的館藏與官方服務`],
-              ['SchoolInfo', '學校資訊', '查看官方總機、網站與名錄地址'],
-              ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
-              ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
-              ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],
-              ['Health', '校園健康', `查看${school.name}諮商、就醫與健康檢查資訊`],
-              ['Dormitory', '宿舍服務', `前往${school.name}住宿相關校方入口`],
-              ['Career', '職涯資訊', `前往${school.name}職涯與就業輔導公開資訊`],
-            ] as const
-          ).map(([route, title, detail], index) => (
-            <Pressable
-              key={route}
-              testID={`public-${route}`}
-              accessibilityRole="button"
-              accessibilityLabel={title}
-              style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
-              onPress={() => safeNavigate(navigation, route)}
-            >
-              <Text
-                style={s.serviceNumber}
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-              >
-                {String(index + 1).padStart(2, '0')}
-              </Text>
-              <View style={s.serviceCopy}>
-                <Text style={s.publicTitle}>{title}</Text>
-                <Text style={s.publicDetail}>{detail}</Text>
-              </View>
-              <Text
-                style={s.serviceArrow}
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-              >
-                →
-              </Text>
-            </Pressable>
-          ))}
+        <SchoolBrowsingControl />
+        <View style={s.panel}>
+          <Text accessibilityRole="header" style={s.title}>失物招領</Text>
+          <Text style={s.body}>用 Google 帳號刊登遺失或拾獲資訊，查看聯絡方式，並管理自己的刊登。</Text>
+          <Pressable
+            testID="platform-lost-found-start"
+            accessibilityRole="button"
+            accessibilityLabel="開啟平台失物招領"
+            style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+            onPress={() => safeNavigate(navigation, 'PlatformLostFound')}
+          >
+            <Text style={s.schoolButtonText}>開啟失物招領 →</Text>
+          </Pressable>
         </View>
-        <TodayTimetablePanel
-          onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
-          onOpenTimetable={(term) =>
-            safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
-          }
-        />
-        <Pressable
-          testID="public-PersonalCalendar"
-          accessibilityRole="button"
-          accessibilityLabel="個人行事曆"
-          style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
-          onPress={() => safeNavigate(navigation, 'PersonalCalendar')}
-        >
-          <Text style={s.publicTitle}>個人行事曆</Text>
-          <Text style={s.publicDetail}>新增、編輯自己的活動與考試；不必學校帳號。</Text>
-        </Pressable>
+        {hasSchool && (
+          <View style={s.schoolPanel}>
+            <Text accessibilityRole="header" style={s.title}>
+              {schoolEntry ? '學校帳號（尚未開放）' : '從學校資料開始'}
+            </Text>
+            <Text style={s.body} testID={schoolEntry ? undefined : 'school-login-hint'}>
+              {schoolEntry
+                ? '尚未開放學號直接登入；你仍可匯入自己取得的課表、成績與活動，或以 Google 帳號使用平台交流與課班服務。'
+                : '尚未開放學號直接登入；你仍可匯入自己從校務系統取得的資料。'}
+            </Text>
+            {schoolEntry ? (
+              <Pressable
+                testID="school-login-start"
+                accessibilityRole="button"
+                style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+                onPress={() => safeNavigate(navigation, 'SSOLogin')}
+              >
+                <Text style={s.schoolButtonText}>學號登入（尚未開放）</Text>
+              </Pressable>
+            ) : null}
+            <SchoolPortalImportEntry
+              onOpenRecords={(kind) => safeNavigate(navigation, 'PersonalImport', { kind })}
+            />
+            <Pressable
+              testID="school-import-start"
+              accessibilityRole="button"
+              accessibilityLabel="匯入課表、成績或活動"
+              style={({ pressed }) => [s.importButton, pressed && s.rowPressed]}
+              onPress={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+            >
+              <Text style={s.importButtonText}>匯入課表、成績或活動 →</Text>
+            </Pressable>
+            <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
+          </View>
+        )}
+        {hasSchool && (
+          <>
+            <View style={s.publicPanel}>
+              <View style={s.sectionHeading}>
+                <Text accessibilityRole="header" style={s.title}>
+                  先找需要的資訊
+                </Text>
+                <Text style={s.sectionCaption}>公開資訊</Text>
+              </View>
+              {(
+                [
+                  ['Map', '校園地圖', '搜尋地點、查看位置與步行路線'],
+                  ['Library', '圖書館', `搜尋${school.name}的館藏與官方服務`],
+                  ['SchoolInfo', '學校資訊', '查看官方總機、網站與名錄地址'],
+                  ['BusSchedule', '公車查詢', '查看站點與官方到站資訊'],
+                  ['公告總覽', '公開公告', `查看${school.name}發布的消息`],
+                  ['CourseCatalog', '課綱查詢', `查看${school.name}課綱或校方課程查詢入口`],
+                  ['Health', '校園健康', `查看${school.name}諮商、就醫與健康檢查資訊`],
+                  ['Dormitory', '宿舍服務', `查看${school.name}報修管道與入住事項；設備問題只存成個人備忘`],
+                  ['Career', '職涯資訊', `前往${school.name}職涯與就業輔導公開資訊`],
+                ] as const
+              ).map(([route, title, detail], index) => (
+                <Pressable
+                  key={route}
+                  testID={`public-${route}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={title}
+                  style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
+                  onPress={() => safeNavigate(navigation, route)}
+                >
+                  <Text
+                    style={s.serviceNumber}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                  >
+                    {String(index + 1).padStart(2, '0')}
+                  </Text>
+                  <View style={s.serviceCopy}>
+                    <Text style={s.publicTitle}>{title}</Text>
+                    <Text style={s.publicDetail}>{detail}</Text>
+                  </View>
+                  <Text
+                    style={s.serviceArrow}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                  >
+                    →
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <TodayTimetablePanel
+              onOpenImport={() => safeNavigate(navigation, 'PersonalImport', { kind: 'timetable' })}
+              onOpenTimetable={(term) =>
+                safeNavigate(navigation, 'PersonalTimetable', term ? { term } : undefined)
+              }
+            />
+            <Pressable
+              testID="public-PersonalCalendar"
+              accessibilityRole="button"
+              accessibilityLabel="個人行事曆"
+              style={({ pressed }) => [s.publicButton, pressed && s.rowPressed]}
+              onPress={() => safeNavigate(navigation, 'PersonalCalendar')}
+            >
+              <Text style={s.publicTitle}>個人行事曆</Text>
+              <Text style={s.publicDetail}>新增、編輯自己的活動與考試；不必學校帳號。</Text>
+            </Pressable>
+          </>
+        )}
         <Text style={s.footer}>nuni · 課程與校園生活</Text>
       </ScrollView>
     </SafeAreaView>

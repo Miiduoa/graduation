@@ -180,7 +180,6 @@ it('keeps an explicit school reconnect when handing off an academic task', () =>
 
 it.each([
   ['/grades?tab=semester&tab=feedback&campus=pu', '/grades?tab=semester&campus=pu'],
-  ['/timetable?campus=nthu#personal-timetable', '/timetable?campus=nthu#personal-timetable'],
   ['/course/cs101?campus=pu#assignment-hw-1', '/course/cs101?campus=pu#assignment-hw-1'],
 ])('keeps %s in the school account flow after filtering page state', (requested, destination) => {
   const href = campusOneLoginHref(new URLSearchParams({ returnUrl: requested }));
@@ -188,6 +187,16 @@ it.each([
   expect(login.pathname).toBe('/login');
   expect(login.searchParams.get('returnUrl')).toBe(destination);
   expect(platformDestination(login.searchParams.get('returnUrl'))).toBe('/classroom');
+});
+
+it('hands a personal timetable back to Google sign-in with its campus and section intact', () => {
+  const destination = '/timetable?campus=nthu#personal-timetable';
+  const href = campusOneLoginHref(new URLSearchParams({ returnUrl: destination }));
+  const login = new URL(href!, 'https://nuni.tw');
+  expect(login.pathname).toBe('/login');
+  expect(login.searchParams.get('returnUrl')).toBe(destination);
+  expect(login.searchParams.has('reconnect')).toBe(false);
+  expect(platformDestination(login.searchParams.get('returnUrl'))).toBe(destination);
 });
 
 it.each([

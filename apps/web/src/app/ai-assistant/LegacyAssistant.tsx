@@ -5,16 +5,27 @@ import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
+  type Dispatch,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
 } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { SpokenReply, stopSpokenReply } from '@/components/SpokenReply';
+import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
+import {
+  answerAssistantLocally,
+  canAnswerAssistantLocally,
+  type LocalAssistantResult,
+} from '@/lib/assistantLocalActions';
 import { SchoolAccountRequired } from '@/components/SchoolAccountRequired';
 import { useAuth } from '@/components/AuthGuard';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
 import { useOptionalCampusDraft } from '@/components/CampusDraftProvider';
 import { useCampusBrowseContext } from '@/lib/useCampusBrowseContext';
 import {
@@ -42,8 +53,14 @@ import home from '../home.module.css';
 import styles from './assistant.module.css';
 
 type Message =
-  | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; response: CampusAssistantEnvelope };
+  | { role: 'user'; content: string; local?: never }
+  | { role: 'assistant'; content: string; response: CampusAssistantEnvelope; local?: LocalAssistantResult };
+function visibleMessage(message: Message) {
+  return message.role === 'assistant' && !isWebOnlineOrderingEnabled() && hasOrderProposal(message.response)
+    ? ONLINE_ORDERING_OFF_TEXT
+    : message.content;
+}
+
 function requestError(error: unknown): string {
   if (error instanceof CampusAssistantError && error.code === 'unconfigured')
     return '雲端助理尚未啟用。';
@@ -59,22 +76,32 @@ function requestError(error: unknown): string {
   return '這次未能取得回覆。你的問題已保留，請稍後重試。';
 }
 
-function AssistantConversation({
+export function AssistantConversation({
   userId,
+  localOwner,
   groupId,
   initialDraft,
   schoolId,
+  inline = false,
+  inlineDraft,
 }: {
   userId: string;
+  localOwner: string;
   groupId: string;
   initialDraft: string;
   schoolId: string;
+  inline?: boolean;
+  inlineDraft?: { text: string; setText: Dispatch<SetStateAction<string>> };
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const campusDraft = useOptionalCampusDraft('assistant');
   const [localDraft, setLocalDraft] = useState(initialDraft);
-  const draft = campusDraft.available ? campusDraft.text : localDraft;
-  const setDraft = campusDraft.available ? campusDraft.setText : setLocalDraft;
+  const sharedDraft = !inline && campusDraft.available ? campusDraft : undefined;
+  const draftState = sharedDraft ?? inlineDraft;
+  const draft = draftState?.text ?? localDraft;
+  const setDraft = draftState?.setText ?? setLocalDraft;
+  const instanceId = useId();
+  const idPrefix = inline ? `assistant-${instanceId}` : 'assistant';
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [senseRevision, setSenseRevision] = useState(0);
@@ -83,14 +110,16 @@ function AssistantConversation({
   const composer = useRef<HTMLTextAreaElement>(null);
   const seededUrlDraft = useRef(false);
   const functionsReady = areFunctionsConfigured();
+  const localQuestion = canAnswerAssistantLocally(draft);
+  const latestCloudReply = messages.findLastIndex((message) => message.role === 'assistant' && !message.local);
 
   useLayoutEffect(() => {
     // 網址 ?q= 有值且與現有草稿不同：以網址為準覆寫（明確深連結手遞）；無 q 才保留草稿。
-    if (!campusDraft.available || seededUrlDraft.current || !initialDraft) return;
+    if (!sharedDraft || seededUrlDraft.current || !initialDraft) return;
     seededUrlDraft.current = true;
-    if (campusDraft.text === initialDraft) return;
-    campusDraft.setText(initialDraft);
-  }, [campusDraft, initialDraft]);
+    if (sharedDraft.text === initialDraft) return;
+    sharedDraft.setText(initialDraft);
+  }, [initialDraft, sharedDraft]);
 
   useEffect(
     () => () => {
@@ -103,7 +132,18 @@ function AssistantConversation({
   async function send(event: FormEvent) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || request.current || !functionsReady) return;
+    if (!content || request.current) return;
+    if (inline) stopSpokenReply();
+    const local = answerAssistantLocally(content, { owner: localOwner, schoolId }, { preferCampusReads: functionsReady });
+    if (local) {
+      setMessages((previous) => [...previous, { role: 'user', content },
+        { role: 'assistant', content: local.content, response: { content: local.content }, local }]);
+      setDraft('');
+      setError('');
+      composer.current?.focus();
+      return;
+    }
+    if (!functionsReady) return;
     if (!isWebOnlineOrderingEnabled() && isWebOrderStatusQuestion(content)) {
       setMessages((previous) => [
         ...previous,
@@ -132,7 +172,9 @@ function AssistantConversation({
           groupId: groupId || undefined,
           sessionId: sessionId.current,
           messages: [
-            ...messages.map(({ role, content: text }) => ({ role, content: text })),
+            ...messages
+              .filter((message, index) => !message.local && !messages[index + 1]?.local)
+              .map(({ role, content: text }) => ({ role, content: text })),
             { role: 'user', content },
           ],
         },
@@ -144,7 +186,7 @@ function AssistantConversation({
         { role: 'user', content },
         { role: 'assistant', content: response.content, response },
       ]);
-      setDraft('');
+      setDraft((draft) => draft.trim() === content ? '' : draft);
     } catch (failure) {
       if (!controller.signal.aborted && request.current === controller)
         setError(requestError(failure));
@@ -152,25 +194,32 @@ function AssistantConversation({
       if (!controller.signal.aborted && request.current === controller) {
         request.current = null;
         setPending(false);
-        composer.current?.focus();
+        if (!inline) composer.current?.focus();
       }
     }
   }
 
-  function clearConversation() {
+  function stopAsking() {
     request.current?.abort();
     request.current = null;
-    sessionId.current = null;
-    setMessages([]);
-    setDraft('');
-    setError('');
     setPending(false);
     composer.current?.focus();
   }
 
+  function clearConversation() {
+    stopAsking();
+    sessionId.current = null;
+    setMessages([]);
+    setDraft('');
+    setError('');
+  }
+
   return (
-    <section className={styles.conversation} aria-label="校園助理對話">
-      {functionsReady && (
+    <section
+      className={inline ? `${styles.conversation} ${styles.inline}` : styles.conversation}
+      aria-label="校園助理對話"
+    >
+      {!inline && functionsReady && (
         <CampusSensePanel
           userId={userId}
           schoolId={schoolId}
@@ -196,17 +245,17 @@ function AssistantConversation({
           </button>
         )}
       </div>
-      {messages.length === 0 && !pending && (
+      {!inline && messages.length === 0 && !pending && (
         <div className={styles.empty}>
           <h2>{functionsReady ? '今天需要什麼幫忙？' : '雲端助理尚未啟用'}</h2>
           <p>
             {functionsReady
               ? '寫下問題，可以補充課程名稱、日期或地點。若要排課、找空堂，請用課表裡的「幫我安排」。'
-              : '正式站尚未接上雲端函式服務，因此無法詢問助理。設定完成前請改用課表、地圖、公車與公開公告。'}
+              : '正式站尚未接上雲端函式服務。你仍可開啟校園服務，或查看此帳號在這台裝置匯入的成績紀錄。'}
           </p>
-          {functionsReady && (
+          {(
             <div className={styles.exampleQuestions} aria-label="常用問題">
-              {['這週有哪些作業要交？', '如何前往圖書館？', '校園裡有哪些餐廳？'].map((question) => (
+              {(functionsReady ? ['這週有哪些作業要交？', '如何前往圖書館？', '校園裡有哪些餐廳？'] : ['你能做什麼？', '查看我的匯入成績', '開啟圖書館']).map((question) => (
                 <button
                   key={question}
                   type="button"
@@ -241,16 +290,12 @@ function AssistantConversation({
             className={message.role === 'user' ? styles.question : styles.answer}
           >
             <p className={styles.author}>{message.role === 'user' ? '你' : '校園助理'}</p>
-            <p className={styles.content}>
-              {message.role === 'assistant' &&
-              !isWebOnlineOrderingEnabled() &&
-              hasOrderProposal(message.response)
-                ? ONLINE_ORDERING_OFF_TEXT
-                : message.content}
-            </p>
+            <p className={styles.content}>{visibleMessage(message)}</p>
             {message.role === 'assistant' && (
               <>
-                {index === messages.length - 1 && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
+                {inline && <SpokenReply text={visibleMessage(message)} disabled={pending} />}
+                {message.local && <AssistantServiceLinks serviceIds={message.local.serviceIds} schoolId={schoolId} />}
+                {index === latestCloudReply && assistantWriteProposals(message.response).map((proposal, proposalIndex) => (
                   <AgentWritePanel
                     key={proposal.agentRunId + ':' + proposal.toolName + ':' + proposalIndex}
                     proposal={proposal}
@@ -313,16 +358,15 @@ function AssistantConversation({
         </p>
       )}
       <form onSubmit={send} className={styles.composer} aria-label="傳送問題">
-        <label htmlFor="assistant-question">你的問題</label>
+        <label htmlFor={`${idPrefix}-question`}>你的問題</label>
         <textarea
           ref={composer}
-          id="assistant-question"
+          id={`${idPrefix}-question`}
           value={draft}
           maxLength={4000}
-          rows={3}
-          readOnly={pending || !functionsReady}
-          disabled={!functionsReady}
-          placeholder={functionsReady ? '例如：圖書館怎麼走？' : '雲端助理尚未啟用'}
+          rows={inline ? 2 : 3}
+          readOnly={pending}
+          placeholder={functionsReady ? '例如：圖書館怎麼走？' : '例如：開啟圖書館、查看我的匯入成績'}
           onChange={(event) => {
             setDraft(event.target.value);
             setError('');
@@ -333,11 +377,11 @@ function AssistantConversation({
               event.currentTarget.form?.requestSubmit();
             }
           }}
-          aria-describedby={error ? 'assistant-error' : 'assistant-note'}
+          aria-describedby={`${idPrefix}-${error ? 'error' : 'note'}`}
         />
         <div className={styles.voiceRow}>
           <VoiceDictationButton
-            disabled={pending || !functionsReady}
+            disabled={pending}
             onTranscript={(text) => {
               setDraft((previous) => [previous.trim(), text.trim()].filter(Boolean).join(' ').slice(0, 4000));
               setError('');
@@ -347,25 +391,32 @@ function AssistantConversation({
           <span className={styles.note}>說完可修改文字，再送出。Enter 送出、Shift + Enter 換行。</span>
         </div>
         {error && (
-          <p id="assistant-error" role="alert" className={styles.error}>
+          <p id={`${idPrefix}-error`} role="alert" className={styles.error}>
             {error}
           </p>
         )}
         <div className={styles.submitRow}>
-          <p id="assistant-note" className={styles.note}>
+          <p id={`${idPrefix}-note`} className={styles.note}>
             {!functionsReady
-              ? '尚未接上雲端函式服務，輸入與送出已停用。'
+              ? '雲端助理尚未啟用；仍可尋找服務與查看這台裝置的個人匯入紀錄。'
               : isWebOnlineOrderingEnabled()
                 ? '回覆可能有誤；申請、繳費與訂單請以服務頁面的紀錄為準。'
                 : '回覆可能有誤；申請、繳費請以服務頁面的紀錄為準。'}
           </p>
-          <button
-            type="submit"
-            className={home.primary}
-            disabled={!functionsReady || pending || !draft.trim()}
-          >
-            {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
-          </button>
+          {inline && pending ? (
+            <button key="stop" type="button" className={home.primary} onClick={stopAsking}>
+              停止回答
+            </button>
+          ) : (
+            <button
+              key="send"
+              type="submit"
+              className={home.primary}
+              disabled={(!functionsReady && !localQuestion) || pending || !draft.trim()}
+            >
+              {pending ? '查詢中…' : functionsReady && error ? '重試' : '送出'}
+            </button>
+          )}
         </div>
       </form>
     </section>
@@ -374,6 +425,7 @@ function AssistantConversation({
 
 function AssistantRoute() {
   const { user, loading, error } = useAuth();
+  const platform = useOptionalNuniSession();
   const search = useSearchParams();
   const campus = useCampusBrowseContext({
     campus: search.get('campus') ?? undefined,
@@ -402,10 +454,16 @@ function AssistantRoute() {
         alternative="校園資訊可先從地圖、公車和公開公告查。"
       />
     );
+  const localOwner = platform && (platform.loading || platform.error || platform.pendingLogout)
+    ? ''
+    : platform?.session
+      ? 'platform:' + platform.session.platformAccountId
+      : 'school:' + user.uid;
   return (
     <AssistantConversation
-      key={JSON.stringify([user.uid, campus.schoolId, groupId, initialDraft])}
+      key={JSON.stringify([user.uid, localOwner, platform?.session?.context, campus.schoolId, groupId, initialDraft])}
       userId={user.uid}
+      localOwner={localOwner}
       groupId={groupId}
       initialDraft={initialDraft}
       schoolId={campus.schoolId}

@@ -1,0 +1,17 @@
+appId: ${APP_ID}
+
+---
+- tapOn:
+    id: school-picker-open
+- tapOn:
+    id: school-picker-search
+- inputText: 'NTHU'
+- extendedWaitUntil:
+    visible:
+      id: school-picker-option-nthu
+    timeout: 20000
+- tapOn:
+    id: school-picker-option-nthu
+- extendedWaitUntil:
+    visible: '目前瀏覽國立清華大學，選擇其他學校'
+    timeout: 15000

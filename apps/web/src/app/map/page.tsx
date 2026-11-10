@@ -22,6 +22,7 @@ export default function MapPage(props: {
     campus?: string;
     route?: string | string[];
     focus?: string | string[];
+    query?: string | string[];
   }>;
 }) {
   const searchParams = props.searchParams ? use(props.searchParams) : undefined;
@@ -36,6 +37,7 @@ export default function MapPage(props: {
   } = usePublicNavigationPort(schoolId, schoolName);
   const route = Array.isArray(searchParams?.route) ? searchParams.route[0] : searchParams?.route;
   const focus = Array.isArray(searchParams?.focus) ? searchParams.focus[0] : searchParams?.focus;
+  const query = Array.isArray(searchParams?.query) ? searchParams.query[0] : searchParams?.query;
 
   return (
     <SiteShell
@@ -51,6 +53,7 @@ export default function MapPage(props: {
           schoolName={schoolName}
           route={route}
           focus={focus}
+          query={query}
           publicTask={port}
         />
       ) : (

@@ -9,14 +9,7 @@ import { LoginRequiredLostFoundComments } from '@/components/LoginRequiredLostFo
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
-import {
-  categoryLabel,
-  formatLostFoundCalendarDate,
-  listLostFoundItems,
-  statusLabel,
-  typeLabel,
-  type LostFoundItem,
-} from '@/lib/lostFound';
+import { listLostFoundItems, type LostFoundItem } from '@/lib/lostFound';
 import {
   describeLostFoundFilterScope,
   filterLostFoundItems,
@@ -31,7 +24,10 @@ import {
 import { replaceServiceListQuery, type ServiceListSearchParams } from '@/lib/serviceListNavigation';
 import { useServiceListQuery } from '@/lib/useServiceListQuery';
 import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { LostFoundItemTag } from '@/components/lost-found/LostFoundItemTag';
 import styles from '@/components/lost-found/LostFound.module.css';
+import { useOptionalNuniSession } from '@/features/nuni/Session';
+import { PlatformLostFound, platformLostFoundHref } from '@/features/lost-found/PlatformLostFound';
 
 /** Bound DOM rows; filters still run over the complete loaded collection. */
 const VISIBLE_PAGE_SIZE = 50;
@@ -40,6 +36,15 @@ export default function LostFoundPage(props: { searchParams?: Promise<ServiceLis
   const search = props.searchParams ? use(props.searchParams) : undefined;
   const context = useBrowsingSchoolPageContext(search);
   const { user } = useAuth();
+  const platform = useOptionalNuniSession();
+  const schoolSource = Array.isArray(search?.source)
+    ? search.source.includes('school')
+    : search?.source === 'school';
+  const platformSource = Array.isArray(search?.source)
+    ? search.source.includes('platform')
+    : search?.source === 'platform';
+  if (platform && !schoolSource && (!user || platformSource))
+    return <PlatformLostFound search={search} />;
   if (!context.ready) {
     return (
       <SiteShell title="失物招領">
@@ -51,7 +56,7 @@ export default function LostFoundPage(props: { searchParams?: Promise<ServiceLis
     <LostFoundPageContent
       key={`${user?.uid ?? 'signed-out'}:${context.schoolId}`}
       context={context}
-      initialQuery={search}
+      initialQuery={schoolSource ? { ...search, source: 'school' } : search}
     />
   );
 }
@@ -153,6 +158,11 @@ function LostFoundPageContent({
       schoolName={context.schoolName}
     >
       <div className={styles.stack}>
+        <p>
+          <Link className={styles.link} href={platformLostFoundHref(context.schoolId)}>
+            Google 帳號刊登
+          </Link>
+        </p>
         {authLoading ? (
           <p role="status">正在確認登入狀態…</p>
         ) : loginRequired || !signedIn ? (
@@ -292,26 +302,13 @@ function LostFoundPageContent({
                 </p>
                 <ul className={styles.list}>
                   {visible.map((item) => (
-                    <li key={item.id} className={styles.panel}>
-                      <div className={styles.itemMeta}>
-                        <span className={styles.badge}>{typeLabel(item.type)}</span>
-                        <span className={styles.badge}>{categoryLabel(item.category)}</span>
-                        <span className={styles.badge}>{statusLabel(item.status)}</span>
-                        {!item.canonical ? <span className={styles.badge}>舊版紀錄</span> : null}
-                      </div>
-                      <h2>
-                        <Link
-                          className={styles.link}
-                          href={`/lost-found/${encodeURIComponent(item.id)}?${listQuery}`}
-                        >
-                          {item.title}
-                        </Link>
-                      </h2>
-                      <p className={styles.muted}>
-                        {item.location}
-                        {item.date ? ` · ${formatLostFoundCalendarDate(item.date)}` : ''}
-                      </p>
-                      <p>{item.description}</p>
+                    <li key={item.id}>
+                      <LostFoundItemTag
+                        item={item}
+                        href={`/lost-found/${encodeURIComponent(item.id)}?${listQuery}`}
+                      >
+                        <p>{item.description}</p>
+                      </LostFoundItemTag>
                     </li>
                   ))}
                 </ul>

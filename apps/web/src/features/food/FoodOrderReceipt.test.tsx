@@ -31,14 +31,22 @@ describe('FoodOrderReceipt', () => {
   it('labels the record and formats integer TWD totals without recomputing fees or options', () => {
     render(<FoodOrderReceipt order={receipt()} />);
     const paper = screen.getByRole('region', { name: '訂單紙本明細' });
-    expect(within(paper).getByRole('heading', { name: 'nuni 訂單明細' })).toBeTruthy();
+    expect(within(paper).getByRole('heading', { name: '校園便當店' })).toBeTruthy();
     expect(within(paper).getByText('非統一發票')).toBeTruthy();
     expect(within(paper).getByText('訂單總額')).toBeTruthy();
     expect(within(paper).getByText('NT$1,234').closest('details')).toBeNull();
     expect(within(paper).queryByText('NT$12.34')).toBeNull();
     fireEvent.click(within(paper).getByText('品項明細 · 1 項'));
-    expect(within(paper).getByText('數量 2')).toBeTruthy();
-    expect(within(paper).getByText('品項金額 NT$240')).toBeTruthy();
+    expect(
+      within(paper).getByText(
+        (_, node) => node?.tagName === 'SPAN' && node.textContent === '數量 2',
+      ),
+    ).toBeTruthy();
+    expect(
+      within(paper).getByText(
+        (_, node) => node?.tagName === 'SPAN' && node.textContent === '品項金額 NT$240',
+      ),
+    ).toBeTruthy();
     expect(within(paper).queryByText(/稅額|服務費|付款成功|已付款|條碼|QR/)).toBeNull();
     expect(paper.querySelector('svg, canvas, img, button, a')).toBeNull();
     expect(
@@ -52,9 +60,9 @@ describe('FoodOrderReceipt', () => {
     const times = view.container.querySelectorAll('time');
     expect(times).toHaveLength(2);
     expect(times[0].dateTime).toBe(order.createdAt);
-    expect(times[0].textContent?.replace(/\s+/gu, ' ')).toBe('2026年 11/1 11:05');
+    expect(times[0].textContent?.replace(/\s+/gu, ' ')).toBe('2026/11/01 11:05');
     expect(times[1].dateTime).toBe(order.updatedAt);
-    expect(times[1].textContent?.replace(/\s+/gu, ' ')).toBe('2026年 11/1 11:08');
+    expect(times[1].textContent?.replace(/\s+/gu, ' ')).toBe('2026/11/01 11:08');
     expect(screen.getByText('時間皆為臺灣時間（UTC+8）')).toBeTruthy();
   });
 
@@ -66,8 +74,8 @@ describe('FoodOrderReceipt', () => {
     };
     const view = render(<FoodOrderReceipt order={order} />);
     const times = view.container.querySelectorAll('time');
-    expect(times[0].textContent?.replace(/\s+/gu, ' ')).toBe('2026年 12/31 23:59');
-    expect(times[1].textContent?.replace(/\s+/gu, ' ')).toBe('2027年 1/1 00:00');
+    expect(times[0].textContent?.replace(/\s+/gu, ' ')).toBe('2026/12/31 23:59');
+    expect(times[1].textContent?.replace(/\s+/gu, ' ')).toBe('2027/01/01 00:00');
     expect(times[1].dateTime).toBe('2026-12-31T16:00:00.000Z');
   });
 
@@ -79,8 +87,8 @@ describe('FoodOrderReceipt', () => {
     };
     const view = render(<FoodOrderReceipt order={order} />);
     const times = view.container.querySelectorAll('time');
-    expect(times[0].textContent?.replace(/\s+/gu, ' ')).toBe('2025年 11/1 11:05');
-    expect(times[1].textContent?.replace(/\s+/gu, ' ')).toBe('2026年 11/1 11:05');
+    expect(times[0].textContent?.replace(/\s+/gu, ' ')).toBe('2025/11/01 11:05');
+    expect(times[1].textContent?.replace(/\s+/gu, ' ')).toBe('2026/11/01 11:05');
   });
 
   it('preserves complete long names, options, notes and order identifiers as text', () => {
@@ -135,15 +143,14 @@ describe('FoodOrderReceipt', () => {
     const view = render(<FoodOrderReceipt order={order} expandLines />);
     const details = view.container.querySelector('details')!;
     expect(details.open).toBe(true);
-    expect(screen.getByText('數量 2')).toBeTruthy();
+    expect(
+      screen.getByText((_, node) => node?.tagName === 'SPAN' && node.textContent === '數量 2'),
+    ).toBeTruthy();
     expect(screen.getByRole('heading', { name: '蔬菜便當' })).toBeTruthy();
     fireEvent.click(screen.getByText('品項明細 · 1 項'));
     expect(details.open).toBe(false);
     view.rerender(
-      <FoodOrderReceipt
-        order={{ ...order, updatedAt: '2026-11-01T03:09:00.000Z' }}
-        expandLines
-      />,
+      <FoodOrderReceipt order={{ ...order, updatedAt: '2026-11-01T03:09:00.000Z' }} expandLines />,
     );
     expect(details.open).toBe(false);
   });

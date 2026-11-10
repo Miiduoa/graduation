@@ -1,0 +1,41 @@
+{
+  "schema": "campus.platform-lost-found-source/v1",
+  "inputTree": "83381c1b04e3a603389f562ada17ef11b9d5facf",
+  "inputAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
+  "baseManifestSha256": "8e0877e879c00830611cd2bfd7eb86986f02448c384b799dba7c6c1996471004",
+  "composedManifestSha256": "ec988e40163fcc194d2555b7ad79bc16a54bfc87b5858b8cb012ebb9ad9c97c1",
+  "adapterSha256": "b61078916cd57d0161493060376103a2277fcaf79b12d760e2f579ba2fb20ab6",
+  "sourceFiles": {
+    "apps/api/src/lost-found/contracts.ts": {
+      "source": "packages/shared/src/nuniLostFound.ts",
+      "sha256": "c4686fa276dd5c8ee71a5d8216c87c0b3e12fdc4878738cb3f9397e5327936cf"
+    },
+    "apps/api/src/lost-found/lostFoundFields.ts": {
+      "source": "packages/shared/src/lostFoundFields.ts",
+      "sha256": "a561c0e1e5fadf8e115817029f11c442b40facbc57a12d5f41496d6759e9bd8a"
+    },
+    "apps/api/src/lost-found/nuni.ts": {
+      "source": "packages/shared/src/nuni.ts",
+      "sha256": "2671a3799789521c8f7306a4fdd6be3a3bb5459b67a5b76f502bacdf0619d224"
+    },
+    "apps/api/src/lost-found/routes.ts": {
+      "source": "deploy/nuni-api/lost-found/routes.ts",
+      "sha256": "e5d37e6f5e34713970cc3638544a9b30b2a6cde11ced47dbb08535a440defbdc"
+    },
+    "apps/api/src/lost-found/service.ts": {
+      "source": "deploy/nuni-api/lost-found/service.ts",
+      "sha256": "98e4065704d703466451e74b4d5945248e67b882a0156e33680b56cbf7a5490b"
+    },
+    "apps/api/src/lost-found/taipeiTime.ts": {
+      "source": "packages/shared/src/taipeiTime.ts",
+      "sha256": "ca42a0d67f7a0d4e8db7ee5632055df9b50e3ae2f0d8b3a61ff7abca6d2fee76"
+    },
+    "apps/api/src/migrations/282_platform_lost_found.sql": {
+      "source": "deploy/nuni-api/lost-found/282_platform_lost_found.sql",
+      "sha256": "6b2b120afdc1f790ae2783bb34405fb999712f81fe507ef1ff6b1653f1e1b37b"
+    }
+  },
+  "migration": "282_platform_lost_found",
+  "enabledByDefault": false,
+  "candidateTreePolicy": "Derived only after exact input tree, source checksums and allowed path diff are verified; no runtime build receipt is implied."
+}

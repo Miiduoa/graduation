@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Input';
 import styles from './Platform.module.css';
@@ -13,17 +13,27 @@ export function ReviewControls({
   disabled,
   busy,
   onDecide,
+  onDraftChange,
 }: {
   subject: string;
   approveLabel: string;
   disabled: boolean;
   busy: boolean;
   onDecide: (decision: ReviewDecision, reason: string) => Promise<boolean>;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const [decision, setDecision] = useState<ReviewDecision | null>(null);
   const [reason, setReason] = useState('');
   const note = reason.trim();
   const valid = note.length >= 5 && note.length <= 500;
+  const draftListener = useRef(onDraftChange);
+  useLayoutEffect(() => {
+    draftListener.current = onDraftChange;
+  }, [onDraftChange]);
+  useEffect(() => {
+    draftListener.current?.(decision !== null || busy);
+  }, [decision, busy]);
+  useEffect(() => () => draftListener.current?.(false), []);
 
   function choose(next: ReviewDecision) {
     if (disabled) return;

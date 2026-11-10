@@ -13,6 +13,8 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
       Map: 'map',
       Library: 'library',
       LibraryCatalog: 'library/catalog',
+      Dormitory: 'dormitory',
+      PlatformLostFound: 'platform-lost-found/:id?',
       SchoolInfo: 'school-info',
       BusSchedule: 'bus',
       公告總覽: 'announcements',

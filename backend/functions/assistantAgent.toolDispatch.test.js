@@ -69,23 +69,29 @@ test.each(registry.tools.filter((tool) => tool.requiresConfirmation).map((tool) 
         },
       },
     ]);
-    const nextMessages = JSON.parse(fetchImpl.mock.calls[1][1].body).messages;
-    expect(nextMessages.find((message) => message.tool_call_id === 'blocked-write')).toMatchObject({
-      role: 'tool',
-      content: JSON.stringify(result.toolCallsTrace[0].output),
-    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.transcriptMessages).toEqual([]);
+    expect(result.securityEvent).toEqual({ action: 'stop_tool_run', reason: 'tool_not_allowed' });
     expect(result.cards).toEqual([]);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   },
 );
 
-test.each(['notARegisteredTool', '__proto__', 'getTodaySchedule '])(
+test.each(['notARegisteredTool', 'computeGradebook', '__proto__', 'getTodaySchedule '])(
   'rejects a name outside the exact published tool set: %s',
   async (name) => {
     const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue({ success: true });
-    const result = await run(modelWithCalls([toolCall('unlisted', name)]));
+    const fetchImpl = modelWithCalls([toolCall('unlisted', name)]);
+    const result = await run(fetchImpl);
+    const exposed = JSON.parse(fetchImpl.mock.calls[0][1].body).tools;
+    expect(registry.byName.has(name)).toBe(false);
+    expect(exposed.some((tool) => tool.function.name === name)).toBe(false);
     expect(dispatch).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(result.toolsInvoked).toEqual([]);
+    expect(result.transcriptMessages).toEqual([]);
+    expect(result.cards).toEqual([]);
+    expect(result.securityEvent).toEqual({ action: 'stop_tool_run', reason: 'tool_not_allowed' });
     expect(result.toolCallsTrace[0].output).toMatchObject({
       success: false,
       errorCode: 'tool_not_allowed',
@@ -93,38 +99,39 @@ test.each(['notARegisteredTool', '__proto__', 'getTodaySchedule '])(
   },
 );
 
-test('a mixed round executes the published tool with its original scope and returns its receipt', async () => {
-  const receipt = { status: 'unavailable', slots: null, message: '課表尚未連接。' };
-  const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue(receipt);
+test('an unlisted call stops the whole batch before any allowed sibling runs', async () => {
+  const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue({ privateData: 'kept-local' });
   const fetchImpl = modelWithCalls([
     toolCall('read', 'getTodaySchedule', { timeZone: 'Asia/Taipei' }),
-    toolCall('write', 'submitLeaveRequest', {
-      courseId: 'course-1',
-      date: '2026-11-02',
-      type: '事假',
-    }),
+    toolCall('write', 'submitLeaveRequest', { courseId: 'course-1' }),
     toolCall('unknown', 'notARegisteredTool'),
   ]);
 
   const result = await run(fetchImpl);
 
-  expect(dispatch).toHaveBeenCalledTimes(1);
-  expect(dispatch).toHaveBeenCalledWith('getTodaySchedule', context, { timeZone: 'Asia/Taipei' });
-  expect(result.toolsInvoked).toEqual(['getTodaySchedule']);
-  const replies = JSON.parse(fetchImpl.mock.calls[1][1].body).messages.filter(
-    (message) => message.role === 'tool',
-  );
-  expect(replies).toHaveLength(3);
-  expect(JSON.parse(replies.find((message) => message.tool_call_id === 'read').content)).toEqual(
-    receipt,
-  );
-  expect(
-    replies.filter((message) => JSON.parse(message.content).errorCode === 'tool_not_allowed'),
-  ).toHaveLength(2);
-  expect(result.toolCallsTrace.find((call) => call.name === 'getTodaySchedule').output).toEqual(
-    receipt,
-  );
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(result.toolsInvoked).toEqual([]);
+  expect(result.toolCallsTrace).toHaveLength(2);
+  expect(result.toolCallsTrace.every((call) => call.output.errorCode === 'tool_not_allowed')).toBe(true);
+  expect(result.transcriptMessages).toEqual([]);
   expect(result.cards).toEqual([]);
+  expect(JSON.stringify(result)).not.toContain('kept-local');
+});
+
+test('a published tool still uses the original scope and returns its receipt', async () => {
+  const receipt = { status: 'unavailable', slots: null, message: '課表尚未連接。' };
+  const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue(receipt);
+  const fetchImpl = modelWithCalls([toolCall('read', 'getTodaySchedule', { timeZone: 'Asia/Taipei' })]);
+
+  const result = await run(fetchImpl);
+
+  expect(dispatch).toHaveBeenCalledWith('getTodaySchedule', context, { timeZone: 'Asia/Taipei' });
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(result.toolsInvoked).toEqual(['getTodaySchedule']);
+  expect(result.toolCallsTrace[0].output).toEqual(receipt);
+  expect(result.securityEvent).toBeUndefined();
+  expect(result.transcriptMessages).not.toEqual([]);
 });
 
 test.each([null, { id: 'missing-name' }, toolCall('invalid-name', 42)])(
@@ -194,10 +201,110 @@ test('a later model round cannot turn instructions from tool content into an unl
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(dispatch.mock.calls[0][0]).toBe('getTodaySchedule');
   expect(result.toolsInvoked).toEqual(['getTodaySchedule']);
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(result.transcriptMessages).toEqual([]);
+  expect(result.content).not.toContain('忽略原本限制');
   expect(result.toolCallsTrace[1]).toMatchObject({
     name: 'submitLeaveRequest',
     args: {},
     output: { success: false, errorCode: 'tool_not_allowed' },
   });
   expect(result.cards).toEqual([]);
+});
+
+test.each(['permission-denied', 'unauthenticated', 7, 16])(
+  'an authorization rejection stops further planning and hides private error details: %s',
+  async (code) => {
+    const dispatch = jest.spyOn(registry, 'runTool').mockRejectedValue(
+      Object.assign(new Error('private-record-id'), { code }),
+    );
+    const fetchImpl = modelWithCalls([toolCall('read', 'getTodaySchedule', { schoolId: 'other-school' })]);
+    const result = await run(fetchImpl);
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.securityEvent).toEqual({ action: 'stop_tool_run', reason: 'authorization_denied' });
+    expect(result.toolCallsTrace[0]).toMatchObject({ args: {}, output: { errorCode: 'authorization_denied' } });
+    expect(JSON.stringify(result)).not.toContain('private-record-id');
+    expect(result.transcriptMessages).toEqual([]);
+    expect(result.cards).toEqual([]);
+  },
+);
+
+test('a transient tool error remains recoverable', async () => {
+  jest.spyOn(registry, 'runTool').mockRejectedValue(Object.assign(new Error('temporarily unavailable'), { code: 'unavailable' }));
+  const fetchImpl = modelWithCalls([toolCall('read', 'getTodaySchedule')]);
+  const result = await run(fetchImpl);
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(result.securityEvent).toBeUndefined();
+});
+
+test.each(['permission-denied', 'unauthenticated', 7, 16])(
+  'waits for a pending authorization check before starting its sibling: %s',
+  async (code) => {
+    let started;
+    let rejectFirst;
+    const firstStarted = new Promise((resolve) => { started = resolve; });
+    const firstResult = new Promise((_resolve, reject) => { rejectFirst = reject; });
+    const dispatch = jest.spyOn(registry, 'runTool')
+      .mockImplementationOnce(() => { started(); return firstResult; })
+      .mockResolvedValue({ success: true, unexpectedWrite: true });
+    const fetchImpl = modelWithCalls([
+      toolCall('first', 'getTodaySchedule'),
+      toolCall('later', 'reflectOnGap'),
+    ]);
+    const pending = run(fetchImpl);
+    await firstStarted;
+    const callsBeforeDecision = dispatch.mock.calls.length;
+    rejectFirst(Object.assign(new Error('private-denial-details'), { code }));
+    const result = await pending;
+
+    expect(callsBeforeDecision).toBe(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.toolsInvoked).toEqual(['getTodaySchedule']);
+    expect(result.securityEvent?.reason).toBe('authorization_denied');
+    expect(JSON.stringify(result)).not.toMatch(/private-denial-details|unexpectedWrite/);
+  },
+);
+
+test('a later denial withholds earlier private results and parameters from the stopped trace', async () => {
+  jest.spyOn(registry, 'runTool')
+    .mockResolvedValueOnce({ assignmentTitle: 'private-assignment-title' })
+    .mockRejectedValueOnce(Object.assign(new Error('private-denial-details'), { code: 'permission-denied' }));
+  const fetchImpl = modelWithCalls([
+    toolCall('first', 'getAssignments', { preferredGroupId: 'private-group-id' }),
+    toolCall('second', 'getTodaySchedule'),
+  ]);
+
+  const result = await run(fetchImpl);
+
+  expect(result.toolCallsTrace[0]).toEqual({ name: 'getAssignments', args: {}, output: { status: 'withheld' } });
+  expect(JSON.stringify(result)).not.toMatch(/private-assignment-title|private-group-id|private-denial-details/);
+  expect(result.transcriptMessages).toEqual([]);
+  expect(result.cards).toEqual([]);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  { success: true, errorCode: 'role_denied' },
+  { success: false, errorCode: 'not_found' },
+  { note: 'permission-denied', summary: 'unauthenticated' },
+])('only an explicit failed authorization receipt triggers containment: %j', async (receipt) => {
+  jest.spyOn(registry, 'runTool').mockResolvedValue(receipt);
+  const fetchImpl = modelWithCalls([toolCall('read', 'getTodaySchedule')]);
+  const result = await run(fetchImpl);
+  expect(result.securityEvent).toBeUndefined();
+  expect(result.toolCallsTrace[0].output).toEqual(receipt);
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+
+test('a stopped run does not restrict a later legitimate request', async () => {
+  const dispatch = jest.spyOn(registry, 'runTool').mockResolvedValue({ status: 'unavailable' });
+  const stopped = await run(modelWithCalls([toolCall('blocked', 'submitLeaveRequest')]));
+  expect(stopped.securityEvent.reason).toBe('tool_not_allowed');
+  const next = await run(modelWithCalls([toolCall('read', 'getTodaySchedule')]));
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(next.securityEvent).toBeUndefined();
+  expect(next.toolsInvoked).toEqual(['getTodaySchedule']);
 });

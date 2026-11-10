@@ -46,7 +46,7 @@
     },
     "apps/api/src/personal-import-sync/imports/sync.ts": {
       "source": "packages/shared/src/imports/sync.ts",
-      "sha256": "b28abfe37280742a0e275e3d14e2a6e1ac43190ae56ba8d682edba6cd9859d7c"
+      "sha256": "4a5c57feafd8ca717f4a8abcef4cd99ddb74309d1f4b4d6ccb1630b15884cdfc"
     },
     "apps/api/src/personal-import-sync/imports/types.ts": {
       "source": "packages/shared/src/imports/types.ts",
@@ -100,8 +100,8 @@
       "sha256": "b1b7b72c863236b327997921380c4d99ca6c48d8990da43a29714fca110a7648"
     }
   ],
-  "overlayTree": "37bd77316d30620b234c34910016548623ec0334",
+  "overlayTree": "530a378f0b3df9b282805488521e24c0e03daeb4",
   "patchedAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "runtimeInventoryScope": "Pinned base analysis only; not a composed API grant receipt",
-  "candidateTree": "6a84f3f845e21c79cc4c51927c524f1486e6099a"
+  "candidateTree": "83381c1b04e3a603389f562ada17ef11b9d5facf"
 }

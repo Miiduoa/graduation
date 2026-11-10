@@ -9,8 +9,12 @@ import {
   where,
   type DocumentSnapshot,
 } from 'firebase/firestore';
+import type { LostFoundWriteFields } from '@campus/shared/src/lostFoundFields';
 import { permissionDeniedError } from '@campus/shared/src/signedInSocialReads';
+import { readLostFoundPhotos, type LostFoundPhoto } from './lostFoundPhotos';
 import { getAuth, getDb, isFirebaseConfigured } from '@/lib/firebase';
+
+export type { LostFoundWriteFields } from '@campus/shared/src/lostFoundFields';
 
 export type LostFoundItem = {
   id: string;
@@ -29,23 +33,9 @@ export type LostFoundItem = {
   resolvedAt?: string;
   schoolId: string;
   contactInfo?: string;
-  imageUrl?: string;
+  photos?: LostFoundPhoto[];
   /** True when the document lives under schools/{schoolId}/lostFound. */
   canonical: boolean;
-};
-
-export type LostFoundWriteFields = {
-  type: 'lost' | 'found';
-  title: string;
-  description: string;
-  category: string;
-  location: string;
-  date: string;
-  /**
-   * Omitted = leave unchanged on patch.
-   * Empty string = explicit clear (must be written and confirmed).
-   */
-  contactInfo?: string;
 };
 
 export const LOST_FOUND_CATEGORIES: { id: string; label: string }[] = [
@@ -334,7 +324,7 @@ function readItem(
     resolvedAt: optionalDateValue(row.resolvedAt),
     schoolId,
     contactInfo: normalizeContact(row.contactInfo),
-    imageUrl: typeof row.imageUrl === 'string' ? row.imageUrl : undefined,
+    photos: readLostFoundPhotos(row.imageUrls, row.imageUrl),
     canonical,
   };
 }
