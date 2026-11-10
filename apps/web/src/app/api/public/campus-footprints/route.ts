@@ -94,8 +94,13 @@ let unavailableUntil = 0;
 // decoded byte limit; checking .text().length afterwards would still buffer an
 // unbounded upstream response in the Node process.
 async function readBoundedResponse(response: Response): Promise<string> {
-  const declared = Number(response.headers.get('content-length') ?? '0');
-  if (!Number.isFinite(declared) || declared < 0 || declared > MAX_RESPONSE_BYTES) {
+  // RFC Content-Length consists solely of decimal digits. Number() also
+  // accepts blank, hex, exponent and fractional representations that are not
+  // valid HTTP lengths. Missing is fine: the streaming byte cap still applies.
+  const lengthHeader = response.headers.get('content-length');
+  const declared = lengthHeader === null ? 0
+    : /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : NaN;
+  if (!Number.isSafeInteger(declared) || declared > MAX_RESPONSE_BYTES) {
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
     // upstream must not hold the shared request open while cancellation stalls.
