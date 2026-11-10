@@ -520,3 +520,9 @@ v1 舊檔還原、v2 保存後重開與步驟／公式完整保留，以及還�
 精確 head `145cb4c` 的 [CI #42728496785](https://github.com/Miiduoa/graduation/actions/runs/42728496785) 已完成，**Web Tests 1 項失敗（11,744 通過／45 略過）**；job `129540202114` 的實際日誌指出 `CourseStudyPracticeIntegration.test.tsx:161` 仍嘗試按「儲存閱讀進度」，但現有白板已刻意在完成練習返回閱讀、仍保留暫停輪次時隱藏此不完整備份入口，以避免丟失作答與自評。這是舊測試與新保存介面衝突，不是學生功能應倒退。
 
 本輪把該測試改為按唯一可用的「儲存暫停的練習與閱讀進度」，經由正式 `parseStudyPracticeCheckpoint` 重新解析下載的 JSON，逐項確認原本閱讀筆記／講解／分支完全不變、完成狀態、兩題順序、主鍵題本輪試答與「已理解」、交易題「略過」都真實保存；並斷言閱讀專用備份入口確實不出現。舊的單獨閱讀進度序列化器未修改，且沒有新增套件、外部教材傳送或部署。新 commit 的完整 CI／CodeQL 必須重新按精確 SHA 驗證；模擬瀏覽器斷言仍不能當 iOS／Android 真機或 Ahaboard 同機驗收。
+
+
+### 2026-11-10：修正更新教材後分頁提醒的 Web CI 回歸
+
+- 精確 head `749d1b6` 的 [CI #42762645479](https://github.com/Miiduoa/graduation/actions/runs/42762645479) 已結束，Web Tests **1 項失敗、11,812 項通過、45 項略過**；[CodeQL #42762645725](https://github.com/Miiduoa/graduation/actions/runs/42762645725) 及其他建置／安全檢查通過。job `129651857108` 的日誌定位到 `CourseMaterials.test.tsx:129`，未出現「教材櫃尚有較早的教材未載入」。原因是新增測試回傳 `materials: []` 同時附上非空 `nextCursor`，違反既有 `createNuniClasses().materialsPage()` 的 API 格式契約；該解析器會拒收並回報 `INVALID_RESPONSE`，故 UI 正確地不顯示載入下一頁提示。
+- 將測試改成第二頁包含另一份有效教材，但仍沒有目前正在閱讀的講義，且 `nextCursor` 有值；接著下一頁再找回原教材。如此才能真正檢查「仍有較早頁面時不能誤判舊教材消失」，並維持原私人筆記。正式頁面解析器、UI 與教材資料界線均不放寬。本修補需以新的 SHA CI／CodeQL 獨立驗證，非真機或 Ahaboard 實測。PR 保持 Draft、未合併、未部署。

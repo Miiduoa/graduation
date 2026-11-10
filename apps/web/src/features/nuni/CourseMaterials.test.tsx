@@ -118,7 +118,8 @@ it('does not claim a selected lecture disappeared while older material pages rem
     if (!route.endsWith('/materials/page')) return Promise.resolve(list());
     pages += 1;
     if (pages === 1) return Promise.resolve(list());
-    if (pages === 2) return Promise.resolve({ materials: [], nextCursor: 'older-page' });
+    // A non-final API page must contain at least one material; empty + cursor is INVALID_RESPONSE.
+    if (pages === 2) return Promise.resolve({ materials: [olderMaterial], nextCursor: 'older-page' });
     return Promise.resolve({ materials: [material], nextCursor: null });
   });
   render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
