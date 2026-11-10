@@ -460,3 +460,22 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 本次只在 legacy 寫入／claim 分支強制查核 group canonical assignment 和目前的 submission receipt，沿用新路徑的 published、draft/closed、dueAt、allowLateSubmission、owner 與 submittedAt 規則。一般開放作業本人仍可上傳；學生本人既有草稿 GET、教師對已繳交收據的 GET 仍按前輪規則。只有 global assignment、缺 group canonical assignment 的歷史上傳現在 fail-closed；需在隔離資料盤點合法舊資料的相容性，不可為了短期相容性跳過授權。
 
 新增 Web 記憶體授權、Functions 合成 GCS HTTP 與 Firebase emulator HTTP 回歸，涵蓋正常上傳、關閉／未發布／逾期拒絕、明確允許遲交、已提交／偽造收據拒絕及缺 canonical assignment；正常 emulator fixture 補上正式 group assignment。本輪僅完成開發提交，**是否通過須依新精確 head 的 CI、Rules、CodeQL 核對**。沒有操作正式 bucket、金鑰、migration、token、E 校園或重新發送未核准 npm/pnpm audit。已發下載／上傳 URL、真實隔離 Storage staging、歷史資料遷移與正式發布／回復仍是獨立阻擋。
+
+## 2026-11-09：HTTP adapter 已預先解析 request body 的資源上限（獨立後續 PR）
+
+PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b0e28a2841f5a559dd15506286fb`）。經 GitHub check-runs 精確核對，合併前 head `a950682200871084dfb797e981075885e335a120` 的指定 `nuni-merge-gate` App 5504170／「審查通過」為 completed/success，同 head 主 CI、CodeQL、Supabase、Python、Mobile Agent 和 Maestro 均成功。舊 PR 已關閉，不能再向它推送修補。限動媒體的校籍綁定由獨立 PR #557 處理，本輪不碰該分支。
+
+新發現：`backend/functions/httpAdapter.js` 的 `readRawBody` 僅在直接讀取 Node request stream 時限制 10 MiB，當上游（例如前置 middleware）已提供 `req.rawBody` Buffer，或預解析的 `req.body` Buffer／string／object 時直接回傳，不檢查實際位元組長度。這會使函式請求在預解析途徑繞過原設的資料量上限；不能只依賴外部反向代理限制。修補統一對四種預解析輸入實施相同實際 bytes 上限，超過時依既有錯誤映射回 413 RESOURCE_EXHAUSTED；一般串流與私有附件的獨立授權＋串流路徑保持不變。
+
+新增五個惰性 HTTP 合成測試：四種 10 MiB 以上的預解析輸入都應在 callable 被呼叫前拒絕；一般小型預解析 JSON 仍須正常執行。既有私有檔案測試也會保留大於 10 MiB 的已授權串流案例，確保不誤套到另一條附件路徑。**修補尚需新 PR 精確 head 的 Functions 測試及完整 CI 驗證，不把尚未執行的測試列為成功。** 無正式資料、金鑰、E 校園連線、migration、部署、token 清理或本機 npm/pnpm audit。
+
+保留風險：已簽發 Firebase/GCS 與 Supabase URL 撤銷、真 GCS staging CAS、#557 帳號撤權時序與發布相容、minimatch 雙套鎖檔的可達風險均需獨立驗收。所有後續 PR 仍須對精確 head 取得指定 App 5504170 核可，未通過不能合併。
+
+## 2026-11-09：拒絕以原型鏈繞過 HTTP／排程路由註冊（PR #559）
+
+檢查 `createRequestListener` 發現 `Boolean(callables[functionName])` 和 `Boolean(httpFunctions[functionName])` 會將普通物件繼承的 `toString`、`constructor`、`hasOwnProperty` 當成已註冊 callable；自訂 prototype 也能讓未註冊函式被 HTTP 路由呼叫。排程 `schedules[name]` 同樣可能繼承原型上的 job（執行仍須 cron secret）。惰性重現：未註冊的 `toString` 在修補前條件為 truthy，`Object.hasOwn` 則為 false。
+
+修補改為 callable／HTTP 必須是自身明確註冊且型別為 function，排程也必須有自己的 job。新增 6 項合成 HTTP 回歸（3 種 Object.prototype 內建名稱、1 種繼承 callable、1 種繼承 HTTP handler、1 種繼承 cron job），全部應回 404，且不執行任何繼承函式。已註冊的合法 callable、二進位私有附件與排程行為應保持原樣。這是意外路由暴露與資源消耗邊界，未聲稱可由此取得跨帳號資料。
+
+與截至本輪最新 main `0de225b6eadcbecfd0635c8ebfe0f1249a451d82` 整合，在樹上保留 #557 與後續主線修改，PR #559 的原始 body size 修補完整保留；新提交需重新跑完整 CI，舊 head 的全部綠燈不能沿用。#517、#557 已合併但不代表正式部署或歷史 bearer URL 已撤銷。沒有碰正式資料、token、金鑰、migration、E 校園與被禁止的直接 npm/pnpm audit。仍需指定 App 5504170 對新 head 核發「審查通過」，才能由主線窗口合併。
+
