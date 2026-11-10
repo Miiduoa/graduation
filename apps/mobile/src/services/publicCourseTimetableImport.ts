@@ -25,6 +25,20 @@ export function preparePublicCourseTimetableImport(
     parsed.rows.some((row) => row.schoolId !== schoolId || row.kind !== 'timetable' ||
       !row.dayOfWeek || !Number.isInteger(row.dayOfWeek) || row.dayOfWeek < 1 || row.dayOfWeek > 7 ||
       row.academicYear !== academicYear || row.semester !== semester || !row.startTime || !row.endTime)) return null;
+  // A single official offering can contain multiple fragments. Never one-tap
+  // import overlapping fragments as if they were two independent class times.
+  // Leave ambiguous feeds to the existing editable/manual import workflow.
+  const meetings: Array<{ day: number; start: number; end: number }> = [];
+  for (const row of parsed.rows) {
+    const startClock = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(row.startTime || '');
+    const endClock = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(row.endTime || '');
+    if (!row.dayOfWeek || !startClock || !endClock) return null;
+    const start = Number(startClock[1]) * 60 + Number(startClock[2]);
+    const end = Number(endClock[1]) * 60 + Number(endClock[2]);
+    if (start >= end || meetings.some((meeting) =>
+      meeting.day === row.dayOfWeek && start < meeting.end && meeting.start < end)) return null;
+    meetings.push({ day: row.dayOfWeek, start, end });
+  }
   return { ...parsed, schoolName, academicYear, semester, term: `${academicYear}|${semester}`, csv };
 }
 

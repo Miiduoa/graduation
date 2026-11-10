@@ -81,6 +81,24 @@ test('unverified semesters, missing meetings and invalid identities have no dire
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });
 
+test('ambiguous overlapping official meetings cannot be added in one tap', () => {
+  const ambiguousNthu: PublicCatalogCourse = {
+    ...nthu,
+    meetings: [{ time: 'M3M4', room: '教室甲' }, { time: 'M4', room: '教室乙' }],
+  };
+  // The same school's two source fragments overlap during M4.
+  expect(preparePublicCourseTimetableImport('nthu', ambiguousNthu)).toBeNull();
+  // A duplicated NCNU period must not silently create two copies of one slot.
+  expect(preparePublicCourseTimetableImport('ncnu', { ...ncnu, time: '4eff' })).toBeNull();
+  // Adjacent fragments are valid, so this does not disable split meetings.
+  expect(preparePublicCourseTimetableImport('nthu', {
+    ...nthu, meetings: [{ time: 'M3', room: '教室甲' }, { time: 'M4', room: '教室甲' }],
+  })?.rows).toHaveLength(2);
+  const view = render(<PublicCourseImportAction schoolId="nthu" course={ambiguousNthu} />);
+  expect(view.queryByText('核對並加入課表')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
 test('requires explicit review and confirmation, preserves existing records and both draft stores', async () => {
   const existing = preparePublicCourseTimetableImport('nthu', {
     ...nthu, code: '11510AES 520400', title: '既有課程', meetings: [{ time: 'T1T2', room: '原教室' }],
