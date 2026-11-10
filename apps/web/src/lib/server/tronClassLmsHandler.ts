@@ -512,7 +512,7 @@ export function createTronClassLmsHandler({
       // A relink can leave the original portal document intact.
       await verifyLinkedSession();
       const cacheData = cached.data();
-      const saveCache = async (snapshot: LmsReadonlySnapshot, stampSessionVersion = true) => {
+      const saveCache = async (snapshot: LmsReadonlySnapshot) => {
         if (!sessionVersion || !db.runTransaction) return;
         try {
           await db.runTransaction(async (tx) => {
@@ -521,12 +521,9 @@ export function createTronClassLmsHandler({
             // A concurrent refresh, relink or cleanup has already replaced our input.
             if (cached.exists !== current.exists || (current.exists &&
               (!current.updateTime || documentVersion(current) !== documentVersion(cached)))) return;
-            const currentData = current.data();
-            const keepLegacyShape = !stampSessionVersion && current.exists &&
-              currentData != null && !('sessionVersion' in currentData);
             tx.set(cacheRef, {
               ownerUid: uid, sessionId: linkedId,
-              ...(keepLegacyShape ? {} : { sessionVersion }),
+              sessionVersion,
               fetchedAt: snapshot.fetchedAt,
               expiresAt: new Date(snapshot.cache.expiresAt),
               snapshot,
@@ -539,10 +536,11 @@ export function createTronClassLmsHandler({
         }
       };
 
-      const legacyCompatibleCache = cacheData != null && !('sessionVersion' in cacheData);
+      // Legacy cache entries cannot prove which cookie revision produced them.
+      // A matching session ID alone is insufficient after in-place credential rotation.
       if (cached.exists && sessionVersion && cacheData &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
-        (cacheData.sessionVersion === sessionVersion || legacyCompatibleCache) &&
+        cacheData.sessionVersion === sessionVersion &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
         const pruned = readCachedExtras(cacheData.extras, now());
         extras = refresh ? {} : pruned.extras;
@@ -552,7 +550,7 @@ export function createTronClassLmsHandler({
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
         if (shouldPruneExtras) {
-          await saveCache(cachedHomework, !legacyCompatibleCache);
+          await saveCache(cachedHomework);
           await verifyLinkedSession();
         }
         return {
@@ -633,10 +631,8 @@ export function createTronClassLmsHandler({
       const homework = homeworkOnlySnapshot(snapshot);
       const merged = mergeExtras(homework, extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
-      // Do not rewrite a still-fresh legacy cache just to stamp sessionVersion
-      // when this request fetched no new school data and needs no prune.
       if (fetchedFromSchool || refresh || shouldPruneExtras) {
-        await saveCache(homework, !legacyCompatibleCache || !cachedHomework);
+        await saveCache(homework);
       }
       // Do not return the old session's data if the user relinked during the write.
       await verifyLinkedSession();
