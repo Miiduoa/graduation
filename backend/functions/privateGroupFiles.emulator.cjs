@@ -228,10 +228,15 @@ test('legacy assignment upload is not visible to the instructor before submissio
   const objectPath = paths().answer;
   assert.equal((await request('POST', objectPath, 'alice')).status, 201);
   assert.equal((await request('GET', objectPath, 'alice')).status, 200);
-  // No attachments list yet: managers keep previous read access.
-  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  // Without a submitted receipt, even the instructor cannot download a draft.
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
   const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
-  await receipt.set({ userId: 'alice', submittedAt: Date.now(), attachments: [objectPath] });
+  await receipt.set({ userId: 'alice', submittedAt: Date.now() });
+  // A genuinely submitted historical receipt without an array still works.
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  await receipt.update({ submittedAt: null });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  await receipt.update({ submittedAt: Date.now(), attachments: [objectPath] });
   assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
   await receipt.update({ attachments: [] });
   assert.equal((await request('GET', objectPath, 'teacher')).status, 403);

@@ -506,6 +506,6 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 以最新確認 main `58dc17ccfba698cad54d704a6bf7036476f8e5d3` 建立獨立修補分支；#517、#559、#569 已合併，不向已合併 PR 推送。本次閱讀 #569 合併版共享授權及 Web 合成測試，發現為相容缺少 `attachments` 清單的歷史收據，群組與舊式路徑的 manager GET 仍允許**完全不存在提交收據**或 `submittedAt` 為 null 的附件。知道物件路徑的管理者因此可能在學生真正繳交前讀取已上傳草稿；保留學生本人草稿預覽、跨校／退組拒絕、明確附件清單逐項比對。
 
-最小變更：兩種 assignment 路徑均要求第三方 manager 有既存 `submissions/{student}`、收據 owner 與路徑一致及 `submittedAt != null`；對真正已提交且沒有 `attachments` 欄位的 legacy 收據保留原閱讀相容性。有清單時仍須精確匹配路徑，未修改學生日常上傳資格。合成回歸改為驗證「無收據／空提交時間拒絕、真實 legacy 已提交收據通過」，並保留錯 owner、未引用 sibling、跨帳號／跨校及撤權案例。
+最小變更：兩種 assignment 路徑均要求第三方 manager 有既存 `submissions/{student}`、收據 owner 與路徑一致及 `submittedAt != null`；對真正已提交且沒有 `attachments` 欄位的 legacy 收據保留原閱讀相容性。有清單時仍須精確匹配路徑，未修改學生日常上傳資格。合成回歸改為驗證「無收據／空提交時間拒絕、真實 legacy 已提交收據通過」，並保留錯 owner、未引用 sibling、跨帳號／跨校及撤權案例。另同步調整 Functions Jest、Firebase emulator HTTP、Web 預簽 URL 的合成案例，確保舊測試不再把提前下載草稿當作應有功能。
 
 **驗證界線：** 原始碼及 Web 測試已修改；本輪此處不代表完整 CI 已成功。需以新 PR 精確 head 核對 Web、Functions、Firestore Rules、CodeQL、Supabase permissions、Python、Mobile Agent、適用 Maestro、review threads 及指定 nuni-merge-gate App 5504170「審查通過」。此補強不撤銷已簽發 GCS/Supabase 網址，也不證明所有歷史附件皆有可信提交收據；缺收據的管理者下載將 fail-closed，正式發布前應以隔離資料盤點並提供安全修復流程。真 GCS staging、minimatch 雙鎖檔、歷史 URL 清理、正式資料／金鑰／migration／部署需另行走既有審查與回復程序。E 校園連線繼續停用；未重跑未獲授權的 npm/pnpm audit。
