@@ -441,6 +441,34 @@ export async function authorizePrivateFile(
           )) deny();
         }
       }
+      // Legacy uploads must obey the same live submission eligibility as group keys.
+      // The global assignments/{id} mirror alone is insufficient for POST/claim.
+      if (scope.kind === 'assignment' && !scope.groupId && writing) {
+        if (scope.userId !== uid) deny();
+        const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
+        const [assignment, submission] = await tx.getAll(
+          assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
+        );
+        if (!assignment.exists) deny();
+        const data = asRecord(assignment.data());
+        const previous = asRecord(submission.data());
+        const owner = 'userId' in previous ? previous.userId
+          : 'uid' in previous ? previous.uid
+            : 'studentId' in previous ? previous.studentId : scope.userId;
+        const dueValue = data.dueAt;
+        const validDueString = typeof dueValue !== 'string' || (
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+          Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+          new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+        );
+        const due = dueValue == null || typeof dueValue === 'number' || !validDueString
+          ? null : storyExpiresAtMs(dueValue);
+        if (
+          data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+          (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due)) ||
+          (submission.exists && (owner !== uid || previous.submittedAt != null))
+        ) deny();
+      }
       // Legacy assignments/{id}/submissions/{uid}/ paths are still reachable
       // via the GCS HTTP and Web signed-URL handlers. A manager must not
       // download an uploaded draft without the canonical submission receipt.

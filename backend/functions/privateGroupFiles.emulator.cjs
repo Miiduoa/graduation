@@ -100,6 +100,7 @@ beforeEach(async () => {
   assignmentId = `work-${caseNumber}`;
   await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
   await db.doc(`assignments/${assignmentId}`).set({ groupId });
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}`).set({ published: true });
   // 下載貼文附件需要貼文仍存在。
   await db.doc(`groups/${groupId}/posts/one`).set({
     authorId: 'alice',
@@ -201,6 +202,21 @@ test('HTTP submission privacy, new filenames and manager cover updates remain su
 
 // firebase-tools 15.34.1 ignores GCS generation preconditions. Atomic overwrite/race
 // behavior requires real Cloud Storage staging. Unit tests verify SDK query serialization.
+test('legacy assignment HTTP upload obeys closed status and submitted receipt', { timeout: 30_000 }, async () => {
+  const canonical = db.doc(`groups/${groupId}/assignments/${assignmentId}`);
+  const path = paths().answer.replace('answer.pdf', 'after-close.pdf');
+  await canonical.update({ published: false });
+  assert.equal((await request('POST', path, 'alice')).status, 403);
+  await canonical.update({ published: true, status: 'closed' });
+  assert.equal((await request('POST', path, 'alice')).status, 403);
+  await canonical.update({ status: 'open' });
+  assert.equal((await request('POST', path, 'alice')).status, 201);
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    userId: 'alice', submittedAt: '2026-11-10T00:00:00.000Z', attachments: [path],
+  });
+  assert.equal((await request('POST', path.replace('.pdf', '-new.pdf'), 'alice')).status, 403);
+});
+
 test('legacy assignment upload is not visible to the instructor before submission', { timeout: 30_000 }, async () => {
   const objectPath = paths().answer;
   assert.equal((await request('POST', objectPath, 'alice')).status, 201);

@@ -452,3 +452,11 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 新增四組確定性 Jest 合成回歸，於假的 GCS `getMetadata()` await 內變更 live 權限或提交收據：貼文組員退組、教師已繳交附件撤下引用、讀取封面期間學籍撤銷，以及封面寫入期間管理者校籍撤銷。預期四者均 403，且不建立讀取串流、不保存覆寫物件；合法路徑由既有正常回歸保持。此修補不能停止已經開始的串流，亦不能將最終驗權與 GCS 串流／寫入實作成跨服務原子交易。正式 GCS staging、已發 signed/bearer URL 的撤銷和發佈仍待驗證。
 
 此變更限定已存續 Draft PR #569，未觸碰正式 bucket、資料、金鑰、migration、部署、E 校園或未授權 audit。新精確提交須以 CI、CodeQL、其他適用 gates 及 App 5504170 審查判定，不能以先前 head 的綠燈取代。
+
+## 2026-11-10：舊作業附件寫入繞過作業狀態／提交收據（待新 head CI）
+
+共用 `authorizePrivateFile` 對新 namespace 的寫入已有 canonical assignment 發布／期限／已繳交檢查；舊 `assignments/{id}/submissions/{uid}/...` namespace 的 POST／claim 卻只查 global assignment 的 groupId 與群組／校籍，可能讓仍屬群組的學生在作業關閉、期限已過或已繳交後，經 GCS HTTP 或 Web private signed upload 入口繼續建立物件。這是舊路徑的寫入授權與資源耗用問題，**不等於已證實跨學生讀取**。
+
+本次只在 legacy 寫入／claim 分支強制查核 group canonical assignment 和目前的 submission receipt，沿用新路徑的 published、draft/closed、dueAt、allowLateSubmission、owner 與 submittedAt 規則。一般開放作業本人仍可上傳；學生本人既有草稿 GET、教師對已繳交收據的 GET 仍按前輪規則。只有 global assignment、缺 group canonical assignment 的歷史上傳現在 fail-closed；需在隔離資料盤點合法舊資料的相容性，不可為了短期相容性跳過授權。
+
+新增 Web 記憶體授權、Functions 合成 GCS HTTP 與 Firebase emulator HTTP 回歸，涵蓋正常上傳、關閉／未發布／逾期拒絕、明確允許遲交、已提交／偽造收據拒絕及缺 canonical assignment；正常 emulator fixture 補上正式 group assignment。本輪僅完成開發提交，**是否通過須依新精確 head 的 CI、Rules、CodeQL 核對**。沒有操作正式 bucket、金鑰、migration、token、E 校園或重新發送未核准 npm/pnpm audit。已發下載／上傳 URL、真實隔離 Storage staging、歷史資料遷移與正式發布／回復仍是獨立阻擋。

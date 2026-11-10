@@ -131,6 +131,30 @@ it('legacy assignment URLs also require a submitted receipt with an exact file r
   await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
 });
 
+it('legacy uploads require a live open assignment and an unsubmitted receipt', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'bob', true)).rejects.toMatchObject({ statusCode: 403 });
+  for (const invalid of [
+    { published: false }, { status: 'draft' }, { status: 'closed' },
+    { dueAt: '2020-01-01T00:00:00Z' }, { dueAt: 'invalid' },
+  ]) {
+    store.docs.set('groups/course/assignments/work', invalid);
+    await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('groups/course/assignments/work', { dueAt: '2020-01-01T00:00:00Z', allowLateSubmission: true });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('groups/course/assignments/work/submissions/alice', { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('groups/course/assignments/work/submissions/alice', { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.delete('groups/course/assignments/work/submissions/alice');
+  store.docs.delete('groups/course/assignments/work');
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  // A previously uploaded private draft remains previewable by its owner.
+  await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
+});
+
 it('requires an existing live post for downloads and author ownership for existing uploads', async () => {
   const store = fileStore();
   await expect(authorize(store, POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });

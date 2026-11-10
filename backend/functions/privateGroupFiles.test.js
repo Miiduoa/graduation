@@ -46,6 +46,7 @@ describe('private group file HTTP handler', () => {
       ['groups/course', { schoolId: 'pu' }],
       ['groups/course/posts/one', { authorId: 'alice' }],
       ['assignments/work', { groupId: 'course' }],
+      ['groups/course/assignments/work', { published: true }],
       ...['alice', 'bob', 'teacher'].flatMap((uid) => [
         [`users/${uid}`, { displayName: uid }],
         [`groups/course/members/${uid}`, { status: 'active', role: uid === 'teacher' ? 'instructor' : 'member' }],
@@ -196,6 +197,23 @@ describe('private group file HTTP handler', () => {
     store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+  });
+
+  test('legacy assignment POST refuses closed assignments and already submitted receipts', async () => {
+    const fresh = ANSWER.replace('answer.pdf', 'new-answer.pdf');
+    store.docs.set('groups/course/assignments/work', { published: false });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(403);
+    expect(bucket.file).not.toHaveBeenCalled();
+    store.docs.set('groups/course/assignments/work', { status: 'closed' });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(403);
+    store.docs.set('groups/course/assignments/work', { dueAt: '2020-01-01T00:00:00Z' });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(403);
+    store.docs.set('groups/course/assignments/work', { published: true });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(201);
+    store.docs.set('groups/course/assignments/work/submissions/alice', { userId: 'alice', submittedAt: Date.now() });
+    const saved = saves.length;
+    expect((await invoke({ path: ANSWER.replace('answer.pdf', 'after-submission.pdf'), method: 'POST', body: 'late' })).status).toBe(403);
+    expect(saves).toHaveLength(saved);
   });
 
   test.each([POST, ANSWER])('attachments use atomic create-only writes at %s', async (path) => {
