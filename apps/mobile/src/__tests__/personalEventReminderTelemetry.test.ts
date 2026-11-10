@@ -14,6 +14,7 @@ jest.mock('expo-notifications', () => ({
 }));
 
 test.each([
+  [{ category: 'nuni_assignment_due', lookupToken: 'private-lookup' }, 'nuni_assignment_reminder_local'],
   [{ type: PERSONAL_EVENT_REMINDER_TYPE, v: 1, t: 'tok', g: 1 }, 'personal_event_reminder_local'],
   [{ category: 'personal_class_occurrence', scope: 'private-owner', courseId: 'private-course', startAt: 123 }, 'personal_class_reminder_local'],
 ] as const)('personal reminder receipt and click telemetry omit title and payload', (data, category) => {

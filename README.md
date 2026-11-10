@@ -1,122 +1,128 @@
-# Campus One｜課程與校園生活
+# nuni｜AI 校園助理
 
 [![CI](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml/badge.svg)](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Miiduoa/graduation/actions/workflows/codeql.yml/badge.svg)](https://github.com/Miiduoa/graduation/actions/workflows/codeql.yml)
 
-Campus One 將課程待辦、教材、作業、測驗和校園服務放在同一個入口。學生從待辦回到課程完成繳交，老師查看實際收件並留下回饋。Web 與 App 共用帳號契約及部分商業規則。
+**把課表、課業與校園服務串在一起，讓助理陪你把下一件事做完。**
 
-目前持續開發中。平台課程使用 Nuni 帳號與 API；學校課表、成績及部分校園服務仍使用各自的校務連線與 Firebase。多校瀏覽不代表已取得校籍或校方授權。正式服務、示範流程和未完成項目見 [全功能驗收表](docs/PRODUCT_ACCEPTANCE_2026-10-11.md)。
+nuni 提供 Web 與手機介面。學生可以請助理整理近期作業與測驗、保存讀書計畫、找準備時間，再確認建立個人行程；也能從同一個入口找到課程、圖書館、公車與校園生活服務。
 
-[兩分鐘導覽](docs/REVIEW_IN_2_MINUTES.md) · [架構說明](docs/ARCHITECTURE_OVERVIEW.md) · [測試紀錄](docs/TESTING_EVIDENCE.md) · [作品介紹](https://miiduoa.github.io/case-studies/campus-one/)
+[開啟 nuni](https://nuni.tw/) · [兩分鐘導覽](docs/REVIEW_IN_2_MINUTES.md) · [操作截圖](docs/SCREENSHOTS.md) · [文件目錄](docs/README.md)
 
-## 日常操作
+![nuni 網站的今天頁，包含需求輸入、課表匯入與公開校園服務](docs/screenshots/2026-11/nuni-today-web.jpg)
 
-- **學生**：今日待辦 → 對應作業或測驗 → 送出 → 確認回執；在課程內查看老師回饋。
-- **老師**：授課課程 → 發布內容 → 查看收件 → 留下回饋。課程角色與學校職務分開驗證。
-- **校園服務**：以「繳交 作業」「借書」「公車」等需求搜尋，確認所需帳號後進入。
-- **店家與管理員**：店家合作查看進駐申請；管理員入口處理學校接入與跨校檢舉，權限由伺服器確認。
+_2026-11-08 擷取的 nuni.tw 公開訪客畫面。下方功能以本儲存庫 main 的實作為準；正式環境的開放範圍依畫面、帳號與校園而定。_
 
-Web 服務入口：[nuni.tw](https://nuni.tw/)。線上版本以 [發布紀錄](docs/PLATFORM_RELEASE.md) 為準，尚未合併的修改不等於已上線。
+## 助理如何完成一件事
 
-公開校園資訊可以直接瀏覽。需要加入課程、繳交作業或申請店家時，再使用 Campus One 平台帳號；個人課表與成績另需已開放的學校連線。瀏覽校園、平台登入或提交學校資格申請，都不會自動授予校籍、教師或管理員權限。
+以「幫我安排這份作業的準備時間」為例，手機助理會接續同一份課業資料：
 
-## Mobile 畫面
+1. **讀取來源**：從目前帳號有權使用的課程，整理作業名稱、期限與本人繳交紀錄。
+2. **找可用時段**：核對已儲存的課表及個人行程，提供三十分鐘的準備時段，或由使用者輸入時間。
+3. **確認後執行**：使用者選定時段、看過完整預覽並確認後，重新核對原作業與行程衝突，再保存個人行程。
+4. **讀回核對**：重新讀到相符紀錄才顯示成功，並提供查看行程與原作業的入口。連線或儲存結果不明時，保留原操作供核對。
 
-<p>
-  <img src="docs/mobile-screenshots/m_student_03_campus.png" alt="Campus One 校園服務入口的既有原型畫面" width="220">
-</p>
+已保存的讀書計畫可繼續勾選個人進度、比較新舊資料；從歷史計畫開始新的操作前，仍要重新取得目前來源。建立準備行程與繳交作業是兩個不同的結果，畫面會分別呈現。
 
-既有原型畫面：學生端校園服務入口。
+| 助理能力           | 使用者可以做什麼                                           | 實作說明                                                                                                              |
+| ------------------ | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 今日與七日課業計畫 | 整理課表、作業與測驗，從計畫開啟對應課業                   | [計畫接續作業](docs/assistant/2026-11-08-plan-coursework-execution.md)                                                |
+| 作業準備時間       | 找三十分鐘候選、選擇時段、預覽後確認建立                   | [尋找空堂與執行](docs/assistant/2026-11-08-coursework-free-time-execution.md)                                         |
+| 連續追問空堂       | 調整今天、明天或後天，以及鐘點與最低時長；每輪重讀已存課表 | [空堂條件追問](docs/evidence/agent-class-gap-followups/README.md)                                                     |
+| 個人行程執行       | 核對後保存，處理部分成功與待確認結果                       | [執行與回執](docs/assistant/2026-11-07-verified-execution.md)                                                         |
+| 任務續接           | 保存計畫、核對來源變動，重新開啟 App 後查核已嘗試的行程    | [保存計畫](docs/evidence/agent-saved-plans/README.md) · [手機恢復](docs/assistant/2026-11-08-mobile-task-recovery.md) |
+| 課業紀錄查詢       | 查看確切作業、測驗與本人紀錄，接續原課程頁                 | [手機操作路徑](apps/mobile/DEMO.md)                                                                                   |
+| 校園服務接續       | 依目前帳號與校園找到服務，使用可用的原生頁或網站入口       | [共用服務目錄](docs/assistant/2026-11-07-service-connections.md)                                                      |
 
-更多操作流程見 [Mobile demo](apps/mobile/DEMO.md)。
+手機的個人行程保存於目前帳號、校園所屬的裝置資料；Web 的確認執行另依平台 API 與功能設定啟用。服務目錄中的 43 個識別項目代表接通的入口，不代表每項都能直接代辦或已在各校開放。
 
-## 功能與程式入口
+## 操作畫面
 
-- **Mobile**：今天、課務、生活、我。課表、作業、訊息、校園地圖與公車。使用 Expo 54、React Native 0.81、React Navigation，程式位於 [`apps/mobile/`](apps/mobile/)。
-- **Web**：學生與管理／教學介面，使用 Next.js 16、React 19、TypeScript，程式位於 [`apps/web/`](apps/web/)。
-- **Backend**：Nuni API 的可重建來源與修補位於 [`deploy/nuni-api/`](deploy/nuni-api/)；Firebase Functions、Firestore／Storage 規則與測試位於 [`backend/`](backend/)。
-- **Shared**：跨端共用的型別與規則位於 [`packages/`](packages/)，由 pnpm workspace 管理。
+![nuni 手機助理的課業計畫、已儲存計畫與準備行程確認，三個正式元件並列展示](docs/screenshots/2026-11/nuni-agent-gallery.jpg)
 
-## 本機執行
+_手機畫面為 main 正式元件的 React Native Web 展示，使用合成資料；不是 iOS／Android 實機截圖。完整圖片、資料來源與重拍方式見 [截圖說明](docs/SCREENSHOTS.md)。_
 
-需求：Node.js 22、pnpm 10。Node.js 22 是 CI／Expo 工具鏈基準；根目錄的 engines 也保留 Node 20.19.4+、低於 21 的相容範圍。
+## 課業與校園生活
+
+| 範圍           | 目前程式提供的操作                                               | 使用條件                                           |
+| -------------- | ---------------------------------------------------------------- | -------------------------------------------------- |
+| 課表與個人資料 | 手動建立課表，從截圖、文字或檔案整理課表、成績與行程，匯入前核對 | 資料依裝置、帳號與校園區分；匯入紀錄不等同校方認證 |
+| 課程與作業     | 閱讀教材、繳交作業、回答測驗、查看收件與教師回饋                 | nuni 平台登入及該課程的有效成員資格                |
+| 教師課程工作   | 發布內容、查看學生收件、留下教師回饋                             | 由各課程的後端授權決定                             |
+| 校園資訊       | 地圖、公車、公告、圖書館、餐廳與學校資訊入口                     | 公開資訊可先瀏覽；即時資料取決於各校來源及服務設定 |
+| 生活安排       | 個人行事曆、宿舍備忘、設備問題紀錄、入住退宿清單與洗衣計時       | 部分內容保存在本裝置；宿舍備忘不等同向校方送出申請 |
+| 交流與訊息     | 公開看板、校內交流、通知與對話                                   | 平台與校園服務使用各自的帳號及資料權限             |
+| 店家與平台管理 | 店家進駐申請、本人門市狀態，及有授權者的管理工作區               | 申請、核准、營業與線上收款各自確認                 |
+
+### 帳號與學校
+
+- **公開瀏覽**：先選擇想看的校園，使用已提供公開來源的服務。
+- **nuni 平台帳號**：透過 Google 登入使用平台課程與已開放的個人服務；課程角色由後端確認。
+- **學校連線**：校方課表、成績與外部 LMS 另依該校整合與授權提供。選擇校園不會自動取得校籍或私人資料。
+
+帳號流程與兩端差異見 [帳號、學校資格與店家進駐](docs/ACCOUNT_AND_SCHOOL_ACCESS.md)。TronClass／玩課雲資料與 nuni 平台課程分別處理，原校方作業仍依原系統的繳交流程。
+
+## 本機開發
+
+使用 [.nvmrc](.nvmrc) 指定的 **Node.js 22.23.4** 與 [package.json](package.json) 指定的 **pnpm 10.28.2**。以下以 nvm 管理 Node 的環境為例；若使用其他方式，先安裝相同 Node 版本：
 
 ```bash
 git clone https://github.com/Miiduoa/graduation.git
 cd graduation
-pnpm install
+nvm install
+nvm use
+corepack enable
+corepack prepare pnpm@10.28.2 --activate
+pnpm install --frozen-lockfile
 ```
 
-Web：
+設定對應的開發環境後啟動：
 
 ```bash
-pnpm dev:web
+pnpm dev:web       # Next.js Web
+pnpm dev:mobile    # Expo 開發伺服器
+pnpm ios:sim       # macOS + Xcode，建置並啟動 iOS 模擬器
 ```
 
-Mobile：
+完整設定、公開設定與伺服器憑證的區別見 [新機器設定](docs/SETUP_NEW_MACHINE.md)；Web 的環境範本與登入設定見 [Web 開發說明](apps/web/README.md)。原生登入與其他原生模組需要相符的開發版本，不以 Expo Go 代表完整 App。
 
-```bash
-pnpm dev:mobile
-```
+### 專案結構
 
-iOS simulator：
+| 目錄                                   | 內容                                                                  |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| [`apps/mobile/`](apps/mobile/)         | Expo 54、React Native 0.81、React Navigation；手機介面與裝置能力      |
+| [`apps/web/`](apps/web/)               | Next.js 16、React 19、TypeScript；網站與同源 API 層                   |
+| [`packages/shared/`](packages/shared/) | 跨端型別、課業與服務契約、匯入及執行規則                              |
+| [`deploy/nuni-api/`](deploy/nuni-api/) | nuni API 的固定來源、修補與重建流程                                   |
+| [`backend/`](backend/)                 | Firebase Functions、Firestore／Storage 規則、模擬器測試與選用 AI 服務 |
+| [`docs/`](docs/README.md)              | 操作、架構、驗證、發布及歷史紀錄                                      |
 
-```bash
-pnpm ios:sim
-```
+[架構總覽](docs/ARCHITECTURE_OVERVIEW.md) 說明 nuni 平台 API、Firebase 校園服務與各端資料如何分工。不同後端的身分不會因為同名帳號而自動互通。
 
-外部服務的可用範圍取決於環境與憑證設定；部分資料及角色流程以 demo data 展示。
-
-## 資料與權限
-
-### 跨端與角色權限
-
-共用型別與規則集中在 workspace package；平台 UI、導航與裝置能力留在各端。權限檢查涵蓋路由、UI、資料存取、後端授權及 Firestore／Storage 規則。
-
-相關文件：[角色與資料流](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md) · [跨角色資料流](docs/CROSS_ROLE_DATA_FLOW.md) · [API](docs/API.md) · [設計決策紀錄](docs/adr/README.md)
-
-### 安全導頁與服務失效處理
-
-Deep link、通知與訊息 action 經過 route registry 及 safe navigation。部分流程提供 mock、cache 或 hybrid data path，讓外部服務失敗時仍能辨識資料狀態、保留基本導航。
-
-### 成績通知的收件人檢查
-
-舊版教師評分頁是本機示範，不會寫入 TronClass 成績；與 Nuni 課程空間的作業收件與回饋流程分開。發布本機成績事件前，會檢查教師帳號及教學角色、明確的學生 UID、作業 ID 與分數；不以姓名或學號推測收件人。
-
-- [評分頁](apps/mobile/src/screens/TeacherGradingScreen.tsx)
-- [傳送前檢查](apps/mobile/src/services/prepareGradingDelivery.ts)
-- [收件人隔離測試](apps/mobile/src/__tests__/prepareGradingDelivery.test.ts)
-
-### 課表與安排
-
-個人課表用靜宜第 1–13 節。截圖或學校選課紀錄要確認後才寫入。好友課表要先加好友才看得到。共同空堂可以約吃飯或讀書。「幫我安排」是依課表算出下一堂、空堂與讀書時段，不是另外一套對話服務。
-
-## 驗證
-
-根目錄提供：
+## 驗證與發布
 
 ```bash
 pnpm lint
 pnpm typecheck
 pnpm format:check
+pnpm --filter web test
+pnpm --filter mobile test
 pnpm test:rules
 ```
 
-Mobile 使用 Jest，Web 使用 Vitest，原生 UI 流程另有 Maestro E2E workflow。`test:rules` 會啟動 Firebase emulators，需要對應的 Java 環境。
+Web 使用 Vitest，手機使用 Jest；`test:rules` 需要 Java 21 與 Firebase emulators。原生導覽另有 [Maestro E2E](.github/workflows/maestro-e2e.yml)，助理流程另有 [Mobile Agent Regression](.github/workflows/mobile-agent-regression.yml)。
 
-[測試紀錄](docs/TESTING_EVIDENCE.md) 按 CI run 與 commit 記錄結果；[依賴風險清單](docs/DEPENDENCY_RISK_REGISTER.md) 保留尚待處理的風險。主要 CI 成功不代表原生 Maestro E2E 已通過、所有裝置都可安裝，或所有安全警示都已清除。
+新提交以 [GitHub Actions](https://github.com/Miiduoa/graduation/actions) 的實際結果為準。main、線上 Web／API 與商店版本分開追蹤；尚未合併的 PR 不列為 main 已完成的能力。
 
-一般 CI 只驗證 Expo Doctor、公開 app config 與 `eas.json` build profile，不需要 `EXPO_TOKEN`，也不提交 EAS Cloud build。iOS／Android 雲端建置由手動的 `EAS Build`／`Release` workflow 執行，屆時才需要 Expo 帳號憑證。
+- [測試證據](docs/TESTING_EVIDENCE.md)：依提交與執行紀錄判讀，保留未驗證範圍。
+- [歷次平台發布](docs/PLATFORM_RELEASE.md) · [原生發布](docs/STORE_RELEASE.md)：每份紀錄只代表該日期與版本。
+- [安全說明](docs/SECURITY.md) · [依賴風險](docs/DEPENDENCY_RISK_REGISTER.md)：權限與仍需處理的風險。
+- [開發中的 PR](https://github.com/Miiduoa/graduation/pulls)：功能進度與待合併修改。
 
-[查看 GitHub Actions](https://github.com/Miiduoa/graduation/actions)
+## 專題團隊
 
-## 目前限制
+靜宜大學資訊管理學系：楊世堅、周攸晨、顧晉瑋、吳容陞。
 
-- 這是校園產品原型，尚非正式校務系統；demo data 不代表校方權威資料。
-- 外部 LMS、地圖、即時交通需要相應環境及憑證。沒開通的服務會在畫面上直接說明。
-- Repo 同時保留研究、驗證及口試文件；待修問題見 [REMAINING_BUGS_AUDIT](docs/REMAINING_BUGS_AUDIT.md)。
-- 點名的伺服器確認要求及現有限制，另見 [Attendance verification boundary](docs/ATTENDANCE_VERIFICATION.md)。
+儲存庫維護：[顧晉瑋／Miiduoa](https://github.com/Miiduoa)
 
-## 作者
-
-顧晉瑋 · Providence University, Information Management  
-[GitHub / Miiduoa](https://github.com/Miiduoa)
+本專案舊名 Campus One。歷史文件、套件名稱與既有路徑可能保留舊名稱，對外產品名稱統一使用 **nuni**。

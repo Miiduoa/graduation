@@ -8,7 +8,7 @@ import {
   PERSONAL_IMPORT_SYNC_BODY_LIMIT,
   validatePersonalImportSyncRecords,
 } from '@campus/shared/src/imports/sync';
-import { createTransitService, validateTransitQuery } from '../../transit-server';
+import { createTransitService } from '../../transit-server';
 import { apiOrigin, boundedJson, type PlatformSession } from '../server';
 import { bounded, id, object, V2Error, type Adapter, type Obj } from './contracts';
 function rows(raw: unknown, key: string, limit = 5): Obj[] {
@@ -320,7 +320,7 @@ export function createAdapter(session: PlatformSession, schoolId: string, signal
         source: 'public cafeteria catalog; 價格/菜單可能缺漏',
       };
     },
-    transit: async (args) => transit(validateTransitQuery(args)),
+    transit: async (args) => transit(args),
     notifications: async () => ({ unavailable: 'NOT_CONNECTED' }),
     write: async (input) => {
       validatePersonalImportSyncRecords(input.records, schoolId);

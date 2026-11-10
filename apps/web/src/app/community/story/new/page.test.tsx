@@ -259,3 +259,32 @@ it.each([
   expect(screen.getByAltText('已選取的照片')).toBeTruthy();
   expect(mock.upload).not.toHaveBeenCalled();
 });
+
+it('confirms a previously published private image after claim succeeds on retry', async () => {
+  const files = await import('@/lib/privateFiles');
+  const claim = vi.spyOn(files, 'claimPrivateFile').mockResolvedValue(undefined);
+  mock.upload.mockResolvedValue({ url: 'schools/ncku/stories/new-story/image.jpg' });
+  mock.publish.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce('new-story');
+  render(<StoryComposePage />);
+  try {
+    chooseImage(new File(['image'], 'photo.jpg', { type: 'image/jpeg' }));
+    await screen.findByAltText('已選取的照片');
+    fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+    await waitFor(() => expect(mock.replace).toHaveBeenCalledOnce());
+    expect(claim).toHaveBeenCalledTimes(2);
+    expect(claim).toHaveBeenLastCalledWith('schools/ncku/stories/new-story/image.jpg', 'schools/ncku/stories/new-story');
+    expect(mock.publish).toHaveBeenCalledTimes(2);
+    expect(mock.publish.mock.calls[1][0]).toEqual({ ...mock.publish.mock.calls[0][0], expiresAtMs: expect.any(Number) });
+    expect(mock.upload).toHaveBeenCalledOnce();
+  } finally { claim.mockRestore(); }
+});
+
+it('accepts an image exactly at the shared 10 MiB boundary', async () => {
+  render(<StoryComposePage />);
+  const file = new File([new Uint8Array(10 * 1024 * 1024)], 'photo.jpg', { type: 'image/jpeg' });
+  chooseImage(file);
+  await screen.findByAltText('已選取的照片');
+  expect(screen.queryByRole('alert')).toBeNull();
+});

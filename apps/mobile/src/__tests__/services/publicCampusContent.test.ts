@@ -95,6 +95,25 @@ test('canonical and legacy details reject other-school data and preserve documen
   expect(doc).toHaveBeenLastCalledWith('db', 'schools', 'pu', 'announcements', 'a1');
 });
 
+test('an exact school announcement does not fall back to a legacy document with the same ID', async () => {
+  jest.mocked(getDocFromServer).mockResolvedValueOnce({ exists: () => false } as never);
+  await expect(loadCampusAnnouncement('pu', 'a1', 'school-announcement')).resolves.toBeNull();
+  expect(doc).toHaveBeenCalledTimes(1);
+  expect(doc).toHaveBeenCalledWith('db', 'schools', 'pu', 'announcements', 'a1');
+});
+
+test('an exact legacy announcement reads only the original document and verifies its school', async () => {
+  jest.mocked(getDocFromServer)
+    .mockResolvedValueOnce(document({ ...row, schoolId: 'pu' } as never) as never)
+    .mockResolvedValueOnce(document({ ...row, schoolId: 'ntu' } as never) as never)
+    .mockResolvedValueOnce(document({ ...row, schoolId: 'pu', visible: false } as never) as never);
+  await expect(loadCampusAnnouncement('pu', 'a1', 'legacy-announcement')).resolves.toMatchObject({ id: 'a1' });
+  await expect(loadCampusAnnouncement('pu', 'a1', 'legacy-announcement')).resolves.toBeNull();
+  await expect(loadCampusAnnouncement('pu', 'a1', 'legacy-announcement')).resolves.toBeNull();
+  expect(doc).toHaveBeenCalledTimes(3);
+  expect(jest.mocked(doc).mock.calls).toEqual(Array(3).fill(['db', 'announcements', 'a1']));
+});
+
 test('preserves the complete announcement body and the producer audience metadata', async () => {
   const data = {
     ...row,

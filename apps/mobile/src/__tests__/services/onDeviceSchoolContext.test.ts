@@ -1,3 +1,4 @@
+import { nextSavedClasses } from '../../services/nextSavedClasses';
 import {
   collectOnDeviceSchoolContext,
   formatOnDeviceSchoolPrompt,
@@ -6,6 +7,7 @@ import {
 import { classMeetingKey, type ClassException, type PersonalImportRecord } from '@campus/shared';
 import { loadPersonalImports } from '../../services/personalImports';
 import { loadOfflinePersonalTimetable, type StoredTimetable } from '../../services/personalTimetable';
+import type { CampusSenseSnapshot } from '../../services/campusSenseSnapshot';
 
 jest.mock('../../services/personalTimetable', () => ({
   ...jest.requireActual('../../services/personalTimetable'),
@@ -50,10 +52,12 @@ test('only reads the selected account and campus copy, never a demo schedule', a
     updatedAt: '2026-10-25T09:00:00.000Z',
     courses: [{ name: '資料庫概論', day: 1, start: 2, end: 3 }],
   });
-  const prompt = formatOnDeviceSchoolPrompt(result);
+  const prompt = formatOnDeviceSchoolPrompt(result, null, 'alice');
   expect(prompt).toContain('資料庫概論');
   expect(prompt).toContain('不能冒充鐘點或官方');
   expect(prompt).toContain('不是本次即時查詢');
+  expect(formatOnDeviceSchoolPrompt(result, null, 'bob')).not.toContain('資料庫概論');
+  expect(formatOnDeviceSchoolPrompt(result, null, '')).not.toContain('資料庫概論');
 });
 
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
@@ -62,7 +66,7 @@ test('missing or invalid cached data does not become a fabricated timetable', as
   expect(result.timetable).toEqual({
     source: 'not-available', updatedAt: null, courses: [],
   });
-  expect(formatOnDeviceSchoolPrompt(result)).toContain('無法回答正式課程安排');
+  expect(formatOnDeviceSchoolPrompt(result, null, 'alice')).toContain('無法回答正式課程安排');
 });
 
 test('keeps the complete saved course set for offline tools, while limiting model context', async () => {
@@ -78,14 +82,44 @@ test('keeps the complete saved course set for offline tools, while limiting mode
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
   expect(result.timetable.courses).toHaveLength(12);
   expect(result.timetable.courses[11].name).toBe('測試課程12');
-  const prompt = formatOnDeviceSchoolPrompt(result);
+  const prompt = formatOnDeviceSchoolPrompt(result, null, 'alice');
   expect(prompt).toContain('測試課程8');
   expect(prompt).not.toContain('測試課程12');
   expect(prompt).toContain('尚有 4 門未列出');
   expect(prompt).toContain('不可據此判定某天沒課');
 });
 
-describe('next class from saved timetables and imports', () => {
+test('only includes an authorized and fresh campus snapshot for its original account', async () => {
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const saved: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 專屬作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  const containsPrivateTitle = (value: CampusSenseSnapshot, owner = local) =>
+    formatOnDeviceSchoolPrompt(owner, value, 'alice').includes('Alice 專屬作業');
+
+  expect(local.ownerUid).toBe('alice');
+  expect(containsPrivateTitle(saved)).toBe(true);
+  expect(formatOnDeviceSchoolPrompt(local, saved, 'bob')).not.toContain('Alice 專屬作業');
+  expect(containsPrivateTitle({ ...saved, userId: 'bob' })).toBe(false);
+  expect(containsPrivateTitle({ ...saved, schoolId: 'ncku' })).toBe(false);
+  expect(containsPrivateTitle({
+    ...saved, checkedAt: new Date(Date.now() - 16 * 60_000).toISOString(),
+  })).toBe(false);
+  expect(containsPrivateTitle({
+    ...saved, checkedAt: new Date(Date.now() + 31_000).toISOString(),
+  })).toBe(false);
+  expect(containsPrivateTitle(saved, { ...local, ownerUid: undefined })).toBe(false);
+  expect(formatOnDeviceSchoolPrompt(local, { ...saved, userId: 'bob' }, 'alice'))
+    .toContain('此回合沒有主動同步且有效的校園資料');
+});
+
+describe('class lookups from saved timetables and imports', () => {
   const now = '2026-11-05T00:00:00+08:00'; // Thursday, still Wednesday in UTC.
   const manual: StoredTimetable = {
     schoolId: 'pu', shareWithFriends: false, updatedAt: '2026-09-02T01:00:00Z',
@@ -111,6 +145,31 @@ describe('next class from saved timetables and imports', () => {
   beforeEach(() => { jest.useFakeTimers().setSystemTime(new Date(now)); });
   afterEach(() => { jest.useRealTimers(); });
 
+  test.each([false, true])('reads class gaps from the selected account and applies a cancellation (platform: %p)', async (platform) => {
+    const params = { uid: platform ? '' : 'alice', schoolId: 'pu', gapDay: 'today' as const,
+      ...(platform && { platformTimetable: { accountId: 'alice', isCurrent: () => true } }) };
+    const later = { ...original, id: 'lab', title: '實驗課', startTime: '13:00', endTime: '14:00' };
+    saveImports(original, later);
+    const { timetable: before } = await collectOnDeviceSchoolContext(params);
+    expect(loadPersonalImports).toHaveBeenCalledWith({ owner: platform ? 'nuni:alice' : 'firebase:alice', schoolId: 'pu' });
+    expect(before.classGaps).toEqual([{ startAt: Date.parse('2026-11-05T10:00:00+08:00'), endAt: Date.parse('2026-11-05T13:00:00+08:00') }]);
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue({ ...manual, classExceptions: [adjust({})] });
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([]);
+  });
+
+  test.each([false, true])('reads the day after tomorrow and rejects an incomplete active schedule (platform: %p)', async (platform) => {
+    const params = { uid: platform ? '' : 'alice', schoolId: 'pu', gapDay: 'day-after-tomorrow' as const,
+      ...(platform && { platformTimetable: { accountId: 'alice', isCurrent: () => true } }) };
+    const morning = { ...original, dayOfWeek: 6, startTime: '09:00', endTime: '10:00' };
+    const afternoon = { ...morning, id: 'lab', title: '實驗課', startTime: '13:00', endTime: '14:00' };
+    saveImports(morning, afternoon);
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toEqual([{
+      startAt: Date.parse('2026-11-07T10:00:00+08:00'), endAt: Date.parse('2026-11-07T13:00:00+08:00'),
+    }]);
+    saveImports(morning, afternoon, { ...original, id: 'unfinished', title: '未填星期的課', dayOfWeek: undefined });
+    expect((await collectOnDeviceSchoolContext(params)).timetable.classGaps).toBeUndefined();
+  });
+
   test('deduplicates manual and imported copies, retaining every class with the earliest start', async () => {
     jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
     saveImports(original, { ...original, id: 'other', title: '英文', location: '210' });
@@ -123,6 +182,31 @@ describe('next class from saved timetables and imports', () => {
     ]);
   });
 
+  test('platform imports and manual classes share the same local namespace and preserve the school alias', async () => {
+    const platformTimetable = { accountId: 'pa-student', isCurrent: () => true };
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
+    saveImports({ ...original, schoolId: 'tw-pu', id: 'other', title: '英文', location: '210' });
+    const result = await collectOnDeviceSchoolContext({ uid: '', schoolId: 'tw-pu', platformTimetable, includeNextClasses: true });
+    expect(loadOfflinePersonalTimetable).toHaveBeenCalledWith('nuni:pa-student', 'tw-pu');
+    expect(loadPersonalImports).toHaveBeenCalledWith({ owner: 'nuni:pa-student', schoolId: 'tw-pu' });
+    expect(result.timetable.nextClasses?.map((entry) => entry.courseId).sort()).toEqual(['manual:db', 'other']);
+  });
+
+  test('platform reads fail closed across account changes and differentiate new accounts from storage failures', async () => {
+    const platformTimetable = { accountId: 'pa-student', isCurrent: jest.fn(() => true) };
+    const params = { uid: '', schoolId: 'pu', includeCurrentClasses: true, platformTimetable };
+    platformTimetable.isCurrent.mockReturnValueOnce(false);
+    expect((await collectOnDeviceSchoolContext(params)).timetable.source).toBe('not-available');
+    expect(loadPersonalImports).not.toHaveBeenCalled();
+    expect(loadOfflinePersonalTimetable).not.toHaveBeenCalled();
+    expect((await collectOnDeviceSchoolContext(params)).timetable.source).toBe('not-available');
+    jest.mocked(loadPersonalImports).mockRejectedValueOnce(new Error('cannot read ledger'));
+    expect((await collectOnDeviceSchoolContext(params)).timetable.source).toBe('unreadable');
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(manual);
+    platformTimetable.isCurrent.mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect((await collectOnDeviceSchoolContext(params)).timetable).toEqual({ source: 'not-available', courses: [], updatedAt: null });
+  });
+
   test('handles exact start, in-progress classes, and the last class of the day', async () => {
     saveImports(original);
     jest.setSystemTime(new Date('2026-11-05T08:10:00+08:00'));
@@ -131,6 +215,83 @@ describe('next class from saved timetables and imports', () => {
     expect((await query()).nextClasses?.[0]?.date).toBe('2026-11-12');
     jest.setSystemTime(new Date('2026-11-05T23:59:59+08:00'));
     expect((await query()).nextClasses?.[0]?.date).toBe('2026-11-12');
+  });
+
+  const current = (classFollowUp?: readonly SavedClassOccurrence[]) =>
+    collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu', includeCurrentClasses: true, classFollowUp })
+      .then((result) => result.timetable.currentClasses);
+
+  test('ongoing covers [start, end), includes staggered overlaps and does not replace the next class', async () => {
+    saveImports(original, { ...original, id: 'other', title: '英文', startTime: '09:00', endTime: '10:30' });
+    jest.setSystemTime(new Date('2026-11-05T08:09:59+08:00'));
+    expect(await current()).toEqual([]);
+    jest.setSystemTime(new Date('2026-11-05T08:10:00+08:00'));
+    const first = await current();
+    expect(first?.map((row) => row.courseId)).toEqual(['imported-db']);
+    jest.setSystemTime(new Date('2026-11-05T08:45:00+08:00'));
+    const both = await collectOnDeviceSchoolContext({
+      uid: 'alice', schoolId: 'pu', includeCurrentClasses: true, includeNextClasses: true,
+    });
+    expect(both.timetable.currentClasses).toEqual(first);
+    expect(both.timetable.nextClasses?.[0]?.courseId).toBe('other');
+    jest.setSystemTime(new Date('2026-11-05T09:45:00+08:00'));
+    expect((await current())?.map((row) => row.courseId)).toEqual(['imported-db', 'other']);
+    expect(await current(first)).toEqual(first);
+    jest.setSystemTime(new Date('2026-11-05T10:00:00+08:00'));
+    expect((await current())?.map((row) => row.courseId)).toEqual(['other']);
+    expect(await current(first)).toEqual([]);
+    jest.setSystemTime(new Date('2026-11-05T10:30:00+08:00'));
+    expect(await current()).toEqual([]);
+  });
+
+  test('cancellation and an overnight makeup change the actual date, time and room used for current class', async () => {
+    saveImports(original);
+    const cache = jest.mocked(loadOfflinePersonalTimetable);
+    cache.mockResolvedValue({ ...manual, classExceptions: [adjust({})] });
+    jest.setSystemTime(new Date('2026-11-05T08:30:00+08:00'));
+    expect(await current()).toEqual([]);
+    cache.mockResolvedValue({ ...manual, classExceptions: [adjust({
+      kind: 'move', date: '2026-11-06', startTime: '23:30', endDate: '2026-11-07', endTime: '01:15', location: '301',
+    })] });
+    jest.setSystemTime(new Date('2026-11-07T00:10:00+08:00'));
+    expect(await current()).toEqual([
+      expect.objectContaining({ courseId: 'imported-db', date: '2026-11-06', startTime: '23:30', endTime: '01:15', room: '301' }),
+    ]);
+    jest.setSystemTime(new Date('2026-11-07T01:15:00+08:00'));
+    expect(await current()).toEqual([]);
+  });
+
+  test('a short upcoming window includes a class on the next Taiwan date, up to the exact cutoff', () => {
+    const afterMidnight = { ...original, dayOfWeek: 5, startTime: '00:10', endTime: '01:00' };
+    const beforeMidnight = new Date('2026-11-05T23:50:00+08:00');
+    expect(nextSavedClasses([afterMidnight], 'pu', beforeMidnight, undefined, 20 * 60_000)).toEqual([
+      expect.objectContaining({ date: '2026-11-06', startTime: '00:10' }),
+    ]);
+    expect(nextSavedClasses([afterMidnight], 'pu', beforeMidnight, undefined, 20 * 60_000 - 1)).toEqual([]);
+  });
+
+  test('an overnight course crossing a term boundary is attributed to the term when it actually started', async () => {
+    saveImports(original, { ...original, id: 'spring', semester: '2' });
+    const moved = {
+      kind: 'move' as const, date: '2027-01-31', startTime: '23:30', endDate: '2027-02-01', endTime: '00:45',
+    };
+    jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue({
+      ...manual, classExceptions: [adjust(moved)],
+    });
+    jest.setSystemTime(new Date('2027-02-01T00:20:00+08:00'));
+    expect(await current()).toEqual([expect.objectContaining({ courseId: 'imported-db', term: '115|1', date: '2027-01-31' })]);
+    jest.setSystemTime(new Date('2027-02-01T00:45:00+08:00'));
+    expect(await current()).toEqual([]);
+  });
+
+  test('current class does not turn unreadable records, missing clocks or an older term into free time', async () => {
+    expect(await current()).toBeUndefined();
+    saveImports({ ...original, academicYear: '114' });
+    expect(await current()).toBeUndefined();
+    saveImports({ ...original, startPeriod: 99 });
+    expect(await current()).toBeUndefined();
+    jest.mocked(loadPersonalImports).mockRejectedValue(new Error('unreadable'));
+    expect(await current()).toBeUndefined();
   });
 
   test('re-reads local cancellations, replacement dates and room changes on every lookup', async () => {

@@ -28,7 +28,6 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
-  getDocsFromServer,
   increment,
   limit,
   orderBy,
@@ -42,7 +41,6 @@ import {
   type Firestore,
   type Timestamp,
 } from 'firebase/firestore';
-import { readStoryQuery } from '@campus/shared/src/signedInSocialReads';
 import { storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '@/lib/firebase';
 
@@ -533,17 +531,40 @@ export async function listActiveStoriesForSchool(
   lim = 80,
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const bySchool = where('schoolId', '==', schoolId);
-  const snap = await readStoryQuery((ordered) => getDocsFromServer(query(
-    storiesCol(db),
-    bySchool,
-    ...(ordered ? [orderBy('createdAt', 'desc')] : []),
-    limit(lim),
-  )));
-  const now = Date.now();
-  return snap.docs
-    .map((d) => ({ ...(d.data() as Omit<CampusStoryDoc, 'id'>), id: d.id }))
-    .filter((s) => typeof s.expiresAt === 'number' && Number.isFinite(s.expiresAt) && s.expiresAt > now);
+  // Keep near-expiry stories visible while allowing a small request-latency buffer.
+  let expiresAfter = Date.now() + 3_000;
+  let permissionRetried = false;
+  const readStories = async (sorted: boolean) => {
+    const read = () => getDocs(query(
+      storiesCol(db),
+      where('schoolId', '==', schoolId),
+      where('expiresAt', '>', expiresAfter),
+      ...(sorted ? [orderBy('expiresAt', 'desc')] : []),
+      limit(lim),
+    ));
+    try {
+      return await read();
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied' || permissionRetried) {
+        throw error;
+      }
+      permissionRetried = true;
+      expiresAfter = Date.now() + 15_000;
+      return read();
+    }
+  };
+  const toActiveStories = (docs: Array<{ id: string; data: () => unknown }>) =>
+    docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
+  try {
+    const snap = await readStories(true);
+    return toActiveStories(snap.docs);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'permission-denied') throw error;
+    const snap = await readStories(false);
+    return toActiveStories(snap.docs);
+  }
 }
 
 export async function markStoryViewed(

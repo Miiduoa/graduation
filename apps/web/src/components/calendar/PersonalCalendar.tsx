@@ -247,7 +247,12 @@ export function PersonalCalendar() {
       ) : null}
       {visible && (
         <div hidden={paused}>
-          <PersonalCalendarWorkspace key={visible.scopeKey} context={visible} paused={paused} />
+          <PersonalCalendarWorkspace
+            key={visible.scopeKey}
+            context={visible}
+            paused={paused}
+            requestedEventId={params?.get('eventId') ?? null}
+          />
         </div>
       )}
     </>
@@ -257,9 +262,11 @@ export function PersonalCalendar() {
 function PersonalCalendarWorkspace({
   context,
   paused,
+  requestedEventId,
 }: {
   context: ReturnType<typeof usePersonalImportScope>;
   paused: boolean;
+  requestedEventId: string | null;
 }) {
   const { user, loading: authLoading } = useAuth();
   const nuni = useOptionalNuniSession();
@@ -354,6 +361,47 @@ function PersonalCalendarWorkspace({
   const suspended = useRef(paused);
   const writing = useRef(false);
   const requestId = useRef(0);
+  const locatedRequest = useRef<string | null>(null);
+  const focusedRequest = useRef<string | null>(null);
+  const linkedEventElement = useRef<HTMLLIElement | null>(null);
+  // The URL selects an existing row in this owner's ledger. It never supplies event contents.
+  const linkedEvent =
+    !paused && ledger.ready && requestedEventId && requestedEventId.length <= 200
+      ? ledger.records.find(
+          (row) =>
+            row.id === requestedEventId && row.kind === 'events' && row.schoolId === scope.schoolId,
+        )
+      : undefined;
+  const linkedEventDate = linkedEvent?.date;
+
+  useEffect(() => {
+    locatedRequest.current = null;
+    focusedRequest.current = null;
+  }, [requestedEventId]);
+
+  useEffect(() => {
+    if (paused || !ledger.ready || !requestedEventId || !linkedEventDate) return;
+    if (locatedRequest.current === requestedEventId) return;
+    locatedRequest.current = requestedEventId;
+    setMonth(linkedEventDate.slice(0, 7));
+    setSelectedDate(linkedEventDate);
+    setCalendarView('list');
+  }, [paused, ledger.ready, requestedEventId, linkedEventDate]);
+
+  useEffect(() => {
+    if (
+      paused ||
+      !requestedEventId ||
+      focusedRequest.current === requestedEventId ||
+      calendarView !== 'list' ||
+      selectedDate !== linkedEventDate ||
+      !linkedEventElement.current
+    )
+      return;
+    focusedRequest.current = requestedEventId;
+    linkedEventElement.current.focus({ preventScroll: true });
+    linkedEventElement.current.scrollIntoView?.({ block: 'nearest' });
+  }, [paused, requestedEventId, linkedEventDate, calendarView, selectedDate]);
 
   useLayoutEffect(() => {
     active.current = true;
@@ -569,7 +617,9 @@ function PersonalCalendarWorkspace({
         </div>
         <p className={styles.note}>
           這裡是 {context.schoolName} 的個人行程，並與手機版一樣顯示已加入課程的作業截止。個人行程不是學校正式紀錄。
-          {personalEventPersistenceCopy(ledger.syncEnabled)}
+          {ledger.ready && (ledger.syncEnabled
+            ? personalEventPersistenceCopy(true)
+            : '裝置同步尚未開啟。在此頁新增、編輯或刪除的行程會先保留於這台裝置；先前已存入帳號的資料仍以帳號紀錄為準。')}
         </p>
         <details className={styles.source}>
           <summary>關於匯入與匯出</summary>
@@ -578,6 +628,13 @@ function PersonalCalendarWorkspace({
           </p>
         </details>
         {exportNotice && <p role="status">{exportNotice}</p>}
+        {!paused && ledger.ready && requestedEventId && (
+          <p role="status">
+            {linkedEvent
+              ? `已定位到「${linkedEvent.title}」。`
+              : '在目前帳號與校園的個人行事曆找不到這筆行程；它可能尚未同步或已移除。'}
+          </p>
+        )}
         <label className={styles.field}>
           查看月份
           <input
@@ -744,7 +801,12 @@ function PersonalCalendarWorkspace({
         ) : calendarView === 'list' || selectedDate ? (
           <ul className={styles.saved}>
             {events.map((event) => (
-              <li key={event.id}>
+              <li
+                key={event.id}
+                ref={event.id === requestedEventId ? linkedEventElement : undefined}
+                tabIndex={event.id === requestedEventId ? -1 : undefined}
+                aria-current={event.id === requestedEventId ? 'true' : undefined}
+              >
                 <div>
                   <time dateTime={event.date}>
                     {event.date}

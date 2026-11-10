@@ -1,5 +1,7 @@
 import { cartArgs, foodHref, foodOrderIntent, pickupAt, priceCart } from './food';
 import { operationSignal, withOperationSignal } from './operation';
+import { ASSISTANT_SERVICES, assistantServiceHref, getAssistantService } from '@campus/shared/src/assistantServices';
+import { summarizeImportedAcademics } from '@campus/shared/src/importedAcademicSummary';
 import {
   getOfficialCampusMapUrl,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
@@ -9,6 +11,7 @@ import { beginProposal, eventInterval, pageArgs, pageHref, signCard } from './ac
 import {
   addDays,
   bounded,
+  bytes,
   canonical,
   clock,
   date,
@@ -25,10 +28,35 @@ import {
   type Obj,
   type Task,
 } from './contracts';
+import {
+  TRANSIT_CITIES,
+  type TransitArrival,
+  type TransitCity,
+  type TransitFailure,
+  type TransitResult,
+  type TransitStop,
+} from '../../transit';
 const s = { type: 'string', maxLength: 100 };
 const d = { type: 'string', format: 'date' };
 const t = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' };
 const definitions: Record<string, [Obj, string[]]> = {
+  list_campus_services: [
+    {
+      serviceId: { enum: ASSISTANT_SERVICES.map((service) => service.id) },
+      offset: { type: 'integer', minimum: 0, maximum: 100 },
+      limit: { type: 'integer', minimum: 1, maximum: 6 },
+    },
+    [],
+  ],
+  get_imported_academics: [
+    {
+      academicYear: { type: 'string', maxLength: 4 },
+      semester: { enum: ['1', '2', '3'] },
+      offset: { type: 'integer', minimum: 0, maximum: 2000 },
+      limit: { type: 'integer', minimum: 1, maximum: 10 },
+    },
+    [],
+  ],
   get_food_locations: [{ tenantId: s }, []],
   get_food_menu: [{ tenantId: s, locationId: s }, []],
   propose_food_order: [
@@ -134,29 +162,133 @@ const definitions: Record<string, [Obj, string[]]> = {
   propose_open_page: [
     {
       page: {
-        enum: [
-          'today',
-          'timetable',
-          'calendar',
-          'classroom',
-          'orders',
-          'clubs',
-          'map',
-          'bus',
-          'cafeteria',
-          'announcements',
-          'events',
-        ],
+        enum: ASSISTANT_SERVICES.map((service) => service.id),
       },
       entityId: s,
     },
     ['page'],
   ],
 };
+export const TRANSIT_COMPACT_MAX_BYTES = 2500;
+export type CompactTransitStop = Pick<TransitStop, 'id' | 'city' | 'name'>;
+export type CompactTransitArrival = Pick<
+  TransitArrival,
+  'route' | 'seconds' | 'stopName' | 'status' | 'scheduledAt' | 'destination'
+> & { minutes?: number };
+export type CompactTransitResult = {
+  href: '/bus';
+  status?: TransitResult['status'];
+  kind?: Exclude<TransitResult, { status: 'unavailable' }>['kind'];
+  reason?: TransitFailure;
+  limited?: boolean;
+  note?: string;
+  stops?: CompactTransitStop[];
+  arrivals?: CompactTransitArrival[];
+};
+function compactTransitText(value: unknown, max = 24): string | undefined {
+  if (typeof value !== 'string' || !value) return;
+  return value.length > max ? value.slice(0, max) : value;
+}
+function isTransitCity(value: unknown): value is TransitCity {
+  return typeof value === 'string' && Object.hasOwn(TRANSIT_CITIES, value);
+}
+function compactStop(stop: Pick<TransitStop, 'id' | 'city' | 'name'>): CompactTransitStop | undefined {
+  if (!stop.id || stop.id.length > 100) return;
+  const name = compactTransitText(stop.name, 40);
+  if (!name) return;
+  return { id: stop.id, city: stop.city, name };
+}
+function compactArrival(
+  arrival: Pick<TransitArrival, 'route' | 'seconds' | 'stopName' | 'status' | 'scheduledAt' | 'destination'>,
+): CompactTransitArrival | undefined {
+  const route = compactTransitText(arrival.route, 24);
+  if (!route) return;
+  if (arrival.seconds !== null && (typeof arrival.seconds !== 'number' || !Number.isFinite(arrival.seconds))) return;
+  if (arrival.status !== null && (typeof arrival.status !== 'number' || !Number.isInteger(arrival.status))) return;
+  const destination = compactTransitText(arrival.destination, 40) ?? '';
+  const out: CompactTransitArrival = {
+    route,
+    seconds: arrival.seconds,
+    destination,
+    status: arrival.status,
+  };
+  if (arrival.seconds != null && arrival.seconds >= 0) out.minutes = Math.ceil(arrival.seconds / 60);
+  const stopName = compactTransitText(arrival.stopName, 40);
+  if (stopName) out.stopName = stopName;
+  if (arrival.scheduledAt === null) out.scheduledAt = null;
+  else if (typeof arrival.scheduledAt === 'string' && arrival.scheduledAt) out.scheduledAt = arrival.scheduledAt;
+  return out;
+}
+function readCompactStop(item: unknown): CompactTransitStop | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+  const row = item as Partial<TransitStop>;
+  if (typeof row.id !== 'string' || !isTransitCity(row.city) || typeof row.name !== 'string') return;
+  return compactStop({ id: row.id, city: row.city, name: row.name });
+}
+function readCompactArrival(item: unknown): CompactTransitArrival | undefined {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+  const row = item as Partial<TransitArrival>;
+  if (typeof row.route !== 'string' || typeof row.destination !== 'string') return;
+  if (row.seconds !== null && typeof row.seconds !== 'number') return;
+  if (row.status !== null && typeof row.status !== 'number') return;
+  if (row.seconds === undefined || row.status === undefined) return;
+  return compactArrival({
+    route: row.route,
+    seconds: row.seconds,
+    destination: row.destination,
+    status: row.status,
+    stopName: row.stopName,
+    scheduledAt: row.scheduledAt,
+  });
+}
+function trimTransitPayload(result: CompactTransitResult): CompactTransitResult {
+  const next: CompactTransitResult = { ...result, stops: result.stops?.slice(), arrivals: result.arrivals?.slice() };
+  const shrink = (key: 'arrivals' | 'stops') => {
+    const list = next[key];
+    if (!list) return;
+    while (list.length && bytes(next) > TRANSIT_COMPACT_MAX_BYTES) {
+      list.pop();
+      next.limited = true;
+    }
+    if (!list.length) delete next[key];
+  };
+  shrink('arrivals');
+  shrink('stops');
+  return next;
+}
+export function compactTransitResult(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const row = raw as Obj;
+  const stops = Array.isArray(row.stops) ? row.stops.flatMap((item) => {
+    const stop = readCompactStop(item);
+    return stop ? [stop] : [];
+  }) : undefined;
+  const arrivals = Array.isArray(row.arrivals) ? row.arrivals.flatMap((item) => {
+    const arrival = readCompactArrival(item);
+    return arrival ? [arrival] : [];
+  }) : undefined;
+  const out: CompactTransitResult = { href: '/bus' };
+  if (row.status === 'ready' || row.status === 'unavailable') out.status = row.status;
+  if (row.kind === 'stops' || row.kind === 'arrivals' || row.kind === 'direct') out.kind = row.kind;
+  if (
+    row.reason === 'not-configured' ||
+    row.reason === 'invalid-query' ||
+    row.reason === 'rate-limited' ||
+    row.reason === 'upstream' ||
+    row.reason === 'network'
+  )
+    out.reason = row.reason;
+  if (typeof row.limited === 'boolean') out.limited = row.limited;
+  const note = compactTransitText(row.note, 40);
+  if (note) out.note = note;
+  if (stops) out.stops = stops;
+  if (arrivals) out.arrivals = arrivals;
+  return trimTransitPayload(out);
+}
 export function studyTitle(title: string): string {
   const clean = title
     .replace(/作[」』”"']\s*作業/g, '作業')
-    .replace(/[「」『』“”\"']/g, '')
+    .replace(/[「」『』“”"']/g, '')
     .replace(/^(?:寫作業[：:]?\s*|寫\s*)+/, '')
     .trim();
   return ('寫作業：' + clean.replace(/作業(?:作業)+/g, '作業')).slice(0, 120);
@@ -223,7 +355,7 @@ export function parseSpokenClock(text: string): string | undefined {
   const digital = text.match(/(\d{1,2})[:：](\d{2})/);
   if (digital) return parseClock(digital[1] + ':' + digital[2]);
   const spoken = text.match(
-    /(凌晨|早上|上午|中午|下午|傍晚|晚上|今晚|今夜|明晚)?\s*([零一二三四五六七八九十兩\d]{1,3})\s*點(半)?/,
+    /(凌晨|早上|上午|今早|明早|中午|下午|傍晚|晚上|今晚|今夜|明晚)?\s*([零一二三四五六七八九十兩\d]{1,3})\s*點(半)?/,
   );
   if (!spoken) return;
   const hour = chineseHour(spoken[2]);
@@ -235,7 +367,7 @@ export function parseSpokenClock(text: string): string | undefined {
       ? '晚上'
       : /下午|傍晚/.test(text)
         ? '下午'
-        : /上午|早上|凌晨/.test(text)
+        : /上午|早上|凌晨|今早|明早/.test(text)
           ? '上午'
           : '');
   if (
@@ -273,7 +405,7 @@ function clockRanges(text: string): { from: string; to: string }[] {
   return ranges;
 }
 const PERIODS: [RegExp, string, string][] = [
-  [/上午/, '08:00', '12:00'],
+  [/上午|早上|早晨|今早|明早/, '08:00', '12:00'],
   [/中午/, '11:00', '13:00'],
   [/晚上|今晚|今夜/, '18:00', '22:00'],
   [/下午/, '13:00', '18:00'],
@@ -296,9 +428,62 @@ export function studyWindow(question: string, answer = ''): { from: string; to: 
   return { from: '08:00', to: '22:00' };
 }
 export const toolNames = Object.keys(definitions);
+// One executable reader/proposal per explicitly requested domain takes precedence
+// over optional context and secondary tools when the eight-tool budget is full.
+function requestedToolDomains(question: string, simulation: boolean): [string, string][] {
+  const domains: [string, string][] = [];
+  const add = (requested: boolean, label: string, tool: string) => {
+    if (requested) domains.push([label, tool]);
+  };
+  add(/作業|測驗|要交/.test(question), '作業／測驗', 'get_due_work');
+  add(studyPlanSelect(question), '學習規劃', 'propose_study_plan');
+  add(/教材/.test(question), '教材', 'get_materials');
+  add(/社團/.test(question), '社團', 'list_clubs');
+  add(/公車|交通|到站/.test(question), '公車／交通', 'get_transit');
+  // Match campusInfoPrelude's exclusions: a mention in an example, negation or
+  // historical statement does not request a campus lookup.
+  const campusQuestion = question.normalize('NFKC').trim();
+  const campusLookup = question.length <= 1000 &&
+    !/[\p{Cc}\p{Zl}\p{Zp}]/u.test(question) &&
+    !/[「」『』“”"'`]|不要|不用|不必|無須|不需要|不想|不是要|先別|別幫|翻譯|這句話|假設|如果|昨天|前天|剛才|之前|曾經|以前/.test(campusQuestion);
+  add(campusLookup && /圖書館|怎麼走|地圖|公告|活動/.test(campusQuestion), '校園資訊', 'get_campus_info');
+  add(foodOrderIntent(question) || /點餐|菜單|便當/.test(question), '點餐',
+    /再點|跟上次一樣/.test(question) ? 'reorder_last_food_order' : 'get_food_menu');
+  add(/吃|中午|餐廳/.test(question) && !foodOrderIntent(question), '餐廳', 'get_dining');
+  add(/課|有空|下午|行程/.test(question) && !studyPlanSelect(question), '課表／行程', 'get_schedule');
+  add(!studyPlanSelect(question) &&
+    (/行程|事件|今晚|今夜|明晚/.test(question) || personalSlotSelect(question)),
+    '個人事件', 'propose_personal_event');
+  add(/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question),
+    '匯入學業紀錄', 'get_imported_academics');
+  add(/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question),
+    '服務入口', 'list_campus_services');
+  add(simulation && /通知/.test(question), '通知', 'get_notifications');
+  return domains;
+}
+// Call only after execution, with successful (including cached) tool steps.
+// Selection alone does not establish coverage; preludes can cover unselected tools.
+export function toolSelectionNotice(question: string, simulation: boolean, completedNames: string[]): string {
+  const completed = new Set(completedNames);
+  // A successful day overview also reads due work and the schedule.
+  if (completed.has('get_day_overview')) {
+    completed.add('get_due_work');
+    completed.add('get_schedule');
+  }
+  if (completed.has('get_course_work')) completed.add('get_due_work');
+  const deferred = requestedToolDomains(question, simulation)
+    .filter(([, tool]) => !completed.has(tool)).map(([label]) => label);
+  return deferred.length
+    ? '本輪尚未查詢：' + deferred.join('、') + '。請下一輪分別詢問這些領域。'
+    : '';
+}
 export function selectTools(question: string, simulation: boolean): string[] {
   const out = new Set<string>(['get_today_context', 'propose_open_page']);
   const add = (...names: string[]) => names.forEach((n) => out.add(n));
+  // School grades stay on campus readers; imported records need an explicit local source.
+  if (/成績|學分/.test(question) && /匯入|儲存|保存|本機紀錄/.test(question)) add('get_imported_academics');
+  if (/功能|服務|能做|可以做|開啟|打開|帶我到|宿舍|請假|社群|私訊|帳號|設定|學分/.test(question))
+    add('list_campus_services');
   if (
     /作業|測驗|要交|規劃|剛剛|剛才/.test(question) ||
     studyPlanSelect(question) ||
@@ -352,9 +537,12 @@ export function selectTools(question: string, simulation: boolean): string[] {
   if (/再點|跟上次一樣/.test(question))
     return ['reorder_last_food_order', 'propose_food_order', 'get_food_menu', 'list_food_orders'];
   const names = [...out];
-  if (names.length > 8) names.splice(names.indexOf('propose_open_page'), 1);
-  if (names.length > 8 && names.includes('find_free_time'))
-    names.splice(names.indexOf('get_calendar'), 1);
+  const remove = (name: string) => {
+    const index = names.indexOf(name);
+    if (index >= 0) names.splice(index, 1);
+  };
+  if (names.length > 8) remove('propose_open_page');
+  if (names.length > 8 && names.includes('find_free_time')) remove('get_calendar');
   if (studyPlanSelect(question))
     return [
       'get_day_overview',
@@ -364,7 +552,10 @@ export function selectTools(question: string, simulation: boolean): string[] {
       'propose_study_plan',
       ...(/吃|餐廳|中午/.test(question) ? ['get_dining'] : []),
     ];
-  return names.slice(0, 8);
+  if (names.length <= 8) return names;
+  const primary = requestedToolDomains(question, simulation)
+    .map(([, tool]) => tool).filter((tool) => names.includes(tool));
+  return [...new Set([...primary, ...names])].slice(0, 8);
 }
 export const schemas = (names: string[]) =>
   names.map((name) => ({
@@ -420,6 +611,8 @@ export function validateTool(name: string, raw: unknown): Obj {
   }
   if (name === 'propose_personal_event') return { ...eventArgs(a) };
   if (name === 'propose_open_page') return pageArgs(a);
+  if (name === 'get_imported_academics' && a.academicYear !== undefined &&
+      !/^\d{2,4}$/.test(String(a.academicYear))) return fail();
   if (
     name === 'get_transit' &&
     (a.action === 'arrivals' ? !a.city || !a.stopId : a.city || a.stopId)
@@ -482,7 +675,7 @@ export function calendar(ledger: Ledger, from: string, to: string) {
       allDay: r.allDay ?? !r.startTime,
     }));
 }
-export function freeTime(ledger: Ledger, args: Obj) {
+export function freeTime(ledger: Ledger, args: Obj, notBefore = -Infinity) {
   const day = date(args.date),
     from = String(args.from || '08:00'),
     to = String(args.to || '22:00'),
@@ -499,7 +692,7 @@ export function freeTime(ledger: Ledger, args: Obj) {
     }
   }
   if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
-  let cursor = start;
+  let cursor = Math.max(start, Math.ceil(notBefore / 60000) * 60000);
   const slots: { date: string; startTime: string; endTime: string; minutes: number }[] = [];
   const append = (a: number, b: number) => {
     if (b - a >= duration * 60000)
@@ -644,6 +837,8 @@ export function createTools(
     const l = await getLedger(),
       e = eventArgs(raw),
       [start, end] = eventInterval(e);
+    if (scheduleIntent(question) && (e.allDay ? end <= now : start < now))
+      return fail('EVENT_START_PASSED', 409);
     const classes = schedule(l, e.date, e.endDate || e.date);
     if (classes.unplaced) return fail('SCHEDULE_INCOMPLETE', 409);
     if (
@@ -676,6 +871,39 @@ export function createTools(
   async function dispatch(name: string, raw: unknown): Promise<unknown> {
     const a = validateTool(name, raw);
     switch (name) {
+      case 'list_campus_services': {
+        const selected = a.serviceId ? getAssistantService(a.serviceId) : null;
+        const services = a.serviceId ? (selected ? [selected] : []) : ASSISTANT_SERVICES;
+        const offset = Number(a.offset || 0), limit = Number(a.limit || 6);
+        return {
+          source: 'service-directory',
+          schoolId: binding.schoolId,
+          services: services.slice(offset, offset + limit).map((service) => ({
+            id: service.id,
+            label: service.label,
+            summary: service.summary,
+            access: service.access,
+            href: assistantServiceHref(service.id, binding.schoolId, 'platform'),
+          })),
+          total: services.length,
+          nextOffset: offset + limit < services.length ? offset + limit : null,
+          note: '這是服務入口與接通範圍，不代表已查詢私人資料或已執行操作；登入與角色權限由目的服務確認。',
+        };
+      }
+      case 'get_imported_academics': {
+        const ledger = await getLedger();
+        return summarizeImportedAcademics({
+          records: ledger.records,
+          schoolId: binding.schoolId,
+          availability: 'available',
+          fetchedAt: new Date(now).toISOString(),
+          updatedAt: ledger.updatedAt,
+          ...(a.academicYear !== undefined && { academicYear: String(a.academicYear) }),
+          ...(a.semester !== undefined && { semester: String(a.semester) }),
+          offset: Number(a.offset || 0),
+          limit: Number(a.limit || 5),
+        });
+      }
       case 'get_food_locations': {
         if (!a.tenantId) {
           const visible = (await getRealms()).filter((r) => r.schoolId === binding.schoolId);
@@ -817,7 +1045,7 @@ export function createTools(
         const classes = schedule(l, day, day);
         let free: unknown;
         try {
-          free = freeTime(l, { date: day });
+          free = freeTime(l, { date: day }, day === taipeiDate(now) ? now : undefined);
         } catch {
           free = { incomplete: true, note: '課表或事件不完整，無法判定空檔' };
         }
@@ -913,10 +1141,12 @@ export function createTools(
       case 'get_notifications':
         return adapter.notifications(Number(a.limit || 5));
       case 'get_transit':
-        return adapter.transit({
-          ...a,
-          ...(a.action === 'campus' ? { schoolId: binding.schoolId } : {}),
-        });
+        return compactTransitResult(
+          await adapter.transit({
+            ...a,
+            ...(a.action === 'campus' ? { schoolId: binding.schoolId } : {}),
+          }),
+        );
       case 'get_campus_info':
         return {
           officialSource:
@@ -926,24 +1156,28 @@ export function createTools(
                 ? getOfficialCampusMapUrl(binding.schoolId)
                 : null,
           source: '站內入口，未讀完整內容',
-          href: pageHref({ page: a.kind === 'library' ? 'map' : a.kind }, binding.schoolId),
+          href: pageHref({ page: a.kind }, binding.schoolId),
           note:
-            a.kind === 'library' ? '請在校園地圖查圖書館；未提供步行時間' : '請以頁面最新資料為準',
+            a.kind === 'library' ? '可前往圖書館查詢館藏與服務；此步驟未查借閱紀錄或預約座位' : '請以頁面最新資料為準',
         };
       case 'find_free_time':
-        return freeTime(await getLedger(), a);
+        return freeTime(await getLedger(), a, a.date === taipeiDate(now) ? now : undefined);
       case 'propose_personal_event':
         return propose(a);
       case 'propose_open_page': {
         if (a.entityId) {
           const entity = String(a.entityId);
+          const observedOrders = a.page === 'orders'
+            ? [...orders].filter((key) => key.endsWith(':' + entity))
+            : [];
           const allowed =
             a.page === 'classroom'
               ? (await getCourses()).some((c) => c.id === entity)
               : a.page === 'orders'
-                ? [...orders].some((key) => key.endsWith(':' + entity))
+                ? observedOrders.length === 1
                 : a.page === 'cafeteria' && diningIds.has(entity);
           if (!allowed) return fail('FORBIDDEN_SCOPE', 403);
+          if (a.page === 'orders') a.tenantId = id(observedOrders[0].slice(0, -entity.length - 1));
         }
         const card = signCard(binding, name, a, 0, secret, now, sequence());
         cards.push(card);
@@ -962,7 +1196,7 @@ export function createTools(
           return { planned: [], unplanned: 0, note: '目前期間沒有未交作業可安排' };
         if (String(a.from || '08:00') >= String(a.to || '22:00'))
           return { planned: [], unplanned: selected.length, note: '指定時段沒有可安排空檔' };
-        const slots = freeTime(await getLedger(), a).slots.map((s) => ({ ...s }));
+        const slots = freeTime(await getLedger(), a, now).slots;
         const minutes = Number(a.minMinutes || 60),
           planned: unknown[] = [];
         for (const task of selected) {
@@ -1143,8 +1377,10 @@ export function createTools(
         const from = parseClock(cleaned.from) || ranged?.from || window.from;
         const to = parseClock(cleaned.to) || ranged?.to || window.to;
         if (from && to) {
-          cleaned.from = from;
-          cleaned.to = to;
+          const requestedWindow = name === 'propose_study_plan' &&
+            (parseSpokenClock(question) || PERIODS.some(([pattern]) => pattern.test(question)));
+          cleaned.from = requestedWindow && from < window.from ? window.from : from;
+          cleaned.to = requestedWindow && to > window.to ? window.to : to;
         }
         if (cleaned.minMinutes !== undefined) {
           const minutes = Number(cleaned.minMinutes);

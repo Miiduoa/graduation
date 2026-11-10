@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   deleteDoc,
   getDocsFromServer,
@@ -12,6 +12,7 @@ import { readMemberGroup } from './groupService';
 import {
   canEditPost,
   createGroupDiscussionPost,
+  createPublicationIntentId,
   deleteGroupDiscussionPost,
   loadGroupDiscussionPage,
   updateGroupDiscussionPost,
@@ -130,6 +131,39 @@ beforeEach(() => {
   } as never);
   vi.mocked(updateDoc).mockResolvedValue(undefined as never);
   vi.mocked(deleteDoc).mockResolvedValue(undefined as never);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+it('prefers randomUUID for publication intent IDs', () => {
+  const randomUUID = vi.fn(() => '12345678-1234-4234-8234-123456789abc');
+  const getRandomValues = vi.fn();
+  vi.stubGlobal('crypto', { randomUUID, getRandomValues });
+
+  expect(createPublicationIntentId()).toBe('12345678-1234-4234-8234-123456789abc');
+  expect(randomUUID).toHaveBeenCalledOnce();
+  expect(getRandomValues).not.toHaveBeenCalled();
+});
+
+it('uses all 16 cryptographically random bytes as padded hex without randomUUID', () => {
+  const getRandomValues = vi.fn((bytes: Uint8Array) => {
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes).toHaveLength(16);
+    bytes.set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 16, 127, 128, 255]);
+    return bytes;
+  });
+  vi.stubGlobal('crypto', { getRandomValues });
+
+  expect(createPublicationIntentId()).toBe('p_000102030405060708090a0f107f80ff');
+  expect(getRandomValues).toHaveBeenCalledOnce();
+});
+
+it.each([undefined, {}])('rejects publication intent creation without secure randomness (%s)', (crypto) => {
+  vi.stubGlobal('crypto', crypto);
+
+  expect(() => createPublicationIntentId()).toThrow('Cryptographic randomness is unavailable');
 });
 
 it('loads posts only after membership is confirmed for the school scope', async () => {

@@ -1,5 +1,44 @@
 import { maskMessages } from './privacy';
-import { bounded, bytes, object, V2Error, type Model, type ModelResult, type ToolCall } from './contracts';
+import {
+  bounded,
+  bytes,
+  object,
+  V2Error,
+  type Message,
+  type Model,
+  type ModelResult,
+  type ToolCall,
+} from './contracts';
+function jsonArguments(raw: string): string {
+  try {
+    JSON.parse(raw);
+    return raw;
+  } catch {
+    return '{}';
+  }
+}
+export function formatProviderMessages(messages: Message[]): Message[] {
+  return messages.map((message) => {
+    const content =
+      message.content == null
+        ? ''
+        : typeof message.content === 'string'
+          ? message.content
+          : JSON.stringify(message.content);
+    const out: Message = { role: message.role, content };
+    if (message.tool_call_id != null) out.tool_call_id = String(message.tool_call_id);
+    if (message.tool_calls?.length)
+      out.tool_calls = message.tool_calls.map((call) => ({
+        id: String(call.id),
+        type: 'function',
+        function: {
+          name: call.function.name,
+          arguments: jsonArguments(call.function.arguments),
+        },
+      }));
+    return out;
+  });
+}
 export const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export const DEFAULT_FALLBACK_MODEL = '@cf/openai/gpt-oss-120b';
 export const PROVIDER_USER_MESSAGES: Record<string, string> = {
@@ -120,7 +159,7 @@ export function groqModel(key: string | undefined, fetcher: typeof fetch = fetch
         headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...payload,
-          messages: maskMessages(payload.messages),
+          messages: formatProviderMessages(maskMessages(payload.messages)),
           model: 'openai/gpt-oss-120b',
           reasoning_effort: 'low',
           include_reasoning: false,
@@ -215,7 +254,7 @@ export function fallbackModel(fetcher: typeof fetch = fetch): Model | null {
         headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...payload,
-          messages: maskMessages(payload.messages),
+          messages: formatProviderMessages(maskMessages(payload.messages)),
           model: modelName,
         }),
       });

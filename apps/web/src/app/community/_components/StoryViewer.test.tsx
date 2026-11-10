@@ -3,6 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StoryViewer } from './StoryViewer';
 import type { CampusStoryDoc } from '@/lib/community/firestore';
 
+vi.mock('@/lib/privateFiles', async () => ({
+  isPrivateFileObjectPath: (await import('@campus/shared/src/privateFileMedia')).isPrivateFileObjectPath,
+  resolvePrivateMedia: async () => null,
+}));
+
 vi.mock('@/components/ui/modalSession', () => ({
   openModalSession(dialog: HTMLDialogElement) {
     dialog.setAttribute('open', '');
@@ -91,3 +96,16 @@ it.each([true, false])(
     expect(viewer.next).not.toHaveBeenCalled();
   },
 );
+
+it('advances automatic playback after the media helper returns null', async () => {
+  vi.useFakeTimers();
+  const next = vi.fn();
+  const viewer = {
+    group: { stories: [{ id: 's', kind: 'image', mediaUrl: 'schools/pu/stories/s/image' }] },
+    index: 0, next, previous: vi.fn(), close: vi.fn(), switchAuthor: vi.fn(), hasPrevious: false, hasNext: true,
+  } as unknown as Parameters<typeof StoryViewer>[0]['viewer'];
+  await act(async () => { render(<StoryViewer viewer={viewer} author="同學" />); });
+  fireEvent.click(screen.getByText('自動播放'));
+  act(() => vi.advanceTimersByTime(7000));
+  expect(next).toHaveBeenCalledTimes(1);
+});

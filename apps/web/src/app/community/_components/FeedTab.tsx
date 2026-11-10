@@ -109,6 +109,7 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
   const [posts, setPosts] = useState<CampusPostDoc[]>([]);
   const [boards, setBoards] = useState<CampusBoard[]>([]);
   const [stories, setStories] = useState<StoryAuthorGroup[]>([]);
+  const shelf = useStoryShelf(stories, schoolId, user.uid);
   const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'filter'), FEED_FILTERS);
   const [order, setOrder] = useFeedChoice(feedChoiceKey(user.uid, schoolId, 'order'), FEED_ORDERS);

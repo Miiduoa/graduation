@@ -1,3 +1,4 @@
+import { DORM_REPAIR_COPY } from '@campus/shared/src/dormitory';
 import type { DataSource } from '../data/source';
 import type {
   ActionQueueItem,
@@ -535,7 +536,7 @@ async function executeRepairRequest(
   const schoolBlock = requireSchool(schoolId);
   if (schoolBlock) return schoolBlock;
   const room = asString(params.room);
-  if (!room) return createActionDraft(ctx, '缺少房號，不能直接送出報修單。');
+  if (!room) return createActionDraft(ctx, '缺少房號，還不能存成報修備忘。');
 
   const type = mapRepairType(params.category ?? params.type);
   const repair = await dataSource.createRepairRequest({
@@ -543,13 +544,13 @@ async function executeRepairRequest(
     schoolId: schoolId!,
     type,
     title: asString(params.title) || `${type === 'ac' ? '冷氣' : '宿舍'}報修`,
-    description: asString(params.description) || asString(userMessage) || 'AI 代理建立的報修申請',
+    description: asString(params.description) || asString(userMessage) || DORM_REPAIR_COPY.defaultMemoDescription,
     room,
     priority: mapRepairPriority(params.urgency ?? params.priority),
     images: Array.isArray(params.images) ? params.images : undefined,
   });
   return executed(
-    `維修單已提交。\n工單編號：${repair.id}\n房號：${repair.room}\n狀態：${repair.status}`,
+    `${DORM_REPAIR_COPY.assistantSavedMemo}\n房號：${repair.room}`,
     repair.id,
     defaultActionsForTool(ctx.tool),
   );

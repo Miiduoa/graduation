@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { NavigationContext } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Linking,
@@ -20,11 +21,14 @@ import {
 } from '@campus/shared/src/nuniAccount';
 import { NuniError } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
-import { NuniDraftProvider, useNuniDraftState, type NuniDraftCache } from '../state/nuniDrafts';
+import {
+  NuniDraftProvider, NuniDraftScopeStore, useNuniDraftScope, useNuniDraftState, type NuniDraftScope,
+} from '../state/nuniDrafts';
 import { clearAllFoodPendingForAccount } from '../state/foodPersistence';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
 import { useThemeStyleSheet } from '../ui/useThemeStyleSheet';
+import type { PreAuthStackParamList } from './preAuthTypes';
 import { NuniCourses } from './nuni/NuniCourses';
 import { NuniMerchant } from './nuni/NuniMerchant';
 import { NuniFood } from './nuni/NuniFood';
@@ -280,18 +284,29 @@ function Account({ onLogout }: { onLogout: () => void }) {
 function SignedInWorkspace({
   onLogout,
   initialTab,
+  courseAccountChanged,
   initialWorkspaceId,
   initialAssignmentId,
   initialMaterialId,
 }: {
   onLogout: () => void;
   initialTab?: Tab;
+  courseAccountChanged: boolean;
   initialWorkspaceId?: string;
   initialAssignmentId?: string;
   initialMaterialId?: string;
 }) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
+  const navigation = React.useContext(NavigationContext);
+  const subscribeToFocus = React.useCallback((listener: () => void) => {
+    if (!navigation) return () => {};
+    const focus = navigation.addListener('focus', listener);
+    const blur = navigation.addListener('blur', listener);
+    return () => { focus(); blur(); };
+  }, [navigation]);
+  const isFocused = React.useCallback(() => navigation?.isFocused() ?? true, [navigation]);
+  const focused = React.useSyncExternalStore(subscribeToFocus, isFocused, isFocused);
   useEffect(() => {
     if (initialTab && ['courses', 'food', 'merchant', 'account'].includes(initialTab))
       setTab(initialTab);
@@ -325,12 +340,22 @@ function SignedInWorkspace({
         accessibilityElementsHidden={tab !== 'courses'}
         importantForAccessibility={tab === 'courses' ? 'auto' : 'no-hide-descendants'}
       >
-        <NuniCourses
-          active={tab === 'courses'}
-          initialWorkspaceId={initialWorkspaceId}
-          initialAssignmentId={initialAssignmentId}
-          initialMaterialId={initialMaterialId}
-        />
+        {courseAccountChanged && (
+          <Text accessibilityRole="alert" style={s.scopeNotice}>
+            已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。
+          </Text>
+        )}
+        {/* A second Workspace can be pushed above this route by the assistant.
+            Rebuild course editors from the shared draft and fresh server data
+            on return, so a hidden old editor cannot overwrite newer input. */}
+        {focused ? (
+          <NuniCourses
+            active={tab === 'courses'}
+            initialWorkspaceId={initialWorkspaceId}
+            initialAssignmentId={initialAssignmentId}
+            initialMaterialId={initialMaterialId}
+          />
+        ) : null}
       </View>
       <View
         style={[s.page, tab !== 'merchant' && s.hidden]}
@@ -354,11 +379,15 @@ export function NuniWorkspaceScreen({
   route,
 }: {
   route?: {
-    params?: { tab?: Tab; workspaceId?: string; assignmentId?: string; materialId?: string };
+    params?: PreAuthStackParamList['NuniWorkspace'];
   };
 } = {}) {
   const auth = useNuniSession();
   const s = useThemeStyleSheet(createStyles);
+  const params = route?.params;
+  const courseAccountChanged = params?.assistantAccountId !== undefined &&
+    params.assistantAccountId !== auth.session?.platformAccountId;
+  const target = courseAccountChanged ? undefined : params;
   const identity = useRef({ key: '', epoch: 0 });
   const identityKey = auth.session
     ? JSON.stringify([auth.session.platformAccountId, auth.session.context])
@@ -376,7 +405,11 @@ export function NuniWorkspaceScreen({
   const active = useRef<{ epoch: number; id: number } | null>(null);
   const nextOperation = useRef(0);
   const mounted = useRef(true);
-  const drafts = useRef<{ accountId: string; cache: NuniDraftCache } | null>(null);
+  const sessionDrafts = useNuniDraftScope();
+  const localDrafts = useRef<NuniDraftScopeStore | null>(null);
+  if (!localDrafts.current) localDrafts.current = new NuniDraftScopeStore();
+  const draftStore = sessionDrafts ?? localDrafts.current;
+  const drafts = useRef<NuniDraftScope | null>(null);
   const cleanupError = (ownerEpoch: number) => {
     if (!mounted.current || identity.current.epoch !== ownerEpoch) return;
     setActionState((previous) => ({
@@ -385,10 +418,10 @@ export function NuniWorkspaceScreen({
       error: '已停止使用這個帳號，但未能清除裝置上的訂餐重試紀錄。',
     }));
   };
-  // Revalidation keeps only user input in memory. The actual workspace still unmounts,
-  // so all server data and permissions must be loaded again with the new request context.
-  // Confirmed logout clears food SecureStore keys once when the in-memory draft scope drops.
+  // An unexpired same-account foreground refresh keeps the verified session mounted.
+  // Confirmed logout, expiry or a changed account still drop the in-memory draft scope.
   if (auth.pendingLogout || (!auth.session && !auth.loading && !auth.error)) {
+    draftStore.clear();
     if (drafts.current) {
       const accountId = drafts.current.accountId;
       drafts.current = null;
@@ -398,13 +431,13 @@ export function NuniWorkspaceScreen({
     }
   }
   if (auth.session && !auth.loading && !auth.pendingLogout && !auth.error && !action) {
-    if (drafts.current?.accountId !== auth.session.platformAccountId)
-      drafts.current = { accountId: auth.session.platformAccountId, cache: new Map() };
+    drafts.current = draftStore.forAccount(auth.session.platformAccountId);
   }
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      localDrafts.current?.clear();
     };
   }, []);
   const run = async (label: string, operation: () => Promise<unknown>) => {
@@ -427,6 +460,7 @@ export function NuniWorkspaceScreen({
   };
   const logout = () => {
     const accountId = drafts.current?.accountId ?? auth.session?.platformAccountId;
+    draftStore.clear();
     drafts.current = null;
     void run('正在登出…', async () => {
       // Revoke authentication immediately. Slow or unavailable device storage
@@ -472,12 +506,13 @@ export function NuniWorkspaceScreen({
     return (
       <NuniDraftProvider cache={drafts.current!.cache}>
         <SignedInWorkspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
+          key={`${auth.session.platformAccountId}:${auth.session.context}:${drafts.current!.revision}`}
           onLogout={logout}
-          initialTab={route?.params?.tab}
-          initialWorkspaceId={route?.params?.workspaceId}
-          initialAssignmentId={route?.params?.assignmentId}
-          initialMaterialId={route?.params?.materialId}
+          initialTab={courseAccountChanged ? 'courses' : target?.tab}
+          courseAccountChanged={courseAccountChanged}
+          initialWorkspaceId={target?.workspaceId}
+          initialAssignmentId={target?.assignmentId}
+          initialMaterialId={target?.materialId}
         />
       </NuniDraftProvider>
     );
@@ -519,6 +554,7 @@ const createStyles = () =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: theme.colors.bg },
     content: { flexGrow: 1, padding: 24, gap: 18, paddingBottom: 48 },
+    scopeNotice: { paddingHorizontal: 20, paddingTop: 8, color: theme.colors.text },
     center: {
       flex: 1,
       backgroundColor: theme.colors.bg,

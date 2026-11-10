@@ -9,6 +9,7 @@
  *  - Story grid 可點開全螢幕 viewer，含進度條與左右切換
  */
 
+import { PrivateImage } from '@/components/PrivateImage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { StoryViewer } from './StoryViewer';
@@ -363,7 +364,8 @@ export function RealtimeTab(props: { schoolId: string }) {
                 aria-label={`查看 ${author} 的限時動態${isVideo ? '，最新一則是影片' : ''}`}
               >
                 {isImage ? (
-                  <img
+                  <PrivateImage
+                    width={300} height={480}
                     src={latest!.mediaUrl as string}
                     alt=""
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}

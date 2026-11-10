@@ -1,3 +1,4 @@
+import { usePrivateMedia } from '../../services/usePrivateMedia';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Animated,
@@ -176,9 +177,10 @@ function StorySlide({
   const playbackActive = playing && !inspecting && !replying;
   const [loadedImage, setLoadedImage] = useState('');
   const [failedImage, setFailedImage] = useState('');
+  const mediaUrl = usePrivateMedia(story.mediaUrl);
   const hasVideo = story.kind === 'video';
   const hasImage = story.kind === 'image' && !!story.mediaUrl;
-  const imageFailed = hasImage && failedImage === story.id;
+  const imageFailed = hasImage && (!mediaUrl || failedImage === story.id);
   const ready = !hasImage || loadedImage === story.id || imageFailed;
   const close = () => selectStory(null);
   const remaining = React.useRef(STORY_DURATION);
@@ -295,7 +297,7 @@ function StorySlide({
           {hasVideo ? (
             <StoryClip
               key={story.id}
-              uri={story.mediaUrl}
+              uri={mediaUrl}
               playing={playbackActive}
               fill={fill}
               onEnd={() => selectStory(nextId ?? null)}
@@ -304,7 +306,7 @@ function StorySlide({
           ) : hasImage && !imageFailed ? (
             <Image
               key={story.id}
-              source={{ uri: story.mediaUrl! }}
+              source={{ uri: mediaUrl! }}
               style={styles.photo}
               resizeMode="contain"
               accessibilityLabel="限時動態照片"

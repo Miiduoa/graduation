@@ -1,9 +1,11 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   deleteDoc,
   doc,
   getDoc,
   getDocFromServer,
+  getDocs,
   getDocsFromServer,
   limit,
   orderBy,
@@ -14,7 +16,6 @@ import {
   where,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
-import { readStoryQuery } from '@campus/shared/src/signedInSocialReads';
 import { buildStoryViewerPage, STORY_VIEWER_QUERY_LIMIT, storyViewerCollectionPath } from '@campus/shared/src/storyViewerPage';
 import { getDb } from '../firebase';
 import { fetchSchoolDirectoryProfiles } from './memberDirectory';
@@ -57,6 +58,7 @@ export async function publishStory(storyId: string, payload: {
   expiresAtMs: number;
   allowReplies: boolean;
 }): Promise<string> {
+  if (payload.mediaUrl) assertPrivateFileNamespace(payload.mediaUrl, `schools/${payload.schoolId}/stories/${storyId}`);
   const ref = doc(storiesCollection(), storyId);
   const content = {
     allowReplies: payload.allowReplies,
@@ -90,18 +92,25 @@ export async function listActiveStoriesForSchool(
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
   try {
-    const bySchool = where('schoolId', '==', schoolId);
-    const snap = await readStoryQuery((ordered) => getDocsFromServer(query(
-      storiesCollection(db),
-      bySchool,
-      ...(ordered ? [orderBy('createdAt', 'desc')] : []),
-      limit(lim),
-    )));
-    const now = Date.now();
+    // Preserve near-expiry stories with only a small request-latency buffer.
+    const read = (expiresAfter: number) => getDocs(
+      query(
+        storiesCollection(db),
+        where('schoolId', '==', schoolId),
+        where('expiresAt', '>', expiresAfter),
+        orderBy('expiresAt', 'desc'),
+        limit(lim),
+      ),
+    );
+    const snap = await read(Date.now() + 3_000).catch((error: unknown) => {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+      return read(Date.now() + 15_000);
+    });
     return snap.docs
-      .map((d) => ({ ...(d.data() as Omit<CampusStoryDoc, 'id'>), id: d.id }))
-      .filter((s) => typeof s.expiresAt === 'number' && Number.isFinite(s.expiresAt) && s.expiresAt > now);
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
   } catch (error) {
+    // Never fall back to a school-only query: it exposes expired metadata.
     if (options.throwOnError) throw error;
     return [];
   }

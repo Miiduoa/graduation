@@ -77,6 +77,7 @@ import {
 import { useNuniSession } from '../../state/nuniSession';
 import { useNuniDraftState } from '../../state/nuniDrafts';
 import { useTheme } from '../../state/theme';
+import { notifyNuniAssignmentChanged } from '../../services/nuniAssignmentChanges';
 import type { NativeNuniSession } from '../../services/nuniSessionController';
 import type {
   NuniRecentTeacherFeedback,
@@ -295,6 +296,11 @@ function RecentTeacherFeedbackRow({
 }
 
 type MutationIntent = 'primary' | 'secondary';
+// Only an authoritative read following a terminal submission response may resolve
+// an uncertain intent without treating its draft as successfully saved.
+type MutationResult = string | void | { kind: 'superseded' };
+type NativeFileRecovery = NativeFileOperation & { pending?: Promise<NuniAssignment> };
+type MutationContent = { values: Record<string, string>; revision: string };
 
 /** Retry preserves the submitted payload and key until the server confirms the outcome. */
 function MutationForm({
@@ -304,19 +310,26 @@ function MutationForm({
   secondaryLabel,
   submit,
   savedContent,
+  retainedContent,
+  onUseSavedContent,
+  onKeepDraft,
 }: {
   draftKey: string;
   fields: Field[];
   label: string;
   /** Optional second action (e.g. save feedback and open next awaiting review). */
   secondaryLabel?: string;
-  savedContent?: { values: Record<string, string>; revision: string };
+  savedContent?: MutationContent;
+  /** Picked attachments also retain the text and version they were paired with. */
+  retainedContent?: MutationContent;
+  onUseSavedContent?(): void;
+  onKeepDraft?(): void;
   submit(
     values: Record<string, string>,
     key: string,
     active: () => boolean,
     intent: MutationIntent,
-  ): Promise<string | void>;
+  ): Promise<MutationResult>;
 }) {
   const theme = useTheme();
   const [values, setValues] = useNuniDraftState<Record<string, string>>(`${draftKey}:values`, {});
@@ -324,12 +337,15 @@ function MutationForm({
     `${draftKey}:revision`,
     null,
   );
-  const editingValues = savedContent ? { ...savedContent.values, ...values } : values;
+  const [resolvedConflict, setResolvedConflict] = useNuniDraftState(`${draftKey}:resolved-conflict`, false);
+  const editingValues = savedContent ? { ...savedContent.values, ...retainedContent?.values, ...values } : values;
   const changed =
     !!savedContent &&
-    Object.keys(values).length > 0 &&
-    draftRevision !== null &&
-    savedContent.revision !== draftRevision;
+    (resolvedConflict || (!!retainedContent && retainedContent.revision !== savedContent.revision) || (
+      Object.keys(values).length > 0 &&
+      draftRevision !== null &&
+      savedContent.revision !== draftRevision
+    ));
   const [storedIntent, setStoredIntent] = useNuniDraftState<{
     values: Record<string, string>;
     signature: string;
@@ -394,14 +410,23 @@ function MutationForm({
         intent.current.action,
       );
       if (mounted.current) {
+        const submittedValues = intent.current?.values;
         intent.current = null;
         setStoredIntent(null);
         setUncertain(false);
-        if (savedContent) {
-          setValues({});
-          setDraftRevision(null);
+        if (typeof confirmed === 'object' && confirmed.kind === 'superseded') {
+          // A file-only draft may have no edited text. Retain the original
+          // submitted text as well, rather than mixing it with the newer receipt.
+          if (submittedValues) setValues({ ...submittedValues, ...values });
+          setResolvedConflict(true);
+        } else {
+          setResolvedConflict(false);
+          if (savedContent) {
+            setValues({});
+            setDraftRevision(null);
+          }
+          setNotice(typeof confirmed === 'string' ? confirmed : '已確認儲存。');
         }
-        setNotice(typeof confirmed === 'string' ? confirmed : '已確認儲存。');
       }
     } catch (failure) {
       if (mounted.current) {
@@ -411,7 +436,8 @@ function MutationForm({
           failure.status === 0 ||
           failure.status === 408 ||
           failure.status >= 500 ||
-          failure.code === 'SESSION_CHANGED';
+          failure.code === 'SESSION_CHANGED' ||
+          failure.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED';
         if (!unknown) {
           intent.current = null;
           setStoredIntent(null);
@@ -439,6 +465,8 @@ function MutationForm({
             onPress={() => {
               setValues({});
               setDraftRevision(null);
+              setResolvedConflict(false);
+              onUseSavedContent?.();
               setError('');
               setNotice('');
             }}
@@ -448,6 +476,8 @@ function MutationForm({
             disabled={busy}
             onPress={() => {
               setDraftRevision(savedContent!.revision);
+              setResolvedConflict(false);
+              onKeepDraft?.();
               setError('');
               setNotice('');
             }}
@@ -466,13 +496,15 @@ function MutationForm({
             autoCapitalize="none"
             textAlignVertical="top"
             onChangeText={(value) => {
+              if (!mounted.current || lock.current || intent.current) return;
               const next = { ...editingValues, [field.name]: value };
               if (savedContent) {
+                const original = retainedContent ?? savedContent;
                 const pristine = fields.every(
-                  (entry) => (next[entry.name] ?? '') === (savedContent.values[entry.name] ?? ''),
+                  (entry) => (next[entry.name] ?? '') === (original.values[entry.name] ?? ''),
                 );
                 setValues(pristine ? {} : next);
-                setDraftRevision(pristine ? null : (draftRevision ?? savedContent.revision));
+                setDraftRevision(pristine ? null : (draftRevision ?? original.revision));
               } else setValues(next);
               setError('');
               setNotice('');
@@ -706,11 +738,14 @@ function CourseScope({
     }
   }, [initialWorkspaceId, setSelected]);
   useEffect(() => {
-    if (initialAssignmentId) setFocusActivityId(initialAssignmentId);
-  }, [initialAssignmentId]);
-  useEffect(() => {
-    if (initialMaterialId) setFocusMaterialId(initialMaterialId);
-  }, [initialMaterialId, setFocusMaterialId]);
+    if (initialMaterialId) {
+      setFocusActivityId(undefined);
+      setFocusMaterialId(initialMaterialId);
+    } else if (initialAssignmentId) {
+      setFocusMaterialId(undefined);
+      setFocusActivityId(initialAssignmentId);
+    }
+  }, [initialAssignmentId, initialMaterialId, setFocusMaterialId]);
   const openCourse = useCallback(
     (id: string, activityId?: string) => {
       searchOffset.current = null;
@@ -754,6 +789,9 @@ function CourseScope({
           id={selected}
           classes={classes}
           classroom={classroom}
+          onAssignmentChanged={(assignmentId, submitted) => notifyNuniAssignmentChanged({
+            accountId: session.platformAccountId, context: session.context, workspaceId: selected, assignmentId, submitted,
+          })}
           onBack={() => {
             pendingSearchReturn.current = searchOffset.current;
             searchOffset.current = null;
@@ -1110,6 +1148,7 @@ function CourseDetail({
   id,
   classes,
   classroom,
+  onAssignmentChanged,
   onBack,
   initialAssignmentId,
   initialMaterialId,
@@ -1124,6 +1163,7 @@ function CourseDetail({
   id: string;
   classes: Classes;
   classroom: ReturnType<typeof createNuniClassroom>;
+  onAssignmentChanged(assignmentId: string, submitted: boolean): void;
   onBack(): void;
   initialAssignmentId?: string;
   initialMaterialId?: string;
@@ -1433,7 +1473,10 @@ function CourseDetail({
     targetSeekCancelled,
   ]);
   const saveActivity = (item: Activity) => {
-    if ('instructions' in item) assignmentRevision.current += 1;
+    if ('instructions' in item) {
+      assignmentRevision.current += 1;
+      onAssignmentChanged(item.id, !!item.mySubmission);
+    }
     result.commit(
       (current) =>
         current
@@ -1451,8 +1494,9 @@ function CourseDetail({
           : current,
       result.version,
     );
-    // The confirmed receipt must stay visible when the item leaves the pending list.
-    setActivityFilter((filter) => (filter === 'pending' ? 'submitted' : filter));
+    // A confirmed receipt leaves pending work; a verified withdrawal still belongs there.
+    const hasReceipt = 'instructions' in item ? !!item.mySubmission : !!item.myResponse;
+    setActivityFilter((filter) => (filter === 'pending' && hasReceipt ? 'submitted' : filter));
   };
   const teacher = data && data.course.memberRole !== 'student';
   useEffect(() => {
@@ -1951,18 +1995,62 @@ function ActivityCard({
   }, [focused]);
   const assignment = 'instructions' in item;
   const receipt = assignment ? item.mySubmission : item.myResponse;
+  const currentContent: MutationContent = {
+    values: { body: receipt ? ('body' in receipt ? receipt.body : receipt.answer) : '' },
+    revision: JSON.stringify(receipt
+      ? ['body' in receipt ? receipt.body : receipt.answer, receipt.submittedAt]
+      : null),
+  };
   const prompt = assignment ? item.instructions : item.prompt;
   const student = course.memberRole === 'student';
   const active = course.state === 'active';
   const canRevise = !assignment || assignmentCanRevise(item.dueAt);
-  const [recovering, setRecovering] = useState(false);
-  const fileOperation = useRef<NativeFileOperation>({});
+  // Closing an activity must not discard the payload of an unconfirmed send.
+  // Current permissions still control new submissions through canSubmit below.
+  const mutationDraftKey = `course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}`;
+  const [recovering, setRecovering] = useNuniDraftState(`${mutationDraftKey}:recovering`, false);
+  const [fileOperation, setFileOperation] = useNuniDraftState<NativeFileRecovery>(
+    `${mutationDraftKey}:file-operation`,
+    () => ({}),
+  );
   const fileSubmit = assignment && assignmentFileSubmitEnabledNative();
   const canSubmit = student && active && (recovering || (item.state === 'open' && (!fileSubmit || !receipt || canRevise)));
   const kind = assignment ? '作業' : '測驗';
   const [withdrawNotice, setWithdrawNotice] = useState('');
-  const [localFiles, setLocalFiles] = useState<LocalNativeFile[]>([]);
+  const [localFiles, setLocalFiles] = useNuniDraftState<LocalNativeFile[]>(`${mutationDraftKey}:files`, []);
+  const [fileDraftBase, setFileDraftBase] = useNuniDraftState<MutationContent | null>(`${mutationDraftKey}:file-draft-base`, null);
   const [pdfOpen, setPdfOpen] = useState(false);
+  const pdfDraftBase = useRef<MutationContent | null>(null);
+  const [fileChoiceError, setFileChoiceError] = useState('');
+  const fileChoiceGeneration = useRef(0);
+  const fileChoiceMounted = useRef(true);
+  const fileChoicePhase = useRef<'disabled' | 'ready' | 'pdf'>('disabled');
+  fileChoicePhase.current = canSubmit && fileSubmit && !recovering
+    ? pdfOpen ? 'pdf' : 'ready'
+    : 'disabled';
+  useEffect(() => {
+    fileChoiceMounted.current = true;
+    return () => {
+      fileChoiceMounted.current = false;
+      fileChoiceGeneration.current += 1;
+    };
+  }, [mutationDraftKey]);
+  const pickFiles = (pick: (files: LocalNativeFile[]) => Promise<LocalNativeFile[]>) => {
+    if (!fileChoiceMounted.current || fileChoicePhase.current !== 'ready') return;
+    const generation = ++fileChoiceGeneration.current;
+    const baseline = localFiles.length && fileDraftBase ? fileDraftBase : currentContent;
+    setFileChoiceError('');
+    void pick(localFiles).then((files) => {
+      if (fileChoiceMounted.current && fileChoicePhase.current === 'ready' && generation === fileChoiceGeneration.current) {
+        setLocalFiles(files);
+        setFileDraftBase(files.length ? baseline : null);
+      }
+    }).catch(() => {
+      if (fileChoiceMounted.current && fileChoicePhase.current === 'ready' && generation === fileChoiceGeneration.current)
+        setFileChoiceError('無法加入照片或檔案，請重新選取。');
+    });
+  };
+  const pdfGeneration = fileChoiceGeneration.current;
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [progress, setProgress] = useState<NativeUploadProgress | null>(null);
   const lateOpen = assignment
@@ -1991,30 +2079,48 @@ function ActivityCard({
           <Button
             label="拍照"
             disabled={pdfOpen}
-            onPress={() => void pickAssignmentCamera(localFiles).then(setLocalFiles)}
+            onPress={() => pickFiles(pickAssignmentCamera)}
           />
           <Button
             label="相簿"
             disabled={pdfOpen}
-            onPress={() => void pickAssignmentAlbum(localFiles).then(setLocalFiles)}
+            onPress={() => pickFiles(pickAssignmentAlbum)}
           />
           <Button
             label="檔案"
             disabled={pdfOpen}
-            onPress={() => void pickAssignmentDocuments(localFiles).then(setLocalFiles)}
+            onPress={() => pickFiles(pickAssignmentDocuments)}
           />
           {photoPdfAvailable() ? (
             <Button
               label="照片轉 PDF"
               disabled={localFiles.filter((file) => file.kind === 'file').length >= MAX_ASSIGNMENT_DOCUMENTS}
-              onPress={() => setPdfOpen(true)}
+              onPress={() => {
+                if (!fileChoiceMounted.current || fileChoicePhase.current !== 'ready') return;
+                fileChoiceGeneration.current += 1;
+                fileChoicePhase.current = 'pdf';
+                pdfDraftBase.current = localFiles.length && fileDraftBase ? fileDraftBase : currentContent;
+                setFileChoiceError('');
+                setPdfOpen(true);
+              }}
             />
           ) : null}
           {pdfOpen ? (
             <NativePhotoPdfEditor
-              onCancel={() => setPdfOpen(false)}
+              onCancel={() => {
+                if (!fileChoiceMounted.current || fileChoicePhase.current !== 'pdf' || pdfGeneration !== fileChoiceGeneration.current) return;
+                fileChoiceGeneration.current += 1;
+                fileChoicePhase.current = 'ready';
+                pdfDraftBase.current = null;
+                setPdfOpen(false);
+              }}
               onConfirm={(file) => {
+                if (!fileChoiceMounted.current || fileChoicePhase.current !== 'pdf' || pdfGeneration !== fileChoiceGeneration.current) return;
+                fileChoiceGeneration.current += 1;
+                fileChoicePhase.current = 'ready';
                 setLocalFiles((current) => [...current, file]);
+                setFileDraftBase(pdfDraftBase.current ?? currentContent);
+                pdfDraftBase.current = null;
                 setPdfOpen(false);
               }}
             />
@@ -2023,6 +2129,7 @@ function ActivityCard({
             <Copy>重新送出會取代這次繳交；沒有選檔就改交純文字。</Copy>
           ) : null}
           <Copy>網路不穩時再送一次，不會重複交。選好的照片可以刪除或調整順序後再送出。</Copy>
+          {fileChoiceError ? <Copy alert>{fileChoiceError}</Copy> : null}
           {progress ? (
             <Copy>
               上傳中 {progress.completed}/{progress.total}，請保持網路連線。
@@ -2051,15 +2158,29 @@ function ActivityCard({
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   <Button
                     label="上移"
-                    onPress={() => setLocalFiles(moveNativeFile(localFiles, index, -1))}
+                    onPress={() => {
+                      if (fileChoicePhase.current !== 'ready') return;
+                      fileChoiceGeneration.current += 1;
+                      setLocalFiles(moveNativeFile(localFiles, index, -1));
+                    }}
                   />
                   <Button
                     label="下移"
-                    onPress={() => setLocalFiles(moveNativeFile(localFiles, index, 1))}
+                    onPress={() => {
+                      if (fileChoicePhase.current !== 'ready') return;
+                      fileChoiceGeneration.current += 1;
+                      setLocalFiles(moveNativeFile(localFiles, index, 1));
+                    }}
                   />
                   <Button
                     label="刪除"
-                    onPress={() => setLocalFiles(removeNativeFile(localFiles, file.key))}
+                    onPress={() => {
+                      if (fileChoicePhase.current !== 'ready') return;
+                      fileChoiceGeneration.current += 1;
+                      const next = removeNativeFile(localFiles, file.key);
+                      setLocalFiles(next);
+                      if (!next.length) setFileDraftBase(null);
+                    }}
                   />
                 </View>
               </View>
@@ -2089,15 +2210,20 @@ function ActivityCard({
       {fileSubmit && receipt && !canRevise ? <Copy>已過截止時間，這份繳交不能再修改或撤回。</Copy> : null}
       {canSubmit ? (
         <MutationForm
-          draftKey={`course:${course.id}:${course.memberRole}:${course.state}:${assignment ? 'assignment' : 'quiz'}:${item.id}:${item.state}`}
-          savedContent={{
-            values: { body: receipt ? ('body' in receipt ? receipt.body : receipt.answer) : '' },
-            revision: JSON.stringify(
-              receipt
-                ? ['body' in receipt ? receipt.body : receipt.answer, receipt.submittedAt]
-                : null,
-            ),
+          draftKey={mutationDraftKey}
+          onUseSavedContent={() => {
+            fileChoiceGeneration.current += 1;
+            setFileOperation({});
+            setLocalFiles([]);
+            setFileDraftBase(null);
+            setPreviewUri(null);
+            setFileChoiceError('');
           }}
+          onKeepDraft={() => {
+            setFileDraftBase((current) => current ? { ...current, revision: currentContent.revision } : null);
+          }}
+          savedContent={currentContent}
+          retainedContent={localFiles.length ? fileDraftBase ?? undefined : undefined}
           fields={[
             {
               name: 'body',
@@ -2123,41 +2249,43 @@ function ActivityCard({
                 !assignmentCanRevise(item.dueAt)
               )
                 throw new NuniError(409, 'ASSIGNMENT_REVISION_CLOSED');
+              fileChoiceGeneration.current += 1;
+              fileChoicePhase.current = 'disabled';
+              pdfDraftBase.current = null;
+              setPdfOpen(false);
+              setFileChoiceError('');
               setRecovering(true);
               if (assignment && fileSubmit && localFiles.length) {
+                // Cache this exact mutable operation before starting any upload. A
+                // reopened form must reuse its prepared files, server IDs and key.
+                setFileOperation(fileOperation);
+                const pending = fileOperation.pending ?? submitNativeAssignmentFiles(
+                  classes,
+                  course.id,
+                  item.id,
+                  body,
+                  localFiles,
+                  key,
+                  setProgress,
+                  fileOperation,
+                );
+                // Joining a still-running attempt also prevents two mounted route
+                // instances from mutating the same upload operation concurrently.
+                fileOperation.pending = pending;
                 try {
-                  const confirmed = await submitNativeAssignmentFiles(
-                    classes,
-                    course.id,
-                    item.id,
-                    body,
-                    localFiles,
-                    key,
-                    setProgress,
-                    fileOperation.current,
-                  );
+                  const confirmed = await pending;
                   if (stillActive()) {
                     setRecovering(false);
-                    fileOperation.current = {};
+                    setFileOperation({});
                     setLocalFiles([]);
+                    setFileDraftBase(null);
                     setPreviewUri(null);
                     saved(confirmed);
                     setWithdrawNotice('');
                   }
                   return '已收到伺服器繳交紀錄。';
-                } catch (failure) {
-                  if (
-                    stillActive() &&
-                    failure instanceof NuniError &&
-                    failure.status > 0 &&
-                    failure.status < 500 &&
-                    failure.status !== 408 &&
-                    failure.code !== 'SESSION_CHANGED'
-                  ) {
-                    setRecovering(false);
-                  }
-                  throw failure;
                 } finally {
+                  if (fileOperation.pending === pending) fileOperation.pending = undefined;
                   if (stillActive()) setProgress(null);
                 }
               }
@@ -2172,26 +2300,50 @@ function ActivityCard({
                 : await classes.submitQuiz(course.id, item.id, body, key);
               if (stillActive()) {
                 setRecovering(false);
+                setFileOperation({});
+                setLocalFiles([]);
+                setFileDraftBase(null);
+                setPreviewUri(null);
                 saved(confirmed);
                 setWithdrawNotice('');
               }
               return '已收到伺服器繳交紀錄。';
             } catch (failure) {
               if (
+                assignment &&
+                stillActive() &&
                 failure instanceof NuniError &&
+                failure.status === 409 &&
                 failure.code === 'ASSIGNMENT_SUBMISSION_SUPERSEDED'
               ) {
                 const fresh = (await classes.assignments(course.id)).find(
                   (entry) => entry.id === item.id,
                 );
                 if (stillActive() && fresh) {
-                  setWithdrawNotice(nuniErrorMessage(failure));
+                  setWithdrawNotice(fresh.mySubmission
+                    ? nuniErrorMessage(failure)
+                    : '這次送出已被取代，目前沒有你的繳交紀錄。草稿已保留，請確認後再送出。');
                   saved(fresh);
                   setRecovering(false);
-                  fileOperation.current = {};
-                  setLocalFiles([]);
+                  setFileOperation({});
                   setPreviewUri(null);
+                  // The old key is terminal. Keep the local text and its original
+                  // revision so the user must choose before replacing newer work.
+                  return { kind: 'superseded' };
                 }
+              }
+              if (
+                stillActive() &&
+                !recovering &&
+                failure instanceof NuniError &&
+                failure.status > 0 &&
+                failure.status < 500 &&
+                failure.status !== 408 &&
+                failure.code !== 'SESSION_CHANGED' &&
+                failure.code !== 'ASSIGNMENT_SUBMISSION_SUPERSEDED'
+              ) {
+                // A later rejection cannot settle an earlier uncertain send.
+                setRecovering(false);
               }
               throw failure;
             }

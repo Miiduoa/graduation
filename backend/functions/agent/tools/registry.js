@@ -26,20 +26,12 @@ const listCafeterias = require('./listCafeterias');
 const getCafeteriaMenu = require('./getCafeteriaMenu');
 const proposeOrder = require('./proposeOrder');
 const submitQuizAttempt = require('./submitQuizAttempt');
-const computeGradebook = require('./computeGradebook');
 const computeCompanionState = require('./computeCompanionState');
-const upsertQuestionBank = require('./upsertQuestionBank');
-const draftQuizFromBank = require('./draftQuizFromBank');
-const upsertRubric = require('./upsertRubric');
 const verifyAttendanceClaim = require('./verifyAttendanceClaim');
 
 const tools = [
   submitQuizAttempt,
-  computeGradebook,
   computeCompanionState,
-  upsertQuestionBank,
-  draftQuizFromBank,
-  upsertRubric,
   verifyAttendanceClaim,
   getTodaySchedule,
   getAssignments,

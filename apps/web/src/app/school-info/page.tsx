@@ -15,6 +15,7 @@ import {
 import { PublicSourceNotice } from '@/components/PublicSourceNotice';
 import { SiteShell } from '@/components/SiteShell';
 import { useCampusBrowseContext, type CampusBrowseContext } from '@/lib/useCampusBrowseContext';
+import styles from './schoolInfo.module.css';
 
 export default function SchoolInfoPage(props: {
   searchParams?: Promise<{ school?: string; schoolId?: string; campus?: string }>;
@@ -89,49 +90,57 @@ function SchoolInfoContent({ schoolId, schoolName, status }: CampusBrowseContext
       subtitle="依目前瀏覽的校園，顯示教育部名錄中的公開聯絡資訊。"
       schoolName={info.name}
     >
-      <div className="pageStack">
-        <section className="card">
-          <p className="eyebrow">{info.academicYear} 學年度名錄</p>
-          <h2>{info.name}</h2>
-          <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>
-            {city}
-            <br />
-            {address}
-          </p>
-          <p style={{ color: 'var(--muted)', lineHeight: 1.7, marginBottom: 0 }}>
-            上述為名錄中的機構地址；若學校有多個校區，請至官方網站確認實際位置與交通資訊。
-          </p>
-        </section>
-
-        <section className="card">
-          <h2>聯絡方式</h2>
-          <p style={{ color: 'var(--muted)', lineHeight: 1.8 }}>學校總機：{info.telephone}</p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {telHref ? (
-              <a className="btn" href={telHref}>
-                撥打學校總機
-              </a>
-            ) : (
-              <button type="button" className="btn" onClick={() => void copyTelephone()}>
-                複製學校總機
-              </button>
-            )}
-            <a className="btn" href={mapsUrl} target="_blank" rel="noopener noreferrer">
-              用地圖搜尋校名與地址 ↗
-            </a>
-          </div>
-          {copyMessage ? (
-            <p style={{ color: 'var(--muted)', lineHeight: 1.7, marginBottom: 0 }}>{copyMessage}</p>
-          ) : null}
-          {copyError ? (
-            <p
-              role="alert"
-              style={{ color: 'var(--danger, #b42318)', lineHeight: 1.7, marginBottom: 0 }}
-            >
-              {copyError}
+      <div className={`pageStack ${styles.page}`}>
+        <div className={styles.plaque} data-testid="school-info-plaque">
+          <span className={styles.fasteners} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+          <section className={styles.identity}>
+            <p className="eyebrow">{info.academicYear} 學年度名錄</p>
+            <h2>{info.name}</h2>
+            <p className={styles.address}>
+              {city}
+              <br />
+              {address}
             </p>
-          ) : null}
-        </section>
+            <p className={styles.note}>
+              上述為名錄中的機構地址；若學校有多個校區，請至官方網站確認實際位置與交通資訊。
+            </p>
+          </section>
+
+          <section className={styles.contact}>
+            <h2>聯絡方式</h2>
+            <p className={styles.telephone}>學校總機：{info.telephone}</p>
+            <div className={styles.actions}>
+              {telHref ? (
+                <a className="btn" href={telHref}>
+                  撥打學校總機
+                </a>
+              ) : (
+                <button type="button" className="btn" onClick={() => void copyTelephone()}>
+                  複製學校總機
+                </button>
+              )}
+              <a className="btn" href={mapsUrl} target="_blank" rel="noopener noreferrer">
+                用地圖搜尋校名與地址 ↗
+              </a>
+            </div>
+            {copyMessage ? (
+              <p className={styles.note} role="status">{copyMessage}</p>
+            ) : null}
+            {copyError ? (
+              <p
+                role="alert"
+                className={styles.copyError}
+              >
+                {copyError}
+              </p>
+            ) : null}
+          </section>
+        </div>
 
         {career ? (
           <section className="card">

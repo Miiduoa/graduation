@@ -1,3 +1,5 @@
+import { PRIVATE_FILE_MAX_BYTES } from '@campus/shared/src/privateFileAccess';
+import { privateFilesEnabled, privateStoryPath, uploadPrivateFile } from '../privateFiles';
 /**
  * 校園社群 — 圖片上傳 (Web)
  *
@@ -69,7 +71,7 @@ export function storyMediaError(file: File): string | null {
   }
   if (!file.type.startsWith('image/')) return '請選擇照片或 MP4 影片。';
   if (!file.size) return '請選擇一張可讀取的圖片。';
-  if (file.size >= 10 * 1024 * 1024) return '照片須小於 10 MB，請換一張較小的照片。';
+  if (file.size > PRIVATE_FILE_MAX_BYTES['story-image']) return '照片須小於 10 MB，請換一張較小的照片。';
   return null;
 }
 
@@ -82,6 +84,13 @@ export async function uploadStoryMedia(input: {
   const error = storyMediaError(input.file);
   if (error) throw new Error(error);
   const kind = input.file.type === STORY_VIDEO_CONTENT_TYPE ? 'video' : 'image';
+  if (privateFilesEnabled()) {
+    if (kind === 'video' && input.file.size > PRIVATE_FILE_MAX_BYTES['story-video']) throw new Error('影片大小不得超過 45 MB。');
+    const path = privateStoryPath(input.schoolId, input.storyId, `${kind}-${Date.now().toString(36)}-${crypto.randomUUID().replace(/-/g, '')}.${kind === 'video' ? 'mp4' : 'jpg'}`);
+    if (!path) throw new Error('限動路徑無效');
+    await uploadPrivateFile({ path, body: input.file, contentType: input.file.type });
+    return { url: path, path, contentType: input.file.type };
+  }
   return uploadMediaFile(`schools/${input.schoolId}/stories/${input.storyId}/${kind}`, input.file, {
     ownerUid: input.uid,
   });
@@ -97,4 +106,16 @@ export async function uploadCampusMediaBatch(input: {
     uploadCampusMedia({ scope: input.scope, schoolId: input.schoolId, uid: input.uid, file }),
   );
   return Promise.all(tasks);
+}
+
+export function storyImageError(file: File): string | null {
+  if (!file.type.startsWith('image/') || !file.size) return '請選擇一張可讀取的圖片。';
+  if (file.size > PRIVATE_FILE_MAX_BYTES['story-image']) return '照片大小不得超過 10 MB，請換一張較小的照片。';
+  return null;
+}
+
+export async function uploadStoryImage(input: Parameters<typeof uploadStoryMedia>[0]) {
+  const error = storyImageError(input.file);
+  if (error) throw new Error(error);
+  return uploadStoryMedia(input);
 }
