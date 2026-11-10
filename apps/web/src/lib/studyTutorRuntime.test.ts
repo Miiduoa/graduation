@@ -464,6 +464,51 @@ describe('explicit local study generation', () => {
     await expect(retry).resolves.toEqual(lesson());
   });
 
+  it.each([
+    {
+      label: 'summary contains only punctuation',
+      mutate: (valid: TutorExplanation): TutorExplanation => ({
+        ...valid, explanation: '。！？…',
+      }),
+    },
+    {
+      label: 'step contains only operators and punctuation',
+      mutate: (valid: TutorExplanation): TutorExplanation => ({
+        ...valid,
+        steps: [
+          valid.steps![0],
+          { ...valid.steps![1], explanation: '＋÷＝！？' },
+        ],
+      }),
+    },
+    {
+      label: 'invisible direction marks hide punctuation-only content',
+      mutate: (valid: TutorExplanation): TutorExplanation => ({
+        ...valid, explanation: '\u2066。！？\u2069',
+      }),
+    },
+  ])('rejects a new lesson whose $label while preserving older backups and retry', async ({ mutate }) => {
+    const invalid = mutate(lesson());
+    // Saved v1/v2 lessons must remain readable, even when old AI quality is weak.
+    expect(parseTutorExplanation(JSON.stringify(invalid), passage())).toEqual(invalid);
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand',
+      signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(invalid) });
+    await expect(pending).rejects.toThrow('說明只有標點或符號');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+    expect(lastWorker().terminate).toHaveBeenCalledOnce();
+  });
+
   it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
     const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
     const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };

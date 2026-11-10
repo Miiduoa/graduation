@@ -84,20 +84,30 @@ function hasBoundedGeneratedEvidence(explanation: TutorExplanation): boolean {
   return generatedEvidenceQuotes(explanation).every((quote) => Array.from(quote).length <= 60);
 }
 
+// Normalize only a temporary comparison copy: never rewrite source quotes,
+// displayed explanations or existing offline backups. Keep ZWJ/ZWNJ because
+// they can carry meaning in other scripts and emoji.
+function comparableGeneratedTeaching(text: string): string {
+  return text.normalize('NFC')
+    .replace(/[\u00ad\u034f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, '')
+    .replace(/\s+/gu, ' ').trim();
+}
+
+// A valid source quote is not enough if the model leaves the explanation itself
+// as punctuation or mathematical operators. Require visible letters or digits
+// in the NEW generated summary and each instructional step, not in saved data.
+function hasSubstantiveGeneratedTeaching(explanation: TutorExplanation): boolean {
+  return [explanation.explanation, ...(explanation.steps?.map((step) => step.explanation) ?? [])]
+    .every((text) => /[\p{L}\p{N}]/u.test(comparableGeneratedTeaching(text)));
+}
+
 // Distinct titles, source lines or whitespace cannot turn the SAME explanation
-// into two instructional steps. Preserve the original text for display and
-// evidence validation; normalize only for this NEW-result duplicate check.
+// into two instructional steps. Keep citations and displayed text untouched.
 function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
   if (!explanation.steps) return false;
   const seen = new Set<string>();
   for (const step of explanation.steps) {
-    const content = step.explanation.normalize('NFC')
-      // Formatting-only characters, including bidi overrides/isolates and
-      // combining grapheme joiners, must not manufacture a second visible step.
-      // Keep ZWJ/ZWNJ: they can change real script and emoji semantics.
-      // Original source and saved lessons are never normalized or rewritten.
-      .replace(/[\u00ad\u034f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, '')
-      .replace(/\s+/gu, ' ').trim();
+    const content = comparableGeneratedTeaching(step.explanation);
     if (!content || seen.has(content)) return false;
     seen.add(content);
   }
@@ -239,6 +249,8 @@ export async function runStudyTutor({
               throw new Error('這次講解缺少分步步驟，無法完成逐步學習。請重新講解。');
             if (!hasDistinctGeneratedSteps(explanation))
               throw new Error('這次講解有空白或重複相同的教學步驟，請重新講解。');
+            if (!hasSubstantiveGeneratedTeaching(explanation))
+              throw new Error('這次講解的說明只有標點或符號，無法作為教學內容。請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
