@@ -57,6 +57,15 @@ const MANUAL_COPY_LABELS: Record<ManualCopyKind, { region: string; field: string
   'practice-progress': { region: '手動複製練習與閱讀進度 JSON', field: '可選取的練習與閱讀進度 JSON' },
 };
 
+// iOS/WebKit can ignore or reject textarea.select() on a readonly backup.
+// Apply an explicit range as well; if either API fails, leave the original
+// local text available for long-press selection rather than losing the backup.
+function selectManualCopyText(input: HTMLTextAreaElement) {
+  try { input.select(); } catch { /* Try a direct selection range below. */ }
+  try { input.setSelectionRange(0, input.value.length); }
+  catch { /* The student can still select the unchanged text manually. */ }
+}
+
 function initialMaterial(material?: Material): { source: StudySource | null; error: string } {
   if (!material?.body.trim()) return { source: null, error: '' };
   try {
@@ -881,12 +890,12 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           aria-label={MANUAL_COPY_LABELS[manualCopyKind].region}>
           <label className={styles.field} htmlFor={manualCopyId}>{MANUAL_COPY_LABELS[manualCopyKind].field}
             <textarea ref={manualCopyInput} id={manualCopyId} readOnly rows={6} value={manualCopyText}
-              onFocus={(event) => event.currentTarget.select()}
-              onClick={(event) => event.currentTarget.select()} />
+              onFocus={(event) => selectManualCopyText(event.currentTarget)}
+              onClick={(event) => selectManualCopyText(event.currentTarget)} />
           </label>
           <button type="button" className={styles.button} onClick={() => {
             manualCopyInput.current?.focus();
-            manualCopyInput.current?.select();
+            if (manualCopyInput.current) selectManualCopyText(manualCopyInput.current);
           }}>全選上方文字</button>
           <p className={styles.note}>可長按選取文字或按「全選上方文字」，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
             內容可能含教材與個人試答，請注意貼上位置。</p>

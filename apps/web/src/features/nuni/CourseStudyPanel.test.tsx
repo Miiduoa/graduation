@@ -1141,6 +1141,41 @@ it('offers a selectable reading-note fallback when mobile clipboard support is m
   }
 });
 
+it('keeps private reading backup text accessible if mobile textarea selection APIs reject the action', () => {
+  const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
+  const select = vi.spyOn(HTMLTextAreaElement.prototype, 'select')
+    .mockImplementation(() => { throw new Error('WebKit selection unavailable'); });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '仍須保留的本機回答' } });
+    fireEvent.click(screen.getByRole('button', { name: '複製閱讀進度 JSON' }));
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    expect(manual.readOnly).toBe(true);
+    expect(document.activeElement).toBe(manual);
+    expect(manual.selectionStart).toBe(0);
+    expect(manual.selectionEnd).toBe(manual.value.length);
+    expect(parseCourseStudyProgress(manual.value, scope).passages['0:0'].note).toBe('仍須保留的本機回答');
+    // Even when both selection methods are rejected, a second tap cannot crash
+    // the board or erase the raw JSON; long-press copy is still available.
+    const range = vi.spyOn(manual, 'setSelectionRange')
+      .mockImplementation(() => { throw new Error('selection range unavailable'); });
+    try {
+      expect(() => fireEvent.click(screen.getByRole('button', { name: '全選上方文字' }))).not.toThrow();
+      expect(document.activeElement).toBe(manual);
+      expect(parseCourseStudyProgress(manual.value, scope).passages['0:0'].note).toBe('仍須保留的本機回答');
+      expect(screen.getByRole('alert').textContent).toContain('無法直接複製進度 JSON');
+    } finally {
+      range.mockRestore();
+    }
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    select.mockRestore();
+    if (originalClipboard) Object.defineProperty(window.navigator, 'clipboard', originalClipboard);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('copies the current reading note and ignores a delayed clipboard denial after editing', async () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   let rejectCopy!: (error: Error) => void;
