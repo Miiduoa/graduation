@@ -192,6 +192,49 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it('stops stale fallback at seven days from OSM replication, not only the HTTP fetch', async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      // The reply was fetched today, but the OSM data was already 47 hours old.
+      const baseTime = new Date(start - 47 * 60 * 60 * 1000)
+        .toISOString().replace('.000Z', 'Z');
+      const payload = JSON.stringify({
+        osm3s: { timestamp_osm_base: baseTime },
+        ...JSON.parse(osmPayload),
+      });
+      const upstream = vi.fn()
+        .mockResolvedValueOnce(new Response(payload, { status: 200 }))
+        .mockRejectedValue(new Error('Overpass offline'));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const fresh = await GET();
+      expect(fresh.status).toBe(200);
+      expect((await fresh.json()).osmBaseAt).toBe(baseTime);
+
+      const expiry = Date.parse(baseTime) + 7 * day;
+      // The response is less than seven days old, but the source is almost seven.
+      expect(expiry - start).toBeLessThan(7 * day);
+      clock.mockReturnValue(expiry - 1);
+      const stale = await GET();
+      expect(stale.status).toBe(200);
+      expect(stale.headers.get('Cache-Control')).toBe('private, no-store');
+      expect((await stale.json()).stale).toBe(true);
+      expect(upstream).toHaveBeenCalledTimes(2);
+
+      // Do not keep serving the old building through a subsequent cooldown hit.
+      clock.mockReturnValue(expiry);
+      const expired = await GET();
+      expect(expired.status).toBe(503);
+      expect(expired.headers.get('Cache-Control')).toBe('no-store');
+      expect((await expired.json()).error).toMatch(/temporarily unavailable/);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not promote a days-old Overpass database state into a new fresh snapshot', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 3 * 24 * 60 * 60 * 1000)
       .toISOString().replace('.000Z', 'Z');
