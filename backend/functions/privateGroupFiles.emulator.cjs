@@ -101,7 +101,11 @@ beforeEach(async () => {
   await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
   await db.doc(`assignments/${assignmentId}`).set({ groupId });
   // 下載貼文附件需要貼文仍存在。
-  await db.doc(`groups/${groupId}/posts/one`).set({ authorId: 'alice' });
+  await db.doc(`groups/${groupId}/posts/one`).set({
+    authorId: 'alice',
+    // The normal shared download must reference the published attachment.
+    attachments: [`groups/${groupId}/posts/one/notes.pdf`],
+  });
   for (const uid of ['alice', 'bob', 'teacher']) {
     await db.doc(`users/${uid}`).set({ displayName: uid });
     await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
@@ -147,6 +151,28 @@ test('active HTTP reads work, direct SDK access is denied, and canonical school 
       assert.equal((await request('POST', revokedUploadPath, uid)).status, 403);
     }
   }
+});
+
+test('post draft sibling stays private to its author until explicitly attached', { timeout: 30_000 }, async () => {
+  const published = paths().post;
+  const draft = published.replace('notes.pdf', 'draft.pdf');
+  assert.equal((await request('POST', published, 'alice')).status, 201);
+  assert.equal((await request('POST', draft, 'alice')).status, 201);
+  // Members (including instructors) can read only the referenced publication.
+  assert.equal((await request('GET', published, 'teacher')).status, 200);
+  assert.equal((await request('GET', published, 'bob')).status, 200);
+  assert.equal((await request('GET', draft, 'teacher')).status, 403);
+  assert.equal((await request('GET', draft, 'bob')).status, 403);
+  // The owner may preview an unreferenced upload; removing a publication closes access.
+  assert.equal((await request('GET', draft, 'alice')).status, 200);
+  await db.doc(`groups/${groupId}/posts/one`).update({ attachments: [] });
+  assert.equal((await request('GET', published, 'teacher')).status, 403);
+  assert.equal((await request('GET', published, 'alice')).status, 200);
+  await db.doc(`groups/${groupId}/posts/one`).update({ attachments: [published] });
+  assert.equal((await request('GET', published, 'teacher')).status, 200);
+  // Revocation still overrides the attachment reference.
+  await db.doc('schools/pu/members/teacher').update({ status: 'inactive' });
+  assert.equal((await request('GET', published, 'teacher')).status, 403);
 });
 
 test('HTTP submission privacy, new filenames and manager cover updates remain supported', { timeout: 30_000 }, async () => {

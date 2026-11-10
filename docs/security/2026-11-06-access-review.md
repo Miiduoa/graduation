@@ -415,3 +415,11 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。此限制會讓歷史貼文只有檔案存在但未儲存 `attachments` 的連結對其他組員 fail-closed；發布前須在隔離資料確認此相容性，不能繞過檢查。
 
 新增 shared authorization、Web 惰性 Storage 完整 upload→finalize→download、Functions GCS 惰性物件回歸：合法作者預覽、原附件正常分享、同貼文 sibling 草稿與 manager 猜路徑拒絕、撤銷校籍拒絕。這是**開發分支修補**，尚非正式已發布／舊 bearer 或 signed URL 已撤銷的證據；必須以精確 head 的 CI、CodeQL、指定 App 5504170 審查與獨立 staging 發布相容驗證為準。遵守 E 校園暫停及未授權 npm/pnpm audit 限制。
+
+## 2026-11-10：修正 #569 精確 head 的 Firestore Rules emulator fixture（待新 CI）
+
+在 PR #569 的精確 head `d0d18389fcef74d6ed23c77929db4b2ffefa5da4`，主 CI [#42695872683](https://github.com/Miiduoa/graduation/actions/runs/42695872683) 已完成但**失敗**：Firestore Rules 270 項中 269 通過、1 失敗；其餘 Functions、Web、Mobile、Security Gates、Assistant Integration、Lint/Type、Build Web、Course access review 與 CodeQL 均成功。失敗案例位於 `backend/functions/privateGroupFiles.emulator.cjs:130`，合法 instructor 對已上傳貼文檔案 GET 預期 200，實際 403。
+
+原因是前輪新增「同組其他成員只可讀取貼文 `attachments` 明確引用之檔案」後，emulator 的共用貼文 fixture 仍僅建立 `{authorId: 'alice'}` 而**未列出實際已公開的 `notes.pdf`**。新的共用授權正確拒絕 instructor，所以本次僅在 fixture 加入精確附件引用，未放寬生產授權。另新增實際 emulator HTTP 回歸：合法已引用附件同組與 instructor 可讀、同貼文尚未引用草稿僅作者可讀、移除引用後其他成員立即拒絕、重新引用後恢復、校籍 inactive 後仍拒絕。
+
+此處是**測試資料修復，不宣稱已解決新的正式漏洞**。本次新的精確提交、Firebase emulator 及完整 CI 須另外確認；舊 head 的成功項目不得替代新 head。維持隔離測試、E 校園停用、禁止未授權 npm/pnpm audit，未合併 main、部署、migration、金鑰或正式 token 清理。GCS 舊 URL、Supabase 已簽 URL、真實隔離 staging、minimatch 相容性與指定 App 5504170 精確 head 審查仍為未解除阻擋。
