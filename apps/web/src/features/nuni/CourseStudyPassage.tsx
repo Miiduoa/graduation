@@ -37,7 +37,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [readAloudRate, setReadAloudRate] = useState(0.95);
   // Even after an AI explanation, let the learner hear the exact source again.
   // The rate stays in this passage while the selected reader is remounted.
-  const [readAloudTarget, setReadAloudTarget] = useState<'source' | 'explanation'>('explanation');
+  const [readAloudTarget, setReadAloudTarget] = useState<'source' | 'explanation' | 'all-steps'>('explanation');
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
@@ -58,6 +58,18 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const result = selected?.response;
   const activeStepIndex = stepSelection?.lessonId === selected?.id ? stepSelection?.index ?? 0 : 0;
   const activeStep = result?.steps?.[activeStepIndex];
+  // The student can listen to the entire cited teaching sequence in one gesture.
+  // Legacy lessons without structured steps continue using the ordinary reader.
+  const hasTeachingSteps = !!result?.steps?.length;
+  const narrationTarget = readAloudTarget === 'all-steps' && !hasTeachingSteps
+    ? 'explanation' : readAloudTarget;
+  const narrationText = narrationTarget === 'source' ? passage.text
+    : narrationTarget === 'all-steps'
+      ? (result?.steps ?? []).map((step, index) =>
+        `第 ${index + 1} 步：${step.title}。教材原文：${step.sourceQuote}。${step.explanation}`).join('\n')
+      : activeStep?.explanation ?? result?.explanation ?? passage.text;
+  // Browsing highlighted citations should not interrupt the whole narration.
+  const narrationKey = `${selected?.id ?? 'source'}:${narrationTarget}:${narrationTarget === 'explanation' ? activeStepIndex : 'whole'}`;
   const displayedQuote = activeStep?.sourceQuote ?? result?.sourceQuote;
   const evidenceKey = JSON.stringify([mode, selected?.id ?? null, activeStepIndex, displayedQuote ?? null]);
   const evidenceOccurrence = evidencePosition?.key === evidenceKey ? evidencePosition.occurrence : 0;
@@ -161,15 +173,18 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       </blockquote>
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
       {result && !busy && <label className={styles.field}>朗讀內容
-        <select value={readAloudTarget} onChange={(event) =>
-          setReadAloudTarget(event.target.value as 'source' | 'explanation')}>
+        <select value={narrationTarget} onChange={(event) =>
+          setReadAloudTarget(event.target.value as 'source' | 'explanation' | 'all-steps')}>
           <option value="explanation">目前講解</option>
+          {hasTeachingSteps && <option value="all-steps">全部步驟與引句</option>}
           <option value="source">教材原文</option>
         </select>
       </label>}
-      {!busy && <StudyReadAloud key={`${selected?.id ?? 'source'}:${activeStepIndex}:${readAloudTarget}`}
-        text={readAloudTarget === 'source' ? passage.text : activeStep?.explanation ?? result?.explanation ?? passage.text}
-        label={readAloudTarget === 'source' || !result ? '朗讀原文' : activeStep ? '朗讀這一步' : '朗讀這段講解'}
+      {!busy && <StudyReadAloud key={narrationKey}
+        text={narrationText}
+        label={narrationTarget === 'source' || !result ? '朗讀原文'
+          : narrationTarget === 'all-steps' ? '朗讀全部步驟與引句'
+            : activeStep ? '朗讀這一步' : '朗讀這段講解'}
         onSpeakingChange={setSpeaking}
         rate={readAloudRate} onRateChange={setReadAloudRate} />}
       <section className={styles.personalNotes} aria-label="本段學習筆記">

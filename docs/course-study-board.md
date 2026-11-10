@@ -613,3 +613,9 @@ v1 舊檔還原、v2 保存後重開與步驟／公式完整保留，以及還�
 ### 2026-11-11：修復 AI／原文朗讀切換的 Web CI 回歸
 
 精確 head `f5b63cc` 的 [CI #42905534526](https://github.com/Miiduoa/graduation/actions/runs/42905534526) 已完成，Web Tests job `130142432806` **1 項失敗（12,648 項通過、63 項略過）**，其餘 Build Web/Mobile、Lint/TypeCheck、Security Gates、Mobile Tests、Functions、Assistant Integration、CodeQL 與 Course access review 皆通過。真實日誌定位到 `CourseStudyPanel.test.tsx:148`：在剛切換到 AI 講解後，測試點擊朗讀按鈕即讀取 `spoken.mock.calls[0][0]`，但語音播放尚未被呼叫，造成 TypeError。首次修補嘗試在新掛載的朗讀按鈕尚未就緒時立即按「重新檢查中文語音」，但 [CI #42915548722](https://github.com/Miiduoa/graduation/actions/runs/42915548722) 的 Web Tests job `130176905623` 再次失敗：當下畫面尚顯示「此瀏覽器未提供語音朗讀功能」，代表安裝狀態的 mount effect **尚未完成**，因此手動重試按鈕也尚未出現。現在在已有本機中文聲音的整合測試中，先等待朗讀按鈕解除 disabled，才點擊並等待實際播放；「後續安裝聲音、手動重試」由 `StudyReadAloud.test.tsx` 的獨立模擬瀏覽器測試驗證，不將初次渲染未就緒誤當成語音清單失敗。切換原文也採相同流程；保留原文／講解逐字對照、0.8 倍語速與私人筆記斷言；若永遠無法偵測本機聲音測試仍會明確失敗，不會偽造語音或啟用遠端服務。此修正只更動整合測試與紀錄，未修改執行時功能或資料格式；新 SHA 仍須完整 CI 重驗，不等於 iOS／Android 真機、App 審查、Maestro 或 Ahaboard 同機對照。
+
+
+### 2026-11-11：整輪逐步講解可連續朗讀並核對原文引句
+
+- 結構化 AI 教學增加「全部步驟與引句」朗讀內容選項，用裝置上已安裝的中文語音依序讀出每步標題、教材逐字引句和解釋；不用每步重按朗讀，也不為朗讀重新生成 AI。朗讀期間切換畫面上標示的教學步驟不會中斷；改回教材原文則停止先前播放，保留原本 0.8／0.95／1.1 倍速度與筆記。
+- 舊版沒有逐步資料的講解不顯示這個選項。新增模擬瀏覽器整合測試，確認引句順序、切換不中斷、改讀原文會停止、朗讀速度及筆記保留。不加套件、不用雲端朗讀、不傳私人教材、不變更進度格式；尚非 iOS Safari／Android Chrome、VoiceOver／TalkBack 真機實測、WebGPU 中文理解正確率或 Ahaboard 同機比較。PR 保持 Draft。
