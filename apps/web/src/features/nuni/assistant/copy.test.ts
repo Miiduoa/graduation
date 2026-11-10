@@ -1,5 +1,11 @@
 import { expect, it } from 'vitest';
-import { inAppHref, isInternalPath, isSafeHref } from './copy';
+import { inAppHref, isInternalPath, isSafeHref, pageLabel } from './copy';
+
+it('distinguishes assistant permissions from the general settings entry', () => {
+  expect(pageLabel('/settings?schoolId=pu')).toBe('設定');
+  expect(pageLabel('/settings?section=assistant&schoolId=pu')).toBe('助理權限');
+  expect(pageLabel('/settings?section=assistant&section=profile')).toBe('設定');
+});
 
 it('accepts campus paths and rejects javascript or protocol-relative hrefs', () => {
   expect(isInternalPath('/food?tenant=a&location=dining-a')).toBe(true);

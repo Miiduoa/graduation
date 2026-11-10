@@ -31,8 +31,8 @@ export function OpenOrderCard({ navigation }: { navigation?: unknown }) {
     let active = true;
     const stop = watchMyOrders(
       { userId: uid, schoolId: school.id },
-      (orders) => {
-        if (active) setOrder(latestOpenOrder(orders));
+      (orders, fromCache) => {
+        if (active) setOrder(fromCache ? null : latestOpenOrder(orders));
       },
       () => {
         if (active) setOrder(null);

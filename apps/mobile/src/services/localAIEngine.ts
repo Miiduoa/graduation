@@ -2729,8 +2729,8 @@ const INFERENCE_RULES: InferenceRule[] = [
   },
   {
     id: 'r15',
-    condition: ['洗��', '壞了'],
-    conclusion: '可以在 APP 上報修，或聯繫宿舍管理員',
+    condition: ['洗衣', '壞了'],
+    conclusion: '可以幫你先存成報修備忘，請依學校管道送出，或聯繫宿舍管理員。',
     domain: 'dormitory',
     confidence: 0.85,
   },

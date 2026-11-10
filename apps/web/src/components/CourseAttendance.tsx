@@ -15,7 +15,8 @@ import { AttendanceQrPresentation } from './AttendanceQrPresentation';
 import { AttendanceCorrectionPanel } from './AttendanceCorrectionPanel';
 import { AttendanceSyncStatus } from './AttendanceSyncStatus';
 import { watchAttendanceLive, type AttendanceLiveState } from '@/lib/watchAttendanceLive';
-import { resolveSchoolPageContext, type SchoolSearchParams } from '@/lib/pageContext';
+import type { SchoolSearchParams } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { useCourseTodayMeeting } from '@/lib/useCourseTodayMeeting';
 import {
   SESSION_FOCUS_MISSING,
@@ -753,7 +754,7 @@ export function CourseAttendance({
   const focusSessionId =
     parseSessionFocusId(query?.get('sessionId')) ||
     parseSessionFocusId(Array.isArray(fromProps) ? fromProps[0] : fromProps);
-  const { schoolSearch } = resolveSchoolPageContext(searchParams);
+  const { schoolSearch } = useBrowsingSchoolPageContext(searchParams);
   const path = `${audience === 'teacher' ? '/teacher' : ''}/course/${encodeURIComponent(courseId)}`;
   const attendanceQuery = (() => {
     const params = new URLSearchParams(

@@ -12,6 +12,9 @@ describe('natural-language campus shortcuts', () => {
     ['我想查公車的到站時間', '/bus'],
     ['宿舍洗衣機報修', '/dormitory'],
     ['要看學期成績', '/grades?tab=semester'],
+    ['開啟成績單', '/grades?tab=semester'],
+    ['開啟我的成績', '/grades?tab=semester'],
+    ['開啟成績回饋', '/grades?tab=feedback'],
     ['找附近的餐廳菜單', '/cafeteria'],
   ])('matches a spoken goal without inventing a service: %s', (utterance, href) => {
     expect(getQuickCampusActions(utterance)[0]?.href).toBe(href);
@@ -41,13 +44,8 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   expect(CAMPUS_QUICK_DESTINATIONS).toHaveLength(34);
   expect([...shortcutSet].every(href => serviceSet.has(href))).toBe(true);
 
-  // The leave workflow added these two routes to main after the original voice
-  // feature was developed. They are not part of the voice allowlist until the
-  // related authenticated interaction and review permissions are integrated.
-  expect(serviceRoutes.filter(href => !shortcutSet.has(href))).toEqual([
-    '/leave',
-    '/leave/review',
-    '/school-lms',
+  expect(serviceRoutes.filter(href => !shortcutSet.has(href)).sort()).toEqual([
+    '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms',
   ]);
 });
 

@@ -83,7 +83,7 @@ function toHybridMenu(row: CafeteriaCatalogMenuItem): MenuItem {
  * 如果不是 PU 學校或沒有 adapter 則回傳 null。
  */
 async function getPUAdapterIfAvailable(schoolId?: string | null): Promise<PUAdapter | null> {
-  const sid = toInternalSchoolId(schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL);
+  const sid = toInternalSchoolId(resolveSchoolId(schoolId));
   if (sid !== 'tw-pu' || !hasAdapter(sid)) return null;
   try {
     const adapter = await getAdapter(sid);
@@ -184,33 +184,10 @@ export function setHybridSourceSchoolContext(schoolId: string | null): void {
   currentSchoolContextId = toPublicSchoolId(schoolId);
 }
 
-const DEFAULT_SCHOOL = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
-
-function inferSchoolIdFromEntityId(id: string): string {
-  if (!id) return DEFAULT_SCHOOL;
-  if (id.startsWith('pu-') || id.startsWith('tc-') || id.startsWith('tw-pu')) {
-    return PROVIDENCE_UNIVERSITY_SCHOOL_ID;
-  }
-  const parts = id.split('-');
-  if (parts.length >= 2 && parts[0] && parts[1]) {
-    return toPublicSchoolId(`${parts[0]}-${parts[1]}`) ?? `${parts[0]}-${parts[1]}`;
-  }
-  return DEFAULT_SCHOOL;
-}
-
-function inferSchoolIdFromUserId(userId: string): string {
-  if (userId.startsWith('pu-')) return PROVIDENCE_UNIVERSITY_SCHOOL_ID;
-  // Accept school-prefixed user ids like "tw-nchu-xxxx".
-  const inferred = inferSchoolIdFromEntityId(userId);
-  return inferred;
-}
-
-function resolveSchoolId(explicitSchoolId?: string, idHint?: string): string {
-  if (explicitSchoolId) return toPublicSchoolId(explicitSchoolId) ?? explicitSchoolId;
-  if (currentSchoolContextId)
-    return toPublicSchoolId(currentSchoolContextId) ?? currentSchoolContextId;
-  if (idHint) return inferSchoolIdFromEntityId(idHint);
-  return DEFAULT_SCHOOL;
+function resolveSchoolId(explicitSchoolId?: string | null): string {
+  const id = toPublicSchoolId(explicitSchoolId === undefined ? currentSchoolContextId : explicitSchoolId);
+  if (!id) throw new Error('請先選擇學校。');
+  return id;
 }
 
 async function fetchWithFallback<T>(
@@ -276,53 +253,55 @@ export const hybridSource: DataSource = {
   listAnnouncements: async (schoolId?: string, options?: QueryOptions): Promise<Announcement[]> => {
     const sid = resolveSchoolId(schoolId);
     return fetchWithFallback(sid, 'listAnnouncements', () =>
-      mockSource.listAnnouncements(schoolId, options),
+      mockSource.listAnnouncements(sid, options),
     );
   },
 
   getAnnouncement: async (id: string, schoolId?: string): Promise<Announcement | null> => {
-    const sid = resolveSchoolId(schoolId, id);
+    const sid = resolveSchoolId(schoolId);
     return fetchWithFallback(sid, 'getAnnouncement', () => mockSource.getAnnouncement(id, sid), id, sid);
   },
 
   listEvents: async (schoolId?: string, options?: QueryOptions): Promise<ClubEvent[]> => {
     const sid = resolveSchoolId(schoolId);
-    return fetchWithFallback(sid, 'listEvents', () => mockSource.listEvents(schoolId, options));
+    return fetchWithFallback(sid, 'listEvents', () => mockSource.listEvents(sid, options));
   },
 
   getEvent: async (id: string): Promise<ClubEvent | null> => {
-    const schoolId = resolveSchoolId(undefined, id);
+    const schoolId = resolveSchoolId();
     return fetchWithFallback(schoolId, 'getEvent', () => mockSource.getEvent(id), id);
   },
 
-  registerEvent: async (eventId: string, userId: string, schoolId?: string): Promise<void> => {
+  registerEvent: async (eventId: string, userId: string, requestedSchoolId?: string): Promise<void> => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     return firebaseSource.registerEvent(
       eventId,
       userId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
 
-  unregisterEvent: async (eventId: string, userId: string, schoolId?: string): Promise<void> => {
+  unregisterEvent: async (eventId: string, userId: string, requestedSchoolId?: string): Promise<void> => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     return firebaseSource.unregisterEvent(
       eventId,
       userId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
 
   listPois: async (schoolId?: string, options?: QueryOptions): Promise<Poi[]> => {
     const sid = resolveSchoolId(schoolId);
-    return fetchWithFallback(sid, 'listPois', () => mockSource.listPois(schoolId, options));
+    return fetchWithFallback(sid, 'listPois', () => mockSource.listPois(sid, options));
   },
 
   getPoi: async (id: string): Promise<Poi | null> => {
-    const schoolId = resolveSchoolId(undefined, id);
+    const schoolId = resolveSchoolId();
     return fetchWithFallback(schoolId, 'getPoi', () => mockSource.getPoi(id), id);
   },
 
   listCafeterias: async (schoolId?: string, options?: QueryOptions): Promise<Cafeteria[]> => {
-    const sid = schoolId ?? currentSchoolContextId ?? undefined;
+    const sid = resolveSchoolId(schoolId);
     if (sid) {
       try {
         return (await fetchCafeteriaLocations(sid)).map(toHybridCafeteria);
@@ -334,7 +313,7 @@ export const hybridSource: DataSource = {
       return await firebaseSource.listCafeterias(sid, options);
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cafeterias:', error);
-      return mockSource.listCafeterias(schoolId, options);
+      return mockSource.listCafeterias(sid, options);
     }
   },
 
@@ -351,11 +330,11 @@ export const hybridSource: DataSource = {
         // Keep the existing Firebase path when the platform catalog is unavailable.
       }
     }
-    return fetchWithFallback(sid, 'listMenu', () => mockSource.listMenus(schoolId, options));
+    return fetchWithFallback(sid, 'listMenu', () => mockSource.listMenus(sid, options));
   },
 
   getMenuItem: async (id: string): Promise<MenuItem | null> => {
-    const schoolId = resolveSchoolId(undefined, id);
+    const schoolId = resolveSchoolId();
     return fetchWithFallback(schoolId, 'getMenuItem', () => mockSource.getMenuItem(id), id);
   },
 
@@ -369,11 +348,11 @@ export const hybridSource: DataSource = {
 
   listCourses: async (schoolId?: string, options?: QueryOptions): Promise<Course[]> => {
     const sid = resolveSchoolId(schoolId);
-    return fetchWithFallback(sid, 'listCourses', () => mockSource.listCourses(schoolId, options));
+    return fetchWithFallback(sid, 'listCourses', () => mockSource.listCourses(sid, options));
   },
 
   getCourse: async (id: string, schoolId?: string): Promise<Course | null> => {
-    const sid = resolveSchoolId(schoolId, id);
+    const sid = resolveSchoolId(schoolId);
     const course = await fetchWithFallback(
       sid, 'getCourse', () => mockSource.getCourse(id, sid), id, sid,
     );
@@ -385,18 +364,20 @@ export const hybridSource: DataSource = {
       return await firebaseSource.searchCourses(searchQuery, sid);
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock searchCourses:', error);
-      return mockSource.searchCourses(searchQuery, schoolId);
+      return mockSource.searchCourses(searchQuery, sid);
     }
   },
-  listCourseSpaces: async (userId: string, schoolId?: string) => {
+  listCourseSpaces: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     // 優先用 PUAdapter（TronClass 資料）
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
       return puAdapter.listCourseSpaces(userId, schoolId);
     }
-    return listWorkspaceCourseSpaces(userId, schoolId ?? currentSchoolContextId ?? undefined);
+    return listWorkspaceCourseSpaces(userId, schoolId);
   },
-  getCourseSpace: async (courseSpaceId: string, userId: string, schoolId?: string) => {
+  getCourseSpace: async (courseSpaceId: string, userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter && courseSpaceId.startsWith('tc-')) {
       return puAdapter.getCourseSpace(courseSpaceId, userId);
@@ -404,10 +385,11 @@ export const hybridSource: DataSource = {
     return getWorkspaceCourseSpace(
       courseSpaceId,
       userId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
-  listCourseModules: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+  listCourseModules: async (userId: string, courseSpaceId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter && (!courseSpaceId || courseSpaceId.startsWith('tc-'))) {
       return puAdapter.listCourseModules(userId, courseSpaceId);
@@ -415,7 +397,7 @@ export const hybridSource: DataSource = {
     return listWorkspaceCourseModules(
       userId,
       courseSpaceId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
   createCourseModule: async (input) => {
@@ -425,7 +407,8 @@ export const hybridSource: DataSource = {
     // TronClass materials are embedded in modules, not separate
     return listWorkspaceCourseMaterials(courseSpaceId, moduleId);
   },
-  listQuizzes: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+  listQuizzes: async (userId: string, courseSpaceId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
       return puAdapter.listQuizzes(userId, courseSpaceId);
@@ -433,15 +416,16 @@ export const hybridSource: DataSource = {
     return listWorkspaceQuizzes(
       userId,
       courseSpaceId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
-  getQuiz: async (quizId: string, userId: string, courseSpaceId?: string, schoolId?: string) => {
+  getQuiz: async (quizId: string, userId: string, courseSpaceId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     return getWorkspaceQuiz(
       quizId,
       userId,
       courseSpaceId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
   createQuiz: async (input) => {
@@ -450,7 +434,8 @@ export const hybridSource: DataSource = {
   submitQuiz: async (input) => {
     return submitCourseSpaceQuiz(input);
   },
-  listAttendanceSessions: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+  listAttendanceSessions: async (userId: string, courseSpaceId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
       return puAdapter.listAttendanceSessions(userId, courseSpaceId);
@@ -458,7 +443,7 @@ export const hybridSource: DataSource = {
     return listWorkspaceAttendanceSessions(
       userId,
       courseSpaceId,
-      schoolId ?? currentSchoolContextId ?? undefined,
+      schoolId,
     );
   },
   startAttendanceSession: async (input) => {
@@ -474,39 +459,43 @@ export const hybridSource: DataSource = {
     }
     return getCourseAttendanceSummary(courseSpaceId);
   },
-  listInboxTasks: async (userId: string, schoolId?: string) => {
+  listInboxTasks: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
       return puAdapter.listInboxTasks(userId);
     }
-    return listWorkspaceInboxTasks(userId, schoolId ?? currentSchoolContextId ?? undefined);
+    return listWorkspaceInboxTasks(userId, schoolId);
   },
   getCourseGradebook: async (courseSpaceId: string) => {
     return getCourseGradebook(courseSpaceId);
   },
-  listNextBestActions: async (userId: string, schoolId?: string) => {
-    return listAgentNextBestActions(userId, schoolId ?? currentSchoolContextId ?? undefined);
+  listNextBestActions: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
+    return listAgentNextBestActions(userId, schoolId);
   },
-  listRiskSnapshots: async (userId: string, schoolId?: string) => {
-    return listAgentRiskSnapshots(userId, schoolId ?? currentSchoolContextId ?? undefined);
+  listRiskSnapshots: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
+    return listAgentRiskSnapshots(userId, schoolId);
   },
   listPulseAggregates: async (schoolId?: string) => {
-    return listAgentPulseAggregates(schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL);
+    return listAgentPulseAggregates(resolveSchoolId(schoolId));
   },
   submitPulseReport: async (input) => {
     return submitAgentPulseReport({
       ...input,
-      schoolId: input.schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL,
+      schoolId: resolveSchoolId(input.schoolId),
     });
   },
   createActionQueueItem: async (input) => {
+    const schoolId = resolveSchoolId(input.schoolId);
     try {
       if (!firebaseSource.createActionQueueItem) {
         throw new Error('Firebase action queue is not available');
       }
       return await firebaseSource.createActionQueueItem({
         ...input,
-        schoolId: input.schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       });
     } catch (error) {
       if (input.sensitivity === 'high' || input.sensitivity === 'sensitive') {
@@ -522,12 +511,13 @@ export const hybridSource: DataSource = {
       }
       return mockSource.createActionQueueItem({
         ...input,
-        schoolId: input.schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL,
+        schoolId,
       });
     }
   },
 
-  listEnrollments: async (userId: string, semester?: string, schoolId?: string) => {
+  listEnrollments: async (userId: string, semester?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     const puEnrollments = await listProvidenceEnrollments(userId, semester, schoolId);
     if (puEnrollments) {
       return puEnrollments;
@@ -537,7 +527,7 @@ export const hybridSource: DataSource = {
       return await firebaseSource.listEnrollments(
         userId,
         semester,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listEnrollments', error);
@@ -545,25 +535,27 @@ export const hybridSource: DataSource = {
       return mockSource.listEnrollments(userId, semester, schoolId);
     }
   },
-  enrollCourse: async (userId: string, courseId: string, semester?: string, schoolId?: string) => {
+  enrollCourse: async (userId: string, courseId: string, semester?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.enrollCourse(
         userId,
         courseId,
         semester,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock enrollCourse:', error);
       return mockSource.enrollCourse(userId, courseId, semester, schoolId);
     }
   },
-  dropCourse: async (enrollmentId: string, userId?: string, schoolId?: string) => {
+  dropCourse: async (enrollmentId: string, userId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.dropCourse(
         enrollmentId,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock dropCourse:', error);
@@ -572,8 +564,7 @@ export const hybridSource: DataSource = {
   },
 
   listGrades: async (userId: string, semester?: string, schoolId?: string): Promise<Grade[]> => {
-    const resolvedSchoolId =
-      resolveSchoolId(schoolId, userId || undefined) || inferSchoolIdFromUserId(userId);
+    const resolvedSchoolId = resolveSchoolId(schoolId);
     if (resolvedSchoolId === 'default') {
       return mockSource.listGrades(userId, semester);
     }
@@ -585,9 +576,10 @@ export const hybridSource: DataSource = {
       semester,
     );
   },
-  getGPA: async (userId: string, schoolId?: string) => {
+  getGPA: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     // 優先用 PUAdapter 計算真實 GPA
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
       try {
         const result = await puAdapter.getGPA(userId);
@@ -597,7 +589,7 @@ export const hybridSource: DataSource = {
       }
     }
     try {
-      return await firebaseSource.getGPA(userId, schoolId ?? currentSchoolContextId ?? undefined);
+      return await firebaseSource.getGPA(userId, schoolId);
     } catch (error) {
       throwPermissionDeniedForPrivateData('getGPA', error);
       console.warn('[HybridSource] Falling back to mock getGPA:', error);
@@ -662,7 +654,7 @@ export const hybridSource: DataSource = {
     return fetchWithFallback(
       sid,
       'searchLibraryBooks',
-      () => mockSource.searchBooks(query, schoolId, options),
+      () => mockSource.searchBooks(query, sid, options),
       query,
     );
   },
@@ -674,11 +666,12 @@ export const hybridSource: DataSource = {
       return mockSource.getBook(id);
     }
   },
-  listLoans: async (userId: string, schoolId?: string) => {
+  listLoans: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listLoans(
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listLoans', error);
@@ -686,36 +679,39 @@ export const hybridSource: DataSource = {
       return mockSource.listLoans(userId, schoolId);
     }
   },
-  borrowBook: async (bookId: string, userId: string, schoolId?: string) => {
+  borrowBook: async (bookId: string, userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.borrowBook(
         bookId,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock borrowBook:', error);
       return mockSource.borrowBook(bookId, userId, schoolId);
     }
   },
-  returnBook: async (loanId: string, userId?: string, schoolId?: string) => {
+  returnBook: async (loanId: string, userId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.returnBook(
         loanId,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock returnBook:', error);
       return mockSource.returnBook(loanId, userId, schoolId);
     }
   },
-  renewBook: async (loanId: string, userId?: string, schoolId?: string) => {
+  renewBook: async (loanId: string, userId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.renewBook(
         loanId,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock renewBook:', error);
@@ -723,19 +719,21 @@ export const hybridSource: DataSource = {
     }
   },
 
-  listSeats: async (schoolId?: string, zone?: string) => {
+  listSeats: async (requestedSchoolId?: string, zone?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
-      return await firebaseSource.listSeats(schoolId ?? currentSchoolContextId ?? undefined, zone);
+      return await firebaseSource.listSeats(schoolId, zone);
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock listSeats:', error);
       return mockSource.listSeats(schoolId, zone);
     }
   },
-  listSeatReservations: async (userId: string, schoolId?: string) => {
+  listSeatReservations: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listSeatReservations(
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listSeatReservations', error);
@@ -749,8 +747,9 @@ export const hybridSource: DataSource = {
     date: string,
     startTime: string,
     endTime: string,
-    schoolId?: string,
+    requestedSchoolId?: string,
   ) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.reserveSeat(
         seatId,
@@ -758,19 +757,20 @@ export const hybridSource: DataSource = {
         date,
         startTime,
         endTime,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock reserveSeat:', error);
       return mockSource.reserveSeat(seatId, userId, date, startTime, endTime, schoolId);
     }
   },
-  cancelSeatReservation: async (id: string, userId?: string, schoolId?: string) => {
+  cancelSeatReservation: async (id: string, userId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.cancelSeatReservation(
         id,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cancelSeatReservation:', error);
@@ -780,7 +780,7 @@ export const hybridSource: DataSource = {
 
   listBusRoutes: async (schoolId?: string): Promise<BusRoute[]> => {
     const sid = resolveSchoolId(schoolId);
-    return fetchWithFallback(sid, 'listBusRoutes', () => mockSource.listBusRoutes(schoolId));
+    return fetchWithFallback(sid, 'listBusRoutes', () => mockSource.listBusRoutes(sid));
   },
   getBusRoute: async (id: string) => {
     try {
@@ -791,7 +791,7 @@ export const hybridSource: DataSource = {
     }
   },
   getBusArrivals: async (stopId: string): Promise<BusArrival[]> => {
-    const schoolId = resolveSchoolId(undefined, stopId);
+    const schoolId = resolveSchoolId();
     return fetchWithFallback(
       schoolId,
       'getBusArrivals',
@@ -811,12 +811,13 @@ export const hybridSource: DataSource = {
   deleteCalendarEvent: firebaseSource.deleteCalendarEvent,
   syncCoursesToCalendar: firebaseSource.syncCoursesToCalendar,
 
-  listOrders: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listOrders: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listOrders(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listOrders', error);
@@ -824,12 +825,13 @@ export const hybridSource: DataSource = {
       return mockSource.listOrders(userId, options, schoolId);
     }
   },
-  getOrder: async (id: string, userId?: string, schoolId?: string) => {
+  getOrder: async (id: string, userId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.getOrder(
         id,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock getOrder:', error);
@@ -844,38 +846,41 @@ export const hybridSource: DataSource = {
     id: string,
     status: Order['status'],
     userId?: string,
-    schoolId?: string,
+    requestedSchoolId?: string,
   ) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.updateOrderStatus(
         id,
         status,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock updateOrderStatus:', error);
       return mockSource.updateOrderStatus(id, status, userId, schoolId);
     }
   },
-  cancelOrder: async (id: string, userId?: string, schoolId?: string) => {
+  cancelOrder: async (id: string, userId?: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.cancelOrder(
         id,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cancelOrder:', error);
       return mockSource.cancelOrder(id, userId, schoolId);
     }
   },
-  listTransactions: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listTransactions: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listTransactions(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listTransactions', error);
@@ -925,12 +930,13 @@ export const hybridSource: DataSource = {
       return mockSource.getDormitoryInfo(userId);
     }
   },
-  listRepairRequests: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listRepairRequests: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listRepairRequests(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listRepairRequests', error);
@@ -962,12 +968,13 @@ export const hybridSource: DataSource = {
       return mockSource.cancelRepairRequest(id);
     }
   },
-  listDormPackages: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listDormPackages: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listDormPackages(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listDormPackages', error);
@@ -975,21 +982,23 @@ export const hybridSource: DataSource = {
       return mockSource.listDormPackages(userId, options, schoolId);
     }
   },
-  confirmPackagePickup: async (id: string, schoolId?: string) => {
+  confirmPackagePickup: async (id: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.confirmPackagePickup(
         id,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock confirmPackagePickup:', error);
       return mockSource.confirmPackagePickup(id, schoolId);
     }
   },
-  listWashingMachines: async (schoolId?: string, building?: string) => {
+  listWashingMachines: async (requestedSchoolId?: string, building?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listWashingMachines(
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
         building,
       );
     } catch (error) {
@@ -997,11 +1006,12 @@ export const hybridSource: DataSource = {
       return mockSource.listWashingMachines(schoolId, building);
     }
   },
-  listWashingReservations: async (userId: string, schoolId?: string) => {
+  listWashingReservations: async (userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listWashingReservations(
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listWashingReservations', error);
@@ -1009,33 +1019,36 @@ export const hybridSource: DataSource = {
       return mockSource.listWashingReservations(userId, schoolId);
     }
   },
-  reserveWashingMachine: async (machineId: string, userId: string, schoolId?: string) => {
+  reserveWashingMachine: async (machineId: string, userId: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.reserveWashingMachine(
         machineId,
         userId,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock reserveWashingMachine:', error);
       return mockSource.reserveWashingMachine(machineId, userId, schoolId);
     }
   },
-  cancelWashingReservation: async (id: string, schoolId?: string) => {
+  cancelWashingReservation: async (id: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.cancelWashingReservation(
         id,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cancelWashingReservation:', error);
       return mockSource.cancelWashingReservation(id, schoolId);
     }
   },
-  listDormAnnouncements: async (schoolId?: string, building?: string) => {
+  listDormAnnouncements: async (requestedSchoolId?: string, building?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listDormAnnouncements(
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
         building,
       );
     } catch (error) {
@@ -1044,10 +1057,11 @@ export const hybridSource: DataSource = {
     }
   },
 
-  listPrinters: async (schoolId?: string, options?: QueryOptions) => {
+  listPrinters: async (requestedSchoolId?: string, options?: QueryOptions) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listPrinters(
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
         options,
       );
     } catch (error) {
@@ -1063,12 +1077,13 @@ export const hybridSource: DataSource = {
       return mockSource.getPrinter(id);
     }
   },
-  listPrintJobs: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listPrintJobs: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listPrintJobs(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listPrintJobs', error);
@@ -1084,11 +1099,12 @@ export const hybridSource: DataSource = {
       return mockSource.createPrintJob(data);
     }
   },
-  cancelPrintJob: async (id: string, schoolId?: string) => {
+  cancelPrintJob: async (id: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.cancelPrintJob(
         id,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cancelPrintJob:', error);
@@ -1096,12 +1112,13 @@ export const hybridSource: DataSource = {
     }
   },
 
-  listHealthAppointments: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listHealthAppointments: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listHealthAppointments(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listHealthAppointments', error);
@@ -1117,35 +1134,38 @@ export const hybridSource: DataSource = {
       return mockSource.createHealthAppointment(data);
     }
   },
-  cancelHealthAppointment: async (id: string, schoolId?: string) => {
+  cancelHealthAppointment: async (id: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.cancelHealthAppointment(
         id,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock cancelHealthAppointment:', error);
       return mockSource.cancelHealthAppointment(id, schoolId);
     }
   },
-  rescheduleHealthAppointment: async (id: string, data: any, schoolId?: string) => {
+  rescheduleHealthAppointment: async (id: string, data: any, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.rescheduleHealthAppointment(
         id,
         data,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock rescheduleHealthAppointment:', error);
       return mockSource.rescheduleHealthAppointment(id, data, schoolId);
     }
   },
-  listHealthRecords: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+  listHealthRecords: async (userId: string, options?: QueryOptions, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listHealthRecords(
         userId,
         options,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       throwPermissionDeniedForPrivateData('listHealthRecords', error);
@@ -1153,12 +1173,13 @@ export const hybridSource: DataSource = {
       return mockSource.listHealthRecords(userId, options, schoolId);
     }
   },
-  listHealthTimeSlots: async (departmentId: string, date: string, schoolId?: string) => {
+  listHealthTimeSlots: async (departmentId: string, date: string, requestedSchoolId?: string) => {
+    const schoolId = resolveSchoolId(requestedSchoolId);
     try {
       return await firebaseSource.listHealthTimeSlots(
         departmentId,
         date,
-        schoolId ?? currentSchoolContextId ?? undefined,
+        schoolId,
       );
     } catch (error) {
       console.warn('[HybridSource] Falling back to mock listHealthTimeSlots:', error);

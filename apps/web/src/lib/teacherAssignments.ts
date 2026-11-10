@@ -1,3 +1,4 @@
+import { privateAttachmentPaths } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   doc,
@@ -43,6 +44,7 @@ export type AssignmentDraft = {
 };
 
 export type ReviewedSubmission = {
+  attachments?: string[];
   uid: string;
   content: string;
   submittedAt: string | null;
@@ -196,6 +198,7 @@ export async function loadTeacherSubmissions(
         const row = entry.data();
         return {
           uid: entry.id,
+          attachments: privateAttachmentPaths(row.attachments),
           content: typeof row.content === 'string' ? row.content : '',
           submittedAt: toIso(row.submittedAt),
           score: row.gradePublished === true && typeof row.gradeScore === 'number'

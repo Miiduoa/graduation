@@ -19,6 +19,12 @@ tags:
 - assertNotVisible:
     id: tab-Today
 
+# Also allow this guest flow to run by itself on a fresh installation.
+- runFlow:
+    when:
+      visible: '選擇我的學校'
+    file: ../helpers/select-nthu.yaml
+
 # Keep the tap target clear of the development warning banner at the screen edge.
 # A cold iOS accessibility swipe can exceed 20s; allow subsequent swipes to run.
 - scrollUntilVisible:

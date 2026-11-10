@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { GroupCover } from '@/components/GroupCover';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
 import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
@@ -229,6 +230,12 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
                 <span>{roles[group.role] ?? '成員'}</span>
                 {group.memberCount !== null && <span>{group.memberCount} 位成員</span>}
               </div>
+              <GroupCover
+                key={group.id}
+                groupId={group.id}
+                coverUrl={group.coverUrl}
+                role={group.role}
+              />
               <h2>
                 {group.type === 'course' ? (
                   <Link
@@ -242,7 +249,12 @@ function MemberDirectory({ uid, schoolId, mode }: { uid: string; schoolId: strin
               </h2>
               {group.description && <p className={styles.description}>{group.description}</p>}
               <div className={styles.actions}>
-                {group.type === 'club' && clubEnabled() && <Link className="btn" href={`/groups/${encodeURIComponent(group.id)}/club?schoolId=${encodeURIComponent(schoolId)}`}>社團後台</Link>}
+                {group.type === 'club' && clubEnabled() && ( <Link className="btn"
+                    href={`/groups/${encodeURIComponent(group.id)}/club?schoolId=${encodeURIComponent(schoolId)}`}
+                  >
+                    社團後台
+                  </Link>
+                )}
                 {group.type === 'course' ? (
                   <Link
                     className="btn"
@@ -329,7 +341,10 @@ export function GroupDirectory({
   const { school, ready } = useBrowsingSchoolPageContext(params);
   const { user, loading } = useAuth();
   if (!ready) {
-    return <SiteShell title={mode === 'clubs' ? '我的社團' : '我的群組'}><SchoolScopePlaceholder /></SiteShell>;
+    return ( <SiteShell title={mode === 'clubs' ? '我的社團' : '我的群組'}>
+        <SchoolScopePlaceholder />
+      </SiteShell>
+    );
   }
   return (
     <SiteShell
