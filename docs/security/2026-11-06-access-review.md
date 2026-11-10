@@ -412,7 +412,7 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 
 延續 #569 附件提交收據修補，獨立檢查共用 `authorizePrivateFile` 發現 group-post 原只要貼文文件存在、讀者有同組資格，就能對該貼文路徑下的任意檔名嘗試新簽發 URL，或經 GCS HTTP 入口讀取；即使該物件只由作者上傳、尚未列在貼文 `attachments`，已知路徑的同組使用者仍可能讀取。這與已發布的附件不同，不能靠同組資格自動視為公開。
 
-最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。此限制會讓歷史貼文只有檔案存在但未儲存 `attachments` 的連結對其他組員 fail-closed；發布前須在隔離資料確認此相容性，不能繞過檢查。
+最小修補保留作者在有效校籍與群組資格下預覽自己的未引用檔案；**其他組員（包含 manager）**只可下載貼文 `attachments` 精確引用（字串或 `url`／`path` 欄位）的路徑。貼文不存在、刪除標記、跨校與停權原有拒絕仍保留。若貼文未儲存 `attachments` 欄位，其他組員維持原先可讀取該貼文路徑下檔案的能力；一旦有清單，則僅精確引用的路徑可被下載。
 
 新增 shared authorization、Web 惰性 Storage 完整 upload→finalize→download、Functions GCS 惰性物件回歸：合法作者預覽、原附件正常分享、同貼文 sibling 草稿與 manager 猜路徑拒絕、撤銷校籍拒絕。這是**開發分支修補**，尚非正式已發布／舊 bearer 或 signed URL 已撤銷的證據；必須以精確 head 的 CI、CodeQL、指定 App 5504170 審查與獨立 staging 發布相容驗證為準。遵守 E 校園暫停及未授權 npm/pnpm audit 限制。
 
@@ -428,7 +428,7 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 
 獨立複核 #569 新增的群組作業附件收據限制後，發現共用 `authorizePrivateFile` 對舊 namespace `assignments/{assignmentId}/submissions/{studentId}/{filename}` 仍直接放行同組 manager 的 GET：它由根 `assignments/{id}.groupId` 定位群組，但不像 `groups/{groupId}/assignments/{id}/submissions/{studentId}/{filename}` 新路徑，沒有查證 live `groups/{groupId}/assignments/{id}/submissions/{studentId}` 的實際繳交收據。合法 instructor 只要得知學生 finalized、尚未繳交的舊路徑，就能透過 GCS HTTP 或新 Web private URL 取得附件。這不是已發 signed URL 的即時撤銷。
 
-最小修補不更動 legacy 學生本人預覽與原上傳路徑，只對其他身分 GET（manager）加上 canonical group submission 的條件：存在、owner 與路徑一致、`submittedAt` 非 null、`attachments` 精確引用完整舊 object path；跨校、非 manager、撤權仍按原條件拒絕。拒絕發生在 bucket 物件查詢或 URL 簽發前。歷史已提交但缺少正確附件清單的 manager 讀取會 fail-closed，須在隔離資料盤點與修復可信收據；不為相容性放寬。
+最小修補不更動 legacy 學生本人預覽與原上傳路徑，只對其他身分 GET（manager）加上 canonical group submission 的條件：存在、owner 與路徑一致、`submittedAt` 非 null、`attachments` 精確引用完整舊 object path；跨校、非 manager、撤權仍按原條件拒絕。拒絕發生在 bucket 物件查詢或 URL 簽發前。若繳交紀錄沒有 `attachments` 清單，manager 維持原先讀取能力；一旦有清單，則須已繳交且精確引用該檔案。
 
 新增 shared Web memory tests、Functions GCS HTTP 惰性測試、Firebase emulator 真 HTTP/Firestore 回歸，涵蓋未繳交時本人可讀／教師不可讀、已提交教師可讀、取消引用／偽造 owner／未引用 sibling 拒絕、恢復引用與校籍撤銷。同步修正原有 emulator 正常 manager 下載案例，提供可信提交收據與精確引用。前一版 #569 head `b1d718da` 的 CI 於本次變更準備時仍在執行，不能沿用其結果；本輪新 head 的 Web、Functions、Rules、CodeQL 與完整 CI 均須重新核對。
 

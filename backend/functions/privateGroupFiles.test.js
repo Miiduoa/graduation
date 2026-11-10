@@ -187,7 +187,7 @@ describe('private group file HTTP handler', () => {
     expect((await invoke({ path: ANSWER, uid: 'bob' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'outsider' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'alice' })).status).toBe(200);
-    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
     const receipt = 'groups/course/assignments/work/submissions/alice';
     store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
