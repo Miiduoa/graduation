@@ -139,7 +139,7 @@ it.each([
   expect(screen.queryByRole('button', { name: '私下回覆' })).toBeNull();
 });
 
-it('keeps the reply action off older stories and stories published with replies disabled', () => {
+it('offers replies for older stories and hides replies only when explicitly disabled', async () => {
   const viewer = position();
   const { allowReplies, ...legacy } = viewer.group.stories[0];
   expect(allowReplies).toBe(true);
@@ -149,7 +149,13 @@ it('keeps the reply action off older stories and stories published with replies 
       author="阿雅"
     />,
   );
-  expect(screen.queryByRole('button', { name: '私下回覆' })).toBeNull();
+  expect(screen.getByRole('button', { name: '私下回覆' })).toBeTruthy();
+  send.mockResolvedValueOnce('dm_pu_reader_writer');
+  const input = compose();
+  fireEvent.change(input, { target: { value: '舊限動也能回覆' } });
+  await act(async () => fireEvent.submit(input.form!));
+  expect(send).toHaveBeenCalledOnce();
+  expect(screen.getByRole('status').textContent).toBe('回覆已送出');
   rerender(<StoryViewer viewer={position('reader', 'one', false)} author="阿雅" />);
   expect(screen.queryByRole('button', { name: '私下回覆' })).toBeNull();
 });

@@ -164,12 +164,26 @@ test.each([
   expect(mockSend).not.toHaveBeenCalled();
 });
 
-test.each([undefined, false])('a story with allowReplies=%s has no reply entry', (allowReplies) => {
+test('a story with replies explicitly disabled has no reply entry', () => {
+  const allowReplies = false;
   const view = render(
     <Shelf rows={[{ ...story, allowReplies, expiresAt: Date.now() + 120000 }]} />,
   );
   fireEvent.press(view.getByText('開啟bob'));
   expect(view.queryByText('私訊回覆')).toBeNull();
+});
+
+test('a legacy story without allowReplies can send a reply', async () => {
+  const { allowReplies, ...legacy } = story;
+  expect(allowReplies).toBe(true);
+  const view = render(<Shelf rows={[{ ...legacy, expiresAt: Date.now() + 120000 }]} />);
+  fireEvent.press(view.getByText('開啟bob'));
+  fireEvent.press(view.getByText('私訊回覆'));
+  fireEvent.changeText(view.getByLabelText('私訊回覆內容'), '舊限動也能回覆');
+  mockSend.mockResolvedValueOnce({ data: { conversationId: 'dm_pu_alice_bob', messageId: 'm1' } });
+  await act(async () => fireEvent.press(view.getByText('傳送私訊')));
+  expect(mockSend).toHaveBeenCalledTimes(1);
+  expect(view.getByText('已送出 · 查看私訊')).toBeTruthy();
 });
 
 test('opens the confirmed private conversation, never a receipt for a different thread', async () => {

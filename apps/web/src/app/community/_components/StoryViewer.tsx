@@ -41,7 +41,7 @@ export function StoryViewer({
   const failedVideo = video && (!mediaUrl || failedId === story.id);
   const scope = JSON.stringify([viewer.viewerUid, story.schoolId, story.authorUid, story.id]);
   const canReply =
-    story.allowReplies === true &&
+    story.allowReplies !== false &&
     !!viewer.viewerUid &&
     viewer.viewerUid !== story.authorUid &&
     !viewer.isOwner &&

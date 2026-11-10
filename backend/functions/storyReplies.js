@@ -119,7 +119,7 @@ function createReplyToCampusStory({ db }) {
       if (
         source?.schoolId !== schoolId ||
         source.authorUid !== authorUid ||
-        source.allowReplies !== true ||
+        source.allowReplies === false ||
         !Number.isFinite(source.expiresAt) ||
         source.expiresAt <= Date.now()
       ) {

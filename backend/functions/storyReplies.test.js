@@ -53,6 +53,15 @@ test('creates one private text message, retaining only the story identifiers', a
   ]);
 });
 
+test.each([undefined, null, 'true', 0])('allows legacy stories with allowReplies=%s', async (allowReplies) => {
+  const legacy = { ...story, expiresAt: Date.now() + 60000 };
+  if (allowReplies === undefined) delete legacy.allowReplies;
+  else legacy.allowReplies = allowReplies;
+  store.docs.set('campusStories/story-1', legacy);
+  const receipt = await send();
+  expect(store.docs.get(`${thread}/messages/${receipt.messageId}`).content).toBe('明天還有嗎？');
+});
+
 test('reuses the DM without resetting read state and never bumps the preview on replay', async () => {
   store.docs.set(thread, {
     type: 'dm',
@@ -88,7 +97,6 @@ test.each([
   ['friendBlocks/alice_bob', {}],
   ['friendBlocks/bob_alice', {}],
   ['campusStories/story-1', { ...story, allowReplies: false, expiresAt: 9e12 }],
-  ['campusStories/story-1', { authorUid: 'bob', schoolId: 'pu', expiresAt: 9e12 }],
   ['campusStories/story-1', { ...story, expiresAt: 0 }],
   ['campusStories/story-1', { ...story, expiresAt: 'tomorrow' }],
   ['campusStories/story-1', { ...story, expiresAt: Infinity }],

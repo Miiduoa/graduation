@@ -185,8 +185,7 @@ service cloud.firestore {
       // get() on a missing conversation denies; skip a separate exists() so
       // DM message creates stay within the 10 get/exists budget after the peer check.
       return isSignedIn()
-        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
-        && isCurrentSchoolMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.get('schoolId', ''));
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
     }
 
     function isAccountAvailable(uid) {
@@ -985,14 +984,12 @@ service cloud.firestore {
     // Conversations (DMs and group chats)
     match /conversations/{conversationId} {
       allow read: if isSignedIn()
-        && request.auth.uid in resource.data.memberIds
-        && isCurrentSchoolMember(resource.data.get('schoolId', ''));
+        && request.auth.uid in resource.data.memberIds;
       allow create: if isSignedIn()
         && request.auth.uid in request.resource.data.memberIds
         && isCurrentSchoolMember(request.resource.data.get('schoolId', ''));
       allow update: if isSignedIn()
         && request.auth.uid in resource.data.memberIds
-        && isCurrentSchoolMember(resource.data.get('schoolId', ''))
         && request.resource.data.get('type', '') == resource.data.get('type', '')
         && (
           !request.resource.data.diff(resource.data).affectedKeys().hasAny([

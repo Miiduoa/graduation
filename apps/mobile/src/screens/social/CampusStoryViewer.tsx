@@ -164,7 +164,7 @@ function StorySlide({
   const [receipt, setReceipt] = useState<{ scope: string; conversationId: string } | null>(null);
   const scope = JSON.stringify([story.authorUid, story.id]);
   const canReply =
-    story.allowReplies === true &&
+    story.allowReplies !== false &&
     !group.isMine &&
     !isDemoUid(viewerUid) &&
     !isDemoUid(story.authorUid) &&

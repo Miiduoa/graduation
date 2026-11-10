@@ -1283,53 +1283,81 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.doc('messages/root-restored').set({ ...rootMessage, text: 'restored' }));
   });
 
-  test('transferring school revokes DM reads, sends and edits even if old membership stays active', async () => {
-    const thread = 'conversations/dm_pu_alice_bob';
-    const nested = thread + '/messages/story-reply';
-    const legacy = 'messages/old-reply';
-    await seedFirestore(async (db) => {
-      await db.doc('users/alice').set({ schoolId: 'pu' });
-      await db.doc('users/bob').set({ schoolId: 'pu' });
-      await db.doc('schools/pu/members/alice').set({ status: 'active' });
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-      await db.doc(thread).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
-      await db.doc(nested).set({
-        conversationId: 'dm_pu_alice_bob', senderId: 'alice', content: '校內限動私訊',
-        storyReplyTo: { storyId: 'old-story', authorUid: 'alice' }, readBy: ['alice'],
+  for (const [label, profile, membership] of [
+    ['transferred with old active membership', { schoolId: 'other' }, { status: 'active' }],
+    ['legacy profile without schoolId', {}, { status: 'active' }],
+    ['inactive old school membership', { schoolId: 'other' }, { status: 'inactive' }],
+  ]) {
+    test(`existing DM members retain reads, sends and edits: ${label}`, async () => {
+      const thread = 'conversations/dm_pu_alice_bob';
+      const nested = thread + '/messages/history';
+      const legacy = 'messages/old-reply';
+      await seedFirestore(async (db) => {
+        await db.doc('users/alice').set({ schoolId: 'pu' });
+        await db.doc('users/bob').set(profile);
+        await db.doc('schools/pu/members/bob').set(membership);
+        await db.doc(thread).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
+        await db.doc(nested).set({
+          senderId: 'alice', content: '歷史訊息', readBy: ['alice'],
+          storyReplyTo: { storyId: 'old-story', authorUid: 'alice' },
+        });
+        await db.doc(legacy).set({
+          conversationId: 'dm_pu_alice_bob', senderId: 'alice', text: '舊版私訊', readBy: ['alice'],
+        });
       });
-      await db.doc(legacy).set({
-        conversationId: 'dm_pu_alice_bob', senderId: 'alice', text: '舊版私訊', readBy: ['alice'],
-      });
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      const alice = testEnv.authenticatedContext('alice').firestore();
+      await assertSucceeds(bob.doc(thread).get());
+      await assertSucceeds(bob.collection('conversations').where('memberIds', 'array-contains', 'bob').get());
+      await assertSucceeds(bob.doc(nested).get());
+      await assertSucceeds(bob.doc(nested).update({ readBy: ['alice', 'bob'] }));
+      await assertSucceeds(bob.doc(nested).update({ reactions: { bob: '❤️' } }));
+      const sent = bob.doc(thread + '/messages/new');
+      await assertSucceeds(sent.set({ senderId: 'bob', content: 'hello' }));
+      await assertSucceeds(sent.update({ recalledAt: serverTimestamp() }));
+      await assertSucceeds(bob.doc(thread).update({ lastReadBy: { bob: 10 } }));
+      await assertSucceeds(bob.doc(thread).update({ lastMessageText: 'hello' }));
+      await assertSucceeds(bob.doc(legacy).get());
+      await assertSucceeds(bob.doc(legacy).update({ readBy: ['alice', 'bob'] }));
+      await assertSucceeds(bob.doc('messages/new').set({
+        conversationId: 'dm_pu_alice_bob', senderId: 'bob', text: 'hello',
+      }));
+      // Both directions remain available when the peer has transferred or lacks schoolId.
+      await assertSucceeds(alice.doc(thread + '/messages/from-alice').set({ senderId: 'alice', content: 'hello' }));
+      await assertSucceeds(alice.doc('messages/from-alice').set({
+        conversationId: 'dm_pu_alice_bob', senderId: 'alice', text: 'hello',
+      }));
+      for (const status of [null, 'deleted', 'disabled', 'suspended', 'inactive']) {
+        const uid = status ? 'bob' : 'outsider';
+        if (status) await seedFirestore(db => db.doc('users/bob').set({ ...profile, status }));
+        const denied = testEnv.authenticatedContext(uid).firestore();
+        await assertFails(denied.doc(thread).get());
+        await assertFails(denied.doc(nested).get());
+        await assertFails(denied.doc(legacy).get());
+        await assertFails(denied.doc(nested).update({ readBy: ['alice', 'bob', uid] }));
+        await assertFails(denied.doc(thread).update({ lastMessageText: 'denied' }));
+        await assertFails(denied.doc(thread + '/messages/denied').set({ senderId: uid, content: 'denied' }));
+        await assertFails(denied.doc(legacy).update({ readBy: ['alice', 'bob', uid] }));
+        await assertFails(denied.doc('messages/denied').set({
+          conversationId: 'dm_pu_alice_bob', senderId: uid, text: 'denied',
+        }));
+      }
     });
-    const bob = testEnv.authenticatedContext('bob').firestore();
-    await assertSucceeds(bob.doc(thread).get());
-    await assertSucceeds(bob.doc(nested).get());
-    await assertSucceeds(bob.doc(legacy).get());
+  }
 
-    await seedFirestore(async (db) => {
-      await db.doc('users/bob').set({ schoolId: 'other' });
-    });
-    await assertFails(bob.doc(thread).get());
-    await assertFails(bob.doc(thread).update({ lastMessageText: 'forged' }));
-    await assertFails(bob.doc(nested).get());
-    await assertFails(bob.doc(nested).update({ readBy: ['alice', 'bob'] }));
-    await assertFails(bob.doc(thread + '/messages/new').set({ senderId: 'bob', content: 'hello' }));
-    await assertFails(bob.doc(legacy).get());
-    await assertFails(bob.doc(legacy).update({ readBy: ['alice', 'bob'] }));
-    await assertFails(bob.doc('messages/forged').set({
-      conversationId: 'dm_pu_alice_bob', senderId: 'bob', text: 'hello',
+  test('new conversations require current school even with an old active membership', async () => {
+    const bob = testEnv.authenticatedContext('bob').firestore();
+    await seedFirestore(db => db.doc('schools/pu/members/bob').set({ status: 'active' }));
+    for (const profile of [{ schoolId: 'other' }, {}]) {
+      await seedFirestore(db => db.doc('users/bob').set(profile));
+      await assertFails(bob.doc('conversations/new').set({
+        type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'],
+      }));
+    }
+    await seedFirestore(db => db.doc('users/bob').set({ schoolId: 'pu' }));
+    await assertSucceeds(bob.doc('conversations/new').set({
+      type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'],
     }));
-    await seedFirestore(async (db) => {
-      await db.doc('users/bob').set({ schoolId: 'pu' });
-      await db.doc('schools/pu/members/bob').set({ status: 'inactive' });
-    });
-    await assertFails(bob.doc(thread).get());
-    await assertFails(bob.doc(nested).get());
-    await seedFirestore(async (db) => {
-      await db.doc('schools/pu/members/bob').set({ status: 'active' });
-    });
-    await assertSucceeds(bob.doc(thread).get());
-    await assertSucceeds(bob.doc(nested).get());
   });
 
   test('deny conversation creation when schoolId is missing', async () => {
