@@ -81,6 +81,9 @@ export default function MeAiFirstScreen() {
           />
         ) : null}
       </AISection>
+      <AISection title="社群經營">
+        {!!uid && <AIRow title="我的社群頁" subtitle="整理貼文、相片、影片與私人收藏" onPress={() => rootNavigateNested('Today', 'CreatorProfile', { memberUid: uid })} />}
+      </AISection>
       <AISection title="學校帳號資料">
         <AICard title={auth.profileLoading ? '正在讀取帳號資料' : '目前登入帳號'}>
           <Text style={{ color: aiTokens.textSecondary, lineHeight: 22 }}>
