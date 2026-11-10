@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { studySourceFromDocument, type TutorExplanation } from '@/lib/studyTutor';
 import { CourseStudyPanel } from './CourseStudyPanel';
+import { parseStudyPracticeCheckpoint } from './courseStudyPracticeCheckpoint';
 import { parseCourseStudyProgress, serializeCourseStudyProgress, type CourseStudyProgressData } from './courseStudyProgress';
 import { appendStudyLesson, emptyStudyPassage, updateStudyMode } from './courseStudySession';
 
@@ -158,11 +159,20 @@ it('keeps all original attempts, answers, branches and review markers unchanged 
   fireEvent.click(screen.getByRole('button', { name: '略過這題' }));
   expect(screen.getByRole('heading', { name: '本輪練習摘要' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
-  fireEvent.click(screen.getByRole('button', { name: '儲存閱讀進度' }));
+  // This finished round is paused on the reading screen until explicitly ended.
+  // The only offered backup must retain the round AND keep reading notes unchanged.
+  expect(screen.queryByRole('button', { name: '儲存閱讀進度' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '儲存暫停的練習與閱讀進度' }));
   const raw = await readBlob(downloads.create.mock.calls[0][0] as Blob);
-  expect(JSON.parse(raw).version).toBe(2);
-  expect(parseCourseStudyProgress(raw, scope).passages).toEqual(original.passages);
-  expect(raw).not.toContain('這輪獨立的主鍵回答');
+  const saved = parseStudyPracticeCheckpoint(raw, scope);
+  expect(saved.progress.passages).toEqual(original.passages);
+  expect(saved.round.finished).toBe(true);
+  expect(saved.round.cards).toHaveLength(2);
+  expect(saved.round.responses[saved.round.cards[0].id]).toMatchObject({
+    attempt: '這輪獨立的主鍵回答',
+    outcome: 'understood',
+  });
+  expect(saved.round.responses[saved.round.cards[1].id].outcome).toBe('skipped');
   expect(screen.getByRole('heading', { name: '待複習 · 3 段' })).toBeTruthy();
   expect(mocks.run).not.toHaveBeenCalled();
 });
