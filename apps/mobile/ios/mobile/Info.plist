@@ -55,6 +55,12 @@
     <string>需要相機權限以掃描 QR 碼</string>
     <key>NSFaceIDUsageDescription</key>
     <string>使用 Face ID 進行安全驗證</string>
+    <key>NFCReaderUsageDescription</key>
+    <string>讀取對方出示的學生證，核對學校與學號。</string>
+    <key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+    <array>
+      <string>F04E554E490101</string>
+    </array>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>需要位置權限以提供校園導航</string>
     <key>NSLocationAlwaysUsageDescription</key>

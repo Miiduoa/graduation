@@ -48,7 +48,7 @@ it('keeps 34 navigable voice shortcuts inside the expanded service catalog', () 
   // navigation contract. Publishing a Web service does not create a native route
   // or authorize an authenticated action through speech.
   expect(serviceRoutes.filter(href => !shortcutSet.has(href)).sort()).toEqual([
-    '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms', '/social',
+    '/classroom/material-bookmarks', '/leave', '/leave/review', '/orders', '/school-lms', '/social', '/student-card',
   ]);
 });
 
