@@ -522,6 +522,40 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     }
   }
 
+  // Some mobile browsers deny the first clipboard request until permissions or
+  // app focus change. Retry only after another explicit tap, using the exact
+  // previously validated backup without regenerating or replacing the lesson.
+  async function retryManualCopy() {
+    const text = manualCopyText;
+    if (text === null) return;
+    const request = ++copyRequest.current;
+    if (!navigator.clipboard?.writeText) {
+      setDownloadError('這個瀏覽器仍無法直接複製；請全選下方文字後使用裝置的複製功能。');
+      manualCopyInput.current?.focus();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      // Editing the lesson, closing the fallback or another copy request must
+      // invalidate late permission responses, including a late success.
+      if (copyRequest.current !== request) return;
+      setManualCopyText(null);
+      setDownloadError('');
+      setDownloadStatus(manualCopyKind === 'notes'
+        ? '已複製本次筆記到剪貼簿；內容含教材及個人筆記，請留意貼上位置。'
+        : manualCopyKind === 'practice'
+          ? '已複製本輪練習紀錄到剪貼簿；內容含個人作答，請留意貼上位置。'
+          : '已複製完整進度 JSON；請貼入純文字檔並儲存為 .json。內容含教材、筆記與參考回答，請勿公開分享。');
+      const target = manualCopyReturnTarget.current;
+      (target?.isConnected ? target : heading.current)?.focus();
+      manualCopyReturnTarget.current = null;
+    } catch {
+      if (copyRequest.current !== request) return;
+      setDownloadError('仍無法直接複製。請全選下方文字並使用裝置的複製功能；目前備份內容沒有遺失。');
+      manualCopyInput.current?.focus();
+    }
+  }
+
   function copyReadingProgress() {
     if (!source) return;
     try {
@@ -893,6 +927,8 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
               onFocus={(event) => selectManualCopyText(event.currentTarget)}
               onClick={(event) => selectManualCopyText(event.currentTarget)} />
           </label>
+          <button type="button" className={styles.button}
+            onClick={() => { void retryManualCopy(); }}>再次嘗試複製到剪貼簿</button>
           <button type="button" className={styles.button} onClick={() => {
             manualCopyInput.current?.focus();
             if (manualCopyInput.current) selectManualCopyText(manualCopyInput.current);
@@ -901,6 +937,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
             內容可能含教材與個人試答，請注意貼上位置。</p>
           <button type="button" className={styles.button} onClick={() => {
             const target = manualCopyReturnTarget.current;
+            copyRequest.current += 1;
             setManualCopyText(null);
             (target?.isConnected ? target : heading.current)?.focus();
             manualCopyReturnTarget.current = null;

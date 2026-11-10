@@ -1187,6 +1187,65 @@ it('offers a selectable reading-note fallback when mobile clipboard support is m
   }
 });
 
+it('retries a denied mobile JSON copy without changing the validated backup or note', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('permission denied'))
+    .mockResolvedValueOnce(undefined);
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '先完成的手機筆記' } });
+    const trigger = screen.getByRole('button', { name: '複製閱讀進度 JSON' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const region = await screen.findByRole('region', { name: '手動複製閱讀進度 JSON' });
+    const manual = screen.getByRole('textbox', { name: '可選取的閱讀進度 JSON' }) as HTMLTextAreaElement;
+    const snapshot = manual.value;
+    expect(parseCourseStudyProgress(snapshot, scope).passages['0:0'].note).toBe('先完成的手機筆記');
+    expect(region.contains(manual)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull());
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText.mock.calls[0][0]).toBe(snapshot);
+    expect(writeText.mock.calls[1][0]).toBe(snapshot);
+    expect(screen.getByText(/已複製完整進度 JSON/)).toBeTruthy();
+    expect(document.activeElement).toBe(trigger);
+    expect(inputValue(noteLabel)).toBe('先完成的手機筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
+it('ignores a delayed clipboard success after closing the manual backup fallback', async () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+  let resolveRetry!: () => void;
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('permission denied'))
+    .mockImplementationOnce(() => new Promise<void>((resolve) => { resolveRetry = resolve; }));
+  Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(noteLabel), { target: { value: '尚未離開的原始筆記' } });
+    const trigger = screen.getByRole('button', { name: '複製閱讀進度 JSON' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await screen.findByRole('region', { name: '手動複製閱讀進度 JSON' });
+    fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+    expect(writeText).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    await act(async () => { resolveRetry(); });
+    expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
+    expect(screen.queryByText(/已複製完整進度 JSON/)).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(inputValue(noteLabel)).toBe('尚未離開的原始筆記');
+    expect(mocks.run).not.toHaveBeenCalled();
+  } finally {
+    if (original) Object.defineProperty(window.navigator, 'clipboard', original);
+    else Reflect.deleteProperty(window.navigator, 'clipboard');
+  }
+});
+
 it('keeps private reading backup text accessible if mobile textarea selection APIs reject the action', () => {
   const originalClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
   Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: undefined });
