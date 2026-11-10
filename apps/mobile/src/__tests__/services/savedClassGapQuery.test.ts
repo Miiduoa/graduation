@@ -270,6 +270,38 @@ describe('saved class gap answer', () => {
     }).content).toContain('沒有課間空堂');
   });
 
+  test('rejects calendar rollover in zoned collection and save timestamps', () => {
+    // Date.parse accepts nonexistent days such as February 30 and 24:00 by
+    // shifting them into the next day. Neither can prove a timetable's date.
+    for (const checkedAt of [
+      '2026-02-30T10:00:01Z',
+      '2026-11-31T10:00:01+08:00',
+      '2026-11-06T24:00:00+08:00',
+    ]) {
+      const answer = answerSavedClassGapQuery(today, { ...context, checkedAt }).content;
+      expect(answer).toContain('資料不足');
+      expect(answer).not.toContain('沒有課間空堂');
+      expect(answer).not.toContain('有 2 段');
+    }
+    for (const updatedAt of [
+      '2026-02-30T00:00:00Z',
+      '2026-11-05T24:00:00+08:00',
+    ]) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, updatedAt },
+      }).content;
+      expect(answer).toContain('無法核對空堂');
+      expect(answer).not.toContain('有 2 段');
+    }
+    // Real leap days and a zoned timestamp still work.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, updatedAt: '2024-02-29T10:00:01Z' },
+    }).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery(today, {
+      ...context, checkedAt: '2026-11-06T02:00:01Z',
+    }).content).toContain('有 2 段');
+  });
+
   test('does not treat an ambiguous or malformed collection clock as evidence of free time', () => {
     // A restored snapshot must not change calendar day when the OS timezone changes.
     const ambiguousOrInvalid: unknown[] = [
