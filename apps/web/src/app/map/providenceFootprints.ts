@@ -150,7 +150,7 @@ function outlineNearPoi(outline: readonly [number, number][], place: { lat: numb
  */
 const NON_BUILDING_VOLUMES = new Set([
   'no', 'maybe', 'proposed', 'planned', 'construction', 'demolished', 'destroyed',
-  'ruins', 'roof', 'bridge',
+  'ruins', 'ruined', 'collapsed', 'abandoned', 'disused', 'derelict', 'roof', 'bridge',
 ]);
 // A way can retain building=yes while carrying a lifecycle tag for a removed,
 // abandoned or unfinished building. Treat contradictory tags as needing review:
@@ -159,6 +159,14 @@ const LIFECYCLE_BUILDING_TAGS = [
   'abandoned:building', 'disused:building', 'demolished:building',
   'destroyed:building', 'removed:building', 'razed:building',
   'construction:building', 'proposed:building', 'planned:building',
+  'ruins:building', 'ruined:building',
+] as const;
+// Older tagging also puts the lifecycle state directly on the building,
+// e.g. building=yes + ruins=yes. A verified way ID alone does not prove the
+// original full-height campus volume still exists.
+const LIFECYCLE_STATUS_TAGS = [
+  'abandoned', 'disused', 'demolished', 'destroyed', 'removed',
+  'razed', 'ruins', 'ruined', 'construction', 'proposed', 'planned',
 ] as const;
 
 function isStandingBuilding(value: unknown): boolean {
@@ -176,10 +184,13 @@ function isStandingBuilding(value: unknown): boolean {
     const offset = tags?.[key];
     if (offset !== undefined && !zeroOffset(offset)) return false;
   }
-  return !LIFECYCLE_BUILDING_TAGS.some((tag) => {
+  return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
-    return typeof status === 'string' && status.trim() !== '' &&
-      !['no', 'false', '0'].includes(status.trim().toLowerCase());
+    // OSM lifecycle flags are usually strings. A present but unrecognized
+    // value must not silently certify a standing campus building.
+    return status !== undefined && status !== null &&
+      (typeof status !== 'string' || (status.trim() !== '' &&
+        !['no', 'false', '0'].includes(status.trim().toLowerCase())));
   });
 }
 
