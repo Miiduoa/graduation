@@ -159,6 +159,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: nuni UI design checks
+        run: |
+          node --test scripts/ui-design-gate.test.mjs
+          node scripts/ui-design-gate.mjs --base HEAD^1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
