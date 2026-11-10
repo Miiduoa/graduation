@@ -57,6 +57,9 @@ export function AssistantThread({
   const field = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
   const [showJump, setShowJump] = useState(false);
+  // Suggestion chips may replace the composer, but never destroy a hand-written draft.
+  const [savedDraft, setSavedDraft] = useState<string | null>(null);
+  const lastSuggestion = useRef<string | null>(null);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -94,8 +97,29 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const canSubmit = !pending && !!question.trim() &&
+    (canAnswerAssistantLocally(question) || (consent && ready));
+  function submitQuestion() {
+    // Enter and the button share the same permissions and busy-state guard.
+    if (!canSubmit) return;
+    setSavedDraft(null);
+    lastSuggestion.current = null;
+    onAsk();
+  }
   function applyChip(phrase: string) {
+    if (question.trim() && question !== phrase && lastSuggestion.current !== question) {
+      setSavedDraft(question);
+    }
+    lastSuggestion.current = phrase;
     onQuestion(phrase);
+    field.current?.focus();
+  }
+  function restoreDraft() {
+    if (savedDraft === null) return;
+    const previous = savedDraft;
+    setSavedDraft(null);
+    lastSuggestion.current = null;
+    onQuestion(previous);
     field.current?.focus();
   }
   return (
@@ -132,7 +156,7 @@ export function AssistantThread({
           </div>
         ) : null}
         {turns.map((turn, i) => (
-          <article className={styles.turn} key={i}>
+          <article className={`${styles.turn} ${i === turns.length - 1 ? styles.turnEnter : ''}`} key={i}>
             <div className={`${styles.row} ${styles.rowUser}`}>
               <div className={`${styles.bubble} ${styles.bubbleUser}`}>
                 <p>{turn.question}</p>
@@ -222,6 +246,12 @@ export function AssistantThread({
             ))}
           </div>
         ) : null}
+        {savedDraft !== null ? (
+          <div className={styles.draftRestore} role="group" aria-label="已保留的輸入內容">
+            <span>原本輸入已保留</span>
+            <button type="button" onClick={restoreDraft}>還原原本輸入</button>
+          </div>
+        ) : null}
         <form
           className={styles.composer}
           aria-label="傳送問題"
@@ -229,7 +259,7 @@ export function AssistantThread({
             e.preventDefault();
             followLatest.current = true;
             setShowJump(false);
-            onAsk();
+            submitQuestion();
           }}
         >
           <label htmlFor="assistant-question">問題</label>
@@ -241,7 +271,11 @@ export function AssistantThread({
             maxLength={1000}
             rows={1}
             placeholder="輸入問題"
-            onChange={(e) => onQuestion(e.target.value)}
+            onChange={(e) => {
+              // Manual edits make subsequent chip taps save the newly edited draft.
+              lastSuggestion.current = null;
+              onQuestion(e.target.value);
+            }}
             onKeyDown={(e) => {
               // In Chinese/Japanese IMEs Enter selects a candidate; it is not a send gesture.
               if (e.key === 'Enter' && !e.shiftKey &&
@@ -249,11 +283,11 @@ export function AssistantThread({
                 e.preventDefault();
                 followLatest.current = true;
                 setShowJump(false);
-                onAsk();
+                submitQuestion();
               }
             }}
           />
-          <button className={styles.send} disabled={pending || !question.trim() || (!canAnswerAssistantLocally(question) && (!consent || !ready))}>
+          <button className={styles.send} disabled={!canSubmit}>
             送出
           </button>
         </form>

@@ -105,7 +105,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .turn {
+  .turnEnter {
     animation: assistantTurnAppear var(--motion-fast, 160ms) var(--ease-out, ease-out) both;
   }
 }
@@ -601,6 +601,30 @@
 
 .typing span[aria-hidden='true']:nth-child(3) {
   animation-delay: 0.3s;
+}
+
+.draftRestore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.draftRestore button {
+  min-height: 44px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 .composerDock {
