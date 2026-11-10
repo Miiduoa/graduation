@@ -84,6 +84,9 @@ function CommunityPageInner({ schoolId, schoolSearch }: { schoolId: string; scho
           <Link href={boardsHref} className={styles.secondaryLink}>
             逛逛看板
           </Link>
+          <Link href={`/community/me?schoolId=${encodeURIComponent(schoolId)}`} className={styles.secondaryLink}>
+            我的頁面
+          </Link>
         </div>
       </section>
 

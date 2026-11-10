@@ -36,6 +36,7 @@ import { BoardDetailScreen } from './social/BoardDetailScreen';
 import { PostComposeScreen } from './social/PostComposeScreen';
 import { PostDetailScreen } from './social/PostDetailScreen';
 import { StoryComposeScreen } from './social/StoryComposeScreen';
+import { CreatorProfileScreen } from './social/CreatorProfileScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { CampusGameScreen } from './CampusGameScreen';
 
@@ -126,6 +127,7 @@ export function HomeStack() {
         options={{ title: '發 Story' }}
       />
       <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ title: '貼文' }} />
+      <Stack.Screen name="CreatorProfile" component={CreatorProfileScreen} options={{ title: '校園個人頁' }} />
       <Stack.Screen
         name="SmartCalendarScreen"
         component={UnifiedCalendarScreen}

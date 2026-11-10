@@ -270,6 +270,41 @@ test('scans full-path membership pages, maintains counters and ignores noncanoni
   expect([...state.docs.keys()].filter((key) => key.endsWith('/members/bob'))).toHaveLength(221);
 });
 
+test('deletes creator profiles across schools while preserving other users and noncanonical paths', async () => {
+  const profile = { displayName: 'Alice', bio: 'Public biography' };
+  const otherProfile = { displayName: 'Bob', uid: 'alice' };
+  const preserved = [
+    ['schools/pu/creatorProfiles/bob', otherProfile],
+    ['archives/shared/creatorProfiles/alice', profile],
+    ['schools/pu/archives/shared/creatorProfiles/alice', profile],
+    ['schools/pu/otherProfiles/alice', profile],
+  ];
+  const state = store([
+    ['schools/pu/creatorProfiles/alice', profile],
+    ['schools/other/creatorProfiles/alice', profile],
+    ...preserved,
+  ]);
+
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has('schools/pu/creatorProfiles/alice')).toBe(false);
+  expect(state.docs.has('schools/other/creatorProfiles/alice')).toBe(false);
+  for (const [path, data] of preserved) expect(state.docs.get(path)).toEqual(data);
+  expect(state.auth.deleteUser).toHaveBeenCalledWith('alice');
+});
+
+test('creator profile deletion failures keep Auth available for retry', async () => {
+  const path = 'schools/pu/creatorProfiles/alice';
+  const state = store([[path, { bio: 'Public biography' }]]);
+  state.fail('delete', path);
+
+  await expect(state.handler(request())).rejects.toThrow('unavailable');
+  expect(state.docs.has(path)).toBe(true);
+  expect(state.auth.deleteUser).not.toHaveBeenCalled();
+  expect((await state.handler(request())).success).toBe(true);
+  expect(state.docs.has(path)).toBe(false);
+  expect(state.auth.deleteUser).toHaveBeenCalledTimes(1);
+});
+
 test.each([
   ['groups/g/members/alice', 'group-ownership'],
   ['schools/pu/cafeterias/c/operators/alice', 'merchant-ownership'],
