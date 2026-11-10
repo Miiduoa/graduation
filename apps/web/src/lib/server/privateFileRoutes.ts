@@ -182,6 +182,8 @@ async function issueUpload(
   });
   // Account for time spent obtaining the URL before starting its expiry clock.
   await uploads.confirmTicket(scope.path, uid, runtime.now?.() ?? Date.now());
+  // Storage signing can outlive a revoked membership; do not expose its URL.
+  await authorizePrivateFile(runtime.db, scope, uid, true);
   return { maxBytes, signed };
 }
 
@@ -209,7 +211,8 @@ async function issueDownload(
   ) {
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
   }
-  if (scope.kind === 'story') {
+  const assertCurrentStoryMedia = async () => {
+    if (scope.kind !== 'story') return;
     const snap = await runtime.db.runTransaction(
       async (tx) => tx.get(runtime.db.collection('campusStories').doc(scope.storyId || '')),
       { readOnly: true },
@@ -225,16 +228,18 @@ async function issueDownload(
       },
       nowMs: runtime.now?.(),
     });
-  }
-  return {
-    maxBytes,
-    signed: await runtime.storage.presignGet({
-      key: scope.path,
-      contentType: object.contentType,
-      attachment: scope.kind === 'assignment' || scope.kind === 'group-post',
-      now: runtime.now ? new Date(runtime.now()) : undefined,
-    }),
   };
+  await assertCurrentStoryMedia();
+  const signed = await runtime.storage.presignGet({
+    key: scope.path,
+    contentType: object.contentType,
+    attachment: scope.kind === 'assignment' || scope.kind === 'group-post',
+    now: runtime.now ? new Date(runtime.now()) : undefined,
+  });
+  // Refuse to release a URL if membership or publication changed mid-signing.
+  await authorizePrivateFile(runtime.db, scope, uid, false);
+  await assertCurrentStoryMedia();
+  return { maxBytes, signed };
 }
 
 async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: PrivateFileScope) {
@@ -258,6 +263,8 @@ async function finalizeUpload(runtime: PrivateFileRuntime, uid: string, scope: P
     if (!validType) throw new HttpsError('invalid-argument', 'Unsupported file type or filename');
     throw Object.assign(new Error('File is too large'), { statusCode: 413 });
   }
+  // Object metadata fetch can outlive a school or group revocation.
+  await authorizePrivateFile(runtime.db, scope, uid, true);
   await uploads.finalize(scope.path, uid, object.contentLength, runtime.now?.() ?? Date.now());
   return { path: scope.path, finalized: true, maxBytes };
 }

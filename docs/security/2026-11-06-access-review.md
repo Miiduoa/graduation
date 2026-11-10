@@ -433,3 +433,11 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 新增 shared Web memory tests、Functions GCS HTTP 惰性測試、Firebase emulator 真 HTTP/Firestore 回歸，涵蓋未繳交時本人可讀／教師不可讀、已提交教師可讀、取消引用／偽造 owner／未引用 sibling 拒絕、恢復引用與校籍撤銷。同步修正原有 emulator 正常 manager 下載案例，提供可信提交收據與精確引用。前一版 #569 head `b1d718da` 的 CI 於本次變更準備時仍在執行，不能沿用其結果；本輪新 head 的 Web、Functions、Rules、CodeQL 與完整 CI 均須重新核對。
 
 本修補僅隔離原始碼及合成測試，無正式 GCS/Supabase staging、正式 token 清除、發佈、migration、E 校園連線、未核准 npm/pnpm audit 或 main 合併。仍須指定 App 5504170 審核精確 head；舊 GCS bearer／Supabase signed URL 與歷史資料相容性維持開放風險。
+ 
+## 2026-11-10：簽發／finalize 等待期間撤權競態補強（待新 head CI）
+
+檢查 Web 私有附件 `privateFileRoutes.ts` 發現，簽發 upload/download URL 前已驗權，但向 Storage provider 取得簽章時等待時間可能跨越群組或校籍權限撤銷、貼文附件下架及限動媒體改引用。舊流程仍可能回傳新簽發 URL；finalize 在等待 metadata `head()` 期間同樣沒有最後驗權。此處不是已簽網址的撤銷功能。
+
+最小修補在 `presignPut` 後確認 ticket 再驗權，在 `presignGet` 後再驗權，故事另外重新檢查最新 live `campusStories` 及確切媒體路徑；`finalize` 在 metadata 查詢後再驗權。四項惰性 Supabase + 記憶體 Firestore 新回歸注入簽發／查詢期間的校籍撤銷、群組撤銷、故事改引用、finalize 撤權並預期 403；保留既有正常使用、跨帳號、跨校、提交收據、撤權測試。**此為縮小非原子權限窗口，無法保證最後驗權後瞬間撤權的一致性，也無法撤銷此前已簽發 URL；需要隔離正式 SDK staging 與短效／金鑰輪替演練。**
+
+此次沒有修改正式資料、發表部署、bucket／金鑰、GCS token、migration、E 校園連線或重新執行未授權的 npm/pnpm audit；新 head 及指定 App 5504170 核可須重新確認。

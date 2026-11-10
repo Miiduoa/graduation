@@ -371,6 +371,80 @@ it.each([
   expect(memoryStorage.objects.has(ANSWER)).toBe(false);
 });
 
+it('withholds an upload URL when school access is revoked during provider signing', async () => {
+  const originalSign = runtime.storage.presignPut;
+  runtime.storage.presignPut = async (input) => {
+    const signed = await originalSign(input);
+    store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+    return signed;
+  };
+  const result = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  });
+  expect(result.status).toBe(403);
+  expect(JSON.stringify(result.body)).not.toContain('upload-token');
+});
+
+it('withholds a download URL when group access is revoked during provider signing', async () => {
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  });
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'text')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: POST })).status).toBe(200);
+  const originalSign = runtime.storage.presignGet;
+  runtime.storage.presignGet = async (input) => {
+    const signed = await originalSign(input);
+    store.docs.set('groups/course/members/alice', { status: 'inactive', role: 'member' });
+    return signed;
+  };
+  const result = await invoke(runtime, { action: 'download', path: POST });
+  expect(result.status).toBe(403);
+  expect(JSON.stringify(result.body)).not.toContain('download-token');
+});
+
+it('withholds a story URL when the published media changes during provider signing', async () => {
+  const auth = { uid: 'stamped' };
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 5,
+  }, auth);
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'photo')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: STORY }, auth)).status).toBe(200);
+  const story = {
+    schoolId: 'pu', authorUid: 'stamped', kind: 'image',
+    expiresAt: Date.now() + 600_000, mediaUrl: STORY,
+  };
+  store.docs.set('campusStories/story-1', story);
+  const originalSign = runtime.storage.presignGet;
+  runtime.storage.presignGet = async (input) => {
+    const signed = await originalSign(input);
+    store.docs.set('campusStories/story-1', {
+      ...story, mediaUrl: STORY.replace('/image', '/unpublished'),
+    });
+    return signed;
+  };
+  const result = await invoke(runtime, { action: 'download', path: STORY }, auth);
+  expect(result.status).toBe(403);
+  expect(JSON.stringify(result.body)).not.toContain('download-token');
+});
+
+it('refuses finalize when school access is revoked during object metadata lookup', async () => {
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  });
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'text')).toBe(200);
+  const originalHead = runtime.storage.head;
+  runtime.storage.head = async (key) => {
+    const object = await originalHead(key);
+    store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+    return object;
+  };
+  expect((await invoke(runtime, { action: 'finalize', path: POST })).status).toBe(403);
+  expect(memoryStorage.objects.has(POST)).toBe(true);
+});
+
 it('rechecks current authorization before finalize and does not delete another user file', async () => {
   memoryStorage.objects.set(ANSWER, { body: Buffer.from('pdf'), contentType: 'application/pdf', etag: '', metadata: {} });
   expect((await invoke(runtime, { action: 'finalize', path: ANSWER }, { uid: 'bob' })).status).toBe(403);
