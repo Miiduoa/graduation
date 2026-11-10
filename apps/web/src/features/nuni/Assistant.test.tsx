@@ -496,7 +496,7 @@ it('restores the confirmation status after a read-only recovery before the next 
   }));
   render(<Assistant />);
   await askForPlan();
-  fireEvent.click(await screen.findByRole('button', { name: '依序全部確認' }));
+  fireEvent.click(await screen.findByRole('button', { name: '依序確認 2 筆個人行程' }));
   await waitFor(() => expect(finishSecond).toBeDefined());
   expect(requests).toEqual([
     'confirm:' + first.token,
