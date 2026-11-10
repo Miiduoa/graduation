@@ -18,6 +18,7 @@ jest.mock('../state/auth', () => ({
   useAuth: () => ({
     user: { uid: 'shop-a' },
     profile: {
+      uid: 'shop-a',
       role: 'vendor',
       displayName: '店員',
       merchantAssignments: [

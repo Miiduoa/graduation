@@ -5,6 +5,7 @@ export type PreAuthStackParamList = {
   Library: undefined;
   LibraryCatalog: { initialQuery?: string } | undefined;
   SchoolInfo: undefined;
+  StudentCard: undefined;
   BusSchedule: undefined;
   公告總覽: undefined;
   公告詳情: { id: string };

@@ -169,9 +169,10 @@ it('logged-out visitors do not subscribe to private data', async () => {
   expect(watchAccountNotifications).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '通知' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '訊息' }).getAttribute('aria-current')).toBeNull();
-  expect(screen.getByRole('link', { name: '前往登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fmessages',
+  expect(screen.getByRole('link', { name: '連結學校帳號' }).getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fmessages',
   );
+  expect(screen.getByText(/Google 平台登入不會自動連結校內帳號/)).toBeTruthy();
 });
 
 it('keeps the current section clear and allows recovery from an empty conversation search', async () => {
