@@ -270,6 +270,28 @@ describe('saved class gap answer', () => {
     }).content).toContain('沒有課間空堂');
   });
 
+  test('does not treat an ambiguous or malformed collection clock as evidence of free time', () => {
+    // A restored snapshot must not change calendar day when the OS timezone changes.
+    const ambiguousOrInvalid: unknown[] = [
+      '2026-11-06T10:00:01', '2026-11-06 10:00:01',
+      'Fri, 06 Nov 2026 02:00:01 GMT', 'not-a-date', 12345,
+    ];
+    for (const checkedAt of ambiguousOrInvalid) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, checkedAt: checkedAt as string,
+      });
+      expect(answer.route).toBe('/timetable');
+      expect(answer.content).toContain('資料不足');
+      expect(answer.content).not.toContain('有 2 段');
+      expect(answer.content).not.toContain('沒有課間空堂');
+    }
+    // ISO instants with explicit offsets remain equivalent across devices.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, checkedAt: '2026-11-06T02:00:01Z',
+    }).content).toContain('有 2 段');
+    expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
+  });
+
   test('rejects invalid or future-dated save provenance without inventing free time', () => {
     const invalidSavedAt: unknown[] = [
       '', 'unparseable', '2099-01-01T00:00:00+08:00', 12345,

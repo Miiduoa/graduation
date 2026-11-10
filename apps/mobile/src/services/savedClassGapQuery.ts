@@ -254,6 +254,13 @@ const clock = new Intl.DateTimeFormat('zh-TW', {
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 
+// Both collection time and save provenance must identify the same instant on
+// iOS and Android, regardless of the device's configured timezone.
+const zonedIsoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+function parseZonedInstant(value: unknown): number {
+  return typeof value === 'string' && zonedIsoInstant.test(value) ? Date.parse(value) : NaN;
+}
+
 export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnDeviceSchoolContext) {
   const { timetable } = context;
   const reply = (content: string) => ({ tool: 'saved-timetable' as const, route: '/timetable' as const, content });
@@ -265,18 +272,14 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (!isValidSavedGapFilters(query)) {
     return reply('空堂查詢條件無法核對，請重新指定日期與時間，或開啟「我的課表」確認。');
   }
-  const now = Date.parse(context.checkedAt);
+  const now = parseZonedInstant(context.checkedAt);
   if (!Array.isArray(timetable.classGaps) || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
   }
   // A future or malformed saved-at timestamp cannot support a current availability
   // claim. Allow a small device-clock skew, while keeping null as explicitly unknown.
   if (timetable.updatedAt != null) {
-    // An unzoned date is parsed in the device's local timezone on JavaScript engines.
-    // Require an explicit offset so one saved timetable has the same provenance on iOS and Android.
-    const hasZone = typeof timetable.updatedAt === 'string' &&
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(timetable.updatedAt);
-    const savedAt = hasZone ? Date.parse(timetable.updatedAt as string) : NaN;
+    const savedAt = parseZonedInstant(timetable.updatedAt);
     if (!Number.isFinite(savedAt) || savedAt > now + 5 * MINUTE) {
       return reply('這份手機課表的儲存時間資料不足或晚於查詢時間，無法核對空堂。請開啟「我的課表」確認來源與時間。');
     }
