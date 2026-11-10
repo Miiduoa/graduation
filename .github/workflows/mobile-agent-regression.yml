@@ -103,6 +103,8 @@ jobs:
             src/__tests__/features/nuniCourseworkStudyAvailability.test.ts \
             src/__tests__/features/nuniCourseworkStudySuggestions.test.tsx \
             src/__tests__/features/nuniPlanCourseworkStudy.test.ts \
+            src/__tests__/features/nuniCourseworkStudyBatch.test.ts \
+            src/__tests__/NuniPlanStudyBatchPicker.test.tsx \
             src/__tests__/services/courseworkClockAvailability.test.ts \
             src/__tests__/features/campusAssistantCourseworkStudy.test.ts \
             src/__tests__/features/campusAssistantCourseworkStudyScreen.test.tsx \

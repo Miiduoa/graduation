@@ -4,7 +4,7 @@ import {
   ASSISTANT_CALENDAR_JOURNAL_MAX_BYTES, ASSISTANT_CALENDAR_JOURNAL_MAX_ENTRIES,
   AssistantCalendarJournalError, assistantCalendarJournalStorageKey,
   consumeAssistantCalendarJournalPermit, readAssistantCalendarJournal, reserveAssistantCalendarAttempt,
-  saveAssistantCalendarJournalObservation, saveAssistantCalendarJournalObservations,
+  parseAssistantCalendarOrigin, saveAssistantCalendarJournalObservation, saveAssistantCalendarJournalObservations,
   type AssistantCalendarJournalEntry, type AssistantCalendarJournalProposal,
 } from '../services/assistantCalendarJournal';
 
@@ -273,4 +273,92 @@ test.each(['read', 'write'] as const)('a stalled native %s is bounded and cannot
   expect(entries).toHaveLength(phase === 'write' ? 1 : 0);
   if (phase === 'write') expect((await reserveAssistantCalendarAttempt(proposal(), () => true)).kind).toBe('existing');
   else expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+describe('batch-step provenance', () => {
+  const origin = { kind: 'batch-step' as const, batchId: 'acb_coursework_first', stepId: 'acs_coursework_first_1' };
+  const sourceProposal = (): AssistantCalendarJournalProposal => ({ ...proposal(), origin: { ...origin } });
+
+  test('the persisted origin survives readback as frozen evidence while a serialized permit grants no write', async () => {
+    const target = sourceProposal();
+    const reserved = await reserveAssistantCalendarAttempt(target, () => true);
+    if (reserved.kind !== 'reserved') throw new Error('Missing original source permit');
+    const readback = await readAssistantCalendarJournal(scope, () => true);
+    expect(readback[0].proposal).toEqual(target);
+    expect(Object.isFrozen(readback[0].proposal.origin)).toBe(true);
+    expect(JSON.parse((await originalGet(key))!)).toEqual(envelope([{ proposal: target, attemptedAt: expect.any(String) }]));
+    expect(consumeAssistantCalendarJournalPermit(JSON.parse(JSON.stringify(reserved.permit)), target, () => true)).toBe(false);
+    expect(consumeAssistantCalendarJournalPermit(reserved.permit, target, () => true)).toBe(true);
+    expect(consumeAssistantCalendarJournalPermit(reserved.permit, target, () => true)).toBe(false);
+  });
+
+  test('a different mutation and event for an existing origin cannot obtain a second reservation or permit', async () => {
+    const first = sourceProposal();
+    await reserveAssistantCalendarAttempt(first, () => true);
+    const second = { ...proposal('second_origin_attempt'), origin, event: { ...event, date: '2099-01-03' } };
+    expect(await reserveAssistantCalendarAttempt(second, () => true)).toEqual({
+      kind: 'existing', entry: { proposal: first, attemptedAt: expect.any(String) },
+    });
+    expect(await readAssistantCalendarJournal(scope, () => true)).toHaveLength(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  });
+
+  test('a live permit is bound to its exact source and is consumed after an attempted origin substitution', async () => {
+    const target = sourceProposal();
+    const reserved = await reserveAssistantCalendarAttempt(target, () => true);
+    if (reserved.kind !== 'reserved') throw new Error('Missing original source permit');
+    const forged = { ...target, origin: { ...origin, stepId: 'acs_coursework_another_1' } };
+    expect(consumeAssistantCalendarJournalPermit(reserved.permit, forged, () => true)).toBe(false);
+    expect(consumeAssistantCalendarJournalPermit(reserved.permit, target, () => true)).toBe(false);
+    expect((await readAssistantCalendarJournal(scope, () => true))[0].proposal).toEqual(target);
+  });
+
+  test.each([
+    ['missing origin', null],
+    ['unknown kind', { ...origin, kind: 'generic' }],
+    ['missing batch', { kind: origin.kind, stepId: origin.stepId }],
+    ['missing step', { kind: origin.kind, batchId: origin.batchId }],
+    ['short identifier', { ...origin, batchId: 'short' }],
+    ['overlong identifier', { ...origin, stepId: 'x'.repeat(101) }],
+    ['padded identifier', { ...origin, stepId: ` ${origin.stepId}` }],
+    ['write authority', { ...origin, authorized: true }],
+  ])('%s is rejected by the provenance parser', (_name, candidate) => {
+    expect(() => parseAssistantCalendarOrigin(candidate)).toThrow(AssistantCalendarJournalError);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  test('origin accessors cannot run while validating a proposal', () => {
+    const getter = jest.fn(() => origin.stepId);
+    const poisoned = { ...origin };
+    Object.defineProperty(poisoned, 'stepId', { enumerable: true, get: getter });
+    expect(() => reserveAssistantCalendarAttempt({ ...sourceProposal(), origin: poisoned }, () => true))
+      .toThrow(AssistantCalendarJournalError);
+    expect(getter).not.toHaveBeenCalled();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  test('two stored entries claiming one origin are corruption even when mutation IDs and events differ', async () => {
+    const entries = [
+      { proposal: sourceProposal(), attemptedAt: createdAt },
+      { proposal: { ...proposal('second_origin_attempt'), origin, event: { ...event, date: '2099-01-03' } }, attemptedAt: createdAt },
+    ];
+    const raw = JSON.stringify(envelope(entries));
+    await seed(raw);
+    await expect(readAssistantCalendarJournal(scope, () => true)).rejects.toMatchObject({ code: 'journal-corrupt' });
+    await expect(reserveAssistantCalendarAttempt(proposal('new_attempt'), () => true)).rejects.toMatchObject({ code: 'journal-corrupt' });
+    expect(await originalGet(key)).toBe(raw);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  test('an existing operation cannot change its origin through reservation or observation updates', async () => {
+    const original = sourceProposal();
+    await reserveAssistantCalendarAttempt(original, () => true);
+    const changed = { ...original, origin: { ...origin, batchId: 'acb_coursework_another' } };
+    await expect(reserveAssistantCalendarAttempt(changed, () => true)).rejects.toMatchObject({ code: 'journal-corrupt' });
+    await expect(saveAssistantCalendarJournalObservation(changed,
+      { state: 'unknown', checkedAt: verifiedAt, reason: 'absent' }, () => true)).rejects.toBeInstanceOf(AssistantCalendarJournalError);
+    const entries = await readAssistantCalendarJournal(scope, () => true);
+    expect(entries).toEqual([{ proposal: original, attemptedAt: expect.any(String) }]);
+    expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  });
 });
