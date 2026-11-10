@@ -464,6 +464,10 @@ it('pauses a practice round for source review, resumes drafts, and saves the pau
   fireEvent.click(screen.getByRole('button', { name: '回白板看這段' }));
   expect(screen.queryByLabelText(practiceLabel)).toBeNull();
   expect(screen.getByRole('region', { name: '暫停的逐題複習' })).toBeTruthy();
+  // A reading-only JSON omits this paused draft; do not offer it as a backup.
+  expect(screen.queryByRole('button', { name: '儲存閱讀進度' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '複製閱讀進度 JSON' })).toBeNull();
+  expect(screen.getByRole('button', { name: '複製暫停的練習與閱讀進度 JSON' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '開始逐題複習' }).hasAttribute('disabled')).toBe(false);
   expect(value('用自己的話記下這一段')).toBe('原本的主鍵筆記');
 
@@ -502,6 +506,29 @@ it('pauses a practice round for source review, resumes drafts, and saves the pau
   fireEvent.click(screen.getByRole('button', { name: '結束暫停的練習' }));
   fireEvent.click(screen.getByRole('button', { name: '確認結束暫停練習' }));
   expect(screen.queryByRole('region', { name: '暫停的逐題複習' })).toBeNull();
+  expect(screen.getByRole('button', { name: '儲存閱讀進度' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: '複製閱讀進度 JSON' })).toBeTruthy();
   expect(screen.getByRole('button', { name: '開始逐題複習' }).hasAttribute('disabled')).toBe(false);
   expect(mocks.run).not.toHaveBeenCalled();
+});
+
+it('offers only a complete backup while a paused round survives progress preview and cancellation', async () => {
+  mount();
+  await restore();
+  begin();
+  fireEvent.change(screen.getByLabelText(practiceLabel), { target: { value: '未備份的原題草稿' } });
+  fireEvent.click(screen.getByRole('button', { name: '回到閱讀' }));
+  const text = serializeCourseStudyProgress(savedPractice());
+  const file = new File([text], '另一份閱讀進度.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: async () => text });
+  fireEvent.change(screen.getByLabelText('載入閱讀進度檔'), { target: { files: [file] } });
+  const preview = await screen.findByRole('region', { name: '閱讀進度預覽' });
+  expect(preview.textContent).toContain('儲存完整練習與閱讀進度');
+  expect(preview.textContent).not.toContain('儲存目前的閱讀進度');
+  expect(screen.queryByRole('button', { name: '儲存閱讀進度' })).toBeNull();
+  expect(screen.getByRole('button', { name: '儲存暫停的練習與閱讀進度' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '取消還原' }));
+  expect(screen.getByRole('button', { name: '繼續這輪練習' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '繼續這輪練習' }));
+  expect(value(practiceLabel)).toBe('未備份的原題草稿');
 });

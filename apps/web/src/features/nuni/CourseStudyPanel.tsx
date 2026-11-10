@@ -779,7 +779,8 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           <div><dt>待複習</dt><dd>{Object.values(restorePreview.progress.passages).filter((item) => item.needsReview).length} 段</dd></div>
           {restorePreview.round && <div><dt>逐題練習</dt><dd>{restorePreview.round.finished ? '已完成' : '第 ' + (restorePreview.round.index + 1) + ' 題'}，共 {restorePreview.round.cards.length} 題</dd></div>}
         </dl>
-        <p className={styles.note}>還原會取代目前白板內容；需要保留時，可先{practiceRound ? '儲存本輪練習與閱讀進度' : '儲存目前的閱讀進度'}。檔案中的教材副本可能與最新課程不同。</p>
+        <p className={styles.note}>還原會取代目前白板內容；需要保留時，可先{practiceRound || pausedRound?.revision === session.revision
+          ? '儲存完整練習與閱讀進度' : '儲存目前的閱讀進度'}。檔案中的教材副本可能與最新課程不同。</p>
         <div className={styles.actions}>
           <button type="button" className={`${styles.button} ${styles.primary}`} onClick={restoreProgress}>還原這份進度</button>
           <button type="button" className={styles.button} onClick={() => {
@@ -840,8 +841,10 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
           </div>
         </section>}
         {!practiceRound && <div className={styles.actions}>
-          <button type="button" className={styles.button} onClick={saveProgress}>儲存閱讀進度</button>
-          <button type="button" className={styles.button} onClick={copyReadingProgress}>複製閱讀進度 JSON</button>
+          {pausedRound?.revision !== session.revision && <>
+            <button type="button" className={styles.button} onClick={saveProgress}>儲存閱讀進度</button>
+            <button type="button" className={styles.button} onClick={copyReadingProgress}>複製閱讀進度 JSON</button>
+          </>}
           <button type="button" className={styles.button} disabled={!hasNotes} onClick={downloadNotes}>下載本次筆記</button>
           <button type="button" className={styles.button} disabled={!hasNotes} onClick={() => { void copyNotes(); }}>複製本次筆記</button>
         </div>}
