@@ -125,6 +125,24 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not cache a building=yes way explicitly marked ruins=yes', async () => {
+    const ruinedPayload = JSON.stringify({
+      elements: [{
+        type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', ruins: 'yes', height: '20' },
+      }],
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(ruinedPayload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect((await result.json()).error).toMatch(/temporarily unavailable/);
+    await GET();
+    expect(upstream).toHaveBeenCalledTimes(1); // Retain the existing upstream cooldown.
+  });
+
   it('uses recent Overpass database replication metadata without confusing it with a way edit', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000).toISOString()
       .replace('.000Z', 'Z');
