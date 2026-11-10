@@ -17,20 +17,8 @@ tags:
     id: platform-workspace-start
 - takeScreenshot: guest_startup
 
-# On iPhone 15 with the embedded Release bundle (Maestro 41335644905), the
-# Google account header was present in the accessibility tree at y=859..885
-# while the viewport ended at y=874. scrollUntilVisible did not move the
-# nested landing ScrollView, leaving that header partially offscreen.
-# Swipe upward from the visible school-unavailable hint inside that same
-# ScrollView, then require the original fully visible account heading.
-# No assertion, route, login restriction, or timeout is relaxed.
-- swipe:
-    from:
-      id: school-login-hint
-    direction: UP
-    duration: 500
-
-# Account and import actions precede the public-service directory.
+# Google is the primary entry before school import and the public-service directory.
+# Scroll to the account itself; the optional school-provider hint is farther down.
 # Check the heading before scrolling to its action; they need not share a viewport.
 # Stop when each target is fully visible, without an extra centering swipe.
 - scrollUntilVisible:
@@ -44,16 +32,32 @@ tags:
       id: login-start
     direction: DOWN
     centerElement: false
-- tapOn:
-    id: login-start
 # Assert the visible terminal state rather than a non-interactive page container.
 # A remote session failure is not a successful login; recovery must remain usable.
-- extendedWaitUntil:
-    visible:
-      text: '登入或建立帳號|目前無法確認登入狀態|登出尚未完成'
-    timeout: 20000
-- assertNotVisible:
-    id: login-landing
+# The first iOS tap can report a hierarchy change while still on the landing page.
+# Retry this transition only while its source is visible; never tap the next page.
+- retry:
+    maxRetries: 2
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: login-landing
+          commands:
+            - assertVisible:
+                id: login-start
+                enabled: true
+            - waitForAnimationToEnd
+            - tapOn:
+                id: login-start
+                enabled: true
+                retryTapIfNoChange: true
+      - extendedWaitUntil:
+          visible:
+            text: '登入或建立帳號|目前無法確認登入狀態|登出尚未完成'
+          timeout: 20000
+      - assertNotVisible:
+          id: login-landing
 - assertNotVisible: '登出 Google 帳號'
 - runFlow:
     when:
@@ -84,10 +88,18 @@ tags:
 
 # On iOS the navigation header owns the back action.
 - runFlow: ../helpers/return-to-landing.yaml
+# Returning preserves the landing scroll position at the Google account entry.
+# The optional school/import section now follows it farther down the page.
+- scrollUntilVisible:
+    element:
+      id: school-picker-open
+    direction: DOWN
+    centerElement: true
+- runFlow: ../helpers/select-nthu.yaml
 - scrollUntilVisible:
     element:
       id: school-import-start
-    direction: UP
+    direction: DOWN
     centerElement: true
 - assertVisible:
     id: school-import-start

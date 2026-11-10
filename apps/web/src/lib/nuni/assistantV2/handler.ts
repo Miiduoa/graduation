@@ -9,7 +9,7 @@ import {
   requireSession,
   sessionContext,
 } from '../server';
-import { cardIssuer, machineId, confirm, revoke, issueRoute, routeOwner, routeTarget } from './actions';
+import { cardIssuer, machineId, confirm, reconcile, revoke, issueRoute, routeOwner, routeTarget } from './actions';
 import { createAdapter } from './adapter';
 import { bounded, hash, history, id, object, text, V2Error, type Obj } from './contracts';
 import { createProviderModel, fallbackReady, PROVIDER_USER_MESSAGES, providerUserMessage } from './groq';
@@ -48,7 +48,7 @@ function quota(now: number, amount: number) {
 }
 export async function handleV2(request: NextRequest, action: string) {
   const requestId = randomUUID();
-  const stage = ['capability', 'ask', 'confirm', 'cancel'].includes(action) ? action : 'unknown';
+  const stage = ['capability', 'ask', 'confirm', 'cancel', 'reconcile'].includes(action) ? action : 'unknown';
   const started = Date.now();
   let logged = false;
   const log = (r: Obj) => {
@@ -62,7 +62,7 @@ export async function handleV2(request: NextRequest, action: string) {
       process.env.CAMPUS_ASSISTANT_V2_ENABLED !== 'true'
     )
       throw new V2Error(404, 'NOT_FOUND');
-    if (!['capability', 'ask', 'confirm', 'cancel'].includes(action))
+    if (!['capability', 'ask', 'confirm', 'cancel', 'reconcile'].includes(action))
       throw new V2Error(404, 'NOT_FOUND');
     if (request.method !== (action === 'capability' ? 'GET' : 'POST'))
       throw new V2Error(405, 'METHOD_NOT_ALLOWED');
@@ -91,7 +91,7 @@ export async function handleV2(request: NextRequest, action: string) {
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(schoolId) || schoolId === 'personal')
       throw new V2Error(422, 'INVALID_INPUT');
     const secret = process.env.BFF_SESSION_SECRET?.trim() || '';
-    const target = action === 'ask'
+    const target = action === 'reconcile' ? undefined : action === 'ask'
       ? raw.routeToken === undefined ? undefined : routeTarget(raw.routeToken, { session: sessionContext(session), conversationId, schoolId }, secret)
       : cardIssuer({ token: raw.token, args: raw.args }, secret);
     if (process.env.FLY_MACHINE_ID && target && target !== process.env.FLY_MACHINE_ID) {
@@ -123,7 +123,19 @@ export async function handleV2(request: NextRequest, action: string) {
     const writes = process.env.CAMPUS_ASSISTANT_V2_WRITES_ENABLED === 'true';
     if (action === 'cancel')
       return jsonResponse(
-        revoke(binding, { token: raw.token, args: raw.args }, secret, Date.now()),
+        await bounded(
+          (child) => withOperationSignal(child, () =>
+            revoke(binding, { token: raw.token, args: raw.args }, secret, Date.now(), source.adapter),
+          ), signal, 12000,
+        ),
+      );
+    if (action === 'reconcile')
+      return jsonResponse(
+        await bounded(
+          (child) => withOperationSignal(child, () =>
+            reconcile(binding, { token: raw.token, args: raw.args }, secret, Date.now(), source.adapter, writes),
+          ), signal, 12000,
+        ),
       );
     if (action === 'confirm')
       return jsonResponse(

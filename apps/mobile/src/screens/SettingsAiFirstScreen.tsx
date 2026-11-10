@@ -79,6 +79,7 @@ export default function SettingsAiFirstScreen({ navigation }: { navigation?: Nav
     <AIDetailScreen
       title="設定"
       subtitle="管理帳號與調整閱讀方式。"
+      keyboardShouldPersistTaps="handled"
       onBack={() => navigation?.goBack?.()}
     >
       <AICard title={uid ? '目前登入帳號' : '尚未登入'}>

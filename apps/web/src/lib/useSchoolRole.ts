@@ -9,12 +9,12 @@ export type SchoolRole = 'student' | 'teacher' | 'admin' | 'editor' | 'vendor' |
 const cache = new Map<string, SchoolRole | null>();
 
 /** 自己在這所學校的身分（讀自己的 members 文件）。還沒讀到或讀不到是 null。 */
-export function useSchoolRole(uid: string | null | undefined, schoolId: string): SchoolRole | null {
-  const key = uid ? `${schoolId}:${uid}` : '';
+export function useSchoolRole(uid: string | null | undefined, schoolId: string | null | undefined): SchoolRole | null {
+  const key = uid && schoolId ? `${schoolId}:${uid}` : '';
   const [role, setRole] = useState<{ key: string; value: SchoolRole | null }>({ key: '', value: null });
 
   useEffect(() => {
-    if (!key || !uid || !isFirebaseConfigured()) return;
+    if (!key || !uid || !schoolId || !isFirebaseConfigured()) return;
     if (cache.has(key)) {
       void Promise.resolve().then(() => setRole({ key, value: cache.get(key) ?? null }));
       return;

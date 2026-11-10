@@ -4,7 +4,7 @@ async function assertAccountAvailable(db, uid) {
   if (!uid) return;
   const profile = await db.collection('users').doc(uid).get();
   const data = profile.exists ? profile.data() : {};
-  if (data.accountDeletionInProgress === true || data.status === 'deleted') {
+  if (data.accountDeletionInProgress === true || ['deleted', 'disabled', 'suspended', 'inactive'].includes(data.status)) {
     throw new HttpsError('failed-precondition', '帳號正在刪除或已停用。', {
       reason: 'account-deletion',
     });

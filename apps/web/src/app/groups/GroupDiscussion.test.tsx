@@ -1,3 +1,4 @@
+import { privateFilesEnabled, uploadPrivateFile } from '@/lib/privateFiles';
 import { Suspense } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
@@ -8,12 +9,23 @@ import {
   type GroupDiscussionPost,
 } from './groupDiscussionService';
 
+vi.mock('@/lib/privateFiles', async () => ({
+  ...await vi.importActual<typeof import('@/lib/privateFiles')>('@/lib/privateFiles'),
+  privateFilesEnabled: vi.fn(() => false),
+  uploadPrivateFile: vi.fn(),
+  claimPrivateFile: vi.fn(async () => {}),
+}));
+
 const account = vi.hoisted(() => ({
   user: { uid: 'alice', displayName: 'Alice' } as {
     uid: string;
     displayName?: string | null;
   } | null,
   loading: false,
+}));
+
+vi.mock('@/lib/firebase', () => ({
+  getAuth: () => ({ currentUser: { getIdToken: async () => 'test-token' } }),
 }));
 
 vi.mock('@/components/AuthGuard', () => ({ useAuth: () => account }));
@@ -77,6 +89,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(privateFilesEnabled).mockImplementation(() => process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND === 'supabase');
   account.user = { uid: 'alice', displayName: 'Alice' };
   account.loading = false;
   sessionStorage.clear();
@@ -347,4 +360,167 @@ it('keeps the visible draft and does not dispatch when the publication record ca
   } finally {
     storage.mockRestore();
   }
+});
+
+it('shows attachment input only when Supabase is enabled and stores uploaded paths', async () => {
+  const privateFiles = await import('@/lib/privateFiles');
+  const upload = vi.spyOn(privateFiles, 'uploadPrivateFile').mockResolvedValue({ path: 'ignored' });
+  const view = await act(async () => renderPage());
+  await screen.findByText('週三外拍');
+  expect(screen.queryByLabelText('附加圖片或文件')).toBeNull();
+  view.unmount();
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  try {
+    await act(async () => {
+      renderPage();
+    });
+    await screen.findByText('週三外拍');
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '新貼文' } });
+    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '內容' } });
+    fireEvent.change(screen.getByLabelText('附加圖片或文件'), {
+      target: { files: [new File(['pdf'], 'note.pdf', { type: 'application/pdf' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    await waitFor(() => expect(createGroupDiscussionPost).toHaveBeenCalled());
+    expect(upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringMatching(/^groups\/g1\/posts\/[^/]+\/0-[a-z0-9]+-[a-z0-9]+\.pdf$/),
+        originalFilename: 'note.pdf',
+      }),
+    );
+    expect(vi.mocked(createGroupDiscussionPost).mock.calls[0]?.[3].attachments).toEqual([
+      expect.stringMatching(/^groups\/g1\/posts\//),
+    ]);
+  } finally {
+    delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND;
+    upload.mockRestore();
+  }
+});
+
+it('limits attachments and resumes a throttled draft without uploading completed files again', async () => {
+  vi.mocked(privateFilesEnabled).mockReturnValue(true);
+  vi.mocked(uploadPrivateFile)
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  await act(async () => { renderPage(); });
+  await screen.findByText('週三外拍');
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+  fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+  const files = Array.from({ length: 7 }, (_, i) => new File(['x'], `${i}.txt`, { type: 'text/plain' }));
+  const picker = screen.getByLabelText('附加圖片或文件');
+  fireEvent.change(picker, { target: { files } });
+  expect(screen.getByRole('alert').textContent).toContain('最多選取 6');
+  fireEvent.change(picker, { target: { files: files.slice(0, 3) } });
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('上傳太頻繁，請稍後再試');
+  expect(uploadPrivateFile).toHaveBeenCalledTimes(2);
+  expect(createGroupDiscussionPost).not.toHaveBeenCalled();
+  const firstPath = vi.mocked(uploadPrivateFile).mock.calls[0][0].path;
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('已發布貼文。');
+  expect(uploadPrivateFile).toHaveBeenCalledTimes(4);
+  expect(vi.mocked(uploadPrivateFile).mock.calls[2][0].path).not.toBe(vi.mocked(uploadPrivateFile).mock.calls[1][0].path);
+  expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments?.[0]).toBe(firstPath);
+  expect((picker as HTMLInputElement).disabled).toBe(false);
+});
+
+it('discards upload progress when starting a new draft', async () => {
+  vi.mocked(privateFilesEnabled).mockReturnValue(true);
+  vi.mocked(uploadPrivateFile).mockRejectedValue(Object.assign(new Error('limited'), { statusCode: 429 }));
+  await act(async () => { renderPage(); });
+  await screen.findByText('週三外拍');
+  const fill = () => {
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+    fireEvent.change(screen.getByLabelText('附加圖片或文件'), { target: { files: [new File(['x'], 'a.txt')] } });
+  };
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('上傳太頻繁，請稍後再試');
+  const path = vi.mocked(uploadPrivateFile).mock.calls[0][0].path;
+  fireEvent.click(screen.getByRole('button', { name: '開始新貼文' }));
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await waitFor(() => expect(uploadPrivateFile).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(uploadPrivateFile).mock.calls[1][0].path).not.toBe(path);
+});
+
+it.each(['upload response', 'finalization'])('retries failed %s with a new path and retains confirmed attachments', async (failure) => {
+  const actual = await vi.importActual<typeof import('@/lib/privateFiles')>('@/lib/privateFiles');
+  vi.mocked(uploadPrivateFile).mockImplementation(actual.uploadPrivateFile);
+  process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND = 'supabase';
+  const stored = new Set<string>();
+  const puts: string[] = [];
+  const network = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      const { path, action } = JSON.parse(String(init.body));
+      if (action === 'finalize') {
+        if (failure === 'finalization' && puts.length === 2) {
+          return { ok: false, status: 413, json: async () => ({ error: 'File is too large' }) } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({ path, finalized: true }) } as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({ path, url: path, method: 'PUT', headers: { 'If-None-Match': '*' }, expiresAt: 'later', maxBytes: 1000, requiresFinalize: true }) } as Response;
+    }
+    const path = String(url);
+    puts.push(path);
+    expect(init?.headers).toEqual({ 'If-None-Match': '*' });
+    if (stored.has(path)) return { ok: false, status: 412 } as Response;
+    stored.add(path);
+    if (failure === 'upload response' && puts.length === 2) throw new TypeError('Response lost');
+    return { ok: true, status: 200 } as Response;
+  });
+  vi.stubGlobal('fetch', network);
+  const view = await act(async () => renderPage());
+  try {
+    await screen.findByText('週三外拍');
+    fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+    fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+    fireEvent.change(screen.getByLabelText('附加圖片或文件'), { target: { files: [
+      new File(['a'], 'a.txt', { type: 'text/plain' }),
+      new File(['b'], 'b.txt', { type: 'text/plain' }),
+    ] } });
+    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    await screen.findByText('附件上傳失敗，請確認檔案格式與連線後重試。');
+    expect(createGroupDiscussionPost).not.toHaveBeenCalled();
+    expect(puts).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: '發布' }));
+    await screen.findByText('已發布貼文。');
+    expect(puts).toHaveLength(3);
+    expect(puts[2]).not.toBe(puts[1]);
+    expect(puts[2].split('/').slice(0, 4)).toEqual(puts[1].split('/').slice(0, 4));
+    const { parsePrivateFilePath } = await import('@campus/shared/src/privateFileAccess');
+    puts.forEach((path) => expect(parsePrivateFilePath(path)?.kind).toBe('group-post'));
+    expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments).toEqual([puts[0], puts[2]]);
+  } finally {
+    view.unmount();
+    delete process.env.NEXT_PUBLIC_FILE_STORAGE_BACKEND;
+    vi.unstubAllGlobals();
+  }
+});
+
+it('reuploads only a cached attachment whose claim returns 410', async () => {
+  const { claimPrivateFile } = await import('@/lib/privateFiles');
+  vi.mocked(privateFilesEnabled).mockReturnValue(true);
+  vi.mocked(uploadPrivateFile)
+    .mockResolvedValueOnce({ path: 'ignored' })
+    .mockRejectedValueOnce(Object.assign(new Error('limited'), { statusCode: 429 }))
+    .mockResolvedValue({ path: 'ignored' });
+  vi.mocked(claimPrivateFile).mockResolvedValue(undefined);
+  await act(async () => { renderPage(); });
+  await screen.findByText('週三外拍');
+  fireEvent.change(screen.getByLabelText('標題'), { target: { value: '附件貼文' } });
+  fireEvent.change(screen.getByLabelText('內容'), { target: { value: '附件內容' } });
+  fireEvent.change(screen.getByLabelText('附加圖片或文件'), {
+    target: { files: [new File(['a'], 'one.txt', { type: 'text/plain' }), new File(['b'], 'two.txt', { type: 'text/plain' })] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('上傳太頻繁，請稍後再試');
+  const expired = vi.mocked(uploadPrivateFile).mock.calls[0][0].path;
+  vi.mocked(claimPrivateFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { statusCode: 410 }));
+  fireEvent.click(screen.getByRole('button', { name: '發布' }));
+  await screen.findByText('已發布貼文。');
+  expect(uploadPrivateFile).toHaveBeenCalledTimes(4);
+  expect(vi.mocked(createGroupDiscussionPost).mock.calls[0][3].attachments).not.toContain(expired);
 });

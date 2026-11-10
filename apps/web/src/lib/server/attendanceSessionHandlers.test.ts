@@ -6,7 +6,9 @@ import { HttpsError } from './httpsError';
 
 function seedStore() {
   return createMemoryGroupStore([
-    ['groups/class-1', { name: '程式設計' }],
+    ['groups/class-1', { name: '程式設計', schoolId: 'school-1', type: 'course' }],
+    ['schools/school-1/members/teacher', { status: 'active' }],
+    ['schools/school-1/members/student', { status: 'active' }],
     ['groups/class-1/members/teacher', { role: 'instructor', status: 'active' }],
     [
       'groups/class-1/members/student',
@@ -45,7 +47,7 @@ it.each([
       data: { groupId: 'class-1', requestId: 'attempt-1', ...data },
     }),
   ).rejects.toMatchObject({ code: 'invalid-argument' });
-  expect(store.docs.size).toBe(3);
+  expect(store.docs.size).toBe(5);
 });
 
 it.each([
@@ -107,6 +109,22 @@ describe('live attendance session handlers', () => {
     });
   });
 
+  it('revoked school membership blocks new sessions, QR replay, check-in and closure', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    store.docs.delete('schools/school-1/members/teacher');
+    store.docs.set('schools/school-1/members/student', { status: 'inactive' });
+    for (const action of [
+      () => handlers.startLiveSession(startRequest()),
+      () => handlers.startLiveSession(startRequest({ requestId: 'another-session' })),
+      () => handlers.joinLiveSession(sessionRequest(session)),
+      () => handlers.endLiveSession(sessionRequest(session, {}, 'teacher')),
+    ]) {
+      await expect(action()).rejects.toMatchObject({ code: 'permission-denied' });
+    }
+    expect(store.docs.get(path(session, 'liveSessions'))?.active).toBe(true);
+    expect(store.docs.get(path(session, 'attendanceSessions'))?.attendeeCount).toBe(0);
+  });
+
   it('creates synchronized public metadata and private token, preserving zero coordinates', async () => {
     const result = await handlers.startLiveSession(
       startRequest({ classroomLat: 0, classroomLng: 0 }),
@@ -136,7 +154,7 @@ describe('live attendance session handlers', () => {
   it('a failed transaction leaves no partial session or notification', async () => {
     store.failNextCommit();
     await expect(handlers.startLiveSession(startRequest())).rejects.toThrow('commit unavailable');
-    expect(store.docs.size).toBe(3);
+    expect(store.docs.size).toBe(5);
     expect(notifyStarted).not.toHaveBeenCalled();
   });
 
@@ -148,7 +166,7 @@ describe('live attendance session handlers', () => {
     time += 60_000;
     const second = await handlers.startLiveSession(startRequest());
     expect(second).toEqual({ ...first, reused: true });
-    expect(store.docs.size).toBe(6);
+    expect(store.docs.size).toBe(8);
     expect(notifyStarted).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledTimes(1);
   });
@@ -163,6 +181,7 @@ describe('live attendance session handlers', () => {
   });
 
   it('request keys are scoped to the instructor and optional for older callers', async () => {
+    store.docs.set('schools/school-1/members/other-teacher', { status: 'active' });
     store.docs.set('groups/class-1/members/other-teacher', { status: 'active', role: 'owner' });
     const first = await handlers.startLiveSession(startRequest());
     const second = await handlers.startLiveSession(startRequest({}, 'other-teacher'));
@@ -174,7 +193,7 @@ describe('live attendance session handlers', () => {
   });
 
   it('opening a new session for the same class ends the previous one and leaves other classes open', async () => {
-    store.docs.set('groups/class-2', { name: '資料結構' });
+    store.docs.set('groups/class-2', { name: '資料結構', schoolId: 'school-1' });
     store.docs.set('groups/class-2/members/teacher', { role: 'instructor', status: 'active' });
     const classA = await handlers.startLiveSession(startRequest({ requestId: 'class-a' }));
     const classB = await handlers.startLiveSession(
@@ -201,7 +220,7 @@ describe('live attendance session handlers', () => {
   });
 
   it('ending one session does not close another class or another leftover session', async () => {
-    store.docs.set('groups/class-2', { name: '資料結構' });
+    store.docs.set('groups/class-2', { name: '資料結構', schoolId: 'school-1' });
     store.docs.set('groups/class-2/members/teacher', { role: 'instructor', status: 'active' });
     const classA = await handlers.startLiveSession(startRequest());
     const leftover = {
@@ -268,6 +287,7 @@ describe('live attendance session handlers', () => {
 
   it('ending requires both current instructor membership and original ownership', async () => {
     const session = await handlers.startLiveSession(startRequest());
+    store.docs.set('schools/school-1/members/other-teacher', { status: 'active' });
     store.docs.set('groups/class-1/members/other-teacher', {
       status: 'active',
       role: 'instructor',
@@ -411,6 +431,7 @@ describe('live attendance session handlers', () => {
   it('another active member cannot recover the first student receipt after expiry', async () => {
     const session = await handlers.startLiveSession(startRequest());
     await handlers.joinLiveSession(sessionRequest(session));
+    store.docs.set('schools/school-1/members/other-student', { status: 'active' });
     store.docs.set('groups/class-1/members/other-student', { status: 'active', role: 'student' });
     time += 300_000;
     await expect(
@@ -478,9 +499,6 @@ describe('live attendance session handlers', () => {
 describe('audited instructor attendance correction', () => {
   function setup() {
     const store = seedStore();
-    store.docs.set('groups/class-1', { name: '程式設計', type: 'course', schoolId: 'school-1' });
-    store.docs.set('schools/school-1/members/teacher', { status: 'active' });
-    store.docs.set('schools/school-1/members/student', { status: 'active' });
     const handlers = createLiveSessionHandlers({
       db: store.db as never,
       now: () => Date.parse('2026-10-27T03:00:00Z'),

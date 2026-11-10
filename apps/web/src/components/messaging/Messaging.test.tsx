@@ -169,9 +169,10 @@ it('logged-out visitors do not subscribe to private data', async () => {
   expect(watchAccountNotifications).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: '通知' }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByRole('link', { name: '訊息' }).getAttribute('aria-current')).toBeNull();
-  expect(screen.getByRole('link', { name: '前往登入' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fmessages',
+  expect(screen.getByRole('link', { name: '連結學校帳號' }).getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fmessages',
   );
+  expect(screen.getByText(/Google 平台登入不會自動連結校內帳號/)).toBeTruthy();
 });
 
 it('keeps the current section clear and allows recovery from an empty conversation search', async () => {
@@ -593,5 +594,123 @@ it('shows source labels and limited coverage without inferring a campus', async 
   await screen.findByText('成績已公布');
   expect(screen.getByText(/每個來源最多 50 則/)).toBeTruthy();
   expect(screen.getByText(/成績 · 靜宜大學/)).toBeTruthy();
-  expect(screen.getByText('其他通知 · 未標示校園')).toBeTruthy();
+  expect(screen.getByText('請假 · 未標示校園')).toBeTruthy();
+});
+
+it('combines notification text, type and unread filters with recoverable empty results', async () => {
+  render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  const search = screen.getByRole('searchbox', { name: '搜尋通知' });
+  fireEvent.change(search, { target: { value: '原校務服務' } });
+  expect(screen.getByText('請假待確認')).toBeTruthy();
+  expect(screen.queryByText('成績已公布')).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('顯示 1 / 2 則通知');
+  fireEvent.click(screen.getByRole('button', { name: '清除搜尋' }));
+  expect(document.activeElement).toBe(search);
+  fireEvent.change(screen.getByRole('combobox', { name: '通知類型' }), {
+    target: { value: 'course' },
+  });
+  fireEvent.click(screen.getByRole('checkbox', { name: '只看未讀' }));
+  expect(screen.getByText('成績已公布')).toBeTruthy();
+  expect(screen.queryByText('請假待確認')).toBeNull();
+  fireEvent.change(search, { target: { value: '不存在' } });
+  expect(screen.getByText('找不到符合的通知')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '清除篩選' }));
+  expect((search as HTMLInputElement).value).toBe('');
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('all');
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+  expect(screen.getByText('請假待確認')).toBeTruthy();
+});
+
+it('restores filters when returning to notifications in the same tab and account', async () => {
+  const view = render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '成績' } });
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'course' } });
+  fireEvent.click(screen.getByRole('checkbox', { name: '只看未讀' }));
+  view.unmount();
+  render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('成績');
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('course');
+  expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+  expect(screen.queryByText('請假待確認')).toBeNull();
+  expect(markAccountNotificationRead).not.toHaveBeenCalled();
+});
+
+it('clears notification filters on account changes and ignores the old feed', async () => {
+  const view = render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '成績' } });
+  const oldReceive = vi.mocked(watchAccountNotifications).mock.calls.at(-1)![1];
+  vi.mocked(watchAccountNotifications).mockImplementationOnce((_session, receive) => {
+    receive({ notifications: [], unscopedCount: 0 });
+    return vi.fn();
+  });
+  account.user = { uid: 'next-user' };
+  view.rerender(<MessagesPage />);
+  await screen.findByText('目前沒有本校通知');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  act(() => oldReceive(notifications()));
+  expect(screen.queryByText('成績已公布')).toBeNull();
+  expect(sessionStorage.getItem('campus-one:notification-filters:next-user:pu')).toBeNull();
+  expect(JSON.parse(sessionStorage.getItem('campus-one:notification-filters:alice:pu')!).q).toBe(
+    '成績',
+  );
+});
+
+it('restores only the current school notification filters', async () => {
+  render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '成績' } });
+  const receiveSession = vi.mocked(watchMessagingSession).mock.calls.at(-1)![1];
+  act(() => receiveSession({ uid: 'alice', schoolId: 'ncnu' }));
+  await screen.findByText('請假待確認');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+  act(() => receiveSession({ uid: 'alice', schoolId: 'pu' }));
+  await screen.findByText('成績已公布');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('成績');
+  expect(screen.queryByText('請假待確認')).toBeNull();
+});
+
+it('preserves the filter while retrying a failed notification feed', async () => {
+  render(<MessagesPage />);
+  await screen.findByText('成績已公布');
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: '成績' } });
+  const fail = vi.mocked(watchAccountNotifications).mock.calls.at(-1)![2];
+  act(() => fail('unavailable'));
+  expect(screen.getByText('暫時無法連線')).toBeTruthy();
+  expect(screen.queryByText('找不到符合的通知')).toBeNull();
+  expect(screen.queryByText('成績已公布')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '重新連線' }));
+  await screen.findByText('成績已公布');
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('成績');
+  expect(screen.queryByText('請假待確認')).toBeNull();
+});
+
+it('keeps notification filtering usable when tab storage is unavailable', async () => {
+  const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  try {
+    render(<MessagesPage />);
+    await screen.findByText('成績已公布');
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '請假' } });
+    expect(screen.getByText('請假待確認')).toBeTruthy();
+    expect(screen.queryByText('成績已公布')).toBeNull();
+  } finally {
+    read.mockRestore();
+    write.mockRestore();
+  }
+});
+
+it('keeps unsupported notifications readable without a link back to the current inbox', async () => {
+  render(<MessagesPage />);
+  await screen.findByText('請假待確認');
+  expect(screen.getByText('這則通知目前沒有可開啟的服務連結。')).toBeTruthy();
+  expect(screen.queryByRole('link', { name: '開啟通知中心' })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '標記已讀' })).toHaveLength(2);
 });

@@ -1,0 +1,74 @@
+name: Campus Spatial Browser
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'apps/web/src/app/map/**'
+      - 'apps/web/src/app/globals.css'
+      - 'apps/web/src/components/ui/Modal*'
+      - 'apps/web/src/components/ui/modalSession*'
+      - 'apps/web/src/components/ui/Button*'
+      - 'apps/web/src/lib/personalImportImagePreview*'
+      - 'packages/shared/src/providenceCampus*'
+      - 'packages/shared/src/campusGeo*'
+      - 'packages/shared/src/campusMapRecords*'
+      - 'packages/shared/src/campusClassroomLookup*'
+      - 'packages/shared/src/campusMapLookup*'
+      - 'scripts/qa/campus-spatial/**'
+      - 'apps/web/tsconfig.json'
+      - 'apps/web/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/campus-spatial-browser.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: campus-spatial-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Spatial explorer browser checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Taipei
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '10.28.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Build production component fixture
+        run: node scripts/qa/campus-spatial/build.mjs
+      - name: Check local interactions and real WebGL recovery
+        run: |
+          python scripts/qa/campus-spatial/check.py
+          python scripts/qa/campus-spatial/building-check.py
+          python scripts/qa/campus-spatial/svg-download-check.py
+          python scripts/qa/campus-spatial/png-download-check.py
+      - name: Upload screenshots and results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: campus-spatial-browser
+          path: artifacts/campus-spatial
+          retention-days: 7

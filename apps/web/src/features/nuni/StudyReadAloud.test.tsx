@@ -185,3 +185,30 @@ it('does not crash source cleanup if a mobile speech engine throws on cancel', (
   expect(utterance.onerror).toBeNull();
   expect(changed).toHaveBeenLastCalledWith(false);
 });
+
+it('retries local Chinese speech when the browser refuses a voiceschanged listener', () => {
+  addEventListener.mockImplementationOnce(() => { throw new Error('event listener unavailable'); });
+  voices = [remote];
+  render(<StudyReadAloud text="學生的原文保留在裝置上" />);
+
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
+  voices = [remote, local];
+  fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }));
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect((speak.mock.calls[0][0] as Utterance).voice).toBe(local);
+});
+
+it('still cancels reading on close if removing the voice listener throws', () => {
+  const changed = vi.fn();
+  const view = render(<StudyReadAloud text="離開頁面要清理的私人教材" onSpeakingChange={changed} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const utterance = speak.mock.calls[0][0] as Utterance;
+  window.speechSynthesis.removeEventListener = () => { throw new Error('event teardown failed'); };
+
+  expect(() => view.unmount()).not.toThrow();
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(utterance.onend).toBeNull();
+  expect(utterance.onerror).toBeNull();
+  expect(changed).toHaveBeenLastCalledWith(false);
+});

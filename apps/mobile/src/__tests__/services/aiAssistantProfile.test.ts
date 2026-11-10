@@ -3,14 +3,19 @@ jest.mock('../../firebase', () => ({
   hasUsableFirebaseConfig: jest.fn(() => false),
 }));
 
+import { DORM_REPAIR_COPY, DORM_REPAIR_DISALLOWED_COPY } from '@campus/shared/src/dormitory';
 import {
   buildAssistantCapabilityPrompt,
   getAssistantIdentityAnswer,
   getAssistantProfileTrainingSeeds,
 } from '../../data/aiAssistantProfile';
+import { inferFromRules } from '../../services/localAIEngine';
 import {
   distillLearnedSkillFromToolSuccess,
   exportTrainingInsights,
+  generateLocalAnswer,
+  getDefaultLearningState,
+  getDefaultMemory,
   getDefaultTrainingDB,
   isInternalToolSelectionPrompt,
   mergeLearnedSkill,
@@ -56,6 +61,48 @@ describe('AI assistant capability profile', () => {
     expect(db.goodExamples.length).toBeGreaterThanOrEqual(8);
     expect(insights).toContain('讓你的參數跟 ChatGPT 一樣多');
     expect(insights).toContain('不能改變 App 端模型權重');
+    const repairSeed = seeds.goodExamples.find((example) => example.q.includes('報修'));
+    expect(repairSeed?.a).toContain('報修備忘');
+    expect(repairSeed?.a).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+  });
+
+  it('local dorm repair answers never claim a submitted ticket', () => {
+    const inferred = inferFromRules('洗衣機壞了', 'dormitory');
+    expect(inferred.some((rule) => rule.conclusion === DORM_REPAIR_COPY.assistantCanHelp
+      || rule.conclusion.includes('報修備忘'))).toBe(true);
+    for (const rule of inferred) {
+      expect(rule.conclusion).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+      expect(rule.conclusion).not.toContain('可以在 APP 上報修');
+    }
+    const local = generateLocalAnswer(
+      '宿舍冷氣壞了幫我報修',
+      ['dormitory'],
+      {
+        courses: [],
+        assignments: [],
+        menus: [],
+        events: [],
+        announcements: [],
+        pois: [],
+        memory: getDefaultMemory('u1'),
+      },
+      [],
+      getDefaultLearningState(),
+    );
+    expect(local?.answer).toContain('報修備忘');
+    expect(local?.answer).not.toMatch(DORM_REPAIR_DISALLOWED_COPY);
+    expect(local?.answer).not.toContain('在 APP 提交');
+    expect(local?.answer).not.toContain('要幫你提交報修');
+  });
+
+  it('offline help does not claim the app files a dorm repair', async () => {
+    const response = await chatWithCampusAssistant(
+      [{ role: 'user', content: '你會什麼' }],
+      { schoolId: 'tw-pu', userId: 'u1', userName: '測試同學' },
+    );
+    expect(response.content).toContain('報修備忘');
+    expect(response.content).toContain('學校網站');
+    expect(response.content).not.toMatch(/確認後提交支援的報修|提交報修|送出報修|工單|叫工人/);
   });
 
   it('answers parameter requests honestly in offline chat', async () => {

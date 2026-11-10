@@ -213,6 +213,13 @@ it('keeps server categories, pinned flags and search functional without invented
   );
   render(<AnnouncementsPage />);
   await screen.findByText('課務消息');
+  expect(screen.getByRole('region', { name: '公告列表' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '課務消息' }).closest('article')?.dataset.pinned).toBe(
+    'true',
+  );
+  expect(
+    screen.getByRole('link', { name: '展覽消息' }).closest('article')?.hasAttribute('data-pinned'),
+  ).toBe(false);
   const options = screen.getByRole('button', { name: '篩選公告' });
   expect(options.getAttribute('aria-expanded')).toBe('false');
   expect(screen.queryByRole('button', { name: '活動' })).toBeNull();

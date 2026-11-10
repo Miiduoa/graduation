@@ -77,4 +77,15 @@ describe('assistantWritePermissions', () => {
     assert.match(message, /settings\?section=assistant/);
     assert.match(assistantWritePermissionDeniedMessage('proposeOrder'), /餐廳下單/);
   });
+
+  test('dorm repair permission is a personal memo, not a school ticket', () => {
+    const repair = ASSISTANT_WRITE_PERMISSION_DEFINITIONS.find((row) => row.key === 'createDormRepairRequest');
+    assert.ok(repair);
+    assert.equal(repair.label, '存成宿舍報修備忘');
+    assert.match(repair.description, /個人備忘/);
+    assert.match(repair.description, /不會送到學校/);
+    assert.doesNotMatch(repair.label, /送出宿舍報修|工單|叫工人/);
+    assert.doesNotMatch(repair.description, /送出宿舍維修申請|提交報修|工單/);
+    assert.match(assistantWritePermissionDeniedMessage('createDormRepairRequest'), /存成宿舍報修備忘/);
+  });
 });

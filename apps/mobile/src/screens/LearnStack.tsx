@@ -320,8 +320,7 @@ function LearnLanding(props: any) {
   const role = resolveDashboardRole(auth.user ? auth.profile : null);
   if (role === 'teacher') return <TeacherTodayScreen />;
   if (role === 'student') return <LearnAiFirstScreen />;
-  if (role === 'vendor') return <ShopDockScreen />;
-  return <RoleWorkspaceScreen {...props} role={role} />;
+  return <RoleWorkspaceScreen key={auth.user?.uid} {...props} role={role} />;
 }
 
 export function LearnStack() {

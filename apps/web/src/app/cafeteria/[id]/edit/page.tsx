@@ -2,9 +2,10 @@
 
 import { use, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { SchoolScopePlaceholder } from '@/components/SchoolScopePlaceholder';
 import { SiteShell } from '@/components/SiteShell';
 import { useAuth } from '@/components/AuthGuard';
-import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useBrowsingSchoolPageContext } from '@/lib/useBrowsingSchoolPageContext';
 import { loadStorefront, saveShopStorefront } from '@/lib/storefront';
 import { storefrontUrlIssue } from '@campus/shared/src/merchantMode';
 import social from '@/features/social/Social.module.css';
@@ -15,7 +16,12 @@ export default function ShopStorefrontEditPage(props: {
 }) {
   const { id } = use(props.params);
   const search = props.searchParams ? use(props.searchParams) : undefined;
-  const context = resolveSchoolPageContext(search);
+  const context = useBrowsingSchoolPageContext(search);
+  if (!context.ready) return <SiteShell title="編輯店面"><SchoolScopePlaceholder /></SiteShell>;
+  return <StorefrontEditor key={JSON.stringify([context.schoolId, id])} id={id} schoolId={context.schoolId} schoolName={context.schoolName} />;
+}
+
+function StorefrontEditor({ id, schoolId, schoolName }: { id: string; schoolId: string; schoolName: string }) {
   const { user } = useAuth();
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [orderingUrl, setOrderingUrl] = useState('');
@@ -30,7 +36,7 @@ export default function ShopStorefrontEditPage(props: {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    void loadStorefront(context.schoolId, id).then(
+    void loadStorefront(schoolId, id).then(
       (shop) => {
         if (!shop) {
           setError('找不到這間店。');
@@ -46,7 +52,7 @@ export default function ShopStorefrontEditPage(props: {
       },
       () => setError('暫時讀不到這間店。'),
     );
-  }, [context.schoolId, id]);
+  }, [schoolId, id]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -64,7 +70,7 @@ export default function ShopStorefrontEditPage(props: {
     }
     setError('');
     void saveShopStorefront({
-      schoolId: context.schoolId,
+      schoolId,
       cafeteriaId: id,
       websiteUrl,
       orderingUrl,
@@ -86,7 +92,7 @@ export default function ShopStorefrontEditPage(props: {
   }
 
   return (
-    <SiteShell title="編輯店面" subtitle="訂單和付款仍由店家處理。" schoolName={context.schoolName}>
+    <SiteShell title="編輯店面" subtitle="訂單和付款仍由店家處理。" schoolName={schoolName}>
       {!ready && !error && <p role="status">正在讀取店面…</p>}
       {error && <p role="alert">{error}</p>}
       {ready && (
@@ -174,7 +180,7 @@ export default function ShopStorefrontEditPage(props: {
               </button>
               <Link
                 className="btn"
-                href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(context.schoolId)}`}
+                href={`/cafeteria/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(schoolId)}`}
               >
                 返回店面
               </Link>

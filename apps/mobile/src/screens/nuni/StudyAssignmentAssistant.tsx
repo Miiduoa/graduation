@@ -7,7 +7,7 @@ import {
   isNuniQuizQuestion, isNuniQuizStatusFollowUp, isNuniQuizReferenceQuestion, isNuniQuizDateFollowUp, queryNuniQuizzes,
   type NuniQuizContext, type NuniQuizRow,
 } from '../../services/nuniQuizAssistant';
-import { parseAssignmentDeadlineWindow } from '../../services/assignmentDeadlineWindow';
+import { parseAssignmentDeadlineWindow, withoutDeadlineConstraint } from '../../services/assignmentDeadlineWindow';
 import {
   isAssignmentDeadlineQuestion,
   queryAssignmentDeadlines,
@@ -28,7 +28,7 @@ type DeadlineSearch = { question: string; filter: string; at: number };
 type Lookup =
   | { kind: 'assignment'; search: DeadlineSearch }
   | { kind: 'receipt'; search: {
-      question: string; scope: string; deadlineScope?: NuniReceiptDeadlineScope;
+      question: string; scope: string; at: number; deadlineScope?: NuniReceiptDeadlineScope;
       source?: NuniReceiptSource;
       returnTo?: { search: DeadlineSearch; offset: number; selected: number | null };
     } }
@@ -56,9 +56,11 @@ function rowDetails(row: ResultRow): string[] {
     closed: '已停止收件 · 本次未見繳交紀錄',
     pending: '本次未見繳交紀錄 · 請到原頁核對',
   }[row.receiptStatus];
-  return [row.submittedAt
+  const receipt = row.submittedAt
     ? status + ' · 繳交時間 ' + formatTaipeiDateTime(row.submittedAt, { seconds: false })
-    : status];
+    : status;
+  return [receipt, Number.isFinite(row.due)
+    ? '參考期限 ' + formatTaipeiDateTime(row.due, { seconds: false }) : '未設定參考期限'];
 }
 
 export function StudyAssignmentAssistant({ data, open }: Props) {
@@ -126,7 +128,7 @@ function AssignmentQuestions({ data, open }: Props) {
   );
   const receipts = useMemo(
     () => receiptQuestion ? queryNuniReceipts(data, receiptQuestion.question, receiptQuestion.scope,
-      receiptQuestion.deadlineScope, receiptQuestion.source) : null,
+      receiptQuestion.deadlineScope, receiptQuestion.source, receiptQuestion.at) : null,
     [data, receiptQuestion],
   );
   const quizzes = useMemo(() => quiz
@@ -186,6 +188,15 @@ function AssignmentQuestions({ data, open }: Props) {
       return;
     }
     const at = Date.now();
+    const period = question
+      .normalize('NFKC')
+      .replace(/\s+/g, '')
+      .replace(/[?!。！？，,、]+$/u, '')
+      .replace(/^(?:那麼?|改看|改查)/u, '')
+      .replace(/(?:的呢|呢|的)$/u, '');
+    const window = search || receiptQuestion ? parseAssignmentDeadlineWindow(period, at) : null;
+    const dateOnly = Boolean(window && (window === 'clarify'
+      ? !withoutDeadlineConstraint(period) : window.label === period));
     const referenceQuiz = isNuniQuizReferenceQuestion(question);
     const quizFollowUp = quiz && (isNuniQuizStatusFollowUp(question) || referenceQuiz || isNuniQuizDateFollowUp(question, at));
     if (isNuniQuizQuestion(question) || quizFollowUp) {
@@ -198,7 +209,7 @@ function AssignmentQuestions({ data, open }: Props) {
       setNotice('');
       return;
     }
-    if (isNuniReceiptQuestion(question)) {
+    if (isNuniReceiptQuestion(question) || (receiptQuestion && dateOnly)) {
       // Only a deliberate tap or ordinal can establish a source for “這份作業”.
       const reference = isNuniReceiptReferenceQuestion(question);
       const selectedAssignment = selected !== null && !quiz ? rows[selected]?.item : undefined;
@@ -209,15 +220,24 @@ function AssignmentQuestions({ data, open }: Props) {
         setNotice('上個作業查詢尚未確定日期或只查特定期限狀態；請指定課程和作業名稱後再查繳交紀錄。');
         return;
       }
-      const previousReceipt = statusOnly ? receiptQuestion : null;
+      const changingReceiptDate = Boolean(receiptQuestion && dateOnly);
+      const previousReceipt = statusOnly || changingReceiptDate || (reference && chosen) ? receiptQuestion : null;
       const inheritedDeadline = fromDeadline && search && answer?.kind === 'results' && answer.window
         ? { window: answer.window, checkedAt: search.at } : undefined;
+      const previousDeadline = previousReceipt && receipts?.kind === 'results'
+        ? receipts.deadlineScope : previousReceipt?.deadlineScope;
+      // A status-only turn keeps the original calendar anchor. A date-only turn
+      // replaces that anchor, while retaining the user's course and receipt filter.
+      const receiptScope = previousReceipt?.scope ??
+        (fromDeadline && search && answer?.kind === 'results' ? search.filter : question);
       setLookup({ kind: 'receipt', search: {
-        question,
-        scope: previousReceipt?.scope ??
-          (fromDeadline && search && answer?.kind === 'results' ? search.filter : question),
-        deadlineScope: previousReceipt?.deadlineScope ?? inheritedDeadline,
-        source: previousReceipt?.source ?? (chosen ? { courseId: chosen.courseId, id: chosen.id } : undefined),
+        question: changingReceiptDate && previousReceipt
+          ? withoutDeadlineConstraint(previousReceipt.question.normalize('NFKC')) : question,
+        scope: changingReceiptDate ? period + ' ' + withoutDeadlineConstraint(receiptScope.normalize('NFKC')) : receiptScope,
+        at: previousReceipt && !changingReceiptDate ? previousReceipt.at
+          : fromDeadline && search ? search.at : at,
+        deadlineScope: changingReceiptDate ? undefined : previousDeadline ?? inheritedDeadline,
+        source: chosen ? { courseId: chosen.courseId, id: chosen.id } : previousReceipt?.source,
         returnTo: (chosen || fromDeadline) && search ? { search, offset, selected }
           : previousReceipt?.returnTo ?? (chosen ? receiptQuestion?.returnTo : undefined),
       } });
@@ -226,14 +246,6 @@ function AssignmentQuestions({ data, open }: Props) {
       setOffset(0);
       return;
     }
-    const period = question
-      .normalize('NFKC')
-      .replace(/\s+/g, '')
-      .replace(/[?!。！？，,、]+$/u, '')
-      .replace(/^(?:那麼?|改看|改查)/u, '')
-      .replace(/(?:的呢|呢|的)$/u, '');
-    const window = search ? parseAssignmentDeadlineWindow(period, at) : null;
-    const dateOnly = window && window !== 'clarify' && window.label === period;
     if (!dateOnly && !isAssignmentDeadlineQuestion(question)) {
       setLookup(null);
       setNotice('可查作業、測驗與個人紀錄。要繳交或作答，請從結果開啟原課程頁。');
@@ -375,9 +387,14 @@ function AssignmentQuestions({ data, open }: Props) {
               </View>
             </View>
           )}
-          {receipts?.kind === 'results' && receiptQuestion?.deadlineScope && (
+          {receipts?.kind === 'results' && receipts.deadlineScope && (
             <Text style={text}>
-              延續上一個查詢的「{receiptQuestion.deadlineScope.window.label}」截止範圍（台灣時間）。
+              截止範圍：「{receipts.deadlineScope.window.label}」（台灣時間），依作業參考期限篩選。
+            </Text>
+          )}
+          {receipts?.kind === 'results' && receipts.undatedOutsideWindow > 0 && (
+            <Text style={text}>
+              另有 {receipts.undatedOutsideWindow} 筆無可核對的參考期限，無法依日期判斷。
             </Text>
           )}
           {shown.map((row, index) => {

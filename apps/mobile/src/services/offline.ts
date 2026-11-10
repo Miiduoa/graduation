@@ -881,10 +881,13 @@ export async function clearCachedData(key: string): Promise<void> {
   await AsyncStorage.removeItem(`${OFFLINE_DATA_PREFIX}${key}`);
 }
 
-export async function clearAllOfflineData(): Promise<void> {
+export async function clearAllOfflineData(assertCurrent?: () => void): Promise<void> {
+  assertCurrent?.();
   const keys = await AsyncStorage.getAllKeys();
+  assertCurrent?.();
   const offlineKeys = keys.filter((k) => k.startsWith(OFFLINE_DATA_PREFIX));
   await AsyncStorage.multiRemove(offlineKeys);
+  assertCurrent?.();
   await clearOfflineQueue();
 }
 

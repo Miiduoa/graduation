@@ -1,3 +1,5 @@
+import { NuniError } from '@campus/shared/src/nuni';
+import { boundedBytes } from './boundedBytes';
 import { isSchoolLmsReadonlyEnabled } from './schoolLmsReadonly';
 import { isHostedWebCallable, isLeaveWebCallable, isSchoolLoginWebCallable } from '@/lib/hostedCallables';
 import { callableErrorBody, HttpsError } from './httpsError';
@@ -107,11 +109,20 @@ async function readJsonBody(request: Request): Promise<unknown> {
   if (contentType !== 'application/json') {
     throw new HttpsError('invalid-argument', 'Request has incorrect Content-Type.');
   }
-  const raw = await request.arrayBuffer();
-  if (raw.byteLength > MAX_BODY_BYTES) {
-    throw new HttpsError('invalid-argument', 'Request body too large');
+  if (!request.body) return undefined;
+  let raw: Buffer;
+  try {
+    raw = await boundedBytes(request, MAX_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof NuniError && error.code === 'BODY_TOO_LARGE') {
+      throw new HttpsError('invalid-argument', 'Request body too large');
+    }
+    if (error instanceof NuniError && error.code === 'READ_TIMEOUT') {
+      throw new HttpsError('unavailable', 'Request body timed out');
+    }
+    throw new HttpsError('invalid-argument', 'Request body could not be read');
   }
-  const text = Buffer.from(raw).toString('utf8').trim();
+  const text = raw.toString('utf8').trim();
   if (!text) return undefined;
   try {
     return JSON.parse(text);
@@ -172,6 +183,10 @@ async function invokeHostedCallable(
   ) {
     const { createLeaveRequestHandlers } = await import('./leaveRequestHandlers');
     return createLeaveRequestHandlers({ db: db as never })[name](request);
+  }
+  if (name === 'ensureCampusStoryBinding') {
+    const { createCampusStoryBindingHandler } = await import('./campusStoryBindingHandler');
+    return createCampusStoryBindingHandler(db)(request);
   }
   throw new HttpsError('not-found', `Unknown function: ${name}`);
 }

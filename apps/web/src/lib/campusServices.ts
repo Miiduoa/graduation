@@ -27,6 +27,14 @@ const lmsLabel = (path: (typeof ACADEMIC_LMS_SECTIONS)[number]['path']) =>
 
 export const CAMPUS_SERVICES = [
   {
+    name: '數位學生證',
+    text: '開啟學生證卡面、出示學號與查找校方證件',
+    href: '/student-card',
+    access: 'account',
+    keywords: '學生證 數位證件 證件 學號 student id card',
+    category: 'campus',
+  },
+  {
     name: academicLabel('/calendar'),
     text: '新增、編輯與查看自己的活動、考試與行程',
     href: '/calendar',
@@ -108,6 +116,15 @@ export const CAMPUS_SERVICES = [
     category: 'study',
   },
   {
+    name: '教材收藏',
+    text: '開啟這台裝置上以目前帳號收藏的課程教材',
+    href: '/classroom/material-bookmarks',
+    access: 'platform',
+    keywords: '書籤 教材收藏 我的收藏 此裝置收藏 bookmark saved',
+    category: 'study',
+    parentHref: '/classroom',
+  },
+  {
     name: lmsLabel('/school-courses'),
     text: '讀取玩課雲（WOW Class）課堂清單，前往教材、作業與公告',
     href: '/school-courses',
@@ -183,6 +200,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板',
+    href: '/social',
+    access: 'platform',
+    keywords: 'Google 公開 跨校 貼文 社群 看板 social community',
+    category: 'connect',
+  },
+  {
     name: '校園交流',
     text: '閱讀與分享校園話題',
     href: '/community',
@@ -232,6 +257,15 @@ export const CAMPUS_SERVICES = [
     parentHref: '/food',
   },
   {
+    name: 'App 餐廳訂單',
+    text: '查看在 App 餐廳下的訂單、取餐號碼與店家接單進度',
+    href: '/orders',
+    access: 'school',
+    keywords: '我的訂單 餐廳訂單 訂單紀錄 取餐號碼 orders',
+    category: 'campus',
+    parentHref: '/food',
+  },
+  {
     name: '宿舍',
     text: '自主管理宿舍備忘、設備問題、入住退宿清單與洗衣計時',
     href: '/dormitory',
@@ -241,10 +275,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '失物招領',
-    text: '查看本校遺失與拾獲刊登',
+    text: '用 Google 帳號查看、刊登與管理失物',
     href: '/lost-found',
-    access: 'school',
-    keywords: '失物 招領 遺失 拾獲 lost found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 Google lost found',
     category: 'campus',
   },
   {
@@ -345,7 +379,10 @@ function isSecondary(service: CampusService) {
 
 /** 含主入口與次級選項（供路由判斷、快捷意圖查找）。 */
 export function flattenCampusServices(schoolLmsEnabled = false) {
-  return CAMPUS_SERVICES.filter((service) => schoolLmsEnabled || service.href !== '/school-lms');
+  return CAMPUS_SERVICES.filter((service) =>
+    (schoolLmsEnabled || service.href !== '/school-lms') &&
+    (service.href !== '/orders' || isWebOnlineOrderingEnabled()),
+  );
 }
 
 export function presentCampusService<T extends { href: string; text: string; name?: string }>(
@@ -372,6 +409,39 @@ export function secondaryCampusServices(parentHref: string, schoolLmsEnabled = f
   return flattenCampusServices(schoolLmsEnabled)
     .filter((service) => isSecondary(service) && service.parentHref === parentHref)
     .map(presentCampusService);
+}
+
+export function readCampusServiceFilters(params: URLSearchParams) {
+  const category = params.get('category');
+  return {
+    query: (params.get('q') ?? '').slice(0, 100),
+    category: SERVICE_CATEGORIES.some((item) => item.id === category)
+      ? (category as ServiceCategory)
+      : ('all' as const),
+  };
+}
+
+export function writeCampusServiceFilters(
+  params: URLSearchParams,
+  query: string,
+  category: ServiceCategory | 'all',
+) {
+  if (query) params.set('q', query);
+  else params.delete('q');
+  if (category === 'all') params.delete('category');
+  else params.set('category', category);
+}
+
+export function countCampusSearchResults(
+  matches: readonly CampusService[],
+  browsing: boolean,
+  schoolLmsEnabled: boolean,
+) {
+  if (!browsing) return matches.length;
+  return matches.reduce(
+    (count, service) => count + 1 + secondaryCampusServices(service.href, schoolLmsEnabled).length,
+    0,
+  );
 }
 
 export function searchCampusServices(

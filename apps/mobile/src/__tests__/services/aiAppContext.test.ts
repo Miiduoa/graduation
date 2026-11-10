@@ -4,6 +4,8 @@ import {
   loadAIAppRuntimeData,
 } from '../../services/aiAppContext';
 import type { DataSource } from '../../data/source';
+import type { PostLoginContext } from '../../data/postLoginTypes';
+import * as postLoginContextHolder from '../../services/postLoginContextHolder';
 
 describe('aiAppContext', () => {
   let warnSpy: jest.SpyInstance;
@@ -14,6 +16,39 @@ describe('aiAppContext', () => {
 
   afterEach(() => {
     warnSpy.mockRestore();
+  });
+
+  it.each(['memory', 'explicit'] as const)('scopes %s post-login data to the exact account and school', (source) => {
+    const postLoginContext: PostLoginContext = {
+      uid: 'owner-a',
+      schoolId: 'pu',
+      roles: {
+        primaryRole: 'student', subRoles: [], source: 'firestore',
+        flags: { isStudent: true, isTeacher: false, isDeptAdmin: false, isAdmin: false },
+      },
+      asStudent: {
+        courses: [], upcomingExams: [],
+        pendingAssignments: [{
+          id: 'private-assignment', courseId: 'private-course', title: '私人作業',
+          dueAt: '2026-05-06T10:00:00+08:00', type: 'homework', status: 'pending', source: 'tron',
+        }],
+      },
+      latestAnnouncements: [], builtAt: '2026-05-05T00:00:00Z', partialErrors: [],
+    };
+    const memory = jest.spyOn(postLoginContextHolder, 'getInMemoryPostLoginContext')
+      .mockReturnValue(source === 'memory' ? postLoginContext : null);
+    const input = {
+      schoolId: 'pu', userId: 'owner-a',
+      ...(source === 'explicit' ? { postLoginContext } : {}),
+    };
+    try {
+      expect(buildAIAppContext(input).pendingAssignments?.map((assignment) => assignment.title)).toContain('私人作業');
+      expect(buildAIAppContext({ ...input, userId: 'owner-b' }).pendingAssignments ?? []).toHaveLength(0);
+      expect(buildAIAppContext({ ...input, schoolId: 'nthu' }).pendingAssignments ?? []).toHaveLength(0);
+      expect(buildAIAppContext({ ...input, userId: null }).pendingAssignments ?? []).toHaveLength(0);
+    } finally {
+      memory.mockRestore();
+    }
   });
 
   it('builds a whole-app pulse summary from app data, risks, actions, and memory', () => {

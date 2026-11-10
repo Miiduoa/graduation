@@ -2,6 +2,7 @@ const { FieldPath, FieldValue } = require('firebase-admin/firestore');
 const { HttpsError } = require('firebase-functions/v2/https');
 const { assertPrivacyRequestOwner } = require('./userDataExport');
 const { releaseDeletedUserEventRegistration } = require('./eventRegistration');
+const { closeCampusStoryAccess } = require('./campusStoryAccessBinding');
 
 const PAGE_SIZE = 200;
 // Account closure removes access and private account data. These shared records
@@ -166,9 +167,11 @@ function createDeleteUserAccountHandler({
 
     // Check responsibilities before removing anything. A retry also checks
     // current ownership, rather than trusting the state seen in a prior attempt.
+    const schoolMemberRefs = [];
     for (const collection of ['members', 'operators']) {
       await scanPages(db.collectionGroup(collection), async (doc) => {
         const kind = canonicalMembership(doc.ref.path, collection, uid);
+        if (kind === 'school') schoolMemberRefs.push(doc.ref);
         const active =
           kind === 'operator' ? doc.data().status !== 'inactive' : doc.data().status === 'active';
         if (!kind || !active || doc.data().role !== 'owner') return;
@@ -178,10 +181,18 @@ function createDeleteUserAccountHandler({
       });
     }
 
-    await userRef.set(
-      { accountDeletionInProgress: true, notificationDeliveryDisabled: true },
-      { merge: true },
-    );
+    await closeCampusStoryAccess({
+      db,
+      uid,
+      FieldValue,
+      memberRefs: schoolMemberRefs,
+      userUpdate: {
+        accountDeletionInProgress: true,
+        notificationDeliveryDisabled: true,
+        campusStoryBindingHaltKind: FieldValue.delete(),
+        campusStoryBindingHaltAt: FieldValue.delete(),
+      },
+    });
 
     // Remove school authority first so ordinary membership-checked writes stop.
     for (const collection of ['members', 'directory', 'serviceRoles', 'operators']) {
@@ -249,6 +260,7 @@ function createDeleteUserAccountHandler({
     // Financial history remains intact, including account-side mirrors. All
     // other private collections include orphaned/nested descendants in cleanup.
     await checkFinancialRecords(db, userRef, uid);
+    await db.collection('_studentCardPresentations').doc(uid).delete();
     await clearPrivateSubtree(db, userRef);
 
     // Replacement is intentional: unknown profile fields must not survive a

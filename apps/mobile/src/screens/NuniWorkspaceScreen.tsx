@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { NavigationContext } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Linking,
@@ -20,7 +21,9 @@ import {
 } from '@campus/shared/src/nuniAccount';
 import { NuniError } from '@campus/shared/src/nuni';
 import { useNuniSession } from '../state/nuniSession';
-import { NuniDraftProvider, useNuniDraftState, type NuniDraftCache } from '../state/nuniDrafts';
+import {
+  NuniDraftProvider, NuniDraftScopeStore, useNuniDraftScope, useNuniDraftState, type NuniDraftScope,
+} from '../state/nuniDrafts';
 import { clearAllFoodPendingForAccount } from '../state/foodPersistence';
 import { getGoogleCredentialCapability } from '../services/nuniGoogle';
 import { theme } from '../ui/theme';
@@ -295,6 +298,15 @@ function SignedInWorkspace({
 }) {
   const s = useThemeStyleSheet(createStyles);
   const [tab, setTab] = useNuniDraftState<Tab>('workspace:tab', 'courses');
+  const navigation = React.useContext(NavigationContext);
+  const subscribeToFocus = React.useCallback((listener: () => void) => {
+    if (!navigation) return () => {};
+    const focus = navigation.addListener('focus', listener);
+    const blur = navigation.addListener('blur', listener);
+    return () => { focus(); blur(); };
+  }, [navigation]);
+  const isFocused = React.useCallback(() => navigation?.isFocused() ?? true, [navigation]);
+  const focused = React.useSyncExternalStore(subscribeToFocus, isFocused, isFocused);
   useEffect(() => {
     if (initialTab && ['courses', 'food', 'merchant', 'account'].includes(initialTab))
       setTab(initialTab);
@@ -333,12 +345,17 @@ function SignedInWorkspace({
             已切換 nuni 帳號，請從目前帳號的課程重新選擇作業。
           </Text>
         )}
-        <NuniCourses
-          active={tab === 'courses'}
-          initialWorkspaceId={initialWorkspaceId}
-          initialAssignmentId={initialAssignmentId}
-          initialMaterialId={initialMaterialId}
-        />
+        {/* A second Workspace can be pushed above this route by the assistant.
+            Rebuild course editors from the shared draft and fresh server data
+            on return, so a hidden old editor cannot overwrite newer input. */}
+        {focused ? (
+          <NuniCourses
+            active={tab === 'courses'}
+            initialWorkspaceId={initialWorkspaceId}
+            initialAssignmentId={initialAssignmentId}
+            initialMaterialId={initialMaterialId}
+          />
+        ) : null}
       </View>
       <View
         style={[s.page, tab !== 'merchant' && s.hidden]}
@@ -388,7 +405,11 @@ export function NuniWorkspaceScreen({
   const active = useRef<{ epoch: number; id: number } | null>(null);
   const nextOperation = useRef(0);
   const mounted = useRef(true);
-  const drafts = useRef<{ accountId: string; cache: NuniDraftCache } | null>(null);
+  const sessionDrafts = useNuniDraftScope();
+  const localDrafts = useRef<NuniDraftScopeStore | null>(null);
+  if (!localDrafts.current) localDrafts.current = new NuniDraftScopeStore();
+  const draftStore = sessionDrafts ?? localDrafts.current;
+  const drafts = useRef<NuniDraftScope | null>(null);
   const cleanupError = (ownerEpoch: number) => {
     if (!mounted.current || identity.current.epoch !== ownerEpoch) return;
     setActionState((previous) => ({
@@ -400,6 +421,7 @@ export function NuniWorkspaceScreen({
   // An unexpired same-account foreground refresh keeps the verified session mounted.
   // Confirmed logout, expiry or a changed account still drop the in-memory draft scope.
   if (auth.pendingLogout || (!auth.session && !auth.loading && !auth.error)) {
+    draftStore.clear();
     if (drafts.current) {
       const accountId = drafts.current.accountId;
       drafts.current = null;
@@ -409,13 +431,13 @@ export function NuniWorkspaceScreen({
     }
   }
   if (auth.session && !auth.loading && !auth.pendingLogout && !auth.error && !action) {
-    if (drafts.current?.accountId !== auth.session.platformAccountId)
-      drafts.current = { accountId: auth.session.platformAccountId, cache: new Map() };
+    drafts.current = draftStore.forAccount(auth.session.platformAccountId);
   }
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      localDrafts.current?.clear();
     };
   }, []);
   const run = async (label: string, operation: () => Promise<unknown>) => {
@@ -438,6 +460,7 @@ export function NuniWorkspaceScreen({
   };
   const logout = () => {
     const accountId = drafts.current?.accountId ?? auth.session?.platformAccountId;
+    draftStore.clear();
     drafts.current = null;
     void run('正在登出…', async () => {
       // Revoke authentication immediately. Slow or unavailable device storage
@@ -449,7 +472,11 @@ export function NuniWorkspaceScreen({
       if (storage.status === 'rejected') cleanupError(epoch);
     });
   };
-  const openWeb = () => void run('正在開啟網頁…', () => Linking.openURL('https://nuni.tw/login'));
+  const merchantEntry = target?.tab === 'merchant';
+  const openWeb = () => {
+    const path = merchantEntry ? '/merchant' : target?.tab === 'courses' ? '/classroom/login' : '/login';
+    void run('正在開啟網頁…', () => Linking.openURL(`https://nuni.tw${path}`));
+  };
   if (auth.loading || action)
     return (
       <View
@@ -483,7 +510,7 @@ export function NuniWorkspaceScreen({
     return (
       <NuniDraftProvider cache={drafts.current!.cache}>
         <SignedInWorkspace
-          key={`${auth.session.platformAccountId}:${auth.session.context}`}
+          key={`${auth.session.platformAccountId}:${auth.session.context}:${drafts.current!.revision}`}
           onLogout={logout}
           initialTab={courseAccountChanged ? 'courses' : target?.tab}
           courseAccountChanged={courseAccountChanged}
@@ -505,9 +532,11 @@ export function NuniWorkspaceScreen({
         繼續時會建立帳號；再次登入會回到原本的帳號。
       </Text>
       <View style={s.panel}>
-        <Text style={s.title}>從你的課程開始</Text>
+        <Text style={s.title}>{merchantEntry ? '店家進駐與門市管理' : '從你的課程開始'}</Text>
         <Text style={s.body}>
-          加入老師的課程、查看待辦與繳交作業。學校資格和店家權限會另外確認。
+          {merchantEntry
+            ? '新店家可在登入後申請進駐。門市負責人請用原申請帳號查進度或管理門市。店員請向負責人確認登入方式。'
+            : '學生可加入老師的課程與繳交作業。教師可建立課程，或進入獲授權的課班。'}
         </Text>
         {capability.available ? (
           <Action label="使用 Google 繼續" onPress={() => void run('正在登入…', auth.signIn)} />

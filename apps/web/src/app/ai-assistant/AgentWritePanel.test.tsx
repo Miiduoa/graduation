@@ -53,3 +53,56 @@ it('permission-denied 顯示後端訊息與前往設定，不顯示結果不確�
   );
   expect(screen.queryByText('尚未收到確定的執行結果')).toBeNull();
 });
+
+it('報修確認用備忘句，不用送出後離開或伺服器已確認執行成功', async () => {
+  mocks.execute.mockResolvedValue({
+    success: true, toolName: 'createDormRepairRequest', repairId: 'repair-123',
+  });
+  render(
+    <AgentWritePanel
+      proposal={{
+        toolName: 'createDormRepairRequest',
+        label: '確認存成報修備忘',
+        input: { dormitory: 'A棟', room: '301', category: '冷氣', description: '不冷' },
+        agentRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      }}
+      userId="alice"
+      schoolId="pu"
+      onCompleted={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText(/確認後只會存成報修備忘/)).toBeTruthy();
+  expect(screen.queryByText(/送出後即使離開此頁/)).toBeNull();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  });
+  await waitFor(() => {
+    expect(screen.getByText('報修備忘已存好')).toBeTruthy();
+  });
+  expect(screen.queryByText('伺服器已確認執行成功')).toBeNull();
+  expect(screen.queryByText(/repair-123/)).toBeNull();
+});
+
+it('非報修確認仍保留通用送出與執行成功句', async () => {
+  mocks.execute.mockResolvedValue({
+    success: true, toolName: 'reserveSeat', reservationId: 'seat-1',
+  });
+  render(
+    <AgentWritePanel
+      proposal={proposal}
+      userId="alice"
+      schoolId="pu"
+      onCompleted={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '檢視草稿' }));
+  expect(screen.getByText(/送出後即使離開此頁，操作也可能繼續完成/)).toBeTruthy();
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: '確認並執行' }));
+  });
+  await waitFor(() => {
+    expect(screen.getByText('伺服器已確認執行成功')).toBeTruthy();
+  });
+  expect(screen.queryByText('報修備忘已存好')).toBeNull();
+});

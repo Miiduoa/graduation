@@ -198,6 +198,7 @@ export function VoiceDictationButton({
         aria-label={
           !supported ? '此瀏覽器不支援語音辨識' : listening ? '停止語音輸入' : '使用語音輸入'
         }
+        data-voice-input
         aria-pressed={listening}
         title={!supported ? '瀏覽器尚不支援；可使用手機鍵盤的語音輸入' : '語音轉文字，不會自動送出'}
         onClick={toggle}

@@ -34,10 +34,15 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     };
     refreshVoices.current = update;
     update();
-    synthesis.addEventListener('voiceschanged', update);
+    // Some mobile speech engines throw when adding a voiceschanged listener.
+    // Keep manual installed-voice detection available rather than crashing the panel.
+    try { synthesis.addEventListener('voiceschanged', update); }
+    catch { /* Students can retry through the manual voice refresh button. */ }
     return () => {
       refreshVoices.current = null;
-      synthesis.removeEventListener('voiceschanged', update);
+      // A failed listener teardown must never prevent cancelling private speech.
+      try { synthesis.removeEventListener('voiceschanged', update); }
+      catch { /* Continue cleaning up the current utterance. */ }
       if (active.current) {
         active.current.onend = null;
         active.current.onerror = null;

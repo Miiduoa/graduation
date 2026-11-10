@@ -310,3 +310,28 @@ it('returns 429 after 20 invalid join codes from the same uid', async () => {
   expect((await limited.json()).error.status).toBe('RESOURCE_EXHAUSTED');
 });
 
+
+it('cancels oversized chunked bodies before reading the rest or authenticating', async () => {
+  const { runtime: deps } = runtime();
+  let chunksRead = 0;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      chunksRead += 1;
+      controller.enqueue(new Uint8Array(32 * 1024));
+      if (chunksRead === 16) controller.close();
+    },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 });
+  const response = await dispatchFnRequest('leaveGroup', new Request('https://nuni.tw/api/fn/leaveGroup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: stream,
+    duplex: 'half',
+  } as RequestInit), deps);
+
+  expect(response.status).toBe(400);
+  expect((await response.json()).error.message).toBe('Request body too large');
+  expect(chunksRead).toBe(3);
+  expect(cancelled).toBe(true);
+});

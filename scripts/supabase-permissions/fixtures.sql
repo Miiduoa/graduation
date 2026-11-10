@@ -36,6 +36,12 @@ insert into public.assignments (id, course_id, title, created_by, due_at, late_p
   ('20000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-000000000001', 'Late submission target', '00000000-0000-4000-8000-000000000002', now() - interval '3 days', 10);
 insert into public.submissions (id, assignment_id, student_id, body_text, grade, submitted_at) values
   ('30000000-0000-4000-8000-000000000004', '20000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000003', 'Late submission A', 80, now() - interval '1 day');
+insert into public.assignments (id, course_id, title, created_by) values
+  ('20000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-000000000001', 'Attachment receipt target', '00000000-0000-4000-8000-000000000002');
+-- Synthetic metadata represents completed uploads for the Data API trigger test.
+insert into storage.objects (bucket_id, name, owner) values
+  ('submissions', '10000000-0000-4000-8000-000000000001/20000000-0000-4000-8000-000000000005/00000000-0000-4000-8000-000000000003/receipt.pdf', '00000000-0000-4000-8000-000000000003'),
+  ('submissions', '10000000-0000-4000-8000-000000000001/20000000-0000-4000-8000-000000000005/00000000-0000-4000-8000-000000000004/receipt.pdf', '00000000-0000-4000-8000-000000000004');
 insert into public.grade_categories (id, course_id, name, weight) values
   ('40000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'Assignments', 1),
   ('40000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'Assignments', 1);
