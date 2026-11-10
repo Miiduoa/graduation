@@ -338,6 +338,39 @@ describe('explicit local study generation', () => {
     expect(lastWorker().terminate).toHaveBeenCalledOnce();
   });
 
+  it('rejects repeated explanations despite different citations and internal whitespace', async () => {
+    const first = { ...lesson().steps![0], explanation: '先 辨識唯一的紀錄。' };
+    const duplicated = {
+      ...lesson(),
+      steps: [
+        first,
+        {
+          ...lesson().steps![1],
+          title: '第二步：換來源但沒教新內容',
+          explanation: '先 \n辨識唯一的紀錄。',
+        },
+      ],
+    };
+    // The citations both match this passage, and old saved lessons remain
+    // readable. Only newly generated tutorials need distinct teaching steps.
+    expect(parseTutorExplanation(JSON.stringify(duplicated), passage()).steps).toHaveLength(2);
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(duplicated) });
+    await expect(pending).rejects.toThrow('重複相同的教學步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
   it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
     const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
     const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };

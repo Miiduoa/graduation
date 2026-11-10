@@ -84,13 +84,14 @@ function hasBoundedGeneratedEvidence(explanation: TutorExplanation): boolean {
   return generatedEvidenceQuotes(explanation).every((quote) => Array.from(quote).length <= 60);
 }
 
-// Distinct step titles do not make repeated instructional content into two
-// learning steps. This applies only to NEW worker results, not saved lessons.
+// Distinct titles, source lines or whitespace cannot turn the SAME explanation
+// into two instructional steps. Preserve the original text for display and
+// evidence validation; normalize only for this NEW-result duplicate check.
 function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
   if (!explanation.steps) return false;
   const seen = new Set<string>();
   for (const step of explanation.steps) {
-    const content = JSON.stringify([step.explanation.trim(), step.sourceQuote, step.formula ?? null]);
+    const content = step.explanation.normalize('NFC').replace(/\s+/gu, ' ').trim();
     if (seen.has(content)) return false;
     seen.add(content);
   }
