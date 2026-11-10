@@ -342,6 +342,20 @@ describe('Providence footprint API snapshot freshness', () => {
     });
   });
 
+  it('rejects a stale CDN snapshot once its OSM source is seven days old', () => {
+    const osmBaseAt = '2026-11-07T10:00:00Z'; // 47h before the HTTP fetch.
+    const expiry = Date.parse(osmBaseAt) + 7 * 24 * 60 * 60 * 1000;
+    const cached = { ...response, osmBaseAt, stale: true };
+    expect(parseProvidenceFootprintSnapshot(cached, expiry - 1)).toMatchObject({
+      buildings: [footprint], stale: true, osmBaseAt,
+    });
+    expect(parseProvidenceFootprintSnapshot(cached, expiry)).toBeNull();
+    expect(parseProvidenceFootprintSnapshot(cached, expiry + 1)).toBeNull();
+    // A legacy payload lacking replication metadata still follows fetch age.
+    expect(parseProvidenceFootprintSnapshot({ ...response, stale: true }, expiry))
+      .toMatchObject({ stale: true, osmBaseAt: null });
+  });
+
   it('rejects fabricated OSM replication metadata while keeping legacy snapshots', () => {
     for (const osmBaseAt of [
       '2099-01-01T00:00:00Z',
