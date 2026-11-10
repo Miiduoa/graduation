@@ -285,6 +285,58 @@ describe('public Providence building geometry route', () => {
     }
   });
 
+  it.each([
+    ['missing timestamp', {}],
+    ['null timestamp', { timestamp_osm_base: null }],
+  ])('rejects an explicit osm3s header with %s instead of caching undated geometry', async (_case, osm3s) => {
+    const payload = JSON.stringify({ osm3s, ...JSON.parse(osmPayload) });
+    const upstream = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect((await response.json()).error).toMatch(/temporarily unavailable/);
+    // Rejected metadata cannot be promoted into a fresh cached campus map.
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a dated stale fallback when a later Overpass reply omits its declared replication date', async () => {
+    const start = Math.floor(Date.now() / 1000) * 1000;
+    const base = new Date(start - 60_000).toISOString().replace('.000Z', 'Z');
+    const initialPayload = JSON.stringify({
+      osm3s: { timestamp_osm_base: base }, ...JSON.parse(osmPayload),
+    });
+    const malformedPayload = JSON.stringify({
+      osm3s: { copyright: 'OpenStreetMap contributors' }, ...JSON.parse(osmPayload),
+    });
+    const upstream = vi.fn()
+      .mockResolvedValueOnce(new Response(initialPayload, { status: 200 }))
+      .mockResolvedValueOnce(new Response(malformedPayload, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    try {
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      const firstBody = await first.json();
+      expect(firstBody.osmBaseAt).toBe(base);
+      clock.mockReturnValue(start + 25 * 60 * 60 * 1000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      const body = await fallback.json();
+      expect(body.stale).toBe(true);
+      expect(body.fetchedAt).toBe(firstBody.fetchedAt);
+      expect(body.osmBaseAt).toBe(base);
+      expect(body.buildings).toEqual(firstBody.buildings);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not promote a days-old Overpass database state into a new fresh snapshot', async () => {
     const baseTime = new Date(Math.floor(Date.now() / 1000) * 1000 - 3 * 24 * 60 * 60 * 1000)
       .toISOString().replace('.000Z', 'Z');
