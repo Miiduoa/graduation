@@ -58,14 +58,15 @@ export function Conversation({ context, schoolId, accountId, cloudEnabled = true
       },
       ...(input ? { body: JSON.stringify(input) } : {}),
     });
-    if (!response.ok)
+    if (!response.ok) {
       throw new Error(
         response.status === 404
-          ? '雲端助理尚未啟用。'
-          : response.status === 429
-            ? '查詢次數已達上限，請稍後再試。'
-            : '目前無法查詢，請重新選擇或稍後再試。',
+            ? '雲端助理尚未啟用。'
+            : response.status === 429
+              ? '查詢次數已達上限，請稍後再試。'
+              : '目前無法查詢，請重新選擇或稍後再試。',
       );
+    }
     return response.json();
     });
   }
@@ -311,8 +312,8 @@ function V2Conversation({
     if (!response.ok)
       throw new Error(
         typeof result.message === 'string' && result.message
-          ? result.message
-          : response.status === 409
+            ? result.message
+            : response.status === 409
             ? '資料或登入狀態已變更，請重新提議。'
             : response.status === 429
               ? '已達查詢預算，請稍後再試。'
@@ -570,6 +571,7 @@ function V2Conversation({
     setError('');
   }
   return (
+    <>
     <AssistantThread
       inline={!!inlineDraft}
       schoolId={schoolId}
@@ -594,6 +596,7 @@ function V2Conversation({
       onCancel={(turn, index) => void cancel(turn, index)}
       onReconcile={(card) => void reconcile(card)}
     />
+    </>
   );
 }
 function AssistantRoute({ cloudEnabled }: { cloudEnabled: boolean }) {

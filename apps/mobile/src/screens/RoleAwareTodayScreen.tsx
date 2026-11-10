@@ -1,5 +1,6 @@
 import React, { useSyncExternalStore } from 'react';
 import { ActivityIndicator } from 'react-native';
+import ShopDockScreen from './ShopDockScreen';
 import StudentTodayScreen from './StudentTodayScreen';
 import TeacherTodayScreen from './TeacherTodayScreen';
 import { useAuth } from '../state/auth';
@@ -15,7 +16,6 @@ const roleTitles: Partial<Record<ResolvedDashboardRole, string>> = {
   club_officer: '社團工作台',
   department: '系所工作台',
   admin: '管理工作台',
-  vendor: '商家工作台',
   staff: '校務服務',
   alumni: '校友服務',
 };
@@ -23,6 +23,7 @@ export function RoleWorkspaceScreen({
   role,
   ...props
 }: ServiceScreenProps & { role: ResolvedDashboardRole }) {
+  if (role === 'vendor') return <ShopDockScreen navigation={props.navigation} />;
   return (
     <UnavailableFeatureScreen
       {...props}
@@ -73,5 +74,5 @@ export default function RoleAwareTodayScreen(props: ServiceScreenProps) {
   const role = resolveDashboardRole(auth.user ? auth.profile : null);
   if (role === 'student') return <StudentTodayScreen />;
   if (role === 'teacher') return <TeacherTodayScreen />;
-  return <RoleWorkspaceScreen {...props} role={role} />;
+  return <RoleWorkspaceScreen key={auth.user?.uid} {...props} role={role} />;
 }
