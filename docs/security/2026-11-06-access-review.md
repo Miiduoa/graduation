@@ -423,3 +423,13 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 原因是前輪新增「同組其他成員只可讀取貼文 `attachments` 明確引用之檔案」後，emulator 的共用貼文 fixture 仍僅建立 `{authorId: 'alice'}` 而**未列出實際已公開的 `notes.pdf`**。新的共用授權正確拒絕 instructor，所以本次僅在 fixture 加入精確附件引用，未放寬生產授權。另新增實際 emulator HTTP 回歸：合法已引用附件同組與 instructor 可讀、同貼文尚未引用草稿僅作者可讀、移除引用後其他成員立即拒絕、重新引用後恢復、校籍 inactive 後仍拒絕。
 
 此處是**測試資料修復，不宣稱已解決新的正式漏洞**。本次新的精確提交、Firebase emulator 及完整 CI 須另外確認；舊 head 的成功項目不得替代新 head。維持隔離測試、E 校園停用、禁止未授權 npm/pnpm audit，未合併 main、部署、migration、金鑰或正式 token 清理。GCS 舊 URL、Supabase 已簽 URL、真實隔離 staging、minimatch 相容性與指定 App 5504170 精確 head 審查仍為未解除阻擋。
+
+## 2026-11-10：封閉 legacy assignment HTTP／signed URL 的未提交附件橫向讀取（待精確 CI）
+
+獨立複核 #569 新增的群組作業附件收據限制後，發現共用 `authorizePrivateFile` 對舊 namespace `assignments/{assignmentId}/submissions/{studentId}/{filename}` 仍直接放行同組 manager 的 GET：它由根 `assignments/{id}.groupId` 定位群組，但不像 `groups/{groupId}/assignments/{id}/submissions/{studentId}/{filename}` 新路徑，沒有查證 live `groups/{groupId}/assignments/{id}/submissions/{studentId}` 的實際繳交收據。合法 instructor 只要得知學生 finalized、尚未繳交的舊路徑，就能透過 GCS HTTP 或新 Web private URL 取得附件。這不是已發 signed URL 的即時撤銷。
+
+最小修補不更動 legacy 學生本人預覽與原上傳路徑，只對其他身分 GET（manager）加上 canonical group submission 的條件：存在、owner 與路徑一致、`submittedAt` 非 null、`attachments` 精確引用完整舊 object path；跨校、非 manager、撤權仍按原條件拒絕。拒絕發生在 bucket 物件查詢或 URL 簽發前。歷史已提交但缺少正確附件清單的 manager 讀取會 fail-closed，須在隔離資料盤點與修復可信收據；不為相容性放寬。
+
+新增 shared Web memory tests、Functions GCS HTTP 惰性測試、Firebase emulator 真 HTTP/Firestore 回歸，涵蓋未繳交時本人可讀／教師不可讀、已提交教師可讀、取消引用／偽造 owner／未引用 sibling 拒絕、恢復引用與校籍撤銷。同步修正原有 emulator 正常 manager 下載案例，提供可信提交收據與精確引用。前一版 #569 head `b1d718da` 的 CI 於本次變更準備時仍在執行，不能沿用其結果；本輪新 head 的 Web、Functions、Rules、CodeQL 與完整 CI 均須重新核對。
+
+本修補僅隔離原始碼及合成測試，無正式 GCS/Supabase staging、正式 token 清除、發佈、migration、E 校園連線、未核准 npm/pnpm audit 或 main 合併。仍須指定 App 5504170 審核精確 head；舊 GCS bearer／Supabase signed URL 與歷史資料相容性維持開放風險。

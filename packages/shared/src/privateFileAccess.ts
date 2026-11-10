@@ -441,6 +441,25 @@ export async function authorizePrivateFile(
           )) deny();
         }
       }
+      // Legacy assignments/{id}/submissions/{uid}/ paths are still reachable
+      // via the GCS HTTP and Web signed-URL handlers. A manager must not
+      // download an uploaded draft without the canonical submission receipt.
+      if (scope.kind === 'assignment' && !scope.groupId && !writing && scope.userId !== uid) {
+        if (!manager) deny();
+        const submission = await tx.get(
+          groupRef.collection('assignments').doc(scope.assignmentId || '')
+            .collection('submissions').doc(scope.userId || ''),
+        );
+        const previous = asRecord(submission.data());
+        const owner = 'userId' in previous ? previous.userId
+          : 'uid' in previous ? previous.uid
+            : 'studentId' in previous ? previous.studentId : scope.userId;
+        if (
+          !submission.exists || owner !== scope.userId ||
+          previous.submittedAt == null ||
+          !referencesPrivateFile(previous.attachments, scope.path)
+        ) deny();
+      }
       if (
         (writing && scope.kind === 'group-cover' && !manager) ||
         (scope.kind === 'assignment' && !scope.groupId && scope.userId !== uid && (writing || !manager))

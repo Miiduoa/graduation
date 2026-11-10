@@ -182,11 +182,18 @@ describe('private group file HTTP handler', () => {
     expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);
   });
 
-  test('submission reads require owner or current manager and writes require the owner', async () => {
+  test('legacy assignment receipts govern manager reads while owners preview drafts', async () => {
     expect((await invoke({ path: ANSWER, uid: 'bob' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'outsider' })).status).toBe(403);
+    expect((await invoke({ path: ANSWER, uid: 'alice' })).status).toBe(200);
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    const receipt = 'groups/course/assignments/work/submissions/alice';
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
     expect((await invoke({ path: ANSWER, uid: 'teacher', method: 'POST' })).status).toBe(403);
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
   });

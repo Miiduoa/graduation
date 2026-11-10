@@ -110,6 +110,27 @@ it('allows managers and owners to read, but refuses another student', async () =
   await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
   await expect(authorize(store, GROUP_ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
 });
+it('legacy assignment URLs also require a submitted receipt with an exact file reference', async () => {
+  const store = fileStore([['assignments/work', { groupId: 'course' }]]);
+  const receiptPath = 'groups/course/assignments/work/submissions/alice';
+  // Owners can preview drafts; managers and other students cannot.
+  await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(authorize(store, ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'bob', submittedAt: Date.now(), attachments: [ANSWER] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [{ path: ANSWER }] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER.replace('answer.pdf', 'private-draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: null, attachments: [ANSWER] });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
+  store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
+});
+
 it('requires an existing live post for downloads and author ownership for existing uploads', async () => {
   const store = fileStore();
   await expect(authorize(store, POST, 'alice', false)).rejects.toMatchObject({ statusCode: 403 });

@@ -126,6 +126,9 @@ after(async () => {
 });
 
 test('active HTTP reads work, direct SDK access is denied, and canonical school revocation blocks later HTTP reads and uploads', { timeout: 30_000 }, async () => {
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    userId: 'alice', submittedAt: '2026-11-06T00:00:00.000Z', attachments: [paths().answer],
+  });
   for (const [kind, objectPath] of Object.entries(paths())) {
     const upload = await request('POST', objectPath, kind === 'cover' ? 'teacher' : 'alice');
     assert.equal(upload.status, 201, upload.body);
@@ -182,6 +185,7 @@ test('HTTP submission privacy, new filenames and manager cover updates remain su
     await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
       userId: 'alice', groupId, assignmentId, status,
       submittedAt: '2026-11-06T00:00:00.000Z',
+      attachments: [objectPath],
       ...(status === 'graded' ? { gradeScore: 90 } : {}),
     });
     assert.equal((await request('GET', objectPath)).body, 'original');
@@ -197,6 +201,21 @@ test('HTTP submission privacy, new filenames and manager cover updates remain su
 
 // firebase-tools 15.34.1 ignores GCS generation preconditions. Atomic overwrite/race
 // behavior requires real Cloud Storage staging. Unit tests verify SDK query serialization.
+test('legacy assignment upload is not visible to the instructor before submission', { timeout: 30_000 }, async () => {
+  const objectPath = paths().answer;
+  assert.equal((await request('POST', objectPath, 'alice')).status, 201);
+  assert.equal((await request('GET', objectPath, 'alice')).status, 200);
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
+  await receipt.set({ userId: 'alice', submittedAt: Date.now(), attachments: [objectPath] });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  await receipt.update({ attachments: [] });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  await receipt.update({ attachments: [objectPath] });
+  await db.doc('schools/pu/members/teacher').update({ status: 'inactive' });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+});
+
 test('direct Storage clients cannot list private objects or alter their metadata', { timeout: 30_000 }, async () => {
   const objectPath = paths().post;
   assert.equal((await request('POST', objectPath)).status, 201);
