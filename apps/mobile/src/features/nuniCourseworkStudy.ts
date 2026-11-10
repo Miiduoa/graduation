@@ -99,7 +99,7 @@ function validWindow(event: AssistantCalendarEvent, dueAt: string) {
   return due !== null && Number.isFinite(start) && Number.isFinite(end) && Date.now() < start && start < end && end <= due;
 }
 
-function resolveStudySource(read: CourseworkRead, assignmentId: string,
+export function resolveCourseworkStudySource(read: CourseworkRead, assignmentId: string,
   context: AssistantCalendarContext): CourseworkStudySource {
   if (!current(context)) throw new CourseworkStudyError('session-changed', STOPPED);
   const platform = context.platformTimetable!;
@@ -130,11 +130,16 @@ function resolveStudySource(read: CourseworkRead, assignmentId: string,
   });
 }
 
+/** Keep the same display title for single and source-bound batch preparations. */
+export function courseworkStudyEventTitle(title: string): string {
+  const fullTitle = `準備：${title.trim()}`;
+  return fullTitle.length <= 200 ? fullTitle : `準備：${Array.from(title.trim()).slice(0, 90).join('')}…`;
+}
+
 function prepareDraft(read: CourseworkRead, assignmentId: string, time: CourseworkStudyTime,
   context: AssistantCalendarContext, slot?: CourseworkStudySlot): CourseworkStudyDraft {
-  const source = resolveStudySource(read, assignmentId, context);
-  const fullTitle = `準備：${source.title.trim()}`;
-  const title = fullTitle.length <= 200 ? fullTitle : `準備：${Array.from(source.title.trim()).slice(0, 90).join('')}…`;
+  const source = resolveCourseworkStudySource(read, assignmentId, context);
+  const title = courseworkStudyEventTitle(source.title);
   let event: AssistantCalendarEvent;
   try {
     event = parseAssistantCalendarEvent({ title, date: time.date.trim(), allDay: false,
@@ -174,7 +179,7 @@ export async function findCourseworkStudyDrafts(read: CourseworkRead, assignment
   if (options.signal?.aborted) stop();
   try {
     if (abort.signal.aborted) return { kind: 'blocked', message: STOPPED };
-    const source = resolveStudySource(read, assignmentId, context);
+    const source = resolveCourseworkStudySource(read, assignmentId, context);
     const saved = deepFreeze(JSON.parse(JSON.stringify(read)) as CourseworkRead);
     const id = sourceKey(context.platformTimetable!.accountId, source.workspaceId, source.assignmentId);
     const version = sourceVersions.get(id) ?? 0;

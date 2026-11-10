@@ -17,7 +17,9 @@ import {
   ASSISTANT_CALENDAR_SOURCE_NAME, AssistantCalendarJournalError, assistantCalendarEventIdentity,
   consumeAssistantCalendarJournalPermit, readAssistantCalendarJournal, reserveAssistantCalendarAttempt,
   saveAssistantCalendarJournalObservation, saveAssistantCalendarJournalObservations,
+  parseAssistantCalendarOrigin, sameAssistantCalendarOrigin,
   type AssistantCalendarJournalEntry, type AssistantCalendarJournalObservation, type AssistantCalendarJournalProposal,
+  type AssistantCalendarJournalOrigin,
 } from './assistantCalendarJournal';
 
 export type AssistantCalendarContext = {
@@ -72,12 +74,14 @@ export function sameAssistantCalendarEvent(first: AssistantCalendarEvent, second
   return keys.every((key) => first[key] === second[key]);
 }
 
-export function createAssistantCalendarTask(event: AssistantCalendarEvent, context: AssistantCalendarContext): AssistantCalendarTask {
+export function createAssistantCalendarTask(event: AssistantCalendarEvent, context: AssistantCalendarContext,
+  origin?: AssistantCalendarJournalOrigin): AssistantCalendarTask {
   const owner = assistantCalendarOwner(context);
   if (!owner) throw new AssistantCalendarScopeError();
   const proposal = {
     owner, schoolId: context.schoolId, mutationId: `aev_${createPersonalImportId()}`,
     createdAt: new Date().toISOString(), event: Object.freeze(parseAssistantCalendarEvent(event)),
+    ...(origin !== undefined ? { origin: parseAssistantCalendarOrigin(origin) } : {}),
   };
   freshProposals.add(proposal);
   return { state: 'review', proposal: Object.freeze(proposal) };
@@ -171,7 +175,8 @@ function withHistory(result: AssistantCalendarTask, previous?: AssistantCalendar
   const historical = previous?.state === 'verified' ? previous.receipt
     : previous?.state === 'unknown' ? previous.lastVerified : undefined;
   if (!historical || previous?.proposal.owner !== proposal.owner || previous.proposal.schoolId !== proposal.schoolId ||
-      previous.proposal.mutationId !== proposal.mutationId || result.state !== 'unknown') return result;
+      previous.proposal.mutationId !== proposal.mutationId ||
+      !sameAssistantCalendarOrigin(previous.proposal.origin, proposal.origin) || result.state !== 'unknown') return result;
   const receipt = parseAssistantCalendarReceipt(historical, {
     schoolId: proposal.schoolId, mutationId: proposal.mutationId, event: proposal.event, storage: 'device',
   });
@@ -215,9 +220,11 @@ async function persistObservation(task: AssistantCalendarTask, context: Assistan
 function matchingEntry(entries: AssistantCalendarJournalEntry[], proposal: AssistantCalendarProposal) {
   const sameId = entries.find((entry) => entry.proposal.mutationId === proposal.mutationId);
   if (sameId && (sameId.proposal.createdAt !== proposal.createdAt ||
-      !sameAssistantCalendarEvent(sameId.proposal.event, proposal.event)))
+      !sameAssistantCalendarEvent(sameId.proposal.event, proposal.event) ||
+      !sameAssistantCalendarOrigin(sameId.proposal.origin, proposal.origin)))
     throw new AssistantCalendarJournalError('journal-corrupt');
-  return sameId || entries.find((entry) => assistantCalendarEventIdentity(entry.proposal.event) === assistantCalendarEventIdentity(proposal.event));
+  const sameOrigin = proposal.origin && entries.find((entry) => sameAssistantCalendarOrigin(entry.proposal.origin, proposal.origin));
+  return sameId || sameOrigin || entries.find((entry) => assistantCalendarEventIdentity(entry.proposal.event) === assistantCalendarEventIdentity(proposal.event));
 }
 
 /** Only the explicit review button calls this. A retry of an attempted ID can only read. */
@@ -233,6 +240,13 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
   let canonical = proposal;
   let previous: AssistantCalendarTask | undefined;
   let latest: AssistantCalendarTask | undefined;
+  const useExisting = (entry: AssistantCalendarJournalEntry) => {
+    if (!sameAssistantCalendarOrigin(proposal.origin, entry.proposal.origin) ||
+        (proposal.origin && !sameAssistantCalendarEvent(proposal.event, entry.proposal.event))) {
+      throw new CalendarBlocked('這個時段已有其他來源或不同內容的原操作。請核對原紀錄，這次不會借用回執或重複建立。');
+    }
+    canonical = entry.proposal; previous = historicalTask(entry); replay = true;
+  };
   const active = () => mayWrite && current(proposal, context);
   // The event's own durable write changes the calendar version. Readback and
   // journal observation retain the account guard rather than this write guard.
@@ -248,11 +262,12 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
         scopeFor(proposal, context);
         const known = matchingEntry(await readAssistantCalendarJournal(scope, active), proposal);
         if (known) {
-          canonical = known.proposal; previous = historicalTask(known); replay = true;
+          useExisting(known);
           return { ledger, result: undefined };
         }
         const existing = ledger.records.find((row) => row.id === proposal.mutationId);
         if (existing) {
+          if (proposal.origin) throw new CalendarBlocked('這筆行程沒有可核對的原批次來源紀錄，這次不會把它冒認為作業安排或重新建立。');
           receiptFor(proposal, existing, true);
           await reserveAssistantCalendarAttempt(proposal, active);
           replay = true;
@@ -277,7 +292,7 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
         verifyWrite(ledger);
         const reservation = await reserveAssistantCalendarAttempt(proposal, canWrite);
         if (reservation.kind === 'existing') {
-          canonical = reservation.entry.proposal; previous = historicalTask(reservation.entry); replay = true;
+          useExisting(reservation.entry);
           return { ledger, result: undefined };
         }
         // Reservation can wait on native storage. Re-check the original time
@@ -313,11 +328,22 @@ export async function confirmAssistantCalendarTask(proposal: AssistantCalendarPr
 
 export async function recheckAssistantCalendarTask(proposal: AssistantCalendarProposal,
   context: AssistantCalendarContext, previous?: AssistantCalendarTask): Promise<AssistantCalendarTask> {
-  scopeFor(proposal, context);
+  const scope = scopeFor(proposal, context);
   let active = true;
   let latest: AssistantCalendarTask | undefined;
   try {
     return await bounded(proposal, context, async () => {
+      if (proposal.origin) {
+        const entries = await readAssistantCalendarJournal(scope, () => active && current(proposal, context));
+        scopeFor(proposal, context);
+        const entry = entries.find((item) => item.proposal.mutationId === proposal.mutationId);
+        if (!entry || entry.proposal.createdAt !== proposal.createdAt ||
+            !sameAssistantCalendarOrigin(entry.proposal.origin, proposal.origin) ||
+            !sameAssistantCalendarEvent(entry.proposal.event, proposal.event)) {
+          return { proposal, state: 'unknown', reason: 'changed',
+            message: '無法核對這份批次行程的原操作與來源。這裡只會核對原紀錄，不會重新建立。' };
+        }
+      }
       latest = withHistory(await readBack(proposal, context, true), previous);
       return persistObservation(latest, context, () => active && current(proposal, context));
     }, () => { active = false; }, () => latest ? journalWarning(latest)

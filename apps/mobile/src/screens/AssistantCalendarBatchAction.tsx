@@ -2,25 +2,27 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import {
   cancelRemainingAssistantCalendarBatch, confirmAssistantCalendarBatch, recheckAssistantCalendarBatch,
-  type AssistantCalendarBatchView,
+  type AssistantCalendarBatchView, type AssistantCalendarBatchSourceChecks,
 } from '../services/assistantCalendarBatchExecution';
 import { assistantCalendarOwner, type AssistantCalendarContext } from '../services/assistantCalendarExecution';
 import { mobileAssistantServiceDestination } from '../services/assistantServiceNavigation';
 import { AIButton, aiTokens } from '../ui/aiFirst';
 import { safeNavigate } from '../utils/safeNavigate';
 import type { ServiceScreenProps } from './UnavailableFeatureScreen';
+import type { NuniPlanAssignmentNavigation } from './NuniPlanAssignmentOpenButton';
 
 const timeLabel = (value: string) => new Date(value).toLocaleString('zh-TW', {
   timeZone: 'Asia/Taipei', hour12: false,
 });
 
 /** A saved plan never carries approval. Every run starts with this explicit confirmation. */
-export function AssistantCalendarBatchAction({ batch, context, navigation, disabled, onChange }: {
+export function AssistantCalendarBatchAction({ batch, context, navigation, disabled, onChange, sourceChecks }: {
   batch: AssistantCalendarBatchView;
   context: AssistantCalendarContext;
   navigation: ServiceScreenProps['navigation'];
   disabled: boolean;
   onChange: (next: AssistantCalendarBatchView) => void;
+  sourceChecks?: AssistantCalendarBatchSourceChecks;
 }) {
   const mounted = useRef(true);
   const lock = useRef(false);
@@ -34,14 +36,22 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
     mounted.current = true;
     return () => { mounted.current = false; controller.current?.abort(); };
   }, []);
+  useEffect(() => {
+    const focused = navigation as NuniPlanAssignmentNavigation | undefined;
+    return focused?.addListener?.('blur', () => controller.current?.abort());
+  }, [navigation]);
   const current = () => mounted.current && context.isCurrent() &&
     assistantCalendarOwner(context) === batch.plan.owner && context.schoolId === batch.plan.schoolId;
+  const coursework = batch.plan.kind === 'coursework-study';
+  const sourceReady = !coursework || !!sourceChecks;
   const unread = batch.stop?.reason === 'unavailable' || batch.stop?.reason === 'timeout';
-  const canContinue = !batch.plan.cancelledAt && batch.state !== 'cancelled' && !unread &&
+  const canContinue = sourceReady && !batch.plan.cancelledAt && batch.state !== 'cancelled' && !unread &&
     batch.progress.notStarted > 0 && batch.steps.every((step) => step.state === 'not-started' ||
       (step.state === 'recorded' && step.task.state === 'verified' && !step.task.warning));
   const execute = async (nextAction: 'confirm' | 'check' | 'cancel') => {
-    if (disabled || lock.current || !current() || (nextAction === 'confirm' && !canContinue)) return;
+    if (disabled || lock.current || !current() ||
+        (navigation as NuniPlanAssignmentNavigation | undefined)?.isFocused?.() === false ||
+        (nextAction === 'confirm' && !canContinue)) return;
     lock.current = true;
     setAction(nextAction);
     setStopping(false);
@@ -55,7 +65,7 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
     try {
       const access = { ...context, isCurrent: current };
       const result = nextAction === 'confirm'
-        ? await confirmAssistantCalendarBatch(batch.plan, access, { signal: run.signal, onUpdate: update })
+        ? await confirmAssistantCalendarBatch(batch.plan, access, { signal: run.signal, onUpdate: update, sourceChecks })
         : nextAction === 'cancel'
           ? await cancelRemainingAssistantCalendarBatch(batch.plan, access)
           : await recheckAssistantCalendarBatch(batch.plan, access);
@@ -82,13 +92,16 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
   const pending = batch.state === 'running' || !!batch.checking || !!action;
   return <View style={{ gap: 12, marginTop: 10 }}>
     <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.text, fontSize: 16, fontWeight: '600' }}>
-      {batch.state === 'completed' ? `已逐筆保存並核對 ${batch.progress.total} 筆行程。`
+      {batch.state === 'completed' ? `已逐筆保存並核對 ${batch.progress.total} 筆${coursework ? '準備' : ''}行程。`
         : `已核對 ${batch.progress.verified}／${batch.progress.total} 筆行程`}
     </Text>
     {batch.steps.map((step, index) => {
       const task = step.state === 'recorded' ? step.task : undefined;
       return <View key={step.id} style={{ gap: 6, paddingTop: 10, borderTopWidth: 1, borderTopColor: aiTokens.border }}>
         <Text style={{ color: aiTokens.text, fontSize: 17, fontWeight: '600' }}>{index + 1}. {step.event.title}</Text>
+        {batch.plan.steps[index].source ? <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
+          {batch.plan.steps[index].source!.expected.courseName} · 作業截止：{timeLabel(batch.plan.steps[index].source!.expected.dueAt)}
+        </Text> : null}
         <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
           {step.event.date}{step.event.endDate ? ` 至 ${step.event.endDate}` : ''} · {step.event.allDay ? '全天'
             : `${step.event.startTime}–${step.event.endTime}`}（台灣時間）
@@ -106,12 +119,16 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
             先前核對時間：{timeLabel(task.lastVerified.verifiedAt)}。歷史回執不代表目前仍有相同內容。
           </Text> : null}
         </> : <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
-          {step.state === 'running' ? '正在保存並讀回核對…' : unread ? '操作進度待重新核對'
+          {step.state === 'running' ? coursework ? '正在核對來源、保存並讀回…' : '正在保存並讀回核對…' : unread ? '操作進度待重新核對'
             : batch.plan.cancelledAt ? '已取消，尚未開始' : '尚未開始'}
         </Text>}
       </View>;
     })}
     {batch.stop ? <Text accessibilityRole="alert" style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>{batch.stop.message}</Text> : null}
+    {!sourceReady && batch.progress.notStarted > 0 ? <Text accessibilityRole="alert"
+      style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
+      目前無法連線核對這份準備安排的原作業。請回到原帳號的上課助理再接續；既有行程仍可重新核對。
+    </Text> : null}
     {pending ? <>
       <Text accessibilityLiveRegion="polite" style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
         {stopping ? '正在停止後續安排；已送出的操作仍會保留並核對。'
@@ -127,6 +144,9 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
         <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
           確認後會依序處理上方尚未開始的 {batch.progress.notStarted} 筆行程。遇到結果不明或衝突會暫停；已完成的行程會保留。
         </Text>
+        {coursework ? <Text style={{ color: aiTokens.textSecondary, lineHeight: 23 }}>
+          會先核對整組未開始的作業，每筆建立前再核對原作業與上方固定時段。作業已繳交、期限改變或時段衝突時，會停止後續安排。
+        </Text> : null}
         <AIButton label={batch.progress.verified ? `確認接續剩餘 ${batch.progress.notStarted} 筆行程`
           : `確認加入 ${batch.progress.notStarted} 筆行程`} disabled={disabled} onPress={() => void execute('confirm')} />
       </> : null}
@@ -135,7 +155,9 @@ export function AssistantCalendarBatchAction({ batch, context, navigation, disab
         variant="ghost" disabled={disabled || unread} onPress={() => void execute('cancel')} /> : null}
     </>}
     <Text style={{ color: aiTokens.muted, fontSize: 13, lineHeight: 21 }}>
-      行程保存在這台手機目前帳號的個人行事曆；重開 App 後需要再次確認，才會接續尚未開始的安排。會檢查個人行程的重疊，課表與校方排程請另外核對。
+      {coursework
+        ? '準備行程保存在這台手機目前帳號的個人行事曆；各段保留至少 10 分鐘間隔。重開 App 後需要再次確認與核對來源，才會接續原先預覽的時段。作業完成與繳交進度以課程頁為準。'
+        : '行程保存在這台手機目前帳號的個人行事曆；重開 App 後需要再次確認，才會接續尚未開始的安排。會檢查個人行程的重疊，課表與校方排程請另外核對。'}
     </Text>
     {error ? <Text accessibilityRole="alert" style={{ color: aiTokens.danger, lineHeight: 22 }}>{error}</Text> : null}
   </View>;
