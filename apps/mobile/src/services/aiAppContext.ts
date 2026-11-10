@@ -141,7 +141,7 @@ export type AIAppContextInput = {
   dialogContextSummary?: string;
   conversationSummary?: string;
   now?: Date;
-  /** 若未傳，buildAIAppContext 會在 schoolId 相符時改用 getInMemoryPostLoginContext() */
+  /** 若未傳，buildAIAppContext 會使用帳號與學校皆相符的記憶體內容。 */
   postLoginContext?: PostLoginContext | null;
 };
 
@@ -709,13 +709,8 @@ function postLoginCoursesToAiCourses(plc: PostLoginContext): Course[] {
 
 /** 當畫面未帶課程／作業／公告時，優先使用 PostLoginContext（記憶體或呼叫端傳入） */
 function mergeWithPostLoginContext(raw: AIAppContextInput): AIAppContextInput {
-  const plc =
-    raw.postLoginContext ??
-    (() => {
-      const m = getInMemoryPostLoginContext();
-      return m && m.schoolId === raw.schoolId ? m : null;
-    })();
-  if (!plc) return raw;
+  const plc = raw.postLoginContext ?? getInMemoryPostLoginContext();
+  if (!raw.userId || !plc || plc.uid !== raw.userId || plc.schoolId !== raw.schoolId) return raw;
 
   const coursesFromPlc = postLoginCoursesToAiCourses(plc);
   const pendingFromPlc =

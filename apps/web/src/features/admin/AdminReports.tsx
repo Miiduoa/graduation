@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
 import { nuniRecord } from '@campus/shared/src/nuni';
@@ -30,6 +30,7 @@ export function AdminReports({
   state,
   onSelect,
   onState,
+  onDraftChange,
 }: {
   context: string;
   suspended: boolean;
@@ -37,9 +38,18 @@ export function AdminReports({
   state: ReportStateFilter;
   onSelect: (reportId: string | null) => void;
   onState: (state: ReportStateFilter) => void;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const resource = useAdminResource(`reports?state=${state}`, context, parseReports, !suspended);
   const selected = resource.value?.find((row) => row.id === selectedId) ?? null;
+  const dirtyRef = useRef(false);
+  const updateDraft = useCallback(
+    (dirty: boolean) => {
+      dirtyRef.current = dirty;
+      onDraftChange?.(dirty);
+    },
+    [onDraftChange],
+  );
 
   return (
     <section className={styles.panel} aria-labelledby="reports-heading">
@@ -52,7 +62,17 @@ export function AdminReports({
               50 件。
             </p>
           </div>
-          <Button disabled={resource.loading} onClick={resource.reload}>
+          <Button
+            disabled={resource.loading}
+            onClick={() => {
+              if (
+                dirtyRef.current &&
+                !window.confirm('重新讀取可能更新案件資料並清除尚未送出的處理理由。要繼續嗎？')
+              )
+                return;
+              resource.reload();
+            }}
+          >
             重新讀取檢舉
           </Button>
         </div>
@@ -77,9 +97,10 @@ export function AdminReports({
             key={`${selected.id}:${selected.version}`}
             report={selected}
             context={context}
-            enabled={!suspended}
+            enabled={!suspended && !resource.loading && !resource.error}
             onChanged={resource.reload}
             onBack={() => onSelect(null)}
+            onDraftChange={updateDraft}
           />
         ) : (
           !!resource.value?.length && (
@@ -125,18 +146,25 @@ function ReportDetail({
   enabled,
   onChanged,
   onBack,
+  onDraftChange,
 }: {
   report: AdminReport;
   context: string;
   enabled: boolean;
   onChanged: () => void;
   onBack: () => void;
+  onDraftChange?: (dirty: boolean) => void;
 }) {
   const [decision, setDecision] = useState<'hide' | 'dismiss' | null>(null);
   const [reason, setReason] = useState('');
   const [complete, setComplete] = useState(false);
   const [responseError, setResponseError] = useState('');
   const mutation = useAdminMutation(context, enabled && !complete);
+  const dirty = !complete && (decision !== null || mutation.busy);
+  useEffect(() => {
+    onDraftChange?.(dirty);
+    return () => onDraftChange?.(false);
+  }, [dirty, onDraftChange]);
   const canDecide = report.state === 'open' && report.canDecide;
   async function submit() {
     if (!canDecide || !decision || reason.trim().length < 5 || complete) return;
@@ -219,14 +247,14 @@ function ReportDetail({
                 maxLength={2000}
                 hint="至少 5 字，請說明判斷依據。"
                 value={reason}
-                disabled={mutation.busy}
+                disabled={!enabled || mutation.busy}
                 onChange={(event) => setReason(event.target.value)}
               />
               <div className={styles.actions}>
                 <Button
                   type="submit"
                   variant={decision === 'hide' ? 'danger' : 'primary'}
-                  disabled={mutation.busy || reason.trim().length < 5}
+                  disabled={!enabled || mutation.busy || reason.trim().length < 5}
                 >
                   確認{decision === 'hide' ? '隱藏貼文' : '駁回檢舉'}
                 </Button>
@@ -243,10 +271,12 @@ function ReportDetail({
             </form>
           ) : (
             <div className={styles.actions}>
-              <Button variant="danger" onClick={() => setDecision('hide')}>
+              <Button variant="danger" disabled={!enabled} onClick={() => setDecision('hide')}>
                 隱藏貼文
               </Button>
-              <Button onClick={() => setDecision('dismiss')}>駁回檢舉</Button>
+              <Button disabled={!enabled} onClick={() => setDecision('dismiss')}>
+                駁回檢舉
+              </Button>
             </div>
           )
         ) : report.state === 'open' ? (

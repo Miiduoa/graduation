@@ -1,3 +1,7 @@
+import { NuniError } from '@campus/shared/src/nuni';
+import { boundedBytes } from '@/lib/server/boundedBytes';
+
+const MAX_SAML_FORM_BYTES = 256 * 1024;
 const DEFAULT_CALLBACK_PATH = '/sso-callback';
 const PENDING_SAML_RESPONSE_KEY = 'campus.web.sso.pendingSamlResponse';
 
@@ -50,15 +54,26 @@ function buildHtml(callbackUrl: string, samlResponse: string) {
 }
 
 export async function GET(request: Request) {
-  const response = Response.redirect(new URL(DEFAULT_CALLBACK_PATH, request.url), 302);
-  response.headers.set('cache-control', 'no-store');
-  response.headers.set('pragma', 'no-cache');
-  response.headers.set('referrer-policy', 'no-referrer');
-  return response;
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: new URL(DEFAULT_CALLBACK_PATH, request.url).href,
+      'Cache-Control': 'no-store',
+      Pragma: 'no-cache',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
+  let formData: FormData;
+  try {
+    const bytes = await boundedBytes(request, MAX_SAML_FORM_BYTES);
+    formData = await new Response(bytes, { headers: request.headers }).formData();
+  } catch (error) {
+    const status = error instanceof NuniError ? error.status : 400;
+    return new Response(null, { status, headers: { 'Cache-Control': 'no-store' } });
+  }
   const samlResponse = formData.get('SAMLResponse');
   const callbackUrl = resolveCallbackUrl(request.url, formData.get('RelayState'));
 

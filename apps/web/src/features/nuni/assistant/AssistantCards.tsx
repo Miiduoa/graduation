@@ -1,9 +1,16 @@
 import Link from 'next/link';
 import { formatEventWhen, formatPickup, formatYuan, inAppHref, pageLabel } from './copy';
 import { formatTaipeiDateTime } from '@campus/shared/src/taipeiTime';
-import { canConfirmAction, priorCalendarActionsVerified } from './execution';
+import { canConfirmAction, firstUnverifiedCalendarAction, priorCalendarActionHint, priorCalendarActionsVerified } from './execution';
 import styles from './AssistantReply.module.css';
 import type { V2ActionState, V2ActionStates, V2Card } from './types';
+
+// Unknown tool names cannot be reviewed as a generic page action.
+// The server independently verifies signed tokens and current authorization.
+function supportedCard(card: V2Card): boolean {
+  return card.tool === 'propose_personal_event' ||
+    card.tool === 'propose_open_page' || card.tool === 'propose_food_order';
+}
 
 function Status({ value, card, pending, onReconcile }: {
   value: V2ActionState;
@@ -75,10 +82,11 @@ function FoodBody({ card }: { card: V2Card }) {
   const href = typeof card.args.href === 'string' ? inAppHref(card.args.href) : null;
   const total = formatYuan(summary.totalMinor);
   const pickup = formatPickup(summary.requestedPickupAt);
+  const pageOnly = card.args.mode !== 'order';
   return (
     <>
       <div className={styles.cardHeader}>
-        <p className={styles.eyebrow}>點餐</p>
+        <p className={styles.eyebrow}>{pageOnly ? '點餐頁面' : '訂單確認'}</p>
         <h3>{store}</h3>
       </div>
       <ul className={styles.lines}>
@@ -102,7 +110,12 @@ function FoodBody({ card }: { card: V2Card }) {
       {total ? <p className={styles.total}>合計 {total}</p> : null}
       {pickup ? <p className={styles.pickup}>取餐 {pickup}</p> : null}
       {reason ? <p className={styles.reason}>{reason}</p> : null}
-      {href ? (
+      <p className={styles.note}>
+        {pageOnly
+          ? '這份內容只會帶到點餐頁，沒有送出訂單或付款。'
+          : '按下確認可能直接送出訂單。請先核對品項、金額與取餐時間；付款狀態以店家實際紀錄為準。'}
+      </p>
+      {pageOnly && href ? (
         <Link className={styles.pageLink} href={href}>
           前往點餐頁
         </Link>
@@ -145,6 +158,17 @@ export function AssistantCard({
   onReconcile?: (card: V2Card) => void;
 }) {
   const state = states[card.mutationId];
+  const prerequisite = firstUnverifiedCalendarAction(cards, index, states);
+  const prerequisiteState = prerequisite && states[prerequisite.mutationId];
+  const prerequisiteHint = priorCalendarActionHint(cards, index, states);
+  const canRecheckPrerequisite = prerequisite && onReconcile &&
+    ['unknown', 'absent', 'conflict'].includes(prerequisiteState?.status ?? '');
+  if (!supportedCard(card)) {
+    return <article className={styles.card} aria-label="無法確認的任務">
+      <p className={styles.eyebrow}>無法確認</p>
+      <p className={styles.note}>這種操作尚未支援。沒有送出任何交易，請重新提問。</p>
+    </article>;
+  }
   return (
     <article
       className={styles.card}
@@ -164,6 +188,17 @@ export function AssistantCard({
         <PageBody card={card} />
       )}
       {state && <Status value={state} card={card} pending={pending} onReconcile={onReconcile} />}
+      {canConfirmAction(state) && prerequisiteHint && (
+        <div className={styles.prerequisiteRecovery}>
+          <p className={styles.hint}>{prerequisiteHint}</p>
+          {canRecheckPrerequisite && (
+            <button type="button" className={styles.secondary} disabled={pending}
+              onClick={() => { if (prerequisite) onReconcile?.(prerequisite); }}>
+              重新核對前一步行程
+            </button>
+          )}
+        </div>
+      )}
       {canConfirmAction(state) && (
         <div className={styles.actions}>
           <button
@@ -202,23 +237,39 @@ export function AssistantCardStack({
   onReconcile?: (card: V2Card) => void;
 }) {
   if (!cards.length) return null;
-  const open = cards.filter((c) => canConfirmAction(states[c.mutationId]));
+  const open = cards.filter((c) => supportedCard(c) && canConfirmAction(states[c.mutationId]));
+  const calendarOnly = cards.every((card) => card.tool === 'propose_personal_event');
   const calendar = cards.filter((card) => card.tool === 'propose_personal_event');
   const verified = calendar.filter((card) => states[card.mutationId]?.status === 'verified').length;
   const uncertain = calendar.filter((card) => ['unknown', 'executing', 'checking'].includes(states[card.mutationId]?.status)).length;
   const retired = calendar.filter((card) => ['cancelled', 'superseded'].includes(states[card.mutationId]?.status)).length;
+  const handoff = cards.filter((card) => states[card.mutationId]?.status === 'handoff').length;
+  const needsReview = cards.filter((card) =>
+    ['unknown', 'executing', 'checking', 'conflict'].includes(states[card.mutationId]?.status)).length;
+  const stopped = cards.filter((card) =>
+    ['cancelled', 'superseded'].includes(states[card.mutationId]?.status)).length;
+  const unverified = Math.max(0, cards.length - verified - handoff - needsReview - stopped);
   return (
     <div className={styles.stack}>
-      {calendar.length > 0 && <p className={styles.executionSummary} role="status" aria-label="行程執行進度">
+      {!calendarOnly && cards.length > 1 ? (
+        <p className={styles.executionSummary} role="status" aria-label="跨功能任務進度">
+          {calendar.length ? `個人行程已讀回核對 ${verified}/${calendar.length} 項 · ` : ''}服務入口已備妥 {handoff} 項
+          {needsReview ? ` · 待核對或有衝突 ${needsReview} 項` : ''}
+          {unverified ? ` · 其他 ${unverified} 項尚未確認完成` : ''}
+          {stopped ? ` · 已停止 ${stopped} 項提議` : ''}。服務入口不代表訂單、付款或作業已完成。
+        </p>
+      ) : calendar.length > 0 ? <p className={styles.executionSummary} role="status" aria-label="行程執行進度">
         已核對 {verified}/{calendar.length} 項{uncertain ? ` · 待核對 ${uncertain} 項` : ''}{calendar.length - verified - uncertain - retired ? ` · 尚未完成 ${calendar.length - verified - uncertain - retired} 項` : ''}{retired ? ` · 已停止 ${retired} 項提議` : ''}
-      </p>}
-      {open.length > 1 ? (
+      </p> : null}
+      {calendarOnly && open.length > 1 ? (
         <button type="button" className={styles.batch} disabled={pending || !priorCalendarActionsVerified(cards, cards.indexOf(open[0]), states)} onClick={() => onConfirm(open)}>
-          依序全部確認
+          依序確認 {open.length} 筆個人行程
         </button>
       ) : null}
       {cards.length > 1 ? (
-        <p className={styles.hint}>讀書安排請依序確認；取消後若要更改順序，請重新規劃。</p>
+        <p className={styles.hint}>{calendarOnly
+          ? '個人行程會逐筆建立並讀回核對；若其中一筆結果不明，後續安排會停止。'
+          : '這次包含不同類型的操作，請逐筆核對。開啟頁面不等於完成交易，點餐也不會和行程一起批次確認。'}</p>
       ) : null}
       {cards.map((card, index) => (
         <AssistantCard

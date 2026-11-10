@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -75,21 +75,34 @@ export function runSqlAssertions(url) {
   sql(url, { file: `${here}/assert-defaults.sql` });
   sql(url, { file: `${here}/assertions.sql`, display: true });
   sql(url, { file: `${repo}/supabase/tests/profile_role_authority.sql`, display: true });
+  sql(url, { file: `${here}/storage.sql`, display: true });
 }
 
-export async function runApiAssertions({ databaseUrl, apiUrl, jwtSecret, anonKey = '' }) {
+export function createTestToken(secret, role, userId) {
+  const now = Math.floor(Date.now() / 1000);
+  const claims = { role, iat: now, exp: now + 3600 };
+  if (userId) Object.assign(claims, { sub: userId, aud: 'authenticated' });
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
+  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+}
+
+export async function runApiAssertions({ databaseUrl, apiUrl, storageUrl = '', jwtSecret, anonKey = '', suite = 'api.test.mjs' }) {
   assertLoopback(apiUrl, ['http:']);
+  if (storageUrl) assertLoopback(storageUrl, ['http:']);
+  if (!['api.test.mjs', 'storage-api.test.mjs'].includes(suite)) throw new Error('Unknown HTTP test suite');
   if (!jwtSecret || jwtSecret.length < 32) throw new Error('Missing local test JWT secret');
   // Keep the parent event loop free to drain PostgREST's logs and schema reloads.
   // A synchronous child can stall the HTTP server once its output pipe fills.
   await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--test', `${here}/api.test.mjs`], {
+    const child = spawn(process.execPath, ['--test', `${here}/${suite}`], {
       cwd: repo,
       timeout: 120_000,
       stdio: ['ignore', 'inherit', 'inherit'],
       env: cleanEnvironment({
         CAMPUS_TEST_DATABASE_URL: databaseUrl,
         CAMPUS_TEST_API_URL: apiUrl,
+        CAMPUS_TEST_STORAGE_URL: storageUrl,
         CAMPUS_TEST_JWT_SECRET: jwtSecret,
         CAMPUS_TEST_ANON_KEY: anonKey,
       }),
@@ -157,8 +170,8 @@ export async function withPostgrest(databaseUrl, callback) {
   }
 }
 
-export function requireSuites({ sqlOnly = false } = {}) {
-  for (const name of ['assertions.sql', 'fixtures.sql', ...(sqlOnly ? [] : ['api.test.mjs'])]) {
+export function requireSuites({ sqlOnly = false, storage = false } = {}) {
+  for (const name of ['assertions.sql', 'storage.sql', 'fixtures.sql', ...(sqlOnly ? [] : ['api.test.mjs']), ...(storage ? ['storage-api.test.mjs'] : [])]) {
     if (!existsSync(`${here}/${name}`)) throw new Error(`Required test suite missing: ${name}`);
   }
 }

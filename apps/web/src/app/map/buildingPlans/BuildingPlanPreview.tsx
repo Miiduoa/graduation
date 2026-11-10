@@ -8,6 +8,9 @@ import type { BuildingPlanView, BuildingPlanScene } from './buildingPlanScene';
 import BuildingPlanTracer from './BuildingPlanTracer';
 import BuildingPlanFloorImporter from './BuildingPlanFloorImporter';
 import BuildingPlanFloorManager from './BuildingPlanFloorManager';
+import BuildingPlanPngExport from './BuildingPlanPngExport';
+import { exportBuildingPlanSvg } from './buildingPlanSvg';
+import { getBuildingPlanSvgFilename } from './buildingPlanSvgFilename';
 import styles from './BuildingPlanPreview.module.css';
 
 type Props = { schoolId: string; buildingId: string; buildingName: string; onClose: () => void };
@@ -354,9 +357,23 @@ function PlanWorkspace({ schoolId, buildingId, buildingName, onClose }: Props) {
             : plan.source.label}</p>}
           <div className={styles.actions}>
             <button type="button" onClick={() => downloadPlan(plan, 'building-plan.json')}>下載目前圖面</button>
+            <button type="button" onClick={() => {
+              const content = exportBuildingPlanSvg(plan, view.floorId);
+              const blob = new Blob([content], { type: 'image/svg+xml;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = getBuildingPlanSvgFilename(plan.name, selectedFloor?.label ?? null);
+              document.body.append(anchor);
+              try { anchor.click(); } finally {
+                anchor.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+              }
+            }}>下載平面圖 SVG</button>
             {traceSession && <button type="button" onClick={startTracing}>返回圖面編輯</button>}
           </div>
-          <p className={styles.hint}>下載內容包含圖面與來源標示，不含底圖圖片。{traceSession && '要保存可續編的版本，請返回圖面編輯並下載編輯檔。'}</p>
+          <BuildingPlanPngExport plan={plan} floorId={view.floorId} />
+          <p className={styles.hint}>JSON 保存模型資料；SVG 匯出目前選擇的樓層（選「全部樓層」則全部匯出），可列印與放入簡報，但不含底圖圖片，且不代表正式校方圖資。{traceSession && '要保存可續編的版本，請返回圖面編輯並下載編輯檔。'}</p>
         </div>
         <div ref={floorTools}>
           {floorNotice && <p className={styles.floorEditingHint} role="status">{floorNotice}</p>}

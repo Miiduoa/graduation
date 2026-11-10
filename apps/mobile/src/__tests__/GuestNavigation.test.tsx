@@ -13,6 +13,7 @@ import {
 } from '../services/schoolLoginAvailability';
 
 let mockBrowsingSchoolId = 'pu';
+let mockSelectionReady = true;
 let mockPlatformSession: { platformAccountId: string } | null = null;
 let mockSchoolAuth: {
   user: { uid: string } | null;
@@ -31,7 +32,13 @@ jest.mock('../state/auth', () => ({ useAuth: () => mockSchoolAuth }));
 // Navigation tests render the signed-out stack without mounting the app shell.
 // Supply the same selected-campus context that production SchoolProvider supplies.
 jest.mock('../state/school', () => ({
-  useSchool: () => ({ school: { id: mockBrowsingSchoolId, name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' } }),
+  useSchool: () => ({
+    school: { id: mockBrowsingSchoolId, name: mockBrowsingSchoolId === 'pu' ? '靜宜大學' : '國立清華大學' },
+    schoolId: mockBrowsingSchoolId || null,
+    selection: { schoolId: mockBrowsingSchoolId || null },
+    selectionReady: mockSelectionReady,
+    setSelection: jest.fn(),
+  }),
 }));
 let mockInitialUrl: string | null = null;
 let mockLinkListener: ((event: { url: string }) => void) | undefined;
@@ -45,6 +52,7 @@ jest.mock('expo-linking', () => ({
   },
 }));
 beforeEach(() => {
+  mockSelectionReady = true;
   mockBrowsingSchoolId = 'pu';
   mockPlatformSession = null;
   mockSchoolAuth = {
@@ -436,4 +444,22 @@ test('the public library remains reachable after browsing away from the logged-i
   expect(view.queryByTestId('private-school')).toBeNull();
   fireEvent.press(await view.findByTestId('public-Library'));
   expect(await view.findByTestId('public-library-screen')).toBeTruthy();
+});
+
+
+test('a restored account cannot mount private navigation before school choice is resolved', () => {
+  mockSchoolAuth = { user: { uid: 'u1' }, profile: { uid: 'u1', schoolId: 'pu' }, loading: false, profileLoading: false };
+  const content = () => (
+    <SchoolSessionBoundary publicContent={<Text>公開入口</Text>}><Text>私人課務</Text></SchoolSessionBoundary>
+  );
+  mockSelectionReady = false;
+  const view = render(content());
+  expect(view.queryByText('私人課務')).toBeNull();
+  mockSelectionReady = true;
+  mockBrowsingSchoolId = '';
+  view.rerender(content());
+  expect(view.getByText('公開入口')).toBeTruthy();
+  mockBrowsingSchoolId = 'pu';
+  view.rerender(content());
+  expect(view.getByText('私人課務')).toBeTruthy();
 });
