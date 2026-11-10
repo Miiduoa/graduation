@@ -127,12 +127,16 @@ after(async () => {
 });
 
 test('active HTTP reads work, direct SDK access is denied, and canonical school revocation blocks later HTTP reads and uploads', { timeout: 30_000 }, async () => {
-  await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
-    userId: 'alice', submittedAt: '2026-11-06T00:00:00.000Z', attachments: [paths().answer],
-  });
   for (const [kind, objectPath] of Object.entries(paths())) {
     const upload = await request('POST', objectPath, kind === 'cover' ? 'teacher' : 'alice');
     assert.equal(upload.status, 201, upload.body);
+    // A submitted receipt must be created after the file is uploaded;
+    // otherwise a correct immutable-write rule would reject this setup.
+    if (kind === 'answer') {
+      await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+        userId: 'alice', submittedAt: '2026-11-06T00:00:00.000Z', attachments: [objectPath],
+      });
+    }
     for (const uid of ['alice', 'teacher']) {
       const result = await request('GET', objectPath, uid);
       assert.equal(result.status, 200, result.body);
@@ -179,11 +183,14 @@ test('post draft sibling stays private to its author until explicitly attached',
   assert.equal((await request('GET', published, 'teacher')).status, 403);
 });
 
-test('HTTP submission privacy, new filenames and manager cover updates remain supported', { timeout: 30_000 }, async () => {
+test('HTTP submission privacy, pre-submit new filenames and manager cover updates remain supported', { timeout: 30_000 }, async () => {
+  const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
   for (const status of ['submitted', 'graded']) {
+    await receipt.delete(); // Synthetic new attempt; prior submitted receipt is immutable.
     const objectPath = paths().answer.replace('answer.pdf', `${status}.pdf`);
     assert.equal((await request('POST', objectPath)).status, 201);
-    await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    assert.equal((await request('POST', objectPath.replace('.pdf', '-new.pdf'))).status, 201);
+    await receipt.set({
       userId: 'alice', groupId, assignmentId, status,
       submittedAt: '2026-11-06T00:00:00.000Z',
       attachments: [objectPath],
@@ -192,7 +199,7 @@ test('HTTP submission privacy, new filenames and manager cover updates remain su
     assert.equal((await request('GET', objectPath)).body, 'original');
     assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
     assert.equal((await request('GET', objectPath, 'bob')).status, 403);
-    assert.equal((await request('POST', objectPath.replace('.pdf', '-new.pdf'))).status, 201);
+    assert.equal((await request('POST', objectPath.replace('.pdf', '-late.pdf'))).status, 403);
   }
   assert.equal((await request('POST', paths().cover, 'teacher')).status, 201);
   assert.equal((await request('POST', paths().cover, 'alice', 'forged cover')).status, 403);
