@@ -441,3 +441,14 @@ Storage `schools/{schoolId}/stories/` 只讀校籍文件與 `campusStories`。�
 最小修補在 `presignPut` 後確認 ticket 再驗權，在 `presignGet` 後再驗權，故事另外重新檢查最新 live `campusStories` 及確切媒體路徑；`finalize` 在 metadata 查詢後再驗權。四項惰性 Supabase + 記憶體 Firestore 新回歸注入簽發／查詢期間的校籍撤銷、群組撤銷、故事改引用、finalize 撤權並預期 403；保留既有正常使用、跨帳號、跨校、提交收據、撤權測試。**此為縮小非原子權限窗口，無法保證最後驗權後瞬間撤權的一致性，也無法撤銷此前已簽發 URL；需要隔離正式 SDK staging 與短效／金鑰輪替演練。**
 
 此次沒有修改正式資料、發表部署、bucket／金鑰、GCS token、migration、E 校園連線或重新執行未授權的 npm/pnpm audit；新 head 及指定 App 5504170 核可須重新確認。
+
+
+## 2026-11-10：舊 GCS HTTP 附件 GET 與封面 POST 的 metadata 等待撤權（待精確 CI）
+
+接續 #569 Web Supabase 預簽 URL 的中途撤權，重新檢查舊 `backend/functions/privateGroupFiles.js` 發現：GET 初次授權之後 await GCS `file.getMetadata()`，未再次核對 live 群組、校籍、貼文附件或作業繳交收據就開始開啟讀取串流；POST 封面替換在檢查寫入授權後，亦可能等待既有物件 generation 查詢再執行 CAS save。這是**等待期間授權狀態變更**的可重現空窗，不代表取得既有 bearer URL 的漏洞。
+
+最小修補：GET 在 metadata 與 generation 檢查後、設定下載標頭及打開串流之前，重新執行共用 canonical `authorizePrivateFile(..., false)`；POST 在可能等待 cover generation 查詢之後、save 之前再次驗證 `authorizePrivateFile(..., true)`。保留版本固定串流、create-only 與 generation CAS，不降級既有內容限制。
+
+新增四組確定性 Jest 合成回歸，於假的 GCS `getMetadata()` await 內變更 live 權限或提交收據：貼文組員退組、教師已繳交附件撤下引用、讀取封面期間學籍撤銷，以及封面寫入期間管理者校籍撤銷。預期四者均 403，且不建立讀取串流、不保存覆寫物件；合法路徑由既有正常回歸保持。此修補不能停止已經開始的串流，亦不能將最終驗權與 GCS 串流／寫入實作成跨服務原子交易。正式 GCS staging、已發 signed/bearer URL 的撤銷和發佈仍待驗證。
+
+此變更限定已存續 Draft PR #569，未觸碰正式 bucket、資料、金鑰、migration、部署、E 校園或未授權 audit。新精確提交須以 CI、CodeQL、其他適用 gates 及 App 5504170 審查判定，不能以先前 head 的綠燈取代。

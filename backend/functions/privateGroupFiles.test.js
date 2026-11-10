@@ -339,6 +339,52 @@ describe('private group file HTTP handler', () => {
     expect(saves).toHaveLength(0);
   });
 
+  test.each([
+    { label: 'group membership revoked during post metadata', path: POST, uid: 'bob', method: 'GET', revoke: 'group' },
+    { label: 'submitted attachment unlinked during metadata', path: ANSWER, uid: 'teacher', method: 'GET', revoke: 'receipt' },
+    { label: 'school revoked during cover metadata read', path: COVER, uid: 'alice', method: 'GET', revoke: 'school' },
+    { label: 'manager revoked during cover generation lookup', path: COVER, uid: 'teacher', method: 'POST', revoke: 'school' },
+  ])('rejects $label before exposing or writing GCS bytes', async ({ path, uid, method, revoke }) => {
+    if (path === POST) store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
+    if (path === ANSWER) store.docs.set('groups/course/assignments/work/submissions/alice', {
+      userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER],
+    });
+    const originalFile = bucket.file;
+    let revoked = false;
+    // The first authorization succeeds. The synthetic authority changes while
+    // the asynchronous GCS metadata operation is in progress.
+    bucket.file = jest.fn((key, options) => {
+      const file = originalFile(key, options);
+      return {
+        ...file,
+        async getMetadata() {
+          const result = await file.getMetadata();
+          if (key === path && !revoked) {
+            revoked = true;
+            if (revoke === 'group') {
+              store.docs.set('groups/course/members/bob', { status: 'inactive', role: 'member' });
+            } else if (revoke === 'receipt') {
+              store.docs.set('groups/course/assignments/work/submissions/alice', {
+                userId: 'alice', submittedAt: Date.now(), attachments: [],
+              });
+            } else {
+              store.docs.set(`schools/pu/members/${uid}`, { status: 'inactive' });
+            }
+          }
+          return result;
+        },
+      };
+    });
+    const response = await invoke({
+      path, uid, method, body: method === 'POST' ? 'replacement' : '',
+      headers: { 'content-type': 'image/jpeg' },
+    });
+    expect(revoked).toBe(true);
+    expect(response).toMatchObject({ status: 403, body: JSON.stringify({ error: 'File access denied' }) });
+    expect(reads).toHaveLength(0);
+    expect(saves).toHaveLength(0);
+  });
+
   test('bounds simultaneous uploads and releases capacity after completion', async () => {
     handler = createPrivateGroupFileHandler({ db: store.db, bucket, verifyIdToken, maxConcurrentUploads: 1 });
     let started;
