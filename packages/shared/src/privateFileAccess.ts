@@ -135,12 +135,6 @@ function referencesPrivateFile(attachments: unknown, path: string): boolean {
     ));
 }
 
-/** Absent or non-array attachments are legacy records; keep the previous access path. */
-function allowsListedOrLegacyPrivateFile(attachments: unknown, path: string): boolean {
-  if (!Array.isArray(attachments)) return true;
-  return referencesPrivateFile(attachments, path);
-}
-
 function accountBlocked(data: Record<string, unknown>): boolean {
   return (
     data.accountDeletionInProgress === true ||
@@ -421,7 +415,7 @@ export async function authorizePrivateFile(
         // The author can preview an uploaded draft. Other group members may
         // download only the precise object referenced by the live post.
         // Finalizing a private upload must not publish a sibling by guessable path.
-        if (!writing && data.authorId !== uid && !allowsListedOrLegacyPrivateFile(data.attachments, scope.path)) deny();
+        if (!writing && data.authorId !== uid && !referencesPrivateFile(data.attachments, scope.path)) deny();
       }
       if (scope.kind === 'assignment' && scope.groupId) {
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
@@ -456,28 +450,21 @@ export async function authorizePrivateFile(
           // attachment on an actual submitted receipt; owner previews remain possible.
           // Assigned peer reviewers remain excluded from file access.
           if (scope.userId !== uid && (
-            !manager || (
-              Array.isArray(previous.attachments) && (
-                !submission.exists || owner !== scope.userId ||
-                previous.submittedAt == null ||
-                !referencesPrivateFile(previous.attachments, scope.path)
-              )
-            )
+            !manager || !submission.exists || owner !== scope.userId ||
+            previous.submittedAt == null ||
+            !referencesPrivateFile(previous.attachments, scope.path)
           )) deny();
         }
       }
-      // Legacy uploads keep working when only the global assignments/{id} mirror
-      // exists. If the canonical group assignment is present, apply the same
-      // live eligibility checks as the group-path upload.
+      // Legacy uploads must obey the same live submission eligibility as group keys.
+      // The global assignments/{id} mirror alone is insufficient for POST/claim.
       if (scope.kind === 'assignment' && !scope.groupId && writing) {
         if (scope.userId !== uid) deny();
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
         const [assignment, submission] = await tx.getAll(
           assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
         );
-        if (!assignment.exists) {
-          // Historical data with only the global mirror: previous owner-upload path.
-        } else {
+        if (!assignment.exists) deny();
         const data = asRecord(assignment.data());
         const previous = asRecord(submission.data());
         const owner = 'userId' in previous ? previous.userId
@@ -496,7 +483,6 @@ export async function authorizePrivateFile(
           (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due)) ||
           (submission.exists && (owner !== uid || previous.submittedAt != null))
         ) deny();
-        }
       }
       // Legacy assignments/{id}/submissions/{uid}/ paths are still reachable
       // via the GCS HTTP and Web signed-URL handlers. A manager must not
@@ -512,11 +498,9 @@ export async function authorizePrivateFile(
           : 'uid' in previous ? previous.uid
             : 'studentId' in previous ? previous.studentId : scope.userId;
         if (
-          Array.isArray(previous.attachments) && (
-            !submission.exists || owner !== scope.userId ||
-            previous.submittedAt == null ||
-            !referencesPrivateFile(previous.attachments, scope.path)
-          )
+          !submission.exists || owner !== scope.userId ||
+          previous.submittedAt == null ||
+          !referencesPrivateFile(previous.attachments, scope.path)
         ) deny();
       }
       if (

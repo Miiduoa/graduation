@@ -98,8 +98,8 @@ it('allows managers and owners to read, but refuses another student', async () =
   store.docs.delete('groups/course/members/bob');
   await expect(authorize(store, GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('groups/course/members/bob', { status: 'active', role: 'member' });
-  // Legacy receipts without an attachments list keep previous manager access.
-  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  // A manager may grade submitted attachments, not browse filenames in a student's draft.
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
   const receipt = 'groups/course/assignments/work/submissions/alice';
   store.docs.set(receipt, { userId: 'alice', attachments: [{ url: GROUP_ANSWER }], submittedAt: Date.now() });
@@ -113,13 +113,10 @@ it('allows managers and owners to read, but refuses another student', async () =
 it('legacy assignment URLs also require a submitted receipt with an exact file reference', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const receiptPath = 'groups/course/assignments/work/submissions/alice';
-  // Owners can preview drafts; other students cannot. Managers keep previous
-  // access when the receipt has no attachments list.
+  // Owners can preview drafts; managers and other students cannot.
   await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
-  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
-  store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now() });
-  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
   store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
   await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set(receiptPath, { userId: 'bob', submittedAt: Date.now(), attachments: [ANSWER] });
@@ -153,8 +150,7 @@ it('legacy uploads require a live open assignment and an unsubmitted receipt', a
   await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.delete('groups/course/assignments/work/submissions/alice');
   store.docs.delete('groups/course/assignments/work');
-  // Only the global assignments/{id} mirror remains: keep the previous upload path.
-  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
   // A previously uploaded private draft remains previewable by its owner.
   await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
 });
@@ -172,9 +168,9 @@ it('requires an existing live post for downloads and author ownership for existi
 it('does not turn a finalized but unreferenced post attachment into a group-wide download', async () => {
   const store = fileStore([['groups/course/posts/one', { authorId: 'alice' }]]);
   const sibling = POST.replace('notes.pdf', 'unpublished.pdf');
-  // Historical posts without an attachments list keep previous member access.
+  // Author previews remain usable; the same path is not yet shared with Bob.
   await expect(authorize(store, POST, 'alice', false)).resolves.toBeUndefined();
-  await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
+  await expect(authorize(store, POST, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [{ url: POST }] });
   await expect(authorize(store, POST, 'bob', false)).resolves.toBeUndefined();
   await expect(authorize(store, sibling, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
