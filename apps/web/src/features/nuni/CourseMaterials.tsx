@@ -121,6 +121,8 @@ function Materials({
   const [study, setStudy] = useState<{ material?: NuniMaterial; version: number; selectionSerial: number } | null>(null);
   const studyVersion = useRef(0);
   const studyTrigger = useRef<HTMLButtonElement | null>(null);
+  const studyOpenButton = useRef<HTMLButtonElement | null>(null);
+  const cabinetHeading = useRef<HTMLHeadingElement | null>(null);
   const now = useClientNow();
   const readIds = useMaterialReadIds(accountId);
   const bookmarks = useMaterialBookmarks(accountId);
@@ -282,6 +284,13 @@ function Materials({
     !!linkedMaterial &&
     !items.some((item) => item.id === linkedMaterial);
 
+  // Do not silently imply an old open copy is still in the course cabinet.
+  // Wait until the refreshed listing is complete: an older material may simply
+  // be on a subsequent page. A failed refresh must not invent a deletion.
+  const selectedMaterialMissing = !!study?.material && !reading && !error && !moreError &&
+    items !== null && !nextCursor &&
+    !items.some((item) => item.id === study.material?.id);
+
   useEffect(() => {
     if (!linkedMaterial || (!accessDenied && !missingLinked)) return;
     // Keep the explanation visible while removing the unavailable target from the address.
@@ -293,7 +302,7 @@ function Materials({
       <div className={styles.heading}>
         <div>
           <p className={shared.eyebrow}>課程內容</p>
-          <h2 id={`materials-${workspace.id}`}>教材櫃</h2>
+          <h2 id={`materials-${workspace.id}`} ref={cabinetHeading} tabIndex={-1}>教材櫃</h2>
         </div>
         <button
           type="button"
@@ -311,7 +320,7 @@ function Materials({
       <div className={shared.actions}>
         <a href={classroomCourseHref(workspace.id, context)}>回課程首頁</a>
         <a href={classroomDirectoryHref(context, 'bookmarks')}>此裝置收藏</a>
-        <button type="button" className={`${shared.button} ${shared.secondary}`}
+        <button ref={studyOpenButton} type="button" className={`${shared.button} ${shared.secondary}`}
           disabled={reading || accessDenied || items === null}
           onClick={(event) => {
             studyTrigger.current = event.currentTarget;
@@ -323,12 +332,26 @@ function Materials({
           }}>讀講義</button>
       </div>
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
+      {study && !accessDenied && selectedMaterialMissing && (
+        <p role="status" className={shared.notice}>
+          先前開啟的「{study.material?.title}」目前不在已載入的教材清單。白板仍保留先前內容與私人筆記，但不能因此判定教材仍可存取或已是最新版本；請對照課程教材並確認權限，必要時先儲存進度。
+        </p>
+      )}
       {study && !accessDenied && items !== null && (
         <CourseStudyPanel key={study.version} courseTitle={workspace.title}
           material={study.material ? items.find((item) => item.id === study.material?.id) ?? study.material : undefined}
           selectionSerial={study.selectionSerial}
           scope={{ platformAccountId: accountId, workspaceId: workspace.id }}
-          onClose={() => { setStudy(null); studyTrigger.current?.focus(); }} />
+          onClose={() => {
+            setStudy(null);
+            // A refresh can remove the original lecture-card button while the
+            // learner is writing. Never focus a detached or disabled control.
+            const trigger = studyTrigger.current;
+            if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+            else if (studyOpenButton.current?.isConnected && !studyOpenButton.current.disabled)
+              studyOpenButton.current.focus();
+            else cabinetHeading.current?.focus();
+          }} />
       )}
       {bookmarks.error && (
         <div role="alert" className={shared.notice}>

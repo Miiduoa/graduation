@@ -86,6 +86,42 @@ it('keeps draft notes during an authorized material refresh and previews newer t
     .toBe('還沒備份的資料庫筆記');
 });
 
+
+it('keeps unsaved study notes and warns when a complete refresh no longer lists the selected lecture', async () => {
+  state.request.mockResolvedValueOnce(list())
+    .mockResolvedValueOnce({ materials: [], nextCursor: null });
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '我還沒備份的私人筆記' } });
+
+  fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
+  expect((await screen.findByRole('status')).textContent).toContain(
+    `先前開啟的「${material.title}」目前不在已載入的教材清單`,
+  );
+  expect(screen.getByText(material.body)).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('我還沒備份的私人筆記');
+  expect(screen.queryByRole('button', { name: `陪我讀「${material.title}」` })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '收起白板' }));
+  fireEvent.click(screen.getByRole('button', { name: '確認關閉白板' }));
+  expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  // Its lecture card has disappeared: return keyboard focus to a live entry.
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '讀講義' }));
+});
+
+it('does not claim a selected lecture disappeared while older material pages remain', async () => {
+  state.request.mockResolvedValueOnce(list())
+    .mockResolvedValueOnce({ materials: [], nextCursor: 'older-page' });
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
+  await screen.findByRole('button', { name: '載入較早教材' });
+  expect(screen.queryByText(/目前不在已載入的教材清單/)).toBeNull();
+  expect(screen.getByText(material.body)).toBeTruthy();
+});
+
 it('asks before switching lecture cards and lets the learner retry after cancelling', async () => {
   const another = { ...material, id: 'cwm_22222222-2222-4222-8222-222222222222',
     title: '第二章：交易', body: '交易必須遵守原子性與一致性。' };
