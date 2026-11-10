@@ -736,3 +736,28 @@ test('a late allowed read cannot restore the realtime grid after access is denie
   await act(async () => fireEvent.press(retry));
   expect(view.getByText(story.text)).toBeTruthy();
 });
+
+test('realtime keeps the open text story and grid during refresh and network failure, then clears on denial', async () => {
+  const story = { id: 'text', schoolId: 'pu', authorUid: 'bob', kind: 'text' as const,
+    text: '校園近況', expiresAt: Date.now() + 120_000 };
+  jest.mocked(listActiveStoriesForSchool).mockResolvedValueOnce([story]);
+  const view = render(<RealtimeSocialScreen />);
+  const card = await view.findByLabelText('查看 同學 的限時動態');
+  fireEvent.press(card);
+  const close = view.getByLabelText('關閉限時動態');
+  let fail!: (error: unknown) => void;
+  jest.mocked(listActiveStoriesForSchool).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+  let refresh!: Promise<void>;
+  act(() => { refresh = view.UNSAFE_getByType(RefreshControl).props.onRefresh(); });
+  expect(view.getByLabelText('關閉限時動態')).toBe(close);
+  expect(view.getByLabelText('查看 同學 的限時動態')).toBeTruthy();
+  await act(async () => { fail(new Error('offline')); await refresh; });
+  expect(view.getByLabelText('關閉限時動態')).toBe(close);
+  expect(view.getByLabelText('查看 同學 的限時動態')).toBeTruthy();
+  expect(view.getByText('暫時無法讀取限時動態，請確認連線與校園帳號。')).toBeTruthy();
+  jest.mocked(listActiveStoriesForSchool).mockRejectedValueOnce({ code: 'permission-denied' });
+  await act(async () => fireEvent.press(view.getByText('重新讀取限時動態')));
+  expect(view.queryByLabelText('關閉限時動態')).toBeNull();
+  expect(view.queryByLabelText('查看 同學 的限時動態')).toBeNull();
+  expect(view.queryByText(story.text)).toBeNull();
+});
