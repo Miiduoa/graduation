@@ -84,9 +84,9 @@ it('lists each role on its own line and links teaching to the course, not /teach
     screen
       .getByRole('link', { name: `測試餐坊 · 主校區 · ${STORE_NOT_OPEN_COPY}` })
       .getAttribute('href'),
-  ).toBe('/merchant');
+  ).toBe('/merchant/workspace');
   expect(screen.getByRole('link', { name: '林家麵 · 已送出' }).getAttribute('href')).toBe(
-    '/merchant',
+    '/merchant/workspace',
   );
 });
 
@@ -112,8 +112,8 @@ it('says empty only after a real empty result, and retries a failed lookup', asy
   });
   fireEvent.click(screen.getByRole('button', { name: '再試一次' }));
   await screen.findByText(IDENTITY_NO_TEACHING_COPY);
-  expect(screen.getByRole('link', { name: IDENTITY_NO_MERCHANT_COPY }).getAttribute('href')).toBe(
-    '/merchant',
+  expect(screen.getByRole('link', { name: '申請店家進駐' }).getAttribute('href')).toBe(
+    '/merchant/apply',
   );
   expect(screen.queryByText(IDENTITY_LOOKUP_FAILED_COPY)).toBeNull();
 });

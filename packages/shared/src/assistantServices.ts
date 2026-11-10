@@ -93,6 +93,10 @@ const services = [
     summary: '查看所選學校的地址、聯絡方式與官方網站。', mobileRoute: 'SchoolInfo',
   },
   {
+    id: 'student-card', label: '數位學生證', href: '/student-card', category: 'campus', access: 'personal',
+    summary: '開啟學生證卡面、出示學號，或查找校方證件說明。', mobileRoute: 'StudentCard',
+  },
+  {
     id: 'cafeteria', label: '校園餐廳', href: '/cafeteria', category: 'life', access: 'public',
     summary: '查看餐廳與菜單，點餐依店家開放情形使用。', mobileRoute: '餐廳總覽',
   },
@@ -266,6 +270,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   map: ['地圖', '校園地圖', 'map', 'campus map'],
   bus: ['公車', '校車', '公車資訊', '公車動態', '交通資訊', 'bus', 'transit'],
   'school-info': ['學校資訊', '校園資訊', '學校聯絡資訊', 'school info'],
+  'student-card': ['數位學生證', '學生證', '數位證件', '證件', '學生證卡面', 'student card', 'student id card'],
   cafeteria: ['餐廳', '校園餐廳', '學餐', '餐廳總覽', '菜單', 'cafeteria', 'dining', 'restaurants'],
   food: ['點餐與取餐', '點餐', '取餐', '取餐憑證', '餐點訂購', 'food', 'food orders', 'food pickup'],
   orders: ['訂單', '我的訂單', '訂餐紀錄', '餐廳訂單', 'orders', 'my orders'],

@@ -397,6 +397,28 @@ it('handler preserves unknown-call reservations when provider failure crosses th
   expect(response.status).toBe(200);
   expect(calls).toBe(2);
 });
+it('keeps V2 capability and ask available with legacy disabled-service cookies', async () => {
+  vi.mocked(createAdapter).mockReturnValue({
+    adapter: fixtureAdapter().adapter,
+    principal: async () => ({ platformAccountId: 'legacy-service-account', isPlatformOperator: false }),
+    apiCalls: () => 0,
+  });
+  const headers = {
+    cookie: `${SESSION_COOKIE}=${sealCookie(SESSION_COOKIE, {
+      ...session, restrictedServices: { social: true, cloudAi: true },
+    })}`,
+  };
+  const capability = await handleNuni(request('capability', undefined, headers), ['assistant', 'capability']);
+  expect(capability.status).toBe(200);
+  expect(await capability.json()).toMatchObject({ enabled: true, version: 2 });
+  const ask = await handleNuni(request('ask', {
+    schoolId: 'fixture-school', conversationId: 'legacy-services',
+    question: '你好', history: [], consent: true,
+  }, headers), ['assistant', 'ask']);
+  expect(ask.status).toBe(200);
+  expect(providerCall).toHaveBeenCalled();
+});
+
 it('capability reports fallback as a boolean without settings', async () => {
   vi.mocked(createAdapter).mockReturnValue({
     adapter: fixtureAdapter().adapter,

@@ -210,6 +210,8 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
     ['users/alice/postLoginRuns/run', { studentId: 'private' }],
     ['users/bob/private/one', { secret: 'keep' }],
     ['_puSessions/bob', { ownerUid: 'bob' }],
+    ['_studentCardPresentations/alice', { maskedId: '•••• 1234' }],
+    ['_studentCardPresentations/bob', { maskedId: '•••• 9876' }],
     ['_puTronClassLmsCache/alice', { ownerUid: 'alice', snapshot: { homework: [] } }],
     ['notifications/bob', { userId: 'bob' }],
   ];
@@ -226,6 +228,7 @@ test('drains more than 200 personal records, sessions and nested orphaned data w
   });
   expect([...state.docs.keys()].sort()).toEqual([
     '_puSessions/bob',
+    '_studentCardPresentations/bob',
     'notifications/bob',
     'users/alice',
     'users/bob/private/one',

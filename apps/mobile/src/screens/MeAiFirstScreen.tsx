@@ -94,6 +94,9 @@ export default function MeAiFirstScreen() {
             </Text>
           ) : null}
         </AICard>
+        {isStudent && profile ? (
+          <AIRow title="數位學生證" subtitle="查看卡面與出示學號" onPress={go('StudentCard')} />
+        ) : null}
         <AIRow title="個人資料" subtitle="修改顯示名稱、簡介與電話" onPress={go('ProfileEdit')} />
       </AISection>
       <AISection title="通知與私訊">

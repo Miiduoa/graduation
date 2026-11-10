@@ -103,7 +103,6 @@ describe('assistant service destinations', () => {
     ]) {
       assert.equal(getAssistantService(id).mobileRoute, undefined);
     }
-    assert.equal(getAssistantService('student-card'), null);
     assert.equal(getAssistantService('attendance').href, '/classroom');
     assert.match(getAssistantService('attendance').summary, /先選擇課程/);
     assert.match(getAssistantService('dormitory').summary, /個人報修備忘/);
@@ -334,7 +333,7 @@ describe('assistant service command routing', () => {
       '打開https://external.test', '打開//external.test', '打開/map', '打開../admin',
       '打開javascript:alert(1)', '打開data:text/html,hello', '打開%2Fadmin',
       '開啟課表?schoolId=ntu', '開啟課表#admin', '打開__proto__', 'open constructor',
-      '打開數位學生證', '打開學費付款', '打開校方選課', '打開課\n表', '打開課\u0000表',
+      '打開學費付款', '打開校方選課', '打開課\n表', '打開課\u0000表',
       'x'.repeat(161), '', ' ', null, undefined, {}, [], 9,
     ]) {
       assert.equal(resolveAssistantServiceIntent(question), null, String(question));
