@@ -1,9 +1,9 @@
 {
   "schema": "campus.platform-lost-found-source/v1",
-  "inputTree": "6a84f3f845e21c79cc4c51927c524f1486e6099a",
+  "inputTree": "83381c1b04e3a603389f562ada17ef11b9d5facf",
   "inputAppSha256": "ebab4626e20f64204db95528e2cd2819c6270c0d2f0efa6f440aaac9f71a5636",
   "baseManifestSha256": "8e0877e879c00830611cd2bfd7eb86986f02448c384b799dba7c6c1996471004",
-  "composedManifestSha256": "7dbbd0c56fa0194c3edd70c61a00cef59027bf17a04f79f64e87b7e4539a7866",
+  "composedManifestSha256": "ec988e40163fcc194d2555b7ad79bc16a54bfc87b5858b8cb012ebb9ad9c97c1",
   "adapterSha256": "b61078916cd57d0161493060376103a2277fcaf79b12d760e2f579ba2fb20ab6",
   "sourceFiles": {
     "apps/api/src/lost-found/contracts.ts": {
