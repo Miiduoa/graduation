@@ -633,7 +633,11 @@ export function createTronClassLmsHandler({
       const homework = homeworkOnlySnapshot(snapshot);
       const merged = mergeExtras(homework, extras);
       merged.cache = { hit: !fetchedFromSchool && !refresh, expiresAt: snapshot.cache.expiresAt };
-      await saveCache(homework);
+      // Do not rewrite a still-fresh legacy cache just to stamp sessionVersion
+      // when this request fetched no new school data and needs no prune.
+      if (fetchedFromSchool || refresh || shouldPruneExtras) {
+        await saveCache(homework, !legacyCompatibleCache || !cachedHomework);
+      }
       // Do not return the old session's data if the user relinked during the write.
       await verifyLinkedSession();
       return merged;

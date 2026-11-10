@@ -465,6 +465,23 @@ it('keeps a still-fresh legacy cache missing sessionVersion without rewriting it
   expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
 });
 
+it('does not rewrite a fresh legacy cache when a missing course is requested', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  delete cached.sessionVersion;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchCourses).mockClear();
+  vi.mocked(source.fetchActivities).mockClear();
+
+  const body = await (await request({ courseId: 19999 })).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect(source.fetchActivities).not.toHaveBeenCalled();
+  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
+});
+
 it.each([
   { scenario: 'missing nested cache', corrupted: undefined },
   { scenario: 'non-object nested cache', corrupted: 'broken' },
