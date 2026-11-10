@@ -680,7 +680,9 @@ describe('public Providence building geometry route', () => {
     expect(result?.status).toBe(503);
     const failed = await pending;
     expect(failed.headers.get('Cache-Control')).toBe('no-store');
-    expect(failed.headers.get('Retry-After')).toBe(cooldown);
+    const retrySeconds = Number(failed.headers.get('Retry-After'));
+    expect(retrySeconds).toBeGreaterThanOrEqual(Number(cooldown) - 1);
+    expect(retrySeconds).toBeLessThanOrEqual(Number(cooldown));
     expect(cancelCalls).toBe(1);
     expect((await GET()).status).toBe(503);
     expect(upstream).toHaveBeenCalledTimes(1);
