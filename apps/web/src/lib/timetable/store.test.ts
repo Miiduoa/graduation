@@ -54,6 +54,7 @@ import {
   loadAppealTeacherStatus,
   loadFriendTimetable,
   loadPersonalTimetable,
+  loadSharedTimetable,
   revokeServerShare,
   savePersonalTimetable,
   type StoredTimetable,
@@ -698,4 +699,19 @@ it('retains separately saved class exceptions when an older timetable writer omi
   expect((await loadPersonalTimetable(null, 'pu')).classExceptions).toEqual(classExceptionsForStorage([value]));
   await savePersonalTimetable(null, { ...timetable, classExceptions: [] });
   expect((await loadPersonalTimetable(null, 'pu')).classExceptions).toEqual([]);
+});
+
+it('loads an old share through the projection endpoint when direct reads are denied', async () => {
+  firestore.getDoc.mockRejectedValueOnce({ code: 'permission-denied' });
+  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  fetchMock.mockResolvedValueOnce(Response.json({ name: '課表', schoolId: 'pu', courses: [course], meta: {}, expiresAt }));
+
+  await expect(loadSharedTimetable('old-token')).resolves.toMatchObject({ schoolId: 'pu', expiresAt });
+  expect(fetchMock).toHaveBeenCalledWith('/api/timetable/shares/old-token', { cache: 'no-store' });
+});
+
+it('never displays an unmarked cached share after the server reports revocation', async () => {
+  firestore.getDoc.mockResolvedValueOnce(cloudSnap({ meta: { email: 'private@example.test' } }));
+  fetchMock.mockResolvedValueOnce(Response.json({ code: 'revoked' }, { status: 410 }));
+  await expect(loadSharedTimetable('old-token')).rejects.toThrow('revoked');
 });

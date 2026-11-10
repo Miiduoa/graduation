@@ -48,6 +48,7 @@
 .metadata { display: grid; gap: 5px; margin: 18px 0; font-size: 0.875rem; }
 .badge { justify-self: start; max-width: 100%; padding: 4px 10px; margin-bottom: 4px !important; background: color-mix(in srgb, #d49d31 15%, var(--plan-panel)); border: 1px solid color-mix(in srgb, #d49d31 50%, var(--plan-border)); border-radius: 7px; font-weight: 600; }
 .metadata a { color: var(--plan-accent); text-decoration: underline; text-underline-offset: 3px; }
+.floorEditingHint { margin: 0 0 12px !important; color: var(--plan-muted); font-size: 0.8125rem; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; font-size: 0.875rem; }
 .toolbar select { min-width: 110px; }
 .sceneSection { position: relative; border: 1px solid var(--plan-border); border-radius: 14px; overflow: hidden; background: var(--plan-panel); }

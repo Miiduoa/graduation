@@ -7,7 +7,13 @@ import {
 } from '../../features/nuniCourseworkStudy';
 import type { CourseworkRead } from '../../features/nuniCourseworkFollowUp';
 import { readAssistantTimetable } from '../../services/assistantTimetableSource';
-import type { AssistantCalendarContext } from '../../services/assistantCalendarExecution';
+import {
+  confirmAssistantCalendarTask, createAssistantCalendarTask, type AssistantCalendarContext,
+} from '../../services/assistantCalendarExecution';
+import {
+  findCourseworkStudyBatchSlots, recheckCourseworkStudySlot, recheckCourseworkStudyTime,
+  type CourseworkStudySlot,
+} from '../../services/courseworkStudyAvailability';
 import { assistantCalendarJournalStorageKey, readAssistantCalendarJournal } from '../../services/assistantCalendarJournal';
 import {
   loadPersonalImports, mutatePersonalImportLedger, personalImportStorageKey,
@@ -466,4 +472,265 @@ test('a timed-out availability read returns promptly and ignores its late result
   await flush();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   expect(await readAssistantCalendarJournal(scope(), () => true)).toHaveLength(0);
+});
+
+const batchSources = (count = 2, dueAt = date + 'T18:00:00+08:00') =>
+  Array.from({ length: count }, (_, index) => ({ id: `selected-${index + 1}`, dueAt }));
+const fixedTime = () => ({ date, startTime: '10:10', endTime: '10:40' });
+const calendarEvent = (slot: CourseworkStudySlot, title: string) => ({
+  title, date: slot.date, startTime: slot.startTime, endTime: slot.endTime, allDay: false,
+});
+
+test('allocates four exact sources from one snapshot by deadline, including several buffered slots in one gap', async () => {
+  const result = await findCourseworkStudyBatchSlots(context(), [
+    { id: 'last', dueAt: date + 'T18:00:00+08:00' },
+    { id: 'second', dueAt: date + 'T12:00:00+08:00' },
+    { id: 'first', dueAt: date + 'T10:40:00+08:00' },
+    { id: 'third', dueAt: date + 'T13:00:00+08:00' },
+  ]);
+  expect(result.kind).toBe('available');
+  if (result.kind !== 'available') throw new Error(result.message);
+  expect(result.slots.map(({ id, slot }) => [id, slot.date, slot.startTime, slot.endTime])).toEqual([
+    ['first', date, '10:10', '10:40'], ['second', date, '10:50', '11:20'],
+    ['third', date, '11:30', '12:00'], ['last', date, '12:10', '12:40'],
+  ]);
+  expect(result.checkedAt).toBe(new Date(now).toISOString());
+  expect(result.slots.every(({ slot }) => slot.checkedAt === result.checkedAt)).toBe(true);
+  expect(Object.isFrozen(result.slots) && result.slots.every((item) =>
+    Object.isFrozen(item) && Object.isFrozen(item.slot))).toBe(true);
+  expect(timetable).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(AsyncStorage.getItem).mock.calls.filter(([key]) => key === personalImportStorageKey(scope()))).toHaveLength(1);
+  expect(transport.request).not.toHaveBeenCalled();
+  expect(transport.bffRequest).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(await readAssistantCalendarJournal(scope(), () => true)).toHaveLength(0);
+});
+
+test('captures all selected IDs and deadlines before an asynchronous batch lookup can be retargeted', async () => {
+  const pending = deferred<TimetableRead>();
+  timetable.mockReturnValueOnce(pending.promise);
+  const selected = batchSources();
+  const work = findCourseworkStudyBatchSlots(context(), selected);
+  selected[0].id = 'replacement';
+  selected[0].dueAt = date + 'T07:00:00+08:00';
+  selected[1] = { id: 'also-replaced', dueAt: '2026-01-01' };
+  selected.push({ id: 'unexpected-third', dueAt: date + 'T18:00:00+08:00' });
+  await flush();
+  pending.resolve(source());
+  const result = await work;
+  expect(result.kind).toBe('available');
+  if (result.kind === 'available') expect(result.slots.map(({ id }) => id)).toEqual(['selected-1', 'selected-2']);
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test('a batch excludes existing personal events and their margins before allocating peers', async () => {
+  await seed([event({ startTime: '10:30', endTime: '11:00' })]);
+  const result = await findCourseworkStudyBatchSlots(context(), batchSources());
+  expect(result.kind).toBe('available');
+  if (result.kind === 'available') expect(result.slots.map(({ slot }) => [slot.startTime, slot.endTime])).toEqual([
+    ['11:10', '11:40'], ['11:50', '12:20'],
+  ]);
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test('insufficient room never returns a shrunken batch or writes a partial plan', async () => {
+  const result = await findCourseworkStudyBatchSlots(context(), batchSources(4, date + 'T11:20:00+08:00'));
+  expect(result).toMatchObject({ kind: 'no-slot', unplacedIds: ['selected-3', 'selected-4'] });
+  expect(result).not.toHaveProperty('slots');
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(await readAssistantCalendarJournal(scope(), () => true)).toHaveLength(0);
+});
+
+test('a deadline one second before a complete slot cannot be rounded later or silently omitted', async () => {
+  expect(await findCourseworkStudyBatchSlots(context(), [
+    { id: 'due-soon', dueAt: date + 'T10:39:59+08:00' }, ...batchSources(1),
+  ])).toMatchObject({ kind: 'no-slot', unplacedIds: ['due-soon'] });
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test.each([
+  [], batchSources(1), batchSources(5), [batchSources()[0], batchSources()[0]],
+  [{ id: '', dueAt: date + 'T18:00:00+08:00' }, batchSources()[1]],
+  [{ id: 'hidden\u200bsource', dueAt: date + 'T18:00:00+08:00' }, batchSources()[1]],
+].map((selected) => ({ selected })))(
+  'rejects an invalid selection before looking for batch availability: %j', async ({ selected }) => {
+  expect(await findCourseworkStudyBatchSlots(context(), selected)).toMatchObject({ kind: 'blocked' });
+  expect(timetable).not.toHaveBeenCalled();
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test.each([
+  '2026-11-09', '2026-11-09T18:00:00', '2026-02-30T18:00:00+08:00',
+  '2026-11-09T25:00:00+08:00', '2026-11-09T18:00:60+08:00', '2026-11-09T18:00:00+14:30',
+])('both batch finding and fixed-time rechecks reject an unverified exact deadline: %s', async (dueAt) => {
+  expect(await findCourseworkStudyBatchSlots(context(), batchSources(2, dueAt))).toMatchObject({ kind: 'blocked' });
+  expect(await recheckCourseworkStudyTime(fixedTime(), dueAt, context())).toMatchObject({ kind: 'blocked' });
+  expect(timetable).not.toHaveBeenCalled();
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+});
+
+test('an elapsed selected deadline prevents the whole batch before any availability read', async () => {
+  const selected = batchSources(); selected[1].dueAt = date + 'T07:00:00+08:00';
+  expect(await findCourseworkStudyBatchSlots(context(), selected))
+    .toMatchObject({ kind: 'no-slot', unplacedIds: ['selected-2'] });
+  expect(timetable).not.toHaveBeenCalled();
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+});
+
+test('a far deadline does not let a batch use the following Monday beyond the seven-day window', async () => {
+  jest.setSystemTime(at('18:00'));
+  expect(await findCourseworkStudyBatchSlots(context(), batchSources(2, '2026-12-31T18:00:00+08:00')))
+    .toMatchObject({ kind: 'no-slot', unplacedIds: ['selected-1', 'selected-2'] });
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test.each(['incomplete-timetable', 'unreadable-timetable', 'corrupt-calendar'] as const)(
+  'batch and fixed-time reads do not treat %s as an empty calendar', async (problem) => {
+    if (problem === 'incomplete-timetable') courses.push(course({ id: 'unplaced', dayOfWeek: undefined }));
+    if (problem === 'unreadable-timetable') timetable.mockRejectedValue(new Error('native unavailable'));
+    if (problem === 'corrupt-calendar') await originalSet(personalImportStorageKey(scope()), '{not-json');
+    expect(await findCourseworkStudyBatchSlots(context(), batchSources())).toMatchObject({ kind: 'unavailable' });
+    expect(await recheckCourseworkStudyTime(fixedTime(), assignment().dueAt!, context())).toMatchObject({ kind: 'unavailable' });
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  },
+);
+
+test('a serialized slot is not a proof; its fixed time can only obtain a restriction after fresh evidence reads', async () => {
+  const result = await findCourseworkStudyBatchSlots(context(), batchSources());
+  if (result.kind !== 'available') throw new Error(result.message);
+  const copied = JSON.parse(JSON.stringify(result.slots[0].slot)) as CourseworkStudySlot;
+  timetable.mockClear(); jest.mocked(AsyncStorage.getItem).mockClear();
+  expect(await recheckCourseworkStudySlot(copied, context())).toMatchObject({ kind: 'blocked' });
+  expect(timetable).not.toHaveBeenCalled();
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+  const checked = await recheckCourseworkStudyTime(copied, assignment().dueAt!, context());
+  expect(checked.kind).toBe('ready');
+  if (checked.kind === 'ready') {
+    expect(checked.writeCheck.isCurrent()).toBe(true);
+    expect(checked.writeCheck.matches(await loadPersonalImports(scope()))).toBe(true);
+  }
+  expect(timetable).toHaveBeenCalledTimes(1);
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(checked).not.toHaveProperty('proposal');
+  expect(await readAssistantCalendarJournal(scope(), () => true)).toHaveLength(0);
+});
+
+test('a persisted time is captured before its fresh evidence read and cannot be changed while waiting', async () => {
+  const pending = deferred<TimetableRead>();
+  timetable.mockReturnValueOnce(pending.promise);
+  const time = fixedTime();
+  const work = recheckCourseworkStudyTime(time, assignment().dueAt!, context());
+  time.date = '2026-12-31'; time.startTime = '08:00'; time.endTime = '08:30';
+  await flush(); pending.resolve(source());
+  const result = await work;
+  expect(result.kind).toBe('ready');
+  if (result.kind === 'ready') {
+    jest.setSystemTime(at('10:10'));
+    expect(result.writeCheck.isCurrent()).toBe(false);
+  }
+});
+
+test.each([
+  { date: '2026-02-30' }, { date: '2026/11/09' }, { startTime: '25:00' }, { endTime: '24:00' },
+  { startTime: '10:1' }, { startTime: '10:10:00' }, { endTime: '10:39' }, { endTime: '11:10' },
+  { startTime: '10:11', endTime: '10:41' }, { startTime: '23:50', endTime: '00:20' },
+])('rejects malformed, shortened or off-policy persisted times before a read: %j', async (patch) => {
+  expect(await recheckCourseworkStudyTime({ ...fixedTime(), ...patch }, assignment().dueAt!, context()))
+    .toMatchObject({ kind: 'blocked' });
+  expect(timetable).not.toHaveBeenCalled();
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+});
+
+test.each([
+  { time: { date, startTime: '07:00', endTime: '07:30' }, dueAt: date + 'T18:00:00+08:00' },
+  { time: { date: '2026-11-16', startTime: '10:10', endTime: '10:40' }, dueAt: '2026-12-31T18:00:00+08:00' },
+  { time: { date, startTime: '10:10', endTime: '10:40' }, dueAt: date + 'T10:39:59+08:00' },
+])('cannot restore a slot outside its future seven-day deadline window: %j', async ({ time, dueAt }) => {
+  expect(await recheckCourseworkStudyTime(time, dueAt, context())).toMatchObject({ kind: 'changed' });
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+test.each(['new-class', 'new-event', 'blank-day'] as const)(
+  'fixed-time validation checks current availability instead of trusting a saved slot: %s', async (change) => {
+    const time = fixedTime();
+    if (change === 'new-class') courses.push(course({ id: 'new-class', startPeriod: 3, endPeriod: 3 }));
+    if (change === 'new-event') await seed([event()]);
+    if (change === 'blank-day') time.date = '2026-11-10';
+    expect(await recheckCourseworkStudyTime(time, '2026-11-12T18:00:00+08:00', context())).toMatchObject({ kind: 'changed' });
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  },
+);
+
+test('each batch step can obtain a fresh ledger check after its predecessor really saves and reads back', async () => {
+  const allocated = await findCourseworkStudyBatchSlots(context(), batchSources());
+  if (allocated.kind !== 'available') throw new Error(allocated.message);
+  const [first, second] = allocated.slots.map(({ slot }) => slot);
+  const firstCheck = await recheckCourseworkStudyTime(first, assignment().dueAt!, context());
+  const staleSecondCheck = await recheckCourseworkStudyTime(second, assignment().dueAt!, context());
+  if (firstCheck.kind !== 'ready' || staleSecondCheck.kind !== 'ready') throw new Error('Expected fresh restrictions');
+  const firstTask = createAssistantCalendarTask(calendarEvent(first, '第一份作業準備'), context());
+  expect(await confirmAssistantCalendarTask(firstTask.proposal, context(), firstCheck.writeCheck))
+    .toMatchObject({ state: 'verified' });
+  expect(staleSecondCheck.writeCheck.isCurrent()).toBe(false);
+  const secondCheck = await recheckCourseworkStudyTime(second, assignment().dueAt!, context());
+  if (secondCheck.kind !== 'ready') throw new Error(secondCheck.message);
+  expect(secondCheck.writeCheck.matches(await loadPersonalImports(scope()))).toBe(true);
+  const secondTask = createAssistantCalendarTask(calendarEvent(second, '第二份作業準備'), context());
+  expect(await confirmAssistantCalendarTask(secondTask.proposal, context(), secondCheck.writeCheck))
+    .toMatchObject({ state: 'verified' });
+  expect(ledgerWrites()).toHaveLength(2);
+  expect((await loadPersonalImports(scope())).records.map((row) => [row.startTime, row.endTime]))
+    .toEqual([['10:10', '10:40'], ['10:50', '11:20']]);
+  expect(await readAssistantCalendarJournal(scope(), () => true)).toHaveLength(2);
+});
+
+test('the fixed-time write restriction detects even an unnotified nonoverlapping ledger change inside the executor', async () => {
+  const checked = await recheckCourseworkStudyTime(fixedTime(), assignment().dueAt!, context());
+  if (checked.kind !== 'ready') throw new Error(checked.message);
+  await seed([event({ startTime: '18:00', endTime: '19:00' })]);
+  expect(checked.writeCheck.matches(await loadPersonalImports(scope()))).toBe(false);
+  const task = createAssistantCalendarTask({ title: '準備行程', ...fixedTime(), allDay: false }, context());
+  expect(await confirmAssistantCalendarTask(task.proposal, context(), checked.writeCheck)).toMatchObject({ state: 'blocked' });
+  expect(ledgerWrites()).toHaveLength(0);
+  expect((await loadPersonalImports(scope())).records).toHaveLength(1);
+});
+
+test.each(['abort', 'account', 'school', 'timetable'] as const)(
+  'a completed fixed-time check cannot authorize a later write after %s changes', async (change) => {
+    const abort = new AbortController();
+    const checked = await recheckCourseworkStudyTime(fixedTime(), assignment().dueAt!, context(), { signal: abort.signal });
+    if (checked.kind !== 'ready') throw new Error(checked.message);
+    if (change === 'abort') abort.abort();
+    if (change === 'account') accountId = 'pa_' + uuid(9999);
+    if (change === 'school') schoolId = 'ncku';
+    if (change === 'timetable') notifyTimetableChanged();
+    expect(checked.writeCheck.isCurrent()).toBe(false);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  },
+);
+
+test.each(['batch', 'fixed-time'] as const)('a pre-aborted %s lookup performs no evidence reads', async (kind) => {
+  const abort = new AbortController(); abort.abort();
+  const result = kind === 'batch'
+    ? await findCourseworkStudyBatchSlots(context(), batchSources(), { signal: abort.signal })
+    : await recheckCourseworkStudyTime(fixedTime(), assignment().dueAt!, context(), { signal: abort.signal });
+  expect(result).toMatchObject({ kind: 'blocked' });
+  expect(timetable).not.toHaveBeenCalled();
+  expect(AsyncStorage.getItem).not.toHaveBeenCalled();
+});
+
+test.each(['batch', 'fixed-time'] as const)('the complete %s evidence read has a deadline and ignores a late result', async (kind) => {
+  const pending = deferred<TimetableRead>();
+  timetable.mockReturnValueOnce(pending.promise);
+  const work = kind === 'batch' ? findCourseworkStudyBatchSlots(context(), batchSources())
+    : recheckCourseworkStudyTime(fixedTime(), assignment().dueAt!, context());
+  await flush();
+  expect(timetable).toHaveBeenCalledTimes(1);
+  await jest.advanceTimersByTimeAsync(20_001);
+  expect(await work).toMatchObject({ kind: 'unavailable' });
+  pending.resolve(source());
+  await flush();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(jest.getTimerCount()).toBe(0);
 });
