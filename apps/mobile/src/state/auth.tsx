@@ -38,6 +38,7 @@ import { puCacheClearAll } from '../data/puDataCache';
 import { clearPUCache } from '../services/puDataCache';
 import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
 import { bindVerifiedSchoolAiScope, revokeVerifiedSchoolAiScope } from '../services/verifiedSchoolAiScope';
+import { ensureCampusStoryBinding } from '../services/campusStoryBinding';
 import { captureSchoolSessionAssertion, clearPUSession } from '../services/studentIdAuth';
 import { clearOwnedPuCampusSessions } from '../services/clearOwnedPuCampusSessions';
 import {
@@ -265,6 +266,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       }
     }
 
+    void ensureCampusStoryBinding(); // Firebase Auth profile only; nuni Google has no uid.
     const userRole = (data.role as UserRole) ?? 'student';
     const roleGroup = getRoleGroup(userRole);
     const postLoginRolesRaw = data.postLoginRoles as unknown;

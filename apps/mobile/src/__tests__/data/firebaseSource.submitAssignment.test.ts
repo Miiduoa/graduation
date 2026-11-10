@@ -284,3 +284,15 @@ test('無關未知提醒只回傳警告，仍可取得本作業收據', async ()
   expect(receipt.reminderWarning).toContain('仍可能響鈴');
   expect(transaction.set).toHaveBeenCalled();
 });
+
+test.each([
+  'groups/course/assignments/work/submissions/other/file.pdf',
+  'groups/course/posts/post/file.pdf',
+  'groups/course/cover.jpg',
+])('rejects attachments outside the submission namespace: %s', async (url) => {
+  await expect(firebaseSource.submitAssignment({
+    groupId: 'course', assignmentId: 'work', userId: 'alice', content: 'answer',
+    attachments: [{ id: url, url, name: 'file.pdf', type: 'document' }],
+  })).rejects.toThrow('附件不屬於此文件');
+  expect(runTransaction).not.toHaveBeenCalled();
+});

@@ -80,7 +80,7 @@ overrides:
   firebase-tools>tmp: 0.2.7
   firebase-tools>morgan: 1.12.1
   firebase-tools>body-parser: 1.20.9
-  '@modelcontextprotocol/sdk>@hono/node-server': 1.19.17
+  '@modelcontextprotocol/sdk>@hono/node-server': 2.1.3
   '@modelcontextprotocol/sdk>hono': 4.13.13
   '@hono/node-server>hono': 4.13.13
   body-parser@^1.0.0: 1.20.9
@@ -1959,9 +1959,9 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  '@hono/node-server@1.19.17':
-    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
-    engines: {node: '>=18.14.1'}
+  '@hono/node-server@2.1.3':
+    resolution: {integrity: sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw==}
+    engines: {node: '>=20'}
     peerDependencies:
       hono: 4.13.13
 
@@ -11733,7 +11733,7 @@ snapshots:
       protobufjs: 7.6.6
       yargs: 17.7.2
 
-  '@hono/node-server@1.19.17(hono@4.13.13)':
+  '@hono/node-server@2.1.3(hono@4.13.13)':
     dependencies:
       hono: 4.13.13
 
@@ -12421,7 +12421,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.32.2(zod@4.6.7)':
     dependencies:
-      '@hono/node-server': 1.19.17(hono@4.13.13)
+      '@hono/node-server': 2.1.3(hono@4.13.13)
       ajv: 8.18.0
       ajv-formats: 3.0.1(ajv@8.18.0)
       content-type: 1.0.5
