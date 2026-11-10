@@ -233,18 +233,25 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) return;
     let active = true;
+    let timedOut = false;
     setFootprintStatus('loading');
     const controller = new AbortController();
-    // An overloaded proxy can hang even after our server's own Overpass timeout.
-    // Give the marker-only map a bounded fallback instead of a permanent spinner.
-    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    // Aborting fetch is advisory: a stalled response body or a proxy/mock that
+    // ignores AbortSignal may never settle. End the loading UI independently,
+    // and quarantine any late completion from this expired request.
+    const timeout = window.setTimeout(() => {
+      if (!active) return;
+      timedOut = true;
+      controller.abort();
+      setFootprintStatus('unavailable');
+    }, 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error('footprint source unavailable');
         return response.json() as Promise<unknown>;
       })
       .then((response) => {
-        if (!active) return;
+        if (!active || timedOut) return;
         const snapshot = parseProvidenceFootprintSnapshot(response);
         if (!snapshot) throw new Error('No recent, source-checked building outlines');
         setFootprints(snapshot.buildings);
@@ -254,7 +261,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         setFootprintStatus('ready');
       })
       .catch(() => {
-        if (!active) return;
+        if (!active || timedOut) return;
         // Keep the existing marker-only canvas; do not recreate the GPU context on failure.
         setFootprintStatus('unavailable');
       })
