@@ -66,10 +66,11 @@ function buildDb({
     id: uid,
     path: `users/${uid}`,
     firestore: null,
-    get: async () => ({
-      exists: true,
-      data: () => ({ ...userState }),
-    }),
+                get: async () => ({
+                  exists: true,
+                  data: () => ({ ...userState }),
+                  createTime: { toMillis: () => 100 },
+                }),
     collection: (name) => {
       if (name === 'postLoginRuns') {
         return {
@@ -158,6 +159,7 @@ function buildDb({
                     return {
                       exists: true,
                       data: () => ({ ...schoolMemberDoc }),
+                      createTime: { toMillis: () => 200 },
                     };
                   }
                   if (sid === schoolId && memberUid === uid && sub === 'serviceRoles') {
@@ -315,5 +317,26 @@ describe('finalizePostLogin authorization', () => {
     expect(claims.role).toBe('student');
     expect(claims.role).not.toBe('admin');
     expect(userState.role).toBe('student');
+  });
+
+  test('does not create a school member from client schoolId', async () => {
+    const uid = 'google-stu';
+    const { committed } = buildDb({
+      uid,
+      userDoc: {
+        role: 'student',
+        email: 'google@gmail.com',
+      },
+      schoolMemberDoc: null,
+    });
+
+    await runFinalizePostLogin({
+      auth: { uid },
+      data: { puSessionId: 'pu-session-1', schoolId: 'pu' },
+    });
+
+    expect(
+      committed.some((op) => String(op.ref?.path || '').includes('/members/')),
+    ).toBe(false);
   });
 });

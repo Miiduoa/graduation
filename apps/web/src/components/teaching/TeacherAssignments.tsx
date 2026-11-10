@@ -1,5 +1,6 @@
 'use client';
 
+import { PrivateAttachment } from '@/components/PrivateAttachment';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -451,6 +452,7 @@ export function TeacherAssignments({ schoolId, courseId, assignments, refresh }:
                               {submission.score !== null ? '已評分並發布' : '已繳交・尚未評分'}
                             </p>
                             <p className={styles.answer}>{submission.content || '本次繳交未包含文字內容。'}</p>
+                            {submission.attachments?.map((path) => <PrivateAttachment key={path} path={path} />)}
                             {submission.score !== null ? (
                               <div className={styles.published}>
                                 <strong>已發布：{submission.score} / {review.points} 分</strong>

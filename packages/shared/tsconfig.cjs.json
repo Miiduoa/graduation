@@ -17,7 +17,9 @@
     "src/lms/**/*.ts",
     "src/companion/**/*.ts",
     "src/timetable/schoolPeriods.ts",
+    "src/timetable/publicShare.ts",
     "src/imports/today.ts",
-    "src/timetable/classExceptions.ts"
+    "src/timetable/classExceptions.ts",
+    "src/privateFileAccess.ts"
   ]
 }

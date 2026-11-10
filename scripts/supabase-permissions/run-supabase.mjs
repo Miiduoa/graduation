@@ -11,7 +11,7 @@ import {
 } from './harness.mjs';
 
 if (process.argv.length !== 2) throw new Error('Usage: run-supabase.mjs (no remote-target options)');
-requireSuites();
+requireSuites({ storage: true });
 const binary = process.env.CAMPUS_TEST_SUPABASE || 'supabase';
 const version = execute(binary, ['--version']).trim();
 if (!/^2\.121\.0$/.test(version)) throw new Error(`Expected Supabase CLI 2.121.0; received ${version}`);
@@ -92,7 +92,7 @@ function localStatus() {
   if (!readFileSync(join(workdir, 'supabase', 'config.toml'), 'utf8').includes(`project_id = "${projectId}"`)) {
     throw new Error('Temporary project identity changed');
   }
-  return { databaseUrl, apiUrl: `${api.origin}/rest/v1`, jwtSecret, anonKey: status.ANON_KEY || status.PUBLISHABLE_KEY || '' };
+  return { databaseUrl, apiUrl: `${api.origin}/rest/v1`, storageUrl: `${api.origin}/storage/v1`, jwtSecret, anonKey: status.ANON_KEY || status.PUBLISHABLE_KEY || '' };
 }
 
 async function verify({ seeded = false } = {}) {
@@ -101,6 +101,7 @@ async function verify({ seeded = false } = {}) {
   if (!seeded) seedFixtures(status.databaseUrl);
   sql(status.databaseUrl, { text: "notify pgrst, 'reload schema';" });
   await delay(500);
+  await runApiAssertions({ ...status, suite: 'storage-api.test.mjs' });
   await runApiAssertions(status);
 }
 
