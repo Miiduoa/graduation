@@ -270,7 +270,7 @@ export function ChatScreen(props: any) {
   }, [peerRoute, sendScope]);
 
   useEffect(() => {
-    if (!peerRoute || !myUid || !peerParam || !school.id) return;
+    if (!peerRoute || !myUid || !peerParam || !school.id || !convoKey) return;
     const controller = new AbortController();
     setPreparation({ scope: sendScope, status: 'loading' });
     setVerifiedPhotoThread(null);
@@ -280,11 +280,32 @@ export function ChatScreen(props: any) {
         setPreparation({ scope: sendScope, status: 'ready', exists: result.exists });
         setVerifiedPhotoThread(sendScope);
       })
-      .catch((error) => {
-        if (!controller.signal.aborted) failPreparation(error);
+      .catch(async (error) => {
+        if (controller.signal.aborted || scopeRef.current !== sendScope) return;
+        // 準備新對話的校籍檢查失敗，不代表既有成員失去舊對話存取權。
+        // 僅接受伺服器確認的本校雙人成員文件，沿用既有對話的規則。
+        try {
+          const snap = await getDoc(doc(db, 'conversations', convoKey));
+          if (controller.signal.aborted || scopeRef.current !== sendScope) return;
+          const data = snap.exists() ? snap.data() as ConvoMeta : null;
+          if (
+            snap.metadata.fromCache === false && !snap.metadata.hasPendingWrites &&
+            data?.type === 'dm' && data.schoolId === school.id &&
+            Array.isArray(data.memberIds) && data.memberIds.length === 2 &&
+            new Set(data.memberIds).size === 2 &&
+            data.memberIds.includes(myUid) && data.memberIds.includes(peerParam)
+          ) {
+            setPreparation({ scope: sendScope, status: 'ready', exists: true });
+            setVerifiedPhotoThread(sendScope);
+            return;
+          }
+        } catch {
+          // 無法確認成員權限時保留原本可重試的失敗狀態。
+        }
+        if (!controller.signal.aborted && scopeRef.current === sendScope) failPreparation(error);
       });
     return () => controller.abort();
-  }, [peerRoute, myUid, peerParam, school.id, sendScope, prepareAttempt, failPreparation]);
+  }, [peerRoute, myUid, peerParam, school.id, sendScope, prepareAttempt, failPreparation, db, convoKey]);
 
   useEffect(() => {
     if (!peerRoute || !peerPrepared || preparation.exists || !myUid || !peerParam || !convoKey) return;
@@ -832,7 +853,7 @@ export function ChatScreen(props: any) {
                 ],
           );
           setOutbound(next);
-        } else if (peerRoute && peerParam) {
+        } else if (peerRoute && peerParam && !liveThread) {
           const controller = new AbortController();
           peerTextRequests.current.add(controller);
           try {
@@ -850,6 +871,7 @@ export function ChatScreen(props: any) {
             peerTextRequests.current.delete(controller);
           }
         } else {
+          // 既有對話沿用成員寫入流程；封鎖與帳號狀態仍由 Firestore 規則檢查。
           await sendChatMessageIdempotent({
             conversationId: draft.conversationId,
             messageId: draft.id,
@@ -930,7 +952,7 @@ export function ChatScreen(props: any) {
         }
       }
     },
-    [myUid, peerId, peerParam, peerRoute, school.id, markPeerThreadExists],
+    [myUid, peerId, peerParam, peerRoute, liveThread, school.id, markPeerThreadExists],
   );
 
   const onRetryOutbound = useCallback(

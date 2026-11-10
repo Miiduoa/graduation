@@ -942,7 +942,85 @@ test('a first-photo receipt starts the live conversation without clearing a type
   expect(setDoc).not.toHaveBeenCalled();
 });
 
+test('a peer who transferred schools can still read and message an existing member conversation', async () => {
+  // Alice 仍在 pu；Bob 的目前校籍已不同，prepare 的嚴格校籍檢查拒絕。
+  jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  jest.mocked(getDoc).mockResolvedValueOnce({
+    exists: () => true,
+    metadata: { fromCache: false, hasPendingWrites: false },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }),
+  } as any);
+  const view = render(firstChat());
+  await waitFor(() => expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true));
+  verifyPhotoChat();
+  await act(async () => emitMessages([{ id: 'old', data: {
+    senderId: 'bob', content: '轉校以前的訊息', readBy: ['alice'],
+  } }]));
+  expect(view.getByText('轉校以前的訊息')).toBeTruthy();
+  expect(view.queryByText('目前無法與此對象開啟私訊，請確認登入帳號與所屬學校。')).toBeNull();
+  fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '繼續既有對話');
+  await act(async () => { fireEvent.press(view.getByLabelText('傳送訊息')); });
+  expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({
+    conversationId: photoConvo, senderId: 'alice', content: '繼續既有對話',
+  }));
+  expect(DmConversations.sendDmText).not.toHaveBeenCalled();
+  expect(DmConversations.watchNewDm).not.toHaveBeenCalled();
+  expect(setDoc).not.toHaveBeenCalled();
+});
+
+test.each([
+  { exists: false },
+  { memberIds: ['alice', 'charlie'] },
+  { memberIds: ['bob', 'charlie'] },
+  { schoolId: 'another' },
+  { type: 'group_chat' },
+  { fromCache: true },
+  { hasPendingWrites: true },
+])('a rejected prepare cannot open or create an unconfirmed member conversation (%j)', async (invalid) => {
+  jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  jest.mocked(getDoc).mockResolvedValueOnce({
+    exists: () => invalid.exists !== false,
+    metadata: { fromCache: false, hasPendingWrites: false, ...invalid },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'], ...invalid }),
+  } as any);
+  const view = render(firstChat());
+  await waitFor(() => expect(view.getByLabelText('重新確認對話')).toBeTruthy());
+  fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '不可新建');
+  fireEvent.press(view.getByLabelText('傳送訊息'));
+  expect(mockSnapshotHandlers.size).toBe(0);
+  expect(mockSend).not.toHaveBeenCalled();
+  expect(DmConversations.sendDmText).not.toHaveBeenCalled();
+  expect(setDoc).not.toHaveBeenCalled();
+});
+
+test.each(['account', 'school', 'peer'])('a late member lookup cannot reopen the previous %s scope', async (kind) => {
+  let finish!: (value: any) => void;
+  jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/permission-denied' });
+  jest.mocked(getDoc).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const view = render(firstChat());
+  await waitFor(() => expect(getDoc).toHaveBeenCalledTimes(1));
+  if (kind === 'account') mockViewer = 'carol';
+  if (kind === 'school') mockSchool = 'another';
+  const nextPeer = kind === 'peer' ? 'charlie' : 'bob';
+  const nextConversation = `dm_${mockSchool}_${[mockViewer, nextPeer].sort().join('_')}`;
+  jest.mocked(DmConversations.prepareDmConversation).mockResolvedValueOnce({
+    conversationId: nextConversation, peerUid: nextPeer, exists: false,
+  });
+  view.rerender(firstChat(nextPeer));
+  await waitFor(() => expect(view.getByLabelText('加入照片')).toBeTruthy());
+  await act(async () => finish({
+    exists: () => true,
+    metadata: { fromCache: false, hasPendingWrites: false },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }),
+  }));
+  expect(mockSnapshotHandlers.size).toBe(0);
+  expect(DmConversations.watchNewDm).toHaveBeenLastCalledWith({
+    viewerUid: mockViewer, schoolId: mockSchool, peerUid: nextPeer, conversationId: nextConversation,
+  }, expect.any(Function), expect.any(Function));
+});
+
 test('prepare rejection stays explicit and can be retried while preserving typed text', async () => {
+  jest.mocked(getDoc).mockResolvedValueOnce({ exists: () => false, metadata: { fromCache: false, hasPendingWrites: false } } as any);
   jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/permission-denied' });
   const view = render(firstChat());
   await waitFor(() => expect(view.getByLabelText('重新確認對話')).toBeTruthy());
@@ -955,7 +1033,7 @@ test('prepare rejection stays explicit and can be retried while preserving typed
   expect(view.getByLabelText('加入照片')).toBeTruthy();
   expect(view.getByDisplayValue('尚未送出的內容')).toBeTruthy();
   expect(DmConversations.prepareDmConversation).toHaveBeenCalledTimes(2);
-  expect(getDoc).not.toHaveBeenCalled();
+  expect(getDoc).toHaveBeenCalledTimes(1);
   expect(setDoc).not.toHaveBeenCalled();
 });
 
