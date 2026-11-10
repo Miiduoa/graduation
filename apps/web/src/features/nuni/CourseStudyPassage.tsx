@@ -35,6 +35,9 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [speaking, setSpeaking] = useState(false);
   // Keep the student's narration pace when the keyed reader switches teaching steps.
   const [readAloudRate, setReadAloudRate] = useState(0.95);
+  // Even after an AI explanation, let the learner hear the exact source again.
+  // The rate stays in this passage while the selected reader is remounted.
+  const [readAloudTarget, setReadAloudTarget] = useState<'source' | 'explanation'>('explanation');
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
@@ -157,9 +160,16 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
           className={styles.evidenceHighlight}>{evidence.quote}</mark>{evidence.after}</> : passage.text}
       </blockquote>
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
-      {!busy && <StudyReadAloud key={`${selected?.id ?? 'source'}:${activeStepIndex}`}
-        text={activeStep?.explanation ?? result?.explanation ?? passage.text}
-        label={activeStep ? '朗讀這一步' : result ? '朗讀這段講解' : '朗讀原文'}
+      {result && !busy && <label className={styles.field}>朗讀內容
+        <select value={readAloudTarget} onChange={(event) =>
+          setReadAloudTarget(event.target.value as 'source' | 'explanation')}>
+          <option value="explanation">目前講解</option>
+          <option value="source">教材原文</option>
+        </select>
+      </label>}
+      {!busy && <StudyReadAloud key={`${selected?.id ?? 'source'}:${activeStepIndex}:${readAloudTarget}`}
+        text={readAloudTarget === 'source' ? passage.text : activeStep?.explanation ?? result?.explanation ?? passage.text}
+        label={readAloudTarget === 'source' || !result ? '朗讀原文' : activeStep ? '朗讀這一步' : '朗讀這段講解'}
         onSpeakingChange={setSpeaking}
         rate={readAloudRate} onRateChange={setReadAloudRate} />}
       <section className={styles.personalNotes} aria-label="本段學習筆記">

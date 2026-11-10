@@ -116,6 +116,52 @@ it('shows the authorized material without downloading or generating until reques
   expect(screen.getByText(/不會自動評分/)).toBeTruthy();
 });
 
+it('switches local narration between the AI explanation and exact textbook without losing the note or speed', async () => {
+  const spoken = vi.fn();
+  const cancelled = vi.fn();
+  class LocalUtterance {
+    voice: unknown;
+    lang = '';
+    rate = 1;
+    onend: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(public text: string) {}
+  }
+  vi.stubGlobal('SpeechSynthesisUtterance', LocalUtterance);
+  vi.stubGlobal('speechSynthesis', {
+    getVoices: () => [{ lang: 'zh-TW', localService: true }],
+    speak: spoken,
+    cancel: cancelled,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
+  const view = render(<CourseStudyPanel scope={scope} courseTitle="資料庫" material={material} onClose={vi.fn()} />);
+  try {
+    const note = screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement;
+    fireEvent.change(note, { target: { value: '我要重新聽原文，核對 AI 說明。' } });
+    fireEvent.change(screen.getByRole('combobox', { name: '朗讀速度' }), { target: { value: '0.8' } });
+    fireEvent.click(screen.getByRole('button', { name: '啟用 AI 講解本段' }));
+    await screen.findByRole('region', { name: '本段 AI 講解' });
+    const target = screen.getByRole('combobox', { name: '朗讀內容' }) as HTMLSelectElement;
+    expect(target.value).toBe('explanation');
+    fireEvent.click(screen.getByRole('button', { name: '朗讀這段講解' }));
+    expect((spoken.mock.calls[0][0] as LocalUtterance).text).toBe(explanation.explanation);
+    expect((spoken.mock.calls[0][0] as LocalUtterance).rate).toBe(0.8);
+    fireEvent.change(target, { target: { value: 'source' } });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement).value).toBe('0.8');
+    fireEvent.click(screen.getByRole('button', { name: '朗讀原文' }));
+    expect((spoken.mock.calls[1][0] as LocalUtterance).text).toBe(material.body);
+    expect((spoken.mock.calls[1][0] as LocalUtterance).rate).toBe(0.8);
+    expect(note.value).toBe('我要重新聽原文，核對 AI 說明。');
+    expect(screen.getByRole('region', { name: '本段 AI 講解' })).toBeTruthy();
+    expect(mocks.run).toHaveBeenCalledTimes(1);
+  } finally {
+    view.unmount();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('navigates repeated exact model quotes without rerunning AI or altering the student note', async () => {
   const repeated = { ...material, body: '主鍵在第一段。外鍵可以參照主鍵。最後一段再提主鍵。' };
   mocks.run.mockResolvedValueOnce({ ...explanation, sourceQuote: '主鍵' });
