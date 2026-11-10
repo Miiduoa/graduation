@@ -15,7 +15,8 @@ type Props = {
   navigation?: Parameters<typeof safeNavigate>[0];
 };
 type Outcome =
-  | { status: 'review' | 'saving' | 'error' }
+  | { status: 'review' | 'saving' }
+  | { status: 'error'; reason?: 'teacher-change' }
   | { status: 'conflict'; overlaps: CatalogTimetableOverlap[]; recordsJson: string }
   | { status: 'saved'; added: number; duplicates: number; batchId?: string }
   | { status: 'undone'; removed: number };
@@ -79,8 +80,15 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         status: 'saved', added: result.added, duplicates: result.duplicates,
         batchId: result.added > 0 ? result.ledger.batches[result.ledger.batches.length - 1]?.id : undefined,
       });
-    } catch {
-      if (active(run)) setOutcome({ status: 'error' });
+    } catch (error) {
+      // A same-section instructor change must not silently create another
+      // personal course slot. Only surface this known safe, actionable error.
+      if (active(run)) setOutcome({
+        status: 'error',
+        reason: error instanceof Error && error.message ===
+          '相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。'
+          ? 'teacher-change' : undefined,
+      });
     } finally {
       if (active(run)) pending.current = false;
     }
@@ -144,11 +152,21 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
           星期{'一二三四五六日'[overlap.dayOfWeek - 1]} · {overlap.incomingTitle} 與 {overlap.existingTitle}（重疊 {overlap.startTime}–{overlap.endTime}）
         </Text>)}
       </>}
-      {outcome.status === 'error' ? <Text accessibilityRole="alert" style={body}>
-        未能確認加入結果（資料可能已變動）。請重新核對後重試；相同時段不會重複新增。若仍失敗，請從個人匯入頁核對現有資料。
-      </Text> : null}
+      {outcome.status === 'error' && <>
+        <Text accessibilityRole="alert" style={body}>
+          {outcome.reason === 'teacher-change'
+            ? '相同課號、班別與時段的教師與原有個人紀錄不同。為避免重複加入，本次沒有儲存；請先查看個人課表，核對並修正原紀錄。'
+            : '未能確認加入結果（資料可能已變動）。請重新核對後重試；相同時段不會重複新增。若仍失敗，請從個人匯入頁核對現有資料。'}
+        </Text>
+        {outcome.reason === 'teacher-change' && <Button text="查看原有個人課表" kind="ghost" onPress={() => {
+          if (active(generation.current)) safeNavigate(navigation, 'PersonalTimetable', {
+            term: preview.term, reminderScope: JSON.stringify(scope),
+          });
+        }} />}
+      </>}
       <Button text={outcome.status === 'saving' ? '正在加入…' :
-        outcome.status === 'conflict' ? '仍要加入（保留兩門課）' : '確認加入個人課表'} kind="primary"
+        outcome.status === 'conflict' ? '仍要加入（保留兩門課）' :
+        outcome.status === 'error' && outcome.reason === 'teacher-change' ? '重新核對' : '確認加入個人課表'} kind="primary"
         disabled={outcome.status === 'saving'} onPress={() => void confirm()} />
     </>}
     <Button text="收起核對" kind="ghost" disabled={outcome.status === 'saving' || undoing} onPress={onClose} />

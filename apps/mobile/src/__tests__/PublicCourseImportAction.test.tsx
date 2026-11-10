@@ -184,16 +184,31 @@ test('storage failure is not success, and retry works without losing the preview
   expect((await ledger.loadPersonalImports(scope)).records).toHaveLength(2);
 });
 
-test('a changed instructor cannot create a second catalog class slot', async () => {
+test('a changed instructor requires an explicit conflict review and offers recovery without writing', async () => {
   const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
   await ledger.appendPersonalImports(scope, preview.rows.map((row) => ({ ...row, teacher: '本人修正的教師' })));
   const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
   jest.clearAllMocks();
   const view = renderAction();
-  review(view); confirm(view);
-  await view.findByText(/未能確認加入結果/);
+  review(view);
+  confirm(view);
+  // First press only reads the scoped ledger. The UI must not report a write error yet.
+  await view.findByText('仍要加入（保留兩門課）');
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  fireEvent.press(view.getByText('仍要加入（保留兩門課）'));
+  await view.findByText(/相同課號、班別與時段的教師與原有個人紀錄不同/);
+  expect(view.getByText('重新核對')).toBeTruthy();
+  expect(view.getByText('查看原有個人課表')).toBeTruthy();
   expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
+  fireEvent.press(view.getByText('查看原有個人課表'));
+  expect(safeNavigate).toHaveBeenCalledWith(navigation, 'PersonalTimetable', {
+    term: '115|1', reminderScope: JSON.stringify(scope),
+  });
+  // Retrying starts a new ledger check; it cannot reuse a stale acknowledgement.
+  fireEvent.press(view.getByText('重新核對'));
+  await view.findByText('仍要加入（保留兩門課）');
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
 });
 
 test.each(['account', 'school', 'unresolved', 'away-and-back'])('a delayed read cannot save after scope changes: %s', async (change) => {
