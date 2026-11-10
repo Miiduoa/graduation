@@ -456,13 +456,12 @@ export async function authorizePrivateFile(
           // attachment on an actual submitted receipt; owner previews remain possible.
           // Assigned peer reviewers remain excluded from file access.
           if (scope.userId !== uid && (
-            !manager || (
-              Array.isArray(previous.attachments) && (
-                !submission.exists || owner !== scope.userId ||
-                previous.submittedAt == null ||
-                !referencesPrivateFile(previous.attachments, scope.path)
-              )
-            )
+            !manager ||
+            // Legacy receipts may omit attachments, but a missing/unsubmitted
+            // receipt is never proof that a teacher may read an uploaded draft.
+            !submission.exists || owner !== scope.userId ||
+            previous.submittedAt == null ||
+            (Array.isArray(previous.attachments) && !referencesPrivateFile(previous.attachments, scope.path))
           )) deny();
         }
       }
@@ -512,11 +511,11 @@ export async function authorizePrivateFile(
           : 'uid' in previous ? previous.uid
             : 'studentId' in previous ? previous.studentId : scope.userId;
         if (
-          Array.isArray(previous.attachments) && (
-            !submission.exists || owner !== scope.userId ||
-            previous.submittedAt == null ||
-            !referencesPrivateFile(previous.attachments, scope.path)
-          )
+          !submission.exists || owner !== scope.userId ||
+          previous.submittedAt == null ||
+          // Preserve access to genuinely submitted historical receipts with
+          // no file list. A present list remains an exact allow-list.
+          (Array.isArray(previous.attachments) && !referencesPrivateFile(previous.attachments, scope.path))
         ) deny();
       }
       if (

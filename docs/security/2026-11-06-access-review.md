@@ -500,3 +500,12 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 
 
 本輪提交後的新精確 head 須重新以 CI／Rules／Functions／Web／CodeQL 驗證，尤其 Web 非附件路徑三項測試仍可能因 main 的近期功能變更而失敗，**不可聲稱本次已全綠**。保留相對主線分歧、指定 nuni-merge-gate App 5504170 審查、GCS／Supabase 已發 URL 撤銷、真隔離 Storage、歷史資料盤點、minimatch 雙鎖檔及正式發布／回復等限制。未觸及 E 校園、正式 bucket／token／金鑰或受限 npm／pnpm audit。
+
+
+## 2026-11-11：已合併 #569 後的 legacy 作業草稿讀取收據補強（隔離驗證待 CI）
+
+以最新確認 main `58dc17ccfba698cad54d704a6bf7036476f8e5d3` 建立獨立修補分支；#517、#559、#569 已合併，不向已合併 PR 推送。本次閱讀 #569 合併版共享授權及 Web 合成測試，發現為相容缺少 `attachments` 清單的歷史收據，群組與舊式路徑的 manager GET 仍允許**完全不存在提交收據**或 `submittedAt` 為 null 的附件。知道物件路徑的管理者因此可能在學生真正繳交前讀取已上傳草稿；保留學生本人草稿預覽、跨校／退組拒絕、明確附件清單逐項比對。
+
+最小變更：兩種 assignment 路徑均要求第三方 manager 有既存 `submissions/{student}`、收據 owner 與路徑一致及 `submittedAt != null`；對真正已提交且沒有 `attachments` 欄位的 legacy 收據保留原閱讀相容性。有清單時仍須精確匹配路徑，未修改學生日常上傳資格。合成回歸改為驗證「無收據／空提交時間拒絕、真實 legacy 已提交收據通過」，並保留錯 owner、未引用 sibling、跨帳號／跨校及撤權案例。
+
+**驗證界線：** 原始碼及 Web 測試已修改；本輪此處不代表完整 CI 已成功。需以新 PR 精確 head 核對 Web、Functions、Firestore Rules、CodeQL、Supabase permissions、Python、Mobile Agent、適用 Maestro、review threads 及指定 nuni-merge-gate App 5504170「審查通過」。此補強不撤銷已簽發 GCS/Supabase 網址，也不證明所有歷史附件皆有可信提交收據；缺收據的管理者下載將 fail-closed，正式發布前應以隔離資料盤點並提供安全修復流程。真 GCS staging、minimatch 雙鎖檔、歷史 URL 清理、正式資料／金鑰／migration／部署需另行走既有審查與回復程序。E 校園連線繼續停用；未重跑未獲授權的 npm/pnpm audit。

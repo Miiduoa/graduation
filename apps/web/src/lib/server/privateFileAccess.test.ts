@@ -98,10 +98,15 @@ it('allows managers and owners to read, but refuses another student', async () =
   store.docs.delete('groups/course/members/bob');
   await expect(authorize(store, GROUP_ANSWER, 'bob')).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set('groups/course/members/bob', { status: 'active', role: 'member' });
-  // Legacy receipts without an attachments list keep previous manager access.
-  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  // Merely uploading a private draft is not evidence of a submission.
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, GROUP_ANSWER, 'alice', false)).resolves.toBeUndefined();
   const receipt = 'groups/course/assignments/work/submissions/alice';
+  // Historical submitted receipts without an attachments array remain accessible.
+  store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  store.docs.set(receipt, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set(receipt, { userId: 'alice', attachments: [{ url: GROUP_ANSWER }], submittedAt: Date.now() });
   await expect(authorize(store, GROUP_ANSWER, 'teacher', false)).resolves.toBeUndefined();
   await expect(authorize(store, GROUP_ANSWER.replace('answer.pdf', 'draft.pdf'), 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
@@ -113,11 +118,13 @@ it('allows managers and owners to read, but refuses another student', async () =
 it('legacy assignment URLs also require a submitted receipt with an exact file reference', async () => {
   const store = fileStore([['assignments/work', { groupId: 'course' }]]);
   const receiptPath = 'groups/course/assignments/work/submissions/alice';
-  // Owners can preview drafts; other students cannot. Managers keep previous
-  // access when the receipt has no attachments list.
+  // The owner may preview a draft; a teacher needs a real submission receipt
+  // even when the legacy attachments list was never stored.
   await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();
-  await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   await expect(authorize(store, ANSWER, 'bob', false)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set(receiptPath, { userId: 'alice', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'teacher', false)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now() });
   await expect(authorize(store, ANSWER, 'teacher', false)).resolves.toBeUndefined();
   store.docs.set(receiptPath, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
