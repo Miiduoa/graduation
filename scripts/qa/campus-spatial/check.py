@@ -816,8 +816,8 @@ async def run_case(browser, base, name, viewport, test, resources):
     context = await browser.new_context(
         viewport=viewport, device_scale_factor=1, color_scheme="light",
         reduced_motion="no-preference", service_workers="block",
-        has_touch=name in {"camera-touch", "building-tracing-mobile", "building-room-search-mobile"},
-        is_mobile=name in {"camera-touch", "building-tracing-mobile", "building-room-search-mobile"},
+        has_touch=name in {"camera-touch", "building-tracing-mobile", "building-room-search-mobile", "building-floor-assembly-mobile"},
+        is_mobile=name in {"camera-touch", "building-tracing-mobile", "building-room-search-mobile", "building-floor-assembly-mobile"},
     )
     await context.add_init_script(PROBE)
     requests, blocked, errors, console = [], [], [], []

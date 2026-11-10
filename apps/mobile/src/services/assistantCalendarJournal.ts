@@ -30,12 +30,18 @@ export class AssistantCalendarJournalError extends Error {
   }
 }
 
+export type AssistantCalendarJournalOrigin = Readonly<{
+  kind: 'batch-step';
+  batchId: string;
+  stepId: string;
+}>;
 export type AssistantCalendarJournalProposal = {
   owner: string;
   schoolId: string;
   mutationId: string;
   createdAt: string;
   event: AssistantCalendarEvent;
+  origin?: AssistantCalendarJournalOrigin;
 };
 export type AssistantCalendarJournalObservation =
   | { state: 'verified'; checkedAt: string; receipt: AssistantCalendarReceipt }
@@ -92,14 +98,27 @@ function instant(raw: unknown): string {
       !Number.isFinite(Date.parse(raw)) || new Date(raw).toISOString() !== raw) return invalid();
   return raw;
 }
+export function parseAssistantCalendarOrigin(raw: unknown): AssistantCalendarJournalOrigin {
+  const value = object(raw, ['kind', 'batchId', 'stepId']);
+  if (value.kind !== 'batch-step' || typeof value.batchId !== 'string' || typeof value.stepId !== 'string' ||
+      !/^[A-Za-z0-9_-]{8,100}$/.test(value.batchId) || !/^[A-Za-z0-9_-]{8,100}$/.test(value.stepId)) return invalid();
+  return Object.freeze({ kind: 'batch-step', batchId: value.batchId, stepId: value.stepId });
+}
+export function sameAssistantCalendarOrigin(first?: AssistantCalendarJournalOrigin,
+  second?: AssistantCalendarJournalOrigin): boolean {
+  return first === undefined || second === undefined ? first === second
+    : first.kind === second.kind && first.batchId === second.batchId && first.stepId === second.stepId;
+}
+const PROPOSAL_FIELDS = ['owner', 'schoolId', 'mutationId', 'createdAt', 'event', 'origin'] as const;
 function proposalValue(raw: unknown, scope: PersonalImportScope): AssistantCalendarJournalProposal {
-  const value = object(raw, ['owner', 'schoolId', 'mutationId', 'createdAt', 'event']);
+  const value = object(raw, PROPOSAL_FIELDS);
   if (value.owner !== scope.owner || value.schoolId !== scope.schoolId ||
       typeof value.mutationId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(value.mutationId)) return invalid();
   try {
     return Object.freeze({
       owner: scope.owner, schoolId: scope.schoolId, mutationId: value.mutationId,
       createdAt: instant(value.createdAt), event: Object.freeze(parseAssistantCalendarEvent(value.event)),
+      ...(value.origin !== undefined ? { origin: parseAssistantCalendarOrigin(value.origin) } : {}),
     });
   } catch { return invalid(); }
 }
@@ -166,8 +185,10 @@ function journalValue(raw: string | null, scope: PersonalImportScope): Journal {
       !Array.isArray(value.entries)) return invalid();
   if (value.entries.length > ASSISTANT_CALENDAR_JOURNAL_MAX_ENTRIES) throw new AssistantCalendarJournalError('journal-full');
   const entries = value.entries.map((entry) => entryValue(entry, scope));
+  const origins = entries.flatMap((entry) => entry.proposal.origin ? [JSON.stringify(entry.proposal.origin)] : []);
   if (new Set(entries.map((entry) => entry.proposal.mutationId)).size !== entries.length ||
-      new Set(entries.map((entry) => eventKey(entry.proposal.event))).size !== entries.length) return invalid();
+      new Set(entries.map((entry) => eventKey(entry.proposal.event))).size !== entries.length ||
+      new Set(origins).size !== origins.length) return invalid();
   return { version: 1, ...scope, entries };
 }
 
@@ -245,14 +266,15 @@ export function readAssistantCalendarJournal(scope: PersonalImportScope, active:
  */
 export function reserveAssistantCalendarAttempt(rawProposal: AssistantCalendarJournalProposal,
   active: () => boolean): Promise<AssistantCalendarJournalReservation> {
-  const raw = object(rawProposal, ['owner', 'schoolId', 'mutationId', 'createdAt', 'event']);
+  const raw = object(rawProposal, PROPOSAL_FIELDS);
   const scope = scopeValue({ owner: raw.owner, schoolId: raw.schoolId });
   const proposal = proposalValue(rawProposal, scope);
   return bounded(scope, active, (current) => locked(scope, async () => {
     const journal = await read(scope, current);
     const sameId = journal.entries.find((entry) => entry.proposal.mutationId === proposal.mutationId);
     if (sameId && proposalKey(sameId.proposal) !== proposalKey(proposal)) return invalid();
-    const existing = sameId || journal.entries.find((entry) => eventKey(entry.proposal.event) === eventKey(proposal.event));
+    const sameOrigin = proposal.origin && journal.entries.find((entry) => sameAssistantCalendarOrigin(entry.proposal.origin, proposal.origin));
+    const existing = sameId || sameOrigin || journal.entries.find((entry) => eventKey(entry.proposal.event) === eventKey(proposal.event));
     if (existing) return { kind: 'existing' as const, entry: existing };
     if (journal.entries.length >= ASSISTANT_CALENDAR_JOURNAL_MAX_ENTRIES) throw new AssistantCalendarJournalError('journal-full');
     const entry = { proposal, attemptedAt: new Date().toISOString() };
@@ -269,7 +291,7 @@ export function consumeAssistantCalendarJournalPermit(permit: AssistantCalendarJ
   rawProposal: AssistantCalendarJournalProposal, active: () => boolean): boolean {
   const expected = permits.get(permit);
   permits.delete(permit);
-  const raw = object(rawProposal, ['owner', 'schoolId', 'mutationId', 'createdAt', 'event']);
+  const raw = object(rawProposal, PROPOSAL_FIELDS);
   const scope = scopeValue({ owner: raw.owner, schoolId: raw.schoolId });
   requireActive(scope, active);
   return expected !== undefined && expected === proposalKey(proposalValue(rawProposal, scope));
@@ -309,7 +331,7 @@ export function saveAssistantCalendarJournalObservation(
   observation: AssistantCalendarJournalObservation,
   active: () => boolean,
 ): Promise<void> {
-  const raw = object(proposal, ['owner', 'schoolId', 'mutationId', 'createdAt', 'event']);
+  const raw = object(proposal, PROPOSAL_FIELDS);
   return saveAssistantCalendarJournalObservations(scopeValue({ owner: raw.owner, schoolId: raw.schoolId }),
     [{ proposal, observation }], active);
 }

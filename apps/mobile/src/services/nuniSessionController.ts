@@ -377,6 +377,7 @@ export class NuniSessionController {
         expiresAt: this.now() + result.expiresInSeconds * 1000,
         pendingLogout: false,
       };
+      // Platform Google stores sessionHandle only. No Firebase customToken or uid.
       if (!this.current(run)) throw new NuniError(409, 'SESSION_CHANGED');
       const principal = parseNuniPrincipal(
         await this.call('sessions/current', issued.sessionHandle),

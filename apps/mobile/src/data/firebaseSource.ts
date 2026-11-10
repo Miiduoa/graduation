@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import type { DataSource } from './source';
 import { lostFoundSource } from './lostFoundSource';
@@ -2052,7 +2053,9 @@ export const firebaseSource: DataSource = {
     const assignmentId = data.assignmentId;
     const groupId = typeof data.groupId === 'string' ? data.groupId.trim() : '';
     const content = data.content?.trim() ?? '';
-    if (!userId || !content || content.length > 20000) {
+    for (const attachment of data.attachments ?? [])
+      assertPrivateFileNamespace(attachment.url, `groups/${groupId}/assignments/${assignmentId}/submissions/${userId}`);
+    if (!userId || (!content && !data.attachments?.length) || content.length > 20000) {
       throw new Error('請輸入 1 至 20,000 字的作業內容。');
     }
     if (!groupId || !assignmentId) {
@@ -2117,6 +2120,7 @@ export const firebaseSource: DataSource = {
           groupId,
           assignmentId,
           content,
+          ...(data.attachments?.length ? { attachments: data.attachments } : {}),
           status: 'submitted',
           submittedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),

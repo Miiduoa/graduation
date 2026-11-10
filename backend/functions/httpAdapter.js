@@ -403,6 +403,12 @@ function createRequestListener({
         return;
       }
       try {
+        if (functionName === 'privateGroupFile') {
+          // This endpoint authenticates before consuming its size- and time-bounded binary stream.
+          decorateNodeRequest(req, { rawBody: req.rawBody, body: req.body, url });
+          await httpFunctions[functionName](req, res);
+          return;
+        }
         const rawBody = await readRawBody(req);
         let body = {};
         if (rawBody.length) {

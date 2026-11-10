@@ -60,7 +60,7 @@ it('writes the image at the school story Storage path and publishes the matching
 it.each([
   new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
   new File([], 'empty.png', { type: 'image/png' }),
-  new File([new ArrayBuffer(10 * 1024 * 1024)], 'large.jpg', { type: 'image/jpeg' }),
+  new File([new ArrayBuffer(10 * 1024 * 1024 + 1)], 'large.jpg', { type: 'image/jpeg' }),
 ])('rejects an invalid image before Storage receives it', async (file) => {
   await expect(
     uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
@@ -114,4 +114,10 @@ it('passes through unrelated write failures without a read', async () => {
   mock.write.mockRejectedValueOnce(offline);
   await expect(publishStory(retry)).rejects.toBe(offline);
   expect(mock.readServer).not.toHaveBeenCalled();
+});
+
+it('uploads an image exactly at the shared size limit', async () => {
+  const file = new File([new ArrayBuffer(10 * 1024 * 1024)], 'photo.jpg', { type: 'image/jpeg' });
+  await expect(uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file })).resolves.toMatchObject({ url: 'https://example.test/photo' });
+  expect(mock.upload).toHaveBeenCalledOnce();
 });
