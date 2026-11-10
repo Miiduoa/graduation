@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BufferGeometry, Camera, ExtrudeGeometry, InstancedMesh, Material, Matrix4, Mesh, PlaneGeometry, Scene, Vector3 } from 'three';
 import { buildCampusSpatialModel } from './campusSpatialModel';
 import { PROVIDENCE_CAMPUS_PLACES } from './providenceCampus';
-import { parseProvidenceOsmFootprints, type ProvidenceFootprint } from './providenceFootprints';
+import { parseProvidenceOsmFootprints, parseProvidenceFootprintResponse, type ProvidenceFootprint } from './providenceFootprints';
 import { createCampusSpatialScene, type CampusSpatialScene, type CampusSpatialView } from './campusSpatialScene';
 import {
   DEFAULT_SPATIAL_BEARING,
@@ -929,4 +929,55 @@ it('fits a long accepted OSM footprint in the campus overview and ground plane',
     .toBeGreaterThan(groundWidth(without.renderer) + 250);
   expect(lastCamera(withLongOutline.renderer).position.length())
     .toBeGreaterThan(lastCamera(without.renderer).position.length() * 1.5);
+});
+
+it('keeps a nearby but off-outline POI on the ground instead of inventing a rooftop marker', () => {
+  // A cross-checked POI may be up to 30m from the verified OSM ring.
+  // The following geometry is deliberately synthetic, not a surveyed building.
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const campus = buildCampusSpatialModel([library]);
+  const [inside] = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes', height: '18 m' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(inside).toBeDefined();
+  const exterior: ProvidenceFootprint = {
+    ...inside,
+    // Moving the outline 22m north leaves the POI about 18m outside.
+    // It remains a permitted proximity match, not a proven roof/entrance.
+    outline: inside.outline.map(([lon, lat]) => [lon, lat + 0.0002]),
+  };
+  expect(parseProvidenceFootprintResponse({
+    schoolId: 'pu', buildings: [exterior],
+  })).toHaveLength(1);
+
+  const markerHeight = (footprint: ProvidenceFootprint) => {
+    const { renderer } = setup(campus, undefined, [footprint]);
+    drawFrame();
+    const graph = renderer.render.mock.calls.at(-1)![0] as Scene;
+    const caps = graph.children.find((item): item is InstancedMesh =>
+      item instanceof InstancedMesh && item.geometry.type === 'SphereGeometry')!;
+    const matrix = new Matrix4();
+    caps.getMatrixAt(0, matrix);
+    let buildingVolumes = 0;
+    graph.traverse((item) => {
+      if (item instanceof Mesh && item.geometry instanceof ExtrudeGeometry) buildingVolumes += 1;
+    });
+    return { y: new Vector3().setFromMatrixPosition(matrix).y, buildingVolumes };
+  };
+
+  const onRoof = markerHeight(inside);
+  const onGround = markerHeight(exterior);
+  expect(onRoof.y).toBeGreaterThan(inside.heightMeters);
+  expect(onGround.y).toBeLessThan(inside.heightMeters);
+  // The accepted sourced outline is still rendered; only the misleading
+  // floating POI is corrected, without moving the POI to a guessed entrance.
+  expect(onRoof.buildingVolumes).toBe(1);
+  expect(onGround.buildingVolumes).toBe(1);
 });
