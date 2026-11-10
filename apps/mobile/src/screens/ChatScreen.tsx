@@ -116,6 +116,7 @@ type PeerPreparation = {
   scope: string;
   status: 'loading' | 'ready' | 'error';
   exists?: boolean;
+  serverConfirmed?: boolean;
   error?: string;
 };
 
@@ -281,26 +282,27 @@ export function ChatScreen(props: any) {
     void prepareDmConversation({ viewerUid: myUid, schoolId: school.id, peerUid: peerParam }, controller.signal)
       .then((result) => {
         if (controller.signal.aborted || scopeRef.current !== sendScope) return;
-        setPreparation({ scope: sendScope, status: 'ready', exists: result.exists });
+        setPreparation({ scope: sendScope, status: 'ready', exists: result.exists, serverConfirmed: true });
         setVerifiedPhotoThread(sendScope);
       })
       .catch(async (error) => {
         if (controller.signal.aborted || scopeRef.current !== sendScope) return;
         // 準備新對話的校籍檢查失敗，不代表既有成員失去舊對話存取權。
-        // 僅接受伺服器確認的本校雙人成員文件，沿用既有對話的規則。
+        // 合格的本校雙人成員快取可開啟文字監聽；照片仍須伺服器確認。
         try {
           const snap = await getDoc(doc(db, 'conversations', convoKey));
           if (controller.signal.aborted || scopeRef.current !== sendScope) return;
           const data = snap.exists() ? snap.data() as ConvoMeta : null;
           if (
-            snap.metadata.fromCache === false && !snap.metadata.hasPendingWrites &&
+            !snap.metadata.hasPendingWrites &&
             data?.type === 'dm' && data.schoolId === school.id &&
             Array.isArray(data.memberIds) && data.memberIds.length === 2 &&
             new Set(data.memberIds).size === 2 &&
             data.memberIds.includes(myUid) && data.memberIds.includes(peerParam)
           ) {
-            setPreparation({ scope: sendScope, status: 'ready', exists: true });
-            setVerifiedPhotoThread(sendScope);
+            const serverConfirmed = snap.metadata.fromCache === false;
+            setPreparation({ scope: sendScope, status: 'ready', exists: true, serverConfirmed });
+            if (serverConfirmed) setVerifiedPhotoThread(sendScope);
             return;
           }
         } catch {
@@ -706,7 +708,7 @@ export function ChatScreen(props: any) {
     let listening = true;
     let serverRejected = false;
     let readableTextMembers: string | null = null;
-    let verifiedPhotoMembers: string | null = peerRoute && peerPrepared
+    let verifiedPhotoMembers: string | null = peerRoute && peerPrepared && preparation?.serverConfirmed
       ? JSON.stringify([myUid, peerParam].sort()) : null;
     const convoRef = doc(db, 'conversations', convoKey);
     const unsub = onSnapshot(
@@ -810,7 +812,7 @@ export function ChatScreen(props: any) {
       listening = false;
       unsub();
     };
-  }, [db, convoKey, peerId, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared]);
+  }, [db, convoKey, peerId, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared, preparation?.serverConfirmed]);
 
   // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {

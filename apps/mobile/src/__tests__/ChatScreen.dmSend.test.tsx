@@ -968,15 +968,48 @@ test('a peer who transferred schools can still read and message an existing memb
   expect(setDoc).not.toHaveBeenCalled();
 });
 
-test.each([
+test('peer entry reads cached history after prepare fails without authorizing photos or receipts', async () => {
+  jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/unavailable' });
+  jest.mocked(getDoc).mockResolvedValueOnce({
+    exists: () => true,
+    metadata: { fromCache: true, hasPendingWrites: false },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }),
+  } as any);
+  const view = render(firstChat());
+  await waitFor(() => expect(mockSnapshotHandlers.has(`conversations/${photoConvo}`)).toBe(true));
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  verifyPhotoChat(true);
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(true);
+  jest.mocked(updateDoc).mockClear();
+  await act(async () => emitMessages([
+    { id: 'history', data: { senderId: 'bob', type: 'text', content: 'peer 離線歷史文字', readBy: [] } },
+    { id: 'mine', data: { senderId: 'alice', type: 'text', content: 'peer 我的歷史文字', readBy: ['bob'] } },
+  ], true));
+  expect(view.getByText('peer 離線歷史文字')).toBeTruthy();
+  expect(view.getByText('peer 我的歷史文字')).toBeTruthy();
+  expect(view.queryByText('已送達')).toBeNull();
+  expect(view.queryByText('已讀')).toBeNull();
+  expect(updateDoc).not.toHaveBeenCalled();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  // 即使收到同成員名單的待寫入文件，也不能繼承不存在的伺服器授權。
+  verifyPhotoChat(false, true);
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  expect(DmConversations.watchNewDm).not.toHaveBeenCalled();
+  expect(DmConversations.sendDmText).not.toHaveBeenCalled();
+  expect(setDoc).not.toHaveBeenCalled();
+  verifyPhotoChat();
+  expect(view.getByLabelText('加入照片')).toBeTruthy();
+});
+
+test.each([false, true].flatMap(fromCache => [
   { exists: false },
   { memberIds: ['alice', 'charlie'] },
   { memberIds: ['bob', 'charlie'] },
   { schoolId: 'another' },
   { type: 'group_chat' },
-  { fromCache: true },
   { hasPendingWrites: true },
-])('a rejected prepare cannot open or create an unconfirmed member conversation (%j)', async (invalid) => {
+].map(invalid => ({ ...invalid, fromCache }))))('a rejected prepare cannot open or create an unconfirmed member conversation (%j)', async (invalid) => {
   jest.mocked(DmConversations.prepareDmConversation).mockRejectedValueOnce({ code: 'functions/permission-denied' });
   jest.mocked(getDoc).mockResolvedValueOnce({
     exists: () => invalid.exists !== false,
