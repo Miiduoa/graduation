@@ -163,7 +163,11 @@ async function readOsm(): Promise<Snapshot> {
   if (validUntil <= now) throw new Error('Overpass replication expired while reading');
   return {
     buildings, fetchedAt: new Date(now).toISOString(), osmBaseAt,
-    validUntil, discardAfter: now + MAX_SNAPSHOT_AGE_MS,
+    validUntil,
+    // The fallback cannot be younger than the underlying OSM database state.
+    // A 47-hour replication lag must not silently extend seven-day retention.
+    discardAfter: Math.min(now + MAX_SNAPSHOT_AGE_MS,
+      osmBaseAt === null ? Number.POSITIVE_INFINITY : Date.parse(osmBaseAt) + MAX_SNAPSHOT_AGE_MS),
   };
 }
 
