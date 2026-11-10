@@ -256,9 +256,19 @@ const DAY = 86_400_000;
 
 // Both collection time and save provenance must identify the same instant on
 // iOS and Android, regardless of the device's configured timezone.
-const zonedIsoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const zonedIsoInstant = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function parseZonedInstant(value: unknown): number {
-  return typeof value === 'string' && zonedIsoInstant.test(value) ? Date.parse(value) : NaN;
+  if (typeof value !== 'string') return NaN;
+  const parts = zonedIsoInstant.exec(value);
+  if (!parts) return NaN;
+  const [, year, month, day, hour, minute, second] = parts;
+  if (+hour > 23 || +minute > 59 || +second > 59) return NaN;
+  // JavaScript Date.parse silently rolls February 30 / November 31 / 24:00
+  // into another day. A damaged snapshot must not move a student's query day.
+  const calendarDate = `${year}-${month}-${day}`;
+  const midnight = new Date(`${calendarDate}T00:00:00Z`);
+  if (!Number.isFinite(midnight.getTime()) || midnight.toISOString().slice(0, 10) !== calendarDate) return NaN;
+  return Date.parse(value);
 }
 
 export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnDeviceSchoolContext) {
