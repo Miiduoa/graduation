@@ -136,7 +136,7 @@ it('does not guess unknown building codes and preserves the classroom through an
   expect(within(result).getByText(/目前地點資料無法確認/)).toBeTruthy();
   expect(within(result).getByRole('link', { name: '核對校方地圖' }).getAttribute('href')).toMatch(/^https:\/\//);
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-library');
-  const login = new URL(screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!, window.location.origin);
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
   const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
   expect(back.searchParams.get('query')).toBe('ZZ303');
   expect(back.searchParams.get('focus')).toBe('pu-library');
@@ -191,7 +191,7 @@ it('never replaces a missing explicit focus with the classroom guess, including 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
   expect(screen.getByText('找不到連結指定的地點，請搜尋地點名稱。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
-  const login = new URL(screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!, window.location.origin);
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
   const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
   expect(back.searchParams.get('focus')).toBe('pu-library');
   expect(back.searchParams.get('query')).toBe('主顧303');
@@ -303,7 +303,7 @@ it('provides keyboard-operable search, categories, selection and reset', async (
   ).toEqual(['library']);
   fireEvent.click(screen.getByRole('button', { name: '查看蓋夏圖書館' }));
   expect(screen.getByRole('link', { name: '從目前位置導航' })).toBeTruthy();
-  expect(screen.getByRole('link', { name: '連線學校帳號以收藏' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: '用 Google 帳號收藏' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '收藏蓋夏圖書館' })).toBeNull();
   fireEvent.change(input, { target: { value: '不存在' } });
   fireEvent.click(screen.getByRole('button', { name: '清除搜尋條件' }));
@@ -323,14 +323,14 @@ it('keeps a place card mounted for the same selection and replaces it for a diff
   expect(screen.getByRole('heading', { name: '正門' })).toBeTruthy();
 });
 
-it('uses an explicit school flow for legacy favorites while keeping public navigation available', async () => {
+it('offers Google favorites and keeps an explicit school flow for existing cloud favorites', async () => {
   state.user = null;
   window.history.replaceState({}, '', '/map?schoolId=pu&route=gate%2Clibrary#directions');
   render(<MapClient school="pu" route="gate,library" focus="gate" />);
   await sourceSettled();
   fireEvent.click(await screen.findByRole('button', { name: '查看蓋夏圖書館' }));
   const login = new URL(
-    screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!,
+    screen.getByRole('link', { name: '查看學校帳號的既有收藏' }).getAttribute('href')!,
     window.location.origin,
   );
   expect(login.pathname).toBe('/login');
@@ -338,7 +338,10 @@ it('uses an explicit school flow for legacy favorites while keeping public navig
   expect(login.searchParams.get('returnUrl')).toBe(
     '/map?schoolId=pu&route=gate%2Clibrary&focus=library#directions',
   );
-  expect(screen.getByText('地圖與導航不需登入；收藏尚未支援 Google 帳號。')).toBeTruthy();
+  const google = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
+  expect(google.searchParams.has('reconnect')).toBe(false);
+  expect(google.searchParams.get('returnUrl')).toBe(login.searchParams.get('returnUrl'));
+  expect(screen.getByText(/登入 Google 後可在此裝置收藏地點/)).toBeTruthy();
   expect(screen.getByRole('link', { name: '從目前位置導航' })).toBeTruthy();
   expect(loadMapFavorites).not.toHaveBeenCalled();
   expect(setMapFavorite).not.toHaveBeenCalled();

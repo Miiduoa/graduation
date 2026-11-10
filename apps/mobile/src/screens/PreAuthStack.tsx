@@ -18,6 +18,7 @@ import PersonalCalendarScreen from './PersonalCalendarScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { HealthScreen } from './HealthScreen';
 import { DormitoryScreen } from './DormitoryScreen';
+import { PlatformLostFoundScreen } from './PlatformLostFoundScreen';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
@@ -124,6 +125,7 @@ export function PreAuthStack() {
         component={PublicCareerScreen}
         options={{ headerShown: false, title: '職涯' }}
       />
+      <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '失物招領' }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="NuniTimetableAssistant"

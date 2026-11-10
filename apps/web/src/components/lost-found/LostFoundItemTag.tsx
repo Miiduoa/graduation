@@ -17,7 +17,10 @@ export function LostFoundItemTag({
   href,
   children,
 }: {
-  item: LostFoundItem;
+  item: Pick<
+    LostFoundItem,
+    'type' | 'category' | 'status' | 'title' | 'location' | 'date' | 'photos'
+  > & { canonical?: boolean };
   href?: string;
   children: ReactNode;
 }) {
@@ -34,7 +37,7 @@ export function LostFoundItemTag({
         <div className={styles.meta}>
           <span className={styles.type}>{typeLabel(item.type)}</span>
           <span>{categoryLabel(item.category)}</span>
-          {!item.canonical ? <span className={styles.legacy}>舊版紀錄</span> : null}
+          {item.canonical === false ? <span className={styles.legacy}>舊版紀錄</span> : null}
         </div>
         <span className={styles.stamp} data-status={item.status}>
           {statusLabel(item.status)}
@@ -50,7 +53,9 @@ export function LostFoundItemTag({
               </span>
             ) : null}
           </Link>
-        ) : item.title}
+        ) : (
+          item.title
+        )}
       </h2>
       <dl className={styles.facts}>
         <div>

@@ -194,9 +194,10 @@ it('sends visitors to sign-in with the original story URL', () => {
   mock.uid = null;
   mock.query = new URLSearchParams('schoolId=ncku');
   render(<StoryComposePage />);
-  expect(screen.getByRole('link', { name: '登入帳號' }).getAttribute('href')).toBe(
-    '/login?returnUrl=%2Fcommunity%2Fstory%2Fnew%3FschoolId%3Dncku',
+  expect(screen.getByRole('link', { name: '連線學校帳號' }).getAttribute('href')).toBe(
+    '/login?reconnect=school&returnUrl=%2Fcommunity%2Fstory%2Fnew%3FschoolId%3Dncku',
   );
+  expect(screen.getByRole('link', { name: '前往公開交流' }).getAttribute('href')).toBe('/social?schoolId=ncku');
   expect(screen.queryByRole('form')).toBeNull();
 });
 
