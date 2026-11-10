@@ -3,14 +3,19 @@ import type { AssistantCalendarEvent } from '@campus/shared/src/assistantExecuti
 import {
   cancelRemainingAssistantCalendarBatch, confirmAssistantCalendarBatch, prepareAssistantCalendarBatch,
   recheckAssistantCalendarBatch, restoreAssistantCalendarBatches, restoreAssistantCalendarWorkspace,
-  updateAssistantCalendarBatchTask, type AssistantCalendarBatchView,
+  updateAssistantCalendarBatchTask, type AssistantCalendarBatchView, type AssistantCalendarBatchSourceChecks,
 } from '../services/assistantCalendarBatchExecution';
-import { assistantCalendarBatchStorageKey, readAssistantCalendarBatchPlans } from '../services/assistantCalendarBatchStore';
 import {
-  confirmAssistantCalendarTask, createAssistantCalendarTask, type AssistantCalendarContext, type AssistantCalendarTask,
+  assistantCalendarBatchStorageKey, readAssistantCalendarBatchPlans,
+  type AssistantCalendarBatchPlan, type AssistantCalendarBatchStepSource,
+} from '../services/assistantCalendarBatchStore';
+import {
+  confirmAssistantCalendarTask, createAssistantCalendarTask, recheckAssistantCalendarTask,
+  type AssistantCalendarContext, type AssistantCalendarTask,
 } from '../services/assistantCalendarExecution';
 import { assistantCalendarJournalStorageKey, readAssistantCalendarJournal } from '../services/assistantCalendarJournal';
 import { deletePersonalImport, loadPersonalImports, personalImportStorageKey } from '../services/personalImports';
+import { calendarTaskFromBatch, mergeCalendarBatchEvidence } from '../state/useAssistantCalendarRecovery';
 
 let mockUid = 'A';
 jest.mock('../firebase', () => ({
@@ -345,4 +350,272 @@ test('the entire run stops at eighty seconds even when each individual read resp
   expect(ledgerWrites()).toHaveLength(0);
   await jest.advanceTimersByTimeAsync(20_000);
   expect(ledgerWrites()).toHaveLength(0);
+});
+
+describe('source-bound batch execution', () => {
+  const uuid = (value: number) => `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`;
+  const accountId = `pa_${uuid(1)}`;
+  const sourceScope = { owner: `nuni:${accountId}`, schoolId: 'pu' };
+  const sourceLedgerKey = personalImportStorageKey(sourceScope);
+  const sourceJournalKey = assistantCalendarJournalStorageKey(sourceScope);
+  const sourceContext = (isCurrent = () => true): AssistantCalendarContext => ({
+    uid: '', schoolId: 'pu', isCurrent, platformTimetable: { accountId, isCurrent },
+  });
+  const metadata = (index: number): AssistantCalendarBatchStepSource => ({
+    kind: 'nuni-assignment',
+    locator: { accountId, schoolId: 'pu', academicYear: '115', semester: '1',
+      workspaceId: `cw_${uuid(1)}`, assignmentId: `cwa_${uuid(index + 1)}` },
+    expected: { title: `作業 ${index + 1}`, courseName: '資料庫', dueAt: '2099-01-05T18:00:00+08:00',
+      courseIdentity: '{"title":"資料庫","academicYear":"115","semester":"1"}' },
+  });
+  const prepare = () => prepareAssistantCalendarBatch(events.slice(0, 2), sourceContext(), {
+    kind: 'coursework-study', sources: [metadata(0), metadata(1)],
+  });
+  const origin = (plan: AssistantCalendarBatchPlan, index = 0) => ({
+    kind: 'batch-step' as const, batchId: plan.id, stepId: plan.steps[index].id,
+  });
+  const sourceWrites = () => jest.mocked(AsyncStorage.setItem).mock.calls.filter(([key]) => key === sourceLedgerKey);
+  function lease(onDispose?: () => void) {
+    let live = true;
+    return { kind: 'ready' as const,
+      writeCheck: { isCurrent: jest.fn(() => live), matches: jest.fn(() => true), message: '作業來源或可用時間已變更。' },
+      dispose: jest.fn(() => { live = false; onDispose?.(); }),
+    };
+  }
+  function checks() {
+    const leases: ReturnType<typeof lease>[] = [];
+    const preflight = jest.fn(async (..._args: Parameters<AssistantCalendarBatchSourceChecks['preflight']>)
+      : ReturnType<AssistantCalendarBatchSourceChecks['preflight']> => ({ kind: 'ready' }));
+    const beforeStep = jest.fn(async (..._args: Parameters<AssistantCalendarBatchSourceChecks['beforeStep']>)
+      : ReturnType<AssistantCalendarBatchSourceChecks['beforeStep']> => {
+      const ready = lease(); leases.push(ready); return ready;
+    });
+    return { sourceChecks: { preflight, beforeStep }, preflight, beforeStep, leases };
+  }
+
+  test.each(['missing-checks', 'missing-preflight', 'missing-before-step'] as const)(
+    '%s cannot resume a saved source plan through the generic executor', async (missing) => {
+      const prepared = await prepare();
+      const hooks = checks();
+      const sourceChecks = missing === 'missing-checks' ? undefined :
+        (missing === 'missing-preflight' ? { beforeStep: hooks.beforeStep } : { preflight: hooks.preflight }) as unknown as AssistantCalendarBatchSourceChecks;
+      const result = await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks });
+      expect(result).toMatchObject({ state: 'paused', stop: { reason: 'preflight' }, progress: { verified: 0, notStarted: 2 } });
+      expect(hooks.preflight).not.toHaveBeenCalled();
+      expect(hooks.beforeStep).not.toHaveBeenCalled();
+      expect(await readAssistantCalendarJournal(sourceScope, () => true)).toEqual([]);
+      expect(sourceWrites()).toHaveLength(0);
+      expect((await restoreAssistantCalendarBatches(sourceContext()))[0]).toEqual(prepared);
+    });
+
+  test.each(['blocked', 'changed', 'unavailable'] as const)('all pending sources must pass preflight before any per-step %s result can write', async (kind) => {
+    const prepared = await prepare();
+    const hooks = checks();
+    const gate = deferred<Awaited<ReturnType<AssistantCalendarBatchSourceChecks['preflight']>>>();
+    const entered = deferred<void>();
+    hooks.preflight.mockImplementationOnce(() => { entered.resolve(); return gate.promise; });
+    const running = confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: hooks.sourceChecks });
+    await entered.promise;
+    expect(hooks.preflight).toHaveBeenCalledTimes(1);
+    expect(hooks.preflight.mock.calls[0][0]).toEqual(prepared.plan);
+    expect(hooks.preflight.mock.calls[0][1]).toEqual(prepared.plan.steps);
+    expect(hooks.beforeStep).not.toHaveBeenCalled();
+    expect(sourceWrites()).toHaveLength(0);
+    gate.resolve({ kind, message: '第二份作業已無法確認，整批停止。' });
+    expect(await running).toMatchObject({ state: 'paused', progress: { verified: 0, notStarted: 2 },
+      stop: { reason: kind === 'unavailable' ? 'unavailable' : 'preflight', message: '第二份作業已無法確認，整批停止。' } });
+    expect(hooks.beforeStep).not.toHaveBeenCalled();
+    expect(await readAssistantCalendarJournal(sourceScope, () => true)).toEqual([]);
+    expect(sourceWrites()).toHaveLength(0);
+  });
+
+  test('a same-event generic receipt cannot complete, authorize or be rewritten as a source-bound step', async () => {
+    const prepared = await prepare();
+    const generic = createAssistantCalendarTask(events[0], sourceContext());
+    const receipt = await confirmAssistantCalendarTask(generic.proposal, sourceContext());
+    expect(receipt.state).toBe('verified');
+    jest.clearAllMocks();
+    const hooks = checks();
+    const restored = (await restoreAssistantCalendarBatches(sourceContext()))[0];
+    expect(restored).toMatchObject({ state: 'paused', stop: { reason: 'preflight' }, progress: { verified: 0, notStarted: 2 } });
+    expect(updateAssistantCalendarBatchTask(prepared, receipt)).toMatchObject({ state: 'paused', progress: { verified: 0 } });
+    expect(await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: hooks.sourceChecks }))
+      .toMatchObject({ state: 'paused', stop: { reason: 'preflight' }, progress: { verified: 0 } });
+    const fresh = createAssistantCalendarTask(events[0], sourceContext(), origin(prepared.plan));
+    expect(await confirmAssistantCalendarTask(fresh.proposal, sourceContext())).toMatchObject({ state: 'blocked', proposal: fresh.proposal });
+    expect(hooks.beforeStep).not.toHaveBeenCalled();
+    const journal = await readAssistantCalendarJournal(sourceScope, () => true);
+    expect(journal).toHaveLength(1);
+    expect(journal[0].proposal).toEqual(generic.proposal);
+    expect(sourceWrites()).toHaveLength(0);
+  });
+
+  test('the original origin with changed full event content stays attempted and unknown instead of becoming a fresh step', async () => {
+    const prepared = await prepare();
+    const different = createAssistantCalendarTask({ ...events[0], location: '另一個地點' }, sourceContext(), origin(prepared.plan));
+    const original = await confirmAssistantCalendarTask(different.proposal, sourceContext());
+    if (original.state !== 'verified') throw new Error('Missing original source receipt');
+    jest.clearAllMocks();
+    const restored = (await restoreAssistantCalendarBatches(sourceContext()))[0];
+    expect(restored).toMatchObject({ state: 'paused', progress: { verified: 0, notStarted: 1 },
+      steps: [{ state: 'recorded', task: { state: 'unknown', reason: 'changed', proposal: different.proposal } }, { state: 'not-started' }] });
+    const restoredStep = restored.steps[0];
+    if (restoredStep.state !== 'recorded' || restoredStep.task.state !== 'unknown' || !restoredStep.task.lastVerified)
+      throw new Error('Missing original source readback evidence');
+    expect(restoredStep.task.proposal).toEqual(different.proposal);
+    // Recovery reads the same operation again, so its fresh receipt is a replay
+    // with a newer check time; the exact record, event and identity must stay unchanged.
+    expect(restoredStep.task.lastVerified).toEqual({
+      ...original.receipt, replay: true, verifiedAt: expect.any(String),
+    });
+    expect(Date.parse(restoredStep.task.lastVerified.verifiedAt)).toBeGreaterThanOrEqual(Date.parse(original.receipt.verifiedAt));
+    const hooks = checks();
+    expect(await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: hooks.sourceChecks }))
+      .toMatchObject({ state: 'paused', progress: { verified: 0, notStarted: 1 } });
+    const replacement = createAssistantCalendarTask(events[0], sourceContext(), origin(prepared.plan));
+    expect(await confirmAssistantCalendarTask(replacement.proposal, sourceContext())).toMatchObject({ state: 'blocked' });
+    expect(hooks.preflight).not.toHaveBeenCalled();
+    expect(sourceWrites()).toHaveLength(0);
+    expect((await readAssistantCalendarJournal(sourceScope, () => true)).map((entry) => entry.proposal)).toEqual([different.proposal]);
+  });
+
+  test('serialization preserves source provenance but never restores the fresh proposal write grant', async () => {
+    const prepared = await prepare();
+    const fresh = createAssistantCalendarTask(events[0], sourceContext(), origin(prepared.plan));
+    const serialized = JSON.parse(JSON.stringify(fresh.proposal));
+    expect(await confirmAssistantCalendarTask(serialized, sourceContext()))
+      .toMatchObject({ state: 'unknown', reason: 'changed', proposal: serialized });
+    expect(sourceWrites()).toHaveLength(0);
+    expect(await readAssistantCalendarJournal(sourceScope, () => true)).toEqual([]);
+    const saved = await confirmAssistantCalendarTask(fresh.proposal, sourceContext());
+    expect(saved.state).toBe('verified');
+    jest.clearAllMocks();
+    expect(await confirmAssistantCalendarTask(serialized, sourceContext())).toMatchObject({ state: 'verified', proposal: fresh.proposal });
+    const forged = { ...serialized, origin: { ...serialized.origin, stepId: prepared.plan.steps[1].id } };
+    expect(await recheckAssistantCalendarTask(forged, sourceContext(), saved)).toMatchObject({ state: 'unknown', reason: 'changed' });
+    expect(sourceWrites()).toHaveLength(0);
+  });
+
+  test('a source invalidated during journal reservation reaches the existing ledger-lock fence and releases its lease once', async () => {
+    const prepared = await prepare();
+    const hooks = checks();
+    const ready = lease();
+    hooks.beforeStep.mockResolvedValueOnce(ready);
+    let reservationWritten = false;
+    jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+      await originalSet(key, value);
+      if (key === sourceJournalKey && !reservationWritten) {
+        reservationWritten = true;
+        ready.writeCheck.isCurrent.mockReturnValue(false);
+      }
+    });
+    const result = await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: hooks.sourceChecks });
+    expect(reservationWritten).toBe(true);
+    expect(ready.writeCheck.matches).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ state: 'paused', progress: { verified: 0, notStarted: 1 },
+      steps: [{ state: 'recorded', task: { state: 'blocked', message: ready.writeCheck.message } }, { state: 'not-started' }] });
+    expect(ready.dispose).toHaveBeenCalledTimes(1);
+    expect(hooks.beforeStep).toHaveBeenCalledTimes(1);
+    expect(sourceWrites()).toHaveLength(0);
+    const attempts = await readAssistantCalendarJournal(sourceScope, () => true);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].proposal.origin).toEqual(origin(prepared.plan));
+    expect((await recheckAssistantCalendarBatch(prepared.plan, sourceContext())).steps[0])
+      .toMatchObject({ state: 'recorded', task: { state: 'unknown', reason: 'absent' } });
+    expect(await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: checks().sourceChecks }))
+      .toMatchObject({ state: 'paused', progress: { verified: 0, notStarted: 1 } });
+    expect(sourceWrites()).toHaveLength(0);
+  });
+
+  test.each(['abort', 'timeout', 'scope-change', 'cancel'] as const)('a beforeStep hook resolving after %s is disposed once and cannot write or publish late evidence', async (stop) => {
+    const prepared = await prepare();
+    jest.useFakeTimers();
+    let active = true;
+    const access = sourceContext(() => active);
+    const abort = new AbortController();
+    const hooks = checks();
+    const gate = deferred<Awaited<ReturnType<AssistantCalendarBatchSourceChecks['beforeStep']>>>();
+    const entered = deferred<void>();
+    hooks.beforeStep.mockImplementationOnce(() => { entered.resolve(); return gate.promise; });
+    const updates = jest.fn();
+    const running = confirmAssistantCalendarBatch(prepared.plan, access, {
+      sourceChecks: hooks.sourceChecks, signal: abort.signal, onUpdate: updates,
+    });
+    // Attach the rejection handler before deliberately invalidating the owner.
+    const result = running.then((value) => ({ value }), (error: unknown) => ({ error }));
+    await entered.promise;
+    expect(hooks.beforeStep).toHaveBeenCalledTimes(1);
+    const internalSignal = hooks.beforeStep.mock.calls[0][3]!;
+    if (stop === 'abort') abort.abort();
+    if (stop === 'timeout') await jest.advanceTimersByTimeAsync(80_001);
+    if (stop === 'scope-change') active = false;
+    if (stop === 'cancel') {
+      expect(await cancelRemainingAssistantCalendarBatch(prepared.plan, access)).toMatchObject({ state: 'cancelled' });
+    }
+    if (stop === 'abort' || stop === 'timeout') {
+      expect(await result).toMatchObject({ value: { state: 'paused', stop: { reason: stop === 'abort' ? 'aborted' : 'timeout' } } });
+    }
+    const publishCount = updates.mock.calls.length;
+    const released = deferred<void>();
+    const ready = lease(() => released.resolve());
+    gate.resolve(ready);
+    if (stop === 'scope-change') expect(await result).toMatchObject({ error: { code: 'session-changed' } });
+    else if (stop === 'cancel') {
+      expect(await result).toMatchObject({ value: { state: 'paused', stop: { reason: 'cancelled' } } });
+      expect((await restoreAssistantCalendarBatches(sourceContext()))[0]).toMatchObject({ state: 'cancelled' });
+    }
+    await released.promise;
+    expect(ready.dispose).toHaveBeenCalledTimes(1);
+    expect(internalSignal.aborted).toBe(true);
+    if (stop !== 'cancel') expect(updates).toHaveBeenCalledTimes(publishCount);
+    expect(sourceWrites()).toHaveLength(0);
+    expect(hooks.beforeStep).toHaveBeenCalledTimes(1);
+    expect(await readAssistantCalendarJournal(sourceScope, () => true)).toEqual([]);
+  });
+
+  test('malformed ready checks and rejecting source hooks stop before minting or dispatching an operation', async () => {
+    const prepared = await prepare();
+    const hooks = checks();
+    const ready = lease();
+    hooks.beforeStep.mockResolvedValueOnce({ ...ready, writeCheck: { ...ready.writeCheck, message: '' } });
+    expect(await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: hooks.sourceChecks }))
+      .toMatchObject({ state: 'paused', stop: { reason: 'preflight' } });
+    expect(ready.dispose).toHaveBeenCalledTimes(1);
+    hooks.beforeStep.mockRejectedValueOnce(new Error('private source response'));
+    const rejected = await confirmAssistantCalendarBatch(prepared.plan, sourceContext(), { sourceChecks: hooks.sourceChecks });
+    expect(rejected).toMatchObject({ state: 'paused', stop: { reason: 'unavailable', message: expect.not.stringContaining('private') } });
+    expect(await readAssistantCalendarJournal(sourceScope, () => true)).toEqual([]);
+    expect(sourceWrites()).toHaveLength(0);
+  });
+
+  test('recovery evidence cannot cross source origins, changed event payloads, or different operation IDs', async () => {
+    const prepared = await prepare();
+    const fresh = createAssistantCalendarTask(events[0], sourceContext(), origin(prepared.plan));
+    const actual = await confirmAssistantCalendarTask(fresh.proposal, sourceContext());
+    if (actual.state !== 'verified') throw new Error('Missing source receipt');
+    const progress = updateAssistantCalendarBatchTask(prepared, actual);
+    const pending: AssistantCalendarTask = { proposal: actual.proposal, state: 'unknown', reason: 'unavailable', message: '重新核對中。' };
+    expect(calendarTaskFromBatch(pending, progress)).toBe(actual);
+    const otherTasks: AssistantCalendarTask[] = [
+      createAssistantCalendarTask(events[0], sourceContext()),
+      createAssistantCalendarTask(events[0], sourceContext(), { ...origin(prepared.plan), batchId: 'acb_coursework_another' }),
+      createAssistantCalendarTask(events[0], sourceContext(), origin(prepared.plan)),
+      { ...pending, proposal: { ...pending.proposal, event: { ...events[0], location: '變更地點' } } },
+    ];
+    for (const other of otherTasks) expect(calendarTaskFromBatch(other, progress)).toBe(other);
+    const conflicting = { ...actual, proposal: { ...actual.proposal, mutationId: 'aev_different_source_attempt' } };
+    expect(updateAssistantCalendarBatchTask(progress, conflicting)).toMatchObject({
+      state: 'paused', progress: { verified: 0, notStarted: 1 },
+      steps: [{ state: 'recorded', task: { state: 'unknown', reason: 'changed', proposal: actual.proposal } }, { state: 'not-started' }],
+    });
+    const changedPlan: AssistantCalendarBatchView = { ...progress, plan: { ...progress.plan,
+      steps: progress.plan.steps.map((step, index) => index ? step : { ...step, source: { ...step.source!,
+        expected: { ...step.source!.expected, courseIdentity: '{"title":"冒名的課程"}' } } }),
+    } };
+    const merged = mergeCalendarBatchEvidence(progress, changedPlan);
+    expect(merged).toMatchObject({ state: 'paused', stop: { reason: 'preflight' } });
+    expect(merged.plan).toBe(progress.plan);
+    expect(merged.steps).toBe(progress.steps);
+    expect(sourceWrites()).toHaveLength(1);
+  });
 });

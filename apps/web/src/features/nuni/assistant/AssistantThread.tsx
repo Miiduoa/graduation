@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AssistantCardStack } from './AssistantCards';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
@@ -19,7 +19,12 @@ export function AssistantThread({
   turns,
   states,
   pending,
+  pendingLabel,
+  asking,
+  onStopAsk,
   error,
+  recoverableQuestion,
+  onRecoverQuestion,
   onAsk,
   onConfirm,
   onCancel,
@@ -35,7 +40,12 @@ export function AssistantThread({
   turns: V2Turn[];
   states: V2ActionStates;
   pending: boolean;
+  pendingLabel?: string;
+  asking: boolean;
+  onStopAsk: () => void;
   error: string;
+  recoverableQuestion: string;
+  onRecoverQuestion: () => void;
   onAsk: () => void;
   onConfirm: (cards: V2Turn['reply']['cards']) => void;
   onCancel: (turn: V2Turn, index: number) => void;
@@ -45,6 +55,8 @@ export function AssistantThread({
   const dock = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const followLatest = useRef(true);
+  const [showJump, setShowJump] = useState(false);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -60,6 +72,18 @@ export function AssistantThread({
     return () => observer.disconnect();
   }, [turns.length, question, pending]);
   useEffect(() => {
+    // Incoming results must not steal the scroll position while someone reads older replies.
+    const trackScroll = () => {
+      if (!end.current || turns.length === 0) return;
+      const nearLatest = end.current.getBoundingClientRect().top - window.innerHeight <= 144;
+      followLatest.current = nearLatest;
+      setShowJump(!nearLatest);
+    };
+    window.addEventListener('scroll', trackScroll, { passive: true });
+    return () => window.removeEventListener('scroll', trackScroll);
+  }, [turns.length]);
+  useEffect(() => {
+    if (!followLatest.current || (!turns.length && !pending && !error)) return;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
   }, [turns, pending, error]);
@@ -149,7 +173,12 @@ export function AssistantThread({
               <span aria-hidden="true" />
               <span aria-hidden="true" />
               <span aria-hidden="true" />
-              <span className={styles.muted}>正在整理回覆</span>
+              <span className={styles.muted}>{pendingLabel ?? (asking ? '正在整理回覆' : '正在核對操作結果')}</span>
+              {asking ? (
+                <button type="button" className={styles.stopReply} onClick={onStopAsk}>
+                  停止這次回答
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -158,9 +187,32 @@ export function AssistantThread({
             {error}
           </p>
         ) : null}
+        {recoverableQuestion ? (
+          <div className={styles.recover} role="group" aria-label="未完成的問題">
+            <p>未完成的問題已保留，切換時不會刪除現在的草稿。</p>
+            <p className={styles.recoverText}>{recoverableQuestion}</p>
+            <button type="button" disabled={pending} onClick={onRecoverQuestion}>
+              切換到這個問題
+            </button>
+          </div>
+        ) : null}
         <div ref={end} className={styles.logEnd} />
       </div>
       <div ref={dock} className={styles.composerDock}>
+        {showJump ? (
+          <button
+            type="button"
+            className={styles.jumpLatest}
+            onClick={() => {
+              followLatest.current = true;
+              setShowJump(false);
+              const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+              end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+            }}
+          >
+            回到最新回覆
+          </button>
+        ) : null}
         {turns.length > 0 ? (
           <div className={`${styles.chips} ${styles.chipsCompact}`} aria-label="建議問題">
             {SUGGESTIONS.map((phrase) => (
@@ -175,12 +227,15 @@ export function AssistantThread({
           aria-label="傳送問題"
           onSubmit={(e) => {
             e.preventDefault();
+            followLatest.current = true;
+            setShowJump(false);
             onAsk();
           }}
         >
           <label htmlFor="assistant-question">問題</label>
           <textarea
             id="assistant-question"
+            aria-describedby="assistant-composer-hint"
             ref={field}
             value={question}
             maxLength={1000}
@@ -188,8 +243,12 @@ export function AssistantThread({
             placeholder="輸入問題"
             onChange={(e) => onQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              // In Chinese/Japanese IMEs Enter selects a candidate; it is not a send gesture.
+              if (e.key === 'Enter' && !e.shiftKey &&
+                  !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
+                followLatest.current = true;
+                setShowJump(false);
                 onAsk();
               }
             }}
@@ -198,6 +257,9 @@ export function AssistantThread({
             送出
           </button>
         </form>
+        <p id="assistant-composer-hint" className={styles.composerHint}>
+          {pending ? '正在處理上一個問題，可以先輸入下一句。' : 'Enter 送出 · Shift + Enter 換行'}
+        </p>
       </div>
     </section>
   );
