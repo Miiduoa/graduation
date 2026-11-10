@@ -813,3 +813,42 @@ it('does not zoom out for a tall building whose POI is absent from the current c
   });
   expect(volumes).toBe(0);
 });
+
+it('frames an explicitly selected short building without zooming out for a different tall campus building', () => {
+  // Both POIs remain visible in the model. Heights and outlines here are
+  // synthetic renderer fixtures, not observed Providence building dimensions.
+  const footprintAt = (point: (typeof model.points)[number], heightMeters: number): ProvidenceFootprint => ({
+    poiId: point.id,
+    name: point.name,
+    sourceUrl: 'https://www.openstreetmap.org/way/255784049',
+    outline: [
+      [point.location.lng - 0.00003, point.location.lat - 0.00003],
+      [point.location.lng + 0.00003, point.location.lat - 0.00003],
+      [point.location.lng + 0.00003, point.location.lat + 0.00003],
+      [point.location.lng - 0.00003, point.location.lat + 0.00003],
+    ],
+    heightMeters,
+    heightBasis: 'osm-tag',
+  });
+  const selectedBuilding = footprintAt(model.points[0], 12);
+  const otherTallBuilding = footprintAt(model.points[1], 100);
+  const shortOnly = setup(model, undefined, [selectedBuilding]);
+  const withTall = setup(model, undefined, [selectedBuilding, otherTallBuilding]);
+
+  const selectedView = { selectedId: model.points[0].id, overhead: false, motion: false, dark: false };
+  shortOnly.scene.setView(selectedView);
+  withTall.scene.setView(selectedView);
+  drawFrame();
+  const focusedShortOnly = lastCamera(shortOnly.renderer).position.clone();
+  const focusedWithTall = lastCamera(withTall.renderer).position.clone();
+  expect(focusedWithTall.distanceTo(focusedShortOnly)).toBeLessThan(1e-6);
+
+  // The overview must still fit the taller *visible* building; only the
+  // explicitly focused camera should be independent of other building heights.
+  const overview = { ...selectedView, selectedId: null };
+  shortOnly.scene.setView(overview);
+  withTall.scene.setView(overview);
+  drawFrame();
+  expect(lastCamera(withTall.renderer).position.length())
+    .toBeGreaterThan(lastCamera(shortOnly.renderer).position.length());
+});
