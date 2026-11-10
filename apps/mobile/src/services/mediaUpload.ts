@@ -1,3 +1,4 @@
+import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_BYTES, STORY_VIDEO_MAX_SECONDS } from '@campus/shared/src/storyVideo';
 import { PRIVATE_FILE_MAX_BYTES } from '@campus/shared/src/privateFileAccess';
 import { privateFileNonce } from './privateFileNonce';
 import { isSupabaseFileStorageEnabled, privateStoryPath, uploadPrivateFile } from './privateFiles';
@@ -6,9 +7,7 @@ import { getStorageInstance } from '../firebase';
 import { campusPostStoragePath, conversationMediaPath,
   storyStoragePath, } from './campusSocialPaths';
 
-export async function uploadRawToPath(
-  path: string, data: Blob, contentType: string, customMetadata?: Record<string, string>,
-) {
+export async function uploadRawToPath(path: string, data: Blob, contentType: string, customMetadata?: Record<string, string>) {
   const r = ref(getStorageInstance(), path);
   await uploadBytes(r, data, { contentType, customMetadata });
   return getDownloadURL(r);
@@ -31,6 +30,31 @@ export async function uploadCampusPostMedia(
 }
 
 export const STORY_IMAGE_LIMIT = PRIVATE_FILE_MAX_BYTES['story-image'];
+
+export const STORY_VIDEO_MAX_MS = STORY_VIDEO_MAX_SECONDS * 1000;
+
+export async function uploadStoryVideo(
+  schoolId: string,
+  storyId: string,
+  ownerUid: string,
+  localUri: string,
+  durationMs: number,
+) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > STORY_VIDEO_MAX_MS)
+    throw new Error('請選擇 30 秒以內的影片。');
+  const blob = await (await fetch(localUri)).blob();
+  if (blob.type && blob.type !== 'application/octet-stream' && blob.type !== STORY_VIDEO_CONTENT_TYPE)
+    throw new Error('請選擇 MP4 影片。');
+  if (!blob.size || blob.size >= STORY_VIDEO_MAX_BYTES) throw new Error('請選擇小於 100 MB 的影片。');
+  if (isSupabaseFileStorageEnabled()) {
+    if (blob.size > PRIVATE_FILE_MAX_BYTES['story-video']) throw new Error('影片大小不得超過 45 MB。');
+    const path = privateStoryPath(schoolId, storyId, `video-${Date.now().toString(36)}-${privateFileNonce()}.mp4`);
+    if (!path) throw new Error('限動路徑無效');
+    await uploadPrivateFile({ path, body: blob, contentType: STORY_VIDEO_CONTENT_TYPE });
+    return path;
+  }
+  return uploadRawToPath(storyStoragePath(schoolId, storyId, 'video'), blob, STORY_VIDEO_CONTENT_TYPE, { ownerUid });
+}
 
 export async function uploadStoryImage(
   schoolId: string,

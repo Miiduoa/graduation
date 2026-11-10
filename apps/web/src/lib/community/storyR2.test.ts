@@ -13,7 +13,7 @@ vi.mock('firebase/storage', () => ({
   uploadBytes: state.legacy,
   getDownloadURL: async () => 'https://legacy/image',
 }));
-import { uploadStoryImage } from './media';
+import { uploadStoryImage, uploadStoryMedia } from './media';
 beforeEach(() => {
   vi.clearAllMocks();
   state.enabled = false;
@@ -54,5 +54,18 @@ it('does not return story media when finalization fails', async () => {
   state.enabled = true;
   state.upload.mockRejectedValueOnce(Object.assign(new Error('File is too large'), { statusCode: 413 }));
   await expect(uploadStoryImage({ schoolId: 'pu', storyId: 's', uid: 'alice', file: new File(['image'], 'photo.png', { type: 'image/png' }) })).rejects.toMatchObject({ statusCode: 413 });
+  expect(state.legacy).not.toHaveBeenCalled();
+});
+
+it('uploads clips privately and enforces the private video size limit', async () => {
+  state.enabled = true;
+  const file = new File(['clip'], 'clip.mp4', { type: 'video/mp4' });
+  const input = { schoolId: 'pu', storyId: 's', uid: 'alice', file };
+  const result = await uploadStoryMedia(input);
+  expect(result.url).toMatch(/^schools\/pu\/stories\/s\/video-[a-z0-9-]+\.mp4$/);
+  expect(state.upload).toHaveBeenCalledWith({ path: result.url, body: file, contentType: 'video/mp4' });
+  Object.defineProperty(file, 'size', { value: 45 * 1024 * 1024 + 1 });
+  await expect(uploadStoryMedia(input)).rejects.toThrow('45 MB');
+  expect(state.upload).toHaveBeenCalledOnce();
   expect(state.legacy).not.toHaveBeenCalled();
 });

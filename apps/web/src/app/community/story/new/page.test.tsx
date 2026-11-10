@@ -18,7 +18,7 @@ vi.mock('@/lib/community/firestore', () => ({
 }));
 vi.mock('@/lib/community/media', async (original) => ({
   ...(await original<typeof import('@/lib/community/media')>()),
-  uploadStoryImage: mock.upload,
+  uploadStoryMedia: mock.upload,
 }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/community/story/new',
@@ -56,7 +56,7 @@ beforeEach(() => {
 });
 
 function chooseImage(file: File) {
-  fireEvent.change(screen.getByLabelText('限動照片'), { target: { files: [file] } });
+  fireEvent.change(screen.getByLabelText('限動照片或影片'), { target: { files: [file] } });
 }
 
 it('publishes only once to the selected school with the signed-in author, palette and 24h expiry', async () => {
@@ -199,6 +199,63 @@ it('sends visitors to sign-in with the original story URL', () => {
   );
   expect(screen.getByRole('link', { name: '前往公開交流' }).getAttribute('href')).toBe('/social?schoolId=ncku');
   expect(screen.queryByRole('form')).toBeNull();
+});
+
+function probeVideo(duration: number, width = 320) {
+  vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, 'src', 'set').mockImplementation(function (
+    this: HTMLVideoElement,
+    value: string,
+  ) {
+    this.setAttribute('src', value);
+    Object.defineProperties(this, {
+      duration: { value: duration, configurable: true },
+      videoWidth: { value: width, configurable: true },
+      videoHeight: { value: width, configurable: true },
+    });
+    queueMicrotask(() => this.dispatchEvent(new Event('loadeddata')));
+  });
+}
+
+it('previews the decoded MP4, then retries the captioned video using the same upload', async () => {
+  probeVideo(30);
+  mock.publish.mockRejectedValueOnce(new Error('offline'));
+  render(<StoryComposePage />);
+  chooseImage(new File(['clip'], 'clip.mp4', { type: 'video/mp4' }));
+  const preview = await screen.findByLabelText('已選取的影片');
+  expect(preview).toHaveProperty('controls', true);
+  expect(preview).toHaveProperty('muted', true);
+  expect(screen.getByText('限時動態預覽 · 30 秒')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('影片說明（選填）'), { target: { value: '社團彩排' } });
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  await screen.findByRole('alert');
+  fireEvent.click(screen.getByRole('button', { name: '發布限時動態' }));
+  await waitFor(() => expect(mock.replace).toHaveBeenCalledOnce());
+  expect(mock.upload).toHaveBeenCalledTimes(1);
+  expect(mock.id).toHaveBeenCalledTimes(1);
+  expect(mock.publish.mock.calls[1][0]).toMatchObject({
+    kind: 'video',
+    storyId: 'new-story',
+    text: '社團彩排',
+    mediaUrl: 'https://example.test/image',
+  });
+});
+
+it.each([
+  [30.01, 320],
+  [Infinity, 320],
+  [0, 320],
+  [10, 0],
+])('keeps the prior photo when video duration is %s and width is %s', async (duration, width) => {
+  probeVideo(duration, width);
+  render(<StoryComposePage />);
+  chooseImage(new File(['original'], 'photo.jpg', { type: 'image/jpeg' }));
+  await screen.findByAltText('已選取的照片');
+  chooseImage(new File(['bad'], 'renamed.mp4', { type: 'video/mp4' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByLabelText('已選取的影片')).toBeNull();
+  expect(screen.getByAltText('已選取的照片')).toBeTruthy();
+  expect(mock.upload).not.toHaveBeenCalled();
 });
 
 it('confirms a previously published private image after claim succeeds on retry', async () => {
