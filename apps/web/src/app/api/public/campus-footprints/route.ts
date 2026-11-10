@@ -18,6 +18,9 @@ const ERROR_COOLDOWN_MS = 10 * 60 * 1000;
 // Respect its Retry-After while bounding malformed or extreme upstream values.
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 500_000;
+// AbortSignal is advisory: intermediaries and stream mocks may never settle.
+// Bound the entire upstream operation so global pending requests can recover.
+const OVERPASS_REQUEST_DEADLINE_MS = 12_000;
 // Overpass exposes its database replication time separately from each way's edit
 // time. A freshly fetched HTTP response can still contain days-old map state.
 const MAX_OVERPASS_REPLICATION_LAG_MS = 48 * 60 * 60 * 1000;
@@ -120,10 +123,10 @@ async function readBoundedResponse(response: Response): Promise<string> {
   }
 }
 
-async function readOsm(): Promise<Snapshot> {
+async function readOsm(signal: AbortSignal): Promise<Snapshot> {
   const url = OVERPASS_ENDPOINT + '?data=' + encodeURIComponent(query);
   const response = await fetch(url, {
-    signal: AbortSignal.timeout(12_000),
+    signal,
     cache: 'no-store',
     headers: {
       Accept: 'application/json',
@@ -171,6 +174,27 @@ async function readOsm(): Promise<Snapshot> {
   };
 }
 
+/** A stalled fetch OR response body must never hold the shared pending promise
+ * indefinitely. Aborting releases cooperative clients; the independent deadline
+ * settles this request even if the upstream ignores AbortSignal.
+ * readOsm only returns a Snapshot and cannot mutate the live cache after timeout.
+ */
+async function readOsmWithDeadline(): Promise<Snapshot> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new Error('OSM request deadline exceeded'));
+    }, OVERPASS_REQUEST_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([readOsm(controller.signal), deadline]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 export async function GET() {
   const now = Date.now();
   if (cache && cache.validUntil > now) {
@@ -185,7 +209,7 @@ export async function GET() {
     });
   } else {
     try {
-      if (!pending) pending = readOsm().finally(() => { pending = null; });
+      if (!pending) pending = readOsmWithDeadline().finally(() => { pending = null; });
       cache = await pending;
       unavailableUntil = 0;
     } catch (error) {
