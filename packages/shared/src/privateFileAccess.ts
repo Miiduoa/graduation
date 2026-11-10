@@ -126,6 +126,21 @@ function deny(): never {
   throw new PrivateFileAccessError(403, 'File access denied');
 }
 
+/** Exact published/submitted attachment reference, never merely a known object path. */
+function referencesPrivateFile(attachments: unknown, path: string): boolean {
+  return Array.isArray(attachments) && attachments.some((item: unknown) =>
+    item === path || (
+      item !== null && typeof item === 'object' && !Array.isArray(item) &&
+      ((item as { path?: unknown }).path === path || (item as { url?: unknown }).url === path)
+    ));
+}
+
+/** Absent or non-array attachments are legacy records; keep the previous access path. */
+function allowsListedOrLegacyPrivateFile(attachments: unknown, path: string): boolean {
+  if (!Array.isArray(attachments)) return true;
+  return referencesPrivateFile(attachments, path);
+}
+
 function accountBlocked(data: Record<string, unknown>): boolean {
   return (
     data.accountDeletionInProgress === true ||
@@ -274,6 +289,7 @@ export function assertStoryMediaRead(input: {
   schoolId: string;
   uid: string;
   story: Record<string, unknown> | null;
+  path: string;
   object: StoryObjectInfo;
   nowMs?: number;
 }): void {
@@ -291,7 +307,7 @@ export function assertStoryMediaRead(input: {
     input.story.schoolId !== input.schoolId ||
     input.story.authorUid !== ownerUid ||
     typeof mediaUrl !== 'string' ||
-    mediaUrl.length === 0 ||
+    mediaUrl !== input.path ||
     expiresAt === null ||
     expiresAt <= nowMs ||
     !((kind === 'image' && isPrivateFileImage(contentType)) ||
@@ -330,10 +346,14 @@ export async function authorizePrivateFile(
           deny();
         }
         const memberData = asRecord(schoolMember.data());
+        // A stale membership stamp must never authorize a recreated user profile.
+        // Only the trusted school-login writer can bind both records in one transaction.
         if (
           memberData.profileBoundSchoolId !== schoolId ||
           typeof memberData.profileBoundGeneration !== 'string' ||
-          memberData.profileBoundGeneration.length === 0
+          memberData.profileBoundGeneration.length === 0 ||
+          memberData.profileBoundGeneration !== accountData.bindingGeneration ||
+          (accountData.schoolId !== schoolId && accountData.primarySchoolId !== schoolId)
         ) {
           deny();
         }
@@ -375,7 +395,22 @@ export async function authorizePrivateFile(
       const schoolMember = await tx.get(
         db.collection('schools').doc(schoolId as string).collection('members').doc(uid),
       );
-      if (!schoolMember.exists || asRecord(schoolMember.data()).status !== 'active') deny();
+      const schoolMemberData = asRecord(schoolMember.data());
+      if (!schoolMember.exists || schoolMemberData.status !== 'active') deny();
+      // A trusted school-login stamp binds this membership to the current
+      // canonical profile. Do not let a deleted/recreated profile reuse it.
+      // Unstamped legacy members remain on the previous access path pending
+      // an audited, backwards-compatible rollout of mandatory stamping.
+      if (
+        ('profileBoundSchoolId' in schoolMemberData || 'profileBoundGeneration' in schoolMemberData) &&
+        (
+          schoolMemberData.profileBoundSchoolId !== schoolId ||
+          typeof schoolMemberData.profileBoundGeneration !== 'string' ||
+          schoolMemberData.profileBoundGeneration.length === 0 ||
+          schoolMemberData.profileBoundGeneration !== accountData.bindingGeneration ||
+          (accountData.schoolId !== schoolId && accountData.primarySchoolId !== schoolId)
+        )
+      ) deny();
       const manager = PRIVATE_FILE_MANAGER_ROLES.has(String(asRecord(member.data()).role || ''));
       if (scope.kind === 'group-post') {
         const post = await tx.get(groupRef.collection('posts').doc(scope.postId || ''));
@@ -383,6 +418,10 @@ export async function authorizePrivateFile(
         // Group posts are hard-deleted; also reject tombstones if present.
         if ((!writing && !post.exists) || data.deletedAt != null || data.deleted === true || data.isDeleted === true || data.status === 'deleted') deny();
         if (writing && post.exists && data.authorId !== uid) deny();
+        // The author can preview an uploaded draft. Other group members may
+        // download only the precise object referenced by the live post.
+        // Finalizing a private upload must not publish a sibling by guessable path.
+        if (!writing && data.authorId !== uid && !allowsListedOrLegacyPrivateFile(data.attachments, scope.path)) deny();
       }
       if (scope.kind === 'assignment' && scope.groupId) {
         const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
@@ -412,10 +451,73 @@ export async function authorizePrivateFile(
           // Submission update: isSubmissionOwner and submittedAt must still be null.
           if (submission.exists && (owner !== uid || previous.submittedAt != null)) deny();
         } else {
-          // Submission read: own document or canReadSubmissionDoc/canManageGroup.
-          // Assigned peer reviewers are deliberately excluded from file access.
-          if (scope.userId !== uid && !manager && (!submission.exists || owner !== uid)) deny();
+          // A student's finalized but unsubmitted/upload-only object is still private,
+          // including from group managers. Grant manager access only to the precise
+          // attachment on an actual submitted receipt; owner previews remain possible.
+          // Assigned peer reviewers remain excluded from file access.
+          if (scope.userId !== uid && (
+            !manager || (
+              Array.isArray(previous.attachments) && (
+                !submission.exists || owner !== scope.userId ||
+                previous.submittedAt == null ||
+                !referencesPrivateFile(previous.attachments, scope.path)
+              )
+            )
+          )) deny();
         }
+      }
+      // Legacy uploads keep working when only the global assignments/{id} mirror
+      // exists. If the canonical group assignment is present, apply the same
+      // live eligibility checks as the group-path upload.
+      if (scope.kind === 'assignment' && !scope.groupId && writing) {
+        if (scope.userId !== uid) deny();
+        const assignmentRef = groupRef.collection('assignments').doc(scope.assignmentId || '');
+        const [assignment, submission] = await tx.getAll(
+          assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
+        );
+        if (!assignment.exists) {
+          // Historical data with only the global mirror: previous owner-upload path.
+        } else {
+        const data = asRecord(assignment.data());
+        const previous = asRecord(submission.data());
+        const owner = 'userId' in previous ? previous.userId
+          : 'uid' in previous ? previous.uid
+            : 'studentId' in previous ? previous.studentId : scope.userId;
+        const dueValue = data.dueAt;
+        const validDueString = typeof dueValue !== 'string' || (
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+          Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+          new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+        );
+        const due = dueValue == null || typeof dueValue === 'number' || !validDueString
+          ? null : storyExpiresAtMs(dueValue);
+        if (
+          data.published === false || ['draft', 'closed'].includes(String(data.status || '')) ||
+          (data.dueAt != null && data.allowLateSubmission !== true && (due === null || Date.now() > due)) ||
+          (submission.exists && (owner !== uid || previous.submittedAt != null))
+        ) deny();
+        }
+      }
+      // Legacy assignments/{id}/submissions/{uid}/ paths are still reachable
+      // via the GCS HTTP and Web signed-URL handlers. A manager must not
+      // download an uploaded draft without the canonical submission receipt.
+      if (scope.kind === 'assignment' && !scope.groupId && !writing && scope.userId !== uid) {
+        if (!manager) deny();
+        const submission = await tx.get(
+          groupRef.collection('assignments').doc(scope.assignmentId || '')
+            .collection('submissions').doc(scope.userId || ''),
+        );
+        const previous = asRecord(submission.data());
+        const owner = 'userId' in previous ? previous.userId
+          : 'uid' in previous ? previous.uid
+            : 'studentId' in previous ? previous.studentId : scope.userId;
+        if (
+          Array.isArray(previous.attachments) && (
+            !submission.exists || owner !== scope.userId ||
+            previous.submittedAt == null ||
+            !referencesPrivateFile(previous.attachments, scope.path)
+          )
+        ) deny();
       }
       if (
         (writing && scope.kind === 'group-cover' && !manager) ||
