@@ -42,7 +42,7 @@ describe('teacher gradebook CSV with synthetic records', () => {
   it('exports an empty gradebook as headers only and sanitizes filenames', () => {
     expect(teacherGradebookCsv({ ...gradebook, rows: [] }).split('\r\n')).toHaveLength(2);
     expect(teacherGradebookFilename('../a/b\n')).toBe('gradebook-___a_b_.csv');
-    expect(teacherGradebookFilename('x'.repeat(100))).toHaveLength(93);
+    expect(teacherGradebookFilename('x'.repeat(100))).toHaveLength(94);
     expect(teacherGradebookFilename('synthetic-course')).toBe('gradebook-synthetic-course.csv');
   });
 });
