@@ -126,11 +126,16 @@ export function parseMerchantWorkspaces(value: unknown): NuniMerchantWorkspace[]
     };
   });
 }
-export async function loadMerchantOverview(transport: NuniTransport) {
+export type MerchantOverviewView = 'overview' | 'apply' | 'workspace';
+
+export async function loadMerchantOverview(
+  transport: NuniTransport,
+  view: MerchantOverviewView = 'overview',
+) {
   const [programs, applications, workspaces] = await Promise.all([
-    transport('merchant-onboarding-programs'),
+    view === 'workspace' ? { programs: [] } : transport('merchant-onboarding-programs'),
     transport('merchant-applications'),
-    transport('merchant-workspaces'),
+    view === 'apply' ? { workspaces: [] } : transport('merchant-workspaces'),
   ]);
   return {
     ...parseMerchantOverview({

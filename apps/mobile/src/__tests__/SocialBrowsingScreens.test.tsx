@@ -10,8 +10,6 @@ import { fetchRecentCampusPosts, toggleCampusPostLike } from '../services/feed';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { listBoards, listSubscribedBoardIds } from '../services/boards';
 import { listActiveStoriesForSchool, markStoryViewed } from '../services/stories';
-
-jest.mock('expo-av', () => ({ Video: 'Video', ResizeMode: { CONTAIN: 'contain' } }));
 import { listFollowingIds, followUser } from '../services/follows';
 import {
   listCampusPostBookmarkIds,

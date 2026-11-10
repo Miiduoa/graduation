@@ -687,6 +687,13 @@ test('a class starting soon keeps the urgent quiz visible in the collapsed list 
   expect(view.queryByLabelText('補交 2，資料結構')).toBeNull();
 });
 
+test('the header opens the student card before the timetable finishes loading', () => {
+  mockTimetable.status = 'loading';
+  const view = render(<StudentTodayScreen />);
+  fireEvent.press(view.getByLabelText('開啟數位學生證'));
+  expect(rootNavigateNested).toHaveBeenCalledWith('我的', 'StudentCard');
+});
+
 test('distinguishes a class in progress and shows the timetable before non-urgent work', async () => {
   mockTimetable.classes = [todayClass({ startAt: Date.parse('2026-11-03T07:50:00+08:00'),
     endAt: Date.parse('2026-11-03T08:40:00+08:00') })];

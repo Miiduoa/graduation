@@ -165,12 +165,12 @@ export function MessagingShell({
         ) : !uid ? (
           <section className={styles.notice}>
             <h2>登入後查看訊息</h2>
-            <p>登入學校帳號後，就能查看你的對話與通知。</p>
+            <p>校內訊息只提供已確認學校身分、且具備對話或通知存取資格的成員。Google 平台登入不會自動連結校內帳號或讀取私人對話。</p>
             <Link
               className={styles.primary}
-              href={`/login?returnUrl=${section === 'notifications' ? '%2Fmessages' : '%2Fdms'}`}
+              href={`/login?reconnect=school&returnUrl=${section === 'notifications' ? '%2Fmessages' : '%2Fdms'}`}
             >
-              前往登入
+              連結學校帳號
             </Link>
           </section>
         ) : session ? (
