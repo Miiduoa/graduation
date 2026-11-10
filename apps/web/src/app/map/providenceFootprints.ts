@@ -322,8 +322,10 @@ export function parseProvidenceFootprintSnapshot(value: unknown, now = Date.now(
   }
   const ageMs = now - fetchedAtMs;
   const day = 24 * 60 * 60 * 1000;
-  // Match the server's seven-day expiry; do not let clock skew invent fresh data.
-  if (ageMs >= 7 * day || ageMs < -5 * 60 * 1000) return null;
+  // Match both server expiry clocks: HTTP fetch age and, when supplied,
+  // the older Overpass replication state. A CDN must not extend either one.
+  if (ageMs >= 7 * day || ageMs < -5 * 60 * 1000 ||
+      (typeof osmBaseAt === 'string' && now - Date.parse(osmBaseAt) >= 7 * day)) return null;
   const buildings = parseProvidenceFootprintResponse(data);
   if (!buildings.length) return null;
   return {
