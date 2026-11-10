@@ -139,6 +139,12 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
     },
   });
   if (!response.ok) {
+    // HTTP 406 may mean the public Overpass server has blocked this client.
+    // Repeating the same request every ten minutes can prolong that block.
+    // Pause for a full day rather than treating access denial as congestion.
+    if (response.status === 406) {
+      throw new OverpassRateLimitError(MAX_RETRY_AFTER_MS);
+    }
     // 429 and 503 can contain a server-provided cooldown. Do not retry against
     // the public endpoint every ten minutes when it explicitly requests longer.
     if (response.status === 429 || response.status === 503) {
