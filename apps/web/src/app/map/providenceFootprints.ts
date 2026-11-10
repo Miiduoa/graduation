@@ -174,7 +174,16 @@ function isStandingBuilding(value: unknown): boolean {
   const classification = tags?.building;
   if (typeof classification !== 'string') return false;
   const kind = classification.trim().toLowerCase();
-  if (!kind || NON_BUILDING_VOLUMES.has(kind)) return false;
+  if (!kind || NON_BUILDING_VOLUMES.has(kind) || kind === 'part') return false;
+  // OSM building:part marks an individual section of a larger building. This
+  // renderer only extrudes audited whole-building ways from the ground and
+  // cannot reconstruct a part's neighbouring volumes or real base elevation.
+  // Even building=yes + building:part=yes is not a verified full building.
+  // An explicitly negative flag is safe; blank/non-string tags are ambiguous.
+  const buildingPart = tags?.['building:part'];
+  if (buildingPart !== undefined &&
+      (typeof buildingPart !== 'string' ||
+        !['no', 'false', '0'].includes(buildingPart.trim().toLowerCase()))) return false;
   // A raised building part cannot be drawn as a ground-to-roof extrusion.
   // We do not yet have verified floor/base elevations for elevated OSM ways.
   // Unknown units or ambiguous offset values must not become a fictitious wall.
