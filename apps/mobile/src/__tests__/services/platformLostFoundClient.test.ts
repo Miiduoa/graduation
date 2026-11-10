@@ -60,6 +60,7 @@ async function setup() {
     request: transport,
     credential,
     clearCredential: jest.fn(async () => undefined),
+    invalidateLocalDrafts: jest.fn(),
     now: () => 1000,
     logoutFence: {
       read: async () => false,
