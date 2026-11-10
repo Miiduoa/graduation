@@ -1,13 +1,15 @@
 import { getStateFromPath, type LinkingOptions } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
-import { stagePendingSharedPostLink, stagePublicInitialSharedPostLink } from './pendingSharedPostLink';
+import { clearPendingSharedPostLink, stagePendingSharedPostLink, stagePublicInitialSharedPostLink } from './pendingSharedPostLink';
 import type { PreAuthStackParamList } from '../screens/preAuthTypes';
 import { rewriteLegacyShopsPath } from './legacyShopsPath';
 
 /** Platform accounts have their own entry before a school account is connected. */
+const publicLinkPrefixes = [Linking.createURL('/'), 'campus://'];
+
 export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
-  prefixes: [Linking.createURL('/'), 'campus://'],
+  prefixes: publicLinkPrefixes,
   config: {
     initialRouteName: 'LoginLanding',
     screens: {
@@ -41,6 +43,11 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
   subscribe: (listener) => {
     const subscription = Linking.addEventListener('url', ({ url }) => {
       if (stagePendingSharedPostLink(url, Constants.expoConfig?.extra?.release?.deepLinkHost)) return;
+      // A newer explicit in-app destination supersedes an older signed-out share.
+      // Only the app's public schemes can cancel it; arbitrary foreign URLs cannot.
+      if (publicLinkPrefixes.some((prefix) => url.startsWith(prefix))) {
+        clearPendingSharedPostLink();
+      }
       listener(url);
     });
     return () => subscription.remove();
