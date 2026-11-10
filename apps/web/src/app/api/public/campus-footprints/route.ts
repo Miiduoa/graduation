@@ -96,6 +96,10 @@ let unavailableUntil = 0;
 async function readBoundedResponse(response: Response): Promise<string> {
   const declared = Number(response.headers.get('content-length') ?? '0');
   if (!Number.isFinite(declared) || declared < 0 || declared > MAX_RESPONSE_BYTES) {
+    // The response body may still be streaming even though the declared size
+    // already violates our limit. Cancel without awaiting: an uncooperative
+    // upstream must not hold the shared request open while cancellation stalls.
+    if (response.body) void response.body.cancel().catch(() => {});
     throw new Error('OSM response too large');
   }
   if (!response.body) {
