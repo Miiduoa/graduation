@@ -10,6 +10,8 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   onSpeakingChange?: (speaking: boolean) => void;
 }) {
   const [available, setAvailable] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const refreshVoices = useRef<(() => void) | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState('');
   const voice = useRef<SpeechSynthesisVoice | null>(null);
@@ -18,16 +20,23 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   useEffect(() => {
     if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
     const synthesis = window.speechSynthesis;
+    setSupported(true);
     setSpeaking(false);
     const update = () => {
-      const voices = synthesis.getVoices().filter((item) => item.localService);
+      // Some mobile browsers return an empty list at first without firing
+      // voiceschanged later. An explicit retry must share this same local-only filter.
+      let voices: SpeechSynthesisVoice[];
+      try { voices = synthesis.getVoices().filter((item) => item.localService); }
+      catch { voices = []; }
       voice.current = voices.find((item) => /^zh[-_]TW$/i.test(item.lang))
         ?? voices.find((item) => /^zh\b/i.test(item.lang)) ?? null;
       setAvailable(!!voice.current);
     };
+    refreshVoices.current = update;
     update();
     synthesis.addEventListener('voiceschanged', update);
     return () => {
+      refreshVoices.current = null;
       synthesis.removeEventListener('voiceschanged', update);
       if (active.current) {
         active.current.onend = null;
@@ -84,7 +93,13 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
         aria-pressed={speaking} onClick={toggle}>
         {speaking ? '停止朗讀' : label}
       </button>
-      {!available && !speaking && <small>裝置沒有可用的中文離線語音，仍可閱讀文字。</small>}
+      {!available && !speaking && <>
+        <small>{supported
+          ? '目前找不到裝置上的中文離線語音；開啟或安裝語音後可重新檢查，仍可閱讀文字。'
+          : '此瀏覽器未提供語音朗讀功能，仍可閱讀文字。'}</small>
+        {supported && <button type="button" className={styles.button}
+          onClick={() => refreshVoices.current?.()}>重新檢查中文語音</button>}
+      </>}
       {error && <small role="status">{error}</small>}
     </div>
   );

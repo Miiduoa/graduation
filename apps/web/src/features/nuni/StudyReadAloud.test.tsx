@@ -90,3 +90,37 @@ it('keeps Stop available when a mobile browser refreshes its voice list mid-read
   expect(speak).toHaveBeenCalledTimes(2);
   expect((speak.mock.calls[1][0] as Utterance).voice).toBe(local);
 });
+
+
+it('finds a newly installed local Chinese voice even when voiceschanged never fires', () => {
+  voices = [remote];
+  render(<StudyReadAloud text="這段講義仍只在裝置上朗讀" />);
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(speak).not.toHaveBeenCalled();
+
+  // Safari may keep the initial voice list until a user gesture and omit the event.
+  voices = [remote, local];
+  fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }));
+  const playButton = screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement;
+  expect(playButton.disabled).toBe(false);
+  fireEvent.click(playButton);
+  expect(speak).toHaveBeenCalledTimes(1);
+  const spoken = speak.mock.calls[0][0] as Utterance;
+  expect(spoken.voice).toBe(local);
+  expect(spoken.text).toBe('這段講義仍只在裝置上朗讀');
+});
+
+it('retains the local-only boundary when the voice lookup temporarily throws', () => {
+  voices = [remote];
+  render(<StudyReadAloud text="原文" />);
+  const synth = window.speechSynthesis;
+  const initial = synth.getVoices;
+  synth.getVoices = () => { throw new Error('voice list not ready'); };
+  expect(() => fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }))).not.toThrow();
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(speak).not.toHaveBeenCalled();
+  synth.getVoices = initial;
+  voices = [local];
+  fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }));
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(false);
+});
