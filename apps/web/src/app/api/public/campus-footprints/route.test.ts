@@ -494,7 +494,10 @@ describe('public Providence building geometry route', () => {
     }
   });
 
-  it.each(['500001', 'invalid'])(
+  it.each([
+    '500001', 'invalid', '', '1e2', '0x10', '2.5', '+10',
+    '99999999999999999999999999999999999999999',
+  ])(
     'does not leave an oversized or malformed Content-Length body streaming (%s)',
     async (declaredSize) => {
       vi.useFakeTimers();
