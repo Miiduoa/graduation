@@ -951,7 +951,7 @@ it('keeps a nearby but off-outline POI on the ground instead of inventing a roof
     ...inside,
     // Moving the outline 22m north leaves the POI about 18m outside.
     // It remains a permitted proximity match, not a proven roof/entrance.
-    outline: inside.outline.map(([lon, lat]) => [lon, lat + 0.0002]),
+    outline: inside.outline.map(([lon, lat]) => [lon, lat + 0.0002] as [number, number]),
   };
   expect(parseProvidenceFootprintResponse({
     schoolId: 'pu', buildings: [exterior],
