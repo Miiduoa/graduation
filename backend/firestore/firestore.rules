@@ -131,6 +131,14 @@ service cloud.firestore {
         && isCurrentSchoolMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.get('schoolId', ''));
     }
 
+    function isAccountAvailable(uid) {
+      return uid is string
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.get('accountDeletionInProgress', false) != true
+        && !(get(/databases/$(database)/documents/users/$(uid)).data.get('status', '')
+          in ['deleted', 'disabled', 'suspended', 'inactive']);
+    }
+
     function isDirectMessageUnblocked(conversationId) {
       let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
       let members = conversation.get('memberIds', []);
@@ -143,6 +151,21 @@ service cloud.firestore {
         && !exists(/databases/$(database)/documents/friendBlocks/$(members[0] + '_' + members[1]))
         && !exists(/databases/$(database)/documents/friendBlocks/$(members[1] + '_' + members[0]))
       );
+    }
+
+    // Existing DM text is written directly by the client. Block sends when either
+    // member is deleted / disabled / suspended / inactive or mid-deletion.
+    function isDirectMessagePeerAvailable(conversationId) {
+      let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+      let members = conversation.get('memberIds', []);
+      return !(conversation.get('type', '') == 'dm' || (members is list && members.size() == 2))
+        || (
+          members is list && members.size() == 2
+          && members[0] is string && members[1] is string
+          && members[0] != members[1]
+          && isAccountAvailable(members[0])
+          && isAccountAvailable(members[1])
+        );
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
@@ -892,6 +915,7 @@ service cloud.firestore {
         allow read: if isConversationMember(conversationId);
         allow create: if isConversationMember(conversationId)
           && isDirectMessageUnblocked(conversationId)
+          && isDirectMessagePeerAvailable(conversationId)
           && !request.resource.data.keys().hasAny(['storyReplyTo', 'attachmentPath', 'attachmentGeneration'])
           && request.resource.data.senderId == request.auth.uid;
         allow update: if isConversationMember(conversationId)

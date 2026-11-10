@@ -1228,6 +1228,34 @@ describe('firestore security rules', () => {
   });
 
 
+  test('existing DM text cannot be sent when the peer account is unavailable', async () => {
+    const path = 'conversations/dm_pu_alice_bob';
+    const message = { senderId: 'alice', content: '還在嗎', type: 'text' };
+    await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc('schools/pu/members/alice').set({ status: 'active' });
+      await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      await db.doc(path).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
+    });
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(alice.doc(path + '/messages/ok').set(message));
+    for (const status of ['deleted', 'disabled', 'suspended', 'inactive']) {
+      await seedFirestore(async (db) => {
+        await db.doc('users/bob').set({ schoolId: 'pu', status });
+      });
+      await assertFails(alice.doc(path + `/messages/blocked-${status}`).set({ ...message, content: status }));
+    }
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ schoolId: 'pu', accountDeletionInProgress: true });
+    });
+    await assertFails(alice.doc(path + '/messages/blocked-deleting').set({ ...message, content: 'deleting' }));
+    await seedFirestore(async (db) => {
+      await db.doc('users/bob').set({ schoolId: 'pu' });
+    });
+    await assertSucceeds(alice.doc(path + '/messages/restored').set({ ...message, content: 'restored' }));
+  });
+
   test('transferring school revokes DM reads, sends and edits even if old membership stays active', async () => {
     const thread = 'conversations/dm_pu_alice_bob';
     const nested = thread + '/messages/story-reply';
