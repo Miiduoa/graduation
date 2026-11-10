@@ -240,7 +240,23 @@ it('successful empty conversations stay empty and an error remains distinct', as
   fireEvent.click(screen.getByRole('button', { name: '重新連線' }));
   await screen.findByText('真實目錄姓名');
 });
-it('a permission or stale event removes previously loaded private conversation content', async () => {
+it.each(['unavailable', 'stale'] as const)('%s preserves loaded history while reconnecting without photo authorization', async (failure) => {
+  render(<Chat />);
+  await screen.findByText('伺服器的訊息');
+  const fail = vi.mocked(watchConversationContents).mock.lastCall![3];
+  act(() => fail(failure));
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '加入照片' }) as HTMLButtonElement).disabled).toBe(true);
+  vi.mocked(watchConversationContents).mockImplementationOnce(() => vi.fn());
+  fireEvent.click(screen.getAllByRole('button', { name: '重新連線' })[0]);
+  expect(screen.getByText('伺服器的訊息')).toBeTruthy();
+  const receive = vi.mocked(watchConversationContents).mock.lastCall![2];
+  act(() => receive(contents()));
+  expect((screen.getByLabelText('訊息內容') as HTMLTextAreaElement).disabled).toBe(false);
+  expect(screen.getByRole('button', { name: '加入照片' })).toBeTruthy();
+});
+it('a permission event removes previously loaded private conversation content', async () => {
   render(<Chat />);
   await screen.findByText('伺服器的訊息');
   const fail = vi.mocked(watchConversationContents).mock.calls.at(-1)![3];

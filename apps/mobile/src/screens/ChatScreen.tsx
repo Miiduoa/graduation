@@ -675,11 +675,11 @@ export function ChatScreen(props: any) {
       },
       (err: any) => {
         if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
-        activeConversationScopeRef.current = null;
-        setMessages([]);
-        setUserNames({});
-        fetchedUids.current = new Set();
         if (err?.code === 'permission-denied') {
+          activeConversationScopeRef.current = null;
+          setMessages([]);
+          setUserNames({});
+          fetchedUids.current = new Set();
           setAccessError('你不是此對話的成員，無法檢視訊息。');
         } else {
           console.error('[ChatScreen] Messages error:', err);
@@ -802,18 +802,23 @@ export function ChatScreen(props: any) {
       },
       (err: any) => {
         if (!listening || scopeRef.current !== sendScope) return;
-        serverRejected = true;
-        readableTextScopeRef.current = null;
-        setReadableTextThread(null);
+        // A listener failure cannot grant photo access, but only an explicit
+        // permission denial revokes the already readable text session.
         verifiedPhotoMembers = null;
         setVerifiedPhotoThread(null);
-        activeConversationScopeRef.current = null;
-        setMessages([]);
-        setUserNames({});
-        fetchedUids.current = new Set();
         if (err?.code === 'permission-denied') {
+          serverRejected = true;
+          readableTextScopeRef.current = null;
+          setReadableTextThread(null);
+          activeConversationScopeRef.current = null;
+          setMessages([]);
+          setUserNames({});
+          fetchedUids.current = new Set();
           setAccessError('你不是此對話的成員，無法檢視訊息。');
+        } else {
+          console.error('[ChatScreen] Conversation error:', err);
         }
+        setLoading(false);
       },
     );
     return () => {

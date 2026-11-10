@@ -59,6 +59,7 @@ type FeedState<T> = {
 function useFeed<T>(
   scope: string,
   subscribe: (receive: (value: T) => void, fail: (reason: MessagingFailure) => void) => () => void,
+  retainHistory = false,
 ) {
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<FeedState<T>>({ scope, attempt, status: 'loading' });
@@ -71,24 +72,34 @@ function useFeed<T>(
           if (active) setState({ scope, attempt, status: 'ready', data });
         },
         (status) => {
-          if (active) setState({ scope, attempt, status });
+          if (active) setState((previous) => ({
+            scope, attempt, status,
+            data: retainHistory && status !== 'permission' && previous.scope === scope
+              ? previous.data : undefined,
+          }));
         },
       );
     } catch {
       queueMicrotask(() => {
-        if (active) setState({ scope, attempt, status: 'unavailable' });
+        if (active) setState((previous) => ({
+          scope, attempt, status: 'unavailable',
+          data: retainHistory && previous.scope === scope ? previous.data : undefined,
+        }));
       });
     }
     return () => {
       active = false;
       stop?.();
     };
-  }, [scope, attempt, subscribe]);
+  }, [scope, attempt, subscribe, retainHistory]);
   return {
     state:
       state.scope === scope && state.attempt === attempt
         ? state
-        : { scope, attempt, status: 'loading' as const },
+        : {
+            scope, attempt, status: 'loading' as const,
+            data: retainHistory && state.scope === scope ? state.data : undefined,
+          },
     retry: () => setAttempt((value) => value + 1),
   };
 }
@@ -399,6 +410,7 @@ export function PrivateConversationView({
   const { state, retry } = useFeed(
     viewScope,
     subscribe,
+    true,
   );
   const isCurrent = useCurrent(session);
   const [draftState, setDraftState] = useState<{ scope: string; text: string }>({ scope: '', text: '' });
@@ -579,9 +591,10 @@ export function PrivateConversationView({
   };
   const visibleMessages = (state.data?.messages ?? []).filter(
     (row) =>
-      !messageSearch.trim() ||
-      (!row.recalled &&
-        row.content.toLocaleLowerCase().includes(messageSearch.trim().toLocaleLowerCase())),
+      (state.status === 'ready' || row.type === 'text' || row.type === 'reply') &&
+      (!messageSearch.trim() ||
+        (!row.recalled &&
+          row.content.toLocaleLowerCase().includes(messageSearch.trim().toLocaleLowerCase()))),
   );
   return (
     <div className={styles.stack}>
@@ -593,7 +606,7 @@ export function PrivateConversationView({
         </button>
       </div>
       <StateNotice status={state.status} retry={retry} />
-      {state.status === 'ready' && state.data && (
+      {state.data && (
         <>
           <div className={styles.chatHeader}>
             <div>
@@ -611,7 +624,7 @@ export function PrivateConversationView({
               lastReadAt: state.data.conversation.lastReadAt,
               lastMessageSenderId: state.data.conversation.lastSenderId,
             }) ? (
-              <button className={styles.button} type="button" onClick={read} disabled={reading}>
+              <button className={styles.button} type="button" onClick={read} disabled={reading || state.status !== 'ready'}>
                 {reading ? '更新中…' : '標記已讀'}
               </button>
             ) : (
@@ -703,7 +716,7 @@ export function PrivateConversationView({
                             aria-label={`${emoji === '👍' ? '讚' : '愛心'}，目前 ${members.length} 人回應`}
                             aria-pressed={mine}
                             className={styles.reactionButton}
-                            disabled={reacting !== null}
+                            disabled={reacting !== null || state.status !== 'ready'}
                             onClick={() => void react(row.id, emoji)}
                           >
                             {emoji}{members.length ? ` ${members.length}` : ''}

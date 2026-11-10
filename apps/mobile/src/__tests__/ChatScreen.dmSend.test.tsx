@@ -1162,7 +1162,34 @@ test('cached received messages neither mark read nor replace the current outboun
   expect(fetchSchoolDirectoryProfiles).not.toHaveBeenCalled();
 });
 
-test.each(['messages', 'roster'])('%s errors clear received content and reject late message callbacks', async (source) => {
+test.each(['messages', 'roster'])('%s non-permission errors retain history and outbound retry', async (source) => {
+  writeOutboundDrafts(photoConvo, [{
+    id: 'retry-history', conversationId: photoConvo, senderId: 'alice',
+    content: '等待重試', status: 'failed', createdAtMs: 100,
+  }]);
+  const view = render(photoChat());
+  verifyPhotoChat();
+  await act(async () => emitMessages([{ id: 'history', data: {
+    senderId: 'bob', content: '已載入歷史', readBy: ['alice'],
+  } }]));
+  const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    act(() => mockSnapshotErrors.get(source === 'messages'
+      ? `conversations/${photoConvo}/messages` : `conversations/${photoConvo}`)({ code: 'unavailable' }));
+    expect(view.getByText('已載入歷史')).toBeTruthy();
+    expect(view.queryByText('你不是此對話的成員，無法檢視訊息。')).toBeNull();
+    if (source === 'roster') expect(view.queryByLabelText('加入照片')).toBeNull();
+    await act(async () => fireEvent.press(view.getByLabelText('重試送出此則訊息')));
+    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ messageId: 'retry-history' }));
+    expect(view.getByText('已載入歷史')).toBeTruthy();
+    expect(view.queryByText('已送達')).toBeNull();
+    expect(readOutboundDrafts(photoConvo, 'alice')).toHaveLength(1);
+  } finally {
+    log.mockRestore();
+  }
+});
+
+test.each(['messages', 'roster'])('%s permission errors clear received content and reject late message callbacks', async (source) => {
   const view = render(photoChat());
   verifyPhotoChat();
   const received = { id: 'received', data: { senderId: 'bob', content: '私人的內容', readBy: ['alice'] } };
@@ -1178,6 +1205,7 @@ test.each(['messages', 'roster'])('%s errors clear received content and reject l
   jest.mocked(fetchSchoolDirectoryProfiles).mockClear();
   act(() => callback({ metadata: { fromCache: false, hasPendingWrites: false }, docs: [{ id: received.id, data: () => ({ ...received.data, readBy: [] }), metadata: { hasPendingWrites: false } }] }));
   expect(view.queryByText('私人的內容')).toBeNull();
+  expect(view.getByText('你不是此對話的成員，無法檢視訊息。')).toBeTruthy();
   expect(updateDoc).not.toHaveBeenCalled();
   expect(fetchSchoolDirectoryProfiles).not.toHaveBeenCalled();
 });
