@@ -229,11 +229,19 @@ function heightFromOsmTags(value: unknown):
   // unreadable height is *not* evidence that the building is 12 metres tall:
   // omit its volume until the unit/value can be verified.
   if (raw === undefined) return { heightMeters: ILLUSTRATIVE_HEIGHT, heightBasis: 'illustrative' };
-  // Retain explicit metric precision; do not misread feet, ranges, comma
-  // decimals, malformed tags, or implausible values as a surveyed height.
-  if (typeof raw !== 'string' || !/^\d{1,3}(?:\.\d{1,6})?(?:\s*m)?$/.test(raw.trim())) return null;
-  const height = Number(raw.trim().replace(/\s*m$/, ''));
-  return height >= 2.5 && height <= 100 ? { heightMeters: height, heightBasis: 'osm-tag' } : null;
+  // OSM heights default to metres; explicit feet and canonical feet/inches
+  // are also documented. Only convert unambiguous units, never infer levels.
+  if (typeof raw !== 'string') return null;
+  const label = raw.trim();
+  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m)?$/.exec(label);
+  const feet = /^(\d{1,3}(?:\.\d{1,6})?)\s+(?:ft|feet)$/i.exec(label);
+  const feetInches = /^(\d{1,3})'(?:([0-9]{1,2})")?$/.exec(label);
+  if (feetInches && Number(feetInches[2] ?? 0) >= 12) return null;
+  const height = metric ? Number(metric[1]) :
+    feet ? Number(feet[1]) * 0.3048 :
+      feetInches ? Number(feetInches[1]) * 0.3048 + Number(feetInches[2] ?? 0) * 0.0254 : NaN;
+  return Number.isFinite(height) && height >= 2.5 && height <= 100
+    ? { heightMeters: height, heightBasis: 'osm-tag' } : null;
 }
 
 /** Overpass JSON：不接收動態 way ID、不猜位置、不補無來源的建築。 */
