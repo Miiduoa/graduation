@@ -17,7 +17,7 @@ export function checkGlobalUiFoundation(source) {
   if (!pageRoot || !/\boverflow-x\s*:\s*clip\s*;/i.test(pageRoot[1])) {
     issues.push(globalStyles + ': html and body must clip viewport-level horizontal overflow');
   }
-  if (!/\b--font-ui\s*:/.test(css) || !/\bfont-family\s*:\s*var\(--font-ui\)\s*;/.test(css)) {
+  if (!/--font-ui\s*:/.test(css) || !/\bfont-family\s*:\s*var\(--font-ui\)\s*;/.test(css)) {
     issues.push(globalStyles + ': the shared UI font must be a design token');
   }
   const focus = css.match(/:where\([^)]*\):focus-visible\s*\{([^}]*)\}/m);
