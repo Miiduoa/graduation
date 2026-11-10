@@ -44,6 +44,11 @@ type QueryFilter = { field: string; op: string; value: unknown };
 type QueryOrder = { field: string; direction: string };
 
 function fieldMatches(data: DocData, filter: QueryFilter): boolean {
+  if (filter.op === 'in') return Array.isArray(filter.value) && filter.value.includes(data[filter.field]);
+  if (filter.op === '<=') {
+    const current = data[filter.field];
+    return typeof current === 'number' && typeof filter.value === 'number' && current <= filter.value;
+  }
   if (filter.op === 'array-contains') {
     const current = data[filter.field];
     return Array.isArray(current) && current.includes(filter.value);
@@ -88,12 +93,14 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
     maximum: number,
     order: QueryOrder | null,
     values: Map<string, DocData>,
+    group = false,
   ) {
     const rows = [...values]
       .filter(
         ([docPath, data]) =>
-          docPath.startsWith(`${path}/`) &&
-          docPath.slice(path.length + 1).indexOf('/') === -1 &&
+          (group ? docPath.split('/').at(-2) === path :
+            docPath.startsWith(`${path}/`) &&
+            docPath.slice(path.length + 1).indexOf('/') === -1) &&
           filters.every((filter) => fieldMatches(data, filter)),
       )
       .map(([docPath]) => snap(ref(docPath), values));
@@ -112,20 +119,26 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
     filters: QueryFilter[] = [],
     maximum = Infinity,
     order: QueryOrder | null = null,
+    after?: string,
+    group = false,
   ) {
     return {
       path,
+      group,
       filters,
       maximum,
       order,
       doc: (id?: string) => ref(`${path}/${id || autoId()}`),
       where: (field: string, op: string, value: unknown) =>
-        collection(path, [...filters, { field, op, value }], maximum, order),
+        collection(path, [...filters, { field, op, value }], maximum, order, after, group),
       orderBy: (field: string, direction = 'asc') =>
-        collection(path, filters, maximum, { field, direction }),
-      limit: (count: number) => collection(path, filters, count, order),
-      async get() {
-        const result = queryDocs(path, filters, maximum, order, docs);
+        collection(path, filters, maximum, { field, direction }, after, group),
+      limit: (count: number) => collection(path, filters, count, order, after, group),
+      startAfter: (id: string) => collection(path, filters, maximum, order, id, group),
+      async get(): Promise<{ docs: ReturnType<typeof snap>[]; size: number; empty: boolean }> {
+        const all = queryDocs(path, filters, Infinity, order, docs, group);
+        if (order?.field === '__name__') all.sort((a, b) => a.id.localeCompare(b.id));
+        const result = all.filter((row) => !after || row.id > after).slice(0, maximum);
         return { docs: result, size: result.length, empty: result.length === 0 };
       },
     };
@@ -144,6 +157,7 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
   const db = {
     doc: (path: string) => ref(path),
     collection: (name: string) => collection(name),
+    collectionGroup: (name: string) => collection(name, [], Infinity, null, undefined, true),
     async runTransaction<T>(callback: (transaction: any) => Promise<T>): Promise<T> {
       const base = new Map(docs);
       const writes: Array<{
@@ -157,6 +171,7 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
           refs.map((reference) => snap(reference, base)),
         get: async (query: {
           path: string;
+          group?: boolean;
           id?: string;
           filters?: QueryFilter[];
           maximum?: number;
@@ -170,6 +185,7 @@ export function createMemoryGroupStore(seed: Array<[string, DocData]> = []) {
             query.maximum ?? Infinity,
             query.order ?? null,
             base,
+            query.group,
           );
           return { docs: result, size: result.length, empty: result.length === 0 };
         },

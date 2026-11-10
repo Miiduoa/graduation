@@ -4,6 +4,8 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { CampusStoryViewer, useCampusStories } from '../screens/social/CampusStoryViewer';
 import type { CampusStoryDoc } from '../services/stories';
 
+jest.mock('expo-av', () => ({ Video: 'Video', ResizeMode: { CONTAIN: 'contain' } }));
+
 jest.mock('../firebase', () => ({ isFirebaseMockMode: () => false }));
 jest.mock('../services/stories', () => ({
   ...jest.requireActual('../services/stories'),

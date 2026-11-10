@@ -44,6 +44,7 @@ describe('private group file HTTP handler', () => {
   beforeEach(() => {
     store = transactionStore([
       ['groups/course', { schoolId: 'pu' }],
+      ['groups/course/posts/one', { authorId: 'alice' }],
       ['assignments/work', { groupId: 'course' }],
       ...['alice', 'bob', 'teacher'].flatMap((uid) => [
         [`users/${uid}`, { displayName: uid }],
@@ -229,6 +230,7 @@ describe('private group file HTTP handler', () => {
   });
 
   test.each([[POST, 0], [COVER, '9007199254740993']])('actual GCS SDK sends the generation precondition for %s', async (path, expected) => {
+    if (path === POST) store.docs.set('groups/course/posts/one', { authorId: 'teacher' });
     const storage = new CloudStorage({ projectId: 'demo-private-files', apiEndpoint: 'http://127.0.0.1:1' });
     storage.request = jest.fn((options, callback) => {
       if (options.method !== 'POST') {
@@ -355,6 +357,7 @@ describe('private group file namespace parser', () => {
     ['groups/course/posts/one/../file.pdf', null], ['groups/course/cover.jpg/', null],
     ['groups/course/cover\n.jpg', null], ['groups/course/cover\\.jpg', null],
     ['assignments/work/submissions/alice', null], ['avatars/alice.jpg', null],
+    ['schools/pu/stories/story-1/image', null],
     [null, null], [['groups/course/cover.jpg'], null],
   ])('limits path %j to scope %s', (path, kind) => {
     expect(parsePrivateGroupFilePath(path)?.kind || null).toBe(kind);

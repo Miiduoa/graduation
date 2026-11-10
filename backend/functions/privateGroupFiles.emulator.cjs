@@ -100,6 +100,8 @@ beforeEach(async () => {
   assignmentId = `work-${caseNumber}`;
   await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
   await db.doc(`assignments/${assignmentId}`).set({ groupId });
+  // 下載貼文附件需要貼文仍存在。
+  await db.doc(`groups/${groupId}/posts/one`).set({ authorId: 'alice' });
   for (const uid of ['alice', 'bob', 'teacher']) {
     await db.doc(`users/${uid}`).set({ displayName: uid });
     await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });

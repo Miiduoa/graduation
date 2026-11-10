@@ -475,6 +475,41 @@ it('keeps verified items when a batch stops, then resumes only after the uncerta
   expect(readPersonalImports({ owner: 'platform:alice', schoolId: 'pu' })).toHaveLength(3);
 });
 
+it('restores the confirmation status after a read-only recovery before the next card', async () => {
+  const first = calendarCard('calendar-event-1', '英文讀書');
+  const second = calendarCard('calendar-event-2', '程式練習', '21:00');
+  const requests: string[] = [];
+  let finishSecond: ((result: Response) => void) | undefined;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    const body = JSON.parse(String(init?.body));
+    if (url.endsWith('confirm')) {
+      requests.push('confirm:' + body.token);
+      if (body.token === first.token) throw new TypeError('first receipt lost');
+      return new Promise<Response>((resolve) => { finishSecond = resolve; });
+    }
+    if (url.endsWith('reconcile')) {
+      requests.push('reconcile:' + body.token);
+      return json(receiptFor(first, true));
+    }
+    return json({ answer: '兩項讀書安排', steps: [], cards: [first, second] });
+  }));
+  render(<Assistant />);
+  await askForPlan();
+  fireEvent.click(await screen.findByRole('button', { name: '依序全部確認' }));
+  await waitFor(() => expect(finishSecond).toBeDefined());
+  expect(requests).toEqual([
+    'confirm:' + first.token,
+    'reconcile:' + first.token,
+    'confirm:' + second.token,
+  ]);
+  // Calendar cards expose a separate live progress status; inspect the assistant status specifically.
+  expect(screen.getByText('正在確認操作結果').closest('[role="status"]')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  finishSecond!(json(receiptFor(second)));
+  await waitFor(() => expect(screen.getByLabelText('行程執行進度').textContent).toContain('已核對 2/2 項'));
+});
+
 it('cancellation reads an already committed row as verified instead of claiming it was removed', async () => {
   const card = calendarCard();
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -722,4 +757,113 @@ it('v2 renders markdown, assignment rows and food cards without raw paths', asyn
   expect(screen.getByText('合成蔬食餐廳')).toBeTruthy();
   expect(screen.getByRole('link', { name: '前往點餐頁' }).getAttribute('href')).toContain('/food?');
   expect(screen.getByText('確認')).toBeTruthy();
+});
+
+it('keeps the next draft typed while a cloud answer is pending', async () => {
+  let resolveAnswer: (response: Response) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return new Promise<Response>((resolve) => { resolveAnswer = resolve; });
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '幫我整理專題介紹的流程' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(field.value).toBe(''));
+  fireEvent.change(field, { target: { value: '也幫我找校園活動' } });
+  expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(true);
+  resolveAnswer(json({ answer: '已整理專題說明流程', steps: [], cards: [] }));
+  await screen.findByText('已整理專題說明流程');
+  expect(field.value).toBe('也幫我找校園活動');
+});
+
+it('keeps an unsuccessful question recoverable without discarding a later draft', async () => {
+  let resolveAnswer: (response: Response) => void = () => {};
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    return new Promise<Response>((resolve) => { resolveAnswer = resolve; });
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '請核對明天的專題會議' } });
+  await waitFor(() => expect((screen.getByRole('button', { name: '送出' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await waitFor(() => expect(field.value).toBe(''));
+  fireEvent.change(field, { target: { value: '新的草稿不能消失' } });
+  resolveAnswer(new Response(JSON.stringify({ message: '查詢服務暫時無法連線' }), {
+    status: 503, headers: { 'Content-Type': 'application/json' },
+  }));
+  await screen.findByRole('group', { name: '未完成的問題' });
+  expect(field.value).toBe('新的草稿不能消失');
+  expect(screen.getByText('請核對明天的專題會議')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '切換到這個問題' }));
+  expect(field.value).toBe('請核對明天的專題會議');
+  expect(screen.getByText('新的草稿不能消失')).toBeTruthy();
+});
+
+it('stops only an in-flight model read, ignores late transport data, and keeps the next draft', async () => {
+  let lateAnswer: (response: Response) => void = () => {};
+  let stoppedSignal: AbortSignal | undefined;
+  let asks = 0;
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: string, options?: RequestInit) => {
+    calls.push(url);
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('/ask')) {
+      asks += 1;
+      if (asks === 1) {
+        stoppedSignal = options?.signal as AbortSignal;
+        return new Promise<Response>((resolve) => { lateAnswer = resolve; });
+      }
+      return json({ answer: '新問題已回答', steps: [], cards: [] });
+    }
+    throw new Error('unexpected mutation endpoint');
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '先幫我規劃本週作業' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  const stop = await screen.findByRole('button', { name: '停止這次回答' });
+  fireEvent.change(field, { target: { value: '下一句已先寫好了' } });
+  fireEvent.click(stop);
+  await screen.findByRole('group', { name: '未完成的問題' });
+  expect(stoppedSignal?.aborted).toBe(true);
+  expect(field.value).toBe('下一句已先寫好了');
+  expect(screen.getByText('先幫我規劃本週作業')).toBeTruthy();
+  lateAnswer(json({ answer: '取消後晚到的舊答案', steps: [], cards: [] }));
+  await waitFor(() => expect(screen.queryByText('取消後晚到的舊答案')).toBeNull());
+  expect(calls.every((path) => !/\/(confirm|cancel|reconcile)$/.test(path))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  await screen.findByText('新問題已回答');
+  expect(asks).toBe(2);
+  expect(field.value).toBe('');
+});
+
+it('stopping a cloud read never treats action confirmation as cancelled', async () => {
+  let lateAnswer: (response: Response) => void = () => {};
+  let calls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('capability')) return json({ enabled: true, ready: true, version: 2 });
+    if (url.endsWith('/ask')) {
+      calls += 1;
+      if (calls === 1) return new Promise<Response>((resolve) => { lateAnswer = resolve; });
+      return json({ answer: '已再次核對需求', steps: [], cards: [] });
+    }
+    throw new Error('should never call a write endpoint');
+  }));
+  render(<Assistant />);
+  const field = await screen.findByLabelText('問題') as HTMLTextAreaElement;
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(field, { target: { value: '請給我行程建議' } });
+  fireEvent.click(screen.getByRole('button', { name: '送出' }));
+  fireEvent.click(await screen.findByRole('button', { name: '停止這次回答' }));
+  await screen.findByText(/已停止這次回答/);
+  lateAnswer(json({ answer: '這筆不是可執行的回執', steps: [], cards: [] }));
+  expect(screen.queryByText('這筆不是可執行的回執')).toBeNull();
+  expect(screen.queryByRole('button', { name: '停止這次回答' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '確認' })).toBeNull();
 });
