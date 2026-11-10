@@ -63,7 +63,7 @@ export default function LoginLandingScreen() {
           </Text>
           <Text style={s.body}>
             {platformReady && hasSchool ? '用這台手機儲存的課表，查現在或下一堂課的時間和教室。'
-              : '選擇學校後，可自行匯入課表、成績與活動；需要平台交流或課班服務時，請使用 Google 帳號登入。校園地圖、公車與公開資訊仍然不必登入。'}
+              : '使用 Google 帳號即可加入平台課程、繳交作業與查看自己的訂單，不必先綁定學校。選擇學校後，可另外匯入自己的課表、成績與活動；校園地圖、公車與公開資訊不必登入。'}
           </Text>
           {platformReady && (
             <Pressable
@@ -75,7 +75,50 @@ export default function LoginLandingScreen() {
             </Pressable>
           )}
         </View>
+        <View style={s.panel}>
+          <Text accessibilityRole="header" style={s.title}>
+            Google 帳號
+          </Text>
+          <Text style={s.body}>和網頁版使用同一個 Google 帳號，加入平台課程、繳交作業或查看自己的訂單，不必先綁定學校。</Text>
+          <Text style={s.importHelp}>校方私人資料、已驗證學生服務與店家管理，仍依各服務的資格與授權開放。</Text>
+          {auth.pendingLogout || auth.error ? (
+            <Text accessibilityRole="alert" style={s.body}>
+              {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
+            </Text>
+          ) : null}
+          <Pressable
+            testID="login-start"
+            accessibilityRole="button"
+            style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
+            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
+          >
+            <Text style={s.buttonText}>
+              {platformReady
+                ? '回到我的 nuni'
+                : auth.loading
+                  ? '確認 Google 帳號'
+                  : auth.pendingLogout
+                    ? '處理未完成的登出'
+                    : auth.error
+                      ? '查看登入問題'
+                      : '登入或建立帳號'}
+            </Text>
+          </Pressable>
+        </View>
         <SchoolBrowsingControl />
+        <View style={s.panel}>
+          <Text accessibilityRole="header" style={s.title}>失物招領</Text>
+          <Text style={s.body}>用 Google 帳號刊登遺失或拾獲資訊，查看聯絡方式，並管理自己的刊登。</Text>
+          <Pressable
+            testID="platform-lost-found-start"
+            accessibilityRole="button"
+            accessibilityLabel="開啟平台失物招領"
+            style={({ pressed }) => [s.schoolButton, pressed && s.rowPressed]}
+            onPress={() => safeNavigate(navigation, 'PlatformLostFound')}
+          >
+            <Text style={s.schoolButtonText}>開啟失物招領 →</Text>
+          </Pressable>
+        </View>
         {hasSchool && (
           <View style={s.schoolPanel}>
             <Text accessibilityRole="header" style={s.title}>
@@ -111,35 +154,6 @@ export default function LoginLandingScreen() {
             <Text style={s.importHelp}>支援學校網頁 HTML 存檔、截圖、PDF、CSV；先選表格並核對內容，不需要提供校務密碼。</Text>
           </View>
         )}
-        <View style={s.panel}>
-          <Text accessibilityRole="header" style={s.title}>
-            Google 帳號
-          </Text>
-          <Text style={s.body}>和網頁版使用同一個帳號，加入課程、繳交作業或管理店家。</Text>
-          {auth.pendingLogout || auth.error ? (
-            <Text accessibilityRole="alert" style={s.body}>
-              {auth.pendingLogout ? '上次登出還沒完成，請先完成登出再使用其他帳號。' : auth.error}
-            </Text>
-          ) : null}
-          <Pressable
-            testID="login-start"
-            accessibilityRole="button"
-            style={({ pressed }) => [s.button, pressed && s.buttonPressed]}
-            onPress={() => safeNavigate(navigation, 'NuniWorkspace')}
-          >
-            <Text style={s.buttonText}>
-              {platformReady
-                ? '回到我的 nuni'
-                : auth.loading
-                  ? '確認 Google 帳號'
-                  : auth.pendingLogout
-                    ? '處理未完成的登出'
-                    : auth.error
-                      ? '查看登入問題'
-                      : '登入或建立帳號'}
-            </Text>
-          </Pressable>
-        </View>
         {hasSchool && (
           <>
             <View style={s.publicPanel}>

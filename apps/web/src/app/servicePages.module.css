@@ -313,6 +313,23 @@
 .methodHeading { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .methodHeading h2 { margin-bottom: 0; }
 .methodStatus { white-space: nowrap; background: var(--success-soft); color: var(--success); border-color: transparent; }
+.schoolConnection > summary {
+  cursor: pointer;
+  min-height: 44px;
+  list-style-position: outside;
+}
+.schoolConnection > summary .methodHeading {
+  display: inline-flex;
+  width: calc(100% - 12px);
+  margin: 0;
+  vertical-align: middle;
+}
+.schoolConnection[open] > summary { margin-bottom: 18px; }
+.schoolConnection > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 5px;
+  border-radius: var(--radius-sm);
+}
 .schoolPicker { display: grid; gap: 8px; margin-block: 16px; font-size: 13px; font-weight: 600; }
 .schoolPicker select {
   width: 100%;
