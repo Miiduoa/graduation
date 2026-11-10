@@ -22,7 +22,7 @@ function listen(listener) {
 
 function request(port, { method, path, body, headers = {} }) {
   return new Promise((resolve, reject) => {
-    const payload = body == null ? null : Buffer.from(JSON.stringify(body));
+    const payload = body == null ? null : (Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body)));
     const req = http.request(
       {
         hostname: '127.0.0.1',
@@ -184,6 +184,201 @@ describe('callable HTTP adapter', () => {
       headers: { Authorization: 'Bearer valid-token', Origin: 'https://evil.example' },
     });
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
+
+describe('registered route ownership', () => {
+  test.each(['toString', 'constructor', 'hasOwnProperty'])(
+    'rejects inherited Object.%s as an unregistered callable',
+    async (name) => {
+      const registered = jest.fn(async () => ({ ok: true }));
+      const { server, port } = await listen(createRequestListener({
+        callables: { registered },
+        verifyIdToken: async () => ({ uid: 'student-1' }),
+      }));
+      try {
+        const response = await request(port, {
+          method: 'POST', path: `/${name}`, body: { data: {} },
+          headers: { Authorization: 'Bearer test-token' },
+        });
+        expect(response.status).toBe(404);
+        expect(response.body.error.status).toBe('NOT_FOUND');
+        expect(registered).not.toHaveBeenCalled();
+      } finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    },
+  );
+
+  test('rejects a callable inherited from a custom prototype', async () => {
+    const inherited = jest.fn(async () => ({ unexpected: true }));
+    const callables = Object.create({ inheritedCallable: inherited });
+    const { server, port } = await listen(createRequestListener({ callables }));
+    try {
+      const response = await request(port, {
+        method: 'POST', path: '/inheritedCallable', body: { data: {} },
+      });
+      expect(response.status).toBe(404);
+      expect(response.body.error.status).toBe('NOT_FOUND');
+      expect(inherited).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('rejects an HTTP handler inherited from a custom prototype', async () => {
+    const inherited = jest.fn((_req, res) => res.status(200).json({ unexpected: true }));
+    const httpFunctions = Object.create({ inheritedHttp: inherited });
+    const { server, port } = await listen(createRequestListener({
+      callables: Object.create(null), httpFunctions,
+    }));
+    try {
+      const response = await request(port, { method: 'GET', path: '/inheritedHttp' });
+      expect(response.status).toBe(404);
+      expect(response.body.error.status).toBe('NOT_FOUND');
+      expect(inherited).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('does not execute a job inherited from a schedule prototype', async () => {
+    const inherited = jest.fn(async () => {});
+    const schedules = Object.create({ inheritedJob: { handler: inherited } });
+    const { server, port } = await listen(createRequestListener({
+      schedules, cronSecret: 'synthetic-secret',
+    }));
+    try {
+      const response = await request(port, {
+        method: 'POST', path: '/internal/cron/inheritedJob',
+        headers: { Authorization: 'Bearer synthetic-secret' },
+      });
+      expect(response.status).toBe(404);
+      expect(inherited).not.toHaveBeenCalled();
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+describe('prebuffered HTTP body resource bounds', () => {
+  test.each(['rawBody', 'body-buffer', 'body-string', 'body-object'])(
+    'rejects oversized %s before invoking a callable',
+    async (kind) => {
+      const callable = jest.fn(async () => ({ ok: true }));
+      const listener = createRequestListener({
+        callables: { boundedOp: callable },
+        verifyIdToken: async () => ({ uid: 'student-1' }),
+      });
+      const oversized = JSON.stringify({ data: { text: 'a'.repeat(10 * 1024 * 1024) } });
+      const { server, port } = await listen((req, res) => {
+        if (kind === 'rawBody') req.rawBody = Buffer.from(oversized);
+        if (kind === 'body-buffer') req.body = Buffer.from(oversized);
+        if (kind === 'body-string') req.body = oversized;
+        if (kind === 'body-object') req.body = JSON.parse(oversized);
+        return listener(req, res);
+      });
+      try {
+        const response = await request(port, {
+          method: 'POST',
+          path: '/boundedOp',
+          body: { data: {} },
+          headers: { Authorization: 'Bearer test-token' },
+        });
+        expect(response.status).toBe(413);
+        expect(response.body.error.status).toBe('RESOURCE_EXHAUSTED');
+        expect(callable).not.toHaveBeenCalled();
+      } finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    },
+  );
+
+  test('allows small prebuffered JSON without changing the callable contract', async () => {
+    const callable = jest.fn(async (req) => ({ received: req.data.value }));
+    const listener = createRequestListener({
+      callables: { boundedOp: callable },
+      verifyIdToken: async () => ({ uid: 'student-1' }),
+    });
+    const { server, port } = await listen((req, res) => {
+      req.rawBody = Buffer.from(JSON.stringify({ data: { value: 'ok' } }));
+      return listener(req, res);
+    });
+    try {
+      const response = await request(port, {
+        method: 'POST',
+        path: '/boundedOp',
+        body: { data: { value: 'ignored' } },
+        headers: { Authorization: 'Bearer test-token' },
+      });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ result: { received: 'ok' } });
+      expect(callable).toHaveBeenCalledTimes(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
+
+describe('private file HTTP transport', () => {
+  test('leaves binary upload limits and stream consumption to the authenticated handler', async () => {
+    const handler = jest.fn(async (req, res) => {
+      expect(req.rawBody).toBeUndefined();
+      expect(req.query.path).toBe('assignments/work/submissions/alice/file.pdf');
+      let bytes = 0;
+      for await (const chunk of req) bytes += chunk.length;
+      res.json({ bytes });
+    });
+    const { server, port } = await listen(createRequestListener({
+      httpFunctions: { privateGroupFile: handler },
+    }));
+    try {
+      const body = Buffer.alloc(11 * 1024 * 1024, 65);
+      const response = await request(port, {
+        method: 'POST',
+        path: '/privateGroupFile?path=assignments%2Fwork%2Fsubmissions%2Falice%2Ffile.pdf',
+        headers: { 'Content-Type': 'application/pdf' },
+        body,
+      });
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ bytes: body.length });
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('permits authorization denial before an upload body arrives', async () => {
+    const handler = jest.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    const { server, port } = await listen(createRequestListener({
+      httpFunctions: { privateGroupFile: handler },
+    }));
+    let upload;
+    try {
+      const status = await new Promise((resolve, reject) => {
+        upload = http.request({
+          hostname: '127.0.0.1', port, method: 'POST', path: '/privateGroupFile',
+          headers: { 'Content-Type': 'application/pdf', 'Content-Length': 1024 },
+        }, (res) => { res.resume(); resolve(res.statusCode); });
+        upload.on('error', reject);
+        upload.setTimeout(1000, () => upload.destroy(new Error('Adapter waited for unauthorized body')));
+        upload.flushHeaders();
+      });
+      expect(status).toBe(401);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally {
+      upload?.destroy();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
 

@@ -144,6 +144,26 @@ it('links unread rows to their notification destination', async () => {
   expect(screen.queryByText('已讀不顯示')).toBeNull();
 });
 
+it('omits the school-only summary for an already signed-in platform account', () => {
+  state.uid = null;
+  render(<TodayUnreadNotifications unsigned={false} />);
+  expect(screen.queryByText(TODAY_NOTIFY_UNSIGNED)).toBeNull();
+  expect(screen.queryByRole('heading', { name: TODAY_NOTIFY_TITLE })).toBeNull();
+  expect(state.watch).toBeNull();
+});
+
+it.each(['account', 'school'])('removes private notification rows immediately when %s changes', (change) => {
+  const view = render(<TodayUnreadNotifications unsigned={false} />);
+  const previous = state.watch!;
+  act(() => previous.receive({ notifications: [notice()], unscopedCount: 0 }));
+  expect(screen.getByRole('link', { name: /作業提醒/ })).toBeTruthy();
+  if (change === 'account') state.uid = 'bob';
+  else state.schoolId = 'nthu';
+  view.rerender(<TodayUnreadNotifications unsigned={false} />);
+  act(() => previous.receive({ notifications: [notice()], unscopedCount: 0 }));
+  expect(screen.queryByRole('link', { name: /作業提醒/ })).toBeNull();
+  expect(screen.queryByText(TODAY_NOTIFY_EMPTY)).toBeNull();
+});
 it.each(['groupId', 'courseId'] as const)(
   'opens attendance with a full document navigation using %s',
   async (courseKey) => {

@@ -29,7 +29,10 @@ type Analysis = {
   result?: CampusSemanticResult;
 };
 
-export function QuickCampusEntry() {
+export function QuickCampusEntry({ onAsk, compact = false }: {
+  onAsk?: ((phrase: string) => void) | null;
+  compact?: boolean;
+} = {}) {
   const schoolLmsEnabled = useSchoolLmsReadonlyEnabled();
   const selection = useOptionalSelectedSchool();
   const { user } = useAuth();
@@ -117,15 +120,19 @@ export function QuickCampusEntry() {
   }
 
   return (
-    <section className={styles.entry} aria-labelledby="quick-entry-title">
+    <section className={compact ? styles.compactEntry : styles.entry} aria-labelledby="quick-entry-title">
       <div className={styles.heading}>
-        <div>
-          <p className={styles.eyebrow}>快速開始</p>
-          <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
-          <p className={styles.subtitle}>
-            說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
-          </p>
-        </div>
+        {compact ? (
+          <h2 id="quick-entry-title" className={styles.compactHeading}>搜尋服務</h2>
+        ) : (
+          <div>
+            <p className={styles.eyebrow}>快速開始</p>
+            <h2 id="quick-entry-title">說出想做的事，直接找到入口。</h2>
+            <p className={styles.subtitle}>
+              說一句話，AI 可以理解複合需求；需要修改資料時仍由你確認。
+            </p>
+          </div>
+        )}
         <Link className={styles.allServices} href={searchHref} onClick={() => rememberQuick(searchHref)}>
           所有服務 <CampusIcon name="arrow" size={16} />
         </Link>
@@ -229,21 +236,13 @@ export function QuickCampusEntry() {
             <p className={styles.noMatch}>沒有找到明確入口，可以補充需求或詢問校園助理。</p>
           ) : null}
           <div className={styles.footerLinks}>
-            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>
-              搜尋更多服務
-            </Link>
-            <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>
-              詢問校園助理
-            </Link>
-            <button
-              type="button"
-              onClick={() => {
-                forgetDirectorySearch('quick');
-                updateQuery('');
-              }}
-            >
-              重新輸入
-            </button>
+            <Link href={searchHref} onClick={() => rememberQuick(searchHref)}>搜尋更多服務</Link>
+            {onAsk ? (
+              <button type="button" onClick={() => onAsk(phrase)}>詢問校園助理</button>
+            ) : onAsk === undefined ? (
+              <Link href={assistantHref} onClick={() => rememberQuick(assistantHref)}>詢問校園助理</Link>
+            ) : null}
+            <button type="button" onClick={() => { forgetDirectorySearch('quick'); updateQuery(''); }}>重新輸入</button>
           </div>
         </div>
       )}

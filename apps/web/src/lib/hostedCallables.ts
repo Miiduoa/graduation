@@ -17,6 +17,7 @@ export const HOSTED_WEB_CALLABLES = [
   'getMyTronClassCourses',
   'getMyTronClassLms',
   'clearPuCampusSessions',
+  'ensureCampusStoryBinding',
 ] as const;
 
 export const LEAVE_WEB_CALLABLES = [

@@ -217,6 +217,44 @@ describe('building geometry validation', () => {
 });
 
 describe('building plan sources and resource budgets', () => {
+  it('preserves separate floor sources while older floors keep their optional source absent', () => {
+    const plan = drawing();
+    plan.source = { label: '整棟資料索引', url: 'https://campus.example.edu/building' };
+    const upper = floor('2f', 3.4);
+    upper.source = { label: '二樓配置圖', url: 'https://campus.example.edu/maps/2f' };
+    plan.floors.push(upper);
+    const result = parse(plan);
+    expect(result).toEqual({ ok: true, plan });
+    if (!result.ok) throw new Error(result.message);
+    expect(result.plan.floors[0]).not.toHaveProperty('source');
+    expect(parse(result.plan)).toEqual(result);
+  });
+
+  it('strips verification and navigation claims from a floor source', () => {
+    const plan = drawing();
+    const source = { label: '一樓平面', url: 'https://campus.example.edu/1f' };
+    const result = parse({ ...plan, floors: [{ ...plan.floors[0], source: {
+      ...source, verified: true, route: '/navigation', verification: 'official',
+    } }] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(result.plan.floors[0].source).toEqual(source);
+    expect(result.plan.floors[0].source).not.toHaveProperty('verified');
+  });
+
+  it.each([
+    null,
+    {},
+    { label: '' },
+    { label: '圖'.repeat(161) },
+    { label: '來源', url: 'http://campus.example.edu/1f' },
+    { label: '來源', url: 'javascript:alert(1)' },
+    { label: '來源', url: 'https://user:password@campus.example.edu/1f' },
+  ])('validates an optional floor source using the same boundary as the building source: %s', (source) => {
+    const plan = drawing();
+    expect(parse({ ...plan, floors: [{ ...plan.floors[0], source }] }).ok).toBe(false);
+  });
+
   it('preserves a full HTTPS source URL without fetching it', () => {
     const source = { label: '樓層配置來源', url: 'https://campus.example.edu/maps/building?lang=zh-TW#floor-1' };
     const result = parse({ ...drawing(), source });

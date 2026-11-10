@@ -2,6 +2,7 @@
 export type PlanPoint = [number, number];
 export type PlanRoom = { id: string; name: string; polygon: PlanPoint[] };
 export type PlanWall = { start: PlanPoint; end: PlanPoint; thickness: number };
+export type PlanSource = { label: string; url?: string };
 export type PlanFloor = {
   id: string;
   label: string;
@@ -10,6 +11,7 @@ export type PlanFloor = {
   outline: PlanPoint[];
   rooms: PlanRoom[];
   walls: PlanWall[];
+  source?: PlanSource;
 };
 export type BuildingPlan = {
   version: 1;
@@ -17,7 +19,7 @@ export type BuildingPlan = {
   buildingId: string;
   name: string;
   units: 'm' | 'relative';
-  source?: { label: string; url?: string };
+  source?: PlanSource;
   floors: PlanFloor[];
 };
 export type BuildingPlanScope = { schoolId: string; buildingId: string };
@@ -178,7 +180,8 @@ export function parseBuildingPlan(input: string, scope: BuildingPlanScope):
         return { start, end, thickness: number(wall.thickness, '牆面厚度', 0.05, 1) };
       });
       return { id, label: text(floor.label, '樓層名稱'), elevation: number(floor.elevation, '樓層高度', -30, 150),
-        height: number(floor.height, '樓高', 1, 10), outline, rooms, walls };
+        height: number(floor.height, '樓高', 1, 10), outline, rooms, walls,
+        ...(floor.source === undefined ? {} : { source: source(floor.source) }) };
     }).sort((a, b) => a.elevation - b.elevation);
     requireValue(floors.every((floor, i) => i === 0 || floor.elevation >= floors[i - 1].elevation + floors[i - 1].height - EPSILON),
       '樓層高度互相重疊，請先修正標高與樓高。');

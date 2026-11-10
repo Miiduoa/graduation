@@ -133,6 +133,10 @@ const services = [
     summary: '查看失物招領，發布與聯絡依登入資格使用。', mobileRoute: 'LostFound',
   },
   {
+    id: 'public-social', label: '跨校公開交流', href: '/social', category: 'community', access: 'personal',
+    summary: '使用 Google 帳號閱讀公開貼文，參與開放看板。',
+  },
+  {
     id: 'community', label: '校園社群', href: '/community', category: 'community', access: 'personal',
     summary: '查看校園動態與看板，發布內容需自行確認。', mobileRoute: 'CampusSocialScreen',
   },
@@ -272,6 +276,7 @@ const aliases: Readonly<Record<AssistantServiceId, readonly string[]>> = {
   appeals: ['課程申訴', '我的申訴', '課務申訴', 'appeals', 'course appeals'],
   teacher: ['課務申訴審核', '申訴審核', '教師申訴審核', '老師工作台', 'teacher review'],
   'lost-found': ['失物招領', '遺失物', 'lost and found', 'lost-found'],
+  'public-social': ['跨校公開交流', '公開交流', '跨校交流', '公開看板', 'public social', 'public exchange'],
   community: ['社群', '校園社群', '校園交流', '校園動態', '動態牆', '看板', 'community', 'feed'],
   messages: ['私訊', '私人訊息', '私人對話', '訊息', 'messages', 'direct messages', 'private messages', 'dms'],
   notifications: ['通知', '我的通知', '通知中心', 'notifications'],

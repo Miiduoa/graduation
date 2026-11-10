@@ -136,6 +136,16 @@ export function createLiveSessionHandlers({
     };
   }
 
+  async function requireSchoolMember(transaction: SessionTransaction, group: DocSnap, uid: string) {
+    const schoolId = group.data()?.schoolId;
+    if (typeof schoolId !== 'string' || !schoolId || schoolId.includes('/')) {
+      throw new HttpsError('permission-denied', 'A school membership is required');
+    }
+    const schoolMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
+    const [membership] = await transaction.getAll(schoolMember);
+    requireMember(membership);
+  }
+
   async function otherActiveSessionIds(
     transaction: SessionTransaction,
     group: {
@@ -223,6 +233,7 @@ export function createLiveSessionHandlers({
       );
       requireMember(member, true);
       if (!group.exists) throw new HttpsError('not-found', 'Group not found');
+      await requireSchoolMember(transaction, group, uid);
       if (live.exists || attendance.exists || secret.exists) {
         if (!live.exists || !attendance.exists || !secret.exists) {
           throw new HttpsError(
@@ -328,12 +339,14 @@ export function createLiveSessionHandlers({
     const sessionId = documentId(data.sessionId, 'sessionId');
     const documents = refs(groupId, sessionId, uid);
     return db.runTransaction(async (transaction) => {
-      const [member, live, attendance] = await transaction.getAll(
+      const [group, member, live, attendance] = await transaction.getAll(
+        documents.group,
         documents.member,
         documents.live,
         documents.attendance,
       );
       requireMember(member, true);
+      await requireSchoolMember(transaction, group, uid);
       if (!live.exists) throw new HttpsError('not-found', 'Session not found');
       if (live.data().teacherId !== uid)
         throw new HttpsError('permission-denied', 'Only the session instructor can end it');
@@ -364,7 +377,8 @@ export function createLiveSessionHandlers({
     }
     const documents = refs(groupId, sessionId, uid);
     return db.runTransaction(async (transaction) => {
-      const [member, live, attendance, secret, record] = await transaction.getAll(
+      const [group, member, live, attendance, secret, record] = await transaction.getAll(
+        documents.group,
         documents.member,
         documents.live,
         documents.attendance,
@@ -372,6 +386,7 @@ export function createLiveSessionHandlers({
         documents.record,
       );
       const membership = requireMember(member);
+      await requireSchoolMember(transaction, group, uid);
       if (!live.exists || !attendance.exists) {
         throw new HttpsError('failed-precondition', 'Session records are missing');
       }
