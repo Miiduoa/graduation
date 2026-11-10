@@ -1,3 +1,4 @@
+import { assertPrivateFileNamespace } from '@campus/shared/src/privateFileMedia';
 import {
   collection,
   deleteDoc,
@@ -50,6 +51,7 @@ export async function publishStory(storyId: string, payload: {
   poiName?: string | null;
   expiresAtMs: number;
 }): Promise<string> {
+  if (payload.mediaUrl) assertPrivateFileNamespace(payload.mediaUrl, `schools/${payload.schoolId}/stories/${storyId}`);
   const ref = doc(storiesCollection(), storyId);
   const content = {
     schoolId: payload.schoolId,
@@ -81,32 +83,28 @@ export async function listActiveStoriesForSchool(
   options: { throwOnError?: boolean } = {},
 ): Promise<CampusStoryDoc[]> {
   const db = getDb();
-  const now = Date.now();
   try {
-    const snap = await getDocs(
+    // Preserve near-expiry stories with only a small request-latency buffer.
+    const read = (expiresAfter: number) => getDocs(
       query(
         storiesCollection(db),
         where('schoolId', '==', schoolId),
-        orderBy('createdAt', 'desc'),
+        where('expiresAt', '>', expiresAfter),
+        orderBy('expiresAt', 'desc'),
         limit(lim),
       ),
     );
+    const snap = await read(Date.now() + 3_000).catch((error: unknown) => {
+      if ((error as { code?: string } | null)?.code !== 'permission-denied') throw error;
+      return read(Date.now() + 15_000);
+    });
     return snap.docs
       .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-      .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-  } catch {
-    // 缺索引 fallback：不排序
-    try {
-      const snap = await getDocs(
-        query(storiesCollection(db), where('schoolId', '==', schoolId), limit(lim)),
-      );
-      return snap.docs
-        .map((d) => ({ id: d.id, ...(d.data() as Omit<CampusStoryDoc, 'id'>) }))
-        .filter((s) => (typeof s.expiresAt === 'number' ? s.expiresAt > now : true));
-    } catch (error) {
-      if (options.throwOnError) throw error;
-      return [];
-    }
+      .filter((s) => typeof s.expiresAt === 'number' && s.expiresAt > Date.now());
+  } catch (error) {
+    // Never fall back to a school-only query: it exposes expired metadata.
+    if (options.throwOnError) throw error;
+    return [];
   }
 }
 

@@ -152,6 +152,22 @@ describe('live attendance session handlers', () => {
     });
   });
 
+  test('revoked school membership blocks new sessions, QR replay, check-in and closure', async () => {
+    const session = await handlers.startLiveSession(startRequest());
+    store.docs.delete('schools/school-1/members/teacher');
+    store.docs.set('schools/school-1/members/student', { status: 'inactive' });
+    for (const action of [
+      () => handlers.startLiveSession(startRequest()),
+      () => handlers.startLiveSession(startRequest({ requestId: 'another-session' })),
+      () => handlers.joinLiveSession(sessionRequest(session)),
+      () => handlers.endLiveSession(sessionRequest(session, {}, 'teacher')),
+    ]) {
+      await expect(action()).rejects.toMatchObject({ code: 'permission-denied' });
+    }
+    expect(store.docs.get(path(session, 'liveSessions'))?.active).toBe(true);
+    expect(store.docs.get(path(session, 'attendanceSessions'))?.attendeeCount).toBe(0);
+  });
+
   test('creates synchronized public metadata and private token, preserving zero coordinates', async () => {
     const result = await handlers.startLiveSession(
       startRequest({ classroomLat: 0, classroomLng: 0 }),
@@ -206,6 +222,7 @@ describe('live attendance session handlers', () => {
   });
 
   test('request keys are scoped to the instructor and optional for older callers', async () => {
+    store.docs.set('schools/school-1/members/other-teacher', { status: 'active' });
     store.docs.set('groups/class-1/members/other-teacher', { status: 'active', role: 'owner' });
     const first = await handlers.startLiveSession(startRequest());
     const second = await handlers.startLiveSession(startRequest({}, 'other-teacher'));
@@ -217,7 +234,7 @@ describe('live attendance session handlers', () => {
   });
 
   test('opening a new session for the same class ends the previous one and leaves other classes open', async () => {
-    store.docs.set('groups/class-2', { name: '資料結構' });
+    store.docs.set('groups/class-2', { name: '資料結構', schoolId: 'school-1' });
     store.docs.set('groups/class-2/members/teacher', { role: 'instructor', status: 'active' });
     const classA = await handlers.startLiveSession(startRequest({ requestId: 'class-a' }));
     const classB = await handlers.startLiveSession(
@@ -238,7 +255,7 @@ describe('live attendance session handlers', () => {
   });
 
   test('ending one session does not close another class or another leftover session', async () => {
-    store.docs.set('groups/class-2', { name: '資料結構' });
+    store.docs.set('groups/class-2', { name: '資料結構', schoolId: 'school-1' });
     store.docs.set('groups/class-2/members/teacher', { role: 'instructor', status: 'active' });
     const classA = await handlers.startLiveSession(startRequest({ requestId: 'class-a' }));
     const leftover = {
@@ -295,6 +312,7 @@ describe('live attendance session handlers', () => {
 
   test('ending requires both current instructor membership and original ownership', async () => {
     const session = await handlers.startLiveSession(startRequest());
+    store.docs.set('schools/school-1/members/other-teacher', { status: 'active' });
     store.docs.set('groups/class-1/members/other-teacher', {
       status: 'active',
       role: 'instructor',
@@ -427,6 +445,7 @@ describe('live attendance session handlers', () => {
   test('another active member cannot recover the first student receipt after expiry', async () => {
     const session = await handlers.startLiveSession(startRequest());
     await handlers.joinLiveSession(sessionRequest(session));
+    store.docs.set('schools/school-1/members/other-student', { status: 'active' });
     store.docs.set('groups/class-1/members/other-student', { status: 'active', role: 'student' });
     time += 300_000;
     await expect(

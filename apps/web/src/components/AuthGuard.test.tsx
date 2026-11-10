@@ -16,6 +16,9 @@ vi.mock('firebase/auth', () => ({ onAuthStateChanged: vi.fn(), signOut: vi.fn() 
 vi.mock('@/lib/clearOwnedPuCampusSessions', () => ({
   clearOwnedPuCampusSessions,
 }));
+vi.mock('@/lib/campusStoryBinding', () => ({
+  ensureCampusStoryBinding: vi.fn(async () => undefined),
+}));
 function Status() {
   const { user, loading } = useAuth();
   return <div>{loading ? 'Checking account' : user ? `Account ${user.uid}` : 'Signed out'}</div>;

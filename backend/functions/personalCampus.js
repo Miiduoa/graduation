@@ -5,8 +5,13 @@ const { HttpsError } = require('firebase-functions/v2/https');
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { MAX_PERIOD_SLOTS } = require('./generated/shared/timetable/schoolPeriods');
 
+const {
+  publicTimetableMeta: publicMeta,
+  publicTimetableCourses: publicCourses,
+  readPublicTimetableShare,
+} = require('./generated/shared/timetable/publicShare');
+
 const SHARE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_COURSES = 80;
 
 function text(value, maximum, field) {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > maximum) {
@@ -90,16 +95,6 @@ function cleanCourse(input = {}) {
   };
 }
 
-function publicShare(data) {
-  return {
-    schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
-    name: data.name || '課表',
-    courses: Array.isArray(data.courses) ? data.courses : [],
-    meta: data.meta || {},
-    expiresAt: data.expiresAt?.toDate?.()?.toISOString?.() || null,
-  };
-}
-
 function createCreateTimetableShareHandler({ db }) {
   return async (request) => {
     const uid = request.auth?.uid;
@@ -107,9 +102,7 @@ function createCreateTimetableShareHandler({ db }) {
     const schoolId = requireSchoolId(request.data?.schoolId);
     const record = await loadShareableTimetable(db, uid, schoolId);
     // 分享出去的資料不帶老師姓名
-    const courses = Array.isArray(record.courses)
-      ? record.courses.slice(0, MAX_COURSES).map((course) => ({ ...cleanCourse(course), teacher: '' }))
-      : [];
+    const courses = publicCourses(record.courses);
     if (!courses.length) throw new HttpsError('failed-precondition', '課表是空的，沒有可分享的內容。');
     const token = nodeCrypto.randomBytes(16).toString('base64url');
     const expiresAt = Timestamp.fromMillis(Date.now() + SHARE_TTL_MS);
@@ -122,7 +115,8 @@ function createCreateTimetableShareHandler({ db }) {
       schoolId,
       name: optionalText(record.meta?.title || request.data?.name, 40) || '課表',
       courses,
-      meta: record.meta || {},
+      meta: publicMeta(record.meta),
+      publicSchemaVersion: 1,
       createdAt: FieldValue.serverTimestamp(),
       expiresAt,
       revoked: false,
@@ -162,31 +156,14 @@ function createGetTimetableShareHandler({ db }) {
       return;
     }
     const token = String(req.query?.token || req.body?.token || '').trim();
-    if (!token || token.length > 80 || token.includes('/')) {
-      res.status(400).json({ error: '分享碼不正確。' });
-      return;
-    }
-    const snapshot = await db.collection('timetableShares').doc(token).get();
-    if (!snapshot.exists) {
-      res.status(404).json({ error: '這份分享不存在或已撤回。' });
-      return;
-    }
-    const data = snapshot.data();
-    if (data.revoked === true) {
-      res.status(410).json({ error: '這份分享已撤回。' });
-      return;
-    }
-    const expires = data.expiresAt?.toMillis?.() || 0;
-    if (!expires || expires <= Date.now()) {
-      res.status(410).json({ error: '這份分享已過期。' });
-      return;
-    }
-    res.status(200).json(publicShare(data));
+    const { status, body } = await readPublicTimetableShare(db, token);
+    res.status(status).json(body);
   };
 }
 
 module.exports = {
   cleanCourse,
+  readPublicTimetableShare,
   createCreateTimetableShareHandler,
   createRevokeTimetableShareHandler,
   createGetTimetableShareHandler,

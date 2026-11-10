@@ -34,6 +34,7 @@ import {
   getFunctionsInstance,
   isFirebaseConfigured,
 } from '@/lib/firebase';
+import { isPermissionDeniedError } from '@campus/shared/src/signedInSocialReads';
 import { areFunctionsConfigured, FunctionsUnconfiguredError } from '@/lib/functionsUrl';
 
 const LOCAL_KEY = 'campus-one-personal-timetable';
@@ -391,12 +392,30 @@ export async function revokeServerShare(token: string) {
 
 export async function loadSharedTimetable(token: string) {
   if (!isFirebaseConfigured()) throw new Error('unconfigured');
-  const snap = await getDoc(doc(getDb(), 'timetableShares', token));
-  if (!snap.exists()) throw new Error('missing');
-  const data = snap.data();
-  if (data?.revoked) throw new Error('revoked');
-  const expires = data?.expiresAt?.toDate?.() as Date | undefined;
-  if (!expires || expires.getTime() <= Date.now()) throw new Error('expired');
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(token)) throw new Error('missing');
+  const snap = await getDoc(doc(getDb(), 'timetableShares', token)).catch((error) => {
+    if (isPermissionDeniedError(error)) return null;
+    throw error;
+  });
+  if (snap && !snap.exists()) throw new Error('missing');
+  let data = snap?.data();
+  let expires: Date;
+  if (data?.publicSchemaVersion === 1) {
+    if (data.revoked !== false) throw new Error('revoked');
+    expires = data.expiresAt?.toDate?.();
+  } else {
+    // Older documents may contain private metadata; only use the server's public projection.
+    const response = await fetch(`/api/timetable/shares/${encodeURIComponent(token)}`, {
+      cache: 'no-store',
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result?.code || 'missing');
+    data = result;
+    expires = new Date(result.expiresAt);
+  }
+  if (!data || !expires || !Number.isFinite(expires.getTime()) || expires.getTime() <= Date.now()) {
+    throw new Error('expired');
+  }
   return {
     name: String(data.name || '課表'),
     schoolId: typeof data.schoolId === 'string' ? data.schoolId : null,
