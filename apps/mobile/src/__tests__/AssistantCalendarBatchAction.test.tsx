@@ -142,3 +142,25 @@ test('completed device events never navigate to a website when the local calenda
   expect(nav.navigate).not.toHaveBeenCalled();
   expect(web).not.toHaveBeenCalled();
 });
+
+test('a recovered coursework batch with no source resolver cannot offer a generic confirmation', async () => {
+  const accountId = 'pa_00000000-0000-4000-8000-000000000001';
+  const access = { uid: '', schoolId: 'pu', isCurrent: () => true,
+    platformTimetable: { accountId, isCurrent: () => true } };
+  const studyEvents = events.map((event) => ({ ...event, title: `準備：${event.title}`,
+    endTime: event.startTime.slice(0, 2) + ':30' }));
+  const initial = await prepareAssistantCalendarBatch(studyEvents, access, { kind: 'coursework-study',
+    sources: events.map((event, index) => ({ kind: 'nuni-assignment', locator: {
+      accountId, schoolId: 'pu', academicYear: '115', semester: '1',
+      workspaceId: 'cw_00000000-0000-4000-8000-000000000001',
+      assignmentId: `cwa_00000000-0000-4000-8000-00000000000${index + 1}`,
+    }, expected: { title: event.title, courseName: '資料庫', dueAt: '2099-01-04T23:59:00+08:00', courseIdentity: '[1,"reviewed"]' } })),
+  });
+  const view = render(<Harness initial={initial} access={access} />);
+  expect(view.queryByRole('button', { name: '確認加入 2 筆行程' })).toBeNull();
+  expect(view.getByText('目前無法連線核對這份準備安排的原作業。請回到原帳號的上課助理再接續；既有行程仍可重新核對。')).toBeTruthy();
+  await act(async () => fireEvent.press(view.getByRole('button', { name: '重新核對整份行程' })));
+  expect(view.queryByRole('button', { name: '確認加入 2 筆行程' })).toBeNull();
+  expect(jest.mocked(AsyncStorage.setItem).mock.calls.filter(([storageKey]) =>
+    storageKey.startsWith('campus.personal-imports.v1:'))).toHaveLength(0);
+});
