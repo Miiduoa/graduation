@@ -94,7 +94,9 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         status: 'error',
         reason: error instanceof Error && error.message ===
           '相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。'
-          ? 'teacher' : undefined,
+          ? 'teacher' : error instanceof Error && error.message ===
+          '相同課號與班別的原有上課時段與官方資料不同；請先核對原有資料。'
+          ? 'time' : undefined,
       });
     } finally {
       if (active(run)) pending.current = false;
@@ -119,7 +121,8 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       }
     }
   }
-  const changedField = outcome.status === 'error' && outcome.reason
+  const changedTime = outcome.status === 'error' && outcome.reason === 'time';
+  const changedField = outcome.status === 'error' && outcome.reason && outcome.reason !== 'time'
     ? { teacher: '教師', room: '教室', title: '課名' }[outcome.reason] : null;
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
   return <View style={{ gap: 10, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10 }}>
@@ -163,11 +166,13 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       </>}
       {outcome.status === 'error' && <>
         <Text accessibilityRole="alert" style={body}>
-          {changedField
+          {changedTime
+            ? '同校同學期相同課號、班別的原有上課時段不在最新公開課程中。可能是校方調課或個人修改；為避免留下兩份不一致課表，本次沒有儲存。請先核對原有個人課表。'
+            : changedField
             ? `相同課號、班別與時段的${changedField}與原有個人紀錄不同。為避免重複加入，本次沒有儲存；請先查看個人課表，核對並修正原紀錄。`
             : '未能確認加入結果（資料可能已變動）。請重新核對後重試；相同時段不會重複新增。若仍失敗，請從個人匯入頁核對現有資料。'}
         </Text>
-        {changedField && <Button text="查看原有個人課表" kind="ghost" onPress={() => {
+        {(changedField || changedTime) && <Button text="查看原有個人課表" kind="ghost" onPress={() => {
           if (active(generation.current)) safeNavigate(navigation, 'PersonalTimetable', {
             term: preview.term, reminderScope: JSON.stringify(scope),
           });
@@ -175,7 +180,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       </>}
       <Button text={outcome.status === 'saving' ? '正在加入…' :
         outcome.status === 'conflict' ? '仍要加入（保留兩門課）' :
-        outcome.status === 'error' && changedField ? '重新核對' : '確認加入個人課表'} kind="primary"
+        outcome.status === 'error' && (changedField || changedTime) ? '重新核對' : '確認加入個人課表'} kind="primary"
         disabled={outcome.status === 'saving'} onPress={() => void confirm()} />
     </>}
     <Button text="收起核對" kind="ghost" disabled={outcome.status === 'saving' || undoing} onPress={onClose} />

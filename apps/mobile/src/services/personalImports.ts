@@ -194,6 +194,21 @@ export function appendPersonalImports(
       );
       if (conflictingTeacher)
         throw new Error('相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。');
+      // Protect the same schedule-change invariant under the owner/school lock.
+      const staleMeeting = current.records.some((saved) => {
+        if (saved.kind !== 'timetable' || !saved.courseCode?.trim()) return false;
+        const sameOffering = rows.filter((row) =>
+          row.kind === 'timetable' && !!row.courseCode?.trim() &&
+          row.schoolId === saved.schoolId &&
+          row.academicYear === saved.academicYear && row.semester === saved.semester &&
+          clean(row.courseCode) === clean(saved.courseCode) &&
+          clean(row.className) === clean(saved.className));
+        return sameOffering.length > 0 && !sameOffering.some((row) =>
+          row.dayOfWeek === saved.dayOfWeek && row.startTime === saved.startTime &&
+          row.endTime === saved.endTime);
+      });
+      if (staleMeeting)
+        throw new Error('相同課號與班別的原有上課時段與官方資料不同；請先核對原有資料。');
     }
     const id = createPersonalImportId();
     const createdAt = new Date().toISOString();

@@ -45,7 +45,7 @@ export function preparePublicCourseTimetableImport(
 /** A cached catalog offering must not create a second copy of the same slot
  * when the official instructor, classroom or course title has changed.
  * The ledger repeats its own guard under the owner/school write lock. */
-export type CatalogSlotChange = 'teacher' | 'room' | 'title';
+export type CatalogSlotChange = 'teacher' | 'room' | 'title' | 'time';
 
 export function findCatalogSameSlotChange(
   incoming: readonly PersonalImportRow[],
@@ -66,6 +66,20 @@ export function findCatalogSameSlotChange(
       if (normalize(saved.location) !== normalize(row.location)) return 'room';
       if (normalize(saved.title) !== normalize(row.title)) return 'title';
     }
+  }
+  // Detect removed or moved official meetings even when no clock overlaps.
+  // Existing partial imports may still add genuinely missing meetings.
+  for (const saved of existing) {
+    if (saved.kind !== 'timetable' || !saved.courseCode?.trim()) continue;
+    const sameOffering = incoming.filter((row) =>
+      row.kind === 'timetable' && !!row.courseCode?.trim() &&
+      row.schoolId === saved.schoolId &&
+      row.academicYear === saved.academicYear && row.semester === saved.semester &&
+      normalize(row.courseCode) === normalize(saved.courseCode) &&
+      normalize(row.className) === normalize(saved.className));
+    if (sameOffering.length && !sameOffering.some((row) =>
+      row.dayOfWeek === saved.dayOfWeek && row.startTime === saved.startTime &&
+      row.endTime === saved.endTime)) return 'time';
   }
   return null;
 }

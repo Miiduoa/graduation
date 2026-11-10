@@ -225,6 +225,43 @@ test.each([
   expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
 });
 
+test.each([
+  { schoolId: 'nthu' as const, oldCourse: nthu,
+    updated: { ...nthu, meetings: [
+      { time: 'T3T4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' },
+    ] } },
+  { schoolId: 'ncnu' as const, oldCourse: ncnu,
+    updated: { ...ncnu, time: '5efg' } },
+])('a moved $schoolId meeting blocks stale personal records at first review', async ({ schoolId, oldCourse, updated }) => {
+  const currentScope = { owner: scope.owner, schoolId };
+  mockScope = currentScope;
+  const previous = preparePublicCourseTimetableImport(schoolId, oldCourse)!;
+  await ledger.appendPersonalImports(currentScope, previous.rows);
+  const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(currentScope));
+  jest.clearAllMocks();
+  const view = render(<PublicCourseImportAction schoolId={schoolId} course={updated} navigation={navigation} />);
+  review(view); confirm(view);
+  await view.findByText(/原有上課時段不在最新公開課程中/);
+  expect(view.getByText('查看原有個人課表')).toBeTruthy();
+  expect(view.getByText('重新核對')).toBeTruthy();
+  expect(view.queryByText('仍要加入（保留兩門課）')).toBeNull();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(currentScope))).toBe(before);
+});
+
+test('the storage write lock rejects moved official meetings without a UI preflight', async () => {
+  const previous = preparePublicCourseTimetableImport('nthu', nthu)!;
+  await ledger.appendPersonalImports(scope, previous.rows);
+  const updated = preparePublicCourseTimetableImport('nthu', {
+    ...nthu, meetings: [{ time: 'T3T4', room: '教室甲' }, { time: 'R5R6', room: '教室乙' }],
+  })!;
+  const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
+  await expect(ledger.appendPersonalImports(scope, updated.rows, () => true, {
+    protectCatalogTimetableSlots: true,
+  })).rejects.toThrow(/原有上課時段與官方資料不同/);
+  expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
+});
+
 test.each(['account', 'school', 'unresolved', 'away-and-back'])('a delayed read cannot save after scope changes: %s', async (change) => {
   let finish!: (value: string | null) => void;
   const read = jest.spyOn(AsyncStorage, 'getItem').mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
