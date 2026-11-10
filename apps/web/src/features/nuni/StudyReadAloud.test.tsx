@@ -212,3 +212,36 @@ it('still cancels reading on close if removing the voice listener throws', () =>
   expect(utterance.onerror).toBeNull();
   expect(changed).toHaveBeenLastCalledWith(false);
 });
+
+it('lets students select the pace of local Chinese speech without changing a playing utterance', () => {
+  const changed = vi.fn();
+  render(<StudyReadAloud text="微積分課程筆記" onSpeakingChange={changed} />);
+  const pace = screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement;
+  expect(pace.value).toBe('0.95');
+  fireEvent.change(pace, { target: { value: '0.8' } });
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const slow = speak.mock.calls[0][0] as Utterance;
+  expect(slow.rate).toBe(0.8);
+  expect(slow.voice).toBe(local);
+  expect(pace.disabled).toBe(true);
+  expect(screen.getByRole('button', { name: '停止朗讀' })).toBeTruthy();
+  act(() => slow.onend?.());
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(pace.disabled).toBe(false);
+  fireEvent.change(pace, { target: { value: '1.1' } });
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const fast = speak.mock.calls[1][0] as Utterance;
+  expect(fast.rate).toBe(1.1);
+  expect(fast.voice).toBe(local);
+  expect(cancel).not.toHaveBeenCalled();
+  expect(changed).toHaveBeenLastCalledWith(true);
+});
+
+it('keeps pace selection disabled when only remote Chinese voices are available', () => {
+  voices = [remote];
+  render(<StudyReadAloud text="來源不外傳" />);
+  const pace = screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement;
+  expect(pace.disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(speak).not.toHaveBeenCalled();
+});

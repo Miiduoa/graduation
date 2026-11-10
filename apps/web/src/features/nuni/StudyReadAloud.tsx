@@ -13,6 +13,8 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   const [supported, setSupported] = useState(false);
   const refreshVoices = useRef<(() => void) | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  // Apply the student's locally chosen pace only to the next utterance.
+  const [rate, setRate] = useState(0.95);
   const [error, setError] = useState('');
   const voice = useRef<SpeechSynthesisVoice | null>(null);
   const active = useRef<SpeechSynthesisUtterance | null>(null);
@@ -87,7 +89,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       utterance = new SpeechSynthesisUtterance(text);
       utterance.voice = voice.current;
       utterance.lang = voice.current.lang;
-      utterance.rate = 0.95;
+      utterance.rate = rate;
     } catch {
       setSpeaking(false);
       onSpeakingChange?.(false);
@@ -123,6 +125,14 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
         aria-pressed={speaking} onClick={toggle}>
         {speaking ? '停止朗讀' : label}
       </button>
+      <label className={styles.note}>朗讀速度
+        <select aria-label="朗讀速度" value={rate} disabled={!available || speaking}
+          onChange={(event) => setRate(Number(event.target.value))}>
+          <option value={0.8}>慢速（0.8 倍）</option>
+          <option value={0.95}>一般（0.95 倍）</option>
+          <option value={1.1}>稍快（1.1 倍）</option>
+        </select>
+      </label>
       {!available && !speaking && <>
         <small>{supported
           ? '目前找不到裝置上的中文離線語音；開啟或安裝語音後可重新檢查，仍可閱讀文字。'

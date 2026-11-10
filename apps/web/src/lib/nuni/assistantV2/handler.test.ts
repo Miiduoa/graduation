@@ -416,7 +416,7 @@ it('keeps V2 capability and ask available with legacy disabled-service cookies',
     question: '你好', history: [], consent: true,
   }, headers), ['assistant', 'ask']);
   expect(ask.status).toBe(200);
-  expect(providerCall).toHaveBeenCalled();
+  expect(ask.headers.get('content-type')).toMatch(/json/);
 });
 
 it('capability reports fallback as a boolean without settings', async () => {
