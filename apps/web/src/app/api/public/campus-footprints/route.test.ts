@@ -125,6 +125,21 @@ describe('public Providence building geometry route', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not cache a building=yes way with a present but empty ruin marker', async () => {
+    const ambiguous = JSON.stringify({
+      elements: [{ type: 'way', id: 255784049, geometry: libraryOutline,
+        tags: { building: 'yes', ruins: '' } }],
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(ambiguous, { status: 200 }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('does not cache a building=yes way explicitly marked ruins=yes', async () => {
     const ruinedPayload = JSON.stringify({
       elements: [{
