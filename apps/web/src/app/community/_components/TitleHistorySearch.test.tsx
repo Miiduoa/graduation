@@ -278,7 +278,7 @@ it('does not tell screen readers that an authorized post was unverified when onl
   const alert = await screen.findByRole('alert');
   expect(alert.textContent).toContain('貼文已通過伺服器確認');
   expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith('pu', 'old-1001');
-  expect(screen.getByRole('status').textContent).toContain('貼文已通過伺服器確認');
+  expect(screen.getByRole('status').textContent).toContain('伺服器已確認貼文可閱讀');
   expect(screen.getByRole('status').textContent).not.toContain('尚未通過伺服器確認');
 });
 

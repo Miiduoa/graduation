@@ -291,7 +291,7 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
           ? '貼文已通過伺服器確認，但頁面開啟失敗。搜尋結果已保留，請再次點擊重試。'
           : '暫時無法向伺服器確認這篇貼文，搜尋結果已保留。連線恢復後可再次點擊。' });
         setNotice(confirmed
-          ? '貼文已通過伺服器確認，但頁面開啟失敗。請再次點擊貼文。'
+          ? '伺服器已確認貼文可閱讀，但網頁尚未開啟。請再次點擊。'
           : '貼文尚未通過伺服器確認。');
       }
     } finally {
