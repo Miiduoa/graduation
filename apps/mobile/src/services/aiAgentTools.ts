@@ -71,6 +71,11 @@ import { requestLeave as requestDemoStoreLeave } from './demoStore';
 import { emitLeaveRequested } from './roleEventBus';
 import { reviewDemoLeaveRequest } from './demoLeaveReview';
 import { sendDemoMessageAsAgent } from './demoMessageAgent';
+import {
+  getVerifiedSchoolAiScope,
+  isVerifiedSchoolAiScopeCurrent,
+  type VerifiedSchoolAiScope,
+} from './verifiedSchoolAiScope';
 
 /** 與 AIChatScreen 訂餐選單一致：itemId@@vendorId */
 const DINING_CHOICE_ID_SEP = '@@';
@@ -1245,6 +1250,21 @@ export type ExecutorContext = {
   lastChoiceMenu?: AssistantChoiceMenu;
 };
 
+const VERIFIED_SCHOOL_TOOLS = new Set([
+  'query_attendance', 'query_student_info', 'analyze_credits', 'predict_gpa', 'comprehensive_analysis',
+  'query_exams', 'query_score_items', 'query_discussions', 'query_materials',
+  'query_course_members', 'query_homework_detail', 'query_course_announcements',
+]);
+
+function schoolScopeUnavailable(): ToolCallResult {
+  return {
+    success: false,
+    isWrite: false,
+    error: 'school_scope_unverified',
+    summary: '目前所選校園的學校資料尚未驗證。請確認校園與登入帳號後再試，或到校方平臺查看。',
+  };
+}
+
 async function executeRegistryTool(
   toolName: string,
   args: Record<string, string>,
@@ -1286,6 +1306,11 @@ export async function executeTool(
   args: Record<string, string>,
   ctx: ExecutorContext,
 ): Promise<ToolCallResult> {
+  const requiresVerifiedSchool = VERIFIED_SCHOOL_TOOLS.has(toolName);
+  const usesSchoolCache = requiresVerifiedSchool ||
+    ['query_courses', 'query_grades', 'query_assignments', 'daily_briefing', 'query_announcements', 'request_leave'].includes(toolName);
+  const verifiedScope = usesSchoolCache ? getVerifiedSchoolAiScope(ctx) : null;
+  if (requiresVerifiedSchool && !verifiedScope) return schoolScopeUnavailable();
   try {
     switch (toolName) {
       case 'order_food':
@@ -1296,7 +1321,8 @@ export async function executeTool(
     if (!executor) {
       return { success: false, error: `未知的工具: ${toolName}`, summary: '無法執行' };
     }
-    const result = await executor(args, ctx);
+    const result = await executor(args, ctx, verifiedScope);
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
     if (result.success && result.isWrite && ctx.lastUserMessage?.trim()) {
       const learned = distillLearnedSkillFromToolSuccess(
         ctx.lastUserMessage.trim(),
@@ -1308,6 +1334,7 @@ export async function executeTool(
     }
     return result;
   } catch (e: any) {
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
     console.warn(`[AIAgent] Tool ${toolName} failed:`, e);
     return { success: false, error: e?.message ?? String(e), summary: '執行失敗' };
   }
@@ -1341,15 +1368,17 @@ function tcActivityNeedsSubmit(activity: { status?: unknown }): boolean {
 
 const TOOL_EXECUTORS: Record<
   string,
-  (args: Record<string, string>, ctx: ExecutorContext) => Promise<ToolCallResult>
+  (args: Record<string, string>, ctx: ExecutorContext, verifiedScope: VerifiedSchoolAiScope | null) => Promise<ToolCallResult>
 > = {
   // ─────── 讀取工具 ───────
 
-  query_courses: async (args, ctx) => {
+  query_courses: async (args, ctx, verifiedScope) => {
     const filter = args.filter ?? 'all';
     // 優先用 puDataCache（本地快取）
-    const tcCourses = await getCachedTCCourses();
-    const puCourses = await getCachedCourses();
+    const tcCourses = verifiedScope ? await getCachedTCCourses() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
+    const puCourses = verifiedScope ? await getCachedCourses() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
 
     let courses: any[] = [];
     if (tcCourses && tcCourses.length > 0) {
@@ -1395,6 +1424,8 @@ const TOOL_EXECUTORS: Record<
       } catch { /* ignore */ }
     }
 
+    if (courses.length === 0 && !verifiedScope) return schoolScopeUnavailable();
+
     if (filter === 'today') {
       const todayDow = new Date().getDay();
       courses = courses.filter(c => c.dayOfWeek === todayDow || c.dayOfWeek === (todayDow === 0 ? 7 : todayDow));
@@ -1432,8 +1463,9 @@ const TOOL_EXECUTORS: Record<
     return { success: true, data: courses, summary: `共 ${courses.length} 門課程:\n${summary}` };
   },
 
-  query_grades: async (args, ctx) => {
-    const rawGrades = await getCachedGrades();
+  query_grades: async (args, ctx, verifiedScope) => {
+    const rawGrades = verifiedScope ? await getCachedGrades() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
     // PUGradeResult is { grades: PUGrade[], ... } — unwrap
     const gradeList: any[] = Array.isArray(rawGrades) ? rawGrades : (rawGrades as any)?.grades ?? [];
     if (gradeList.length === 0) {
@@ -1442,6 +1474,7 @@ const TOOL_EXECUTORS: Record<
         try {
           const ds = getDataSource();
           const dsGrades = await ds.listGrades(ctx.userId, args.semester, ctx.schoolId);
+          if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
           if (dsGrades.length > 0) {
             const summary = dsGrades.map((g, i) =>
               `${i + 1}. ${(g as any).courseName ?? g.id}：${(g as any).score ?? (g as any).grade ?? '未公布'}${(g as any).credits ? ` (${(g as any).credits}學分)` : ''}`
@@ -1455,7 +1488,7 @@ const TOOL_EXECUTORS: Record<
           }
         } catch { /* ignore */ }
       }
-      return { success: true, data: [], summary: '目前沒有成績資料。' };
+      return verifiedScope ? { success: true, data: [], summary: '目前沒有成績資料。' } : schoolScopeUnavailable();
     }
 
     const summary = gradeList.map((g: any, i: number) =>
@@ -1481,10 +1514,13 @@ const TOOL_EXECUTORS: Record<
     };
   },
 
-  query_assignments: async (args, ctx) => {
-    const tcActivities = await getCachedTCActivities();
-    const tcTodos = await getCachedTCTodos();
-    const tcCourses = await getCachedTCCourses();
+  query_assignments: async (args, ctx, verifiedScope) => {
+    const tcActivities = verifiedScope ? await getCachedTCActivities() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
+    const tcTodos = verifiedScope ? await getCachedTCTodos() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
+    const tcCourses = verifiedScope ? await getCachedTCCourses() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
     const courseNameById = new Map<number, string>();
     if (tcCourses) {
       for (const c of tcCourses) {
@@ -1570,6 +1606,8 @@ const TOOL_EXECUTORS: Record<
         pushTcRow(t);
       }
     }
+
+    if (items.length === 0 && !verifiedScope) return schoolScopeUnavailable();
 
     const status = args.status ?? 'all';
     if (status === 'overdue') {
@@ -1767,9 +1805,10 @@ const TOOL_EXECUTORS: Record<
     };
   },
 
-  query_announcements: async (args, ctx) => {
+  query_announcements: async (args, ctx, verifiedScope) => {
     const limit = parseInt(args.limit ?? '5');
-    const cached = await getCachedAnnouncements();
+    const cached = verifiedScope ? await getCachedAnnouncements() : null;
+    if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
 
     let announcements: any[] = [];
     if (cached && cached.length > 0) {
@@ -2058,11 +2097,11 @@ const TOOL_EXECUTORS: Record<
   comprehensive_analysis: async (args, ctx) => {
     // 並行執行多個查詢
     const [gradesResult, attendResult, assignResult, creditsResult, gpaResult] = await Promise.all([
-      TOOL_EXECUTORS.query_grades({}, ctx),
-      TOOL_EXECUTORS.query_attendance({}, ctx),
-      TOOL_EXECUTORS.query_assignments({ status: 'all' }, ctx),
-      TOOL_EXECUTORS.analyze_credits({}, ctx),
-      TOOL_EXECUTORS.predict_gpa({}, ctx),
+      executeTool('query_grades', {}, ctx),
+      executeTool('query_attendance', {}, ctx),
+      executeTool('query_assignments', { status: 'all' }, ctx),
+      executeTool('analyze_credits', {}, ctx),
+      executeTool('predict_gpa', {}, ctx),
     ]);
 
     const parts = [
@@ -2083,10 +2122,10 @@ const TOOL_EXECUTORS: Record<
 
   daily_briefing: async (args, ctx) => {
     const [coursesResult, assignResult, notifResult, calendarResult] = await Promise.all([
-      TOOL_EXECUTORS.query_courses({ filter: 'today' }, ctx),
-      TOOL_EXECUTORS.query_assignments({ status: 'pending' }, ctx),
-      TOOL_EXECUTORS.query_notifications({ unreadOnly: 'true' }, ctx),
-      TOOL_EXECUTORS.query_calendar({}, ctx),
+      executeTool('query_courses', { filter: 'today' }, ctx),
+      executeTool('query_assignments', { status: 'pending' }, ctx),
+      executeTool('query_notifications', { unreadOnly: 'true' }, ctx),
+      executeTool('query_calendar', {}, ctx),
     ]);
 
     const now = new Date();
@@ -2765,7 +2804,7 @@ const TOOL_EXECUTORS: Record<
     }
   },
 
-  request_leave: async (args, ctx) => {
+  request_leave: async (args, ctx, verifiedScope) => {
     if (!ctx.userId) {
       return { success: false, isWrite: true, summary: '請先登入才能請假。' };
     }
@@ -2797,15 +2836,19 @@ const TOOL_EXECUTORS: Record<
         }));
       }
       try {
-        if (courses.length === 0) {
+        if (courses.length === 0 && verifiedScope) {
           const cached = await getCachedCourses();
+          if (!isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
           if (cached && Array.isArray((cached as any).courses)) courses = (cached as any).courses;
           else if (Array.isArray(cached)) courses = cached;
         }
       } catch { /* ignore cache errors */ }
+      if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
       if (courses.length === 0 && hasDataSource()) {
         try { courses = await getDataSource().listCourses(ctx.schoolId); } catch { /* ignore */ }
       }
+      if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
+      if (!verifiedScope && courses.length === 0 && !ctx.userId.startsWith('demo_')) return schoolScopeUnavailable();
 
       // 找出當天的課
       const todayCourses = courses.filter((c: any) => {
@@ -2877,6 +2920,7 @@ const TOOL_EXECUTORS: Record<
         const ds = getDataSource();
         // 嘗試寫入請假記錄
         for (const course of targetCourses) {
+          if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
           try {
             await (ds as any).createLeaveRequest?.({
               userId: ctx.userId,
@@ -2889,6 +2933,7 @@ const TOOL_EXECUTORS: Record<
               status: 'pending',
             } as any);
           } catch {
+            if (verifiedScope && !isVerifiedSchoolAiScopeCurrent(verifiedScope)) return schoolScopeUnavailable();
             // 如果 createLeaveRequest 不存在，用 createCalendarEvent 記錄
             try {
               await ds.createCalendarEvent?.({

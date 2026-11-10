@@ -327,6 +327,13 @@ it('uses the same consumer transaction as Web, verifies current session, and sto
     expect.any(AbortSignal),
   );
   expect(JSON.parse(persisted()!)).not.toHaveProperty('isPlatformOperator');
+  expect(JSON.parse(persisted()!)).toEqual({
+    sessionHandle: handle,
+    platformAccountId: account,
+    expiresAt: 3_601_000,
+    pendingLogout: false,
+  });
+  expect(JSON.parse(persisted()!)).not.toHaveProperty('customToken');
 });
 it('prevents double login and treats credential cancellation as cancellation', async () => {
   const { controller, credential } = setup();

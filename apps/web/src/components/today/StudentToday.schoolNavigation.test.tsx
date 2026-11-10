@@ -189,9 +189,18 @@ async function links(owner: string, schoolId = 'ntu', title = TITLE) {
   await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe(`${owner}|${schoolId}`));
   const hero = await screen.findByTestId('next-action');
   await waitFor(() => expect(hero.textContent).toContain(title));
-  const heroHrefs = within(hero)
-    .getAllByRole('link')
-    .map((a) => a.getAttribute('href'));
+  const heroMapLink = within(hero).getByRole('link', { name: /^找教室：/ });
+  const listMapLink = within(screen.getByTestId('today-classes')).getByRole('link', { name: /^找教室：/ });
+  const heroLinks = within(hero).getAllByRole('link');
+  expect(heroLinks).toHaveLength(3);
+  for (const link of [heroMapLink, listMapLink]) {
+    const map = new URL(link.getAttribute('href')!, 'https://fixture.invalid');
+    expect(map.pathname).toBe('/map');
+    expect(map.searchParams.get('schoolId')).toBe(schoolId);
+    expect(map.searchParams.get('query')).toBe('合成教室 301');
+    expect(link.parentElement?.closest('a, button')).toBeNull();
+  }
+  const heroHrefs = heroLinks.filter((link) => link !== heroMapLink).map((link) => link.getAttribute('href'));
   const listHref = within(screen.getByTestId('today-classes'))
     .getByRole('link', { name: new RegExp(title) })
     .getAttribute('href');
@@ -280,6 +289,7 @@ it('keeps each campus course and fallback isolated through NTU–NCKU–NTU navi
 
   state.search = 'campus=ncku';
   view.rerender(<App />);
+  expect(screen.queryByRole('link', { name: /^找教室：/ })).toBeNull();
   const ncku = await links(owner, 'ncku', '成大合成課程');
   expect(ncku.heroHrefs).toEqual(['/timetable?campus=ncku', '/timetable?campus=ncku']);
   expect(ncku.listHref).toBe('/timetable?campus=ncku');

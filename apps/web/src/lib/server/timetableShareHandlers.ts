@@ -239,6 +239,7 @@ export function createTimetableShareHandlers({ db }: { db: GroupFirestore }) {
         name: shareTitle,
         courses: shareCoursesList,
         meta: shareMeta,
+        publicSchemaVersion: 1,
         createdAt: FieldValue.serverTimestamp(),
         expiresAt,
         revoked: false,

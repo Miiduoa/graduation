@@ -75,10 +75,10 @@ export function PostLoginDebugScreen() {
     setCacheMeta(await getPuCacheDebugMetadata());
     const schoolId = profile?.primarySchoolId ?? profile?.schoolId ?? null;
     const mem = getInMemoryPostLoginContext();
-    setPlcMemoryText(mem ? JSON.stringify({ primary: mem.roles.primaryRole, source: mem.roles.source, builtAt: mem.builtAt }, null, 2) : '（無記憶體 PostLoginContext）');
-    if (schoolId) {
+    setPlcMemoryText(mem && mem.uid === user?.uid && mem.schoolId === schoolId ? JSON.stringify({ primary: mem.roles.primaryRole, source: mem.roles.source, builtAt: mem.builtAt }, null, 2) : '（無記憶體 PostLoginContext）');
+    if (schoolId && user?.uid) {
       try {
-        const fromCache = await getPostLoginContext(schoolId);
+        const fromCache = await getPostLoginContext(schoolId, user.uid);
         setPlcCacheText(
           fromCache
             ? JSON.stringify({ primary: fromCache.roles.primaryRole, source: fromCache.roles.source, builtAt: fromCache.builtAt }, null, 2)
@@ -88,7 +88,7 @@ export function PostLoginDebugScreen() {
         setPlcCacheText(`讀取失敗: ${e instanceof Error ? e.message : String(e)}`);
       }
     } else {
-      setPlcCacheText('（無 schoolId，略過 getPostLoginContext）');
+      setPlcCacheText('（尚未登入或選校）');
     }
 
     const au = getAuthInstance().currentUser;
