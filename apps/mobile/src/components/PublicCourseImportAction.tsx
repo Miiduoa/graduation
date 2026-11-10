@@ -3,7 +3,7 @@ import { Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { PublicCatalogCourse, PublicCourseCatalogResponse } from '@campus/shared/src/publicCourseCatalog';
 import { appendPersonalImports, snapshotPersonalImports, undoLastPersonalImport, type PersonalImportScope } from '../services/personalImports';
-import { findCatalogTimetableOverlaps, preparePublicCourseTimetableImport, type CatalogTimetableOverlap, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
+import { findCatalogSameSlotChange, findCatalogTimetableOverlaps, preparePublicCourseTimetableImport, type CatalogSlotChange, type CatalogTimetableOverlap, type PublicCourseTimetablePreview } from '../services/publicCourseTimetableImport';
 import { usePersonalImportScope } from '../state/personalImportScope';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
@@ -16,7 +16,7 @@ type Props = {
 };
 type Outcome =
   | { status: 'review' | 'saving' }
-  | { status: 'error'; reason?: 'teacher-change' }
+  | { status: 'error'; reason?: CatalogSlotChange }
   | { status: 'conflict'; overlaps: CatalogTimetableOverlap[]; recordsJson: string }
   | { status: 'saved'; added: number; duplicates: number; batchId?: string }
   | { status: 'undone'; removed: number };
@@ -65,6 +65,13 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         const current = await snapshotPersonalImports(scope, () => active(run));
         if (!active(run)) return;
         recordsJson = JSON.stringify(current.records);
+        // Show an actionable stale-offering warning on the first tap. The
+        // ledger still rejects instructor changes under its write lock.
+        const changed = findCatalogSameSlotChange(preview.rows, current.records);
+        if (changed) {
+          setOutcome({ status: 'error', reason: changed });
+          return;
+        }
         const overlaps = findCatalogTimetableOverlaps(preview.rows, current.records);
         if (overlaps.length) {
           setOutcome({ status: 'conflict', overlaps, recordsJson });
@@ -87,7 +94,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
         status: 'error',
         reason: error instanceof Error && error.message ===
           '相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。'
-          ? 'teacher-change' : undefined,
+          ? 'teacher' : undefined,
       });
     } finally {
       if (active(run)) pending.current = false;
@@ -112,6 +119,8 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       }
     }
   }
+  const changedField = outcome.status === 'error' && outcome.reason
+    ? { teacher: '教師', room: '教室', title: '課名' }[outcome.reason] : null;
   const body = { color: theme.colors.textSecondary, lineHeight: 22 };
   return <View style={{ gap: 10, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10 }}>
     <Text accessibilityRole="header" style={{ color: theme.colors.text, fontWeight: '600' }}>加入前核對</Text>
@@ -154,11 +163,11 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       </>}
       {outcome.status === 'error' && <>
         <Text accessibilityRole="alert" style={body}>
-          {outcome.reason === 'teacher-change'
-            ? '相同課號、班別與時段的教師與原有個人紀錄不同。為避免重複加入，本次沒有儲存；請先查看個人課表，核對並修正原紀錄。'
+          {changedField
+            ? `相同課號、班別與時段的${changedField}與原有個人紀錄不同。為避免重複加入，本次沒有儲存；請先查看個人課表，核對並修正原紀錄。`
             : '未能確認加入結果（資料可能已變動）。請重新核對後重試；相同時段不會重複新增。若仍失敗，請從個人匯入頁核對現有資料。'}
         </Text>
-        {outcome.reason === 'teacher-change' && <Button text="查看原有個人課表" kind="ghost" onPress={() => {
+        {changedField && <Button text="查看原有個人課表" kind="ghost" onPress={() => {
           if (active(generation.current)) safeNavigate(navigation, 'PersonalTimetable', {
             term: preview.term, reminderScope: JSON.stringify(scope),
           });
@@ -166,7 +175,7 @@ function ScopedReview({ preview, scope, scopeKey, liveScopeKey, navigation, onCl
       </>}
       <Button text={outcome.status === 'saving' ? '正在加入…' :
         outcome.status === 'conflict' ? '仍要加入（保留兩門課）' :
-        outcome.status === 'error' && outcome.reason === 'teacher-change' ? '重新核對' : '確認加入個人課表'} kind="primary"
+        outcome.status === 'error' && changedField ? '重新核對' : '確認加入個人課表'} kind="primary"
         disabled={outcome.status === 'saving'} onPress={() => void confirm()} />
     </>}
     <Button text="收起核對" kind="ghost" disabled={outcome.status === 'saving' || undoing} onPress={onClose} />

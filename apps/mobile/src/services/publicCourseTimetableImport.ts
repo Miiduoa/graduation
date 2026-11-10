@@ -42,6 +42,34 @@ export function preparePublicCourseTimetableImport(
   return { ...parsed, schoolName, academicYear, semester, term: `${academicYear}|${semester}`, csv };
 }
 
+/** A cached catalog offering must not create a second copy of the same slot
+ * when the official instructor, classroom or course title has changed.
+ * The ledger repeats its own guard under the owner/school write lock. */
+export type CatalogSlotChange = 'teacher' | 'room' | 'title';
+
+export function findCatalogSameSlotChange(
+  incoming: readonly PersonalImportRow[],
+  existing: readonly PersonalImportRecord[],
+): CatalogSlotChange | null {
+  const normalize = (value?: string) => (value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+  for (const row of incoming) {
+    if (row.kind !== 'timetable' || !row.courseCode?.trim() ||
+      !row.dayOfWeek || !row.startTime || !row.endTime) continue;
+    for (const saved of existing) {
+      if (saved.kind !== 'timetable' || saved.schoolId !== row.schoolId ||
+        saved.academicYear !== row.academicYear || saved.semester !== row.semester ||
+        normalize(saved.courseCode) !== normalize(row.courseCode) ||
+        normalize(saved.className) !== normalize(row.className) ||
+        saved.dayOfWeek !== row.dayOfWeek ||
+        saved.startTime !== row.startTime || saved.endTime !== row.endTime) continue;
+      if (normalize(saved.teacher) !== normalize(row.teacher)) return 'teacher';
+      if (normalize(saved.location) !== normalize(row.location)) return 'room';
+      if (normalize(saved.title) !== normalize(row.title)) return 'title';
+    }
+  }
+  return null;
+}
+
 export type CatalogTimetableOverlap = {
   dayOfWeek: number;
   incomingTitle: string;
