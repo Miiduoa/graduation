@@ -4,17 +4,21 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './CourseStudyPanel.module.css';
 
 /** Use an installed voice so reading a private course does not require a speech service. */
-export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChange }: {
+export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChange, rate: selectedRate, onRateChange }: {
   text: string;
   label?: string;
   onSpeakingChange?: (speaking: boolean) => void;
+  /** Pass a controlled rate to preserve the choice when a teaching step remounts. */
+  rate?: number;
+  onRateChange?: (rate: number) => void;
 }) {
   const [available, setAvailable] = useState(false);
   const [supported, setSupported] = useState(false);
   const refreshVoices = useRef<(() => void) | null>(null);
   const [speaking, setSpeaking] = useState(false);
   // Apply the student's locally chosen pace only to the next utterance.
-  const [rate, setRate] = useState(0.95);
+  const [localRate, setLocalRate] = useState(0.95);
+  const rate = selectedRate ?? localRate;
   const [error, setError] = useState('');
   const voice = useRef<SpeechSynthesisVoice | null>(null);
   const active = useRef<SpeechSynthesisUtterance | null>(null);
@@ -127,7 +131,12 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       </button>
       <label className={styles.note}>朗讀速度
         <select aria-label="朗讀速度" value={rate} disabled={!available || speaking}
-          onChange={(event) => setRate(Number(event.target.value))}>
+          onChange={(event) => {
+            const nextRate = Number(event.target.value);
+            if (![0.8, 0.95, 1.1].includes(nextRate)) return;
+            if (onRateChange) onRateChange(nextRate);
+            else setLocalRate(nextRate);
+          }}>
           <option value={0.8}>慢速（0.8 倍）</option>
           <option value={0.95}>一般（0.95 倍）</option>
           <option value={1.1}>稍快（1.1 倍）</option>

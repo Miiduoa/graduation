@@ -33,6 +33,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
   const [availability, setAvailability] = useState<ReturnType<typeof getStudyTutorAvailability> | null>(null);
   const [busy, setBusy] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  // Keep the student's narration pace when the keyed reader switches teaching steps.
+  const [readAloudRate, setReadAloudRate] = useState(0.95);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const [timing, setTiming] = useState<StudyTutorTiming | null>(null);
@@ -158,7 +160,8 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
       {!busy && <StudyReadAloud key={`${selected?.id ?? 'source'}:${activeStepIndex}`}
         text={activeStep?.explanation ?? result?.explanation ?? passage.text}
         label={activeStep ? '朗讀這一步' : result ? '朗讀這段講解' : '朗讀原文'}
-        onSpeakingChange={setSpeaking} />}
+        onSpeakingChange={setSpeaking}
+        rate={readAloudRate} onRateChange={setReadAloudRate} />}
       <section className={styles.personalNotes} aria-label="本段學習筆記">
         <div className={styles.coachHeading}>
           <h4>我的理解</h4>

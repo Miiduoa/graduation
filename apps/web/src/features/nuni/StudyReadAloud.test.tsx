@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StudyReadAloud } from './StudyReadAloud';
@@ -244,4 +245,37 @@ it('keeps pace selection disabled when only remote Chinese voices are available'
   expect(pace.disabled).toBe(true);
   expect((screen.getByRole('button', { name: '朗讀這一段' }) as HTMLButtonElement).disabled).toBe(true);
   expect(speak).not.toHaveBeenCalled();
+});
+
+it('preserves the selected Chinese narration pace when a new teaching step remounts the reader', () => {
+  function StepReader({ step }: { step: string }) {
+    const [savedRate, setSavedRate] = useState(0.95);
+    return <StudyReadAloud key={step} text={step} rate={savedRate} onRateChange={setSavedRate} />;
+  }
+
+  const view = render(<StepReader step="第一步：先讀題目" />);
+  const pace = screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement;
+  fireEvent.change(pace, { target: { value: '0.8' } });
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const first = speak.mock.calls[0][0] as Utterance;
+  expect(first.rate).toBe(0.8);
+  expect(first.voice).toBe(local);
+  act(() => first.onend?.());
+
+  view.rerender(<StepReader step="第二步：計算答案" />);
+  expect((screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement).value).toBe('0.8');
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const second = speak.mock.calls[1][0] as Utterance;
+  expect(second.text).toBe('第二步：計算答案');
+  expect(second.rate).toBe(0.8);
+  expect(second.voice).toBe(local);
+
+  act(() => second.onend?.());
+  fireEvent.change(screen.getByRole('combobox', { name: '朗讀速度' }), { target: { value: '1.1' } });
+  view.rerender(<StepReader step="第三步：檢查結果" />);
+  expect((screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement).value).toBe('1.1');
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect((speak.mock.calls[2][0] as Utterance).rate).toBe(1.1);
+  expect((speak.mock.calls[2][0] as Utterance).voice).toBe(local);
+  expect(cancel).not.toHaveBeenCalled();
 });
