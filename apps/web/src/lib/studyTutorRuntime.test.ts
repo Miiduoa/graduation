@@ -405,6 +405,65 @@ describe('explicit local study generation', () => {
     await expect(retry).resolves.toEqual(lesson());
   });
 
+  it.each([
+    { label: 'left-to-right mark', marker: '\u200e' },
+    { label: 'right-to-left override', marker: '\u202e' },
+    { label: 'bidi isolate', marker: '\u2066' },
+    { label: 'combining grapheme joiner', marker: '\u034f' },
+  ])('rejects a duplicate step disguised with $label without changing saved lessons', async ({ marker }) => {
+    const duplicate = {
+      ...lesson(),
+      steps: [
+        lesson().steps![0],
+        {
+          ...lesson().steps![1],
+          title: '換標題與引句',
+          explanation: '辨' + marker + '識唯一的紀錄。',
+        },
+      ],
+    };
+    expect(parseTutorExplanation(JSON.stringify(duplicate), passage()).steps).toHaveLength(2);
+    const onTiming = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand',
+      signal: new AbortController().signal, onTiming,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(duplicate) });
+    await expect(pending).rejects.toThrow('重複相同的教學步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
+  it.each([
+    { label: 'zero-width space', explanation: '\u200b' },
+    { label: 'bidi isolates', explanation: '\u2066\u2069' },
+  ])('rejects a visually blank new step ($label) while retaining the original lesson', async ({ explanation }) => {
+    const blank = {
+      ...lesson(),
+      steps: [lesson().steps![0], { ...lesson().steps![1], explanation }],
+    };
+    // Legacy offline progress remains parseable; only a NEW worker result is rejected.
+    expect(parseTutorExplanation(JSON.stringify(blank), passage()).steps).toHaveLength(2);
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(blank) });
+    await expect(pending).rejects.toThrow('空白或重複相同的教學步驟');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'understand', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify(lesson()) });
+    await expect(retry).resolves.toEqual(lesson());
+  });
+
   it('rejects an overlong exact main citation rather than treating a whole paragraph as evidence', async () => {
     const longQuote = '主鍵用來唯一識別一筆紀錄。'.repeat(6);
     const source = { ...passage(), text: longQuote + '外鍵連接資料表。' };

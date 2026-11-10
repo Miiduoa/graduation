@@ -92,12 +92,13 @@ function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
   const seen = new Set<string>();
   for (const step of explanation.steps) {
     const content = step.explanation.normalize('NFC')
-      // Soft hyphen, zero-width space and word joiner are invisible in the
-      // student's explanation. Do not count them as a second teaching step.
+      // Formatting-only characters, including bidi overrides/isolates and
+      // combining grapheme joiners, must not manufacture a second visible step.
       // Keep ZWJ/ZWNJ: they can change real script and emoji semantics.
-      .replace(/[\u00ad\u200b\u2060\ufeff]/gu, '')
+      // Original source and saved lessons are never normalized or rewritten.
+      .replace(/[\u00ad\u034f\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu, '')
       .replace(/\s+/gu, ' ').trim();
-    if (seen.has(content)) return false;
+    if (!content || seen.has(content)) return false;
     seen.add(content);
   }
   return true;
@@ -237,7 +238,7 @@ export async function runStudyTutor({
             if (!explanation.steps)
               throw new Error('這次講解缺少分步步驟，無法完成逐步學習。請重新講解。');
             if (!hasDistinctGeneratedSteps(explanation))
-              throw new Error('這次講解重複相同的教學步驟，請重新講解。');
+              throw new Error('這次講解有空白或重複相同的教學步驟，請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))
