@@ -779,7 +779,15 @@ function ScopedFeedTab(props: FeedTabProps & { user: { uid: string } }) {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
-                      {authorLine(item)}
+                      {!item.anonymous && item.authorUid ? (
+                        <Link
+                          href={`/community/member/${encodeURIComponent(item.authorUid)}?schoolId=${encodeURIComponent(schoolId)}`}
+                          aria-label={`查看 ${authorLine(item)} 的個人頁`}
+                          style={{ color: 'inherit', textDecoration: 'none' }}
+                        >
+                          {authorLine(item)}
+                        </Link>
+                      ) : authorLine(item)}
                       <span style={{ color: 'var(--muted)', fontWeight: 500, marginLeft: 6 }}>
                         · {formatTs(item.createdAt)}
                       </span>

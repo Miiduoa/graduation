@@ -31,6 +31,9 @@ it('only opens classroom camera when ASSIGNMENT_FILE_SUBMIT_ENABLED is the liter
   );
   expect(off.some((entry) => entry.source === '/merchant')).toBe(true);
 
+  expect(off.find((entry) => entry.source === '/merchant/workspace')?.headers[0].value).toContain('camera=(self)');
+  expect(off.some((entry) => entry.source === '/merchant/apply')).toBe(false);
+
   vi.stubEnv('ASSIGNMENT_FILE_SUBMIT_ENABLED', 'true');
   const on = (await nextConfig.headers?.()) ?? [];
   expect(on.some((entry) => entry.source === '/classroom')).toBe(true);

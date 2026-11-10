@@ -1965,9 +1965,11 @@ exports.signInPuStudentId = onRequest(
           schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
         });
 
+        const verifiedStudentId = canonicalizePuStudentId(profile.studentId);
         customToken = await auth.createCustomToken(uid, {
           schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
           role: schoolRole.role,
+          ...(schoolRole.role === 'student' && verifiedStudentId ? { campusCardStudentId: verifiedStudentId } : {}),
         });
       }
 
@@ -2332,6 +2334,9 @@ exports.verifySSOCallback = onRequest(
         schoolId,
         ssoSub: userInfo.sub,
         role: resolvedRole,
+        ...(availability.isProductionReady && resolvedRole === 'student' && userInfo.campusCardStudentId
+          ? { campusCardStudentId: userInfo.campusCardStudentId }
+          : {}),
       });
 
       await syncAuthClaims(uid, {

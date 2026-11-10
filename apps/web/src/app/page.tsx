@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { NuniError, nuniErrorMessage } from '@campus/shared/src/nuni';
 import { AppHeader } from '@/components/AppHeader';
+import { StudentCardEntry } from '@/components/StudentCardEntry';
 import { TodayAssistantDisclosure, type TodayVoiceHandle } from '@/components/TodayCampusEntry';
 import { SiteFooter } from '@/components/SiteFooter';
 import { useAuth } from '@/components/AuthGuard';
@@ -260,6 +261,7 @@ export default function HomePage() {
       </a>
       <AppHeader onOpenVoice={() => voiceEntry.current?.openVoice()} />
       <main id="today-content" className={styles.main} tabIndex={-1}>
+        <StudentCardEntry />
         {blocked ? (
           <section className={styles.focus} aria-labelledby="session-title">
             <h2 id="session-title">

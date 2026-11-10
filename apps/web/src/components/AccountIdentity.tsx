@@ -98,21 +98,22 @@ export function AccountIdentity({ context, accountId }: { context: string; accou
             )}
             {stores.map((store) => (
               <li key={`${store.name}:${store.campus}`}>
-                <Link href="/merchant">
+                <Link href="/merchant/workspace">
                   {store.name} · {store.campus} · {store.status}
                 </Link>
               </li>
             ))}
             {applications.map((item) => (
               <li key={`${item.brand}:${item.progress}`}>
-                <Link href="/merchant">
+                <Link href="/merchant/workspace">
                   {item.brand} · {item.progress}
                 </Link>
               </li>
             ))}
             {merchantEmpty && (
               <li>
-                <Link href="/merchant">{IDENTITY_NO_MERCHANT_COPY}</Link>
+                <span>{IDENTITY_NO_MERCHANT_COPY}。</span>{' '}
+                <Link href="/merchant/apply">申請店家進駐</Link>
               </li>
             )}
           </ul>

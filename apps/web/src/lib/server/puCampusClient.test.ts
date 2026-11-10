@@ -99,7 +99,9 @@ it('does not treat the live alcat login page as maintenance', async () => {
 it('treats a visible maintenance page without a login form as closed', async () => {
   expect(campusPageHasLoginForm(ALCAT_MAINTENANCE_HTML)).toBe(false);
   expect(campusPageLooksClosed(ALCAT_MAINTENANCE_HTML)).toBe(true);
-  const fetchMock = vi.fn(async (_url: string) => htmlResponse(200, ALCAT_MAINTENANCE_HTML));
+  const fetchMock = vi.fn<(url: string) => Promise<Response>>(
+    async () => htmlResponse(200, ALCAT_MAINTENANCE_HTML),
+  );
   const gateway = createPuCampusGateway({ fetch: fetchMock });
   await expect(gateway.loginStudent(STUDENT, SECRET)).rejects.toMatchObject({
     kind: 'closed',
@@ -182,12 +184,13 @@ it('accepts a student portal page that still has the maintenance HTML comment', 
     }
     return htmlResponse(
       200,
-      `<!-- 系統維護公告 -->
+      `<!-- 系統維護公告 學號(Student No.): 123456789 -->
        <html><body>學號(Student No.): ${STUDENT} 姓名(Student Name): 陳同學 query_course</body></html>`,
     );
   });
   const gateway = createPuCampusGateway({ fetch: fetchMock });
   await expect(gateway.loginStudent(STUDENT, SECRET)).resolves.toMatchObject({
+    studentId: STUDENT,
     studentName: '陳同學',
     cookies: { PHPSESSID: 'abc' },
   });
@@ -1138,4 +1141,24 @@ it('keeps ETIMEDOUT on teacher LMS failures', async () => {
     stage: 'submit',
     code: 'ETIMEDOUT',
   });
+});
+
+it.each([
+  ['visible number', `<span hidden>學號(Student No.)：777777777</span><textarea>學號(Student No.)：888888888</textarea>
+    <p title="學號(Student No.)：999999999">學號(Student No.)：<b>${STUDENT}</b></p>`, STUDENT],
+  ['hidden number', `<div aria-hidden="true">學號(Student No.)：${STUDENT}</div>`, null],
+  ['malformed number', `學號(Student No.)：${STUDENT}A`, null],
+  ['two different numbers', `學號(Student No.)：${STUDENT} 學號(Student No.)：123456789`, null],
+] as const)('binds the card to the visible, unambiguous profile field (%s)', async (_label, html, expected) => {
+  const gateway = createPuCampusGateway({ fetch: async () => htmlResponse(200, `<p>姓名(Student Name)：林同學</p>${html}`) });
+  await expect(gateway.fetchStudentInfo({ PHPSESSID: 'fixture' })).resolves.toMatchObject({ studentId: expected });
+});
+
+it('withholds a student number on another portal page reached by redirect', async () => {
+  const gateway = createPuCampusGateway({
+    fetch: async url => String(url).endsWith('/query_course.html')
+      ? htmlResponse(302, '', { location: '/announcements' })
+      : htmlResponse(200, `<p>學號(Student No.)：${STUDENT}</p>`),
+  });
+  await expect(gateway.fetchStudentInfo({ PHPSESSID: 'fixture' })).resolves.toMatchObject({ studentId: null });
 });

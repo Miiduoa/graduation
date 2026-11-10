@@ -5,7 +5,7 @@ import styles from './accountEntry.module.css';
 
 export const metadata: Metadata = {
   title: '登入',
-  description: '請用學校核發的帳號登入。',
+  description: '學生、教師、店家與管理人員的註冊及登入入口。',
 };
 
 function LoadingEntry() {
