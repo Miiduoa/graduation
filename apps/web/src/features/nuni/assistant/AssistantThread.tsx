@@ -83,23 +83,27 @@ export function AssistantThread({
     return () => observer.disconnect();
   }, [inline, turns.length, question, pending, draft]);
   useEffect(() => {
-    if (inline) return;
-    // Incoming results must not steal the scroll position while someone reads older replies.
+    const node = log.current;
+    const scrollTarget = inline ? node : window;
+    if (!scrollTarget) return;
+    // The inline thread owns its scroll position; outer page scrolling must not change it.
     const trackScroll = () => {
       if (!end.current || turns.length === 0) return;
-      const nearLatest = end.current.getBoundingClientRect().top - window.innerHeight <= 144;
+      const nearLatest = inline && node
+        ? node.scrollHeight - node.clientHeight - Math.max(0, node.scrollTop) <= 48
+        : end.current.getBoundingClientRect().top - window.innerHeight <= 144;
       followLatest.current = nearLatest;
       setShowJump(!nearLatest);
     };
-    window.addEventListener('scroll', trackScroll, { passive: true });
-    return () => window.removeEventListener('scroll', trackScroll);
+    scrollTarget.addEventListener('scroll', trackScroll, { passive: true });
+    return () => scrollTarget.removeEventListener('scroll', trackScroll);
   }, [inline, turns.length]);
   useEffect(() => {
+    if (!followLatest.current || (!turns.length && !pending && !error)) return;
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
-    if (!followLatest.current || (!turns.length && !pending && !error)) return;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
   }, [inline, turns, pending, error]);
@@ -163,7 +167,8 @@ export function AssistantThread({
           {consentControl}
         </details>
       ) : consentControl}
-      <div ref={log} className={styles.log} role="log" aria-busy={pending || undefined}>
+      <div ref={log} className={styles.log} role="log" aria-label="對話紀錄"
+        tabIndex={inline ? 0 : undefined} aria-busy={pending || undefined}>
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
             <h2>今天想問什麼？</h2>
@@ -256,8 +261,17 @@ export function AssistantThread({
             onClick={() => {
               followLatest.current = true;
               setShowJump(false);
-              const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-              end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+              if (inline) {
+                // Keep the homepage in place and leave keyboard focus on a persistent target.
+                const node = log.current;
+                if (node) {
+                  node.focus({ preventScroll: true });
+                  node.scrollTop = node.scrollHeight;
+                }
+              } else {
+                const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+                end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+              }
             }}
           >
             回到最新回覆
