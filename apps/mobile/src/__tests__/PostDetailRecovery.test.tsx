@@ -386,3 +386,71 @@ test('public entry rejects untrusted, ambiguous and expired shared posts while p
   expect(delivered).toHaveBeenCalledWith('campus://library');
   subscription?.();
 });
+
+
+test('remounting public navigation cannot renew an expired cold-share intent from the same OS URL', async () => {
+  const { clearPendingSharedPostLink, takePendingSharedPostLink } = require('../app/pendingSharedPostLink');
+  clearPendingSharedPostLink();
+  const date = jest.spyOn(Date, 'now');
+  try {
+    date.mockReturnValue(1_000_000);
+    mockIncomingInitialURL = 'https://nuni.tw/community/post/remount-1?schoolId=pu&utm_source=cold';
+    expect(await preAuthLinking.getInitialURL?.()).toBeNull();
+    date.mockReturnValue(1_000_000 + 10 * 60 * 1000 + 1);
+    // PublicNavigation can remount during authentication or an interrupted login.
+    expect(await preAuthLinking.getInitialURL?.()).toBeNull();
+    expect(takePendingSharedPostLink()).toBeNull();
+  } finally {
+    date.mockRestore();
+    mockIncomingInitialURL = null;
+    clearPendingSharedPostLink();
+  }
+});
+
+test('private navigation never replays a publicly handled expired or canceled initial HTTPS share', async () => {
+  const {
+    clearPendingSharedPostLink, takePendingSharedPostLink, resolvePrivateInitialSharedPostURL,
+  } = require('../app/pendingSharedPostLink');
+  clearPendingSharedPostLink();
+  const date = jest.spyOn(Date, 'now');
+  try {
+    const incoming = 'https://nuni.tw/community/post/expired-1?schoolId=pu&utm_source=campus';
+    mockIncomingInitialURL = incoming;
+    date.mockReturnValue(2_000_000);
+    expect(await preAuthLinking.getInitialURL?.()).toBeNull();
+    date.mockReturnValue(2_000_000 + 10 * 60 * 1000 + 1);
+    // Expo Linking.getInitialURL() can still return the launch URL later.
+    expect(resolvePrivateInitialSharedPostURL(incoming, 'nuni.tw')).toBeNull();
+    expect(takePendingSharedPostLink()).toBeNull();
+    expect(resolvePrivateInitialSharedPostURL(incoming, 'nuni.tw')).toBeNull();
+  } finally {
+    date.mockRestore();
+    mockIncomingInitialURL = null;
+    clearPendingSharedPostLink();
+  }
+});
+
+test('private navigation retains a fresh authenticated cold share and takes staged public intent once', async () => {
+  const {
+    clearPendingSharedPostLink, resolvePrivateInitialSharedPostURL,
+  } = require('../app/pendingSharedPostLink');
+  clearPendingSharedPostLink();
+  const date = jest.spyOn(Date, 'now');
+  try {
+    date.mockReturnValue(3_000_000);
+    // A direct authenticated cold launch does not pass through the public stack.
+    const authenticated = 'https://nuni.tw/community/post/direct-1?schoolId=pu';
+    expect(resolvePrivateInitialSharedPostURL(authenticated, 'nuni.tw')).toBe(authenticated);
+    mockIncomingInitialURL = 'https://nuni.tw/community/post/public-1?schoolId=pu&utm_ref=abc';
+    expect(await preAuthLinking.getInitialURL?.()).toBeNull();
+    expect(resolvePrivateInitialSharedPostURL(mockIncomingInitialURL, 'nuni.tw'))
+      .toBe('https://nuni.tw/community/post/public-1?schoolId=pu');
+    // Subsequent private stack recreation cannot open a consumed share again.
+    expect(resolvePrivateInitialSharedPostURL(mockIncomingInitialURL, 'nuni.tw')).toBeNull();
+    expect(resolvePrivateInitialSharedPostURL('campus://library', 'nuni.tw')).toBe('campus://library');
+  } finally {
+    date.mockRestore();
+    mockIncomingInitialURL = null;
+    clearPendingSharedPostLink();
+  }
+});
