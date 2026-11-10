@@ -4,7 +4,7 @@ import { buildPersonalImportAiPrompt } from '@campus/shared/src/imports/aiRecogn
 import { PERSONAL_IMPORT_CLOUD_IMAGE_MAX_BYTES } from '@campus/shared/src/imports/aiCloudImage';
 import { boundedJson, platformRequest, readPlatformAuthorization, requireSameOrigin, requireSession } from '../nuni/server';
 import { getFirebaseAdmin } from './firebaseAdmin';
-import { modelOutput, outputSchema, reservePersonalImportCloudQuota, type PersonalImportCloudDependencies } from './personalImportCloud';
+import { modelOutput, outputSchema, personalImportCloudQuotaLimits, reservePersonalImportCloudQuota, type PersonalImportCloudDependencies } from './personalImportCloud';
 
 export const PERSONAL_IMPORT_VISION_MODEL = '@cf/qwen/qwen3.8-27b';
 export const PERSONAL_IMPORT_CLOUD_IMAGE_SERVER_TIMEOUT_MS = 37_000;
@@ -72,7 +72,7 @@ export async function handlePersonalImportCloudImage(
       if (!encoded) return respond(422, { code: 'invalid-input' });
       const db = await (dependencies.getQuotaStore ?? (async () => (await getFirebaseAdmin())?.db as unknown as NonNullable<Awaited<ReturnType<NonNullable<PersonalImportCloudDependencies['getQuotaStore']>>>> ?? null))();
       if (!db) return respond(503, { code: 'unavailable' });
-      if (!await reservePersonalImportCloudQuota(db, principal.platformAccountId, (dependencies.now ?? Date.now)())) return respond(429, { code: 'quota' });
+      if (!await reservePersonalImportCloudQuota(db, principal.platformAccountId, (dependencies.now ?? Date.now)(), personalImportCloudQuotaLimits())) return respond(429, { code: 'quota' });
       if (controller.signal.aborted) return respond(504, { code: 'timeout' });
       const prompt = buildPersonalImportAiPrompt('', {
         kind: 'timetable', schoolId: 'personal', academicYear: input.academicYear,

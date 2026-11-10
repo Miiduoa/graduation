@@ -44,6 +44,13 @@ function configuredLimit(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(limit) ? limit : fallback;
 }
 
+export function personalImportCloudQuotaLimits(): QuotaLimits {
+  return {
+    globalDaily: configuredLimit(process.env.PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT, PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT),
+    accountMinute: configuredLimit(process.env.PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT, PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT),
+  };
+}
+
 export async function reservePersonalImportCloudQuota(db: QuotaStore, principal: string, now: number, limits: QuotaLimits = {
   globalDaily: PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT,
   accountMinute: PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT,
@@ -144,10 +151,7 @@ export async function handlePersonalImportCloud(request: NextRequest, dependenci
       const db = await (dependencies.getQuotaStore ?? (async () => (await getFirebaseAdmin())?.db as unknown as QuotaStore ?? null))();
       if (!db) return response(503, { code: 'unavailable', message: '雲端整理暫時無法使用。' });
       if (controller.signal.aborted) return response(504, { code: 'timeout' });
-      const limits = {
-        globalDaily: configuredLimit(process.env.PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT, PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT),
-        accountMinute: configuredLimit(process.env.PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT, PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT),
-      };
+      const limits = personalImportCloudQuotaLimits();
       if (!await reservePersonalImportCloudQuota(db, principal.platformAccountId, (dependencies.now ?? Date.now)(), limits)) return response(429, { code: 'quota', message: '雲端整理已達使用上限，請改用本機整理。' }, { 'Retry-After': '60' });
       if (controller.signal.aborted) return response(504, { code: 'timeout' });
       const prompt = [

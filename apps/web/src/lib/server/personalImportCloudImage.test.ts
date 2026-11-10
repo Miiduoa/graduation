@@ -41,14 +41,51 @@ function setup() {
   }));
   const verifySession = vi.fn().mockResolvedValue(principal);
   const getQuotaStore = vi.fn().mockResolvedValue(store);
-  return { fetcher, verifySession, getQuotaStore,
+  return { counter, fetcher, verifySession, getQuotaStore,
     dependencies: {
       config: { accountId: 'test', token: 'secret' }, fetcher, verifySession, getQuotaStore,
     },
   };
 }
-beforeEach(() => { vi.stubEnv('WEB_PUBLIC_ORIGIN', 'https://nuni.tw'); });
+beforeEach(() => {
+  vi.stubEnv('WEB_PUBLIC_ORIGIN', 'https://nuni.tw');
+  vi.stubEnv('PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', '2000');
+  vi.stubEnv('PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT', '10');
+});
 afterEach(() => { vi.unstubAllEnvs(); });
+
+it.each(['PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', 'PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT'])(
+  'blocks image model calls without spending quota when %s=0', async (name) => {
+    vi.stubEnv(name, '0');
+    const { dependencies, fetcher, counter } = setup();
+    const result = await handlePersonalImportCloudImage(req(), dependencies);
+    expect(result.status).toBe(429);
+    expect(await result.json()).toEqual({ code: 'quota' });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(counter.size).toBe(0);
+  },
+);
+
+it.each(['PERSONAL_IMPORT_CLOUD_GLOBAL_DAILY_LIMIT', 'PERSONAL_IMPORT_CLOUD_ACCOUNT_MINUTE_LIMIT'])(
+  'blocks image model calls at and above the configured %s without increasing counters', async (name) => {
+    vi.stubEnv(name, '2');
+    const { dependencies, fetcher, counter } = setup();
+    const now = Date.parse('2026-11-09T01:00:00Z');
+    const fixedDependencies = { ...dependencies, now: () => now };
+    expect((await handlePersonalImportCloudImage(req(), fixedDependencies)).status).toBe(200);
+    expect((await handlePersonalImportCloudImage(req(), fixedDependencies)).status).toBe(200);
+    fetcher.mockClear();
+    const before = structuredClone(counter);
+    for (const limit of ['2', '1']) {
+      vi.stubEnv(name, limit);
+      const result = await handlePersonalImportCloudImage(req(), fixedDependencies);
+      expect(result.status).toBe(429);
+      expect(await result.json()).toEqual({ code: 'quota' });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(counter).toEqual(before);
+    }
+  },
+);
 
 it('uploads a consented screenshot as real image_url input to a vision model and never returns the image', async () => {
   const { dependencies, fetcher, verifySession } = setup();
