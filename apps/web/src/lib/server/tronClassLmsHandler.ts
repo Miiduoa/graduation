@@ -512,7 +512,7 @@ export function createTronClassLmsHandler({
       // A relink can leave the original portal document intact.
       await verifyLinkedSession();
       const cacheData = cached.data();
-      const saveCache = async (snapshot: LmsReadonlySnapshot) => {
+      const saveCache = async (snapshot: LmsReadonlySnapshot, stampSessionVersion = true) => {
         if (!sessionVersion || !db.runTransaction) return;
         try {
           await db.runTransaction(async (tx) => {
@@ -521,8 +521,12 @@ export function createTronClassLmsHandler({
             // A concurrent refresh, relink or cleanup has already replaced our input.
             if (cached.exists !== current.exists || (current.exists &&
               (!current.updateTime || documentVersion(current) !== documentVersion(cached)))) return;
+            const currentData = current.data();
+            const keepLegacyShape = !stampSessionVersion && current.exists &&
+              currentData != null && !('sessionVersion' in currentData);
             tx.set(cacheRef, {
-              ownerUid: uid, sessionId: linkedId, sessionVersion,
+              ownerUid: uid, sessionId: linkedId,
+              ...(keepLegacyShape ? {} : { sessionVersion }),
               fetchedAt: snapshot.fetchedAt,
               expiresAt: new Date(snapshot.cache.expiresAt),
               snapshot,
@@ -535,8 +539,10 @@ export function createTronClassLmsHandler({
         }
       };
 
-      if (cached.exists && sessionVersion && cacheData?.sessionVersion === sessionVersion &&
+      const legacyCompatibleCache = cacheData != null && !('sessionVersion' in cacheData);
+      if (cached.exists && sessionVersion && cacheData &&
         cacheData.ownerUid === uid && cacheData.sessionId === linkedId &&
+        (cacheData.sessionVersion === sessionVersion || legacyCompatibleCache) &&
         cacheStillFresh(cacheData.expiresAt, now()) && publicSnapshot(cacheData.snapshot, uid, now())) {
         const pruned = readCachedExtras(cacheData.extras, now());
         extras = refresh ? {} : pruned.extras;
@@ -546,7 +552,7 @@ export function createTronClassLmsHandler({
 
       if (cachedHomework && !refresh && (!courseId || extras[String(courseId)])) {
         if (shouldPruneExtras) {
-          await saveCache(cachedHomework);
+          await saveCache(cachedHomework, !legacyCompatibleCache);
           await verifyLinkedSession();
         }
         return {

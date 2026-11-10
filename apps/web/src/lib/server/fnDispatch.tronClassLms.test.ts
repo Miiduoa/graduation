@@ -437,17 +437,32 @@ it('does not serve another linked TronClass session\'s cached courses after reco
   expect(store.docs.get(CACHE)?.sessionId).toBe(nextId);
 });
 
-it.each(['sessionId', 'sessionVersion'])('refetches a legacy cache missing %s', async (field) => {
+it('refetches a legacy cache missing sessionId', async () => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
   const cached = store.docs.get(CACHE)!;
-  delete cached[field];
+  delete cached.sessionId;
   vi.mocked(source.fetchHomeworkPage).mockClear();
 
   const body = await (await request()).json();
   expect(body.result.cache.hit).toBe(false);
   expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(store.docs.get(CACHE)?.[field]).toBeDefined();
+  expect(store.docs.get(CACHE)?.sessionId).toBeDefined();
+});
+
+it('keeps a still-fresh legacy cache missing sessionVersion without rewriting it', async () => {
+  const { request, source, store } = setup();
+  expect((await request()).status).toBe(200);
+  const cached = store.docs.get(CACHE)!;
+  delete cached.sessionVersion;
+  vi.mocked(source.fetchHomeworkPage).mockClear();
+  vi.mocked(source.fetchCourses).mockClear();
+
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
 });
 
 it.each([
