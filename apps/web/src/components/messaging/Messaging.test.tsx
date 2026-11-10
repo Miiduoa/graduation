@@ -821,9 +821,32 @@ it.each([
     expect(create).toHaveBeenCalledWith(expect.any(File));
     expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBeNull();
     expect((screen.getByRole('button', { name: '讀取照片中…' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.load(screen.getByRole('img', { name: '待傳送照片預覽' }));
+    expect((screen.getByRole('button', { name: '讀取照片中…' }) as HTMLButtonElement).disabled).toBe(true);
     expect(uploadDmPhoto).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '移除照片' }));
     expect(release).toHaveBeenCalledWith(url);
+  } finally {
+    create.mockRestore();
+    release.mockRestore();
+  }
+});
+
+it('replaces and revokes local preview URLs when the selected File changes and on unmount', async () => {
+  const create = vi.spyOn(URL, 'createObjectURL')
+    .mockReturnValueOnce('blob:first-photo').mockReturnValueOnce('blob:second-photo');
+  const release = vi.spyOn(URL, 'revokeObjectURL');
+  try {
+    const view = render(<Chat />);
+    await screen.findByText('伺服器的訊息');
+    selectPhoto();
+    expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBe('blob:first-photo');
+    selectPhoto();
+    expect(release).toHaveBeenCalledWith('blob:first-photo');
+    expect(screen.getByRole('img', { name: '待傳送照片預覽' }).getAttribute('src')).toBe('blob:second-photo');
+    expect((screen.getByRole('button', { name: '傳送照片' }) as HTMLButtonElement).disabled).toBe(false);
+    view.unmount();
+    expect(release).toHaveBeenCalledWith('blob:second-photo');
   } finally {
     create.mockRestore();
     release.mockRestore();

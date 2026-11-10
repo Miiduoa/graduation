@@ -179,7 +179,8 @@ export function ChatScreen(props: any) {
   const [outbound, setOutbound] = useState<DmOutboundDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [accessError, setAccessError] = useState<string | null>(null);
+  const [accessFailure, setAccessFailure] = useState<{ scope: string; message: string } | null>(null);
+  const deniedScopeRef = useRef<string | null>(null);
   const [peerName, setPeerName] = useState<string>('');
   const [peerOnline, setPeerOnline] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
@@ -234,6 +235,22 @@ export function ChatScreen(props: any) {
   const sendScope = `${myUid ?? ''}:${school.id ?? ''}:${convoKey ?? ''}`;
   const [displayScope, setDisplayScope] = useState(sendScope);
   const displayCurrentScope = displayScope === sendScope;
+  const accessError = accessFailure?.scope === sendScope ? accessFailure.message : null;
+  const denyAccess = useCallback((message: string) => {
+    if (scopeRef.current !== sendScope) return;
+    deniedScopeRef.current = sendScope;
+    activeConversationScopeRef.current = null;
+    readableTextScopeRef.current = null;
+    confirmedPhotos.current = null;
+    setReadableTextThread(null);
+    setVerifiedPhotoThread(null);
+    setMessages([]);
+    setUserNames({});
+    fetchedUids.current = new Set();
+    setDisplayScope(sendScope);
+    setAccessFailure({ scope: sendScope, message });
+    setLoading(false);
+  }, [sendScope]);
   const [preparation, setPreparation] = useState<PeerPreparation | null>(null);
   const [prepareAttempt, setPrepareAttempt] = useState(0);
   const peerTextRequests = useRef(new Set<AbortController>());
@@ -246,6 +263,8 @@ export function ChatScreen(props: any) {
 
   useLayoutEffect(() => {
     scopeRef.current = sendScope;
+    deniedScopeRef.current = null;
+    setAccessFailure(null);
     textEditRevision.current += 1;
     restoredTextDraft.current = null;
     confirmedPhotos.current = null;
@@ -345,7 +364,6 @@ export function ChatScreen(props: any) {
     sendLockRef.current = false;
     setMessages([]);
     setUserNames({});
-    setAccessError(null);
     setText('');
     setDisplayScope(sendScope);
     if (!convoKey || !myUid) {
@@ -409,11 +427,9 @@ export function ChatScreen(props: any) {
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'conversations', conversationIdParam));
-        if (cancelled) return;
+        if (cancelled || deniedScopeRef.current === sendScope) return;
         if (!snap.exists()) {
-          activeConversationScopeRef.current = null;
-          setMessages([]);
-          setAccessError('找不到此對話。');
+          denyAccess('找不到此對話。');
           return;
         }
         const data = snap.data() as ConvoMeta;
@@ -426,9 +442,7 @@ export function ChatScreen(props: any) {
           new Set(mids).size !== 2 ||
           !mids.includes(myUid)
         ) {
-          activeConversationScopeRef.current = null;
-          setAccessError('這不是目前帳號可存取的本校私訊。');
-          setMessages([]);
+          denyAccess('這不是目前帳號可存取的本校私訊。');
           return;
         }
         const other = mids.find((m) => m !== myUid);
@@ -436,16 +450,14 @@ export function ChatScreen(props: any) {
       } catch (e: any) {
         if (cancelled) return;
         if (e?.code === 'permission-denied') {
-          activeConversationScopeRef.current = null;
-          setMessages([]);
-          setAccessError('你不是此對話的成員，無法檢視訊息。');
+          denyAccess('你不是此對話的成員，無法檢視訊息。');
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [conversationIdParam, peerParam, myUid, db, school.id]);
+  }, [conversationIdParam, peerParam, myUid, db, school.id, sendScope, denyAccess]);
 
   // ── 取得對方名稱（切人時先清空，避免顯示上一個對象的名稱） ──
   useEffect(() => {
@@ -560,7 +572,7 @@ export function ChatScreen(props: any) {
     setUserNames({});
     fetchedUids.current = new Set();
 
-    if (!convoKey || !messageReadAllowed || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
+    if (deniedScopeRef.current === sendScope || !convoKey || !messageReadAllowed || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
       // demo 模式已在上方處理
       setLoading(false);
       activeConversationScopeRef.current = null;
@@ -676,11 +688,7 @@ export function ChatScreen(props: any) {
       (err: any) => {
         if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
         if (err?.code === 'permission-denied') {
-          activeConversationScopeRef.current = null;
-          setMessages([]);
-          setUserNames({});
-          fetchedUids.current = new Set();
-          setAccessError('你不是此對話的成員，無法檢視訊息。');
+          denyAccess('你不是此對話的成員，無法檢視訊息。');
         } else {
           console.error('[ChatScreen] Messages error:', err);
         }
@@ -695,7 +703,7 @@ export function ChatScreen(props: any) {
       }
       unsub();
     };
-  }, [db, convoKey, myUid, school.id, messageReadAllowed, sendScope]);
+  }, [db, convoKey, myUid, school.id, messageReadAllowed, sendScope, denyAccess]);
 
   // ── 對方打字 & 在線狀態監聽 ──
   useEffect(() => {
@@ -716,7 +724,7 @@ export function ChatScreen(props: any) {
       convoRef,
       { includeMetadataChanges: true },
       (snap) => {
-        if (!listening || scopeRef.current !== sendScope) return;
+        if (!listening || scopeRef.current !== sendScope || deniedScopeRef.current === sendScope) return;
         // A valid cached roster permits text reading only. Cache cannot revoke
         // an existing session or grant photo access. Presence/read-marker writes
         // may be pending while the roster still matches this DM.
@@ -749,15 +757,8 @@ export function ChatScreen(props: any) {
         ) {
           if (fromCache) return;
           serverRejected = true;
-          readableTextScopeRef.current = null;
-          setReadableTextThread(null);
           verifiedPhotoMembers = null;
-          setVerifiedPhotoThread(null);
-          activeConversationScopeRef.current = null;
-          setMessages([]);
-          setUserNames({});
-          fetchedUids.current = new Set();
-          setAccessError('這不是目前帳號可存取的本校私訊。');
+          denyAccess('這不是目前帳號可存取的本校私訊。');
           return;
         }
         const textMembers = JSON.stringify([...data.memberIds].sort());
@@ -801,20 +802,14 @@ export function ChatScreen(props: any) {
         }
       },
       (err: any) => {
-        if (!listening || scopeRef.current !== sendScope) return;
+        if (!listening || scopeRef.current !== sendScope || deniedScopeRef.current === sendScope) return;
         // A listener failure cannot grant photo access, but only an explicit
         // permission denial revokes the already readable text session.
         verifiedPhotoMembers = null;
         setVerifiedPhotoThread(null);
         if (err?.code === 'permission-denied') {
           serverRejected = true;
-          readableTextScopeRef.current = null;
-          setReadableTextThread(null);
-          activeConversationScopeRef.current = null;
-          setMessages([]);
-          setUserNames({});
-          fetchedUids.current = new Set();
-          setAccessError('你不是此對話的成員，無法檢視訊息。');
+          denyAccess('你不是此對話的成員，無法檢視訊息。');
         } else {
           console.error('[ChatScreen] Conversation error:', err);
         }
@@ -825,7 +820,7 @@ export function ChatScreen(props: any) {
       listening = false;
       unsub();
     };
-  }, [db, convoKey, peerId, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared, preparation?.serverConfirmed]);
+  }, [db, convoKey, peerId, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared, preparation?.serverConfirmed, denyAccess]);
 
   // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {

@@ -61,9 +61,7 @@ jest.mock('../ui/components', () => {
     Screen: ({ children }: { children: React.ReactNode }) => (
       <ReactNative.View>{children}</ReactNative.View>
     ),
-    ErrorState: ({ title }: { title: string }) => (
-      <ReactNative.Text>{title}</ReactNative.Text>
-    ),
+    ErrorState: jest.requireActual('../ui/components').ErrorState,
   };
 });
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -1201,6 +1199,8 @@ test.each(['messages', 'roster'])('%s permission errors clear received content a
   await act(async () => emitMessages([received]));
   expect(view.getByText('私人的內容')).toBeTruthy();
   act(() => mockSnapshotErrors.get(source === 'messages' ? `conversations/${photoConvo}/messages` : `conversations/${photoConvo}`)({ code: 'permission-denied' }));
+  // A late valid roster must not restore a revoked message listener or hide the error.
+  verifyPhotoChat();
   jest.mocked(updateDoc).mockClear();
   jest.mocked(fetchSchoolDirectoryProfiles).mockClear();
   act(() => callback({ metadata: { fromCache: false, hasPendingWrites: false }, docs: [{ id: received.id, data: () => ({ ...received.data, readBy: [] }), metadata: { hasPendingWrites: false } }] }));

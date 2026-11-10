@@ -35,7 +35,6 @@ function PhotoIcon() {
 
 type PhotoDraft = {
   file: File;
-  url: string;
   previewReady: boolean;
   messageId: string;
   uploadedPath?: string;
@@ -64,13 +63,23 @@ export function DmPhotoComposer({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
-  const previewUrl = draft?.url;
-  useEffect(
-    () => () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    },
-    [previewUrl],
-  );
+  const preview = useRef<HTMLImageElement>(null);
+  const previewFile = draft?.file;
+  useLayoutEffect(() => {
+    const image = preview.current;
+    if (!previewFile || !image) return;
+    const url = URL.createObjectURL(previewFile);
+    try {
+      const localUrl = new URL(url);
+      if (localUrl.protocol === 'blob:') image.src = localUrl.href;
+    } catch {
+      // Invalid object URLs must never become preview sources.
+    }
+    return () => {
+      image.removeAttribute('src');
+      URL.revokeObjectURL(url);
+    };
+  }, [previewFile]);
   useLayoutEffect(() => () => request.current?.controller.abort(), []);
   const finish = useCallback(() => {
     setDraft(null);
@@ -103,7 +112,6 @@ export function DmPhotoComposer({
     setError('');
     setDraft({
       file,
-      url: URL.createObjectURL(file),
       previewReady: false,
       messageId: newPrivateMessageId(scope.conversationId),
     });
@@ -174,9 +182,13 @@ export function DmPhotoComposer({
           <img
             key={draft.messageId}
             className={styles.photoThumb}
-            src={draft.url.startsWith('blob:') ? draft.url : undefined}
+            ref={preview}
             alt="待傳送照片預覽"
-            onLoad={() => setDraft((current) => current && { ...current, previewReady: true })}
+            onLoad={() => {
+              if (preview.current?.getAttribute('src')) {
+                setDraft((current) => current && { ...current, previewReady: true });
+              }
+            }}
             onError={() => {
               setDraft(null);
               setError('無法讀取這張照片，請重新選擇。');
