@@ -115,8 +115,11 @@ export function createCampusSpatialScene(
   const camera = new PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, Math.max(10_000, model.radius * 20));
   const lookAt = new Vector3();
   const pointsById = new Map(model.points.map((point) => [point.id, point]));
-  const buildingHeightById = new Map((options.footprints ?? [])
-    .filter((footprint) => pointsById.has(footprint.poiId))
+  // An unrelated building must not affect this campus view's geometry or
+  // camera framing when its POI is not part of the currently visible model.
+  const visibleFootprints = (options.footprints ?? [])
+    .filter((footprint) => pointsById.has(footprint.poiId));
+  const buildingHeightById = new Map(visibleFootprints
     .map((footprint) => [footprint.poiId, footprint.heightMeters]));
   const geometries: BufferGeometry[] = [];
   const materials: Material[] = [];
@@ -147,7 +150,7 @@ export function createCampusSpatialScene(
   let ringMaterial: MeshStandardMaterial | null = null;
   const pinRadius = Math.max(3, Math.min(9, model.radius * 0.018));
   const pinHeight = pinRadius * 3.3;
-  const tallestBuilding = Math.max(0, ...(options.footprints ?? []).map((item) => item.heightMeters));
+  const tallestBuilding = Math.max(0, ...visibleFootprints.map((item) => item.heightMeters));
   const groundWidth = Math.max(180, model.extent.width + pinRadius * 12);
   const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12);
 
@@ -537,8 +540,7 @@ export function createCampusSpatialScene(
     const longitudeScale = 6_371_008.8 * Math.PI / 180 *
       Math.cos(anchor.location.lat * Math.PI / 180);
     const latitudeScale = 6_371_008.8 * Math.PI / 180;
-    for (const footprint of options.footprints ?? []) {
-      if (!pointsById.has(footprint.poiId)) continue;
+    for (const footprint of visibleFootprints) {
       const shape = new Shape();
       footprint.outline.forEach(([longitude, latitude], index) => {
         const x = anchor.x + (longitude - anchor.location.lng) * longitudeScale;
