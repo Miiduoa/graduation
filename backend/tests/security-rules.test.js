@@ -2774,6 +2774,23 @@ describe('storage security rules', () => {
   for (const objectPath of [
     'conversations/chat/messages/one/photo.jpg',
     'conversations/chat/media/one/photo.jpg',
+  ]) {
+    test('client SDK cannot write conversation attachments at ' + objectPath, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('conversations/chat').set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
+        for (const uid of ['alice', 'bob']) {
+          await db.doc('users/' + uid).set({ status: 'active', schoolId: 'pu' });
+          await db.doc('schools/pu/members/' + uid).set({ status: 'active' });
+        }
+      });
+      const original = testEnv.authenticatedContext('alice').storage().ref(objectPath);
+      const other = testEnv.authenticatedContext('bob').storage().ref(objectPath);
+      await assertFails(uploadString(original, 'original', 'image/jpeg'));
+      await assertFails(uploadString(other, 'replaced', 'image/jpeg'));
+    });
+  }
+
+  for (const objectPath of [
     'schools/pu/campusPosts/replacement-proof/photo.jpg',
     'lostfound/one/photo.jpg',
     'bugreports/one/photo.jpg',

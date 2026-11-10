@@ -125,15 +125,17 @@ service cloud.firestore {
     }
 
     function isConversationMember(conversationId) {
+      // get() on a missing conversation denies; skip a separate exists() so
+      // DM message creates stay within the 10 get/exists budget after the peer check.
       return isSignedIn()
-        && exists(/databases/$(database)/documents/conversations/$(conversationId))
         && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
         && isCurrentSchoolMember(get(/databases/$(database)/documents/conversations/$(conversationId)).data.get('schoolId', ''));
     }
 
     function isAccountAvailable(uid) {
+      // A missing profile get() denies. Only the peer is checked; the sender
+      // is already covered by isSignedIn, keeping the 10-access budget.
       return uid is string
-        && exists(/databases/$(database)/documents/users/$(uid))
         && get(/databases/$(database)/documents/users/$(uid)).data.get('accountDeletionInProgress', false) != true
         && !(get(/databases/$(database)/documents/users/$(uid)).data.get('status', '')
           in ['deleted', 'disabled', 'suspended', 'inactive']);
@@ -158,14 +160,11 @@ service cloud.firestore {
     function isDirectMessagePeerAvailable(conversationId) {
       let conversation = get(/databases/$(database)/documents/conversations/$(conversationId)).data;
       let members = conversation.get('memberIds', []);
+      let peer = members is list && members.size() == 2 && members[0] != members[1]
+        ? (members[0] == request.auth.uid ? members[1] : members[0])
+        : '';
       return !(conversation.get('type', '') == 'dm' || (members is list && members.size() == 2))
-        || (
-          members is list && members.size() == 2
-          && members[0] is string && members[1] is string
-          && members[0] != members[1]
-          && isAccountAvailable(members[0])
-          && isAccountAvailable(members[1])
-        );
+        || (peer is string && peer.size() > 0 && isAccountAvailable(peer));
     }
 
     // 使用者自己個人資料上的名字；邀請和找人代號顯示的名字只能用這個，不能自己填
