@@ -124,6 +124,7 @@ function MerchantAccount({ context }: { context: string }) {
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [addingLocation, setAddingLocation] = useState(false);
   const [notice, setNotice] = useState('');
   const [submitError, setSubmitError] = useState('');
   const alive = useRef(false);
@@ -219,6 +220,7 @@ function MerchantAccount({ context }: { context: string }) {
       );
       setPending(null);
       setDraft(emptyDraft());
+      setAddingLocation(false);
       setNotice('申請已收件。審核通過後仍需完成營運設定，才會開放店家服務。');
     } catch (error) {
       if (!alive.current) return;
@@ -257,13 +259,14 @@ function MerchantAccount({ context }: { context: string }) {
 
   const selected = overview?.programs.find((program) => program.tenantId === draft.tenantId);
   const locked = busy || Boolean(pending);
+  const hasMerchantRecords = overview && (overview.workspaces.length > 0 || overview.applications.length > 0);
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
       <Text accessibilityRole="header" style={styles.heading}>
         店家合作
       </Text>
       <Text style={styles.text}>
-        使用同一個 Google 帳號申請進駐。審核與營運權限依場域分開，不會取得學校管理權限。
+        新店家請由負責人申請進駐。用原申請帳號查詢審核結果，核准並取得門市管理權限後，即可在此完成營運設定。
       </Text>
       {invalidSession ? (
         <>
@@ -284,26 +287,6 @@ function MerchantAccount({ context }: { context: string }) {
       ) : (
         overview && (
           <>
-            <Text accessibilityRole="header" style={styles.title}>
-              我的申請
-            </Text>
-            {overview.applications.length ? (
-              overview.applications.map((application) => (
-                <View key={application.applicationId} style={styles.row}>
-                  <Text style={styles.title}>
-                    {application.brandName} · {application.locationName}
-                  </Text>
-                  <Text style={styles.text}>
-                    {merchantApplicationStateLabel(application.state)}
-                  </Text>
-                  {application.reviewerNote ? (
-                    <Text style={styles.text}>審核說明：{application.reviewerNote}</Text>
-                  ) : null}
-                </View>
-              ))
-            ) : (
-              <Text style={styles.text}>這個帳號尚未送出進駐申請。</Text>
-            )}
             <Text accessibilityRole="header" style={styles.title}>
               我的門市
             </Text>
@@ -327,7 +310,27 @@ function MerchantAccount({ context }: { context: string }) {
                 </View>
               ))
             ) : (
-              <Text style={styles.text}>核准後會在這裡顯示你有權管理的門市。</Text>
+              <Text style={styles.text}>這個帳號目前沒有可管理的門市。已送件可在下方查看審核進度。</Text>
+            )}
+            <Text accessibilityRole="header" style={styles.title}>
+              我的申請
+            </Text>
+            {overview.applications.length ? (
+              overview.applications.map((application) => (
+                <View key={application.applicationId} style={styles.row}>
+                  <Text style={styles.title}>
+                    {application.brandName} · {application.locationName}
+                  </Text>
+                  <Text style={styles.text}>
+                    {merchantApplicationStateLabel(application.state)}
+                  </Text>
+                  {application.reviewerNote ? (
+                    <Text style={styles.text}>審核說明：{application.reviewerNote}</Text>
+                  ) : null}
+                </View>
+              ))
+            ) : (
+              <Text style={styles.text}>這個帳號尚未送出進駐申請。</Text>
             )}
             <Action disabled={busy} onPress={() => void load()}>
               重新載入店家資料
@@ -337,6 +340,8 @@ function MerchantAccount({ context }: { context: string }) {
             </Text>
             {!overview.programs.length ? (
               <Text style={styles.text}>目前沒有開放申請的場域，請稍後再查看。</Text>
+            ) : hasMerchantRecords && !addingLocation && !pending ? (
+              <Action onPress={() => setAddingLocation(true)}>申請另一間門市</Action>
             ) : (
               <>
                 <Text style={styles.text}>進駐場域</Text>

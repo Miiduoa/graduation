@@ -445,6 +445,7 @@ export async function handleSignInPuStudentId(
             campus,
             deps,
             config,
+            payload.skipFirebase !== true,
           )
         : await signInTeacher(teacherAccount, password, campus, deps, config);
     } catch (error) {
@@ -570,6 +571,7 @@ async function signInStudent(
   campus: PuCampusGateway,
   deps: SignInPuDeps,
   config: SchoolLoginConfig,
+  allowCardClaim: boolean,
 ): Promise<Record<string, unknown>> {
   if (config.studentAdapter !== 'form-password') {
     closedWithoutCampus();
@@ -609,9 +611,13 @@ async function signInStudent(
     throw new PuLoginHttpError(503, SCHOOL_UNAVAILABLE);
   }
 
+  const verifiedStudentId = canonicalizePuStudentId(login.studentId);
   const customToken = await mintToken(deps, uid, {
     schoolId: config.schoolId,
     role: schoolRole.role,
+    ...(allowCardClaim && config.schoolId === PROVIDENCE_SCHOOL_ID && schoolRole.role === 'student' && verifiedStudentId
+      ? { campusCardStudentId: verifiedStudentId }
+      : {}),
   });
 
   if (requestAbandoned(deps)) {

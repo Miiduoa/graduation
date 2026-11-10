@@ -169,3 +169,10 @@ it('exposes merchant and leave entries in the flattened catalog for intent looku
   expect(hrefs).toContain('/classroom');
   expect(CAMPUS_SERVICES.some((service) => service.href === '/classroom')).toBe(true);
 });
+
+it('finds the student card by its everyday names', () => {
+  for (const term of ['學生證', '數位證件', 'student id']) {
+    expect(searchCampusServices(term).some((service) => service.href === '/student-card')).toBe(true);
+  }
+  expect(directoryCampusServices().some((service) => service.href === '/student-card')).toBe(true);
+});

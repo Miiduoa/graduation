@@ -1,0 +1,7 @@
+{
+  "name": "campus-student-card-nfc",
+  "version": "0.1.0",
+  "description": "Foreground NFC transport for single-use nuni student-card tokens.",
+  "main": "index.ts",
+  "private": true
+}

@@ -1,7 +1,7 @@
 import React from 'react';
-import { act, render } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
 import type { User } from 'firebase/auth';
-import { getDoc, getDocs } from 'firebase/firestore';
+import { getDoc, getDocs, type CollectionReference } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getPostLoginContext } from '../data/postLoginDataRouter';
 import { getInMemoryPostLoginContext, setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
@@ -38,6 +38,7 @@ jest.mock('firebase/auth', () => ({
 }));
 jest.mock('firebase/firestore', () => ({
   doc: (_db: unknown, ...segments: string[]) => ({ path: segments.join('/') }),
+  collection: (_db: unknown, ...segments: string[]) => ({ path: segments.join('/') }),
   collectionGroup: jest.fn(),
   documentId: jest.fn(),
   query: jest.fn(),
@@ -116,6 +117,13 @@ function snapshot(data: Record<string, unknown> | undefined) {
   return { exists: () => data !== undefined, data: () => data };
 }
 
+function collectionSnapshot(path: string) {
+  const docs = [...records.entries()]
+    .filter(([key]) => key.startsWith(`${path}/`) && key.split('/').length === path.split('/').length + 1)
+    .map(([key, data]) => ({ id: key.split('/').pop(), data: () => data }));
+  return { empty: docs.length === 0, docs };
+}
+
 function mountProvider(initialSchoolId: string | null = 'pu') {
   return render(
     <SchoolProvider initial={{ schoolId: initialSchoolId }}>
@@ -155,7 +163,103 @@ beforeEach(async () => {
   ]);
   jest.mocked(loadMockAuthSession).mockResolvedValue(null);
   jest.mocked(getDoc).mockImplementation(async (ref) => snapshot(records.get(ref.path)) as never);
-  jest.mocked(getDocs).mockResolvedValue({ empty: true, docs: [] } as never);
+  jest.mocked(getDocs).mockImplementation(async (ref) => collectionSnapshot((ref as CollectionReference).path) as never);
+});
+
+test('merchant assignments use exact self reads for legacy documents across schools and stores', async () => {
+  records.set('users/u1', { role: 'vendor' });
+  records.set('schools/pu', { name: '靜宜大學' });
+  records.set('schools/nthu', { name: '清華大學' });
+  records.set('schools/pu/cafeterias/cafe-a', { name: 'A 餐廳', merchantId: 'brand-a', orderingEnabled: true, pilotStatus: 'live' });
+  records.set('schools/pu/cafeterias/cafe-b', { name: 'B 餐廳' });
+  records.set('schools/nthu/cafeterias/cafe-c', { name: 'C 餐廳' });
+  records.set('schools/pu/cafeterias/cafe-a/operators/u1', { status: 'active', role: 'manager' });
+  records.set('schools/pu/cafeterias/cafe-b/operators/u1', { status: 'inactive', role: 'staff' });
+  records.set('schools/nthu/cafeterias/cafe-c/operators/u1', { status: 'active', role: 'owner' });
+  records.set('schools/pu/cafeterias/cafe-a/operators/another-user', { status: 'active', role: 'owner' });
+  mountProvider();
+  await signIn();
+
+  expect(auth.profile?.merchantAssignmentsError).toBeNull();
+  expect(auth.profile?.merchantAssignments).toMatchObject([
+    { schoolId: 'pu', cafeteriaId: 'cafe-a', merchantId: 'brand-a', operatorRole: 'manager', status: 'active', orderingEnabled: true, pilotStatus: 'live' },
+    { schoolId: 'nthu', cafeteriaId: 'cafe-c', operatorRole: 'owner', status: 'active' },
+    { schoolId: 'pu', cafeteriaId: 'cafe-b', operatorRole: 'staff', status: 'inactive' },
+  ]);
+  expect(auth.profile?.schoolId).toBe('pu');
+  expect(jest.mocked(getDocs).mock.calls.map(([ref]) => (ref as CollectionReference).path).sort()).toEqual([
+    'schools', 'schools/nthu/cafeterias', 'schools/pu/cafeterias',
+  ]);
+  expect(jest.mocked(getDoc).mock.calls.map(([ref]) => ref.path).filter((path) => path.includes('/operators/')).sort()).toEqual([
+    'schools/nthu/cafeterias/cafe-c/operators/u1',
+    'schools/pu/cafeterias/cafe-a/operators/u1',
+    'schools/pu/cafeterias/cafe-b/operators/u1',
+  ]);
+});
+
+test('a successfully read missing self assignment remains distinct from a loading failure', async () => {
+  records.set('schools/pu', {});
+  records.set('schools/pu/cafeterias/cafe', { name: '餐廳' });
+  records.set('schools/pu/cafeterias/cafe/operators/another-user', { status: 'active' });
+  mountProvider();
+  await signIn();
+  expect(auth.profile).toMatchObject({ merchantAssignments: [], merchantAssignmentsError: null });
+});
+
+test.each(['schools', 'schools/pu/cafeterias', 'schools/pu/cafeterias/cafe/operators/u1'])(
+  'a failed merchant read at %s exposes a retryable error and recovers on refresh',
+  async (failedPath) => {
+    records.set('schools/pu', {});
+    records.set('schools/pu/cafeterias/cafe', { name: '餐廳' });
+    records.set('schools/pu/cafeterias/cafe/operators/u1', { status: 'active', role: 'staff' });
+    jest.mocked(getDocs).mockImplementation(async (ref) => {
+      const path = (ref as CollectionReference).path;
+      if (path === failedPath) throw new Error('unavailable');
+      return collectionSnapshot(path) as never;
+    });
+    jest.mocked(getDoc).mockImplementation(async (ref) => {
+      if (ref.path === failedPath) throw new Error('unavailable');
+      return snapshot(records.get(ref.path)) as never;
+    });
+    mountProvider();
+    await signIn();
+    expect(auth.profile).toMatchObject({
+      uid: 'u1',
+      merchantAssignments: [],
+      merchantAssignmentsError: '目前無法確認門市指派，請重新載入。',
+    });
+    jest.mocked(getDocs).mockImplementation(async (ref) => collectionSnapshot((ref as CollectionReference).path) as never);
+    jest.mocked(getDoc).mockImplementation(async (ref) => snapshot(records.get(ref.path)) as never);
+    await act(async () => auth.refreshProfile());
+    expect(auth.profile?.merchantAssignmentsError).toBeNull();
+    expect(auth.profile?.merchantAssignments).toMatchObject([{ cafeteriaId: 'cafe', status: 'active' }]);
+  },
+);
+
+test('late merchant reads cannot restore assignments after an account switch', async () => {
+  records.set('schools/pu', {});
+  records.set('schools/pu/cafeterias/cafe', { name: '餐廳' });
+  records.set('users/u2', { role: 'vendor', primarySchoolId: 'pu' });
+  let release!: (value: unknown) => void;
+  const pending = new Promise((resolve) => { release = resolve; });
+  jest.mocked(getDoc).mockImplementation(async (ref) => {
+    if (ref.path === 'schools/pu/cafeterias/cafe/operators/u1') return (await pending) as never;
+    return snapshot(records.get(ref.path)) as never;
+  });
+  mountProvider();
+  const firstUser = firebaseUser();
+  mockFirebaseAuth.currentUser = firstUser;
+  let firstSignIn!: Promise<void>;
+  await act(async () => {
+    firstSignIn = mockAuthCallback!(firstUser);
+  });
+  await waitFor(() => expect(getDoc).toHaveBeenCalledWith({ path: 'schools/pu/cafeterias/cafe/operators/u1' }));
+  await signIn('u2');
+  await act(async () => {
+    release(snapshot({ status: 'active', role: 'owner' }));
+    await firstSignIn;
+  });
+  expect(auth.profile).toMatchObject({ uid: 'u2', merchantAssignments: [], merchantAssignmentsError: null });
 });
 
 test.each([
@@ -310,6 +414,8 @@ test('a failed profile refresh clears previously verified management authority',
       role: 'student',
       schoolMembershipRole: null,
       serviceRoles: [],
+      merchantAssignments: [],
+      merchantAssignmentsError: '目前無法確認門市指派，請重新載入。',
     });
   } finally {
     quiet.mockRestore();

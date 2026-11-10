@@ -54,6 +54,7 @@ export type CookieJar = Record<string, string>;
 
 export type StudentCampusLogin = {
   cookies: CookieJar;
+  studentId?: string;
   studentName?: string;
   studentClass?: string;
 };
@@ -264,12 +265,13 @@ function pruneIgnoredHtml(node: HtmlNode): void {
   });
 }
 
-function collectHtmlText(node: HtmlNode): string {
+function collectHtmlText(node: HtmlNode, omit?: (node: HtmlNode) => boolean): string {
+  if (omit?.(node)) return '';
   if (node.nodeName === '#text' && 'value' in node) {
     return String(node.value || '');
   }
   if (!isHtmlParent(node)) return '';
-  return node.childNodes.map(collectHtmlText).join(' ');
+  return node.childNodes.map((child) => collectHtmlText(child, omit)).join(' ');
 }
 
 function inspectCampusHtml(html: string): { markup: string; text: string } {
@@ -287,6 +289,35 @@ function stripIgnoredHtml(html: string): string {
 
 function visibleCampusText(html: string): string {
   return inspectCampusHtml(html).text;
+}
+
+const PROFILE_NON_TEXT = new Set([
+  ...IGNORED_HTML_NODES, 'template', 'noscript', 'input', 'textarea', 'select', 'button',
+]);
+
+function skipProfileNode(node: HtmlNode): boolean {
+  return (
+    PROFILE_NON_TEXT.has(node.nodeName) ||
+    ('attrs' in node && node.attrs.some(({ name, value }) =>
+      name === 'hidden' ||
+      (name === 'aria-hidden' && value.toLowerCase() === 'true') ||
+      (name === 'style' && /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\b/i.test(value)),
+    ))
+  );
+}
+
+function studentNumberOnPage(page: SentPage, portalOrigin: string): string | undefined {
+  const source = new URL(page.url);
+  if (
+    page.status !== 200 ||
+    source.origin !== portalOrigin ||
+    source.pathname !== '/stu_query/query_course.html'
+  )
+    return undefined;
+  const text = collectHtmlText(parseFragment(page.html), skipProfileNode);
+  const fields = [...text.matchAll(/學號\(Student No\.\)\s*[：:]\s*(\S*)/g)];
+  const number = fields.length === 1 ? fields[0]?.[1] : undefined;
+  return number && /^\d{7,10}$/.test(number) ? number : undefined;
 }
 
 export function campusPageHasLoginForm(html: string): boolean {
@@ -877,6 +908,7 @@ export function createPuCampusGateway(
           verify.html.match(/([^\s<]+)同學您好/);
         return {
           cookies: verify.cookies,
+          studentId: studentNumberOnPage(verify, portalOrigin),
           studentName: nameMatch?.[1],
           studentClass: verify.html.match(/班級\(Class\)[：:]\s*([^\s<]+)/)?.[1],
         };
@@ -898,7 +930,7 @@ export function createPuCampusGateway(
           return {};
         }
         return {
-          studentId: page.html.match(/學號\(Student No\.\)[：:]\s*(\d+)/)?.[1] ?? null,
+          studentId: studentNumberOnPage(page, portalOrigin) ?? null,
           name: page.html.match(/姓名\(Student Name\)[：:]\s*([^\s<]+)/)?.[1] ?? null,
           class: page.html.match(/班級\(Class\)[：:]\s*([^\s<]+)/)?.[1] ?? null,
         };

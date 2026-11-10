@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { NuniSignIn } from '@/components/NuniSignIn';
 import { Button } from '@/components/ui/Button';
@@ -13,6 +14,7 @@ import {
   merchantWorkspaceStateLabel,
   parseMerchantApplication,
   validateMerchantApplicationInput,
+  type MerchantOverviewView,
   type NuniMerchantApplicationInput,
 } from '@campus/shared/src/nuniMerchant';
 import styles from './MerchantWorkspace.module.css';
@@ -46,7 +48,26 @@ function expired(error: unknown) {
   return error instanceof NuniError && (error.status === 401 || error.code === 'SESSION_CHANGED');
 }
 
-export function MerchantWorkspace() {
+const merchantEntry = {
+  overview: {
+    path: '/merchant',
+    title: '店家合作',
+    subtitle: '申請校園門市、查看審核進度或管理自己的門市。',
+  },
+  apply: {
+    path: '/merchant/apply',
+    title: '店家進駐申請',
+    subtitle: '請由負責人使用自己的 Google 帳號提出申請，日後用同一個帳號管理門市。',
+  },
+  workspace: {
+    path: '/merchant/workspace',
+    title: '我的門市與申請',
+    subtitle: '使用送出進駐申請的 Google 帳號，查看審核進度與已核准的門市。',
+  },
+} as const;
+
+export function MerchantWorkspace({ view = 'overview' }: { view?: MerchantOverviewView }) {
+  const entry = merchantEntry[view];
   const auth = useNuniSession();
   const [cleanupError, setCleanupError] = useState('');
   const [operationScope, setOperationScope] = useState<{
@@ -73,42 +94,49 @@ export function MerchantWorkspace() {
     return null;
   }
   return (
-    <SiteShell title="店家合作" subtitle="使用同一個 Google 帳號，申請進駐並查看審核進度。">
+    <SiteShell title={entry.title} subtitle={entry.subtitle}>
       {cleanupError ? <p role="alert">{cleanupError}</p> : null}
       {auth.session && !auth.pendingLogout && !auth.error ? (
         <AccountWorkspace
           key={`${auth.session.platformAccountId}:${auth.session.context}`}
+          view={view}
           context={auth.session.context}
           operationDrafts={operationScope.locations}
           foodDrafts={operationScope.food}
           suspended={auth.loading}
+          onSwitchAccount={auth.logout}
           onExpired={auth.refresh}
         />
       ) : (
-        <NuniSignIn returnUrl="/merchant" />
+        <NuniSignIn returnUrl={entry.path} />
       )}
     </SiteShell>
   );
 }
 
 function AccountWorkspace({
+  view,
   context,
   operationDrafts,
   foodDrafts,
   suspended,
   onExpired,
+  onSwitchAccount,
 }: {
+  view: MerchantOverviewView;
   context: string;
   operationDrafts: MerchantOperationDrafts;
   foodDrafts: FoodDraftCache;
   suspended: boolean;
   onExpired: () => Promise<void>;
+  onSwitchAccount: () => Promise<void>;
 }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [invalidSession, setInvalidSession] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [applyingAgain, setApplyingAgain] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [submitError, setSubmitError] = useState('');
@@ -142,8 +170,9 @@ function AccountWorkspace({
     setLoading(true);
     setLoadError('');
     try {
-      const data = await loadMerchantOverview((path, input) =>
-        browserRequest(path, context, input),
+      const data = await loadMerchantOverview(
+        (path, input) => browserRequest(path, context, input),
+        view,
       );
       if (mounted.current && enabled.current && run === generation.current) setOverview(data);
     } catch (error) {
@@ -154,7 +183,7 @@ function AccountWorkspace({
     } finally {
       if (mounted.current && run === generation.current) setLoading(false);
     }
-  }, [context, expire]);
+  }, [context, expire, view]);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -283,21 +312,51 @@ function AccountWorkspace({
         <Button onClick={() => setInvalidSession(false)}>重新載入店家資料</Button>
       </section>
     );
+  if (view === 'apply' && notice) {
+    return (
+      <section className={styles.panel}>
+        <h2>已收到進駐申請</h2>
+        <p role="status">{notice}</p>
+        <Link href="/merchant/workspace">查看收件進度</Link>
+      </section>
+    );
+  }
+  if (
+    view === 'apply' &&
+    !applyingAgain &&
+    !loading &&
+    !loadError &&
+    overview?.applications.length
+  ) {
+    return (
+      <section className={styles.panel}>
+        <h2>這個帳號已有進駐申請</h2>
+        <p>你可以查看各筆申請的審核結果與補件說明。如果要新設另一間門市，可以再送一份申請。</p>
+        <div className={styles.entryActions}>
+          <Link className="btn primary" href="/merchant/workspace">
+            查看申請進度
+          </Link>
+          <Button onClick={() => setApplyingAgain(true)}>申請另一間門市</Button>
+        </div>
+      </section>
+    );
+  }
   return (
     <div className={styles.stack}>
-      <section className={styles.intro}>
-        <h2>先申請，再開店</h2>
-        <p>
-          場域管理者核准後，從下方選擇門市，完成營運設定與首次菜單，再確認啟用。核准不代表已經開始接單。
-        </p>
-        <ol>
-          <li>送出營業與聯絡資料</li>
-          <li>查看審核結果或補件說明</li>
-          <li>核准後完成菜單及營運設定</li>
-        </ol>
-      </section>
+      {view !== 'workspace' && (
+        <section className={styles.intro}>
+          <h2>店家如何進駐</h2>
+          <p>請準備店名、營業地點及聯絡方式。已經申請過的店家可以直接查看審核進度。</p>
+          <ol>
+            <li>送出營業與聯絡資料</li>
+            <li>查看審核結果或補件說明</li>
+            <li>核准後完成菜單及營運設定</li>
+          </ol>
+          <Link href="/merchant/workspace">查看申請進度與門市</Link>
+        </section>
+      )}
       <div className={styles.toolbar}>
-        <h2>我的店家與申請</h2>
+        <h2>{view === 'apply' ? '填寫進駐資料' : '我的店家與申請'}</h2>
         <Button onClick={() => void load()} disabled={loading || busy}>
           重新載入
         </Button>
@@ -306,247 +365,267 @@ function AccountWorkspace({
       {loadError && <p role="alert">{loadError}</p>}
       {overview && (
         <div className={styles.stack} hidden={loading || !!loadError}>
-          <section className={styles.panel} aria-labelledby="merchant-locations-title">
-            <h3 id="merchant-locations-title">已授權門市</h3>
-            {overview.workspaces.length === 0 ? (
-              <p>目前沒有授權給這個帳號的門市。申請通過後會顯示在這裡。</p>
-            ) : (
-              <ul className={styles.list}>
-                {overview.workspaces.map((item) => (
-                  <li key={`${item.tenantId}:${item.locationId}`}>
-                    <h4>
-                      {item.merchantName}／{item.locationName}
-                    </h4>
-                    <p>
-                      {item.tenantName} · {item.campusName}
-                    </p>
-                    <p>{merchantWorkspaceStateLabel(item)}</p>
-                    <p>{item.publicAccess ? '允許公開瀏覽' : '尚未公開'}</p>
-                    {item.missingRequirements.length > 0 && (
+          {view !== 'apply' && (
+            <section className={styles.panel} aria-labelledby="merchant-locations-title">
+              <h3 id="merchant-locations-title">已授權門市</h3>
+              {overview.workspaces.length === 0 ? (
+                <>
+                  <p>
+                    這個帳號目前沒有已核准的門市。如果你是店員，請向門市負責人確認工作帳號與接單方式。
+                  </p>
+                  {view === 'workspace' && (
+                    <Button onClick={() => void onSwitchAccount()}>登出並切換店家帳號</Button>
+                  )}
+                </>
+              ) : (
+                <ul className={styles.list}>
+                  {overview.workspaces.map((item) => (
+                    <li key={`${item.tenantId}:${item.locationId}`}>
+                      <h4>
+                        {item.merchantName}／{item.locationName}
+                      </h4>
                       <p>
-                        待完成：
-                        {item.missingRequirements
-                          .map((requirement) => requirementLabel[requirement] ?? '確認其他營運條件')
-                          .join('、')}
+                        {item.tenantName} · {item.campusName}
                       </p>
-                    )}
-                    <Button
-                      onClick={() =>
-                        setSelectedLocation({
-                          tenantId: item.tenantId,
-                          locationId: item.locationId,
-                        })
-                      }
-                    >
-                      管理門市：{item.locationName}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section className={styles.panel} aria-labelledby="merchant-applications-title">
-            <h3 id="merchant-applications-title">申請進度</h3>
-            {overview.applications.length === 0 ? (
-              <p>你還沒有送出進駐申請。</p>
-            ) : (
-              <ul className={styles.list}>
-                {overview.applications.map((item) => (
-                  <li key={item.applicationId}>
-                    <h4>
-                      {item.brandName}／{item.locationName}
-                    </h4>
-                    <p>
-                      {merchantApplicationStateLabel(item.state)} ·{' '}
-                      {new Date(item.submittedAt).toLocaleDateString('zh-TW', {
-                        timeZone: 'Asia/Taipei',
-                      })}
-                    </p>
-                    {item.reviewerNote && <p>審核說明：{item.reviewerNote}</p>}
-                    {item.state === 'needs-information' && (
-                      <p>請依審核說明向受理單位提供資料，不必重複建立申請。</p>
-                    )}
-                    {item.state === 'approved' && (
-                      <p>店家已核准。請查看已授權門市，確認尚待完成的營運條件。</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section className={styles.panel} aria-labelledby="merchant-apply-title">
-            <h3 id="merchant-apply-title">申請進駐</h3>
-            {overview.programs.length === 0 ? (
-              <p>目前沒有場域開放進駐申請。既有申請仍可在上方查看進度。</p>
-            ) : (
-              <form
-                onSubmit={(event) => void submit(event)}
-                className={styles.form}
-                aria-busy={busy}
-              >
-                <p>請填營業主體與聯絡資料；這裡不收身分證影本、存摺或銀行帳號。</p>
-                <fieldset disabled={busy || !!pending}>
-                  <legend>申請地點</legend>
-                  <Select
-                    label="申請場域"
-                    value={draft.tenantId}
-                    required
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        tenantId: event.target.value,
-                        campusId: '',
-                      }))
-                    }
-                    placeholder="請選擇場域"
-                    options={overview.programs.map((item) => ({
-                      value: item.tenantId,
-                      label: item.name,
-                    }))}
-                  />
-                  {selected?.note && <p>{selected.note}</p>}
-                  <Select
-                    label="校區／營運區域"
-                    value={draft.campusId}
-                    required
-                    onChange={(event) => update('campusId', event.target.value)}
-                    disabled={!selected}
-                    placeholder="請選擇營運區域"
-                    options={
-                      selected?.campuses.map((item) => ({ value: item.id, label: item.name })) ?? []
-                    }
-                  />
-                </fieldset>
-                <fieldset disabled={busy || !!pending}>
-                  <legend>營業資料</legend>
-                  <Select
-                    label="營業型態"
-                    value={draft.businessKind}
-                    onChange={(event) => update('businessKind', event.target.value)}
-                    options={[
-                      { value: 'company', label: '公司' },
-                      { value: 'sole-proprietor', label: '商號／行號' },
-                      { value: 'campus-stall', label: '校園攤商或餐廳櫃位' },
-                      { value: 'other', label: '其他合作單位' },
-                    ]}
-                  />
-                  <div className={styles.fields}>
-                    <Input
-                      label="登記名稱／負責單位"
-                      value={draft.legalName}
-                      required
-                      maxLength={200}
-                      onChange={(event) => update('legalName', event.target.value)}
-                    />
-                    <Input
-                      label="對外品牌名稱"
-                      value={draft.brandName}
-                      required
-                      maxLength={200}
-                      onChange={(event) => update('brandName', event.target.value)}
-                    />
-                    <Input
-                      label="統一編號或商業登記號"
-                      hint="無則留白"
-                      value={draft.businessRegistrationNumber ?? ''}
-                      minLength={3}
-                      maxLength={40}
-                      onChange={(event) => update('businessRegistrationNumber', event.target.value)}
-                    />
-                    <Input
-                      label="食品業者登錄字號"
-                      hint="不適用時留白，由審核員確認"
-                      value={draft.foodBusinessRegistrationNumber ?? ''}
-                      minLength={3}
-                      maxLength={60}
-                      onChange={(event) =>
-                        update('foodBusinessRegistrationNumber', event.target.value)
-                      }
-                    />
-                    <Input
-                      label="門市／櫃位名稱"
-                      value={draft.locationName}
-                      required
-                      maxLength={200}
-                      onChange={(event) => update('locationName', event.target.value)}
-                    />
-                    <Input
-                      label="實際營業地址或校內位置"
-                      value={draft.operatingAddress}
-                      required
-                      minLength={3}
-                      maxLength={300}
-                      onChange={(event) => update('operatingAddress', event.target.value)}
-                    />
-                  </div>
-                </fieldset>
-                <fieldset disabled={busy || !!pending}>
-                  <legend>聯絡方式</legend>
-                  <div className={styles.fields}>
-                    <Input
-                      label="聯絡人"
-                      value={draft.contactName}
-                      required
-                      maxLength={120}
-                      onChange={(event) => update('contactName', event.target.value)}
-                      autoComplete="name"
-                    />
-                    <Input
-                      label="聯絡信箱"
-                      type="email"
-                      value={draft.contactEmail}
-                      required
-                      maxLength={254}
-                      onChange={(event) => update('contactEmail', event.target.value)}
-                      autoComplete="email"
-                    />
-                    <Input
-                      label="聯絡電話"
-                      type="tel"
-                      value={draft.contactPhone}
-                      required
-                      minLength={6}
-                      maxLength={30}
-                      onChange={(event) => update('contactPhone', event.target.value)}
-                      autoComplete="tel"
-                    />
-                  </div>
-                </fieldset>
-                <fieldset disabled={busy || !!pending}>
-                  <legend>預計服務方式（至少選一項）</legend>
-                  <div className={styles.checks}>
-                    {(['pickup', 'dine-in', 'delivery'] as const).map((mode) => (
-                      <label key={mode}>
-                        <input
-                          type="checkbox"
-                          checked={draft.serviceModes.includes(mode)}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              serviceModes: event.target.checked
-                                ? [...current.serviceModes, mode]
-                                : current.serviceModes.filter((item) => item !== mode),
-                            }))
-                          }
-                        />
-                        {{ pickup: '外帶自取', 'dine-in': '內用', delivery: '外送' }[mode]}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                {submitError && <p role="alert">{submitError}</p>}
-                <Button
-                  type="submit"
-                  variant="primary"
-                  loading={busy}
-                  disabled={loading || !!loadError}
+                      <p>{merchantWorkspaceStateLabel(item)}</p>
+                      <p>{item.publicAccess ? '允許公開瀏覽' : '尚未公開'}</p>
+                      {item.missingRequirements.length > 0 && (
+                        <p>
+                          待完成：
+                          {item.missingRequirements
+                            .map(
+                              (requirement) => requirementLabel[requirement] ?? '確認其他營運條件',
+                            )
+                            .join('、')}
+                        </p>
+                      )}
+                      <Button
+                        onClick={() =>
+                          setSelectedLocation({
+                            tenantId: item.tenantId,
+                            locationId: item.locationId,
+                          })
+                        }
+                      >
+                        管理門市：{item.locationName}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+          {view !== 'apply' && (
+            <section className={styles.panel} aria-labelledby="merchant-applications-title">
+              <h3 id="merchant-applications-title">申請進度</h3>
+              {overview.applications.length === 0 ? (
+                <p>你還沒有送出進駐申請。</p>
+              ) : (
+                <ul className={styles.list}>
+                  {overview.applications.map((item) => (
+                    <li key={item.applicationId}>
+                      <h4>
+                        {item.brandName}／{item.locationName}
+                      </h4>
+                      <p>
+                        {merchantApplicationStateLabel(item.state)} ·{' '}
+                        {new Date(item.submittedAt).toLocaleDateString('zh-TW', {
+                          timeZone: 'Asia/Taipei',
+                        })}
+                      </p>
+                      {item.reviewerNote && <p>審核說明：{item.reviewerNote}</p>}
+                      {item.state === 'needs-information' && (
+                        <p>請依審核說明向受理單位提供資料，不必重複建立申請。</p>
+                      )}
+                      {item.state === 'approved' && (
+                        <p>店家已核准。請查看已授權門市，確認尚待完成的營運條件。</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+          {view === 'workspace' ? (
+            <Link href="/merchant/apply">申請新門市</Link>
+          ) : (
+            <section className={styles.panel} aria-labelledby="merchant-apply-title">
+              <h3 id="merchant-apply-title">申請進駐</h3>
+              {overview.programs.length === 0 ? (
+                <p>目前沒有場域開放進駐申請。</p>
+              ) : (
+                <form
+                  onSubmit={(event) => void submit(event)}
+                  className={styles.form}
+                  aria-busy={busy}
                 >
-                  {busy ? '正在確認收件…' : pending ? '重試同一份申請' : '送出進駐申請'}
-                </Button>
-              </form>
-            )}
-            {notice && <p role="status">{notice}</p>}
-          </section>
+                  <p>請填營業主體與聯絡資料；這裡不收身分證影本、存摺或銀行帳號。</p>
+                  <fieldset disabled={busy || !!pending}>
+                    <legend>申請地點</legend>
+                    <Select
+                      label="申請場域"
+                      value={draft.tenantId}
+                      required
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          tenantId: event.target.value,
+                          campusId: '',
+                        }))
+                      }
+                      placeholder="請選擇場域"
+                      options={overview.programs.map((item) => ({
+                        value: item.tenantId,
+                        label: item.name,
+                      }))}
+                    />
+                    {selected?.note && <p>{selected.note}</p>}
+                    <Select
+                      label="校區／營運區域"
+                      value={draft.campusId}
+                      required
+                      onChange={(event) => update('campusId', event.target.value)}
+                      disabled={!selected}
+                      placeholder="請選擇營運區域"
+                      options={
+                        selected?.campuses.map((item) => ({ value: item.id, label: item.name })) ??
+                        []
+                      }
+                    />
+                  </fieldset>
+                  <fieldset disabled={busy || !!pending}>
+                    <legend>營業資料</legend>
+                    <Select
+                      label="營業型態"
+                      value={draft.businessKind}
+                      onChange={(event) => update('businessKind', event.target.value)}
+                      options={[
+                        { value: 'company', label: '公司' },
+                        { value: 'sole-proprietor', label: '商號／行號' },
+                        { value: 'campus-stall', label: '校園攤商或餐廳櫃位' },
+                        { value: 'other', label: '其他合作單位' },
+                      ]}
+                    />
+                    <div className={styles.fields}>
+                      <Input
+                        label="登記名稱／負責單位"
+                        value={draft.legalName}
+                        required
+                        maxLength={200}
+                        onChange={(event) => update('legalName', event.target.value)}
+                      />
+                      <Input
+                        label="對外品牌名稱"
+                        value={draft.brandName}
+                        required
+                        maxLength={200}
+                        onChange={(event) => update('brandName', event.target.value)}
+                      />
+                      <Input
+                        label="統一編號或商業登記號"
+                        hint="無則留白"
+                        value={draft.businessRegistrationNumber ?? ''}
+                        minLength={3}
+                        maxLength={40}
+                        onChange={(event) =>
+                          update('businessRegistrationNumber', event.target.value)
+                        }
+                      />
+                      <Input
+                        label="食品業者登錄字號"
+                        hint="不適用時留白，由審核員確認"
+                        value={draft.foodBusinessRegistrationNumber ?? ''}
+                        minLength={3}
+                        maxLength={60}
+                        onChange={(event) =>
+                          update('foodBusinessRegistrationNumber', event.target.value)
+                        }
+                      />
+                      <Input
+                        label="門市／櫃位名稱"
+                        value={draft.locationName}
+                        required
+                        maxLength={200}
+                        onChange={(event) => update('locationName', event.target.value)}
+                      />
+                      <Input
+                        label="實際營業地址或校內位置"
+                        value={draft.operatingAddress}
+                        required
+                        minLength={3}
+                        maxLength={300}
+                        onChange={(event) => update('operatingAddress', event.target.value)}
+                      />
+                    </div>
+                  </fieldset>
+                  <fieldset disabled={busy || !!pending}>
+                    <legend>聯絡方式</legend>
+                    <div className={styles.fields}>
+                      <Input
+                        label="聯絡人"
+                        value={draft.contactName}
+                        required
+                        maxLength={120}
+                        onChange={(event) => update('contactName', event.target.value)}
+                        autoComplete="name"
+                      />
+                      <Input
+                        label="聯絡信箱"
+                        type="email"
+                        value={draft.contactEmail}
+                        required
+                        maxLength={254}
+                        onChange={(event) => update('contactEmail', event.target.value)}
+                        autoComplete="email"
+                      />
+                      <Input
+                        label="聯絡電話"
+                        type="tel"
+                        value={draft.contactPhone}
+                        required
+                        minLength={6}
+                        maxLength={30}
+                        onChange={(event) => update('contactPhone', event.target.value)}
+                        autoComplete="tel"
+                      />
+                    </div>
+                  </fieldset>
+                  <fieldset disabled={busy || !!pending}>
+                    <legend>預計服務方式（至少選一項）</legend>
+                    <div className={styles.checks}>
+                      {(['pickup', 'dine-in', 'delivery'] as const).map((mode) => (
+                        <label key={mode}>
+                          <input
+                            type="checkbox"
+                            checked={draft.serviceModes.includes(mode)}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                serviceModes: event.target.checked
+                                  ? [...current.serviceModes, mode]
+                                  : current.serviceModes.filter((item) => item !== mode),
+                              }))
+                            }
+                          />
+                          {{ pickup: '外帶自取', 'dine-in': '內用', delivery: '外送' }[mode]}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  {submitError && <p role="alert">{submitError}</p>}
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    loading={busy}
+                    disabled={loading || !!loadError}
+                  >
+                    {busy ? '正在確認收件…' : pending ? '重試同一份申請' : '送出進駐申請'}
+                  </Button>
+                </form>
+              )}
+              {notice && <p role="status">{notice}</p>}
+            </section>
+          )}
         </div>
       )}
     </div>
