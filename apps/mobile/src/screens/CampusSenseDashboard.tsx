@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TouchableOpacity, View } from 'react-native';
 import { AICard, AIButton, aiTokens } from '../ui/aiFirst';
 import type { CampusSenseSnapshot, CampusSenseProgress } from '../services/campusSenseSnapshot';
+import { querySyncedAnnouncements } from '../services/syncedAnnouncementQuery';
+import { CampusAnnouncementRows } from './CampusAnnouncementRows';
 import { CampusAssignmentCoverage } from './CampusAssignmentCoverage';
 import { CampusAssignmentWorkbench, type CampusAssignmentWorkbenchContext } from './CampusAssignmentWorkbench';
 
@@ -12,7 +14,7 @@ function Metric({ label, value, available, detail = '已讀取' }: {
     <View style={{ backgroundColor: aiTokens.panel, minWidth: 86, flexGrow: 1, flexBasis: '28%',
       paddingVertical: 14, paddingHorizontal: 12, borderRadius: 12 }}>
       <Text style={{ color: aiTokens.muted, fontSize: 12, marginBottom: 6 }}>{label}</Text>
-      <Text numberOfLines={1} style={{ color: available ? aiTokens.text : aiTokens.warning,
+      <Text style={{ color: available ? aiTokens.text : aiTokens.warning,
         fontSize: available ? 23 : 14, fontWeight: '700' }}>{value}</Text>
       <Text style={{ color: aiTokens.muted, marginTop: 5, fontSize: 11 }}>
         {available ? detail : '無資料來源'}
@@ -21,9 +23,49 @@ function Metric({ label, value, available, detail = '已讀取' }: {
   );
 }
 
+type Announcement = CampusSenseSnapshot['announcements']['items'][number];
+
+function AnnouncementDisclosure({ items, available, disabled, onOpenAnnouncement, onOpenAnnouncements }: {
+  items: ReadonlyArray<Announcement>;
+  available: boolean;
+  disabled: boolean;
+  onOpenAnnouncement?: (item: Announcement) => void;
+  onOpenAnnouncements?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasItems = available && items.length > 0;
+  return (
+    <View style={{ gap: 8 }}>
+      {hasItems ? (
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="本次同步的公告"
+          accessibilityState={{ expanded, disabled }} disabled={disabled} onPress={() => setExpanded(!expanded)}
+          style={{ minHeight: 48, padding: 12, justifyContent: 'center', borderRadius: 12,
+            borderColor: aiTokens.border, borderWidth: 1, opacity: disabled ? 0.6 : 1 }}>
+          <Text style={{ color: aiTokens.text, fontSize: 15, fontWeight: '600' }}>
+            {expanded ? '收合公告摘要' : `查看本次同步的 ${items.length} 則公告`}
+          </Text>
+        </TouchableOpacity>
+      ) : (
+        <Text style={{ color: available ? aiTokens.muted : aiTokens.warning, fontSize: 13 }}>
+          {available ? '這次同步沒有可顯示的公告。' : '本次未取得公告來源，無法確認有幾則公告。'}
+        </Text>
+      )}
+      {hasItems && expanded ? (
+        <>
+          <Text style={{ color: aiTokens.muted, fontSize: 13 }}>僅列出本次同步讀取的公告，發布日期以台灣時間顯示。</Text>
+          <CampusAnnouncementRows items={items} disabled={disabled} onOpenAnnouncement={onOpenAnnouncement} />
+        </>
+      ) : null}
+      {(!hasItems || expanded) && onOpenAnnouncements ? (
+        <AIButton label="前往公告總覽" variant="ghost" disabled={disabled} onPress={onOpenAnnouncements} />
+      ) : null}
+    </View>
+  );
+}
+
 export function CampusSenseDashboard({
   snapshot, expired, authenticated, busy, syncBusy, error, onSync, onClear, onBrief, onWeekBrief,
-  progress, onCancelSync, assignmentContext,
+  progress, onCancelSync, assignmentContext, onOpenAnnouncement, onOpenAnnouncements,
 }: {
   snapshot: CampusSenseSnapshot | null;
   expired: boolean;
@@ -38,21 +80,30 @@ export function CampusSenseDashboard({
   progress?: CampusSenseProgress | null;
   onCancelSync?: () => void;
   assignmentContext?: CampusAssignmentWorkbenchContext;
+  onOpenAnnouncement?: (item: Announcement) => void;
+  onOpenAnnouncements?: () => void;
 }) {
-  const [showWorkbench, setShowWorkbench] = useState(false);
+  const snapshotKey = snapshot ? JSON.stringify([snapshot.userId, snapshot.schoolId, snapshot.checkedAt]) : null;
+  const [openWorkbenchFor, setOpenWorkbenchFor] = useState<string | null>(null);
+  const showWorkbench = snapshotKey !== null && openWorkbenchFor === snapshotKey;
   const freshness = snapshot ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   }).format(new Date(snapshot.checkedAt)) : '';
-  const partial = snapshot?.assignments.status === 'available' &&
-    snapshot.assignments.count !== snapshot.assignments.items.length;
+  const availableSources = snapshot ? [snapshot.schedule, snapshot.assignments, snapshot.announcements]
+    .filter((source) => source.status === 'available').length : 0;
+  const partial = availableSources < 3 || (snapshot?.assignments.status === 'available' &&
+    snapshot.assignments.count !== snapshot.assignments.items.length);
+  const badge = !snapshot ? '待同步' : !availableSources ? '未取得資料' : partial ? '部分資料' : '已同步';
+  const announcements = snapshot?.announcements.status === 'available'
+    ? querySyncedAnnouncements(snapshot.announcements.items, null, snapshot.checkedAt).items : [];
 
   return (
-    <AICard title="校園感知" badge={snapshot ? partial ? '部分資料' : '已同步' : '待同步'}
-      badgeTone={snapshot && !partial ? 'success' : 'muted'}>
+    <AICard title="校園感知" badge={badge}
+      badgeTone={!snapshot ? 'muted' : partial ? 'warning' : 'success'}>
       <View style={{ gap: 12 }}>
         <Text style={{ color: aiTokens.text, fontSize: 16, fontWeight: '700' }}>
-          {snapshot ? '已取得本次授權資料' : expired
+          {snapshot ? (availableSources ? '已取得本次授權資料' : '本次未能讀取校園資料') : expired
             ? '校園摘要已過期，請重新同步' : '尚未同步校園摘要'}
         </Text>
         {snapshot ? (
@@ -61,13 +112,18 @@ export function CampusSenseDashboard({
               <Metric label="待交作業" detail="已接通來源總數"
                 available={snapshot.assignments.status === 'available'}
                 value={snapshot.assignments.status === 'available' ? String(snapshot.assignments.count) : '不可用'} />
-              <Metric label="校園公告"
+              <Metric label="校園公告" detail="本次摘要則數"
                 available={snapshot.announcements.status === 'available'}
-                value={snapshot.announcements.status === 'available' ? String(snapshot.announcements.items.length) : '不可用'} />
+                value={snapshot.announcements.status === 'available' ? String(announcements.length) : '不可用'} />
               <Metric label="正式課表"
                 available={snapshot.schedule.status === 'available'}
                 value={snapshot.schedule.status === 'available' ? String(snapshot.schedule.count) : '未接通'} />
             </View>
+            {!syncBusy ? (
+              <AnnouncementDisclosure key={snapshotKey}
+                available={snapshot.announcements.status === 'available'} items={announcements}
+                disabled={busy} onOpenAnnouncement={onOpenAnnouncement} onOpenAnnouncements={onOpenAnnouncements} />
+            ) : null}
             <CampusAssignmentCoverage assignments={snapshot.assignments} />
             <Text style={{ color: aiTokens.muted, fontSize: 12, lineHeight: 20 }}>
               同步時間：{freshness}。僅涵蓋已串接且授權的來源，不等於全部學校系統。
@@ -105,7 +161,7 @@ export function CampusSenseDashboard({
         {snapshot && assignmentContext && snapshot.assignments.status === 'available' ? (
           <>
             <AIButton label={showWorkbench ? '收合作業工作台' : '查看與篩選已同步作業'}
-              variant="ghost" disabled={busy || syncBusy} onPress={() => setShowWorkbench((value) => !value)} />
+              variant="ghost" disabled={busy || syncBusy} onPress={() => setOpenWorkbenchFor(showWorkbench ? null : snapshotKey)} />
             {showWorkbench ? <CampusAssignmentWorkbench
               key={JSON.stringify([assignmentContext.userId, assignmentContext.schoolId, snapshot.checkedAt])}
               snapshot={snapshot} context={assignmentContext} disabled={busy || syncBusy} /> : null}

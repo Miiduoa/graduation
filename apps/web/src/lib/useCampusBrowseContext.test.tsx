@@ -60,12 +60,12 @@ it('uses the selected campus rather than a stale schoolId on the page', () => {
   });
 });
 
-it('defaults to Providence when the person has not chosen a campus yet', () => {
+it('stays unselected on a first visit despite a stale page schoolId', () => {
   render(<Directory />);
   expect(JSON.parse(screen.getByTestId('campus-scope').textContent || '{}')).toEqual({
-    id: 'pu',
-    name: '靜宜大學',
-    status: 'ready',
+    id: null,
+    name: '',
+    status: 'unselected',
   });
 });
 

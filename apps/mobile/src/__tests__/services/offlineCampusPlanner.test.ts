@@ -167,3 +167,63 @@ test('next-week scheduling uses Taiwan weekdays, never treating an unscheduled c
   expect(result?.steps.find((step) => step.evidence === 'saved-timetable')?.detail).toContain('資料庫');
   expect(result?.content).not.toContain('未排入課表');
 });
+
+test('comparison keeps all observed assignment identities and the actual source read time', () => {
+  const sensed: CampusSenseSnapshot = {
+    ...snapshot, checkedAt: '2026-10-26T00:59:00.000Z',
+    assignments: {
+      status: 'available', count: 4, coverage: { complete: true, reason: 'complete', pages: 1 },
+      items: [...snapshot.assignments.items, { title: '之後才截止的報告', groupName: '資料分析', dueAt: '2026-12-01T12:00:00Z' }]
+        .map((item, index) => ({ ...item, source: { kind: 'group-assignment', groupId: 'course-A', assignmentId: 'task-' + index } })),
+    },
+  };
+  const result = plan('今天要先處理什麼？', { snapshot: sensed })!;
+  expect(result.comparisonBasis).toEqual({
+    assignments: {
+      status: 'complete', checkedAt: sensed.checkedAt, total: 4,
+      items: sensed.assignments.items.map((item, index) => ({
+        identity: ['course-A', 'task-' + index], title: item.title, groupName: item.groupName, dueAt: item.dueAt,
+      })),
+    },
+    timetableUpdatedAt: context.timetable.updatedAt,
+  });
+  expect(result.steps.some((step) => step.title === '之後才截止的報告')).toBe(false);
+  expect(result.checkedAt).not.toBe(result.comparisonBasis!.assignments.checkedAt);
+  sensed.assignments.items[0].source!.assignmentId = 'changed-after-planning';
+  expect(result.comparisonBasis!.assignments.items[0].identity).toEqual(['course-A', 'task-0']);
+});
+
+test.each([
+  undefined,
+  { complete: false, reason: 'legacy-partial' as const, pages: 1 },
+  { complete: false, reason: 'read-budget' as const, pages: 8 },
+])('a matching count alone never proves complete assignment coverage: %j', (coverage) => {
+  const result = plan('今天要先處理什麼？', { snapshot: {
+    ...snapshot, assignments: { ...snapshot.assignments, coverage },
+  } })!;
+  expect(result.comparisonBasis!.assignments.status).toBe('partial');
+  expect(result.comparisonBasis!.assignments.items.every((item) => item.identity === null)).toBe(true);
+});
+
+test('comparison basis never stores cross-account, stale or cross-campus source evidence', () => {
+  for (const stale of [
+    { ...snapshot, userId: 'another-user' },
+    { ...snapshot, schoolId: 'another-campus' },
+    { ...snapshot, checkedAt: '2026-10-25T01:00:00.000Z' },
+    { ...snapshot, checkedAt: '2026-10-26T01:01:00.000Z' },
+  ]) {
+    const result = plan('今天要先處理什麼？', { snapshot: stale })!;
+    expect(result.comparisonBasis!.assignments).toEqual({ status: 'unavailable', checkedAt: null, total: null, items: [] });
+    expect(JSON.stringify(result)).not.toContain('明天小考複習');
+  }
+});
+
+test('comparison does not turn date-only deadlines or a missing identity into confirmed facts', () => {
+  const result = plan('今天要先處理什麼？', { snapshot: {
+    ...snapshot, assignments: { status: 'available', count: 1,
+      items: [{ title: '尚待核對', groupName: '', dueAt: '2026-10-26' }],
+      coverage: { complete: true, reason: 'complete', pages: 1 },
+    },
+  } })!;
+  expect(result.comparisonBasis!.assignments.items).toEqual([{ identity: null, title: '尚待核對', groupName: '', dueAt: null }]);
+});

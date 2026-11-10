@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createStoryId, publishStory } from './firestore';
-import { uploadStoryMedia } from './media';
+import { uploadStoryImage, uploadStoryMedia } from './media';
 
 const mock = vi.hoisted(() => ({
   ref: vi.fn((_storage, path: string) => path),
@@ -61,7 +61,7 @@ it.each([
   new File(['clip'], 'clip.mov', { type: 'video/quicktime' }),
   new File([], 'empty.mp4', { type: 'video/mp4' }),
   new File([], 'empty.png', { type: 'image/png' }),
-  new File([new ArrayBuffer(10 * 1024 * 1024)], 'large.jpg', { type: 'image/jpeg' }),
+  new File([new ArrayBuffer(10 * 1024 * 1024 + 1)], 'large.jpg', { type: 'image/jpeg' }),
 ])('rejects unsupported or empty media before Storage receives it', async (file) => {
   await expect(
     uploadStoryMedia({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
@@ -129,4 +129,21 @@ it('uploads an MP4 at the reserved video path with uploader ownership', async ()
     uploadStoryMedia({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
   ).rejects.toThrow('小於 100 MB');
   expect(mock.upload).toHaveBeenCalledTimes(1);
+});
+
+it('uploads an image exactly at the shared size limit', async () => {
+  const file = new File([new ArrayBuffer(10 * 1024 * 1024)], 'photo.jpg', { type: 'image/jpeg' });
+  await expect(uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file })).resolves.toMatchObject({ url: 'https://example.test/photo' });
+  expect(mock.upload).toHaveBeenCalledOnce();
+});
+
+it.each([
+  new File(['clip'], 'clip.mp4', { type: 'video/mp4' }),
+  new File([], 'empty.png', { type: 'image/png' }),
+  new File([new ArrayBuffer(10 * 1024 * 1024 + 1)], 'large.jpg', { type: 'image/jpeg' }),
+])('rejects an invalid image before Storage receives it', async (file) => {
+  await expect(
+    uploadStoryImage({ schoolId: 'ncku', uid: 'student', storyId: 'reserved', file }),
+  ).rejects.toThrow();
+  expect(mock.upload).not.toHaveBeenCalled();
 });

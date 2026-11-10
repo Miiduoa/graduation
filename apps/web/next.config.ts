@@ -18,12 +18,29 @@ const libraryFormOrigins = [...new Set(Object.values(officialLibraryDirectory)
   .filter((url) => url.protocol === 'https:' && !url.username && !url.password)
   .map((url) => url.origin))];
 
+// 私人媒體先下載為 Blob；只有 fetch 需要儲存服務來源。
+// 正式映像建置時沒有 Supabase 設定，CSP 又在建置時固定，故以正式專案 origin（非機密）為預設。
+const DEFAULT_PRIVATE_STORAGE_ORIGIN = 'https://hrrmkrayvrgnwcroyttp.supabase.co';
+const privateStorageOrigin = (() => {
+  for (const raw of [process.env.SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_URL]) {
+    if (!raw?.trim()) continue;
+    try {
+      const url = new URL(raw.trim());
+      if (url.protocol === 'https:' && !url.username && !url.password) return url.origin;
+    } catch {
+      // 無效設定不擴大來源。
+    }
+  }
+  return DEFAULT_PRIVATE_STORAGE_ORIGIN;
+})();
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
   "form-action 'self' https://accounts.google.com " + libraryFormOrigins.join(' '),
+  "media-src 'self' blob:",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
@@ -31,7 +48,7 @@ const contentSecurityPolicy = [
   "worker-src 'self' blob:",
   // api.nuni.tw is the existing school-discovery host used by /auth/account.
   "connect-src 'self' https://api.nuni.tw https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.fly.dev https://*.web.app https://*.firebaseapp.com https://huggingface.co https://*.huggingface.co https://*.hf.co wss:" +
-    emulatorConnectSrc,
+    ' ' + privateStorageOrigin + emulatorConnectSrc,
 ].join('; ');
 
 const securityHeaders = [
@@ -118,12 +135,14 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      {
-        source: '/merchant',
-        headers: [
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
-        ],
-      },
+      ...['/merchant', '/course/:courseId/attendance', '/teacher/course/:courseId/attendance'].map(
+        (source) => ({
+          source,
+          headers: [
+            { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(self)' },
+          ],
+        }),
+      ),
       // classroom camera 是建置時讀進映像的；開 ASSIGNMENT_FILE_SUBMIT_ENABLED 必須重建 Web 映像。
       ...(process.env.ASSIGNMENT_FILE_SUBMIT_ENABLED === 'true'
         ? [

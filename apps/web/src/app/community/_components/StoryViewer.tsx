@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import { usePrivateMedia } from '@/lib/usePrivateMedia';
 import { openModalSession } from '@/components/ui/modalSession';
 import { StoryAudience } from './StoryAudience';
 import type { useStoryShelf } from './useStoryShelf';
@@ -31,10 +32,12 @@ export function StoryViewer({
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
   const story = viewer.group.stories[viewer.index]!;
+  const onMediaFailure = useCallback(() => setFailedId(story.id), [story.id]);
+  const mediaUrl = usePrivateMedia(story.mediaUrl, onMediaFailure);
   const photo = story.kind === 'image' && !!story.mediaUrl;
   const video = story.kind === 'video';
   const media = photo || video;
-  const failedVideo = video && (!story.mediaUrl || failedId === story.id);
+  const failedVideo = video && (!mediaUrl || failedId === story.id);
   const scope = JSON.stringify([story.schoolId, story.authorUid, story.id]);
   const audienceOpen = viewer.isOwner && audienceFor === scope;
   if (audienceFor !== null && !audienceOpen) setAudienceFor(null);
@@ -224,12 +227,12 @@ export function StoryViewer({
             }
           }}
         >
-          {video && story.mediaUrl && failedId !== story.id ? (
+          {video && mediaUrl && failedId !== story.id ? (
             <video
               key={story.id}
               ref={videoElement}
               className={styles.photo}
-              src={story.mediaUrl}
+              src={mediaUrl ?? undefined}
               aria-label="限時動態影片"
               controls
               muted
@@ -262,7 +265,7 @@ export function StoryViewer({
               height={1600}
               key={story.id}
               className={styles.photo}
-              src={story.mediaUrl!}
+              src={mediaUrl!}
               alt="限時動態照片"
               onLoad={() => setLoadedId(story.id)}
               onError={() => setFailedId(story.id)}

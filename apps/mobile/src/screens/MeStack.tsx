@@ -23,6 +23,9 @@ import ShopDockScreen from './ShopDockScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
 import { NuniWorkspaceScreen } from './NuniWorkspaceScreen';
+import { NuniTimetableAssistantScreen } from './NuniTimetableAssistantScreen';
+import PersonalImportScreen from './PersonalImportScreen';
+import PersonalTimetableScreen from './PersonalTimetableScreen';
 import { DataExportScreen } from './DataExportScreen';
 import { AccountDeletionScreen } from './AccountDeletionScreen';
 import { AccessibilitySettingsScreen } from './AccessibilitySettingsScreen';
@@ -35,9 +38,11 @@ import { PostLoginDebugScreen } from './PostLoginDebugScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import AIModelManagerScreen from './AIModelManagerScreen';
 import { useThemeMode } from '../state/theme';
+import { useOptionalNuniSession } from '../state/nuniSession';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
 import { usePermissions } from '../hooks/usePermissions';
+import { AIButton } from '../ui/aiFirst';
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
@@ -155,6 +160,8 @@ function GuardedAchievementsAiFirst(props: any) {
 
 export function MeStack() {
   useThemeMode();
+  const platform = useOptionalNuniSession();
+  const platformReady = !!platform?.session && !platform.loading && !platform.error && !platform.pendingLogout;
 
   return (
     <Stack.Navigator
@@ -175,9 +182,22 @@ export function MeStack() {
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
+        name="NuniTimetableAssistant"
+        component={NuniTimetableAssistantScreen}
+        options={{ title: '課表助理', headerShown: false }}
+      />
+      <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
+      <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
+      <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}
-        options={{ title: 'nuni' }}
+        options={({ navigation }) => ({
+          title: 'nuni',
+          headerRight: platformReady ? () => (
+            <AIButton label="問課表" variant="ghost" style={{ minHeight: 44 }}
+              onPress={() => navigation.navigate('NuniTimetableAssistant')} />
+          ) : undefined,
+        })}
       />
       <Stack.Screen
         name="Notifications"

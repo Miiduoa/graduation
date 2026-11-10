@@ -16,7 +16,7 @@ const state = vi.hoisted(() => ({
   uid: 'alice' as string | null,
   selectedSchoolId: 'pu' as string | null,
   schoolRole: null as string | null,
-  schoolRoleCalls: [] as Array<[string | null | undefined, string]>,
+  schoolRoleCalls: [] as Array<[string | null | undefined, string | null | undefined]>,
   session: null as null | { context: string; platformAccountId: string },
   sessionLoading: false,
   sessionError: '',
@@ -55,17 +55,21 @@ vi.mock('@/lib/usePersonalImports', async (original) => {
     usePersonalImportScope: () => state.importScope,
   };
 });
-vi.mock('@/features/nuni/Session', () => ({
-  useNuniSession: () => ({
+vi.mock('@/features/nuni/Session', () => {
+  const useSession = () => ({
     session: state.session,
     loading: state.sessionLoading,
     error: state.sessionError,
     pendingLogout: state.pendingLogout,
     logout: vi.fn(),
     refresh: state.refresh,
-  }),
-  browserRequest: (path: string) => state.request(path),
-}));
+  });
+  return {
+    useNuniSession: useSession,
+    useOptionalNuniSession: useSession,
+    browserRequest: (path: string) => state.request(path),
+  };
+});
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({
     user: state.uid ? { uid: state.uid } : null,
@@ -80,7 +84,7 @@ vi.mock('@/lib/useSchoolRole', async (original) => {
   const actual = await original<typeof import('@/lib/useSchoolRole')>();
   return {
     ...actual,
-    useSchoolRole: (uid: string | null | undefined, schoolId: string) => {
+    useSchoolRole: (uid: string | null | undefined, schoolId: string | null | undefined) => {
       state.schoolRoleCalls.push([uid, schoolId]);
       return state.schoolRole;
     },
@@ -434,7 +438,8 @@ it('looks up the school role from the selected school instead of always using pu
   expect(screen.queryByRole('link', { name: /課務申訴審核/ })).toBeNull();
   state.selectedSchoolId = null;
   view.rerender(<HomePage />);
-  expect(state.schoolRoleCalls.some((call) => call[0] === 'alice' && call[1] === 'pu')).toBe(true);
+  expect(state.schoolRoleCalls.at(-1)).toEqual(['alice', null]);
+  expect(state.schoolRoleCalls.some((call) => call[1] === 'pu')).toBe(false);
 });
 
 it('shows the LMS-unconnected sentence instead of pretending there is no homework', async () => {

@@ -21,6 +21,8 @@ COPY scripts/build-functions-shared.cjs ./scripts/build-functions-shared.cjs
 RUN node scripts/build-functions-shared.cjs
 COPY scripts/import-ai/ ./scripts/import-ai/
 COPY backend/functions/puScraper.js backend/functions/tronClassScraper.js ./backend/functions/
+COPY backend/functions/campusStoryAccessBinding.js ./backend/functions/
+COPY backend/functions/campusAnnouncements/catalog.js ./backend/functions/campusAnnouncements/
 COPY backend/functions/lib/puGradeDocument.js backend/functions/lib/puCreditSummary.js backend/functions/lib/puCourseTime.js backend/functions/lib/taipeiDay.js backend/functions/lib/puSessionStore.js backend/functions/lib/puCampusTransport.js ./backend/functions/lib/
 
 # These are public browser settings. Never pass server credentials as build args.
@@ -32,7 +34,9 @@ ARG NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
 ARG NEXT_PUBLIC_FIREBASE_APP_ID
 ARG NEXT_PUBLIC_SITE_URL=https://nuni.tw
 ARG NEXT_PUBLIC_FUNCTIONS_BASE_URL
+ARG NEXT_PUBLIC_FILE_STORAGE_BACKEND=
 ENV NEXT_PUBLIC_FUNCTIONS_BASE_URL=$NEXT_PUBLIC_FUNCTIONS_BASE_URL
+ENV NEXT_PUBLIC_FILE_STORAGE_BACKEND=$NEXT_PUBLIC_FILE_STORAGE_BACKEND
 ENV NEXT_PUBLIC_CLOUD_FUNCTION_REGION=asia-east1
 ENV NEXT_PUBLIC_DEFAULT_SCHOOL_ID=pu
 ENV NEXT_PUBLIC_ALLOW_LOCAL_MOCK_AUTH=false

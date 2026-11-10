@@ -1,5 +1,5 @@
-/** 手機第一屏預算：頂欄、精簡標題、搜尋列與底欄；與 map.module.css 的 --map-first-screen-chrome 對齊。 */
-export const MAP_FIRST_SCREEN_CHROME_PX = 314;
+/** 手機第一屏預算含頂欄、標題、搜尋、折頁標頭與底欄，對齊 map.module.css 的 --map-first-screen-chrome。 */
+export const MAP_FIRST_SCREEN_CHROME_PX = 386;
 export const MAP_FIRST_SCREEN_MIN_MAP_PX = 240;
 export const MAP_FIRST_SCREEN_BOTTOM_NAV_PX = 72;
 export const MAP_FIRST_SCREEN_VIEWPORTS = [

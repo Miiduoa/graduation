@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import QRCode from 'qrcode';
+import {
+  FOOD_POLL_MS,
+  canShowPickupCredential,
+  foodCustomerNextStep,
+  isFoodOrderInProgress,
+} from '@campus/shared/src/foodOrderGuidance';
 import type {
   NuniFoodCustomerCancelReason,
   NuniFoodPaymentSessionProjection,
@@ -12,8 +18,6 @@ import { Button } from '@/components/ui/Button';
 import { Select, Textarea } from '@/components/ui/Input';
 import type { FoodClient } from './FoodWorkspace';
 import {
-  FOOD_POLL_MS,
-  FOOD_TERMINAL_STATES,
   FoodMutationStatus,
   foodKey,
   foodMoney,
@@ -25,7 +29,6 @@ import {
   useFoodRead,
   type FoodDraftCache,
 } from './foodState';
-import { foodCustomerNextStep, isFoodOrderInProgress } from './foodOrderGuidance';
 import { FoodOrderReceipt } from './FoodOrderReceipt';
 import styles from './Food.module.css';
 
@@ -43,7 +46,8 @@ export function FoodOrders({
   initialOrder: string;
 }) {
   const [state, setState] = useState('');
-  const [cursor, setCursor] = useState<string | undefined>();
+  const [pageCursors, setPageCursors] = useState<string[]>([]);
+  const cursor = pageCursors.at(-1);
   const [selected, setSelected] = useFoodDraft(
     cache,
     `food:orders:${tenantId}:selected`,
@@ -69,6 +73,12 @@ export function FoodOrders({
     };
   }, [orders.data]);
   const detailOpen = !!selected;
+  const nextCursor = orders.data?.nextCursor;
+
+  function changePage(cursors: string[]) {
+    setPageCursors(cursors);
+    listHeadingRef.current?.focus();
+  }
 
   function openOrder(orderId: string, trigger?: HTMLElement | null) {
     returnFocusRef.current = trigger ?? null;
@@ -133,7 +143,7 @@ export function FoodOrders({
           ]}
           onChange={(event) => {
             setState(event.target.value);
-            setCursor(undefined);
+            setPageCursors([]);
           }}
         />
         {orders.loading && <p role="status">正在查詢訂單…</p>}
@@ -167,13 +177,21 @@ export function FoodOrders({
                 ))}
               </div>
             )}
-            <div className={styles.bar}>
-              {cursor && <Button onClick={() => setCursor(undefined)}>回到第一頁訂單</Button>}
-              {orders.data.nextCursor && (
-                <Button onClick={() => setCursor(orders.data!.nextCursor)}>下一頁訂單</Button>
-              )}
-            </div>
           </>
+        )}
+        {(cursor || nextCursor) && (
+          <nav className={styles.bar} aria-label="訂單分頁">
+            <span>第 {pageCursors.length + 1} 頁</span>
+            {pageCursors.length > 1 && (
+              <Button onClick={() => changePage([])}>回到第一頁訂單</Button>
+            )}
+            {cursor && (
+              <Button onClick={() => changePage(pageCursors.slice(0, -1))}>上一頁訂單</Button>
+            )}
+            {nextCursor && !pageCursors.includes(nextCursor) && (
+              <Button onClick={() => changePage([...pageCursors, nextCursor])}>下一頁訂單</Button>
+            )}
+          </nav>
         )}
       </section>
     </div>
@@ -246,7 +264,7 @@ export function FoodOrderDetail({
   const load = useCallback(() => client.getOrder(tenantId, orderId), [client, tenantId, orderId]);
   const order = useFoodRead(load, {
     pollMs: FOOD_POLL_MS,
-    shouldPoll: (data) => !data || !FOOD_TERMINAL_STATES.has(data.state),
+    shouldPoll: (data) => !data || isFoodOrderInProgress(data.state),
   });
   const [reason, setReason] = useFoodDraft<NuniFoodCustomerCancelReason>(
     cache,
@@ -286,12 +304,7 @@ export function FoodOrderDetail({
   const locked = !order.data || task.busy || !!task.pending || task.storageBlocked;
   const receipt = order.data;
   const payment = checkout ?? receipt?.paymentSession;
-  const token = receipt?.pickup.credential;
-  const canShow =
-    !!receipt?.allowedActions.includes('show-pickup-credential') &&
-    receipt.pickup.allowedActions.includes('present-one-time-token') &&
-    !!token &&
-    Date.parse(token.expiresAt) > now;
+  const token = receipt && canShowPickupCredential(receipt, now) ? receipt.pickup.credential : null;
   const nextStep = receipt
     ? foodCustomerNextStep({
         state: receipt.state,
@@ -412,7 +425,7 @@ export function FoodOrderDetail({
               。叫號不代表已取餐。
             </p>
           )}
-          {canShow && (
+          {token && (
             <div className={styles.pickupBlock}>
               <Button
                 variant="primary"
@@ -425,15 +438,15 @@ export function FoodOrderDetail({
                 <>
                   <p>請只交給這間店的店員。取餐號碼不能取代這份一次性憑證。</p>
                   <code className={styles.token} aria-label="一次性取餐憑證">
-                    {token!.token}
+                    {token.token}
                   </code>
-                  <PickupQr token={token!.token} />
-                  <p>有效至 {foodTime(token!.expiresAt)}</p>
+                  <PickupQr token={token.token} />
+                  <p>有效至 {foodTime(token.expiresAt)}</p>
                 </>
               )}
             </div>
           )}
-          {receipt.state === 'ready' && !canShow && (
+          {receipt.state === 'ready' && !token && (
             <p>取餐憑證目前無法使用，請更新這筆訂單取得最新狀態。</p>
           )}
           {receipt.allowedActions.includes('cancel') && (

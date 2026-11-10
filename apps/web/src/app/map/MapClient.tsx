@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAuth } from '@/components/AuthGuard';
 import { useLocationHash } from '@/lib/useLocationHash';
 import MapCanvas from './MapCanvas';
+import CampusSpatialExplorer from './CampusSpatialExplorer';
 import {
   loadMapFavorites,
   loadMapLocations,
@@ -33,8 +34,13 @@ import {
   hasOfficialProvidenceLibraryGuide,
   PROVIDENCE_LIBRARY_FLOOR_GUIDE_URL,
 } from '@campus/shared/src/campusMapLookup';
+import {
+  MAX_CAMPUS_CLASSROOM_QUERY_LENGTH,
+  normalizeCampusClassroomQuery,
+  resolveCampusClassroom,
+} from '@campus/shared/src/campusClassroomLookup';
 
-type MapProps = { school: string; schoolName?: string; route?: string; focus?: string };
+type MapProps = { school: string; schoolName?: string; route?: string; focus?: string; query?: string };
 type FavoritesState = { status: 'loading' | 'error' | 'ready'; ids: Set<string> };
 
 export default function MapClient(props: MapProps) {
@@ -45,6 +51,7 @@ export default function MapClient(props: MapProps) {
         props.school,
         props.route,
         props.focus,
+        normalizeCampusClassroomQuery(props.query),
         user?.uid,
         loading,
         Boolean(error),
@@ -61,6 +68,7 @@ function MapContent({
   schoolName,
   route,
   focus,
+  query,
   uid,
   authLoading,
 }: MapProps & {
@@ -120,7 +128,9 @@ function MapContent({
     };
   }, [school, placeAttempt, bundled]);
   const [category, setCategory] = useState('全部');
-  const [search, setSearch] = useState('');
+  const initialQuery = normalizeCampusClassroomQuery(query);
+  const [search, setSearch] = useState(initialQuery);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selection, setSelection] = useState<string | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [nearbyOnly, setNearbyOnly] = useState(false);
@@ -164,22 +174,37 @@ function MapContent({
     () => ['全部', ...new Set(locations.map((location) => location.category))],
     [locations],
   );
+  const classroom = useMemo(
+    () => resolveCampusClassroom({ schoolId: school, query: search, locations }),
+    [school, search, locations],
+  );
+  const classroomIds = useMemo(() => new Set(classroom.matches.map((place) => place.id)), [classroom]);
+  const classroomLinkActive = Boolean(initialQuery && search === initialQuery);
   const filtered = useMemo(() => {
     const matched = locations.filter(
       (location) =>
         (category === '全部' || location.category === category) &&
-        locationMatchesSearch(location, search) &&
+        (locationMatchesSearch(location, search) || classroomIds.has(location.id)) &&
         (!onlyFavorites || favorites.status !== 'ready' || favorites.ids.has(location.id)) &&
         (!nearbyOnly || !myLocation || distanceMeters(myLocation, location) <= 1000),
     );
     if (myLocation)
       matched.sort((a, b) => distanceMeters(myLocation, a) - distanceMeters(myLocation, b));
     return matched;
-  }, [locations, category, search, onlyFavorites, favorites, nearbyOnly, myLocation]);
-  const selected = locations.find((location) => location.id === (selection ?? focus)) ?? null;
+  }, [locations, category, search, classroomIds, onlyFavorites, favorites, nearbyOnly, myLocation]);
+  const focusedPlace = locations.find((location) => location.id === focus);
+  // Explicit selections (including closing a detail) and focus links take priority.
+  // A missing explicit destination must not silently turn into another building.
+  // A later source update can make a room ambiguous; derive this instead of retaining a guess.
+  const classroomPlace = classroomLinkActive && classroom.status === 'matched' ? classroom.matches[0] : null;
+  const selectedId = selection ?? (focus ? focusedPlace?.id : classroomPlace?.id);
+  const selected = locations.find((location) => location.id === selectedId) ?? null;
   const returnParams = new URLSearchParams({ schoolId: school });
   if (route) returnParams.set('route', route);
-  if (selection ?? focus) returnParams.set('focus', (selection ?? focus)!);
+  const returnFocus = selection ?? focus ?? selectedId;
+  if (returnFocus) returnParams.set('focus', returnFocus);
+  const returnQuery = normalizeCampusClassroomQuery(search);
+  if (returnQuery) returnParams.set('query', returnQuery);
   const schoolLoginHref = `/login?reconnect=school&returnUrl=${encodeURIComponent(`/map?${returnParams}${hash}`)}`;
   const deepLinkRoute = useMemo<[MapLocation, MapLocation] | null>(() => {
     const ids = route?.split(',').map((id) => id.trim());
@@ -272,12 +297,14 @@ function MapContent({
     return (
       <div className="card" role="status">
         正在載入校園地點…（最多約 8 秒，讀不到會提示並可重試）
+        {initialQuery && <p>待確認的教室：{initialQuery}</p>}
       </div>
     );
   if (error)
     return (
       <div className={`card ${styles.state}`} role="alert">
         <h2>暫時無法取得校園地點</h2>
+        {initialQuery && <p>待確認的教室：{initialQuery}</p>}
         <p>地點資料連線逾時或失敗，請檢查網路後重新載入。確認地點資料後，就能搜尋設施與開啟導航。</p>
         <div className={styles.actions}>
           <button className="btn" onClick={retry}>
@@ -295,6 +322,7 @@ function MapContent({
     return (
       <div className={`card ${styles.state}`}>
         <h2>目前沒有可顯示的校園地點</h2>
+        {initialQuery && <p>待確認的教室：{initialQuery}</p>}
         <p>地點需要有完整的名稱與座標才能顯示。你也可以先查詢校方提供的校園資訊。</p>
         <p>目前還沒有這所校園可顯示的地點清單，不會改用其他學校的建築或導航位置。</p>
         <div className={styles.actions}>
@@ -359,9 +387,11 @@ function MapContent({
             <input
               className="input"
               type="search"
+              ref={searchInputRef}
               aria-label="搜尋地點"
               placeholder="宿舍、影印或公車"
               value={search}
+              maxLength={MAX_CAMPUS_CLASSROOM_QUERY_LENGTH}
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
@@ -381,7 +411,52 @@ function MapContent({
           </p>
         )}
       </div>
+      {classroomLinkActive && (
+        <section className={`card ${styles.classroom}`} aria-label="教室定位結果">
+          <p className={styles.eyebrow}>課表教室</p>
+          <h2>{initialQuery}</h2>
+          {classroom.status === 'matched' && classroomPlace ? <>
+            <p>可對應「{classroomPlace.name}」的位置。抵達後請依課表與現場標示確認教室。</p>
+            {selected?.id !== classroomPlace.id && (
+              <button className="btn" type="button" onClick={() => selectLocation(classroomPlace)}>
+                定位{classroomPlace.name}
+              </button>
+            )}
+          </> : classroom.status === 'ambiguous' ? <>
+            <p>有多個相符地點，請核對位置後選擇。</p>
+            <ul className={styles.classroomCandidates}>
+              {classroom.matches.map((place, index) => (
+                <li key={place.id}>
+                  <button className="btn" type="button" onClick={() => selectLocation(place)}>
+                    選擇候選 {index + 1}：{place.name}
+                  </button>
+                  <p>{[place.description, place.building, place.floor && `樓層：${place.floor}`].filter(Boolean).join(' · ')}</p>
+                  <small>座標 {place.lat.toFixed(5)}, {place.lng.toFixed(5)}</small>
+                </li>
+              ))}
+            </ul>
+          </> : (
+            <p>{sourcePending
+              ? '正在確認地點資料，尚未找到能對應這間教室的位置。'
+              : '目前地點資料無法確認這間教室的位置。請改用建築全名搜尋，或核對校方地圖。'}</p>
+          )}
+          {(classroom.status === 'ambiguous' || classroom.status === 'unmatched') && (
+            <div className={styles.actions}>
+              <button className="btn" type="button" onClick={() => {
+                searchInputRef.current?.focus();
+                searchInputRef.current?.select();
+              }}>
+                修改教室名稱
+              </button>
+              {officialMapUrl && (
+                <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">核對校方地圖</a>
+              )}
+            </div>
+          )}
+        </section>
+      )}
       <MapCanvas
+        schoolName={schoolName}
         locations={mapLocations}
         selected={selected}
         route={routeLocations}
@@ -437,6 +512,12 @@ function MapContent({
         </section>
       )}
       <div className={styles.tools}>
+        <CampusSpatialExplorer
+          school={school}
+          locations={mapLocations}
+          selected={selected}
+          onSelect={selectLocation}
+        />
         {officialMapUrl && (
           <a className="btn" href={officialMapUrl} target="_blank" rel="noopener noreferrer">
             校方校區平面圖
@@ -484,7 +565,7 @@ function MapContent({
         ))}
       </div>
       {selected && (
-        <section className={`card ${styles.detail}`} aria-label="地點詳情">
+        <section key={selected.id} className={`card ${styles.detail}`} aria-label="地點詳情">
           <div>
             <p className={styles.eyebrow}>{selected.category}</p>
             <h2>{selected.name}</h2>

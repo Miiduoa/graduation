@@ -9,6 +9,7 @@
  *  - 「我在這裡」打卡會在 chip 上顯示 ACTIVE 標記
  *  - 同點位列表顯示頭像 / 姓名（從 directory 取）
  */
+import { PrivateImage } from '../../ui/PrivateImage';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -361,7 +362,7 @@ function RealtimeSocialContent({ requestedAuthorUid, requestedSchoolId, onReques
                   accessibilityLabel={`查看 ${author} 的限時動態${isVideo ? '，最新一則是影片' : ''}`}
                 >
                   {isImage ? (
-                    <Image source={{ uri: latest!.mediaUrl as string }} style={styles.storyCardImg} />
+                    <PrivateImage uri={latest!.mediaUrl as string} style={styles.storyCardImg} />
                   ) : isVideo ? (
                     <View style={[styles.storyCardText, styles.videoCover]}>
                       <View style={styles.videoBadge}>

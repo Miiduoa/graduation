@@ -31,6 +31,9 @@ let mockAuth: {
 };
 
 jest.mock('../state/auth', () => ({ useAuth: () => mockAuth }));
+jest.mock('../state/nuniSession', () => ({
+  useNuniSession: () => ({ session: null, loading: false, pendingLogout: false, error: null }),
+}));
 jest.mock('../hooks/usePermissions', () => ({ usePermissions: () => ({ isStudent: true }) }));
 jest.mock('../data/studentHome', () => ({ loadStudentHome: jest.fn() }));
 jest.mock('../components/LearningNextClassCard', () => ({ LearningNextClassCard: () => null }));
@@ -254,6 +257,7 @@ test('my account uses the signed-in profile without invented grades, identity or
   expect(view.getByText('陳同學')).toBeTruthy();
   expect(view.getByText('資訊系 · 學號 A123')).toBeTruthy();
   expect(view.getByText('student-a@example.edu')).toBeTruthy();
+  expect(view.queryByText('開啟課表助理')).toBeNull();
   expect(view.queryByText(/王小明|3\.63|61%|78|明年 6 月|seed|示範工具|12 場/)).toBeNull();
   fireEvent.press(view.getByText('課程與成績'));
   expect(safeNavigate).toHaveBeenCalledWith(mockNavigation, 'LearnHome');

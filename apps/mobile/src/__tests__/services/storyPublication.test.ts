@@ -56,7 +56,7 @@ test('uploads to the matching school and reserved document, keeping the image ty
 test.each([
   ['video/mp4', 42],
   ['image/png', 0],
-  ['image/jpeg', 10 * 1024 * 1024],
+  ['image/jpeg', 10 * 1024 * 1024 + 1],
 ] as const)('rejects an invalid photo (%s, %i bytes) before uploading', async (type, size) => {
   localPhoto(type, size);
   await expect(
@@ -137,4 +137,10 @@ test.each([
     uploadStoryVideo('pu', 'reserved', 'alice', 'file:///clip', duration),
   ).rejects.toThrow();
   expect(uploadBytes).not.toHaveBeenCalled();
+});
+
+test('uploads an image exactly at the shared size limit', async () => {
+  localPhoto('image/jpeg', 10 * 1024 * 1024);
+  await expect(uploadStoryImage('pu', 'reserved', 'alice', 'file:///local', 'image/jpeg')).resolves.toBe('https://example.com/photo');
+  expect(uploadBytes).toHaveBeenCalledTimes(1);
 });

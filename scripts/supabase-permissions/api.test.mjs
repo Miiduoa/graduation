@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import test from 'node:test';
+import { createTestToken } from './harness.mjs';
 
 // Exercise the real HTTP/PostgREST boundary used by supabase-js. This intentionally
 // uses no SDK mocks and no hosted project credentials. It does not exercise Auth,
@@ -19,6 +19,7 @@ const ids = {
   courseA: uuid('10000000', 1), courseB: uuid('10000000', 2),
   assignmentA: uuid('20000000', 1), assignmentB: uuid('20000000', 2),
   assignmentNew: uuid('20000000', 3),
+  assignmentAttachment: uuid('20000000', 5),
   submissionA: uuid('30000000', 1), submissionB: uuid('30000000', 2),
   submissionOutside: uuid('30000000', 3), submissionLate: uuid('30000000', 4),
   quizGradeItem: uuid('50000000', 3),
@@ -33,12 +34,8 @@ const ids = {
   pairA: uuid('f1000000', 1), pairB: uuid('f1000000', 2), pairOutside: uuid('f1000000', 3), pairExpired: uuid('f1000000', 4),
 };
 function token(identity) {
-  const now = Math.floor(Date.now() / 1000);
-  const claims = { role: identity === 'service' ? 'service_role' : identity === 'anon' ? 'anon' : 'authenticated', iat: now, exp: now + 3600 };
-  if (ids[identity]) Object.assign(claims, { sub: ids[identity], aud: 'authenticated' });
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const unsigned = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
-  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+  const role = identity === 'service' ? 'service_role' : identity === 'anon' ? 'anon' : 'authenticated';
+  return createTestToken(secret, role, ids[identity]);
 }
 async function request(identity, path, { method = 'GET', body, prefer } = {}) {
   const headers = { Authorization: `Bearer ${token(identity)}`, Accept: 'application/json' };
@@ -476,4 +473,87 @@ test('service webhook RPCs can claim, acknowledge, and enqueue without direct ou
   assert.equal(row.last_status, 200);
   assert.ok(row.delivered_at);
   assert.equal(succeeds(await rpc('service', ...workerCalls[6])), 1);
+});
+
+test('submission receipts use server time and grading freezes the submitted work', async () => {
+  const target = `submissions?id=eq.${ids.submissionLate}`;
+  const forgedTime = '2000-01-01T00:00:00Z';
+  const receipt = () => request('a', target + '&select=body_text,submitted_at,storage_path');
+  const original = succeeds(await receipt())[0];
+  succeeds(await request('a', target, { method: 'PATCH', body: { submitted_at: forgedTime } }));
+  assert.equal(succeeds(await rpc('a', 'apply_late_penalty', { p_submission_id: ids.submissionLate })), 64);
+  assert.deepEqual(succeeds(await receipt())[0], original);
+
+  const body = { assignment_id: ids.assignmentNew, student_id: ids.b, body_text: 'First version', submitted_at: forgedTime };
+  const upsert = (data) => request('b', 'submissions?on_conflict=assignment_id,student_id&select=id,submitted_at', {
+    method: 'POST', body: data, prefer: 'resolution=merge-duplicates,return=representation',
+  });
+  const first = succeeds(await upsert(body))[0];
+  assert.ok(Date.parse(first.submitted_at) > Date.parse(forgedTime));
+  const revised = succeeds(await upsert({ ...body, body_text: 'Second version' }))[0];
+  assert.ok(Date.parse(revised.submitted_at) >= Date.parse(first.submitted_at));
+  const graded = succeeds(await request('teacher', `submissions?id=eq.${first.id}&select=submitted_at`, {
+    method: 'PATCH', body: { grade: 75, graded_at: new Date().toISOString(), graded_by: ids.teacher },
+    prefer: 'return=representation',
+  }))[0];
+  assert.equal(graded.submitted_at, revised.submitted_at);
+  denied(await upsert({ ...body, body_text: 'Post-grading replacement' }));
+  denied(await request('b', `submissions?id=eq.${first.id}`, { method: 'PATCH', body: { storage_path: 'other-file' } }));
+  const final = succeeds(await request('b', `submissions?id=eq.${first.id}&select=body_text,storage_path,grade,submitted_at`))[0];
+  assert.deepEqual(final, { body_text: 'Second version', storage_path: null, grade: 75, submitted_at: revised.submitted_at });
+});
+
+test('Data API validates uploaded attachment ownership and preserves teacher grading', async () => {
+  const ownPath = `${ids.courseA}/${ids.assignmentAttachment}/${ids.a}/receipt.pdf`;
+  const peerPath = `${ids.courseA}/${ids.assignmentAttachment}/${ids.b}/receipt.pdf`;
+  const body = { assignment_id: ids.assignmentAttachment, student_id: ids.a, storage_path: ownPath };
+  for (const storage_path of [peerPath, `${ownPath}.missing`]) {
+    denied(await request('a', 'submissions', { method: 'POST', body: { ...body, storage_path } }));
+  }
+  const receipt = succeeds(await request('a', 'submissions?select=id,storage_path', {
+    method: 'POST', body, prefer: 'return=representation',
+  }))[0];
+  assert.equal(receipt.storage_path, ownPath);
+  denied(await request('a', `submissions?id=eq.${receipt.id}`, {
+    method: 'PATCH', body: { storage_path: peerPath },
+  }));
+  const graded = succeeds(await request('teacher', `submissions?id=eq.${receipt.id}&select=grade,storage_path`, {
+    method: 'PATCH', body: { grade: 90, graded_at: new Date().toISOString(), graded_by: ids.teacher },
+    prefer: 'return=representation',
+  }))[0];
+  assert.deepEqual(graded, { grade: 90, storage_path: ownPath });
+});
+
+test('course search and playback respect unpublished and scheduled material', async () => {
+  const title = 'Release boundary fixture';
+  const search = (who) => rpc(who, 'search_course', { p_course_id: ids.courseA, p_query: title });
+  for (const visibility of [{ is_published: false }, { publish_at: '2100-01-01T00:00:00Z' }]) {
+    const id = succeeds(await request('teacher', 'course_materials?select=id', {
+      method: 'POST', body: { course_id: ids.courseA, title, created_by: ids.teacher, ...visibility },
+      prefer: 'return=representation',
+    }))[0].id;
+    assert.deepEqual(succeeds(await request('a', `course_materials?id=eq.${id}&select=id`)), []);
+    assert.deepEqual(succeeds(await search('a')), []);
+    assert.deepEqual(values(succeeds(await search('teacher')), 'record_id'), [id]);
+    const issue = () => rpc('a', 'issue_media_play_token', { p_material_id: id });
+    denied(await issue());
+    succeeds(await request('teacher', `course_materials?id=eq.${id}`, {
+      method: 'PATCH', body: { is_published: true, publish_at: null },
+    }));
+    assert.deepEqual(values(succeeds(await search('a')), 'record_id'), [id]);
+    assert.deepEqual(succeeds(await search('outsider')), []);
+    const token = succeeds(await issue())[0].token;
+    succeeds(await request('teacher', `course_materials?id=eq.${id}`, { method: 'PATCH', body: { is_published: false } }));
+    assert.equal(succeeds(await rpc('a', 'consume_media_play_token', { p_token: token })), false);
+    succeeds(await request('teacher', `course_materials?id=eq.${id}`, { method: 'DELETE' }));
+  }
+});
+
+test('a playback token is consumed only once across concurrent requests', async () => {
+  const id = uuid('70000000', 1);
+  const token = succeeds(await rpc('a', 'issue_media_play_token', { p_material_id: id }))[0].token;
+  const consume = (who) => rpc(who, 'consume_media_play_token', { p_token: token });
+  assert.equal(succeeds(await consume('b')), false);
+  const results = await Promise.all(Array.from({ length: 8 }, () => consume('a')));
+  assert.equal(results.filter((r) => succeeds(r)).length, 1);
 });

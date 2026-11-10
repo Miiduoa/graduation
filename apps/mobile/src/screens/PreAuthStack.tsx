@@ -1,4 +1,6 @@
 import React from 'react';
+import { ActivityIndicator, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import LoginLandingScreen from './LoginLandingScreen';
@@ -19,6 +21,11 @@ import { DormitoryScreen } from './DormitoryScreen';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
+import { AIButton } from '../ui/aiFirst';
+import { useNuniSession } from '../state/nuniSession';
+import { SchoolBrowsingControl } from '../components/SchoolBrowsingControl';
+import { useSchool } from '../state/school';
+import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
 const Stack = createNativeStackNavigator<PreAuthStackParamList, undefined>();
@@ -36,15 +43,40 @@ function PublicCareerScreen(props: ServiceScreenProps) {
   );
 }
 
+function PublicSchoolRoute({ children, onHome }: { children: React.ReactNode; onHome: () => void }) {
+  const { school, selectionReady } = useSchool();
+  if (selectionReady === false) return <ActivityIndicator accessibilityLabel="正在讀取選校設定" />;
+  if (school.id) return <>{children}</>;
+  return (
+    <SafeAreaView style={{ flex: 1, padding: 20, backgroundColor: theme.colors.bg }}>
+      <View style={{ gap: 14 }}>
+        <Text accessibilityRole="header" style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
+          先選擇要瀏覽的學校
+        </Text>
+        <Text style={{ color: theme.colors.muted }}>選校後會開啟你剛才要看的頁面。</Text>
+        <SchoolBrowsingControl />
+        <AIButton label="返回首頁" variant="ghost" onPress={onHome} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
 /**
  * 平台帳號與學校帳號各自驗證，與 MeStack 共用同一入口。
  */
 export function PreAuthStack() {
   useThemeMode();
+  const platform = useNuniSession();
+  const platformReady = !!platform.session && !platform.loading && !platform.error && !platform.pendingLogout;
 
   return (
     <Stack.Navigator
       initialRouteName="LoginLanding"
+      screenLayout={({ children, route, navigation }) =>
+        route.name === 'LoginLanding' || route.name === 'NuniWorkspace' ? <>{children}</> : (
+          <PublicSchoolRoute onHome={() => navigation.navigate('LoginLanding')}>{children}</PublicSchoolRoute>
+        )
+      }
       screenOptions={createStackScreenOptions()}
       id={undefined}
     >
@@ -93,6 +125,11 @@ export function PreAuthStack() {
         options={{ headerShown: false, title: '職涯' }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
+      <Stack.Screen
+        name="NuniTimetableAssistant"
+        getComponent={() => require('./NuniTimetableAssistantScreen').NuniTimetableAssistantScreen}
+        options={{ title: '課表助理', headerShown: false }}
+      />
       <Stack.Screen name="PersonalImport" component={PersonalImportScreen} options={{ title: '匯入我的資料' }} />
       <Stack.Screen name="PersonalTimetable" component={PersonalTimetableScreen} options={{ title: '我的課表' }} />
       <Stack.Screen
@@ -103,7 +140,13 @@ export function PreAuthStack() {
       <Stack.Screen
         name="NuniWorkspace"
         component={NuniWorkspaceScreen}
-        options={{ title: 'nuni' }}
+        options={({ navigation }) => ({
+          title: 'nuni',
+          headerRight: platformReady ? () => (
+            <AIButton label="問課表" variant="ghost" style={{ minHeight: 44 }}
+              onPress={() => navigation.navigate('NuniTimetableAssistant')} />
+          ) : undefined,
+        })}
       />
     </Stack.Navigator>
   );

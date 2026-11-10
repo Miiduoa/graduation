@@ -1,3 +1,4 @@
+import { claimPrivateFile } from '../../services/privateFiles';
 /* eslint-disable */
 /**
  * 校園社群 — 發 Story Compose
@@ -97,7 +98,7 @@ function StoryComposer(props: any) {
         : { mediaTypes: 'videos', videoExportPreset: VideoExportPreset.H264_1280x720 });
       if (!file || !active.current || selection.current !== seq || publishing.current) return;
       if (type === 'image') {
-        if (!file.type?.startsWith('image/') || file.size >= STORY_IMAGE_LIMIT) {
+        if (!file.type?.startsWith('image/') || file.size > STORY_IMAGE_LIMIT) {
           Alert.alert('無法使用這張照片', '請選擇小於 10 MB 的圖片。');
           return;
         }
@@ -162,6 +163,10 @@ function StoryComposer(props: any) {
         entry.url = media.kind === 'video'
           ? await uploadStoryVideo(sid, entry.id, uid, media.uri, media.durationMs)
           : await uploadStoryImage(sid, entry.id, uid, media.uri, media.mime);
+      }
+      if (entry.url) {
+        try { await claimPrivateFile(entry.url, `schools/${sid}/stories/${entry.id}`); }
+        catch (error) { if ((error as { statusCode?: number }).statusCode === 410) entry.url = null; throw error; }
       }
       if (!active.current) return;
       await publishStory(entry.id, {

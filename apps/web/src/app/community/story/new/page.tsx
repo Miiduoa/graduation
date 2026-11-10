@@ -1,4 +1,5 @@
 'use client';
+import { claimPrivateFile } from '@/lib/privateFiles';
 
 import { STORY_VIDEO_CONTENT_TYPE, STORY_VIDEO_MAX_SECONDS } from '@campus/shared/src/storyVideo';
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
@@ -183,6 +184,10 @@ function StoryComposeInner({ schoolId }: { schoolId: string }) {
         });
         if (!mounted.current) return;
         uploadedUrl.current = uploaded.url;
+      }
+      if (uploadedUrl.current) {
+        try { await claimPrivateFile(uploadedUrl.current, `schools/${schoolId}/stories/${storyId.current}`); }
+        catch (error) { if ((error as { statusCode?: number }).statusCode === 410) uploadedUrl.current = ''; throw error; }
       }
       setStatus('publishing');
       await publishStory({

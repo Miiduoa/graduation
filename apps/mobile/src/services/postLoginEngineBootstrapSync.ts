@@ -24,7 +24,8 @@ function primaryRoleToUserRole(primary: PrimaryRole): UserRole {
 /** 將 PostLoginContext 與最近一次 finalize bootstrap 合併後餵給各引擎 */
 export function syncEnginesFromPostLoginContext(ctx: PostLoginContext | null): void {
   if (!ctx) return;
-  const prev = getLastPostLoginEngineBootstrap();
+  const last = getLastPostLoginEngineBootstrap();
+  const prev = last?.uid === ctx.uid && last.schoolId === ctx.schoolId ? last : null;
   const primaryRole = primaryRoleToUserRole(ctx.roles.primaryRole);
   const sub = ctx.roles.subRoles?.length ? ctx.roles.subRoles.map(String) : undefined;
   const bootstrap: PostLoginEngineBootstrap = {

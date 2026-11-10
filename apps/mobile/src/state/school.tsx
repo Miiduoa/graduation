@@ -1,14 +1,11 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-  type School,
-} from '@campus/shared/src';
-import { findSchoolById, findSchoolsByCode, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import type { School } from '@campus/shared/src';
+import { getPublicSchoolInfo } from '@campus/shared/src/publicSchoolInfo';
+import { findSchoolById, findSchoolsByCode, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
-import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
+import { applySchoolTheme, clearSchoolTheme, registerSchoolTheme } from '../ui/theme';
 
 export type SchoolSelection = {
   code: string;
@@ -20,9 +17,10 @@ export type SchoolSelection = {
 };
 
 export type SchoolContextValue = {
+  selectionReady: boolean;
   selection: SchoolSelection;
   setSelection: (next: Partial<SchoolSelection>) => void;
-  school: ReturnType<typeof resolveSchool>;
+  school: School;
   schoolId: string | null;
 };
 
@@ -30,15 +28,8 @@ const SchoolContext = createContext<SchoolContextValue | null>(null);
 
 const STORAGE_KEY = 'campus.schoolSelection.v1';
 
-function getProvidenceSchool(): School {
-  return (
-    findSchoolById(PROVIDENCE_UNIVERSITY_SCHOOL_ID) ??
-    resolveSchool({
-      schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-      school: PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    })
-  );
-}
+// Presentation only. An empty ID cannot identify a data source.
+const noSchool: School = { id: '', code: '', name: '尚未選校' };
 
 function toSelection(school: School): SchoolSelection {
   return {
@@ -52,9 +43,12 @@ function toSelection(school: School): SchoolSelection {
 }
 
 export function schoolFromSelection(selection: Partial<SchoolSelection>): School {
+  if ((selection.schoolId != null && typeof selection.schoolId !== 'string') ||
+      (selection.code != null && typeof selection.code !== 'string')) return noSchool;
   const byId = findSchoolById(selection.schoolId);
   if (byId) return byId;
   const id = selection.schoolId?.trim();
+  if (id && /^(?:all|unknown)$/i.test(id)) return noSchool;
   if (id && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)) {
     // The public directory can introduce schools before the bundled legacy catalog is updated.
     // Preserve their identity instead of silently rendering another institution's data.
@@ -65,7 +59,8 @@ export function schoolFromSelection(selection: Partial<SchoolSelection>): School
       !(codeOwner.length === 1 && codeOwner[0].id !== id)
         ? chosenCode
         : id.toUpperCase();
-    const name = typeof selection.schoolName === 'string' ? selection.schoolName.trim() : '';
+    const official = getPublicSchoolInfo(id);
+    const name = official?.name ?? (typeof selection.schoolName === 'string' ? selection.schoolName.trim() : '');
     const shortName = typeof selection.shortName === 'string' ? selection.shortName.trim() : '';
     const color = typeof selection.themeColor === 'string' ? selection.themeColor : '';
     return {
@@ -78,30 +73,19 @@ export function schoolFromSelection(selection: Partial<SchoolSelection>): School
     };
   }
   const matches = findSchoolsByCode(selection.code);
-  return matches.length === 1 ? matches[0] : getProvidenceSchool();
+  return !id && matches.length === 1 ? matches[0] : noSchool;
 }
 
 function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
-  const normalized = toSelection(schoolFromSelection(selection));
-  const requestedId = selection.schoolId?.trim();
-  const hasSchoolIdentity = requestedId
-    ? /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(requestedId)
-    : findSchoolsByCode(selection.code).length === 1;
-  // A public browsing fallback does not establish a school management scope.
-  return hasSchoolIdentity
-    ? normalized
-    : { ...normalized, code: normalizeSchoolCode(selection.code), schoolId: null };
+  const school = schoolFromSelection(selection);
+  return school.id ? toSelection(school) : { code: '', schoolId: null };
 }
 
 export function SchoolProvider(props: {
   children: React.ReactNode;
   initial?: Partial<SchoolSelection>;
 }) {
-  const initialSelection = normalizeSelection({
-    code: props.initial?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    schoolId: props.initial?.schoolId ?? (props.initial?.code ? null : PROVIDENCE_UNIVERSITY_SCHOOL_ID),
-  });
-  const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
+  const [selection, setSelectionState] = useState<SchoolSelection>(() => normalizeSelection(props.initial ?? {}));
   const [loaded, setLoaded] = useState(false);
   // Any user-initiated selection takes priority over an earlier pending storage read.
   const selectionRevision = useRef(0);
@@ -114,19 +98,10 @@ export function SchoolProvider(props: {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (!raw) return;
         const parsed = JSON.parse(raw) as Partial<SchoolSelection>;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
         if (cancelled || selectionRevision.current !== startingRevision) return;
-        setSelectionState((prev) =>
-          selectionRevision.current !== startingRevision
-            ? prev
-            : normalizeSelection({
-                code: parsed.code ?? prev.code,
-                schoolId: parsed.schoolId === undefined ? (parsed.code ? null : prev.schoolId) : parsed.schoolId,
-                schoolName: parsed.schoolName ?? prev.schoolName ?? null,
-                shortName: parsed.shortName ?? prev.shortName ?? null,
-                themeColor: parsed.themeColor ?? prev.themeColor ?? null,
-                domains: parsed.domains ?? prev.domains ?? null,
-              }),
-        );
+        const restored = normalizeSelection(parsed);
+        setSelectionState((current) => selectionRevision.current === startingRevision ? restored : current);
       } catch {
         // ignore invalid persisted state
       } finally {
@@ -146,7 +121,7 @@ export function SchoolProvider(props: {
     selectionRevision.current += 1;
     setSelectionState((prev) => {
       const identityChanged = next.code !== undefined || next.schoolId !== undefined;
-      const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
+      const code = next.code != null ? normalizeSchoolCode(next.code) : next.schoolId === null ? '' : prev.code;
       const schoolId = next.schoolId === undefined
         ? next.code === undefined
           ? prev.schoolId
@@ -184,28 +159,36 @@ export function SchoolProvider(props: {
   useEffect(() => {
     if (!loaded) return;
 
-    const currentSchoolKey = selection.schoolId || selection.code;
+    const currentSchoolKey = selection.schoolId;
     const previousSchoolKey = previousSchoolRef.current;
 
-    if (previousSchoolKey && previousSchoolKey !== currentSchoolKey) {
+    if (currentSchoolKey && previousSchoolKey && previousSchoolKey !== currentSchoolKey) {
       clearCacheExceptSchool(currentSchoolKey).catch((error) => {
         console.warn('Failed to clear cache on school switch:', error);
       });
     }
 
     previousSchoolRef.current = currentSchoolKey;
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(selection)).catch(() => void 0);
+    if (currentSchoolKey) {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(selection)).catch(() => void 0);
+    } else if (selectionRevision.current > 0) {
+      AsyncStorage.removeItem(STORAGE_KEY).catch(() => void 0);
+    }
   }, [loaded, selection]);
 
-  const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
-  const school = useMemo(
-    () => schoolFromSelection(normalizedSelection),
-    [normalizedSelection],
-  );
+  const school = useMemo(() => schoolFromSelection(selection), [selection]);
+
+  useLayoutEffect(() => {
+    setHybridSourceSchoolContext(loaded ? selection.schoolId : null);
+    return () => { setHybridSourceSchoolContext(null); };
+  }, [loaded, selection.schoolId]);
 
   useEffect(() => {
-    if (!loaded || !school) return;
-
+    if (!loaded) return;
+    if (!selection.schoolId) {
+      clearSchoolTheme();
+      return;
+    }
     if (school.themeColor) {
       registerSchoolTheme({
         schoolId: school.id,
@@ -214,17 +197,17 @@ export function SchoolProvider(props: {
     }
 
     applySchoolTheme(school.id, school.themeColor);
-    setHybridSourceSchoolContext(school.id);
-  }, [loaded, school]);
+  }, [loaded, school, selection.schoolId]);
 
   const value: SchoolContextValue = useMemo(
     () => ({
-      selection: normalizedSelection,
+      selectionReady: loaded,
+      selection,
       setSelection,
       school,
-      schoolId: normalizedSelection.schoolId ?? school?.id ?? null,
+      schoolId: selection.schoolId,
     }),
-    [normalizedSelection, school],
+    [loaded, selection, school],
   );
 
   return <SchoolContext.Provider value={value}>{props.children}</SchoolContext.Provider>;

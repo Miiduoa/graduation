@@ -271,6 +271,31 @@ test('nested module files replace the unit link and drop unsafe or unpublished f
   ]);
 });
 
+test('nested materials must match their school, course and parent module when those IDs are set', async () => {
+  const file = { url: 'https://school.test/reading' };
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/materials'))
+      return collectionResult([
+        { ...file, label: '舊版教材' },
+        { ...file, label: '沿用上層', schoolId: null, groupId: null, moduleId: null },
+        { ...file, label: '本週教材', schoolId: 'pu', groupId: 'course-a', moduleId: '0' },
+        { ...file, label: '別校教材', schoolId: 'other' },
+        { ...file, label: '別課教材', groupId: 'course-b' },
+        { ...file, label: '別週教材', moduleId: '1' },
+        { ...file, label: '錯誤單元型別', moduleId: 0 },
+        { ...file, label: '空白學校識別碼', schoolId: '' },
+      ]);
+    if (String(ref).endsWith('/modules'))
+      return collectionResult([{ title: '第一週', published: true }]);
+    return collectionResult([]);
+  });
+
+  const result = await loadCourseHub(scope);
+  expect(result.materials.items.map((item) => item.title)).toEqual([
+    '舊版教材', '沿用上層', '本週教材',
+  ]);
+});
+
 test('student receipts reflect server-acknowledged submissions without leaking unpublished grades', async () => {
   jest.mocked(getDocsFromServer).mockImplementation(async (ref) => (
     String(ref).endsWith('/assignments')
@@ -415,4 +440,99 @@ test.each(['', '   ', 1793023200000, { unexpected: true }])('malformed present d
   const result = await loadCourseHub(scope);
   expect(result.assignments.items[0].dueAt).not.toBeNull();
   expect(canSubmitCourseWork(result.assignments.items[0])).toBe(false);
+});
+
+test('a failed file list keeps the module overview and files from readable siblings', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    switch (String(ref)) {
+      case 'groups/course-a/modules':
+        return collectionResult([
+          { title: '第一週', published: true, order: 1 },
+          { title: '第二週', published: true, order: 2, resourceUrl: 'https://school.test/week2' },
+        ]);
+      case 'groups/course-a/modules/0/materials':
+        return collectionResult([{ label: '第一週講義', url: 'https://school.test/week1.pdf' }]);
+      case 'groups/course-a/modules/1/materials':
+        throw new Error('unavailable');
+      default:
+        return collectionResult([]);
+    }
+  });
+
+  const { materials } = await loadCourseHub(scope);
+  expect(materials.status).toBe('partial');
+  expect(materials.items).toMatchObject([
+    { title: '第一週講義', url: 'https://school.test/week1.pdf' },
+    { title: '第二週', url: null },
+  ]);
+});
+
+test('a confirmed empty file list keeps the module overview and marks materials ready', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) =>
+    collectionResult(String(ref).endsWith('/modules') ? [{ title: '課程導讀', published: true }] : []),
+  );
+
+  const { materials } = await loadCourseHub(scope);
+  expect(getDocsFromServer).toHaveBeenCalledWith('groups/course-a/modules/0/materials');
+  expect(materials.status).toBe('ready');
+  expect(materials.items).toMatchObject([{ title: '課程導讀', url: null }]);
+});
+
+test('an unreadable module list marks materials unavailable without loading files', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/modules')) throw new Error('unavailable');
+    return collectionResult([]);
+  });
+
+  const { assignments, materials } = await loadCourseHub(scope);
+  expect(materials).toEqual({ status: 'error', items: [] });
+  expect(assignments).toEqual({ status: 'ready', items: [] });
+  expect(getDocsFromServer).not.toHaveBeenCalledWith(expect.stringMatching(/\/materials$/));
+});
+
+test('losing course membership during a failed file read hides the module overview', async () => {
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/materials')) {
+      records['groups/course-a/members/alice'].status = 'left';
+      throw new Error('permission-denied');
+    }
+    return collectionResult(
+      String(ref).endsWith('/modules') ? [{ title: '課內講義', published: true }] : [],
+    );
+  });
+
+  await expect(loadCourseHub(scope)).rejects.toThrow('無法存取');
+});
+
+test.each([
+  { published: false },
+  { published: 'false' },
+  { status: 'retracted' },
+  { groupId: 'another-course' },
+  { moduleId: 'another-module' },
+])('the overview cannot reopen a hidden attachment with the same URL (%j)', async (hidden) => {
+  const url = 'https://school.test/week1.pdf';
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/modules'))
+      return collectionResult([{ title: '第一週', published: true, resourceUrl: url }]);
+    if (String(ref).endsWith('/materials'))
+      return collectionResult([{ label: '舊附件', url, ...hidden }]);
+    return collectionResult([]);
+  });
+
+  const { materials } = await loadCourseHub(scope);
+  expect(materials).toMatchObject({ status: 'ready', items: [{ title: '第一週', url: null }] });
+});
+
+test('an overview with its own URL stays available when an unrelated file is hidden', async () => {
+  const overview = 'https://school.test/overview';
+  jest.mocked(getDocsFromServer).mockImplementation(async (ref) => {
+    if (String(ref).endsWith('/modules'))
+      return collectionResult([{ title: '第一週', published: true, resourceUrl: overview }]);
+    if (String(ref).endsWith('/materials'))
+      return collectionResult([{ url: 'https://school.test/draft', status: 'draft' }]);
+    return collectionResult([]);
+  });
+
+  expect((await loadCourseHub(scope)).materials.items[0].url).toBe(overview);
 });
