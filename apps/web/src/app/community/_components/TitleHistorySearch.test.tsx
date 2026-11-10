@@ -250,6 +250,25 @@ it('does not navigate offline, keeps the result for a fresh on-demand retry', as
   expect(mocks.confirm).toHaveBeenCalledTimes(2);
 });
 
+it('recovers when an authorized article cannot be opened by the client router', async () => {
+  mocks.navigate.mockImplementationOnce(() => { throw new Error('navigation transition failed'); });
+  render(<TitleHistorySearch schoolId="pu" />);
+  submit();
+  const link = await screen.findByRole('link', { name: '二手書 old-1001' });
+  fireEvent.click(link);
+  await screen.findByText(/暫時無法向伺服器確認這篇貼文/);
+  expect(mocks.confirm).toHaveBeenCalledTimes(1);
+  expect(window.sessionStorage.getItem('nuni:community-history-reading-position:v1')).toBeNull();
+
+  // The same student can retry the same link after the router refuses it.
+  fireEvent.click(link);
+  await waitFor(() => expect(mocks.confirm).toHaveBeenCalledTimes(2));
+  expect(mocks.navigate).toHaveBeenCalledTimes(2);
+  expect(mocks.navigate).toHaveBeenLastCalledWith('/community/post/old-1001?schoolId=pu');
+  const saved = JSON.parse(window.sessionStorage.getItem('nuni:community-history-reading-position:v1')!);
+  expect(saved).toMatchObject({ uid: 'alice', schoolId: 'pu', query: '二手書', postId: 'old-1001' });
+});
+
 it('confirms at most once during two rapid clicks and navigates only after success', async () => {
   const pending = deferred<boolean>();
   mocks.confirm.mockReturnValueOnce(pending.promise);
