@@ -1824,7 +1824,7 @@ describe('campus story view receipts', () => {
   test('recreating a deleted story in another author or school cannot inherit its audience', async () => {
     const story = (db) => db.doc('campusStories/story-1');
     const publish = async (uid, schoolId) => assertSucceeds(story(dbFor(uid)).set({
-      schoolId, authorUid: uid, expiresAt: Date.now() + 86_400_000,
+      schoolId, authorUid: uid, kind: 'text', expiresAt: Date.now() + 86_400_000,
     }));
     await assertSucceeds(views(dbFor('alice')).doc('alice').set(receipt('alice')));
     await assertSucceeds(legacyViews(dbFor('alice')).doc('alice').set(receipt('alice')));
@@ -2096,7 +2096,7 @@ describe('storage security rules', () => {
       await db.doc('users/alice').set(campusBoundProfile('pu'));
       await db.doc('users/bob').set(campusBoundProfile('pu'));
     });
-    const media = alice.storage().ref('schools/pu/stories/expiring/photo.jpg');
+    const media = alice.storage().ref('schools/pu/stories/expiring/image');
     await assertSucceeds(media.putString('draft photo', 'raw', {
       contentType: 'image/jpeg', customMetadata: { ownerUid: 'alice' },
     }));
