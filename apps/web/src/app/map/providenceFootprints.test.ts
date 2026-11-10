@@ -41,6 +41,30 @@ describe('Providence OSM building outlines', () => {
     })[0].heightBasis).toBe('illustrative');
   });
 
+  it('keeps explicit metric OSM heights beyond two decimal places instead of inventing 12 m', () => {
+    // Height values are OSM contributions, not official elevation measurements.
+    // A precise decimal in metres remains an explicit tag even without a space
+    // before the unit; it must not turn into a 12 m illustrative building.
+    for (const height of ['18.125', '18.125 m', '18.125m', '18.125000 m']) {
+      const parsed = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height })],
+      });
+      expect(parsed, height).toHaveLength(1);
+      expect(parsed[0], height).toMatchObject({
+        heightMeters: 18.125, heightBasis: 'osm-tag',
+      });
+      expect(parseProvidenceFootprintResponse({
+        schoolId: 'pu', buildings: parsed,
+      })).toEqual(parsed);
+    }
+    // Do not interpret non-metric values, ranges or out-of-bound measurements.
+    for (const height of ['18,125 m', '18-20 m', '59 ft', '2.499 m', '100.001 m']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', height })],
+      })[0], height).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
+    }
+  });
+
   it('does not extrude a retired, roof-only, unfinished or untagged OSM way as a complete building', () => {
     expect(parseProvidenceOsmFootprints({
       elements: [{ ...way(255784049), tags: undefined }],
