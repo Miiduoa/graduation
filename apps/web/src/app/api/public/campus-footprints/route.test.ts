@@ -644,6 +644,48 @@ describe('public Providence building geometry route', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { status: 406, retryAfter: null, cooldown: '86400' },
+    { status: 429, retryAfter: '3600', cooldown: '3600' },
+    { status: 503, retryAfter: '3600', cooldown: '3600' },
+    { status: 500, retryAfter: null, cooldown: '600' },
+  ])('cancels an unread HTTP $status error body without waiting for upstream cancellation', async ({
+    status, retryAfter, cooldown,
+  }) => {
+    vi.useFakeTimers();
+    let cancelCalls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Headers have arrived, but the rejected response keeps its body open.
+        controller.enqueue(new Uint8Array([123]));
+      },
+      cancel() {
+        cancelCalls += 1;
+        // A broken proxy may never acknowledge cancellation.
+        return new Promise<void>(() => {});
+      },
+    });
+    const upstream = vi.fn().mockResolvedValue(new Response(stream, {
+      status,
+      headers: retryAfter ? { 'Retry-After': retryAfter } : undefined,
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    let result: Response | undefined;
+    const pending = GET().then((response) => { result = response; return response; });
+
+    // The error is already known from the headers. Neither a pending cancel
+    // nor a never-ending error body should consume the 12-second deadline.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(result?.status).toBe(503);
+    const failed = await pending;
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+    expect(failed.headers.get('Retry-After')).toBe(cooldown);
+    expect(cancelCalls).toBe(1);
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it('backs off for 24 hours after an Overpass 406 instead of repeatedly querying a blocked client', async () => {
     const start = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
