@@ -28,6 +28,10 @@ type Props = {
   onSelect: (location: MapLocation) => void;
 };
 
+// Reuse a single empty array to avoid recreating a WebGL context whenever
+// the footprint status or the visible map selection changes.
+const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
+
 function readAppearance() {
   const root = document.documentElement;
   const reduced = root.dataset.reducedMotion === 'true' ||
@@ -213,8 +217,18 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     setCamera((previous) => ({ ...previous, zoom: 1 }));
   }, []);
   const source = place ? providencePlaceSourceUrl(school, place) : null;
-  const sourceFootprint = place && footprintStatus === 'ready'
-    ? footprints.find((footprint) => footprint.poiId === place.id) : null;
+  // The map can be filtered while a spatial dialog remains open. Never count,
+  // attribute or frame OSM buildings whose POIs are no longer in that view.
+  const visibleFootprints = useMemo(() => {
+    if (school !== 'pu' || footprintStatus !== 'ready' || model.unavailableReason) {
+      return NO_VISIBLE_FOOTPRINTS;
+    }
+    const pointIds = new Set(model.points.map((point) => point.id));
+    const matching = footprints.filter((footprint) => pointIds.has(footprint.poiId));
+    return matching.length ? matching : NO_VISIBLE_FOOTPRINTS;
+  }, [school, footprintStatus, model.unavailableReason, model.points, footprints]);
+  const sourceFootprint = place
+    ? visibleFootprints.find((footprint) => footprint.poiId === place.id) : null;
 
   useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) return;
@@ -285,7 +299,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
               camera={camera}
               onCameraChange={changeCamera}
               onSelect={selectPlace}
-              footprints={footprints}
+              footprints={visibleFootprints}
             />
             <div className={styles.viewTools} role="group" aria-label="導覽視角">
               <button className="btn" type="button" aria-pressed={showOverview} onClick={() => {
@@ -311,7 +325,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 </>}
                 {footprintStatus === 'ready' && (
                   <>
-                    <strong>{footprints.length} 棟公開建築輪廓</strong>
+                    <strong>{visibleFootprints.length} 棟公開建築輪廓</strong>
                     <span>依 OpenStreetMap 圖徵立體化。高度使用 OSM 標註或 12 公尺示意值，未經校方測量；不是室內導覽或無障礙路線。</span>
                     {footprintDate && <small>資料讀取：{footprintDate}{footprintStale ? '（暫用舊快照）' : ''}</small>}
                     {footprintBaseDate && <small>OSM 資料庫同步：{footprintBaseDate}（非現地查證）</small>}
