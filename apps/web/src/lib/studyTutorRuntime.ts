@@ -101,6 +101,13 @@ function hasSubstantiveGeneratedTeaching(explanation: TutorExplanation): boolean
     .every((text) => /[\p{L}\p{N}]/u.test(comparableGeneratedTeaching(text)));
 }
 
+// A valid quote and visible explanation do not make a punctuation-only
+// self-check usable. Keep the legacy parser unchanged for saved lessons.
+function hasSubstantiveGeneratedReview(explanation: TutorExplanation): boolean {
+  return [explanation.question, explanation.answer]
+    .every((text) => /[\p{L}\p{N}]/u.test(comparableGeneratedTeaching(text)));
+}
+
 // Distinct titles, source lines or whitespace cannot turn the SAME explanation
 // into two instructional steps. Keep citations and displayed text untouched.
 function hasDistinctGeneratedSteps(explanation: TutorExplanation): boolean {
@@ -251,6 +258,8 @@ export async function runStudyTutor({
               throw new Error('這次講解有空白或重複相同的教學步驟，請重新講解。');
             if (!hasSubstantiveGeneratedTeaching(explanation))
               throw new Error('這次講解的說明只有標點或符號，無法作為教學內容。請重新講解。');
+            if (!hasSubstantiveGeneratedReview(explanation))
+              throw new Error('這次講解的複習題或參考回答只有標點或符號，無法用來練習。請重新講解。');
             if (!hasSubstantiveGeneratedEvidence(explanation))
               throw new Error('這次講解的原文引句只有標點或符號，無法核對教材依據。請重新講解。');
             if (!hasBoundedGeneratedEvidence(explanation))

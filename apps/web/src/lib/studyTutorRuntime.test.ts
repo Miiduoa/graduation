@@ -816,3 +816,32 @@ describe('study cancellation and failure isolation', () => {
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
 });
+
+
+describe('new lesson self-check quality boundary', () => {
+  it.each([
+    { field: 'question', label: 'punctuation-only question', content: '？？？' },
+    { field: 'answer', label: 'operator-only answer', content: '＋÷＝' },
+    { field: 'answer', label: 'invisible direction marks hiding punctuation', content: '\u2066！？\u2069' },
+  ] as const)('rejects $label without breaking legacy saved lessons or retries', async ({ field, content }) => {
+    const invalid = { ...lesson(), [field]: content };
+    expect(parseTutorExplanation(JSON.stringify(invalid), passage())[field]).toBe(content);
+
+    const timing = vi.fn();
+    const pending = runStudyTutor({
+      passage: passage(), mode: 'practice',
+      signal: new AbortController().signal, onTiming: timing,
+    });
+    const worker = lastWorker();
+    worker.emit({ type: 'result', raw: JSON.stringify(invalid) });
+    await expect(pending).rejects.toThrow('複習題或參考回答只有標點或符號');
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    expect(timing).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+
+    const retry = runStudyTutor({
+      passage: passage(), mode: 'practice', signal: new AbortController().signal,
+    });
+    lastWorker().emit({ type: 'result', raw: JSON.stringify({ ...lesson(), answer: 'x = 2' }) });
+    await expect(retry).resolves.toMatchObject({ answer: 'x = 2' });
+  });
+});
