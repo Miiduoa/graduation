@@ -301,13 +301,17 @@ export function createCampusSpatialScene(
     const up = new Vector3().crossVectors(direction, right);
     const halfWidth = (point ? focusSpan : groundWidth) / 2;
     const halfDepth = (point ? focusSpan : groundDepth) / 2;
+    // An explicit building selection should fit that building, not the tallest
+    // different building elsewhere in the still-visible campus model. Keep the
+    // tallest visible volume only for the full-campus overview.
+    const framingHeight = point ? (buildingHeightById.get(point.id) ?? 0) : tallestBuilding;
     const tangent = Math.tan(FIELD_OF_VIEW * Math.PI / 360) * 0.82;
     let distance = 80;
     // An oblique camera needs room for both the rotated footprint and its near edge.
     // Fit the whole volume, including marker tops, rather than only its 2D width.
     for (const x of [-halfWidth, halfWidth]) {
       for (const z of [-halfDepth, halfDepth]) {
-        for (const y of [0, Math.max(pinHeight + pinRadius, tallestBuilding + pinRadius * 2)]) {
+        for (const y of [0, Math.max(pinHeight + pinRadius, framingHeight + pinRadius * 2)]) {
           const corner = new Vector3(x, y, z);
           const nearOffset = corner.dot(direction);
           distance = Math.max(distance,
