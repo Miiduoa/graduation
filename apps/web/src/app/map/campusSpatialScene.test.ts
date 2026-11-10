@@ -788,3 +788,28 @@ it('extrudes OSM footprints in geographically aligned meters only for known spat
   });
   expect(otherVolumes).toBe(0);
 });
+
+
+it('does not zoom out for a tall building whose POI is absent from the current campus view', () => {
+  // A filtering change can keep an older API footprint in memory. It must not
+  // make an unrelated map look tiny despite that building never being drawn.
+  const unrelated: ProvidenceFootprint = {
+    poiId: 'pu-library', name: '測試用建築', sourceUrl: 'https://www.openstreetmap.org/way/255784049',
+    outline: [[120.58131, 24.22624], [120.58143, 24.22624],
+      [120.58143, 24.22634], [120.58131, 24.22634]],
+    heightMeters: 100, heightBasis: 'osm-tag',
+  };
+  const without = setup(model);
+  drawFrame();
+  const expected = lastCamera(without.renderer).position.clone();
+  const withUnrelated = setup(model, undefined, [unrelated]);
+  drawFrame();
+  const actual = lastCamera(withUnrelated.renderer).position;
+  expect(actual.distanceTo(expected)).toBeLessThan(1e-6);
+  const graph = withUnrelated.renderer.render.mock.calls.at(-1)?.[0] as Scene;
+  let volumes = 0;
+  graph.traverse((object) => {
+    if (object instanceof Mesh && object.geometry instanceof ExtrudeGeometry) volumes += 1;
+  });
+  expect(volumes).toBe(0);
+});
