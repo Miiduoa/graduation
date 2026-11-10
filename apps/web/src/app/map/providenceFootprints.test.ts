@@ -31,14 +31,16 @@ describe('Providence OSM building outlines', () => {
     expect(PROVIDENCE_OSM_BUILDING_WAY_IDS).toContain(255784049);
   });
 
-  it('does not infer a true height from building:levels or an unknown unit', () => {
+  it('uses an illustrative height only when height is absent, never for an explicit unknown unit', () => {
     const levelsOnly = parseProvidenceOsmFootprints({
-      elements: [way(255784049, library, { building: 'yes', 'building:levels': '8', height: '50 ft' })],
+      elements: [way(255784049, library, { building: 'yes', 'building:levels': '8' })],
     });
     expect(levelsOnly[0]).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
-    expect(parseProvidenceOsmFootprints({
-      elements: [way(255784049, library, { building: 'yes', height: '9999' })],
-    })[0].heightBasis).toBe('illustrative');
+    for (const height of ['50 ft', '9999', '', '   ', null, 18]) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', 'building:levels': '8', height })],
+      }), JSON.stringify(height)).toEqual([]);
+    }
   });
 
   it('keeps explicit metric OSM heights beyond two decimal places instead of inventing 12 m', () => {
@@ -61,7 +63,7 @@ describe('Providence OSM building outlines', () => {
     for (const height of ['18,125 m', '18-20 m', '59 ft', '2.499 m', '100.001 m']) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', height })],
-      })[0], height).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
+      }), height).toEqual([]);
     }
   });
 
