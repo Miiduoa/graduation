@@ -45,7 +45,7 @@ import {
 import styles from './CourseStudyPanel.module.css';
 
 type Material = { id: string; title: string; body: string };
-type Props = { courseTitle: string; scope: CourseStudyProgressScope; material?: Material; onClose: () => void };
+type Props = { courseTitle: string; scope: CourseStudyProgressScope; material?: Material; selectionSerial?: number; onClose: () => void };
 type RestorePreview = { filename: string; progress: CourseStudyProgressData; round: StudyPracticeRound | null; origin: 'file' | 'paste' };
 type PendingSource = { source: StudySource; clearPaste: boolean };
 type ManualCopyKind = 'notes' | 'practice' | 'reading-progress' | 'practice-progress';
@@ -105,9 +105,9 @@ async function readStudyTextFile(file: File, encoding: StudyTextEncoding): Promi
   }
 }
 
-function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
+function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onClose }: Props) {
   const [initial] = useState(() => initialMaterial(material));
-  const previousAuthorizedMaterial = useRef<Material | undefined>(material);
+  const previousAuthorizedMaterial = useRef({ material, selectionSerial });
   const [source, setSource] = useState<StudySource | null>(initial.source);
   const [sectionIndex, setSectionIndex] = useState(0);
   const [passageIndex, setPassageIndex] = useState(0);
@@ -376,9 +376,12 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
   // Compare actual content, not just id: the same material id may be updated.
   useEffect(() => {
     const previous = previousAuthorizedMaterial.current;
-    previousAuthorizedMaterial.current = material;
+    previousAuthorizedMaterial.current = { material, selectionSerial };
     if (!material?.body.trim()) return;
-    if (previous?.id === material.id && previous?.title === material.title && previous?.body === material.body) return;
+    // An explicit new click reopens a cancelled replacement even for the same item.
+    if (previous.selectionSerial === selectionSerial &&
+      previous.material?.id === material.id && previous.material?.title === material.title &&
+      previous.material?.body === material.body) return;
 
     // A newly selected authorized source supersedes a pending local file read.
     // A late file result must not overwrite the newer selection.
@@ -391,7 +394,7 @@ function StudySessionPanel({ courseTitle, scope, material, onClose }: Props) {
     else setError(next.error);
     // requestSourceReplacement has render-local closures; the content comparison
     // above makes effect reruns after state updates harmless.
-  }, [material, requestSourceReplacement]);
+  }, [material, selectionSerial, requestSourceReplacement]);
 
   function downloadFile(contents: () => Blob, filename: string, label: string) {
     // A new download supersedes any earlier selectable clipboard fallback.

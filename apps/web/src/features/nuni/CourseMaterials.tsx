@@ -118,7 +118,7 @@ function Materials({
   const [readingMore, setReadingMore] = useState(false);
   const [moreError, setMoreError] = useState('');
   const [query, setQuery] = useState('');
-  const [study, setStudy] = useState<{ material?: NuniMaterial; version: number } | null>(null);
+  const [study, setStudy] = useState<{ material?: NuniMaterial; version: number; selectionSerial: number } | null>(null);
   const studyVersion = useRef(0);
   const studyTrigger = useRef<HTMLButtonElement | null>(null);
   const now = useClientNow();
@@ -136,7 +136,6 @@ function Materials({
 
   async function load() {
     if (denied.current) return;
-    setStudy(null);
     const run = ++request.current;
     moreRequest.current = null;
     setReadingMore(false);
@@ -316,12 +315,18 @@ function Materials({
           disabled={reading || accessDenied || items === null}
           onClick={(event) => {
             studyTrigger.current = event.currentTarget;
-            setStudy({ version: ++studyVersion.current });
+            // Opening the already visible board must not discard its draft.
+            if (!study) {
+              const serial = ++studyVersion.current;
+              setStudy({ version: serial, selectionSerial: serial });
+            }
           }}>讀講義</button>
       </div>
       <p className={styles.note}>收藏只記在此瀏覽器的目前帳號，換裝置不會同步；閱讀與收藏分開記錄。</p>
-      {study && !reading && !accessDenied && items !== null && (
-        <CourseStudyPanel key={study.version} courseTitle={workspace.title} material={study.material}
+      {study && !accessDenied && items !== null && (
+        <CourseStudyPanel key={study.version} courseTitle={workspace.title}
+          material={study.material ? items.find((item) => item.id === study.material?.id) ?? study.material : undefined}
+          selectionSerial={study.selectionSerial}
           scope={{ platformAccountId: accountId, workspaceId: workspace.id }}
           onClose={() => { setStudy(null); studyTrigger.current?.focus(); }} />
       )}
@@ -408,7 +413,11 @@ function Materials({
                               aria-label={`陪我讀「${item.title}」`} disabled={reading || accessDenied}
                               onClick={(event) => {
                                 studyTrigger.current = event.currentTarget;
-                                setStudy({ material: item, version: ++studyVersion.current });
+                                // Keep the same board instance; it will confirm replacing saved/unsaved work.
+                                const serial = ++studyVersion.current;
+                                setStudy((current) => current
+                                  ? { ...current, material: item, selectionSerial: serial }
+                                  : { material: item, version: serial, selectionSerial: serial });
                               }}>陪我讀這份教材</button>
                             <button
                               type="button"

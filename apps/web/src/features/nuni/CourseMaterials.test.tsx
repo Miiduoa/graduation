@@ -62,6 +62,52 @@ it('opens the study board only on demand and returns focus when it closes', asyn
   expect(document.activeElement).toBe(open);
 });
 
+
+it('keeps draft notes during an authorized material refresh and previews newer text', async () => {
+  const pending = deferred();
+  const changed = { ...material, body: '更新後的教材：主鍵和外鍵需要個別理解。' };
+  state.request.mockResolvedValueOnce(list()).mockReturnValueOnce(pending.promise);
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '還沒備份的資料庫筆記' } });
+
+  fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
+  expect(screen.getByRole('heading', { name: '讀書白板' })).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('還沒備份的資料庫筆記');
+  await act(async () => pending.resolve({ materials: [changed], nextCursor: null }));
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('還沒備份的資料庫筆記');
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('還沒備份的資料庫筆記');
+});
+
+it('asks before switching lecture cards and lets the learner retry after cancelling', async () => {
+  const another = { ...material, id: 'cwm_22222222-2222-4222-8222-222222222222',
+    title: '第二章：交易', body: '交易必須遵守原子性與一致性。' };
+  state.request.mockResolvedValueOnce({ materials: [material, another], nextCursor: null });
+  render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
+  fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
+  fireEvent.change(screen.getByLabelText('用自己的話記下這一段'),
+    { target: { value: '第一章未保存的私人筆記' } });
+  const next = screen.getByRole('button', { name: `陪我讀「${another.title}」` });
+  fireEvent.click(next);
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value)
+    .toBe('第一章未保存的私人筆記');
+  fireEvent.click(screen.getByRole('button', { name: '保留原本的學習內容' }));
+  fireEvent.click(next);
+  expect(screen.getByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '確認改讀新教材' }));
+  expect((screen.getByLabelText('用自己的話記下這一段') as HTMLTextAreaElement).value).toBe('');
+  expect(screen.getByRole('group', { name: /目前閱讀段落/ })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '要改讀另一份教材嗎？' })).toBeNull();
+});
+
 it('clears study content when the course session changes', async () => {
   const view = render(<CourseMaterials workspace={{ ...workspace, memberRole: 'student' }} />);
   fireEvent.click(await screen.findByRole('button', { name: `陪我讀「${material.title}」` }));
@@ -88,7 +134,7 @@ it('closes the study board on refresh and prevents reopening after access is rev
   fireEvent.change(screen.getByLabelText('用自己的話記下這一段'), { target: { value: '權限撤銷前的筆記' } });
   state.request.mockRejectedValue(new NuniError(403, 'FORBIDDEN'));
   fireEvent.click(screen.getByRole('button', { name: '更新教材' }));
-  expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole('heading', { name: '讀書白板' })).toBeNull());
   await waitFor(() => expect(screen.queryByRole('button', { name: `陪我讀「${material.title}」` })).toBeNull());
   expect(screen.getByRole('button', { name: '讀講義' }).hasAttribute('disabled')).toBe(true);
 });
