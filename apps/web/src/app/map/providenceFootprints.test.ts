@@ -116,6 +116,24 @@ describe('Providence OSM building outlines', () => {
     }
   });
 
+  it('fails closed on empty or null lifecycle flags instead of treating them as an explicit no', () => {
+    // Missing tags are normal. Present-but-blank OSM values are not evidence
+    // that a formerly demolished/ruined/unfinished building is intact.
+    for (const key of [
+      'ruins', 'demolished', 'construction', 'abandoned',
+      'ruins:building', 'demolished:building', 'proposed:building',
+    ]) {
+      for (const value of ['', '  ', null]) {
+        expect(parseProvidenceOsmFootprints({
+          elements: [way(255784049, library, { building: 'yes', [key]: value })],
+        }), `${key}=${String(value)}`).toEqual([]);
+      }
+    }
+    expect(parseProvidenceOsmFootprints({
+      elements: [way(255784049, library, { building: 'yes' })],
+    })).toHaveLength(1);
+  });
+
   it('does not invent ground-level walls for elevated OSM building parts', () => {
     // Height is top elevation, not proof that the building begins at ground.
     // Until we model a verified base elevation, an elevated footprint is not
