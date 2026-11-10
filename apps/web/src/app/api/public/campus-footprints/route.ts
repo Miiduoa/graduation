@@ -35,7 +35,11 @@ function verifyOverpassReplicationTime(payload: unknown, now: number): string | 
     throw new Error('Invalid Overpass replication metadata');
   }
   const timestamp = (metadata as Record<string, unknown>).timestamp_osm_base;
-  if (timestamp === undefined) return null;
+  // An explicit osm3s header without a usable database timestamp is not
+  // equivalent to a legacy response lacking the header entirely. Otherwise a
+  // malformed upstream reply would gain a 24-hour "fresh" OSM label despite
+  // providing no proof of when its replicated map data was last updated.
+  if (timestamp === undefined) throw new Error('Missing Overpass replication timestamp');
   if (typeof timestamp !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(timestamp)) {
     throw new Error('Invalid Overpass replication timestamp');
