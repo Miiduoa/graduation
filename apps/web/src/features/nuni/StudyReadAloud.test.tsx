@@ -150,3 +150,38 @@ it('keeps reading available and allows retry when a mobile browser rejects utter
   expect(changed).toHaveBeenLastCalledWith(true);
   expect(screen.queryByRole('status')).toBeNull();
 });
+
+it('does not falsely report that mobile playback stopped when cancel throws, and allows a retry', () => {
+  const changed = vi.fn();
+  render(<StudyReadAloud text="需保持可停止的講義朗讀" onSpeakingChange={changed} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const utterance = speak.mock.calls[0][0] as Utterance;
+  cancel.mockImplementationOnce(() => { throw new Error('speech engine busy'); });
+  fireEvent.click(screen.getByRole('button', { name: '停止朗讀' }));
+
+  expect(screen.getByRole('status').textContent).toContain('尚未確認停止朗讀');
+  expect(screen.getByRole('status').textContent).not.toContain('speech engine busy');
+  expect((screen.getByRole('button', { name: '停止朗讀' }) as HTMLButtonElement).disabled).toBe(false);
+  expect(changed).toHaveBeenLastCalledWith(true);
+  expect(utterance.onend).not.toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: '停止朗讀' }));
+  expect(cancel).toHaveBeenCalledTimes(2);
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(utterance.onend).toBeNull();
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(2);
+});
+
+it('does not crash source cleanup if a mobile speech engine throws on cancel', () => {
+  const changed = vi.fn();
+  const view = render(<StudyReadAloud text="舊講義" onSpeakingChange={changed} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const utterance = speak.mock.calls[0][0] as Utterance;
+  cancel.mockImplementationOnce(() => { throw new Error('engine already gone'); });
+  expect(() => view.unmount()).not.toThrow();
+  expect(utterance.onend).toBeNull();
+  expect(utterance.onerror).toBeNull();
+  expect(changed).toHaveBeenLastCalledWith(false);
+});

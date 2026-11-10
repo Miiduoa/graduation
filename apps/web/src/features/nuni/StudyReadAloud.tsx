@@ -42,21 +42,33 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
         active.current.onend = null;
         active.current.onerror = null;
         active.current = null;
-        synthesis.cancel();
+        // Some mobile speech engines throw while the view is closing.
+        // Focus changes and source replacement must still complete safely.
+        try { synthesis.cancel(); } catch { /* The browser owns this speech engine. */ }
         onSpeakingChange?.(false);
       }
     };
   }, [text, onSpeakingChange]);
 
-  function stop() {
+  function stop(): boolean {
     if (active.current) {
-      active.current.onend = null;
-      active.current.onerror = null;
+      // Do not claim that playback has stopped if a mobile browser rejects
+      // cancel(). Keep Stop enabled and voice dictation blocked for a retry.
+      const utterance = active.current;
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        setError('瀏覽器尚未確認停止朗讀，請再按一次「停止朗讀」；若仍播放，請使用裝置的語音控制。');
+        return false;
+      }
+      utterance.onend = null;
+      utterance.onerror = null;
       active.current = null;
-      window.speechSynthesis.cancel();
     }
     setSpeaking(false);
+    setError('');
     onSpeakingChange?.(false);
+    return true;
   }
 
   function toggle() {
@@ -95,7 +107,9 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     setSpeaking(true);
     onSpeakingChange?.(true);
     try { window.speechSynthesis.speak(utterance); }
-    catch { stop(); setError('目前無法朗讀，可繼續閱讀文字。'); }
+    catch {
+      if (stop()) setError('目前無法朗讀，可繼續閱讀文字。');
+    }
   }
 
   return (
