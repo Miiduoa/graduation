@@ -358,6 +358,7 @@ it('adds source-checked Providence building shapes without changing navigation o
   // Both provenance labels can show the same calendar day; anchor by meaning.
   expect(within(dialog).getByText(new RegExp(`^資料讀取：${fetchedAt.slice(0, 10)}`))).toBeTruthy();
   expect(within(dialog).getByText(new RegExp(`OSM 資料庫同步：${osmBaseAt.slice(0, 10)}.*非現地查證`))).toBeTruthy();
+  expect(within(dialog).getByText(/高度：12 公尺示意.*無 OSM 高度標註.*非實際樓高/)).toBeTruthy();
   expect(within(dialog).getByText(/OSM way 版本 v7.*2026-10-15/)).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '© OpenStreetMap 貢獻者' })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
@@ -545,6 +546,9 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
   const dialog = await open();
   await waitFor(() => expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual(buildings));
   expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+  // A sourced numerical height must be distinguishable from a 12m illustrative volume.
+  expect(within(dialog).getByText(/高度：100 公尺.*OSM 使用者標註.*非校方實測/)).toBeTruthy();
+  expect(within(dialog).queryByText(/高度：12 公尺示意/)).toBeNull();
   const beforeFilter = scene.create.mock.calls.length;
 
   // A same-school map filter does not unmount the spatial dialog or refetch
@@ -553,6 +557,8 @@ it('withdraws filtered-out Providence volumes and counts only buildings in the c
   await waitFor(() => expect(scene.create.mock.calls.length).toBeGreaterThan(beforeFilter));
   expect(scene.create.mock.calls.at(-1)?.[2].footprints).toEqual([]);
   expect(within(dialog).getByText(/0 棟公開建築輪廓/)).toBeTruthy();
+  expect(within(dialog).getByText(/此地點沒有可用的已核對 OSM 建築外框.*不代表已驗證入口/)).toBeTruthy();
+  expect(within(dialog).queryByText(/高度：100 公尺/)).toBeNull();
   expect(within(dialog).getByRole('heading', { name: zhugu.name })).toBeTruthy();
   expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
   expect(fetchMock).toHaveBeenCalledTimes(1);
