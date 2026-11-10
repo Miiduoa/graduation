@@ -249,6 +249,18 @@ function createDeleteUserAccountHandler({
         await doc.ref.delete();
     });
 
+    // Featured-post pointers are also a new per-school author record.
+    await scanPages(db.collectionGroup('creatorHighlights'), async (doc) => {
+      const parts = doc.ref.path.split('/');
+      if (
+        parts.length === 4 &&
+        parts[0] === 'schools' &&
+        parts[2] === 'creatorHighlights' &&
+        parts[3] === uid
+      )
+        await doc.ref.delete();
+    });
+
     // Only the controlled event contract can release a seat. Old registration
     // records are retained rather than guessing how their counters work.
     await scanPages(db.collectionGroup('registrations').where('userId', '==', uid), async (doc) => {
