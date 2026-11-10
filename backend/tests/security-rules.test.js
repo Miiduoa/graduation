@@ -1345,34 +1345,47 @@ describe('firestore security rules', () => {
     });
   }
 
-  test('new conversations require current school even with an old active membership', async () => {
-    const bob = testEnv.authenticatedContext('bob').firestore();
-    await seedFirestore(db => db.doc('schools/pu/members/bob').set({ status: 'active' }));
-    for (const profile of [{ schoolId: 'other' }, {}]) {
-      await seedFirestore(db => db.doc('users/bob').set(profile));
-      await assertFails(bob.doc('conversations/new').set({
-        type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'],
-      }));
-    }
-    await seedFirestore(db => db.doc('users/bob').set({ schoolId: 'pu' }));
-    await assertSucceeds(bob.doc('conversations/new').set({
-      type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'],
-    }));
-  });
+  for (const type of ['dm', 'group']) {
+    test(`new ${type} conversations allow active school members regardless of profile schoolId`, async () => {
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      await seedFirestore(db => db.doc('schools/pu/members/bob').set({ status: 'active' }));
+      for (const [label, profile] of [
+        ['transferred', { schoolId: 'other' }],
+        ['legacy', {}],
+        ['current', { schoolId: 'pu' }],
+      ]) {
+        await seedFirestore(db => db.doc('users/bob').set({ status: 'active', ...profile }));
+        await assertSucceeds(bob.doc(`conversations/${type}-${label}`).set({
+          type, schoolId: 'pu', memberIds: ['alice', 'bob'],
+        }));
+      }
+    });
 
-  test('deny conversation creation when schoolId is missing', async () => {
-    const db = testEnv.authenticatedContext('alice').firestore();
+    test(`new ${type} conversations deny missing or inactive school membership`, async () => {
+      await seedFirestore(db => db.doc('users/bob').set({ status: 'active' }));
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      const member = 'schools/pu/members/bob';
+      for (const status of [null, 'inactive']) {
+        if (status) await seedFirestore(db => db.doc(member).set({ status }));
+        await assertFails(bob.doc(`conversations/${type}-no-active-membership`).set({
+          type, schoolId: 'pu', memberIds: ['alice', 'bob'],
+        }));
+      }
+    });
 
-    await assertFails(
-      db
-        .collection('conversations')
-        .doc('conversation-2')
-        .set({
-          memberIds: ['alice', 'bob'],
-          createdAt: '2026-03-20T00:00:00.000Z',
-        }),
-    );
-  });
+    test(`deny ${type} conversation creation when schoolId is missing, null or empty`, async () => {
+      await seedFirestore(async (db) => {
+        await db.doc('users/bob').set({ status: 'active' });
+        await db.doc('schools/pu/members/bob').set({ status: 'active' });
+      });
+      const bob = testEnv.authenticatedContext('bob').firestore();
+      for (const school of [{}, { schoolId: null }, { schoolId: '' }]) {
+        await assertFails(bob.doc(`conversations/${type}-no-school`).set({
+          type, memberIds: ['alice', 'bob'], ...school,
+        }));
+      }
+    });
+  }
 
   test('allow conversation members to update nested message readBy only', async () => {
     await seedFirestore(async (db) => {
