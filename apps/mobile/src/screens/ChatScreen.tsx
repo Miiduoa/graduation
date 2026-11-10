@@ -552,9 +552,8 @@ export function ChatScreen(props: any) {
       (snapshot) => {
         if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
         if (snapshot.metadata.fromCache) {
-          setMessages([]);
-          setUserNames({});
-          fetchedUids.current = new Set();
+          // Offline cache is not a revocation or a delivery receipt. Keep the
+          // loaded messages and outbound drafts until the next server snapshot.
           setLoading(false);
           return;
         }
@@ -666,7 +665,6 @@ export function ChatScreen(props: any) {
     setPeerOnline(false);
     if (!convoKey || !liveThread || isFirebaseMockMode()) return;
     let listening = true;
-    let receivedServerSnapshot = false;
     let verifiedPhotoMembers: string | null = peerRoute && peerPrepared
       ? JSON.stringify([myUid, peerParam].sort()) : null;
     const convoRef = doc(db, 'conversations', convoKey);
@@ -675,19 +673,9 @@ export function ChatScreen(props: any) {
       { includeMetadataChanges: true },
       (snap) => {
         if (!listening || scopeRef.current !== sendScope) return;
-        // The callable already confirmed this peer session. Initial local cache events
-        // must not erase a draft while its first successful send starts live listeners.
-        if (snap.metadata.fromCache && peerRoute && peerPrepared && !receivedServerSnapshot) return;
-        if (snap.metadata.fromCache) {
-          verifiedPhotoMembers = null;
-          setVerifiedPhotoThread(null);
-          activeConversationScopeRef.current = null;
-          setMessages([]);
-          setUserNames({});
-          fetchedUids.current = new Set();
-          return;
-        }
-        if (!snap.metadata.fromCache && !snap.metadata.hasPendingWrites) receivedServerSnapshot = true;
+        // Cache events cannot confirm or revoke access. Preserve the current
+        // verified session (including prepared peers) until the server responds.
+        if (snap.metadata.fromCache) return;
         if (!snap.exists()) {
           verifiedPhotoMembers = null;
           setVerifiedPhotoThread(null);

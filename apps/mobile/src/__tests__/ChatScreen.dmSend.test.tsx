@@ -540,7 +540,6 @@ test('pending typing and presence writes preserve a verified photo draft and in-
 
 test.each([
   { name: 'pending member change', fromCache: false, hasPendingWrites: true, data: { memberIds: ['alice', 'charlie'] } },
-  { name: 'cache-only snapshot', fromCache: true, hasPendingWrites: false, data: {} },
 ])('$name clears a photo draft and requires fresh server confirmation', async ({ fromCache, hasPendingWrites, data }) => {
   pickPhoto();
   const view = render(photoChat());
@@ -557,6 +556,38 @@ test.each([
   verifyPhotoChat();
   expect(view.getByLabelText('加入照片')).toBeTruthy();
   expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
+});
+
+test('offline cache preserves loaded messages, a photo draft, and verified access without restarting listeners', async () => {
+  pickPhoto();
+  const view = render(photoChat());
+  verifyPhotoChat();
+  const received = { id: 'received', data: { senderId: 'bob', content: '離線仍可閱讀', readBy: ['alice'] } };
+  await act(async () => emitMessages([received]));
+  await act(async () => fireEvent.press(view.getByLabelText('加入照片')));
+  fireEvent.changeText(view.getByPlaceholderText('輸入訊息...'), '保留文字草稿');
+  const messagesPath = `conversations/${photoConvo}/messages`;
+  const listener = mockSnapshotHandlers.get(messagesPath);
+
+  await act(async () => emitMessages([], true));
+  expect(view.getByText('離線仍可閱讀')).toBeTruthy();
+  verifyPhotoChat(true);
+  // A missing cached document also cannot revoke server-confirmed access.
+  act(() => mockSnapshotHandlers.get(`conversations/${photoConvo}`)({
+    exists: () => false,
+    metadata: { fromCache: true, hasPendingWrites: false },
+  }));
+  expect(view.getByText('離線仍可閱讀')).toBeTruthy();
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(view.getByLabelText('加入照片')).toBeTruthy();
+  expect(view.getByDisplayValue('保留文字草稿')).toBeTruthy();
+  expect(mockSnapshotHandlers.get(messagesPath)).toBe(listener);
+
+  await act(async () => emitMessages([
+    received,
+    { id: 'reconnected', data: { senderId: 'bob', content: '重新連線後的訊息', readBy: ['alice'] } },
+  ]));
+  expect(view.getByText('重新連線後的訊息')).toBeTruthy();
 });
 
 test.each(['account', 'school', 'thread'])('switching %s discards a private draft and cancels a late upload', async (kind) => {
@@ -1010,7 +1041,7 @@ test('cached received messages neither mark read nor replace the current outboun
     { ...received, data: { ...received.data, readBy: [] } },
     { id: 'fixed-msg-1', data: { senderId: 'alice', content: '等待確認的草稿', readBy: ['alice'] } },
   ], true));
-  expect(view.queryByText('伺服器訊息')).toBeNull();
+  expect(view.getByText('伺服器訊息')).toBeTruthy();
   expect(view.getByText('等待確認的草稿')).toBeTruthy();
   expect(view.getByText('送出中')).toBeTruthy();
   expect(readOutboundDrafts(photoConvo, 'alice')).toHaveLength(1);
@@ -1026,7 +1057,7 @@ test.each(['messages', 'roster'])('%s errors clear received content and reject l
   expect(view.getByText('私人的內容')).toBeTruthy();
   const callback = mockSnapshotHandlers.get(`conversations/${photoConvo}/messages`);
   await act(async () => emitMessages([received], true));
-  expect(view.queryByText('私人的內容')).toBeNull();
+  expect(view.getByText('私人的內容')).toBeTruthy();
   await act(async () => emitMessages([received]));
   expect(view.getByText('私人的內容')).toBeTruthy();
   act(() => mockSnapshotErrors.get(source === 'messages' ? `conversations/${photoConvo}/messages` : `conversations/${photoConvo}`)({ code: 'permission-denied' }));
