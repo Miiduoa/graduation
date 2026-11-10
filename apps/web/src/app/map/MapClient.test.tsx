@@ -136,7 +136,7 @@ it('does not guess unknown building codes and preserves the classroom through an
   expect(within(result).getByText(/目前地點資料無法確認/)).toBeTruthy();
   expect(within(result).getByRole('link', { name: '核對校方地圖' }).getAttribute('href')).toMatch(/^https:\/\//);
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected.id).toBe('pu-library');
-  const login = new URL(screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!, window.location.origin);
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
   const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
   expect(back.searchParams.get('query')).toBe('ZZ303');
   expect(back.searchParams.get('focus')).toBe('pu-library');
@@ -191,7 +191,7 @@ it('never replaces a missing explicit focus with the classroom guess, including 
   expect(JSON.parse(screen.getByLabelText('地圖狀態').textContent!).selected).toBeNull();
   expect(screen.getByText('找不到連結指定的地點，請搜尋地點名稱。')).toBeTruthy();
   expect(screen.queryByRole('link', { name: '從目前位置導航' })).toBeNull();
-  const login = new URL(screen.getByRole('link', { name: '連線學校帳號以收藏' }).getAttribute('href')!, window.location.origin);
+  const login = new URL(screen.getByRole('link', { name: '用 Google 帳號收藏' }).getAttribute('href')!, window.location.origin);
   const back = new URL(login.searchParams.get('returnUrl')!, window.location.origin);
   expect(back.searchParams.get('focus')).toBe('pu-library');
   expect(back.searchParams.get('query')).toBe('主顧303');
