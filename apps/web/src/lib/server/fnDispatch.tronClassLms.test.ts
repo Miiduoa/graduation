@@ -450,7 +450,7 @@ it('refetches a legacy cache missing sessionId', async () => {
   expect(store.docs.get(CACHE)?.sessionId).toBeDefined();
 });
 
-it('refetches a fresh legacy cache without sessionVersion instead of trusting a session ID alone', async () => {
+it('keeps a still-fresh legacy cache missing sessionVersion without rewriting it', async () => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
   const cached = store.docs.get(CACHE)!;
@@ -459,13 +459,13 @@ it('refetches a fresh legacy cache without sessionVersion instead of trusting a 
   vi.mocked(source.fetchCourses).mockClear();
 
   const body = await (await request()).json();
-  expect(body.result.cache.hit).toBe(false);
-  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
-  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+  expect(body.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
 });
 
-it('refetches a legacy cache for an unknown course without trusting the stale homework list', async () => {
+it('does not rewrite a fresh legacy cache when a missing course is requested', async () => {
   const { request, source, store } = setup();
   expect((await request()).status).toBe(200);
   const cached = store.docs.get(CACHE)!;
@@ -475,35 +475,33 @@ it('refetches a legacy cache for an unknown course without trusting the stale ho
   vi.mocked(source.fetchActivities).mockClear();
 
   const body = await (await request({ courseId: 19999 })).json();
-  expect(body.result.cache.hit).toBe(false);
-  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(source.fetchCourses).toHaveBeenCalledTimes(2);
+  expect(body.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
   expect(source.fetchActivities).not.toHaveBeenCalled();
-  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
+  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
 });
 
-it('refetches legacy homework and course contents after an in-place cookie rotation', async () => {
+it('does not rewrite a still-fresh legacy cache when extras have expired', async () => {
   const { request, source, store } = setup();
   expect((await request({ courseId: 10001 })).status).toBe(200);
-  delete store.docs.get(CACHE)!.sessionVersion;
-  await store.db.doc(LMS).set({ cookies: { session: 'rotated-cookie' } }, { merge: true });
-  vi.mocked(source.fetchCourses).mockClear();
+  const cached = store.docs.get(CACHE)!;
+  delete cached.sessionVersion;
+  const extras = cached.extras as Record<string, { expiresAt?: string }>;
+  if (extras) {
+    for (const key of Object.keys(extras)) {
+      extras[key] = { ...extras[key], expiresAt: '2000-01-01T00:00:00.000Z' };
+    }
+  }
   vi.mocked(source.fetchHomeworkPage).mockClear();
-  vi.mocked(source.fetchActivities).mockClear();
-  vi.mocked(source.fetchCourseAnnouncements).mockClear();
+  vi.mocked(source.fetchCourses).mockClear();
 
-  const response = await request({ courseId: 10001 });
-  expect(response.status).toBe(200);
-  const body = await response.json();
-  expect(body.result.cache.hit).toBe(false);
-  expect(source.fetchCourses).toHaveBeenCalledWith(
-    { session: 'rotated-cookie' }, { userId: 10, status: 'ongoing' },
-  );
-  expect(source.fetchHomeworkPage).toHaveBeenCalledTimes(1);
-  expect(source.fetchActivities).toHaveBeenCalledWith({ session: 'rotated-cookie' }, 10001, '');
-  expect(source.fetchCourseAnnouncements).toHaveBeenCalledTimes(1);
-  expect(store.docs.get(CACHE)?.sessionVersion).toBeDefined();
-  expect(JSON.stringify(body)).not.toMatch(/rotated-cookie|lms-secret|cookies/);
+  const body = await (await request()).json();
+  expect(body.result.cache.hit).toBe(true);
+  expect(source.fetchHomeworkPage).not.toHaveBeenCalled();
+  expect(source.fetchCourses).not.toHaveBeenCalled();
+  expect('sessionVersion' in (store.docs.get(CACHE) || {})).toBe(false);
+  expect(store.docs.get(CACHE)?.extras).toEqual(cached.extras);
 });
 
 it.each([
