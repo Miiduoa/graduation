@@ -256,7 +256,7 @@ it('recovers when an authorized article cannot be opened by the client router', 
   submit();
   const link = await screen.findByRole('link', { name: '二手書 old-1001' });
   fireEvent.click(link);
-  await screen.findByText(/暫時無法向伺服器確認這篇貼文/);
+  await screen.findByText(/貼文已通過伺服器確認，但頁面開啟失敗/);
   expect(mocks.confirm).toHaveBeenCalledTimes(1);
   expect(window.sessionStorage.getItem('nuni:community-history-reading-position:v1')).toBeNull();
 

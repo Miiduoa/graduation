@@ -261,6 +261,7 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
     setFailure(null);
     setNotice('正在向伺服器確認這篇貼文…');
     let navigated = false;
+    let confirmed = false;
     try {
       const available = await confirmWithinDeadline(schoolId, id);
       if (request !== version.current) return;
@@ -272,9 +273,11 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
         setNotice('這篇貼文已刪除或不再提供，已從搜尋結果移除。');
         return;
       }
-      navigated = true;
-      saveReadingPosition({ uid: accountId, schoolId, query: searched, postId: id });
+      confirmed = true;
+      // A failed client transition must not persist a reading position or lock the link.
       router.push(`/community/post/${encodeURIComponent(id)}?schoolId=${encodeURIComponent(schoolId)}`);
+      saveReadingPosition({ uid: accountId, schoolId, query: searched, postId: id });
+      navigated = true;
     } catch (cause) {
       if (request !== version.current) return;
       if (isPermissionDeniedError(cause)) {
@@ -284,7 +287,9 @@ function ScopedTitleHistorySearch({ schoolId, accountId }: Props & { accountId: 
         setFailure({ kind: 'denied', text: '校籍或貼文存取權限已變更，先前結果已清除。' });
         setNotice('搜尋未完成。');
       } else {
-        setFailure({ kind: 'open', text: '暫時無法向伺服器確認這篇貼文，搜尋結果已保留。連線恢復後可再次點擊。' });
+        setFailure({ kind: 'open', text: confirmed
+          ? '貼文已通過伺服器確認，但頁面開啟失敗。搜尋結果已保留，請再次點擊重試。'
+          : '暫時無法向伺服器確認這篇貼文，搜尋結果已保留。連線恢復後可再次點擊。' });
         setNotice('貼文尚未通過伺服器確認。');
       }
     } finally {
