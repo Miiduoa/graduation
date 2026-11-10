@@ -92,6 +92,25 @@ function overlaps(first: Rectangle, second: Rectangle) {
     first.top + first.height + gap > second.top;
 }
 
+/** The audited POI can be near (but outside) an OSM building by up to 30m.
+ * Never place its marker on an invented rooftop when the POI is off the outline.
+ * Its original map position remains a ground POI, not an inferred entrance.
+ */
+function poiWithinOutline(point: CampusSpatialPoint, footprint: ProvidenceFootprint): boolean {
+  const { lat, lng } = point.location;
+  let inside = false;
+  const ring = footprint.outline;
+  for (let i = 0, previous = ring.length - 1; i < ring.length; previous = i, i += 1) {
+    const [lon, latitude] = ring[i];
+    const [previousLon, previousLat] = ring[previous];
+    if ((latitude > lat) !== (previousLat > lat) &&
+        lng < lon + (lat - latitude) * (previousLon - lon) / (previousLat - latitude)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /** This owns a single, optional canvas. No render loop runs while the view is still. */
 export function createCampusSpatialScene(
   container: HTMLElement,
@@ -121,6 +140,15 @@ export function createCampusSpatialScene(
     .filter((footprint) => pointsById.has(footprint.poiId));
   const buildingHeightById = new Map(visibleFootprints
     .map((footprint) => [footprint.poiId, footprint.heightMeters]));
+  // Building heights always count for camera framing. Rooftop POI markers,
+  // however, are only justified where the POI actually lies inside the ring.
+  const rooftopMarkerHeightById = new Map<string, number>();
+  for (const footprint of visibleFootprints) {
+    const point = pointsById.get(footprint.poiId);
+    if (point && poiWithinOutline(point, footprint)) {
+      rooftopMarkerHeightById.set(point.id, footprint.heightMeters);
+    }
+  }
   const geometries: BufferGeometry[] = [];
   const materials: Material[] = [];
   const instances: InstancedMesh[] = [];
@@ -443,8 +471,8 @@ export function createCampusSpatialScene(
       ...label,
       screen: new Vector3(
         label.point.x,
-        buildingHeightById.has(label.point.id)
-          ? buildingHeightById.get(label.point.id)! + pinRadius * 2
+        rooftopMarkerHeightById.has(label.point.id)
+          ? rooftopMarkerHeightById.get(label.point.id)! + pinRadius * 2
           : pinHeight + pinRadius,
         label.point.z,
       ).project(camera),
@@ -630,7 +658,7 @@ export function createCampusSpatialScene(
     const matrix = new Matrix4();
     const flat = new Matrix4().makeRotationX(-Math.PI / 2);
     model.points.forEach((point, index) => {
-      const roof = buildingHeightById.get(point.id);
+      const roof = rooftopMarkerHeightById.get(point.id);
       if (roof === undefined) {
         stems.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight / 2, point.z));
         feet.setMatrixAt(index, matrix.makeTranslation(point.x, 0.1, point.z).multiply(flat));
