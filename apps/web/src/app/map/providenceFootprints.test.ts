@@ -36,7 +36,7 @@ describe('Providence OSM building outlines', () => {
       elements: [way(255784049, library, { building: 'yes', 'building:levels': '8' })],
     });
     expect(levelsOnly[0]).toMatchObject({ heightMeters: 12, heightBasis: 'illustrative' });
-    for (const height of ['50 ft', '9999', '', '   ', null, 18]) {
+    for (const height of ['50 cubits', '9999', '', '   ', null, 18]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', 'building:levels': '8', height })],
       }), JSON.stringify(height)).toEqual([]);
@@ -60,7 +60,33 @@ describe('Providence OSM building outlines', () => {
       })).toEqual(parsed);
     }
     // Do not interpret non-metric values, ranges or out-of-bound measurements.
-    for (const height of ['18,125 m', '18-20 m', '59 ft', '2.499 m', '100.001 m']) {
+    for (const height of ['18,125 m', '18-20 m', '59 yd', '2.499 m', '100.001 m']) {
+      expect(parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'yes', height })],
+      }), height).toEqual([]);
+    }
+  });
+
+  it('converts unambiguous OSM feet and inches without inventing a height', () => {
+    // OSM's ft/in convention: 1 foot is exactly 0.3048 metres;
+    // 1 inch is exactly 0.0254 metres. No levels-based estimates.
+    const valid: Array<[string, number]> = [
+      ['50 ft', 15.24], ['50 feet', 15.24], ["50'", 15.24],
+      ['50.5 ft', 15.3924], ["50'6\"", 15.3924], ["10'4\"", 3.1496],
+    ];
+    for (const [height, expected] of valid) {
+      const parsed = parseProvidenceOsmFootprints({
+        elements: [way(255784049, library, { building: 'school', height })],
+      });
+      expect(parsed, height).toHaveLength(1);
+      expect(parsed[0].heightMeters, height).toBeCloseTo(expected, 6);
+      expect(parsed[0].heightBasis, height).toBe('osm-tag');
+      expect(parseProvidenceFootprintResponse({
+        schoolId: 'pu', buildings: parsed,
+      }), height).toEqual(parsed);
+    }
+    for (const height of ["50' 6\"", "50'12\"", '50 ft; 60 ft',
+      '1,000 ft', '333 ft', '50 foot', '50 yd', "5'99\"", '12 inch', "7'4\""]) {
       expect(parseProvidenceOsmFootprints({
         elements: [way(255784049, library, { building: 'yes', height })],
       }), height).toEqual([]);
