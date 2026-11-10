@@ -144,13 +144,25 @@ it('switches local narration between the AI explanation and exact textbook witho
     await screen.findByRole('region', { name: '本段 AI 講解' });
     const target = screen.getByRole('combobox', { name: '朗讀內容' }) as HTMLSelectElement;
     expect(target.value).toBe('explanation');
-    fireEvent.click(screen.getByRole('button', { name: '朗讀這段講解' }));
+    // A freshly mounted reader can briefly lack a populated voice list on
+    // mobile browsers. Exercise the student's explicit local-voice retry instead
+    // of clicking a disabled button and indexing a missing speech mock call.
+    const startLocalNarration = async (label: string, expectedCalls: number) => {
+      const play = screen.getByRole('button', { name: label }) as HTMLButtonElement;
+      if (play.disabled) {
+        fireEvent.click(screen.getByRole('button', { name: '重新檢查中文語音' }));
+      }
+      await waitFor(() => expect(play.disabled).toBe(false));
+      fireEvent.click(play);
+      await waitFor(() => expect(spoken).toHaveBeenCalledTimes(expectedCalls));
+    };
+    await startLocalNarration('朗讀這段講解', 1);
     expect((spoken.mock.calls[0][0] as LocalUtterance).text).toBe(explanation.explanation);
     expect((spoken.mock.calls[0][0] as LocalUtterance).rate).toBe(0.8);
     fireEvent.change(target, { target: { value: 'source' } });
     expect(cancelled).toHaveBeenCalledTimes(1);
     expect((screen.getByRole('combobox', { name: '朗讀速度' }) as HTMLSelectElement).value).toBe('0.8');
-    fireEvent.click(screen.getByRole('button', { name: '朗讀原文' }));
+    await startLocalNarration('朗讀原文', 2);
     expect((spoken.mock.calls[1][0] as LocalUtterance).text).toBe(material.body);
     expect((spoken.mock.calls[1][0] as LocalUtterance).rate).toBe(0.8);
     expect(note.value).toBe('我要重新聽原文，核對 AI 說明。');
