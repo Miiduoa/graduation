@@ -551,6 +551,78 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
   }
 });
 
+it('preserves a dated stale 3D outline through cooldown, a failed refresh and recovery', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  let rejectRefresh: ((reason: Error) => void) | null = null;
+  const stalledRefresh = new Promise<unknown>((_resolve, reject) => {
+    rejectRefresh = reject;
+  });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true, status: 200,
+      headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(), stale: true,
+      }),
+    })
+    .mockReturnValueOnce(stalledRefresh)
+    .mockResolvedValueOnce({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        schoolId: 'pu', source: 'OpenStreetMap', buildings,
+        fetchedAt: new Date().toISOString(), stale: false,
+      }),
+    });
+  vi.stubGlobal('fetch', fetchMock);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/暫用舊快照/)).toBeTruthy();
+    const retry = within(dialog).getByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 10 分鐘冷卻/)).toBeTruthy();
+    fireEvent.click(retry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const release = timeoutSpy.mock.calls.find(([, delay]) =>
+      typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
+    expect(typeof release).toBe('function');
+    await act(async () => { (release as () => void)(); });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
+    expect(retry.hasAttribute('disabled')).toBe(true);
+
+    await act(async () => { rejectRefresh?.(new Error('offline during refresh')); });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(within(dialog).queryByRole('button', { name: '重新讀取建築輪廓' })).toBeNull());
+    expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
 it('releases a server cooldown after a suspended mobile tab resumes, without auto retrying', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const fetchMock = vi.fn().mockResolvedValue({
