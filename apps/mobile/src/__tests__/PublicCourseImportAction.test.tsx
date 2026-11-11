@@ -249,6 +249,24 @@ test.each([
   expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(currentScope))).toBe(before);
 });
 
+test.each([
+  ['teacher', '教師'],
+  ['location', '教室'],
+  ['title', '課名'],
+] as const)('the storage write lock rejects updated catalog metadata without UI preflight: %s', async (field, label) => {
+  const preview = preparePublicCourseTimetableImport('nthu', nthu)!;
+  await ledger.appendPersonalImports(scope, preview.rows.map((row) => ({
+    ...row, [field]: `原有的${label}`,
+  })));
+  const before = await AsyncStorage.getItem(ledger.personalImportStorageKey(scope));
+  jest.clearAllMocks();
+  await expect(ledger.appendPersonalImports(scope, preview.rows, () => true, {
+    protectCatalogTimetableSlots: true,
+  })).rejects.toThrow(new RegExp(`不同${label}`));
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(await AsyncStorage.getItem(ledger.personalImportStorageKey(scope))).toBe(before);
+});
+
 test('the storage write lock rejects moved official meetings without a UI preflight', async () => {
   const previous = preparePublicCourseTimetableImport('nthu', nthu)!;
   await ledger.appendPersonalImports(scope, previous.rows);
