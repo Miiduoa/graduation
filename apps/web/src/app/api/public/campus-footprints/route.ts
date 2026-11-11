@@ -100,6 +100,14 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   const lengthHeader = response.headers.get('content-length');
   const declared = lengthHeader === null ? 0
     : /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : NaN;
+  // For identity-encoded responses, a body that ends at a different byte count
+  // from its declared Content-Length is not a verified full Overpass result.
+  // Fetch may transparently decompress gzip/br while retaining the *encoded*
+  // length header, so comparing those lengths would reject valid compressed
+  // responses. Keep the decoded 500 KB cap for every encoding.
+  const contentEncoding = response.headers.get('content-encoding');
+  const verifyIdentityLength = lengthHeader !== null &&
+    (contentEncoding === null || contentEncoding.trim().toLowerCase() === 'identity');
   if (!Number.isSafeInteger(declared) || declared > MAX_RESPONSE_BYTES) {
     // The response body may still be streaming even though the declared size
     // already violates our limit. Cancel without awaiting: an uncooperative
@@ -110,8 +118,10 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
   if (!response.body) {
     // Covers non-streaming fetch mocks; production Node fetch supplies a stream.
     const raw = await response.text();
-    if (new TextEncoder().encode(raw).byteLength > MAX_RESPONSE_BYTES) {
-      throw new Error('OSM response too large');
+    const byteLength = new TextEncoder().encode(raw).byteLength;
+    if (byteLength > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
+    if (verifyIdentityLength && byteLength !== declared) {
+      throw new Error('OSM response length mismatch');
     }
     return raw;
   }
@@ -137,6 +147,9 @@ async function readBoundedResponse(response: Response, signal: AbortSignal): Pro
       size += value.byteLength;
       if (size > MAX_RESPONSE_BYTES) throw new Error('OSM response too large');
       segments.push(decoder.decode(value, { stream: true }));
+    }
+    if (verifyIdentityLength && size !== declared) {
+      throw new Error('OSM response length mismatch');
     }
     segments.push(decoder.decode());
     return segments.join('');
