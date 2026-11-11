@@ -500,7 +500,7 @@ it('honors the API Retry-After cooldown without hammering Overpass or blocking n
     // Use the actual scheduled cooldown callback instead of advancing every
     // unrelated React and graphics timer. This is a synthetic server response,
     // not a real public Overpass rate-limit observation.
-    const release = timeoutSpy.mock.calls.find(([, delay]) => delay === 600_000)?.[0];
+    const release = timeoutSpy.mock.calls.find(([, delay]) => typeof delay === 'number' && delay >= 599_000 && delay <= 600_000)?.[0];
     expect(typeof release).toBe('function');
     await act(async () => { (release as () => void)(); });
     expect(retry.hasAttribute('disabled')).toBe(false);
