@@ -59,6 +59,8 @@
 
 - **上游回應讀取逾時也必須取消 body reader**：`fetch` 已拿到 200 標頭後，回應內容仍可能只傳一部分便停止；單靠中止原先的 `fetch` 不一定會取消已交付給 `ReadableStream` 的讀取器。現在 12 秒伺服器 deadline 會額外向 body reader 發送取消要求，不等待可能永遠不完成的取消 Promise；被中止的分段 JSON 不得被當成完整 OSM 快照。新增先送出語法完整的 JSON 片段、但永不結束串流的 API 回歸，檢查取消、503／`no-store` 與不快取。Node.js 22 原生串流的獨立重現觀察到取消要求一次且等待中的 read 結束；**正式專案測試、線上 Overpass 實況及網路連線是否真正釋放，仍以新 head CI／現地驗證為準**。
 
+- **非地面 OSM 圖徵不擠出為地面校舍**：即使 way ID 已在校園白名單內，後續編輯仍可能帶入 `location=underground/underwater/roof/overhead`、非零 `layer`、`bridge=yes` 或 `tunnel=yes`。目前立體化只支援從地面開始的整棟外框；沒有可靠的基底高程、上下層幾何時，這些圖徵必須被排除，而不是把地下空間或懸空建物繪成從地面延伸的牆。沒有定位標籤、明示 `location=surface`／`layer=0` 與 `bridge=no` 等否定旗標時，仍須通過原有 way 白名單、座標、外框及樓高檢查。新增加 OSM parser 的正反例及 API 503／`no-store`／冷卻回歸，使用**合成標註**，不代表已發現靜宜真有地下或橋上校舍，也未完成實際 Overpass 抽樣。參考 [OSM location 語意](https://wiki.openstreetmap.org/wiki/Key:location) 和 [建築局部／基底高度](https://wiki.openstreetmap.org/wiki/Key:building:part)。
+
 ## 需驗收，不可直接說已超越競品
 
 - [ ] 真實線上 Overpass 回傳：確認已核對的靜宜建築輪廓數量，逐棟對照 OSM 原始 way 與校方位置，保留失敗樣本。
