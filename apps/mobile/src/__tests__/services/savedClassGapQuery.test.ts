@@ -434,6 +434,32 @@ describe('saved class gap answer', () => {
     expect(unrelatedDay).toContain('14:00–15:00（60 分鐘）');
   });
 
+  test('does not confuse another day\'s restored gaps with a verified empty date', () => {
+    // A stale cache saved for tomorrow must not answer "today has no gaps".
+    const wrongDay = answerSavedClassGapQuery(today, {
+      ...context, timetable: {
+        ...context.timetable, classGaps: [gap('14:00', '15:00', '2026-11-07')],
+      },
+    });
+    expect(wrongDay.route).toBe('/timetable');
+    expect(wrongDay.content).toContain('無法核對');
+    expect(wrongDay.content).toContain('查詢日期');
+    expect(wrongDay.content).not.toContain('沒有課間空堂');
+    expect(wrongDay.content).not.toContain('有 1 段');
+
+    // The identical saved interval is valid when the student asks for tomorrow.
+    expect(answerSavedClassGapQuery(tomorrow, {
+      ...context, timetable: {
+        ...context.timetable, classGaps: [gap('14:00', '15:00', '2026-11-07')],
+      },
+    }).content).toContain('14:00–15:00（60 分鐘）');
+
+    // The source calculation can legitimately return an empty set.
+    expect(answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [] },
+    }).content).toContain('沒有課間空堂');
+  });
+
   test('combines touching free intervals before enforcing the minimum without bridging a real class', () => {
     const timetable = { ...context.timetable, classGaps: [
       gap('15:00', '16:00'), gap('14:00', '15:00'), gap('16:10', '17:10'),
