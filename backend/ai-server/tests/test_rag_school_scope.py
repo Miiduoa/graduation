@@ -165,4 +165,56 @@ class SyncTests(unittest.TestCase):
         with patch.object(sync, "delete_by_source"), patch.object(sync, "index_documents", side_effect=len) as index:
             self.assertEqual(sync.sync_collection("announcements", db), 501)
         query.start_after.assert_called_once_with(first[-1])
-        self.assertEqual(index.call_args.args[0][0]["metadata"]["schoolId"], "nchu")
+        self.assertEqual(len(index.call_args.args[0]), 501)
+        self.assertEqual(index.call_args.args[0][-1]["metadata"]["schoolId"], "nchu")
+
+
+class MigrationSafetyTests(unittest.TestCase):
+    def test_failed_firestore_read_keeps_old_index_and_uses_json_fallback(self):
+        import sys
+        import types
+        if "chromadb" not in sys.modules:
+            chromadb = types.ModuleType("chromadb")
+            chromadb.config = types.ModuleType("chromadb.config")
+            chromadb.config.Settings = object
+            sys.modules["chromadb"] = chromadb
+            sys.modules["chromadb.config"] = chromadb.config
+        if "langchain_text_splitters" not in sys.modules:
+            langchain = types.ModuleType("langchain_text_splitters")
+            class _Splitter:
+                def __init__(self, *args, **kwargs):
+                    pass
+            langchain.RecursiveCharacterTextSplitter = _Splitter
+            sys.modules["langchain_text_splitters"] = langchain
+        from rag import sync_firestore as sync
+
+        db = Mock()
+        db.collection.return_value.limit.return_value.stream.side_effect = ConnectionError("temporary Firestore outage")
+        leftover = ["old-announcement"]
+        deleted = []
+
+        def current_legacy(_name="campus"):
+            return leftover.copy()
+
+        def fallback(dump_dir=None):
+            leftover.clear()
+            return {"announcements": 1}
+
+        with patch.object(sync, "delete_by_source", side_effect=lambda source: deleted.append(source)), patch.object(
+            sync, "index_documents", side_effect=AssertionError("must not index after a failed read")
+        ):
+            self.assertEqual(sync.sync_all(db)["announcements"], -1)
+        self.assertEqual(deleted, [])
+
+        leftover[:] = ["old-announcement"]
+        with patch.object(sync, "legacy_unscoped_firestore_ids", side_effect=current_legacy), patch.object(
+            sync, "sync_from_json_dump", side_effect=fallback
+        ) as json_sync, patch.object(sync, "delete_by_source", side_effect=lambda source: deleted.append(source)):
+            result = sync.migrate_legacy_firestore_index(db=db, dump_dir="/valid-backup")
+        self.assertEqual(json_sync.call_args.args[0], "/valid-backup")
+        self.assertEqual(result["firestore"]["announcements"], -1)
+        self.assertEqual(result["json"], {"announcements": 1})
+        self.assertEqual(result["remaining"], 0)
+        self.assertTrue(result["rebuilt"])
+        self.assertFalse(result["retryable"])
+
