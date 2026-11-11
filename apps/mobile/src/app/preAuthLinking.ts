@@ -38,6 +38,12 @@ export const preAuthLinking: LinkingOptions<PreAuthStackParamList> = {
     if (url && stagePublicInitialSharedPostLink(url, Constants.expoConfig?.extra?.release?.deepLinkHost)) {
       return null;
     }
+    // A newer OS cold-start destination takes precedence over an older
+    // signed-out shared post, just like a warm public-link event does.
+    // Do not let unrelated or foreign URLs discard a verified share.
+    if (url && publicLinkPrefixes.some((prefix) => url.startsWith(prefix))) {
+      clearPendingSharedPostLink();
+    }
     return url;
   },
   subscribe: (listener) => {
