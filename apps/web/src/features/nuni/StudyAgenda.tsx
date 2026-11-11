@@ -1,6 +1,11 @@
 'use client';
 
+import {
+  personalImportDeadlineSources,
+  type StudyDeadlineSource,
+} from '@campus/shared/src/studyDeadlineConflicts';
 import Link from 'next/link';
+import { usePersonalImportScope, usePersonalImports } from '@/lib/usePersonalImports';
 import { StudyDeadlineExport } from './StudyDeadlineExport';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -116,16 +121,24 @@ function TaskRow({ task, now, context }: { task: NuniStudyTask; now: number; con
 }
 
 export function StudyAgenda({
+  conflictSources,
   workspaces,
   filter,
   onFilter,
   context,
 }: {
+  conflictSources?: readonly StudyDeadlineSource[];
   workspaces: NuniWorkspace[];
   filter: StudyAgendaFilter;
   onFilter: (filter: StudyAgendaFilter) => void;
   context: string;
 }) {
+  const { scope, loading: scopeLoading } = usePersonalImportScope();
+  const imports = usePersonalImports(scope, !scopeLoading);
+  const localConflictSources =
+    imports.ready && !scopeLoading
+      ? personalImportDeadlineSources(imports.records, scope.schoolId)
+      : [];
   const classes = useClasses();
   const params = useSearchParams();
   const { refresh } = useNuniSession();
@@ -404,6 +417,7 @@ export function StudyAgenda({
         data &&
         (filter === 'all' || filter === 'pending' || filter === 'soon' || filter === 'overdue') && (
           <StudyDeadlineExport
+            conflictSources={conflictSources ?? localConflictSources}
             key={`${membershipKey}:${selectedCourse}:${filter}:${epoch}`}
             tasks={shown}
             partial={partial}
