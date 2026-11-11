@@ -402,7 +402,7 @@ describe('public Providence building geometry route', () => {
   });
 
   it('does not publish a way edit later than the Overpass database timestamp', async () => {
-    const stamp = (ms: number) => new Date(ms).toISOString().replace(/\\.\\d{3}Z$/, 'Z');
+    const stamp = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
     const now = Date.now();
     const baseTime = stamp(now - 10 * 60_000);
     const impossibleWayEdit = stamp(now - 60_000);
