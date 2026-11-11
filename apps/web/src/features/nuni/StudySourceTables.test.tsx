@@ -462,3 +462,41 @@ it('does not let a fence-looking line inside an HTML code block swallow later ta
     rows: [['資料庫', '3']],
   }]);
 });
+
+
+it('does not treat indented code examples as live HTML that hides later source tables', () => {
+  const suffix = [
+    '| 正式教材 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ];
+  for (const example of [
+    '    <!-- 這是縮排程式碼裡的字面註解，未關閉',
+    '\t<pre>這是 Tab 縮排的原始碼範例',
+    '   \t<!-- 三格空白加 Tab 也是程式碼',
+  ]) {
+    const tables = extractStudySourceTables([example, ...suffix].join('\n'));
+    expect(tables).toEqual([{
+      startLine: 2,
+      headers: ['正式教材', '學分'],
+      rows: [['資料庫', '3']],
+    }]);
+  }
+});
+
+it('still recognizes indented closing HTML tags inside real HTML blocks', () => {
+  const content = [
+    '<pre>',
+    '    </pre>',
+    '<!-- 教師備註',
+    '    -->',
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資管 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 5,
+    headers: ['課程', '學分'],
+    rows: [['資管', '3']],
+  }]);
+});
