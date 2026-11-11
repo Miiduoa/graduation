@@ -524,3 +524,14 @@ PR #517 已於 2026-11-09 02:02:59 UTC 合入 main（merge commit `3ba18e768175b
 在前次修補之後，第三方教師下載群組與 legacy 作業附件的條件仍是 `submittedAt != null`。它會把 `false`、`0`、空字串、任意物件等非真正提交時間當作有效收據，搭配精確附件路徑或缺欄位 legacy 相容模式可能錯誤簽發私有檔案下載。本次只收緊**教師的讀取條件**：支援有效 Firestore Timestamp 的 `toMillis()`、Date、正整數毫秒及 ISO 日期／日期時間；拒絕空值、布林、畸形字串及不可信 map。學生本人草稿讀取和既有寫入時的「欄位非 null 即視為已提交、禁止再次上傳」保護不變。
 
 新增 Web 記憶體 Firestore 合成回歸，對新／舊兩種作業路徑模擬無效提交標記、正常提交時間、作者預覽及教師校籍撤銷。**開發補強並非已發 URL 撤銷；只有新提交精確 head 的 CI 才能視為驗證結果。** 真正缺少附件清單的歷史收據仍不能證明個別物件被提交，隔離 staging、可信資料補齊與正式發布順序仍待驗收。沒有修改正式資料、token、金鑰、migration、部署、E 校園連線或重跑被限制的 npm/pnpm audit。
+
+
+## 2026-11-11：只有全域作業鏡像時不得繞過關閉或已繳交限制（PR #577）
+
+共享 `authorizePrivateFile` 原本在舊路徑 `assignments/{id}/submissions/{uid}/...` 的 canonical 群組作業文件不存在時，直接放行已有全域鏡像的同群學生寫入。即使鏡像已關閉、尚未發布、過期或全域提交收據已有 submittedAt，仍可能取得新的上傳資格，屬舊資料相容路徑的寫入授權缺口。
+
+本次維持**正常開放、尚未繳交的全域鏡像**可用；在 read-only 交易重讀全域鏡像，要求其 groupId 與原解析群組相符，檢查 published/status/dueAt/allowLateSubmission；同時檢查全域 submission 的 owner 與 submittedAt，拒絕已繳交及錯 owner。canonical group assignment 存在時維持原審查邏輯，學生本人預覽既有草稿不受影響。
+
+新增合成回歸：全域-only 正常與明確遲交開放、跨群鏡像、關閉／草稿／未發布、已過期與格式錯誤截止日、已繳交、錯 owner。正式判定必須以**新精確 head** 的 Web/Functions/Rules/CI/CodeQL 為準；舊 head 的成功不可沿用。先前報告的真 PG CI 缺口已由現有 test-web 的 PostgreSQL 15 service 與 NUNI_TEST_POSTGRES_PORT=5432 接入，但仍須核對最新 job 實際執行。
+
+本補強不是歷史資料 migration，無法解決缺少 attachments 清單的真正舊收據檔案級授權、舊 GCS／Supabase URL 撤銷、真隔離 Storage、minimatch 雙鎖檔及正式發布／回復。沒有自行合併 main、部署、清理 token、修改正式資料或金鑰、連線 E 校園或直接重跑未授權 npm/pnpm audit。

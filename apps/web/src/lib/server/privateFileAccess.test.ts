@@ -191,7 +191,26 @@ it('legacy uploads require a live open assignment and an unsubmitted receipt', a
   await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
   store.docs.delete('groups/course/assignments/work/submissions/alice');
   store.docs.delete('groups/course/assignments/work');
-  // Only the global assignments/{id} mirror remains: keep the previous upload path.
+  // A live global-only legacy assignment remains writable without its group copy.
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  for (const invalid of [
+    { groupId: 'course', published: false },
+    { groupId: 'course', status: 'closed' },
+    { groupId: 'course', status: 'draft' },
+    { groupId: 'course', dueAt: '2020-01-01T00:00:00Z' },
+    { groupId: 'course', dueAt: 'invalid' },
+    { groupId: 'another-school' },
+  ]) {
+    store.docs.set('assignments/work', invalid);
+    await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  }
+  store.docs.set('assignments/work', { groupId: 'course', dueAt: '2020-01-01T00:00:00Z', allowLateSubmission: true });
+  await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
+  store.docs.set('assignments/work/submissions/alice', { userId: 'alice', submittedAt: Date.now() });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('assignments/work/submissions/alice', { userId: 'bob', submittedAt: null });
+  await expect(authorize(store, ANSWER, 'alice', true)).rejects.toMatchObject({ statusCode: 403 });
+  store.docs.set('assignments/work/submissions/alice', { userId: 'alice', submittedAt: null });
   await expect(authorize(store, ANSWER, 'alice', true)).resolves.toBeUndefined();
   // A previously uploaded private draft remains previewable by its owner.
   await expect(authorize(store, ANSWER, 'alice', false)).resolves.toBeUndefined();

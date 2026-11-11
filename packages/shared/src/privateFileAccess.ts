@@ -499,7 +499,32 @@ export async function authorizePrivateFile(
           assignmentRef, assignmentRef.collection('submissions').doc(scope.userId || ''),
         );
         if (!assignment.exists) {
-          // Historical data with only the global mirror: previous owner-upload path.
+          // A global-only legacy assignment must not bypass current submission
+          // closure or an already recorded submission in the global namespace.
+          const mirrorRef = db.collection('assignments').doc(scope.assignmentId || '');
+          const [mirror, legacySubmission] = await tx.getAll(
+            mirrorRef, mirrorRef.collection('submissions').doc(scope.userId || ''),
+          );
+          const legacy = asRecord(mirror.data());
+          const previousLegacy = asRecord(legacySubmission.data());
+          const legacyOwner = 'userId' in previousLegacy ? previousLegacy.userId
+            : 'uid' in previousLegacy ? previousLegacy.uid
+              : 'studentId' in previousLegacy ? previousLegacy.studentId : scope.userId;
+          const dueValue = legacy.dueAt;
+          const validDueString = typeof dueValue !== 'string' || (
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(dueValue) &&
+            Number.isFinite(Date.parse(dueValue.slice(0, 10))) &&
+            new Date(dueValue.slice(0, 10)).toISOString().startsWith(dueValue.slice(0, 10))
+          );
+          const due = dueValue == null || typeof dueValue === 'number' || !validDueString
+            ? null : storyExpiresAtMs(dueValue);
+          if (
+            !mirror.exists || legacy.groupId !== groupId ||
+            legacy.published === false || ['draft', 'closed'].includes(String(legacy.status || '')) ||
+            (legacy.dueAt != null && legacy.allowLateSubmission !== true &&
+              (due === null || Date.now() > due)) ||
+            (legacySubmission.exists && (legacyOwner !== uid || previousLegacy.submittedAt != null))
+          ) deny();
         } else {
         const data = asRecord(assignment.data());
         const previous = asRecord(submission.data());
