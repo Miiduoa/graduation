@@ -424,7 +424,8 @@ jobs:
 
       - name: Run Expo Doctor
         working-directory: apps/mobile
-        run: npx expo-doctor
+        # 1.21.7 npx install cannot resolve @expo/env; keep the last known-good CLI.
+        run: npx expo-doctor@1.21.6
 
       - name: Bundle mobile JavaScript
         working-directory: apps/mobile
