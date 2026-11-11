@@ -33,6 +33,8 @@ set -euo pipefail
 shift
 limit="$1"; shift
 printf 'timeout:%s\n' "$limit" >> "$MOCK_LOG"
+count="$(grep -c '^timeout:' "$MOCK_LOG" || true)"
+if (( count <= ${MOCK_TIMEOUT_FAILS:-0} )); then exit 124; fi
 "$@"
 MOCK
 chmod +x "$mock_dir/bin/"*
@@ -49,11 +51,14 @@ bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^timeout:60s' "$MOCK_LOG")" -eq 2 ]]
 
 # Both first and second attempts may time out; the third success is still valid.
-export MOCK_PYTHON_FAILS=2 MOCK_SUDO_FAILS=0
+export MOCK_PYTHON_FAILS=0 MOCK_SUDO_FAILS=0 MOCK_TIMEOUT_FAILS=2
 : > "$MOCK_LOG"
 bash "$script_dir/install-playwright.sh" >/dev/null 2>&1
-[[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 3 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 3 ]]
+[[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 1 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 2 ]]
+
+export MOCK_TIMEOUT_FAILS=0
 
 # A persistent failure stays a red CI job: never quietly skip browser QA.
 export MOCK_PYTHON_FAILS=3 MOCK_SUDO_FAILS=0
