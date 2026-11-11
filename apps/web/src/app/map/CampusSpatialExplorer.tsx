@@ -211,6 +211,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintBaseDate, setFootprintBaseDate] = useState<string | null>(null);
   const [footprintStale, setFootprintStale] = useState(false);
   const [footprintRefreshing, setFootprintRefreshing] = useState(false);
+  const [footprintRefreshFailed, setFootprintRefreshFailed] = useState(false);
   const staleSnapshotRef = useRef(false);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
@@ -294,6 +295,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       timedOut = true;
       controller.abort();
       setFootprintRefreshing(false);
+      if (preserveStale) setFootprintRefreshFailed(true);
       setFootprintStatus(preserveStale ? 'ready' : 'unavailable');
     }, 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
@@ -329,6 +331,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
           until: Date.now() + seconds * 1000, minutes: Math.ceil(seconds / 60),
         });
         setFootprintRefreshing(false);
+        setFootprintRefreshFailed(false);
         setFootprintStatus('ready');
       })
       .catch(() => {
@@ -336,6 +339,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // A failed refresh must not discard a still-valid, explicitly stale
         // building snapshot. Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
+        if (preserveStale) setFootprintRefreshFailed(true);
         setFootprintStatus(preserveStale ? 'ready' : 'unavailable');
       })
       .finally(() => window.clearTimeout(timeout));
@@ -420,9 +424,13 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                         來源要求約 {footprintRetryAfter.minutes} 分鐘冷卻，到期後可再試。
                       </span>}
                       {footprintRefreshing && <span>正在檢查更新，暫時保留舊輪廓。</span>}
+                      {footprintRefreshFailed && !footprintRefreshing && <span>更新未成功，仍顯示先前有日期標註的舊輪廓；資料日期沒有更新。</span>}
                       <button className={styles.retryFootprints} type="button"
                         disabled={footprintRetryAfter !== null || footprintRefreshing}
-                        onClick={() => setFootprintAttempt((value) => value + 1)}>
+                        onClick={() => {
+                          setFootprintRefreshFailed(false);
+                          setFootprintAttempt((value) => value + 1);
+                        }}>
                         重新讀取建築輪廓
                       </button>
                     </>}

@@ -611,13 +611,16 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
 
     await act(async () => { rejectRefresh(new Error('offline during refresh')); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
+    expect(within(dialog).getByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeTruthy();
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
     fireEvent.click(retry);
+    expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(within(dialog).queryByRole('button', { name: '重新讀取建築輪廓' })).toBeNull());
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).queryByText(/暫用舊快照/)).toBeNull();
+    expect(within(dialog).queryByText(/更新未成功，仍顯示先前有日期標註的舊輪廓/)).toBeNull();
   } finally {
     timeoutSpy.mockRestore();
   }
