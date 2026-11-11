@@ -178,6 +178,8 @@ export function ChatScreen(props: any) {
   const db = getDb();
 
   const [peerId, setPeerId] = useState<string | undefined>(peerParam);
+  const peerIdRef = useRef(peerId);
+  peerIdRef.current = peerId;
 
   useEffect(() => {
     setPeerId(peerParam);
@@ -769,6 +771,9 @@ export function ChatScreen(props: any) {
           denyAccess('這不是目前帳號可存取的本校私訊。');
           return;
         }
+        // Resolving the peer of this same conversation must not restart the
+        // roster listener and discard its readable/verified session.
+        const peerId = peerIdRef.current;
         const textMembers = JSON.stringify([...data.memberIds].sort());
         const expectedMembers = peerId ? JSON.stringify([myUid, peerId].sort()) : null;
         const trustedMembers = readableTextMembers ?? expectedMembers;
@@ -828,7 +833,7 @@ export function ChatScreen(props: any) {
       listening = false;
       unsub();
     };
-  }, [db, convoKey, peerId, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared, preparation?.serverConfirmed, denyAccess]);
+  }, [db, convoKey, peerParam, myUid, school.id, sendScope, liveThread, peerRoute, peerPrepared, preparation?.serverConfirmed, denyAccess]);
 
   // ── 更新我的在線狀態 + 進入即更新 lastReadBy（讓對話列表的未讀立刻歸零） ──
   useEffect(() => {

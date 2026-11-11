@@ -1447,3 +1447,24 @@ test('conversation-ID entry reads pending cached text after resolving the valid 
   expect(view.getByText('從對話列表重進的離線文字')).toBeTruthy();
   expect(view.queryByLabelText('加入照片')).toBeNull();
 });
+
+
+test('resolving the peer preserves a pending cached text session', async () => {
+  let resolvePeer!: (snapshot: any) => void;
+  jest.mocked(getDoc).mockImplementationOnce(() => new Promise((resolve) => { resolvePeer = resolve; }));
+  const view = render(<ChatScreen route={{ params: { conversationId: photoConvo } }} navigation={{ setOptions: jest.fn() }} />);
+  verifyPhotoChat(true, true);
+  await act(async () => emitMessages([{ id: 'history', data: {
+    senderId: 'bob', type: 'text', content: '解析期間的離線文字', readBy: [],
+  } }], true));
+  await act(async () => resolvePeer({
+    exists: () => true,
+    metadata: { fromCache: true, hasPendingWrites: true },
+    data: () => ({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] }),
+  }));
+  expect(view.getByText('解析期間的離線文字')).toBeTruthy();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  act(() => mockSnapshotErrors.get(`conversations/${photoConvo}`)({ code: 'permission-denied' }));
+  expect(view.queryByText('解析期間的離線文字')).toBeNull();
+  expect(mockSnapshotHandlers.has(`conversations/${photoConvo}/messages`)).toBe(false);
+});
