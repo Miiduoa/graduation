@@ -211,6 +211,7 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const index = model.points.findIndex((point) => point.id === selectedPoint?.id);
   const selectId = useId();
   const progressId = useId();
+  const directionsNoteId = useId();
   const selectPlace = useCallback((id: string) => {
     setSelection(id);
     setOverview(false);
@@ -414,7 +415,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
                 <button className="btn primary" type="button" onClick={() => { onSelect(place); onClose(); }}>
                   在平面地圖查看
                 </button>
-                <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer">開啟步行導航</a>
+                <a className="btn" href={walkingDirectionsUrl(place)} target="_blank" rel="noopener noreferrer" aria-describedby={directionsNoteId}>開啟步行導航</a>
+                <p id={directionsNoteId} className={styles.note}>導航僅以目前地點標記為目的地，並非已核實的校舍入口、可通行道路或無障礙動線；請依現場指標確認。</p>
                 <button className="btn" type="button" onClick={() => setBuildingPlanOpen(true)}>平面圖建模預覽</button>
                 {source && <a className={styles.source} href={source} target="_blank" rel="noopener noreferrer">查看地點資料來源 ↗</a>}
               </div>
