@@ -43,6 +43,10 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
   const rate = selectedRate ?? localRate;
   const [error, setError] = useState('');
   const voice = useRef<SpeechSynthesisVoice | null>(null);
+  // A parent may recreate this callback while narrating (for example on a UI state change).
+  // Keep the latest listener without tearing down a playing utterance.
+  const onSpeakingChangeRef = useRef(onSpeakingChange);
+  onSpeakingChangeRef.current = onSpeakingChange;
   const active = useRef<SpeechSynthesisUtterance | null>(null);
   const remainingChunks = useRef<string[]>([]);
 
@@ -80,10 +84,10 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
         // Some mobile speech engines throw while the view is closing.
         // Focus changes and source replacement must still complete safely.
         try { synthesis.cancel(); } catch { /* The browser owns this speech engine. */ }
-        onSpeakingChange?.(false);
+        onSpeakingChangeRef.current?.(false);
       }
     };
-  }, [text, onSpeakingChange]);
+  }, [text]);
 
   function stop(): boolean {
     if (active.current) {
@@ -111,7 +115,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     }
     setSpeaking(false);
     setError('');
-    onSpeakingChange?.(false);
+    onSpeakingChangeRef.current?.(false);
     return true;
   }
 
@@ -127,7 +131,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
     const finishPlayback = (message = '') => {
       remainingChunks.current = [];
       setSpeaking(false);
-      onSpeakingChange?.(false);
+      onSpeakingChangeRef.current?.(false);
       // A failed cancel can still be followed by a natural onend. Once the
       // browser reports completion, remove the now-inaccurate Stop warning.
       setError(message);
@@ -194,7 +198,7 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       if (active.current === utterance && !announced) {
         announced = true;
         setSpeaking(true);
-        onSpeakingChange?.(true);
+        onSpeakingChangeRef.current?.(true);
       }
     };
 

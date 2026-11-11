@@ -434,3 +434,26 @@ it('drains thousands of immediately finished speech chunks without recursion or 
   expect(changed).toHaveBeenLastCalledWith(false);
   expect(screen.queryByRole('button', { name: '停止朗讀' })).toBeNull();
 });
+
+it('keeps the same local narration when the parent replaces the status callback', () => {
+  const firstListener = vi.fn();
+  const latestListener = vi.fn();
+  const source = '原文與逐字引句。'.repeat(45);
+  const view = render(<StudyReadAloud text={source} onSpeakingChange={firstListener} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const utterance = speak.mock.calls[0][0] as Utterance;
+  expect(firstListener).toHaveBeenLastCalledWith(true);
+
+  // Parent state updates can create a new callback without changing the
+  // chosen lesson. This must not cancel a student's ongoing reading.
+  view.rerender(<StudyReadAloud text={source} onSpeakingChange={latestListener} />);
+  expect(cancel).not.toHaveBeenCalled();
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: '停止朗讀' })).toBeTruthy();
+  expect(utterance.onend).not.toBeNull();
+
+  act(() => utterance.onend?.());
+  expect(latestListener).toHaveBeenLastCalledWith(false);
+  expect(firstListener).toHaveBeenCalledTimes(1);
+  expect(cancel).not.toHaveBeenCalled();
+});
