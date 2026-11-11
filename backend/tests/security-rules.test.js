@@ -1310,7 +1310,8 @@ describe('firestore security rules', () => {
       await assertSucceeds(alice.doc(pairGroup + `/messages/group-${blockPath.replace(/\//g, '_')}`).set(message));
       await assertSucceeds(alice.doc(`messages/root-group-${blockPath.replace(/\//g, '_')}`).set(rootGroup));
       await assertSucceeds(alice.doc(pairGroup).update({ lastMessageText: 'group still open' }));
-      await assertFails(alice.doc(dm).update({ type: 'group' }));
+      // Match main: members may change type while schoolId and memberIds stay unchanged.
+      await assertSucceeds(alice.doc(dm).update({ type: 'group' }));
     }
   });
 
