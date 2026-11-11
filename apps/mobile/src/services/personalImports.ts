@@ -311,7 +311,7 @@ export function personalImportCourses(
         row.schoolId === schoolId &&
         Number.isInteger(row.dayOfWeek) &&
         row.dayOfWeek! >= 1 &&
-        row.dayOfWeek! <= 5 &&
+        row.dayOfWeek! <= 7 &&
         Number.isInteger(row.startPeriod) &&
         Number.isInteger(row.endPeriod) &&
         row.startPeriod! >= 1 &&

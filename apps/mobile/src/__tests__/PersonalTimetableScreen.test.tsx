@@ -167,6 +167,30 @@ test.each([
   expect(view.getByRole('button', { name: '今天空堂' })).toBeDisabled();
 });
 
+test('verified weekend imports appear in week, day and scrollable grid without changing weekday planning', async () => {
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1,
+    records: [
+      record({ id: 'sat', title: '週六實驗課', dayOfWeek: 6 }),
+      record({ id: 'sun', title: '週日實作課', dayOfWeek: 7 }),
+    ],
+    batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週六實驗課');
+  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  expect(view.getByRole('button', { name: '排讀書時間' })).not.toBeDisabled();
+  fireEvent.press(view.getByText('單日'));
+  fireEvent.press(view.getByText('星期日'));
+  expect(view.getByText('星期日 · 08:00–09:50')).toBeTruthy();
+  expect(view.queryByText('週六實驗課')).toBeNull();
+  fireEvent.press(view.getByText('格子'));
+  expect(view.getByText('週日實作課')).toBeTruthy();
+  expect(view.getByText('六')).toBeTruthy();
+  expect(view.getByText('日')).toBeTruthy();
+});
+
 test('unresolved logout never loads a guest or account timetable', () => {
   mockScope = null;
   const view = render(<PersonalTimetableScreen />);
