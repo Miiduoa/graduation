@@ -54,14 +54,26 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     // students must not mistake for visible source data. Never interpret a
     // comment marker inside a fenced code example as an actual comment.
     if (!fence) {
-      if (inHtmlComment) {
-        if (line.includes('-->')) inHtmlComment = false;
-        continue;
+      // One physical line may close a comment and immediately open another.
+      // Scan markers in order rather than exposing subsequent hidden tables.
+      let commentLine = inHtmlComment;
+      let position = 0;
+      while (position < line.length) {
+        if (inHtmlComment) {
+          const closing = line.indexOf('-->', position);
+          if (closing < 0) break;
+          inHtmlComment = false;
+          commentLine = true;
+          position = closing + 3;
+        } else {
+          const opening = line.indexOf('<!--', position);
+          if (opening < 0) break;
+          inHtmlComment = true;
+          commentLine = true;
+          position = opening + 4;
+        }
       }
-      if (line.includes('<!--')) {
-        if (line.lastIndexOf('-->') < line.lastIndexOf('<!--')) inHtmlComment = true;
-        continue;
-      }
+      if (commentLine) continue;
     }
     const marker = fenceMarker(line);
     if (marker) {

@@ -229,3 +229,22 @@ it('does not let a comment marker in a fenced code sample hide later source tabl
     rows: [['資管', '3']],
   }]);
 });
+
+it('tracks a second HTML comment opened on the same line the first one closes', () => {
+  const content = [
+    '<!-- 第一段隱藏',
+    '--> <!-- 第二段繼續隱藏',
+    '| 假學分 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    '-->',
+    '| 正式科目 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 7,
+    headers: ['正式科目', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
