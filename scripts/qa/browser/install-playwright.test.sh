@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# No packages/network required: exercise the actual retry script with mock tools.
+# No packages/network required: exercise the actual bounded retry script with mock tools.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +26,15 @@ cat > "$mock_dir/bin/sleep" <<'MOCK'
 set -euo pipefail
 printf 'sleep:%s\n' "$*" >> "$MOCK_LOG"
 MOCK
+cat > "$mock_dir/bin/timeout" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == '--kill-after=5s' ]]
+shift
+limit="$1"; shift
+printf 'timeout:%s\n' "$limit" >> "$MOCK_LOG"
+"$@"
+MOCK
 chmod +x "$mock_dir/bin/"*
 export PATH="$mock_dir/bin:$PATH" MOCK_LOG="$mock_dir/install.log"
 
@@ -35,6 +44,15 @@ export MOCK_PYTHON_FAILS=1 MOCK_SUDO_FAILS=1
 bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1
 [[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 2 ]]
 [[ "$(grep -c '^sudo:' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^timeout:180s' "$MOCK_LOG")" -eq 2 ]]
+[[ "$(grep -c '^timeout:60s' "$MOCK_LOG")" -eq 2 ]]
+
+# Both first and second attempts may time out; the third success is still valid.
+export MOCK_PYTHON_FAILS=2 MOCK_SUDO_FAILS=0
+: > "$MOCK_LOG"
+bash "$script_dir/install-playwright.sh" >/dev/null 2>&1
+[[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 3 ]]
 [[ "$(grep -c '^sleep:' "$MOCK_LOG")" -eq 2 ]]
 
 # A persistent failure stays a red CI job: never quietly skip browser QA.
@@ -47,6 +65,17 @@ fi
 [[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 3 ]]
 [[ "$(grep -c '^sudo:' "$MOCK_LOG" || true)" -eq 0 ]]
 
+# Fonts are also required for visual QA. Do not let three apt failures pass.
+export MOCK_PYTHON_FAILS=0 MOCK_SUDO_FAILS=3
+: > "$MOCK_LOG"
+if bash "$script_dir/install-playwright.sh" --fonts-noto-cjk >/dev/null 2>&1; then
+  echo 'Persistent font installation failure was silently accepted' >&2
+  exit 1
+fi
+[[ "$(grep -c '^python:' "$MOCK_LOG")" -eq 1 ]]
+[[ "$(grep -c '^sudo:' "$MOCK_LOG")" -eq 3 ]]
+[[ "$(grep -c '^timeout:60s' "$MOCK_LOG")" -eq 3 ]]
+
 # Bad parameters fail before any installation attempt.
 : > "$MOCK_LOG"
 if bash "$script_dir/install-playwright.sh" --unsupported >/dev/null 2>&1; then
@@ -55,4 +84,4 @@ if bash "$script_dir/install-playwright.sh" --unsupported >/dev/null 2>&1; then
 fi
 [[ ! -s "$MOCK_LOG" ]]
 
-echo 'Browser installation retry tests: 3/3 passed'
+echo 'Browser installation bounded retry tests: 5/5 passed'
