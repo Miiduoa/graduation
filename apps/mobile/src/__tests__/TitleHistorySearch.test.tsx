@@ -561,6 +561,30 @@ test('a confirmed post whose native navigation throws stays retryable without a 
   expect(remember).toHaveBeenCalledWith('二手書', 'one');
 });
 
+test('missing community stack navigation never counts as a successful reading', async () => {
+  // The actual CommunityScreen used to silently optional-chain navigate().
+  // Authorization succeeded but no detail opened, and the modal still closed.
+  const view = render(<CommunityScreen />);
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  enter(view);
+  await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  expect(await view.findByText(/貼文已通過伺服器確認.*頁面開啟失敗/)).toBeTruthy();
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+  expect(confirmOpen).toHaveBeenCalledTimes(1);
+
+  // Restoring the genuine stack navigator allows a fresh server check and a
+  // successful detail route without saving a false previous-reading marker.
+  const navigate = jest.fn();
+  view.rerender(<CommunityScreen navigation={{ navigate }} />);
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith('PostDetail', { postId: 'one', schoolId: 'pu' }));
+  expect(confirmOpen).toHaveBeenCalledTimes(2);
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+  expect(view.getByLabelText('回到上次閱讀位置')).toBeTruthy();
+});
+
 test('a thrown community navigation keeps native history open for a retry', async () => {
   const navigate = jest.fn().mockImplementationOnce(() => { throw new Error('native router unavailable'); });
   const view = render(<TitleHistoryLauncher onOpenPost={navigate} />);
