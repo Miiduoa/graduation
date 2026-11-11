@@ -543,3 +543,37 @@ test('iOS screen reader announces revoked history access but ignores a late outd
     Platform.OS = previousOS;
   }
 });
+
+
+test('a confirmed post whose native navigation throws stays retryable without a false reading position', async () => {
+  const onOpenPost = jest.fn().mockImplementationOnce(() => { throw new Error('native router unavailable'); });
+  const remember = jest.fn();
+  const view = render(<TitleHistorySearch schoolId="pu" onClose={jest.fn()} onOpenPost={onOpenPost} onRememberQuery={remember} />);
+  enter(view);
+  await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  expect(await view.findByText(/貼文已通過伺服器確認.*頁面開啟失敗/)).toBeTruthy();
+  expect(remember).not.toHaveBeenCalled();
+  expect(view.getByText('二手書 one')).toBeTruthy();
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await waitFor(() => expect(onOpenPost).toHaveBeenCalledTimes(2));
+  expect(confirmOpen).toHaveBeenCalledTimes(2);
+  expect(remember).toHaveBeenCalledWith('二手書', 'one');
+});
+
+test('a thrown community navigation keeps native history open for a retry', async () => {
+  const navigate = jest.fn().mockImplementationOnce(() => { throw new Error('native router unavailable'); });
+  const view = render(<TitleHistoryLauncher onOpenPost={navigate} />);
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  enter(view);
+  await view.findByText('二手書 one');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  expect(await view.findByText(/貼文已通過伺服器確認.*頁面開啟失敗/)).toBeTruthy();
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+  fireEvent.press(view.getByLabelText('開啟貼文：二手書 one'));
+  await waitFor(() => expect(navigate).toHaveBeenCalledTimes(2));
+  expect(view.queryByLabelText('記得的標題開頭')).toBeNull();
+  fireEvent.press(view.getByLabelText('找舊貼文'));
+  expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
+  expect(view.getByLabelText('回到上次閱讀位置')).toBeTruthy();
+});
