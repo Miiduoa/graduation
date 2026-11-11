@@ -746,6 +746,45 @@ it('ages an already-open campus 3D snapshot to stale, then withdraws it after se
   }
 });
 
+it('honors the earlier OSM replication expiry instead of extending it with a later fetch timestamp', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  const day = 24 * 60 * 60 * 1000;
+  let clock = Date.now();
+  // Valid metadata: HTTP fetch is less than 48 hours after Overpass sync.
+  const fetchedAt = new Date(clock - 5 * day + 60_000).toISOString();
+  const osmBaseAt = new Date(Math.floor((clock - 7 * day + 120_000) / 1000) * 1000)
+    .toISOString().replace('.000Z', 'Z');
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ schoolId: 'pu', source: 'OpenStreetMap', buildings, fetchedAt, osmBaseAt, stale: true }),
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const clockSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    clock += 3 * 60_000;
+    fireEvent(document, new Event('visibilitychange'));
+    expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+    expect(within(dialog).queryByText(/1 棟公開建築輪廓/)).toBeNull();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    clockSpy.mockRestore();
+  }
+});
+
 it('does not resurrect an expired stale outline after a pending refresh fails', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const buildings = parseProvidenceOsmFootprints({ elements: [{
