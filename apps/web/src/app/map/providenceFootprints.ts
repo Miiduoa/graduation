@@ -253,7 +253,10 @@ function heightFromOsmTags(value: unknown):
   // are also documented. Only convert unambiguous units, never infer levels.
   if (typeof raw !== 'string') return null;
   const label = raw.trim();
-  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m)?$/.exec(label);
+  // OSM recommends `m`; explicit metre/meter aliases are discouraged but
+  // unambiguous. Accept them rather than silently hiding a sourced building.
+  // Keep the required space for spelled-out aliases; never guess other units.
+  const metric = /^(\d{1,3}(?:\.\d{1,6})?)(?:\s*m|\s+(?:metre|metres|meter|meters))?$/.exec(label);
   const feet = /^(\d{1,3}(?:\.\d{1,6})?)\s+(?:ft|feet)$/i.exec(label);
   const feetInches = /^(\d{1,3})'(?:([0-9]{1,2})")?$/.exec(label);
   if (feetInches && Number(feetInches[2] ?? 0) >= 12) return null;
