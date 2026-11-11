@@ -95,7 +95,9 @@ function PersonalTimetableWorkspace({ initialTerm, initialCourseId, initialDate,
   const [view, setView] = useState<'week' | 'day' | 'grid'>('week');
   const [day, setDay] = useState(() => {
     const today = new Date().getDay();
-    return today >= 1 && today <= 5 ? today : 1;
+    // Calendar dates are Sunday=0; timetable days use Monday=1…Sunday=7.
+    // Weekend classes are now visible, so open the actual current day.
+    return today === 0 ? 7 : today;
   });
   const [editing, setEditing] = useState<PersonalCourse | null>(null);
   const importScope = usePersonalImportScope();
