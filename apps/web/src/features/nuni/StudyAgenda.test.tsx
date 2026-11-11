@@ -6,7 +6,42 @@ import type { NuniStudyAgenda, NuniStudyTask } from '@campus/shared/src/nuniStud
 import { StudyAgenda } from './StudyAgenda';
 import type { StudyAgendaFilter } from './studyNavigation';
 
-const state = vi.hoisted(() => ({ load: vi.fn(), refresh: vi.fn(), request: vi.fn() }));
+const state = vi.hoisted(() => ({
+  load: vi.fn(),
+  importsReady: true,
+  refresh: vi.fn(),
+  request: vi.fn(),
+}));
+vi.mock('@/lib/usePersonalImports', () => ({
+  usePersonalImportScope: () => ({ scope: { owner: 'test', schoolId: 's' }, loading: false }),
+  usePersonalImports: () => ({
+    ready: state.importsReady,
+    records: [
+      {
+        id: 'e',
+        kind: 'events',
+        schoolId: 's',
+        academicYear: '115',
+        semester: '1',
+        title: '本機活動',
+        date: '2026-10-26',
+        startTime: '18:00',
+        endTime: '20:00',
+      },
+      {
+        id: 't',
+        kind: 'timetable',
+        schoolId: 's',
+        academicYear: '115',
+        semester: '1',
+        title: '本機課堂',
+        dayOfWeek: 1,
+        startTime: '18:00',
+        endTime: '20:00',
+      },
+    ],
+  }),
+}));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
@@ -397,4 +432,32 @@ it('exports only matching pending dates after switching from all work to the com
   fireEvent.click(screen.getByRole('button', { name: '匯出未繳期限 ICS' }));
   expect(screen.getAllByRole('checkbox')).toHaveLength(1);
   expect(screen.getByRole('checkbox', { name: /這週交/ })).toBeTruthy();
+});
+
+it('connects authorized local records to the deadline preview', async () => {
+  state.load.mockResolvedValue(agenda([task(1)]));
+  render(<Harness />);
+  await screen.findByText('學習任務 1');
+  fireEvent.click(screen.getByRole('button', { name: '匯出未繳期限 ICS' }));
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: /預覽/ }));
+  expect(screen.getByText(/與個人事件衝突：本機活動/)).toBeTruthy();
+  expect(screen.getByText(/與課表衝突：本機課堂/)).toBeTruthy();
+  expect(screen.getByText(/課表未知/)).toBeTruthy();
+});
+
+it('keeps records unknown when the local scope has not finished loading', async () => {
+  state.importsReady = false;
+  state.load.mockResolvedValue(agenda([task(1)]));
+  try {
+    render(<Harness />);
+    await screen.findByText('學習任務 1');
+    fireEvent.click(screen.getByRole('button', { name: '匯出未繳期限 ICS' }));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /預覽/ }));
+    expect(screen.getByText(/課表未知/)).toBeTruthy();
+    expect(screen.queryByText(/與個人事件衝突/)).toBeNull();
+  } finally {
+    state.importsReady = true;
+  }
 });

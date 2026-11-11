@@ -4,6 +4,7 @@ import {
   Color,
   CylinderGeometry,
   DirectionalLight,
+  ExtrudeGeometry,
   HemisphereLight,
   InstancedMesh,
   LineBasicMaterial,
@@ -15,12 +16,14 @@ import {
   PlaneGeometry,
   RingGeometry,
   Scene,
+  Shape,
   SphereGeometry,
   Vector3,
   WebGLRenderer,
   type Material,
 } from 'three';
 import type { CampusSpatialModel, CampusSpatialPoint } from './campusSpatialModel';
+import type { ProvidenceFootprint } from './providenceFootprints';
 import {
   normalizeSpatialCamera,
   spatialCameraDirection,
@@ -48,6 +51,7 @@ type Options = {
   onSelect: (id: string) => void;
   onError: () => void;
   onCameraChange?: (camera: CampusSpatialCamera) => void;
+  footprints?: readonly ProvidenceFootprint[];
 };
 type Pose = { position: Vector3; target: Vector3 };
 type Transition = { from: Pose; to: Pose; start: number };
@@ -88,6 +92,25 @@ function overlaps(first: Rectangle, second: Rectangle) {
     first.top + first.height + gap > second.top;
 }
 
+/** The audited POI can be near (but outside) an OSM building by up to 30m.
+ * Never place its marker on an invented rooftop when the POI is off the outline.
+ * Its original map position remains a ground POI, not an inferred entrance.
+ */
+function poiWithinOutline(point: CampusSpatialPoint, footprint: ProvidenceFootprint): boolean {
+  const { lat, lng } = point.location;
+  let inside = false;
+  const ring = footprint.outline;
+  for (let i = 0, previous = ring.length - 1; i < ring.length; previous = i, i += 1) {
+    const [lon, latitude] = ring[i];
+    const [previousLon, previousLat] = ring[previous];
+    if ((latitude > lat) !== (previousLat > lat) &&
+        lng < lon + (lat - latitude) * (previousLon - lon) / (previousLat - latitude)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /** This owns a single, optional canvas. No render loop runs while the view is still. */
 export function createCampusSpatialScene(
   container: HTMLElement,
@@ -111,9 +134,28 @@ export function createCampusSpatialScene(
   const camera = new PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, Math.max(10_000, model.radius * 20));
   const lookAt = new Vector3();
   const pointsById = new Map(model.points.map((point) => [point.id, point]));
+  // An unrelated building must not affect this campus view's geometry or
+  // camera framing when its POI is not part of the currently visible model.
+  const visibleFootprints = (options.footprints ?? [])
+    .filter((footprint) => pointsById.has(footprint.poiId));
+  const buildingHeightById = new Map(visibleFootprints
+    .map((footprint) => [footprint.poiId, footprint.heightMeters]));
+  // Building heights always count for camera framing, even when illustrative.
+  // An illustrative 12m volume has no sourced roof elevation: keep the POI
+  // anchored to its real map point at ground level instead of visually asserting
+  // that its marker is on a measured roof. Sourced-height roof markers still
+  // require the actual POI to lie within the accepted OSM outline.
+  const rooftopMarkerHeightById = new Map<string, number>();
+  for (const footprint of visibleFootprints) {
+    const point = pointsById.get(footprint.poiId);
+    if (point && footprint.heightBasis === 'osm-tag' && poiWithinOutline(point, footprint)) {
+      rooftopMarkerHeightById.set(point.id, footprint.heightMeters);
+    }
+  }
   const geometries: BufferGeometry[] = [];
   const materials: Material[] = [];
   const instances: InstancedMesh[] = [];
+  const buildingMaterials: Array<{ id: string; material: MeshStandardMaterial }> = [];
   const labels: Label[] = [];
   const listeners: Array<() => void> = [];
   let renderer: WebGLRenderer | null = null;
@@ -139,8 +181,29 @@ export function createCampusSpatialScene(
   let ringMaterial: MeshStandardMaterial | null = null;
   const pinRadius = Math.max(3, Math.min(9, model.radius * 0.018));
   const pinHeight = pinRadius * 3.3;
-  const groundWidth = Math.max(180, model.extent.width + pinRadius * 12);
-  const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12);
+  const tallestBuilding = Math.max(0, ...visibleFootprints.map((item) => item.heightMeters));
+  const anchor = model.points[0];
+  const longitudeScale = 6_371_008.8 * Math.PI / 180 *
+    Math.cos(anchor.location.lat * Math.PI / 180);
+  const latitudeScale = 6_371_008.8 * Math.PI / 180;
+  // A verified footprint can extend beyond its POI. When the overview is
+  // framed using only POI bounds, long campus buildings fall outside the
+  // ground plane and get cropped, especially on narrow screens. Include
+  // actual OSM outline vertices; never invent entrances or nearby paths.
+  let footprintHalfWidth = 0;
+  let footprintHalfDepth = 0;
+  for (const footprint of visibleFootprints) {
+    for (const [longitude, latitude] of footprint.outline) {
+      footprintHalfWidth = Math.max(footprintHalfWidth,
+        Math.abs(anchor.x + (longitude - anchor.location.lng) * longitudeScale));
+      footprintHalfDepth = Math.max(footprintHalfDepth,
+        Math.abs(anchor.z - (latitude - anchor.location.lat) * latitudeScale));
+    }
+  }
+  const groundWidth = Math.max(180, model.extent.width + pinRadius * 12,
+    footprintHalfWidth * 2 + pinRadius * 12);
+  const groundDepth = Math.max(160, model.extent.depth + pinRadius * 12,
+    footprintHalfDepth * 2 + pinRadius * 12);
 
   function ownGeometry<T extends BufferGeometry>(geometry: T): T {
     geometries.push(geometry);
@@ -280,20 +343,43 @@ export function createCampusSpatialScene(
     const point = view.selectedId ? pointsById.get(view.selectedId) : undefined;
     const target = new Vector3(point?.x ?? 0, 0, point?.z ?? 0);
     const aspect = width > 0 && height > 0 ? width / height : 1;
-    const focusSpan = Math.max(180, Math.min(450, model.radius * 0.85));
+    // A POI can be up to 30 m outside its accepted OSM outline. The old
+    // fixed 140-260 m focus span clipped long buildings when selected, most
+    // noticeably on narrow phone screens. Fit the actual source geometry
+    // relative to the POI, without inventing a building center or new bounds.
+    let footprintSpan = 0;
+    if (point) {
+      const footprint = visibleFootprints.find((item) => item.poiId === point.id);
+      if (footprint) {
+        const metersPerLatitude = 6_371_008.8 * Math.PI / 180;
+        const metersPerLongitude = metersPerLatitude * Math.cos(point.location.lat * Math.PI / 180);
+        for (const [longitude, latitude] of footprint.outline) {
+          footprintSpan = Math.max(footprintSpan,
+            2 * Math.abs((longitude - point.location.lng) * metersPerLongitude),
+            2 * Math.abs((latitude - point.location.lat) * metersPerLatitude));
+        }
+      }
+    }
+    const focusSpan = point && buildingHeightById.has(point.id)
+      ? Math.max(140, Math.min(260, model.radius * 0.32), footprintSpan + pinRadius * 4)
+      : Math.max(180, Math.min(450, model.radius * 0.85));
     const offset = spatialCameraDirection(view.bearing, view.overhead);
     const direction = new Vector3(offset.x, offset.y, offset.z);
     const right = new Vector3().crossVectors(new Vector3(0, 1, 0), direction).normalize();
     const up = new Vector3().crossVectors(direction, right);
     const halfWidth = (point ? focusSpan : groundWidth) / 2;
     const halfDepth = (point ? focusSpan : groundDepth) / 2;
+    // An explicit building selection should fit that building, not the tallest
+    // different building elsewhere in the still-visible campus model. Keep the
+    // tallest visible volume only for the full-campus overview.
+    const framingHeight = point ? (buildingHeightById.get(point.id) ?? 0) : tallestBuilding;
     const tangent = Math.tan(FIELD_OF_VIEW * Math.PI / 360) * 0.82;
     let distance = 80;
     // An oblique camera needs room for both the rotated footprint and its near edge.
     // Fit the whole volume, including marker tops, rather than only its 2D width.
     for (const x of [-halfWidth, halfWidth]) {
       for (const z of [-halfDepth, halfDepth]) {
-        for (const y of [0, pinHeight + pinRadius]) {
+        for (const y of [0, Math.max(pinHeight + pinRadius, framingHeight + pinRadius * 2)]) {
           const corner = new Vector3(x, y, z);
           const nearOffset = corner.dot(direction);
           distance = Math.max(distance,
@@ -357,6 +443,10 @@ export function createCampusSpatialScene(
     stemMaterial?.color.set(palette.stem);
     gridMaterial?.color.set(palette.grid);
     ringMaterial?.color.set(palette.accent);
+    for (const item of buildingMaterials) {
+      item.material.color.set(item.id === view.selectedId ? palette.accent :
+        view.dark ? '#53645f' : '#abbab2');
+    }
     const neutral = new Color(palette.pin);
     const accent = new Color(palette.accent);
     for (let index = 0; index < model.points.length; index += 1) {
@@ -382,7 +472,13 @@ export function createCampusSpatialScene(
     const focusedButton = labels.find(({ button }) => button === container.ownerDocument.activeElement)?.button;
     const projected = labels.map((label) => ({
       ...label,
-      screen: new Vector3(label.point.x, pinHeight + pinRadius, label.point.z).project(camera),
+      screen: new Vector3(
+        label.point.x,
+        rooftopMarkerHeightById.has(label.point.id)
+          ? rooftopMarkerHeightById.get(label.point.id)! + pinRadius * 2
+          : pinHeight + pinRadius,
+        label.point.z,
+      ).project(camera),
     }));
     projected.sort((a, b) => {
       if (a.button === focusedButton) return -1;
@@ -510,6 +606,30 @@ export function createCampusSpatialScene(
     ground.position.y = -0.1;
     scene.add(ground);
 
+    // Only published OSM way outlines that passed the Providence source whitelist are extruded.
+    // The shape is geographic; without a recorded OSM height the 12 m volume is illustrative.
+    for (const footprint of visibleFootprints) {
+      const shape = new Shape();
+      footprint.outline.forEach(([longitude, latitude], index) => {
+        const x = anchor.x + (longitude - anchor.location.lng) * longitudeScale;
+        const z = anchor.z - (latitude - anchor.location.lat) * latitudeScale;
+        if (index === 0) shape.moveTo(x, -z);
+        else shape.lineTo(x, -z);
+      });
+      shape.closePath();
+      const material = ownMaterial(new MeshStandardMaterial({
+        color: '#abbab2', roughness: 0.93, metalness: 0,
+      }));
+      const geometry = ownGeometry(new ExtrudeGeometry(shape, {
+        depth: footprint.heightMeters, bevelEnabled: false, steps: 1, curveSegments: 1,
+      }));
+      const building = new Mesh(geometry, material);
+      building.rotation.x = -Math.PI / 2;
+      building.position.y = 0.2;
+      scene.add(building);
+      buildingMaterials.push({ id: footprint.poiId, material });
+    }
+
     const gridPoints: Vector3[] = [];
     const step = 10 ** Math.floor(Math.log10(Math.max(groundWidth, groundDepth) / 6));
     for (let x = Math.ceil(-groundWidth / 2 / step) * step; x <= groundWidth / 2; x += step) {
@@ -541,9 +661,22 @@ export function createCampusSpatialScene(
     const matrix = new Matrix4();
     const flat = new Matrix4().makeRotationX(-Math.PI / 2);
     model.points.forEach((point, index) => {
-      stems.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight / 2, point.z));
-      feet.setMatrixAt(index, matrix.makeTranslation(point.x, 0.1, point.z).multiply(flat));
-      caps!.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight, point.z));
+      const roof = rooftopMarkerHeightById.get(point.id);
+      if (roof === undefined) {
+        stems.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight / 2, point.z));
+        feet.setMatrixAt(index, matrix.makeTranslation(point.x, 0.1, point.z).multiply(flat));
+        caps!.setMatrixAt(index, matrix.makeTranslation(point.x, pinHeight, point.z));
+      } else {
+        // Keep an accessible marker above the roof without covering the whole
+        // geographic building footprint with the original oversized pin.
+        const roofStemHeight = pinRadius * 0.9;
+        stems.setMatrixAt(index, matrix.makeTranslation(point.x, roof + roofStemHeight / 2, point.z)
+          .scale(new Vector3(0.35, roofStemHeight / pinHeight, 0.35)));
+        feet.setMatrixAt(index, matrix.makeTranslation(point.x, roof + 0.15, point.z)
+          .multiply(flat).scale(new Vector3(0.32, 0.32, 0.32)));
+        caps!.setMatrixAt(index, matrix.makeTranslation(point.x, roof + roofStemHeight, point.z)
+          .scale(new Vector3(0.36, 0.36, 0.36)));
+      }
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = point.name;
