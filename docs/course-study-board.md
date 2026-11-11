@@ -1,3 +1,9 @@
+## 2026-11-11：原文 Markdown 表格可逐格閱讀，不假裝理解圖片圖表
+
+- 在教材原文下方，對真正含有 Markdown pipe 表頭、分隔線與資料列的段落，額外顯示有欄標題的 HTML 表格；原文仍原封不動保留，點選引句與原文導航也不受影響。
+- 遵守每表 2–8 欄、最多 20 列、每段最多 3 表的顯示界線；跳過格式不全、欄數不一致、逸出直線符號與程式碼區塊，超長表整張不顯示而非無聲截斷。欄位僅逐字呈現來源，不補數據、不做總結與計算。窄螢幕可橫向捲動，表格有 caption、列欄語意與鍵盤焦點。
+- 新增純函式及模擬 DOM 回歸，涵蓋原文欄值、欄數錯誤、程式碼區塊、超長表與切換教材。這是**已有結構化 Markdown 文字表格的讀取改善**，不代表辨識 PDF 圖片、座標繪圖或 AI 圖表理解；缺少 Safari／Android 真機驗收及 Ahaboard 同教材同題同機對照。未新增套件、傳輸私人教材或更動進度備份格式，PR 保持 Draft、未合併或部署。
+
 ## 2026-11-11：修復朗讀跨步驟回呼的 React lint 與模擬語音污染
 
 - 查核精確 `320fdfc` 的 [CI #42953172458](https://github.com/Miiduoa/graduation/actions/runs/42953172458)：Lint & Type Check 因 `StudyReadAloud.tsx:49` 在 render 直接寫 ref 被 React hooks lint 阻擋；改由 `useEffect([onSpeakingChange])` 更新最新 listener，來源文字未變時不因父層新回呼中斷正在播放的本機中文朗讀。

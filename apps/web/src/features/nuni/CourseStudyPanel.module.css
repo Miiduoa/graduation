@@ -73,6 +73,14 @@
 .sourceHeading { margin: 24px 0 12px; font-size: 12px; color: var(--muted); }
 .sourceHeading h4 { margin: 0; font-size: 13px; font-weight: 500; }
 .sourceText { margin: 0 0 18px; padding: 0 0 0 18px; border-left: 2px solid var(--border-strong); white-space: pre-wrap; line-height: 2; font-size: 17px; }
+.sourceTableGroup { margin: 0 0 20px; padding: 16px; border: 1px solid var(--border); background: var(--surface); }
+.sourceTableGroup h5 { margin: 0; font-size: 15px; font-weight: 600; }
+.sourceTableScroll { max-width: 100%; overflow-x: auto; margin-top: 12px; }
+.sourceTableScroll:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.sourceTable { border-collapse: collapse; min-width: 100%; width: max-content; font-size: 14px; line-height: 1.65; }
+.sourceTable caption { text-align: start; padding: 6px 0; color: var(--muted); font-size: 12px; }
+.sourceTable :is(th, td) { border: 1px solid var(--border-strong); padding: 9px 12px; max-width: 28ch; min-width: 8ch; white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; }
+.sourceTable th { font-weight: 600; background: var(--bg); }
 .readAloud { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .readAloud small { color: var(--muted); font-size: 12px; }
 .coach { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border); }

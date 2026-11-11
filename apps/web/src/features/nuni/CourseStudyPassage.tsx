@@ -18,6 +18,7 @@ import {
   type StudyPassageMemory,
 } from './courseStudySession';
 import { StudyReadAloud } from './StudyReadAloud';
+import { StudySourceTables } from './StudySourceTables';
 import { CourseStudySteps } from './CourseStudySteps';
 import { locateStudyEvidence } from './studyEvidence';
 import styles from './CourseStudyPanel.module.css';
@@ -171,6 +172,7 @@ export function CourseStudyPassage({ passage, mode, memory, onChange }: Props) {
         {evidence ? <>{evidence.before}<mark ref={evidenceMark} tabIndex={-1}
           className={styles.evidenceHighlight}>{evidence.quote}</mark>{evidence.after}</> : passage.text}
       </blockquote>
+      <StudySourceTables text={passage.text} />
       {!passage.text.trim() && <p className={styles.note}>這一段只有空白，可直接前往下一段。</p>}
       {result && !busy && <label className={styles.field}>朗讀內容
         <select value={narrationTarget} onChange={(event) =>
