@@ -156,6 +156,15 @@ function matchesOutboundText(message: Msg, draft: DmOutboundDraft) {
     message.type === 'text' && message.content === draft.content;
 }
 
+function cachedMessageLabel(item: Msg): string {
+  if (item.recalledAt) return '訊息已撤回';
+  const body = item.content ?? item.text;
+  if (body) return body;
+  if (item.type === 'image') return '照片';
+  if (item.type === 'file') return item.fileName ?? '檔案';
+  return '';
+}
+
 // ═══════ Main Component ═══════
 
 export function ChatScreen(props: any) {
@@ -592,14 +601,13 @@ export function ChatScreen(props: any) {
       (snapshot) => {
         if (!listening || scopeRef.current !== sendScope || activeConversationScopeRef.current !== sendScope) return;
         if (snapshot.metadata.fromCache) {
-          // Cache can restore historical text, but cannot acknowledge sends or
-          // replace already loaded rows (including with an empty cache result).
-          // A pending row must not suppress other confirmed cached history.
+          // Cache restores every confirmed row, including file/image/system.
+          // It cannot acknowledge sends. Opening an attachment re-requests
+          // authorization instead of hiding historical media.
           if (readableTextScopeRef.current === sendScope && !receivedServerMessages) {
             const cachedRows = snapshot.docs
               .filter((entry) => !entry.metadata.hasPendingWrites)
-              .map((entry) => ({ ...(entry.data() as any), id: entry.id, cacheOnly: true }) as Msg)
-              .filter((row) => !row.type || row.type === 'text');
+              .map((entry) => ({ ...(entry.data() as any), id: entry.id, cacheOnly: true }) as Msg);
             setMessages((current) => {
               const existingIds = new Set(current.map((row) => row.id));
               return [...current, ...cachedRows.filter((row) => !existingIds.has(row.id))];
@@ -1204,7 +1212,7 @@ export function ChatScreen(props: any) {
             {canOpenPhoto ? <DmPhotoMessage key={JSON.stringify([photoKey, item.id, item.attachmentPath])}
               scope={{ ...photoThread!, messageId: item.id }} path={item.attachmentPath!} /> :
               <Text style={[s.msgText, mine ? s.msgTextMine : s.msgTextPeer]}>
-                {item.recalledAt ? '訊息已撤回' : item.content ?? item.text}
+                {cachedMessageLabel(item)}
               </Text>}
           </View>
           {item.reactions &&

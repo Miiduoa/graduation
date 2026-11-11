@@ -72,27 +72,27 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       blocks.doc(`${memberIds[0]}_${memberIds[1]}`),
       blocks.doc(`${memberIds[1]}_${memberIds[0]}`),
     ];
+    const caller = db.collection('users').doc(uid);
     if (threadSnap.exists) {
-      const [a, b, ...blocked] = await tx.getAll(first, second, ...blockRefs);
-      // Existing members keep photos after transfer or missing school fields.
+      // Existing DMs match main plus user-initiated blocks: caller identity,
+      // membership, and block records. Do not require the peer's profile.
+      const [callerSnap, ...blocked] = await tx.getAll(caller, ...blockRefs);
       if (
-        ![a, b].every((snap) => !isAccountUnavailable(snap.data())) ||
+        (callerSnap.exists && isAccountUnavailable(callerSnap.data())) ||
         blocked.some((snap) => snap.exists)
       )
         throw denied();
     } else {
-      // New DMs are no stricter than main conversation create: both accounts
-      // usable and not blocked. Main only checks the caller's school membership,
-      // never the recipient's.
+      // New DMs match main conversation create: caller school membership and
+      // user-initiated blocks. Never check the recipient's school or account.
       const senderMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-      const [a, b, senderMembership, ...blocked] = await tx.getAll(
-        first,
-        second,
+      const [callerSnap, senderMembership, ...blocked] = await tx.getAll(
+        caller,
         senderMember,
         ...blockRefs,
       );
       if (
-        ![a, b].every((snap) => !isAccountUnavailable(snap.data())) ||
+        (callerSnap.exists && isAccountUnavailable(callerSnap.data())) ||
         senderMembership.data()?.status !== 'active' ||
         blocked.some((snap) => snap.exists)
       )

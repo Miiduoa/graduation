@@ -63,7 +63,7 @@ test('server authorization checks conversation members, live accounts, and block
   expect(result).toEqual({ url: expect.stringContaining('X-Goog-Expires'), expiresAt: new Date(1234567000000 + MINUTE_MS).toISOString() });
   expect(reads).toEqual([
     'conversations/private',
-    'users/alice', 'users/bob',
+    'users/alice',
     'users/alice/blockedUsers/bob', 'users/bob/blockedUsers/alice',
     'friendBlocks/alice_bob', 'friendBlocks/bob_alice',
   ]);
@@ -84,14 +84,8 @@ test.each([
   ['disabled profile', 'users/alice', { schoolId: 'pu', status: 'disabled' }],
   ['suspended profile', 'users/alice', { schoolId: 'pu', status: 'suspended' }],
   ['inactive profile', 'users/alice', { schoolId: 'pu', status: 'inactive' }],
-  ['peer deleted profile', 'users/bob', { schoolId: 'pu', status: 'deleted' }],
-  ['peer disabled profile', 'users/bob', { schoolId: 'pu', status: 'disabled' }],
-  ['peer suspended profile', 'users/bob', { schoolId: 'pu', status: 'suspended' }],
-  ['peer inactive profile', 'users/bob', { schoolId: 'pu', status: 'inactive' }],
-  ['peer account deletion', 'users/bob', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['account deletion', 'users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['removed from conversation', 'conversations/private', { type: 'dm', schoolId: 'pu', memberIds: ['bob', 'carol'] }],
-  ['duplicate members', 'conversations/private', { type: 'dm', schoolId: 'pu', memberIds: ['alice', 'alice'] }],
   ['viewer blocked peer', 'users/alice/blockedUsers/bob', {}],
   ['peer blocked viewer', 'users/bob/blockedUsers/alice', {}],
   ['friend block', 'friendBlocks/alice_bob', {}],
@@ -256,6 +250,34 @@ test('blocked members still cannot read or upload attachments', async () => {
     .rejects.toMatchObject({ code: 'permission-denied' });
   expect(file.getSignedUrl).not.toHaveBeenCalled();
   expect(file.generateSignedPostPolicyV4).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['peer deleted', { schoolId: 'pu', status: 'deleted' }],
+  ['peer disabled', { schoolId: 'pu', status: 'disabled' }],
+  ['peer missing', null],
+])('existing DM attachments still open when the peer is %s', async (_name, profile) => {
+  const { call, docs } = fixture();
+  if (profile == null) docs.delete('users/bob');
+  else docs.set('users/bob', profile);
+  await expect(call()).resolves.toHaveProperty('url');
+});
+
+test('two-person groups ignore DM block records for attachments', async () => {
+  const { call, docs, file } = fixture();
+  docs.set('conversations/pair-group', {
+    type: 'group',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
+  });
+  docs.set('users/alice/blockedUsers/bob', {});
+  docs.set('friendBlocks/bob_alice', {});
+  await expect(call({ conversationId: 'pair-group' })).resolves.toHaveProperty('url');
+  await expect(call({
+    action: 'upload', conversationId: 'pair-group', contentType: 'image/png', size: 1024,
+  })).resolves.toMatchObject({ method: 'POST' });
+  expect(file.getSignedUrl).toHaveBeenCalled();
+  expect(file.generateSignedPostPolicyV4).toHaveBeenCalled();
 });
 
 

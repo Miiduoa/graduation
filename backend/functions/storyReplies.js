@@ -74,7 +74,7 @@ function createReplyToCampusStory({ db }) {
     return db.runTransaction(async (tx) => {
       const [
         senderProfile,
-        authorProfile,
+        ,
         senderMembership,
         story,
         thread,
@@ -93,8 +93,7 @@ function createReplyToCampusStory({ db }) {
         friendBlocks.doc(`${authorUid}_${uid}`),
       );
       if (
-        !availableProfile(senderProfile) ||
-        !availableProfile(authorProfile) ||
+        (senderProfile.exists && isAccountUnavailable(senderProfile.data())) ||
         blocks.some((block) => block.exists)
       ) {
         throw unavailable();

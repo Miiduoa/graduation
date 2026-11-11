@@ -346,6 +346,55 @@ test('a direct-message block still allows a member to post in their shared group
   );
 });
 
+test('existing DMs still send when the peer profile is missing or disabled; two-person groups ignore blocks', async () => {
+  await handlers.sendText(request());
+  const alice = environment.authenticatedContext('alice').firestore();
+  await db.doc('users/bob').set({ status: 'disabled' });
+  await assertSucceeds(
+    alice.doc(`${messages.path}/peer-disabled`).set({
+      conversationId,
+      senderId: 'alice',
+      type: 'text',
+      content: '對方已停用',
+      readBy: ['alice'],
+    }),
+  );
+  await db.doc('users/bob').delete();
+  await assertSucceeds(
+    alice.doc(`${messages.path}/peer-missing`).set({
+      conversationId,
+      senderId: 'alice',
+      type: 'text',
+      content: '對方資料已不在',
+      readBy: ['alice'],
+    }),
+  );
+  await db.doc('users/bob/blockedUsers/alice').set({});
+  await db.doc('conversations/pair-group').set({
+    type: 'group',
+    schoolId: 'pu',
+    memberIds: ['alice', 'bob'],
+  });
+  await assertSucceeds(
+    alice.doc('conversations/pair-group/messages/pair-group-message').set({
+      conversationId: 'pair-group',
+      senderId: 'alice',
+      type: 'text',
+      content: '兩人群組',
+      readBy: ['alice'],
+    }),
+  );
+  await assertFails(
+    alice.doc(`${messages.path}/after-block`).set({
+      conversationId,
+      senderId: 'alice',
+      type: 'text',
+      content: '不該送出',
+      readBy: ['alice'],
+    }),
+  );
+});
+
 test('membership revoked after prepare or on a transaction retry prevents all first-message writes', async () => {
   await handlers.prepare(request());
   let attempts = 0;

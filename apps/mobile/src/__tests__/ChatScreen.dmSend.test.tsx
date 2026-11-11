@@ -982,11 +982,18 @@ test.each([false, true])('peer entry reads cached history after prepare fails wi
   await act(async () => emitMessages([
     { id: 'history', data: { senderId: 'bob', type: 'text', content: 'peer 離線歷史文字', readBy: [] } },
     { id: 'mine', data: { senderId: 'alice', type: 'text', content: 'peer 我的歷史文字', readBy: ['bob'] } },
+    { id: 'photo', data: { senderId: 'bob', type: 'image', attachmentPath: `conversations/${photoConvo}/photos/old/sent.jpg` } },
+    { id: 'file', data: { senderId: 'bob', type: 'file', fileName: '作業.pdf' } },
+    { id: 'system', data: { senderId: 'bob', type: 'system', content: '已加入對話' } },
     { id: 'pending', hasPendingWrites: true, data: { senderId: 'alice', content: 'peer 尚未確認的文字' } },
   ], true));
   expect(view.getByText('peer 離線歷史文字')).toBeTruthy();
   expect(view.getByText('peer 我的歷史文字')).toBeTruthy();
+  expect(view.getByText('照片')).toBeTruthy();
+  expect(view.getByText('作業.pdf')).toBeTruthy();
+  expect(view.getByText('已加入對話')).toBeTruthy();
   expect(view.queryByText('peer 尚未確認的文字')).toBeNull();
+  expect(Photos.openDmPhoto).not.toHaveBeenCalled();
   expect(view.queryByText('已送達')).toBeNull();
   expect(view.queryByText('已讀')).toBeNull();
   expect(updateDoc).not.toHaveBeenCalled();

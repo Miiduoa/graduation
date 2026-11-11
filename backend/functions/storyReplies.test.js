@@ -84,9 +84,7 @@ test('reuses the DM without resetting read state and never bumps the preview on 
 test.each([
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
   ['users/alice', { schoolId: 'pu', status: 'disabled' }],
-  ['users/bob', { schoolId: 'pu', status: 'suspended' }],
   ['users/alice', { schoolId: 'pu', status: 'inactive' }],
-  ['users/bob', { accountDeletionInProgress: true }],
   ['users/alice/blockedUsers/bob', {}],
   ['users/bob/blockedUsers/alice', {}],
   ['friendBlocks/alice_bob', {}],
@@ -105,6 +103,17 @@ test.each([
   store.docs.set(path, record);
   await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
   expect([...store.docs.keys()].some((key) => key.includes('/messages/'))).toBe(false);
+});
+
+test.each([
+  { status: 'suspended' },
+  { accountDeletionInProgress: true },
+  { status: 'deleted' },
+])('story replies do not require the author profile to stay available %j', async (profile) => {
+  store.docs.set('users/bob', { schoolId: 'pu', ...profile });
+  const receipt = await send();
+  expect(receipt.conversationId).toBe('dm_pu_alice_bob');
+  expect(store.docs.get(`${thread}/messages/${receipt.messageId}`).content).toBe('明天還有嗎？');
 });
 
 test.each([

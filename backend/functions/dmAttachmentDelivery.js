@@ -49,10 +49,6 @@ function conversationMembers(thread) {
     : null;
 }
 
-function availableAccount(snapshot) {
-  return snapshot.exists && !isAccountUnavailable(snapshot.data());
-}
-
 async function authorize(db, uid, conversationId) {
   const conversation = await db.collection('conversations').doc(conversationId).get();
   const thread = conversation.data();
@@ -64,23 +60,20 @@ async function authorize(db, uid, conversationId) {
   }
   const uniqueMembers = [...new Set(memberIds)];
   const isDirect = thread.type === 'dm' && uniqueMembers.length === 2 && memberIds.length === 2;
-  if (thread.type === 'dm' && !isDirect) throw forbidden();
-  const peerUid = isDirect ? uniqueMembers.find((id) => id !== uid) : null;
   const reads = [db.collection('users').doc(uid).get()];
+  const peerUid = isDirect ? uniqueMembers.find((id) => id !== uid) : null;
   if (peerUid) {
     reads.push(
-      db.collection('users').doc(peerUid).get(),
       db.collection('users').doc(uid).collection('blockedUsers').doc(peerUid).get(),
       db.collection('users').doc(peerUid).collection('blockedUsers').doc(uid).get(),
       db.collection('friendBlocks').doc(`${uid}_${peerUid}`).get(),
       db.collection('friendBlocks').doc(`${peerUid}_${uid}`).get(),
     );
   }
-  const [profileSnapshot, peerProfile, ...blocks] = await Promise.all(reads);
-  if (!availableAccount(profileSnapshot)) throw forbidden();
-  if (peerUid && (!availableAccount(peerProfile) || blocks.some((block) => block.exists))) {
-    throw forbidden();
-  }
+  const [profileSnapshot, ...blocks] = await Promise.all(reads);
+  // Caller status matches isSignedIn. Groups never consult block records.
+  if (profileSnapshot.exists && isAccountUnavailable(profileSnapshot.data())) throw forbidden();
+  if (blocks.some((block) => block.exists)) throw forbidden();
 }
 
 function attachmentPath(conversationId, folder, mediaId, fileName) {

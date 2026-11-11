@@ -97,9 +97,7 @@ test.each(
 
 test.each([
   ['users/alice', { status: 'disabled' }],
-  ['users/bob', { status: 'suspended', schoolId: '' }],
   ['users/alice', { accountDeletionInProgress: true }],
-  ['users/bob', { status: 'deleted' }],
   ['users/alice/blockedUsers/bob', {}],
   ['users/bob/blockedUsers/alice', {}],
   ['friendBlocks/alice_bob', {}],
@@ -124,6 +122,23 @@ test.each([
   await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
   expect(store.docs.get(thread)).toEqual(before);
   expect(store.docs.has(`${thread}/messages/next-text-message-000002`)).toBe(false);
+});
+
+test.each([
+  ['users/bob', { status: 'suspended', schoolId: '' }],
+  ['users/bob', { status: 'deleted' }],
+  ['users/bob', { accountDeletionInProgress: true }],
+])('peer account status does not block first or existing DM at %s', async (path, value) => {
+  store.docs.set('users/alice', {});
+  store.docs.set(path, value);
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: false });
+  expect(await send()).toEqual({ conversationId, messageId });
+  store.docs.set(path, value);
+  expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: true });
+  expect(await send({ messageId: 'next-text-message-000002' })).toEqual({
+    conversationId,
+    messageId: 'next-text-message-000002',
+  });
 });
 
 test.each([
@@ -173,12 +188,9 @@ test('a receipt replay preserves a later message and existing read state', async
 
 test.each([
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
-  ['users/bob', { schoolId: 'pu', status: 'deleted' }],
   ['users/alice', { schoolId: 'pu', status: 'disabled' }],
-  ['users/bob', { schoolId: 'pu', status: 'suspended' }],
   ['users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
-  ['users/bob', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['users/alice/blockedUsers/bob', {}],
   ['users/bob/blockedUsers/alice', {}],
   ['friendBlocks/alice_bob', {}],
@@ -249,13 +261,24 @@ test.each([
   });
 });
 
-test.each(['users/alice', 'users/bob', 'schools/pu/members/alice'])(
-  'refuses preparation and creation when %s is missing',
+test('refuses preparation and creation when the caller has no school membership', async () => {
+  store.docs.delete('schools/pu/members/alice');
+  await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
+  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(store.docs.has(thread)).toBe(false);
+});
+
+test.each(['users/alice', 'users/bob'])(
+  'first and existing DMs still send when %s is missing',
   async (path) => {
     store.docs.delete(path);
-    await expect(prepare()).rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
-    expect(store.docs.has(thread)).toBe(false);
+    expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: false });
+    expect(await send()).toEqual({ conversationId, messageId });
+    store.docs.delete(path);
+    expect(await send({ messageId: 'next-text-message-000002' })).toEqual({
+      conversationId,
+      messageId: 'next-text-message-000002',
+    });
   },
 );
 

@@ -1250,7 +1250,7 @@ describe('firestore security rules', () => {
   });
 
 
-  test('existing DM text cannot be sent when the peer account is unavailable', async () => {
+  test('existing chats still send when the peer profile is missing or unavailable', async () => {
     const path = 'conversations/dm_pu_alice_bob';
     const message = { senderId: 'alice', content: '還在嗎', type: 'text' };
     await seedFirestore(async (db) => {
@@ -1268,19 +1268,51 @@ describe('firestore security rules', () => {
       await seedFirestore(async (db) => {
         await db.doc('users/bob').set({ schoolId: 'pu', status });
       });
-      await assertFails(alice.doc(path + `/messages/blocked-${status}`).set({ ...message, content: status }));
-      await assertFails(alice.doc(`messages/root-blocked-${status}`).set({ ...rootMessage, text: status }));
+      await assertSucceeds(alice.doc(path + `/messages/peer-${status}`).set({ ...message, content: status }));
+      await assertSucceeds(alice.doc(`messages/root-peer-${status}`).set({ ...rootMessage, text: status }));
+      await assertSucceeds(alice.doc(path).update({ lastMessageText: status }));
     }
     await seedFirestore(async (db) => {
       await db.doc('users/bob').set({ schoolId: 'pu', accountDeletionInProgress: true });
     });
-    await assertFails(alice.doc(path + '/messages/blocked-deleting').set({ ...message, content: 'deleting' }));
-    await assertFails(alice.doc('messages/root-blocked-deleting').set({ ...rootMessage, text: 'deleting' }));
+    await assertSucceeds(alice.doc(path + '/messages/peer-deleting').set({ ...message, content: 'deleting' }));
+    await assertSucceeds(alice.doc('messages/root-peer-deleting').set({ ...rootMessage, text: 'deleting' }));
+    await seedFirestore(async (db) => db.doc('users/bob').delete());
+    await assertSucceeds(alice.doc(path + '/messages/peer-missing').set({ ...message, content: 'missing' }));
+    await assertSucceeds(alice.doc('messages/root-peer-missing').set({ ...rootMessage, text: 'missing' }));
+  });
+
+  test('DM block records deny existing 1:1 sends; two-person groups stay open', async () => {
+    const dm = 'conversations/dm_pu_alice_bob';
+    const pairGroup = 'conversations/pair-group';
+    const message = { senderId: 'alice', content: '還在嗎', type: 'text' };
     await seedFirestore(async (db) => {
+      await db.doc('users/alice').set({ schoolId: 'pu' });
       await db.doc('users/bob').set({ schoolId: 'pu' });
+      await db.doc(dm).set({ type: 'dm', schoolId: 'pu', memberIds: ['alice', 'bob'] });
+      await db.doc(pairGroup).set({ type: 'group', schoolId: 'pu', memberIds: ['alice', 'bob'] });
     });
-    await assertSucceeds(alice.doc(path + '/messages/restored').set({ ...message, content: 'restored' }));
-    await assertSucceeds(alice.doc('messages/root-restored').set({ ...rootMessage, text: 'restored' }));
+    const alice = testEnv.authenticatedContext('alice').firestore();
+    const rootDm = { conversationId: 'dm_pu_alice_bob', senderId: 'alice', text: 'hello' };
+    const rootGroup = { conversationId: 'pair-group', senderId: 'alice', text: 'group' };
+    await assertSucceeds(alice.doc(dm + '/messages/before').set(message));
+    await assertSucceeds(alice.doc(pairGroup + '/messages/before').set(message));
+    for (const blockPath of [
+      'users/alice/blockedUsers/bob',
+      'users/bob/blockedUsers/alice',
+      'friendBlocks/alice_bob',
+      'friendBlocks/bob_alice',
+    ]) {
+      await seedFirestore(async (db) => db.doc(blockPath).set({}));
+      await assertFails(alice.doc(dm + '/messages/blocked').set(message));
+      await assertFails(alice.doc('messages/root-blocked').set(rootDm));
+      await assertFails(alice.doc(dm).update({ lastMessageText: 'blocked' }));
+      await assertSucceeds(alice.doc(pairGroup + `/messages/open-${blockPath.replace(/\//g, '_')}`).set(message));
+      await assertSucceeds(alice.doc(`messages/root-group-${blockPath.replace(/\//g, '_')}`).set(rootGroup));
+      await assertSucceeds(alice.doc(pairGroup).update({ lastMessageText: 'group still open' }));
+      await seedFirestore(async (db) => db.doc(blockPath).delete());
+    }
+    await assertSucceeds(alice.doc(dm + '/messages/after-unblock').set(message));
   });
 
   for (const [label, profile, membership] of [
