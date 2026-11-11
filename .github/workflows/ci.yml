@@ -424,9 +424,7 @@ jobs:
 
       - name: Run Expo Doctor
         working-directory: apps/mobile
-        # Pin: unversioned `npx expo-doctor` pulled 1.21.7, which fails to
-        # resolve `@expo/env` and reds an otherwise healthy mobile build.
-        run: npx --yes expo-doctor@1.21.6
+        run: npx expo-doctor@1.21.5
 
       - name: Bundle mobile JavaScript
         working-directory: apps/mobile
