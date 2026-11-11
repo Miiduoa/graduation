@@ -60,6 +60,33 @@ test('only reads the selected account and campus copy, never a demo schedule', a
   expect(formatOnDeviceSchoolPrompt(result, null, '')).not.toContain('資料庫概論');
 });
 
+test('a restored invalid clock cannot crash the local prompt or expose private evidence', async () => {
+  jest.mocked(loadOfflinePersonalTimetable).mockResolvedValue(timetable as never);
+  const local = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'pu' });
+  const saved: CampusSenseSnapshot = {
+    userId: 'alice', schoolId: 'pu', checkedAt: new Date().toISOString(),
+    schedule: { status: 'available', count: 1 },
+    assignments: {
+      status: 'available', count: 1,
+      items: [{ title: 'Alice 私人作業', groupName: '資料庫', dueAt: null }],
+    },
+    announcements: { status: 'available', items: [] },
+  };
+  expect(formatOnDeviceSchoolPrompt(local, saved, 'alice')).toContain('資料庫概論');
+  for (const checkedAt of [
+    'not-a-date', '2026-02-30T10:00:00.000Z',
+    '2026-11-05T12:00:00', '2026-11-05T12:00:00.000+08:00',
+    null, undefined,
+  ]) {
+    const damaged = { ...local, checkedAt: checkedAt as string };
+    const prompt = formatOnDeviceSchoolPrompt(damaged, saved, 'alice');
+    expect(prompt).toContain('台灣當地時間：無法核對');
+    expect(prompt).toContain('目前沒有可確認的本機個人課表');
+    expect(prompt).not.toContain('資料庫概論');
+    expect(prompt).not.toContain('Alice 私人作業');
+  }
+});
+
 test('missing or invalid cached data does not become a fabricated timetable', async () => {
   jest.mocked(loadOfflinePersonalTimetable).mockRejectedValue(new Error('corrupt'));
   const result = await collectOnDeviceSchoolContext({ uid: 'alice', schoolId: 'nthu' });
