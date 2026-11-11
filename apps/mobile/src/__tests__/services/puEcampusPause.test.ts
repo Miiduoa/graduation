@@ -71,6 +71,7 @@ beforeEach(async () => {
     extra: {
       appEnv: 'production',
       release: { releasedSchoolIds: ['pu'], features: { enabled: true, sso: true } },
+      tronClassDataEnabled: true,
     },
   });
 });

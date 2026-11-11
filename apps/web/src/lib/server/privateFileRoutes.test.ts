@@ -76,7 +76,10 @@ function seedStore() {
       'schools/pu/members/stamped',
       { status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1' },
     ],
-    ['users/stamped', { displayName: 'stamped' }],
+    ['users/stamped', {
+      displayName: 'stamped', schoolId: 'pu',
+      primarySchoolId: 'pu', bindingGeneration: 'gen-1',
+    }],
   ]);
 }
 
@@ -158,6 +161,29 @@ it('rejects a non-member without disclosing whether the object exists', async ()
   });
 });
 
+it('signs only published post attachments for other group members', async () => {
+  const auth = { uid: 'alice' };
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  }, auth);
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'text')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: POST }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: POST }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(200);
+  store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(200);
+  const sibling = POST.replace('notes.pdf', 'draft.pdf');
+  const draft = await invoke(runtime, { action: 'upload', path: sibling, contentType: 'application/pdf', byteSize: 4 }, auth);
+  expect(draft.status).toBe(200);
+  expect(put(draft, 'text')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: sibling }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: sibling }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: sibling }, { uid: 'bob' })).status).toBe(403);
+  store.docs.set('schools/pu/members/bob', { status: 'inactive' });
+  expect((await invoke(runtime, { action: 'download', path: POST }, { uid: 'bob' })).status).toBe(403);
+});
+
 it('rejects an unstamped campus story reader (未蓋章)', async () => {
   expect(await invoke(runtime, { action: 'download', path: STORY })).toEqual({
     status: 403,
@@ -189,6 +215,36 @@ it('lets a stamped school member upload and download a draft story', async () =>
   expect((await invoke(runtime, { action: 'download', path: STORY }, { uid: 'stamped' })).status).toBe(200);
 });
 
+it('does not issue story signed URLs to a recreated profile with a stale school stamp', async () => {
+  const auth = { uid: 'stamped' };
+  const upload = await invoke(
+    runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 5 }, auth,
+  );
+  expect(upload.status).toBe(200);
+  expect(put(upload, 'photo')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: STORY }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(200);
+
+  store.docs.delete('users/stamped');
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+  store.docs.set('users/stamped', { displayName: 'self recreated' });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+  expect((await invoke(runtime, { action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 5 }, auth)).status).toBe(403);
+  store.docs.set('users/stamped', { schoolId: 'other', bindingGeneration: 'gen-1' });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+  store.docs.set('users/stamped', { schoolId: 'pu', bindingGeneration: 'new-generation' });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+
+  store.docs.set('users/stamped', {
+    schoolId: 'pu', primarySchoolId: 'pu', bindingGeneration: 'gen-1',
+  });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(200);
+  store.docs.set('schools/pu/members/stamped', {
+    status: 'inactive', profileBoundSchoolId: 'pu', profileBoundGeneration: 'gen-1',
+  });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(403);
+});
+
 it('uploads and downloads an assignment file for the owner', async () => {
   const upload = await invoke(runtime, {
     action: 'upload',
@@ -205,6 +261,11 @@ it('uploads and downloads an assignment file for the owner', async () => {
 
   const asBob = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' });
   expect(asBob.status).toBe(403);
+  // A finalized upload is not a submitted answer until a trusted receipt references it.
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(200);
+  store.docs.set('groups/course/assignments/work/submissions/alice', {
+    userId: 'alice', submittedAt: Date.now(), attachments: [{ url: ANSWER }],
+  });
   const asTeacher = await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' });
   expect(asTeacher.status).toBe(200);
   const teacherWrite = await invoke(
@@ -216,6 +277,19 @@ it('uploads and downloads an assignment file for the owner', async () => {
   const download = await invoke(runtime, { action: 'download', path: ANSWER });
   expect(download.status).toBe(200);
   expect(download.body.url).toContain('token=download-token');
+
+  // A second finalized file in the same submission directory remains a private
+  // draft: known path + teacher role must not be enough to sign its URL.
+  const draftPath = ANSWER.replace('answer.pdf', 'unsubmitted.pdf');
+  const draft = await invoke(runtime, {
+    action: 'upload', path: draftPath, contentType: 'application/pdf', byteSize: 8,
+  });
+  expect(draft.status).toBe(403); // Student submitted already; no new file may be uploaded.
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'bob' })).status).toBe(403);
+  store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(403);
+  store.docs.set('schools/pu/members/teacher', { status: 'active' });
+  expect((await invoke(runtime, { action: 'download', path: ANSWER }, { uid: 'teacher' })).status).toBe(200);
 });
 
 it('lets a manager replace a group cover and rejects a member write', async () => {
@@ -295,6 +369,80 @@ it.each([
   expect((await invoke(runtime, { action: 'download', path: ANSWER })).status).toBe(404);
   expect((await invoke(runtime, { action: 'finalize', path: ANSWER })).status).toBe(status);
   expect(memoryStorage.objects.has(ANSWER)).toBe(false);
+});
+
+it('withholds an upload URL when school access is revoked during provider signing', async () => {
+  const originalSign = runtime.storage.presignPut;
+  runtime.storage.presignPut = async (input) => {
+    const signed = await originalSign(input);
+    store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+    return signed;
+  };
+  const result = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  });
+  expect(result.status).toBe(403);
+  expect(JSON.stringify(result.body)).not.toContain('upload-token');
+});
+
+it('withholds a download URL when group access is revoked during provider signing', async () => {
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  });
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'text')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: POST })).status).toBe(200);
+  const originalSign = runtime.storage.presignGet;
+  runtime.storage.presignGet = async (input) => {
+    const signed = await originalSign(input);
+    store.docs.set('groups/course/members/alice', { status: 'inactive', role: 'member' });
+    return signed;
+  };
+  const result = await invoke(runtime, { action: 'download', path: POST });
+  expect(result.status).toBe(403);
+  expect(JSON.stringify(result.body)).not.toContain('download-token');
+});
+
+it('withholds a story URL when the published media changes during provider signing', async () => {
+  const auth = { uid: 'stamped' };
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: STORY, contentType: 'image/jpeg', byteSize: 5,
+  }, auth);
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'photo')).toBe(200);
+  expect((await invoke(runtime, { action: 'finalize', path: STORY }, auth)).status).toBe(200);
+  const story = {
+    schoolId: 'pu', authorUid: 'stamped', kind: 'image',
+    expiresAt: Date.now() + 600_000, mediaUrl: STORY,
+  };
+  store.docs.set('campusStories/story-1', story);
+  const originalSign = runtime.storage.presignGet;
+  runtime.storage.presignGet = async (input) => {
+    const signed = await originalSign(input);
+    store.docs.set('campusStories/story-1', {
+      ...story, mediaUrl: STORY.replace('/image', '/unpublished'),
+    });
+    return signed;
+  };
+  const result = await invoke(runtime, { action: 'download', path: STORY }, auth);
+  expect(result.status).toBe(403);
+  expect(JSON.stringify(result.body)).not.toContain('download-token');
+});
+
+it('refuses finalize when school access is revoked during object metadata lookup', async () => {
+  const uploaded = await invoke(runtime, {
+    action: 'upload', path: POST, contentType: 'application/pdf', byteSize: 4,
+  });
+  expect(uploaded.status).toBe(200);
+  expect(put(uploaded, 'text')).toBe(200);
+  const originalHead = runtime.storage.head;
+  runtime.storage.head = async (key) => {
+    const object = await originalHead(key);
+    store.docs.set('schools/pu/members/alice', { status: 'inactive' });
+    return object;
+  };
+  expect((await invoke(runtime, { action: 'finalize', path: POST })).status).toBe(403);
+  expect(memoryStorage.objects.has(POST)).toBe(true);
 });
 
 it('rechecks current authorization before finalize and does not delete another user file', async () => {
@@ -386,6 +534,37 @@ it('confirms only the original claimed story object after publication while uplo
   expect((await invoke(runtime, { action: 'claim', path: STORY }, { uid: 'bob' })).status).toBe(403);
   store.docs.set('campusStories/story-1', { schoolId: 'pu', authorUid: 'stamped', mediaUrl: STORY.replace('story-1', 'other') });
   expect((await invoke(runtime, { action: 'claim', path: STORY }, auth)).status).toBe(403);
+});
+
+it('never signs a finalized sibling story object that the published story does not reference', async () => {
+  const auth = { uid: 'stamped' };
+  const unused = STORY.replace('/image', '/unpublished.jpg');
+  for (const path of [STORY, unused]) {
+    const ticket = await invoke(
+      runtime, { action: 'upload', path, contentType: 'image/jpeg', byteSize: 5 }, auth,
+    );
+    expect(ticket.status).toBe(200);
+    expect(put(ticket, 'photo')).toBe(200);
+    expect((await invoke(runtime, { action: 'finalize', path }, auth)).status).toBe(200);
+  }
+
+  // Two objects have the same author, school and story ID. Only the referenced
+  // one may be newly signed after publication (including for the author).
+  store.docs.set('campusStories/story-1', {
+    schoolId: 'pu', authorUid: 'stamped', kind: 'image',
+    expiresAt: Date.now() + 600_000, mediaUrl: STORY,
+  });
+  expect((await invoke(runtime, { action: 'download', path: STORY }, auth)).status).toBe(200);
+  expect((await invoke(runtime, { action: 'download', path: unused }, auth)).status).toBe(403);
+  // Replaying the same path must not issue a URL to a different campus member.
+  store.docs.set('users/bob', {
+    schoolId: 'pu', bindingGeneration: 'bob-generation',
+  });
+  store.docs.set('schools/pu/members/bob', {
+    status: 'active', profileBoundSchoolId: 'pu', profileBoundGeneration: 'bob-generation',
+  });
+  expect((await invoke(runtime, { action: 'download', path: unused }, { uid: 'bob' })).status).toBe(403);
+  expect((await invoke(runtime, { action: 'download', path: STORY }, { uid: 'bob' })).status).toBe(200);
 });
 
 it('keeps a released cover downloadable while the group still references it', async () => {

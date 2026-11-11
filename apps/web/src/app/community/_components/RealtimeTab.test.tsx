@@ -5,6 +5,7 @@ import { RealtimeTab } from './RealtimeTab';
 const mocks = vi.hoisted(() => ({
   auth: { user: { uid: 'student' } },
   peers: vi.fn(),
+  groupStories: vi.fn(),
   checkIn: vi.fn(),
   clear: vi.fn(),
 }));
@@ -23,11 +24,12 @@ vi.mock('@/lib/community/firestore', () => ({
   clearPresence: mocks.clear,
   peersAtPoi: mocks.peers,
   listActiveStoriesForSchool: vi.fn().mockResolvedValue([]),
-  groupStoriesByAuthor: () => [],
+  groupStoriesByAuthor: mocks.groupStories,
   fetchSchoolDirectoryProfiles: (_school: string, uids: string[]) => Promise.resolve(uids.map((uid) => ({ uid, displayName: uid }))),
   markStoryViewed: vi.fn(),
 }));
 beforeEach(() => {
+  mocks.groupStories.mockReset().mockReturnValue([]);
   mocks.peers.mockReset().mockResolvedValue([]);
   mocks.checkIn.mockReset().mockResolvedValue('session');
   mocks.clear.mockReset().mockResolvedValue(undefined);
@@ -60,4 +62,17 @@ it('does not show a delayed peer response from the previously selected location'
   await act(async () => finishLibrary([{ uid: '圖書館同學' }]));
   expect(screen.queryByText('圖書館同學')).toBeNull();
   expect(screen.getByText('教室同學')).toBeTruthy();
+});
+
+it('labels the newest story as a video without mounting a player in the grid', async () => {
+  mocks.groupStories.mockReturnValue([{
+    authorUid: '阿杰', latestAt: Date.now(), stories: [{
+      id: 'club-clip', schoolId: 'pu', authorUid: '阿杰', kind: 'video',
+      text: '校隊今天練這一球', mediaUrl: '/practice.mp4', expiresAt: Date.now() + 60_000,
+    }],
+  }]);
+  const { container } = render(<RealtimeTab schoolId="pu" />);
+  const card = await screen.findByRole('button', { name: '查看 阿杰 的限時動態，最新一則是影片' });
+  expect(card.textContent).toContain('校隊今天練這一球');
+  expect(container.querySelector('video')).toBeNull();
 });

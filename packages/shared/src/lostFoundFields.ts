@@ -25,7 +25,8 @@ export function isLostFoundWriteFields(value: unknown): value is LostFoundWriteF
 // Drafts and server records also carry metadata. Persist only the editable fields.
 export function pickLostFoundFields(source: LostFoundWriteFields): LostFoundWriteFields {
   const { type, title, description, category, location, date, contactInfo } = source;
-  return { type, title, description, category, location, date, contactInfo };
+  return { type, title, description, category, location, date,
+    ...(contactInfo === undefined ? {} : { contactInfo }) };
 }
 
 export function newLostFoundFields(

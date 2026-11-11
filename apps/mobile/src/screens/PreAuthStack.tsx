@@ -18,6 +18,7 @@ import PersonalCalendarScreen from './PersonalCalendarScreen';
 import { CourseCatalogScreen } from './CourseCatalogScreen';
 import { HealthScreen } from './HealthScreen';
 import { DormitoryScreen } from './DormitoryScreen';
+import { PlatformLostFoundScreen } from './PlatformLostFoundScreen';
 import { UnavailableFeatureScreen, type ServiceScreenProps } from './UnavailableFeatureScreen';
 import type { PreAuthStackParamList } from './preAuthTypes';
 import { createStackScreenOptions } from '../ui/navigationTheme';
@@ -88,6 +89,7 @@ export function PreAuthStack() {
       <Stack.Screen name="Map" component={GoogleMapsLikeScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Library" component={LibraryAiFirstScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LibraryCatalog" component={LibraryCatalogScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="StudentCard" getComponent={() => require('./StudentCardScreen').default} options={{ title: '數位學生證' }} />
       <Stack.Screen name="SchoolInfo" component={SchoolInfoScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="BusSchedule"
@@ -124,6 +126,7 @@ export function PreAuthStack() {
         component={PublicCareerScreen}
         options={{ headerShown: false, title: '職涯' }}
       />
+      <Stack.Screen name="PlatformLostFound" component={PlatformLostFoundScreen} options={{ title: '失物招領' }} />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="NuniTimetableAssistant"

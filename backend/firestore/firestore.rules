@@ -98,6 +98,63 @@ service cloud.firestore {
         && (!('orderingUrl' in request.resource.data) || isOptionalStorefrontUrl(request.resource.data.orderingUrl));
     }
 
+    function creatorCardValid(schoolId, uid) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'updatedAt'])
+        && data.keys().hasOnly(['schoolId', 'ownerUid', 'headline', 'bio', 'linkUrl', 'pinnedPostId', 'updatedAt'])
+        && data.schoolId == schoolId
+        && data.ownerUid == uid
+        && (
+          data.get('pinnedPostId', '') == ''
+          || (
+            data.get('pinnedPostId', '') is string
+            && data.get('pinnedPostId', '').size() <= 128
+            && data.get('pinnedPostId', '').matches('^[A-Za-z0-9_-]{1,128}$')
+          )
+        )
+        && data.headline is string
+        && data.headline.size() <= 64
+        && data.bio is string
+        && data.bio.size() <= 220
+        && data.linkUrl is string
+        && data.linkUrl.size() <= 512
+        && (data.linkUrl == '' || isHttpsStorefrontUrl(data.linkUrl))
+        && data.updatedAt == request.time;
+    }
+
+    function creatorPinTargetValid(schoolId, uid, postId) {
+      return postId == ''
+        || (
+          postId is string
+          && postId.size() <= 128
+          && postId.matches('^[A-Za-z0-9_-]{1,128}$')
+          && exists(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId))
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('authorUid', '') == uid
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('anonymous', true) == false
+          && get(/databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId)).data.get('schoolId', '') == schoolId
+        );
+    }
+
+    function creatorHighlightPostSigned(schoolId, uid, postId) {
+      let postPath = /databases/$(database)/documents/schools/$(schoolId)/campusPosts/$(postId);
+      return postId is string
+        && postId.matches('^[A-Za-z0-9_-]{1,128}$')
+        && exists(postPath)
+        && get(postPath).data.get('schoolId', '') == schoolId
+        && get(postPath).data.get('authorUid', '') == uid
+        && get(postPath).data.get('anonymous', true) == false;
+    }
+
+    function creatorHighlightValid(schoolId, uid) {
+      let data = request.resource.data;
+      return data.keys().hasAll(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
+        && data.keys().hasOnly(['schoolId', 'ownerUid', 'postId', 'updatedAt'])
+        && data.schoolId == schoolId
+        && data.ownerUid == uid
+        && data.updatedAt == request.time
+        && creatorHighlightPostSigned(schoolId, uid, data.postId);
+    }
+
     function isActiveGroupMember(groupId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
@@ -113,6 +170,15 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
           || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
         );
+    }
+
+    // An active old-school membership alone must not permit access after transfer.
+    function isCurrentSchoolMember(schoolId) {
+      return schoolId is string
+        && schoolId.size() > 0
+        && isSchoolMember(schoolId)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('schoolId', '') == schoolId;
     }
 
     function isConversationMember(conversationId) {
@@ -428,6 +494,43 @@ service cloud.firestore {
       match /directory/{uid} {
         allow read: if isSchoolMember(schoolId);
         allow write: if false;
+      }
+
+      // Creator cards contain only explicitly published social fields.
+      // Private account and directory fields are never copied into this document.
+      match /creatorProfiles/{uid} {
+        allow get: if isSchoolMember(schoolId);
+        allow list: if false;
+        allow create: if isSelf(uid) && isSchoolMember(schoolId)
+          && creatorCardValid(schoolId, uid)
+          && creatorPinTargetValid(schoolId, uid, request.resource.data.get('pinnedPostId', ''));
+        allow update: if isSelf(uid) && isSchoolMember(schoolId)
+          && resource.data.get('schoolId', '') == schoolId
+          && resource.data.get('ownerUid', '') == uid
+          && creatorCardValid(schoolId, uid)
+          && (
+            request.resource.data.get('pinnedPostId', '') == resource.data.get('pinnedPostId', '')
+            || creatorPinTargetValid(schoolId, uid, request.resource.data.get('pinnedPostId', ''))
+          );
+        // The owner may withdraw an already-published card after losing school membership.
+        allow delete: if isSelf(uid);
+      }
+
+      // Only a member's own signed post can be featured. Owners may unfeature after revocation.
+      match /creatorHighlights/{uid} {
+        allow get: if isSelf(uid)
+          || (isSchoolMember(schoolId) && (
+            resource == null
+            || creatorHighlightPostSigned(schoolId, uid, resource.data.get('postId', ''))
+          ));
+        allow list: if false;
+        allow create: if isSelf(uid) && isSchoolMember(schoolId)
+          && creatorHighlightValid(schoolId, uid);
+        allow update: if isSelf(uid) && isSchoolMember(schoolId)
+          && resource.data.get('schoolId', '') == schoolId
+          && resource.data.get('ownerUid', '') == uid
+          && creatorHighlightValid(schoolId, uid);
+        allow delete: if isSelf(uid);
       }
 
       match /members/{uid} {
@@ -1804,26 +1907,34 @@ service cloud.firestore {
         && isCanonicalStoryMember(resource.data.schoolId);
       allow update: if false;
 
+      function story() {
+        return get(/databases/$(database)/documents/campusStories/$(storyId)).data;
+      }
+      function canAccessReceipts() {
+        let parent = story();
+        return isCurrentSchoolMember(parent.schoolId)
+          && parent.expiresAt is int && parent.expiresAt > request.time.toMillis();
+      }
+      function validOwnReceipt(viewerUid) {
+        return request.auth.uid == viewerUid
+          && request.resource.data.keys().hasOnly(['viewerUid', 'viewedAt'])
+          && request.resource.data.viewerUid == viewerUid
+          && request.resource.data.viewedAt == request.time;
+      }
+
+      // Old receipts lack author/school provenance. A reused story ID must never expose them.
       match /storyViews/{viewerUid} {
-        function activeParentStory() {
-          let story = get(/databases/$(database)/documents/campusStories/$(storyId)).data;
-          return story.expiresAt is int
-            && story.expiresAt > request.time.toMillis()
-            && isCanonicalStoryMember(story.schoolId);
+        allow get: if canAccessReceipts() && request.auth.uid == viewerUid;
+        allow create: if canAccessReceipts() && validOwnReceipt(viewerUid);
+      }
+
+      match /schools/{schoolId}/authors/{authorUid}/views/{viewerUid} {
+        function currentAudience() {
+          return canAccessReceipts() && story().schoolId == schoolId && story().authorUid == authorUid;
         }
-        // Watching a story is personal activity: only that viewer and the
-        // story's author may read a viewer receipt. Lists are author-only.
-        function isParentStoryAuthor() {
-          return get(/databases/$(database)/documents/campusStories/$(storyId)).data.authorUid == request.auth.uid;
-        }
-        allow get: if isSignedIn()
-          && activeParentStory()
-          && (viewerUid == request.auth.uid || isParentStoryAuthor());
-        allow list: if isSignedIn() && activeParentStory() && isParentStoryAuthor();
-        allow create: if isSignedIn()
-          && viewerUid == request.auth.uid
-          && activeParentStory();
-        allow delete, update: if false;
+        allow get: if currentAudience() && (request.auth.uid == viewerUid || request.auth.uid == authorUid);
+        allow list: if currentAudience() && request.auth.uid == authorUid;
+        allow create: if currentAudience() && viewerUid != authorUid && validOwnReceipt(viewerUid);
       }
     }
 

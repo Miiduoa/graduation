@@ -10,6 +10,7 @@ import {
 } from 'next/experimental/testing/server';
 import { prepareDestination } from 'next/dist/shared/lib/router/utils/prepare-destination';
 import { proxy } from '../proxy';
+import nextConfig from '../../next.config';
 import { LOGIN_COOKIE, sealCookie } from './nuni/server';
 import {
   ACCOUNT_ENTRY_PATH,
@@ -160,7 +161,8 @@ describe('legacy route configuration', () => {
 
   it.each([
     '/auth/account/token',
-    '/auth/account/callback',
+    '/auth/callback',
+    '/auth/platform/callback',
     '/auth/platform/token',
     '/auth/platform/providers',
     '/_next/static/chunks/old-hash.js',
@@ -181,6 +183,23 @@ describe('legacy route configuration', () => {
       expectMatchedRewrite(fallback, path);
     },
   );
+
+  it('keeps the school authorization code out of referrers and cached responses', async () => {
+    const response = await unstable_getResponseFromNextConfig({
+      url: 'https://nuni.tw/auth/account/callback?code=once&state=opaque',
+      nextConfig: { headers: nextConfig.headers },
+    });
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(response.headers.get('cache-control')).toContain('no-store');
+  });
+
+  it('keeps the school callback on the local page, including provider error returns', async () => {
+    for (const search of ['?code=test-code&state=test-state', '?error=access_denied&state=test-state']) {
+      const response = await responseFor('/auth/account/callback', search);
+      expect(getRewrittenUrl(response)).toBeNull();
+      expect(redirectLocation(response)).toBeNull();
+    }
+  });
 
   it('does not allow a query parameter to change the fixed loopback destination', async () => {
     const response = await responseFor(

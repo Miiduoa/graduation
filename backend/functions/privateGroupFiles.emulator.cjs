@@ -100,8 +100,13 @@ beforeEach(async () => {
   assignmentId = `work-${caseNumber}`;
   await db.doc(`groups/${groupId}`).set({ schoolId: 'pu', type: 'course' });
   await db.doc(`assignments/${assignmentId}`).set({ groupId });
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}`).set({ published: true });
   // 下載貼文附件需要貼文仍存在。
-  await db.doc(`groups/${groupId}/posts/one`).set({ authorId: 'alice' });
+  await db.doc(`groups/${groupId}/posts/one`).set({
+    authorId: 'alice',
+    // The normal shared download must reference the published attachment.
+    attachments: [`groups/${groupId}/posts/one/notes.pdf`],
+  });
   for (const uid of ['alice', 'bob', 'teacher']) {
     await db.doc(`users/${uid}`).set({ displayName: uid });
     await db.doc(`schools/pu/members/${uid}`).set({ status: 'active' });
@@ -125,6 +130,13 @@ test('active HTTP reads work, direct SDK access is denied, and canonical school 
   for (const [kind, objectPath] of Object.entries(paths())) {
     const upload = await request('POST', objectPath, kind === 'cover' ? 'teacher' : 'alice');
     assert.equal(upload.status, 201, upload.body);
+    // A submitted receipt must be created after the file is uploaded;
+    // otherwise a correct immutable-write rule would reject this setup.
+    if (kind === 'answer') {
+      await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+        userId: 'alice', submittedAt: '2026-11-06T00:00:00.000Z', attachments: [objectPath],
+      });
+    }
     for (const uid of ['alice', 'teacher']) {
       const result = await request('GET', objectPath, uid);
       assert.equal(result.status, 200, result.body);
@@ -149,19 +161,45 @@ test('active HTTP reads work, direct SDK access is denied, and canonical school 
   }
 });
 
-test('HTTP submission privacy, new filenames and manager cover updates remain supported', { timeout: 30_000 }, async () => {
+test('post draft sibling stays private to its author until explicitly attached', { timeout: 30_000 }, async () => {
+  const published = paths().post;
+  const draft = published.replace('notes.pdf', 'draft.pdf');
+  assert.equal((await request('POST', published, 'alice')).status, 201);
+  assert.equal((await request('POST', draft, 'alice')).status, 201);
+  // Members (including instructors) can read only the referenced publication.
+  assert.equal((await request('GET', published, 'teacher')).status, 200);
+  assert.equal((await request('GET', published, 'bob')).status, 200);
+  assert.equal((await request('GET', draft, 'teacher')).status, 403);
+  assert.equal((await request('GET', draft, 'bob')).status, 403);
+  // The owner may preview an unreferenced upload; removing a publication closes access.
+  assert.equal((await request('GET', draft, 'alice')).status, 200);
+  await db.doc(`groups/${groupId}/posts/one`).update({ attachments: [] });
+  assert.equal((await request('GET', published, 'teacher')).status, 403);
+  assert.equal((await request('GET', published, 'alice')).status, 200);
+  await db.doc(`groups/${groupId}/posts/one`).update({ attachments: [published] });
+  assert.equal((await request('GET', published, 'teacher')).status, 200);
+  // Revocation still overrides the attachment reference.
+  await db.doc('schools/pu/members/teacher').update({ status: 'inactive' });
+  assert.equal((await request('GET', published, 'teacher')).status, 403);
+});
+
+test('HTTP submission privacy, pre-submit new filenames and manager cover updates remain supported', { timeout: 30_000 }, async () => {
+  const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
   for (const status of ['submitted', 'graded']) {
+    await receipt.delete(); // Synthetic new attempt; prior submitted receipt is immutable.
     const objectPath = paths().answer.replace('answer.pdf', `${status}.pdf`);
     assert.equal((await request('POST', objectPath)).status, 201);
-    await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    assert.equal((await request('POST', objectPath.replace('.pdf', '-new.pdf'))).status, 201);
+    await receipt.set({
       userId: 'alice', groupId, assignmentId, status,
       submittedAt: '2026-11-06T00:00:00.000Z',
+      attachments: [objectPath],
       ...(status === 'graded' ? { gradeScore: 90 } : {}),
     });
     assert.equal((await request('GET', objectPath)).body, 'original');
     assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
     assert.equal((await request('GET', objectPath, 'bob')).status, 403);
-    assert.equal((await request('POST', objectPath.replace('.pdf', '-new.pdf'))).status, 201);
+    assert.equal((await request('POST', objectPath.replace('.pdf', '-late.pdf'))).status, 403);
   }
   assert.equal((await request('POST', paths().cover, 'teacher')).status, 201);
   assert.equal((await request('POST', paths().cover, 'alice', 'forged cover')).status, 403);
@@ -171,6 +209,37 @@ test('HTTP submission privacy, new filenames and manager cover updates remain su
 
 // firebase-tools 15.34.1 ignores GCS generation preconditions. Atomic overwrite/race
 // behavior requires real Cloud Storage staging. Unit tests verify SDK query serialization.
+test('legacy assignment HTTP upload obeys closed status and submitted receipt', { timeout: 30_000 }, async () => {
+  const canonical = db.doc(`groups/${groupId}/assignments/${assignmentId}`);
+  const path = paths().answer.replace('answer.pdf', 'after-close.pdf');
+  await canonical.update({ published: false });
+  assert.equal((await request('POST', path, 'alice')).status, 403);
+  await canonical.update({ published: true, status: 'closed' });
+  assert.equal((await request('POST', path, 'alice')).status, 403);
+  await canonical.update({ status: 'open' });
+  assert.equal((await request('POST', path, 'alice')).status, 201);
+  await db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`).set({
+    userId: 'alice', submittedAt: '2026-11-10T00:00:00.000Z', attachments: [path],
+  });
+  assert.equal((await request('POST', path.replace('.pdf', '-new.pdf'), 'alice')).status, 403);
+});
+
+test('legacy assignment upload is not visible to the instructor before submission', { timeout: 30_000 }, async () => {
+  const objectPath = paths().answer;
+  assert.equal((await request('POST', objectPath, 'alice')).status, 201);
+  assert.equal((await request('GET', objectPath, 'alice')).status, 200);
+  // No attachments list yet: managers keep previous read access.
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  const receipt = db.doc(`groups/${groupId}/assignments/${assignmentId}/submissions/alice`);
+  await receipt.set({ userId: 'alice', submittedAt: Date.now(), attachments: [objectPath] });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 200);
+  await receipt.update({ attachments: [] });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+  await receipt.update({ attachments: [objectPath] });
+  await db.doc('schools/pu/members/teacher').update({ status: 'inactive' });
+  assert.equal((await request('GET', objectPath, 'teacher')).status, 403);
+});
+
 test('direct Storage clients cannot list private objects or alter their metadata', { timeout: 30_000 }, async () => {
   const objectPath = paths().post;
   assert.equal((await request('POST', objectPath)).status, 201);
