@@ -601,3 +601,16 @@ test('a thrown community navigation keeps native history open for a retry', asyn
   expect(view.getByLabelText('記得的標題開頭').props.value).toBe('二手書');
   expect(view.getByLabelText('回到上次閱讀位置')).toBeTruthy();
 });
+
+
+test('warns before searching an overlong native title, but accepts 80 Unicode code points', async () => {
+  const view = panel();
+  const field = view.getByLabelText('記得的標題開頭');
+  fireEvent.changeText(field, 'a'.repeat(81));
+  expect(view.getByText('標題開頭最多 80 字，請刪減後搜尋。')).toBeTruthy();
+  expect(search).not.toHaveBeenCalled();
+  fireEvent.changeText(field, '😀'.repeat(80));
+  expect(view.queryByText('標題開頭最多 80 字，請刪減後搜尋。')).toBeNull();
+  fireEvent.press(view.getByLabelText('搜尋歷史標題'));
+  await waitFor(() => expect(search).toHaveBeenCalledWith('pu', '😀'.repeat(80), null));
+});

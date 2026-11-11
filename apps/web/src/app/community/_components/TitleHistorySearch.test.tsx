@@ -548,3 +548,18 @@ it('times out reading-position lookup without replaying a cached article or losi
     expect(screen.getByRole('link', { name: '二手書 old-1001' })).toBeTruthy();
   } finally { vi.useRealTimers(); }
 });
+
+
+it('warns immediately about an overlong Web title but accepts 80 Unicode code points', async () => {
+  render(<TitleHistorySearch schoolId="pu" />);
+  const field = screen.getByRole('searchbox');
+  fireEvent.change(field, { target: { value: 'a'.repeat(81) } });
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  expect(screen.getByText('標題開頭最多 80 字，請刪減後搜尋。')).toBeTruthy();
+  expect(mocks.search).not.toHaveBeenCalled();
+  fireEvent.change(field, { target: { value: '😀'.repeat(80) } });
+  expect(field.getAttribute('aria-invalid')).toBe('false');
+  expect(screen.queryByText('標題開頭最多 80 字，請刪減後搜尋。')).toBeNull();
+  fireEvent.submit(field.closest('form')!);
+  await waitFor(() => expect(mocks.search).toHaveBeenCalledWith('pu', '😀'.repeat(80), null));
+});
