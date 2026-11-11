@@ -25,6 +25,7 @@ describe('public Providence building geometry route', () => {
   it('queries only a fixed set of OSM building ways and caches the inspected outlines', async () => {
     const mockedFetch = vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       headers: { get: () => null },
       text: async () => osmPayload,
     });
@@ -79,6 +80,55 @@ describe('public Providence building geometry route', () => {
     // requests while the existing error cooldown remains active.
     expect((await GET()).status).toBe(503);
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([206, 203])('rejects an upstream HTTP %i even when its JSON body is valid', async (status) => {
+    // Fetch Response.ok is true for every 2xx. A proxy's partial (206) or
+    // transformed (203) response is not a complete OSM source snapshot.
+    const upstream = vi.fn().mockImplementation(async () =>
+      new Response(osmPayload, { status }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+
+    const first = await GET();
+    expect(first.status).toBe(503);
+    expect(first.headers.get('Cache-Control')).toBe('no-store');
+    expect(first.headers.get('Retry-After')).toBeTruthy();
+    expect((await first.json()).error).toMatch(/temporarily unavailable/);
+    // A syntactically valid partial JSON response must not be cached as a
+    // verified building, and cooldown must avoid repeated public API calls.
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains a dated stale snapshot instead of replacing it with HTTP 206 geometry', async () => {
+    const originalTime = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(originalTime);
+    try {
+      const upstream = vi.fn()
+        .mockImplementationOnce(async () => new Response(osmPayload, { status: 200 }))
+        .mockImplementationOnce(async () => new Response(osmPayload, { status: 206 }));
+      vi.stubGlobal('fetch', upstream);
+      const { GET } = await import('./route');
+      const first = await GET();
+      expect(first.status).toBe(200);
+      const trusted = await first.json();
+
+      clock.mockReturnValue(originalTime + 25 * 60 * 60 * 1000);
+      const fallback = await GET();
+      expect(fallback.status).toBe(200);
+      expect(fallback.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(await fallback.json()).toMatchObject({
+        stale: true, fetchedAt: trusted.fetchedAt, buildings: trusted.buildings,
+      });
+      expect(upstream).toHaveBeenCalledTimes(2);
+      // The rejected partial response neither refreshes TTL nor causes a
+      // retry loop while the upstream is within its error cooldown.
+      expect((await GET()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('limits shared-cache freshness to the remaining lifetime of the 24-hour OSM snapshot', async () => {
@@ -588,6 +638,7 @@ describe('public Providence building geometry route', () => {
     const text = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
+      status: 200,
       headers: { get: () => null },
       body,
       text,
@@ -917,7 +968,8 @@ describe('public Providence building geometry route', () => {
 
   it('returns a dated stale snapshot if the upstream later goes away', async () => {
     const firstFetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, headers: { get: () => null }, text: async () => osmPayload })
+      .mockResolvedValueOnce({ ok: true,
+      status: 200, headers: { get: () => null }, text: async () => osmPayload })
       .mockRejectedValueOnce(new Error('upstream down'));
     vi.stubGlobal('fetch', firstFetch);
     const { GET } = await import('./route');
