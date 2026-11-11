@@ -505,3 +505,45 @@ it('still recognizes indented closing HTML tags inside real HTML blocks', () => 
     }]);
   }
 });
+
+it('shows the visible table after preformatted HTML teaching code mentions nested tags', () => {
+  const content = [
+    '<pre class="lesson">',
+    'HTML 教學的字面範例：<code> 與 <pre> 標記',
+    '| 範例科目 | 假學分 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    '</pre>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 7,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('omits hidden HTML template and noscript samples while keeping the following real table', () => {
+  const content = [
+    '<template id="unpublished">',
+    '| 未公開成績 | 分數 |',
+    '| --- | --- |',
+    '| 範例 | 999 |',
+    '</template>',
+    '<noscript>',
+    '| 備用頁面 | 分數 |',
+    '| --- | --- |',
+    '| 範例 | 888 |',
+    '</noscript>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 11,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});

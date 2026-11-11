@@ -18,7 +18,7 @@ function parseSimplePipeRow(line: string): string[] | null {
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
   // Raw HTML code elements are not Markdown table cell content.
-  if (/<\/?(?:pre|code|script|style|textarea)\b/iu.test(trimmed)) return null;
+  if (/<\/?(?:pre|code|script|style|textarea|template|noscript)\b/iu.test(trimmed)) return null;
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
   if (!trimmed.includes('|') || trimmed.includes('\\|') ||
@@ -95,7 +95,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {
+    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript)\b[^>]*>/giu)) {
       const token = match[0];
       if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
@@ -115,9 +115,13 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       }
       const tag = match[1]?.toLowerCase();
       if (!tag) continue;
-      if (token.startsWith('</')) {
-        if (htmlCodeBlocks[htmlCodeBlocks.length - 1] === tag) htmlCodeBlocks.pop();
-      } else if (!/\/>$/u.test(token)) {
+      // Once inside a raw HTML element, tag-looking text in teaching
+      // examples does not open another block. Wait for that element's
+      // own closing tag so a later published table is not swallowed.
+      if (htmlCodeBlocks.length > 0) {
+        if (token.startsWith('</') && htmlCodeBlocks[htmlCodeBlocks.length - 1] === tag)
+          htmlCodeBlocks.pop();
+      } else if (!token.startsWith('</') && !/\/>$/u.test(token)) {
         htmlCodeBlocks.push(tag);
       }
       hiddenLine = true;
