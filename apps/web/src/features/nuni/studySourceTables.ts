@@ -20,7 +20,8 @@ function parseSimplePipeRow(line: string): string[] | null {
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
   if (!trimmed.includes('|') || trimmed.includes('\\|') ||
-      trimmed.includes(String.fromCharCode(96))) return null;
+      trimmed.includes(String.fromCharCode(96)) ||
+      trimmed.includes('<!--') || trimmed.includes('-->')) return null;
   const body = trimmed.replace(/^\|/u, '').replace(/\|$/u, '');
   const cells = body.split('|').map((cell) => cell.trim());
   return cells.length >= 2 && cells.length <= MAX_COLUMNS ? cells : null;
@@ -45,9 +46,24 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
   const lines = source.split(/\r?\n/u);
   const tables: StudySourceTable[] = [];
   let fence: { character: string; length: number } | null = null;
+  let inHtmlComment = false;
 
   for (let index = 0; index < lines.length - 2 && tables.length < MAX_TABLES; index += 1) {
-    const marker = fenceMarker(lines[index]);
+    const line = lines[index];
+    // Markdown HTML comments can contain convincing example tables that
+    // students must not mistake for visible source data. Never interpret a
+    // comment marker inside a fenced code example as an actual comment.
+    if (!fence) {
+      if (inHtmlComment) {
+        if (line.includes('-->')) inHtmlComment = false;
+        continue;
+      }
+      if (line.includes('<!--')) {
+        if (line.lastIndexOf('-->') < line.lastIndexOf('<!--')) inHtmlComment = true;
+        continue;
+      }
+    }
+    const marker = fenceMarker(line);
     if (marker) {
       if (fence === null) fence = marker;
       else if (fence.character === marker.character && marker.length >= fence.length && !marker.suffix.trim()) fence = null;

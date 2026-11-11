@@ -179,3 +179,53 @@ it('does not treat a tab-indented code marker as a new fenced block', () => {
     rows: [['資料庫', '3']],
   }]);
 });
+
+it('omits tables hidden inside Markdown HTML comments without losing visible material afterward', () => {
+  const content = [
+    '<!-- 以下資料僅供教師備註',
+    '| 模擬科目 | 模擬分數 |',
+    '| --- | --- |',
+    '| 尚未發布 | 999 |',
+    '-->',
+    '| 公開教材 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\\n');
+  const tables = extractStudySourceTables(content);
+  expect(tables).toEqual([{
+    startLine: 6,
+    headers: ['公開教材', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('does not turn an inline HTML comment into a fabricated or incomplete source table', () => {
+  const content = [
+    '| 科目 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+    '<!-- | 尚未公布 | 999 | -->',
+    '| 網路概論 | 2 |',
+  ].join('\\n');
+  expect(extractStudySourceTables(content)).toEqual([]);
+});
+
+it('does not let a comment marker in a fenced code sample hide later source tables', () => {
+  const ticks = String.fromCharCode(96).repeat(3);
+  const content = [
+    ticks + 'markdown',
+    '<!--',
+    '| 範例 | 假分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    ticks,
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資管 | 3 |',
+  ].join('\\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 7,
+    headers: ['正式課程', '學分'],
+    rows: [['資管', '3']],
+  }]);
+});
