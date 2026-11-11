@@ -40,3 +40,35 @@ it('does not reuse geometry after a verified source, height, revision, shape or 
   const removed: ProvidenceFootprint[] = [];
   expect(reuseUnchangedProvidenceFootprints([original], removed)).toBe(removed);
 });
+
+it('keeps the current WebGL data reference if the API sends identical POIs in another order', () => {
+  // Synthetic second POI only; no assertion about a real campus building.
+  const other: ProvidenceFootprint = {
+    ...copy(), poiId: 'synthetic-second', name: '合成第二棟',
+    sourceUrl: 'https://www.openstreetmap.org/way/999',
+  };
+  const previous = [original, other];
+  const reversed = [
+    { ...other, outline: other.outline.map(([lon, lat]): [number, number] => [lon, lat]) },
+    copy(),
+  ];
+  expect(reuseUnchangedProvidenceFootprints(previous, reversed)).toBe(previous);
+  const revised = [{ ...reversed[0], osmVersion: 3 }, reversed[1]];
+  expect(reuseUnchangedProvidenceFootprints(previous, revised)).toBe(revised);
+  const moved = [
+    { ...reversed[0], outline: [[120.58131, 24.22624], [120.58144, 24.22624], [120.58143, 24.22634]] as Array<[number, number]> },
+    reversed[1],
+  ];
+  expect(reuseUnchangedProvidenceFootprints(previous, moved)).toBe(moved);
+});
+
+it('never treats duplicate POIs as the same complete snapshot', () => {
+  const other = { ...copy(), poiId: 'synthetic-second' };
+  const previous = [original, other];
+  const duplicated = [copy(), copy()];
+  expect(reuseUnchangedProvidenceFootprints(previous, duplicated)).toBe(duplicated);
+
+  const previousDuplicates = [original, copy()];
+  const next = [copy(), copy()];
+  expect(reuseUnchangedProvidenceFootprints(previousDuplicates, next)).toBe(next);
+});
