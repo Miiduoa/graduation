@@ -97,7 +97,7 @@ export function formatOnDeviceSchoolPrompt(
   // must neither crash the local model prompt nor authorize cached private data.
   // Live collectors use canonical UTC timestamps from Date#toISOString.
   const checkedAt = typeof snapshot.checkedAt === 'string' &&
-    /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(snapshot.checkedAt)
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(snapshot.checkedAt)
     ? new Date(snapshot.checkedAt) : new Date(NaN);
   const verifiedClock = Number.isFinite(checkedAt.getTime()) &&
     checkedAt.toISOString() === snapshot.checkedAt;
