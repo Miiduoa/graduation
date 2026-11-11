@@ -168,6 +168,8 @@ test.each([
 });
 
 test('verified weekend imports appear in week, day and scrollable grid without changing weekday planning', async () => {
+  // Use local calendar noon so Sunday is stable across CI runner timezones.
+  jest.setSystemTime(new Date(2026, 9, 25, 12));
   jest.mocked(loadPersonalImports).mockResolvedValue({
     version: 1,
     records: [
@@ -194,6 +196,23 @@ test('verified weekend imports appear in week, day and scrollable grid without c
   expect(view.getByText('週日實作課')).toBeTruthy();
   expect(view.getByText('六')).toBeTruthy();
   expect(view.getByText('日')).toBeTruthy();
+});
+
+test('Saturday classes are the default single-day view on Saturday', async () => {
+  jest.setSystemTime(new Date(2026, 9, 24, 12));
+  jest.mocked(loadPersonalImports).mockResolvedValue({
+    version: 1,
+    records: [
+      record({ id: 'sat', title: '週六實驗課', dayOfWeek: 6 }),
+      record({ id: 'sun', title: '週日實作課', dayOfWeek: 7 }),
+    ],
+    batches: [],
+  });
+  const view = render(<PersonalTimetableScreen />);
+  await view.findByText('週六實驗課');
+  fireEvent.press(view.getByText('單日'));
+  expect(view.getByText('星期六 · 08:00–09:50')).toBeTruthy();
+  expect(view.queryByText('週日實作課')).toBeNull();
 });
 
 test('unresolved logout never loads a guest or account timetable', () => {
