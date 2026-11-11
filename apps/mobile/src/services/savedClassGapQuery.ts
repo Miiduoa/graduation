@@ -141,7 +141,10 @@ function readQuestion(question: string, inheritedPart?: DayPart) {
   const clearDuration = /^(?:不限(?:長度|時長|分鐘)|不限制(?:長度|時長))/.exec(scope.rest);
   const threshold = clearDuration ? null : readDuration(scope.rest);
   const rest = (clearDuration ? scope.rest.slice(clearDuration[0].length) : threshold?.rest ?? scope.rest)
-    .replace(gapPurpose, '');
+    .replace(gapPurpose, '')
+    // Natural short follow-ups such as「那明天的呢」refer to the previous gap topic.
+    // Remove only a standalone linking particle; never consume another task noun.
+    .replace(/^的$/, '');
   return { ...scope, refinement, replaceTime, rest, minMinutes: clearDuration ? 0 : threshold?.minutes };
 }
 
@@ -189,7 +192,25 @@ export function savedClassGapQuery(question: string): SavedClassGapQuery | null 
   return applyFilters(filters);
 }
 
+// A follow-up may restore its filters from a previous app session. Validate before
+// using an inherited period in the clock parser or reading its time boundaries.
+function isValidSavedGapFilters(query: SavedClassGapQuery | null | undefined): query is SavedClassGapQuery {
+  if (!query || typeof query !== 'object' ||
+      !['today', 'tomorrow', 'day-after-tomorrow'].includes(query.day) ||
+      !Number.isSafeInteger(query.minMinutes) || query.minMinutes < 0 || query.minMinutes > 1440 ||
+      (query.part !== undefined && query.part !== 'morning' && query.part !== 'afternoon' && query.part !== 'evening') ||
+      (query.fromMinute !== undefined && (!Number.isSafeInteger(query.fromMinute) ||
+        query.fromMinute < 0 || query.fromMinute >= 1440)) ||
+      (query.untilMinute !== undefined && (!Number.isSafeInteger(query.untilMinute) ||
+        query.untilMinute <= 0 || query.untilMinute > 1440))) return false;
+  const bounds = query.part ? partBounds[query.part] : undefined;
+  const start = Math.max((bounds?.start ?? 0) * 60, query.fromMinute ?? 0);
+  const end = Math.min((bounds?.end ?? 24) * 60, query.untilMinute ?? 1440);
+  return start < end;
+}
+
 export function savedClassGapFollowUp(question: string, previous: SavedClassGapQuery): SavedClassGapQuery | null {
+  if (!isValidSavedGapFilters(previous)) return null;
   const filters = readQuestion(question, previous.part);
   if (!filters || (!filters.day && !filters.part && !filters.allDay && !filters.hasClock && filters.minMinutes === undefined)) return null;
   if (filters.rest) {
@@ -214,12 +235,14 @@ export function isSavedClassGapRefinement(question: string): boolean {
   if (/^(?:那麼|那|改成|改查|改看|換成|只看|只找|查看)/.test(normalized) && isSavedClassGapQuestion(question)) return true;
   const text = normalized.replace(/^(?:那麼|那)(?:就)?[，,]?/, '')
     .replace(/^(?:改成|改查|改看|換成|只看|只找|查看)/, '');
+  // A trailing「的」is a colloquial reference to the previous topic, not a new request.
+  const bareTopic = text.endsWith('的') ? text.slice(0, -1) : text;
   const date = '(?:今天|今日|明天|明日|後天|後日|(?:這|下)?(?:週|星期|禮拜)[一二三四五六日天])';
   const scope = '(?:早上|上午|下午|晚上|全天|全日|整天|全部時段)';
   const length = `(?:至少|最少|超過|不超過)?(?:${numberText}|半)(?:個)?(?:半)?(?:小時|鐘頭|h|分鐘)(?:半|(?:又)?${numberText}分鐘)?(?:以上|以內|以下|後)?`;
   const clock = `(?:${clockText})(?:(?:到|至|[-–—~～])(?:${clockText})(?:之間|內)?|(?:以後|之後|後|以前|之前|前))?`;
-  return new RegExp(`^(?:${date})?(?:${scope})?(?:${length}|${clock}|不限(?:長度|時長|分鐘)|不限制(?:長度|時長))$`, 'i').test(text) ||
-    new RegExp(`^(?:${date})(?:${scope})?$|^${scope}$`).test(text);
+  return new RegExp(`^(?:${date})?(?:${scope})?(?:${length}|${clock}|不限(?:長度|時長|分鐘)|不限制(?:長度|時長))$`, 'i').test(bareTopic) ||
+    new RegExp(`^(?:${date})(?:${scope})?$|^${scope}$`).test(bareTopic);
 }
 
 export function savedClassGapDayOffset(day: SavedClassGapQuery['day']): number {
@@ -236,24 +259,67 @@ const clock = new Intl.DateTimeFormat('zh-TW', {
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 
+// Both collection time and save provenance must identify the same instant on
+// iOS and Android, regardless of the device's configured timezone.
+const zonedIsoInstant = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+function parseZonedInstant(value: unknown): number {
+  if (typeof value !== 'string') return NaN;
+  const parts = zonedIsoInstant.exec(value);
+  if (!parts) return NaN;
+  const [, year, month, day, hour, minute, second] = parts;
+  if (+hour > 23 || +minute > 59 || +second > 59) return NaN;
+  // JavaScript Date.parse silently rolls February 30 / November 31 / 24:00
+  // into another day. A damaged snapshot must not move a student's query day.
+  const calendarDate = `${year}-${month}-${day}`;
+  const midnight = new Date(`${calendarDate}T00:00:00Z`);
+  if (!Number.isFinite(midnight.getTime()) || midnight.toISOString().slice(0, 10) !== calendarDate) return NaN;
+  return Date.parse(value);
+}
+
 export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnDeviceSchoolContext) {
-  const { timetable } = context;
   const reply = (content: string) => ({ tool: 'saved-timetable' as const, route: '/timetable' as const, content });
+  // Restored device snapshots can be damaged despite their compile-time shape.
+  // Never treat a missing timetable or an unknown provenance as saved evidence.
+  if (!context || typeof context !== 'object' ||
+      !context.timetable || typeof context.timetable !== 'object' ||
+      Array.isArray(context.timetable)) {
+    return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」重新確認。');
+  }
+  const { timetable } = context;
+  if (timetable.source !== 'saved-device-copy' &&
+      timetable.source !== 'unreadable' && timetable.source !== 'not-available') {
+    return reply('這份手機課表的來源無法核對。請開啟「我的課表」重新確認。');
+  }
   if (timetable.source === 'unreadable') return reply('這台手機暫時讀不到已存的課表。請開啟「我的課表」重新讀取。');
   if (timetable.source === 'not-available') return reply('這台手機還沒有這個帳號的個人課表。請先在「我的課表」匯入或儲存課程。');
 
-  const now = Date.parse(context.checkedAt);
+  // Restored follow-up filters are not trusted merely because the TypeScript type matches.
+  // A damaged clock/duration must not crash the formatter or imply the student is free.
+  if (!isValidSavedGapFilters(query)) {
+    return reply('空堂查詢條件無法核對，請重新指定日期與時間，或開啟「我的課表」確認。');
+  }
+  const now = parseZonedInstant(context.checkedAt);
   if (!Array.isArray(timetable.classGaps) || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
   }
   // A damaged local snapshot cannot be treated as proof that a student has no free period.
   if (timetable.classGaps.some((gap) => !gap || typeof gap !== 'object' ||
-    !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) || gap.startAt >= gap.endAt)) {
+    !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) ||
+    gap.startAt >= gap.endAt || gap.endAt - gap.startAt >= DAY)) {
     return reply('這份手機課表的空堂時間資料不足，無法核對。請開啟「我的課表」重新確認上課時間。');
   }
   const offset = savedClassGapDayOffset(query.day);
   const date = classDate(new Date(now + offset * DAY));
   const midnight = Date.parse(date + 'T00:00:00+08:00');
+  const dayEnd = midnight + DAY;
+  // savedClassGaps computes openings between meetings on one Taiwan date.
+  // A shorter-than-24h interval crossing this date boundary is still corrupt:
+  // clipping it would invent an available slot after midnight or before 24:00.
+  if (timetable.classGaps.some(({ startAt, endAt }) =>
+    (startAt < midnight && endAt > midnight) ||
+    (startAt < dayEnd && endAt > dayEnd))) {
+    return reply('這份手機課表有跨越查詢日期的空堂紀錄，無法核對可用時間。請開啟「我的課表」確認上課時間。');
+  }
   const label = (offset === 0 ? '今天剩下的時間' : offset === 1 ? '明天' : '後天') + '（' + date.slice(5).replace('-', '/') + '）';
   const bounds = query.part && partBounds[query.part];
   // The clock label must describe the same interval used to calculate gaps.
@@ -261,6 +327,9 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   // during the afternoon really means 15:30–18:00).
   const startMinute = Math.max((bounds?.start ?? 0) * 60, query.fromMinute ?? 0);
   const endMinute = Math.min((bounds?.end ?? 24) * 60, query.untilMinute ?? 1440);
+  if (startMinute >= endMinute) {
+    return reply('空堂查詢條件的時間範圍無效，請重新指定開始與結束時間。');
+  }
   const from = Math.max(now, midnight + startMinute * MINUTE);
   const until = midnight + endMinute * MINUTE;
   const time = (minute: number) => minute === 1440 ? '24:00' : clock.format(midnight + minute * MINUTE);
@@ -269,13 +338,40 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
     : query.fromMinute !== undefined ? `${time(startMinute)} 之後`
       : query.untilMinute !== undefined ? `${time(endMinute)} 之前` : '';
   const minimum = query.minMinutes ? '至少 ' + query.minMinutes + ' 分鐘的' : '';
-  const windows = timetable.classGaps.map(({ startAt, endAt }) => ({
-    start: Math.ceil(Math.max(startAt, from) / MINUTE) * MINUTE,
-    end: Math.floor(Math.min(endAt, until) / MINUTE) * MINUTE,
-  })).filter(({ start, end }) => end > start && end - start >= query.minMinutes * MINUTE)
-    .sort((a, b) => a.start - b.start);
-  const saved = timetable.updatedAt && formatTaipeiDateTime(timetable.updatedAt, { seconds: false });
-  const source = saved ? '依手機課表計算，課表儲存於 ' + saved + '。' : '依手機課表計算，儲存時間不詳。';
+  // A damaged snapshot may hold duplicate or overlapping free intervals.
+  // They cannot prove two separate openings, even if each timestamp looks valid.
+  // Only compare intervals that occupy the requested Taiwan date.
+  const dailyGaps = timetable.classGaps.map(({ startAt, endAt }) => ({
+    start: Math.max(startAt, midnight),
+    end: Math.min(endAt, midnight + DAY),
+  })).filter(({ start, end }) => end > start).sort((a, b) => a.start - b.start);
+  // A restored cache containing only another day's gaps is not evidence that
+  // the requested date has none. An actually empty calculation remains valid.
+  if (timetable.classGaps.length > 0 && dailyGaps.length === 0) {
+    return reply('這份手機課表的空堂紀錄不屬於查詢日期，無法核對可用時間。請開啟「我的課表」重新確認。');
+  }
+  if (dailyGaps.some((gap, index) => index > 0 && gap.start < dailyGaps[index - 1].end)) {
+    return reply('這份手機課表有重疊的空堂紀錄，無法核對可用時間。請開啟「我的課表」重新確認課程。');
+  }
+  // Adjacent saved gaps describe one continuous opening. Combine them before
+  // checking the requested duration, or two 60-minute pieces would hide a
+  // usable two-hour slot from a student asking for at least 90 minutes.
+  const continuousGaps: typeof dailyGaps = [];
+  for (const gap of dailyGaps) {
+    const last = continuousGaps[continuousGaps.length - 1];
+    if (last && last.end === gap.start) last.end = gap.end;
+    else continuousGaps.push({ ...gap });
+  }
+  const windows = continuousGaps.map(({ start, end }) => ({
+    start: Math.ceil(Math.max(start, from) / MINUTE) * MINUTE,
+    end: Math.floor(Math.min(end, until) / MINUTE) * MINUTE,
+  })).filter(({ start, end }) => end > start && end - start >= query.minMinutes * MINUTE);
+  // Save time only describes provenance. Legacy formats and device-clock corrections
+  // must not block answers backed by valid collection time and gap data.
+  const savedAt = parseZonedInstant(timetable.updatedAt);
+  const saved = Number.isFinite(savedAt) && formatTaipeiDateTime(new Date(savedAt).toISOString(), { seconds: false });
+  const source = !saved ? '依手機課表計算，儲存時間不詳。'
+    : '依手機課表計算，課表儲存於 ' + saved + (savedAt > now ? '（晚於查詢時間，需核對）。' : '。');
   const lines = windows.map(({ start, end }) =>
     clock.format(start) + '–' + (end === midnight + DAY ? '24:00' : clock.format(end)) + '（' + (end - start) / MINUTE + ' 分鐘）');
   return reply([
