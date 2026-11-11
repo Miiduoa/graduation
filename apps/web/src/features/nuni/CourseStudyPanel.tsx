@@ -142,6 +142,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   const downloadUrl = useRef<string | null>(null);
   const manualCopyInput = useRef<HTMLTextAreaElement>(null);
   const manualCopyReturnTarget = useRef<HTMLElement | null>(null);
+  const restoreManualCopyFocus = useRef(false);
   const copyRequest = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -311,8 +312,18 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
     if (pendingPracticeAction) practiceConfirmHeading.current?.focus();
   }, [pendingPracticeAction]);
 
+  // Restore focus only after the fallback has unmounted. Focusing its trigger
+  // inside the close handler can be undone when React removes the active button.
   useEffect(() => {
-    if (manualCopyText !== null) manualCopyInput.current?.focus();
+    if (manualCopyText !== null) {
+      manualCopyInput.current?.focus();
+      return;
+    }
+    if (!restoreManualCopyFocus.current) return;
+    restoreManualCopyFocus.current = false;
+    const target = manualCopyReturnTarget.current;
+    (target?.isConnected ? target : heading.current)?.focus();
+    manualCopyReturnTarget.current = null;
   }, [manualCopyText]);
 
   // A cancelled/failed import removes its status button. Return focus to the
@@ -339,6 +350,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
   // Invalidate an outstanding clipboard result whenever the source position or study state changes.
   function invalidateCopyFeedback() {
     copyRequest.current += 1;
+    restoreManualCopyFocus.current = false;
     setManualCopyText(null);
     setDownloadStatus('');
     setDownloadError('');
@@ -539,6 +551,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
       // Editing the lesson, closing the fallback or another copy request must
       // invalidate late permission responses, including a late success.
       if (copyRequest.current !== request) return;
+      restoreManualCopyFocus.current = true;
       setManualCopyText(null);
       setDownloadError('');
       setDownloadStatus(manualCopyKind === 'notes'
@@ -936,11 +949,9 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
           <p className={styles.note}>可長按選取文字或按「全選上方文字」，再用手機的「複製」功能。這是本機顯示，不會自動傳送或保存；
             內容可能含教材與個人試答，請注意貼上位置。</p>
           <button type="button" className={styles.button} onClick={() => {
-            const target = manualCopyReturnTarget.current;
             copyRequest.current += 1;
+            restoreManualCopyFocus.current = true;
             setManualCopyText(null);
-            (target?.isConnected ? target : heading.current)?.focus();
-            manualCopyReturnTarget.current = null;
           }}>收起手動複製文字</button>
         </section>}
         {source.warnings.length > 0 && <details className={styles.reference}>

@@ -1303,7 +1303,10 @@ it('ignores a delayed clipboard success after closing the manual backup fallback
     await screen.findByRole('region', { name: '手動複製閱讀進度 JSON' });
     fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
     expect(writeText).toHaveBeenCalledTimes(2);
-    fireEvent.click(screen.getByRole('button', { name: '收起手動複製文字' }));
+    const dismiss = screen.getByRole('button', { name: '收起手動複製文字' });
+    dismiss.focus(); // Model keyboard focus on a button that will be unmounted.
+    fireEvent.click(dismiss);
+    expect(document.activeElement).toBe(trigger);
     await act(async () => { resolveRetry(); });
     expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull();
     expect(screen.queryByText(/已複製完整進度 JSON/)).toBeNull();
