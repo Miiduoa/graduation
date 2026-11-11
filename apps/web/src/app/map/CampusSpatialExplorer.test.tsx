@@ -564,7 +564,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     ],
   }] });
   expect(buildings).toHaveLength(1);
-  let rejectRefresh: ((reason: Error) => void) | null = null;
+  let rejectRefresh!: (reason: Error) => void;
   const stalledRefresh = new Promise<unknown>((_resolve, reject) => {
     rejectRefresh = reject;
   });
@@ -609,7 +609,7 @@ it('preserves a dated stale 3D outline through cooldown, a failed refresh and re
     expect(within(dialog).getByText(/正在檢查更新，暫時保留舊輪廓/)).toBeTruthy();
     expect(retry.hasAttribute('disabled')).toBe(true);
 
-    await act(async () => { rejectRefresh?.(new Error('offline during refresh')); });
+    await act(async () => { rejectRefresh(new Error('offline during refresh')); });
     await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(false));
     expect(within(dialog).getByText(/1 棟公開建築輪廓/)).toBeTruthy();
     expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
