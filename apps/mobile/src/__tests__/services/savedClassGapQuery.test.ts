@@ -448,6 +448,36 @@ describe('saved class gap answer', () => {
     expect(answer({ minMinutes: 121 })).toContain('沒有至少 121 分鐘');
   });
 
+  test('rejects shorter cross-midnight gaps instead of clipping them into false free time', () => {
+    // These intervals are shorter than a day, but savedClassGaps only returns
+    // periods between classes within the requested Taiwan calendar date.
+    const crossing = [
+      { startAt: instant('23:45', '2026-11-05'), endAt: instant('00:30') },
+      { startAt: instant('23:00'), endAt: instant('00:20', '2026-11-07') },
+    ];
+    for (const bad of crossing) {
+      const result = answerSavedClassGapQuery(today, {
+        ...context, checkedAt: '2026-11-06T00:05:01+08:00',
+        timetable: { ...context.timetable, classGaps: [bad] },
+      });
+      expect(result.route).toBe('/timetable');
+      expect(result.content).toContain('跨越查詢日期');
+      expect(result.content).toContain('無法核對');
+      expect(result.content).not.toContain('有 1 段');
+      expect(result.content).not.toContain('沒有課間空堂');
+    }
+    // Midnight exactly at the endpoint is not a crossing, and unrelated
+    // next-day openings must not contaminate today's result.
+    const correct = answerSavedClassGapQuery(today, {
+      ...context, timetable: { ...context.timetable, classGaps: [
+        { startAt: instant('23:00'), endAt: instant('00:00', '2026-11-07') },
+        gap('01:00', '02:00', '2026-11-07'),
+      ] },
+    }).content;
+    expect(correct).toContain('23:00–24:00（60 分鐘）');
+    expect(correct).not.toContain('01:00–02:00');
+  });
+
   test('rejects fabricated day-long gaps instead of turning them into an all-day free period', () => {
     // Two classes on the requested day cannot create a whole-day or multi-day class gap.
     // Corrupt persisted data must not become a plausible 10:01–24:00 opening when clipped.
