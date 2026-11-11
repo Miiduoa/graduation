@@ -7,14 +7,19 @@ import {
 } from '../../services/lmsV2QuizDelivery';
 import { quizOptions, type QuizAnswerInput } from '../../services/lmsV2QuizModels';
 import { QuizQuestionEditor } from './QuizQuestionEditor';
+import { useAuth } from '../../state/auth';
 import {
   CourseV2Header, useCourseV2Params, useLoadable, CourseV2Loading, CourseV2Error,
 } from './_courseV2Shell';
 
 export default function CourseQuizTakingV2Screen() {
   const styles = useThemeStyleSheet(createStyles);
+  const { user } = useAuth();
   const { courseId, quizId, courseName } = useCourseV2Params();
-  const loadable = useLoadable(() => loadLmsQuizWorkspace(courseId, quizId!));
+  const loadable = useLoadable(
+    () => loadLmsQuizWorkspace(courseId, quizId!),
+    JSON.stringify([courseId, quizId, user?.uid]),
+  );
   const [drafts, setDrafts] = useState<Record<string, QuizAnswerInput>>({});
   const [saved, setSaved] = useState<Record<string, QuizAnswerInput>>({});
   const [sessionKey, setSessionKey] = useState('');

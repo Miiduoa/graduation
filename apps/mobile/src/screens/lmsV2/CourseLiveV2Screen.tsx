@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAuth } from '../../state/auth';
 import { theme } from '../../ui/theme';
 import { useThemeMode } from '../../state/theme';
 import { View, Alert } from 'react-native';
@@ -14,6 +15,7 @@ import {
 
 export default function CourseLiveV2Screen() {
   useThemeMode();
+  const { user } = useAuth();
   const { courseId, courseName } = useCourseV2Params();
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
@@ -26,7 +28,7 @@ export default function CourseLiveV2Screen() {
       .limit(50);
     if (error) throw error;
     return data ?? [];
-  });
+  }, JSON.stringify([courseId, user?.uid]));
 
   const handleCheckIn = async (sessionId: string) => {
     const r = await checkInLive({ sessionId });
