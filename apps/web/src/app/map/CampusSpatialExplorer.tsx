@@ -173,10 +173,10 @@ function SpatialCanvas({ model, selectedId, overhead, camera, onCameraChange, on
       <div className={styles.cameraTools} role="group" aria-label="調整空間視角">
         <button className="btn" type="button" aria-label="向左旋轉" title="向左旋轉" onClick={() => onCameraChange({ ...camera, bearing: camera.bearing - SPATIAL_ROTATION_STEP })}>↶</button>
         <button className="btn" type="button" aria-label="向右旋轉" title="向右旋轉" onClick={() => onCameraChange({ ...camera, bearing: camera.bearing + SPATIAL_ROTATION_STEP })}>↷</button>
-        <button className="btn" type="button" aria-label="縮小空間圖" title="縮小空間圖" aria-disabled={camera.zoom <= MIN_SPATIAL_ZOOM} onClick={() => {
+        <button className="btn" type="button" aria-label="縮小空間圖" title="縮小空間圖" disabled={camera.zoom <= MIN_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom > MIN_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom / SPATIAL_ZOOM_FACTOR });
         }}>−</button>
-        <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" aria-disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
+        <button className="btn" type="button" aria-label="放大空間圖" title="放大空間圖" disabled={camera.zoom >= MAX_SPATIAL_ZOOM} onClick={() => {
           if (camera.zoom < MAX_SPATIAL_ZOOM) onCameraChange({ ...camera, zoom: camera.zoom * SPATIAL_ZOOM_FACTOR });
         }}>＋</button>
         <button className="btn" type="button" onClick={() => onCameraChange({ bearing: 0, zoom: 1 })}>回到北向</button>
