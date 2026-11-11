@@ -348,6 +348,11 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
     start: Math.max(startAt, midnight),
     end: Math.min(endAt, midnight + DAY),
   })).filter(({ start, end }) => end > start).sort((a, b) => a.start - b.start);
+  // A restored cache containing only another day's gaps is not evidence that
+  // the requested date has none. An actually empty calculation remains valid.
+  if (timetable.classGaps.length > 0 && dailyGaps.length === 0) {
+    return reply('這份手機課表的空堂紀錄不屬於查詢日期，無法核對可用時間。請開啟「我的課表」重新確認。');
+  }
   if (dailyGaps.some((gap, index) => index > 0 && gap.start < dailyGaps[index - 1].end)) {
     return reply('這份手機課表有重疊的空堂紀錄，無法核對可用時間。請開啟「我的課表」重新確認課程。');
   }
