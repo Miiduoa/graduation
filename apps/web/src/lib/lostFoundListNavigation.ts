@@ -28,6 +28,13 @@ export function lostFoundListQuery(
   scope?: ServiceListQuery,
 ): URLSearchParams {
   const query = serviceListSchoolQuery(schoolId, scope);
+  const schoolSource =
+    scope instanceof URLSearchParams
+      ? scope.getAll('source').includes('school')
+      : Array.isArray(scope?.source)
+        ? scope.source.includes('school')
+        : scope?.source === 'school';
+  if (schoolSource) query.set('source', 'school');
   if (state.query.trim()) query.set('q', listSearchText(state.query));
   if (state.type !== 'all') query.set('type', state.type);
   if (state.status !== 'all') query.set('status', state.status);

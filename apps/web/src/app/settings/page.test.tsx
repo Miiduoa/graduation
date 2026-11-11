@@ -295,7 +295,7 @@ it('shows assistant write permissions defaulting off and can save an enabled tog
   fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
   expect(screen.getByRole('heading', { name: '助理權限' })).toBeTruthy();
   expect(screen.getByRole('heading', { name: '預設關閉' })).toBeTruthy();
-  expect(screen.getByText(/拆待辦／設提醒/)).toBeTruthy();
+  expect(screen.getByText(/涵蓋拆作業待辦、設定提醒/)).toBeTruthy();
   expect(screen.getByRole('switch', { name: '建立個人待辦與提醒' })).toBeTruthy();
   expect(screen.getByRole('switch', { name: '存成宿舍報修備忘' })).toBeTruthy();
   expect(screen.getByText(/確認後只會存成個人備忘，不會送到學校/)).toBeTruthy();
@@ -601,6 +601,19 @@ for (const enabled of [false, true]) {
     state.nuni.session = { platformAccountId: 'fixture', context: 'fixture-context', isPlatformOperator: false };
     render(<AssistantEnabledProvider enabled={enabled}><SettingsPage /></AssistantEnabledProvider>);
     fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
-    expect(!!screen.queryByText(/nuni 校園助理目前僅提供公開資訊/)).toBe(enabled);
+    expect(!!screen.queryByText(/Google 平台 AI 會維持開啟，無法透過「平台權限」關閉/)).toBe(enabled);
   });
 }
+
+it('directs a confirmed Google-only account to platform AI settings without prompting another Google login', async () => {
+  state.user = null;
+  state.nuni.session = { platformAccountId: 'pa_a', context: 'a', isPlatformOperator: false };
+  render(<AssistantEnabledProvider enabled><SettingsPage /></AssistantEnabledProvider>);
+  fireEvent.click(screen.getByRole('button', { name: '助理權限' }));
+  expect(screen.getByRole('heading', { name: 'Google 平台帳號已登入' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: '登入後設定校內助理權限' })).toBeNull();
+  expect((screen.getByRole('switch', { name: /餐廳下單/ }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: '管理平台 AI 權限' }));
+  expect(screen.getByRole('heading', { name: '平台服務權限' })).toBeTruthy();
+  expect(new URL(window.location.href).searchParams.get('section')).toBe('platform');
+});

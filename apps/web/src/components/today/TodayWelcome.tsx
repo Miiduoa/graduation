@@ -43,7 +43,7 @@ export function TodayWelcome({
             {hasTimetable ? '查看這週課表' : '匯入我的課表'}
           </Link>
           <Link href={hasTimetable ? importHref : timetableHref} className={styles.secondary}>
-            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'} <CampusIcon name="arrow" size={16} />
+            {hasTimetable ? '更新匯入紀錄' : '手動建立課表'}
           </Link>
         </div>
         <p className={styles.signIn}>
@@ -53,7 +53,6 @@ export function TodayWelcome({
       <nav className={styles.shortcuts} aria-label="常用校園服務">
         <div className={styles.shortcutHeading}>
           <h3>校園服務</h3>
-          <span>免登入</span>
         </div>
         <div className={styles.shortcutGrid}>
           {shortcuts.map((item) => (

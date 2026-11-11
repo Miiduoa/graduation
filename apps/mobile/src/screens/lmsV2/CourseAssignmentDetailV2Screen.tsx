@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { theme } from '../../ui/theme';
 import { useThemeStyleSheet } from '../../ui/useThemeStyleSheet';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, StyleSheet } from 'react-native';
+import { useAuth } from '../../state/auth';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import {
   submitAssignmentDraft,
@@ -19,11 +20,11 @@ import {
 
 export default function CourseAssignmentDetailV2Screen() {
   const styles = useThemeStyleSheet(createStyles);
+  const { user } = useAuth();
   const { courseId, assignmentId, courseName } = useCourseV2Params();
   const nav = useCourseV2Nav();
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
 
   const loadable = useLoadable(async () => {
     const sb = getSupabaseClient();
@@ -48,9 +49,16 @@ export default function CourseAssignmentDetailV2Screen() {
     const draft = await readOwnAssignmentDraft({ courseId, assignmentId });
     const newerDraft = draft && (!ownSub?.submitted_at ||
       Date.parse(draft.savedAt) > Date.parse(ownSub.submitted_at));
-    setContent(newerDraft ? draft.text : (ownSub?.body_text ?? ''));
-    return { assignment, ownSub };
-  });
+    return {
+      assignment,
+      ownSub,
+      editorText: newerDraft ? draft.text : (ownSub?.body_text ?? ''),
+    };
+  }, JSON.stringify([courseId, assignmentId, user?.uid]));
+
+  useEffect(() => {
+    if (loadable.data) setContent(loadable.data.editorText);
+  }, [loadable.data]);
 
   const handleSubmit = async (final: boolean) => {
     if (!courseId || !assignmentId || submitting || loadable.data?.ownSub?.graded_at) return;

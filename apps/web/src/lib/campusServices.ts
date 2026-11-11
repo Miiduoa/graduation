@@ -27,6 +27,14 @@ const lmsLabel = (path: (typeof ACADEMIC_LMS_SECTIONS)[number]['path']) =>
 
 export const CAMPUS_SERVICES = [
   {
+    name: '數位學生證',
+    text: '開啟學生證卡面、出示學號與查找校方證件',
+    href: '/student-card',
+    access: 'account',
+    keywords: '學生證 數位證件 證件 學號 student id card',
+    category: 'campus',
+  },
+  {
     name: academicLabel('/calendar'),
     text: '新增、編輯與查看自己的活動、考試與行程',
     href: '/calendar',
@@ -192,6 +200,14 @@ export const CAMPUS_SERVICES = [
     category: 'connect',
   },
   {
+    name: '跨校公開交流',
+    text: '使用 Google 帳號閱讀公開貼文，參與開放看板',
+    href: '/social',
+    access: 'platform',
+    keywords: 'Google 公開 跨校 貼文 社群 看板 social community',
+    category: 'connect',
+  },
+  {
     name: '校園交流',
     text: '閱讀與分享校園話題',
     href: '/community',
@@ -259,10 +275,10 @@ export const CAMPUS_SERVICES = [
   },
   {
     name: '失物招領',
-    text: '查看本校遺失與拾獲刊登',
+    text: '用 Google 帳號查看、刊登與管理失物',
     href: '/lost-found',
-    access: 'school',
-    keywords: '失物 招領 遺失 拾獲 lost found',
+    access: 'platform',
+    keywords: '失物 招領 遺失 拾獲 Google lost found',
     category: 'campus',
   },
   {

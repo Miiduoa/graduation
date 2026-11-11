@@ -286,6 +286,17 @@ export default function StudentTodayScreen() {
             <Text style={s.date}>{formatTodayHeaderDate(now)}</Text>
             {updatedAt ? <Text style={s.updated}>{formatUpdatedAt(updatedAt)}</Text> : null}
           </View>
+          {profile?.role === 'student' && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="開啟數位學生證"
+              onPress={() => rootNavigateNested('我的', 'StudentCard')}
+              style={s.studentCard}
+            >
+              <Ionicons name="id-card-outline" size={19} color={theme.colors.text} />
+              <Text style={s.studentCardLabel}>學生證</Text>
+            </Pressable>
+          )}
         </View>
         {firstLoad ? (
           <TodaySkeleton styles={s} />
@@ -546,6 +557,11 @@ const createStyles = () => {
       alignSelf: 'center',
       gap: 24,
     },
+    studentCard: {
+      flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 14,
+      borderRadius: 14, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface,
+    },
+    studentCardLabel: { fontSize: 15, fontWeight: '600', color: theme.colors.text },
     date: {
       color: muted,
       fontSize: 13,

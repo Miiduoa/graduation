@@ -32,10 +32,61 @@ it('keeps the requested task through the native OAuth form', async () => {
 });
 it('recognizes an authenticated account and avoids school-login redirect loops', () => {
   mocks.session = { platformAccountId: 'a' };
-  render(<NuniSignIn returnUrl="/grades" />);
+  render(<NuniSignIn returnUrl="/grades?tab=semester" />);
   expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/classroom');
   expect(mocks.request).not.toHaveBeenCalled();
 });
+it.each([
+  '/timetable?schoolId=pu#today',
+  '/calendar?campus=ntu#week',
+  '/import?campus=nthu',
+  '/dormitory?schoolId=ntu',
+  '/food?tenant=pu&order=order-1',
+  '/shops?campus=nthu',
+  '/map?schoolId=pu&focus=library#directions',
+  '/lost-found?schoolId=pu',
+  '/lost-found/platform?schoolId=nthu&mine=1',
+  '/lost-found/platform/post?schoolId=pu',
+  '/lost-found/platform/plf_11111111-1111-4111-8111-111111111111?schoolId=pu#contact',
+  '/grades',
+  '/classroom/material-bookmarks',
+])('keeps the Google task %s for both a new and an existing account', async (destination) => {
+  const view = render(<NuniSignIn returnUrl={destination} />);
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  const action = new URL(button.closest('form')!.action);
+  expect(action.searchParams.get('returnUrl')).toBe(destination);
+  mocks.session = { platformAccountId: 'a' };
+  view.rerender(<NuniSignIn returnUrl={destination} />);
+  expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe(destination);
+});
+it('keeps the campus when Next normalizes the existing-account shops link', () => {
+  mocks.session = { platformAccountId: 'a' };
+  render(<NuniSignIn returnUrl="/shops/?campus=all" />);
+  expect(screen.getByRole('link', { name: '繼續使用' }).getAttribute('href')).toBe('/shops?campus=all');
+});
+it('explains that Google map favorites stay on this device', async () => {
+  render(<NuniSignIn returnUrl="/map?schoolId=pu&focus=library#directions" />);
+  expect(screen.getByText('登入後回到地圖，在此裝置收藏常用地點。')).toBeTruthy();
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  expect(new URL(button.closest('form')!.action).searchParams.get('returnUrl')).toBe(
+    '/map?schoolId=pu&focus=library#directions',
+  );
+});
+it('explains Google lost-found access and preserves the intended publication', async () => {
+  const destination = '/lost-found/platform/post?schoolId=pu';
+  render(<NuniSignIn returnUrl={destination} />);
+  expect(screen.getByText('登入後查看、刊登與管理失物招領，不需要先綁定學校帳號。')).toBeTruthy();
+  const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+  expect(new URL(button.closest('form')!.action).searchParams.get('returnUrl')).toBe(destination);
+});
+it.each(['/lost-found?source=school&schoolId=pu', '/lost-found/post', '/lost-found/legacy-item?schoolId=pu'])(
+  'does not promise Google access to the retained school data at %s', async (destination) => {
+    render(<NuniSignIn returnUrl={destination} />);
+    expect(screen.queryByText('登入後查看、刊登與管理失物招領，不需要先綁定學校帳號。')).toBeNull();
+    const button = await screen.findByRole('button', { name: '使用 Google 帳號繼續' });
+    expect(new URL(button.closest('form')!.action).searchParams.get('returnUrl')).toBe('/classroom');
+  },
+);
 it('returns a new Google session to course feedback with its campus and section intact', async () => {
   const destination = '/grades?schoolId=tw-pu&tab=feedback#recent';
   render(<NuniSignIn returnUrl={destination} />);

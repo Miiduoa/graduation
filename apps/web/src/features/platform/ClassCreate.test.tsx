@@ -55,6 +55,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('returns guests to class creation after platform sign-in', () => {
+  mocks.session = null;
+  render(<ClassCreate />);
+  expect(screen.getByRole('link', { name: '前往登入' }).getAttribute('href')).toBe(
+    '/classroom/login?returnUrl=%2Fauth%2Fplatform%2Fclass-workspace%2Fnew',
+  );
+  expect(screen.queryByLabelText('課班名稱')).toBeNull();
+});
+
 it('creates a workspace then asks the nuni invite API for 100 uses', async () => {
   mocks.create.mockResolvedValue({ id: 'cw_11111111-1111-4111-8111-111111111111' });
   mocks.invite.mockResolvedValue({ code: 'INVITE1' });
@@ -94,7 +103,7 @@ it('sends an expired session back to account login', async () => {
   fireEvent.submit(screen.getByLabelText('課班名稱').closest('form')!);
   await waitFor(() =>
     expect(replace).toHaveBeenCalledWith(
-      `/auth/account?returnUrl=${encodeURIComponent('/auth/platform/class-workspace/new')}`,
+      `/classroom/login?returnUrl=${encodeURIComponent('/auth/platform/class-workspace/new')}`,
     ),
   );
   expect(mocks.replace).not.toHaveBeenCalled();
