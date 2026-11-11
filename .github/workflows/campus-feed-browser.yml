@@ -48,8 +48,18 @@ jobs:
       - name: Browser and font prerequisites
         run: |
           command -v google-chrome
-          sudo timeout 120 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update
-          sudo timeout 120 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y fonts-noto-cjk
+          # Hosted runners already include apt package indexes. Avoid a global mirror
+          # refresh when fetching one CJK font: the previous two jobs timed out
+          # during apt-get update, before the Chromium checks could run.
+          if ! fc-list :lang=zh-tw family | grep -Fq 'Noto Sans CJK TC'; then
+            if ! sudo timeout --kill-after=5s 100 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y --no-install-recommends fonts-noto-cjk; then
+              # Only refresh stale/missing metadata after the direct install fails.
+              sudo timeout --kill-after=5s 60 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 update
+              sudo timeout --kill-after=5s 100 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y --no-install-recommends fonts-noto-cjk
+            fi
+          fi
+          fc-cache -f
+          fc-list :lang=zh-tw family | grep -F '${f.verify}'
       - name: Actual feed component and SDK against isolated rules
         env:
           GCLOUD_PROJECT: demo-campus-feed-browser
