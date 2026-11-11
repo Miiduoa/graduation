@@ -85,10 +85,6 @@ test.each([
   ['users/alice', { schoolId: 'pu', status: 'deleted' }],
   ['users/alice', { schoolId: 'pu', status: 'disabled' }],
   ['users/alice', { schoolId: 'pu', status: 'inactive' }],
-  ['users/alice/blockedUsers/bob', {}],
-  ['users/bob/blockedUsers/alice', {}],
-  ['friendBlocks/alice_bob', {}],
-  ['friendBlocks/bob_alice', {}],
   ['campusStories/story-1', { ...story, allowReplies: false, expiresAt: 9e12 }],
   ['campusStories/story-1', { ...story, expiresAt: 0 }],
   ['campusStories/story-1', { ...story, expiresAt: 'tomorrow' }],
@@ -177,12 +173,14 @@ test('replays an existing reply after the viewer loses story read access', async
   expect([...store.docs.keys()].filter((key) => key.includes('/messages/'))).toHaveLength(1);
 });
 
-test('blocked accounts still cannot reply after a transfer or missing schoolId', async () => {
+test('story replies still send when a block record exists if the viewer can read the story', async () => {
   store.docs.set('users/alice', { primarySchoolId: 'pu' });
   store.docs.set('users/bob', { schoolId: 'other' });
   store.docs.set('users/alice/blockedUsers/bob', {});
-  await expect(send()).rejects.toMatchObject({ code: 'permission-denied' });
-  expect([...store.docs.keys()].some((key) => key.includes('/messages/'))).toBe(false);
+  store.docs.set('friendBlocks/bob_alice', {});
+  const receipt = await send();
+  expect(receipt.conversationId).toBe('dm_pu_alice_bob');
+  expect(store.docs.get(`${thread}/messages/${receipt.messageId}`).content).toBe('明天還有嗎？');
 });
 
 test('rejects an expired or deleted story, a self reply, and an account switch', async () => {

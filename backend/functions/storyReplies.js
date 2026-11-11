@@ -67,35 +67,23 @@ function createReplyToCampusStory({ db }) {
     const conversation = db.collection('conversations').doc(conversationId);
     const message = conversation.collection('messages').doc(messageId);
     const sender = db.collection('users').doc(uid);
-    const author = db.collection('users').doc(authorUid);
     const senderMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-    const friendBlocks = db.collection('friendBlocks');
 
     return db.runTransaction(async (tx) => {
       const [
         senderProfile,
-        ,
         senderMembership,
         story,
         thread,
         existing,
-        ...blocks
       ] = await tx.getAll(
         sender,
-        author,
         senderMember,
         db.collection('campusStories').doc(storyId),
         conversation,
         message,
-        sender.collection('blockedUsers').doc(authorUid),
-        author.collection('blockedUsers').doc(uid),
-        friendBlocks.doc(`${uid}_${authorUid}`),
-        friendBlocks.doc(`${authorUid}_${uid}`),
       );
-      if (
-        (senderProfile.exists && isAccountUnavailable(senderProfile.data())) ||
-        blocks.some((block) => block.exists)
-      ) {
+      if (senderProfile.exists && isAccountUnavailable(senderProfile.data())) {
         throw unavailable();
       }
       if (thread.exists) {

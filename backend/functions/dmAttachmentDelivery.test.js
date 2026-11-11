@@ -64,8 +64,6 @@ test('server authorization checks conversation members, live accounts, and block
   expect(reads).toEqual([
     'conversations/private',
     'users/alice',
-    'users/alice/blockedUsers/bob', 'users/bob/blockedUsers/alice',
-    'friendBlocks/alice_bob', 'friendBlocks/bob_alice',
   ]);
   expect(bucket.file).toHaveBeenCalledWith('conversations/private/media/one/file.pdf');
   expect(file.setMetadata).not.toHaveBeenCalled();
@@ -86,10 +84,6 @@ test.each([
   ['inactive profile', 'users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['account deletion', 'users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
   ['removed from conversation', 'conversations/private', { type: 'dm', schoolId: 'pu', memberIds: ['bob', 'carol'] }],
-  ['viewer blocked peer', 'users/alice/blockedUsers/bob', {}],
-  ['peer blocked viewer', 'users/bob/blockedUsers/alice', {}],
-  ['friend block', 'friendBlocks/alice_bob', {}],
-  ['reverse friend block', 'friendBlocks/bob_alice', {}],
 ])('refuses %s before generating a capability', async (_name, key, value) => {
   const { call, docs, file } = fixture();
   if (value == null) docs.delete(key);
@@ -242,14 +236,13 @@ test('group outsider cannot read attachments even with an active school profile'
   expect(file.getSignedUrl).not.toHaveBeenCalled();
 });
 
-test('blocked members still cannot read or upload attachments', async () => {
-  const { call, docs, file } = fixture();
+test('block records do not prevent reading or uploading attachments', async () => {
+  const { call, docs } = fixture();
   docs.set('users/alice/blockedUsers/bob', {});
-  await expect(call()).rejects.toMatchObject({ code: 'permission-denied' });
+  docs.set('friendBlocks/bob_alice', {});
+  await expect(call()).resolves.toHaveProperty('url');
   await expect(call({ action: 'upload', contentType: 'application/pdf', size: 300 }))
-    .rejects.toMatchObject({ code: 'permission-denied' });
-  expect(file.getSignedUrl).not.toHaveBeenCalled();
-  expect(file.generateSignedPostPolicyV4).not.toHaveBeenCalled();
+    .resolves.toMatchObject({ method: 'POST' });
 });
 
 test.each([

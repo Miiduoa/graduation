@@ -58,22 +58,8 @@ async function authorize(db, uid, conversationId) {
   if (!conversation.exists || !memberIds || !memberIds.includes(uid)) {
     throw forbidden();
   }
-  const uniqueMembers = [...new Set(memberIds)];
-  const isDirect = thread.type === 'dm' && uniqueMembers.length === 2 && memberIds.length === 2;
-  const reads = [db.collection('users').doc(uid).get()];
-  const peerUid = isDirect ? uniqueMembers.find((id) => id !== uid) : null;
-  if (peerUid) {
-    reads.push(
-      db.collection('users').doc(uid).collection('blockedUsers').doc(peerUid).get(),
-      db.collection('users').doc(peerUid).collection('blockedUsers').doc(uid).get(),
-      db.collection('friendBlocks').doc(`${uid}_${peerUid}`).get(),
-      db.collection('friendBlocks').doc(`${peerUid}_${uid}`).get(),
-    );
-  }
-  const [profileSnapshot, ...blocks] = await Promise.all(reads);
-  // Caller status matches isSignedIn. Groups never consult block records.
+  const profileSnapshot = await db.collection('users').doc(uid).get();
   if (profileSnapshot.exists && isAccountUnavailable(profileSnapshot.data())) throw forbidden();
-  if (blocks.some((block) => block.exists)) throw forbidden();
 }
 
 function attachmentPath(conversationId, folder, mediaId, fileName) {

@@ -98,10 +98,6 @@ test.each(
 test.each([
   ['users/alice', { status: 'disabled' }],
   ['users/alice', { accountDeletionInProgress: true }],
-  ['users/alice/blockedUsers/bob', {}],
-  ['users/bob/blockedUsers/alice', {}],
-  ['friendBlocks/alice_bob', {}],
-  ['friendBlocks/bob_alice', {}],
 ])('legacy profiles still reject prepare and sends when access changes at %s', async (path, value) => {
   store.docs.set('users/alice', {});
   store.docs.set('users/bob', { schoolId: '' });
@@ -128,7 +124,11 @@ test.each([
   ['users/bob', { status: 'suspended', schoolId: '' }],
   ['users/bob', { status: 'deleted' }],
   ['users/bob', { accountDeletionInProgress: true }],
-])('peer account status does not block first or existing DM at %s', async (path, value) => {
+  ['users/alice/blockedUsers/bob', {}],
+  ['users/bob/blockedUsers/alice', {}],
+  ['friendBlocks/alice_bob', {}],
+  ['friendBlocks/bob_alice', {}],
+])('peer account status and block records do not block first or existing DM at %s', async (path, value) => {
   store.docs.set('users/alice', {});
   store.docs.set(path, value);
   expect(await prepare()).toEqual({ conversationId, peerUid: 'bob', exists: false });
@@ -191,10 +191,6 @@ test.each([
   ['users/alice', { schoolId: 'pu', status: 'disabled' }],
   ['users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
-  ['users/alice/blockedUsers/bob', {}],
-  ['users/bob/blockedUsers/alice', {}],
-  ['friendBlocks/alice_bob', {}],
-  ['friendBlocks/bob_alice', {}],
 ])(
   'refuses preparation, first delivery and receipt replay after access changes at %s',
   async (path, value) => {

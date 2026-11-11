@@ -1282,7 +1282,7 @@ describe('firestore security rules', () => {
     await assertSucceeds(alice.doc('messages/root-peer-missing').set({ ...rootMessage, text: 'missing' }));
   });
 
-  test('DM block records deny existing 1:1 sends; two-person groups stay open', async () => {
+  test('existing DMs and groups still send when block records exist', async () => {
     const dm = 'conversations/dm_pu_alice_bob';
     const pairGroup = 'conversations/pair-group';
     const message = { senderId: 'alice', content: '還在嗎', type: 'text' };
@@ -1304,15 +1304,14 @@ describe('firestore security rules', () => {
       'friendBlocks/bob_alice',
     ]) {
       await seedFirestore(async (db) => db.doc(blockPath).set({}));
-      await assertFails(alice.doc(dm + '/messages/blocked').set(message));
-      await assertFails(alice.doc('messages/root-blocked').set(rootDm));
-      await assertFails(alice.doc(dm).update({ lastMessageText: 'blocked' }));
-      await assertSucceeds(alice.doc(pairGroup + `/messages/open-${blockPath.replace(/\//g, '_')}`).set(message));
+      await assertSucceeds(alice.doc(dm + `/messages/open-${blockPath.replace(/\//g, '_')}`).set(message));
+      await assertSucceeds(alice.doc(`messages/root-${blockPath.replace(/\//g, '_')}`).set(rootDm));
+      await assertSucceeds(alice.doc(dm).update({ lastMessageText: 'still open' }));
+      await assertSucceeds(alice.doc(pairGroup + `/messages/group-${blockPath.replace(/\//g, '_')}`).set(message));
       await assertSucceeds(alice.doc(`messages/root-group-${blockPath.replace(/\//g, '_')}`).set(rootGroup));
       await assertSucceeds(alice.doc(pairGroup).update({ lastMessageText: 'group still open' }));
-      await seedFirestore(async (db) => db.doc(blockPath).delete());
+      await assertFails(alice.doc(dm).update({ type: 'group' }));
     }
-    await assertSucceeds(alice.doc(dm + '/messages/after-unblock').set(message));
   });
 
   for (const [label, profile, membership] of [

@@ -1152,10 +1152,10 @@ export function ChatScreen(props: any) {
 
   // ── Render ──
 
-  const photoThread = focused && verifiedPhotoThread === sendScope && canSend && (!peerParam || peerId === peerParam) &&
+  const photoThread = verifiedPhotoThread === sendScope && canSend && (!peerParam || peerId === peerParam) &&
     myUid && school.id && !isFirebaseMockMode() && !isDemoPersonaUid(myUid) && !isDemoUid(myUid)
     ? { viewerUid: myUid, schoolId: school.id, conversationId: convoKey, ...(peerRoute ? { peerUid: peerParam } : {}) } : null;
-  const photoKey = JSON.stringify(photoThread);
+  const photoKey = sendScope;
   const renderMessage = ({ item, index }: { item: Msg; index: number }) => {
     const mine = item.senderId === myUid;
     const showDate = shouldShowDateHeader(item, filteredMessages[index - 1]);
@@ -1371,7 +1371,7 @@ export function ChatScreen(props: any) {
         )}
 
         {/* 輸入區 */}
-        <DmPhotoComposer key={photoKey} thread={photoThread} barStyle={s.inputBar} onSent={peerRoute ? markPeerThreadExists : undefined} hasConfirmedPhoto={hasConfirmedPhoto}>
+        <DmPhotoComposer key={photoKey} thread={photoThread} enabled={focused} barStyle={s.inputBar} onSent={peerRoute ? markPeerThreadExists : undefined} hasConfirmedPhoto={hasConfirmedPhoto}>
           <TextInput
             value={displayCurrentScope ? text : ''}
             onChangeText={handleTextChange}

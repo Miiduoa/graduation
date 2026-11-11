@@ -29,12 +29,14 @@ type Draft = { photo: LocalPhoto; messageId: string; uploadedPath?: string };
 
 export function DmPhotoComposer({
   thread,
+  enabled = true,
   barStyle,
   children,
   onSent,
   hasConfirmedPhoto,
 }: {
   thread: PhotoThread | null;
+  enabled?: boolean;
   barStyle: StyleProp<ViewStyle>;
   children: React.ReactNode;
   onSent?: () => void;
@@ -48,6 +50,15 @@ export function DmPhotoComposer({
   const request = useRef<AbortController | null>(null);
   useLayoutEffect(() => () => request.current?.abort(), []);
   useEffect(() => {
+    if (thread) return;
+    request.current?.abort();
+    request.current = null;
+    setDraft(null);
+    setPending(false);
+    setError('');
+    setSent(false);
+  }, [thread]);
+  useEffect(() => {
     if (pending || !error || !thread || !draft?.uploadedPath) return;
     if (!hasConfirmedPhoto?.({ ...thread, messageId: draft.messageId }, draft.uploadedPath)) return;
     setDraft(null);
@@ -57,7 +68,7 @@ export function DmPhotoComposer({
   }, [pending, error, thread, draft, hasConfirmedPhoto, onSent]);
 
   async function pick() {
-    if (!thread || request.current) return;
+    if (!enabled || !thread || request.current) return;
     const controller = new AbortController();
     request.current = controller;
     setSent(false);
@@ -81,7 +92,7 @@ export function DmPhotoComposer({
   }
 
   async function send() {
-    if (!thread || !draft || request.current) return;
+    if (!enabled || !thread || !draft || request.current) return;
     const controller = new AbortController();
     request.current = controller;
     setError('');
@@ -127,7 +138,7 @@ export function DmPhotoComposer({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="移除照片"
-            disabled={pending}
+            disabled={pending || !enabled}
             style={s.icon}
             onPress={() => {
               setDraft(null);
@@ -138,9 +149,9 @@ export function DmPhotoComposer({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: pending, busy: pending }}
-            disabled={pending}
-            style={[s.send, pending && s.disabled]}
+            accessibilityState={{ disabled: pending || !enabled, busy: pending }}
+            disabled={pending || !enabled}
+            style={[s.send, (pending || !enabled) && s.disabled]}
             onPress={send}
           >
             <Text style={s.sendText}>
@@ -160,6 +171,8 @@ export function DmPhotoComposer({
             accessibilityRole="button"
             accessibilityLabel="加入照片"
             accessibilityHint="可選擇小於 10 MiB 的 JPG、PNG 或 WebP 照片"
+            accessibilityState={{ disabled: !enabled }}
+            disabled={!enabled}
             style={s.icon}
             onPress={pick}
           >

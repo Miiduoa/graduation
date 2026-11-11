@@ -445,8 +445,23 @@ const photoId = 'photo_message_00000001';
 const photoConvo = 'dm_pu_alice_bob';
 const staged = 'conversations/dm_pu_alice_bob/photos/media-1/photo.png';
 const published = staged.replace('photo.png', 'sent.png');
-function photoChat(conversationId = photoConvo) {
-  return <ChatScreen route={{ params: { conversationId, peerId: 'bob' } }} navigation={{ setOptions: jest.fn() }} />;
+function navigationWithFocus() {
+  const listeners: Partial<Record<'focus' | 'blur', () => void>> = {};
+  return {
+    setOptions: jest.fn(),
+    isFocused: () => true,
+    addListener: (event: 'focus' | 'blur', listener: () => void) => {
+      listeners[event] = listener;
+      return () => {
+        if (listeners[event] === listener) delete listeners[event];
+      };
+    },
+    emit: (event: 'focus' | 'blur') => listeners[event]?.(),
+  };
+}
+
+function photoChat(conversationId = photoConvo, navigation: { setOptions: jest.Mock } = { setOptions: jest.fn() }) {
+  return <ChatScreen route={{ params: { conversationId, peerId: 'bob' } }} navigation={navigation} />;
 }
 function verifyPhotoChat(
   fromCache = false,
@@ -502,6 +517,37 @@ test('local preview is removable and retries reuse one upload and the same messa
   await act(async () => ack());
   expect(view.getByText('照片已傳送')).toBeTruthy();
   expect(view.queryByLabelText('待傳送照片預覽')).toBeNull();
+});
+
+test('blurring the screen keeps the photo composer mounted with the same draft and uploaded path', async () => {
+  pickPhoto();
+  jest.mocked(Photos.uploadDmPhoto).mockReset().mockResolvedValue(staged);
+  let ack!: () => void;
+  jest.mocked(Photos.confirmDmPhoto).mockReset().mockImplementation(() => new Promise((done) => { ack = done; }));
+  const navigation = navigationWithFocus();
+  const view = render(photoChat(photoConvo, navigation));
+  verifyPhotoChat();
+  await act(async () => { navigation.emit('blur'); });
+  expect(view.getByLabelText('加入照片').props.accessibilityState).toEqual({ disabled: true });
+  fireEvent.press(view.getByLabelText('加入照片'));
+  expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
+  await act(async () => { navigation.emit('focus'); });
+  await act(async () => { fireEvent.press(view.getByLabelText('加入照片')); });
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  await act(async () => { navigation.emit('blur'); });
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  expect(view.queryByLabelText('加入照片')).toBeNull();
+  fireEvent.press(view.getByText('傳送照片'));
+  expect(Photos.uploadDmPhoto).not.toHaveBeenCalled();
+  await act(async () => { navigation.emit('focus'); });
+  expect(view.getByLabelText('待傳送照片預覽')).toBeTruthy();
+  await act(async () => { fireEvent.press(view.getByText('傳送照片')); });
+  expect(Photos.uploadDmPhoto).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(Photos.uploadDmPhoto).mock.calls[0][0]).toEqual({
+    conversationId: photoConvo, viewerUid: 'alice', schoolId: 'pu', messageId: photoId,
+  });
+  await act(async () => ack());
+  expect(view.getByText('照片已傳送')).toBeTruthy();
 });
 
 test('pending typing and presence writes preserve a verified photo draft and in-flight send', async () => {

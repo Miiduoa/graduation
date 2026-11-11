@@ -146,7 +146,7 @@ test('existing members can still send and replay a private story reply after tra
   assert.deepEqual(await reply('alice', firstId), first);
   await assert.rejects(reply('alice', 'story-transfer-reply-third'), { code: 'permission-denied' });
   await db.doc('users/alice/blockedUsers/bob').set({});
-  await assert.rejects(reply('alice', firstId), { code: 'permission-denied' });
+  assert.deepEqual(await reply('alice', firstId), first);
   assert.equal((await thread.collection('messages').get()).size, 2);
 });
 

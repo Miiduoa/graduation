@@ -199,8 +199,8 @@ test('rechecks both students at publication and issuance, including block and sc
     'friendBlocks/bob_alice',
   ]) {
     f.docs.set(key, {});
-    await expect(f.read(mediaId)).rejects.toMatchObject({ code: 'permission-denied' });
-    await expect(f.send(path)).rejects.toMatchObject({ code: 'permission-denied' });
+    expect(await f.read(mediaId)).toHaveProperty('url');
+    expect(await f.send(path)).toEqual({ conversationId: 'thread', messageId });
     f.docs.delete(key);
   }
   f.docs.set('schools/pu/members/alice', { status: 'inactive' });
@@ -287,14 +287,14 @@ test('a first photo rechecks changed access after copying and leaves no empty th
   const copy = f.copy.getMockImplementation();
   f.copy.mockImplementationOnce(async (...args) => {
     await copy(...args);
-    f.docs.set('friendBlocks/bob_alice', {});
+    f.docs.set('schools/pu/members/alice', { status: 'inactive' });
   });
   await expect(f.send(path, { peerUid: 'bob' })).rejects.toMatchObject({
     code: 'permission-denied',
   });
   expect(f.docs.has(thread)).toBe(false);
   expect(f.docs.has(`${thread}/messages/${messageId}`)).toBe(false);
-  f.docs.delete('friendBlocks/bob_alice');
+  f.docs.set('schools/pu/members/alice', { status: 'active' });
   await f.send(path, { peerUid: 'bob' });
   expect(f.docs.get(thread).lastMessage.id).toBe(messageId);
 });

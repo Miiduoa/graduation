@@ -268,10 +268,15 @@ test('late first-send receipt replay preserves a newer inbox preview', async () 
   assert.equal(afterReplay.updatedAt.isEqual(beforeReplay.updatedAt), true);
   assert.equal((await messages.get()).size, 2);
   await db.doc('users/bob/blockedUsers/alice').set({});
-  await assert.rejects(handlers.sendText(request()), { code: 'permission-denied' });
+  assert.deepEqual(
+    await handlers.sendText(
+      request('alice', { messageId: 'third-text-message-0001', content: '封鎖後仍可傳' }),
+    ),
+    { conversationId, messageId: 'third-text-message-0001' },
+  );
 });
 
-test('existing client DM sends honor both block stores and cannot update the inbox when rejected', async () => {
+test('existing client DM sends still write inbox previews when block records exist', async () => {
   await handlers.sendText(request());
   const alice = environment.authenticatedContext('alice').firestore();
   const sendClientMessage = (id) => {
@@ -296,35 +301,31 @@ test('existing client DM sends honor both block stores and cannot update the inb
     'friendBlocks/bob_alice',
   ]) {
     await db.doc(blockPath).set({});
-    await assertFails(sendClientMessage('client-after-block'));
-    await assertFails(alice.doc('messages/legacy-after-block').set(legacyMessage));
+    await assertSucceeds(sendClientMessage(`client-${blockPath.replace(/\//g, '_')}`));
+    await assertSucceeds(alice.doc(`messages/legacy-${blockPath.replace(/\//g, '_')}`).set(legacyMessage));
     await assertFails(alice.doc(thread.path).update({ type: 'group' }));
-    await assertFails(alice.doc(thread.path).update({ lastMessageText: 'forged preview' }));
-    assert.equal((await messages.doc('client-after-block').get()).exists, false);
-    assert.equal((await thread.get()).data().lastMessageText, 'client-before-block');
+    await assertSucceeds(alice.doc(thread.path).update({ lastMessageText: 'preview after block' }));
     await db.doc(blockPath).delete();
   }
-  await assertSucceeds(sendClientMessage('client-after-unblock'));
-  await assertSucceeds(alice.doc('messages/legacy-after-unblock').set(legacyMessage));
 });
 
-test('a blocked sender cannot change any inbox preview field while read markers remain writable', async () => {
+test('conversation type stays immutable while preview fields remain writable', async () => {
   await handlers.sendText(request());
   await db.doc('friendBlocks/bob_alice').set({});
   const alice = environment.authenticatedContext('alice').firestore();
   const reference = alice.doc(thread.path);
+  await assertFails(reference.update({ type: 'group' }));
   for (const change of [
-    { lastMessage: { content: 'forged', type: 'text' } },
-    { lastMessageText: 'forged' },
+    { lastMessage: { content: 'preview', type: 'text' } },
+    { lastMessageText: 'preview' },
     { lastMessageType: 'image' },
     { lastMessageAt: new Date() },
     { lastMessageSenderId: 'bob' },
     { updatedAt: new Date() },
   ]) {
-    await assertFails(reference.update(change));
+    await assertSucceeds(reference.update(change));
   }
   await assertSucceeds(reference.update({ 'lastReadBy.alice': new Date() }));
-  assert.equal((await thread.get()).data().lastMessage.id, textId);
 });
 
 test('a direct-message block still allows a member to post in their shared group conversation', async () => {
@@ -384,12 +385,12 @@ test('existing DMs still send when the peer profile is missing or disabled; two-
       readBy: ['alice'],
     }),
   );
-  await assertFails(
+  await assertSucceeds(
     alice.doc(`${messages.path}/after-block`).set({
       conversationId,
       senderId: 'alice',
       type: 'text',
-      content: '不該送出',
+      content: '封鎖後既有對話仍可傳',
       readBy: ['alice'],
     }),
   );
@@ -431,13 +432,13 @@ test('first DM still opens when the recipient has no school membership', async (
 });
 
 test('revocation during first-photo publication leaves no thread and a safe retry commits exactly once', async () => {
-  const photos = photoFixture(() => db.doc('users/bob/blockedUsers/alice').set({}));
+  const photos = photoFixture(() => db.doc('schools/pu/members/alice').update({ status: 'inactive' }));
   const grant = await photos.upload();
   photos.stage(grant.path);
   await assert.rejects(photos.send(grant.path), { code: 'permission-denied' });
   assert.equal((await thread.get()).exists, false);
   assert.equal((await messages.get()).empty, true);
-  await db.doc('users/bob/blockedUsers/alice').delete();
+  await db.doc('schools/pu/members/alice').update({ status: 'active' });
   const receipt = await photos.send(grant.path);
   assert.deepEqual(receipt, { conversationId, messageId: photoId });
   assert.deepEqual(await photos.send(grant.path), receipt);

@@ -37,7 +37,7 @@ function dmMessageSession(request) {
   return { ...identity, conversationId, messageId };
 }
 
-// Every send, receipt replay and media grant rechecks both students in the same transaction.
+// Every send, receipt replay and media grant rechecks the caller in the same transaction.
 function inDmConversation(db, session, action, { allowMissing = false } = {}) {
   const { uid, conversationId, schoolId, peerUid, messageId } = session;
   const thread = db.collection('conversations').doc(conversationId);
@@ -64,37 +64,18 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
       if (conversationId !== canonicalConversationId(session)) throw denied();
       memberIds = [uid, peerUid].sort();
     }
-    const [first, second] = memberIds.map((id) => db.collection('users').doc(id));
-    const blocks = db.collection('friendBlocks');
-    const blockRefs = [
-      first.collection('blockedUsers').doc(memberIds[1]),
-      second.collection('blockedUsers').doc(memberIds[0]),
-      blocks.doc(`${memberIds[0]}_${memberIds[1]}`),
-      blocks.doc(`${memberIds[1]}_${memberIds[0]}`),
-    ];
     const caller = db.collection('users').doc(uid);
     if (threadSnap.exists) {
-      // Existing DMs match main plus user-initiated blocks: caller identity,
-      // membership, and block records. Do not require the peer's profile.
-      const [callerSnap, ...blocked] = await tx.getAll(caller, ...blockRefs);
-      if (
-        (callerSnap.exists && isAccountUnavailable(callerSnap.data())) ||
-        blocked.some((snap) => snap.exists)
-      )
-        throw denied();
+      // Existing DMs match main: signed-in caller identity and membership.
+      const callerSnap = await tx.get(caller);
+      if (callerSnap.exists && isAccountUnavailable(callerSnap.data())) throw denied();
     } else {
-      // New DMs match main conversation create: caller school membership and
-      // user-initiated blocks. Never check the recipient's school or account.
+      // New DMs match main conversation create: caller school membership.
       const senderMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
-      const [callerSnap, senderMembership, ...blocked] = await tx.getAll(
-        caller,
-        senderMember,
-        ...blockRefs,
-      );
+      const [callerSnap, senderMembership] = await tx.getAll(caller, senderMember);
       if (
         (callerSnap.exists && isAccountUnavailable(callerSnap.data())) ||
-        senderMembership.data()?.status !== 'active' ||
-        blocked.some((snap) => snap.exists)
+        senderMembership.data()?.status !== 'active'
       )
         throw denied();
     }
