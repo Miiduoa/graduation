@@ -128,7 +128,9 @@ export function StudyReadAloud({ text, label = '朗讀這一段', onSpeakingChan
       remainingChunks.current = [];
       setSpeaking(false);
       onSpeakingChange?.(false);
-      if (message) setError(message);
+      // A failed cancel can still be followed by a natural onend. Once the
+      // browser reports completion, remove the now-inaccurate Stop warning.
+      setError(message);
     };
     // A browser may dispatch onend inside speak(). Drain that completion
     // without recursively nesting one speakNext call per lesson chunk.

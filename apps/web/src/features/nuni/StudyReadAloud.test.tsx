@@ -175,6 +175,30 @@ it('does not falsely report that mobile playback stopped when cancel throws, and
   expect(speak).toHaveBeenCalledTimes(2);
 });
 
+it('clears a failed-stop warning when the remaining speech ends naturally', () => {
+  const changed = vi.fn();
+  render(<StudyReadAloud text={'長篇講義原文'.repeat(90)} onSpeakingChange={changed} />);
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  const first = speak.mock.calls[0][0] as Utterance;
+  expect(changed).toHaveBeenLastCalledWith(true);
+  cancel.mockImplementationOnce(() => { throw new Error('browser speech engine busy'); });
+  fireEvent.click(screen.getByRole('button', { name: '停止朗讀' }));
+  expect(screen.getByRole('status').textContent).toContain('尚未確認停止朗讀');
+
+  // The engine can finish on its own despite rejecting cancel(). The
+  // abandoned remaining chunks must stay stopped and the warning must clear.
+  act(() => first.onend?.());
+  expect(speak).toHaveBeenCalledTimes(1);
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.getByRole('button', { name: '朗讀這一段' })).toBeTruthy();
+
+  // A new user gesture can start a fresh reading without stale error UI.
+  fireEvent.click(screen.getByRole('button', { name: '朗讀這一段' }));
+  expect(speak).toHaveBeenCalledTimes(2);
+  expect((speak.mock.calls[1][0] as Utterance).voice).toBe(local);
+});
+
 it('does not crash source cleanup if a mobile speech engine throws on cancel', () => {
   const changed = vi.fn();
   const view = render(<StudyReadAloud text="舊講義" onSpeakingChange={changed} />);
