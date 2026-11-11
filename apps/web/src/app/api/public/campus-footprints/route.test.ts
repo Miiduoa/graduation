@@ -101,6 +101,58 @@ describe('public Providence building geometry route', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { declared: 0, description: 'zero bytes' },
+    { declared: new TextEncoder().encode(osmPayload).byteLength - 1, description: 'too few bytes' },
+    { declared: new TextEncoder().encode(osmPayload).byteLength + 1, description: 'too many bytes' },
+  ])('rejects HTTP 200 identity JSON when Content-Length declares $description', async ({ declared }) => {
+    // A proxy can send a syntactically valid JSON subset with an incorrect
+    // identity body length. HTTP 200 and JSON.parse alone do not prove that
+    // every advertised byte arrived, so it must never become a 24h snapshot.
+    const upstream = vi.fn().mockImplementation(async () =>
+      new Response(osmPayload, {
+        status: 200, headers: { 'Content-Length': String(declared) },
+      }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const result = await GET();
+    expect(result.status).toBe(503);
+    expect(result.headers.get('Cache-Control')).toBe('no-store');
+    expect((await GET()).status).toBe(503);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts an identity Overpass body when its declared length matches', async () => {
+    const upstream = vi.fn().mockImplementation(async () =>
+      new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Length': String(new TextEncoder().encode(osmPayload).byteLength) },
+      }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+    expect((await GET()).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not compare decoded gzip bytes against the encoded Content-Length header', async () => {
+    // Fetch exposes decompressed Response.body bytes but may preserve the
+    // original compressed length header. Model that Fetch contract, without
+    // implying this mock represents a real gzip network transfer.
+    const upstream = vi.fn().mockImplementation(async () =>
+      new Response(osmPayload, {
+        status: 200,
+        headers: { 'Content-Encoding': 'gzip', 'Content-Length': '42' },
+      }));
+    vi.stubGlobal('fetch', upstream);
+    const { GET } = await import('./route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).buildings).toHaveLength(1);
+  });
+
   it('retains a dated stale snapshot instead of replacing it with HTTP 206 geometry', async () => {
     const originalTime = Date.now();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(originalTime);
