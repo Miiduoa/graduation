@@ -9,6 +9,7 @@
 | nuni 解決什麼問題、主要操作流程    | [兩分鐘導覽](REVIEW_IN_2_MINUTES.md)           |
 | 目前畫面、來源版本與示範資料說明   | [截圖與畫面來源](SCREENSHOTS.md)               |
 | 用手機展示 AI 助理規劃、執行與回執 | [手機展示流程](../apps/mobile/DEMO.md)         |
+| 2026-11-12 口試：各角色示範入口    | [口試示範工作區](demo/oral-exam-2026-11-12.md) |
 | 平台帳號、學校資格與店家權限       | [帳號與學校資格](ACCOUNT_AND_SCHOOL_ACCESS.md) |
 
 ## 開發與維護
