@@ -81,6 +81,54 @@ class RetrievalTests(unittest.TestCase):
         self.assertEqual(narrowed, [])
 
 
+    def test_legacy_firestore_index_is_rebuilt_with_school_scope(self):
+        import chromadb
+        from rag import indexer, retriever, sync_firestore as sync
+
+        client = chromadb.EphemeralClient()
+        collection = client.get_or_create_collection("campus_legacy_scope")
+        self.addCleanup(client.delete_collection, collection.name)
+        self.enterContext(patch.object(indexer, "get_or_create_collection", return_value=collection))
+        self.enterContext(patch.object(retriever, "get_or_create_collection", return_value=collection))
+
+        def embed(texts):
+            return [[1.0, 0.0] if "午餐" in text else [0.0, 1.0] for text in texts]
+
+        indexer.index_documents(
+            [
+                {
+                    "source": "firestore:announcements",
+                    "text": "[announcements]\ntitle: 午餐時段\nbody: 舊公告",
+                    "metadata": {"firestore_id": "old-1", "collection": "announcements"},
+                },
+                {"source": "app:navigation", "text": "課表操作", "metadata": {}},
+            ],
+            embedding_fn=embed,
+        )
+        before = retriever.retrieve("午餐時段", school_id="nchu", embedding_fn=embed, top_k=10)
+        self.assertEqual([c.text for c in before if c.source.startswith("firestore:")], [])
+
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "announcements.json").write_text(
+                '[{"title": "午餐時段", "body": "舊公告", "schoolId": "nchu"}]',
+                encoding="utf-8",
+            )
+            result = sync.migrate_legacy_firestore_index(dump_dir=folder)
+        self.assertGreater(result["legacy"], 0)
+        self.assertEqual(result["remaining"], 0)
+        self.assertTrue(result["rebuilt"])
+        found = retriever.retrieve("午餐時段", school_id="nchu", embedding_fn=embed, top_k=10)
+        campus = [c for c in found if c.source.startswith("firestore:")]
+        self.assertTrue(campus)
+        self.assertEqual({c.metadata["schoolId"] for c in campus}, {"nchu"})
+        other = retriever.retrieve("午餐時段", school_id="pu", embedding_fn=embed, top_k=10)
+        self.assertEqual([c for c in other if c.source.startswith("firestore:")], [])
+        self.assertEqual(
+            [c.text for c in retriever.retrieve("午餐時段", embedding_fn=embed)],
+            ["課表操作"],
+        )
+
+
 @unittest.skipUnless(HAS_RAG and find_spec("firebase_admin"), "requires Firestore and local RAG dependencies")
 class SyncTests(unittest.TestCase):
     def test_firestore_and_json_apply_the_same_policy(self):

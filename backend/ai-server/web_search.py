@@ -107,25 +107,30 @@ async def _fetch_weather(query: str, client: httpx.AsyncClient, school_id: str |
     if not re.search(r"(天氣|氣溫|下雨|帶傘|雨具|天候)", query):
         return None
 
-    place = re.sub(
-        r"今天|明天|昨天|現在|目前|今晚|早上|中午|下午|晚上|近期|"
-        r"請問|幫我|麻煩|搜尋|查詢|查查|一下|會不會|要不要|"
-        r"天氣|氣溫|下雨|帶傘|雨具|天候|weather|temperature|rain|umbrella|"
-        r"如何|怎麼樣|怎樣|怎麼|即時|需要|應該|大概|可能|好像|"
-        r"的|會|嗎|呢|啊|喔|呀|唄|啦|吧|嘛|了|在|裡|内|內|查|雨|傘|要|"
-        r"[？?！!。，、\s]",
-        "",
-        query,
-        flags=re.IGNORECASE,
-    )
-    if place in ("靜宜", "静宜", "靜宜大學", "静宜大學", "沙鹿", "沙鹿區") or (
-        not place and school_id in ("pu", "tw-pu")
-    ):
+    providence = ("靜宜大學", "静宜大學", "靜宜", "静宜", "沙鹿區", "沙鹿")
+    taichung = ("台中市", "臺中市", "台中", "臺中")
+    if any(token in query for token in providence):
         name, lat, lon = "台中市沙鹿區靜宜大學", 24.226, 120.563
-    elif place in ("台中", "臺中", "台中市", "臺中市"):
+    elif any(token in query for token in taichung):
         name, lat, lon = "台中市", 24.1477, 120.6736
     else:
-        return "目前無法確認查詢地點的即時天氣，可至中央氣象署選擇所在鄉鎮查詢。", []
+        place = re.sub(
+            r"今天|明天|昨天|現在|目前|今晚|早上|中午|下午|晚上|近期|"
+            r"請問|幫我|麻煩|搜尋|查詢|查查|一下|會不會|要不要|好不好|好嗎|"
+            r"天氣|氣溫|下雨|帶傘|雨具|天候|weather|temperature|rain|umbrella|"
+            r"如何|怎麼樣|怎樣|怎麼|即時|需要|應該|大概|可能|好像|"
+            r"的|會|嗎|呢|啊|喔|呀|唄|啦|吧|嘛|了|在|裡|内|內|查|雨|傘|要|好|"
+            r"[？?！!。，、\s]",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        )
+        if place in providence or (not place and school_id in ("pu", "tw-pu")):
+            name, lat, lon = "台中市沙鹿區靜宜大學", 24.226, 120.563
+        elif place in taichung:
+            name, lat, lon = "台中市", 24.1477, 120.6736
+        else:
+            return "目前無法確認查詢地點的即時天氣，可至中央氣象署選擇所在鄉鎮查詢。", []
 
     params = urlencode(
         {

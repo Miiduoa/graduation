@@ -11,6 +11,8 @@ PUBLIC_FIELDS = {
     "announcements": ("title", "body", "content", "source", "category", "publishedAt"),
     "events": ("title", "description", "location", "startsAt", "endsAt", "organizer"),
     "courses": ("name", "code", "teacher", "description", "credits", "department"),
+    "cafeterias": ("name", "location", "openingHours", "description"),
+    "menuItems": ("name", "description", "price", "category", "cafeteria"),
     "menus": ("name", "description", "price", "category", "cafeteria"),
     "pois": ("name", "category", "description", "address", "openingHours"),
 }

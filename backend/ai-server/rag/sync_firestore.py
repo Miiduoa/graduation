@@ -103,6 +103,47 @@ def sync_from_json_dump(dump_dir: str | Path | None = None) -> dict[str, int]:
     return results
 
 
+def legacy_unscoped_firestore_ids(collection_name: str = "campus") -> list[str]:
+    """Legacy sync wrote firestore chunks without schoolId; those cannot be scoped."""
+    from rag.indexer import get_or_create_collection
+
+    collection = get_or_create_collection(collection_name)
+    data = collection.get(include=["metadatas"])
+    leftover: list[str] = []
+    for doc_id, meta in zip(data.get("ids") or [], data.get("metadatas") or []):
+        meta = meta or {}
+        source = str(meta.get("source") or "")
+        if source.startswith("firestore:") and not meta.get("schoolId"):
+            leftover.append(doc_id)
+    return leftover
+
+
+def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, collection_name: str = "campus") -> dict:
+    """Rebuild unscoped Firestore RAG rows from source before school filters apply.
+
+    Unscoped rows are never opened to every campus. If source data is unavailable,
+    they stay unscoped and remain invisible to school-filtered retrieval.
+    """
+    leftover = legacy_unscoped_firestore_ids(collection_name)
+    if not leftover:
+        return {"legacy": 0, "remaining": 0, "rebuilt": False}
+    results = {"legacy": len(leftover)}
+    try:
+        results["firestore"] = sync_all(db)
+    except Exception as exc:
+        logger.warning("Legacy Firestore re-sync from live collections failed: %s", exc)
+        results["firestore"] = None
+    leftover = legacy_unscoped_firestore_ids(collection_name)
+    if leftover:
+        results["json"] = sync_from_json_dump(dump_dir)
+        leftover = legacy_unscoped_firestore_ids(collection_name)
+    results["remaining"] = len(leftover)
+    results["rebuilt"] = results["remaining"] < results["legacy"]
+    if leftover:
+        logger.error("%s legacy Firestore RAG records still lack school scope", len(leftover))
+    return results
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     print("Syncing from JSON dump (dev mode)...")
