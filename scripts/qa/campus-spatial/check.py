@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
@@ -692,6 +693,68 @@ async def desktop(page, requests, resources):
             "placeCount": len(options), "navigationHref": href}
 
 
+async def sourced_building_volumes(page, _requests, _resources):
+    """Check that actual Three.js WebGL pixels change when validated building geometry arrives.
+
+    This is a geometrically plausible local fixture tied to the known library way ID,
+    not a live OSM response, audited real-world footprint, or façade measurement.
+    """
+    release = asyncio.Event()
+    requests_seen = []
+    fixture = {
+        "schoolId": "pu",
+        "source": "OpenStreetMap",
+        "fetchedAt": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "stale": False,
+        "buildings": [{
+            "poiId": "pu-library",
+            "name": "蓋夏圖書館",
+            "sourceUrl": LIBRARY["source"],
+            "heightMeters": 18,
+            "heightBasis": "osm-tag",
+            "outline": [
+                [120.58131, 24.22624],
+                [120.58143, 24.22624],
+                [120.58143, 24.22634],
+                [120.58131, 24.22634],
+            ],
+        }],
+    }
+
+    async def provide_geometry(route):
+        requests_seen.append(route.request.url)
+        await release.wait()
+        await route.fulfill(status=200, content_type="application/json",
+                            body=json.dumps(fixture, ensure_ascii=False))
+
+    await page.route("**/api/public/campus-footprints", provide_geometry)
+    await open_explorer(page)
+    await selector_for(page).select_option(LIBRARY["id"])
+    for _ in range(3):
+        await dialog_for(page).get_by_role("button", name="放大空間圖", exact=True).click()
+    await assert_idle_renderer(page)
+    before = await canvas_fingerprint(page)
+
+    release.set()
+    info = dialog_for(page).get_by_text("1 棟公開建築輪廓", exact=False)
+    await expect(info).to_be_visible(timeout=15_000)
+    await ready(page)
+    await assert_idle_renderer(page)
+    after = await canvas_fingerprint(page)
+    assert before != after, "A source-checked building did not alter the real WebGL pixels"
+    assert len(requests_seen) == 1, requests_seen
+    await expect(dialog_for(page).get_by_text(f"資料讀取：{fixture['fetchedAt'][:10]}", exact=False)).to_be_visible()
+    await assert_layout(page)
+    await page.screenshot(path=str(OUT / "sourced-building-volume.png"))
+    return {
+        "geometry": "labelled local OSM-way-aligned fixture, not live OSM",
+        "verified": "real WebGL pixels changed after validated 3D building volume",
+        "fetchCount": len(requests_seen),
+        "source": LIBRARY["source"],
+        "webgl": await assert_webgl(page),
+    }
+
+
 async def mobile(page, _requests, _resources):
     await open_explorer(page)
     layout = await assert_layout(page)
@@ -916,6 +979,7 @@ async def main():
                     ("desktop", {"width": 1440, "height": 1000}, desktop),
                     ("camera-controls", {"width": 1440, "height": 1000}, camera_controls),
                     ("camera-touch", {"width": 390, "height": 844}, touch_camera),
+                    ("sourced-building-volumes", {"width": 390, "height": 844}, sourced_building_volumes),
                     ("mobile-320", {"width": 320, "height": 568}, mobile),
                     ("mobile-390", {"width": 390, "height": 844}, mobile),
                     ("dark-large-text", {"width": 390, "height": 844}, dark_large_text),

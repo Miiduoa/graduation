@@ -8,6 +8,8 @@ import { AssistantServiceLinks } from '@/components/AssistantServiceLinks';
 import { canAnswerAssistantLocally } from '@/lib/assistantLocalActions';
 import { assistantPermissionSettingsHref, SUGGESTIONS, stepFamily, stepStatus } from './copy';
 import styles from './AssistantReply.module.css';
+import draftStyles from './AssistantDraft.module.css';
+import { EMPTY_COMPOSER_DRAFT, chooseComposerSuggestion, editComposerDraft, restoreComposerDraft, sendComposerDraft } from './composerDraft';
 import type { V2ActionStates, V2Card, V2Turn } from './types';
 
 export function AssistantThread({
@@ -65,6 +67,7 @@ export function AssistantThread({
   const field = useRef<HTMLTextAreaElement>(null);
   const followLatest = useRef(true);
   const [showJump, setShowJump] = useState(false);
+  const [draft, setDraft] = useState(EMPTY_COMPOSER_DRAFT);
   useEffect(() => {
     const root = shell.current;
     const node = dock.current;
@@ -78,25 +81,29 @@ export function AssistantThread({
     const observer = new ResizeObserver(apply);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [inline, turns.length, question, pending]);
+  }, [inline, turns.length, question, pending, draft]);
   useEffect(() => {
-    if (inline) return;
-    // Incoming results must not steal the scroll position while someone reads older replies.
+    const node = log.current;
+    const scrollTarget = inline ? node : window;
+    if (!scrollTarget) return;
+    // The inline thread owns its scroll position; outer page scrolling must not change it.
     const trackScroll = () => {
       if (!end.current || turns.length === 0) return;
-      const nearLatest = end.current.getBoundingClientRect().top - window.innerHeight <= 144;
+      const nearLatest = inline && node
+        ? node.scrollHeight - node.clientHeight - Math.max(0, node.scrollTop) <= 48
+        : end.current.getBoundingClientRect().top - window.innerHeight <= 144;
       followLatest.current = nearLatest;
       setShowJump(!nearLatest);
     };
-    window.addEventListener('scroll', trackScroll, { passive: true });
-    return () => window.removeEventListener('scroll', trackScroll);
+    scrollTarget.addEventListener('scroll', trackScroll, { passive: true });
+    return () => scrollTarget.removeEventListener('scroll', trackScroll);
   }, [inline, turns.length]);
   useEffect(() => {
+    if (!followLatest.current || (!turns.length && !pending && !error)) return;
     if (inline) {
       if (log.current) log.current.scrollTop = log.current.scrollHeight;
       return;
     }
-    if (!followLatest.current || (!turns.length && !pending && !error)) return;
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
   }, [inline, turns, pending, error]);
@@ -107,8 +114,26 @@ export function AssistantThread({
     node.style.height = Math.min(node.scrollHeight, 132) + 'px';
   }, [question]);
   const schoolQuery = '?schoolId=' + encodeURIComponent(schoolId);
+  const canSubmit = !pending && !onStop && !!question.trim() &&
+    (canAnswerAssistantLocally(question) || (consent && ready));
+  function submitQuestion() {
+    // Rejected keyboard/form submits must not resume automatic scrolling.
+    if (!canSubmit) return;
+    followLatest.current = true;
+    setShowJump(false);
+    setDraft(sendComposerDraft(draft, question));
+    onAsk();
+  }
   function applyChip(phrase: string) {
-    onQuestion(phrase);
+    const next = chooseComposerSuggestion(draft, question, phrase);
+    setDraft(next.draft);
+    if (next.question !== question) onQuestion(next.question);
+    field.current?.focus();
+  }
+  function restoreDraft() {
+    const next = restoreComposerDraft(draft, question);
+    setDraft(next.draft);
+    if (next.question !== question) onQuestion(next.question);
     field.current?.focus();
   }
   const consentControl = (
@@ -142,7 +167,8 @@ export function AssistantThread({
           {consentControl}
         </details>
       ) : consentControl}
-      <div ref={log} className={styles.log} role="log" aria-busy={pending || undefined}>
+      <div ref={log} className={styles.log} role="log" aria-label="對話紀錄"
+        tabIndex={inline ? 0 : undefined} aria-busy={pending || undefined}>
         {!inline && turns.length === 0 && !pending ? (
           <div className={styles.empty}>
             <h2>今天想問什麼？</h2>
@@ -157,7 +183,7 @@ export function AssistantThread({
           </div>
         ) : null}
         {turns.map((turn, i) => (
-          <article className={styles.turn} key={i}>
+          <article className={styles.turn} style={i === turns.length - 1 ? undefined : { animation: 'none' }} key={i}>
             <div className={`${styles.row} ${styles.rowUser}`}>
               <div className={`${styles.bubble} ${styles.bubbleUser}`}>
                 <p>{turn.question}</p>
@@ -238,8 +264,17 @@ export function AssistantThread({
             onClick={() => {
               followLatest.current = true;
               setShowJump(false);
-              const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-              end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+              if (inline) {
+                // Keep the homepage in place and leave keyboard focus on a persistent target.
+                const node = log.current;
+                if (node) {
+                  node.focus({ preventScroll: true });
+                  node.scrollTop = node.scrollHeight;
+                }
+              } else {
+                const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+                end.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
+              }
             }}
           >
             回到最新回覆
@@ -254,14 +289,19 @@ export function AssistantThread({
             ))}
           </div>
         ) : null}
+        {draft.saved !== null ? (
+          <div className={draftStyles.restore} role="group" aria-label="已保留的輸入內容">
+            <span>另有一份草稿已保留</span>
+            <button type="button" onClick={restoreDraft}>切換保留草稿</button>
+          </div>
+        ) : null}
+        {draft.notice ? <p className={draftStyles.notice} role="status">{draft.notice}</p> : null}
         <form
           className={styles.composer}
           aria-label="傳送問題"
           onSubmit={(e) => {
             e.preventDefault();
-            followLatest.current = true;
-            setShowJump(false);
-            onAsk();
+            submitQuestion();
           }}
         >
           <label htmlFor={fieldId}>問題</label>
@@ -273,15 +313,16 @@ export function AssistantThread({
             maxLength={1000}
             rows={1}
             placeholder={inline && turns.length ? '接著問…' : '輸入問題'}
-            onChange={(e) => onQuestion(e.target.value)}
+            onChange={(e) => {
+              setDraft(editComposerDraft(draft));
+              onQuestion(e.target.value);
+            }}
             onKeyDown={(e) => {
               // In Chinese/Japanese IMEs Enter selects a candidate; it is not a send gesture.
               if (e.key === 'Enter' && !e.shiftKey &&
                   !e.nativeEvent.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
-                followLatest.current = true;
-                setShowJump(false);
-                onAsk();
+                submitQuestion();
               }
             }}
           />
@@ -289,6 +330,7 @@ export function AssistantThread({
             <VoiceDictationButton
               disabled={pending || !ready}
               onTranscript={(text) => {
+                setDraft(editComposerDraft(draft));
                 onQuestion([question.trim(), text.trim()].filter(Boolean).join(' ').slice(0, 1000));
                 field.current?.focus();
               }}
@@ -307,7 +349,7 @@ export function AssistantThread({
               停止回答
             </button>
           ) : (
-            <button key="send" className={styles.send} disabled={pending || !question.trim() || (!canAnswerAssistantLocally(question) && (!consent || !ready))}>
+            <button key="send" className={styles.send} disabled={!canSubmit}>
               送出
             </button>
           )}
