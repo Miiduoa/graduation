@@ -17,6 +17,9 @@ const MAX_ROWS = 20;
 // visible course material. Do not infer CSS visibility or parse arbitrary
 // HTML: only recognize explicit hidden / aria-hidden=true containers.
 const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
+// HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
+// nested disclosures balanced so a closed inner example cannot expose its parent.
+const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dialog']);
 
 function hasHiddenHtmlAttribute(token: string): boolean {
   return /\shidden(?=[\s=/>])/iu.test(token) ||
@@ -28,7 +31,7 @@ function parseSimplePipeRow(line: string): string[] | null {
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
   const trimmed = line.trim();
   // Raw HTML blocks and graphics cannot be treated as Markdown table cells.
-  if (/<\/?(?:pre|code|script|style|textarea|template|noscript|svg|math|table)\b/iu.test(trimmed)) return null;
+  if (/<\/?(?:pre|code|script|style|textarea|template|noscript|svg|math|table|details|dialog)\b/iu.test(trimmed)) return null;
   // A literal pipe inside a cell or inline code needs a full Markdown parser.
   // Do not silently shift the student's values into the wrong columns.
   if (!trimmed.includes('|') || trimmed.includes('\\|') ||
@@ -105,7 +108,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table|div|section|aside)\b[^>]*>/giu)) {
+    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table|details|dialog|div|section|aside)\b[^>]*>/giu)) {
       const token = match[0];
       if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
@@ -133,7 +136,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       if (htmlCodeBlocks.length > 0) {
         const current = htmlCodeBlocks[htmlCodeBlocks.length - 1];
         if (closing && current === tag) htmlCodeBlocks.pop();
-        else if (!closing && !selfClosing && current === tag && HIDDEN_HTML_CONTAINERS.has(tag))
+        else if (!closing && !selfClosing && current === tag && NESTABLE_HTML_BLOCKS.has(tag))
           htmlCodeBlocks.push(tag);
       } else if (!closing && !selfClosing &&
           (!HIDDEN_HTML_CONTAINERS.has(tag) || hasHiddenHtmlAttribute(token))) {

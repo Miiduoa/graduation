@@ -101,3 +101,46 @@ it('does not activate literal hidden tags in inline code or data-hidden attribut
   ].join('\n');
   expect(extractStudySourceTables(source)).toEqual(realTable(3));
 });
+
+
+describe('collapsible HTML lesson answers are not public source Markdown tables', () => {
+  it('does not reveal an answer inside closed nested details after an inner details ends', () => {
+    const source = [
+      '<details>',
+      '<summary>課堂練習解答</summary>',
+      '<details>',
+      '| 模擬答案 | 分數 |',
+      '| --- | --- |',
+      '| 不應額外呈現 | 999 |',
+      '</details>',
+      '| 外層仍收合 | 分數 |',
+      '| --- | --- |',
+      '| 尚未展開 | 888 |',
+      '</details>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(12));
+  });
+
+  it('does not reconstruct source tables inside HTML dialog or even an open disclosure', () => {
+    for (const wrapper of [
+      ['<dialog>', '</dialog>'],
+      ['<details open>', '</details>'],
+    ]) {
+      const source = [
+        wrapper[0],
+        '| 互動區內部範例 | 學分 |',
+        '| --- | --- |',
+        '| 非獨立表格 | 99 |',
+        wrapper[1],
+        ...visibleTable,
+      ].join('\n');
+      expect(extractStudySourceTables(source)).toEqual(realTable(6));
+    }
+  });
+
+  it('does not activate details or dialog tags mentioned only as inline code', () => {
+    const source = ['HTML 教學以 `<details>` 和 `<dialog>` 為例。', ...visibleTable].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+});
