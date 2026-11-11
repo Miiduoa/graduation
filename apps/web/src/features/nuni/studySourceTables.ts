@@ -58,10 +58,11 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
     // Literal HTML-looking text inside fenced Markdown code is not markup.
     if (!fence) {
       let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-      for (const match of line.matchAll(/<!--|-->|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {
+      // Handle both --> and the HTML-standard --!> comment endings.
+      for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {
         const token = match[0];
         if (inHtmlComment) {
-          if (token === '-->') inHtmlComment = false;
+          if (token === '-->' || token === '--!>') inHtmlComment = false;
           hiddenLine = true;
           continue;
         }

@@ -339,3 +339,55 @@ it('omits an ambiguous table row containing raw HTML code tags', () => {
   ].join('\n');
   expect(extractStudySourceTables(content)).toEqual([]);
 });
+
+it('recognizes --!> as an HTML comment end without showing hidden sample tables', () => {
+  const content = [
+    '<!-- 教師未公開的資料',
+    '| 隱藏科目 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    '--!> <!-- 第二段仍未公開',
+    '| 假科目 | 分數 |',
+    '| --- | --- |',
+    '| 模擬 | 888 |',
+    '--!> <pre>',
+    '| 程式範例 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 777 |',
+    '</pre>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 14,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('does not let a literal --!> inside fenced code alter HTML comment tracking', () => {
+  const ticks = String.fromCharCode(96).repeat(3);
+  const content = [
+    ticks + 'html',
+    '<!--',
+    '--!>',
+    '| 假科目 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    ticks,
+    '<!-- 真正 HTML 註解',
+    '| 其他假資料 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 888 |',
+    '--!>',
+    '| 真正教材 | 學分 |',
+    '| --- | --- |',
+    '| 資管 | 3 |',
+  ].join('\\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 13,
+    headers: ['真正教材', '學分'],
+    rows: [['資管', '3']],
+  }]);
+});
