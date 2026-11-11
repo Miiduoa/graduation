@@ -314,6 +314,15 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   const offset = savedClassGapDayOffset(query.day);
   const date = classDate(new Date(now + offset * DAY));
   const midnight = Date.parse(date + 'T00:00:00+08:00');
+  const dayEnd = midnight + DAY;
+  // savedClassGaps computes openings between meetings on one Taiwan date.
+  // A shorter-than-24h interval crossing this date boundary is still corrupt:
+  // clipping it would invent an available slot after midnight or before 24:00.
+  if (timetable.classGaps.some(({ startAt, endAt }) =>
+    (startAt < midnight && endAt > midnight) ||
+    (startAt < dayEnd && endAt > dayEnd))) {
+    return reply('這份手機課表有跨越查詢日期的空堂紀錄，無法核對可用時間。請開啟「我的課表」確認上課時間。');
+  }
   const label = (offset === 0 ? '今天剩下的時間' : offset === 1 ? '明天' : '後天') + '（' + date.slice(5).replace('-', '/') + '）';
   const bounds = query.part && partBounds[query.part];
   // The clock label must describe the same interval used to calculate gaps.
