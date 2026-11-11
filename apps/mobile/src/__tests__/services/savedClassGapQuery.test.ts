@@ -74,6 +74,25 @@ describe('class gap questions', () => {
     }
   });
 
+  test('carries colloquial elliptical follow-ups without swallowing a different student task', () => {
+    const initial = { ...tomorrow, part: 'morning' as const };
+    const cases: Array<[string, SavedClassGapQuery, SavedClassGapQuery]> = [
+      ['那明天的呢？', { ...today, minMinutes: 30 }, tomorrow],
+      ['那下午的呢？', initial, { ...initial, part: 'afternoon' }],
+      ['那至少一小時的呢？', tomorrow, { ...tomorrow, minMinutes: 60 }],
+    ];
+    for (const [question, previous, expected] of cases) {
+      expect(isSavedClassGapRefinement(question)).toBe(true);
+      expect(savedClassGapFollowUp(question, previous)).toEqual(expected);
+    }
+    for (const question of ['那明天的作業呢', '那下午的公告呢', '那至少一小時的提醒呢']) {
+      expect(isSavedClassGapRefinement(question)).toBe(false);
+      expect(savedClassGapFollowUp(question, tomorrow)).toBeNull();
+    }
+    // Bare ellipses cannot start a new lookup without an earlier verified gap turn.
+    expect(savedClassGapQuery('那明天的呢？')).toBeNull();
+  });
+
   test('does not reuse corrupt restored filters in a follow-up', () => {
     const invalidPrevious: unknown[] = [
       null, undefined,

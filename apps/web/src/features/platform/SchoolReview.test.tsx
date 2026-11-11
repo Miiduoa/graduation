@@ -627,7 +627,7 @@ it('reports review drafts and opening confirmations to the shared navigation gua
   expect(onDraftChange).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole('button', { name: '檢查開通條件' }));
   await screen.findByRole('button', { name: '確認開通 待開放學校' });
-  expect(onDraftChange).toHaveBeenLastCalledWith(true);
+  await waitFor(() => expect(onDraftChange).toHaveBeenLastCalledWith(true));
   fireEvent.click(screen.getByRole('button', { name: '取消' }));
   expect(onDraftChange).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole('button', { name: '拒絕' }));

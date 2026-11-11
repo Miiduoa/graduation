@@ -141,7 +141,10 @@ function readQuestion(question: string, inheritedPart?: DayPart) {
   const clearDuration = /^(?:不限(?:長度|時長|分鐘)|不限制(?:長度|時長))/.exec(scope.rest);
   const threshold = clearDuration ? null : readDuration(scope.rest);
   const rest = (clearDuration ? scope.rest.slice(clearDuration[0].length) : threshold?.rest ?? scope.rest)
-    .replace(gapPurpose, '');
+    .replace(gapPurpose, '')
+    // Natural short follow-ups such as「那明天的呢」refer to the previous gap topic.
+    // Remove only a standalone linking particle; never consume another task noun.
+    .replace(/^的$/, '');
   return { ...scope, refinement, replaceTime, rest, minMinutes: clearDuration ? 0 : threshold?.minutes };
 }
 
@@ -232,12 +235,14 @@ export function isSavedClassGapRefinement(question: string): boolean {
   if (/^(?:那麼|那|改成|改查|改看|換成|只看|只找|查看)/.test(normalized) && isSavedClassGapQuestion(question)) return true;
   const text = normalized.replace(/^(?:那麼|那)(?:就)?[，,]?/, '')
     .replace(/^(?:改成|改查|改看|換成|只看|只找|查看)/, '');
+  // A trailing「的」is a colloquial reference to the previous topic, not a new request.
+  const bareTopic = text.endsWith('的') ? text.slice(0, -1) : text;
   const date = '(?:今天|今日|明天|明日|後天|後日|(?:這|下)?(?:週|星期|禮拜)[一二三四五六日天])';
   const scope = '(?:早上|上午|下午|晚上|全天|全日|整天|全部時段)';
   const length = `(?:至少|最少|超過|不超過)?(?:${numberText}|半)(?:個)?(?:半)?(?:小時|鐘頭|h|分鐘)(?:半|(?:又)?${numberText}分鐘)?(?:以上|以內|以下|後)?`;
   const clock = `(?:${clockText})(?:(?:到|至|[-–—~～])(?:${clockText})(?:之間|內)?|(?:以後|之後|後|以前|之前|前))?`;
-  return new RegExp(`^(?:${date})?(?:${scope})?(?:${length}|${clock}|不限(?:長度|時長|分鐘)|不限制(?:長度|時長))$`, 'i').test(text) ||
-    new RegExp(`^(?:${date})(?:${scope})?$|^${scope}$`).test(text);
+  return new RegExp(`^(?:${date})?(?:${scope})?(?:${length}|${clock}|不限(?:長度|時長|分鐘)|不限制(?:長度|時長))$`, 'i').test(bareTopic) ||
+    new RegExp(`^(?:${date})(?:${scope})?$|^${scope}$`).test(bareTopic);
 }
 
 export function savedClassGapDayOffset(day: SavedClassGapQuery['day']): number {
