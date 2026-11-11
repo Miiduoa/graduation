@@ -167,7 +167,10 @@ async function readOsm(signal: AbortSignal): Promise<Snapshot> {
       'User-Agent': 'nuni-campus-spatial/1.0 (https://nuni.tw)',
     },
   });
-  if (!response.ok) {
+  // Overpass returns one complete JSON document on HTTP 200. Fetch's ok flag
+  // also accepts 206 Partial Content and other 2xx codes: a truncated or
+  // intermediary-transformed reply must never become a 24-hour OSM snapshot.
+  if (response.status !== 200) {
     // Fetch resolves as soon as headers arrive; error bodies may keep streaming
     // indefinitely (including 406/429/503 responses from a congested proxy).
     // We only need status/Retry-After. Release the unused body immediately,
