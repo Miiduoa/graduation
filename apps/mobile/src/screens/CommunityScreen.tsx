@@ -128,7 +128,14 @@ export function CommunityScreen(props: Record<string, unknown>) {
       <CampusSocialNavProvider navigation={stackNav}>
         <View style={{ flex: 1 }}>
           {activeTab === 'feed' && (
-            <TitleHistoryLauncher onOpenPost={({ id, schoolId }) => stackNav?.navigate?.('PostDetail', { postId: id, schoolId })} />
+            <TitleHistoryLauncher onOpenPost={({ id, schoolId }) => {
+              // A missing navigator is not a successful reading. Let the
+              // history panel retain the result and offer the same-card retry.
+              if (typeof stackNav?.navigate !== 'function') {
+                throw new Error('PostDetail navigation is unavailable');
+              }
+              stackNav.navigate('PostDetail', { postId: id, schoolId });
+            }} />
           )}
           {activeTab === 'feed' && <HomeFeedScreen />}
           {activeTab === 'boards' && <BoardsScreen />}
