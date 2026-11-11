@@ -134,7 +134,12 @@ function ConfirmedAccountPanel({
       resolve = yes;
       reject = no;
     });
-    const operation = { promise, resolve, reject, targetVersion: readerVersion + 1 };
+    const operation: MembershipRecovery = {
+      promise,
+      resolve,
+      reject,
+      targetVersion: readerVersion + 1,
+    };
     recoveryOperation.current = operation;
     // The legacy membership button does not await the returned promise.
     void promise.catch(() => {});
