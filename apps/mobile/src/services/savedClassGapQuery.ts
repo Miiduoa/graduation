@@ -297,14 +297,6 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
   if (!Array.isArray(timetable.classGaps) || !Number.isFinite(now)) {
     return reply('這份手機課表的資料不足，無法核對課間空堂。請開啟「我的課表」確認學期和上課時間。');
   }
-  // A future or malformed saved-at timestamp cannot support a current availability
-  // claim. Allow a small device-clock skew, while keeping null as explicitly unknown.
-  if (timetable.updatedAt != null) {
-    const savedAt = parseZonedInstant(timetable.updatedAt);
-    if (!Number.isFinite(savedAt) || savedAt > now + 5 * MINUTE) {
-      return reply('這份手機課表的儲存時間資料不足或晚於查詢時間，無法核對空堂。請開啟「我的課表」確認來源與時間。');
-    }
-  }
   // A damaged local snapshot cannot be treated as proof that a student has no free period.
   if (timetable.classGaps.some((gap) => !gap || typeof gap !== 'object' ||
     !Number.isSafeInteger(gap.startAt) || !Number.isSafeInteger(gap.endAt) ||
@@ -369,8 +361,12 @@ export function answerSavedClassGapQuery(query: SavedClassGapQuery, context: OnD
     start: Math.ceil(Math.max(start, from) / MINUTE) * MINUTE,
     end: Math.floor(Math.min(end, until) / MINUTE) * MINUTE,
   })).filter(({ start, end }) => end > start && end - start >= query.minMinutes * MINUTE);
-  const saved = timetable.updatedAt && formatTaipeiDateTime(timetable.updatedAt, { seconds: false });
-  const source = saved ? '依手機課表計算，課表儲存於 ' + saved + '。' : '依手機課表計算，儲存時間不詳。';
+  // Save time only describes provenance. Legacy formats and device-clock corrections
+  // must not block answers backed by valid collection time and gap data.
+  const savedAt = parseZonedInstant(timetable.updatedAt);
+  const saved = Number.isFinite(savedAt) && formatTaipeiDateTime(new Date(savedAt).toISOString(), { seconds: false });
+  const source = !saved ? '依手機課表計算，儲存時間不詳。'
+    : '依手機課表計算，課表儲存於 ' + saved + (savedAt > now ? '（晚於查詢時間，需核對）。' : '。');
   const lines = windows.map(({ start, end }) =>
     clock.format(start) + '–' + (end === midnight + DAY ? '24:00' : clock.format(end)) + '（' + (end - start) / MINUTE + ' 分鐘）');
   return reply([

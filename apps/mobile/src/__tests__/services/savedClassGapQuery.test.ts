@@ -320,8 +320,8 @@ describe('saved class gap answer', () => {
       const answer = answerSavedClassGapQuery(today, {
         ...context, timetable: { ...context.timetable, updatedAt },
       }).content;
-      expect(answer).toContain('無法核對空堂');
-      expect(answer).not.toContain('有 2 段');
+      expect(answer).toContain('儲存時間不詳');
+      expect(answer).toContain('有 2 段');
     }
     // Real leap days and a zoned timestamp still work.
     expect(answerSavedClassGapQuery(today, {
@@ -354,7 +354,7 @@ describe('saved class gap answer', () => {
     expect(answerSavedClassGapQuery(today, context).content).toContain('有 2 段');
   });
 
-  test('rejects invalid or future-dated save provenance without inventing free time', () => {
+  test('answers valid gaps with unknown or future-dated save provenance', () => {
     const invalidSavedAt: unknown[] = [
       '', 'unparseable', '2099-01-01T00:00:00+08:00', 12345,
       // Without a timezone, the same snapshot can mean different instants on iOS and Android.
@@ -366,23 +366,39 @@ describe('saved class gap answer', () => {
         timetable: { ...context.timetable, updatedAt: updatedAt as string },
       });
       expect(answer.route).toBe('/timetable');
-      expect(answer.content).toContain('無法核對空堂');
-      expect(answer.content).not.toContain('有 2 段');
+      expect(answer.content).toMatch(/儲存時間不詳|晚於查詢時間，需核對/);
+      expect(answer.content).toContain('有 2 段');
+      expect(answer.content).toContain('14:00–15:00（60 分鐘）');
+      expect(answer.content).not.toContain('無法核對空堂');
       expect(answer.content).not.toContain('沒有課間空堂');
     }
     // Explicit UTC or offset timestamps are portable evidence, not device-local guesses.
     expect(answerSavedClassGapQuery(today, {
       ...context, timetable: { ...context.timetable, updatedAt: '2026-11-05T23:12:00+08:00' },
     }).content).toContain('有 2 段');
-    // Five minutes of clock skew does not invalidate a recently saved snapshot.
+    // Small clock skew remains answerable, with provenance marked for review.
     const nearFuture = answerSavedClassGapQuery(today, {
       ...context, timetable: { ...context.timetable, updatedAt: '2026-11-06T10:04:00+08:00' },
     });
     expect(nearFuture.content).toContain('有 2 段');
+    expect(nearFuture.content).toContain('晚於查詢時間，需核對');
     // Null remains a known limitation, not a forged timestamp.
-    expect(answerSavedClassGapQuery(today, {
+    const unknownSaveTime = answerSavedClassGapQuery(today, {
       ...context, timetable: { ...context.timetable, updatedAt: null },
-    }).content).toContain('儲存時間不詳');
+    }).content;
+    expect(unknownSaveTime).toContain('儲存時間不詳');
+    expect(unknownSaveTime).toContain('有 2 段');
+  });
+
+  test('keeps legacy saves and saves preceding a device-clock rollback queryable', () => {
+    for (const updatedAt of ['2026-11-05T15:12:00', '2026-11-06T10:30:00+08:00']) {
+      const answer = answerSavedClassGapQuery(today, {
+        ...context, timetable: { ...context.timetable, updatedAt },
+      }).content;
+      expect(answer).toContain('有 2 段');
+      expect(answer).toContain('14:00–15:00（60 分鐘）');
+      expect(answer).toMatch(/儲存時間不詳|晚於查詢時間，需核對/);
+    }
   });
 
   test('malformed saved gap containers and entries fail closed instead of crashing or claiming no free time', () => {
