@@ -93,7 +93,15 @@ export function formatOnDeviceSchoolPrompt(
   senseSnapshot: CampusSenseSnapshot | null | undefined,
   expectedOwnerUid: string,
 ): string {
-  const now = new Intl.DateTimeFormat('zh-TW', {
+  // A restored context is untrusted. An invalid or timezone-free timestamp
+  // must neither crash the local model prompt nor authorize cached private data.
+  // Live collectors use canonical UTC timestamps from Date#toISOString.
+  const checkedAt = typeof snapshot.checkedAt === 'string' &&
+    /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(snapshot.checkedAt)
+    ? new Date(snapshot.checkedAt) : new Date(NaN);
+  const verifiedClock = Number.isFinite(checkedAt.getTime()) &&
+    checkedAt.toISOString() === snapshot.checkedAt;
+  const now = verifiedClock ? new Intl.DateTimeFormat('zh-TW', {
     timeZone: 'Asia/Taipei',
     year: 'numeric',
     month: 'long',
@@ -101,12 +109,12 @@ export function formatOnDeviceSchoolPrompt(
     weekday: 'long',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(snapshot.checkedAt));
+  }).format(checkedAt) : '無法核對（請重新整理裝置資料）';
   // The rule-based timetable tool uses every saved course. Keep only a short
   // excerpt in the LLM prompt so a small local model cannot overflow context.
   // The prompt is a separate privacy boundary: a caller cannot pass a cached
   // timetable or campus snapshot for someone other than the active account.
-  const owned = !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
+  const owned = verifiedClock && !!expectedOwnerUid && snapshot.ownerUid === expectedOwnerUid;
   const sampleCourses = owned ? snapshot.timetable.courses.slice(0, 8) : [];
   const omitted = owned ? snapshot.timetable.courses.length - sampleCourses.length : 0;
   const note = owned && snapshot.timetable.source === 'saved-device-copy'
