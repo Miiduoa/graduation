@@ -378,8 +378,8 @@ export default ({ config }: any) => {
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
       allowLocalMockAuth,
-      /** `false` 時不對 TronClass 發網路請求；口試／離線 Demo：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false` */
-      tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, true),
+      /** 僅在 `EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=true` 時對 TronClass 發網路請求；未設定或非 true 則關閉，學校連線預設關閉。 */
+      tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, false),
       assignmentFileSubmit: parseBoolean(
         process.env.EXPO_PUBLIC_ASSIGNMENT_FILE_SUBMIT_ENABLED,
         false,

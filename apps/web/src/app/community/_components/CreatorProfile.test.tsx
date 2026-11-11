@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   pinSave: vi.fn(),
 }));
 
+vi.mock('./CreatorHighlight', () => ({
+  CreatorHighlight: () => <aside data-testid="featured-creator-work" />,
+}));
 vi.mock('@/components/AuthGuard', () => ({
   useAuth: () => ({ user: mocks.user, loading: mocks.loading }),
 }));
