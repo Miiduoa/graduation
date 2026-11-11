@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { findCatalogSameSlotChange } from './publicCourseTimetableImport';
 import {
   parsePersonalImportSyncState,
   type PersonalImportSyncState,
@@ -173,41 +174,16 @@ export function appendPersonalImports(
     if (options.expectedRecordsJson !== undefined && JSON.stringify(current.records) !== options.expectedRecordsJson)
       throw new Error('個人課表已更新，請重新核對衝堂後再加入。');
     if (options.protectCatalogTimetableSlots) {
-      // Run alongside normal duplicate checks under the same owner/school lock.
-      // Instructor changes must not create another copy of the same class slot.
-      const clean = (value?: string) =>
-        (value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
-      const conflictingTeacher = rows.some((row) =>
-        row.kind === 'timetable' && !!row.courseCode?.trim() && !!row.startTime && !!row.endTime &&
-        current.records.some((previous) =>
-          previous.kind === 'timetable' &&
-          previous.schoolId === row.schoolId &&
-          previous.academicYear === row.academicYear &&
-          previous.semester === row.semester &&
-          clean(previous.courseCode) === clean(row.courseCode) &&
-          clean(previous.className) === clean(row.className) &&
-          previous.dayOfWeek === row.dayOfWeek &&
-          previous.startTime === row.startTime &&
-          previous.endTime === row.endTime &&
-          clean(previous.teacher) !== clean(row.teacher),
-        ),
-      );
-      if (conflictingTeacher)
+      // Use the same source-change check as the review screen, but repeat it
+      // under the owner/school write lock so direct calls cannot bypass it.
+      const changed = findCatalogSameSlotChange(rows, current.records);
+      if (changed === 'teacher')
         throw new Error('相同課號、班別與時段已有不同教師的個人紀錄；請先核對原有資料。');
-      // Protect the same schedule-change invariant under the owner/school lock.
-      const staleMeeting = current.records.some((saved) => {
-        if (saved.kind !== 'timetable' || !saved.courseCode?.trim()) return false;
-        const sameOffering = rows.filter((row) =>
-          row.kind === 'timetable' && !!row.courseCode?.trim() &&
-          row.schoolId === saved.schoolId &&
-          row.academicYear === saved.academicYear && row.semester === saved.semester &&
-          clean(row.courseCode) === clean(saved.courseCode) &&
-          clean(row.className) === clean(saved.className));
-        return sameOffering.length > 0 && !sameOffering.some((row) =>
-          row.dayOfWeek === saved.dayOfWeek && row.startTime === saved.startTime &&
-          row.endTime === saved.endTime);
-      });
-      if (staleMeeting)
+      if (changed === 'room')
+        throw new Error('相同課號、班別與時段已有不同教室的個人紀錄；請先核對原有資料。');
+      if (changed === 'title')
+        throw new Error('相同課號、班別與時段已有不同課名的個人紀錄；請先核對原有資料。');
+      if (changed === 'time')
         throw new Error('相同課號與班別的原有上課時段與官方資料不同；請先核對原有資料。');
     }
     const id = createPersonalImportId();
