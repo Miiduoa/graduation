@@ -724,3 +724,8 @@ Markdown 中四個半形空格或 Tab 開頭的 `<!--`、`<pre>` 是程式碼文
 - 在 Markdown 的原始 HTML pre 範例內，若用 code 或 pre 示範標記，解析器不再把字面標記當成額外開啟的原始區塊，避免外層關閉後的正式課程表格消失。
 - template、noscript 中的表格不會被額外當成目前可見的正式課程資料；結束區塊後仍能排版教材原文中的真正表格。新增兩項來源文字解析器回歸，原始文字維持可供逐字核對。
 - 僅改善 Markdown 原文結構的保守辨識；不是圖像圖表理解、AI 正確率或手機真機驗收。沒有更動備份 v1/v2、筆記、付費 API、套件或私人教材傳輸；所有 CI/CodeQL、指定 App 5504170、Maestro 及 Ahaboard 同機比較均需按新 SHA 重查。
+
+
+### 2026-11-12：明確隱藏的 HTML 教材區塊不再被當成公開表格
+
+Markdown 來源若包含 `<div hidden>` 或 `<section aria-hidden="true">` 等明確隱藏的 HTML 區塊，裡面的管線分隔文字先前仍可能被「原文表格」重新顯示，讓學生誤把教師未公開的示例當作正式課程數據。現在只針對 `div/section/aside` 的 `hidden` 或 `aria-hidden=true` 明確標記保守排除表格，且會對同名巢狀容器配對關閉，避免內層 `</div>` 過早暴露外層隱藏資料；離開區塊後仍保留真正的教材 Markdown 表格。行內反引號中的 HTML 範例與 `data-hidden` 非隱藏屬性不會誤觸。新增三項 Node/Vitest 回歸案例，不宣稱推斷 CSS 可見性或理解圖片圖表；原文、JSON 進度、私人筆記與教材傳輸方式不變。此為解析器測試，iOS／Android 真機、WebGPU 中文教學、指定 App 5504170 及 Ahaboard 同機對照仍待獨立驗證，PR 保持 Draft。

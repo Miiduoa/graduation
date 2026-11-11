@@ -56,3 +56,48 @@ describe('raw HTML figures and tables are not source Markdown tables', () => {
     expect(extractStudySourceTables(source)).toEqual([]);
   });
 });
+
+
+it('does not reveal hidden HTML course rows after an inner div closes', () => {
+  const source = [
+    '<div hidden>',
+    '<div class="example">',
+    '| 未發布科目 | 分數 |',
+    '| --- | --- |',
+    '| 假資料 | 999 |',
+    '</div>',
+    '| 仍然隱藏 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 888 |',
+    '</div>',
+    '| 正式課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual([{
+    startLine: 11,
+    headers: ['正式課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('omits aria-hidden course samples without hiding the later visible Markdown table', () => {
+  const source = [
+    '<section aria-hidden="true">',
+    '| 未公開結果 | 分數 |',
+    '| --- | --- |',
+    '| 範例 | 999 |',
+    '</section>',
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(6));
+});
+
+it('does not activate literal hidden tags in inline code or data-hidden attributes', () => {
+  const source = [
+    'HTML 課以 `<div hidden>` 為例。',
+    '<div data-hidden="example">',
+    ...visibleTable,
+  ].join('\n');
+  expect(extractStudySourceTables(source)).toEqual(realTable(3));
+});

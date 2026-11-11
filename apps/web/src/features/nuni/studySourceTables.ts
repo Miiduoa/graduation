@@ -13,6 +13,16 @@ const MAX_TABLES = 3;
 const MAX_COLUMNS = 8;
 const MAX_ROWS = 20;
 
+// A Markdown-looking table in an explicitly hidden HTML wrapper is not
+// visible course material. Do not infer CSS visibility or parse arbitrary
+// HTML: only recognize explicit hidden / aria-hidden=true containers.
+const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
+
+function hasHiddenHtmlAttribute(token: string): boolean {
+  return /\shidden(?=[\s=/>])/iu.test(token) ||
+    /\saria-hidden\s*=\s*(?:"true"|'true'|true)(?=\s|\/?>)/iu.test(token);
+}
+
 function parseSimplePipeRow(line: string): string[] | null {
   // Markdown renders four-space / tab-indented rows as code, not a table.
   if (/^(?: {4}| {0,3}\t)/u.test(line)) return null;
@@ -95,7 +105,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table)\b[^>]*>/giu)) {
+    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table|div|section|aside)\b[^>]*>/giu)) {
       const token = match[0];
       if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
           isInsideInlineCode(line, match.index ?? 0)) continue;
@@ -115,13 +125,18 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
       }
       const tag = match[1]?.toLowerCase();
       if (!tag) continue;
-      // Once inside a raw HTML element or graphic, tag-looking text in teaching
-      // examples does not open another block. Wait for that element's
-      // own closing tag so a later published table is not swallowed.
+      // Preformatted examples contain literal tag-looking text. In contrast,
+      // nested containers of the same type inside a hidden wrapper must be
+      // balanced, or the inner closing tag could expose unpublished rows.
+      const closing = token.startsWith('</');
+      const selfClosing = /\/>$/u.test(token);
       if (htmlCodeBlocks.length > 0) {
-        if (token.startsWith('</') && htmlCodeBlocks[htmlCodeBlocks.length - 1] === tag)
-          htmlCodeBlocks.pop();
-      } else if (!token.startsWith('</') && !/\/>$/u.test(token)) {
+        const current = htmlCodeBlocks[htmlCodeBlocks.length - 1];
+        if (closing && current === tag) htmlCodeBlocks.pop();
+        else if (!closing && !selfClosing && current === tag && HIDDEN_HTML_CONTAINERS.has(tag))
+          htmlCodeBlocks.push(tag);
+      } else if (!closing && !selfClosing &&
+          (!HIDDEN_HTML_CONTAINERS.has(tag) || hasHiddenHtmlAttribute(token))) {
         htmlCodeBlocks.push(tag);
       }
       hiddenLine = true;
