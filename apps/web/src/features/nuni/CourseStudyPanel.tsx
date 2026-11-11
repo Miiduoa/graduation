@@ -559,9 +559,7 @@ function StudySessionPanel({ courseTitle, scope, material, selectionSerial, onCl
         : manualCopyKind === 'practice'
           ? '已複製本輪練習紀錄到剪貼簿；內容含個人作答，請留意貼上位置。'
           : '已複製完整進度 JSON；請貼入純文字檔並儲存為 .json。內容含教材、筆記與參考回答，請勿公開分享。');
-      const target = manualCopyReturnTarget.current;
-      (target?.isConnected ? target : heading.current)?.focus();
-      manualCopyReturnTarget.current = null;
+      // The unmount effect restores focus after the retry controls disappear.
     } catch {
       if (copyRequest.current !== request) return;
       setDownloadError('仍無法直接複製。請全選下方文字並使用裝置的複製功能；目前備份內容沒有遺失。');

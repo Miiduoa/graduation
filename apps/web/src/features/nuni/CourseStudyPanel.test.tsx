@@ -1273,7 +1273,10 @@ it('retries a denied mobile JSON copy without changing the validated backup or n
     const snapshot = manual.value;
     expect(parseCourseStudyProgress(snapshot, scope).passages['0:0'].note).toBe('先完成的手機筆記');
     expect(region.contains(manual)).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' }));
+    const retry = screen.getByRole('button', { name: '再次嘗試複製到剪貼簿' });
+    retry.focus(); // The retry button is the focused element React will unmount after success.
+    expect(document.activeElement).toBe(retry);
+    fireEvent.click(retry);
     await waitFor(() => expect(screen.queryByRole('region', { name: '手動複製閱讀進度 JSON' })).toBeNull());
     expect(writeText).toHaveBeenCalledTimes(2);
     expect(writeText.mock.calls[0][0]).toBe(snapshot);
