@@ -150,7 +150,7 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(sync.sync_collection("announcements", db), 2)
             (Path(folder) / "announcements.json").write_text(json.dumps(rows))
             (Path(folder) / "users.json").write_text(json.dumps(rows))
-            self.assertEqual(sync.sync_from_json_dump(folder), {"announcements": 2})
+            self.assertEqual(sync.sync_from_json_dump(folder, collections={"announcements"}), {"announcements": 2})
             self.assertEqual(index.call_args_list[0], index.call_args_list[1])
             self.assertEqual({item["metadata"]["schoolId"] for item in index.call_args.args[0]}, {"nchu"})
 
@@ -298,3 +298,10 @@ class MigrationSafetyTests(unittest.TestCase):
         self.assertFalse(result["rebuilt"])
         self.assertTrue(result["retryable"])
         self.assertEqual(result["remaining"], 1)
+
+    def test_json_dump_missing_requested_collection_returns_minus_one(self):
+        sync = self._stub_rag_imports()
+        with tempfile.TemporaryDirectory() as folder:
+            result = sync.sync_from_json_dump(folder, collections={"announcements"})
+        self.assertEqual(result, {"announcements": -1})
+
