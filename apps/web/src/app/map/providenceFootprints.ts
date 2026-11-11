@@ -193,6 +193,23 @@ function isStandingBuilding(value: unknown): boolean {
     const offset = tags?.[key];
     if (offset !== undefined && !zeroOffset(offset)) return false;
   }
+  // This renderer extrudes from the ground. OSM can also describe a roof,
+  // underground footprint, bridge or other feature at a different elevation.
+  // Without verified bottom elevations, drawing those as surface walls would
+  // claim a real 3D building that the source does not establish.
+  const location = tags?.location;
+  if (location !== undefined && (typeof location !== 'string' ||
+      !['surface', 'ground'].includes(location.trim().toLowerCase()))) return false;
+  // Non-zero OSM layers describe relative vertical ordering, not a surveyed
+  // building base height. Preserve normal buildings with an explicit layer=0.
+  const layer = tags?.layer;
+  if (layer !== undefined && (typeof layer !== 'string' ||
+      !/^[+]?0+$/.test(layer.trim()))) return false;
+  for (const key of ['bridge', 'tunnel']) {
+    const marker = tags?.[key];
+    if (marker !== undefined && (typeof marker !== 'string' ||
+        !['no', 'false', '0'].includes(marker.trim().toLowerCase()))) return false;
+  }
   return ![...LIFECYCLE_BUILDING_TAGS, ...LIFECYCLE_STATUS_TAGS].some((tag) => {
     const status = tags?.[tag];
     // OSM lifecycle flags are usually strings. A present but unrecognized
