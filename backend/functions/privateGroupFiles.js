@@ -3,83 +3,18 @@
 const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 const { verifyRequestFirebaseUser } = require('./sessionSecurity');
+const {
+  parsePrivateGroupFilePath,
+  authorizePrivateFile,
+  PRIVATE_DOCUMENT_TYPES,
+  isPrivateFileImage,
+  validPrivateFileSegment,
+} = require('./generated/shared/privateFileAccess');
 
-const MANAGER_ROLES = new Set(['owner', 'admin', 'instructor', 'moderator']);
-const DOCUMENT_TYPES = new Set([
-  'application/pdf', 'text/plain', 'application/msword', 'application/vnd.ms-excel',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-]);
-
-function validSegment(value) {
-  return typeof value === 'string' && value.length > 0 && value.length <= 255
-    // Reject control characters before constructing document and object paths.
-    // eslint-disable-next-line no-control-regex
-    && value !== '.' && value !== '..' && !/[\\/\u0000-\u001f\u007f]/.test(value);
-}
-
-/** Returns the exact legacy private namespace scope, or null for any other path. */
-function parsePrivateGroupFilePath(value) {
-  if (typeof value !== 'string' || Buffer.byteLength(value) > 1024) return null;
-  const parts = value.split('/');
-  if (!parts.every(validSegment)) return null;
-  const common = { path: value, filename: parts.at(-1) };
-  if (parts[0] === 'groups' && parts.length === 3) {
-    return { ...common, kind: 'group-cover', groupId: parts[1], maxBytes: 5 * 1024 * 1024 };
-  }
-  if (parts[0] === 'groups' && parts[2] === 'posts' && parts.length === 5) {
-    return {
-      ...common, kind: 'group-post', groupId: parts[1], postId: parts[3],
-      maxBytes: 20 * 1024 * 1024,
-    };
-  }
-  if (parts[0] === 'assignments' && parts[2] === 'submissions' && parts.length === 5) {
-    return {
-      ...common, kind: 'assignment', assignmentId: parts[1], userId: parts[3],
-      maxBytes: 50 * 1024 * 1024,
-    };
-  }
-  return null;
-}
+const DOCUMENT_TYPES = PRIVATE_DOCUMENT_TYPES;
 
 function failure(statusCode, message) {
   return Object.assign(new Error(message), { statusCode });
-}
-
-async function authorize(db, scope, uid, writing) {
-  await db.runTransaction(async (tx) => {
-    let groupId = scope.groupId;
-    if (scope.kind === 'assignment') {
-      const assignment = await tx.get(db.collection('assignments').doc(scope.assignmentId));
-      groupId = assignment.data()?.groupId;
-      if (!assignment.exists || !validSegment(groupId)) throw failure(403, 'File access denied');
-    }
-    const groupRef = db.collection('groups').doc(groupId);
-    const [account, group, member] = await tx.getAll(
-      db.collection('users').doc(uid), groupRef, groupRef.collection('members').doc(uid),
-    );
-    const accountData = account.data() || {};
-    const schoolId = group.data()?.schoolId;
-    if (!account.exists || accountData.accountDeletionInProgress === true
-      || ['deleted', 'disabled', 'suspended', 'inactive'].includes(accountData.status)
-      || !group.exists || !validSegment(schoolId)
-      || !member.exists || member.data().status !== 'active') {
-      throw failure(403, 'File access denied');
-    }
-    const schoolMember = await tx.get(
-      db.collection('schools').doc(schoolId).collection('members').doc(uid),
-    );
-    if (!schoolMember.exists || schoolMember.data().status !== 'active') {
-      throw failure(403, 'File access denied');
-    }
-    const manager = MANAGER_ROLES.has(member.data().role);
-    if ((writing && scope.kind === 'group-cover' && !manager)
-      || (scope.kind === 'assignment' && scope.userId !== uid && (writing || !manager))) {
-      throw failure(403, 'File access denied');
-    }
-  }, { readOnly: true });
 }
 
 async function uploadBody(req, limit, timeoutMs) {
@@ -151,13 +86,13 @@ function createPrivateGroupFileHandler({
         throw failure(405, 'Method not allowed');
       }
       const user = await verifyRequestFirebaseUser(req, (token) => verify(token, true));
-      if (!validSegment(user.uid)) throw failure(401, 'Invalid Firebase ID token');
+      if (!validPrivateFileSegment(user.uid)) throw failure(401, 'Invalid Firebase ID token');
       const scope = parsePrivateGroupFilePath(req.query?.path);
       if (!scope || (scope.kind === 'group-cover' && !/^cover\.[A-Za-z0-9]+$/.test(scope.filename))) {
         throw failure(400, 'Invalid private file path');
       }
       const writing = req.method === 'POST';
-      await authorize(db, scope, user.uid, writing);
+      await authorizePrivateFile(db, scope, user.uid, writing);
       if (writing) {
         if (activeUploads >= maxConcurrentUploads) throw failure(429, 'Too many uploads');
         activeUploads += 1;
@@ -176,6 +111,9 @@ function createPrivateGroupFileHandler({
           || !Number.isSafeInteger(Number(metadata.generation))) {
           throw failure(500, 'Missing file generation');
         }
+        // GCS metadata lookup may outlive a membership or submission revocation.
+        // Reauthorize before opening any read stream or sending response headers.
+        await authorizePrivateFile(db, scope, user.uid, false);
         const filename = encodeURIComponent(scope.filename)
           .replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
         const contentType = String(metadata.contentType || 'application/octet-stream');
@@ -197,14 +135,14 @@ function createPrivateGroupFileHandler({
       }
 
       const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
-      const image = /^image\/[\w.+-]+$/.test(contentType);
+      const image = isPrivateFileImage(contentType);
       if ((scope.kind === 'group-cover' && !image)
         || (!image && !DOCUMENT_TYPES.has(contentType))) {
         throw failure(400, 'Unsupported file type or filename');
       }
       const bytes = await uploadBody(req, scope.maxBytes, uploadTimeoutMs);
       // Receiving bytes can take time. Revocation during an upload must prevent its commit.
-      await authorize(db, scope, user.uid, true);
+      await authorizePrivateFile(db, scope, user.uid, true);
       let generation = 0;
       if (scope.kind === 'group-cover') {
         try {
@@ -217,6 +155,8 @@ function createPrivateGroupFileHandler({
           if (Number(error.code) !== 404) throw error;
         }
       }
+      // Cover generation lookup can also wait across a manager or school revocation.
+      await authorizePrivateFile(db, scope, user.uid, true);
       await file.save(bytes, {
         resumable: false,
         preconditionOpts: { ifGenerationMatch: generation },

@@ -9,22 +9,26 @@ import {
   assistantCalendarOwner, confirmAssistantCalendarTask, createAssistantCalendarTask,
   findPersistedAssistantCalendarTask, restoreAssistantCalendarTasks, sameAssistantCalendarEvent,
   type AssistantCalendarContext, type AssistantCalendarProposal, type AssistantCalendarTask,
+  type AssistantCalendarWriteCheck,
 } from './assistantCalendarExecution';
 import {
   ASSISTANT_CALENDAR_JOURNAL_MAX_BYTES, ASSISTANT_CALENDAR_JOURNAL_MAX_ENTRIES,
   ASSISTANT_CALENDAR_SOURCE_NAME, assistantCalendarEventIdentity, readAssistantCalendarJournal,
+  sameAssistantCalendarOrigin, type AssistantCalendarJournalOrigin,
 } from './assistantCalendarJournal';
 import {
   ASSISTANT_CALENDAR_BATCH_MAX_STEPS, AssistantCalendarBatchError,
+  ASSISTANT_CALENDAR_COURSEWORK_PLAN_PREFIX, ASSISTANT_CALENDAR_COURSEWORK_STEP_PREFIX,
   cancelAssistantCalendarBatchPlan, parseAssistantCalendarBatchPlan, readAssistantCalendarBatchPlans,
   sameAssistantCalendarBatchPlan, saveAssistantCalendarBatchPlan, type AssistantCalendarBatchPlan,
+  type AssistantCalendarBatchStep, type AssistantCalendarBatchStepSource,
 } from './assistantCalendarBatchStore';
 import { personalImportStorageKey, snapshotPersonalImports, type PersonalImportScope } from './personalImports';
 
 export type AssistantCalendarBatchTask = Extract<AssistantCalendarTask, { state: 'verified' | 'unknown' | 'blocked' }>;
-export type AssistantCalendarBatchStepView =
+export type AssistantCalendarBatchStepView = AssistantCalendarBatchStep & (
   | { id: string; event: AssistantCalendarEvent; state: 'not-started' | 'running'; task?: never }
-  | { id: string; event: AssistantCalendarEvent; state: 'recorded'; task: AssistantCalendarBatchTask };
+  | { id: string; event: AssistantCalendarEvent; state: 'recorded'; task: AssistantCalendarBatchTask });
 export type AssistantCalendarBatchStop = {
   reason: 'unknown' | 'blocked' | 'warning' | 'aborted' | 'cancelled' | 'preflight' | 'unavailable' | 'timeout';
   message: string;
@@ -37,9 +41,25 @@ export type AssistantCalendarBatchView = {
   stop?: AssistantCalendarBatchStop;
   checking?: boolean;
 };
+export type AssistantCalendarBatchSourceCheckFailure = {
+  kind: 'blocked' | 'changed' | 'unavailable';
+  message: string;
+};
+export type AssistantCalendarBatchSourceChecks = {
+  preflight: (plan: AssistantCalendarBatchPlan, pendingSteps: readonly AssistantCalendarBatchStep[],
+    context: AssistantCalendarContext, signal?: AbortSignal) => Promise<{ kind: 'ready' } | AssistantCalendarBatchSourceCheckFailure>;
+  beforeStep: (plan: AssistantCalendarBatchPlan, step: AssistantCalendarBatchStep,
+    context: AssistantCalendarContext, signal?: AbortSignal) => Promise<
+      { kind: 'ready'; writeCheck: AssistantCalendarWriteCheck; dispose?: () => void } | AssistantCalendarBatchSourceCheckFailure>;
+};
 export type AssistantCalendarBatchRunOptions = {
   signal?: AbortSignal;
   onUpdate?: (view: AssistantCalendarBatchView) => void;
+  sourceChecks?: AssistantCalendarBatchSourceChecks;
+};
+export type AssistantCalendarBatchPrepareOptions = {
+  kind: 'coursework-study';
+  sources: readonly AssistantCalendarBatchStepSource[];
 };
 export type AssistantCalendarWorkspace = {
   tasks: AssistantCalendarTask[];
@@ -50,12 +70,16 @@ const READ_WAIT_MS = 20_000;
 const RUN_WAIT_MS = ASSISTANT_CALENDAR_BATCH_MAX_STEPS * 20_000;
 const STOPPED = '後續安排已停止。處理中的行程仍須核對；這不會刪除已建立的行程，也不會自動重送。';
 const CANCELLED = '已取消這份計畫尚未開始的安排。已建立或待核對的行程仍保留原紀錄。';
+const SOURCE_CONFLICT = '相同時段已有其他來源或不同內容的操作紀錄，無法當成這份作業安排的完成證明。請先核對原行程；這次不會重複建立。';
+const SOURCE_UNAVAILABLE = '目前無法重新核對這份作業計畫的來源，這次不會開始新的行程操作。';
 type Run = {
   plan: AssistantCalendarBatchPlan;
   latest?: AssistantCalendarBatchView;
   current?: { index: number; proposal: AssistantCalendarProposal };
   stopped?: 'aborted' | 'cancelled' | 'timeout';
   finished: boolean;
+  controller: AbortController;
+  disposeStep?: () => void;
 };
 const runs = new Map<string, Run>();
 
@@ -107,6 +131,12 @@ function expectedTask(event: AssistantCalendarEvent, rawTask: AssistantCalendarT
     ...(historical ? { lastVerified: historical } : {}),
   };
 }
+function stepOrigin(plan: AssistantCalendarBatchPlan, step: AssistantCalendarBatchStep): AssistantCalendarJournalOrigin | undefined {
+  return plan.kind === 'coursework-study' ? { kind: 'batch-step', batchId: plan.id, stepId: step.id } : undefined;
+}
+function sameStepOrigin(plan: AssistantCalendarBatchPlan, step: AssistantCalendarBatchStep, task: AssistantCalendarTask) {
+  return sameAssistantCalendarOrigin(stepOrigin(plan, step), task.proposal.origin);
+}
 function derive(plan: AssistantCalendarBatchPlan, steps: AssistantCalendarBatchStepView[],
   sticky?: AssistantCalendarBatchStop): AssistantCalendarBatchView {
   const verified = steps.filter((step) => step.state === 'recorded' && step.task.state === 'verified').length;
@@ -128,12 +158,20 @@ function derive(plan: AssistantCalendarBatchPlan, steps: AssistantCalendarBatchS
   return view;
 }
 function viewFor(plan: AssistantCalendarBatchPlan, tasks: readonly AssistantCalendarTask[]): AssistantCalendarBatchView {
+  let conflict = false;
   const steps: AssistantCalendarBatchStepView[] = plan.steps.map((step) => {
-    const task = tasks.find((candidate) => candidate.proposal.owner === plan.owner && candidate.proposal.schoolId === plan.schoolId &&
-      assistantCalendarEventIdentity(candidate.proposal.event) === assistantCalendarEventIdentity(step.event));
+    const scoped = tasks.filter((candidate) => candidate.proposal.owner === plan.owner && candidate.proposal.schoolId === plan.schoolId);
+    const matches = scoped.filter((candidate) => sameStepOrigin(plan, step, candidate) &&
+      (plan.kind === 'coursework-study' || assistantCalendarEventIdentity(candidate.proposal.event) === assistantCalendarEventIdentity(step.event)));
+    if (matches.length > 1) throw new AssistantCalendarBatchError('batch-corrupt');
+    const task = matches[0];
+    if (scoped.some((candidate) => !sameStepOrigin(plan, step, candidate) &&
+        assistantCalendarEventIdentity(candidate.proposal.event) === assistantCalendarEventIdentity(step.event))) conflict = true;
+    // The original origin, even with changed event content, is an attempted
+    // step. It must remain unknown rather than becoming a fresh write again.
     return task ? { ...step, state: 'recorded', task: expectedTask(step.event, task) } : { ...step, state: 'not-started' };
   });
-  return derive(plan, steps);
+  return derive(plan, steps, conflict ? { reason: 'preflight', message: SOURCE_CONFLICT } : undefined);
 }
 
 /** Share fresh evidence across cards without changing another plan's reviewed event. */
@@ -142,11 +180,23 @@ export function updateAssistantCalendarBatchTask(view: AssistantCalendarBatchVie
   if (!['verified', 'unknown', 'blocked'].includes(task.state) ||
       task.proposal.owner !== view.plan.owner || task.proposal.schoolId !== view.plan.schoolId) return view;
   let changed = false;
-  const steps: AssistantCalendarBatchStepView[] = view.steps.map((step) => {
-    if (assistantCalendarEventIdentity(step.event) !== assistantCalendarEventIdentity(task.proposal.event)) return step;
+  let conflict = false;
+  const steps: AssistantCalendarBatchStepView[] = view.steps.map((step): AssistantCalendarBatchStepView => {
+    const sameEventKey = assistantCalendarEventIdentity(step.event) === assistantCalendarEventIdentity(task.proposal.event);
+    if (!sameStepOrigin(view.plan, step, task)) {
+      if (sameEventKey) conflict = true;
+      return step;
+    }
+    if (view.plan.kind !== 'coursework-study' && !sameEventKey) return step;
     changed = true;
-    return { id: step.id, event: step.event, state: 'recorded', task: expectedTask(step.event, task) };
+    if (view.plan.kind === 'coursework-study' && step.state === 'recorded' &&
+        step.task.proposal.mutationId !== task.proposal.mutationId) {
+      return { ...step, task: { proposal: step.task.proposal, state: 'unknown', reason: 'changed',
+        message: '同一份作業安排出現不同的原操作 ID，無法核對進度。請重新載入原紀錄，這次不會再寫入。' } };
+    }
+    return { ...step, state: 'recorded', task: expectedTask(step.event, task) };
   });
+  if (conflict) return derive(view.plan, steps, { reason: 'preflight', message: SOURCE_CONFLICT });
   if (!changed) return view;
   const sticky = view.stop && ['aborted', 'cancelled', 'preflight', 'unavailable', 'timeout', 'warning'].includes(view.stop.reason) ? view.stop : undefined;
   return derive(view.plan, steps, sticky);
@@ -211,7 +261,8 @@ async function preflight(view: AssistantCalendarBatchView, access: AssistantCale
   // or used as proposals. Real mutation IDs are minted only during dispatch.
   const projected = pending.map((step, index) => {
     const mutationId = 'batch_capacity_' + String(index).padStart(2, '0') + 'x'.repeat(83);
-    const proposal = { ...scope, mutationId, createdAt: now, event: step.event };
+    const origin = stepOrigin(view.plan, step);
+    const proposal = { ...scope, mutationId, createdAt: now, event: step.event, ...(origin ? { origin } : {}) };
     const receipt = createAssistantCalendarReceipt({
       schoolId: scope.schoolId, mutationId, event: step.event, storage: 'device', verifiedAt: now,
       record: { ...step.event, id: mutationId, batchId: mutationId, kind: 'events',
@@ -227,12 +278,20 @@ async function preflight(view: AssistantCalendarBatchView, access: AssistantCale
 
 /** Persist only the immutable preview. No task, permit or operation ID is created here. */
 export function prepareAssistantCalendarBatch(events: readonly AssistantCalendarEvent[],
-  context: AssistantCalendarContext): Promise<AssistantCalendarBatchView> {
+  context: AssistantCalendarContext, options?: AssistantCalendarBatchPrepareOptions): Promise<AssistantCalendarBatchView> {
   const parsed = validateEvents(events);
+  if (options !== undefined && (!options || options.kind !== 'coursework-study' || !Array.isArray(options.sources) ||
+      options.sources.length !== parsed.length || Object.keys(options).some((key) => !['kind', 'sources'].includes(key)))) {
+    throw new AssistantCalendarBatchError('batch-invalid');
+  }
   return boundedRead(context, async (access, scope) => {
     const requested = parseAssistantCalendarBatchPlan({
-      id: 'acb_' + createPersonalImportId(), ...scope, createdAt: new Date().toISOString(),
-      steps: parsed.map((event) => ({ id: 'acs_' + createPersonalImportId(), event })),
+      id: (options ? ASSISTANT_CALENDAR_COURSEWORK_PLAN_PREFIX : 'acb_') + createPersonalImportId(),
+      ...scope, createdAt: new Date().toISOString(), ...(options ? { kind: options.kind } : {}),
+      steps: parsed.map((event, index) => ({
+        id: (options ? ASSISTANT_CALENDAR_COURSEWORK_STEP_PREFIX : 'acs_') + createPersonalImportId(), event,
+        ...(options ? { source: options.sources[index] } : {}),
+      })),
     }, scope);
     const plan = await saveAssistantCalendarBatchPlan(requested, () => current(scope, access));
     guard(scope, access);
@@ -284,6 +343,7 @@ export function cancelRemainingAssistantCalendarBatch(plan: AssistantCalendarBat
   if (run?.plan.id === requested.id) {
     if (!sameAssistantCalendarBatchPlan(run.plan, requested)) throw new AssistantCalendarBatchError('batch-corrupt');
     run.stopped = 'cancelled'; // Immediate fence, independent of any pending native write.
+    run.controller.abort();
   }
   return boundedRead(context, async (access) => {
     await authoritativePlan(requested, access, scope);
@@ -303,7 +363,10 @@ export async function confirmAssistantCalendarBatch(rawPlan: AssistantCalendarBa
   const key = personalImportStorageKey(scope);
   if (runs.has(key)) throw new AssistantCalendarBatchError('batch-busy');
   if (options.signal?.aborted) throw new AssistantCalendarBatchError('batch-unavailable');
-  const run: Run = { plan: requested, finished: false };
+  const run: Run = { plan: requested, finished: false, controller: new AbortController() };
+  const sourceChecks = options.sourceChecks;
+  const sourcePreflight = sourceChecks?.preflight;
+  const beforeStep = sourceChecks?.beforeStep;
   runs.set(key, run);
   const deadline = Date.now() + RUN_WAIT_MS;
   const active = () => !run.finished && !run.stopped && Date.now() < deadline && current(scope, context);
@@ -327,7 +390,7 @@ export async function confirmAssistantCalendarBatch(rawPlan: AssistantCalendarBa
     if (run.current && steps[run.current.index]?.state === 'running') {
       const { index, proposal } = run.current;
       steps = steps.map((step, position) => position === index ? {
-        id: step.id, event: step.event, state: 'recorded' as const,
+        ...step, state: 'recorded' as const,
         task: { proposal, state: 'unknown' as const, reason: 'unavailable' as const, message: STOPPED },
       } : step);
     }
@@ -346,10 +409,25 @@ export async function confirmAssistantCalendarBatch(rawPlan: AssistantCalendarBa
           let view = publish(viewFor(run.plan, tasks));
           if (run.stopped) return publish(stopped());
           if (view.state === 'cancelled' || view.state === 'completed' || view.state === 'paused') return view;
+          if (run.plan.kind === 'coursework-study' &&
+              (typeof sourcePreflight !== 'function' || typeof beforeStep !== 'function')) {
+            return publish(derive(run.plan, view.steps, { reason: 'preflight', message: SOURCE_UNAVAILABLE }));
+          }
           const issue = await preflight(view, access, scope);
           guard(scope, context);
-          if (run.stopped) return publish(stopped());
+          if (run.stopped || !active()) return publish(stopped());
           if (issue) return publish(derive(run.plan, view.steps, { reason: 'preflight', message: issue }));
+          const sourceFailure = (result: AssistantCalendarBatchSourceCheckFailure | undefined) => publish(derive(run.plan, view.steps, {
+            reason: result?.kind === 'unavailable' ? 'unavailable' : 'preflight',
+            message: typeof result?.message === 'string' && result.message.trim() ? result.message : SOURCE_UNAVAILABLE,
+          }));
+          if (run.plan.kind === 'coursework-study') {
+            const pending = run.plan.steps.filter((step) => view.steps.some((item) => item.id === step.id && item.state === 'not-started'));
+            const result = await sourcePreflight!.call(sourceChecks, run.plan, pending, access, run.controller.signal);
+            guard(scope, context);
+            if (run.stopped || !active()) return publish(stopped());
+            if (!result || result.kind !== 'ready') return sourceFailure(result);
+          }
           for (let index = 0; index < view.steps.length; index++) {
             if (run.stopped || !active()) return publish(stopped());
             if (view.steps[index].state !== 'not-started') continue;
@@ -360,17 +438,50 @@ export async function confirmAssistantCalendarBatch(rawPlan: AssistantCalendarBa
             guard(scope, context);
             if (run.stopped || !active()) return publish(stopped());
             let task: AssistantCalendarTask;
-            if (existing) task = existing;
+            if (existing) {
+              if (!sameStepOrigin(run.plan, step, existing)) {
+                return publish(derive(run.plan, view.steps, { reason: 'preflight', message: SOURCE_CONFLICT }));
+              }
+              task = existing;
+            }
             else {
-              const fresh = createAssistantCalendarTask(step.event, access);
-              run.current = { index, proposal: fresh.proposal };
-              view = publish(derive(run.plan, view.steps.map((item, position) => position === index
-                ? { id: item.id, event: item.event, state: 'running' as const } : item)));
-              if (run.stopped || !active()) return publish(stopped());
-              task = await confirmAssistantCalendarTask(fresh.proposal, access);
+              let writeCheck: AssistantCalendarWriteCheck | undefined;
+              let release: () => void = () => undefined;
+              try {
+                if (run.plan.kind === 'coursework-study') {
+                  const checked = await beforeStep!.call(sourceChecks, run.plan, step, access, run.controller.signal);
+                  if (checked?.kind === 'ready') {
+                    let released = false;
+                    release = () => {
+                      if (released) return;
+                      released = true;
+                      if (run.disposeStep === release) run.disposeStep = undefined;
+                      try { checked.dispose?.(); } catch { /* Cleanup cannot restore write authority. */ }
+                    };
+                    run.disposeStep = release;
+                  }
+                  guard(scope, context);
+                  if (run.stopped || !active()) return publish(stopped());
+                  if (!checked || checked.kind !== 'ready') return sourceFailure(checked);
+                  writeCheck = checked.writeCheck;
+                  if (!writeCheck || typeof writeCheck.isCurrent !== 'function' || typeof writeCheck.matches !== 'function' ||
+                      typeof writeCheck.message !== 'string' || !writeCheck.message.trim() ||
+                      (checked.dispose !== undefined && typeof checked.dispose !== 'function')) return sourceFailure(undefined);
+                  if (!writeCheck.isCurrent()) return sourceFailure({ kind: 'changed', message: writeCheck.message });
+                }
+                const fresh = createAssistantCalendarTask(step.event, access, stepOrigin(run.plan, step));
+                run.current = { index, proposal: fresh.proposal };
+                view = publish(derive(run.plan, view.steps.map((item, position) => position === index
+                  ? { ...run.plan.steps[position], state: 'running' as const } : item)));
+                if (run.stopped || !active()) return publish(stopped());
+                task = await confirmAssistantCalendarTask(fresh.proposal, access, writeCheck);
+              } finally { release(); }
             }
             guard(scope, context);
             if (run.stopped || !active()) return publish(stopped());
+            if (!sameStepOrigin(run.plan, step, task)) {
+              return publish(derive(run.plan, stopped().steps, { reason: 'preflight', message: SOURCE_CONFLICT }));
+            }
             run.current = undefined;
             view = publish(updateAssistantCalendarBatchTask({ ...view, plan: run.plan }, task));
             if (view.state === 'paused' || view.state === 'cancelled') return view;
@@ -389,6 +500,7 @@ export async function confirmAssistantCalendarBatch(rawPlan: AssistantCalendarBa
       new Promise<AssistantCalendarBatchView>((resolve, reject) => {
         const stop = (reason: 'aborted' | 'timeout') => {
           run.stopped = reason;
+          run.controller.abort();
           try { resolve(publish(stopped())); } catch (error) { reject(safeError(error, scope, context)); }
         };
         timer = setTimeout(() => stop('timeout'), RUN_WAIT_MS);
@@ -399,6 +511,8 @@ export async function confirmAssistantCalendarBatch(rawPlan: AssistantCalendarBa
     ]);
   } finally {
     run.finished = true;
+    run.controller.abort();
+    run.disposeStep?.();
     if (timer !== undefined) clearTimeout(timer);
     if (abort) options.signal?.removeEventListener('abort', abort);
     if (runs.get(key) === run) runs.delete(key);

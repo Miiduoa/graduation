@@ -44,7 +44,9 @@ describe('private group file HTTP handler', () => {
   beforeEach(() => {
     store = transactionStore([
       ['groups/course', { schoolId: 'pu' }],
+      ['groups/course/posts/one', { authorId: 'alice' }],
       ['assignments/work', { groupId: 'course' }],
+      ['groups/course/assignments/work', { published: true }],
       ...['alice', 'bob', 'teacher'].flatMap((uid) => [
         [`users/${uid}`, { displayName: uid }],
         [`groups/course/members/${uid}`, { status: 'active', role: uid === 'teacher' ? 'instructor' : 'member' }],
@@ -167,13 +169,51 @@ describe('private group file HTTP handler', () => {
     expect(bucket.file).not.toHaveBeenCalled();
   });
 
-  test('submission reads require owner or current manager and writes require the owner', async () => {
+  test('does not stream another author’s unpublished group-post draft', async () => {
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(200);
+    expect((await invoke({ path: POST, uid: 'alice' })).status).toBe(200);
+    store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(200);
+    const sibling = POST.replace('notes.pdf', 'draft.pdf');
+    put(sibling, 'draft-only');
+    expect((await invoke({ path: sibling, uid: 'bob' })).status).toBe(403);
+    expect((await invoke({ path: sibling, uid: 'teacher' })).status).toBe(403);
+    expect((await invoke({ path: sibling, uid: 'alice' })).status).toBe(200);
+    store.docs.set('groups/course/members/bob', { status: 'inactive', role: 'member' });
+    expect((await invoke({ path: POST, uid: 'bob' })).status).toBe(403);
+  });
+
+  test('legacy assignment receipts govern manager reads while owners preview drafts', async () => {
     expect((await invoke({ path: ANSWER, uid: 'bob' })).status).toBe(403);
     expect((await invoke({ path: ANSWER, uid: 'outsider' })).status).toBe(403);
+    expect((await invoke({ path: ANSWER, uid: 'alice' })).status).toBe(200);
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
+    const receipt = 'groups/course/assignments/work/submissions/alice';
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(200);
     expect((await invoke({ path: ANSWER, uid: 'teacher', method: 'POST' })).status).toBe(403);
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [] });
+    expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+    store.docs.set(receipt, { userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER] });
     store.docs.set('schools/pu/members/teacher', { status: 'inactive' });
     expect((await invoke({ path: ANSWER, uid: 'teacher' })).status).toBe(403);
+  });
+
+  test('legacy assignment POST refuses closed assignments and already submitted receipts', async () => {
+    const fresh = ANSWER.replace('answer.pdf', 'new-answer.pdf');
+    store.docs.set('groups/course/assignments/work', { published: false });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(403);
+    expect(bucket.file).not.toHaveBeenCalled();
+    store.docs.set('groups/course/assignments/work', { status: 'closed' });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(403);
+    store.docs.set('groups/course/assignments/work', { dueAt: '2020-01-01T00:00:00Z' });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(403);
+    store.docs.set('groups/course/assignments/work', { published: true });
+    expect((await invoke({ path: fresh, method: 'POST', body: 'draft' })).status).toBe(201);
+    store.docs.set('groups/course/assignments/work/submissions/alice', { userId: 'alice', submittedAt: Date.now() });
+    const saved = saves.length;
+    expect((await invoke({ path: ANSWER.replace('answer.pdf', 'after-submission.pdf'), method: 'POST', body: 'late' })).status).toBe(403);
+    expect(saves).toHaveLength(saved);
   });
 
   test.each([POST, ANSWER])('attachments use atomic create-only writes at %s', async (path) => {
@@ -229,6 +269,7 @@ describe('private group file HTTP handler', () => {
   });
 
   test.each([[POST, 0], [COVER, '9007199254740993']])('actual GCS SDK sends the generation precondition for %s', async (path, expected) => {
+    if (path === POST) store.docs.set('groups/course/posts/one', { authorId: 'teacher' });
     const storage = new CloudStorage({ projectId: 'demo-private-files', apiEndpoint: 'http://127.0.0.1:1' });
     storage.request = jest.fn((options, callback) => {
       if (options.method !== 'POST') {
@@ -316,6 +357,52 @@ describe('private group file HTTP handler', () => {
     expect(saves).toHaveLength(0);
   });
 
+  test.each([
+    { label: 'group membership revoked during post metadata', path: POST, uid: 'bob', method: 'GET', revoke: 'group' },
+    { label: 'submitted attachment unlinked during metadata', path: ANSWER, uid: 'teacher', method: 'GET', revoke: 'receipt' },
+    { label: 'school revoked during cover metadata read', path: COVER, uid: 'alice', method: 'GET', revoke: 'school' },
+    { label: 'manager revoked during cover generation lookup', path: COVER, uid: 'teacher', method: 'POST', revoke: 'school' },
+  ])('rejects $label before exposing or writing GCS bytes', async ({ path, uid, method, revoke }) => {
+    if (path === POST) store.docs.set('groups/course/posts/one', { authorId: 'alice', attachments: [POST] });
+    if (path === ANSWER) store.docs.set('groups/course/assignments/work/submissions/alice', {
+      userId: 'alice', submittedAt: Date.now(), attachments: [ANSWER],
+    });
+    const originalFile = bucket.file;
+    let revoked = false;
+    // The first authorization succeeds. The synthetic authority changes while
+    // the asynchronous GCS metadata operation is in progress.
+    bucket.file = jest.fn((key, options) => {
+      const file = originalFile(key, options);
+      return {
+        ...file,
+        async getMetadata() {
+          const result = await file.getMetadata();
+          if (key === path && !revoked) {
+            revoked = true;
+            if (revoke === 'group') {
+              store.docs.set('groups/course/members/bob', { status: 'inactive', role: 'member' });
+            } else if (revoke === 'receipt') {
+              store.docs.set('groups/course/assignments/work/submissions/alice', {
+                userId: 'alice', submittedAt: Date.now(), attachments: [],
+              });
+            } else {
+              store.docs.set(`schools/pu/members/${uid}`, { status: 'inactive' });
+            }
+          }
+          return result;
+        },
+      };
+    });
+    const response = await invoke({
+      path, uid, method, body: method === 'POST' ? 'replacement' : '',
+      headers: { 'content-type': 'image/jpeg' },
+    });
+    expect(revoked).toBe(true);
+    expect(response).toMatchObject({ status: 403, body: JSON.stringify({ error: 'File access denied' }) });
+    expect(reads).toHaveLength(0);
+    expect(saves).toHaveLength(0);
+  });
+
   test('bounds simultaneous uploads and releases capacity after completion', async () => {
     handler = createPrivateGroupFileHandler({ db: store.db, bucket, verifyIdToken, maxConcurrentUploads: 1 });
     let started;
@@ -355,6 +442,7 @@ describe('private group file namespace parser', () => {
     ['groups/course/posts/one/../file.pdf', null], ['groups/course/cover.jpg/', null],
     ['groups/course/cover\n.jpg', null], ['groups/course/cover\\.jpg', null],
     ['assignments/work/submissions/alice', null], ['avatars/alice.jpg', null],
+    ['schools/pu/stories/story-1/image', null],
     [null, null], [['groups/course/cover.jpg'], null],
   ])('limits path %j to scope %s', (path, kind) => {
     expect(parsePrivateGroupFilePath(path)?.kind || null).toBe(kind);

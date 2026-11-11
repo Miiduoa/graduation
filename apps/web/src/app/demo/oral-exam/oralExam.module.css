@@ -1,0 +1,141 @@
+.banner {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 12px);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+}
+
+.banner strong {
+  font-size: var(--font-label-size, 14px);
+}
+
+.banner p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-label-sm-size, 13px);
+}
+
+.roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 24px;
+}
+
+.roles a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-label-size, 14px);
+}
+
+.roles a[aria-current='page'] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand, #fff);
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 840px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 12px);
+  background: var(--surface);
+}
+
+.card h2,
+.card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.card p,
+.card li {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-body-size, 16px);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button,
+.reset {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--font-label-size, 14px);
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-label-sm-size, 13px);
+}
+
+.script {
+  grid-column: 1 / -1;
+}
+
+.identity {
+  margin: 0 0 18px;
+}
+
+.identity h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}

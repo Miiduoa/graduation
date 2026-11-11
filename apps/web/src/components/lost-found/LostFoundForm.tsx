@@ -22,6 +22,7 @@ type Props = {
   onCancel?: () => void;
   disabled?: boolean;
   statusMessage?: string;
+  contactVisibilityNote?: string;
 };
 
 export function validateLostFoundForm(value: LostFoundWriteFields): LostFoundFormErrors {
@@ -52,6 +53,7 @@ export function LostFoundForm({
   onCancel,
   disabled = false,
   statusMessage,
+  contactVisibilityNote = CONTACT_VISIBILITY_NOTE,
 }: Props) {
   const formId = useId();
   const locked = busy || disabled;
@@ -70,7 +72,7 @@ export function LostFoundForm({
       }}
       noValidate
     >
-      <p className={styles.notice}>{CONTACT_VISIBILITY_NOTE}</p>
+      <p className={styles.notice}>{contactVisibilityNote}</p>
       <p className={styles.muted}>
         請在說明寫清楚物品特徵；若需提供照片，可透過聯絡方式與對方約定如何分享。
       </p>

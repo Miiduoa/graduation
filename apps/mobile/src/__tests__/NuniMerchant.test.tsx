@@ -99,6 +99,8 @@ test('sends the selected school and server campus under the captured account and
   await act(async () => accept(receipt));
   expect(view.getByText(/申請已收件/)).toBeTruthy();
   expect(view.getByText('已送出')).toBeTruthy();
+  expect(view.queryByLabelText('品牌名稱')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '申請另一間門市' }));
   expect(view.getByLabelText('品牌名稱').props.value).toBe('');
 });
 
@@ -244,4 +246,18 @@ test('restores a same-account merchant draft and retries an interrupted request 
   expect(calls[1][1]).toBe('revalidated');
   expect(calls[1][2]).toEqual(original);
   await act(async () => accept(receipt));
+});
+
+test('a returning applicant sees the review status before opening a new application', async () => {
+  mockRequest.mockImplementation(async (path) =>
+    path === 'merchant-applications'
+      ? { applications: [{ ...receipt, state: 'under-review' }] }
+      : data(path),
+  );
+  const view = render(<NuniMerchant />);
+  await view.findByText('審核中');
+  expect(view.queryByLabelText('品牌名稱')).toBeNull();
+  fireEvent.press(view.getByRole('button', { name: '申請另一間門市' }));
+  expect(view.getByLabelText('品牌名稱')).toBeTruthy();
+  expect(mockRequest.mock.calls.filter((call) => call[2])).toHaveLength(0);
 });

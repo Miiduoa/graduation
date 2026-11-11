@@ -221,6 +221,15 @@
   cursor: not-allowed;
 }
 
+.toggle:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle span { transition: none; }
+}
+
 .notice {
   display: grid;
   justify-items: start;

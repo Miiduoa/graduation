@@ -1,11 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseAssistantCalendarEvent, type AssistantCalendarEvent } from '@campus/shared/src/assistantExecution';
+import { courseScope } from '@campus/shared/src/courseAccess';
+import { isPersonalImportDate } from '@campus/shared/src/imports/validation';
+import { nuniId } from '@campus/shared/src/nuni';
+import { toPublicSchoolId } from '@campus/shared/src/schoolIds';
 import { assistantCalendarEventIdentity } from './assistantCalendarJournal';
+import type { NuniPlanAssignmentSource } from './nuniPlanAssignmentTarget';
 import type { PersonalImportScope } from './personalImports';
 
 export const ASSISTANT_CALENDAR_BATCH_MAX_STEPS = 4;
 export const ASSISTANT_CALENDAR_BATCH_MAX_PLANS = 64;
 export const ASSISTANT_CALENDAR_BATCH_MAX_BYTES = 256 * 1024;
+export const ASSISTANT_CALENDAR_COURSE_IDENTITY_MAX_LENGTH = 2048;
+export const ASSISTANT_CALENDAR_COURSEWORK_PLAN_PREFIX = 'acb_coursework_';
+export const ASSISTANT_CALENDAR_COURSEWORK_STEP_PREFIX = 'acs_coursework_';
 const WAIT_MS = 20_000;
 const locks = new Map<string, Promise<unknown>>();
 
@@ -30,12 +38,23 @@ export class AssistantCalendarBatchError extends Error {
   }
 }
 
+export type AssistantCalendarBatchStepSource = Readonly<{
+  kind: 'nuni-assignment';
+  locator: Readonly<NuniPlanAssignmentSource>;
+  expected: Readonly<{ title: string; courseName: string; dueAt: string; courseIdentity: string }>;
+}>;
+export type AssistantCalendarBatchStep = Readonly<{
+  id: string;
+  event: AssistantCalendarEvent;
+  source?: AssistantCalendarBatchStepSource;
+}>;
 export type AssistantCalendarBatchPlan = Readonly<{
   id: string;
   owner: string;
   schoolId: string;
   createdAt: string;
-  steps: ReadonlyArray<Readonly<{ id: string; event: AssistantCalendarEvent }>>;
+  kind?: 'coursework-study';
+  steps: ReadonlyArray<AssistantCalendarBatchStep>;
   cancelledAt?: string;
 }>;
 type Store = { version: 1; owner: string; schoolId: string; plans: AssistantCalendarBatchPlan[] };
@@ -78,21 +97,70 @@ function instant(raw: unknown): string {
       !Number.isFinite(Date.parse(raw)) || new Date(raw).toISOString() !== raw) return invalid();
   return raw;
 }
+function sourceText(raw: unknown, max: number, canonical = false): string {
+  if (typeof raw !== 'string' || !raw.trim() || raw.length > max ||
+      (canonical && raw !== raw.trim()) || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(raw)) return invalid();
+  try { encodeURIComponent(raw); } catch { return invalid(); }
+  return raw;
+}
+function sourceDueAt(raw: unknown): string {
+  if (typeof raw !== 'string' || raw.length > 40) return invalid();
+  const match = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:0\d|1[0-4]):[0-5]\d)$/.exec(raw);
+  if (!match || !isPersonalImportDate(match[1]) || !Number.isFinite(Date.parse(raw))) return invalid();
+  return raw;
+}
+function stepSource(raw: unknown, scope: PersonalImportScope): AssistantCalendarBatchStepSource {
+  const value = object(raw, ['kind', 'locator', 'expected']);
+  if (value.kind !== 'nuni-assignment') return invalid();
+  const locator = object(value.locator, ['accountId', 'schoolId', 'academicYear', 'semester', 'workspaceId', 'assignmentId']);
+  let parsed: NuniPlanAssignmentSource;
+  try {
+    const term = courseScope(locator);
+    if (term.schoolId !== locator.schoolId || term.academicYear !== locator.academicYear ||
+        term.semester !== locator.semester || (toPublicSchoolId(term.schoolId) || term.schoolId) !== term.schoolId) return invalid();
+    parsed = { ...term, accountId: nuniId(locator.accountId, 'pa'), workspaceId: nuniId(locator.workspaceId, 'cw'),
+      assignmentId: nuniId(locator.assignmentId, 'cwa') };
+  } catch { return invalid(); }
+  if (scope.owner !== `nuni:${parsed.accountId}` || scope.schoolId !== parsed.schoolId) return invalid();
+  const expected = object(value.expected, ['title', 'courseName', 'dueAt', 'courseIdentity']);
+  return Object.freeze({ kind: 'nuni-assignment', locator: Object.freeze(parsed), expected: Object.freeze({
+    title: sourceText(expected.title, 200), courseName: sourceText(expected.courseName, 200),
+    dueAt: sourceDueAt(expected.dueAt),
+    courseIdentity: sourceText(expected.courseIdentity, ASSISTANT_CALENDAR_COURSE_IDENTITY_MAX_LENGTH, true),
+  }) });
+}
 export function parseAssistantCalendarBatchPlan(raw: unknown, expectedScope?: PersonalImportScope): AssistantCalendarBatchPlan {
-  const value = object(raw, ['id', 'owner', 'schoolId', 'createdAt', 'steps', 'cancelledAt']);
+  const value = object(raw, ['id', 'owner', 'schoolId', 'createdAt', 'kind', 'steps', 'cancelledAt']);
   const scope = scopeValue({ owner: value.owner, schoolId: value.schoolId });
   if (expectedScope && (scope.owner !== expectedScope.owner || scope.schoolId !== expectedScope.schoolId)) return invalid();
-  if (!Array.isArray(value.steps) || value.steps.length < 2 || value.steps.length > ASSISTANT_CALENDAR_BATCH_MAX_STEPS) return invalid();
+  if (value.kind !== undefined && value.kind !== 'coursework-study') return invalid();
+  const coursework = value.kind === 'coursework-study';
+  const id = identifier(value.id);
+  // These persisted IDs retain the mode if a damaged JSON document loses its
+  // kind/source fields. Old generic IDs and their storage format stay valid.
+  if (id.startsWith(ASSISTANT_CALENDAR_COURSEWORK_PLAN_PREFIX) !== coursework) return invalid();
+  if (!Array.isArray(value.steps) || value.steps.length < 2 || value.steps.length > ASSISTANT_CALENDAR_BATCH_MAX_STEPS ||
+      Array.from(value.steps).some((step) => !step || typeof step !== 'object')) return invalid();
   const steps = value.steps.map((item) => {
-    const step = object(item, ['id', 'event']);
+    const step = object(item, ['id', 'event', 'source']);
+    const stepId = identifier(step.id);
+    if (stepId.startsWith(ASSISTANT_CALENDAR_COURSEWORK_STEP_PREFIX) !== coursework ||
+        (!coursework && step.source !== undefined)) return invalid();
     let event: AssistantCalendarEvent;
     try { event = parseAssistantCalendarEvent(step.event); } catch { return invalid(); }
-    return Object.freeze({ id: identifier(step.id), event: Object.freeze(event) });
+    return Object.freeze({ id: stepId, event: Object.freeze(event),
+      ...(coursework ? { source: stepSource(step.source, scope) } : {}),
+    });
   });
   if (new Set(steps.map((step) => step.id)).size !== steps.length ||
       new Set(steps.map((step) => assistantCalendarEventIdentity(step.event))).size !== steps.length) return invalid();
+  if (coursework && new Set(steps.map((step) => JSON.stringify([
+    step.source!.locator.accountId, step.source!.locator.schoolId,
+    step.source!.locator.workspaceId, step.source!.locator.assignmentId,
+  ]))).size !== steps.length) return invalid();
   return Object.freeze({
-    id: identifier(value.id), ...scope, createdAt: instant(value.createdAt), steps: Object.freeze(steps),
+    id, ...scope, createdAt: instant(value.createdAt),
+    ...(coursework ? { kind: 'coursework-study' as const } : {}), steps: Object.freeze(steps),
     ...(value.cancelledAt !== undefined ? { cancelledAt: instant(value.cancelledAt) } : {}),
   });
 }
@@ -102,10 +170,11 @@ export function assistantCalendarBatchPlanKey(plan: AssistantCalendarBatchPlan):
 /** cancelledAt is deliberately separate: the original reviewed plan never changes. */
 export function sameAssistantCalendarBatchPlan(first: AssistantCalendarBatchPlan, second: AssistantCalendarBatchPlan): boolean {
   return first.id === second.id && first.owner === second.owner && first.schoolId === second.schoolId &&
-    first.createdAt === second.createdAt && JSON.stringify(first.steps) === JSON.stringify(second.steps);
+    first.createdAt === second.createdAt && first.kind === second.kind && JSON.stringify(first.steps) === JSON.stringify(second.steps);
 }
 function sameEvents(first: AssistantCalendarBatchPlan, second: AssistantCalendarBatchPlan) {
-  return JSON.stringify(first.steps.map((step) => step.event)) === JSON.stringify(second.steps.map((step) => step.event));
+  return first.kind === second.kind && JSON.stringify(first.steps.map(({ event, source }) => ({ event, source }))) ===
+    JSON.stringify(second.steps.map(({ event, source }) => ({ event, source })));
 }
 function utf8Bytes(raw: string) {
   let length = 0;
