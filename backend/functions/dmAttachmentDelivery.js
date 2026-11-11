@@ -59,7 +59,8 @@ async function authorize(db, uid, conversationId) {
     throw forbidden();
   }
   const profileSnapshot = await db.collection('users').doc(uid).get();
-  if (profileSnapshot.exists && isAccountUnavailable(profileSnapshot.data())) throw forbidden();
+  // Match Storage conversationMember(): a live canonical users/{uid} is required.
+  if (!profileSnapshot.exists || isAccountUnavailable(profileSnapshot.data())) throw forbidden();
 }
 
 function attachmentPath(conversationId, folder, mediaId, fileName) {
@@ -117,18 +118,14 @@ function createDmAttachmentDelivery({ db, getBucket, now = Date.now, newId = ran
 
     const path = attachmentPath(conversationId, folder, mediaId, fileName);
     const file = bucket.file(path);
-    let metadata;
     try {
-      [metadata] = await file.getMetadata();
+      await file.getMetadata();
     } catch (error) {
       if (error?.code === 404) throw forbidden();
       throw error;
     }
-    // Do not issue capabilities for empty or disallowed objects. Uploaded
-    // objects are checked on delivery as well as on upload.
-    const limit = uploadLimit(metadata.contentType);
-    if (!limit || Number(metadata.size) < 1 || Number(metadata.size) > limit) throw forbidden();
-    // Preserve legacy download tokens: revocation is a separate manual migration.
+    // Historical reads match Storage: member auth only. Size and MIME limits
+    // apply to new uploads, not to objects that were already stored.
     const expires = now() + MINUTE_MS;
     const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires });
     // Never return firebaseStorageDownloadTokens or getDownloadURL() here.

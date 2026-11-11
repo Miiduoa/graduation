@@ -38,7 +38,12 @@ function dmMessageSession(request) {
 }
 
 // Every send, receipt replay and media grant rechecks the caller in the same transaction.
-function inDmConversation(db, session, action, { allowMissing = false } = {}) {
+function callerUnavailable(snapshot, requireCanonicalProfile) {
+  if (!snapshot.exists) return requireCanonicalProfile;
+  return isAccountUnavailable(snapshot.data());
+}
+
+function inDmConversation(db, session, action, { allowMissing = false, requireCanonicalProfile = false } = {}) {
   const { uid, conversationId, schoolId, peerUid, messageId } = session;
   const thread = db.collection('conversations').doc(conversationId);
   const message = messageId ? thread.collection('messages').doc(messageId) : null;
@@ -66,15 +71,15 @@ function inDmConversation(db, session, action, { allowMissing = false } = {}) {
     }
     const caller = db.collection('users').doc(uid);
     if (threadSnap.exists) {
-      // Existing DMs match main: signed-in caller identity and membership.
+      // Text matches Firestore isSignedIn. Photos match Storage conversationMember.
       const callerSnap = await tx.get(caller);
-      if (callerSnap.exists && isAccountUnavailable(callerSnap.data())) throw denied();
+      if (callerUnavailable(callerSnap, requireCanonicalProfile)) throw denied();
     } else {
       // New DMs match main conversation create: caller school membership.
       const senderMember = db.collection('schools').doc(schoolId).collection('members').doc(uid);
       const [callerSnap, senderMembership] = await tx.getAll(caller, senderMember);
       if (
-        (callerSnap.exists && isAccountUnavailable(callerSnap.data())) ||
+        callerUnavailable(callerSnap, requireCanonicalProfile) ||
         senderMembership.data()?.status !== 'active'
       )
         throw denied();

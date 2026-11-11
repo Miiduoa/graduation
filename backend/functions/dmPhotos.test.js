@@ -355,6 +355,24 @@ test('a text delivered during the first photo upload shares the same thread and 
   ).toHaveLength(1);
 });
 
+test('photo delivery requires the caller canonical profile to exist', async () => {
+  const missing = fixture();
+  missing.docs.delete('users/alice');
+  await expect(missing.upload()).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(missing.policy).not.toHaveBeenCalled();
+  const first = fixture({ conversationId: 'dm_pu_alice_bob', createThread: false });
+  first.docs.delete('users/alice');
+  await expect(first.upload({ peerUid: 'bob' })).rejects.toMatchObject({ code: 'permission-denied' });
+  const f = fixture();
+  const { path, mediaId } = await f.upload();
+  f.stage(path);
+  await f.send(path);
+  f.docs.delete('users/bob');
+  await expect(f.read(mediaId)).rejects.toMatchObject({ code: 'permission-denied' });
+  f.docs.set('users/bob', { schoolId: 'pu' });
+  expect(await f.read(mediaId)).toHaveProperty('url');
+});
+
 test('an orphan photo cannot be used to prepare another upload, read or recover a missing conversation', async () => {
   const conversationId = 'dm_pu_alice_bob';
   const thread = 'conversations/' + conversationId;

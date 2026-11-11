@@ -106,7 +106,7 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
         ({ existing }) => {
           if (existing) throw denied();
         },
-        { allowMissing: true },
+        { allowMissing: true, requireCanonicalProfile: true },
       );
       const folder = photoFolder(conversationId, uid, messageId);
       const path = `${folder}/${fileName}`;
@@ -141,16 +141,21 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
     )
       throw invalid();
     const path = `conversations/${conversationId}/photos/${mediaId}/${fileName}`;
-    const version = await inDmConversation(db, session, ({ existing: row }) => {
-      if (
-        row?.type !== 'image' ||
-        row.recalledAt ||
-        row.attachmentPath !== path ||
-        path !== photoFolder(conversationId, row.senderId, messageId) + '/' + fileName
-      )
-        throw denied();
-      return generation({ generation: row.attachmentGeneration });
-    });
+    const version = await inDmConversation(
+      db,
+      session,
+      ({ existing: row }) => {
+        if (
+          row?.type !== 'image' ||
+          row.recalledAt ||
+          row.attachmentPath !== path ||
+          path !== photoFolder(conversationId, row.senderId, messageId) + '/' + fileName
+        )
+          throw denied();
+        return generation({ generation: row.attachmentGeneration });
+      },
+      { requireCanonicalProfile: true },
+    );
     const expires = now() + MINUTE_MS;
     const [url] = await getBucket()
       .file(path, { generation: version })
@@ -174,14 +179,14 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
       }
       return true;
     }
-    if (await inDmConversation(db, session, replay, { allowMissing: true })) return receipt;
+    if (await inDmConversation(db, session, replay, { allowMissing: true, requireCanonicalProfile: true })) return receipt;
     let published;
     try {
       published = await publishPhoto(getBucket(), path, publishedPath, entry[0], session);
     } catch (error) {
       // A parallel attempt can finish and remove the staging object before this read.
       if (Number(error?.code) !== 404) throw error;
-      if (await inDmConversation(db, session, replay, { allowMissing: true })) return receipt;
+      if (await inDmConversation(db, session, replay, { allowMissing: true, requireCanonicalProfile: true })) return receipt;
       throw new HttpsError('not-found', '找不到已上傳的照片。');
     }
     const { version, draft } = published;
@@ -197,7 +202,7 @@ function createDmPhotos({ db, getBucket, now = Date.now }) {
           attachmentGeneration: version,
         });
       },
-      { allowMissing: true },
+      { allowMissing: true, requireCanonicalProfile: true },
     );
     // The committed message always points to the immutable copy. A cleanup failure
     // cannot turn a delivered message into a failed send or delete a subsequent upload.

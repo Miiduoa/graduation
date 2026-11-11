@@ -83,6 +83,7 @@ test.each([
   ['suspended profile', 'users/alice', { schoolId: 'pu', status: 'suspended' }],
   ['inactive profile', 'users/alice', { schoolId: 'pu', status: 'inactive' }],
   ['account deletion', 'users/alice', { schoolId: 'pu', accountDeletionInProgress: true }],
+  ['missing profile', 'users/alice', null],
   ['removed from conversation', 'conversations/private', { type: 'dm', schoolId: 'pu', memberIds: ['bob', 'carol'] }],
 ])('refuses %s before generating a capability', async (_name, key, value) => {
   const { call, docs, file } = fixture();
@@ -140,15 +141,33 @@ test('previous message attachment path remains addressable without exposing a Fi
   expect(bucket.file).toHaveBeenCalledWith('conversations/private/messages/old-message/file.pdf');
 });
 
-test('missing or malformed stored files never receive a link', async () => {
+test('missing stored files never receive a link', async () => {
   const { call, file } = fixture();
   file.getMetadata.mockRejectedValueOnce({ code: 404 });
   await expect(call()).rejects.toMatchObject({ code: 'permission-denied' });
-  file.getMetadata.mockResolvedValueOnce([{ size: '0', contentType: 'application/pdf' }]);
-  await expect(call()).rejects.toMatchObject({ code: 'permission-denied' });
-  file.getMetadata.mockResolvedValueOnce([{ size: '3', contentType: 'application/x-msdownload' }]);
-  await expect(call()).rejects.toMatchObject({ code: 'permission-denied' });
   expect(file.getSignedUrl).not.toHaveBeenCalled();
+});
+
+test('historical reads skip upload size limits so older 15 MiB images still open', async () => {
+  const { call, file } = fixture();
+  file.getMetadata.mockResolvedValueOnce([{
+    size: String(15 * 1024 * 1024), contentType: 'image/jpeg',
+  }]);
+  await expect(call({ fileName: 'old.jpg' })).resolves.toHaveProperty('url');
+  expect(file.getSignedUrl).toHaveBeenCalledTimes(1);
+  await expect(call({
+    action: 'upload', contentType: 'image/jpeg', size: 15 * 1024 * 1024,
+  })).rejects.toMatchObject({ code: 'invalid-argument' });
+  expect(file.generateSignedPostPolicyV4).not.toHaveBeenCalled();
+});
+
+test('historical reads still open empty or unrecognized objects that members can already access', async () => {
+  const { call, file } = fixture();
+  file.getMetadata.mockResolvedValueOnce([{ size: '0', contentType: 'application/pdf' }]);
+  await expect(call()).resolves.toHaveProperty('url');
+  file.getMetadata.mockResolvedValueOnce([{ size: '3', contentType: 'application/x-msdownload' }]);
+  await expect(call()).resolves.toHaveProperty('url');
+  expect(file.getSignedUrl).toHaveBeenCalledTimes(2);
 });
 
 test('upload grants server-generated object name and enforces a storage-side policy', async () => {

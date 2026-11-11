@@ -209,6 +209,16 @@ test.each([
   },
 );
 
+test('text DMs still send when the caller profile document is missing', async () => {
+  store.docs.delete('users/alice');
+  expect(await send()).toEqual({ conversationId, messageId });
+  store.docs.delete('users/alice');
+  expect(await send({ messageId: 'next-text-message-000002' })).toEqual({
+    conversationId,
+    messageId: 'next-text-message-000002',
+  });
+});
+
 test('new chats still require the caller to have active school membership, existing chats do not', async () => {
   const path = 'schools/pu/members/alice';
   const original = store.docs.get(path);
