@@ -391,3 +391,74 @@ it('does not let a literal --!> inside fenced code alter HTML comment tracking',
     rows: [['資管', '3']],
   }]);
 });
+
+it('treats inline Markdown examples of HTML tags and comments as literal teaching content', () => {
+  const content = [
+    'HTML 課：`<pre>`、`<!--` 與 `--!>` 是要說明的字面符號。',
+    '| 課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 2,
+    headers: ['課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});
+
+it('tracks a real HTML comment after an inline code example on the same line', () => {
+  const content = [
+    '用 `<pre>` 舉例 <!-- 教師未公布',
+    '| 隱藏成績 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    '-->',
+    '| 正式教材 | 學分 |',
+    '| --- | --- |',
+    '| 資管 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 6,
+    headers: ['正式教材', '學分'],
+    rows: [['資管', '3']],
+  }]);
+});
+
+it('handles an HTML-looking Markdown fence info string before reading later tables', () => {
+  const ticks = String.fromCharCode(96).repeat(3);
+  const content = [
+    ticks + 'html <pre>',
+    '| 虛構課程 | 分數 |',
+    '| --- | --- |',
+    '| 測試 | 999 |',
+    ticks,
+    '| 正式教材 | 學分 |',
+    '| --- | --- |',
+    '| 資管 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 6,
+    headers: ['正式教材', '學分'],
+    rows: [['資管', '3']],
+  }]);
+});
+
+it('does not let a fence-looking line inside an HTML code block swallow later tables', () => {
+  const ticks = String.fromCharCode(96).repeat(3);
+  const content = [
+    '<pre>',
+    ticks,
+    '| 範例 | 數值 |',
+    '| --- | --- |',
+    '| 模擬 | 999 |',
+    '</pre>',
+    '| 真正課程 | 學分 |',
+    '| --- | --- |',
+    '| 資料庫 | 3 |',
+  ].join('\n');
+  expect(extractStudySourceTables(content)).toEqual([{
+    startLine: 7,
+    headers: ['真正課程', '學分'],
+    rows: [['資料庫', '3']],
+  }]);
+});

@@ -43,6 +43,29 @@ function fenceMarker(line: string): { character: string; length: number; suffix:
   return length >= 3 ? { character: marker, length, suffix: trimmed.slice(length) } : null;
 }
 
+/** Markdown inline code contains literal tags, not active HTML blocks. */
+function isInsideInlineCode(line: string, target: number): boolean {
+  const tick = String.fromCharCode(96);
+  for (let offset = 0; offset < line.length;) {
+    if (line[offset] !== tick) { offset += 1; continue; }
+    const start = offset;
+    while (line[offset] === tick) offset += 1;
+    const width = offset - start;
+    let closingEnd = -1;
+    for (let probe = offset; probe < line.length;) {
+      if (line[probe] !== tick) { probe += 1; continue; }
+      const begin = probe;
+      while (line[probe] === tick) probe += 1;
+      if (probe - begin === width) { closingEnd = probe; break; }
+    }
+    if (closingEnd < 0) continue;
+    if (target >= start && target < closingEnd) return true;
+    offset = closingEnd;
+    if (offset > target) break;
+  }
+  return false;
+}
+
 export function extractStudySourceTables(source: string): StudySourceTable[] {
   if (!source.includes('|')) return [];
   const lines = source.split(/\r?\n/u);
@@ -53,46 +76,48 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
 
   for (let index = 0; index < lines.length - 2 && tables.length < MAX_TABLES; index += 1) {
     const line = lines[index];
-    // HTML comments and raw code blocks can span lines. Track boundaries in
-    // source order: a comment may close and open a <pre> on the same line.
-    // Literal HTML-looking text inside fenced Markdown code is not markup.
-    if (!fence) {
-      let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-      // Handle both --> and the HTML-standard --!> comment endings.
-      for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {
-        const token = match[0];
-        if (inHtmlComment) {
-          if (token === '-->' || token === '--!>') inHtmlComment = false;
-          hiddenLine = true;
-          continue;
-        }
-        if (token === '<!--') {
-          if (htmlCodeBlocks.length === 0) inHtmlComment = true;
-          hiddenLine = true;
-          continue;
-        }
-        if (token === '-->') {
-          hiddenLine = true;
-          continue;
-        }
-        const tag = match[1]?.toLowerCase();
-        if (!tag) continue;
-        if (token.startsWith('</')) {
-          if (htmlCodeBlocks[htmlCodeBlocks.length - 1] === tag) htmlCodeBlocks.pop();
-        } else if (!/\/>$/u.test(token)) {
-          htmlCodeBlocks.push(tag);
-        }
-        hiddenLine = true;
-      }
-      if (hiddenLine) continue;
-    }
+    // Recognize fences before HTML-looking words in the fence info string.
+    // Within a real HTML comment/raw block, fence-like text is inert.
     const marker = fenceMarker(line);
-    if (marker) {
-      if (fence === null) fence = marker;
-      else if (fence.character === marker.character && marker.length >= fence.length && !marker.suffix.trim()) fence = null;
+    if (fence) {
+      if (marker && fence.character === marker.character &&
+          marker.length >= fence.length && !marker.suffix.trim()) fence = null;
       continue;
     }
-    if (fence) continue;
+    if (!inHtmlComment && htmlCodeBlocks.length === 0 && marker) {
+      fence = marker;
+      continue;
+    }
+    // HTML boundaries follow source order; Markdown inline code is literal.
+    let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
+    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea)\b[^>]*>/giu)) {
+      const token = match[0];
+      if (!inHtmlComment && htmlCodeBlocks.length === 0 &&
+          isInsideInlineCode(line, match.index ?? 0)) continue;
+      if (inHtmlComment) {
+        if (token === '-->' || token === '--!>') inHtmlComment = false;
+        hiddenLine = true;
+        continue;
+      }
+      if (token === '<!--') {
+        if (htmlCodeBlocks.length === 0) inHtmlComment = true;
+        hiddenLine = true;
+        continue;
+      }
+      if (token === '-->') {
+        hiddenLine = true;
+        continue;
+      }
+      const tag = match[1]?.toLowerCase();
+      if (!tag) continue;
+      if (token.startsWith('</')) {
+        if (htmlCodeBlocks[htmlCodeBlocks.length - 1] === tag) htmlCodeBlocks.pop();
+      } else if (!/\/>$/u.test(token)) {
+        htmlCodeBlocks.push(tag);
+      }
+      hiddenLine = true;
+    }
+    if (hiddenLine) continue;
     const headers = parseSimplePipeRow(lines[index]);
     const separator = parseSimplePipeRow(lines[index + 1]);
     if (!headers || !separator || headers.some((header) => !header) ||
