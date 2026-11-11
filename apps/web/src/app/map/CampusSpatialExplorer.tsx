@@ -31,6 +31,7 @@ type Props = {
 // Reuse a single empty array to avoid recreating a WebGL context whenever
 // the footprint status or the visible map selection changes.
 const NO_VISIBLE_FOOTPRINTS: readonly ProvidenceFootprint[] = [];
+const FOOTPRINT_DAY_MS = 24 * 60 * 60 * 1000;
 
 // A dated stale fallback may return HTTP 200 together with Retry-After.
 // Validate the seconds before disabling the manual retry on mobile.
@@ -213,6 +214,9 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   const [footprintRefreshing, setFootprintRefreshing] = useState(false);
   const [footprintRefreshFailed, setFootprintRefreshFailed] = useState(false);
   const staleSnapshotRef = useRef(false);
+  // Previously valid snapshots have an absolute expiry even in suspended tabs.
+  const [footprintClock, setFootprintClock] = useState<{ staleAt: number; expiresAt: number } | null>(null);
+  const footprintExpiresAtRef = useRef<number | null>(null);
   // Respect a 503 Retry-After from our server instead of inviting users to
   // repeatedly retry while the public Overpass origin is in cooldown.
   const [footprintRetryAfter, setFootprintRetryAfter] = useState<{ until: number; minutes: number } | null>(null);
@@ -275,6 +279,40 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
   }, [footprintRetryAfter]);
 
   useEffect(() => {
+    if (school !== 'pu' || footprintClock === null) return;
+    const checkSnapshotAge = () => {
+      if (footprintExpiresAtRef.current !== footprintClock.expiresAt) return;
+      const now = Date.now();
+      if (now >= footprintClock.expiresAt) {
+        // A browser can sleep past the seven-day source limit without refetching.
+        // Withdraw geometry itself, not only the displayed freshness label.
+        footprintExpiresAtRef.current = null;
+        staleSnapshotRef.current = false;
+        setFootprintClock(null);
+        setFootprints([]);
+        setFootprintStatus('unavailable');
+        setFootprintDate(null);
+        setFootprintBaseDate(null);
+        setFootprintStale(false);
+        setFootprintRefreshing(false);
+        setFootprintRefreshFailed(false);
+      } else if (now >= footprintClock.staleAt) {
+        staleSnapshotRef.current = true;
+        setFootprintStale(true);
+      }
+    };
+    const nextDeadline = footprintStale ? footprintClock.expiresAt : footprintClock.staleAt;
+    const timer = window.setTimeout(checkSnapshotAge, Math.max(0, nextDeadline - Date.now()));
+    document.addEventListener('visibilitychange', checkSnapshotAge);
+    window.addEventListener('pageshow', checkSnapshotAge);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', checkSnapshotAge);
+      window.removeEventListener('pageshow', checkSnapshotAge);
+    };
+  }, [school, footprintClock, footprintStale]);
+
+  useEffect(() => {
     if (school !== 'pu' || model.unavailableReason) {
       staleSnapshotRef.current = false;
       return;
@@ -283,7 +321,8 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     let timedOut = false;
     // Keep a previously verified, explicitly stale outline in view while
     // checking for a newer snapshot. Do not blank the 3D canvas on retry.
-    const preserveStale = staleSnapshotRef.current;
+    const preserveStale = staleSnapshotRef.current &&
+      footprintExpiresAtRef.current !== null && Date.now() < footprintExpiresAtRef.current;
     setFootprintStatus(preserveStale ? 'ready' : 'loading');
     setFootprintRefreshing(preserveStale);
     const controller = new AbortController();
@@ -295,8 +334,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
       timedOut = true;
       controller.abort();
       setFootprintRefreshing(false);
-      if (preserveStale) setFootprintRefreshFailed(true);
-      setFootprintStatus(preserveStale ? 'ready' : 'unavailable');
+      const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
+        Date.now() < footprintExpiresAtRef.current;
+      if (keepStale) setFootprintRefreshFailed(true);
+      setFootprintStatus(keepStale ? 'ready' : 'unavailable');
     }, 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
@@ -321,6 +362,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         if (!active || timedOut) return;
         const snapshot = parseProvidenceFootprintSnapshot(payload);
         if (!snapshot) throw new Error('No recent, source-checked building outlines');
+        const fetchedMs = Date.parse(snapshot.fetchedAt);
+        const replicationMs = snapshot.osmBaseAt === null ? Infinity : Date.parse(snapshot.osmBaseAt);
+        const expiresAt = Math.min(fetchedMs + 7 * FOOTPRINT_DAY_MS, replicationMs + 7 * FOOTPRINT_DAY_MS);
+        const staleAt = Math.min(fetchedMs + FOOTPRINT_DAY_MS, replicationMs + 2 * FOOTPRINT_DAY_MS);
+        footprintExpiresAtRef.current = expiresAt;
+        setFootprintClock({ staleAt, expiresAt });
         setFootprints(snapshot.buildings);
         setFootprintDate(snapshot.fetchedAt.slice(0, 10));
         setFootprintBaseDate(snapshot.osmBaseAt?.slice(0, 10) ?? null);
@@ -339,8 +386,10 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
         // A failed refresh must not discard a still-valid, explicitly stale
         // building snapshot. Normal first-load failures remain marker-only.
         setFootprintRefreshing(false);
-        if (preserveStale) setFootprintRefreshFailed(true);
-        setFootprintStatus(preserveStale ? 'ready' : 'unavailable');
+        const keepStale = preserveStale && footprintExpiresAtRef.current !== null &&
+          Date.now() < footprintExpiresAtRef.current;
+        if (keepStale) setFootprintRefreshFailed(true);
+        setFootprintStatus(keepStale ? 'ready' : 'unavailable');
       })
       .finally(() => window.clearTimeout(timeout));
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
