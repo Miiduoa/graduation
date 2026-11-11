@@ -20,7 +20,7 @@ App 啟動、回到前景、匯入或手動改課時，原本快照寫入佇列�
 
 過期與結束機制依據 [ActivityKit 顯示與更新文件](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities) 及 [結束動態文件](https://developer.apple.com/documentation/activitykit/activity/end(_:dismissalpolicy:))。
 
-原生內容不超過 4KB。新原生方法需要新安裝包，正式版 runtimeVersion 為 `campus-one-native-photo-pdf-widget-live-2`，預覽版為 `campus-preview-native-photo-pdf-widget-live-2`；發版腳本、設定契約及建置測試必須一致，舊原生安裝包不應接收這版更新。
+原生內容不超過 4KB。新原生方法需要新安裝包，正式版 runtimeVersion 為 `campus-one-native-photo-pdf-widget-live-nfc-3`，預覽版為 `campus-preview-native-photo-pdf-widget-live-nfc-3`。發版腳本、設定契約及建置測試必須一致，OTA 更新須使用對應原生版本。
 
 ## 驗證
 

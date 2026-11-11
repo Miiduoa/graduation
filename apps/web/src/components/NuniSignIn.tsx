@@ -6,6 +6,27 @@ import { browserRequest, useNuniSession } from '@/features/nuni/Session';
 import { platformDestination } from '@/lib/accountDestination';
 import styles from '@/app/servicePages.module.css';
 
+function signInPurpose(path: string): string {
+  if (path.startsWith('/merchant')) return '登入後繼續店家申請、查看審核進度與授權門市。';
+  if (path === '/admin' || path.startsWith('/admin/'))
+    return '登入後確認管理權限，再回到管理台。';
+  if (path.startsWith('/classroom/course/'))
+    return '登入後回到這門課，繼續查看或繳交作業。';
+  if (path === '/classroom/grades' || path === '/grades')
+    return '登入後查看各門課目前的成績、等待公布與老師回饋。';
+  if (path === '/social') return '登入後回到公開交流，閱讀貼文、參與討論與分享近況。';
+  if (path === '/lost-found' || path.startsWith('/lost-found/platform'))
+    return '登入後查看、刊登與管理失物招領，不需要先綁定學校帳號。';
+  if (['/food', '/shops', '/shops/'].includes(path))
+    return '登入後回到餐飲服務，查看自己的訂單與取餐進度。';
+  if (path === '/map') return '登入後回到地圖，在此裝置收藏常用地點。';
+  if (['/timetable', '/calendar', '/import'].includes(path))
+    return '登入後回到你的課表、行程或資料匯入，不需要先綁定學校帳號。';
+  if (path === '/dormitory') return '登入後整理自己的住宿備忘、設備問題與入住退宿清單。';
+  if (path === '/classroom/material-bookmarks') return '登入後回到你收藏的課程教材。';
+  return '使用 Google 帳號，繼續課程、作業與公開看板。';
+}
+
 export function NuniSignIn({
   returnUrl,
   issue = false,
@@ -25,16 +46,7 @@ export function NuniSignIn({
   const destination = platformDestination(returnUrl);
   const taskUrl = new URL(destination, 'https://campus.local');
   const taskPath = taskUrl.pathname;
-  const purpose = taskPath.startsWith('/merchant')
-    ? '登入後繼續店家申請、查看審核進度與授權門市。'
-    : taskPath === '/admin'
-      ? '登入後確認管理權限，再回到管理台。'
-      : taskPath.startsWith('/classroom/course/')
-        ? '登入後回到這門課，繼續查看或繳交作業。'
-        : taskPath === '/classroom/grades' ||
-            (taskPath === '/grades' && taskUrl.searchParams.get('tab') === 'feedback')
-          ? '登入後查看各門課目前的成績、等待公布與老師回饋。'
-          : '使用 Google 帳號，繼續課程、作業與公開看板。';
+  const purpose = signInPurpose(taskPath);
   useEffect(() => {
     const restore = () => {
       submitting.current = false;

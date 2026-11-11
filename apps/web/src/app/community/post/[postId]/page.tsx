@@ -386,7 +386,15 @@ function PostDetailInner({ schoolId }: { schoolId: string }) {
             )}
           </div>
           <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
-            {authorName}
+            {!post.anonymous && post.authorUid ? (
+              <Link
+                href={`/community/member/${encodeURIComponent(post.authorUid)}?schoolId=${encodeURIComponent(schoolId)}`}
+                aria-label={`查看 ${authorName} 的個人頁`}
+                style={{ color: 'inherit', textDecoration: 'none' }}
+              >
+                {authorName}
+              </Link>
+            ) : authorName}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {isMine ? (
