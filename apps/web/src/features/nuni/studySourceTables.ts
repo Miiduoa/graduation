@@ -20,6 +20,12 @@ const HIDDEN_HTML_CONTAINERS = new Set(['div', 'section', 'aside']);
 // HTML disclosure / dialog bodies are not standalone Markdown tables. Keep
 // nested disclosures balanced so a closed inner example cannot expose its parent.
 const NESTABLE_HTML_BLOCKS = new Set([...HIDDEN_HTML_CONTAINERS, 'details', 'dialog']);
+// Scan every syntactically complete tag so quoted attributes on other HTML
+// elements cannot smuggle fake opening/closing tags into the block tracker.
+const TABLE_SUPPRESSED_HTML_TAGS = new Set([
+  ...NESTABLE_HTML_BLOCKS, 'pre', 'code', 'script', 'style', 'textarea',
+  'template', 'noscript', 'svg', 'math', 'table',
+]);
 
 function hasHiddenHtmlAttribute(token: string): boolean {
   return /\shidden(?=[\s=/>])/iu.test(token) ||
@@ -118,7 +124,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         /^(?: {4}| {0,3}\t)/u.test(line)) continue;
     // HTML boundaries follow source order; Markdown inline code is literal.
     let hiddenLine = inHtmlComment || htmlCodeBlocks.length > 0;
-    for (const match of line.matchAll(/<!--|--!?>|<\/?(pre|code|script|style|textarea|template|noscript|svg|math|table|details|dialog|div|section|aside)\b[^>]*>/giu)) {
+    for (const match of line.matchAll(/<!--|--!?>|<\/?([A-Za-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/giu)) {
       const token = match[0];
       // In a disclosure or hidden container, a paired inline-code example
       // such as `</details>` is not an actual closing tag. Otherwise it
@@ -143,7 +149,7 @@ export function extractStudySourceTables(source: string): StudySourceTable[] {
         continue;
       }
       const tag = match[1]?.toLowerCase();
-      if (!tag) continue;
+      if (!tag || !TABLE_SUPPRESSED_HTML_TAGS.has(tag)) continue;
       // Preformatted examples contain literal tag-looking text. In contrast,
       // nested containers of the same type inside a hidden wrapper must be
       // balanced, or the inner closing tag could expose unpublished rows.

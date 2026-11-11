@@ -212,3 +212,50 @@ it('keeps a real inline-code span after a pair of literal backslashes', () => {
   ].join('\n');
   expect(extractStudySourceTables(source)).toEqual(realTable(2));
 });
+
+describe('quoted HTML attributes are not active table-boundary markup', () => {
+  it('does not expose a hidden table when a quoted greater-than sign precedes hidden', () => {
+    const source = [
+      '<div title="教材 > 練習" hidden>',
+      '| 未公開科目 | 學分 |',
+      '| --- | --- |',
+      '| 範例 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+
+  it('does not accept a quoted fake closing tag inside an unrelated element', () => {
+    const source = [
+      '<div hidden>',
+      '<span title="字面 </div> 並非關閉">範例</span>',
+      '| 未公開科目 | 學分 |',
+      '| --- | --- |',
+      '| 範例 | 99 |',
+      '</div>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(7));
+  });
+
+  it('does not hide a legitimate table after an unrelated tag quotes an opening tag', () => {
+    const source = [
+      '<span title="字面 <details> 不是真實標記">範例</span>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(2));
+  });
+
+  it('honors single-quoted attribute content before aria-hidden on a section', () => {
+    const source = [
+      "<section title='比較 x > y' aria-hidden='true'>",
+      '| 未公開科目 | 學分 |',
+      '| --- | --- |',
+      '| 範例 | 99 |',
+      '</section>',
+      ...visibleTable,
+    ].join('\n');
+    expect(extractStudySourceTables(source)).toEqual(realTable(6));
+  });
+});
