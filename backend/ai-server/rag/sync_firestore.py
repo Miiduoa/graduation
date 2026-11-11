@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from config import DATA_DIR, FIREBASE_CRED_PATH
-from rag.indexer import index_documents
+from rag.indexer import index_written_ids
 from rag.public_documents import PUBLIC_FIELDS, public_document
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,11 @@ def delete_ids(ids: list[str], collection_name: str = "campus") -> None:
 def replace_source_documents(source: str, documents: list, collection_name: str = "campus") -> int:
     """Write the new rows first; only then drop previous rows for this source."""
     old_ids = source_document_ids(source, collection_name)
-    count = index_documents(documents, collection_name=collection_name) if documents else 0
     if documents:
-        current = set(source_document_ids(source, collection_name))
-        stale = [doc_id for doc_id in old_ids if doc_id not in current]
+        count, written = index_written_ids(documents, collection_name=collection_name)
+        stale = [doc_id for doc_id in old_ids if doc_id not in set(written)]
     else:
+        count, written = 0, []
         stale = old_ids
     delete_ids(stale, collection_name)
     return count
@@ -176,9 +176,11 @@ def migrate_legacy_firestore_index(db=None, dump_dir: str | Path | None = None, 
         results["firestore"] = None
     leftover = legacy_unscoped_firestore_ids(collection_name)
     need = failed_collections(results.get("firestore"))
-    if leftover or need:
-        results["json"] = sync_from_json_dump(dump_dir, collections=need or None)
+    if need:
+        results["json"] = sync_from_json_dump(dump_dir, collections=need)
         leftover = legacy_unscoped_firestore_ids(collection_name)
+    else:
+        leftover = leftover or legacy_unscoped_firestore_ids(collection_name)
     results["remaining"] = len(leftover)
     results["rebuilt"] = results["remaining"] == 0 and (
         sync_ok(results.get("firestore")) or sync_ok(results.get("json"))

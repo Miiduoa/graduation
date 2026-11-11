@@ -144,7 +144,7 @@ class SyncTests(unittest.TestCase):
         db.collection.return_value.limit.return_value.stream.return_value = [
             Mock(id=str(i), to_dict=Mock(return_value=row)) for i, row in enumerate(rows)
         ]
-        with tempfile.TemporaryDirectory() as folder, patch.object(sync, "source_document_ids", return_value=[]), patch.object(sync, "delete_ids"), patch.object(sync, "index_documents", side_effect=len) as index:
+        with tempfile.TemporaryDirectory() as folder, patch.object(sync, "source_document_ids", return_value=[]), patch.object(sync, "delete_ids"), patch.object(sync, "index_written_ids", side_effect=lambda documents, collection_name="campus", embedding_fn=None: (len(documents), [f"new-{i}" for i in range(len(documents))])) as index:
             self.assertEqual(sync.sync_collection("users", db), 0)
             db.collection.assert_not_called()
             self.assertEqual(sync.sync_collection("announcements", db), 2)
@@ -162,7 +162,7 @@ class SyncTests(unittest.TestCase):
         first = [Mock(id=str(i), to_dict=Mock(return_value=announcement("pu"))) for i in range(500)]
         query.stream.return_value = first
         query.start_after.return_value.stream.return_value = [Mock(id="next", to_dict=Mock(return_value=announcement("nchu")))]
-        with patch.object(sync, "source_document_ids", return_value=[]), patch.object(sync, "delete_ids"), patch.object(sync, "index_documents", side_effect=len) as index:
+        with patch.object(sync, "source_document_ids", return_value=[]), patch.object(sync, "delete_ids"), patch.object(sync, "index_written_ids", side_effect=lambda documents, collection_name="campus", embedding_fn=None: (len(documents), [f"new-{i}" for i in range(len(documents))])) as index:
             self.assertEqual(sync.sync_collection("announcements", db), 501)
         query.start_after.assert_called_once_with(first[-1])
         self.assertEqual(len(index.call_args.args[0]), 501)
@@ -205,7 +205,7 @@ class MigrationSafetyTests(unittest.TestCase):
             return {name: 1 for name in (collections or ["announcements"])}
 
         with patch.object(sync, "delete_ids", side_effect=lambda ids, collection_name="campus": deleted.extend(ids)), patch.object(
-            sync, "index_documents", side_effect=AssertionError("must not index after a failed read")
+            sync, "index_written_ids", side_effect=AssertionError("must not index after a failed read")
         ), patch.object(sync, "source_document_ids", return_value=["old-announcement"]):
             self.assertEqual(sync.sync_all(db)["announcements"], -1)
         self.assertEqual(deleted, [])
@@ -233,7 +233,7 @@ class MigrationSafetyTests(unittest.TestCase):
             return ["old-announcement"] if source == "firestore:announcements" else []
 
         with patch.object(sync, "source_document_ids", side_effect=ids_for), patch.object(
-            sync, "index_documents", side_effect=RuntimeError("upsert failed")
+            sync, "index_written_ids", side_effect=RuntimeError("upsert failed")
         ), patch.object(sync, "delete_ids", side_effect=lambda ids, collection_name="campus": deleted.extend(ids)):
             self.assertEqual(sync.sync_all(db)["announcements"], -1)
         self.assertEqual(deleted, [])
@@ -241,7 +241,7 @@ class MigrationSafetyTests(unittest.TestCase):
         with patch.object(sync, "legacy_unscoped_firestore_ids", side_effect=lambda _name="campus": leftover.copy()), patch.object(
             sync, "sync_from_json_dump", return_value={}
         ) as json_sync, patch.object(sync, "delete_ids", side_effect=lambda ids, collection_name="campus": deleted.extend(ids)), patch.object(
-            sync, "index_documents", side_effect=RuntimeError("upsert failed")
+            sync, "index_written_ids", side_effect=RuntimeError("upsert failed")
         ), patch.object(sync, "source_document_ids", side_effect=ids_for):
             result = sync.migrate_legacy_firestore_index(db=db, dump_dir="/empty-backup")
         self.assertTrue(json_sync.called)
@@ -271,3 +271,30 @@ class MigrationSafetyTests(unittest.TestCase):
         self.assertEqual(requested["collections"], expected)
         self.assertEqual(json_sync.call_args.kwargs["collections"], expected)
         self.assertTrue(result["rebuilt"])
+
+    def test_successful_write_deletes_only_ids_not_returned_by_indexer(self):
+        sync = self._stub_rag_imports()
+        deleted = []
+
+        def write(documents, collection_name="campus", embedding_fn=None):
+            return 1, ["new-1"]
+
+        with patch.object(sync, "source_document_ids", return_value=["old-1", "new-1"]), patch.object(
+            sync, "index_written_ids", side_effect=write
+        ), patch.object(sync, "delete_ids", side_effect=lambda ids, collection_name="campus": deleted.extend(ids)):
+            count = sync.replace_source_documents("firestore:announcements", [{"text": "x", "source": "firestore:announcements"}])
+        self.assertEqual(count, 1)
+        self.assertEqual(deleted, ["old-1"])
+
+    def test_live_success_does_not_json_fallback_just_because_legacy_remains(self):
+        sync = self._stub_rag_imports()
+        leftover = ["old-announcement"]
+        firestore = {name: 1 for name in sync.PUBLIC_FIELDS}
+        with patch.object(sync, "legacy_unscoped_firestore_ids", side_effect=lambda _name="campus": leftover.copy()), patch.object(
+            sync, "sync_all", return_value=firestore
+        ), patch.object(sync, "sync_from_json_dump") as json_sync:
+            result = sync.migrate_legacy_firestore_index(db=Mock(), dump_dir="/valid-backup")
+        json_sync.assert_not_called()
+        self.assertFalse(result["rebuilt"])
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["remaining"], 1)
