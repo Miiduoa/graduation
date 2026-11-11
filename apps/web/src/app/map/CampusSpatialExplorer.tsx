@@ -258,7 +258,12 @@ function SpatialDialog({ school, locations, selected, onSelect, onClose }: Props
     }, 15_000);
     void fetch('/api/public/campus-footprints', { signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) {
+        // Fetch considers 203/206 successful, but the map API contract is a
+        // complete 200 JSON document. A CDN/proxy must not turn a transformed
+        // or partial representation into a trusted 3D building snapshot.
+        const contentRange = response.headers?.get('content-range') ?? null;
+        if (!response.ok || (typeof response.status === 'number' && response.status !== 200) ||
+            contentRange !== null) {
           // Only our 503 responses use this contract. Ignore malformed or
           // unreasonably large intermediary values rather than freezing the UI.
           const raw = response.status === 503 ? response.headers?.get('retry-after')?.trim() : null;

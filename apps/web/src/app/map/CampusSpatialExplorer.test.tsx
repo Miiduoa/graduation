@@ -423,6 +423,44 @@ it('falls back after 15 seconds even if an OSM proxy ignores abort, and ignores 
   }
 });
 
+it.each([
+  { status: 203, contentRange: null },
+  { status: 206, contentRange: 'bytes 0-119/250' },
+  { status: 200, contentRange: 'bytes 0-119/250' },
+])('rejects a transformed or ranged OSM API response ($status, $contentRange)', async ({ status, contentRange }) => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const response = new Response(JSON.stringify({
+    schoolId: 'pu', source: 'OpenStreetMap', buildings,
+    fetchedAt: new Date().toISOString(), stale: false,
+  }), {
+    status,
+    headers: contentRange ? { 'Content-Range': contentRange } : undefined,
+  });
+  // Response.ok is true for every synthetic case; status alone cannot be
+  // inferred from ok, and parsing must not begin for these untrusted bodies.
+  expect(response.ok).toBe(true);
+  const json = vi.spyOn(response, 'json');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+  const dialog = await open();
+  expect(await within(dialog).findByText(/公開建築輪廓目前無法取得/)).toBeTruthy();
+  expect(json).not.toHaveBeenCalled();
+  expect(scene.create).toHaveBeenCalledTimes(1);
+  expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
+  expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+});
+
 it('keeps the spatial map usable when Providence building geometry is unavailable', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
