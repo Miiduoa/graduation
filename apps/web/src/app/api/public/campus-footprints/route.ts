@@ -304,7 +304,13 @@ export async function GET() {
     stale: cache.validUntil <= Date.now(), buildings: cache.buildings,
   }, {
     // 有舊快照時保留舊輪廓並明示來源日期，不把快取說成最新。
-    headers: { 'Cache-Control': cache.validUntil <= Date.now()
-      ? 'private, no-store' : freshCacheControl(cache.validUntil) },
+    headers: {
+      'Cache-Control': cache.validUntil <= Date.now()
+        ? 'private, no-store' : freshCacheControl(cache.validUntil),
+      // A valid dated fallback is still served with HTTP 200. Advertise the
+      // current upstream cooldown so the client does not hammer a stale origin.
+      ...(cache.validUntil <= Date.now() && unavailableUntil > Date.now()
+        ? { 'Retry-After': retryAfterSeconds() } : {}),
+    },
   });
 }
