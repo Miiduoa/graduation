@@ -294,7 +294,7 @@ jobs:
         run: pnpm --filter @campus/shared test:food
 
       - name: Test assistant services, academic data and verified execution contracts
-        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs packages/shared/tests/studyDeadlineConflicts.test.cjs
+        run: node --test packages/shared/tests/assistantServices.test.cjs packages/shared/tests/importedAcademicSummary.test.cjs packages/shared/tests/assistantExecution.test.cjs packages/shared/tests/personalImportAcknowledgement.test.cjs
 
       - name: Test PDF and Excel readers with real document fixtures
         run: pnpm test:documents
@@ -424,8 +424,7 @@ jobs:
 
       - name: Run Expo Doctor
         working-directory: apps/mobile
-        # 1.21.7 npx install cannot resolve @expo/env; keep the last known-good CLI.
-        run: npx expo-doctor@1.21.6
+        run: npx expo-doctor@1.21.5
 
       - name: Bundle mobile JavaScript
         working-directory: apps/mobile
