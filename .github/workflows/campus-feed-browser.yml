@@ -51,7 +51,7 @@ jobs:
           # Hosted runners already include apt package indexes. Avoid a global mirror
           # refresh when fetching one CJK font: the previous two jobs timed out
           # during apt-get update, before the Chromium checks could run.
-          if ! fc-list :lang=zh-tw family | grep -Fq 'Noto Sans CJK TC'; then
+          if ! dpkg-query -W -f='${Status}' fonts-noto-cjk 2>/dev/null | grep -Fq 'install ok installed'; then
             if ! sudo timeout --kill-after=5s 100 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y --no-install-recommends fonts-noto-cjk; then
               # Only refresh stale/missing metadata after the direct install fails.
               sudo timeout --kill-after=5s 60 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 update
@@ -59,7 +59,9 @@ jobs:
             fi
           fi
           fc-cache -f
-          fc-list :lang=zh-tw family | grep -F '${f.verify}'
+          # Fontconfig TTC family names may omit the localized TC label.
+          dpkg-query -W -f='${Status}\n' fonts-noto-cjk | grep -Fx 'install ok installed'
+          fc-match -f '%{family}\n' 'Noto Sans CJK TC:lang=zh-tw' | grep -F 'Noto Sans CJK'
       - name: Actual feed component and SDK against isolated rules
         env:
           GCLOUD_PROJECT: demo-campus-feed-browser
