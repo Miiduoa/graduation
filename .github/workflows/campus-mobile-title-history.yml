@@ -5,6 +5,8 @@ on:
     branches: ['feat/social-feed-older-search-20261106']
     paths:
       - 'apps/mobile/src/screens/CommunityScreen.tsx'
+      - 'apps/mobile/src/app/preAuthLinking.ts'
+      - 'apps/mobile/src/__tests__/preAuthSharedPostLink.test.ts'
       - 'apps/mobile/src/screens/social/TitleHistorySearch.tsx'
       - 'apps/mobile/src/services/titleSearch.ts'
       - 'apps/mobile/src/services/feed.ts'
@@ -21,6 +23,8 @@ on:
     branches: [main, 'feat/story-media-in-place-retry-20261106']
     paths:
       - 'apps/mobile/src/screens/CommunityScreen.tsx'
+      - 'apps/mobile/src/app/preAuthLinking.ts'
+      - 'apps/mobile/src/__tests__/preAuthSharedPostLink.test.ts'
       - 'apps/mobile/src/screens/social/TitleHistorySearch.tsx'
       - 'apps/mobile/src/services/titleSearch.ts'
       - 'apps/mobile/src/services/feed.ts'
@@ -66,7 +70,7 @@ jobs:
       - name: Native history interactions and existing feed regression
         run: |
           mkdir -p artifacts/mobile-title-history artifacts/mobile-title-integration
-          pnpm --filter mobile exec jest src/__tests__/PostDetailRecovery.test.tsx src/__tests__/TitleHistorySearch.test.tsx src/__tests__/SocialBrowsingScreens.test.tsx src/__tests__/feedPages.test.ts src/__tests__/feedDiscoveryModel.test.ts --runInBand --json --outputFile=../../artifacts/mobile-title-history/jest.json
+          pnpm --filter mobile exec jest src/__tests__/PostDetailRecovery.test.tsx src/__tests__/TitleHistorySearch.test.tsx src/__tests__/preAuthSharedPostLink.test.ts src/__tests__/SocialBrowsingScreens.test.tsx src/__tests__/feedPages.test.ts src/__tests__/feedDiscoveryModel.test.ts --runInBand --json --outputFile=../../artifacts/mobile-title-history/jest.json
       - name: Native service against real SDK and repository rules
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
@@ -84,7 +88,7 @@ jobs:
         run: pnpm --filter mobile typecheck
       - name: Native search focused lint
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: pnpm --filter mobile exec eslint src/screens/social/TitleHistorySearch.tsx src/services/titleSearch.ts
+        run: pnpm --filter mobile exec eslint src/screens/social/TitleHistorySearch.tsx src/services/titleSearch.ts src/app/preAuthLinking.ts
       - name: Preserve exact source and test evidence
         if: always()
         uses: actions/upload-artifact@v4
