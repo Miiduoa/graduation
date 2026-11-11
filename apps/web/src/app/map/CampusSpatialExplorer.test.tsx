@@ -463,6 +463,56 @@ it('keeps real campus navigation when a tampered API snapshot repeats a verified
   expect(scene.create.mock.calls[0][2].footprints).toEqual([]);
 });
 
+it('honors the API Retry-After cooldown without hammering Overpass or blocking navigation', async () => {
+  const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
+  const buildings = parseProvidenceOsmFootprints({ elements: [{
+    type: 'way', id: 255784049, tags: { building: 'yes' },
+    geometry: [
+      { lat: 24.22624, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58143 },
+      { lat: 24.22634, lon: 120.58131 },
+      { lat: 24.22624, lon: 120.58131 },
+    ],
+  }] });
+  expect(buildings).toHaveLength(1);
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({
+      ok: false, status: 503,
+      headers: { get: (name: string) => name === 'retry-after' ? '600' : null },
+    })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({
+      schoolId: 'pu', source: 'OpenStreetMap', buildings,
+      fetchedAt: new Date().toISOString(), stale: false,
+    }) });
+  vi.stubGlobal('fetch', fetchMock);
+  const timeoutSpy = vi.spyOn(window, 'setTimeout');
+  try {
+    render(<CampusSpatialExplorer school="pu" locations={[library]} selected={library} onSelect={vi.fn()} />);
+    const dialog = await open();
+    const retry = await within(dialog).findByRole('button', { name: '重新讀取建築輪廓' });
+    await waitFor(() => expect(retry.hasAttribute('disabled')).toBe(true));
+    expect(within(dialog).getByText(/約 10 分鐘後可再試/)).toBeTruthy();
+    expect(within(dialog).getByRole('link', { name: '開啟步行導航' })).toBeTruthy();
+    fireEvent.click(retry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Use the actual scheduled cooldown callback instead of advancing every
+    // unrelated React and graphics timer. This is a synthetic server response,
+    // not a real public Overpass rate-limit observation.
+    const release = timeoutSpy.mock.calls.find(([, delay]) => delay === 600_000)?.[0];
+    expect(typeof release).toBe('function');
+    await act(async () => { (release as () => void)(); });
+    expect(retry.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(await within(dialog).findByText(/1 棟公開建築輪廓/)).toBeTruthy();
+    expect(within(dialog).queryByText(/約 10 分鐘後可再試/)).toBeNull();
+  } finally {
+    timeoutSpy.mockRestore();
+  }
+});
+
 it('retries Providence building data after a temporary outage without closing the tour', async () => {
   const library = PROVIDENCE_CAMPUS_PLACES.find((place) => place.id === 'pu-library')!;
   const outline = [
